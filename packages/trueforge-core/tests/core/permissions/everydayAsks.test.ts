@@ -5,11 +5,20 @@
  */
 import type { CalendarWriteReview } from '../../../src/core/calendar/eventWrite';
 import type { ReviewableDraft } from '../../../src/core/email/gmail/draftReview';
-import { allowsChatApproval } from '../../../src/core/mcp/approvalGrant';
+import {
+  allowsChatApproval,
+  allowsToolGrant,
+  approvalGrantKey,
+  effectiveToolAdmissions,
+} from '../../../src/core/mcp/approvalGrant';
 import { classifyTier, type ClassifyContext, type SentinelAction } from '../../../src/core/permissions/classifier';
 import { defaultSentinelServices, forUnattendedRun } from '../../../src/core/permissions/context';
-import { recordPersonText } from '../../../src/core/permissions/provenance';
-import { createWebSearchTurnState, recordToolResultProvenance } from '../../../src/core/permissions/webSearch';
+import { recordPersonText, recordReplyText } from '../../../src/core/permissions/provenance';
+import {
+  createWebSearchTurnState,
+  hostToolStamp,
+  recordToolResultProvenance,
+} from '../../../src/core/permissions/webSearch';
 
 function makeCtx(options: { unattended?: boolean; secrets?: readonly string[] } = {}): ClassifyContext {
   const base = {
@@ -50,6 +59,7 @@ function read(ctx: ClassifyContext, input: { tool_name: string; args: string[]; 
   recordToolResultProvenance({
     state: ctx.web_search,
     tool_name: input.tool_name,
+    stamp: hostToolStamp({ type: 'mcp', search_provider_call: true }),
     argument_values: input.args,
     texts: [input.text],
   });
@@ -203,7 +213,89 @@ const gmailInfo = (original_tool_name: string, tier_reason: string) => ({
   tier_reason,
 });
 
-describe('sends and guest changes ask every time, with only Allow and Not now', () => {
+describe("a site the assistant's own reply named", () => {
+  it('still opens a page there without asking, in a chat that read nothing else', async () => {
+    const ctx = makeCtx();
+    recordPersonText({ provenance: ctx.web_search.provenance, text: 'Where are the Python docs?' });
+    recordReplyText({ provenance: ctx.web_search.provenance, text: 'They are at https://docs.python.example/3/.' });
+    recordPersonText({ provenance: ctx.web_search.provenance, text: 'Open the asyncio page.' });
+    expect(await classifyTier(openPage('https://docs.python.example/3/library/asyncio.html'), ctx)).toMatchObject({
+      tier: 1,
+      card: null,
+    });
+  });
+
+  /** A chat where only the assistant's reply brought up the docs site and one search link on it. */
+  function chatWhereTheReplyNamedTheSite(options: { unattended?: boolean } = {}): ClassifyContext {
+    const ctx = makeCtx(options);
+    recordPersonText({ provenance: ctx.web_search.provenance, text: PROFILE });
+    recordPersonText({ provenance: ctx.web_search.provenance, text: 'Where are the Python docs?' });
+    recordReplyText({
+      provenance: ctx.web_search.provenance,
+      text: 'They are at https://docs.python.example/3/. You can search them at https://docs.python.example/3/search.html?q=asyncio.',
+    });
+    recordPersonText({ provenance: ctx.web_search.provenance, text: 'Thanks, have a look for me.' });
+    return ctx;
+  }
+
+  it('opens the exact link the reply wrote without asking, even with a part after a question mark', async () => {
+    const decision = await classifyTier(
+      openPage('https://docs.python.example/3/search.html?q=asyncio'),
+      chatWhereTheReplyNamedTheSite(),
+    );
+    expect(decision).toMatchObject({ tier: 1, card: null });
+  });
+
+  it('asks before opening a link there that adds a part after a question mark', async () => {
+    const decision = await classifyTier(
+      openPage('https://docs.python.example/3/search.html?q=gather'),
+      chatWhereTheReplyNamedTheSite(),
+    );
+    expect(decision).toMatchObject({ tier: 3, reason: 'mcp_search_steered' });
+    expect(decision.card?.plain_what).toMatch(
+      / You did not name this site\. Aman brought it up in an earlier reply, and this link adds details to it, so Aman is checking with you first\.$/,
+    );
+  });
+
+  it('asks before opening a link there that carries one of your own details', async () => {
+    const decision = await classifyTier(
+      openPage('https://docs.python.example/3/people/sam.rivers@example.com'),
+      chatWhereTheReplyNamedTheSite(),
+    );
+    expect(decision).toMatchObject({ tier: 3, reason: 'mcp_search_steered' });
+  });
+
+  it('skips such a link in a scheduled run, and says so in one line', async () => {
+    const decision = await classifyTier(
+      openPage('https://docs.python.example/3/search.html?q=gather'),
+      chatWhereTheReplyNamedTheSite({ unattended: true }),
+    );
+    expect(decision).toMatchObject({
+      auto_deny: 'steered_by_content',
+      owner_message: 'One lookup was skipped, because its link added details to a site you did not name.',
+    });
+  });
+
+  it('opens a link with a part after a question mark without asking once you named the site yourself', async () => {
+    const ctx = chatWhereTheReplyNamedTheSite();
+    recordPersonText({ provenance: ctx.web_search.provenance, text: 'Search docs.python.example for gather.' });
+    expect(await classifyTier(openPage('https://docs.python.example/3/search.html?q=gather'), ctx)).toMatchObject({
+      tier: 1,
+      card: null,
+    });
+  });
+
+  it('opens a link with a part after a question mark on a site nobody named, as before', async () => {
+    const ctx = makeCtx();
+    recordPersonText({ provenance: ctx.web_search.provenance, text: 'What is new in Python?' });
+    expect(await classifyTier(openPage('https://news.python.example/search?q=release'), ctx)).toMatchObject({
+      tier: 1,
+      card: null,
+    });
+  });
+});
+
+describe('sends, mail drafts and guest changes ask every time, with only Allow and Not now', () => {
   it('asks before sending an email, and never offers the chat-wide answer', async () => {
     const decision = await classifyTier(sendDraft(draft({})), makeCtx());
     expect(decision).toMatchObject({ tier: 3, reason: 'gmail_send' });
@@ -236,10 +328,41 @@ describe('sends and guest changes ask every time, with only Allow and Not now', 
     expect(decision.card?.plain_what).toContain('so Mannie always asks.');
   });
 
-  it('still lets the chat-wide answer cover saving a draft, which sends nothing', async () => {
+  it('asks before saving a draft every time, and never offers the chat-wide answer or a standing one', async () => {
     const saved = await classifyTier({ ...sendDraft(draft({})), tool_name: 'draft_email' }, makeCtx());
-    expect(saved.reason).toBe('gmail_draft');
-    expect(allowsChatApproval(gmailInfo('draft_email', saved.reason))).toBe(true);
+    expect(saved).toMatchObject({ tier: 3, auto_deny: null, reason: 'gmail_draft' });
+    expect(saved.card?.email?.to).toEqual([{ name: 'Dana Wolfe', address: 'dana@example.org' }]);
+    const info = { ...gmailInfo('draft_email', saved.reason), is_approval_required: true, tier3_card: saved.card };
+    expect(allowsChatApproval(info)).toBe(false);
+    expect(allowsToolGrant(info)).toBe(false);
+  });
+
+  it('asks again for a second draft to the same people, whatever was answered for the first', async () => {
+    const saved = await classifyTier({ ...sendDraft(draft({})), tool_name: 'draft_email' }, makeCtx());
+    const info = { ...gmailInfo('draft_email', saved.reason), is_approval_required: true, tier3_card: saved.card };
+    const admissions = effectiveToolAdmissions({
+      calls: [{ id: 'second', type: 'function', function: { name: 'draft_email', arguments: '{}' }, tool_info: info }],
+      decisions: new Map(),
+      chatApprovalGrants: new Set([approvalGrantKey(info)]),
+      implementationPlanGrants: new Set(),
+    });
+    expect(admissions.get('second')).toEqual({ decision: undefined, admission_provenance: { source: 'automatic' } });
+  });
+
+  it('still offers the chat-wide answer for an event on your own calendar that has no guests', async () => {
+    const decision = await classifyTier(calendarCreate([]), makeCtx());
+    expect(decision).toMatchObject({ tier: 3, auto_deny: null, reason: 'calendar_write' });
+    expect(
+      allowsChatApproval({
+        type: 'truefoundry-system',
+        mcp_server_id: 'google_calendar',
+        mcp_server_name: 'google_calendar',
+        original_tool_name: 'create_event',
+        tier: 3,
+        tier_reason: decision.reason,
+        tier3_card: decision.card,
+      }),
+    ).toBe(true);
   });
 
   it("asks as usual for a reply to the sender of the message it answers, read by the host from the person's mail", async () => {
@@ -418,6 +541,33 @@ describe('what is held, because content steered it', () => {
       / This goes to billing@supplier\.example, whose address was in a file Aman read\.$/,
     );
     expect(allowsChatApproval(gmailInfo('send_draft', decision.reason))).toBe(false);
+  });
+
+  it("holds a send to an address only the assistant's earlier reply named, and says so", async () => {
+    const ctx = makeCtx();
+    recordPersonText({ provenance: ctx.web_search.provenance, text: 'Who takes print orders?' });
+    recordReplyText({ provenance: ctx.web_search.provenance, text: 'Orders go to bookings@harbour-prints.example.' });
+    recordPersonText({ provenance: ctx.web_search.provenance, text: 'Ok, write to them.' });
+    const decision = await classifyTier(
+      sendDraft(draft({ to: [{ name: '', address: 'bookings@harbour-prints.example' }] })),
+      ctx,
+    );
+    expect(decision.card?.plain_what).toMatch(
+      / This goes to bookings@harbour-prints\.example, whose address was only in an earlier reply from Aman, not in your own words\.$/,
+    );
+    expect(allowsChatApproval(gmailInfo('send_draft', decision.reason))).toBe(false);
+  });
+
+  it('adds nothing to the card when the person gave the address and the reply only repeated it', async () => {
+    const ctx = makeCtx();
+    recordPersonText({ provenance: ctx.web_search.provenance, text: 'Write to dana@example.org about Friday.' });
+    recordReplyText({ provenance: ctx.web_search.provenance, text: 'Here is a draft for dana@example.org.' });
+    const said = await classifyTier(sendDraft(draft({ to: [{ name: '', address: 'dana@example.org' }] })), ctx);
+    const fresh = makeCtx();
+    recordPersonText({ provenance: fresh.web_search.provenance, text: 'Write to dana@example.org about Friday.' });
+    const unsaid = await classifyTier(sendDraft(draft({ to: [{ name: '', address: 'dana@example.org' }] })), fresh);
+    expect(said.card?.plain_what).toBe(unsaid.card?.plain_what);
+    expect(said.reason).toBe(unsaid.reason);
   });
 
   it('holds a search that carries a real secret, whatever its source', async () => {

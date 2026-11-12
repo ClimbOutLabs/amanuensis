@@ -4,6 +4,7 @@
  */
 import { OpenAPIHono } from '@hono/zod-openapi';
 import {
+  CALDAV_GOOGLE_PROVIDER_KEY,
   CALDAV_PROVIDER_PRESETS,
   caldavProviderKeyForUrl,
 } from '@truefoundry/trueforge-core/core/calendar/caldav/presets';
@@ -33,15 +34,17 @@ interface CalendarAccountRouterDeps {
   mcpServerStore: Pick<IMcpServerStore, 'upsertServer' | 'deleteServer' | 'getServer'>;
 }
 
-const DEFAULT_PROVIDER_KEY = 'fastmail';
+const DEFAULT_PROVIDER_KEY = CALDAV_GOOGLE_PROVIDER_KEY;
 
 function providerTable(): CalendarAccountStatus['providers'] {
   return CALDAV_PROVIDER_PRESETS.map(preset => ({
     key: preset.key,
     name: preset.name,
     server_url: preset.server_url,
+    account_url_template: preset.account_url_template,
     help_url: preset.help_url,
     help_hint: preset.help_hint,
+    setup_steps: [...preset.setup_steps],
   }));
 }
 

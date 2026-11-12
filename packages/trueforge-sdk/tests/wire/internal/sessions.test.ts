@@ -21,8 +21,10 @@ describe("SessionsClient", () => {
                 },
                 folder_id: "folder_id",
                 id: "id",
+                is_incognito: true,
                 metadata: { key: "value" },
                 metrics: { total_cost_in_usd: 1.1, total_duration_ms: 1, total_turns: 1 },
+                private_expires_at: "private_expires_at",
                 source: { id: "id", run_id: "run_id", type: "schedule" },
                 title: "title",
                 updated_at: "updated_at",
@@ -63,6 +65,7 @@ describe("SessionsClient", () => {
                 },
                 folderId: "folder_id",
                 id: "id",
+                isIncognito: true,
                 metadata: {
                     key: "value",
                 },
@@ -71,6 +74,7 @@ describe("SessionsClient", () => {
                     totalDurationMs: 1,
                     totalTurns: 1,
                 },
+                privateExpiresAt: "private_expires_at",
                 source: {
                     id: "id",
                     runId: "run_id",

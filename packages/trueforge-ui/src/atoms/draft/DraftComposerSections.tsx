@@ -11,6 +11,7 @@ import {
 } from '../ComposerSections.js';
 import { useCompactLayout } from '../lib/CompactLayoutContext.js';
 import { useIsMobile } from '../lib/useIsMobile.js';
+import { PrivateChatToggle } from '../privateChat/PrivateChatToggle.js';
 
 export function DraftComposerLeftSection({ disabled, isRunning, onAttach }: ComposerLeftSectionProps) {
   const shell = useOptionalShellMode();
@@ -42,6 +43,7 @@ export function DraftComposerLeftSection({ disabled, isRunning, onAttach }: Comp
         <>
           <DraftCompositeSelector disabled={disabled} isRunning={isRunning} onAttach={onAttach} />
           <ActivePersonaIndicator disabled={disabled || isRunning} />
+          <PrivateChatToggle disabled={disabled || isRunning} />
         </>
       ) : (
         <DraftComposerActionsMenu actions={builderActions} disabled={disabled || isRunning} />

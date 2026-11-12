@@ -10,11 +10,15 @@ import type { AccountConnectionState } from './accountSetup.js';
 export interface CalendarProviderInfo {
   key: string;
   name: string;
-  /** The built-in calendar address; null when it depends on the email domain or is typed. */
+  /** The built-in calendar address; null when it depends on the email domain, the email address or is typed. */
   serverUrl: string | null;
+  /** A built-in calendar address made from the email address; null when the provider does not use one. */
+  accountUrlTemplate: string | null;
   /** The provider's own help page for making an app password; null when none could be checked. */
   helpUrl: string | null;
   helpHint: string;
+  /** Plain steps to show before the form; empty when the hint is enough. */
+  setupSteps: string[];
 }
 
 /** The Calendar card's state. The app password is never part of it: the field is write-only. */
