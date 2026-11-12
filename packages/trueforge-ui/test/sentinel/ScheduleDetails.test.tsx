@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { PermissionApprovalCard } from '@/sentinel/PermissionApprovalCard.js';
@@ -31,6 +31,26 @@ const MORNING_BRIEF_CARD = {
     task: 'Give me a morning brief: my calendar for today, important unread mail, and the weather.',
     runs_as: 'Aman',
     next_runs: ['Monday, October 19 at 8:00 AM', 'Tuesday, October 20 at 8:00 AM', 'Wednesday, October 21 at 8:00 AM'],
+  },
+} satisfies SentinelApprovalCard;
+
+/** The same card for a plain chat: the schedule gets its own agent, and the person may pick its tools. */
+const PICKABLE_CARD = {
+  ...MORNING_BRIEF_CARD,
+  schedule: {
+    ...MORNING_BRIEF_CARD.schedule,
+    runs_as: 'morning-brief',
+    tools: {
+      editable: true,
+      agent_name: 'morning-brief',
+      connectors: [
+        { name: 'gmail', on: true },
+        { name: 'calendar', on: false },
+      ],
+      skills: [{ name: 'pdf', on: false }],
+      run_code: false,
+      memory: true,
+    },
   },
 } satisfies SentinelApprovalCard;
 
@@ -91,5 +111,103 @@ describe('schedule approval card', () => {
       MORNING_BRIEF_CARD.schedule,
     );
     expect(extractSentinelFromEvent(event({ action: 'create', name: 'x' }))[0]?.card.schedule).toBeNull();
+  });
+
+  it('shows tick boxes for a new schedule with its own agent, ticked as the server sent them', () => {
+    render(
+      <PermissionApprovalCard
+        approvalId="approval-1"
+        othersWaiting={0}
+        card={PICKABLE_CARD}
+        onApprove={vi.fn()}
+        onDeny={vi.fn()}
+        onChangeRequest={vi.fn()}
+      />,
+    );
+    const ticked = (name: string | RegExp) => screen.getByRole<HTMLInputElement>('checkbox', { name }).checked;
+    expect(document.querySelector('[data-role="schedule-tools-note"]')?.textContent).toBe(
+      'Pick what this schedule may use. Your choices are saved as morning-brief, and you can change them later.',
+    );
+    expect([ticked('gmail'), ticked('calendar'), ticked('pdf'), ticked('Run code'), ticked(/^Memory/)]).toEqual([
+      true,
+      false,
+      false,
+      false,
+      true,
+    ]);
+    expect(screen.queryByRole('button', { name: 'Update the card' })).not.toBeInTheDocument();
+    expect(document.querySelector('[data-approval-primary]')).toBeEnabled();
+  });
+
+  it('will not approve changed ticks: it asks for the card again with exactly what is ticked', () => {
+    const onApprove = vi.fn();
+    const onChangeRequest = vi.fn();
+    render(
+      <PermissionApprovalCard
+        approvalId="approval-1"
+        othersWaiting={0}
+        card={PICKABLE_CARD}
+        onApprove={onApprove}
+        onDeny={vi.fn()}
+        onChangeRequest={onChangeRequest}
+      />,
+    );
+    fireEvent.click(screen.getByRole('checkbox', { name: 'calendar' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'pdf' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /^Memory/ }));
+    // A skill needs run code, so it is turned on and held on.
+    expect(screen.getByRole('checkbox', { name: /^Run code/ })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: /^Run code/ })).toBeDisabled();
+    expect(document.querySelector('[data-approval-primary]')).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Update the card' }));
+    expect(onChangeRequest).toHaveBeenCalledWith(
+      'Use exactly these for the schedule. Connectors: gmail, calendar. Skills: pdf. Run code: On. Memory: Off',
+    );
+    expect(onApprove).not.toHaveBeenCalled();
+  });
+
+  it('lets the person approve again once the ticks are back as the card sent them', () => {
+    render(
+      <PermissionApprovalCard
+        approvalId="approval-1"
+        othersWaiting={0}
+        card={PICKABLE_CARD}
+        onApprove={vi.fn()}
+        onDeny={vi.fn()}
+        onChangeRequest={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByRole('checkbox', { name: 'calendar' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'calendar' }));
+    expect(screen.queryByRole('button', { name: 'Update the card' })).not.toBeInTheDocument();
+    expect(document.querySelector('[data-approval-primary]')).toBeEnabled();
+  });
+
+  it("shows a saved agent's tools as plain rows, with nothing to tick", () => {
+    renderCard({
+      ...PICKABLE_CARD,
+      schedule: { ...PICKABLE_CARD.schedule, tools: { ...PICKABLE_CARD.schedule.tools, editable: false } },
+    });
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+    const rows = Array.from(document.querySelectorAll('[data-role="schedule-tools"] p')).map(node => node.textContent);
+    expect(rows).toEqual(['Connectors: gmail', 'Skills: None', 'Run code: Off', 'Memory: On']);
+  });
+
+  it('does not show a card whose tools cannot be read in full', () => {
+    const event = (schedule: unknown) => ({
+      type: 'tool.approval_required',
+      tool_calls: [{ id: 'call-1', tier: 3, tier3_card: { plain_what: 'Create it', schedule } }],
+    });
+    expect(extractSentinelFromEvent(event(PICKABLE_CARD.schedule))[0]?.card.schedule).toEqual(PICKABLE_CARD.schedule);
+    expect(
+      extractSentinelFromEvent(event({ ...PICKABLE_CARD.schedule, tools: { editable: true } }))[0]?.card.schedule,
+    ).toBeNull();
+    // The generated client hands the same card over with camelCase keys.
+    const { agent_name: agentName, run_code: runCode, ...rest } = PICKABLE_CARD.schedule.tools;
+    expect(
+      extractSentinelFromEvent(event({ ...PICKABLE_CARD.schedule, tools: { ...rest, agentName, runCode } }))[0]?.card
+        .schedule,
+    ).toEqual(PICKABLE_CARD.schedule);
   });
 });

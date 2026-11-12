@@ -25,7 +25,7 @@ import {
 import { CalendarEventDetails } from './CalendarEventDetails.js';
 import { ChangeRequestBox } from './ChangeRequestBox.js';
 import { PersonaDetails } from './PersonaDetails.js';
-import { ScheduleDetails } from './ScheduleDetails.js';
+import { sameScheduleTools, ScheduleDetails, scheduleToolsRequest } from './ScheduleDetails.js';
 import { SkillDetails } from './SkillDetails.js';
 import type { SentinelApprovalCard } from './types.js';
 
@@ -137,6 +137,11 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
   const { tryPlay } = useRewardLedger();
 
   const { calendar_event: calendarEvent, schedule, persona, skill } = card;
+  const cardTools = schedule?.tools;
+  const [pickedTools, setPickedTools] = useState(cardTools);
+  // Approving saves what the card shows, so other choices must come back on a new card first.
+  const toolsChanged =
+    cardTools !== undefined && pickedTools !== undefined && !sameScheduleTools(pickedTools, cardTools);
   // A new-recipient send never offers a standing grant or a chat-wide allow: approving it adds addresses.
   const newRecipients = isNewRecipientCard(card);
   const plumbingText = card.outbound_plumbing_text ?? null;
@@ -203,7 +208,23 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
 
       {calendarEvent !== null && <CalendarEventDetails event={calendarEvent} />}
 
-      {schedule !== null && <ScheduleDetails schedule={schedule} />}
+      {schedule !== null && (
+        <ScheduleDetails
+          schedule={schedule}
+          picker={
+            pickedTools === undefined || onChangeRequest === undefined
+              ? undefined
+              : {
+                  picked: pickedTools,
+                  onPick: setPickedTools,
+                  onUpdate: () => {
+                    onChangeRequest(scheduleToolsRequest(pickedTools));
+                  },
+                  disabled: busy,
+                }
+          }
+        />
+      )}
 
       {persona !== null && <PersonaDetails persona={persona} />}
 
@@ -236,7 +257,7 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
           {...(safeFirst ? {} : { 'data-approval-primary': true })}
           title={APPROVAL_CHOICES.approve.hint}
           onClick={markSent(onApprove)}
-          disabled={busy}
+          disabled={busy || toolsChanged}
           className={cn(safeFirst && card.destructive === true && 'text-failure-bg')}
         >
           {approveVerb(card)}
