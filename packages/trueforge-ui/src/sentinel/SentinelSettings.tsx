@@ -14,8 +14,7 @@ import { TIER2_ACTION_KINDS, TIER2_ACTION_LABELS, type Tier2ActionKind } from '.
  * switch and the sandbox switch. While offline mode is on, actions outside this device are auto-denied without an approval
  * card, and the persistent offline indicator shows in the app shell. The search switch decides whether
  * the connector you designated as your search provider asks before each search. The maps switch
- * decides whether maps ask first. It covers places from the person's own words and calendar: once a chat has
- * read anything else, a map of any other place still asks.
+ * decides whether maps ask first. A scheduled run never waits on a map: with the switch off it skips the map.
  */
 export const SentinelSettings: FC = () => {
   const assistant = useAssistantDisplayName();
@@ -36,7 +35,7 @@ export const SentinelSettings: FC = () => {
 
   const offline = sentinel.settings?.offline_mode ?? false;
   const searchWithoutAsking = sentinel.settings?.search_without_asking ?? true;
-  const mapsWithoutAsking = sentinel.settings?.maps_without_asking ?? false;
+  const mapsWithoutAsking = sentinel.settings?.maps_without_asking ?? true;
   const sandboxWithoutAsking = sentinel.settings?.sandbox_without_asking ?? true;
 
   const handleChange = async (next: boolean) => {
@@ -178,8 +177,8 @@ export const SentinelSettings: FC = () => {
           <p className="text-sm font-medium text-text-primary">Maps</p>
           <p className="mt-1 text-sm text-text-secondary">
             {mapsWithoutAsking
-              ? 'A map runs without asking when its places come from your own words or your own calendar. Once a chat has read something else, such as an email or a web page, a map of any other place asks first. A map also asks if it would send a password or key.'
-              : 'Maps ask before each one. Turn this on to let maps of places from your own words and your own calendar run without asking.'}
+              ? 'Maps run without asking. A map asks first only if it would send a password or key.'
+              : 'Maps ask before each one. A scheduled run, such as a daily briefing, skips its maps.'}
           </p>
           {mapsError !== null && (
             <p className="mt-2 text-xs text-failure-bg" role="alert">

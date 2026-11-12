@@ -82,8 +82,8 @@ export function effectiveToolAdmissions(input: {
  * *receive* chat scope; the scope's binding lives in the grant key: the tool and its destination, and for sandbox
  * exec an invocation digest over (purpose, command, cwd, env), so approving one command in a chat never authorizes a
  * different one or reaches another chat. A consequential action qualifies only when its card names a target for
- * the grant to be tied to; a send, a mail draft and a steered call never do. A map of the person's own places
- * qualifies; a map that would send a secret or a place the chat only read does not.
+ * the grant to be tied to; a send, a mail draft and a steered call never do. A map qualifies, unless it would
+ * send something that looks like a secret.
  */
 export function allowsChatApproval(info: InternalToolCallInfo): boolean {
   if (secretPathReadBarsDurableGrant(info)) {
@@ -147,8 +147,8 @@ function secretPathReadBarsDurableGrant(info: InternalToolCallInfo): boolean {
  * that is read-only inspection, for the same argument-blindness reason as a chat grant. A call the
  * classifier stamped with a grant scope key is the one exception: the key itself is the scope
  * (a Home Assistant domain or the one entity), so the grant is never wider than the key says.
- * A change to the person's own calendar is answered per chat, so it never gets one. A map of the person's own
- * places gets one, which lets maps run without asking.
+ * A change to the person's own calendar is answered per chat, so it never gets one. A map gets one, which lets
+ * maps run without asking.
  */
 export function allowsToolGrant(info: InternalToolCallInfo): boolean {
   // A grant has no effect on the designated search provider, which has its own guarded path.
@@ -171,8 +171,7 @@ export function allowsToolGrant(info: InternalToolCallInfo): boolean {
 /**
  * Whether this is the card of the assistant's own maps tool that a lasting answer may cover. "Always allow in
  * this chat" stops the question for the chat, and "Always allow everywhere" lets maps run without asking from
- * then on. Either covers only places from the person's own words and their own calendar, so a map that asks
- * for any other reason offers neither.
+ * then on. A map that asks because it would send something that looks like a secret offers neither.
  */
 export function mapsCardTakesLastingAnswer(info: InternalToolCallInfo): boolean {
   return info.type === 'truefoundry-system' && info.tier_reason === MAPS_ASK_REASON;

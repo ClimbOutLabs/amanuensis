@@ -11,7 +11,7 @@ describe('sentinelSettingsServices', () => {
       offline_mode: true,
       tier2_auto_allow: ['file_write'],
       search_without_asking: false,
-      maps_without_asking: true,
+      maps_without_asking: false,
       sandbox_without_asking: false,
       chat_search_enabled: undefined,
       package_downloads_without_project_allowed: false,
@@ -23,9 +23,8 @@ describe('sentinelSettingsServices', () => {
     expect((await services.tier2AutoAllow({ tenant_id: 't1', created_by: 'bob' })).size).toBe(0);
     expect(await services.searchWithoutAsking({ tenant_id: 't1', created_by: 'alice' })).toBe(false);
     expect(await services.searchWithoutAsking({ tenant_id: 't1', created_by: 'bob' })).toBe(true);
-    // Maps ask until the person turns the switch on.
-    expect(await services.mapsWithoutAsking({ tenant_id: 't1', created_by: 'alice' })).toBe(true);
-    expect(await services.mapsWithoutAsking({ tenant_id: 't1', created_by: 'bob' })).toBe(false);
+    expect(await services.mapsWithoutAsking({ tenant_id: 't1', created_by: 'alice' })).toBe(false);
+    expect(await services.mapsWithoutAsking({ tenant_id: 't1', created_by: 'bob' })).toBe(true);
     expect(await services.sandboxWithoutAsking({ tenant_id: 't1', created_by: 'alice' })).toBe(false);
     expect(await services.sandboxWithoutAsking({ tenant_id: 't1', created_by: 'bob' })).toBe(true);
   });
@@ -53,16 +52,18 @@ describe('sentinelSettingsServices', () => {
     const services = sentinelSettingsServices(store);
     const alice = { tenant_id: 't1', created_by: 'alice' };
     const bob = { tenant_id: 't1', created_by: 'bob' };
-    await store.patch({
-      ...alice,
-      offline_mode: undefined,
-      tier2_auto_allow: ['file_write'],
-      search_without_asking: false,
-      maps_without_asking: undefined,
-      sandbox_without_asking: false,
-      chat_search_enabled: undefined,
-      package_downloads_without_project_allowed: undefined,
-    });
+    for (const person of [alice, bob]) {
+      await store.patch({
+        ...person,
+        offline_mode: undefined,
+        tier2_auto_allow: ['file_write'],
+        search_without_asking: false,
+        maps_without_asking: false,
+        sandbox_without_asking: false,
+        chat_search_enabled: undefined,
+        package_downloads_without_project_allowed: undefined,
+      });
+    }
     expect(await services.mapsWithoutAsking(alice)).toBe(false);
 
     await services.allowMapsWithoutAsking(alice);

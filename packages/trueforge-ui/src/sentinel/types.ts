@@ -803,7 +803,7 @@ export function parseUserSettings(body: unknown): SentinelUserSettings {
       offline_mode: false,
       tier2_auto_allow: [],
       search_without_asking: true,
-      maps_without_asking: false,
+      maps_without_asking: true,
       sandbox_without_asking: true,
       chat_search_enabled: false,
       package_downloads_without_project_allowed: false,
@@ -813,7 +813,7 @@ export function parseUserSettings(body: unknown): SentinelUserSettings {
     offline_mode: optionalBoolean(settings, 'offline_mode') ?? false,
     tier2_auto_allow: tier2ActionKindArray(settings.tier2_auto_allow),
     search_without_asking: optionalBoolean(settings, 'search_without_asking') ?? true,
-    maps_without_asking: optionalBoolean(settings, 'maps_without_asking') ?? false,
+    maps_without_asking: optionalBoolean(settings, 'maps_without_asking') ?? true,
     sandbox_without_asking: optionalBoolean(settings, 'sandbox_without_asking') ?? true,
     chat_search_enabled: optionalBoolean(settings, 'chat_search_enabled') ?? false,
     package_downloads_without_project_allowed:

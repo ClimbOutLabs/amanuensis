@@ -890,31 +890,31 @@ describe('lasting answers on a maps card', () => {
     };
   }
 
-  it("offers both for a map of the person's own places", () => {
+  it('offers both for a map that asks only because maps are set to ask', () => {
     const info = mapsInfo({});
     expect(mapsCardTakesLastingAnswer(info)).toBe(true);
     expect(allowsChatApproval(info)).toBe(true);
     expect(allowsToolGrant(info)).toBe(true);
   });
 
-  it('offers neither for a map that would send a secret or a place the chat only read', () => {
+  it('offers neither for a map that would send something that looks like a secret', () => {
     const info = mapsInfo({ tier_reason: MAPS_HOLD_REASON });
     expect(mapsCardTakesLastingAnswer(info)).toBe(false);
     expect(allowsChatApproval(info)).toBe(false);
     expect(allowsToolGrant(info)).toBe(false);
   });
 
-  it('does not let an answer given for the chat cover a later map of a place the chat only read', () => {
-    const own = mapsInfo({});
-    const read = mapsInfo({ tier_reason: MAPS_HOLD_REASON });
+  it('does not let an answer given for the chat cover a later map that would send a secret', () => {
+    const plain = mapsInfo({});
+    const secret = mapsInfo({ tier_reason: MAPS_HOLD_REASON });
     const admissions = effectiveToolAdmissions({
-      calls: [toolCall('own-again', own), toolCall('read', read)],
+      calls: [toolCall('plain-again', plain), toolCall('secret', secret)],
       decisions: new Map(),
-      chatApprovalGrants: new Set([approvalGrantKey(own), approvalGrantKey(read)]),
+      chatApprovalGrants: new Set([approvalGrantKey(plain), approvalGrantKey(secret)]),
       implementationPlanGrants: new Set(),
     });
-    expect(admissions.get('own-again')?.decision).toEqual({ status: 'allow', scope: 'chat' });
-    expect(admissions.get('read')).toEqual({ decision: undefined, admission_provenance: { source: 'automatic' } });
+    expect(admissions.get('plain-again')?.decision).toEqual({ status: 'allow', scope: 'chat' });
+    expect(admissions.get('secret')).toEqual({ decision: undefined, admission_provenance: { source: 'automatic' } });
   });
 
   it('offers neither for such a map even if the maps tool were marked as only reading', () => {

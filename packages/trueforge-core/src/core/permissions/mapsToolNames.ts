@@ -12,8 +12,8 @@ export const MAPS_TOOL_NAMES = [RENDER_MAP_TOOL_NAME, RENDER_ROUTE_TOOL_NAME, RE
 export const MAPS_ASK_REASON = 'maps_tool';
 
 /**
- * Reason code for an embedded maps call that asks every time: it would send a secret, or a place that is not
- * from the person's own words or their own calendar. No lasting answer covers it.
+ * Reason code for an embedded maps call that asks every time: it would send text that looks like a password, a
+ * key, a card number or a long block of text. No lasting answer covers it.
  */
 export const MAPS_HOLD_REASON = 'maps_hold';
 

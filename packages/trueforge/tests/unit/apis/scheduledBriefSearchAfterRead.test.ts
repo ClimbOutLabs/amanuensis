@@ -1,8 +1,8 @@
 /**
  * A scheduled brief over the real server path: no one is watching, so nothing may stop at a card. The
  * scripted model reads the inbox, searches the web, then maps the address the inbox names. A search that names
- * someone from the mail runs too: the person's own mail is theirs to use. The map does not run: only someone
- * else's mail named that address, so it waits for the owner even with maps set to run without asking.
+ * someone from the mail runs too: the person's own mail is theirs to use. With maps set to ask, the brief
+ * leaves its map out instead of leaving a card for the owner.
  */
 import { z } from '@hono/zod-openapi';
 import { AgentSpecSchema, type Turn } from '@truefoundry/trueforge-core/agent-session';
@@ -29,6 +29,8 @@ const CLEAN_QUERY = 'Lantern Row bakery';
 const REPEAT_QUERY = 'Quay Street florist';
 /** Carries the sender's name, which the mail header copies. */
 const NAMED_QUERY = `${MAIL_SENDER_NAME} bakery`;
+/** A phrase only the maps-set-to-ask test uses. */
+const NO_MAP_QUERY = 'Mill Lane tailor';
 
 const AGENT_SPEC = AgentSpecSchema.parse({
   model: { name: MODEL_FQN },
@@ -255,7 +257,7 @@ describe('scheduled brief: search and map after reading the mail', () => {
   });
 
   it(
-    'reads the mail, searches with a clean query, and holds the map of an address only the inbox named for the owner',
+    'reads the mail, searches with a clean query, and maps the inbox address, with no card left waiting',
     async () => {
       const { sessionId, turn } = await runScheduledBrief({
         agent,
@@ -271,14 +273,11 @@ describe('scheduled brief: search and map after reading the mail', () => {
 
       const entries = await auditEntries(server, sessionId);
       const search = entries.find(e => e.tool_name === 'tavily_search' && e.description === `Searched: ${CLEAN_QUERY}`);
+      const map = entries.find(
+        e => e.tool_name === 'render_map' && e.description === `Maps ran without asking: ${HARBOUR_ADDRESS}`,
+      );
       expect(search).toMatchObject({ tier: 1, outcome: 'logged' });
-      // The place went nowhere: the only map entry is the one held for the owner, and the brief says so.
-      const maps = entries.filter(e => e.tool_name === 'render_map');
-      expect(maps).toHaveLength(1);
-      expect(maps[0]).toMatchObject({ tier: 3, outcome: 'logged', auto_deny_reason: null });
-      expect(maps[0]?.description).toContain('Held for the owner: ');
-      expect(maps[0]?.description).toContain(HARBOUR_ADDRESS);
-      expect(JSON.stringify(turn.state)).toContain('Needs your OK');
+      expect(map).toMatchObject({ tier: 1, outcome: 'logged' });
     },
     TURN_TIMEOUT_MS,
   );
@@ -333,5 +332,36 @@ describe('scheduled brief: search and map after reading the mail', () => {
       });
     },
     TURN_TIMEOUT_MS * 2,
+  );
+
+  it(
+    'with maps set to ask, finishes without its map, says which switch to turn on, and leaves no card waiting',
+    async () => {
+      const setMaps = async (value: boolean) => {
+        const response = await server.request(
+          '/api/v1/user/settings/sentinel',
+          jsonInit({ maps_without_asking: value }, 'PATCH'),
+        );
+        expect(response.status).toBe(200);
+      };
+      await setMaps(false);
+      try {
+        const { sessionId, turn } = await runScheduledBrief({ agent, server, search: NO_MAP_QUERY });
+
+        expect(turn.state.status).toBe('done');
+        expect(turn.state).toMatchObject({ required_actions: [] });
+        expect(JSON.stringify(turn.state)).not.toContain('Needs your OK');
+        expect(tavily.calls[0]?.body).toMatchObject({ query: NO_MAP_QUERY });
+
+        const maps = (await auditEntries(server, sessionId)).filter(e => e.tool_name === 'render_map');
+        // The map went nowhere: every entry for it is a refusal, and the owner's line names the switch.
+        expect(maps.map(e => e.outcome)).toEqual(['auto_denied', 'auto_denied']);
+        expect(maps.map(e => e.auto_deny_reason)).toContain('unattended_run');
+        expect(maps.some(e => e.description.includes('turn on Maps in Settings'))).toBe(true);
+      } finally {
+        await setMaps(true);
+      }
+    },
+    TURN_TIMEOUT_MS,
   );
 });

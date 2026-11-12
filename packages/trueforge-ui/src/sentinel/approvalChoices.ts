@@ -81,9 +81,9 @@ export type AlwaysAllowConfirm = { hint: string; description: string; undo: stri
 export function alwaysAllowConfirm(input: { covers: 'maps' | undefined; toolSay: string }): AlwaysAllowConfirm {
   if (input.covers === 'maps') {
     return {
-      hint: 'Show maps of your own places without asking, in every chat, until you turn it off in Settings.',
+      hint: 'Show maps without asking, in every chat, until you turn it off in Settings.',
       description:
-        'Maps of places from your own words and your own calendar will show without asking, in every chat. A map of any other place still asks.',
+        'Maps will show without asking, in every chat and in scheduled runs. A map still asks if it would send something that looks like a password or key.',
       undo: 'You can turn this off later with the Maps switch in Settings.',
     };
   }

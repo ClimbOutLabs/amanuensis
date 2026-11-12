@@ -133,7 +133,6 @@ import {
   hasReadContent,
   isPersonVouchedUrl,
   namesUrl,
-  placesNotFromPerson,
   replyLinksWithAddedData,
   steeredDestinations,
   steeredLinks,
@@ -2224,42 +2223,28 @@ function steeringChecked(input: {
   };
 }
 
-/** The place strings a maps call sends to the map service: what it looks up, never a pin's own details. */
-function mapsPlaces(action: SentinelAction): string[] {
-  const params = action.canonical_params;
-  const sent: unknown[] =
-    action.tool_name === RENDER_ROUTE_TOOL_NAME
-      ? [params['from_place'], params['to_place']]
-      : action.tool_name === RENDER_PLACES_TOOL_NAME
-        ? Array.isArray(params['places'])
-          ? params['places'].map((place: unknown) =>
-              typeof place === 'object' && place !== null && 'address' in place ? place.address : undefined,
-            )
-          : []
-        : [params['place_name'], params['poi']];
-  return sent.filter((place): place is string => typeof place === 'string');
-}
-
 /**
- * Why a maps call asks whatever the person allowed, as the sentence for its card: it would send a secret, or one
- * of its places is not from the person's own words or their own calendar in a chat that has read other content.
- * Undefined when a lasting answer may cover the call.
+ * A map that would ask, left out of a scheduled run: nobody is there to answer, and a map never leaves a card
+ * waiting for the owner. `guard` is the outbound guard's verdict on what the map would send.
  */
-async function mapsHoldSay(input: {
-  ctx: ClassifyContext;
-  action: SentinelAction;
-  strings: ReturnType<typeof collectOutboundStrings>;
-}): Promise<string | undefined> {
-  const { ctx, action, strings } = input;
-  const assistant = ctx.web_search.assistantName;
-  const { verdict } = await outboundGuard({ ctx, strings });
-  if (!verdict.ok) {
-    return guardRuleSay({ rule: verdict.rule, assistant });
+function mapsSkipped(guard: OutboundGuardVerdict): TierDecision {
+  if (!guard.ok) {
+    return autoDenyDecision({
+      reason: 'outbound_guard',
+      reason_detail:
+        'The map would have sent text that looks like a password, a key, a card number or a long block of text.',
+      owner_message:
+        'One map was skipped, because its place text looked like a password, a key, a card number or a long block of text. Ask for the map in a chat to see what it would send.',
+      sensitive_read: false,
+    });
   }
-  if (placesNotFromPerson({ provenance: ctx.web_search.provenance, places: mapsPlaces(action) }).length > 0) {
-    return holdSay(assistant).maps_read_place;
-  }
-  return undefined;
+  return autoDenyDecision({
+    reason: 'unattended_run',
+    reason_detail: 'Maps are set to ask, and nobody is here to answer in a scheduled run. Continue without the map.',
+    owner_message:
+      'One map was skipped, because maps are set to ask. To get maps in scheduled runs, turn on Maps in Settings, under Permissions.',
+    sensitive_read: false,
+  });
 }
 
 /** An embedded maps call that runs without a card, once the person has let maps run without asking. */
@@ -4045,13 +4030,16 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
         });
       }
       const strings = collectOutboundStrings(action.canonical_params);
-      // Judged whatever the setting says, so an answer given for the chat never covers such a map either.
-      const held = await mapsHoldSay({ ctx, action, strings });
+      // Judged whatever the setting says, so an answer given for the chat never covers a map that trips the guard.
+      const { verdict } = await outboundGuard({ ctx, strings });
       if (
-        held === undefined &&
+        verdict.ok &&
         (await ctx.services.mapsWithoutAsking({ tenant_id: ctx.tenant_id, created_by: ctx.created_by }))
       ) {
         return mapsSilentDecision({ ctx, strings });
+      }
+      if (ctx.services.unattended) {
+        return mapsSkipped(verdict);
       }
       const outbound = renderOutboundArguments(
         action.tool_name === RENDER_PLACES_TOOL_NAME
@@ -4072,8 +4060,10 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
           destination_host: action.maps_hosts === undefined ? null : mapsDestinationHosts(action.maps_hosts),
           outbound_truncated: outbound.truncated,
         },
-        reason: held === undefined ? MAPS_ASK_REASON : MAPS_HOLD_REASON,
-        reason_detail: held ?? holdSay(ctx.web_search.assistantName).maps_always,
+        reason: verdict.ok ? MAPS_ASK_REASON : MAPS_HOLD_REASON,
+        reason_detail: verdict.ok
+          ? holdSay(ctx.web_search.assistantName).maps_always
+          : guardRuleSay({ rule: verdict.rule, assistant: ctx.web_search.assistantName }),
         sensitive_read: false,
         approval_token_id: await mintPlainToken({
           ctx,

@@ -18,10 +18,9 @@ import {
   MAPS_HOLD_REASON,
   MAPS_SILENT_REASON,
 } from '../../../src/core/permissions/mapsToolNames';
-import { recordPersonText, recordUntrustedText } from '../../../src/core/permissions/provenance';
+import { recordPersonText } from '../../../src/core/permissions/provenance';
 import {
   createWebSearchTurnState,
-  hostToolStamp,
   NO_HOST_STAMP,
   recordToolResultProvenance,
 } from '../../../src/core/permissions/webSearch';
@@ -347,6 +346,17 @@ describe('maps without asking', () => {
   });
   const maps_on = withServices({ mapsWithoutAsking: () => Promise.resolve(true) });
   const maps_off = withServices({ mapsWithoutAsking: () => Promise.resolve(false) });
+  const STRANGER_PLACE = '12 Harbour Street, Lisbon';
+
+  function readStrangerMail(ctx: ClassifyContext): void {
+    recordToolResultProvenance({
+      state: ctx.web_search,
+      tool_name: 'read_email',
+      stamp: NO_HOST_STAMP,
+      argument_values: ['m1'],
+      texts: [`From: Dana Wolfe <dana@example.org>\nLunch at ${STRANGER_PLACE} on Friday.`],
+    });
+  }
 
   it("keeps today's card when the setting is off", async () => {
     for (const services of [defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }), withServices({})]) {
@@ -357,30 +367,6 @@ describe('maps without asking', () => {
         'Send "Paris" to nominatim.openstreetmap.org to find it, then load map tiles for that area from tile.openstreetmap.org?',
       );
     }
-  });
-
-  it('says why a map asked when the setting is off and the place is one the chat only read', async () => {
-    const ctx = makeCtx(maps_off);
-    recordPersonText({ provenance: ctx.web_search.provenance, text: 'Where is that clinic?' });
-    recordUntrustedText({
-      provenance: ctx.web_search.provenance,
-      text: 'Harbour Family Clinic, 12 Example Street, Lisbon 1100-000',
-      source: 'page',
-    });
-    const decision = await classifyTier(mapsAction('render_map', { place_name: '12 Example Street, Lisbon' }), ctx);
-    expect(decision).toMatchObject({
-      tier: 3,
-      reason: MAPS_HOLD_REASON,
-      reason_detail: 'This place is not from your own words or your calendar, so Aman is checking with you first.',
-    });
-  });
-
-  it("asks with the plain maps reason for the person's own place when the setting is off", async () => {
-    const ctx = makeCtx(maps_off);
-    recordPersonText({ provenance: ctx.web_search.provenance, text: 'Show me 12 Example Street in Lisbon.' });
-    recordUntrustedText({ provenance: ctx.web_search.provenance, text: 'Harbour Family Clinic', source: 'page' });
-    const decision = await classifyTier(mapsAction('render_map', { place_name: '12 Example Street, Lisbon' }), ctx);
-    expect(decision).toMatchObject({ tier: 3, reason: MAPS_ASK_REASON });
   });
 
   it('gives the always-Tier-3 detail when the setting is off', async () => {
@@ -427,6 +413,13 @@ describe('maps without asking', () => {
     expect(second.reason).toBe(MAPS_HOLD_REASON);
   });
 
+  it("runs after the chat read mail, since a lookup on the person's behalf is the point", async () => {
+    const ctx = makeCtx(maps_on);
+    readStrangerMail(ctx);
+    const decision = await classifyTier(mapsAction('render_map', { place_name: STRANGER_PLACE }), ctx);
+    expect(decision.tier).toBe(1);
+  });
+
   it("runs a map of the person's own city from their profile", async () => {
     const ctx = makeCtx(maps_on);
     recordPersonText({
@@ -450,6 +443,35 @@ describe('maps without asking', () => {
     expect(decision.card).not.toBeNull();
   });
 
+  it('asks with the plain maps reason when the setting is off, wherever the place came from', async () => {
+    const ctx = makeCtx(maps_off);
+    readStrangerMail(ctx);
+    const decision = await classifyTier(mapsAction('render_map', { place_name: STRANGER_PLACE }), ctx);
+    expect(decision).toMatchObject({
+      tier: 3,
+      reason: MAPS_ASK_REASON,
+      reason_detail: 'Maps are set to ask, so Aman is checking with you first.',
+      auto_deny: null,
+    });
+    expect(decision.card).not.toBeNull();
+  });
+
+  it('marks a map that would send a held secret apart from a plain one, also when the setting is off', async () => {
+    const services = withServices({
+      mapsWithoutAsking: () => Promise.resolve(false),
+      outboundSecrets: () => Promise.resolve([HELD_VALUE]),
+    });
+    const decision = await classifyTier(
+      mapsAction('render_map', { place_name: `Paris ${HELD_VALUE}` }),
+      makeCtx(services),
+    );
+    expect(decision).toMatchObject({
+      tier: 3,
+      reason: MAPS_HOLD_REASON,
+      reason_detail: 'This sends something that looks like a password or key.',
+    });
+  });
+
   it('denies offline before the setting is consulted', async () => {
     const services = withServices({
       mapsWithoutAsking: () => Promise.resolve(true),
@@ -463,6 +485,43 @@ describe('maps without asking', () => {
   it('runs silently in an unattended run on the same clean-chat rule', async () => {
     const services = withServices({ mapsWithoutAsking: () => Promise.resolve(true), unattended: true });
     expect((await classifyTier(mapsAction('render_map', { place_name: 'Paris' }), makeCtx(services))).tier).toBe(1);
+  });
+
+  it.each([
+    ['a map', mapsAction('render_map', { place_name: STRANGER_PLACE })],
+    ['a route', mapsAction('render_route', { from_place: 'Paris', to_place: STRANGER_PLACE })],
+    ['a pin', mapsAction('render_places', { places: [{ ...PLACE_CLAIM, address: STRANGER_PLACE }] })],
+  ])('a scheduled run with maps on shows %s of a place from the mail it read', async (_label, action) => {
+    const ctx = makeCtx(withServices({ mapsWithoutAsking: () => Promise.resolve(true), unattended: true }));
+    readStrangerMail(ctx);
+    expect(await classifyTier(action, ctx)).toMatchObject({ tier: 1, reason: MAPS_SILENT_REASON, card: null });
+  });
+
+  it('a scheduled run with maps set to ask leaves the map out and says which switch to turn on', async () => {
+    const ctx = makeCtx(withServices({ mapsWithoutAsking: () => Promise.resolve(false), unattended: true }));
+    const decision = await classifyTier(mapsAction('render_map', { place_name: 'Paris' }), ctx);
+    expect(decision).toMatchObject({
+      tier: 3,
+      auto_deny: 'unattended_run',
+      card: null,
+      approval_token_id: null,
+      owner_message:
+        'One map was skipped, because maps are set to ask. To get maps in scheduled runs, turn on Maps in Settings, under Permissions.',
+    });
+  });
+
+  it('a scheduled run leaves out a map that would send a held secret, with no card left waiting', async () => {
+    const ctx = makeCtx(
+      withServices({
+        mapsWithoutAsking: () => Promise.resolve(true),
+        outboundSecrets: () => Promise.resolve([HELD_VALUE]),
+        unattended: true,
+      }),
+    );
+    const decision = await classifyTier(mapsAction('render_map', { place_name: `Paris ${HELD_VALUE}` }), ctx);
+    expect(decision).toMatchObject({ tier: 3, auto_deny: 'outbound_guard', card: null, approval_token_id: null });
+    expect(decision.owner_message).toContain('One map was skipped');
+    expect(JSON.stringify(decision)).not.toContain(HELD_VALUE);
   });
 
   it('records a silent map in the audit log with the maps reason', async () => {
@@ -488,160 +547,5 @@ describe('maps without asking', () => {
     expect(decision.reason).toBe(MAPS_SILENT_REASON);
     expect(records).toHaveLength(1);
     expect(records[0]).toMatchObject({ tier: 1, tool_name: 'render_map', outcome: 'logged' });
-  });
-});
-
-describe("with maps set to run without asking, only the person's own places run without a card", () => {
-  const READ_PLACE_SAY = 'This place is not from your own words or your calendar, so Aman is checking with you first.';
-  const STRANGER_MAIL = 'From: Dana Wolfe <dana@example.org>\nLunch at 12 Harbour Street, Lisbon on Friday.';
-
-  function mapsOnCtx(overrides?: Partial<SentinelServices>): ClassifyContext {
-    return makeCtx({
-      ...defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }),
-      mapsWithoutAsking: () => Promise.resolve(true),
-      ...overrides,
-    });
-  }
-
-  function readMail(ctx: ClassifyContext, text: string): void {
-    recordToolResultProvenance({
-      state: ctx.web_search,
-      tool_name: 'read_email',
-      stamp: NO_HOST_STAMP,
-      argument_values: ['m1'],
-      texts: [text],
-    });
-  }
-
-  /** Events as the assistant's own Calendar tool returns them. */
-  function readCalendar(ctx: ClassifyContext, text: string): void {
-    recordToolResultProvenance({
-      state: ctx.web_search,
-      tool_name: 'list_events',
-      stamp: hostToolStamp({ type: 'truefoundry-system' }),
-      argument_values: [],
-      texts: [text],
-    });
-  }
-
-  it.each([
-    ['a map of it', mapsAction('render_map', { place_name: '12 Harbour Street, Lisbon' })],
-    ['a route from it', mapsAction('render_route', { from_place: '12 Harbour Street, Lisbon', to_place: 'Paris' })],
-    [
-      'a pin on it',
-      mapsAction('render_places', { places: [{ ...PLACE_CLAIM, address: '12 Harbour Street, Lisbon' }] }),
-    ],
-  ])("asks for an address only someone else's email named: %s", async (_label, action) => {
-    const ctx = mapsOnCtx();
-    recordPersonText({ provenance: ctx.web_search.provenance, text: 'Show me a map of Paris and where lunch is.' });
-    readMail(ctx, STRANGER_MAIL);
-    const decision = await classifyTier(action, ctx);
-    expect(decision).toMatchObject({ tier: 3, reason: MAPS_HOLD_REASON, reason_detail: READ_PLACE_SAY });
-    expect(decision.card).not.toBeNull();
-  });
-
-  it('asks for an address only a web page named', async () => {
-    const ctx = mapsOnCtx();
-    recordPersonText({ provenance: ctx.web_search.provenance, text: 'Where is that clinic?' });
-    recordUntrustedText({
-      provenance: ctx.web_search.provenance,
-      text: 'Harbour Family Clinic, 12 Example Street, Lisbon 1100-000',
-      source: 'page',
-    });
-    const decision = await classifyTier(mapsAction('render_map', { place_name: '12 Example Street, Lisbon' }), ctx);
-    expect(decision).toMatchObject({ tier: 3, reason: MAPS_HOLD_REASON, reason_detail: READ_PLACE_SAY });
-  });
-
-  it('asks for an address only a search result named', async () => {
-    const ctx = mapsOnCtx();
-    recordPersonText({ provenance: ctx.web_search.provenance, text: 'Find me a clinic that is open today.' });
-    recordToolResultProvenance({
-      state: ctx.web_search,
-      tool_name: 'web_search',
-      stamp: hostToolStamp({ type: 'mcp', search_provider_call: true }),
-      argument_values: ['clinic open today'],
-      texts: [
-        JSON.stringify({
-          results: [
-            {
-              title: 'Harbour Family Clinic',
-              url: 'https://clinic.example/',
-              content: 'Open today at 12 Example Street, Lisbon 1100-000.',
-            },
-          ],
-        }),
-      ],
-    });
-    const decision = await classifyTier(mapsAction('render_map', { place_name: '12 Example Street, Lisbon' }), ctx);
-    expect(decision).toMatchObject({ tier: 3, reason: MAPS_HOLD_REASON, reason_detail: READ_PLACE_SAY });
-  });
-
-  it('runs a place the person named themselves, also after the chat read mail', async () => {
-    const ctx = mapsOnCtx();
-    recordPersonText({ provenance: ctx.web_search.provenance, text: 'Show me 12 Harbour Street in Lisbon.' });
-    readMail(ctx, STRANGER_MAIL);
-    const decision = await classifyTier(mapsAction('render_map', { place_name: '12 Harbour Street, Lisbon' }), ctx);
-    expect(decision).toMatchObject({ tier: 1, reason: MAPS_SILENT_REASON, card: null });
-  });
-
-  it("runs a place from the person's own calendar, also after the chat read mail", async () => {
-    const ctx = mapsOnCtx();
-    recordPersonText({ provenance: ctx.web_search.provenance, text: 'How do I get to my next appointment?' });
-    readCalendar(ctx, JSON.stringify({ events: [{ title: 'Dentist', location: '40 Rua Augusta, Lisbon' }] }));
-    readMail(ctx, STRANGER_MAIL);
-    const decision = await classifyTier(mapsAction('render_map', { place_name: '40 Rua Augusta, Lisbon' }), ctx);
-    expect(decision).toMatchObject({ tier: 1, reason: MAPS_SILENT_REASON, card: null });
-  });
-
-  it("asks for a place only a connector's tool named, though the tool is called like the Calendar tool", async () => {
-    const ctx = mapsOnCtx();
-    recordPersonText({ provenance: ctx.web_search.provenance, text: 'How do I get to my next appointment?' });
-    recordToolResultProvenance({
-      state: ctx.web_search,
-      tool_name: 'list_events',
-      stamp: hostToolStamp({ type: 'mcp' }),
-      argument_values: [],
-      texts: [JSON.stringify({ events: [{ title: 'Dentist', location: '40 Rua Augusta, Lisbon' }] })],
-    });
-    const decision = await classifyTier(mapsAction('render_map', { place_name: '40 Rua Augusta, Lisbon' }), ctx);
-    expect(decision).toMatchObject({ tier: 3, reason: MAPS_HOLD_REASON, reason_detail: READ_PLACE_SAY });
-  });
-
-  it('runs a place nobody named in a chat that has read only the calendar', async () => {
-    const ctx = mapsOnCtx();
-    recordPersonText({ provenance: ctx.web_search.provenance, text: 'Show me the capital of France.' });
-    readCalendar(ctx, JSON.stringify({ events: [{ title: 'Dentist', location: '40 Rua Augusta, Lisbon' }] }));
-    expect((await classifyTier(mapsAction('render_map', { place_name: 'Paris' }), ctx)).tier).toBe(1);
-  });
-
-  it("keeps a pin's details out of the check: only the address is looked up", async () => {
-    const ctx = mapsOnCtx();
-    recordPersonText({ provenance: ctx.web_search.provenance, text: 'Pin 12 Example Street, Lisbon 1100-000 for me.' });
-    recordUntrustedText({ provenance: ctx.web_search.provenance, text: 'Harbour Family Clinic', source: 'page' });
-    const decision = await classifyTier(mapsAction('render_places', { places: [PLACE_CLAIM] }), ctx);
-    expect(decision.tier).toBe(1);
-  });
-
-  it("a scheduled morning brief gets travel times for the person's own appointments, and holds a stranger's address", async () => {
-    const ctx = mapsOnCtx({ unattended: true });
-    recordPersonText({
-      provenance: ctx.web_search.provenance,
-      text: '<user-profile>Lives at 7 Calm Lane, Lisbon.</user-profile>\nEvery morning, tell me when to leave for each appointment.',
-    });
-    readCalendar(ctx, JSON.stringify({ events: [{ title: 'Dentist', location: '40 Rua Augusta, Lisbon' }] }));
-    readMail(ctx, STRANGER_MAIL);
-
-    const own = await classifyTier(
-      mapsAction('render_route', { from_place: '7 Calm Lane, Lisbon', to_place: '40 Rua Augusta, Lisbon' }),
-      ctx,
-    );
-    expect(own).toMatchObject({ tier: 1, reason: MAPS_SILENT_REASON, card: null });
-
-    const read = await classifyTier(
-      mapsAction('render_route', { from_place: '7 Calm Lane, Lisbon', to_place: '12 Harbour Street, Lisbon' }),
-      ctx,
-    );
-    expect(read).toMatchObject({ tier: 3, reason: MAPS_HOLD_REASON, reason_detail: READ_PLACE_SAY, auto_deny: null });
-    expect(read.card).not.toBeNull();
   });
 });

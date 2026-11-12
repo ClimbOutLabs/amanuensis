@@ -39,8 +39,6 @@ export type HeldActionCardProps = {
   status: HeldActionStatus;
   /** Show "Always allow everywhere": the server only accepts it for some tools. */
   alwaysAllowOffered: boolean;
-  /** Set when that answer lets maps run without asking, instead of allowing one tool. */
-  alwaysAllowCovers?: 'maps' | undefined;
   /** Lets a person who cannot manage this chat read the card without answering it. */
   disabled?: boolean;
   onApprove: () => void;
@@ -107,7 +105,6 @@ export const HeldActionCard: FC<HeldActionCardProps> = ({
   card,
   status,
   alwaysAllowOffered,
-  alwaysAllowCovers,
   disabled = false,
   onApprove,
   onAlwaysAllow,
@@ -210,7 +207,7 @@ export const HeldActionCard: FC<HeldActionCardProps> = ({
                 size="large"
                 disabled={disabled}
                 confirm={alwaysAllowConfirm({
-                  covers: alwaysAllowCovers,
+                  covers: undefined,
                   toolSay: `${assistant} will run this tool on this connector without asking, in every chat.`,
                 })}
                 onConfirm={onAlwaysAllow}

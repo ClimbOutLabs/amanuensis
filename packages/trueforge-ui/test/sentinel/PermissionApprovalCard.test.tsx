@@ -307,22 +307,22 @@ describe('PermissionApprovalCard always allow this tool', () => {
     expect(screen.queryByText(/The agent will run/)).not.toBeInTheDocument();
   });
 
-  it('says on a maps card that the answer covers maps of your own places, and names the Maps switch', () => {
+  it('says on a maps card that the answer turns maps on everywhere, and names the Maps switch', () => {
     renderCard({}, { onApproveAlways: vi.fn(), alwaysAllowCovers: 'maps' });
     const button = screen.getByRole('button', { name: ALWAYS_ALLOW_TOOL });
     expect(button).toHaveAttribute(
       'title',
-      'Show maps of your own places without asking, in every chat, until you turn it off in Settings.',
+      'Show maps without asking, in every chat, until you turn it off in Settings.',
     );
     fireEvent.click(button);
 
     expect(
       screen.getByText(
-        'Maps of places from your own words and your own calendar will show without asking, in every chat. A map of any other place still asks.',
+        'Maps will show without asking, in every chat and in scheduled runs. A map still asks if it would send something that looks like a password or key.',
       ),
     ).toBeInTheDocument();
     expect(screen.getByText('You can turn this off later with the Maps switch in Settings.')).toBeInTheDocument();
-    expect(screen.queryByText(/connector settings/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/connector/)).not.toBeInTheDocument();
   });
 
   it('calls nothing when the owner cancels the confirm step', () => {

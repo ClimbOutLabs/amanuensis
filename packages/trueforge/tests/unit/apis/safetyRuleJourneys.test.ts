@@ -580,7 +580,7 @@ describe('a map', () => {
       .maps_without_asking;
   }
 
-  /** One turn that asks for a map of the harbour address, which the person's own message names. */
+  /** One turn that asks for a map of the harbour address. */
   async function runMapTurn(chatId: string): Promise<Turn> {
     server.model.next({ toolArguments: { place_name: HARBOUR_ADDRESS } });
     const input: TurnInputItem[] = [
@@ -589,7 +589,7 @@ describe('a map', () => {
     return runTurn({ server, chatId, input });
   }
 
-  async function mapOwnPlace(chatId: string) {
+  async function mapCards(chatId: string) {
     return cards(await runMapTurn(chatId));
   }
 
@@ -599,6 +599,12 @@ describe('a map', () => {
     const read = onlyCard(await runTurn({ server, chatId, input: ask(INERT_GET_PAGE_TOOL) }));
     await runTurn({ server, chatId, input: answer({ card: read, scope: 'once' }) });
     server.model.next({ toolArguments: { place_name: '40 Rua Augusta, Lisbon' } });
+    return cards(await runTurn({ server, chatId, input: ask('render_map') }));
+  }
+
+  /** Asks for a map whose place text looks like a key. */
+  async function mapOfSomethingLikeAKey(chatId: string) {
+    server.model.next({ toolArguments: { place_name: ['AKI', 'A', 'ABCDEFGH', 'IJKLMNOP'].join('') } });
     return cards(await runTurn({ server, chatId, input: ask('render_map') }));
   }
 
@@ -613,65 +619,80 @@ describe('a map', () => {
   });
 
   afterEach(async () => {
-    await setMapsWithoutAsking(false);
+    await setMapsWithoutAsking(true);
   });
 
   it(
-    'of a place the person named offers both lasting answers, and "Always allow in this chat" covers that chat only',
+    'runs with no card while maps are on, also for a place the chat only read',
     async () => {
       const chatId = await createChat(server);
-      const [card, ...others] = await mapOwnPlace(chatId);
+      expect(await mapsWithoutAsking()).toBe(true);
+      expect(await mapCards(chatId)).toEqual([]);
+      expect(await mapPlaceTheChatOnlyRead(chatId)).toEqual([]);
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
+    'with maps set to ask offers both lasting answers, and "Always allow in this chat" covers that chat only',
+    async () => {
+      await setMapsWithoutAsking(false);
+      const chatId = await createChat(server);
+      const [card, ...others] = await mapCards(chatId);
       expect(others).toEqual([]);
       expect(card).toMatchObject({ can_chat_allow: true, can_always_allow: true, always_allow_covers: 'maps' });
       if (card === undefined) {
         throw new Error('the map did not ask');
       }
       await runTurn({ server, chatId, input: answer({ card, scope: 'chat' }) });
-      expect(await mapOwnPlace(chatId)).toEqual([]);
+      expect(await mapCards(chatId)).toEqual([]);
+      expect(await mapPlaceTheChatOnlyRead(chatId)).toEqual([]);
       expect(await mapsWithoutAsking()).toBe(false);
 
-      expect(await mapOwnPlace(await createChat(server))).toHaveLength(1);
+      expect(await mapCards(await createChat(server))).toHaveLength(1);
     },
     TURN_TIMEOUT_MS,
   );
 
   it(
-    'answered with "Always allow everywhere" turns on maps without asking, so a later chat gets its map with no card',
+    'answered with "Always allow everywhere" turns maps on, so a later chat gets its map with no card',
     async () => {
+      await setMapsWithoutAsking(false);
       const chatId = await createChat(server);
       const card = onlyCard(await runMapTurn(chatId));
       await runTurn({ server, chatId, input: answer({ card, scope: 'always' }) });
       expect(await mapsWithoutAsking()).toBe(true);
 
-      expect(await mapOwnPlace(await createChat(server))).toEqual([]);
+      expect(await mapCards(await createChat(server))).toEqual([]);
     },
     TURN_TIMEOUT_MS,
   );
 
   it(
-    'of a place the chat only read offers no lasting answer, also after both lasting answers were given',
+    'that would send something that looks like a key offers no lasting answer, also after both were given',
     async () => {
+      await setMapsWithoutAsking(false);
       const chatId = await createChat(server);
-      const [own] = await mapOwnPlace(chatId);
-      if (own === undefined) {
+      const [plain] = await mapCards(chatId);
+      if (plain === undefined) {
         throw new Error('the map did not ask');
       }
-      await runTurn({ server, chatId, input: answer({ card: own, scope: 'chat' }) });
+      await runTurn({ server, chatId, input: answer({ card: plain, scope: 'chat' }) });
       await setMapsWithoutAsking(true);
 
-      const [read, ...others] = await mapPlaceTheChatOnlyRead(chatId);
+      const [held, ...others] = await mapOfSomethingLikeAKey(chatId);
       expect(others).toEqual([]);
-      expect(read).toMatchObject({ can_chat_allow: false, can_always_allow: false });
-      expect(read).not.toHaveProperty('always_allow_covers');
-      if (read === undefined) {
-        throw new Error('the map of a place the chat only read did not ask');
+      expect(held).toMatchObject({ can_chat_allow: false, can_always_allow: false });
+      expect(held).not.toHaveProperty('always_allow_covers');
+      if (held === undefined) {
+        throw new Error('the map that looks like it sends a key did not ask');
       }
       for (const scope of ['chat', 'always'] as const) {
-        const refused = await sendTurn({ server, chatId, input: answer({ card: read, scope }) });
+        const refused = await sendTurn({ server, chatId, input: answer({ card: held, scope }) });
         expect(refused.status).toBe(422);
       }
-      await runTurn({ server, chatId, input: answer({ card: read, scope: 'once' }) });
-      expect(await mapOwnPlace(chatId)).toEqual([]);
+      await runTurn({ server, chatId, input: answer({ card: held, scope: 'once' }) });
+      expect(await mapCards(chatId)).toEqual([]);
     },
     TURN_TIMEOUT_MS,
   );

@@ -14,7 +14,6 @@ import {
   emptyChatProvenance,
   namesUrl,
   recordEmailText,
-  recordOwnCalendarText,
   recordPageImageUrls,
   recordSearchResults,
   recordUntrustedText,
@@ -302,8 +301,6 @@ export function recordToolResultProvenance(input: {
   for (const text of input.texts) {
     if (source === 'email') {
       recordEmailText({ provenance, text });
-    } else if (source === 'event' && input.stamp.host_tool) {
-      recordOwnCalendarText({ provenance, text });
     } else {
       recordUntrustedText({ provenance, text, source });
     }

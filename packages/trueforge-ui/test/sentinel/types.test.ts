@@ -562,13 +562,6 @@ describe('held actions', () => {
     expect(info?.alwaysAllowOffered).toBe(true);
   });
 
-  it('reads that the every-chat answer on a maps card covers maps, and leaves it unset on any other card', () => {
-    const maps = { ...heldRef, id: 'call-map', always_allow_covers: 'maps' };
-    const other = { ...heldRef, id: 'call-other', always_allow_covers: 'everything' };
-    const parsed = extractSentinelFromEvent({ type: 'tool.approval_required', tool_calls: [maps, heldRef, other] });
-    expect(parsed.map(info => info.alwaysAllowCovers)).toEqual(['maps', undefined, undefined]);
-  });
-
   it('offers always allow for a held mail read the owner may grant, and never for a held send', () => {
     const mailRead = {
       ...heldRef,
@@ -591,7 +584,6 @@ describe('held actions', () => {
         tool_calls: [
           {
             ...heldRef,
-            always_allow_covers: 'maps',
             tier3_card: {
               plain_what: 'Send a note to Ana.',
               plain_why: null,
@@ -613,7 +605,20 @@ describe('held actions', () => {
     const [info] = extractSentinelFromEvent(parsed);
     expect(info?.held).toEqual({ expiresAt: '2026-10-17T07:00:00.000Z' });
     expect(info?.alwaysAllowOffered).toBe(true);
-    expect(info?.alwaysAllowCovers).toBe('maps');
+  });
+
+  it('reads that the every-chat answer on a maps card turns maps on, and leaves it unset on any other card', () => {
+    const card = { tier: 3, can_always_allow: true, tier3_card: { plain_what: 'Show a map of Lisbon?' } };
+    const parsed = extractSentinelFromEvent({
+      type: 'tool.approval_required',
+      tool_calls: [
+        { ...card, id: 'call-map', always_allow_covers: 'maps' },
+        { ...card, id: 'call-sdk', alwaysAllowCovers: 'maps' },
+        { ...card, id: 'call-plain' },
+        { ...card, id: 'call-other', always_allow_covers: 'everything' },
+      ],
+    });
+    expect(parsed.map(info => info.alwaysAllowCovers)).toEqual(['maps', 'maps', undefined, undefined]);
   });
 
   it('leaves an ordinary approval without a held marker, and never offers always-allow it did not get', () => {
@@ -752,12 +757,12 @@ describe('sentinelAuditLabel', () => {
 });
 
 describe('parseUserSettings', () => {
-  it('defaults to offline off, nothing relaxed, searches running without asking and maps asking', () => {
+  it('defaults to offline off, nothing relaxed, and searches and maps running without asking', () => {
     const defaults = {
       offline_mode: false,
       tier2_auto_allow: [],
       search_without_asking: true,
-      maps_without_asking: false,
+      maps_without_asking: true,
       sandbox_without_asking: true,
       chat_search_enabled: false,
       package_downloads_without_project_allowed: false,
@@ -779,7 +784,7 @@ describe('parseUserSettings', () => {
       offline_mode: true,
       tier2_auto_allow: ['file_write'],
       search_without_asking: true,
-      maps_without_asking: false,
+      maps_without_asking: true,
       sandbox_without_asking: true,
       chat_search_enabled: false,
       package_downloads_without_project_allowed: false,
@@ -791,9 +796,9 @@ describe('parseUserSettings', () => {
     expect(parseUserSettings({ data: { search_without_asking: 'no' } }).search_without_asking).toBe(true);
   });
 
-  it('reads the maps setting, and falls back to asking when it is not a boolean', () => {
-    expect(parseUserSettings({ data: { maps_without_asking: true } }).maps_without_asking).toBe(true);
-    expect(parseUserSettings({ data: { maps_without_asking: 'yes' } }).maps_without_asking).toBe(false);
+  it('reads the maps setting, and falls back to running without asking when it is not a boolean', () => {
+    expect(parseUserSettings({ data: { maps_without_asking: false } }).maps_without_asking).toBe(false);
+    expect(parseUserSettings({ data: { maps_without_asking: 'yes' } }).maps_without_asking).toBe(true);
   });
 
   it('reads the sandbox setting, and falls back to running without asking when it is not a boolean', () => {
@@ -819,7 +824,7 @@ describe('parseUserSettings', () => {
       offline_mode: false,
       tier2_auto_allow: [],
       search_without_asking: true,
-      maps_without_asking: false,
+      maps_without_asking: true,
       sandbox_without_asking: true,
       chat_search_enabled: false,
       package_downloads_without_project_allowed: false,

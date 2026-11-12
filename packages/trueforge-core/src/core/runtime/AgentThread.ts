@@ -1182,11 +1182,6 @@ function getPendingApprovalToolCalls(input: {
   );
 }
 
-/**
- * The tier and card an approval request carries. Every approval the user is asked for gets a card:
- * one that Sentinel did not card (a call a selector gates though it let it through) is described
- * from its own arguments, and shows as a review card because it asks all the same.
- */
 /** Whether the card offers the every-chat answer, and what that answer covers when it is not one tool. */
 function alwaysAllowFields(
   info: InternalToolCallInfo,
@@ -1197,6 +1192,11 @@ function alwaysAllowFields(
     : { can_always_allow: offered };
 }
 
+/**
+ * The tier and card an approval request carries. Every approval the user is asked for gets a card:
+ * one that Sentinel did not card (a call a selector gates though it let it through) is described
+ * from its own arguments, and shows as a review card because it asks all the same.
+ */
 function approvalCardFields(toolCall: InternalEnrichedToolCall): { tier?: Tier; tier3_card: Tier3Card } {
   const { tool_info } = toolCall;
   if (tool_info.tier3_card !== undefined && tool_info.tier3_card !== null) {
@@ -5642,7 +5642,7 @@ export class AgentThread {
               source_event_id: modelMessageEventId,
               ...approvalCardFields(call),
               held: true as const,
-              ...alwaysAllowFields(call.tool_info),
+              can_always_allow: allowsToolGrant(call.tool_info),
               expires_at: held.expires_at,
             },
           ]

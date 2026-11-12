@@ -128,19 +128,6 @@ describe('HeldActionCard', () => {
     expect(screen.queryByText(/The agent will run/)).not.toBeInTheDocument();
   });
 
-  it('says on a maps card that the answer covers maps of your own places, and names the Maps switch', () => {
-    renderCard({ alwaysAllowOffered: true, alwaysAllowCovers: 'maps' });
-    fireEvent.click(screen.getByRole('button', { name: 'Always allow everywhere' }));
-
-    expect(
-      screen.getByText(
-        'Maps of places from your own words and your own calendar will show without asking, in every chat. A map of any other place still asks.',
-      ),
-    ).toBeInTheDocument();
-    expect(screen.getByText('You can turn this off later with the Maps switch in Settings.')).toBeInTheDocument();
-    expect(screen.queryByText(/connector/)).not.toBeInTheDocument();
-  });
-
   it('calls nothing when the owner cancels the Always allow confirm step', () => {
     const { onAlwaysAllow, onApprove } = renderCard({ alwaysAllowOffered: true });
     fireEvent.click(screen.getByRole('button', { name: 'Always allow everywhere' }));
