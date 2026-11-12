@@ -64,7 +64,7 @@ export function boundedText(text: string): { text: string; cut: boolean } {
 
 /** Cap on generated summary tokens; bounds output cost by construction (the
  * 2000-char validation only discards after the tokens are paid for). */
-export const SUMMARIZE_MAX_OUTPUT_TOKENS = 800;
+const SUMMARIZE_MAX_OUTPUT_TOKENS = 800;
 
 /**
  * Cap for the one retry after a reply was cut off by the first cap. A model that thinks before it
@@ -154,7 +154,7 @@ function releaseSummarizeSlot(): void {
   }
 }
 
-export async function withSummarizeSlot<T>(fn: () => Promise<T>): Promise<T> {
+async function withSummarizeSlot<T>(fn: () => Promise<T>): Promise<T> {
   await acquireSummarizeSlot();
   try {
     return await fn();
@@ -621,9 +621,7 @@ function withRequestFields({
   };
 }
 
-export function flattenLlmContent(
-  content: string | { type: string; text?: string; refusal?: string }[] | null,
-): string {
+function flattenLlmContent(content: string | { type: string; text?: string; refusal?: string }[] | null): string {
   if (typeof content === 'string') {
     return content;
   }
