@@ -241,6 +241,8 @@ export interface SentinelAction {
   mcp_server_id?: string | undefined;
   /** Host of the connector's configured server URL, for the approval card. Never derived from tool arguments. */
   mcp_server_host?: string | undefined;
+  /** What a standing grant on this connector binds to (see `ToolGrantKey`). Set by the host, never from tool arguments. */
+  mcp_grant_binding?: string | undefined;
   /** The host provisioned this connector itself. Never derived from tool metadata or client input. */
   mcp_first_party?: boolean | undefined;
   /** The CalDAV event a change names, read once before classifying. Set only for the CalDAV connector. */
@@ -2636,7 +2638,7 @@ function hasStandingToolGrant(ctx: ClassifyContext, action: SentinelAction): Pro
     created_by: ctx.created_by,
     mcp_server_name: action.mcp_server_name,
     tool_name: action.tool_name,
-    mcp_server_host: action.mcp_server_host ?? null,
+    connector_binding: action.mcp_grant_binding ?? null,
   });
 }
 
@@ -2650,7 +2652,7 @@ function hasStandingScopeGrant(ctx: ClassifyContext, action: SentinelAction, sco
     created_by: ctx.created_by,
     mcp_server_name: action.mcp_server_name,
     tool_name: scope_key,
-    mcp_server_host: action.mcp_server_host ?? null,
+    connector_binding: action.mcp_grant_binding ?? null,
   });
 }
 
@@ -2896,6 +2898,16 @@ function scheduleWriteCard(input: { review: Tier3Schedule; agent_intent: string 
       task: escapeDisplayText(review.task, { keepNewlines: true }),
       runs_as: show(review.runs_as),
       next_runs: review.next_runs.map(show),
+      ...(review.tools === undefined || review.tools === null
+        ? {}
+        : {
+            tools: {
+              ...review.tools,
+              agent_name: show(review.tools.agent_name),
+              connectors: review.tools.connectors.map(choice => ({ ...choice, name: show(choice.name) })),
+              skills: review.tools.skills.map(choice => ({ ...choice, name: show(choice.name) })),
+            },
+          }),
     },
   };
 }
@@ -3670,7 +3682,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
         created_by: ctx.created_by,
         mcp_server_name: action.mcp_server_name,
         tool_name: action.tool_name,
-        mcp_server_host: action.mcp_server_host ?? null,
+        connector_binding: action.mcp_grant_binding ?? null,
       }))
         ? action.mcp_server_name
         : undefined;
@@ -3719,7 +3731,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
       : 'Fail-closed: unrecognized tools require approval.',
     sensitive_read: readsPrivateData,
     inspection: grantableRead,
-    grant_host: action.mcp_server_host ?? null,
+    grant_binding: action.mcp_grant_binding ?? null,
     secret_path_read: containsSecretPath(action.canonical_params) || pathLike,
     approval_token_id: await mintPlainToken({
       ctx,

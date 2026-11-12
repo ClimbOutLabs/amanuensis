@@ -131,6 +131,8 @@
   "From": "packages/trueforge-ui/src/sentinel/AuditLogSettings.tsx",
   "To": "packages/trueforge-ui/src/sentinel/AuditLogSettings.tsx",
   "Clear dates": "packages/trueforge-ui/src/sentinel/AuditLogSettings.tsx",
+  "Run code": "packages/trueforge-ui/src/sentinel/ScheduleDetails.tsx",
+  "Update the card": "packages/trueforge-ui/src/sentinel/ScheduleDetails.tsx",
   "A hard conversation about care": "packages/trueforge-ui/src/components/tourPrompts.ts",
   "A simple budget for this month": "packages/trueforge-ui/src/components/tourPrompts.ts",
   "A trip is coming": "packages/trueforge-ui/src/components/tourPrompts.ts",

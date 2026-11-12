@@ -755,6 +755,8 @@ export { SessionsBrowserButton } from './atoms/SessionsBrowserButton.js';
 export type { SessionsBrowserButtonProps } from './atoms/SessionsBrowserButton.js';
 export { SpacesButton } from './atoms/SpacesButton.js';
 export type { SpacesButtonProps } from './atoms/SpacesButton.js';
+export { ChatAnswerMarksProvider, useOptionalChatAnswerMarks } from './chatAnswers/ChatAnswerMarksContext.js';
+export type { ChatAnswerMark, ChatAnswerMarksApi } from './chatAnswers/types.js';
 export { DeliveriesProvider, useOptionalDeliveries } from './deliveries/DeliveriesContext.js';
 export { NOTICING_KINDS } from './deliveries/types.js';
 export type {
