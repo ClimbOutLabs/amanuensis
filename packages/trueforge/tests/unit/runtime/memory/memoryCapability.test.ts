@@ -14,7 +14,6 @@ import { buildInternalSourceToolPolicy, createInternalSourceState } from '../../
 import type {
   EntitySummary,
   GetOperationOutcome,
-  HindsightClient,
   MentalModel,
   RecallItem,
 } from '../../../../src/runtime/memory/hindsightClient';
@@ -1769,7 +1768,7 @@ describe('HindsightMemoryProcessor curated and reflect layers', () => {
     };
   }
 
-  function layeredClient(overrides: Parameters<typeof makeClient>[0] = {}): HindsightClient {
+  function layeredClient(overrides: Parameters<typeof makeClient>[0] = {}): MemoryClient {
     return makeClient({
       recall: jest.fn().mockResolvedValue({ ok: true, results: [fact], entities: [] }),
       getProfile: jest.fn().mockResolvedValue({
@@ -1782,7 +1781,7 @@ describe('HindsightMemoryProcessor curated and reflect layers', () => {
   }
 
   async function run(input: {
-    client: HindsightClient;
+    client: MemoryClient;
     config?: MemoryConfig;
     message: string;
     screenClient?: ScreenClient;
@@ -2030,10 +2029,10 @@ describe('HindsightMemoryProcessor pages layer', () => {
     reason: 'direct' as const,
     page: pageOf({ front: { kind: 'person', title: 'Wendy', aliases: [], household: true } }),
     text: wendyText,
-    drafting: [] as string[],
+    drafting: new Array<string>(),
     holdsOutsideText: false,
     ownLines: wendyText.split('\n'),
-    readLines: [] as string[],
+    readLines: new Array<string>(),
     estimatedTokens: estimateTokens(wendyText),
   };
   const fact: RecallItem = { id: '1', occurred_start: '2026-08-14', text: 'filed on 14 April' };
@@ -2588,7 +2587,7 @@ describe('HindsightMemoryProcessor post-compaction recall damping', () => {
     return { role: 'user', content: `<tfy-internal>${HOST_SUMMARY_PREFACE}\n\n${text}</tfy-internal>` };
   }
 
-  function dampingRecallClient(): { recall: jest.Mock; client: HindsightClient } {
+  function dampingRecallClient(): { recall: jest.Mock; client: MemoryClient } {
     const recall = jest.fn().mockResolvedValue({
       ok: true,
       results: [
@@ -2602,7 +2601,7 @@ describe('HindsightMemoryProcessor post-compaction recall damping', () => {
 
   /** Runs one turn against a fresh processor, carrying `priorState` forward as the host would. */
   async function runTurn(input: {
-    client: HindsightClient;
+    client: MemoryClient;
     context: ContextMessage[];
     priorState?: unknown;
     config?: MemoryConfig;

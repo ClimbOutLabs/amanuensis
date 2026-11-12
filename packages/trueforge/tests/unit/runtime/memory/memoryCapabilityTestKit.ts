@@ -4,8 +4,8 @@ import type {
   ContextMessage,
 } from '@truefoundry/trueforge-core/core';
 import winston from 'winston';
-import type { HindsightClient } from '../../../../src/runtime/memory/hindsightClient';
 import type { MemoryConfig } from '../../../../src/runtime/memory/memoryCapability';
+import type { MemoryClient } from '../../../../src/runtime/memory/memoryClient';
 
 export const DEFAULT_CONFIG: MemoryConfig = {
   recallMaxTokens: 2048,
@@ -36,7 +36,7 @@ export function makeClient(overrides: {
   getProfile?: jest.Mock;
   listMentalModels?: jest.Mock;
   reflect?: jest.Mock;
-}): HindsightClient {
+}): MemoryClient {
   return {
     recall: overrides.recall ?? jest.fn().mockResolvedValue({ ok: true, results: [], entities: [] }),
     retain: overrides.retain ?? jest.fn().mockResolvedValue({ ok: true }),
@@ -49,7 +49,11 @@ export function makeClient(overrides: {
         .mockResolvedValue({ ok: true, profile: { name: undefined, mission: undefined, background: undefined } }),
     listMentalModels: overrides.listMentalModels ?? jest.fn().mockResolvedValue({ ok: true, models: [] }),
     reflect: overrides.reflect ?? jest.fn().mockResolvedValue({ ok: true, text: '', basedOn: 0 }),
-  } as unknown as HindsightClient;
+    deleteDocument: jest.fn().mockResolvedValue({ ok: true }),
+    listEntries: jest.fn().mockResolvedValue({ ok: true, entries: [] }),
+    updateEntry: jest.fn().mockResolvedValue({ ok: false, code: 'not_found', reason: 'not used' }),
+    deleteEntry: jest.fn().mockResolvedValue({ ok: true }),
+  };
 }
 
 export function makeExecution(context: ContextMessage[]): Readonly<AgentThreadExecutionContext> {

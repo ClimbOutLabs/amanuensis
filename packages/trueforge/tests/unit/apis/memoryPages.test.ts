@@ -42,6 +42,10 @@ const PageSchema = z.object({
   sections: z.array(z.object({ name: z.string(), lines: z.array(LineSchema) })),
 });
 const ErrorSchema = z.object({ error: z.object({ message: z.string() }) });
+const DataSchema = z.object({ data: z.unknown() });
+const PageListSchema = z.object({
+  data: z.object({ pages: z.array(z.record(z.string(), z.unknown())), skipped_files: z.array(z.string()) }),
+});
 const ChangesSchema = z.object({
   data: z.object({
     available: z.boolean(),
@@ -77,7 +81,7 @@ describe('memory pages API', () => {
   async function readPage(path = '/person/wendy') {
     const response = await call(path);
     expect(response.status).toBe(200);
-    return PageSchema.parse(((await response.json()) as { data: unknown }).data);
+    return PageSchema.parse(DataSchema.parse(await response.json()).data);
   }
 
   async function changes() {
@@ -113,9 +117,7 @@ describe('memory pages API', () => {
   it('lists pages with summary, unconfirmed count and the files it could not read', async () => {
     await seed();
     await writeFile(join(vault(), 'people', 'Bob Smith.md'), '# Bob\n');
-    const body = (await (await call('')).json()) as {
-      data: { pages: Record<string, unknown>[]; skipped_files: string[] };
-    };
+    const body = PageListSchema.parse(await (await call('')).json());
     expect(body.data.pages.map(page => [page['kind'], page['slug'], page['title'], page['unconfirmed_count']])).toEqual(
       [
         ['person', 'wendy', 'Wendy', 1],
@@ -337,14 +339,14 @@ describe('memory pages API', () => {
       slug: 'ada-friend',
       content: WENDY.replace('Wendy', 'Zed'),
     });
-    const shared = (await (await call('')).json()) as { data: { pages: { slug: string }[] } };
-    expect(shared.data.pages.map(page => page.slug)).toEqual(['wendy', 'the-madrid-move']);
-    const persona = (await (await call('?namespace=persona%3AAda')).json()) as { data: { pages: { slug: string }[] } };
-    expect(persona.data.pages.map(page => page.slug)).toEqual(['ada-friend']);
+    const shared = PageListSchema.parse(await (await call('')).json());
+    expect(shared.data.pages.map(page => page['slug'])).toEqual(['wendy', 'the-madrid-move']);
+    const persona = PageListSchema.parse(await (await call('?namespace=persona%3AAda')).json());
+    expect(persona.data.pages.map(page => page['slug'])).toEqual(['ada-friend']);
     expect((await call('/person/wendy?namespace=persona%3AAda')).status).toBe(404);
     expect((await call('/person/wendy?namespace=persona%3AAda', { method: 'DELETE' })).status).toBe(404);
     tenant = 'someone-else';
-    const other = (await (await call('')).json()) as { data: { pages: unknown[] } };
+    const other = PageListSchema.parse(await (await call('')).json());
     expect(other.data.pages).toEqual([]);
     expect((await call('/person/wendy')).status).toBe(404);
     expect((await changes()).changes).toEqual([]);
@@ -377,7 +379,7 @@ describe('memory pages API', () => {
 
     it('counts the pairs in the list and shows them with both lines on the page', async () => {
       await findPair();
-      const list = (await (await call('')).json()) as { data: { pages: Record<string, unknown>[] } };
+      const list = PageListSchema.parse(await (await call('')).json());
       expect(list.data.pages.map(page => [page['slug'], page['disagreement_count']])).toEqual([
         ['wendy', 1],
         ['the-madrid-move', 0],

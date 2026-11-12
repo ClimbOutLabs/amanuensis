@@ -24,7 +24,6 @@ import path from 'node:path';
 import winston from 'winston';
 import { z } from 'zod';
 
-import type { HindsightClient } from '../../../../src/runtime/memory/hindsightClient';
 import { MarkdownMemoryClient } from '../../../../src/runtime/memory/markdownMemoryClient';
 import { hindsightMemoryCapability, type MemoryConfig } from '../../../../src/runtime/memory/memoryCapability';
 import type { MemoryClient } from '../../../../src/runtime/memory/memoryClient';
@@ -296,7 +295,7 @@ function recalling(notes: { text: string; origin: string }[]): MemoryClient {
     occurred_start: '2026-10-20',
     metadata: { origin: note.origin },
   }));
-  const client = {
+  return {
     recall: jest.fn().mockResolvedValue({ ok: true, results: recalled, entities: [] }),
     retain: jest.fn().mockResolvedValue({ ok: true }),
     getOperation: jest.fn().mockResolvedValue({ ok: true, status: 'unknown' }),
@@ -304,8 +303,11 @@ function recalling(notes: { text: string; origin: string }[]): MemoryClient {
     getProfile: jest.fn().mockResolvedValue({ ok: true, profile: {} }),
     listMentalModels: jest.fn().mockResolvedValue({ ok: true, models: [] }),
     reflect: jest.fn().mockResolvedValue({ ok: true, text: '', basedOn: 0 }),
+    deleteDocument: jest.fn().mockResolvedValue({ ok: true }),
+    listEntries: jest.fn().mockResolvedValue({ ok: true, entries: [] }),
+    updateEntry: jest.fn().mockResolvedValue({ ok: false, code: 'not_found', reason: 'not used' }),
+    deleteEntry: jest.fn().mockResolvedValue({ ok: true }),
   };
-  return client as unknown as HindsightClient;
 }
 
 describe('recalled text in the memory block', () => {
