@@ -55,10 +55,10 @@ test_docker_desktop_on_linux_plans_the_private_addresses() {
   sandbox_new
   fixture_network eth0:192.168.1.20
   fixture_kernel 6.8.0-generic
-  STUB_DOCKER_OS="Docker Desktop" run_install --dry-run --email owner@example.invalid --tls off
+  STUB_DOCKER_OS="Docker Desktop" run_install --dry-run --email owner@example.invalid
   assert_rc 0
-  assert_flat_contains "$OUT" "It opens on port 8791 at: 127.0.0.1, localhost, 192.168.1.20."
-  assert_flat_contains "$OUT" "the port is open to your network"
+  assert_flat_contains "$OUT" "It opens over https on port 8443 at: 127.0.0.1, localhost, 192.168.1.20, with a certificate Aman makes on this computer."
+  assert_flat_contains "$OUT" "Port 8791 only sends devices to https."
   sandbox_drop
 }
 
@@ -67,10 +67,10 @@ test_wsl2_plans_the_private_addresses() {
   sandbox_new
   fixture_network eth0:192.168.1.20
   fixture_kernel 5.15.153.1-microsoft-standard-WSL2
-  run_install --dry-run --email owner@example.invalid --tls off
+  run_install --dry-run --email owner@example.invalid
   assert_rc 0
-  assert_flat_contains "$OUT" "It opens on port 8791 at: 127.0.0.1, localhost, 192.168.1.20."
-  assert_flat_contains "$OUT" "the port is open to your network"
+  assert_flat_contains "$OUT" "It opens over https on port 8443 at: 127.0.0.1, localhost, 192.168.1.20, with a certificate Aman makes on this computer."
+  assert_flat_contains "$OUT" "Port 8791 only sends devices to https."
   sandbox_drop
 }
 

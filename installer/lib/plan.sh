@@ -362,7 +362,7 @@ plan_build() {
     PLAN_DOWNLOADS_AMAN=1
     plan_image "$REL_APP_TAG" "The Aman app is downloaded" "Download the Aman app" app-image
   else
-    plan_image "$REL_APP_TAG" "The Aman app is built" "Build the Aman app" app-base app-deps dockerfile-frontend
+    plan_image "$REL_APP_TAG" "The Aman app is built" "Build the Aman app" app-base app-deps vad-model dockerfile-frontend
   fi
   plan_aman_image "$REL_STT_TAG" published_stt_image "the speech-to-text service" stt-image stt-base stt-deps
   plan_aman_image "$REL_TTS_TAG" published_tts_image "the voice that reads replies aloud" tts-image tts-deps tts-voice
@@ -454,7 +454,7 @@ plan_aman_command() {
 }
 
 # An instance from before addresses were listed is opened on the network like a new one, unless --local-only says not to.
-# One already open on the network changes between https and plain http when --tls says so, or moves to https by default.
+# One already open on the network is served over https; an older record that still says plain http moves to https.
 plan_existing_addresses() { # name
   local name=$1 hosts port
   port=$(reg_get "$name" app_port)
@@ -469,15 +469,9 @@ plan_existing_addresses() { # name
   fi
   # shellcheck disable=SC2086 # the extra hosts are checked hosts without spaces
   hosts=$(network_origin_list "$port" '' ${OPT_ADDRESSES:-$(reg_get "$name" extra_hosts)} | sed "s|http://||g; s|:$port||g; s|,|, |g")
-  if [ "$(tls_target "$name")" = local ]; then
-    plan_add todo "Serve instance $name over https on your network" \
-      "It will open at: $hosts, with a certificate Aman makes on this computer. The old plain http address sends devices to https." \
-      "Each device trusts that certificate once. Its data and sign-in stay as they are."
-    return 0
-  fi
-  plan_add todo "Open instance $name on your network" \
-    "It will open at: $hosts. Sign-in works from each. Only devices on your private network can reach it." \
-    "Its data and sign-in stay as they are."
+  plan_add todo "Serve instance $name over https on your network" \
+    "It will open at: $hosts, with a certificate Aman makes on this computer. The old plain http address sends devices to https." \
+    "Each device trusts that certificate once. Its data and sign-in stay as they are."
 }
 
 # The https front end and the local authority, when an instance is about to be served over https.
@@ -486,7 +480,7 @@ plan_tls() {
   if need_new_instance && [ -n "${I_TLS_PORT:-}" ]; then need=1; fi
   for name in $(reg_names); do
     change=$(instance_address_change "$name")
-    if tls_active "$name" || { [ -n "$change" ] && [ "$change" != close ] && [ "$(tls_target "$name")" = local ]; }; then need=1; fi
+    if tls_active "$name" || { [ -n "$change" ] && [ "$change" != close ]; }; then need=1; fi
   done
   if tls_authority_needs_replacing && [ -n "$(tls_instances)" ]; then
     plan_add todo "Make this computer's root certificate again" \
@@ -643,6 +637,8 @@ install_execute() {
   ensure_private_dir "$MACHINE_DIR"
   ensure_private_dir "$INSTANCES_DIR"
   install_doctor_shim
+  # Before the build and the backup, so a port Tailscale would take stops the run with nothing changed.
+  for name in $(reg_names); do instance_tailscale_port_check "$name"; done
   if need_new_instance && [ -z "$AMAN_PASSWORD" ]; then
     ui_hint "Asked now so the rest of the setup runs on its own."
     ask_password AMAN_PASSWORD
@@ -662,7 +658,7 @@ install_execute() {
   for name in $(reg_names); do
     change=$(instance_address_change "$name")
     if [ -n "$change" ]; then
-      instance_apply_addresses "$name" "$change"
+      instance_apply_addresses "$name" "$change" "$REL_APP_TAG"
       ADDRESS_CHANGED="$ADDRESS_CHANGED $name "
     fi
   done
@@ -688,7 +684,7 @@ install_execute() {
     instance_create
     AMAN_PASSWORD=
   fi
-  if [ -n "$CAL_TARGET" ] && [ -n "$CAL_EMAIL" ] && [ -z "$CAL_SKIP" ]; then calendar_apply "$CAL_TARGET"; fi
+  if [ -n "$CAL_TARGET" ] && [ -n "$CAL_EMAIL" ]; then calendar_apply "$CAL_TARGET"; fi
   if [ -n "$EM_TARGET" ] && [ -n "$EM_ADDRESS" ] && [ -z "$EM_SKIP" ]; then email_apply "$EM_TARGET"; fi
   tf_rotation_apply
   if tls_authority_needs_replacing && [ -n "$(tls_instances)" ]; then

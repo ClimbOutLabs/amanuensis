@@ -1,6 +1,6 @@
 import { buildHelpHealthCheck, type HelpProbeResults } from '../../../src/help/healthCheck';
 import type { HostReportRead } from '../../../src/help/hostReport';
-import type { HostReportFile } from '../../../src/schemas/help';
+import { HelpHealthCheckSchema, type HostReportFile } from '../../../src/schemas/help';
 
 const NOW = new Date('2026-10-21T09:00:00Z');
 
@@ -33,7 +33,9 @@ const REPORT: HostReportFile = {
 function results(overrides: Partial<HelpProbeResults> = {}): HelpProbeResults {
   return {
     model: HEALTHY_MODEL,
-    connectors: [{ name: 'linear', ok: true }],
+    profileNamed: true,
+    app: { version: '1.4.0', buildRef: 'abc1234' },
+    connectors: [{ name: 'linear', problem: null }],
     google: 'not_set_up',
     sandboxReady: true,
     scheduler: 'running',
@@ -53,6 +55,52 @@ function item(check: ReturnType<typeof build>, id: string) {
   }
   return found;
 }
+
+describe('buildHelpHealthCheck state', () => {
+  it('reports each field the guide reads, typed by the schema', () => {
+    const check = build({
+      model: { kind: 'no_default' },
+      profileNamed: false,
+      connectors: [
+        { name: 'linear', problem: null },
+        { name: 'notion', problem: 'needs_sign_in' },
+        { name: 'Email', problem: 'no_answer' },
+        { name: 'Calendar', problem: 'unreadable' },
+      ],
+      google: 'needs_reconnect',
+      sandboxReady: false,
+      app: { version: '1.4.0', buildRef: null },
+    });
+
+    expect(HelpHealthCheckSchema.parse(check)).toEqual(check);
+    expect(check.state).toEqual({
+      setup_steps: [
+        { id: 'model', done: false },
+        { id: 'about_you', done: false },
+      ],
+      connectors: [
+        { name: 'linear', connected: true, last_error: null },
+        { name: 'notion', connected: false, last_error: 'It needs you to sign in to it again.' },
+        { name: 'Email', connected: false, last_error: 'It did not answer.' },
+        { name: 'Calendar', connected: false, last_error: 'Its saved settings could not be read.' },
+      ],
+      google_login: 'needs_reconnect',
+      sandbox_ready: false,
+      app_version: '1.4.0',
+      build_ref: null,
+    });
+  });
+
+  it('marks the setup steps done once a model is chosen and the name is saved', () => {
+    const check = build({ model: { kind: 'no_answer' }, profileNamed: true });
+
+    expect(check.state.setup_steps).toEqual([
+      { id: 'model', done: true },
+      { id: 'about_you', done: true },
+    ]);
+    expect(check.state.build_ref).toBe('abc1234');
+  });
+});
 
 describe('buildHelpHealthCheck', () => {
   it('puts the model first and shows it as the first red item when no model is connected', () => {
@@ -100,8 +148,8 @@ describe('buildHelpHealthCheck', () => {
   it('lists connectors that did not answer by name only, and asks the person to check them', () => {
     const check = build({
       connectors: [
-        { name: 'linear', ok: true },
-        { name: 'notion', ok: false },
+        { name: 'linear', problem: null },
+        { name: 'notion', problem: 'no_answer' },
       ],
     });
 
@@ -144,7 +192,7 @@ describe('buildHelpHealthCheck', () => {
   });
 
   it('reports mail and calendar OK when a configured mail or calendar connector answers', () => {
-    const check = build({ connectors: [{ name: 'Email', ok: true }] });
+    const check = build({ connectors: [{ name: 'Email', problem: null }] });
 
     expect(item(check, 'mail_calendar')).toMatchObject({ status: 'pass', message: 'Email and calendar answered.' });
   });
@@ -154,7 +202,7 @@ describe('buildHelpHealthCheck', () => {
   });
 
   it('reports mail and calendar as failed, not as not set up, when a configured connector does not answer', () => {
-    const check = build({ connectors: [{ name: 'Calendar', ok: false }] });
+    const check = build({ connectors: [{ name: 'Calendar', problem: 'no_answer' }] });
 
     expect(item(check, 'mail_calendar')).toMatchObject({
       status: 'fail',

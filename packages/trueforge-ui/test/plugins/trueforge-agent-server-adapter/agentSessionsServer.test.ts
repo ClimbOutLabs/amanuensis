@@ -22,7 +22,6 @@ describe('createHarnessAgentSessionsServer', () => {
           {
             labelName: 'TypeScript',
             language: 'typescript',
-            icon: 'https://assets.example/typescript.svg',
             sampleCode: { stream: 'stream()', nonStream: 'run()' },
           },
         ],
@@ -48,7 +47,6 @@ describe('createHarnessAgentSessionsServer', () => {
       {
         labelName: 'TypeScript',
         language: 'typescript',
-        icon: 'https://assets.example/typescript.svg',
         sampleCode: { stream: 'stream()', nonStream: 'run()' },
       },
     ]);

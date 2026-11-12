@@ -124,11 +124,10 @@ describe('loop_detected handoff cause', () => {
     const toolSet = makeSearchToolSet();
     const madrid = { query: 'Madrid rental market September 2026' };
     const other = { query: 'NLV processing times' };
-    const third = { query: 'Valencia rental prices' };
-    // Madrid is searched four times, with other searches between, so no repeat is consecutive.
-    // The fourth Madrid search trips the repeat budget (first fire: recovery note). The model then
-    // searches Valencia, and its next Madrid search is the second fire, which ends the turn.
-    const sequence = [madrid, other, madrid, other, madrid, other, madrid, third, madrid];
+    // The two searches alternate, so no repeat is consecutive, and every repeat is refused before it
+    // runs. Five refused steps in a row trip the guard (first fire: recovery note). The model's next
+    // refused search is the second fire, which ends the turn inside the reply's eight steps.
+    const sequence = [madrid, other, madrid, other, madrid, other, madrid, other];
     const create = jest.fn();
     sequence.forEach((args, index) => {
       create.mockImplementationOnce(() => searchCallStream({ id: `search-${String(index + 1)}`, args }));

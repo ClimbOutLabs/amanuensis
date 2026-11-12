@@ -27,7 +27,7 @@ function authCookieName(base: string): string {
  * cookie would never be sent back, so the flag follows the scheme of the listed origin the request came to; with no
  * list it follows the public address.
  */
-function cookiesAreSecure(context: Context): boolean {
+export function cookiesAreSecure(context: Context): boolean {
   const allowedOrigins = getAllowedOrigins();
   if (allowedOrigins.length === 0) {
     return getPublicBaseUrl().startsWith('https://');
