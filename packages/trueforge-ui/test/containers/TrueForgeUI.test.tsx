@@ -207,7 +207,7 @@ describe('TrueForgeUI', () => {
     fireEvent.click(screen.getByRole('button', { name: 'New Agent' }));
     await waitFor(() => {
       expect(screen.getByRole('dialog', { name: 'Chat' })).toBeInTheDocument();
-      expect(screen.getByRole('dialog', { name: 'Agent Config' })).toBeInTheDocument();
+      expect(screen.getByRole('dialog', { name: 'Agent setup' })).toBeInTheDocument();
     });
   });
 
@@ -302,8 +302,9 @@ describe('TrueForgeUI', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Start new agent' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Save Agent' }));
     const saveDialog = await screen.findByRole('dialog', { name: 'Save agent' });
-    expect(within(saveDialog).getByLabelText('Agent name')).toBeInTheDocument();
-    expect(within(saveDialog).getByLabelText('Description')).toBeInTheDocument();
+    expect(within(saveDialog).getByLabelText('Name')).toBeInTheDocument();
+    expect(within(saveDialog).getByLabelText("What it's for")).toBeInTheDocument();
+    fireEvent.click(within(saveDialog).getByRole('button', { name: 'More settings' }));
     expect(within(saveDialog).getByRole('button', { name: 'Edit Model' })).toBeInTheDocument();
     expect(within(saveDialog).getByRole('button', { name: 'Edit Connectors' })).toBeInTheDocument();
     expect(within(saveDialog).getByRole('button', { name: 'Edit Skills' })).toBeInTheDocument();
@@ -448,13 +449,13 @@ describe('SidebarLayout', () => {
       openRailMenu();
 
       fireEvent.click(screen.getByRole('button', { name: 'Start new agent' }));
-      expect(screen.getByRole('dialog', { name: 'Agent Config' })).toBeInTheDocument();
+      expect(screen.getByRole('dialog', { name: 'Agent setup' })).toBeInTheDocument();
 
-      fireEvent.click(screen.getByRole('button', { name: 'Close agent config' }));
-      expect(screen.queryByRole('dialog', { name: 'Agent Config' })).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Close agent setup' }));
+      expect(screen.queryByRole('dialog', { name: 'Agent setup' })).not.toBeInTheDocument();
 
-      fireEvent.click(screen.getByRole('button', { name: 'Agent config' }));
-      expect(screen.getByRole('dialog', { name: 'Agent Config' })).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Agent setup' }));
+      expect(screen.getByRole('dialog', { name: 'Agent setup' })).toBeInTheDocument();
     } finally {
       Object.defineProperty(window, 'matchMedia', { configurable: true, value: originalMatchMedia });
     }
@@ -673,13 +674,13 @@ describe('SidebarLayout', () => {
     openRailMenu();
     fireEvent.click(await screen.findByRole('button', { name: 'Start new agent' }));
     await waitFor(() => expect(current()).toEqual(['More']));
-    const config = await screen.findByRole('dialog', { name: 'Agent Config' });
+    const config = await screen.findByRole('dialog', { name: 'Agent setup' });
     const chatColumn = config.nextElementSibling;
     expect(config).toHaveClass('md:max-w-140', 'md:flex-1', '2xl:max-w-150', 'border-r');
     expect(chatColumn).not.toBeNull();
     expect(config.querySelector('header')).toHaveClass('min-h-14');
     expect(chatColumn?.querySelector('header')).toHaveClass('min-h-14');
-    expect(screen.queryByRole('button', { name: 'Agent config' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Agent setup' })).not.toBeInTheDocument();
 
     openRailMenu();
     fireEvent.click(await screen.findByRole('button', { name: 'Settings' }));

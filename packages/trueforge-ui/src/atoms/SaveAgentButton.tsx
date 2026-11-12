@@ -19,6 +19,7 @@ import { DraftCatalogProvider, useDraftCatalog } from './draft/DraftCatalogProvi
 import { displayModelLabel, DraftModelCatalogPanel, ProviderMark } from './draft/DraftModelCatalogPanel.js';
 import { CatalogRow, ConnectorConnectButton, isUnauthenticatedDcrConnector } from './draft/DraftToolPicker.js';
 import { modelPatchWithReasoningEffort } from './draft/reasoningEffort.js';
+import { agentNameFromLabel } from './lib/agentName.js';
 import { auiButtonClass } from './lib/buttonClasses.js';
 import { cn } from './lib/cn.js';
 import { auiInputClass } from './lib/inputClasses.js';
@@ -196,6 +197,7 @@ function SaveAgentButtonContent({
   const [modelQuery, setModelQuery] = useState('');
   const [search, setSearch] = useState('');
   const [saving, setSaving] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const errorRef = useRef<HTMLParagraphElement>(null);
 
@@ -205,6 +207,8 @@ function SaveAgentButtonContent({
     () => catalog.models.find(model => model.name === draftSpec?.model.name),
     [catalog.models, draftSpec?.model.name],
   );
+
+  const savedName = intent === 'create' ? agentNameFromLabel(name) : name.trim();
 
   useEffect(() => {
     if (error === null) return;
@@ -216,6 +220,7 @@ function SaveAgentButtonContent({
     if (saving) return;
     setEditor(null);
     setOpen(false);
+    setMoreOpen(false);
     setDraftSpec(null);
     setDescription('');
     setError(null);
@@ -253,7 +258,8 @@ function SaveAgentButtonContent({
 
   const save = async () => {
     if (builder === null || draftSpec === null) return;
-    const normalizedName = name.trim();
+    // An existing agent keeps its saved name; a new one takes the tidied form of what was typed.
+    const normalizedName = intent === 'create' ? agentNameFromLabel(name) : name.trim();
     const normalizedDescription = description.trim();
     if (!normalizedName || !normalizedDescription || !draftSpec.model.name.trim()) return;
     setSaving(true);
@@ -337,54 +343,42 @@ function SaveAgentButtonContent({
           <div className="flex min-h-0 w-full flex-1 flex-col">
             <div className="min-h-0 flex-1 overflow-y-auto px-5 py-3">
               <label className="mb-3 block">
-                <span className="mb-1.5 block text-sm font-medium">Agent name</span>
+                <span className="mb-1.5 block text-sm font-medium">Name</span>
                 <input
                   value={name}
                   disabled={saving || intent === 'update'}
                   onChange={event => setName(event.target.value)}
-                  placeholder="release-notes"
+                  placeholder="Morning email helper"
                   className={auiInputClass('h-9 disabled:opacity-60')}
                 />
+                {intent === 'create' && savedName !== '' && savedName !== name.trim() ? (
+                  <span className="text-text-secondary mt-1 block text-xs">It will be saved as {savedName}.</span>
+                ) : null}
               </label>
 
               <label className="mb-3 block">
-                <span className="mb-1.5 block text-sm font-medium">Description</span>
+                <span className="mb-1.5 block text-sm font-medium">What it's for</span>
                 <textarea
                   value={description}
                   disabled={saving}
                   onChange={event => setDescription(event.target.value)}
                   rows={2}
-                  placeholder="Summarizes weekly PR activity into a digest."
+                  placeholder="Reads my email each morning and lists what needs a reply."
                   className={auiInputClass('resize-y py-2 disabled:opacity-60')}
                 />
               </label>
 
               <label className="mb-3 block">
-                <span className="mb-1.5 block text-sm font-medium">Instructions</span>
+                <span className="mb-1.5 block text-sm font-medium">What should it do?</span>
                 <textarea
                   value={draftSpec.instructions ?? ''}
                   disabled={saving}
                   onChange={event => setDraftSpec({ ...draftSpec, instructions: event.target.value })}
                   rows={5}
-                  placeholder="You are a release notes writer for a platform team."
+                  placeholder="Each morning, read my new email and tell me which messages need a reply."
                   className={auiInputClass('resize-y py-2 disabled:opacity-60')}
                 />
               </label>
-
-              <ConfigSection label="Model" onEdit={() => setEditor('model')} disabled={saving}>
-                {draftSpec.model.name ? (
-                  <span className="border-border inline-flex items-center gap-2 rounded-lg border py-1 pr-2.5 pl-2">
-                    <ProviderMark
-                      logo={modelEntry?.provider.logo}
-                      label={modelEntry?.provider.name ?? draftSpec.model.name}
-                      className="size-5 text-[10px]"
-                    />
-                    <span className="text-text-primary text-sm">{displayModelLabel(draftSpec.model.name)}</span>
-                  </span>
-                ) : (
-                  <p className="text-text-secondary text-xs">No model selected.</p>
-                )}
-              </ConfigSection>
 
               <ConfigSection label="Connectors" onEdit={() => setEditor('mcp')} disabled={saving}>
                 <MountChips
@@ -399,20 +393,56 @@ function SaveAgentButtonContent({
                 <MountChips mounts={skillMounts} disabled={saving} emptyLabel="No skills added." />
               </ConfigSection>
 
-              <div>
-                <p className="text-text-secondary mb-1.5 text-xs font-semibold tracking-wide uppercase">Capabilities</p>
-                <DraftCapabilitiesPanel
-                  layout="cards"
-                  value={readAgentCapabilities(draftSpec.config)}
-                  disabled={saving}
-                  onChange={values =>
-                    setDraftSpec({
-                      ...draftSpec,
-                      config: withAgentCapabilities({ config: draftSpec.config, values }),
-                    })
-                  }
-                />
+              <div className="mb-3">
+                <button
+                  type="button"
+                  aria-expanded={moreOpen}
+                  className="text-text-secondary hover:text-text-primary flex items-center gap-1.5 text-xs font-semibold tracking-wide uppercase"
+                  onClick={() => setMoreOpen(value => !value)}
+                >
+                  <Icon
+                    name="chevron-right"
+                    className={cn('size-3.5 transition-transform', moreOpen ? 'rotate-90' : null)}
+                  />
+                  More settings
+                </button>
               </div>
+
+              {moreOpen ? (
+                <>
+                  <ConfigSection label="Model" onEdit={() => setEditor('model')} disabled={saving}>
+                    {draftSpec.model.name ? (
+                      <span className="border-border inline-flex items-center gap-2 rounded-lg border py-1 pr-2.5 pl-2">
+                        <ProviderMark
+                          logo={modelEntry?.provider.logo}
+                          label={modelEntry?.provider.name ?? draftSpec.model.name}
+                          className="size-5 text-[10px]"
+                        />
+                        <span className="text-text-primary text-sm">{displayModelLabel(draftSpec.model.name)}</span>
+                      </span>
+                    ) : (
+                      <p className="text-text-secondary text-xs">No model selected.</p>
+                    )}
+                  </ConfigSection>
+
+                  <div>
+                    <p className="text-text-secondary mb-1.5 text-xs font-semibold tracking-wide uppercase">
+                      Capabilities
+                    </p>
+                    <DraftCapabilitiesPanel
+                      layout="cards"
+                      value={readAgentCapabilities(draftSpec.config)}
+                      disabled={saving}
+                      onChange={values =>
+                        setDraftSpec({
+                          ...draftSpec,
+                          config: withAgentCapabilities({ config: draftSpec.config, values }),
+                        })
+                      }
+                    />
+                  </div>
+                </>
+              ) : null}
 
               {error ? (
                 <p
@@ -436,11 +466,11 @@ function SaveAgentButtonContent({
               </button>
               <button
                 type="button"
-                disabled={saving || !name.trim() || !description.trim() || !draftSpec.model.name.trim()}
+                disabled={saving || savedName === '' || !description.trim() || !draftSpec.model.name.trim()}
                 className={auiButtonClass({ variant: 'primary' })}
                 onClick={() => void save()}
               >
-                {saving ? 'Saving…' : 'Save changes'}
+                {saving ? 'Saving…' : intent === 'create' ? 'Save agent' : 'Save changes'}
               </button>
             </div>
           </div>

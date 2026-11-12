@@ -75,7 +75,7 @@ export function DrawerLayout({ className }: { className?: string }) {
       {showAgentConfig ? (
         <aside
           role="dialog"
-          aria-label="Agent Config"
+          aria-label="Agent setup"
           className="absolute inset-y-0 left-0 z-20 w-full max-w-sm border-r border-border shadow-xl md:static md:z-auto md:w-88 md:max-w-none md:shrink-0 md:shadow-none"
         >
           <AgentConfigDrawerContainer showClose={isMobile} />

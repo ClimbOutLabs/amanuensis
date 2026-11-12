@@ -63,6 +63,11 @@ const spec: AgentSpec = {
   config: { sandbox: { enabled: true } },
 };
 
+/** The model and run settings start folded under More settings. */
+function openMoreSettings(): void {
+  fireEvent.click(screen.getByRole('button', { name: /More settings/ }));
+}
+
 describe('AgentConfigPanel', () => {
   it('shows supported configuration and omits deferred sections', () => {
     render(
@@ -77,6 +82,7 @@ describe('AgentConfigPanel', () => {
         />
       </SlotsProvider>,
     );
+    openMoreSettings();
 
     expect(screen.getByText(/200K/)).toBeInTheDocument();
     expect(screen.getByText('25000')).toBeInTheDocument();
@@ -96,14 +102,43 @@ describe('AgentConfigPanel', () => {
     expect(screen.queryByText('Endpoint')).not.toBeInTheDocument();
     expect(screen.queryByText('Variables')).not.toBeInTheDocument();
     expect(screen.queryByText('Initial messages')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Close agent config' })).not.toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Agent Config' }).parentElement).toHaveClass(
+    expect(screen.queryByRole('button', { name: 'Close agent setup' })).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Set up your agent' }).parentElement).toHaveClass(
       'min-h-14',
       'border-b',
       'bg-topbar-bg',
       'px-3',
       'py-1.5',
     );
+  });
+
+  it('leads with plain questions and folds the model and run settings away', () => {
+    render(
+      <SlotsProvider>
+        <AgentConfigPanel
+          spec={spec}
+          model={model}
+          {...catalogProps}
+          skillsAvailable
+          instructions=""
+          onOpenEditor={vi.fn()}
+        />
+      </SlotsProvider>,
+    );
+
+    expect(screen.getByRole('heading', { name: 'What should it do?' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add a connector' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add a skill' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Edit Model' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Edit Run settings' })).not.toBeInTheDocument();
+    expect(screen.queryByText('iteration limit:')).not.toBeInTheDocument();
+    const more = screen.getByRole('button', { name: /More settings/ });
+    expect(more).toHaveAttribute('aria-expanded', 'false');
+
+    fireEvent.click(more);
+    expect(more).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('button', { name: 'Edit Model' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Edit Run settings' })).toBeInTheDocument();
   });
 
   it('routes editor actions from the configuration summary', () => {
@@ -120,6 +155,7 @@ describe('AgentConfigPanel', () => {
         />
       </SlotsProvider>,
     );
+    openMoreSettings();
 
     fireEvent.click(screen.getByRole('button', { name: 'Model settings' }));
     expect(screen.getByRole('menu')).toBeInTheDocument();
@@ -147,6 +183,7 @@ describe('AgentConfigPanel', () => {
         />
       </SlotsProvider>,
     );
+    openMoreSettings();
 
     const summaryButton = screen.getByRole('button', { name: 'Edit model settings' });
     // Real clicks fire mousedown then click; DropdownMenu dismisses on document mousedown.
@@ -177,6 +214,7 @@ describe('AgentConfigPanel', () => {
         />
       </SlotsProvider>,
     );
+    openMoreSettings();
 
     fireEvent.click(screen.getByRole('button', { name: 'Edit Model' }));
 
@@ -211,6 +249,7 @@ describe('AgentConfigPanel', () => {
         />
       </SlotsProvider>,
     );
+    openMoreSettings();
 
     const modelTrigger = screen.getByRole('button', { name: 'Edit Model' });
     const settingsTrigger = screen.getByRole('button', { name: 'Model settings' });
@@ -242,6 +281,7 @@ describe('AgentConfigPanel', () => {
         </SlotsProvider>
       </CompactLayoutProvider>,
     );
+    openMoreSettings();
 
     fireEvent.click(screen.getByRole('button', { name: 'Edit Model' }));
 
@@ -417,11 +457,11 @@ describe('AgentConfigPanel', () => {
       </SlotsProvider>,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Add MCP server' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add a connector' }));
     expect(onOpenEditor).toHaveBeenCalledWith('mcp');
   });
 
-  it('shows the MCP empty state without a selected-servers message', () => {
+  it('shows a plain empty state for connectors', () => {
     render(
       <SlotsProvider>
         <AgentConfigPanel
@@ -435,9 +475,9 @@ describe('AgentConfigPanel', () => {
       </SlotsProvider>,
     );
 
-    expect(screen.getByText('MCP Servers')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Add MCP server' })).toBeInTheDocument();
-    expect(screen.queryByText('No MCP servers selected.')).not.toBeInTheDocument();
+    expect(screen.getByText('Connectors')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add a connector' })).toBeInTheDocument();
+    expect(screen.getByText('None yet.')).toBeInTheDocument();
   });
 
   it('renders an optional close action for overlay layouts', () => {
@@ -456,7 +496,7 @@ describe('AgentConfigPanel', () => {
       </SlotsProvider>,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Close agent config' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Close agent setup' }));
     expect(onClose).toHaveBeenCalledOnce();
   });
 });

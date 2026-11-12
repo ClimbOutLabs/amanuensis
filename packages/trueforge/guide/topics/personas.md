@@ -32,11 +32,12 @@ Each persona in that list has a knowledge library. You can add documents to it t
 ## Build an agent to save and try
 
 1. Click **More** in the left bar, then click **Build agent**.
-2. The **Agent Config** panel opens.
-3. Click **Edit Model** and choose a model.
-4. Click **Edit Instructions** and write what the agent should do.
-5. Click **Save Agent**.
-6. Type an **Agent name** and a **Description**. You need both.
-7. Click **Save changes**.
+2. The **Set up your agent** panel opens.
+3. Under **What should it do?**, click **Edit Instructions** and write the job in your own words.
+4. To let it use your apps, click **Add a connector**. To give it extra know-how, click **Add a skill**.
+5. The model and run settings sit under **More settings**. The usual choices work for most agents. To pick another model, open **More settings** and click **Edit Model**.
+6. Click **Save Agent**.
+7. Type a **Name** and say **What it's for**. You need both. Spaces and capitals are fine.
+8. Click **Save agent**.
 
 To use it, click **More** in the left bar, then click **Agents**. Click **Try** on the row of your agent. You can also pick it when you make a schedule.

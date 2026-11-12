@@ -192,7 +192,7 @@ export function StackChatPanel({ className, threadHeaderEnd }: StackChatPanelPro
       {shell?.agentConfigOpen ? (
         <aside
           role="dialog"
-          aria-label="Agent Config"
+          aria-label="Agent setup"
           className="absolute inset-0 z-20 border-l border-border shadow-xl"
         >
           <AgentConfigDrawerContainer showClose />
