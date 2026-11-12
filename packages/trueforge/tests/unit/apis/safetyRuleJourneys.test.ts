@@ -58,7 +58,10 @@ async function sendTurn({
   chatId: string;
   input: TurnInputItem[];
 }): Promise<Response> {
-  return server.request(`/api/v1/sessions/${chatId}/turns`, jsonInit({ input, stream: true }));
+  return server.request(
+    `/api/v1/sessions/${chatId}/turns`,
+    jsonInit({ input, stream: true, client_timezone: 'Europe/London' }),
+  );
 }
 
 /** Runs one turn to its end and returns the saved turn. */
@@ -518,6 +521,77 @@ describe('a connector read the person always allows', () => {
         expect.stringContaining(`Look this up on ${INERT_SERVER_NAME}?`),
       ]);
       expect(server.mcp.getPageInvocations()).toBe(before);
+    },
+    TURN_TIMEOUT_MS,
+  );
+});
+
+describe('reminders and schedules in a chat', () => {
+  let server: ApprovalTestServer;
+  const REMINDER = {
+    what: 'Take the medicine',
+    at: `${new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)}T18:00:00+00:00`,
+  };
+
+  /** Asks for one tool with these arguments and returns the cards that came up. */
+  async function call({ chatId, tool, toolArguments }: { chatId: string; tool: string; toolArguments: object }) {
+    server.model.next({ toolArguments });
+    return cards(await runTurn({ server, chatId, input: ask(tool) }));
+  }
+
+  beforeAll(async () => {
+    server = await startApprovalTestServer();
+  });
+
+  afterAll(async () => {
+    await server.close();
+  });
+
+  it(
+    'setting a reminder runs without a card, and cancelling it asks with no chat-wide answer',
+    async () => {
+      const chatId = await createChat(server);
+      expect(await call({ chatId, tool: 'set_reminder', toolArguments: REMINDER })).toEqual([]);
+
+      const [cancel, ...others] = await call({
+        chatId,
+        tool: 'cancel_reminder',
+        toolArguments: { reminder: REMINDER.what },
+      });
+      expect(others).toEqual([]);
+      expect(cancel?.tier3_card?.plain_what).toContain(REMINDER.what);
+      expect(cancel?.can_chat_allow).toBe(false);
+      expect(cancel?.can_always_allow).toBe(false);
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
+    'pausing a schedule asks, and resuming it asks again',
+    async () => {
+      const chatId = await createChat(server);
+      const create = onlyCard(await runTurn({ server, chatId, input: ask('create_schedule') }));
+      await runTurn({ server, chatId, input: answer({ card: create, scope: 'once' }) });
+
+      const [pause] = await call({
+        chatId,
+        tool: 'pause_schedule',
+        toolArguments: { schedule: SCRIPTED_SCHEDULE.name },
+      });
+      if (pause === undefined) {
+        throw new Error('pausing the schedule showed no card');
+      }
+      expect(pause.can_chat_allow).toBe(false);
+      expect(pause.can_always_allow).toBe(false);
+      await runTurn({ server, chatId, input: answer({ card: pause, scope: 'once' }) });
+
+      const [resume] = await call({
+        chatId,
+        tool: 'resume_schedule',
+        toolArguments: { schedule: SCRIPTED_SCHEDULE.name },
+      });
+      expect(resume?.tier3_card?.plain_what).toContain('Resume the schedule');
+      expect(resume?.can_chat_allow).toBe(false);
     },
     TURN_TIMEOUT_MS,
   );
