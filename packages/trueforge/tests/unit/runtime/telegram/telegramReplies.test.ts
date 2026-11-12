@@ -195,6 +195,7 @@ describe('telegram pending replies', () => {
     expect(client.sent).toHaveLength(1);
     const sent = client.sent[0];
     expect(sent?.text).toContain('Send this email.');
+    expect(sent?.text).toContain('What will be sent:');
     expect(sent?.text).toContain('To: Sam (sam@example.com)');
     expect(sent?.text).toContain('Copy: pat@example.com');
     expect(sent?.text).toContain('Subject: The summary you asked for');
@@ -202,6 +203,67 @@ describe('telegram pending replies', () => {
     expect(sent?.inline_buttons?.[0]?.map(button => button.text)).toEqual(['Approve', 'Deny']);
     expect(store.pendingApprovals).toHaveLength(1);
     expect(store.pendingApprovals[0]?.prompt).toBe(sent?.text);
+  });
+
+  it.each([
+    {
+      field: 'from_name',
+      email: { from_name: 'Sam at Acme' },
+      line: 'Sent as: Sam at Acme',
+    },
+    {
+      field: 'name_left_off',
+      email: { name_left_off: true },
+      line: 'The name was left off an address because it looked like an address.',
+    },
+  ])("shows the email card's $field line, as the app card does", async ({ email, line }) => {
+    const card = cardWith({
+      plain_what: 'Send this email.',
+      email: {
+        action: 'send',
+        to: [{ name: '', address: 'sam@example.com' }],
+        cc: [],
+        bcc: [],
+        subject: 'Hello',
+        body: 'Hi.',
+        replaces: null,
+        reply_in_thread: null,
+        reply_to: null,
+        ...email,
+      },
+    });
+    const { client, deps } = harness(doneTurnWith(approvalAction(card)));
+    await deliverPendingTelegramReplies(deps);
+    expect(client.sent[0]?.text).toContain(line);
+    expect(client.sent[0]?.inline_buttons).toBeDefined();
+  });
+
+  it.each([
+    { field: 'already_created', event: { already_created: true }, line: 'You already have this event.' },
+    { field: 'span_days', event: { span_days: 3 }, line: 'This event runs over 3 days.' },
+  ])("shows the calendar card's $field line, as the app card does", async ({ event, line }) => {
+    const card = cardWith({
+      plain_what: 'Add this event.',
+      calendar_event: {
+        action: 'create',
+        calendar: 'sam@example.com',
+        title: 'Offsite',
+        when: 'Monday 9 March, 09:00',
+        time_zone: 'Europe/London',
+        duration: '1 hour',
+        location: '',
+        description: '',
+        attendees: [],
+        guests_emailed: false,
+        one_of_repeating: false,
+        before: null,
+        ...event,
+      },
+    });
+    const { client, deps } = harness(doneTurnWith(approvalAction(card)));
+    await deliverPendingTelegramReplies(deps);
+    expect(client.sent[0]?.text).toContain(line);
+    expect(client.sent[0]?.inline_buttons).toBeDefined();
   });
 
   it('says Add and send on the button of a card with new email addresses', async () => {

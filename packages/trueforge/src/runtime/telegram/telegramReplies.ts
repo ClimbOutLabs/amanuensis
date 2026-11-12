@@ -151,6 +151,7 @@ function approvalCardLines(card: Tier3Card): string[] {
   }
   const email = card.email ?? null;
   if (email !== null) {
+    lines.push(email.action === 'send' ? 'What will be sent:' : 'What will be saved:');
     if (email.reply_in_thread !== null) {
       lines.push(`Reply in the thread of the message from ${email.reply_in_thread.from}.`);
       lines.push(`Thread subject: ${email.reply_in_thread.subject}`);
@@ -162,7 +163,13 @@ function approvalCardLines(card: Tier3Card): string[] {
     if (email.bcc.length > 0) {
       lines.push(`Hidden copy: ${email.bcc.map(mailboxLine).join(', ')}`);
     }
+    if (email.from_name !== null && email.from_name !== undefined) {
+      lines.push(`Sent as: ${email.from_name}`);
+    }
     lines.push(`Subject: ${email.subject === '' ? 'No subject' : email.subject}`);
+    if (email.name_left_off === true) {
+      lines.push('The name was left off an address because it looked like an address.');
+    }
     if (email.reply_to !== null) {
       lines.push(`Replies go to: ${email.reply_to}`);
     }
@@ -197,6 +204,12 @@ function approvalCardLines(card: Tier3Card): string[] {
     lines.push(`Length: ${event.duration}`);
     if (event.location !== '') {
       lines.push(`Where: ${event.location}`);
+    }
+    if (event.already_created === true) {
+      lines.push('You already have this event.');
+    }
+    if (event.span_days !== undefined && event.span_days > 1) {
+      lines.push(`This event runs over ${String(event.span_days)} days.`);
     }
     if (event.one_of_repeating) {
       lines.push('Repeats: Only this one event of the series changes');
