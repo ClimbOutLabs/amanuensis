@@ -46,4 +46,33 @@ describe('sentinelSettingsServices', () => {
     });
     expect((await services.tier2AutoAllow(alice)).has('file_write')).toBe(true);
   });
+
+  it('turns maps without asking on for the person who chose it, and changes nothing else', async () => {
+    const store = new InMemorySentinelSettingsStore();
+    const services = sentinelSettingsServices(store);
+    const alice = { tenant_id: 't1', created_by: 'alice' };
+    const bob = { tenant_id: 't1', created_by: 'bob' };
+    for (const person of [alice, bob]) {
+      await store.patch({
+        ...person,
+        offline_mode: undefined,
+        tier2_auto_allow: ['file_write'],
+        search_without_asking: false,
+        maps_without_asking: false,
+        sandbox_without_asking: false,
+        chat_search_enabled: undefined,
+        package_downloads_without_project_allowed: undefined,
+      });
+    }
+    expect(await services.mapsWithoutAsking(alice)).toBe(false);
+
+    await services.allowMapsWithoutAsking(alice);
+
+    expect(await services.mapsWithoutAsking(alice)).toBe(true);
+    expect(await services.mapsWithoutAsking(bob)).toBe(false);
+    expect([...(await services.tier2AutoAllow(alice))]).toEqual(['file_write']);
+    expect(await services.searchWithoutAsking(alice)).toBe(false);
+    expect(await services.sandboxWithoutAsking(alice)).toBe(false);
+    expect(await services.isOffline(alice)).toBe(false);
+  });
 });

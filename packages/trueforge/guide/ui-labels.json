@@ -37,6 +37,7 @@
   "Write files": "packages/trueforge-ui/src/sentinel/types.ts",
   "Web searches": "packages/trueforge-ui/src/sentinel/SentinelSettings.tsx",
   "Sandbox": "packages/trueforge-ui/src/sentinel/SentinelSettings.tsx",
+  "Maps": "packages/trueforge-ui/src/sentinel/SentinelSettings.tsx",
   "Connectors": "packages/trueforge-ui/src/containers/SettingsBuilder/index.tsx",
   "Offline mode": "packages/trueforge-ui/src/sentinel/SentinelSettings.tsx",
   "Google": "packages/trueforge-ui/src/containers/SettingsBuilder/ConnectorSettings.tsx",
