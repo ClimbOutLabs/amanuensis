@@ -164,6 +164,23 @@ describe('Reminder tool classification', () => {
       'Cancel the reminder "Take the medicine", set for Monday, October 26 at 6:00 PM?',
     );
     expect(decision.card?.cannot_be_undone).toBe('Once cancelled, the reminder is gone for good.');
+    // Gone for good, so the safe choice leads the card and the copy carries the warning.
+    expect(decision.card?.safe_choice).toBe(true);
+    expect(decision.card?.destructive).toBe(true);
+    expect(decision.card?.copy?.consequence).toBe('Once cancelled, the reminder is gone for good.');
+  });
+
+  it('keeps a schedule pause card plain: it can be resumed, so Allow stays the main choice', async () => {
+    const decision = await classifyTier(
+      {
+        ...reminderAction('cancel_reminder', { when: null, what: 'x' }),
+        tool_name: 'pause_schedule',
+        schedule_status: { action: 'pause', name: 'Morning brief', when: 'Every day at 8:00 AM', time_zone: 'UTC' },
+      },
+      makeCtx(),
+    );
+    expect(decision.card?.safe_choice).toBe(false);
+    expect(decision.card?.destructive).toBe(false);
   });
 
   it('shows the whole of a long reminder on the cancel card', async () => {

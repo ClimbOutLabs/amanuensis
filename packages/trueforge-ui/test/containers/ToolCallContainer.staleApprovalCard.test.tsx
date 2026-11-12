@@ -130,26 +130,26 @@ describe('a second approval after a resolved one', () => {
     const { rerender } = render(tree([message('m1', [call('a', 'pending')], true)]));
     await settle();
     publish('a', 'Do a');
-    expect(screen.getByText('Do a')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Do a' })).toBeInTheDocument();
 
     const recording = recordFrames();
     // A is answered: it must stop reading as pending right away.
     pendingApprovals.current = [];
     rerender(tree([message('m1', [call('a', 'approved')], false)]));
     await settle();
-    expect(screen.queryByText('Do a')).not.toBeInTheDocument();
+    expect(screen.queryAllByText('Do a')).toEqual([]);
     expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument();
 
     // B arrives as a pending call before its card has been delivered.
     pendingApprovals.current = [{ approvalId: 'b', threadId: 'main' }];
     rerender(tree([message('m1', [call('a', 'approved'), call('b', 'pending')], true)]));
     await settle();
-    expect(screen.queryByText('Do a')).not.toBeInTheDocument();
+    expect(screen.queryAllByText('Do a')).toEqual([]);
     expect(screen.queryAllByRole('button', { name: 'Approve' }).length).toBeLessThanOrEqual(1);
 
     publish('b', 'Do b');
     await settle();
-    expect(screen.getByText('Do b')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Do b' })).toBeInTheDocument();
     recording.stop();
 
     const firstFrameWithoutA = recording.frames.findIndex(text => !text.includes('Do a'));
@@ -171,8 +171,8 @@ describe('a second approval after a resolved one', () => {
     pendingApprovals.current = [{ approvalId: 'b', threadId: 'main' }];
     rerender(tree([message('m1', [call('b', 'pending')], true)]));
     await settle();
-    expect(screen.getByText('Do b')).toBeInTheDocument();
-    expect(screen.queryByText('Do a')).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Do b' })).toBeInTheDocument();
+    expect(screen.queryAllByText('Do a')).toEqual([]);
     expect(screen.queryByRole('button', { name: 'Show less' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Show all/ })).toBeInTheDocument();
   });
@@ -185,23 +185,23 @@ describe('a second approval after a resolved one', () => {
     const { rerender } = render(tree([message('m1', [call(first, 'pending')], true)]));
     await settle();
     publish('call_0', 'Do a', null, 'src-1');
-    expect(screen.getByText('Do a')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Do a' })).toBeInTheDocument();
 
     const recording = recordFrames();
     pendingApprovals.current = [];
     rerender(tree([message('m1', [call(first, 'approved')], false)]));
     await settle();
-    expect(screen.queryByText('Do a')).not.toBeInTheDocument();
+    expect(screen.queryAllByText('Do a')).toEqual([]);
 
     // The second call is pending, but its own card has not been delivered yet.
     pendingApprovals.current = [{ approvalId: 'call_0', threadId: 'main' }];
     rerender(tree([message('m1', [call(first, 'approved'), call(second, 'pending')], true)]));
     await settle();
-    expect(screen.queryByText('Do a')).not.toBeInTheDocument();
+    expect(screen.queryAllByText('Do a')).toEqual([]);
 
     publish('call_0', 'Do b', null, 'src-2');
     await settle();
-    expect(screen.getByText('Do b')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Do b' })).toBeInTheDocument();
     recording.stop();
     expect(recording.frames.some(text => text.includes('Do a'))).toBe(false);
   });
