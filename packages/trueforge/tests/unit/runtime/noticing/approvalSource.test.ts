@@ -22,6 +22,7 @@ function session({ id, owner, updated }: { id: string; owner: string; updated: s
     updated_at: new Date(updated),
     last_activity_timestamp_ms: 0,
     approval_grants: [],
+    approval_refusals: [],
     task_checklist: { revision: 0, items: [] },
     metrics: { total_duration_ms: 0, total_turns: 0 },
     metadata: {},
