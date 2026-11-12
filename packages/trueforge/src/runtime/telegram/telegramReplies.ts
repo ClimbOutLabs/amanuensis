@@ -8,6 +8,7 @@ import type {
   Tier3ScheduleSchema,
   Tier3SkillSchema,
 } from '@truefoundry/trueforge-core/core/permissions/tier';
+import { SCHEDULE_AWAY_NOTE } from '@truefoundry/trueforge-core/core/schedules/scheduleCardCopy';
 import type { Logger } from 'winston';
 import { z } from 'zod';
 
@@ -76,10 +77,6 @@ function switchedOnNames(choices: readonly { name: string; on: boolean }[]): str
   const names = choices.filter(choice => choice.on).map(choice => choice.name);
   return names.length === 0 ? 'None' : names.join(', ');
 }
-
-/** The card's note on a new schedule: a run holds anything that would ask until the person is back. */
-const SCHEDULE_AWAY_LINE =
-  "While you're away it can only read and write to chat; anything risky is skipped and waits for your OK.";
 
 /** One email recipient as the cards show it: `Name (address)`, or the bare address when it has no name. */
 function mailboxLine(mailbox: { name: string; address: string }): string {
@@ -346,7 +343,7 @@ function approvalCardLines(card: Tier3Card): string[] {
       lines.push(`Memory: ${tools.memory ? 'On' : 'Off'}`);
     }
     if (schedule.action === 'create') {
-      lines.push(SCHEDULE_AWAY_LINE);
+      lines.push(SCHEDULE_AWAY_NOTE);
     }
   }
   const persona = card.persona ?? null;

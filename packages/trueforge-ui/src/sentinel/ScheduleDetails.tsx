@@ -1,13 +1,10 @@
 'use client';
 
+import { SCHEDULE_AWAY_NOTE } from '@truefoundry/trueforge-core/core/schedules/scheduleCardCopy';
 import type { FC } from 'react';
 
 import { Button } from '../atoms/primitives/Button.js';
 import type { SentinelApprovalSchedule, SentinelScheduleToolChoice, SentinelScheduleTools } from './types.js';
-
-/** Scheduled runs hold anything that would ask, so nobody approves it by accident while away. */
-const SCHEDULE_AWAY_NOTE =
-  "While you're away it can only read and write to chat; anything risky is skipped and waits for your OK.";
 
 function Line({ label, value }: { label: string; value: string }) {
   return (

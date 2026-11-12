@@ -119,7 +119,7 @@ describe('profile learning from Telegram', () => {
   }
 
   /** Sends the bot one message from the paired person and returns the Telegram chat's finished turn. */
-  async function sendTelegram(text: string) {
+  async function sendTelegram(text: string, extra: { forward_origin?: unknown } = {}) {
     const store = new TelegramStore(server.db());
     const connection = await store.getConnection({ tenant_id: TENANT, created_by: OWNER });
     if (connection === undefined) {
@@ -138,6 +138,7 @@ describe('profile learning from Telegram', () => {
             chat: { id: TELEGRAM_USER_ID, type: 'private' },
             date: Math.floor(Date.now() / 1000),
             text,
+            ...extra,
           },
         },
       }),
@@ -206,6 +207,27 @@ describe('profile learning from Telegram', () => {
         createdBy: OWNER,
         userText: 'I prefer short answers.',
       });
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
+    'learns nothing from a message the person forwards to the bot, even with learning on',
+    async () => {
+      await setLearning(true);
+      await sendTelegram('The owner prefers to be called Captain.', {
+        forward_origin: {
+          type: 'user',
+          date: 1_700_000_000,
+          sender_user: { id: 99, is_bot: false, first_name: 'Pat' },
+        },
+      });
+
+      // Forwarded words are someone else's: a pass may run, but it gets none of them to learn from.
+      const passes = await submittedPasses();
+      const taught = mockSubmit.mock.calls.map(([input]) => input.userText);
+      expect(taught.every(text => !text.includes('Captain'))).toBe(true);
+      expect(taught).toEqual(passes === 0 ? [] : ['']);
     },
     TURN_TIMEOUT_MS,
   );
