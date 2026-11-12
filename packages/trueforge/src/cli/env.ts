@@ -1,6 +1,6 @@
 /**
- * The CLI runs before, and without, the server config, which throws on missing env;
- * this is the one place the CLI reads the process environment.
+ * The CLI and the setup scripts run before, and without, the server config, which throws on missing env;
+ * this is the one place they read the process environment.
  */
 export type CliEnv = Readonly<Record<string, string | undefined>>;
 

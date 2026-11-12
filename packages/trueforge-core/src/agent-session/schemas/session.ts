@@ -120,10 +120,17 @@ export const SessionSchema = z
     updated_at: z.string().describe('ISO 8601 last-update timestamp.'),
     approval_grants: z
       .array(z.string())
-      .describe('Server-derived grants created by "Always allow this here" for one kind of action in this chat.'),
+      .describe('Server-derived grants created by "Always allow in this chat" for one kind of action in this chat.'),
     metrics: SessionMetricsSchema,
     metadata: SessionMetadataSchema,
     source: SessionSourceSchema.nullable(),
+    is_incognito: z
+      .boolean()
+      .describe('True for a private chat: nothing from it is remembered, and it is deleted when it is closed.'),
+    private_expires_at: z
+      .string()
+      .nullable()
+      .describe('ISO 8601 time a private chat is deleted if it is not closed first; null for other chats.'),
   })
   .openapi('Session');
 

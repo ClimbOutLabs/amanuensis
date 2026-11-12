@@ -1,7 +1,4 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
@@ -11,6 +8,7 @@ import { createServer, defaultClientConditions } from 'vite';
 
 import { HELP_COMPOSER_PLACEHOLDER } from '../../trueforge-ui/src/help/helpModel.ts';
 import { DEV_OPTIMIZE_DEPS } from '../src/devPrebundle.ts';
+import { featureShotPath, saveFailureShots } from './support/featureShots.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.ts';
 import { FIRST_LOAD_TIMEOUT_MS } from './support/firstLoad.ts';
 import { privateViteCache } from './support/viteCache.ts';
@@ -49,15 +47,6 @@ const CASES = [
   },
 ] as const;
 
-async function screenshotDir(): Promise<string> {
-  const configured = process.env.AMAN_SCREENSHOT_DIR;
-  if (configured != null && configured !== '') {
-    await mkdir(configured, { recursive: true });
-    return configured;
-  }
-  return await mkdtemp(join(tmpdir(), 'aman-help-stuck-'));
-}
-
 test("Help, I'm stuck opens the help chat in every case, never a blank page", { timeout: 300_000 }, async () => {
   const frontendRoot = fileURLToPath(new URL('../', import.meta.url));
   const viteCache = privateViteCache('help-stuck');
@@ -72,7 +61,6 @@ test("Help, I'm stuck opens the help chat in every case, never a blank page", { 
     server: { host: '127.0.0.1', port: 0 },
   });
   let browser: Browser | undefined;
-  const outDir = await screenshotDir();
 
   try {
     await server.listen();
@@ -133,14 +121,19 @@ test("Help, I'm stuck opens the help chat in every case, never a blank page", { 
         assert.deepEqual(pageErrors, [], `${testCase.name}: the page should not throw`);
         assert.ok(await results.isVisible(), `${testCase.name}: the help panel should still be on screen`);
         await page.screenshot({
-          path: join(outDir, `help-stuck-${testCase.name.replace(/\W+/g, '-')}.png`),
+          path: await featureShotPath({
+            surface: 'screen:help-chat',
+            step: testCase.name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+          }),
           fullPage: true,
         });
       } finally {
         await page.close();
       }
     }
-    console.log(`help screenshots written to ${outDir}`);
+  } catch (error) {
+    await saveFailureShots({ browser, surface: 'screen:help-chat' });
+    throw error;
   } finally {
     await browser?.close();
     await server.close();

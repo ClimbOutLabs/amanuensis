@@ -24,6 +24,7 @@ import { useOpenChatById } from '../hooks/useOpenChatById.js';
 import { useResourcePermissions } from '../hooks/useResourcePermissions.js';
 import { Icon } from '../icons/Icon.js';
 import { useOptionalChatFolders, type ChatFolderSession } from '../server/ChatFolderContext.js';
+import { useIsPrivateChat, usePrivateChatState } from '../server/privateChatStore.js';
 import { useOptionalServer } from '../server/ServerContext.js';
 import { useOptionalShellMode } from '../server/ShellModeContext.js';
 import { useSlot } from '../theme/SlotsProvider.js';
@@ -91,6 +92,7 @@ function ThreadListItemRow({
   }, [remoteId, isOpen, answerStamp, markAnswerSeen]);
   const canDelete = canDeleteSession && remoteId != null && canDeleteResource(remoteId);
   const canRename = canRenameSession && remoteId != null;
+  const isPrivate = useIsPrivateChat(remoteId);
   // The "..." actions menu holds Rename, Delete, and/or Move to folder (the "Show agent
   // details" item moved to a header button next to Clear chat), so it stays gated on those.
   const showActions = remoteId != null && (canDelete || chatFolders !== null || canRename);
@@ -104,6 +106,7 @@ function ThreadListItemRow({
         agentName={agentName}
         lastMessageAt={lastMessageAt}
         unread={unread}
+        isPrivate={isPrivate}
         onSelect={() => {
           onThreadOpen?.();
           shell?.setSettingsOpen(false);
@@ -669,6 +672,7 @@ export function ThreadListContainer({ onThreadOpen, variant = 'default' }: Threa
     };
   }, [hasMore, isIdle, isLoading, isLoadingMore, threadIds.length]);
 
+  const { openSessionId: openPrivateChatId } = usePrivateChatState();
   const handleNewChat = () => {
     onThreadOpen?.();
     shell?.setLibraryOpen(false);
@@ -686,9 +690,11 @@ export function ThreadListContainer({ onThreadOpen, variant = 'default' }: Threa
   const loadedRemoteSessionIdSet = new Set(loadedRemoteSessionIds);
   const hasFolderOnlySessions = remoteSessionIds.some(sessionId => !loadedRemoteSessionIdSet.has(sessionId));
   const hasFolders = chatFolders !== null && (chatFolders.folders.length > 0 || hasFolderOnlySessions);
-  const shownEntries = isRecentHistory
-    ? filterChatsByTitle({ chats: entries, query: searchOpen ? searchQuery : '' })
-    : entries;
+  const titleQuery = searchOpen ? searchQuery : '';
+  // A private chat is shown while it is open, but a search never finds it.
+  const searchableEntries =
+    titleQuery.trim() === '' ? entries : entries.filter(entry => entry.remoteId !== openPrivateChatId);
+  const shownEntries = isRecentHistory ? filterChatsByTitle({ chats: searchableEntries, query: titleQuery }) : entries;
   const openKey = activeRemoteId == null ? undefined : entries.find(entry => entry.remoteId === activeRemoteId)?.key;
   const messageSearchActive = isRecentHistory && searchOpen && searchQuery.trim().length > 0;
   const titleMatchSessionIds = new Set(
