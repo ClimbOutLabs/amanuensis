@@ -857,6 +857,9 @@ describe('the Home Assistant connector', () => {
   beforeAll(async () => {
     server = await startApprovalTestServer();
     home = await startHomeAssistantStub({ token: TOKEN, newerTools: true });
+    // The stub runs on this computer, which the address check refuses; the operator vouches for it
+    // by listing its origin, as FIRST_PARTY_MCP_ORIGINS does for a service of their own.
+    server.setFirstPartyOrigins([server.mcp.origin, new URL(home.url).origin]);
     const created = await server.request(
       '/api/v1/settings/mcp-servers',
       jsonInit({

@@ -136,7 +136,9 @@ async function startTurn(options: {
     tenant_id: TENANT_ID,
     settings: {
       apiKey: 'sk-nebius',
-      baseUrl: options.tokenFactoryUrl ?? 'https://api.tokenfactory.nebius.com/v1',
+      // A public IP address, not a name: the provider is judged by the address check when a
+      // model is resolved, and a fixture name's resolution depends on the machine's DNS.
+      baseUrl: options.tokenFactoryUrl ?? 'https://93.184.216.34/v1',
       model: options.tokenFactoryModel ?? 'nvidia/nemotron-3-super-120b-a12b',
     },
     catalogModels:
