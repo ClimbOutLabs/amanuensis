@@ -66,10 +66,10 @@ describe('the notes folder setup panel', () => {
     expect(screen.getByRole('button', { name: 'Connect' })).toBeDefined();
   });
 
-  it('says the Docker install cannot use a notes folder yet, and that Aman Setup on Windows is the same', async () => {
+  it('says the Docker install and Aman Setup cannot use a notes folder, and points them at Obsidian', async () => {
     renderPanel(makePort(statusOf()));
-    expect(await screen.findByText(/Aman Setup on Windows uses Docker/)).toBeDefined();
-    expect(screen.getByText(/cannot use a notes folder yet either/)).toBeDefined();
+    expect(await screen.findByText(/Aman Setup on Windows cannot use one/)).toBeDefined();
+    expect(screen.getByText(/connect Obsidian instead/)).toBeDefined();
   });
 
   it('saves the folder and the inbox name the person typed', async () => {
