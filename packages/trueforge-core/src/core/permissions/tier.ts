@@ -199,6 +199,26 @@ export const Tier3CalendarEventSchema = z
   .describe('The calendar event a write adds or changes, shown in full.')
   .openapi('Tier3CalendarEvent');
 
+/** One connector or skill a new schedule may run with, and whether it is turned on. */
+export const Tier3ScheduleToolChoiceSchema = z
+  .object({
+    name: z.string().describe('Connector or skill name.'),
+    on: z.boolean().describe('True when the schedule runs with it.'),
+  })
+  .openapi('Tier3ScheduleToolChoice');
+
+/** What a new schedule runs with, as it will be saved. */
+export const Tier3ScheduleToolsSchema = z
+  .object({
+    editable: z.boolean().describe('True when the person may ask for other choices before approving.'),
+    agent_name: z.string().describe('The agent the schedule runs as.'),
+    connectors: z.array(Tier3ScheduleToolChoiceSchema).describe('Connectors the person may pick from.'),
+    skills: z.array(Tier3ScheduleToolChoiceSchema).describe('Skills the person may pick from.'),
+    run_code: z.boolean().describe('True when runs may run code.'),
+    memory: z.boolean().describe('True when runs recall memories.'),
+  })
+  .openapi('Tier3ScheduleTools');
+
 /** A schedule that a chat call creates or deletes, shown in full. */
 export const Tier3ScheduleSchema = z
   .object({
@@ -211,6 +231,9 @@ export const Tier3ScheduleSchema = z
     next_runs: z
       .array(z.string())
       .describe('The next three runs in plain words for a new schedule; empty for a delete.'),
+    tools: Tier3ScheduleToolsSchema.nullable()
+      .optional()
+      .describe('What a new schedule runs with; absent for a delete and on an older card.'),
   })
   .describe('The schedule a chat call creates or deletes, shown in full.')
   .openapi('Tier3Schedule');
@@ -307,6 +330,7 @@ export const Tier3CardSchema = z
 
 export type Tier3Card = z.infer<typeof Tier3CardSchema>;
 export type Tier3Schedule = z.infer<typeof Tier3ScheduleSchema>;
+export type Tier3ScheduleTools = z.infer<typeof Tier3ScheduleToolsSchema>;
 export type Tier3Persona = z.infer<typeof Tier3PersonaSchema>;
 export type Tier3Skill = z.infer<typeof Tier3SkillSchema>;
 
@@ -351,8 +375,8 @@ export interface TierDecision {
    * is stamped as inspection, so the grant and chat scope both apply to it.
    */
   inspection: boolean;
-  /** Host of the connector the call goes to; a standing grant the user records on this ask binds to it. */
-  grant_host: string | null;
+  /** The connector setup the call goes to (see `ToolGrantKey`); a standing grant the user records on this ask binds to it. */
+  grant_binding: string | null;
   /**
    * Tool name a standing grant for this call is recorded under, when the grant covers a scope
    * wider than the one tool (a Home Assistant domain, say). Null records under the tool's own name.
@@ -397,7 +421,7 @@ export function failClosedDecision(input: { reason_detail: string | null }): Tie
     audit_description: null,
     shell_binding: null,
     inspection: false,
-    grant_host: null,
+    grant_binding: null,
     grant_tool_name: null,
     secret_path_read: false,
     mail_send: false,
@@ -418,7 +442,7 @@ function baseDecision(): Omit<TierDecision, 'tier' | 'reason' | 'reason_detail'>
     audit_description: null,
     shell_binding: null,
     inspection: false,
-    grant_host: null,
+    grant_binding: null,
     grant_tool_name: null,
     secret_path_read: false,
     mail_send: false,
@@ -480,7 +504,7 @@ export function tier3Decision(input: {
   approval_token_id?: string | null | undefined;
   shell_binding?: ShellApprovalBinding | null | undefined;
   inspection?: boolean | undefined;
-  grant_host?: string | null | undefined;
+  grant_binding?: string | null | undefined;
   grant_tool_name?: string | null | undefined;
   secret_path_read?: boolean | undefined;
   mail_send?: boolean | undefined;
@@ -498,7 +522,7 @@ export function tier3Decision(input: {
     approval_token_id: input.approval_token_id ?? null,
     shell_binding: input.shell_binding ?? null,
     inspection: input.inspection === true,
-    grant_host: input.grant_host ?? null,
+    grant_binding: input.grant_binding ?? null,
     grant_tool_name: input.grant_tool_name ?? null,
     secret_path_read: input.secret_path_read === true,
     mail_send: input.mail_send === true,

@@ -158,6 +158,7 @@ export const SCHEDULE_FIELD_RULES: Record<keyof Schedule, NestedRule> = {
   task: 'spoken',
   runs_as: 'spoken',
   next_runs: 'empty',
+  tools: 'empty',
 };
 
 /** The fields of one recipient: the name it is shown with and the address mail goes to. */

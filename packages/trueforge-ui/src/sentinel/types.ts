@@ -107,6 +107,21 @@ const APPROVAL_SCHEDULE_ACTIONS = ['create', 'delete'] as const;
 
 export type SentinelApprovalScheduleAction = (typeof APPROVAL_SCHEDULE_ACTIONS)[number];
 
+/** One connector or skill a new schedule may run with. */
+export type SentinelScheduleToolChoice = { name: string; on: boolean };
+
+/** What a new schedule runs with, as it will be saved. */
+export type SentinelScheduleTools = {
+  /** True when the person may ask for other choices before approving. */
+  editable: boolean;
+  /** The agent the schedule runs as. */
+  agent_name: string;
+  connectors: SentinelScheduleToolChoice[];
+  skills: SentinelScheduleToolChoice[];
+  run_code: boolean;
+  memory: boolean;
+};
+
 /** The whole schedule a chat call creates or deletes, in plain words. */
 export type SentinelApprovalSchedule = {
   action: SentinelApprovalScheduleAction;
@@ -121,6 +136,8 @@ export type SentinelApprovalSchedule = {
   runs_as: string;
   /** The next three runs in plain words for a new schedule; empty for a delete. */
   next_runs: string[];
+  /** What a new schedule runs with; absent for a delete and on an older card. */
+  tools?: SentinelScheduleTools | undefined;
 };
 
 /**
@@ -609,6 +626,37 @@ function parsePersona(value: unknown): SentinelApprovalPersona | null {
   return { name, description, instructions, model_name };
 }
 
+function parseToolChoices(value: unknown): SentinelScheduleToolChoice[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const choices: SentinelScheduleToolChoice[] = [];
+  for (const item of value) {
+    if (!isRecord(item) || typeof item.name !== 'string' || typeof item.on !== 'boolean') return undefined;
+    choices.push({ name: item.name, on: item.on });
+  }
+  return choices;
+}
+
+/** Tools missing any field are not shown, so a partial list is never approved as if it were whole. */
+function parseScheduleTools(value: unknown): SentinelScheduleTools | undefined {
+  if (!isRecord(value)) return undefined;
+  const agent_name = optionalString(value, 'agent_name') ?? optionalString(value, 'agentName');
+  const connectors = parseToolChoices(value.connectors);
+  const skills = parseToolChoices(value.skills);
+  const { editable, memory } = value;
+  const run_code = value.run_code ?? value.runCode;
+  if (
+    agent_name === undefined ||
+    connectors === undefined ||
+    skills === undefined ||
+    typeof editable !== 'boolean' ||
+    typeof run_code !== 'boolean' ||
+    typeof memory !== 'boolean'
+  ) {
+    return undefined;
+  }
+  return { editable, agent_name, connectors, skills, run_code, memory };
+}
+
 /** A card missing any field is not shown as a skill, so a partial one is never approved as if it were whole. */
 function parseSkill(value: unknown): SentinelApprovalSkill | null {
   if (!isRecord(value)) return null;
@@ -651,7 +699,12 @@ function parseSchedule(value: unknown): SentinelApprovalSchedule | null {
   ) {
     return null;
   }
-  return { action, name, when, time_zone, task, runs_as, next_runs };
+  const tools = parseScheduleTools(value.tools);
+  // Tools that were sent but cannot be read make the whole card unreadable, never a card without them.
+  if (value.tools !== undefined && value.tools !== null && tools === undefined) {
+    return null;
+  }
+  return { action, name, when, time_zone, task, runs_as, next_runs, ...(tools === undefined ? {} : { tools }) };
 }
 
 function parseApprovalCard(value: unknown): SentinelApprovalCard | undefined {
