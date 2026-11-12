@@ -107,6 +107,21 @@ const APPROVAL_SCHEDULE_ACTIONS = ['create', 'delete'] as const;
 
 export type SentinelApprovalScheduleAction = (typeof APPROVAL_SCHEDULE_ACTIONS)[number];
 
+/** One connector or skill a new schedule may run with. */
+export type SentinelScheduleToolChoice = { name: string; on: boolean };
+
+/** What a new schedule runs with, as it will be saved. */
+export type SentinelScheduleTools = {
+  /** True when the person may ask for other choices before approving. */
+  editable: boolean;
+  /** The agent the schedule runs as. */
+  agent_name: string;
+  connectors: SentinelScheduleToolChoice[];
+  skills: SentinelScheduleToolChoice[];
+  run_code: boolean;
+  memory: boolean;
+};
+
 /** The whole schedule a chat call creates or deletes, in plain words. */
 export type SentinelApprovalSchedule = {
   action: SentinelApprovalScheduleAction;
@@ -121,6 +136,23 @@ export type SentinelApprovalSchedule = {
   runs_as: string;
   /** The next three runs in plain words for a new schedule; empty for a delete. */
   next_runs: string[];
+  /** What a new schedule runs with; absent for a delete and on an older card. */
+  tools?: SentinelScheduleTools | undefined;
+};
+
+/**
+ * The words an approval card is made of, produced by the server by one owner per action kind.
+ * The UI renders the three parts and never builds sentences of its own. Absent on cards saved
+ * before copy existed; those build their headline from their own fields, or show the generic
+ * headline when they have none, never their stored plain_what.
+ */
+export type SentinelApprovalCopy = {
+  /** What will happen, in one sentence, in words the person recognises. */
+  headline: string;
+  /** What follows from approving, in one line, or null when nothing needs saying. */
+  consequence: string | null;
+  /** Why the tier asks, in plain words, shown behind "Why I'm asking", or null. */
+  reason: string | null;
 };
 
 /**
@@ -132,6 +164,12 @@ export type SentinelApprovalSchedule = {
 export type SentinelApprovalCard = {
   /** One plain-language sentence describing what will happen. No jargon. Always present. */
   plain_what: string;
+  /** The headline, consequence and reason the card renders, or null on cards saved before copy existed. */
+  copy?: SentinelApprovalCopy | null | undefined;
+  /** True when the safe choice is the primary button: the action is irreversible or reaches other people. */
+  safe_choice?: boolean | undefined;
+  /** True when the action destroys or sends something for good, so its button wears the destructive ink. */
+  destructive?: boolean | undefined;
   /** One sentence on why the agent wants this, from agent intent when available. */
   plain_why: string | null;
   /** What cannot be undone, or null when fully reversible. */
@@ -609,6 +647,37 @@ function parsePersona(value: unknown): SentinelApprovalPersona | null {
   return { name, description, instructions, model_name };
 }
 
+function parseToolChoices(value: unknown): SentinelScheduleToolChoice[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const choices: SentinelScheduleToolChoice[] = [];
+  for (const item of value) {
+    if (!isRecord(item) || typeof item.name !== 'string' || typeof item.on !== 'boolean') return undefined;
+    choices.push({ name: item.name, on: item.on });
+  }
+  return choices;
+}
+
+/** Tools missing any field are not shown, so a partial list is never approved as if it were whole. */
+function parseScheduleTools(value: unknown): SentinelScheduleTools | undefined {
+  if (!isRecord(value)) return undefined;
+  const agent_name = optionalString(value, 'agent_name') ?? optionalString(value, 'agentName');
+  const connectors = parseToolChoices(value.connectors);
+  const skills = parseToolChoices(value.skills);
+  const { editable, memory } = value;
+  const run_code = value.run_code ?? value.runCode;
+  if (
+    agent_name === undefined ||
+    connectors === undefined ||
+    skills === undefined ||
+    typeof editable !== 'boolean' ||
+    typeof run_code !== 'boolean' ||
+    typeof memory !== 'boolean'
+  ) {
+    return undefined;
+  }
+  return { editable, agent_name, connectors, skills, run_code, memory };
+}
+
 /** A card missing any field is not shown as a skill, so a partial one is never approved as if it were whole. */
 function parseSkill(value: unknown): SentinelApprovalSkill | null {
   if (!isRecord(value)) return null;
@@ -651,7 +720,24 @@ function parseSchedule(value: unknown): SentinelApprovalSchedule | null {
   ) {
     return null;
   }
-  return { action, name, when, time_zone, task, runs_as, next_runs };
+  const tools = parseScheduleTools(value.tools);
+  // Tools that were sent but cannot be read make the whole card unreadable, never a card without them.
+  if (value.tools !== undefined && value.tools !== null && tools === undefined) {
+    return null;
+  }
+  return { action, name, when, time_zone, task, runs_as, next_runs, ...(tools === undefined ? {} : { tools }) };
+}
+
+/** The card's copy, read from the wire shape or its camel twin; undefined when the card predates copy. */
+function parseApprovalCopy(value: unknown): SentinelApprovalCopy | undefined {
+  if (!isRecord(value)) return undefined;
+  const headline = optionalString(value, 'headline');
+  if (headline === undefined) return undefined;
+  return {
+    headline,
+    consequence: cardString(value, { snake: 'consequence', camel: 'consequence' }),
+    reason: cardString(value, { snake: 'reason', camel: 'reason' }),
+  };
 }
 
 function parseApprovalCard(value: unknown): SentinelApprovalCard | undefined {
@@ -660,6 +746,9 @@ function parseApprovalCard(value: unknown): SentinelApprovalCard | undefined {
   if (plain_what === undefined) return undefined;
   return readSavedHoldReason({
     plain_what,
+    copy: parseApprovalCopy(value.copy),
+    safe_choice: cardFlag(value, { snake: 'safe_choice', camel: 'safeChoice' }),
+    destructive: cardFlag(value, { snake: 'destructive', camel: 'destructive' }),
     plain_why: cardString(value, { snake: 'plain_why', camel: 'plainWhy' }),
     cannot_be_undone: cardString(value, { snake: 'cannot_be_undone', camel: 'cannotBeUndone' }),
     why_asked_again: cardString(value, { snake: 'why_asked_again', camel: 'whyAskedAgain' }),

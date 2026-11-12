@@ -34,6 +34,13 @@ describe('ModelProviderManifestSchema', () => {
     expect(rejected).toEqual([]);
   });
 
+  // A stored setup may wait for its key: an import restores the setup first
+  // and the person adds the key after. Setup through the API still asks for one.
+  it('accepts a manifest with no key', () => {
+    expect(ModelProviderManifestSchema.safeParse({ type: 'openai', models }).success).toBe(true);
+    expect(ModelProviderManifestSchema.safeParse({ type: 'anthropic', models }).success).toBe(true);
+  });
+
   // A named endpoint keeps buildLanguageModel off its adapter's implicit default.
   it('defaults base_url for every type that has a known endpoint', () => {
     for (const type of VERCEL_AI_PROVIDER_NAMES) {

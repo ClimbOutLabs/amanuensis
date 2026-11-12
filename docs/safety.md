@@ -76,6 +76,8 @@ A change to your own calendar that reaches no guests also offers **Always allow 
 
 **Always allow everywhere** covers every chat. It's never offered for sends, deletes, installs, outside services or a calendar change. A maps card is the one exception: its **Always allow everywhere** turns on the **Maps** switch, described under Maps below. The connector tools you always allow are listed in that connector's page under **Settings**, **Connectors**, where **Revoke** turns each one off.
 
+An **Always allow everywhere** choice holds for the connector as it was set up when you chose it. If you change its address, or the way it signs in, every such choice on it ends, and each tool asks again. Changing its description, or a key being refreshed, keeps them.
+
 ### Maps
 
 A map sends the places it looks up to the map service that Aman is set up to use. Nothing else gets them.

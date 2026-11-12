@@ -55,6 +55,7 @@ import {
   classifyContextFor,
   classifyHostToolCall,
   isNewWriteTarget,
+  sandboxCardCopy,
   type SentinelHostContext,
 } from '../permissions';
 import { toJsonSafeParams } from '../permissions/approvalTokens';
@@ -7550,6 +7551,12 @@ function withHostGitCard(input: {
   return {
     ...input.card,
     plain_what: input.hostGitCard.plain_what,
+    // The card renders its copy, so the push wording goes through the sandbox copy owner as well.
+    copy: sandboxCardCopy({
+      headline: input.hostGitCard.plain_what,
+      undo: input.hostGitCard.cannot_be_undone,
+      reason: input.card.copy?.reason ?? null,
+    }),
     cannot_be_undone: input.hostGitCard.cannot_be_undone,
     destination: input.hostGitCard.destination,
     parsed_command: input.hostGitCard.parsed_command,
@@ -7572,6 +7579,7 @@ function withPackageDownloadCard(input: {
   if (input.card === null || input.card === undefined) {
     return {
       plain_what: input.packageCard.plain_what,
+      copy: sandboxCardCopy({ headline: input.packageCard.plain_what, undo: null, reason: null }),
       plain_why: null,
       cannot_be_undone: null,
       why_asked_again: null,
@@ -7584,5 +7592,14 @@ function withPackageDownloadCard(input: {
       outbound_truncated: false,
     };
   }
-  return { ...input.card, plain_what: input.packageCard.plain_what };
+  return {
+    ...input.card,
+    plain_what: input.packageCard.plain_what,
+    // The card renders its copy, so the download wording goes through the sandbox copy owner as well.
+    copy: sandboxCardCopy({
+      headline: input.packageCard.plain_what,
+      undo: input.card.cannot_be_undone,
+      reason: input.card.copy?.reason ?? null,
+    }),
+  };
 }

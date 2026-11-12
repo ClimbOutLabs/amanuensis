@@ -26,20 +26,28 @@ import {
   BROWSER_TYPE_TOOL_NAME,
   isBrowserToolName,
 } from './browserToolNames';
+import { browserCardCopy } from './cardCopy';
 import type { SentinelAction } from './classifier';
 import { escapeDisplayText } from './displayText';
 import { renderOutboundArguments } from './extractorRegistry';
+import { withHoldSay } from './searchHoldText';
 import { autoDenyDecision, tier1Decision, tier3Decision, type Tier3Card, type TierDecision } from './tier';
 
-/** The card for an open that asks: the exact address, which is everything the open sends, and the site it goes to. */
+/**
+ * The card for an open that asks: the exact address, which is everything the open sends, and the site
+ * it goes to. The question and the sentence that says why this open asks arrive apart, so the copy
+ * owner can lead with the question and carry the sentence as the reason; plain_what joins them.
+ */
 export function browserOpenCard(input: {
   url: string;
   host: string | null;
-  plain_what: string;
+  headline: string;
+  say: string;
   plain_why: string | null;
 }): Tier3Card {
   return {
-    plain_what: input.plain_what,
+    plain_what: withHoldSay(input.headline, input.say),
+    copy: browserCardCopy({ headline: input.headline, reason: input.say }),
     plain_why: input.plain_why,
     cannot_be_undone: null,
     why_asked_again: null,
@@ -173,8 +181,10 @@ function headlineLabel(label: string): string {
 function commitClickCard(review: BrowserElementReview): Tier3Card {
   const label = headlineLabel(review.accessible_name);
   const outbound = renderOutboundArguments(review.form_values);
+  const plain_what = `Click "${label}" on ${shown(review.site)}?`;
   return {
-    plain_what: `Click "${label}" on ${shown(review.site)}?`,
+    plain_what,
+    copy: browserCardCopy({ headline: plain_what, reason: null }),
     plain_why: null,
     cannot_be_undone: null,
     why_asked_again: null,
@@ -192,8 +202,10 @@ function commitClickCard(review: BrowserElementReview): Tier3Card {
 function prepareCard(input: { review: BrowserElementReview; verb: 'Type' | 'Pick'; text: string }): Tier3Card {
   const field = headlineLabel(input.review.accessible_name);
   const outbound = renderOutboundArguments({ [input.review.accessible_name.trim() || 'field']: input.text });
+  const plain_what = `${input.verb} "${headlineText(input.text)}" ${input.verb === 'Type' ? 'into' : 'in'} "${field}" on ${shown(input.review.site)}?`;
   return {
-    plain_what: `${input.verb} "${headlineText(input.text)}" ${input.verb === 'Type' ? 'into' : 'in'} "${field}" on ${shown(input.review.site)}?`,
+    plain_what,
+    copy: browserCardCopy({ headline: plain_what, reason: null }),
     plain_why: null,
     cannot_be_undone: null,
     why_asked_again: null,

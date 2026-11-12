@@ -36,7 +36,7 @@ from phonemes import (  # noqa: E402
     to_phonemes,
     whole_words,
 )
-from pins import PinnedAsset  # noqa: E402
+from pins import VOICE_IDS, PinnedAsset  # noqa: E402
 
 SECRET_TEXT = "my bank password is hunter two"
 
@@ -1042,6 +1042,35 @@ class BuildAssetsTest(unittest.TestCase):
             self.assertEqual(sorted(archive.namelist()), ["af_bella.npy", "af_heart.npy"])
         with self.assertRaises(build_assets.AssetVerificationError):
             build_assets.select_voices(buf.getvalue(), ("am_nobody",))
+
+    def test_voice_ids_are_the_curated_twelve_with_heart_first(self):
+        self.assertEqual(
+            VOICE_IDS,
+            (
+                "af_heart",
+                "af_bella",
+                "af_nicole",
+                "af_sarah",
+                "af_alloy",
+                "af_aoede",
+                "af_kore",
+                "af_nova",
+                "af_sky",
+                "am_michael",
+                "am_fenrir",
+                "am_puck",
+            ),
+        )
+
+    def test_select_voices_bakes_exactly_the_curated_twelve(self):
+        unshipped = ("af_jessica", "af_river", "am_adam", "am_echo", "am_eric", "am_liam", "am_onyx", "am_santa", "bf_emma")
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as archive:
+            for name in VOICE_IDS + unshipped:
+                archive.writestr(f"{name}.npy", name)
+        out = build_assets.select_voices(buf.getvalue(), VOICE_IDS)
+        with zipfile.ZipFile(io.BytesIO(out)) as archive:
+            self.assertEqual(sorted(archive.namelist()), sorted(f"{name}.npy" for name in VOICE_IDS))
 
 
 LEXICON = Lexicon(

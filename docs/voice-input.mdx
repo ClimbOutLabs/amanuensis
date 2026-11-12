@@ -13,7 +13,7 @@ Everything voice does runs on your own computer. No speech service on the intern
 Aman's voice uses two small helper programs, each in its own container. A container is a sealed box that Docker runs next to Aman.
 
 - **`aman-stt`** turns speech into text. It runs the Whisper `small` model (int8, on the processor) through faster-whisper.
-- **`aman-tts`** turns reply text into speech. It runs the Kokoro voice model (Apache-2.0) on the processor. The model and its six voices are built into the container, so it never goes online.
+- **`aman-tts`** turns reply text into speech. It runs the Kokoro voice model (Apache-2.0) on the processor. The model and its twelve voices are built into the container, so it never goes online.
 
 Voice mode also uses a small speech-detection model inside Aman itself. It finds where each sentence starts and ends.
 
@@ -96,7 +96,7 @@ Stop the `aman-tts` container, and replies are read by your browser's voice inst
 `docker-compose.yml` runs `aman-stt` next to the server:
 
 - It is built from `ops/aman-stt` (Python 3.11 slim, processor only, with no CUDA). The app pins `device=cpu`.
-- It is pinned to cores `16-19` with a 2 GB memory limit, so transcription never competes with chat or memory search, which stay on cores `0-15`.
+- It has a 2 GB memory limit. It is not tied to particular cores, so the stack starts on any computer. See Tuning to give it cores of its own.
 - It publishes no port on your computer. It is reachable only inside the compose network at `http://aman-stt:8001`.
 - The Whisper model (about 464 MB) downloads once at first start into the `stt-model-cache` volume. Recreated containers reuse it.
 - It restarts unless stopped, like the server.
@@ -110,7 +110,7 @@ Compose sets `STT_URL` itself. The server does not wait for `aman-stt` to be hea
 The service uses the same build, image, memory limit and thread count as the full stack, with two differences:
 
 - It publishes `127.0.0.1:8001`, on your own computer only, because `aman-stt` has no sign-in.
-- It is not pinned to cores, because a fixed range would fail on a computer with fewer than 20 cores.
+- Do not give it cores of its own here. The server runs on your computer and cannot be kept off them.
 
 `pnpm dev:infra` rebuilds the images each time, so an older voice service is never reused. The first run builds the image and downloads the model (about 464 MB) into the dev project's own `stt-model-cache` volume.
 
@@ -133,5 +133,17 @@ pnpm voice:model
 
 ## Tuning
 
-- **A different number of cores.** The `16-19` and `0-15` split assumes 20 cores. On another computer, move both pins together and keep them apart. Give `aman-stt` 4 cores and the server the rest. For example, on 12 cores, pin `aman-stt` to `8-11` and the server to `0-7`. The server pin is `cpuset` on the `server` service, and the other is on `aman-stt`.
+- **Cores of its own.** On a computer with many cores, you can keep voice work from slowing chat. Give the voice services and the server separate cores in a `docker-compose.override.yml` file next to `docker-compose.yml`. Compose reads that file by itself. For example, on 20 cores:
+
+    ```yaml
+    services:
+      server:
+        cpuset: '0-15'
+      aman-stt:
+        cpuset: '16-19'
+      aman-tts:
+        cpuset: '16-19'
+    ```
+
+    On 12 cores, use `0-7` for the server and `8-11` for the voice services. Give the voice services 4 cores and the server the rest, and keep the two sets apart. A range your computer does not have stops the stack with "Requested CPUs are not available".
 - **Memory.** The 2 GB limit covers the `small` model with room to spare. If the container is stopped for running out of memory while it warms up, raise `mem_limit` before changing anything else. Raise it too when you choose a larger model.

@@ -133,6 +133,20 @@ describe('a Sandbox whose provider does network git on the host', () => {
     expect(info.tier3_card?.parsed_command).toContain('ddddddd first change');
   });
 
+  test('a push card copy carries the push wording the host worked out', async () => {
+    const { sandbox } = setup();
+    const info = await sandbox.toolCallInfo({
+      name: SANDBOX_EXEC_TOOL_NAME,
+      arguments: pushArguments('git push origin main'),
+    });
+    // The card renders its copy, so the host's wording has to be in the copy, not only in plain_what.
+    expect(info.tier3_card?.copy).toEqual({
+      headline: 'Push 2 commits to the main branch of acme/widgets on GitHub.',
+      consequence: "Once this is sent, it can't be unsent.",
+      reason: null,
+    });
+  });
+
   test('keeps the rest of the Sentinel card (why, re-ask) unchanged', async () => {
     const { sandbox } = setup();
     const info = await sandbox.toolCallInfo({
