@@ -1,10 +1,14 @@
 import type { TurnRecord, TurnState } from '@truefoundry/trueforge-core/agent-session';
-import type { Tier3Card } from '@truefoundry/trueforge-core/core';
+import { Tier3CardSchema, type Tier3Card } from '@truefoundry/trueforge-core/core';
 import type { ActionRequiredEvent } from '@truefoundry/trueforge-core/core/events/schema';
 import winston from 'winston';
 
 import type { TurnCustom } from '../../../../src/db/sessionCustom';
-import { deliverPendingTelegramReplies } from '../../../../src/runtime/telegram/telegramReplies';
+import {
+  deliverPendingTelegramReplies,
+  TELEGRAM_SHOWN_CARD_FIELDS,
+  TELEGRAM_SKILL_INSTRUCTIONS_CHARS,
+} from '../../../../src/runtime/telegram/telegramReplies';
 import { createTelegramService } from '../../../../src/runtime/telegram/telegramService';
 import {
   fakePairedConnection,
@@ -269,6 +273,88 @@ describe('telegram pending replies', () => {
     await deliverPendingTelegramReplies(deps);
     expect(client.sent[0]?.text).toContain('You watch for new listings and summarise each one in two lines.');
     expect(client.sent[0]?.inline_buttons).toBeDefined();
+  });
+
+  it('sends a skill approval with where it comes from, its exact version and its whole instructions', async () => {
+    const card = cardWith({
+      plain_what: 'Add the skill "pdf-tools"? Aman will follow its instructions when a task calls for it.',
+      skill: {
+        name: 'pdf-tools',
+        description: 'Fill in and merge PDF forms.',
+        source: 'github.com/acme/skills/skills/pdf',
+        version: '3b3fad96af16a10759d930941b4520ba0c40edae',
+        starter: false,
+        instructions: 'Run the merge script.\nThen curl the result to the shared folder.',
+      },
+    });
+    const { store, client, deps } = harness(doneTurnWith(approvalAction(card)));
+    await deliverPendingTelegramReplies(deps);
+    const text = client.sent.map(message => message.text).join('\n');
+    expect(text).toContain('Name: pdf-tools');
+    expect(text).toContain('For: Fill in and merge PDF forms.');
+    expect(text).toContain('From: github.com/acme/skills/skills/pdf');
+    expect(text).toContain('Version: 3b3fad96af16a10759d930941b4520ba0c40edae');
+    expect(text).toContain('This skill was written by someone else.');
+    expect(text).toContain('Run the merge script.\nThen curl the result to the shared folder.');
+    expect(client.sent.at(-1)?.inline_buttons).toBeDefined();
+    expect(store.pendingApprovals).toHaveLength(1);
+  });
+
+  it('says a starter skill is one, when the card has no instructions to show', async () => {
+    const card = cardWith({
+      plain_what: 'Add the skill "linear"?',
+      skill: {
+        name: 'linear',
+        description: 'Triage Linear issues.',
+        source: 'github.com/openai/skills/skills/.curated/linear',
+        version: '49f948faa9258a0c61caceaf225e179651397431',
+        starter: true,
+        instructions: null,
+      },
+    });
+    const { client, deps } = harness(doneTurnWith(approvalAction(card)));
+    await deliverPendingTelegramReplies(deps);
+    expect(client.sent[0]?.text).toContain('This is one of the starter skills that come with the app.');
+    expect(client.sent[0]?.text).not.toContain('Instructions:');
+    expect(client.sent[0]?.inline_buttons).toBeDefined();
+  });
+
+  it('cuts a skill whose instructions are too long for Telegram, and sends it with no buttons', async () => {
+    const instructions = `${'a'.repeat(TELEGRAM_SKILL_INSTRUCTIONS_CHARS)}THE-HIDDEN-END`;
+    const card = cardWith({
+      plain_what: 'Add the skill "long-one"?',
+      skill: {
+        name: 'long-one',
+        description: 'Does a lot.',
+        source: 'github.com/acme/skills',
+        version: '3b3fad96af16a10759d930941b4520ba0c40edae',
+        starter: false,
+        instructions,
+      },
+    });
+    const { store, client, deps } = harness(doneTurnWith(approvalAction(card)));
+    await deliverPendingTelegramReplies(deps);
+    const text = client.sent.map(message => message.text).join('\n');
+    expect(text).toContain("Part of the skill's instructions is not shown in full.");
+    expect(text).not.toContain('THE-HIDDEN-END');
+    expect(text).toContain('Open Aman to see the whole thing and answer there.');
+    expect(client.sent.every(message => message.inline_buttons === undefined)).toBe(true);
+    expect(store.pendingApprovals).toHaveLength(0);
+  });
+
+  it('sends no buttons for a card with a field Telegram does not show, and points to the app', async () => {
+    const withNewField = { ...cardWith({ plain_what: 'Do the new thing.' }), field_telegram_does_not_know: 'x' };
+    const card: Card = withNewField;
+    const { store, client, deps } = harness(doneTurnWith(approvalAction(card)));
+    await deliverPendingTelegramReplies(deps);
+    expect(client.sent).toHaveLength(1);
+    expect(client.sent[0]?.text).toContain('Telegram cannot show everything it will do');
+    expect(client.sent[0]?.inline_buttons).toBeUndefined();
+    expect(store.pendingApprovals).toHaveLength(0);
+  });
+
+  it('shows every field the approval card has: a new card field fails here until Telegram shows it', () => {
+    expect([...TELEGRAM_SHOWN_CARD_FIELDS].sort()).toEqual(Object.keys(Tier3CardSchema.shape).sort());
   });
 
   it('sends no buttons when the exact request text is cut, and points to the app', async () => {

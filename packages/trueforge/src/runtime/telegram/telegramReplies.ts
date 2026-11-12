@@ -7,6 +7,7 @@ import { z } from 'zod';
 import type { SessionCustom, TurnCustom } from '../../db/sessionCustom';
 import type { ITelegramStore, TelegramConnection, TelegramPendingReply } from '../../db/telegramStore';
 import { telegramCallbackData } from './telegramChannel';
+import { TELEGRAM_MAX_MESSAGE_CHARS } from './telegramClient';
 import { sendTelegramText, type TelegramSendQueue } from './telegramSendQueue';
 import type { TelegramService } from './telegramService';
 
@@ -69,10 +70,63 @@ function mailboxLine(mailbox: { name: string; address: string }): string {
 }
 
 /**
+ * The card fields Telegram shows. A card that carries any other field is never sent with buttons,
+ * so a field added to the card later cannot be approved from Telegram before it is shown here.
+ * `outbound_plumbing_text` repeats lines of `outbound_text`, and `mail_draft` only names the button.
+ */
+export const TELEGRAM_SHOWN_CARD_FIELDS = [
+  'plain_what',
+  'plain_why',
+  'cannot_be_undone',
+  'why_asked_again',
+  'destination',
+  'recipient',
+  'amount',
+  'parsed_command',
+  'outbound_text',
+  'destination_host',
+  'outbound_truncated',
+  'outbound_plumbing_text',
+  'email',
+  'calendar_event',
+  'schedule',
+  'persona',
+  'skill',
+  'mail_new_recipients',
+  'mail_draft',
+] as const satisfies readonly (keyof Tier3Card)[];
+
+const SHOWN_CARD_FIELDS: ReadonlySet<string> = new Set(TELEGRAM_SHOWN_CARD_FIELDS);
+
+/** True when the card carries a field Telegram does not show. */
+function cardHasUnshownField(card: Tier3Card): boolean {
+  return Object.entries(card).some(
+    ([field, value]) => value !== null && value !== undefined && !SHOWN_CARD_FIELDS.has(field),
+  );
+}
+
+/**
+ * How much of a skill's own instruction file Telegram sends: three messages' worth. A longer file is
+ * cut, and like a cut request it cannot be approved from Telegram.
+ */
+export const TELEGRAM_SKILL_INSTRUCTIONS_CHARS = 3 * TELEGRAM_MAX_MESSAGE_CHARS;
+const SKILL_INSTRUCTIONS_CUT_LINE = "Part of the skill's instructions is not shown in full.";
+
+function skillInstructionsCut(instructions: string): boolean {
+  return instructions.length > TELEGRAM_SKILL_INSTRUCTIONS_CHARS;
+}
+
+/** True when part of what the card shows was cut for Telegram, or was already cut on the card. */
+function cardIsCut(card: Tier3Card): boolean {
+  const instructions = card.skill?.instructions ?? null;
+  return card.outbound_truncated || (instructions !== null && skillInstructionsCut(instructions));
+}
+
+/**
  * Every line of one approval card, in the order the app's card shows them: what will happen,
  * the exact details (the whole email, the whole calendar event, a schedule's whole task, a
- * persona's whole instructions, the shell command, the exact request a connector will get),
- * what cannot be undone, and the reason last. Nothing the card shows is left out: a person
+ * persona's whole instructions, a skill's source, version and instructions, the shell command,
+ * the exact request a connector will get), what cannot be undone, and the reason last. Nothing the card shows is left out: a person
  * approving from Telegram decides on the same words as a person approving in the app.
  */
 function approvalCardLines(card: Tier3Card): string[] {
@@ -183,6 +237,28 @@ function approvalCardLines(card: Tier3Card): string[] {
     lines.push('Instructions:');
     lines.push(persona.instructions);
   }
+  const skill = card.skill ?? null;
+  if (skill !== null) {
+    lines.push(`Name: ${skill.name}`);
+    lines.push(`For: ${skill.description}`);
+    lines.push(`From: ${skill.source}`);
+    lines.push(`Version: ${skill.version}`);
+    lines.push(
+      skill.starter
+        ? 'This is one of the starter skills that come with the app.'
+        : 'This skill was written by someone else. Add it only if you trust where it comes from.',
+    );
+    lines.push('It may bring files and scripts along. Running code still asks you first, as always.');
+    if (skill.instructions !== null) {
+      lines.push('Instructions:');
+      if (skillInstructionsCut(skill.instructions)) {
+        lines.push(SKILL_INSTRUCTIONS_CUT_LINE);
+        lines.push(skill.instructions.slice(0, TELEGRAM_SKILL_INSTRUCTIONS_CHARS));
+      } else {
+        lines.push(skill.instructions);
+      }
+    }
+  }
   if (
     card.mail_new_recipients !== null &&
     card.mail_new_recipients !== undefined &&
@@ -216,8 +292,8 @@ export interface TelegramApprovalPrompt {
   text: string;
   /**
    * True when the text shows everything the card shows, so Approve and Deny buttons may ride
-   * it. False when the action has no card, or its exact request text is cut: the message then
-   * carries no buttons and the person answers in the app.
+   * it. False when the action has no card, the card carries a field Telegram does not show, or
+   * part of it is cut: the message then carries no buttons and the person answers in the app.
    */
   complete: boolean;
   /**
@@ -253,8 +329,11 @@ export function approvalPrompt(action: ActionRequiredEvent, toolCallId: string):
   if (card === null) {
     return { text: APP_ONLY_APPROVAL_LINE, complete: false, approve_label: 'Approve' };
   }
+  if (cardHasUnshownField(card)) {
+    return { text: APP_ONLY_APPROVAL_LINE, complete: false, approve_label: 'Approve' };
+  }
   const lines = approvalCardLines(card);
-  if (card.outbound_truncated) {
+  if (cardIsCut(card)) {
     lines.push(TRUNCATED_APPROVAL_LINE);
     return { text: lines.join('\n'), complete: false, approve_label: approveLabel(card) };
   }
