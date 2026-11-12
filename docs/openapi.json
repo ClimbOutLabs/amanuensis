@@ -246,7 +246,6 @@
           }
         },
         "required": [
-          "auth",
           "models",
           "type"
         ],
@@ -317,7 +316,6 @@
           }
         },
         "required": [
-          "auth",
           "models",
           "type"
         ],
@@ -3290,7 +3288,6 @@
           }
         },
         "required": [
-          "auth",
           "models",
           "type"
         ],
@@ -4443,7 +4440,6 @@
           }
         },
         "required": [
-          "auth",
           "models",
           "type"
         ],
@@ -5879,6 +5875,25 @@
               "$ref": "#/components/schemas/ReachSuggestion"
             },
             "type": "array"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "ListRemindersResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ReminderItem"
+            },
+            "type": "array"
+          },
+          "next_page_token": {
+            "description": "Pass as page_token to get more reminders; absent on the last page.",
+            "type": "string"
           }
         },
         "required": [
@@ -8218,7 +8233,6 @@
           }
         },
         "required": [
-          "auth",
           "models",
           "type"
         ],
@@ -8437,7 +8451,6 @@
           }
         },
         "required": [
-          "auth",
           "models",
           "type"
         ],
@@ -9655,6 +9668,97 @@
           "attempts"
         ],
         "type": "object"
+      },
+      "ReminderItem": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "last_due_at": {
+            "description": "When its latest past time was due, or null if none has passed.",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "last_reminded_at": {
+            "description": "When it last reached the person, or null if it never has.",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "next_due_at": {
+            "description": "When it is next due, or null when nothing is queued.",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "persona_name": {
+            "description": "The persona the reminder was set with.",
+            "type": "string"
+          },
+          "repeats": {
+            "description": "True when the reminder runs again on a repeating timing.",
+            "type": "boolean"
+          },
+          "session_id": {
+            "description": "The chat the reminder was set in, or null when it was set elsewhere or that chat is gone.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "set_at": {
+            "description": "When the reminder was set.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ReminderState"
+          },
+          "timezone": {
+            "description": "The IANA time zone the reminder times are read in.",
+            "type": "string"
+          },
+          "timing": {
+            "description": "When it runs, in plain words.",
+            "type": "string"
+          },
+          "what": {
+            "description": "What the reminder is for, in the words it was set with.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "what",
+          "timezone",
+          "repeats",
+          "timing",
+          "state",
+          "next_due_at",
+          "last_reminded_at",
+          "last_due_at",
+          "set_at",
+          "persona_name",
+          "session_id"
+        ],
+        "type": "object"
+      },
+      "ReminderState": {
+        "enum": [
+          "upcoming",
+          "paused",
+          "reminded",
+          "missed"
+        ],
+        "type": "string"
       },
       "RemoteMCPServerManifest": {
         "additionalProperties": false,
@@ -12854,6 +12958,53 @@
             "description": "IANA time zone the times are in.",
             "type": "string"
           },
+          "tools": {
+            "description": "What a new schedule runs with; absent for a delete and on an older card.",
+            "properties": {
+              "agent_name": {
+                "description": "The agent the schedule runs as.",
+                "type": "string"
+              },
+              "connectors": {
+                "description": "Connectors the person may pick from.",
+                "items": {
+                  "$ref": "#/components/schemas/Tier3ScheduleToolChoice"
+                },
+                "type": "array"
+              },
+              "editable": {
+                "description": "True when the person may ask for other choices before approving.",
+                "type": "boolean"
+              },
+              "memory": {
+                "description": "True when runs recall memories.",
+                "type": "boolean"
+              },
+              "run_code": {
+                "description": "True when runs may run code.",
+                "type": "boolean"
+              },
+              "skills": {
+                "description": "Skills the person may pick from.",
+                "items": {
+                  "$ref": "#/components/schemas/Tier3ScheduleToolChoice"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "editable",
+              "agent_name",
+              "connectors",
+              "skills",
+              "run_code",
+              "memory"
+            ],
+            "type": [
+              "object",
+              "null"
+            ]
+          },
           "when": {
             "description": "When it runs, in plain words.",
             "type": "string"
@@ -12872,6 +13023,23 @@
           "object",
           "null"
         ]
+      },
+      "Tier3ScheduleToolChoice": {
+        "properties": {
+          "name": {
+            "description": "Connector or skill name.",
+            "type": "string"
+          },
+          "on": {
+            "description": "True when the schedule runs with it.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "on"
+        ],
+        "type": "object"
       },
       "Tier3Skill": {
         "description": "The skill a chat call adds, shown in full.",
@@ -12954,7 +13122,6 @@
           }
         },
         "required": [
-          "auth",
           "models",
           "type"
         ],
@@ -12991,7 +13158,6 @@
           }
         },
         "required": [
-          "auth",
           "models",
           "type"
         ],
@@ -15868,7 +16034,6 @@
           }
         },
         "required": [
-          "auth",
           "models",
           "type"
         ],
@@ -27495,6 +27660,76 @@
         "x-fern-sdk-method-name": "test_channel"
       }
     },
+    "/api/v1/user/reminders": {
+      "get": {
+        "description": "Lists the reminders the signed-in person set, upcoming and past, a page at a time, each with the chat it was set in.",
+        "parameters": [
+          {
+            "description": "Most schedules to read for this page.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Most schedules to read for this page.",
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Token from the previous page; omit for the first page.",
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "description": "Token from the previous page; omit for the first page.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListRemindersResponse"
+                }
+              }
+            },
+            "description": "One page of the reminders the signed-in person set."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          }
+        },
+        "summary": "List reminders",
+        "tags": [
+          "Reminders"
+        ],
+        "x-fern-sdk-group-name": [
+          "reminders"
+        ],
+        "x-fern-sdk-method-name": "list"
+      }
+    },
     "/api/v1/user/settings/calendar": {
       "delete": {
         "description": "Deletes the saved account and its app password from the sidecar for good.",
@@ -28813,6 +29048,9 @@
     },
     {
       "name": "Deliveries"
+    },
+    {
+      "name": "Reminders"
     },
     {
       "name": "Personas"

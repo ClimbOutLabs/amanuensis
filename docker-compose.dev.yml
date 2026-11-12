@@ -39,10 +39,8 @@ services:
   # Local speech-to-text sidecar for host `pnpm dev`; same build, image tag,
   # memory limit and thread count as docker-compose.yml (the image's own
   # HEALTHCHECK applies in both). The host-run server reaches it through the
-  # published port via STT_URL in packages/trueforge/.env. Unlike the smoke
-  # stack it has no cpuset pin: the host-run server cannot be pinned to a
-  # disjoint core set, and a fixed range would stop `dev:infra` on hosts with
-  # fewer than 20 cores.
+  # published port via STT_URL in packages/trueforge/.env. Do not pin it to
+  # its own cores here: the host-run server cannot be kept off them.
   aman-stt:
     build:
       context: ops/aman-stt
@@ -63,7 +61,7 @@ services:
   # Local text-to-speech sidecar for host `pnpm dev`; same build, image tag,
   # memory limit and thread count as docker-compose.yml. The host-run server
   # reaches it through the published port via TTS_URL in
-  # packages/trueforge/.env. No cpuset pin, for the same reason as aman-stt.
+  # packages/trueforge/.env. No core pin, for the same reason as aman-stt.
   aman-tts:
     build:
       context: ops/aman-tts

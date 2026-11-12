@@ -186,6 +186,7 @@ function unusedScheduleStore(): IScheduleStore<unknown> {
     updateRunStatus: () => unused('updateRunStatus'),
     listScheduledRuns: () => unused('listScheduledRuns'),
     listRuns: () => unused('listRuns'),
+    listLatestRuns: () => unused('listLatestRuns'),
   };
 }
 
@@ -196,6 +197,7 @@ function scheduleContext(logger: Logger): NonNullable<SpaceTurnContext['schedule
     persona_id: null,
     approval_key: 'prompt-report',
     agent: () => unused('agent'),
+    ownAgent: null,
   };
   return {
     store: unusedScheduleStore(),

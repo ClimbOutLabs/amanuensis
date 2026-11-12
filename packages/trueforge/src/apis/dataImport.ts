@@ -23,6 +23,7 @@ import type { AgentRecord, IAgentStore } from '../db/agentStore';
 import type { IDeliveryStore } from '../db/deliveryStore';
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 import type { IMcpServerWithAuthStore } from '../db/mcpServerStore';
+import type { IModelProviderStore } from '../db/modelProviderStore';
 import type { IPersonaStore } from '../db/personaStore';
 import type { IPersonalizationStore } from '../db/personalizationStore';
 import type { IReachSettingsStore } from '../db/reachSettingsStore';
@@ -56,6 +57,7 @@ export interface DataImportRouterDeps<TTransaction> {
   chatSearchIndexer: Pick<ChatSearchIndexer, 'resumePending'>;
   tokenStore: IOAuthTokenStore<TTransaction>;
   resolveMcpServerStore: (c?: Context, runAsAgent?: AgentRecord) => IMcpServerWithAuthStore<TTransaction>;
+  resolveModelProviderStore: (c: Context) => IModelProviderStore<TTransaction>;
   resolveAgentStore: (c: Context) => IAgentStore<TTransaction>;
   mcpCatalog: McpCatalog;
   withTransaction: WithTransaction<TTransaction>;
@@ -167,6 +169,7 @@ export function createDataImportRouter<TTransaction>(deps: DataImportRouterDeps<
           reachSettingsStore: deps.reachSettingsStore,
           turnArtifactStore: deps.turnArtifactStore,
           mcpServerStore: deps.resolveMcpServerStore(c),
+          modelProviderStore: deps.resolveModelProviderStore(c),
           agentStore,
           mcpCatalog: deps.mcpCatalog,
           withTransaction: deps.withTransaction,

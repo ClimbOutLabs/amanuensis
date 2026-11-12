@@ -37,7 +37,8 @@ import { SqlitePersonaStore } from '../../../src/db/sqlite/persona-store/SqliteP
 import { SqlitePersonalizationStore } from '../../../src/db/sqlite/personalization-store/SqlitePersonalizationStore';
 import { SqliteScheduleStore } from '../../../src/db/sqlite/schedule-store/SqliteScheduleStore';
 import {
-  CHAT_ASSISTANT_DESCRIPTION,
+  chatAssistantAgentName,
+  getOrCreateChatAssistantAgent,
   resolveChatAssistant,
   scheduleRunsAs,
   type ChatRunner,
@@ -53,7 +54,12 @@ const MORNING_BRIEF = {
   task: 'Give me a morning brief: my calendar for today and important unread mail.',
   repeat: 'weekdays',
   time: '08:00',
+  connectors: [],
+  skills: [],
 };
+
+/** What the person has set up, which a schedule made in a plain chat may be given. */
+const SET_UP = { connectors: ['gmail', 'calendar'], skills: ['pdf'] };
 
 /** A plain chat's own setup: no saved agent, just the model and instructions the person chose. */
 const CHAT_SPEC = AgentSpecSchema.parse({ model: { name: 'test-provider/chat-model' }, instructions: 'chat' });
@@ -68,6 +74,8 @@ async function setup(
     persona?: boolean;
     /** A plain chat's own setup; defaults to a bare model and instructions. */
     spec?: AgentSpec;
+    /** What the saved-agent check says about a setup; nothing by default. */
+    problem?: (spec: AgentSpec) => string | null;
   } = {},
 ) {
   const db = createSqliteDb(':memory:');
@@ -140,8 +148,11 @@ async function setup(
       owner: OWNER,
       runner,
       persona,
-      assistantName,
       agentStore,
+      scheduleAgentChoices: {
+        available: () => Promise.resolve(SET_UP),
+        problemWith: spec => Promise.resolve(input.problem?.(spec) ?? null),
+      },
     }),
     runsAs: scheduleRunsAs({ tenant_id: 'default', agentStore, personaStore, personalizationStore }),
     logger: winston.createLogger({ silent: true }),
@@ -235,7 +246,7 @@ describe('create_schedule', () => {
     expect(allowsChatApproval(remove)).toBe(false);
   });
 
-  it("shows a card first, then on approval saves an active schedule that runs as the plain chat's assistant", async () => {
+  it('shows a card first, then on approval saves an active schedule that runs as its own saved agent', async () => {
     const built = await setup();
     const info = await built.tools.toolCallInfo({ name: 'create_schedule', arguments: MORNING_BRIEF });
     expect(info).toMatchObject({ tier: 3, tier_reason: 'schedule_write', is_approval_required: true });
@@ -248,12 +259,23 @@ describe('create_schedule', () => {
       when: 'Every weekday at 8:00 AM',
       time_zone: 'America/New_York',
       task: MORNING_BRIEF.task,
-      runs_as: 'Aman',
+      runs_as: 'morning-brief',
       next_runs: [
         'Monday, October 19 at 8:00 AM',
         'Tuesday, October 20 at 8:00 AM',
         'Wednesday, October 21 at 8:00 AM',
       ],
+      tools: {
+        editable: true,
+        agent_name: 'morning-brief',
+        connectors: [
+          { name: 'gmail', on: false },
+          { name: 'calendar', on: false },
+        ],
+        skills: [{ name: 'pdf', on: false }],
+        run_code: false,
+        memory: true,
+      },
     });
     expect(await built.listAll()).toEqual([]);
 
@@ -274,37 +296,120 @@ describe('create_schedule', () => {
     });
     const pending = await built.store.getScheduledRunFor({ tenant_id: 'default', schedule_id: saved?.id ?? '' });
     expect(pending?.scheduled_for).toBe('2026-10-19T12:00:00.000Z');
-    // The host made the stored agent from the chat's own setup; the model never named one.
+    // The agent is an ordinary saved one, named after the schedule, so it shows on the Agents page.
     const runsAs = await built.agentStore.getAgent({ tenant_id: 'default', id: saved?.agent_id ?? '' });
     expect(runsAs).toMatchObject({
-      name: saved?.agent_name,
-      host_managed: true,
-      description: CHAT_ASSISTANT_DESCRIPTION,
-      manifest: CHAT_SPEC,
+      name: 'morning-brief',
+      host_managed: false,
+      description: 'Runs your schedule morning-brief.',
+      manifest: { model: CHAT_SPEC.model, instructions: CHAT_SPEC.instructions, mcp_servers: [], skills: [] },
       created_by_subject: OWNER,
     });
-    expect(JSON.parse(resultText(result))).toMatchObject({ created: { runs_as: 'Aman' } });
+    expect(JSON.parse(resultText(result))).toMatchObject({ created: { runs_as: 'morning-brief' } });
   });
 
-  it("captures the chat's connectors, skills and sandbox on the agent the schedule runs as", async () => {
+  it('gives the agent exactly the choices on the card, whatever the chat itself has turned on', async () => {
     const spec = AgentSpecSchema.parse({
       model: { name: 'test-provider/chat-model' },
       instructions: 'chat',
-      mcp_servers: [{ name: 'calendar' }, { name: 'mail' }],
-      skills: [{ name: 'digest' }],
-      config: { sandbox: { enabled: true } },
+      mcp_servers: [{ name: 'calendar' }],
+      config: { sandbox: { enabled: false } },
     });
     const built = await setup({ spec });
-    await dispatch({ built, name: 'create_schedule', args: MORNING_BRIEF, decision: { status: 'allow' } });
+    const args = { ...MORNING_BRIEF, connectors: ['gmail'], skills: ['pdf'], memory: false };
+    const info = await built.tools.toolCallInfo({ name: 'create_schedule', arguments: args });
+    expect(info.tier3_card?.schedule?.tools).toMatchObject({
+      connectors: [
+        { name: 'gmail', on: true },
+        { name: 'calendar', on: false },
+      ],
+      skills: [{ name: 'pdf', on: true }],
+      run_code: true,
+      memory: false,
+    });
+    await dispatch({ built, name: 'create_schedule', args, decision: { status: 'allow' } });
     const [saved] = await built.listAll();
     const runsAs = await built.agentStore.getAgent({ tenant_id: 'default', id: saved?.agent_id ?? '' });
-    expect(runsAs?.manifest.mcp_servers?.map(server => server.name)).toEqual(['calendar', 'mail']);
-    expect(runsAs?.manifest.skills?.map(skill => skill.name)).toEqual(['digest']);
+    expect(runsAs?.manifest.mcp_servers?.map(server => server.name)).toEqual(['gmail']);
+    expect(runsAs?.manifest.skills?.map(skill => skill.name)).toEqual(['pdf']);
     expect(runsAs?.manifest.config.sandbox.enabled).toBe(true);
+    expect(runsAs?.manifest.config.memory.recall_enabled).toBe(false);
   });
 
-  it('reuses the one stored agent for every schedule from a plain chat', async () => {
+  it('answers a call that picked nothing with the names to pick from, and shows no card', async () => {
     const built = await setup();
+    const { connectors: _connectors, skills: _skills, ...unpicked } = MORNING_BRIEF;
+    const info = await built.tools.toolCallInfo({ name: 'create_schedule', arguments: unpicked });
+    expect(info.tier3_card).toBeUndefined();
+    expect(info.pre_dispatch_failure?.message).toBe(
+      'Nothing was saved yet. Call again with the connectors and skills this task needs, [] for none. Connectors: gmail, calendar. Skills: pdf. run_code and memory can be set to true or false.',
+    );
+  });
+
+  it.each([
+    [{ connectors: ['slack'] }, 'Nothing was saved because these are not set up: slack.'],
+    [{ skills: ['pdf'], run_code: false }, 'Nothing was saved because skills need run_code.'],
+  ])('answers choices that cannot be saved with what to change, and shows no card', async (choices, message) => {
+    const built = await setup();
+    const info = await built.tools.toolCallInfo({
+      name: 'create_schedule',
+      arguments: { ...MORNING_BRIEF, ...choices },
+    });
+    expect(info.tier3_card).toBeUndefined();
+    expect(info.pre_dispatch_failure?.message).toContain(message);
+  });
+
+  it('answers choices the saved-agent check turns down with its reason', async () => {
+    const built = await setup({ problem: () => 'Run code is not set up' });
+    const info = await built.tools.toolCallInfo({ name: 'create_schedule', arguments: MORNING_BRIEF });
+    expect(info.pre_dispatch_failure?.message).toBe(
+      'Nothing was saved because these choices cannot run: Run code is not set up. Change the connectors, skills or run_code and try again.',
+    );
+  });
+
+  it('ends the approval when the choices changed after the card', async () => {
+    const built = await setup();
+    const shown = await built.tools.toolCallInfo({ name: 'create_schedule', arguments: MORNING_BRIEF });
+    const { result } = await dispatch({
+      built,
+      name: 'create_schedule',
+      args: { ...MORNING_BRIEF, connectors: ['gmail'] },
+      decision: { status: 'allow' },
+      shown,
+    });
+    expect(result.toolCallResults[0]?.message.content).not.toContain('"created"');
+    expect(await built.listAll()).toEqual([]);
+  });
+
+  it('ends the approval when the name on the card was taken before the person approved', async () => {
+    const built = await setup();
+    const shown = await built.tools.toolCallInfo({ name: 'create_schedule', arguments: MORNING_BRIEF });
+    await built.agentStore.createAgent({
+      host_managed: false,
+      tenant_id: 'default',
+      created_by_subject: OWNER,
+      name: 'morning-brief',
+      description: 'Made meanwhile.',
+      manifest: AgentSpecSchema.parse({ model: { name: 'test-provider/test-model' }, instructions: 'test' }),
+      external_id: null,
+    });
+    // The same call would now be saved as morning-brief-2, which is not what the card showed.
+    const { result } = await dispatch({
+      built,
+      name: 'create_schedule',
+      args: MORNING_BRIEF,
+      decision: { status: 'allow' },
+      shown,
+    });
+    expect(result.toolCallResults[0]?.message.content).not.toContain('"created"');
+    expect(await built.listAll()).toEqual([]);
+  });
+
+  it('makes one agent per schedule, and numbers the name when an agent already has it', async () => {
+    const built = await setup();
+    await dispatch({ built, name: 'create_schedule', args: MORNING_BRIEF, decision: { status: 'allow' } });
+    const [first] = await built.listAll();
+    await built.store.deleteSchedule({ tenant_id: 'default', id: first?.id ?? '' });
     await dispatch({ built, name: 'create_schedule', args: MORNING_BRIEF, decision: { status: 'allow' } });
     await dispatch({
       built,
@@ -313,8 +418,7 @@ describe('create_schedule', () => {
       decision: { status: 'allow' },
     });
     const saved = await built.listAll();
-    expect(saved).toHaveLength(2);
-    expect(new Set(saved.map(schedule => schedule.agent_id)).size).toBe(1);
+    expect(saved.map(schedule => schedule.agent_name).sort()).toEqual(['evening-brief', 'morning-brief-2']);
     const agents = await built.agentStore.listAgents({
       include_host_managed: true,
       tenant_id: 'default',
@@ -322,7 +426,55 @@ describe('create_schedule', () => {
       limit: undefined,
       page_token: undefined,
     });
-    expect(agents.data.filter(agent => agent.host_managed)).toHaveLength(1);
+    expect(agents.data.filter(agent => agent.host_managed)).toEqual([]);
+  });
+
+  it('still lists a schedule made earlier on the shared hidden agent under the assistant name', async () => {
+    const built = await setup({ assistantName: 'Bender' });
+    const hidden = await getOrCreateChatAssistantAgent({
+      tenant_id: 'default',
+      owner: OWNER,
+      name: chatAssistantAgentName({ owner: OWNER, spec: CHAT_SPEC }),
+      spec: CHAT_SPEC,
+      agentStore: built.agentStore,
+    });
+    await built.store.createScheduleAndRun({
+      tenant_id: 'default',
+      agent_id: hidden.id,
+      agent_name: hidden.name,
+      name: 'old-brief',
+      persona_id: null,
+      manifest: {
+        task: 'Brief me.',
+        cron: '0 8 * * *',
+        run_at: null,
+        urgent: false,
+        timezone: 'America/New_York',
+        status: 'active',
+        kind: 'task',
+        origin_session_id: null,
+      },
+      created_by_subject: OWNER,
+      runFrom: NOW,
+    });
+    const { result } = await dispatch({ built, name: 'list_schedules', args: {} });
+    expect(JSON.parse(resultText(result))).toMatchObject({ schedules: [{ name: 'old-brief', runs_as: 'Bender' }] });
+  });
+
+  it('shows the tools of the saved agent as fixed rows when the chat has one', async () => {
+    const built = await setup({ runner: 'saved' });
+    const info = await built.tools.toolCallInfo({
+      name: 'create_schedule',
+      arguments: { ...MORNING_BRIEF, connectors: ['gmail'] },
+    });
+    expect(info.tier3_card?.schedule?.tools).toEqual({
+      editable: false,
+      agent_name: 'researcher',
+      connectors: [],
+      skills: [],
+      run_code: false,
+      memory: true,
+    });
   });
 
   it("runs as the chat's saved agent when the chat has one", async () => {
@@ -343,29 +495,18 @@ describe('create_schedule', () => {
     expect(JSON.parse(resultText(result))).toMatchObject({ schedules: [{ runs_as: 'Zara' }] });
   });
 
-  it("ignores an agent the model passes, shows a normal card and runs as the chat's assistant by the user's name for it", async () => {
-    const built = await setup({ assistantName: 'Bender' });
+  it('ignores an agent the model passes and shows a normal card', async () => {
+    const built = await setup();
     const guessed = { ...MORNING_BRIEF, agent: 'bender' };
     const info = await built.tools.toolCallInfo({ name: 'create_schedule', arguments: guessed });
     expect(info.pre_dispatch_failure).toBeUndefined();
     expect(info).toMatchObject({ tier: 3, is_approval_required: true });
-    expect(info.tier3_card?.schedule).toMatchObject({ name: 'Morning brief', runs_as: 'Bender' });
+    expect(info.tier3_card?.schedule).toMatchObject({ name: 'Morning brief', runs_as: 'morning-brief' });
 
     const { result } = await dispatch({ built, name: 'create_schedule', args: guessed, decision: { status: 'allow' } });
-    expect(JSON.parse(resultText(result))).toMatchObject({ created: { name: 'morning-brief', runs_as: 'Bender' } });
-    const [saved] = await built.listAll();
-    const runsAs = await built.agentStore.getAgent({ tenant_id: 'default', id: saved?.agent_id ?? '' });
-    expect(runsAs).toMatchObject({ description: CHAT_ASSISTANT_DESCRIPTION, manifest: CHAT_SPEC });
-    const listed = await dispatch({ built, name: 'list_schedules', args: {} });
-    expect(JSON.parse(resultText(listed.result))).toMatchObject({
-      schedules: [{ name: 'morning-brief', runs_as: 'Bender' }],
+    expect(JSON.parse(resultText(result))).toMatchObject({
+      created: { name: 'morning-brief', runs_as: 'morning-brief' },
     });
-  });
-
-  it('names the assistant in plain words when the user has not named it', async () => {
-    const built = await setup({ assistantName: null });
-    const info = await built.tools.toolCallInfo({ name: 'create_schedule', arguments: MORNING_BRIEF });
-    expect(info.tier3_card?.schedule?.runs_as).toBe('Your assistant');
   });
 
   it('has no agent field, so the model cannot pick one', async () => {
@@ -373,6 +514,13 @@ describe('create_schedule', () => {
     const { result } = await built.tools.listTools();
     const create = result.tools.find(tool => tool.name === 'create_schedule');
     expect(Object.keys(create?.inputSchema.properties ?? {})).not.toContain('agent');
+  });
+
+  it('says in its description that a schedule is not a calendar event', async () => {
+    const built = await setup();
+    const { result } = await built.tools.listTools();
+    const create = result.tools.find(tool => tool.name === 'create_schedule');
+    expect(create?.description).toContain('not a calendar event');
   });
 
   it('still reports other unknown details as a fixable error', async () => {
@@ -459,7 +607,14 @@ describe('create_schedule', () => {
 
   it('saves a morning brief with the canonical prompt, whatever the model would have written', async () => {
     const built = await setup();
-    const brief = { name: 'morning-brief', morning_brief: true, repeat: 'weekdays', time: '08:00' };
+    const brief = {
+      name: 'morning-brief',
+      morning_brief: true,
+      repeat: 'weekdays',
+      time: '08:00',
+      connectors: ['gmail', 'calendar'],
+      skills: [],
+    };
     const info = await built.tools.toolCallInfo({ name: 'create_schedule', arguments: brief });
     expect(info.tier3_card?.schedule).toMatchObject({ task: MORNING_BRIEF_PROMPT });
 
@@ -549,7 +704,7 @@ describe('create_schedule', () => {
 });
 
 describe.each([
-  ['a plain chat', 'plain', 'Aman'],
+  ['a plain chat', 'plain', 'morning-brief'],
   ['a saved agent chat', 'saved', 'researcher'],
 ] as const)('list, pause, resume and delete for a schedule made in %s', (_label, runner, runsAs) => {
   async function withMorningBrief() {
@@ -936,6 +1091,7 @@ async function dispatchUnattended(input: { built: Setup; name: string; args: Rec
     },
     alreadyHeld: 0,
     isSubAgent: false,
+    browserEditWaiting: false,
   });
   const result = await executeToolCalls({
     assistantMessage: message,
@@ -1060,6 +1216,8 @@ const CHECK_IN = {
   repeat: 'daily',
   time: '08:25',
   time_zone: 'America/New_York',
+  connectors: [],
+  skills: [],
 };
 const SAID_NO = /you said no|you declined|you held off|the person declined/i;
 

@@ -40,6 +40,8 @@ export const SCRIPTED_SCHEDULE = {
   days: ['friday'],
   time: '16:00',
   time_zone: 'Europe/London',
+  connectors: [],
+  skills: [],
 };
 /** What `run:draft_email` asks to save, so a test can check the card and the saved draft against it. */
 export const SCRIPTED_DRAFT = {
@@ -115,12 +117,12 @@ export interface ScriptedModelServer {
   close: () => Promise<void>;
 }
 
-interface ChatMessage {
+export interface ChatMessage {
   role: string;
   content?: unknown;
 }
 
-interface AdvertisedTool {
+export interface AdvertisedTool {
   function?: { name?: unknown };
 }
 
@@ -138,7 +140,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function toChatMessages(value: unknown): ChatMessage[] {
+export function toChatMessages(value: unknown): ChatMessage[] {
   if (!Array.isArray(value)) {
     return [];
   }
@@ -151,7 +153,7 @@ function toChatMessages(value: unknown): ChatMessage[] {
   return messages;
 }
 
-function toAdvertisedTools(value: unknown): AdvertisedTool[] {
+export function toAdvertisedTools(value: unknown): AdvertisedTool[] {
   if (!Array.isArray(value)) {
     return [];
   }
@@ -188,7 +190,7 @@ const HOST_BLOCK = /^\s*<([a-z][a-z-]*)>[\s\S]*<\/\1>\s*$/;
  * recalled memory) into the same message as labelled blocks; like a real model, the script
  * reads directives only from the person's own words, never from recalled chat titles.
  */
-function personText(content: unknown): string {
+export function personText(content: unknown): string {
   const parts = typeof content === 'string' ? [content] : Array.isArray(content) ? content : [];
   const own: string[] = [];
   for (const part of parts) {
@@ -261,7 +263,7 @@ function pendingDirective(messages: ChatMessage[]): string | undefined {
   return directive;
 }
 
-function readRequestBody(req: IncomingMessage): Promise<unknown> {
+export function readRequestBody(req: IncomingMessage): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     req.on('data', (chunk: Buffer) => chunks.push(chunk));
@@ -419,13 +421,13 @@ function chunkEnvelope(choice: Record<string, unknown>, usage?: typeof USAGE): R
   };
 }
 
-interface ScriptedToolCall {
+export interface ScriptedToolCall {
   name: string;
   callId: string;
   argumentsJson: string;
 }
 
-function toolCallChunks(toolCalls: ScriptedToolCall[]): Record<string, unknown>[] {
+export function toolCallChunks(toolCalls: ScriptedToolCall[]): Record<string, unknown>[] {
   return [
     chunkEnvelope({ index: 0, delta: { role: 'assistant', content: '' }, finish_reason: null }),
     chunkEnvelope({
@@ -444,14 +446,14 @@ function toolCallChunks(toolCalls: ScriptedToolCall[]): Record<string, unknown>[
   ];
 }
 
-function textChunks(text: string): Record<string, unknown>[] {
+export function textChunks(text: string): Record<string, unknown>[] {
   return [
     chunkEnvelope({ index: 0, delta: { role: 'assistant', content: text }, finish_reason: null }),
     chunkEnvelope({ index: 0, delta: {}, finish_reason: 'stop' }, USAGE),
   ];
 }
 
-function completionBody({ text, toolCalls }: { text: string | null; toolCalls: ScriptedToolCall[] }) {
+export function completionBody({ text, toolCalls }: { text: string | null; toolCalls: ScriptedToolCall[] }) {
   return {
     id: 'scripted-completion',
     object: 'chat.completion',

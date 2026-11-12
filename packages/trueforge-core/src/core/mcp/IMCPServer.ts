@@ -7,7 +7,7 @@ import type {
   MCPServerInitInfo,
   ToolAdmissionProvenance,
 } from '../events/schema';
-import type { InternalToolCallInfo } from '../llm/LLMTypes';
+import type { BrowserElementReview, InternalToolCallInfo } from '../llm/LLMTypes';
 import type { ConnectorBinding } from '../permissions/approvalTokens';
 import type { SandboxInfo, WorkspaceVerificationReceiptCandidate } from '../sandbox/Sandbox';
 import type { StructuredEditPrecondition } from '../sandbox/structuredEditPrecondition';
@@ -26,6 +26,11 @@ export interface ToolInvocationContext {
   structured_edit_precondition?: StructuredEditPrecondition | undefined;
   /** The params the approval was minted over, for tools that tie an approval to state outside the call. */
   approved_params?: Record<string, unknown> | undefined;
+  /**
+   * What the live page said about a browser click's element when the call was classified. The click
+   * runs only while the element still reads exactly this way, so it never lands on an element nobody checked.
+   */
+  browser_element_precondition?: BrowserElementReview | undefined;
   /** Host-observed git remotes captured before approval; the call runs authenticated only against these. */
   git_remote_precondition?: GitRemotePrecondition | undefined;
   /**
@@ -174,6 +179,9 @@ export interface IToolSet {
    */
   resolveConnector?(params: CallToolRequest['params']): ConnectorBinding | undefined;
 
+  /** What an "Always allow" grant for this call binds to as of now (see `ToolGrantKey`); absent when none. */
+  resolveGrantBinding?(params: CallToolRequest['params']): string | undefined;
+
   /**
    * The canonical params an approval for this call is minted over, derived from the wire arguments the same way
    * classification derives them. Absent on tool sets whose wire arguments are already canonical.
@@ -208,6 +216,8 @@ export interface ToolSource {
   readonly description?: string | undefined;
   /** Host of the remote server's configured URL, shown on approval cards; absent for local sources. */
   readonly serverHost?: string | undefined;
+  /** What an "Always allow" grant on this source binds to (see `ToolGrantKey`); absent when the host set none. */
+  readonly grantBinding?: string | undefined;
 
   listTools(): Promise<ListToolsResolvedResponse | AuthRequiredResponse>;
 
