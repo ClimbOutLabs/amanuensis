@@ -142,6 +142,7 @@ import {
 import { synchronizeRepositoryCommandProposals } from '../runtime/repositoryCommandProposals';
 import { validateSandboxFilePath } from '../runtime/sandboxFilePath';
 import type { ScheduleStoreAccess, ScheduleTurnContext } from '../runtime/scheduleCapability';
+import { scheduleAgentChoices } from '../runtime/scheduleTools';
 import {
   applyTokenFactoryRouting,
   buildGatewayMetadata,
@@ -2872,8 +2873,15 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
                 owner: scheduleOwner,
                 runner: chatRunner,
                 persona: persona?.kind === 'persona' ? persona.persona : undefined,
-                assistantName: profile?.assistant_name ?? null,
                 agentStore,
+                scheduleAgentChoices: scheduleAgentChoices({
+                  tenant_id: requestContext.tenant_id,
+                  modelProviderStore,
+                  mcpServerStore,
+                  skillStore,
+                  sandboxProviderStore,
+                  searchProviderPresetNames: deps.mcpCatalog.searchProviderPresetNames(),
+                }),
               }),
               runsAs: scheduleRunsAs({
                 tenant_id: requestContext.tenant_id,
