@@ -18,6 +18,7 @@ import {
   threadListIndicesByRecency,
   threadListItemIsMutable,
 } from '../atoms/lib/threadListMeta.js';
+import { useOptionalChatAnswerMarks } from '../chatAnswers/ChatAnswerMarksContext.js';
 import { useOptionalDeliveries } from '../deliveries/DeliveriesContext.js';
 import { useOpenChatById } from '../hooks/useOpenChatById.js';
 import { useResourcePermissions } from '../hooks/useResourcePermissions.js';
@@ -73,14 +74,26 @@ function ThreadListItemRow({
     shell?.schedulesOpen === true ||
     shell?.remindersOpen === true;
   const deliveries = useOptionalDeliveries();
+  const answerMarks = useOptionalChatAnswerMarks();
   // A chat with an unread item in the feed (a reminder, say) is marked until it is opened.
-  const unread = remoteId != null && deliveries?.unreadChatIds.has(remoteId) === true;
+  const feedUnread = remoteId != null && deliveries?.unreadChatIds.has(remoteId) === true;
+  // A chat whose latest answer landed after the person last opened it is marked the same way.
+  const answerUnseen = remoteId != null && answerMarks?.unseenAnswerChatIds.has(remoteId) === true;
+  const answerStamp = remoteId == null ? undefined : answerMarks?.answerStampsByChatId.get(remoteId);
+  const unread = feedUnread || answerUnseen;
   const isOpen = id === mainThreadId && !sidebarNavOpen;
   const markChatSeen = deliveries?.markChatSeen;
-  // The mark clears once the chat is open, however it was opened.
+  const markAnswerSeen = answerMarks?.markAnswerSeen;
+  // The marks clear once the chat is open, however it was opened.
   useEffect(() => {
-    if (remoteId != null && isOpen && unread) void markChatSeen?.(remoteId);
-  }, [remoteId, isOpen, unread, markChatSeen]);
+    if (remoteId != null && isOpen && feedUnread) void markChatSeen?.(remoteId);
+  }, [remoteId, isOpen, feedUnread, markChatSeen]);
+  // An open chat is read as far as its newest stamp: mark it seen when it opens and
+  // again on every stamp update while it stays open, so an answer the person watched
+  // land never dots the chat once they switch away.
+  useEffect(() => {
+    if (remoteId != null && isOpen && answerStamp !== undefined) markAnswerSeen?.(remoteId);
+  }, [remoteId, isOpen, answerStamp, markAnswerSeen]);
   const canDelete = canDeleteSession && remoteId != null && canDeleteResource(remoteId);
   const canRename = canRenameSession && remoteId != null;
   const isPrivate = useIsPrivateChat(remoteId);
