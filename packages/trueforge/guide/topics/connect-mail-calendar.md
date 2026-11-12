@@ -8,8 +8,6 @@ You connect email and calendar in one place, in Settings. You do not need the te
 
 How to get there: Click **More** in the left bar, then **Settings**, then **Connectors**.
 
-![The Connectors page in Settings](../../../../docs/screenshots/app/settings-connectors.png)
-
 Google email uses a Google app that you make once in your own Google account. This takes about ten minutes.
 
 Google Calendar can use that app, or the simpler Calendar card with an app password.

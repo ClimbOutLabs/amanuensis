@@ -24,13 +24,37 @@ Aman sorts every action before it runs.
 - **Shows a card and waits:** sending mail or messages, running code, writing or changing files, cancelling a reminder, pausing or resuming a schedule, and any connector tool that could change something or reach outside your machine. A tool Aman cannot classify also shows a card.
 - **Refused without a card:** a send whose destination cannot be checked, a send whose card would hide a recipient or cut off its content, and anything that needs the network while Aman is in offline mode. Nothing runs.
 
-The card shows what will happen, including what will be sent, before anything leaves. In a chat, the card offers **Approve** and **Deny**. Sending mail or a message, saving a mail draft, and a calendar change that invites or emails guests, each ask every time: those cards offer only **Approve** and **Deny**. Cancelling a reminder asks every time too, because a cancelled reminder is gone for good. So does pausing or resuming a schedule, because either one changes what runs while you are away. Deletes and other actions with real effects also offer **Always allow in this chat** when the card names who or where the action goes: Aman stops asking for that kind of action to that same place for the rest of this chat, and asks again in any other chat. A card that names no such place offers only **Approve** and **Deny**, because there is nothing to tie the answer to. Creating a schedule or a persona asks every time for the same reason. A change to your own calendar that reaches no guests also offers **Always allow in this chat**. That answer covers every later change to your own calendar in that chat. It is the only lasting answer on a calendar card, so a calendar change asks again in every new chat. **Always allow everywhere**, which covers every chat, is never offered for sends, deletes, installs, outside services or a calendar change. The connector tools you always allow are listed in that connector's settings, where **Revoke** turns each one off.
+### What the card offers
 
-In the sandbox, a command that only reads inside the workspace runs without asking, also when several reads are joined, as in `cd repo && git status`. Reads are listing files, reading a file or part of one, searching files, and looking at git history. Every other command asks first, unless the Sandbox switch described below covers it. Answering **Always allow in this chat** on a command covers running that same command again in this chat, and nothing else.
+The card shows what will happen, including what will be sent, before anything leaves. In a chat, the card offers **Approve** and **Deny**.
+
+Sending mail or a message, saving a mail draft, and a calendar change that invites or emails guests, each ask every time: those cards offer only **Approve** and **Deny**. Cancelling a reminder asks every time too, because a cancelled reminder is gone for good.
+
+So does pausing or resuming a schedule, because either one changes what runs while you are away.
+
+Deletes and other actions with real effects also offer **Always allow in this chat** when the card names who or where the action goes: Aman stops asking for that kind of action to that same place for the rest of this chat, and asks again in any other chat.
+
+A card that names no such place offers only **Approve** and **Deny**, because there is nothing to tie the answer to. Creating a schedule or a persona asks every time for the same reason.
+
+A change to your own calendar that reaches no guests also offers **Always allow in this chat**. That answer covers every later change to your own calendar in that chat. It is the only lasting answer on a calendar card, so a calendar change asks again in every new chat.
+
+**Always allow everywhere**, which covers every chat, is never offered for sends, deletes, installs, outside services or a calendar change. The connector tools you always allow are listed in that connector's settings, where **Revoke** turns each one off.
+
+### Commands in the sandbox
+
+In the sandbox, a command that only reads inside the workspace runs without asking, also when several reads are joined, as in `cd repo && git status`. Reads are listing files, reading a file or part of one, searching files, and looking at git history.
+
+Every other command asks first, unless the Sandbox switch described below covers it. Answering **Always allow in this chat** on a command covers running that same command again in this chat, and nothing else.
 
 Installing a package asks first on every sandbox. The Sandbox switch never covers it.
 
-In Settings, under Permissions, the **Sandbox** switch lets Aman make new files and run the scripts it wrote in the same chat without asking. The switch only applies where the sandbox has no network. That is the sandbox the installer sets up, which runs in Docker. A sandbox that can reach the internet always asks before it runs code or makes a file, whatever the switch says. That is the case when Aman is started with npx or from source, where the sandbox can reach PyPI and GitHub. The installer's sandbox also asks in two places where what it runs can reach a site. One is a project, or your chats without a project, where you allowed package downloads: code there can reach the package sites. The other is a chat that uses a skill you let reach its own sites. With the switch on, changing a file that already exists, running a script from your repository and running tests still ask.
+In Settings, under Permissions, the **Sandbox** switch lets Aman make new files and run the scripts it wrote in the same chat without asking. The switch only applies where the sandbox has no network. That is the sandbox the installer sets up, which runs in Docker.
+
+A sandbox that can reach the internet always asks before it runs code or makes a file, whatever the switch says. That is the case when Aman is started with npx or from source, where the sandbox can reach PyPI and GitHub.
+
+The installer's sandbox also asks in two places where what it runs can reach a site. One is a project, or your chats without a project, where you allowed package downloads: code there can reach the package sites.
+
+The other is a chat that uses a skill you let reach its own sites. With the switch on, changing a file that already exists, running a script from your repository and running tests still ask.
 
 The sandbox is what keeps this work contained. Aman also looks at a script before it runs it without asking, but that look only decides when to ask. It is not what keeps you safe.
 

@@ -8,8 +8,6 @@ Aman can read files and run code in a sandbox, a small separate space on your co
 
 How to get there: Click **More** in the left bar, then **Settings**, then **Sandbox**.
 
-![The Sandbox page in Settings](../../../../docs/screenshots/app/settings-sandbox.png)
-
 The sandbox must be set up first. Open Settings, then Sandbox. The "Read files and run code" card only appears once the sandbox is ready.
 
 If the sandbox is off in a chat, the Add-ons list in the message box says why.

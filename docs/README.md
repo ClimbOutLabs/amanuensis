@@ -1,6 +1,6 @@
-# Amanuensis documentation
+# Aman documentation
 
-Amanuensis (Aman for short) is a private assistant that runs on your own computer. These guides are grouped by what you want to do. Pick the guide that matches you, then the page that matches your task.
+Aman is a private assistant that runs on your own computer. These guides are grouped by what you want to do. Pick the guide that matches you, then the page that matches your task.
 
 - [Getting started](#getting-started): Install Aman and have your first chat.
 - [User guide](#user-guide): Get things done with Aman day to day.

@@ -8,8 +8,6 @@ A persona is a helper that answers in your chats. It has its own name, its own i
 
 How to get there: Click **More** in the left bar, then **Settings**, then **Roles and Personas**.
 
-![The Roles and Personas page in Settings](../../../../docs/screenshots/app/settings-roles-and-personas.png)
-
 ## Make a persona
 
 1. Click **Add persona**.

@@ -1,6 +1,6 @@
 # Settings for the docs website on GitHub Pages. The pages come from docs/ and the in-app help
 # topics; `pnpm docs:site:build` lays them out and adds the menu from docs/README.md.
-site_name: Amanuensis documentation
+site_name: Aman documentation
 site_description: Aman, a private assistant that runs on your own computer.
 site_url: https://climboutlabs.github.io/amanuensis/
 repo_url: https://github.com/ClimbOutLabs/amanuensis

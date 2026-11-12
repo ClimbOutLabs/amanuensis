@@ -4,15 +4,13 @@ sidebarTitle: 'Sandbox'
 description: 'Connect an isolated execution environment for code, files, and shell commands — provisioned only when the agent needs one.'
 ---
 
-The sandbox gives your agent a secure, isolated environment to run code, manipulate files, and execute shell commands — separate from the TrueForge server and your infrastructure.
+The sandbox gives your agent a secure, isolated environment to run code, manipulate files, and execute shell commands — separate from the Aman server and your infrastructure.
 
 How to get there: Click **More** in the left bar, then **Settings**, then **Sandbox**.
 
-![The Sandbox page in Settings](screenshots/app/settings-sandbox.png)
-
 Skills and [Code Mode](/key-features/code-mode) require a sandbox. Check that it is ready under **Settings → Sandbox**, then enable the sandbox on each agent that needs it.
 
-## TrueForge's approach
+## Aman's approach
 
 There are two common patterns for combining agents with sandboxes:
 
@@ -21,7 +19,7 @@ There are two common patterns for combining agents with sandboxes:
 | **Agent in sandbox** | Inside the sandbox image | Sandbox is provisioned even for the simplest request; secrets must live in the sandbox; updates mean rebuilding images |
 | **Sandbox as tool** | Outside, on the server | Sandbox is provisioned on demand when needed; secrets stay in the harness; sandbox is only for exec/files |
 
-TrueForge uses **sandbox as tool**: the agent loop and credentials stay in the harness; the sandbox only runs code, file, and shell operations.
+Aman uses **sandbox as tool**: the agent loop and credentials stay in the harness; the sandbox only runs code, file, and shell operations.
 
 That means:
 
