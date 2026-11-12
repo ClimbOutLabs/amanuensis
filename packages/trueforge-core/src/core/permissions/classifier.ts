@@ -2717,15 +2717,7 @@ async function classifyCalendarTool(action: SentinelAction, ctx: ClassifyContext
         });
       }
     }
-    // Only a change that reaches no guest can be covered by a standing grant; a guest change always asks.
     const reachesGuests = review.attendees.length > 0;
-    if (!reachesGuests && (await hasStandingToolGrant(ctx, action))) {
-      return tier1Decision({
-        reason: TOOL_GRANT_REASON,
-        reason_detail: `Always allowed: \`${action.tool_name}\` on your calendar.`,
-        sensitive_read: false,
-      });
-    }
     return tier3Decision({
       card: calendarWriteCard({ review, agent_intent: ctx.agent_intent, assistant: ctx.web_search.assistantName }),
       reason: reachesGuests ? 'calendar_write_guests' : 'calendar_write',
@@ -4047,7 +4039,6 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
       action,
       review: action.caldav_event ?? null,
       assistant: ctx.web_search.assistantName,
-      hasStandingGrant: () => hasStandingToolGrant(ctx, action),
       mintToken: () =>
         mintPlainToken({
           ctx,
