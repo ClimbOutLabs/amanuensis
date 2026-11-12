@@ -417,7 +417,7 @@ await client.agents.delete("agent_id");
 <dl>
 <dd>
 
-Returns the authenticated caller identity (`type`, `tenant_id`, `subject`, `roles`) wrapped as `{ data }`. `type` is `oidc-connected` when browser OIDC is enabled, otherwise `default`. When auth is enabled this requires a valid `id_token` cookie or `Authorization: Bearer` token (401 otherwise). When auth is disabled, returns the standalone default identity.
+Returns the authenticated caller identity (`type`, `tenant_id`, `subject`, `roles`) wrapped as `{ data }`. `type` is `oidc-connected` when browser OIDC is enabled, `local-connected` for local sign-in, otherwise `default`. When auth is enabled this requires a valid `id_token` cookie or `Authorization: Bearer` token (401 otherwise). When auth is disabled, returns the standalone default identity.
 </dd>
 </dl>
 </dd>
@@ -973,6 +973,69 @@ Disconnects OAuth for the MCP server when applicable and returns the updated ser
 
 ```typescript
 await client.mcpServers.deleteAuthorization("name");
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**name:** `string` — MCP server name.
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `McpServersClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.mcpServers.<a href="/src/api/resources/mcpServers/client/Client.ts">homeAssistantCheck</a>(name) -> TrueForge.HomeAssistantCheckResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Runs the MCP handshake against the saved connector, lists its tools, and reads the live-context tool once, so the answer says how many tools and exposed entities Aman can see, or the one thing to fix. Read-only: the connector is never modified, and a failed check is a 200 carrying the reason.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.mcpServers.homeAssistantCheck("name");
 
 ```
 </dd>
@@ -9623,6 +9686,134 @@ await client.reach.texts.confirm({
 <dd>
 
 **request:** `TrueForge.reach.ConfirmTextCodeRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `TextsClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.reach.texts.<a href="/src/api/resources/reach/resources/texts/client/Client.ts">addWord</a>({ ...params }) -> TrueForge.GetTextStatusResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Lets a Full text carry a name or word that is not a common word. Letters only. A web ending or a number word is refused.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.reach.texts.addWord({
+    word: "word"
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.reach.AddTextWordRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `TextsClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.reach.texts.<a href="/src/api/resources/reach/resources/texts/client/Client.ts">removeWord</a>(word) -> TrueForge.GetTextStatusResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Takes a word off the person’s list. A word that is not on it changes nothing.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.reach.texts.removeWord("word");
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**word:** `string` — The word to remove.
 
 </dd>
 </dl>

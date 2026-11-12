@@ -5,6 +5,7 @@
  */
 import { createRoute } from '@hono/zod-openapi';
 import { RequestErrorResponseSchema } from '../schemas/errors';
+import { HomeAssistantCheckResponseSchema } from '../schemas/homeAssistant';
 import {
   CreateMcpServerRequestSchema,
   DeleteMcpServerResponseSchema,
@@ -346,6 +347,32 @@ export const memoryCheckMcpServerRoute = createRoute({
     200: {
       content: { 'application/json': { schema: MemoryProviderCheckResponseSchema } },
       description: 'The check ran; the result says whether the provider answered and why not.',
+    },
+    404: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'MCP server not found.',
+    },
+  },
+});
+
+export const homeAssistantCheckMcpServerRoute = createRoute({
+  method: 'post',
+  path: '/{name}/home-assistant-check',
+  tags: [OpenApiTag.MCP_SERVERS],
+  summary: 'Check a Home Assistant connector',
+  'x-fern-sdk-group-name': ['mcpServers'],
+  'x-fern-sdk-method-name': 'home_assistant_check',
+  description:
+    'Runs the MCP handshake against the saved connector, lists its tools, and reads the live-context ' +
+    'tool once, so the answer says how many tools and exposed entities Aman can see, or the one thing ' +
+    'to fix. Read-only: the connector is never modified, and a failed check is a 200 carrying the reason.',
+  request: {
+    params: McpServerNameParamsSchema,
+  },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: HomeAssistantCheckResponseSchema } },
+      description: 'The check ran; the result says whether Home Assistant answered and why not.',
     },
     404: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },

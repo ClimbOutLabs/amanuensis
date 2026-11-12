@@ -137,6 +137,7 @@ test('push is off when the server sends no key, and a server error says what it 
 const WIRE_REACH = {
   data: {
     settings: {
+      noticing_on: true,
       channels: { texts: false, calls: false },
       always_important: [
         { address: 'dana@example.com', name: 'Dana', source: 'memory', added_at: '2026-11-01T00:00:00.000Z' },
@@ -172,6 +173,7 @@ test('reads Reach me settings into the app shape, dropping what it does not know
     { address: 'dana@example.com', name: 'Dana', source: 'memory', addedAt: '2026-11-01T00:00:00.000Z' },
   ]);
   assert.equal(view.settings.timezone, 'Europe/Paris');
+  assert.equal(view.settings.noticingOn, true);
   assert.deepEqual(view.maxLevels, { travel: 'call', bill_due: 'nudge' });
   assert.equal(view.availability.calls.note, 'Phone calls are not set up yet.');
   assert.equal(view.mailProblem, null);
@@ -269,6 +271,7 @@ test('saves Reach me settings in the wire shape and shows the server message whe
   const sent = typeof body === 'object' && body !== null && 'settings' in body ? body.settings : undefined;
   assert.ok(typeof sent === 'object' && sent !== null);
   assert.deepEqual('channels' in sent ? sent.channels : undefined, { texts: false, calls: false });
+  assert.equal('noticing_on' in sent ? sent.noticing_on : undefined, true);
   assert.deepEqual('call_kinds' in sent ? sent.call_kinds : undefined, ['travel']);
   assert.deepEqual('always_important' in sent ? sent.always_important : undefined, [
     { address: 'dana@example.com', name: 'Dana', source: 'memory', added_at: '2026-11-01T00:00:00.000Z' },
@@ -298,6 +301,7 @@ test('walks the text number flow over the texts routes and reads the status in p
     code_pending: true,
     pending_phone: '+15550122',
     private_preview: 'Mannie: a reminder is due. Open the app to see it.',
+    words: ['patel', 7],
   };
   const { fetcher, calls } = recordingFetch(() => Response.json({ data: wire }));
   const texts = createDeliveriesApi(fetcher).reach.texts;
@@ -309,10 +313,13 @@ test('walks the text number flow over the texts routes and reads the status in p
     codePending: true,
     pendingPhone: '+15550122',
     privatePreview: 'Mannie: a reminder is due. Open the app to see it.',
+    words: ['patel'],
   });
   await texts.sendCode('+15550111');
   await texts.confirm('123456');
   await texts.setMode('full');
+  await texts.addWord('Lopez');
+  await texts.removeWord('lopez');
   await texts.remove();
   assert.deepEqual(
     calls.map(call => [call.method, new URL(call.url).pathname, call.body]),
@@ -321,6 +328,8 @@ test('walks the text number flow over the texts routes and reads the status in p
       ['POST', '/api/v1/user/reach/texts/code', { phone: '+15550111' }],
       ['POST', '/api/v1/user/reach/texts/confirm', { code: '123456' }],
       ['PUT', '/api/v1/user/reach/texts', { mode: 'full' }],
+      ['POST', '/api/v1/user/reach/texts/words', { word: 'Lopez' }],
+      ['DELETE', '/api/v1/user/reach/texts/words/lopez', {}],
       ['DELETE', '/api/v1/user/reach/texts', {}],
     ],
   );

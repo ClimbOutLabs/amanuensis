@@ -348,6 +348,7 @@ describe('Settings, Reach me preferences', () => {
         codePending: false,
         pendingPhone: null,
         privatePreview: 'Mannie: a reminder is due. Open the app to see it.',
+        words: [],
       };
       render(<ReachPreferences reach={server.api.reach} />);
       expect(await screen.findByText(words)).toBeTruthy();
@@ -369,6 +370,7 @@ describe('Settings, Reach me preferences', () => {
         codePending: false,
         pendingPhone: null,
         privatePreview: 'Mannie: a reminder is due. Open the app to see it.',
+        words: [],
       };
       render(<ReachPreferences reach={server.api.reach} />);
       expect(await screen.findByRole('checkbox', { name: /Send me texts/ })).toHaveProperty('checked', true);
@@ -395,6 +397,7 @@ describe('Settings, Reach me preferences', () => {
         codePending: false,
         pendingPhone: null,
         privatePreview: 'Mannie: a reminder is due. Open the app to see it.',
+        words: [],
       };
       render(<ReachPreferences reach={server.api.reach} />);
       fireEvent.click(await screen.findByRole('button', { name: 'Change number' }));
@@ -421,6 +424,7 @@ describe('Settings, Reach me preferences', () => {
         codePending: false,
         pendingPhone: null,
         privatePreview: 'Mannie: a reminder is due. Open the app to see it.',
+        words: [],
       };
       render(<ReachPreferences reach={server.api.reach} />);
       expect(
@@ -428,5 +432,49 @@ describe('Settings, Reach me preferences', () => {
       ).toBeTruthy();
       expect(screen.queryByRole('checkbox', { name: /Send me texts/ })).toBeNull();
     });
+  });
+});
+
+describe('Settings, Reach me background checks switch', () => {
+  it('shows the switch off at first, with what it does in plain words', async () => {
+    renderPreferences();
+    const toggle = await screen.findByRole('switch', { name: /watch for things/ });
+    expect(toggle.getAttribute('aria-checked')).toBe('false');
+    expect(screen.getByText(/checks your mail every 10 minutes, your calendar every 30 minutes/)).toBeTruthy();
+    expect(screen.getByText(/Reminders you set work either way/)).toBeTruthy();
+  });
+
+  it('saves the switch at once, keeps other changes waiting for Save, and turns it off again', async () => {
+    const { api } = renderPreferences();
+    fireEvent.change(await screen.findByLabelText('Email address'), { target: { value: 'dana@example.com' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    fireEvent.click(screen.getByRole('switch', { name: /watch for things/ }));
+    await waitFor(() => expect(api.reach.save).toHaveBeenCalledTimes(1));
+    expect(api.reach.save).toHaveBeenLastCalledWith(expect.objectContaining({ noticingOn: true, alwaysImportant: [] }));
+    await waitFor(() =>
+      expect(screen.getByRole('switch', { name: /watch for things/ }).getAttribute('aria-checked')).toBe('true'),
+    );
+    // The sender added before the switch is still waiting for Save.
+    expect(screen.getByText('dana@example.com')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('switch', { name: /watch for things/ }));
+    await waitFor(() => expect(api.reach.save).toHaveBeenCalledTimes(2));
+    expect(api.reach.save).toHaveBeenLastCalledWith(expect.objectContaining({ noticingOn: false }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(api.reach.save).toHaveBeenCalledTimes(3));
+    expect(api.reach.save).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        noticingOn: false,
+        alwaysImportant: [expect.objectContaining({ address: 'dana@example.com' })],
+      }),
+    );
+  });
+
+  it('says what went wrong when the switch cannot be saved, and leaves it as it was', async () => {
+    const { api } = renderPreferences();
+    vi.mocked(api.reach.save).mockRejectedValueOnce(new Error('The server is not answering. Try again in a minute.'));
+    fireEvent.click(await screen.findByRole('switch', { name: /watch for things/ }));
+    expect(await screen.findByText('The server is not answering. Try again in a minute.')).toBeTruthy();
+    expect(screen.getByRole('switch', { name: /watch for things/ }).getAttribute('aria-checked')).toBe('false');
   });
 });

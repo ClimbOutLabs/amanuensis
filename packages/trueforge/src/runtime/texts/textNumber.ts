@@ -7,8 +7,15 @@ import type { IPersonalizationStore } from '../../db/personalizationStore';
 import type { PersonOwner } from '../../db/personOwner';
 import type { IReachSettingsStore } from '../../db/reachSettingsStore';
 import type { ITextContactStore } from '../../db/textContactStore';
-import { E164_PATTERN, type TextContact, type TextMode, type TextStatus } from '../../schemas/textMessages';
+import {
+  E164_PATTERN,
+  TEXT_WORDS_MAX,
+  type TextContact,
+  type TextMode,
+  type TextStatus,
+} from '../../schemas/textMessages';
 import { textAssistantName } from './assistantName';
+import { customWordProblem, foldWord } from './knownWords';
 import type { SmsFailure, SmsProvider } from './smsProvider';
 import { claimTextLimits, codeTextLimits } from './textLimits';
 import { codeText, privateText } from './textWords';
@@ -47,6 +54,8 @@ type ConfirmCodeResult =
 
 type TextModeResult = { ok: true } | { ok: false; reason: 'no_number' };
 
+type AddWordResult = { ok: true } | { ok: false; reason: 'refused'; problem: string } | { ok: false; reason: 'full' };
+
 export interface TextNumberService {
   status(owner: PersonOwner): Promise<TextStatus>;
   /**
@@ -56,6 +65,9 @@ export interface TextNumberService {
   sendCode(input: { owner: PersonOwner; phone: string }): Promise<SendCodeResult>;
   confirm(input: { owner: PersonOwner; code: string }): Promise<ConfirmCodeResult>;
   setMode(input: { owner: PersonOwner; mode: TextMode }): Promise<TextModeResult>;
+  /** Lets Full texts carry a word that is not on the common list. Adding a word already there changes nothing. */
+  addWord(input: { owner: PersonOwner; word: string }): Promise<AddWordResult>;
+  removeWord(input: { owner: PersonOwner; word: string }): Promise<void>;
   /** Forgets the number and switches texts off. Codes already sent stay counted. */
   remove(owner: PersonOwner): Promise<void>;
   /** A STOP from this number: texts go off for everyone who has it, and Activity says so. Resolves to how many people. */
@@ -147,7 +159,11 @@ export function createTextNumberService({
 
   return {
     async status(owner) {
-      const [contact, name] = await Promise.all([store.get(owner), textAssistantName({ personalization, owner })]);
+      const [contact, name, words] = await Promise.all([
+        store.get(owner),
+        textAssistantName({ personalization, owner }),
+        store.listWords(owner),
+      ]);
       const private_preview = privateText({ name, kind: 'reminder' });
       if (contact === undefined) {
         return {
@@ -158,6 +174,7 @@ export function createTextNumberService({
           pending_phone: null,
           code_pending: false,
           private_preview,
+          words,
         };
       }
       const pending =
@@ -174,6 +191,7 @@ export function createTextNumberService({
         pending_phone: contact.pending_phone,
         code_pending: pending,
         private_preview,
+        words,
       };
     },
 
@@ -269,6 +287,19 @@ export function createTextNumberService({
         return { ok: false, reason: 'no_number' };
       }
       return { ok: true };
+    },
+
+    async addWord({ owner, word }) {
+      const problem = customWordProblem(word);
+      if (problem !== undefined) {
+        return { ok: false, reason: 'refused', problem };
+      }
+      const added = await store.addWord({ ...owner, word: foldWord(word), max: TEXT_WORDS_MAX, now: now() });
+      return added === 'full' ? { ok: false, reason: 'full' } : { ok: true };
+    },
+
+    async removeWord({ owner, word }) {
+      await store.removeWord({ ...owner, word: foldWord(word) });
     },
 
     async remove(owner) {

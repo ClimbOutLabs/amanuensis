@@ -16,4 +16,6 @@ export interface TextStatus {
     phone: string | null;
     /** What a Private text says, word for word, for a reminder. */
     privatePreview: string;
+    /** The words the person lets Aman text besides the common words, such as a name. */
+    words: string[];
 }

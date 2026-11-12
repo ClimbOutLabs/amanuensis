@@ -14,6 +14,7 @@ export const TextStatus: core.serialization.ObjectSchema<serializers.TextStatus.
         pendingPhone: core.serialization.property("pending_phone", core.serialization.string().nullable()),
         phone: core.serialization.string().nullable(),
         privatePreview: core.serialization.property("private_preview", core.serialization.string()),
+        words: core.serialization.list(core.serialization.string()),
     });
 
 export declare namespace TextStatus {
@@ -25,5 +26,6 @@ export declare namespace TextStatus {
         pending_phone?: string | null;
         phone?: string | null;
         private_preview: string;
+        words: string[];
     }
 }

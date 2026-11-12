@@ -71,10 +71,12 @@ export const TABLES_TO_MOVE = [
   'text_contact',
   'phone_call',
   'text_send_count',
+  'text_word',
   'noticing_event',
   'noticing_checkpoint',
   'reach_lease',
   'push_subscription',
+  'local_user',
 ] as const;
 
 /**

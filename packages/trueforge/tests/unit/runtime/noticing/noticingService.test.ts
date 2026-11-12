@@ -35,12 +35,14 @@ import type { Delivery } from '../../../../src/schemas/deliveries';
 import type { ReachAvailability } from '../../../../src/schemas/reach';
 import {
   defaultReachSettings,
+  NOTICING_ON_BY_DEFAULT,
   type NoticingEvent,
   type NoticingVerdict,
   type ReachSettings,
 } from '../../../../src/schemas/reach';
 
 const OWNER = { tenant_id: 'default', created_by: 'owner-1' };
+const whenOnByDefault = NOTICING_ON_BY_DEFAULT ? it : it.skip;
 const NOW = new Date('2026-11-05T15:00:00.000Z');
 const PASS = 'mx.example.net; dkim=pass header.d=example.com; dmarc=pass header.from=example.com';
 const PHONE_READY: ReachAvailability = {
@@ -132,6 +134,7 @@ async function setup({
       ...OWNER,
       settings: {
         ...defaultReachSettings('UTC'),
+        noticing_on: true,
         quiet_hours: { enabled: false, start: '21:00', end: '08:00' },
         ...settings,
       },
@@ -195,6 +198,7 @@ async function setup({
   };
   const approvals: ApprovalSource = { listWaiting: () => Promise.resolve(waiting) };
   const listOwners = jest.fn(() => Promise.resolve([OWNER]));
+  const sourcesFor = jest.fn(() => Promise.resolve(sources));
   const judge = jest.fn<ReturnType<NoticingJudge>, Parameters<NoticingJudge>>(async () => {
     await judgeDelay;
     if (verdict instanceof Error) {
@@ -204,7 +208,7 @@ async function setup({
   });
   const makeService = () =>
     createNoticingService({
-      sources: { listOwners, sourcesFor: () => Promise.resolve(sources) },
+      sources: { listOwners, sourcesFor },
       approvals,
       reachSettings,
       store,
@@ -225,6 +229,8 @@ async function setup({
     service,
     makeService,
     listOwners,
+    sourcesFor,
+    reachSettings,
     clock,
     channelState,
     judge,
@@ -245,6 +251,129 @@ const ALWAYS = {
   source: 'settings' as const,
   added_at: '2026-11-01T00:00:00.000Z',
 };
+
+function waitingFor({
+  owner,
+  approval_id,
+  since,
+}: {
+  owner: typeof OWNER;
+  approval_id: string;
+  since: string;
+}): WaitingApproval {
+  return { owner, session_id: `s-${approval_id}`, approval_id, waiting_since: new Date(since) };
+}
+
+describe('the switch for the background checks', () => {
+  const minutes = (count: number) => new Date(NOW.getTime() + count * 60_000);
+  const turn = async (store: ReachSettingsStore, noticing_on: boolean) => {
+    const settings = await store.get(OWNER);
+    if (settings === undefined) {
+      throw new Error('The test person has no settings.');
+    }
+    await store.put({ ...OWNER, settings: { ...settings, noticing_on } });
+  };
+  const ALWAYS_ON = { always_important: [ALWAYS] };
+
+  it('opens no source and asks no model while it is off, and leaves what was stored as it was', async () => {
+    const built = await setup({
+      settings: { ...ALWAYS_ON, noticing_on: false },
+      messages: [mail()],
+      events: [
+        event({ id: 'e1', title: 'Dentist', start: '2026-11-05T16:00:00.000Z', end: '2026-11-05T17:00:00.000Z' }),
+      ],
+      waiting: [waitingFor({ owner: OWNER, approval_id: 'a1', since: '2026-11-05T14:00:00.000Z' })],
+    });
+    const stored = (id: string, due_at: string | null) => ({
+      id,
+      kind: 'mail_always' as const,
+      evidence: 'verified_sender' as const,
+      summary: 'New mail from Dana.',
+      facts: 'From: Dana',
+      matched: 'Dana is on your always-important list.',
+      link: null,
+      mail_ref: { message_id: id, thread_id: null },
+      occurred_at: '2026-11-05T14:00:00.000Z',
+      due_at,
+    });
+    await built.store.recordAll({
+      ...OWNER,
+      status: 'pending',
+      now: NOW,
+      events: [stored('mail_always:waiting', null)],
+    });
+    await built.store.recordAll({
+      ...OWNER,
+      status: 'tracking',
+      now: NOW,
+      events: [{ ...stored('bill_due:tracked', '2026-11-06T12:00:00.000Z'), kind: 'bill_due', evidence: 'content' }],
+    });
+    for (const watcher of ['mail', 'calendar', 'approvals'] as const) {
+      await expect(built.service.run({ watcher })).resolves.toEqual({ owners: 1, raised: 0 });
+    }
+    expect(built.sourcesFor).not.toHaveBeenCalled();
+    expect(built.mailSource.listNewMessages).not.toHaveBeenCalled();
+    expect(built.calendarSource.listEvents).not.toHaveBeenCalled();
+    expect(built.judge).not.toHaveBeenCalled();
+    expect(await built.feed()).toEqual([]);
+    expect(await built.store.getCheckpoint({ ...OWNER, watcher: 'mail' })).toBeUndefined();
+    const tracked = await built.store.listTracking({ ...OWNER, due_before: minutes(7 * 24 * 60), limit: 10 });
+    expect(tracked.map(item => item.id)).toEqual(['bill_due:tracked']);
+  });
+
+  it('stops at the next pass once it is turned off', async () => {
+    const inbox = [mail({ id: 'first', received_at: minutes(-5) })];
+    const { service, clock, mailSource, judge, feed, reachSettings } = await setup({
+      settings: ALWAYS_ON,
+      messages: inbox,
+    });
+    await service.run({ watcher: 'mail' });
+    expect(await feed()).toHaveLength(1);
+    const listed = jest.mocked(mailSource.listNewMessages).mock.calls.length;
+    const asked = judge.mock.calls.length;
+    await turn(reachSettings, false);
+    inbox.push(mail({ id: 'second', received_at: minutes(5) }));
+    clock.now = minutes(10);
+    await service.run({ watcher: 'mail' });
+    expect(jest.mocked(mailSource.listNewMessages).mock.calls).toHaveLength(listed);
+    expect(judge.mock.calls).toHaveLength(asked);
+    expect(await feed()).toHaveLength(1);
+  });
+
+  it('starts from the moment it is first turned on, so mail from while it was off is never raised', async () => {
+    const inbox = [mail({ id: 'before', received_at: minutes(-120) })];
+    const { service, clock, mailSource, feed, reachSettings } = await setup({
+      settings: { ...ALWAYS_ON, noticing_on: false },
+      messages: inbox,
+    });
+    await service.run({ watcher: 'mail' });
+    inbox.push(mail({ id: 'while-off', received_at: minutes(30) }));
+    clock.now = minutes(60);
+    await service.run({ watcher: 'mail' });
+    await turn(reachSettings, true);
+    inbox.push(mail({ id: 'after', received_at: minutes(65) }));
+    clock.now = minutes(70);
+    await service.run({ watcher: 'mail' });
+    // The first look starts ten minutes before the pass, as on a first check, so "while-off" is never read.
+    expect(jest.mocked(mailSource.listNewMessages).mock.calls[0]?.[0].since).toEqual(minutes(60));
+    expect(await feed()).toHaveLength(1);
+  });
+
+  it('turned off and on again within a day, goes on from where mail was read to', async () => {
+    const inbox = [mail({ id: 'first', received_at: minutes(-5) })];
+    const { service, clock, feed, reachSettings } = await setup({ settings: ALWAYS_ON, messages: inbox });
+    await service.run({ watcher: 'mail' });
+    await turn(reachSettings, false);
+    inbox.push(mail({ id: 'while-off', received_at: minutes(120) }));
+    clock.now = minutes(180);
+    await service.run({ watcher: 'mail' });
+    expect(await feed()).toHaveLength(1);
+    await turn(reachSettings, true);
+    clock.now = minutes(190);
+    await service.run({ watcher: 'mail' });
+    expect(await feed()).toHaveLength(2);
+  });
+});
 
 describe('mail from an always-important sender', () => {
   it('raises one event for a verified sender and none the second time', async () => {
@@ -584,21 +713,6 @@ describe('calendar', () => {
 });
 
 describe('approvals', () => {
-  const waitingFor = ({
-    owner,
-    approval_id,
-    since,
-  }: {
-    owner: typeof OWNER;
-    approval_id: string;
-    since: string;
-  }): WaitingApproval => ({
-    owner,
-    session_id: `s-${approval_id}`,
-    approval_id,
-    waiting_since: new Date(since),
-  });
-
   it('raises one event for an approval that waited longer than the chosen time, leading to the request', async () => {
     const { service, feed } = await setup({
       settings: { approval_wait_minutes: 10 },
@@ -620,7 +734,7 @@ describe('approvals', () => {
     });
   });
 
-  it('reaches someone with an open request who connected nothing and never saved Reach me', async () => {
+  whenOnByDefault('reaches someone with an open request who connected nothing and never saved Reach me', async () => {
     const newcomer = { tenant_id: 'default', created_by: 'newcomer' };
     const { service, deliveryStore, listOwners } = await setup({
       waiting: [waitingFor({ owner: newcomer, approval_id: 'a9', since: '2026-11-05T14:40:00.000Z' })],
@@ -1183,7 +1297,8 @@ describe('passes that fail, stop or overlap', () => {
     expect(newest).toMatchObject({ level: 'nudge' });
   });
 
-  it('reads the day in the person’s own time zone when they never saved Reach me', async () => {
+  /** A person who never saved Reach me is watched only while the checks are on by default. */
+  whenOnByDefault('reads the day in the person’s own time zone when they never saved Reach me', async () => {
     const { service, deliveryStore, feed } = await setup({
       saved: false,
       events: clash,
@@ -2437,19 +2552,22 @@ describe('mail trouble follows how far behind the checkpoint is', () => {
       source: 'google' as const,
     };
 
-    it('still records that Google needs a sign-in, for a person who never saved Reach me settings', async () => {
-      const { service, store, sources, listOwners, clock } = await setup({ saved: false });
-      listOwners.mockResolvedValue([]);
-      await store.setCheckpoint({ ...OWNER, watcher: 'mail', ...behind });
-      sources.mail = { status: 'unreachable', error: new GoogleReconnectRequiredError(), kind: 'google' };
-      await expect(service.run({ watcher: 'mail' })).resolves.toMatchObject({ owners: 1 });
-      expect(mailProblemOf({ checkpoint: await checkpoint(store), now: clock.now })).toMatchObject({
-        kind: 'google_sign_in',
-        since: behind.failure.since,
-      });
-    });
+    whenOnByDefault(
+      'still records that Google needs a sign-in, for a person who never saved Reach me settings',
+      async () => {
+        const { service, store, sources, listOwners, clock } = await setup({ saved: false });
+        listOwners.mockResolvedValue([]);
+        await store.setCheckpoint({ ...OWNER, watcher: 'mail', ...behind });
+        sources.mail = { status: 'unreachable', error: new GoogleReconnectRequiredError(), kind: 'google' };
+        await expect(service.run({ watcher: 'mail' })).resolves.toMatchObject({ owners: 1 });
+        expect(mailProblemOf({ checkpoint: await checkpoint(store), now: clock.now })).toMatchObject({
+          kind: 'google_sign_in',
+          since: behind.failure.since,
+        });
+      },
+    );
 
-    it('tells about unread mail once after a full disconnect', async () => {
+    whenOnByDefault('tells about unread mail once after a full disconnect', async () => {
       const { service, store, sources, listOwners, feed } = await setup({ saved: false });
       listOwners.mockResolvedValue([]);
       await store.setCheckpoint({ ...OWNER, watcher: 'mail', ...behind });

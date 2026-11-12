@@ -20,10 +20,10 @@ import { PhoneVoiceTransport, readPhoneFrame } from '../../voice/phoneTransport'
 import { VoiceSession, type VoiceSessionDeps } from '../../voice/session';
 import type { DeliveryChannelSender } from '../delivery/deliveryChannel';
 import type { DeliveryService } from '../delivery/deliveryService';
-import { plainName } from '../texts/assistantName';
 import { maskedTarget } from '../texts/smsSender';
 import { canText } from '../texts/textNumber';
 import { privatePhrase } from '../texts/textWords';
+import { callName } from './callName';
 import { CALL_LINES, CallTurns, type CallChat } from './callTurns';
 import { callVoiceProblem, type CallVoice } from './callVoiceReady';
 import { messageLine } from './callWords';
@@ -206,8 +206,8 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
   async function namesFor(owner: { tenant_id: string; created_by: string }): Promise<CallNames> {
     const profile = await deps.personalization.getProfile(owner);
     return {
-      assistant: plainName(profile?.assistant_name),
-      person: plainName(profile?.address_as ?? profile?.user_name),
+      assistant: callName(profile?.assistant_name),
+      person: callName(profile?.address_as ?? profile?.user_name),
     };
   }
 

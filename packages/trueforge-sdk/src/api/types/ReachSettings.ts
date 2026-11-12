@@ -21,6 +21,8 @@ export interface ReachSettings {
     maxNudgesPerDay: number;
     /** Fewest hours between two calls. */
     minHoursBetweenCalls: number;
+    /** Whether the assistant checks mail, the calendar and waiting approvals in the background. Reminders work either way. */
+    noticingOn?: boolean;
     quietHours: TrueForge.QuietHours;
     timezone: TrueForge.Timezone;
     /** How long before an event with a place the person wants to hear about leaving. */

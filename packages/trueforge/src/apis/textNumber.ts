@@ -2,9 +2,11 @@ import { OpenAPIHono, type RouteHandler } from '@hono/zod-openapi';
 
 import type { ResolveRequestContext } from '../auth/identity';
 import {
+  addTextWordRoute,
   confirmTextCodeRoute,
   deleteTextNumberRoute,
   getTextStatusRoute,
+  removeTextWordRoute,
   sendTextCodeRoute,
   updateTextModeRoute,
 } from '../routes/textRoutes';
@@ -101,6 +103,24 @@ export function createTextNumberRouter(deps: TextNumberRouterDeps) {
     return c.json({ data: await deps.textNumbers.status(owner) }, 200);
   };
 
+  const addWordHandler: RouteHandler<typeof addTextWordRoute> = async c => {
+    const owner = ownerOf(c);
+    const result = await deps.textNumbers.addWord({ owner, word: c.req.valid('json').word });
+    if (result.ok) {
+      return c.json({ data: await deps.textNumbers.status(owner) }, 201);
+    }
+    if (result.reason === 'full') {
+      return c.json({ error: { message: 'That is as many words as can be added. Remove one to add another.' } }, 409);
+    }
+    return c.json({ error: { message: result.problem } }, 400);
+  };
+
+  const removeWordHandler: RouteHandler<typeof removeTextWordRoute> = async c => {
+    const owner = ownerOf(c);
+    await deps.textNumbers.removeWord({ owner, word: c.req.valid('param').word });
+    return c.json({ data: await deps.textNumbers.status(owner) }, 200);
+  };
+
   const deleteHandler: RouteHandler<typeof deleteTextNumberRoute> = async c => {
     await deps.textNumbers.remove(ownerOf(c));
     return c.json({}, 200);
@@ -111,6 +131,8 @@ export function createTextNumberRouter(deps: TextNumberRouterDeps) {
   router.openapi(sendTextCodeRoute, sendCodeHandler);
   router.openapi(confirmTextCodeRoute, confirmHandler);
   router.openapi(updateTextModeRoute, updateHandler);
+  router.openapi(addTextWordRoute, addWordHandler);
+  router.openapi(removeTextWordRoute, removeWordHandler);
   router.openapi(deleteTextNumberRoute, deleteHandler);
   return router;
 }

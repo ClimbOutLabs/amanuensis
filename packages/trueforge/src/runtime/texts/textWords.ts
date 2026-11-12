@@ -1,5 +1,6 @@
 import type { Delivery, DeliveryKind } from '../../schemas/deliveries';
 import type { TextMode } from '../../schemas/textMessages';
+import { isAllowedWord, isEndingOrNumber } from './knownWords';
 
 /** Said wherever texts are asked for on a server that has no Twilio details. */
 export const TEXTS_NOT_SET_UP =
@@ -84,19 +85,9 @@ const MONTH_DAYS = new Map<string, number>([
   ['dec', 31], ['december', 31],
 ]);
 
-/** How many digits each number word stands for, so a number read out in words counts like one in digits. */
-// prettier-ignore
-const NUMBER_WORDS = new Map<string, number>([
-  ['zero', 1], ['oh', 1], ['nought', 1], ['one', 1], ['two', 1], ['three', 1], ['four', 1], ['five', 1], ['six', 1],
-  ['seven', 1], ['eight', 1], ['nine', 1], ['niner', 1], ['ten', 2], ['eleven', 2], ['twelve', 2], ['thirteen', 2],
-  ['fourteen', 2], ['fifteen', 2], ['sixteen', 2], ['seventeen', 2], ['eighteen', 2], ['nineteen', 2],
-  ['twenty', 2], ['thirty', 2], ['forty', 2], ['fourty', 2], ['fifty', 2], ['sixty', 2], ['seventy', 2],
-  ['eighty', 2], ['ninety', 2], ['hundred', 2], ['thousand', 3], ['double', 1], ['triple', 2],
-]);
-
 /**
- * The most digits a Full text may hold in all, in times, dates, amounts, codes or number words, so it cannot hold a
- * phone number with its area code. A short code of 5 or 6 digits still fits.
+ * The most digits a Full text may hold in all, in times, dates, amounts and codes, so it cannot hold a phone number
+ * with its area code. A short code of 5 or 6 digits still fits.
  */
 const MAX_DIGITS = 6;
 
@@ -105,13 +96,14 @@ const TIME_PART = '\\d{1,2}(?:[:.]\\d{2})?(?:[ap]\\.?m\\.?)?';
 const RANGE = new RegExp(`(?<![\\d:./-])(${TIME_PART})\\s?-\\s?(?=${TIME_PART}(?![\\d:/-]|\\.\\d))`, 'g');
 /** A time with a space before am or pm, such as 3 pm, read as one word. */
 const SPACED_AM_PM = /(\d)\s([ap]\.?m\.?)(?![a-z])/g;
-/** Punctuation a sentence puts before or after a word. Anywhere else in a word, it could join the parts of a site. */
-const EDGES = /^[("']+|[)"'.,!?;:]+$/g;
-/** Standing alone, these join words rather than spell anything. */
-const JOINS = new Set(['-', '&']);
+/** The signs a sentence may end a word with: a comma, a full stop, a question mark or an exclamation mark. */
+const ENDING_SIGNS = /[.,?!]{1,3}$/;
+/** A word of letters, with a dash or an apostrophe only inside it. */
 const WORD = /^[a-z]+(?:['-][a-z]+)*$/;
-/** Two single letters with dots, such as e.g. or U.S. */
-const ABBREVIATION = /^[a-z]\.[a-z]$/;
+/** What may follow an apostrophe: the rest of a contraction or a possessive, such as 's, 'll or n't. */
+const APOSTROPHE_ENDS = new Set(['s', 'd', 'll', 're', 've', 'm', 't']);
+/** The stems before n't that are not words on their own, such as ca in can't. */
+const NT_STEMS = new Set(['ca', 'wo', 'sha', 'ai']);
 /** An amount or a count: a dollar sign before, a percent after, thousands commas and decimals inside. */
 const NUMBER = /^\$?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?%?$/;
 const ORDINAL = /^\d+(?:st|nd|rd|th)$/;
@@ -121,49 +113,8 @@ const AM_PM_TIME = /^(\d{1,2})(?:[:.](\d{2}))?([ap])\.?m$/;
 const CLOCK_TIME = /^(\d{1,2}):(\d{2})$/;
 const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
 const SLASHED_DATE = /^(\d{1,2})\/(\d{1,2})(?:\/(\d{2}|\d{4}))?$/;
-/** Words that only ever start a site. */
-const SITE_WORDS = new Set(['www', 'http', 'https']);
-/** Words that read out the dot of a site when said between two words, such as evil dot com. */
-const DOT_WORDS = new Set(['dot', 'point', 'period']);
-/** A lone written dot, bare or in brackets or quotes, between spaces, such as evil . com or evil [.] com. */
-const LONE_DOT = /^[("']*\.[)"']*$/;
-/** A toll-free number whose rest is spelled as a capitalised word, such as 1 800 FLOWERS or 1 800 (Flowers). */
-const VANITY_NUMBER =
-  /(?<![\d$.,/-])(?:[01][\s-]*)?\(?(?:800|833|844|855|866|877|888)\)?[^\p{L}\p{N}]+[A-Z][A-Za-z]{3,}/u;
-/** Every sign that can stand for a dot, as typed or as another script writes it, including an ellipsis. */
-const DOT_SIGN = '[.．｡。·•‧∙⋅・…․﹒‥︙︰]';
-/**
- * A word or number, with its closing brackets or quotes, then a dot sign or a run of them, with spaces anywhere, then
- * another word or number, such as evil. com, (evil). com, evil .. com or evil … com.
- */
-const DOT_BETWEEN_WORDS = new RegExp(
-  `(?<before>\\S*[\\p{L}\\p{N}][)"'\\]]*)(?<dots>(?:\\s*${DOT_SIGN})+)(?<gap>[)"'\\]]*\\s*)(?=[("'\\[]*(?<next>[\\p{L}\\p{N}]+))`,
-  'gu',
-);
-/** A dotted abbreviation of single letters, such as e.g. or U.S., the only word a sentence's dot may follow. */
-const DOTTED_ABBREVIATION = /^(?:\p{L}\.)+\p{L}$/u;
-/** Site endings that a dotted abbreviation must not be followed by, since U.S. com would read out u.s.com. */
-const SITE_ENDINGS = new Set(['com', 'co', 'net', 'org', 'io', 'uk', 'us', 'info']);
-
-/**
- * Whether a dot sits between two words with a space on one side, which reads out a site (evil. com) and cannot be told
- * from a sentence end, since a capital after it proves nothing (Evil. Com). The text's last dot is no joiner. A dot
- * with no space around it is judged by the shapes later.
- */
-function dotJoinsWords(text: string): boolean {
-  for (const match of text.matchAll(DOT_BETWEEN_WORDS)) {
-    const { before, dots, gap, next } = match.groups ?? {};
-    if (before === undefined || dots === undefined || gap === undefined || !/\s/.test(dots + gap)) {
-      continue;
-    }
-    const abbreviation =
-      DOTTED_ABBREVIATION.test(before) && dots === '.' && gap !== '' && !SITE_ENDINGS.has((next ?? '').toLowerCase());
-    if (!abbreviation) {
-      return true;
-    }
-  }
-  return false;
-}
+/** The toll-free prefixes, which read out as a phone number when a word follows, such as 1 800 flowers. */
+const TOLL_FREE = /^1?(?:800|833|844|855|866|877|888)$/;
 /** Currency signs plainText writes as letters; any other one is dropped, and would change the amount's meaning. */
 const KNOWN_CURRENCY = /[$€£¥]/g;
 
@@ -205,7 +156,11 @@ function digitWord(word: string): { digits: number; bare: boolean } | undefined 
   if (NUMBER.test(word)) {
     return { digits, bare: true };
   }
-  return ORDINAL.test(word) || CODE.test(word) ? { digits, bare: false } : undefined;
+  if (ORDINAL.test(word)) {
+    return { digits, bare: false };
+  }
+  // The letters of a code, such as the k of 5k, must not be a web ending, as in 1com.
+  return CODE.test(word) && !isEndingOrNumber(word.replace(/\d/g, '')) ? { digits, bare: false } : undefined;
 }
 
 /** Whether a day next to a month names a day that month never has, such as Feb 31. */
@@ -215,97 +170,153 @@ function impossibleDay({ month, day }: { month: string | undefined; day: string 
   return most !== undefined && number !== undefined && !inRange({ value: number, low: 1, high: most });
 }
 
-/**
- * Whether a Full text may carry these words, as written and as it will be sent. Every word must have a known shape: a word of letters, an amount or a
- * count, an ordinal, a short code of letters and digits, or a time or a date in range. The digits in all of them,
- * and in number words, come to at most 6, so the words cannot hold a phone number with its area code. A site's
- * shape, three single letters in a row, or three numbers in a row also fail. A false alarm only costs the item's own
- * words, which stay in the app. This is the one check for words a text carries.
- */
-export function isPlainWords(text: string): boolean {
-  return plainAsGiven(text) && plainAsGiven(plainText(text));
+/** Whether every part of a word of letters is on the list, reading a dash or an apostrophe as a join. */
+function wordAllowed({ word, extra }: { word: string; extra: ReadonlySet<string> }): boolean {
+  return word.split('-').every(part => {
+    if (isAllowedWord({ word: part, extra })) {
+      return true;
+    }
+    const [stem, end, ...rest] = part.split("'");
+    if (stem === undefined || rest.length > 0) {
+      return false;
+    }
+    if (end === undefined) {
+      return stem.length === 1 || isAllowedWord({ word: stem, extra });
+    }
+    if (stem === 'o' && end === 'clock') {
+      return true;
+    }
+    if (end === 't' && stem.endsWith('n')) {
+      const base = stem.slice(0, -1);
+      return NT_STEMS.has(base) || isAllowedWord({ word: base, extra });
+    }
+    return APOSTROPHE_ENDS.has(end) && end !== 't' && (stem.length === 1 || isAllowedWord({ word: stem, extra }));
+  });
 }
 
-/** The whole check on one string, as it is. */
-function plainAsGiven(text: string): boolean {
-  if (/\p{Sc}/u.test(text.replace(KNOWN_CURRENCY, ''))) {
-    return false;
+/**
+ * The first word that keeps this text from going out in Full, or undefined when every word is allowed. The text is read
+ * in its cleaned form, so what is checked is what a phone would show. `extra` holds the words allowed besides the list: the
+ * assistant's name and the words the person added.
+ * A word is allowed when it is on the list of known words or among the person's own, or has a known shape: an
+ * amount or a count, an ordinal, a short code of letters and digits, or a time or a date in range. A comma, a full
+ * stop, a question mark or an exclamation mark may end a word, and a dash or an apostrophe may sit inside one. The
+ * digits in all of them come to at most 6, so the words cannot hold a phone number with its area code.
+ */
+export function heldBackWord({
+  text,
+  extra = NO_WORDS,
+}: {
+  text: string;
+  extra?: ReadonlySet<string> | undefined;
+}): string | undefined {
+  const odd = /\p{Sc}/u.exec(text.replace(KNOWN_CURRENCY, ''));
+  if (odd !== null) {
+    return odd[0];
   }
-  if (dotJoinsWords(text)) {
-    return false;
-  }
-  const asWritten = plainText(text);
-  const plain = asWritten.toLowerCase();
-  if (/\(\s*at\s*\)/.test(plain) || VANITY_NUMBER.test(asWritten)) {
-    return false;
-  }
-  const words = plain
+  const tokens = plainText(text)
+    .toLowerCase()
     .replace(SPACED_AM_PM, '$1$2')
     .replace(RANGE, '$1 to ')
     .split(/\s+/)
-    .filter(token => token !== '' && !JOINS.has(token))
-    .map(token => (LONE_DOT.test(token) ? 'dot' : token.replace(EDGES, '')))
-    .filter(word => word !== '');
-  // Read part by part, so dashes or apostrophes cannot hide a spoken dot, a spelled number or single letters.
-  const parts = words.flatMap(word => (WORD.test(word) ? word.split(/['-]/) : [word]));
-  if (parts.some((part, at) => DOT_WORDS.has(part) && at > 0 && at < parts.length - 1)) {
-    return false;
-  }
+    .filter(token => token !== '');
+  const words = tokens.map(token => token.replace(ENDING_SIGNS, ''));
   let digits = 0;
   let numberRun = 0;
   let letterRun = 0;
   for (const [index, word] of words.entries()) {
-    const previous = words[index - 1];
-    const next = words[index + 1];
-    const isWord = WORD.test(word);
-    const counted = isWord ? undefined : digitWord(word);
-    if (!isWord && !ABBREVIATION.test(word) && word !== 'w/' && counted === undefined) {
-      return false;
-    }
-    if (SITE_WORDS.has(word)) {
-      return false;
-    }
-    if (
-      impossibleDay({ month: previous, day: word }) ||
-      impossibleDay({ month: next === 'of' ? words[index + 2] : next, day: word })
-    ) {
-      return false;
-    }
-    digits += counted?.digits ?? 0;
-    let bare = counted?.bare === true;
-    for (const part of isWord ? word.split(/['-]/) : [word]) {
-      const spoken = NUMBER_WORDS.get(part);
-      digits += spoken ?? 0;
-      // A number read out in a row: number words and bare numbers alike, joined by "and".
-      if (spoken !== undefined || bare) {
-        numberRun += 1;
-        bare = false;
-        if (numberRun >= 3 || (numberRun >= 2 && (part === 'hundred' || part === 'thousand'))) {
-          return false;
-        }
-      } else if (part !== 'and') {
-        numberRun = 0;
+    const token = tokens[index] ?? word;
+    if (!WORD.test(word)) {
+      const counted = digitWord(word);
+      const next = words[index + 1];
+      const previous = words[index - 1];
+      if (counted === undefined) {
+        return token;
       }
-      // Single letters in a row spell a site or a number letter by letter.
-      letterRun = /^[a-z]$/.test(part) ? letterRun + 1 : 0;
+      if (
+        impossibleDay({ month: previous, day: word }) ||
+        impossibleDay({ month: next === 'of' ? words[index + 2] : next, day: word })
+      ) {
+        return token;
+      }
+      if (TOLL_FREE.test(word) && next !== undefined && /^[a-z]{4,}/.test(next)) {
+        return token;
+      }
+      digits += counted.digits;
+      letterRun = 0;
+      numberRun = counted.bare ? numberRun + 1 : 0;
+      if (numberRun >= 3 || digits > MAX_DIGITS) {
+        return token;
+      }
+      continue;
+    }
+    numberRun = 0;
+    if (!wordAllowed({ word, extra })) {
+      return token;
+    }
+    // Single letters in a row spell a site or a number letter by letter.
+    for (const part of word.split('-')) {
+      letterRun = part.split("'")[0]?.length === 1 ? letterRun + 1 : 0;
       if (letterRun >= 3) {
-        return false;
+        return token;
       }
     }
   }
-  return digits <= MAX_DIGITS;
+  return undefined;
+}
+
+const NO_WORDS: ReadonlySet<string> = new Set();
+
+/** Whether a Full text may carry these words. See `heldBackWord`. */
+export function isPlainWords(text: string, extra?: ReadonlySet<string>): boolean {
+  return heldBackWord({ text, extra }) === undefined;
 }
 
 /**
  * The words a Full text may carry, in the exact form they are sent, or undefined. The only way to get words for a Full
  * text, so none goes out that was not checked as sent: the text as given passes, and so do the cleaned and cut words.
  */
-export function checkedWords({ text, room }: { text: string; room: number }): string | undefined {
-  if (!isPlainWords(text)) {
-    return undefined;
+export function checkedWords({
+  text,
+  room,
+  extra,
+}: {
+  text: string;
+  room: number;
+  extra?: ReadonlySet<string> | undefined;
+}): string | undefined {
+  return checkWords({ text, room, extra }).words;
+}
+
+/** What `checkedWords` finds, and the first word that held the text back when it finds none. */
+export function checkWords({
+  text,
+  room,
+  extra,
+}: {
+  text: string;
+  room: number;
+  extra?: ReadonlySet<string> | undefined;
+}): {
+  words: string | undefined;
+  held: string | undefined;
+} {
+  const held = heldBackWord({ text, extra });
+  if (held !== undefined) {
+    return { words: undefined, held };
   }
   const sent = cut({ text: plainText(text), room });
-  return isPlainWords(sent) ? sent : undefined;
+  const heldSent = heldBackWord({ text: sent, extra });
+  return heldSent === undefined ? { words: sent, held: undefined } : { words: undefined, held: heldSent };
+}
+
+/** The words of the assistant's name, such as O'Neil and its parts, which a text may repeat. */
+export function nameWords(name: string): Set<string> {
+  const words = name
+    .toLowerCase()
+    .split(/[^a-z']+/)
+    .flatMap(word => [word.replace(/^'+|'+$/g, ''), ...word.split("'")]);
+  return new Set(words.filter(word => word !== ''));
 }
 
 /** Why a Full text went out in Private words instead, or null when it carried the item's own words. */
@@ -324,28 +335,34 @@ export function textBody({
   delivery,
   mode,
   test,
+  allowed,
 }: {
   name: string;
   delivery: Delivery;
   mode: TextMode;
   test: boolean;
+  /** The words the person added, which a text may carry besides the list and the assistant's name. */
+  allowed?: ReadonlySet<string>;
 }): {
   body: string;
   withheld: FullWithheld;
+  /** The first word that held a Full text back, when `withheld` is `not_plain_words`. */
+  held: string | null;
 } {
   const privateBody = privateText({ name, kind: delivery.kind });
   if (mode === 'private') {
-    return { body: privateBody, withheld: null };
+    return { body: privateBody, withheld: null, held: null };
   }
   if (!test && !OWN_WORDS_KINDS.has(delivery.kind)) {
-    return { body: privateBody, withheld: 'noticed' };
+    return { body: privateBody, withheld: 'noticed', held: null };
   }
   const prefix = `${name}: `;
-  const words = checkedWords({ text: delivery.text, room: TEXT_MAX - prefix.length });
+  const extra = new Set([...(allowed ?? NO_WORDS), ...nameWords(name)]);
+  const { words, held } = checkWords({ text: delivery.text, room: TEXT_MAX - prefix.length, extra });
   if (words === undefined) {
-    return { body: privateBody, withheld: 'not_plain_words' };
+    return { body: privateBody, withheld: 'not_plain_words', held: held ?? null };
   }
-  return { body: `${prefix}${words}`, withheld: null };
+  return { body: `${prefix}${words}`, withheld: null, held: null };
 }
 
 /** The code text. It carries no name the person chose, because it goes to a number nobody has proved yet. */

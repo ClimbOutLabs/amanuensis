@@ -5,6 +5,7 @@ import type { DeliveryAttempt } from '../../schemas/deliveries';
 import type { TextMode } from '../../schemas/textMessages';
 import { TEST_WORDS, type DeliveryChannelSender } from '../delivery/deliveryChannel';
 import { textAssistantName } from './assistantName';
+import { customWordProblem } from './knownWords';
 import { smsFailureWords, type SmsProvider } from './smsProvider';
 import {
   claimTextLimits,
@@ -36,12 +37,21 @@ function attempt({
   return { channel: 'sms', outcome, detail, target, attempted_at: at.toISOString() };
 }
 
-function sentWords({ mode, withheld }: { mode: TextMode; withheld: FullWithheld }): string {
+/** Names the word that held a Full text back, cut short so a long run of signs stays readable. */
+function heldWords(held: string | null): string {
+  if (held === null || held === '') {
+    return 'a word in it is not one a text may carry,';
+  }
+  const shown = held.length > 30 ? `${held.slice(0, 30)}...` : held;
+  return `"${shown}" is not a word a text may carry,`;
+}
+
+function sentWords({ mode, withheld, held }: { mode: TextMode; withheld: FullWithheld; held: string | null }): string {
   switch (withheld) {
     case 'noticed':
       return 'Private text: what your assistant noticed is shown only in the app, so only the kind of thing was sent.';
     case 'not_plain_words':
-      return 'Private text: a Full text carries only plain words, with at most 6 digits in all. This message had more digits, a dot or sign between or inside words, or something that could spell a link or a number, so only the kind of thing was sent. To get its words by text, write one sentence and leave out links and long numbers. The whole message is in the app.';
+      return `Private text: ${heldWords(held)} so only the kind of thing was sent. A Full text carries common words, times, dates, amounts, short codes and the words you add, with at most 6 digits in all. To get this message by text, add the word under Words Aman may text in Settings, Reach me, or write it in common words. The whole message is in the app.`;
     case null:
       return mode === 'full' ? 'Full text.' : 'Private text: only the kind of thing was sent.';
   }
@@ -62,7 +72,7 @@ export function createSmsSender({
   textNumbers,
   now = () => new Date(),
 }: {
-  contacts: Pick<ITextContactStore, 'get' | 'claimTextSends' | 'forgetTextSends'>;
+  contacts: Pick<ITextContactStore, 'get' | 'claimTextSends' | 'forgetTextSends' | 'listWords'>;
   reachSettings: Pick<IReachSettingsStore, 'get'>;
   personalization: Pick<IPersonalizationStore, 'getProfile'>;
   /** Undefined when this server has no text provider. */
@@ -124,15 +134,19 @@ export function createSmsSender({
       }
       const name = await textAssistantName({ personalization, owner });
       // Only the fixed test words are let through in Full, whatever kind a test delivery has.
-      const { body, withheld } = textBody({
+      const allowed = new Set((await contacts.listWords(owner)).filter(word => customWordProblem(word) === undefined));
+      const { body, withheld, held } = textBody({
         name,
         delivery,
         mode: contact.mode,
         test: test && delivery.text === TEST_WORDS,
+        allowed,
       });
       const result = await provider.send({ to: contact.phone, body });
       if (result.outcome === 'sent') {
-        return [attempt({ outcome: 'sent', detail: sentWords({ mode: contact.mode, withheld }), target, at: now() })];
+        return [
+          attempt({ outcome: 'sent', detail: sentWords({ mode: contact.mode, withheld, held }), target, at: now() }),
+        ];
       }
       if (result.failure === 'opted_out') {
         await textNumbers.stopNumber(contact.phone);

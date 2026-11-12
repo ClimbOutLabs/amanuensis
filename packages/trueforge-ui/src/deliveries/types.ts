@@ -38,6 +38,8 @@ export type ReachSender = {
 };
 
 export type ReachSettings = {
+  /** Whether the assistant checks mail, the calendar and waiting approvals in the background. */
+  noticingOn: boolean;
   textsOn: boolean;
   callsOn: boolean;
   alwaysImportant: ReachSender[];
@@ -95,6 +97,8 @@ export type TextStatus = {
   pendingPhone: string | null;
   /** What a Private text says, word for word, as the server writes it. */
   privatePreview: string;
+  /** The names and words the person lets Aman text besides the common words. */
+  words: string[];
 };
 
 /** The number for texts, served by the host. Each call rejects with a message fit to show. */
@@ -104,6 +108,9 @@ export type TextsApi = {
   sendCode(phone: string): Promise<TextStatus>;
   confirm(code: string): Promise<TextStatus>;
   setMode(mode: TextMode): Promise<TextStatus>;
+  /** Lets Full texts carry a name or word. Rejects with the reason when the word cannot be added. */
+  addWord(word: string): Promise<TextStatus>;
+  removeWord(word: string): Promise<TextStatus>;
   /** Forgets the number and switches texts off. */
   remove(): Promise<void>;
 };

@@ -1,7 +1,7 @@
 import type { Context, MiddlewareHandler } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import { jwtVerify } from 'jose';
-import { timingSafeEqual } from 'node:crypto';
+import { createHash, timingSafeEqual } from 'node:crypto';
 
 import configuration from '../config';
 import type { Authenticator } from './authenticator';
@@ -53,18 +53,17 @@ export function createAdminAuthMiddleware(authenticator: Authenticator): Middlew
   };
 }
 
-/** Constant-time API key comparison; different lengths reject without throwing. */
+/**
+ * Constant-time API key comparison. Both keys are hashed first, so keys of any two lengths are compared the
+ * same way and the time taken says nothing about the expected key, its length included.
+ */
 export function apiKeysEqual(
   provided: string,
   expected: string,
   timingSafeEqualFn: typeof timingSafeEqual = timingSafeEqual,
 ): boolean {
-  const providedBytes = Buffer.from(provided, 'utf8');
-  const expectedBytes = Buffer.from(expected, 'utf8');
-  if (providedBytes.length !== expectedBytes.length) {
-    return false;
-  }
-  return timingSafeEqualFn(providedBytes, expectedBytes);
+  const digest = (key: string): Buffer => createHash('sha256').update(key, 'utf8').digest();
+  return timingSafeEqualFn(digest(provided), digest(expected));
 }
 
 /** Bearer API-key gate for service-only routes. */
@@ -89,7 +88,7 @@ export const truefoundryAdminMiddleware: MiddlewareHandler = async (c, next) => 
     throw new HTTPException(403, { message: 'Service API key required' });
   }
   const apiKey = configuration.TRUEFOUNDRY_API_KEY;
-  if (apiKey === undefined || token === undefined || token !== apiKey) {
+  if (apiKey === undefined || token === undefined || !apiKeysEqual(token, apiKey)) {
     throw new HTTPException(403, { message: 'Service API key required' });
   }
   c.set('request_context', {

@@ -1,8 +1,9 @@
 import type { IPersonalizationStore } from '../../db/personalizationStore';
 import { assistantNameFor, UNNAMED_ASSISTANT } from '../chatAssistant';
-import { isPlainWords, plainText } from './textWords';
+import { isRemovedWord } from './knownWords';
+import { isPlainWords, nameWords, plainText } from './textWords';
 
-/** The most of a name a text or a call carries, so a name cannot hold a message of its own. */
+/** The most of the assistant's name a text carries, so a name cannot hold a message of its own. */
 const TEXT_NAME_MAX = 20;
 
 /** Cuts at the last whole word that fits, or after 20 characters when one word is longer. The cut name is checked again. */
@@ -15,57 +16,35 @@ function cutAtWord(text: string): string {
   return (text[TEXT_NAME_MAX] === ' ' || space < 0 ? head : head.slice(0, space)).trim();
 }
 
-/** Dashes and apostrophes that are not inside a word, which a voice would not say as written. */
-const LONE_MARKS = /(?<![A-Za-z])['-]+|['-]+(?![A-Za-z])/g;
-
-/** Letters that do not split into a base letter and an accent, so stripping accents would drop them. */
-const SPELLED_LETTERS: Record<string, string> = {
-  ø: 'o',
-  Ø: 'O',
-  ł: 'l',
-  Ł: 'L',
-  đ: 'd',
-  Đ: 'D',
-  æ: 'ae',
-  Æ: 'Ae',
-  ß: 'ss',
-  Þ: 'Th',
-  þ: 'th',
-  Œ: 'Oe',
-  œ: 'oe',
-  Ħ: 'H',
-  ħ: 'h',
-  Ð: 'D',
-  ð: 'd',
-};
-
-function spellOut(name: string): string {
-  return name.replace(/[øØłŁđĐæÆßÞþŒœĦħÐð]/g, letter => SPELLED_LETTERS[letter] ?? letter);
+/**
+ * Whether a name spells nothing: none of its words is one of the endings people write after a dot or a number word,
+ * and any digits in it fit the digit budget. It stands before its colon, so its own words need no place on the list.
+ */
+function nameIsPlain(name: string): boolean {
+  return (
+    !name
+      .toLowerCase()
+      .split(/[^a-z]+/)
+      .some(isRemovedWord) && isPlainWords(name, nameWords(name))
+  );
 }
 
 /**
- * A name from the person's settings, made fit to say or send: only letters, spaces, apostrophes and dashes inside
- * words, at most 20 of them, so it cannot carry a link or a number to call. The name is checked as given and again as
- * it will be used, since leaving out signs and cutting it can make new words. Undefined when it cannot be used.
+ * The name the person gave their assistant, made fit for the first words of a text: only letters, spaces,
+ * apostrophes and dashes inside words, at most 20 of them, so it cannot carry a link or a number to call. The name
+ * is checked as given and again as it will be sent, since leaving out signs and cutting it can make new words. Its own
+ * words need no place on the word list, but a web ending or a number word in it fails.
  */
-export function plainName(name: string | null | undefined): string | undefined {
-  const plain = plainText(spellOut(name ?? ''));
+export function textName(name: string | null | undefined): string {
+  const plain = plainText(name ?? '');
   const letters = cutAtWord(
     plain
       .replace(/[^A-Za-z '-]/g, ' ')
-      .replace(LONE_MARKS, ' ')
+      .replace(/(?<![A-Za-z])['-]+|['-]+(?![A-Za-z])/g, ' ')
       .replace(/\s+/g, ' ')
       .trim(),
-  )
-    // A cut inside a long word can leave a dash at its end.
-    .replace(LONE_MARKS, ' ')
-    .trim();
-  return letters !== '' && isPlainWords(plain) && isPlainWords(letters) ? letters : undefined;
-}
-
-/** The name the person gave their assistant, made fit for the first words of a text. */
-export function textName(name: string | null | undefined): string {
-  return plainName(name) ?? UNNAMED_ASSISTANT;
+  );
+  return letters !== '' && nameIsPlain(plain) && nameIsPlain(letters) ? letters : UNNAMED_ASSISTANT;
 }
 
 /** The person's assistant name, as their settings give it, made fit for a text. */

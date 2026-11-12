@@ -603,6 +603,8 @@ install_execute() {
   ensure_private_dir "$MACHINE_DIR"
   ensure_private_dir "$INSTANCES_DIR"
   install_doctor_shim
+  # Before the build and the backup, so a port Tailscale would take stops the run with nothing changed.
+  for name in $(reg_names); do instance_tailscale_port_check "$name"; done
   if need_new_instance && [ -z "$AMAN_PASSWORD" ]; then
     ui_hint "Asked now so the rest of the setup runs on its own."
     ask_password AMAN_PASSWORD

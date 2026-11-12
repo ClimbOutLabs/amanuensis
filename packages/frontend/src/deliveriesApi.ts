@@ -136,6 +136,7 @@ function parseSettings(value: unknown): ReachSettings {
   const channels = required(raw.channels, isRecord);
   const quiet = required(raw.quiet_hours, isRecord);
   return {
+    noticingOn: required(raw.noticing_on, isBoolean),
     textsOn: required(channels.texts, isBoolean),
     callsOn: required(channels.calls, isBoolean),
     alwaysImportant: required(raw.always_important, isArray).map(parseSender),
@@ -216,6 +217,7 @@ function parseView(body: unknown): ReachView {
 
 function settingsBody(settings: ReachSettings): unknown {
   return {
+    noticing_on: settings.noticingOn,
     channels: { texts: settings.textsOn, calls: settings.callsOn },
     always_important: settings.alwaysImportant.map(sender => ({
       address: sender.address,
@@ -248,6 +250,7 @@ function parseTextStatus(body: unknown): TextStatus {
     codePending: data.code_pending === true,
     pendingPhone: typeof data.pending_phone === 'string' ? data.pending_phone : null,
     privatePreview: typeof data.private_preview === 'string' ? data.private_preview : '',
+    words: Array.isArray(data.words) ? data.words.filter((word): word is string => typeof word === 'string') : [],
   };
 }
 
@@ -270,6 +273,14 @@ function createTextsApi(fetcher: typeof fetch): TextsApi {
         body: JSON.stringify({ mode }),
       });
       return parseTextStatus(await readBody(response));
+    },
+    async addWord(word) {
+      return parseTextStatus(await readBody(await fetcher(`${url()}/words`, json({ word }))));
+    },
+    async removeWord(word) {
+      return parseTextStatus(
+        await readBody(await fetcher(`${url()}/words/${encodeURIComponent(word)}`, json({}, 'DELETE'))),
+      );
     },
     async remove() {
       await readBody(await fetcher(url(), json({}, 'DELETE')));

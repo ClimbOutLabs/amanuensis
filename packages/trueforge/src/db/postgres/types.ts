@@ -42,12 +42,13 @@ import type { SkillManifest } from '../../schemas/skill';
 import type { BriefItemCompletionTable } from '../briefItemCompletionStore';
 import type { ChatImageOrigin } from '../chatImageStore';
 import type { DeliveryAttemptTable, DeliveryTable } from '../deliveryStore';
+import type { LocalUserTable } from '../localUserStore';
 import type { OAuthClient, OAuthPendingAuthorizationData, OAuthServer, OAuthToken } from '../mcpServerStore';
 import type { NoticingCheckpointTable, NoticingEventTable, ReachLeaseTable } from '../noticingStore';
 import type { PhoneCallTable } from '../phoneCallStore';
 import type { PushSubscriptionTable } from '../pushSubscriptionStore';
 import type { ReachSettingsTable } from '../reachSettingsStore';
-import type { TextContactTable, TextSendCountTable } from '../textContactStore';
+import type { TextContactTable, TextSendCountTable, TextWordTable } from '../textContactStore';
 
 /**
  * Trace-level state for one thread at one turn (`turn_thread.checkpoint`).
@@ -1010,10 +1011,12 @@ export interface Database {
   text_contact: TextContactTable;
   phone_call: PhoneCallTable;
   text_send_count: TextSendCountTable;
+  text_word: TextWordTable;
   noticing_event: NoticingEventTable;
   noticing_checkpoint: NoticingCheckpointTable;
   reach_lease: ReachLeaseTable;
   push_subscription: PushSubscriptionTable;
+  local_user: LocalUserTable;
   approval_token: ApprovalTokenTable;
   sentinel_user_settings: SentinelUserSettingsTable;
   implementation_plan_grant: ImplementationPlanGrantTable;

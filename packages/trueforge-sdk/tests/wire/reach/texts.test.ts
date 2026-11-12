@@ -18,6 +18,7 @@ describe("TextsClient", () => {
                 pending_phone: "pending_phone",
                 phone: "phone",
                 private_preview: "private_preview",
+                words: ["words"],
             },
         };
 
@@ -39,6 +40,7 @@ describe("TextsClient", () => {
                 pendingPhone: "pending_phone",
                 phone: "phone",
                 privatePreview: "private_preview",
+                words: ["words"],
             },
         });
     });
@@ -75,6 +77,7 @@ describe("TextsClient", () => {
                 pending_phone: "pending_phone",
                 phone: "phone",
                 private_preview: "private_preview",
+                words: ["words"],
             },
         };
 
@@ -99,6 +102,7 @@ describe("TextsClient", () => {
                 pendingPhone: "pending_phone",
                 phone: "phone",
                 privatePreview: "private_preview",
+                words: ["words"],
             },
         });
     });
@@ -219,6 +223,7 @@ describe("TextsClient", () => {
                 pending_phone: "pending_phone",
                 phone: "phone",
                 private_preview: "private_preview",
+                words: ["words"],
             },
         };
 
@@ -243,6 +248,7 @@ describe("TextsClient", () => {
                 pendingPhone: "pending_phone",
                 phone: "phone",
                 privatePreview: "private_preview",
+                words: ["words"],
             },
         });
     });
@@ -370,6 +376,7 @@ describe("TextsClient", () => {
                 pending_phone: "pending_phone",
                 phone: "phone",
                 private_preview: "private_preview",
+                words: ["words"],
             },
         };
 
@@ -394,6 +401,7 @@ describe("TextsClient", () => {
                 pendingPhone: "pending_phone",
                 phone: "phone",
                 privatePreview: "private_preview",
+                words: ["words"],
             },
         });
     });
@@ -439,6 +447,174 @@ describe("TextsClient", () => {
             return await client.reach.texts.confirm({
                 code: "x",
             });
+        }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+    });
+
+    test("add_word (1)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { word: "word" };
+        const rawResponseBody = {
+            data: {
+                code_pending: true,
+                confirmed: true,
+                mode: "private",
+                opted_out: true,
+                pending_phone: "pending_phone",
+                phone: "phone",
+                private_preview: "private_preview",
+                words: ["words"],
+            },
+        };
+
+        server
+            .mockEndpoint()
+            .post("/api/v1/user/reach/texts/words")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(200)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        const response = await client.reach.texts.addWord({
+            word: "word",
+        });
+        expect(response).toEqual({
+            data: {
+                codePending: true,
+                confirmed: true,
+                mode: "private",
+                optedOut: true,
+                pendingPhone: "pending_phone",
+                phone: "phone",
+                privatePreview: "private_preview",
+                words: ["words"],
+            },
+        });
+    });
+
+    test("add_word (2)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { word: "x" };
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .post("/api/v1/user/reach/texts/words")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(400)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.reach.texts.addWord({
+                word: "x",
+            });
+        }).rejects.toThrow(TrueForgeTypes.BadRequestError);
+    });
+
+    test("add_word (3)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { word: "x" };
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .post("/api/v1/user/reach/texts/words")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(401)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.reach.texts.addWord({
+                word: "x",
+            });
+        }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+    });
+
+    test("add_word (4)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { word: "x" };
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .post("/api/v1/user/reach/texts/words")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(409)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.reach.texts.addWord({
+                word: "x",
+            });
+        }).rejects.toThrow(TrueForgeTypes.ConflictError);
+    });
+
+    test("remove_word (1)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = {
+            data: {
+                code_pending: true,
+                confirmed: true,
+                mode: "private",
+                opted_out: true,
+                pending_phone: "pending_phone",
+                phone: "phone",
+                private_preview: "private_preview",
+                words: ["words"],
+            },
+        };
+
+        server
+            .mockEndpoint()
+            .delete("/api/v1/user/reach/texts/words/word")
+            .respondWith()
+            .statusCode(200)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        const response = await client.reach.texts.removeWord("word");
+        expect(response).toEqual({
+            data: {
+                codePending: true,
+                confirmed: true,
+                mode: "private",
+                optedOut: true,
+                pendingPhone: "pending_phone",
+                phone: "phone",
+                privatePreview: "private_preview",
+                words: ["words"],
+            },
+        });
+    });
+
+    test("remove_word (2)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .delete("/api/v1/user/reach/texts/words/word")
+            .respondWith()
+            .statusCode(401)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.reach.texts.removeWord("word");
         }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
     });
 });

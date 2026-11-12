@@ -3046,7 +3046,7 @@ describe('runDataImport keeps permission history and persona choices', () => {
     try {
       const entries = new Map(readZipEntries(archive).map(entry => [entry.name, entry.data]));
       const rows = listAt(parseJson(entries.get('texts.json'), 'texts.json'), 'texts.json');
-      expect(rows).toEqual([{ phone: '+15550111', mode: 'full' }]);
+      expect(rows).toEqual([{ phone: '+15550111', mode: 'full', words: [] }]);
       expect(entries.get('texts.json')?.toString('utf8')).not.toMatch(/code|confirmed|pending|0122|a{20}/);
 
       await runDataImport(importDeps(target), importRequest(archive));
@@ -3070,6 +3070,33 @@ describe('runDataImport keeps permission history and persona choices', () => {
     }
   });
 
+  it('imports the words a person let Aman text, and an export from before those words has none', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-text-words');
+    const older = await makeInstance('target-text-words-older');
+    const owner = { tenant_id: TENANT, created_by: 'bob' };
+    try {
+      const withWords = await repack(archive, entries => {
+        entries.set(
+          'texts.json',
+          Buffer.from(JSON.stringify([{ phone: '+15550111', mode: 'full', words: ['patel', 'lopez'] }])),
+        );
+      });
+      await runDataImport(importDeps(target), importRequest(withWords));
+      await expect(target.stores.textContactStore.listWords(owner)).resolves.toEqual(['lopez', 'patel']);
+      // The format before the words existed: a number and a choice, and nothing else.
+      const before = await repack(archive, entries => {
+        entries.set('texts.json', Buffer.from(JSON.stringify([{ phone: '+15550111', mode: 'full' }])));
+      });
+      await runDataImport(importDeps(older), importRequest(before));
+      await expect(older.stores.textContactStore.listWords(owner)).resolves.toEqual([]);
+    } finally {
+      await source.close();
+      await target.close();
+      await older.close();
+    }
+  });
+
   it('still imports an export made before texts existed, with no number', async () => {
     const { source, archive } = await seededArchive();
     const target = await makeInstance('target-no-texts');
@@ -3085,6 +3112,35 @@ describe('runDataImport keeps permission history and persona choices', () => {
     } finally {
       await source.close();
       await target.close();
+    }
+  });
+
+  it('brings the background checks in switched off, from an export made before the switch and from one with it on', async () => {
+    const { source, archive } = await seededArchive();
+    try {
+      const withSwitch = (noticing_on: boolean | undefined) =>
+        repack(archive, entries => {
+          const rows = listAt(parseJson(entries.get('reach.json'), 'reach.json'), 'reach.json').map(row => {
+            const { noticing_on: _dropped, ...rest } = recordAt(row, 'row');
+            return noticing_on === undefined ? rest : { ...rest, noticing_on };
+          });
+          entries.set('reach.json', Buffer.from(JSON.stringify(rows), 'utf8'));
+        });
+      for (const [name, value] of [
+        ['target-reach-before-switch', undefined],
+        ['target-reach-switch-on', true],
+      ] as const) {
+        const target = await makeInstance(name);
+        try {
+          await runDataImport(importDeps(target), importRequest(await withSwitch(value)));
+          const imported = await target.stores.reachSettingsStore.get({ tenant_id: TENANT, created_by: 'bob' });
+          expect(imported).toMatchObject({ noticing_on: false, max_nudges_per_day: 3 });
+        } finally {
+          await target.close();
+        }
+      }
+    } finally {
+      await source.close();
     }
   });
 
