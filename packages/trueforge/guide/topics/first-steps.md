@@ -14,3 +14,7 @@ You can change any of these later in Settings.
 ## Signing out
 
 Click **More** in the left bar, then click **Sign out**. Aman asks first. Click **Sign out** again to leave, or **Stay** to keep working. Your chats and settings stay on the computer, and they are there when you sign in again.
+
+## New answers in your chats
+
+In the list of chats, a dot and a bold title mark a chat with an answer you have not opened yet. Open the chat and the mark goes away. Each browser keeps its own marks, so reading a chat on your phone does not clear its mark on your laptop.

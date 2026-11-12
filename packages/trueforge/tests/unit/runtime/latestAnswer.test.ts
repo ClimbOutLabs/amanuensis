@@ -25,6 +25,8 @@ async function storeWithChat(metadata: Record<string, string>) {
     external_id: null,
     metadata,
     source: null,
+    is_incognito: false,
+    private_expires_at: null,
     custom: null,
   });
   return sessionStore;

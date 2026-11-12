@@ -631,6 +631,8 @@ export function runStoreContractSuite<
         metadata: { a: '1', b: '2' },
         external_id: null,
         source: null,
+        is_incognito: false,
+        private_expires_at: null,
       });
       await store.updateSession({
         tenant_id: tenant,

@@ -42,6 +42,8 @@ async function drainOneTurn(event: TurnDoneEvent) {
     external_id: null,
     metadata: { folder_hint: 'keep' },
     source: null,
+    is_incognito: false,
+    private_expires_at: null,
     custom: null,
   });
 
