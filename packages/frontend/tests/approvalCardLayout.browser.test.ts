@@ -41,7 +41,7 @@ function boxesOverlap(a: Box, b: Box): boolean {
 
 /** True when the topmost element at the point is the button or something inside it. */
 async function centreIsClickable(page: Page, name: string): Promise<boolean> {
-  const button = page.getByRole('button', { name }).first();
+  const button = page.getByRole('button', { name, exact: true }).first();
   const box = await button.boundingBox();
   if (box === null) return false;
   return await button.evaluate(
@@ -80,7 +80,7 @@ test(
         waitUntil: 'domcontentloaded',
         timeout: FIRST_LOAD_TIMEOUT_MS,
       });
-      const allow = page.getByRole('button', { name: ALLOW }).first();
+      const allow = page.getByRole('button', { name: ALLOW, exact: true }).first();
       await allow.waitFor({ timeout: RENDER_TIMEOUT_MS });
       await page.screenshot({
         path: await featureShotPath({ surface: 'screen:approval-card', step: 'waiting-card-at-rest' }),
@@ -108,7 +108,7 @@ test(
       }, SCROLL_UP_PX);
       const arrow = page.getByRole('button', { name: 'Scroll to bottom' }).first();
       await arrow.waitFor({ timeout: RENDER_TIMEOUT_MS });
-      const deny = page.getByRole('button', { name: DENY }).first();
+      const deny = page.getByRole('button', { name: DENY, exact: true }).first();
       await deny.waitFor({ timeout: RENDER_TIMEOUT_MS });
       await page.screenshot({
         path: await featureShotPath({ surface: 'screen:approval-card', step: 'scrolled-up-arrow-clear-of-the-card' }),
