@@ -137,5 +137,6 @@
   "Memories": "packages/trueforge-ui/src/containers/SettingsBuilder/MemorySection.tsx",
   "Sharing": "packages/trueforge-ui/src/containers/SettingsBuilder/MemorySection.tsx",
   "Learned profile": "packages/trueforge-ui/src/containers/SettingsBuilder/MemorySection.tsx",
-  "Import and export": "packages/trueforge-ui/src/containers/SettingsBuilder/MemorySection.tsx"
+  "Import and export": "packages/trueforge-ui/src/containers/SettingsBuilder/MemorySection.tsx",
+  "Personas": "packages/trueforge-ui/src/containers/SettingsBuilder/ModelRoleSettings.tsx"
 }
