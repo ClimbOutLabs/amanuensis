@@ -18,7 +18,7 @@ test_one_secret_on_the_machine_and_a_copy_in_the_instance() {
   assert_eq "$(grep -c '^SPEECH_SECRET=' "$AMAN_HOME/machine/.env")" 1 "one line in the machine settings"
   assert_eq "$(grep -c '^SPEECH_SECRET=' "$AMAN_HOME/instances/main/.env")" 1 "one line in the instance settings"
   assert_mode "$AMAN_HOME/machine/.env" 600
-  assert_contains "$(cat "$AMAN_HOME/machine/compose.yaml")" "SPEECH_SECRET: \${SPEECH_SECRET}"
+  assert_contains "$(cat "$AMAN_HOME/machine/compose.yaml")" "SPEECH_SECRET: \${SPEECH_SECRET:?missing from .env}"
   assert_not_contains "$(cat "$AMAN_HOME/machine/compose.yaml")" "$machine" "the machine compose file never holds the secret"
   assert_not_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "$machine" "the instance compose file never holds the secret"
   sandbox_drop

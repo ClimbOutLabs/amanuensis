@@ -38,13 +38,11 @@ wait for the warm model before routing. When the model fails to load (for
 example a weight verification failure), `model_loaded` is `false` and
 `model_error` carries the reason.
 
-Calls to `/v1/transcribe` must carry the shared secret in the
-`x-speech-secret` header when `SPEECH_SECRET` is set, the same check the
-browser sidecar uses; the compose stacks and the installer always set it,
-and a value under 32 characters stops the service from starting.
-`/healthz` answers without it, because the Docker health check carries no
-secret. Left unset, which is only for loopback development
-(`docker-compose.dev.yml` binds `127.0.0.1:8001`), no secret is checked.
+Calls to `/v1/transcribe` must carry the shared secret from `SPEECH_SECRET`
+in the `x-speech-secret` header, the same check the browser sidecar uses.
+The compose stacks and the installer always set it, and without a value of
+at least 32 characters the service does not start. `/healthz` answers
+without it, because the Docker health check carries no secret.
 
 ## Lifecycle
 
