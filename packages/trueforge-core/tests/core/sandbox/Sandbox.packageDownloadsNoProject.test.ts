@@ -356,12 +356,12 @@ describe('the first download always asks, even when sandbox work runs without as
     expect(firstInfo.tier3_card?.plain_what).toBe(
       'Aman wants to download packages from the public package sites (npm) in your chats that are not working on a project. This also covers your scheduled runs.',
     );
-    // The classifier raised no card for a run it would have let through, so the download card is
-    // built on its own: its copy comes from the download wording alone.
+    // An install always asks, so the download wording takes over the command card: the headline is the
+    // download sentence and the command card's own warning stays as the consequence.
     expect(firstInfo.tier3_card?.copy).toEqual({
       headline:
         'Aman wants to download packages from the public package sites (npm) in your chats that are not working on a project. This also covers your scheduled runs.',
-      consequence: null,
+      consequence: 'Commands can change or delete files.',
       reason: null,
     });
 
