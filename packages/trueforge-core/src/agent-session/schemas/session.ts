@@ -38,14 +38,6 @@ export const SessionMetadataSchema = z
 
 export type SessionMetadata = z.infer<typeof SessionMetadataSchema>;
 
-/**
- * Session metadata key holding the ISO time of the chat's latest finished answer: the last
- * turn that ended with a final message from the persona or the built-in agent. The server
- * stamps it when such a turn finishes; the chat list compares it with the time the person
- * last opened the chat to decide whether the chat carries the unseen-answer dot.
- */
-export const LATEST_ANSWER_AT_METADATA_KEY = 'latest_answer_at';
-
 export const SessionMetricsSchema = z
   .object({
     total_cost_in_usd: z.number().nonnegative().optional().describe('Estimated total cost in USD for this session'),

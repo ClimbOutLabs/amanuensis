@@ -1,4 +1,4 @@
-import { LATEST_ANSWER_AT_METADATA_KEY } from '@truefoundry/trueforge-core/agent-session/schemas/session';
+import { LATEST_ANSWER_AT_METADATA_KEY } from '@truefoundry/trueforge-core/agent-session/schemas/sessionMetadataKeys';
 import type { ChatAnswerMark, ChatAnswerMarksApi } from '@truefoundry/trueforge-ui';
 
 import { apiPath } from './publicPath';
