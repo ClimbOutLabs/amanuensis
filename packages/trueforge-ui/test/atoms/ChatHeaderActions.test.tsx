@@ -68,7 +68,8 @@ describe('chat header actions', () => {
     ]);
     for (const action of actions) {
       expect(action.className).toBe(headerActionClassName);
-      expect(action).toHaveClass('border-0', 'bg-transparent');
+      expect(action).toHaveClass('border-0', 'bg-transparent', 'text-sm');
+      expect(action.className).not.toMatch(/text-\[0\.8125rem\]/);
     }
   });
 

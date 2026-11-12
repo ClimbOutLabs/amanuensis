@@ -27,7 +27,7 @@ The first time you turn it on, Aman starts from that moment, so old mail does no
 
 ## How loudly
 
-Everything shows under the bell, with the reason you got it.
+Everything shows under the bell, with the reason you got it. The bell is at the top of the left panel. On a phone, tap the menu button to see it; that button shows how many items you have not seen.
 
 - A note is quiet. Most things are notes.
 - A nudge is a notice on the devices where you turned notices on.
