@@ -34,7 +34,14 @@ Click **Sign in**, then enter the email and the password you chose.
 
 **On a Mac,** Aman opens on that Mac only. Phones and other computers cannot reach it.
 
-**On Linux, from your phone or another computer in your home:** the install printed a line that starts "Instead, open this page once on that device and follow its steps", with an address that ends in `/trust`. Open that address on the phone (or scan the square code that was printed). The page explains, for iPhone, Android, Mac and Windows, how to make that device trust your computer. You do this once per device. After that, open the https address from the "Open" list (the one that starts with `https://` and ends in `:8443`). An iPhone says the profile is "Not Signed"; that is expected for a profile you made yourself.
+**On Linux, from your phone or another computer in your home:**
+
+1. Find the line the install printed that starts "Instead, open this page once on that device and follow its steps". It has an address that ends in `/trust`.
+2. Open that address on the phone (or scan the square code that was printed).
+3. Follow the page. It explains, for iPhone, Android, Mac and Windows, how to make that device trust your computer. You do this once per device.
+4. After that, open the https address from the "Open" list. It starts with `https://` and ends in `:8443`.
+
+An iPhone says the profile is "Not Signed". That is expected for a profile you made yourself.
 
 ## Step 4: add your AI model
 
@@ -111,7 +118,13 @@ It shows your backups, newest first, and asks:
 Restore which backup (number):
 ```
 
-Type a number. It tells you what will be replaced and asks you to type `yes`. The password goes back to the one you had when the backup was made. Before it changes anything it saves a copy of what you have now and shows you where that copy is. If something goes wrong it puts everything back and says so. To use the newest backup without the list, run `aman restore --latest`.
+Type a number. It tells you what will be replaced and asks you to type `yes`.
+
+The password goes back to the one you had when the backup was made.
+
+Before it changes anything it saves a copy of what you have now and shows you where that copy is. If something goes wrong it puts everything back and says so.
+
+To use the newest backup without the list, run `aman restore --latest`.
 
 ## Good to know
 

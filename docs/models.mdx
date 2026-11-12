@@ -6,6 +6,10 @@ description: 'Connect model providers from the shipped catalog or add a custom O
 
 TrueForge works with the major model providers and any OpenAI-compatible endpoint. Configure credentials once under **Settings → Models**. Agents reference models by name — agent definitions never contain API keys.
 
+How to get there: Click **More** in the left bar, then **Settings**, then **Models**.
+
+![The Models page in Settings](screenshots/app/settings-models.png)
+
 ## Supported providers
 
 | Provider type   | Notes                                                                  |
@@ -46,26 +50,32 @@ See [Roles and Personas](/model-roles).
 
 ## Stalled model streams
 
-Aman waits 90 seconds for a model's first output, then 60 seconds between
-chunks, and 3 minutes between chunks while the model is writing out a tool call.
-Set `MODEL_FIRST_RESPONSE_TIMEOUT_MS`, `MODEL_STREAM_IDLE_TIMEOUT_MS` and
-`MODEL_STREAM_TOOL_CALL_IDLE_TIMEOUT_MS` to change them. A provider's
-`stream_timeout` can only shorten them for that provider. To give a local model
-that takes long to load more time, raise `MODEL_FIRST_RESPONSE_TIMEOUT_MS`.
-The first-output wait starts when the request is sent,
-so it also covers the wait for the provider to start answering. Nonempty
-reasoning and tool-argument chunks count as progress; empty transport heartbeats
-do not. There is no overall answer-duration ceiling, and thinking remains
-enabled where configured.
+### How long Aman waits
 
-Embedders of the core library can supply `VercelAILLMConfig.streamTimeout` with
-positive `firstChunkMs` and `chunkMs` values within the runtime timer range
-(at most 2,147,483,647 milliseconds); without it the defaults are five minutes
-and sixty seconds. These are host settings, not model request parameters.
-Standalone embedders must supply their own overall cancellation signal.
+Aman waits 90 seconds for a model's first output. After that it waits 60 seconds between chunks. While the model is writing out a tool call, it waits 3 minutes between chunks.
 
-A timeout fails the turn with its recorded cause. An unfinished tool proposal
-is never approved or executed, and is not automatically retried. Results from
-earlier completed tool calls remain in the audit history.
+The first-output wait starts when the request is sent. So it also covers the wait for the provider to start answering.
 
-To run on NVIDIA Nemotron through Nebius Token Factory, including which model does which job, prices, the cost line under each answer and the daily cap, see [Nemotron on Nebius Token Factory](https://github.com/ClimbOutLabs/amanuensis/blob/main/docs/token-factory.md).
+Nonempty reasoning and tool-argument chunks count as progress. Empty transport heartbeats do not.
+
+There is no overall answer-duration ceiling, and thinking remains enabled where configured.
+
+### Changing the waits
+
+Set `MODEL_FIRST_RESPONSE_TIMEOUT_MS`, `MODEL_STREAM_IDLE_TIMEOUT_MS` and `MODEL_STREAM_TOOL_CALL_IDLE_TIMEOUT_MS` to change them.
+
+A provider's `stream_timeout` can only shorten them for that provider.
+
+To give a local model that takes long to load more time, raise `MODEL_FIRST_RESPONSE_TIMEOUT_MS`.
+
+Embedders of the core library can supply `VercelAILLMConfig.streamTimeout` with positive `firstChunkMs` and `chunkMs` values within the runtime timer range (at most 2,147,483,647 milliseconds). Without it the defaults are five minutes and sixty seconds.
+
+These are host settings, not model request parameters. Standalone embedders must supply their own overall cancellation signal.
+
+### When a timeout happens
+
+A timeout fails the turn with its recorded cause.
+
+An unfinished tool proposal is never approved or executed, and is not automatically retried.
+
+Results from earlier completed tool calls remain in the audit history.

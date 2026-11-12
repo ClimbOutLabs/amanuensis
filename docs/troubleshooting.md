@@ -50,9 +50,23 @@ Inside Aman, click **Help, I'm stuck** at the top of the screen. The guide check
 
 ## Using Aman from a phone or another computer
 
-**The page says the connection is not private.** That device does not trust your computer yet. On the computer itself, use the `http://localhost` address instead. On a phone or another computer, do the trust step once: the install printed a line that starts "Instead, open this page once on that device", with an address that ends in `/trust`. Open that address on the device and follow the steps for it. On a Mac, Aman opens on that Mac only, so other devices cannot reach it. [Try Aman](try-aman.md) has the details.
+**The page says the connection is not private.** That device does not trust your computer yet. On the computer itself, use the `http://localhost` address instead.
 
-**The phone cannot reach Aman at all.** The phone must be on the same Wi-Fi as the computer. Run `aman doctor network`. If it says this computer's address changed, run `aman doctor network --fix` to add the new address. On Windows with Aman Setup, run `aman network open` in PowerShell. [Using Aman from your phone](../packages/trueforge/guide/topics/phone.md) covers the rest.
+On a phone or another computer, do the trust step once:
+
+1. Find the line the install printed that starts "Instead, open this page once on that device". It has an address that ends in `/trust`.
+2. Open that address on the device.
+3. Follow the steps for it.
+
+On a Mac, Aman opens on that Mac only, so other devices cannot reach it. [Try Aman](try-aman.md) has the details.
+
+**The phone cannot reach Aman at all.** The phone must be on the same Wi-Fi as the computer. Run `aman doctor network`.
+
+If it says this computer's address changed, run `aman doctor network --fix` to add the new address.
+
+On Windows with Aman Setup, run `aman network open` in PowerShell.
+
+[Using Aman from your phone](../packages/trueforge/guide/topics/phone.md) covers the rest.
 
 **After an update, the https address stopped working.** If an update had to move Aman's https port, it printed the new port. Open Aman with that port on each device.
 
@@ -66,7 +80,9 @@ Inside Aman, click **Help, I'm stuck** at the top of the screen. The guide check
 
 **A card is waiting for your answer.** Aman waits for your OK before it sends, deletes or installs anything. [Approval cards](../packages/trueforge/guide/topics/approvals.md) says what each button does.
 
-**Mail or calendar stopped working.** Click **More** in the left bar, click **Settings**, then click **Connectors**, and look at the card for that account. If it says the sign-in stopped working, click **Manage** and type the details again. A Google account in testing mode signs out every 7 days; the [Google guide](google.mdx) says how to stay signed in.
+**Mail or calendar stopped working.** Click **More** in the left bar, click **Settings**, then click **Connectors**, and look at the card for that account. If it says the sign-in stopped working, click **Manage** and type the details again.
+
+A Google account in testing mode signs out every 7 days. The [Google guide](google.mdx) says how to stay signed in.
 
 ## Updating and backups
 

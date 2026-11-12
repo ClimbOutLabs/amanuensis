@@ -8,7 +8,13 @@ covers: settings:themes
 
 Click **More** at the bottom of the left bar. Under **Appearance**, click **Light**, **Dark** or **Match my computer**. A check shows the one you use now.
 
+![The More menu with Light, Dark and Match my computer under Appearance](../../../../docs/screenshots/app/more-menu.png)
+
 ## Choose a colour theme
+
+How to get there: Click **More** in the left bar, then **Settings**, then **Themes**.
+
+![The Themes page in Settings](../../../../docs/screenshots/app/settings-themes.png)
 
 1. Click **More** in the left bar, then click **Settings**.
 2. Click **Themes**. The page is called **Appearance**.

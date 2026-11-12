@@ -8,6 +8,10 @@ description: 'Assign a model to each job the host does, and let one chat switch 
 **Settings → Roles and Personas** decides which of those models does which job. The two are
 deliberately separate: one is inventory, the other is assignment.
 
+How to get there: Click **More** in the left bar, then **Settings**, then **Roles and Personas**.
+
+![The Roles and Personas page in Settings](screenshots/app/settings-roles-and-personas.png)
+
 ## Roles
 
 Three configurable roles cover the assistant's normal answer, delegation, and compaction work.
@@ -18,9 +22,10 @@ Three configurable roles cover the assistant's normal answer, delegation, and co
 | **Coding / subagent model** | Sub-agent threads (`auxiliary_models.delegation`)                  | Inherits the main chat model   |
 | **Compaction model**       | Context summarization (`auxiliary_models.compaction`)              | Inherits the main chat model   |
 
-Inheritance resolves when the role is used, not when it is saved, so changing the main
-chat model carries every inheriting role with it. Clearing a role removes it rather than
-freezing today's main model into it.
+Inheritance resolves when the role is used, not when it is saved. So changing the main
+chat model carries every inheriting role with it.
+
+Clearing a role removes it. It does not freeze today's main model into it.
 
 A sub-agent that explicitly asks for a model still gets that model — a configured default
 never overrides a deliberate request.
@@ -39,24 +44,38 @@ is worse than a visible error.
 
 ## What each model did
 
-With **Show agent details** on for the chat, each answer's details start with a quiet line that names
-the model that answered, its provider, and the tokens and cost of the whole turn, with any helper
-calls folded into the total:
+### The line under each answer
+
+With **Show agent details** on for the chat, each answer's details start with a quiet line. It names
+the model that answered, its provider, and the tokens and cost of the whole turn. Any helper
+calls are folded into the total:
 
 ```text
 Nemotron 3 Super · Token Factory · 2,140 tokens (1,800 in, 340 out) · $0.0011 at list price · + 2 helper calls on Nemotron 3 Super
 ```
 
-With **Show agent details** on for the chat, each role that ran (the answer, sub-agents, compaction,
-turn summarization, profile learning, the library relevance check) is listed with its model, calls,
-tokens and cost. Token counts are the usage the provider reported for each call. A call whose
+### The list of roles that ran
+
+With **Show agent details** on for the chat, each role that ran is listed with its model, calls,
+tokens and cost. The roles are the answer, sub-agents, compaction, turn summarization, profile
+learning and the library relevance check.
+
+Token counts are the usage the provider reported for each call. A call whose
 provider reported none is shown as `usage not reported`, never as zero or an estimate.
 
-Cost is an estimate from a price table in USD per million tokens, shown "at list price" because it
-is not your bill. Token Factory models have built-in list prices read on 2026-10-15; set
+### Cost
+
+Cost is an estimate from a price table in USD per million tokens. It is shown "at list price" because it
+is not your bill.
+
+Token Factory models have built-in list prices read on 2026-10-15. Set
 `TOKEN_FACTORY_PRICES` to change them or to price a model on another provider. A model with no
-price shows tokens only. **Settings, Themes, Answers** hides the line and the helper rows
-for you without stopping usage from being counted, and **Settings, Models** shows today's tokens
+price shows tokens only.
+
+**Settings, Themes, Answers** hides the line and the helper rows
+for you without stopping usage from being counted.
+
+**Settings, Models** shows today's tokens
 and cost per Token Factory model with the daily cap remaining.
 
 Compaction that inherits the chat model is counted with the chat calls. Set a compaction model to
@@ -80,22 +99,31 @@ let me talk to Zara
 Could Zara answer this one?
 ```
 
-Direct address and the common lead-ins above use a deterministic fast path. Other wording that
-mentions a configured persona receives one short classification by the chat's main model. The
-classification sees only the current message, configured names and IDs, and the current speaker;
-it receives no persona instructions, tools, files, attachments, memory, or chat history. The host
+Direct address and the common lead-ins above use a deterministic fast path.
+
+Other wording that mentions a configured persona receives one short classification by the chat's main model. The
+classification sees only the current message, configured names and IDs, and the current speaker.
+It receives no persona instructions, tools, files, attachments, memory, or chat history.
+
+The host
 accepts only a valid structured selection naming a configured target with a complete, exact,
 unquoted request clause. It rejects a shorter identity that overlaps a longer configured name.
-Malformed, ambiguous, stale, or uncertain results keep the current speaker, and a newer selection
-made in the UI wins while the preflight is running. The preflight's model, finish reason, and usage
+
+Malformed, ambiguous, stale, or uncertain results keep the current speaker. A newer selection
+made in the UI wins while the preflight is running.
+
+The preflight's model, finish reason, and usage
 are recorded separately from the answer completion.
 
 Nothing infers a persona from what a message is *about*. A name in ordinary prose ("I was reading
 about Zara yesterday"), a quotation, a hypothetical, or a negated switch switches nothing.
 
+### Returning to the default assistant
+
 To return naturally to the default assistant, use the assistant name saved under Personalization
-(for example, "Can I talk to Mannie again?") or say "default assistant" / "main assistant". The
-header control remains the deterministic alternative.
+(for example, "Can I talk to Mannie again?"). Or say "default assistant" / "main assistant".
+
+The header control remains the deterministic alternative.
 
 ### While a persona is active
 
@@ -112,7 +140,7 @@ header control remains the deterministic alternative.
   the system prompt and cannot replace harness policy.
 
 Names and aliases must be unique across your personas. A duplicate is rejected when you
-save it, because an invocation that could mean two personas has no correct answer.
+save it. An invocation that could mean two personas has no correct answer.
 
 If a persona's model is no longer configured, invoking it fails visibly and the assignment
 is kept, so you can point it at another model rather than losing it.
@@ -134,7 +162,9 @@ GET    /api/v1/sessions/{session_id}/persona-activations
 when that persona answers, so nothing about the persona is hidden.
 
 `persona-activations` is the newest-first record of which persona answered this chat and
-why. Entries carrying a `turn_id` are that turn's provenance; they survive deleting the
+why.
+
+Entries carrying a `turn_id` are that turn's provenance. They survive deleting the
 persona, so a past turn can still say which persona and model answered it.
 
 Existing installs with no personas configured behave exactly as before: no persona is

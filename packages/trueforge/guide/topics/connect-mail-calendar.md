@@ -6,7 +6,15 @@ covers: settings:connectors, calendar-preset:google, calendar-preset:fastmail, c
 
 You connect email and calendar in one place, in Settings. You do not need the terminal.
 
-Google email uses a Google app that you make once in your own Google account. This takes about ten minutes. Google Calendar can use that app, or the simpler Calendar card with an app password. A calendar from another provider, such as Fastmail, also connects with an app password. See "Connect a calendar with an app password" below.
+How to get there: Click **More** in the left bar, then **Settings**, then **Connectors**.
+
+![The Connectors page in Settings](../../../../docs/screenshots/app/settings-connectors.png)
+
+Google email uses a Google app that you make once in your own Google account. This takes about ten minutes.
+
+Google Calendar can use that app, or the simpler Calendar card with an app password.
+
+A calendar from another provider, such as Fastmail, also connects with an app password. See "Connect a calendar with an app password" below.
 
 If Aman is in offline mode, turn it off first. Click **More**, click **Settings**, click **Permissions**, and turn off **Offline mode**.
 
@@ -39,10 +47,17 @@ The panel then says it is connected and shows your Google address.
 ## Connect Google Drive
 
 1. Click **More**, click **Settings**, click **Connectors**, find **Google**, and click **Manage**.
-2. Open the Drive API, Docs API and Sheets API links in the Drive section. On each Google page, click Enable. All three are needed: the Drive API lists files, the Docs API reads and writes Docs, and the Sheets API reads and adds to Sheets.
+2. Open the Drive API, Docs API and Sheets API links in the Drive section. On each Google page, click Enable. All three are needed:
+   - The Drive API lists files.
+   - The Docs API reads and writes Docs.
+   - The Sheets API reads and adds to Sheets.
 3. Click **Connect Google Drive**. On Google's screen, leave the Drive box ticked and continue.
 
-Aman only sees files it created, or files you opened with Aman. It can read a Doc or a Sheet. Creating a Doc or adding rows to a Sheet asks you first, and the card shows the whole text or every row. Aman cannot delete a file, and it cannot change who a file is shared with.
+Aman only sees files it created, or files you opened with Aman. It can read a Doc or a Sheet.
+
+Creating a Doc or adding rows to a Sheet asks you first, and the card shows the whole text or every row.
+
+Aman cannot delete a file, and it cannot change who a file is shared with.
 
 ## Connect a calendar with an app password
 
@@ -60,15 +75,23 @@ An app password is a separate password for apps like this one. It is not your us
 
 The app signs in to your calendar once before it saves anything. If the sign-in fails, nothing is saved, and the panel says what to fix.
 
-To change the calendar, click **Manage**, then click the button that starts with "Change". To turn it off, click **Manage**, then click **Remove**. This deletes the saved app password for good. If the card says the sign-in stopped working, or that the calendar is not working right now, click **Manage**. You can type the details again, click **Cancel**, or click **Remove**.
+To change the calendar, click **Manage**, then click the button that starts with "Change".
 
-The app stores the app password only on your computer, in the calendar connector. Your assistant never sees it. Never paste the password into a chat. A chat cannot connect a calendar. Use Settings.
+To turn it off, click **Manage**, then click **Remove**. This deletes the saved app password for good.
+
+If the card says the sign-in stopped working, or that the calendar is not working right now, click **Manage**. You can type the details again, click **Cancel**, or click **Remove**.
+
+The app stores the app password only on your computer, in the calendar connector. Your assistant never sees it.
+
+Never paste the password into a chat. A chat cannot connect a calendar. Use Settings.
 
 ## Later
 
 - Click **Allow drafts and sending** if you skipped drafts at the start.
 - Click **Test connection** to check that it still works.
-- If Google signs you out, click **Reconnect**. A Google project in Testing mode signs you out every 7 days. To stop this, open Audience in Google Cloud and click Publish app. Then reconnect once.
+- If Google signs you out, click **Reconnect**.
+  - A Google project in Testing mode signs you out every 7 days.
+  - To stop this, open Audience in Google Cloud and click Publish app. Then reconnect once.
 - Click **Disconnect**, then **Disconnect Google**, to turn off email, calendar and Google Drive.
 
 ## Connect Home Assistant
@@ -85,7 +108,11 @@ To connect it in Aman:
 4. Aman says how many tools and exposed entities it found, or the one thing to fix.
 5. In Home Assistant, expose each entity Aman may see (its settings, then Voice assistants, then Expose). Only exposed entities are visible to Aman.
 
-Reading the state of your home runs on its own. A change, such as turning off a lamp, asks you first, unless you allow that kind of device for good on the card. You can see what you allowed, and take it back, on the Home Assistant connector's page in Settings. Aman never controls locks, alarms or garage doors.
+Reading the state of your home runs on its own.
+
+A change, such as turning off a lamp, asks you first, unless you allow that kind of device for good on the card. You can see what you allowed, and take it back, on the Home Assistant connector's page in Settings.
+
+Aman never controls locks, alarms or garage doors.
 
 ## Connect Notion
 

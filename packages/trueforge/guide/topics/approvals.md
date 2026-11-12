@@ -6,6 +6,12 @@ covers: settings:permissions, approval:plain, approval:email, route:permission, 
 
 Aman shows an approval card before it does something that matters. Nothing happens until you answer.
 
+![An approval card asking to save an email draft, with Allow, Edit and Not now](../../../../docs/screenshots/app/approval-card.png)
+
+How to get there: Click **More** in the left bar, then **Settings**, then **Permissions**.
+
+![The Permissions page in Settings](../../../../docs/screenshots/app/settings-permissions.png)
+
 Reading is free. Aman does not ask before it reads. It asks before it sends, saves or changes something.
 
 ## The buttons on a card

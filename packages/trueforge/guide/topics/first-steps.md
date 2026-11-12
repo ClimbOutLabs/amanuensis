@@ -9,6 +9,8 @@ covers: settings:models, settings:personalization, route:firstRunGuide, route:mo
 3. Connect your email and calendar. Only if you want Aman to read them. See "Connecting your email and calendar".
 4. Try a card. On an empty chat, tap a card such as "Your morning brief". Aman starts a chat with that message.
 
+![The Set up Aman checklist on a new chat: add a model, tell Aman about you, try your first chat](../../../../docs/screenshots/app/setup-checklist.png)
+
 You can change any of these later in Settings.
 
 ## Signing out

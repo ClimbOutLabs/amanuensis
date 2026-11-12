@@ -17,7 +17,10 @@ export const HELP_DIR = 'help';
 const TOPICS_FROM_DOCS = '../packages/trueforge/guide/topics/';
 
 /** Files under docs/ that are for maintainers or tooling, not readers of the site. */
-const SKIPPED = new Set(['docs.json', 'TEST_RATIONALIZATION_REPORT.md']);
+// token-factory.md stays on GitHub for the installer's Token Factory option; the website leaves it out.
+const SKIPPED = new Set(['docs.json', 'TEST_RATIONALIZATION_REPORT.md', 'token-factory.md']);
+/** How a help topic reaches the docs folder, for its screenshots. On the site, docs/ is the root and topics sit in help/. */
+const DOCS_FROM_TOPICS = '../../../../docs/';
 
 const CALLOUTS = { Note: 'note', Info: 'info', Tip: 'tip', Warning: 'warning', Check: 'success' };
 const DROPPED = new Set(['AccordionGroup', 'CardGroup', 'Steps', 'Tabs', 'CodeGroup', 'Frame', 'Columns']);
@@ -191,13 +194,20 @@ export function rewriteLinks(markdown, { fromHelp, fromFile = 'index.md', pages 
       return `](${relative}${rooted[2] ?? ''})`;
     }
     let link = target.replace(/\.mdx(?=$|#)/, '.md');
-    if (!fromHelp && link.startsWith(TOPICS_FROM_DOCS)) {
+    if (fromHelp && link.startsWith(DOCS_FROM_TOPICS)) {
+      link = `../${link.slice(DOCS_FROM_TOPICS.length)}`;
+    } else if (!fromHelp && link.startsWith(TOPICS_FROM_DOCS)) {
       link = `${HELP_DIR}/${link.slice(TOPICS_FROM_DOCS.length)}`;
     } else if (!fromHelp && link.startsWith('../')) {
       link = `${REPO_BLOB_BASE}/${link.slice(3)}`;
     }
     return `](${link})`;
   });
+}
+
+/** A "How to get there:" line, which says where a screen is in the app, becomes a highlighted box. */
+export function howToGetThereBoxes(markdown) {
+  return markdown.replace(/^How to get there: (.+)$/gm, '!!! tip "How to get there"\n    $1');
 }
 
 /** The topic front matter is for the in-app help; the site only needs the title. */
@@ -318,7 +328,10 @@ export async function buildDocsSite({
       text = siteDocsHome(text);
     }
     await mkdir(path.dirname(path.join(outDir, target)), { recursive: true });
-    await writeFile(path.join(outDir, target), rewriteLinks(text, { fromHelp: false, fromFile: target, pages }));
+    await writeFile(
+      path.join(outDir, target),
+      howToGetThereBoxes(rewriteLinks(text, { fromHelp: false, fromFile: target, pages })),
+    );
   }
 
   // Aman's own font, mark and site style, copied from the app so the site matches it.
@@ -331,7 +344,10 @@ export async function buildDocsSite({
   await mkdir(path.join(outDir, HELP_DIR), { recursive: true });
   for (const name of (await readdir(topicsDir)).filter(n => n.endsWith('.md'))) {
     const text = await readFile(path.join(topicsDir, name), 'utf8');
-    await writeFile(path.join(outDir, HELP_DIR, name), rewriteLinks(siteFrontMatter(text), { fromHelp: true }));
+    await writeFile(
+      path.join(outDir, HELP_DIR, name),
+      howToGetThereBoxes(rewriteLinks(siteFrontMatter(text), { fromHelp: true })),
+    );
   }
   // The settings live in docs-site/mkdocs.yml; this file adds the menu built from the docs home.
   const nav = navFromDocsHome(siteDocsHome(await readFile(path.join(docsDir, 'README.md'), 'utf8')));

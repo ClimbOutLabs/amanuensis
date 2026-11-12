@@ -6,6 +6,7 @@ import test from 'node:test';
 import {
   buildDocsSite,
   convertMintlify,
+  howToGetThereBoxes,
   navFromDocsHome,
   REPO_BLOB_BASE,
   rewriteLinks,
@@ -70,6 +71,20 @@ test('a link from the site root points at the page relative to the linking page'
     pages,
   });
   assert.equal(out, '[q](quickstart.md) [s](../key-features/subagents.md#why) [x](/nowhere)');
+});
+
+test('a help topic links its screenshots in the docs folder from the site root', () => {
+  assert.equal(
+    rewriteLinks('![Models](../../../../docs/screenshots/app/models.png)', { fromHelp: true }),
+    '![Models](../screenshots/app/models.png)',
+  );
+});
+
+test('a "How to get there" line becomes a highlighted box', () => {
+  assert.equal(
+    howToGetThereBoxes('Intro.\n\nHow to get there: click **More**, then **Settings**.\n'),
+    'Intro.\n\n!!! tip "How to get there"\n    click **More**, then **Settings**.\n',
+  );
 });
 
 test('topic front matter keeps only the title', () => {

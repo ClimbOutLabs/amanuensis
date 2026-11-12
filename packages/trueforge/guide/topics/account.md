@@ -6,6 +6,8 @@ covers: settings:account
 
 ## How sign-in works on this install
 
+How to get there: Click **More** in the left bar, then **Settings**, then **Account**.
+
 This install keeps its own sign-in: one email address and one password, for one person. There is no account to make anywhere else, and nobody else can be added. The first time you opened Aman, the sign-in page asked you to create it. After that, the same page just asks for the email and password.
 
 Aman stores the password scrambled, never as plain text, and it only works when the page is on this computer or behind https.

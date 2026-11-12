@@ -1,41 +1,33 @@
 ---
 id: personas
-title: Personas, agents, and choosing who answers
-covers: settings:model-roles, route:persona, route:personaKnowledge, route:agent, route:agentImport
+title: Personas
+covers: settings:model-roles, route:persona, route:personaKnowledge
 ---
 
-A persona is a helper that answers in your chats. It has its own name, its own instructions, and its own model. For example, a travel persona can plan a trip for you.
+A persona is a helper that answers in your chats. It has its own name, its own instructions and its own model. For example, a travel persona can plan a trip for you.
 
-An agent is different. It is a saved set of instructions you build and try, and it is what runs your schedules.
+How to get there: Click **More** in the left bar, then **Settings**, then **Roles and Personas**.
 
-## Make a persona that answers in your chats
+![The Roles and Personas page in Settings](../../../../docs/screenshots/app/settings-roles-and-personas.png)
 
-1. Click **More** in the left bar, then click **Settings**.
-2. Click **Roles and Personas**.
-3. Click **Add persona**.
-4. In **Name**, type the name you will use to call the persona, such as Zara.
-5. In **Also answers to**, type other names for it, with commas between them. You can skip this.
-6. In **Model**, pick the model the persona should use.
-7. In **Role**, write how the persona should answer.
-8. Click **Save persona**.
+## Make a persona
 
-Each persona in that list has a knowledge library. You can add documents to it there.
+1. Click **Add persona**.
+2. In **Name**, type the name you will use to call the persona, such as Zara.
+3. In **Also answers to**, type other names for it, with commas between them. You can skip this.
+4. In **Model**, pick the model the persona should use.
+5. In **Role**, write how the persona should answer.
+6. Click **Save persona**.
+
+Each persona in the list has a knowledge library. You can add documents to it there.
 
 ## Choose who answers a chat
 
 - Start your message with the persona's name, such as "Zara, plan a long weekend". The persona answers the rest of that chat.
-- Or click the small button by the message box that shows the name of who is answering. Its tip says "Choose a persona". A list opens. Click a persona in it.
-- This button shows only after you have made at least one persona.
-- That button shows the name of who is answering. To go back, click it again and click the first name in the list. That is Aman itself.
+- Or click the small button by the message box that shows who is answering. Its tip says "Choose a persona". Click a persona in the list.
 
-## Build an agent to save and try
+The button shows only after you have made at least one persona. To go back to Aman, click it again and click the first name in the list.
 
-1. Click **More** in the left bar, then click **Build agent**.
-2. The **Agent Config** panel opens.
-3. Click **Edit Model** and choose a model.
-4. Click **Edit Instructions** and write what the agent should do.
-5. Click **Save Agent**.
-6. Type an **Agent name** and a **Description**. You need both.
-7. Click **Save changes**.
+## Personas and agents
 
-To use it, click **More** in the left bar, then click **Agents**. Click **Try** on the row of your agent. You can also pick it when you make a schedule.
+A persona answers in your chats. An agent is a saved set of instructions you build and try, and it is what runs your schedules. See "Agents".

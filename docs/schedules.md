@@ -21,7 +21,11 @@ A schedule asks Aman to do the same job again and again, for example every weekd
 
 A reminder is for something that should happen once. In any chat, ask with a time, such as "Remind me at 5 pm to call the pharmacy".
 
-When it is due, the reminder shows in the bell and, if you allowed notices, on your devices. Its line also appears at the end of the chat you set it in. If Aman is still answering in that chat, the line waits until the answer ends. A reminder whose chat was deleted still shows in the bell.
+When it is due, the reminder shows in the bell and, if you allowed notices, on your devices.
+
+Its line also appears at the end of the chat you set it in. If Aman is still answering in that chat, the line waits until the answer ends.
+
+A reminder whose chat was deleted still shows in the bell.
 
 Reminders do not show on the Schedules page. To see or cancel them, ask in a chat, such as "What reminders do I have?".
 
@@ -33,4 +37,14 @@ A scheduled run sends no notice. Its results wait in its chat until you open it.
 
 Aman can think all day. Doing things needs your OK.
 
-A scheduled run can read and search, but it never sends or changes anything by itself. It also holds a few things a chat does without asking: running code in the sandbox, setting or cancelling a reminder, and pausing or resuming a schedule. Anything that would need your OK in a chat is held, and the run's chat ends with a **Needs your OK** list. Approve or deny each item there. Held items expire after 24 hours. See [Safety story](/safety) for the details.
+A scheduled run can read and search, but it never sends or changes anything by itself.
+
+It also holds a few things a chat does without asking:
+
+- Running code in the sandbox.
+- Setting or cancelling a reminder.
+- Pausing or resuming a schedule.
+
+Anything that would need your OK in a chat is held, and the run's chat ends with a **Needs your OK** list. Approve or deny each item there.
+
+Held items expire after 24 hours. See [Safety story](/safety) for the details.
