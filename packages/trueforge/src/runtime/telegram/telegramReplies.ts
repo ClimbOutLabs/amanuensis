@@ -1,6 +1,13 @@
 import type { ISessionStore } from '@truefoundry/trueforge-core/agent-session';
 import type { Tier3Card } from '@truefoundry/trueforge-core/core';
 import type { ActionRequiredEvent, ModelMessageEvent } from '@truefoundry/trueforge-core/core/events/schema';
+import type {
+  Tier3CalendarEventSchema,
+  Tier3EmailSchema,
+  Tier3PersonaSchema,
+  Tier3ScheduleSchema,
+  Tier3SkillSchema,
+} from '@truefoundry/trueforge-core/core/permissions/tier';
 import type { Logger } from 'winston';
 import { z } from 'zod';
 
@@ -96,12 +103,88 @@ export const TELEGRAM_SHOWN_CARD_FIELDS = [
   'mail_draft',
 ] as const satisfies readonly (keyof Tier3Card)[];
 
-const SHOWN_CARD_FIELDS: ReadonlySet<string> = new Set(TELEGRAM_SHOWN_CARD_FIELDS);
+/**
+ * The fields Telegram shows inside each card section, held to the same rule. A calendar event's
+ * `action` shows as its heading: "Now:" and "After the change:" for a change, "Exactly what will be
+ * saved:" for a new event.
+ */
+export const TELEGRAM_SHOWN_SECTION_FIELDS = {
+  email: [
+    'action',
+    'to',
+    'cc',
+    'bcc',
+    'subject',
+    'body',
+    'replaces',
+    'reply_in_thread',
+    'reply_to',
+    'from_name',
+    'name_left_off',
+  ] as const satisfies readonly (keyof z.infer<typeof Tier3EmailSchema>)[],
+  calendar_event: [
+    'action',
+    'calendar',
+    'title',
+    'when',
+    'time_zone',
+    'duration',
+    'location',
+    'description',
+    'attendees',
+    'guests_emailed',
+    'one_of_repeating',
+    'before',
+    'already_created',
+    'span_days',
+  ] as const satisfies readonly (keyof z.infer<typeof Tier3CalendarEventSchema>)[],
+  schedule: [
+    'action',
+    'name',
+    'when',
+    'time_zone',
+    'task',
+    'runs_as',
+    'next_runs',
+  ] as const satisfies readonly (keyof z.infer<typeof Tier3ScheduleSchema>)[],
+  persona: ['name', 'description', 'instructions', 'model_name'] as const satisfies readonly (keyof z.infer<
+    typeof Tier3PersonaSchema
+  >)[],
+  skill: [
+    'name',
+    'description',
+    'source',
+    'version',
+    'starter',
+    'instructions',
+  ] as const satisfies readonly (keyof z.infer<typeof Tier3SkillSchema>)[],
+};
 
-/** True when the card carries a field Telegram does not show. */
+/** True when the object carries a set field that is not in the shown list. */
+function hasUnshownField(input: { value: object; shown: readonly string[] }): boolean {
+  const shown = new Set(input.shown);
+  return Object.entries(input.value).some(
+    ([field, value]) => value !== null && value !== undefined && !shown.has(field),
+  );
+}
+
+/** True when the card, or one of its sections, carries a field Telegram does not show. */
 function cardHasUnshownField(card: Tier3Card): boolean {
-  return Object.entries(card).some(
-    ([field, value]) => value !== null && value !== undefined && !SHOWN_CARD_FIELDS.has(field),
+  if (hasUnshownField({ value: card, shown: TELEGRAM_SHOWN_CARD_FIELDS })) {
+    return true;
+  }
+  const sections: readonly { value: object | null | undefined; shown: readonly string[] }[] = [
+    { value: card.email, shown: TELEGRAM_SHOWN_SECTION_FIELDS.email },
+    { value: card.calendar_event, shown: TELEGRAM_SHOWN_SECTION_FIELDS.calendar_event },
+    { value: card.schedule, shown: TELEGRAM_SHOWN_SECTION_FIELDS.schedule },
+    { value: card.persona, shown: TELEGRAM_SHOWN_SECTION_FIELDS.persona },
+    { value: card.skill, shown: TELEGRAM_SHOWN_SECTION_FIELDS.skill },
+  ];
+  return sections.some(
+    section =>
+      section.value !== null &&
+      section.value !== undefined &&
+      hasUnshownField({ value: section.value, shown: section.shown }),
   );
 }
 

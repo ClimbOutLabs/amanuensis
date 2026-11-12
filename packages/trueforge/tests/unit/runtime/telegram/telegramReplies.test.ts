@@ -1,12 +1,20 @@
 import type { TurnRecord, TurnState } from '@truefoundry/trueforge-core/agent-session';
 import { Tier3CardSchema, type Tier3Card } from '@truefoundry/trueforge-core/core';
 import type { ActionRequiredEvent } from '@truefoundry/trueforge-core/core/events/schema';
+import {
+  Tier3CalendarEventSchema,
+  Tier3EmailSchema,
+  Tier3PersonaSchema,
+  Tier3ScheduleSchema,
+  Tier3SkillSchema,
+} from '@truefoundry/trueforge-core/core/permissions/tier';
 import winston from 'winston';
 
 import type { TurnCustom } from '../../../../src/db/sessionCustom';
 import {
   deliverPendingTelegramReplies,
   TELEGRAM_SHOWN_CARD_FIELDS,
+  TELEGRAM_SHOWN_SECTION_FIELDS,
   TELEGRAM_SKILL_INSTRUCTIONS_CHARS,
 } from '../../../../src/runtime/telegram/telegramReplies';
 import { createTelegramService } from '../../../../src/runtime/telegram/telegramService';
@@ -417,6 +425,40 @@ describe('telegram pending replies', () => {
 
   it('shows every field the approval card has: a new card field fails here until Telegram shows it', () => {
     expect([...TELEGRAM_SHOWN_CARD_FIELDS].sort()).toEqual(Object.keys(Tier3CardSchema.shape).sort());
+  });
+
+  it.each([
+    { section: 'email', shown: TELEGRAM_SHOWN_SECTION_FIELDS.email, schema: Tier3EmailSchema.shape },
+    {
+      section: 'calendar_event',
+      shown: TELEGRAM_SHOWN_SECTION_FIELDS.calendar_event,
+      schema: Tier3CalendarEventSchema.shape,
+    },
+    { section: 'schedule', shown: TELEGRAM_SHOWN_SECTION_FIELDS.schedule, schema: Tier3ScheduleSchema.shape },
+    { section: 'persona', shown: TELEGRAM_SHOWN_SECTION_FIELDS.persona, schema: Tier3PersonaSchema.shape },
+    { section: 'skill', shown: TELEGRAM_SHOWN_SECTION_FIELDS.skill, schema: Tier3SkillSchema.shape },
+  ])(
+    'shows every field of the $section section: a new field fails here until Telegram shows it',
+    ({ shown, schema }) => {
+      expect([...shown].sort()).toEqual(Object.keys(schema).sort());
+    },
+  );
+
+  it('sends no buttons for a card section with a field Telegram does not show, and points to the app', async () => {
+    const persona = {
+      name: 'Scout',
+      description: 'Keeps an eye on new listings.',
+      instructions: 'Watch the listings.',
+      model_name: 'house-model',
+      field_telegram_does_not_know: 'x',
+    };
+    const card = cardWith({ plain_what: 'Add a persona.', persona });
+    const { store, client, deps } = harness(doneTurnWith(approvalAction(card)));
+    await deliverPendingTelegramReplies(deps);
+    expect(client.sent).toHaveLength(1);
+    expect(client.sent[0]?.text).toContain('Telegram cannot show everything it will do');
+    expect(client.sent[0]?.inline_buttons).toBeUndefined();
+    expect(store.pendingApprovals).toHaveLength(0);
   });
 
   it('sends no buttons when the exact request text is cut, and points to the app', async () => {
