@@ -381,6 +381,30 @@ describe('create_schedule', () => {
     expect(await built.listAll()).toEqual([]);
   });
 
+  it('ends the approval when the name on the card was taken before the person approved', async () => {
+    const built = await setup();
+    const shown = await built.tools.toolCallInfo({ name: 'create_schedule', arguments: MORNING_BRIEF });
+    await built.agentStore.createAgent({
+      host_managed: false,
+      tenant_id: 'default',
+      created_by_subject: OWNER,
+      name: 'morning-brief',
+      description: 'Made meanwhile.',
+      manifest: AgentSpecSchema.parse({ model: { name: 'test-provider/test-model' }, instructions: 'test' }),
+      external_id: null,
+    });
+    // The same call would now be saved as morning-brief-2, which is not what the card showed.
+    const { result } = await dispatch({
+      built,
+      name: 'create_schedule',
+      args: MORNING_BRIEF,
+      decision: { status: 'allow' },
+      shown,
+    });
+    expect(result.toolCallResults[0]?.message.content).not.toContain('"created"');
+    expect(await built.listAll()).toEqual([]);
+  });
+
   it('makes one agent per schedule, and numbers the name when an agent already has it', async () => {
     const built = await setup();
     await dispatch({ built, name: 'create_schedule', args: MORNING_BRIEF, decision: { status: 'allow' } });
