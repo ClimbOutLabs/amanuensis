@@ -96,6 +96,12 @@ export interface ScriptedModelServer {
   baseUrl: string;
   /** Chat-completion requests served so far, oldest first. */
   requests: () => readonly ChatCompletionRequest[];
+  /**
+   * Sets what the model does next without the person's message saying it, so a test can tell the model's
+   * words from the person's. `reply` is the next plain answer; `toolArguments` are the next tool call's arguments.
+   * Each is used once.
+   */
+  next: (step: { reply?: string; toolArguments?: unknown }) => void;
   /** Thinking streams still open: a cancelled turn must hang up every one of them. */
   openThinkingStreams: () => number;
   close: () => Promise<void>;
@@ -444,6 +450,8 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
   const stalled = new Set<ServerResponse>();
   const thinking = new Set<ServerResponse>();
   let callCounter = 0;
+  let nextReply: string | undefined;
+  let nextToolArgumentsJson: string | undefined;
 
   async function dispatch(req: IncomingMessage, res: ServerResponse): Promise<void> {
     if (!req.url?.endsWith('/chat/completions')) {
@@ -514,18 +522,20 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
       }
     } else if (toolName !== undefined) {
       callCounter += 1;
+      const scriptedArgumentsJson =
+        requestedTool?.argumentsJson === '' || requestedTool?.argumentsJson === undefined
+          ? argumentsJsonForTool({
+              name: toolName,
+              callToolServer: callToolServer(parsed.messages),
+              text: textArgument(parsed.messages),
+            })
+          : requestedTool.argumentsJson;
       toolCalls.push({
         name: toolName,
         callId: `call_${String(callCounter)}`,
-        argumentsJson:
-          requestedTool?.argumentsJson === '' || requestedTool?.argumentsJson === undefined
-            ? argumentsJsonForTool({
-                name: toolName,
-                callToolServer: callToolServer(parsed.messages),
-                text: textArgument(parsed.messages),
-              })
-            : requestedTool.argumentsJson,
+        argumentsJson: nextToolArgumentsJson ?? scriptedArgumentsJson,
       });
+      nextToolArgumentsJson = undefined;
     }
 
     const rejectingJudge =
@@ -534,9 +544,15 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
     const quoteToolResult = parsed.messages.some(message =>
       personText(message.content).includes(QUOTE_TOOL_RESULT_DIRECTIVE),
     );
+    const isChatAnswer = toolCalls.length === 0 && parsed.tools.length > 0 && !rejectingJudge;
     const replyText = rejectingJudge
       ? '{"helpful":[]}'
-      : ((quoteToolResult ? lastToolResultText(parsed.messages) : undefined) ?? FINAL_TEXT);
+      : ((quoteToolResult ? lastToolResultText(parsed.messages) : undefined) ??
+        (isChatAnswer ? nextReply : undefined) ??
+        FINAL_TEXT);
+    if (isChatAnswer) {
+      nextReply = undefined;
+    }
 
     if (!parsed.stream) {
       res.writeHead(200, { 'content-type': 'application/json' });
@@ -614,6 +630,11 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
   return {
     baseUrl: `http://127.0.0.1:${String(address.port)}/v1`,
     requests: () => requests,
+    next: step => {
+      nextReply = step.reply ?? nextReply;
+      nextToolArgumentsJson =
+        step.toolArguments === undefined ? nextToolArgumentsJson : JSON.stringify(step.toolArguments);
+    },
     openThinkingStreams: () => thinking.size,
     close: () =>
       new Promise<void>((resolve, reject) => {
