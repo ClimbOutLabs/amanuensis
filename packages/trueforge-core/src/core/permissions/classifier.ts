@@ -52,6 +52,7 @@ import {
   isScheduleWriteToolName,
   LIST_REMINDERS_TOOL_NAME,
   LIST_SCHEDULES_TOOL_NAME,
+  PAUSE_SCHEDULE_TOOL_NAME,
   SCHEDULE_SERVER_ID,
   SET_REMINDER_TOOL_NAME,
 } from '../schedules/toolContract';
@@ -203,7 +204,13 @@ import {
 
 import type { CaldavEventReview } from '../calendar/caldav/eventReview';
 import { CALDAV_SERVER_NAME, isCaldavReadToolName } from '../calendar/caldav/toolContract';
+import {
+  HOME_ASSISTANT_SERVER_NAME,
+  homeAssistantTarget,
+  homeAssistantTargetLabel,
+} from '../homeassistant/toolContract';
 import { classifyCaldavTool } from './caldavTier';
+import { classifyHomeAssistantTool } from './homeAssistantTier';
 
 export interface SentinelAction {
   /** Original tool name (sandbox name or mcp server tool name). */
@@ -271,6 +278,8 @@ export interface SentinelAction {
   persona_write?: Tier3Persona | undefined;
   /** The reminder a set or cancel call touches, settled by the schedule tool set so the activity line reads it plainly. */
   reminder?: ReminderLine | undefined;
+  /** The name of the schedule a pause or resume call touches, settled by the schedule tool set from the store. */
+  schedule_status?: { name: string } | undefined;
   /**
    * Context for a browser_click call, read from the live page before the click: the site, the
    * element's accessible name, whether it submits a form, and the form's values. Set by the browser
@@ -2585,6 +2594,55 @@ function hasStandingToolGrant(ctx: ClassifyContext, action: SentinelAction): Pro
   });
 }
 
+/** Whether a standing grant is stored under a scope key instead of the tool's own name (a Home Assistant domain). */
+function hasStandingScopeGrant(ctx: ClassifyContext, action: SentinelAction, scope_key: string): Promise<boolean> {
+  if (action.mcp_server_name === undefined) {
+    return Promise.resolve(false);
+  }
+  return ctx.services.tool_grants.hasToolGrant({
+    tenant_id: ctx.tenant_id,
+    created_by: ctx.created_by,
+    mcp_server_name: action.mcp_server_name,
+    tool_name: scope_key,
+    mcp_server_host: action.mcp_server_host ?? null,
+  });
+}
+
+/**
+ * Whether read content chose a Home Assistant change's target: the entity it names, or any address
+ * or link among its arguments, appears only in what the assistant read. Judged with the same
+ * provenance record that guards sends.
+ */
+function homeAssistantSteered(input: { action: SentinelAction; ctx: ClassifyContext }): boolean {
+  const { action, ctx } = input;
+  if (action.mcp_server_name !== HOME_ASSISTANT_SERVER_NAME) {
+    return false;
+  }
+  const target = homeAssistantTarget({ tool_name: action.tool_name, params: action.canonical_params });
+  const label = homeAssistantTargetLabel(target);
+  const values: string[] = [];
+  if (label !== null) {
+    values.push(label);
+  }
+  if (target.entity_id !== null) {
+    values.push(target.entity_id);
+  }
+  for (const value of Object.values(action.canonical_params)) {
+    if (typeof value === 'string') {
+      values.push(value);
+    } else if (Array.isArray(value)) {
+      for (const entry of value) {
+        if (typeof entry === 'string') {
+          values.push(entry);
+        }
+      }
+    }
+  }
+  return (
+    steeredDestinations({ provenance: ctx.web_search.provenance, addresses: [], values, reply_sender: null }).length > 0
+  );
+}
+
 /**
  * Calendar tools are the host's own, named by server. A read is silent but flagged as sensitive (so a session that
  * read the calendar can no longer search silently). A write always asks with the event in full; in a scheduled run
@@ -2866,12 +2924,46 @@ async function classifyPersonaTool(action: SentinelAction, ctx: ClassifyContext)
 }
 
 /**
+ * A change to the person's own reminders and schedules that a chat they watch makes without asking. A scheduled
+ * run has nobody watching, so the same change asks there, which holds it for the owner.
+ */
+async function askWhileUnattended(input: {
+  action: SentinelAction;
+  ctx: ClassifyContext;
+  plain_what: string;
+  reason: string;
+  reason_detail: string;
+}): Promise<TierDecision> {
+  const { action, ctx } = input;
+  return tier3Decision({
+    card: {
+      plain_what: input.plain_what,
+      plain_why: plainWhy(ctx.agent_intent),
+      cannot_be_undone: null,
+      why_asked_again: null,
+      destination: null,
+      recipient: null,
+      amount: null,
+      parsed_command: null,
+      outbound_text: null,
+      destination_host: null,
+      outbound_truncated: false,
+    },
+    reason: input.reason,
+    reason_detail: input.reason_detail,
+    sensitive_read: false,
+    approval_token_id: await mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params }),
+  });
+}
+
+/**
  * Schedule tools are the host's own, named by server. Creating or deleting always asks with the schedule in full;
- * listing, pausing and resuming run without asking. Any other name fails closed.
+ * listing runs without asking. Pausing and resuming run without asking in a chat, and ask in a scheduled run.
+ * Any other name fails closed.
  */
 async function classifyScheduleTool(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
   if (isReminderToolName(action.tool_name)) {
-    return classifyReminderTool(action);
+    return classifyReminderTool(action, ctx);
   }
   if (isScheduleWriteToolName(action.tool_name)) {
     if (action.schedule_write === undefined) {
@@ -2890,6 +2982,17 @@ async function classifyScheduleTool(action: SentinelAction, ctx: ClassifyContext
     });
   }
   if (isScheduleStatusToolName(action.tool_name)) {
+    if (ctx.services.unattended) {
+      const verb = action.tool_name === PAUSE_SCHEDULE_TOOL_NAME ? 'Pause' : 'Resume';
+      const name = action.schedule_status?.name;
+      return askWhileUnattended({
+        action,
+        ctx,
+        plain_what: name === undefined ? `${verb} a schedule?` : `${verb} the schedule ${cardSubject(name)}?`,
+        reason: 'schedule_status_unattended',
+        reason_detail: 'A scheduled run asks before it pauses or resumes a schedule.',
+      });
+    }
     return tier1Decision({
       reason: 'schedule_status',
       reason_detail: 'Pause or resume a schedule.',
@@ -2904,11 +3007,30 @@ async function classifyScheduleTool(action: SentinelAction, ctx: ClassifyContext
 
 /**
  * A reminder is the person's own note on their own machine and only ever reaches them, so setting, listing and
- * cancelling one runs without asking. The activity line is the only trace.
+ * cancelling one runs without asking in a chat. The activity line is the only trace. A scheduled run asks
+ * before it sets or cancels one.
  */
-function classifyReminderTool(action: SentinelAction): TierDecision {
+async function classifyReminderTool(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
   const what = displayLineText(action.reminder?.what ?? null);
   const when = displayLineText(action.reminder?.when ?? null);
+  if (ctx.services.unattended && action.tool_name === SET_REMINDER_TOOL_NAME) {
+    return askWhileUnattended({
+      action,
+      ctx,
+      plain_what: when !== null && what !== null ? `Set a reminder for ${when}: ${what}?` : 'Set a reminder?',
+      reason: 'reminder_write_unattended',
+      reason_detail: 'A scheduled run asks before it sets a reminder.',
+    });
+  }
+  if (ctx.services.unattended && action.tool_name === CANCEL_REMINDER_TOOL_NAME) {
+    return askWhileUnattended({
+      action,
+      ctx,
+      plain_what: what === null ? 'Cancel a reminder?' : `Cancel the reminder: ${what}?`,
+      reason: 'reminder_write_unattended',
+      reason_detail: 'A scheduled run asks before it cancels a reminder.',
+    });
+  }
   switch (action.tool_name) {
     case SET_REMINDER_TOOL_NAME:
       return tier1Decision({
@@ -3854,6 +3976,22 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
   }
 
   if (action.tool_type === 'mcp') {
+    const homeAssistant = await classifyHomeAssistantTool({
+      action,
+      assistant: ctx.web_search.assistantName,
+      steered: homeAssistantSteered({ action, ctx }),
+      hasStandingGrant: (scope_key: string) => hasStandingScopeGrant(ctx, action, scope_key),
+      mintToken: () =>
+        mintPlainToken({
+          ctx,
+          tool_name: action.tool_name,
+          params: action.canonical_params,
+          connector: connectorBindingFor(action),
+        }),
+    });
+    if (homeAssistant !== undefined) {
+      return steeringChecked({ decision: homeAssistant, ctx, guests: [] });
+    }
     const caldav = await classifyCaldavTool({
       action,
       review: action.caldav_event ?? null,

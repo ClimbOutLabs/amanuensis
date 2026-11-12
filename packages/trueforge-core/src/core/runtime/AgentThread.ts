@@ -2354,7 +2354,7 @@ export class AgentThread {
               tenant_id: this.sentinel.tenant_id,
               created_by: this.sentinel.created_by,
               mcp_server_name: pending.tool_info.mcp_server_name,
-              tool_name: pending.tool_info.original_tool_name,
+              tool_name: pending.tool_info.grant_tool_name ?? pending.tool_info.original_tool_name,
               mcp_server_host: pending.tool_info.grant_host ?? null,
             });
           }
