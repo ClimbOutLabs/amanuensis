@@ -66,7 +66,11 @@ export async function resolveGitTurnSkills(
     // covers: the stored pin, never the ref, so the code that was checked is the code that
     // runs. Without an approval in force the manifest ref is used, as before.
     const approvalInForce =
-      effectiveSkillNetworkHosts({ declared: git.network_hosts, approved: record.network_approval }) !== null;
+      effectiveSkillNetworkHosts({
+        declared: git.network_hosts,
+        approved: record.network_approval,
+        denied: record.network_denied_hosts,
+      }) !== null;
     resolved.push({
       type: 'git',
       name: git.name,
