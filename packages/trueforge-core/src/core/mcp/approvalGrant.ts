@@ -145,6 +145,7 @@ function secretPathReadBarsDurableGrant(info: InternalToolCallInfo): boolean {
  * that is read-only inspection, for the same argument-blindness reason as a chat grant. A call the
  * classifier stamped with a grant scope key is the one exception: the key itself is the scope
  * (a Home Assistant domain or the one entity), so the grant is never wider than the key says.
+ * A change to the person's own calendar is answered per chat, so it never gets one.
  */
 export function allowsToolGrant(info: InternalToolCallInfo): boolean {
   // A grant has no effect on the designated search provider, which has its own guarded path.
@@ -157,7 +158,6 @@ export function allowsToolGrant(info: InternalToolCallInfo): boolean {
     return false;
   }
   return (
-    isOwnCalendarChange(info) ||
     isOwnDriveWrite(info) ||
     (info.type === 'mcp' && info.effect === 'inspect') ||
     (info.type === 'mcp' && info.grant_tool_name !== undefined)

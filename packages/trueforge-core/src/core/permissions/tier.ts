@@ -81,14 +81,14 @@ export const CHAT_GRANTABLE_CONSEQUENCE_REASONS: ReadonlySet<string> = new Set([
 
 /**
  * Calendar changes that touch only the person's own calendar: no guest is invited, reached or cancelled.
- * Only these may get an "Always allow" or chat grant. Anything that cannot be shown guest-free is a guest change.
+ * Only these may get a chat grant, and none gets a grant for every chat. Anything that cannot be shown guest-free
+ * is a guest change.
  */
 export const OWN_CALENDAR_CHANGE_REASONS: ReadonlySet<string> = new Set(['calendar_write', 'caldav_calendar_change']);
 
 /**
  * Drive writes touch only the person's own files: a new Doc, or rows added to their own Sheet. Nothing is
- * sent to anyone and nothing is shared, so only these may get an "Always allow" or chat grant, as an
- * own-calendar change may.
+ * sent to anyone and nothing is shared, so only these may get an "Always allow" or chat grant.
  */
 export const OWN_DRIVE_WRITE_REASONS: ReadonlySet<string> = new Set(['google_drive_write']);
 
