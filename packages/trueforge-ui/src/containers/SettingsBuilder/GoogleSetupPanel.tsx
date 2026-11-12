@@ -22,6 +22,9 @@ import { useAssistantDisplayName } from '../../components/PersonalizationContext
 const GOOGLE_PROJECT_URL = 'https://console.cloud.google.com/projectcreate';
 const GOOGLE_GMAIL_API_URL = 'https://console.cloud.google.com/apis/library/gmail.googleapis.com';
 const GOOGLE_CALENDAR_API_URL = 'https://console.cloud.google.com/apis/library/calendar-json.googleapis.com';
+const GOOGLE_DRIVE_API_URL = 'https://console.cloud.google.com/apis/library/drive.googleapis.com';
+const GOOGLE_DOCS_API_URL = 'https://console.cloud.google.com/apis/library/docs.googleapis.com';
+const GOOGLE_SHEETS_API_URL = 'https://console.cloud.google.com/apis/library/sheets.googleapis.com';
 const GOOGLE_CONSENT_SCREEN_URL = 'https://console.cloud.google.com/apis/credentials/consent';
 const GOOGLE_CREDENTIALS_URL = 'https://console.cloud.google.com/apis/credentials';
 const GOOGLE_AUDIENCE_URL = 'https://console.cloud.google.com/auth/audience';
@@ -105,8 +108,24 @@ const CALENDAR_FEATURE = 'calendar_read' satisfies GoogleFeature;
 const CALENDAR_WRITE_FEATURE = 'calendar_write' satisfies GoogleFeature;
 const CALENDAR_FEATURES: GoogleFeature[] = [CALENDAR_FEATURE, CALENDAR_WRITE_FEATURE];
 
+/**
+ * The Drive feature's name on the wire, typed as a plain string on purpose: the generated SDK's feature
+ * list learns it when the SDK is next generated, and until then the panel reads the value from the status
+ * the server sends, never retyping it.
+ */
+const DRIVE_FEATURE_NAME: string = 'drive_files';
+
 function grantedFeatures(status: GoogleConnectionStatus): GoogleFeature[] {
   return status.features.filter(item => item.granted).map(item => item.feature);
+}
+
+/** The Drive feature as the server named it in this status, or undefined when the server has no Drive yet. */
+function driveFeature(status: GoogleConnectionStatus): GoogleFeature | undefined {
+  return status.features.find(item => item.feature === DRIVE_FEATURE_NAME)?.feature;
+}
+
+function driveGranted(status: GoogleConnectionStatus): boolean {
+  return status.features.some(item => item.feature === DRIVE_FEATURE_NAME && item.granted);
 }
 
 function describeTest({
@@ -124,7 +143,7 @@ function describeTest({
     case 'not_connected':
       return 'Google is not connected.';
     case 'needs_reconnect':
-      return 'Reconnect needed. Google sign-in expired and mail and calendar are paused. Select Reconnect to sign in again.';
+      return 'Reconnect needed. Google sign-in expired and mail, calendar and Drive files are paused. Select Reconnect to sign in again.';
     case 'unreachable':
       return `${assistant} couldn't reach Google just now. Try again in a minute.`;
     case 'calendar_unavailable':
@@ -335,10 +354,10 @@ export function GoogleSetupPanel({ open, onOpenChange, port, onChanged }: Google
             </h3>
             {status.state === 'needs_reconnect' ? (
               <p className="rounded-md border border-warning-bg/40 bg-warning-bg/10 px-3 py-2">
-                Google sign-in expired. Mail and calendar are paused, and other parts of {assistant} keep working.
-                Select Reconnect to sign in again. If this keeps happening about once a week, your Google project is in
-                Testing: either reconnect each week, or in Google Cloud open Audience and choose Publish app, then
-                reconnect once.
+                Google sign-in expired. Mail, calendar and Drive files are paused, and other parts of {assistant} keep
+                working. Select Reconnect to sign in again. If this keeps happening about once a week, your Google
+                project is in Testing: either reconnect each week, or in Google Cloud open Audience and choose Publish
+                app, then reconnect once.
               </p>
             ) : (
               <>
@@ -357,7 +376,7 @@ export function GoogleSetupPanel({ open, onOpenChange, port, onChanged }: Google
             )}
             <ul className="space-y-1 text-text-secondary">
               {status.features
-                .filter(item => !CALENDAR_FEATURES.includes(item.feature))
+                .filter(item => !CALENDAR_FEATURES.includes(item.feature) && item.feature !== DRIVE_FEATURE_NAME)
                 .map(item => (
                   <li key={item.feature}>
                     {item.label}: {item.granted ? 'allowed' : 'not allowed'}
@@ -444,6 +463,70 @@ export function GoogleSetupPanel({ open, onOpenChange, port, onChanged }: Google
                 )}
               </div>
             ) : null}
+            {status.state === 'connected' && driveFeature(status) !== undefined ? (
+              <div aria-label="Google Drive" className="space-y-2 rounded-md border border-border bg-primary-bg p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p>
+                    <span className="font-medium">Google Drive</span>:{' '}
+                    {driveGranted(status) ? 'connected' : 'not connected'}
+                  </p>
+                  {driveGranted(status) ? null : (
+                    <Button
+                      variant="secondary"
+                      size="small"
+                      type="button"
+                      disabled={busy || offline}
+                      onClick={() => {
+                        const feature = driveFeature(status);
+                        if (feature !== undefined) {
+                          void beginConsent({ useSavedClient: true, features: [feature] });
+                        }
+                      }}
+                    >
+                      Connect Google Drive
+                    </Button>
+                  )}
+                </div>
+                {driveGranted(status) ? (
+                  <>
+                    <p className="text-text-secondary">
+                      {assistant} can read the Drive files it created, or that you opened with it. It can create a
+                      Google Doc and add rows to a Google Sheet, and you approve each one first. It cannot delete files
+                      or change who a file is shared with.
+                    </p>
+                    <p className="text-text-secondary">
+                      If Drive stops answering, check that its APIs are still on: open these pages and click Enable.
+                    </p>
+                    <CopyField label="Drive API link" value={GOOGLE_DRIVE_API_URL} href={GOOGLE_DRIVE_API_URL} />
+                    <CopyField label="Docs API link" value={GOOGLE_DOCS_API_URL} href={GOOGLE_DOCS_API_URL} />
+                    <CopyField label="Sheets API link" value={GOOGLE_SHEETS_API_URL} href={GOOGLE_SHEETS_API_URL} />
+                  </>
+                ) : (
+                  <>
+                    <p className="text-text-secondary">
+                      Lets {assistant} work with a small part of your Drive: the files it created, and the files you
+                      opened with it. The rest of your Drive stays invisible to {assistant}. Creating a Doc and adding
+                      rows to a Sheet still ask you first, and {assistant} cannot delete files or change sharing.
+                    </p>
+                    <ol className="list-decimal space-y-3 pl-5">
+                      <li>
+                        <p className="font-medium">Turn on the Google Drive, Docs and Sheets APIs</p>
+                        <p className="text-text-secondary">On each page, click Enable.</p>
+                        <CopyField label="Drive API link" value={GOOGLE_DRIVE_API_URL} href={GOOGLE_DRIVE_API_URL} />
+                        <CopyField label="Docs API link" value={GOOGLE_DOCS_API_URL} href={GOOGLE_DOCS_API_URL} />
+                        <CopyField label="Sheets API link" value={GOOGLE_SHEETS_API_URL} href={GOOGLE_SHEETS_API_URL} />
+                      </li>
+                      <li>
+                        <p className="font-medium">Select Connect Google Drive</p>
+                        <p className="text-text-secondary">
+                          On Google&apos;s screen, leave the Drive box ticked and continue.
+                        </p>
+                      </li>
+                    </ol>
+                  </>
+                )}
+              </div>
+            ) : null}
             {testMessage ? (
               <p role="status" className="text-text-secondary">
                 {testMessage}
@@ -498,9 +581,9 @@ export function GoogleSetupPanel({ open, onOpenChange, port, onChanged }: Google
                 className="rounded-md border border-border bg-primary-bg p-3"
               >
                 <p>
-                  Disconnecting turns off both mail and calendar. It removes {assistant}&apos;s access to your Google
-                  account everywhere it is used and deletes the saved login. Emails already sent stay in Gmail. You can
-                  connect again later.
+                  Disconnecting turns off mail, calendar and Google Drive. It removes {assistant}&apos;s access to your
+                  Google account everywhere it is used and deletes the saved login. Emails already sent stay in Gmail.
+                  You can connect again later.
                 </p>
                 <div className="mt-3 flex gap-2">
                   <Button

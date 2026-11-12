@@ -120,3 +120,15 @@ mcp_servers:
       type: header
       headers:
         Authorization: Bearer YOUR_HINDSIGHT_API_KEY
+  # The person's own Home Assistant, so the URL here is a placeholder: the connect form asks for
+  # their address and long-lived access token, and builds this endpoint and the header itself.
+  - type: remote
+    name: home-assistant
+    url: https://homeassistant.local:8123/mcp_server/sse
+    description: >-
+      See and control the Home Assistant devices you expose to voice assistants. Reads run on
+      their own; changes ask first; locks, alarms and garage doors are never controlled.
+    auth:
+      type: header
+      headers:
+        Authorization: Bearer YOUR_HOME_ASSISTANT_TOKEN
