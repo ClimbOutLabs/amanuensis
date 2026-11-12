@@ -1,113 +1,185 @@
 ---
 id: connect-mail-calendar
-title: Connecting your email and calendar
-covers: settings:connectors, calendar-preset:google, calendar-preset:fastmail, calendar-preset:yahoo, calendar-preset:gmx, calendar-preset:webde, calendar-preset:other, route:google, route:calendarAccount, route:connectorAccount
+title: Connect email and calendar
+covers: settings:connectors, calendar-preset:google, calendar-preset:fastmail, calendar-preset:yahoo, calendar-preset:gmx, calendar-preset:webde, calendar-preset:other, email-preset:gmail, email-preset:yahoo, email-preset:aol, email-preset:icloud, email-preset:fastmail, email-preset:zoho, email-preset:gmx, email-preset:webde, route:google, route:calendarAccount, route:emailAccount, route:connectorAccount
 ---
 
-You connect email and calendar in one place, in Settings. You do not need the terminal.
+Connect your email and calendar so Aman can read your mail, look at your calendar and, after you say yes, write and send for you. You set it all up in Settings. You don't need the terminal.
 
-Google email uses a Google app that you make once in your own Google account. This takes about ten minutes. Google Calendar can use that app, or the simpler Calendar card with an app password. A calendar from another provider, such as Fastmail, also connects with an app password. See "Connect a calendar with an app password" below.
+How to get there: Click **More** in the left bar, then **Settings**, then **Connectors**.
 
-If Aman is in offline mode, turn it off first. Click **More**, click **Settings**, click **Permissions**, and turn off **Offline mode**.
+=== "Computer"
 
-## Connect your email
+    ![The Connectors page in Settings, with the Email, Calendar and Google cards](../../../../docs/screenshots/app/connect-mail-calendar-connectors-desktop.png)
 
-1. Click **More** in the left bar, click **Settings**, then click **Connectors**.
-2. Find **Google** in the list and click **Connect**.
-3. A panel opens with a list of steps. Do them in order. Each step has a link you can copy.
-4. Make a Google Cloud project. Use one you already have if you like.
-5. Turn on the Gmail API. On Google's page, click Enable.
-6. Set up the consent screen. Choose External, then type an app name and your email address.
-7. Add yourself as a test user. On the Audience page, under Test users, click Add users. Add the Gmail address you will connect.
-8. Make the client. Choose the app type the panel names. Click Create, then click Download JSON.
-9. Back in Aman, type the **Client ID** and **Client secret**. Or drop the file you downloaded into the panel.
-10. Click **Check my client**. Fix anything it lists.
-11. To let Aman save drafts and send email, tick the box about drafts and sending. Every draft and every send still asks you first.
-12. Click **Connect Google**. A Google window opens. If nothing opens, allow pop-ups for this site.
-13. Google says it has not checked the app. This is because you made it. Click Advanced, then click the link to your app, then click Continue.
-14. If your browser ends on a page that says "This site can't be reached", copy the whole address from the address bar. Paste it into the panel and click **Finish connecting**.
+=== "Phone"
 
-The panel then says it is connected and shows your Google address.
+    ![The Connectors page in Settings, with the Email, Calendar and Google cards](../../../../docs/screenshots/app/connect-mail-calendar-connectors-phone.png)
 
-## Connect your calendar
+!!! note "Before you start"
 
-1. Click **More**, click **Settings**, click **Connectors**, find **Google**, and click **Manage**.
-2. Open the Calendar API link in the Calendar section. On Google's page, click Enable.
-3. Click **Connect Calendar**. On Google's screen, leave the calendar box ticked and continue.
-4. To let Aman add events, click the button that starts with "Allow" and ends with "to add events". It shows Aman's name in the middle. You still approve each event first. Aman cannot delete events.
+    If Aman is in offline mode, turn it off first. Email and calendar need the internet. Click **More**, then **Settings**, then **Permissions**, and turn off **Offline mode**.
 
-## Connect Google Drive
+## Pick the right card
 
-1. Click **More**, click **Settings**, click **Connectors**, find **Google**, and click **Manage**.
-2. Open the Drive API, Docs API and Sheets API links in the Drive section. On each Google page, click Enable. All three are needed: the Drive API lists files, the Docs API reads and writes Docs, and the Sheets API reads and adds to Sheets.
-3. Click **Connect Google Drive**. On Google's screen, leave the Drive box ticked and continue.
+There are three cards for mail and calendar on the Connectors page. Most people only need one or two.
 
-Aman only sees files it created, or files you opened with Aman. It can read a Doc or a Sheet. Creating a Doc or adding rows to a Sheet asks you first, and the card shows the whole text or every row. Aman cannot delete a file, and it cannot change who a file is shared with.
+| Card         | What it connects                                                          | What you need                                                       | Time       |
+| ------------ | ------------------------------------------------------------------------- | ------------------------------------------------------------------- | ---------- |
+| **Email**    | Gmail, iCloud, Yahoo, AOL, Fastmail, Zoho, GMX, web.de or another account | An app password from your email provider                            | 5 minutes  |
+| **Calendar** | Google, Fastmail, Yahoo, GMX, web.de or another calendar                  | An app password from your calendar provider                         | 5 minutes  |
+| **Google**   | Gmail, Google Calendar and Google Drive together                          | A free Google Cloud project that you make once, in your own account | 10 minutes |
 
-## Connect a calendar with an app password
+An app password is a separate password that your provider makes for apps like Aman. It is not your usual password, and you can delete it at your provider at any time.
 
-Use this for Google Calendar or a calendar from another provider. Google, Fastmail, Yahoo, GMX and web.de are on the list. Any other calendar that gives you an https calendar address works too.
+- The quick way: use the **Email** card for mail and the **Calendar** card for your calendar.
+- For Google Drive, or when your work account doesn't allow app passwords, use the **Google** card.
 
-An app password is a separate password for apps like this one. It is not your usual password. You make it at your calendar provider.
+If you don't see the **Email** or **Calendar** card, your install of Aman doesn't include it. Use the **Google** card instead, or ask the person who set up Aman.
 
-1. Click **More** in the left bar, click **Settings**, then click **Connectors**.
-2. Find **Calendar** in the list and click **Connect**.
-3. Pick your provider in **Calendar provider**. For a provider that is not on the list, pick Other.
-4. If you picked Other, type the **Calendar address**. Your provider's help pages give it. It starts with https://.
-5. Type your **Email address**. If you sign in to the calendar with a different name, type that name in the login box.
-6. Make an app password at your provider. The panel shows a short note for your provider. For some providers it also shows a link, **How to make an app password**.
-7. Type it in **App password**, then click **Connect**.
+## Connect your email with an app password
 
-The app signs in to your calendar once before it saves anything. If the sign-in fails, nothing is saved, and the panel says what to fix.
+1. Click **More** in the left bar, then **Settings**, then **Connectors**.
+2. Find **Email** and click **Connect**.
+3. Pick your provider in **Email provider**.
+4. Make an app password at your provider. The panel shows a short note for your provider, with a link called **How to get an app password**. The tabs below say the same.
+5. Type your **Email address**.
+6. Paste the app password in **App password**.
+7. Click **Connect**.
 
-To change the calendar, click **Manage**, then click the button that starts with "Change". To turn it off, click **Manage**, then click **Remove**. This deletes the saved app password for good. If the card says the sign-in stopped working, or that the calendar is not working right now, click **Manage**. You can type the details again, click **Cancel**, or click **Remove**.
+Aman signs in to your email once before it saves anything. If the sign-in fails, nothing is saved, and the panel says what to fix.
 
-The app stores the app password only on your computer, in the calendar connector. Your assistant never sees it. Never paste the password into a chat. A chat cannot connect a calendar. Use Settings.
+=== "Gmail"
 
-## Later
+    Turn on 2-Step Verification, then make an app password under Security, App passwords.
 
-- Click **Allow drafts and sending** if you skipped drafts at the start.
-- Click **Test connection** to check that it still works.
-- If Google signs you out, click **Reconnect**. A Google project in Testing mode signs you out every 7 days. To stop this, open Audience in Google Cloud and click Publish app. Then reconnect once.
-- Click **Disconnect**, then **Disconnect Google**, to turn off email, calendar and Google Drive.
+=== "iCloud"
 
-## Connect Home Assistant
+    Make an app-specific password at account.apple.com, under Sign-In and Security.
 
-You can connect your Home Assistant, so Aman can see and control the devices you choose to share.
+=== "Yahoo"
 
-First, in Home Assistant, open your profile and make a long-lived access token (your profile, then Security). Then add the Model Context Protocol Server integration (in Home Assistant's settings, under Devices and services).
+    Make an app password under Account Security, Generate app password.
 
-To connect it in Aman:
+=== "AOL"
 
-1. Click **More** in the left bar, click **Settings**, then click **Connectors**.
-2. Find the home-assistant connector in the list and click **Connect**.
-3. Type your Home Assistant address and paste the token, then click **Connect**.
-4. Aman says how many tools and exposed entities it found, or the one thing to fix.
-5. In Home Assistant, expose each entity Aman may see (its settings, then Voice assistants, then Expose). Only exposed entities are visible to Aman.
+    Make an app password under Account Security, Generate app password.
 
-Reading the state of your home runs on its own. A change, such as turning off a lamp, asks you first, unless you allow that kind of device for good on the card. You can see what you allowed, and take it back, on the Home Assistant connector's page in Settings. Aman never controls locks, alarms or garage doors.
+=== "Fastmail"
 
-## Connect Notion
+    Make an app password in your Fastmail settings, under Privacy & Security, then Manage app passwords.
 
-You can connect Notion, so Aman can search and read your pages and databases, and make new ones.
+=== "Zoho"
 
-1. Click **More** in the left bar, click **Settings**, then click **Connectors**.
-2. Find notion in the list and click **Add**.
-3. Open the notion connector and click **Connect**.
-4. A Notion window opens. Sign in and pick your workspace.
+    Turn on two-factor authentication, then make an app password under Security, App passwords.
 
-Signing in gives Aman the same access you have in Notion. Any page or database you can open, Aman can reach. Every Notion tool asks you first before it runs.
+=== "GMX and web.de"
 
-## Connect GitHub
+    Turn on two-factor authentication, then make an application-specific password under Security Options.
 
-You can connect GitHub, so Aman can work with your issues, pull requests, repository files and CI status.
+=== "Other"
 
-First, make a token in GitHub. Open your GitHub settings, then Developer settings, then Personal access tokens, and make a fine-grained token. Give it only the repositories and permissions Aman needs.
+    Pick **Other**. Then type your provider's **Incoming server (IMAP)**, **Incoming port**, **Outgoing server (SMTP)** and **Outgoing port**. Your provider's help pages list them. The ports start as 993 and 465, which most providers use.
 
-To connect it in Aman:
+## Connect your calendar with an app password
 
-1. Click **More** in the left bar, click **Settings**, then click **Connectors**.
-2. Find github in the list and click **Connect**.
-3. Paste the token, then click **Connect**.
+1. Click **More** in the left bar, then **Settings**, then **Connectors**.
+2. Find **Calendar** and click **Connect**.
+3. Pick your provider in **Calendar provider**.
+4. Make an app password at your provider. The panel shows a short note for your provider. For most providers it also shows a link called **How to make an app password**.
+5. Type your **Email address**. If you sign in to the calendar with a different name, type that name in the login name box. Otherwise, leave it empty.
+6. Paste the app password in **App password**.
+7. Click **Connect**.
 
-Every GitHub tool asks you first before it runs.
+Aman signs in to your calendar once before it saves anything. If the sign-in fails, nothing is saved, and the panel says what to fix.
+
+=== "Google"
+
+    1. Turn on 2-Step Verification for your Google account, if it's not on yet. Google only offers app passwords after that.
+    2. Open myaccount.google.com/apppasswords, type a name such as Aman, and select Create.
+    3. Copy the 16-letter password Google shows. Google shows it only once.
+    4. In Aman, type your Gmail address and paste the app password. Leave the login name empty.
+
+    Aman fills in the calendar address for you. If a Google Workspace admin has turned off app passwords for your account, use the **Google** card instead.
+
+=== "Fastmail"
+
+    Make an app password in your Fastmail settings, under Privacy & Security, then Manage app passwords, and allow calendar access.
+
+=== "Yahoo"
+
+    Make an app password under Account Security, Generate app password.
+
+=== "GMX and web.de"
+
+    Turn on two-factor authentication, then make an application-specific password under Security Options.
+
+=== "Other"
+
+    Pick **Other**, then type the **Calendar address**. Your provider's help pages give it. It must start with https://. It can be on the internet or on your home or office network.
+
+## Connect Google
+
+The **Google** card connects Gmail first. Calendar and Google Drive are extra steps on the same panel. Each step comes with a link you can copy.
+
+1. Click **More** in the left bar, then **Settings**, then **Connectors**.
+2. Find **Google** and click **Connect**.
+3. Follow the steps in the panel, in order. They make a free Google Cloud project, turn on Gmail, and give you a client file.
+4. Drop the file into the panel, or type the **Client ID** and **Client secret**.
+5. Click **Check my client**, and fix anything it lists.
+6. To let Aman save drafts and send email, tick the box about drafts and sending. Every draft and every send still asks you first.
+7. Click **Connect Google**, and allow access in the Google window.
+
+[Connect Google](../../../../docs/google.mdx) walks through every step, with what to click on Google's pages.
+
+To add your calendar, click **Manage** on the **Google** card, turn on the Calendar API with the link in the Calendar part, then click **Connect Calendar**. To add Google Drive, turn on the three links in the Drive part, then click **Connect Google Drive**.
+
+## Let Aman watch your mail
+
+Aman can watch your mail for you. It can tell you about bills that are due soon, and about mail from people you mark always important. This is off until you turn it on.
+
+1. In the Google or Email panel, click **Open Reach me**. Or click **More** in the left bar, then **Settings**, then **Reach me**.
+2. Turn on the switch called "Let Aman watch for things".
+
+See [Reach me](reach-me.md) for what Aman watches for and how it tells you.
+
+## Change or remove a connection
+
+=== "Email or Calendar card"
+
+    - Change it: click **Manage**, then "Change account" on the Email card or "Change calendar" on the Calendar card. Type the details again and click **Connect**. Aman checks the new sign-in before it replaces the old one.
+    - Remove it: click **Manage**, then **Remove**, then "Remove account" or "Remove calendar". This deletes the saved app password for good. Click **Keep it** if you change your mind.
+    - If the card says "Sign-in stopped working": make a new app password at your provider, then click **Manage** and save it again.
+    - If the card says "Not working right now": check your internet connection, then click **Manage**. You can type the details again, click **Cancel**, or click **Remove**.
+
+=== "Google card"
+
+    - Test it: click **Manage**, then **Test connection**.
+    - Allow drafts later: click **Manage**, then **Allow drafts and sending**.
+    - If it says "Reconnect needed": click **Reconnect** and sign in again. A Google project in Testing mode signs you out every 7 days. To stop that, open Audience in Google Cloud, click Publish app, then reconnect once.
+    - Turn it off: click **Manage**, then **Disconnect**, then **Disconnect Google**. This turns off email, calendar and Google Drive.
+
+## Good to know
+
+- Reading is quiet. Every draft, every send and every new or changed event asks you first, on a card that shows exactly what will happen.
+- An app password is saved only on this computer, in the email or calendar connector. It is never shown again, and the assistant never sees it.
+- Never paste a password into a chat. A chat can't connect an account. Use Settings.
+- Aman reads only your own calendar. Calendars other people share with you, and holiday calendars, are left out on purpose.
+- Aman can't delete calendar events.
+
+## Other connectors
+
+The same Connectors page has more connectors, such as your notes folder, Home Assistant, Notion and GitHub.
+
+- Notes folder: see [Your notes folder](notes-folder.md).
+- Home Assistant: click **Connect**, type your Home Assistant address and paste a long-lived access token, then click **Connect**. Only the devices you expose in Home Assistant are visible. A change, such as turning off a lamp, asks you first, unless you allow that kind of device for good on the card. Aman never controls locks, alarms or garage doors. [Home Assistant](../../../../docs/connectors/home-assistant.md) has the full steps.
+- Notion: click **Add**, open the notion connector, click **Connect**, and sign in to Notion in the window that opens. Aman can then reach any page or database you can open. Every Notion tool asks you first.
+- GitHub: make a fine-grained personal access token in your GitHub settings, under Developer settings. Give it only the repositories and permissions Aman needs. Then click **Connect** on github, paste the token, and click **Connect**. Every GitHub tool asks you first.
+
+[Other connectors](../../../../docs/mcp-servers.mdx) explains adding any connector, signing in and testing it.
+
+## Related
+
+- [Connect Google](../../../../docs/google.mdx)
+- [Email](email.md)
+- [Calendar](calendar.md)

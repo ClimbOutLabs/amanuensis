@@ -510,6 +510,14 @@ interface TurnStreamCursor {
 type TurnStreamItem = { sequenceNumber: number; event: TurnStreamingEvent };
 
 /**
+ * A finished turn needs no closing event, but a failed one does: the runtime shows the failure and Retry from a
+ * failed `turn.done`, so dropping it hid the error until the chat was reloaded.
+ */
+function failedTurnDoneEvent(done: TrueForgeApi.TurnStreamingEvent): TurnStreamingEvent | undefined {
+  return done.type === 'turn.done' && done.state.status === 'error' ? toUiStreamingEvent(done) : undefined;
+}
+
+/**
  * Streams one connection attempt of a turn's live events via
  * `subscribeToTurn`, advancing `cursor` as it goes so a subsequent reconnect
  * resumes exactly after the last event this attempt saw — no duplicates, no
@@ -542,6 +550,10 @@ async function* subscribeTurnOnce(
     tapSentinelStreamEvent(item.data);
     if (item.data.type === 'turn.done') {
       seenTurnDone.done = true;
+      const failure = failedTurnDoneEvent(item.data);
+      if (failure !== undefined) {
+        yield { sequenceNumber: seq, event: failure };
+      }
       return;
     }
     const event = toUiStreamingEvent(item.data);
@@ -830,6 +842,10 @@ export function createHarnessChatServer(
           tapSentinelStreamEvent(item.data);
           if (item.data.type === 'turn.done') {
             seenTurnDone.done = true;
+            const failure = failedTurnDoneEvent(item.data);
+            if (failure !== undefined) {
+              yield { sequenceNumber: seq, event: failure };
+            }
             return;
           }
           const event = toUiStreamingEvent(item.data);

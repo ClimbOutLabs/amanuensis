@@ -26,7 +26,9 @@ import configuration from '../src/config';
 import { McpServerWithAuthStore } from '../src/db/McpServerWithAuthStore';
 import { BriefItemCompletionStore } from '../src/db/briefItemCompletionStore';
 import { DeliveryStore } from '../src/db/deliveryStore';
+import { NoticingStore } from '../src/db/noticingStore';
 import { PushSubscriptionStore } from '../src/db/pushSubscriptionStore';
+import { ReachSettingsStore } from '../src/db/reachSettingsStore';
 import { SentinelAuditStore, type SentinelAuditDatabase } from '../src/db/sentinelAuditStore';
 import { SqliteAgentStore } from '../src/db/sqlite/agent-store/SqliteAgentStore';
 import { SqliteChatDeletionStore } from '../src/db/sqlite/chat-deletion-store/SqliteChatDeletionStore';
@@ -56,6 +58,8 @@ import { createImageReencoder } from '../src/runtime/chatImages/reencodeInSandbo
 import { ChatSearchIndexer } from '../src/runtime/chatSearchIndexing';
 import { createDeliveryService } from '../src/runtime/delivery/deliveryService';
 import { EventSubscriptionRegistry } from '../src/runtime/event-subscription';
+import { NO_PHONE_CHANNELS } from '../src/runtime/noticing/reachChannels';
+import { createReminderReach } from '../src/runtime/noticing/reminderReach';
 import { createTokenFactoryBudget } from '../src/runtime/tokenFactoryBudget';
 import { TurnDrainRegistry } from '../src/runtime/turnDrains';
 
@@ -150,6 +154,17 @@ const app = createServerApp({
     audit: { record: () => Promise.resolve() },
     logger,
   }),
+  reachSettingsStore: new ReachSettingsStore(db),
+  noticingStore: new NoticingStore(db),
+  noticingService: { run: () => Promise.resolve({ owners: 0, raised: 0 }) },
+  reminderReach: createReminderReach({
+    reachSettings: new ReachSettingsStore(db),
+    store: new NoticingStore(db),
+    history: deliveryStore,
+    channels: () => NO_PHONE_CHANNELS,
+    logger,
+  }),
+  reachChannels: () => NO_PHONE_CHANNELS,
   webPushPublicKey: undefined,
   sessions: new Sessions({ sessionStore }),
   chatImages: createChatImageService({
