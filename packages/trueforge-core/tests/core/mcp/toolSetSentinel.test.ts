@@ -26,6 +26,8 @@ jest.mock('../../../src/core/mcp/remoteMcpClient', () => {
 const mockConnect = jest.mocked(connectRemoteMcp);
 const noopLogger = createLogger({ silent: true });
 const SERVER_NAME = 'notes';
+/** What the test connector's grants bind to, as the host would set it from the connector record. */
+const GRANT_BINDING = 'binding-of-the-notes-connector';
 
 function makeToolSet(params: {
   tools: ToolSchema[];
@@ -47,6 +49,7 @@ function makeToolSet(params: {
     name: params.serverName ?? SERVER_NAME,
     id: params.serverName ?? SERVER_NAME,
     url: 'https://mcp.example.com/mcp',
+    grantBinding: GRANT_BINDING,
     headers: {},
     logger: noopLogger,
     tracing: NOOP_AGENT_TRACING,
@@ -103,7 +106,7 @@ function servicesWithGrants(toolNames: string[]): SentinelServices {
       created_by: 'u1',
       mcp_server_name: SERVER_NAME,
       tool_name,
-      mcp_server_host: 'mcp.example.com',
+      connector_binding: GRANT_BINDING,
     });
   }
   return services;
@@ -676,7 +679,7 @@ describe("the operator's own Calendar sidecar, under a standing grant the person
         created_by: 'u1',
         mcp_server_name: 'Calendar',
         tool_name,
-        mcp_server_host: 'mcp.example.com',
+        connector_binding: GRANT_BINDING,
       });
     }
     return services;

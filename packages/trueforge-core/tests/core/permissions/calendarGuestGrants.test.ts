@@ -20,7 +20,7 @@ async function ctxWithGrants(grants: [string, string][]): Promise<ClassifyContex
       created_by: 'u1',
       mcp_server_name,
       tool_name,
-      mcp_server_host: null,
+      connector_binding: null,
     });
   }
   return {

@@ -40,7 +40,7 @@ async function recordGrant(ctx: ClassifyContext, scope_key: string): Promise<voi
     created_by: 'u1',
     mcp_server_name: 'home-assistant',
     tool_name: scope_key,
-    mcp_server_host: null,
+    connector_binding: null,
   });
 }
 

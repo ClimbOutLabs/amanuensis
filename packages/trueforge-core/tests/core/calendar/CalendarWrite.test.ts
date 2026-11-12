@@ -782,7 +782,7 @@ describe('the write tool under a standing grant', () => {
       created_by: built.sentinel.created_by,
       mcp_server_name: CALENDAR_SERVER_ID,
       tool_name: 'create_event',
-      mcp_server_host: null,
+      connector_binding: null,
     });
     const info = await built.tools.toolCallInfo({ name: 'create_event', arguments: DENTIST });
     expect(info).toMatchObject({ tier: 3, tier_reason: 'calendar_write', is_approval_required: true });
@@ -818,7 +818,7 @@ describe('the write tool under a standing grant', () => {
       created_by: built.sentinel.created_by,
       mcp_server_name: CALENDAR_SERVER_ID,
       tool_name: 'create_event',
-      mcp_server_host: null,
+      connector_binding: null,
     });
     const guestArgs = { ...DENTIST, attendees: ['lin@example.com'], send_updates: 'all' as const };
     const info = await built.tools.toolCallInfo({ name: 'create_event', arguments: guestArgs });

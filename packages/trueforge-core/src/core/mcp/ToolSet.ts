@@ -130,7 +130,7 @@ export function stampSentinelDecision(input: {
   | 'silent_search_query'
   | 'audit_description'
   | 'effect'
-  | 'grant_host'
+  | 'grant_binding'
   | 'grant_tool_name'
   | 'secret_path_read'
   | 'mail_send'
@@ -146,7 +146,7 @@ export function stampSentinelDecision(input: {
     shell_binding: decision.shell_binding,
     // A connector read is inspection per call: its arguments decide it, not the tool's annotations.
     ...(decision.inspection ? { effect: 'inspect' as const } : {}),
-    ...(decision.grant_host === null ? {} : { grant_host: decision.grant_host }),
+    ...(decision.grant_binding === null ? {} : { grant_binding: decision.grant_binding }),
     ...(decision.grant_tool_name === null ? {} : { grant_tool_name: decision.grant_tool_name }),
     ...(decision.secret_path_read ? { secret_path_read: true as const } : {}),
     ...(decision.mail_send ? { mail_send: true as const } : {}),
@@ -549,6 +549,10 @@ export class ToolSet implements IToolSet {
     return { server_id: this.id, destination_host: this.source.serverHost ?? null };
   }
 
+  resolveGrantBinding(): string | undefined {
+    return this.source.grantBinding;
+  }
+
   async toolCallInfo(
     params: CallToolRequest['params'],
     resolveUnderlyingTool?: boolean,
@@ -671,6 +675,7 @@ export class ToolSet implements IToolSet {
         mcp_server_name: info.mcp_server_name,
         mcp_server_id: info.mcp_server_id,
         mcp_server_host: this.source.serverHost,
+        mcp_grant_binding: this.source.grantBinding,
         mcp_first_party: this.firstParty,
         mcp_search_provider: this.searchProvider,
         mcp_search_tool: this.searchTools.has(params.name),
