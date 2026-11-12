@@ -417,7 +417,7 @@ await client.agents.delete("agent_id");
 <dl>
 <dd>
 
-Returns the authenticated caller identity (`type`, `tenant_id`, `subject`, `roles`) wrapped as `{ data }`. `type` is `oidc-connected` when browser OIDC is enabled, otherwise `default`. When auth is enabled this requires a valid `id_token` cookie or `Authorization: Bearer` token (401 otherwise). When auth is disabled, returns the standalone default identity.
+Returns the authenticated caller identity (`type`, `tenant_id`, `subject`, `roles`) wrapped as `{ data }`. `type` is `oidc-connected` when browser OIDC is enabled, `local-connected` for local sign-in, otherwise `default`. When auth is enabled this requires a valid `id_token` cookie or `Authorization: Bearer` token (401 otherwise). When auth is disabled, returns the standalone default identity.
 </dd>
 </dl>
 </dd>
@@ -973,6 +973,69 @@ Disconnects OAuth for the MCP server when applicable and returns the updated ser
 
 ```typescript
 await client.mcpServers.deleteAuthorization("name");
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**name:** `string` — MCP server name.
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `McpServersClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.mcpServers.<a href="/src/api/resources/mcpServers/client/Client.ts">homeAssistantCheck</a>(name) -> TrueForge.HomeAssistantCheckResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Runs the MCP handshake against the saved connector, lists its tools, and reads the live-context tool once, so the answer says how many tools and exposed entities Aman can see, or the one thing to fix. Read-only: the connector is never modified, and a failed check is a 200 carrying the reason.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.mcpServers.homeAssistantCheck("name");
 
 ```
 </dd>
@@ -4259,7 +4322,7 @@ await client.sessions.createBugReport("session_id");
 <dl>
 <dd>
 
-Cancel the running last turn for a session. Only the session creator may cancel.
+Cancel the running last turn for a session, or only the turn named by `turn_id`. Only the session creator may cancel.
 </dd>
 </dl>
 </dd>
@@ -7113,7 +7176,336 @@ await client.deliveries.get("delivery_id");
 </dl>
 </details>
 
+## Reach
+<details><summary><code>client.reach.<a href="/src/api/resources/reach/client/Client.ts">get</a>() -> TrueForge.GetReachResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Reads how the signed-in person wants to be reached, with which channels are set up on this server.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.reach.get();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**requestOptions:** `ReachClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.reach.<a href="/src/api/resources/reach/client/Client.ts">createOrUpdate</a>({ ...params }) -> TrueForge.GetReachResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Replaces how the signed-in person wants to be reached. Texts and calls cannot be turned on until set up.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.reach.createOrUpdate({
+    settings: {
+        alwaysImportant: [{
+                addedAt: "added_at",
+                address: "address",
+                source: "settings"
+            }],
+        approvalWaitMinutes: 1,
+        callForUrgentReminders: true,
+        callKinds: ["mail_always"],
+        channels: {
+            calls: true,
+            texts: true
+        },
+        dismissedSuggestions: ["dismissed_suggestions"],
+        maxNudgesPerDay: 1,
+        minHoursBetweenCalls: 1,
+        quietHours: {
+            enabled: true,
+            end: "end",
+            start: "start"
+        },
+        timezone: "timezone",
+        travelLeadMinutes: 1
+    }
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.UpdateReachRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `ReachClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.reach.<a href="/src/api/resources/reach/client/Client.ts">listSuggestions</a>() -> TrueForge.ListReachSuggestionsResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Lists senders the memory suggests. Nothing is added until the person accepts it in a saved update.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.reach.listSuggestions();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**requestOptions:** `ReachClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.reach.<a href="/src/api/resources/reach/client/Client.ts">testChannel</a>({ ...params }) -> TrueForge.TestReachChannelResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Sends the signed-in person a test item on one channel. A channel that is not set up answers 409.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.reach.testChannel({
+    channel: "in_app"
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.TestReachChannelRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `ReachClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
 ## Voice
+<details><summary><code>client.voice.<a href="/src/api/resources/voice/client/Client.ts">connect</a>({ ...params }) -> TrueForge.VoiceTicketResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Checks that the chat belongs to the caller and voice mode is ready, then returns a single-use ticket for the voice WebSocket. The WebSocket itself is not described here.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.voice.connect({
+    sessionId: "session_id"
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.ConnectVoiceRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `VoiceClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
 <details><summary><code>client.voice.<a href="/src/api/resources/voice/client/Client.ts">speak</a>({ ...params }) -> core.BinaryResponse</code></summary>
 <dl>
 <dd>
@@ -7893,6 +8285,72 @@ await client.internal.metrics.getMeters({
 <dd>
 
 **requestOptions:** `MetricsClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+## Internal Noticing
+<details><summary><code>client.internal.noticing.<a href="/src/api/resources/internal/resources/noticing/client/Client.ts">run</a>({ ...params }) -> TrueForge.RunNoticingResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Runs one pass of one watcher for everyone it can watch.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.internal.noticing.run({
+    watcher: "mail"
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.internal.RunNoticingRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `NoticingClient.RequestOptions`
 
 </dd>
 </dl>
@@ -8695,7 +9153,7 @@ await client.memory.vault.delete("entry_id");
 <dl>
 <dd>
 
-Lists the authenticated user’s Sentinel audit entries from every chat, newest first, including chats that were deleted. Read-only and paged.
+Lists the authenticated user’s Sentinel audit entries from every chat, newest first, including chats that were deleted. Can be narrowed by outcome and by a from and to time. Read-only and paged.
 </dd>
 </dl>
 </dd>
@@ -11584,6 +12042,182 @@ await client.settings.google.testConnection();
 <dd>
 
 **requestOptions:** `GoogleClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+## Settings Notes
+<details><summary><code>client.settings.notes.<a href="/src/api/resources/settings/resources/notes/client/Client.ts">saveFolder</a>({ ...params }) -> TrueForge.SaveNotesFolderResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Checks the folder first and saves it only when it can be used: it must be there, be a folder, and not be where Aman keeps its own memory.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.notes.saveFolder({
+    folderPath: "folder_path"
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.settings.SaveNotesFolderRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `NotesClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.settings.notes.<a href="/src/api/resources/settings/resources/notes/client/Client.ts">removeFolder</a>() -> TrueForge.RemoveNotesFolderResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Forgets the folder. Nothing inside the folder is changed or removed.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.notes.removeFolder();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**requestOptions:** `NotesClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.settings.notes.<a href="/src/api/resources/settings/resources/notes/client/Client.ts">getStatus</a>() -> TrueForge.GetNotesFolderResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Returns whether a notes folder is connected, the folder, the inbox file name, and how many notes the folder holds.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.notes.getStatus();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**requestOptions:** `NotesClient.RequestOptions`
 
 </dd>
 </dl>

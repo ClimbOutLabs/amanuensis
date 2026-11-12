@@ -59,6 +59,7 @@ import type { Logger } from 'winston';
 import type { Authorizer } from '../auth/authorizer';
 import { createdBySubjectFromRequestContext, type ResolveRequestContext } from '../auth/identity';
 import type { McpCatalog } from '../catalog/McpCatalog';
+import type { SkillCatalog } from '../catalog/SkillCatalog';
 import configuration, { getRunCodeToolCallTimeoutMs, isTrueFoundryModeEnabled } from '../config';
 import type { AgentRecord, IAgentStore } from '../db/agentStore';
 import type { ICompletedTurnEventStore } from '../db/completedTurnEvents';
@@ -97,6 +98,12 @@ import { submitArtifactPersistence } from '../runtime/artifacts/persistTurnArtif
 import { chatModelName, resolveChatAssistant, scheduleRunsAs, type ChatRunner } from '../runtime/chatAssistant';
 import type { ChatSearchIndexer } from '../runtime/chatSearchIndexing';
 import { readChatSearchEnabled } from '../runtime/chatSearchSettings';
+import {
+  capChatTitle,
+  resolveChatTitleContext,
+  runChatTitleFollowUp,
+  type ChatTitleDrainMember,
+} from '../runtime/chatTitle';
 import { StreamGoneError, type EventSubscription, type EventSubscriptionRegistry } from '../runtime/event-subscription';
 import { buildInternalSourceToolPolicy, type InternalSourceState } from '../runtime/internalSourceGuard';
 import { mailAccountDirectory } from '../runtime/mailConnector';
@@ -122,6 +129,7 @@ import {
   type ModelUsageDrainMember,
   type TurnModelUsage,
 } from '../runtime/modelUsage';
+import { notesFolderServiceDeps, sharedNotesFolderService } from '../runtime/notesFolder/notesFolderRuntime';
 import { mintPeeredTurnId } from '../runtime/peeringIds';
 import type { PersonaTurnContext } from '../runtime/personaCapability';
 import type { PersonaSwitchNotice } from '../runtime/PersonaTurnResourceResolver';
@@ -152,6 +160,7 @@ import {
   resolveSandboxProvider,
   withGatewayMetadataHeaders,
 } from '../runtime/sessionResources';
+import type { SkillTurnContext } from '../runtime/skillCapability';
 import { SPACE_WRITE_TOOL_ARGUMENT_LIMITS, SpaceTurnResourceResolver } from '../runtime/spaceCapability';
 import { TokenFactoryMeteredLLM, tokenFactoryRole, type TokenFactoryBudget } from '../runtime/tokenFactoryBudget';
 import { resolveToolOutputScreenEnabled } from '../runtime/toolOutputScreenSettings';
@@ -278,6 +287,8 @@ export interface TurnsRouterDeps {
   resolveModelProviderStore: (c: Context, runAsAgent?: AgentRecord) => IModelProviderStore;
   resolveMcpServerStore: (c: Context, runAsAgent?: AgentRecord) => IMcpServerWithAuthStore;
   resolveSkillStore: (c: Context) => ISkillStore;
+  /** The starter skills a chat can add; absent, no skill tools mount. */
+  skillCatalog?: SkillCatalog | undefined;
   resolveAgentStore: (c: Context) => IAgentStore;
   /** Fork-only: not agent-scoped upstream, so these stay directly injected rather than resolved per-request. */
   tokenStore: IOAuthTokenStore;
@@ -427,6 +438,8 @@ function createTurnResolver(deps: {
   spaceStore: ISpaceStore;
   /** Per-user Google logins; absent, no Gmail tools mount. */
   googleConnectionStore?: IGoogleConnectionStore | undefined;
+  /** The instance's global settings, where the notes folder choice lives; absent, no notes tools mount. */
+  globalSettingsStore?: IGlobalSettingsStore | undefined;
   /** From CreateTurnRequest.client_timezone. See ITurnResourceResolver.clientTimezone. */
   clientTimezone?: string | undefined;
   /** From CreateTurnRequest.spoken_reply. See ITurnResourceResolver.spokenReply. */
@@ -450,6 +463,8 @@ function createTurnResolver(deps: {
   schedules?: ScheduleTurnContext | undefined;
   /** Chat turns that have a model to answer with; absent, no persona tool mounts. */
   personas?: PersonaTurnContext | undefined;
+  /** Chat turns where this app keeps the skills itself; absent, no skill tools mount. */
+  skills?: SkillTurnContext | undefined;
 }): SpaceTurnResourceResolver {
   const {
     mcpCatalog,
@@ -497,6 +512,7 @@ function createTurnResolver(deps: {
     modelUsage,
     schedules,
     personas,
+    skills,
   } = deps;
   const tenant_id = session.tenant_id;
   const sessionId = session.session_id;
@@ -967,10 +983,17 @@ function createTurnResolver(deps: {
     {
       store: spaceStore,
       googleConnections: googleConnectionStore,
+      notesFolder:
+        deps.globalSettingsStore === undefined
+          ? undefined
+          : {
+              service: sharedNotesFolderService(notesFolderServiceDeps({ settings: deps.globalSettingsStore, logger })),
+            },
       authority: { tenantId: tenant_id, userRef },
       sessionId,
       schedules,
       personas,
+      skills,
       logger,
       startsAnswer,
     },
@@ -1000,33 +1023,12 @@ function createTurnResolver(deps: {
   return resolver;
 }
 
-const MAX_SESSION_TITLE_LENGTH = 50;
-
-/** Grapheme segmentation for title truncation (locale-independent per UAX #29). */
-const titleSegmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
-
 /**
- * Caps a title at MAX_SESSION_TITLE_LENGTH UTF-16 units without splitting a
- * grapheme cluster: clusters that would cross the cap (emoji with skin tones or
- * ZWJ sequences, which read as one unit but span several) are dropped whole.
- */
-function truncateSessionTitle(title: string): string {
-  let truncated = '';
-  let length = 0;
-  for (const { segment } of titleSegmenter.segment(title)) {
-    if (length + segment.length > MAX_SESSION_TITLE_LENGTH) {
-      break;
-    }
-    truncated += segment;
-    length += segment.length;
-  }
-  return truncated;
-}
-
-/**
- * Derives a session title from the first user message of the first turn. Returns the
- * trimmed text (capped at {@link MAX_SESSION_TITLE_LENGTH}) or `undefined` when no usable
- * text is present (e.g. file-only or tool-approval input).
+ * Derives a session's working title from the first user message of the first turn.
+ * Returns the trimmed text (capped at the chat title length) or `undefined` when no
+ * usable text is present (e.g. file-only or tool-approval input). The working title
+ * is what the chat shows while its first turn runs; when that turn finishes, the
+ * follow-up asks a model for a subject title and swaps it in (see runtime/chatTitle).
  */
 export function deriveSessionTitle(input: TurnInputItem[] | undefined): string | undefined {
   const firstUserMessage = input?.find(isAgentInputUserMessage);
@@ -1046,7 +1048,7 @@ export function deriveSessionTitle(input: TurnInputItem[] | undefined): string |
   if (!trimmed) {
     return undefined;
   }
-  const title = truncateSessionTitle(trimmed);
+  const title = capChatTitle(trimmed);
   // A single cluster longer than the cap truncates to nothing; treat it as no usable title
   // so the store keeps the title unset instead of persisting a blank first-write-wins value.
   if (!title) {
@@ -1306,6 +1308,12 @@ export interface DrainTurnEventsInput {
         createdBy: string;
       }
     | undefined;
+  /**
+   * Present only on a chat's first turn, when that turn set the chat's working title
+   * from the person's first message. The follow-up starts the subject-title step
+   * detached; nothing in the drain waits for it.
+   */
+  chatTitle?: ChatTitleDrainMember | undefined;
 }
 
 export interface PrivateChatDrainMember {
@@ -1485,8 +1493,18 @@ async function runTurnFollowUp(params: {
   markArtifactsCaptured: () => void;
 }): Promise<void> {
   const { input, state, ingestedToolOutput, toolResults, markArtifactsCaptured } = params;
-  const { turnEventStream, sessionId, turnId, logger, memory, artifacts, profileLearning, modelUsage, chatSearch } =
-    input;
+  const {
+    turnEventStream,
+    sessionId,
+    turnId,
+    logger,
+    memory,
+    artifacts,
+    profileLearning,
+    modelUsage,
+    chatSearch,
+    chatTitle,
+  } = input;
   try {
     // First, and never behind a model call: the chat's next turn reuses the sandbox and waits
     // on this step, so its tools cannot change a file before this turn has saved it.
@@ -1559,6 +1577,20 @@ async function runTurnFollowUp(params: {
       created_by: chatSearch.createdBy,
       session_id: sessionId,
       turn_id: turnId,
+    });
+  }
+  if (chatTitle !== undefined && modelUsage !== undefined) {
+    // Detached on purpose: the title step makes its own model call, and nothing the
+    // person waits on (this follow-up, the chat's next turn) may wait for it. It
+    // never throws; a failure leaves the working title in place.
+    void runChatTitleFollowUp({
+      member: chatTitle,
+      sessionId,
+      turnId,
+      assistantText: formatAssistantMessageText(state.output?.content),
+      modelUsage,
+      turnEventStream,
+      logger,
     });
   }
 }
@@ -1730,6 +1762,7 @@ export interface TurnEventDrainInput {
   modelUsage: ModelUsageDrainMember;
   memory?: DrainTurnEventsInput['memory'];
   chatSearch?: DrainTurnEventsInput['chatSearch'];
+  chatTitle?: DrainTurnEventsInput['chatTitle'];
   privateChat?: DrainTurnEventsInput['privateChat'];
 }
 
@@ -1847,6 +1880,7 @@ async function beginAcceptedTurnExecution(
         sessionStore: deps.sessionStore,
         spaceStore: deps.spaceStore,
         googleConnectionStore: deps.googleConnectionStore,
+        globalSettingsStore: deps.globalSettingsStore,
         logger: deps.logger,
         signal: abortController.signal,
         userRef,
@@ -1881,8 +1915,8 @@ async function beginAcceptedTurnExecution(
         modelUsage,
       });
 
-      // First turn only: derive the title from the first user message. The store
-      // never overwrites an existing title.
+      // First turn only: derive the working title from the first user message. The
+      // store never overwrites an existing title.
       const title = session.record.last_turn_id ? undefined : deriveSessionTitle(input);
 
       const turn = await session.createTurn({
@@ -1900,7 +1934,7 @@ async function beginAcceptedTurnExecution(
         unattended: params.unattended,
         withheld_tools: params.withheldTools,
       });
-      return { turn, resolver, memorySummarize };
+      return { turn, resolver, memorySummarize, derivedTitle: title };
     },
     discard: ({ turn, resolver }) =>
       abandonTurnThatCouldNotStart({ session, turn, resolver, abortController, logger: deps.logger }),
@@ -1910,7 +1944,29 @@ async function beginAcceptedTurnExecution(
   if (setup.status === 'could_not_start') {
     throw new TurnCouldNotStartError();
   }
-  const { turn, memorySummarize } = setup.value;
+  const { turn, memorySummarize, derivedTitle } = setup.value;
+
+  // A first turn that set a working title also carries the context for the
+  // subject-title step its follow-up starts. Resolved here, after the turn exists,
+  // and never allowed to fail the turn (the resolver returns undefined instead).
+  // An incognito chat skips the step: its first exchange never goes to a model
+  // to be named.
+  const chatTitle =
+    derivedTitle === undefined || sessionKeepsNothing({ session: session.record })
+      ? undefined
+      : await resolveChatTitleContext({
+          tenantId: tenant_id,
+          sessionId,
+          sessionAgent: session.record.agent,
+          personaModelName: deps.personaContext?.model_name,
+          agentStore: deps.agentStore,
+          modelProviderStore: deps.modelProviderStore,
+          tokenFactoryBudget: deps.tokenFactoryBudget,
+          sessionStore: deps.sessionStore,
+          derivedTitle,
+          userText: extractUserMessageText(input ?? []),
+          logger: deps.logger,
+        });
 
   await armTurnExecution({ turnDrains: deps.turnDrains, sessionId, logger: deps.logger });
 
@@ -1965,6 +2021,7 @@ async function beginAcceptedTurnExecution(
               timeZone: deps.clientTimezone,
               summarize: memorySummarize,
             },
+      chatTitle,
     },
   };
 }
@@ -2424,13 +2481,18 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       return c.json({ error: { message: FORBIDDEN_CREATE_TURN } }, 403);
     }
 
+    // The turn this one follows: the chat's last turn unless the caller named one or asked for none.
+    const requestedParent = submitted.previous_turn_id;
+    const previousTurnId =
+      requestedParent === 'none' ? null : requestedParent === 'auto' ? session.record.last_turn_id : requestedParent;
+
     // Eval instances approve only their fixture-backed tools; any other approval is declined here, whatever the runner sent.
     const body = configuration.AMAN_EVAL_MODE
       ? {
           ...submitted,
           input: await gateEvalApprovals({
             session,
-            previous_turn_id: submitted.previous_turn_id,
+            previous_turn_id: previousTurnId,
             input: submitted.input,
           }),
         }
@@ -2499,9 +2561,6 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       throw error;
     }
 
-    const requestedParent = body.previous_turn_id;
-    const previousTurnId =
-      requestedParent === 'none' ? null : requestedParent === 'auto' ? session.record.last_turn_id : requestedParent;
     const previousTurn = previousTurnId === null ? undefined : await session.getTurn(previousTurnId);
     if (previousTurnId !== null && previousTurn === undefined) {
       return c.json({ error: { message: `Turn not found: ${previousTurnId}` } }, 404);
@@ -2720,6 +2779,11 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       memoryProvider?.settings,
       memoryScreenSetting.overridden ? memoryScreenSetting.enabled : undefined,
     );
+    const serverSandboxAvailable = await readServerSandboxAvailable({
+      store: sandboxProviderStore,
+      tenant_id: requestContext.tenant_id,
+      logger: deps.logger,
+    });
     const resolver = createTurnResolver({
       mcpCatalog: deps.mcpCatalog,
       chatDeletionStore: deps.chatDeletionStore,
@@ -2744,11 +2808,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       switchedByMessage: persona?.selection === 'direct',
       internalSourceState: internalSources.internalSourceState,
       boundRepository,
-      serverSandboxAvailable: await readServerSandboxAvailable({
-        store: sandboxProviderStore,
-        tenant_id: requestContext.tenant_id,
-        logger: deps.logger,
-      }),
+      serverSandboxAvailable,
       repositoryStore: deps.repositoryStore,
       sentinelSettingsStore: deps.sentinelSettingsStore,
       sessionStore: deps.sessionStore,
@@ -2762,6 +2822,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       personaStore: deps.personaStore,
       spaceStore: deps.spaceStore,
       googleConnectionStore: deps.googleConnectionStore,
+      globalSettingsStore: deps.globalSettingsStore,
       clientTimezone: body.client_timezone,
       spokenReply: body.spoken_reply,
       toolOutputScreenEnabled,
@@ -2780,6 +2841,17 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
               session_id: session.session_id,
               default_assistant_name: profile?.assistant_name ?? null,
               logger: deps.logger,
+            },
+      // A managed registry keeps its own skills, so there the tools stay off.
+      skills:
+        deps.skillCatalog === undefined || isTrueFoundryModeEnabled()
+          ? undefined
+          : {
+              store: skillStore,
+              tenant_id: requestContext.tenant_id,
+              catalog: deps.skillCatalog.list(),
+              sandboxReady: serverSandboxAvailable,
+              fetchImpl: fetch,
             },
       schedules:
         deps.schedules === undefined || chatRunner === undefined
@@ -2804,11 +2876,13 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
                 personalizationStore: deps.personalizationStore,
               }),
               logger: deps.logger,
+              // A reminder set in this chat fires back into this chat.
+              session_id: session.session_id,
             },
     });
 
-    // First turn only: derive the title from the first user message. The store
-    // never overwrites an existing title.
+    // First turn only: derive the working title from the first user message. The
+    // store never overwrites an existing title.
     const title = session.record.last_turn_id ? undefined : deriveSessionTitle(body.input);
 
     // Turning down held actions ends the turn with no model call. Approving one runs the call,
@@ -3104,6 +3178,26 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
             sessionId,
           }),
         );
+        // A first turn that set a working title also carries the context for the
+        // subject-title step its follow-up starts. The resolver never throws, so
+        // this cannot fail a turn that has already been created. An incognito
+        // chat skips the step: its first exchange never goes to a model to be named.
+        const chatTitle =
+          title === undefined || sessionKeepsNothing({ session: session.record })
+            ? undefined
+            : await resolveChatTitleContext({
+                tenantId: requestContext.tenant_id,
+                sessionId,
+                sessionAgent: session.record.agent,
+                personaModelName: persona?.kind === 'persona' ? persona.persona.model_name : undefined,
+                agentStore,
+                modelProviderStore,
+                tokenFactoryBudget: deps.tokenFactoryBudget,
+                sessionStore: deps.sessionStore,
+                derivedTitle: title,
+                userText: extractUserMessageText(body.input),
+                logger: deps.logger,
+              });
         const drainInput = {
           trackedStream,
           turnEventStream,
@@ -3114,6 +3208,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
           logger: deps.logger,
           turnDrains: deps.turnDrains,
           modelUsage: { ledger: modelUsage, eventStore: deps.sessionStore },
+          chatTitle,
           privateChat: privateChatDrainMember({ session, sessionStore: deps.sessionStore }),
           memory:
             memoryClient === undefined

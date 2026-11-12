@@ -294,6 +294,8 @@ describe('Data export route', () => {
         status: 'active',
         run_at: null,
         kind: 'task',
+        urgent: false,
+        origin_session_id: null,
       },
       created_by_subject: subject('alice'),
       runFrom: new Date(),
@@ -311,6 +313,8 @@ describe('Data export route', () => {
         status: 'paused',
         run_at: null,
         kind: 'task',
+        urgent: false,
+        origin_session_id: null,
       },
       created_by_subject: subject('bob'),
       runFrom: new Date(),
@@ -595,6 +599,7 @@ describe('Data export route', () => {
       'settings.json',
       'audit.json',
       'deliveries.json',
+      'reach.json',
     ]);
     for (const section of manifest.sections) {
       expect(names).toContain(section);

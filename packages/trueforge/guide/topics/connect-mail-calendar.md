@@ -29,12 +29,26 @@ If Aman is in offline mode, turn it off first. Click **More**, click **Settings*
 
 The panel then says it is connected and shows your Google address.
 
+## Let Aman watch your mail
+
+Aman can watch your mail for you. It can tell you about bills that are due soon, and about mail from people you mark always important. This is off until you turn it on, in **Settings**, then **Reach me**.
+
+The Google panel and the Email panel both say this. Click **Open Reach me** in the panel to go straight there. Then turn on the switch called "Let Aman watch for things".
+
 ## Connect your calendar
 
 1. Click **More**, click **Settings**, click **Connectors**, find **Google**, and click **Manage**.
 2. Open the Calendar API link in the Calendar section. On Google's page, click Enable.
 3. Click **Connect Calendar**. On Google's screen, leave the calendar box ticked and continue.
 4. To let Aman add events, click the button that starts with "Allow" and ends with "to add events". It shows Aman's name in the middle. You still approve each event first. Aman cannot delete events.
+
+## Connect Google Drive
+
+1. Click **More**, click **Settings**, click **Connectors**, find **Google**, and click **Manage**.
+2. Open the Drive API, Docs API and Sheets API links in the Drive section. On each Google page, click Enable. All three are needed: the Drive API lists files, the Docs API reads and writes Docs, and the Sheets API reads and adds to Sheets.
+3. Click **Connect Google Drive**. On Google's screen, leave the Drive box ticked and continue.
+
+Aman only sees files it created, or files you opened with Aman. It can read a Doc or a Sheet. Creating a Doc or adding rows to a Sheet asks you first, and the card shows the whole text or every row. Aman cannot delete a file, and it cannot change who a file is shared with.
 
 ## Connect a calendar with an app password
 
@@ -61,4 +75,45 @@ The app stores the app password only on your computer, in the calendar connector
 - Click **Allow drafts and sending** if you skipped drafts at the start.
 - Click **Test connection** to check that it still works.
 - If Google signs you out, click **Reconnect**. A Google project in Testing mode signs you out every 7 days. To stop this, open Audience in Google Cloud and click Publish app. Then reconnect once.
-- Click **Disconnect**, then **Disconnect Google**, to turn off both email and calendar.
+- Click **Disconnect**, then **Disconnect Google**, to turn off email, calendar and Google Drive.
+
+## Connect Home Assistant
+
+You can connect your Home Assistant, so Aman can see and control the devices you choose to share.
+
+First, in Home Assistant, open your profile and make a long-lived access token (your profile, then Security). Then add the Model Context Protocol Server integration (in Home Assistant's settings, under Devices and services).
+
+To connect it in Aman:
+
+1. Click **More** in the left bar, click **Settings**, then click **Connectors**.
+2. Find the home-assistant connector in the list and click **Connect**.
+3. Type your Home Assistant address and paste the token, then click **Connect**.
+4. Aman says how many tools and exposed entities it found, or the one thing to fix.
+5. In Home Assistant, expose each entity Aman may see (its settings, then Voice assistants, then Expose). Only exposed entities are visible to Aman.
+
+Reading the state of your home runs on its own. A change, such as turning off a lamp, asks you first, unless you allow that kind of device for good on the card. You can see what you allowed, and take it back, on the Home Assistant connector's page in Settings. Aman never controls locks, alarms or garage doors.
+
+## Connect Notion
+
+You can connect Notion, so Aman can search and read your pages and databases, and make new ones.
+
+1. Click **More** in the left bar, click **Settings**, then click **Connectors**.
+2. Find notion in the list and click **Add**.
+3. Open the notion connector and click **Connect**.
+4. A Notion window opens. Sign in and pick your workspace.
+
+Signing in gives Aman the same access you have in Notion. Any page or database you can open, Aman can reach. Every Notion tool asks you first before it runs.
+
+## Connect GitHub
+
+You can connect GitHub, so Aman can work with your issues, pull requests, repository files and CI status.
+
+First, make a token in GitHub. Open your GitHub settings, then Developer settings, then Personal access tokens, and make a fine-grained token. Give it only the repositories and permissions Aman needs.
+
+To connect it in Aman:
+
+1. Click **More** in the left bar, click **Settings**, then click **Connectors**.
+2. Find github in the list and click **Connect**.
+3. Paste the token, then click **Connect**.
+
+Every GitHub tool asks you first before it runs.

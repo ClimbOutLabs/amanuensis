@@ -57,6 +57,7 @@ import { SqliteSkillStore } from '../../src/db/sqlite/skill-store/SqliteSkillSto
 import { SqliteSpaceStore } from '../../src/db/sqlite/space-store/SqliteSpaceStore';
 import { SqliteOAuthTokenStore } from '../../src/db/sqlite/token-store/SqliteOAuthTokenStore';
 import { SqliteTurnArtifactStore } from '../../src/db/sqlite/turn-artifact-store/SqliteTurnArtifactStore';
+import { evalSources, type EvalSources } from '../../src/eval/fixtures';
 import { closePersonaKnowledgeIndexers } from '../../src/personaKnowledge/knowledgeIndexer';
 import { ActiveTurnRegistry } from '../../src/runtime/activeTurns';
 import { createChatImageService } from '../../src/runtime/chatImages/chatImageService';
@@ -95,6 +96,13 @@ export interface ApprovalTestServer {
   db: () => SqliteDb;
   /** Replaces the operator's first-party origin list, as booting with another `FIRST_PARTY_MCP_ORIGINS` would. */
   setFirstPartyOrigins: (origins: string[]) => void;
+  /**
+   * Turns eval mode on or off, as booting with another `AMAN_EVAL_MODE` would. While on, Gmail and Google Calendar
+   * are the invented inbox and calendar, and only their cards can be allowed.
+   */
+  setEvalMode: (on: boolean) => void;
+  /** The invented inbox and calendar eval mode reads and writes, so a test can see what a turn saved. */
+  evalSources: () => EvalSources;
   close: () => Promise<void>;
 }
 
@@ -193,6 +201,7 @@ function buildApp(input: {
     eventSubscriptions: new EventSubscriptionRegistry<TurnStreamingEvent>(undefined),
     logger: createLogger({ silent: true }),
     oidcDiscovery: undefined,
+    localUserStore: undefined,
     authenticator,
     authorizer: new TrueForgeAuthorizer(),
     outboundSecrets,
@@ -234,9 +243,17 @@ export async function startApprovalTestServer(options?: {
   authenticator?: Authenticator | undefined;
   /** Adds the inert connector's opt-in `web_search` tool. */
   inertWebSearch?: boolean | undefined;
+  /** Adds the inert connector's opt-in read of one page by its id. */
+  inertPageById?: boolean | undefined;
+  /** Adds the inert connector's opt-in `search_messages` lookup. */
+  inertMessageSearch?: boolean | undefined;
 }): Promise<ApprovalTestServer> {
   const authenticator = options?.authenticator ?? createAuthenticator({ mode: TrueForgeAuthMode.Standalone });
-  const mcp = await startInertMcpServer({ webSearch: options?.inertWebSearch === true });
+  const mcp = await startInertMcpServer({
+    webSearch: options?.inertWebSearch === true,
+    pageById: options?.inertPageById === true,
+    messageSearch: options?.inertMessageSearch === true,
+  });
   const model = await startScriptedModelServer();
   const directory = await mkdtemp(join(tmpdir(), 'tfy-approval-'));
   const databaseFile = join(directory, 'approvals.sqlite');
@@ -274,7 +291,13 @@ export async function startApprovalTestServer(options?: {
         {
           model_id: 'scripted-model',
           name: 'scripted-model',
-          properties: { context_length: 128000, max_output_tokens: 4096, reasoning_efforts: ['none'] },
+          // A custom model takes one request at a time by default; a test that holds two chats' turns open needs two.
+          properties: {
+            context_length: 128000,
+            max_output_tokens: 4096,
+            reasoning_efforts: ['none'],
+            max_concurrent_requests: 2,
+          },
         },
         {
           model_id: 'scripted-alt-model',
@@ -298,6 +321,7 @@ export async function startApprovalTestServer(options?: {
   });
 
   const originalFirstPartyOrigins = configuration.FIRST_PARTY_MCP_ORIGINS;
+  const originalEvalMode = configuration.AMAN_EVAL_MODE;
   configuration.FIRST_PARTY_MCP_ORIGINS = options?.memoryProvider === true ? [mcp.origin] : [];
 
   // One registry for the server's life, so close() can wait for turn drains the way main.ts does.
@@ -326,8 +350,13 @@ export async function startApprovalTestServer(options?: {
     setFirstPartyOrigins: origins => {
       configuration.FIRST_PARTY_MCP_ORIGINS = origins;
     },
+    setEvalMode: on => {
+      configuration.AMAN_EVAL_MODE = on;
+    },
+    evalSources,
     close: async () => {
       configuration.FIRST_PARTY_MCP_ORIGINS = originalFirstPartyOrigins;
+      configuration.AMAN_EVAL_MODE = originalEvalMode;
       // The guide installs, and the indexing they queue, write into directories removed below, so they finish first.
       await app.guidesSettled();
       await closePersonaKnowledgeIndexers();

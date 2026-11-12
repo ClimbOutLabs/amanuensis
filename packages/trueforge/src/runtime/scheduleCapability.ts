@@ -5,6 +5,7 @@ import type {
   AgentTracing,
   InstructionBuilder,
   ReminderLine,
+  ScheduleStatusReview,
   SentinelHostContext,
   Tier3Schedule,
 } from '@truefoundry/trueforge-core/core';
@@ -24,8 +25,6 @@ import {
   CANCEL_REMINDER_TOOL_NAME,
   CREATE_SCHEDULE_TOOL_NAME,
   DELETE_SCHEDULE_TOOL_NAME,
-  isReminderToolName,
-  isScheduleWriteToolName,
   LIST_REMINDERS_TOOL_NAME,
   LIST_SCHEDULES_TOOL_NAME,
   PAUSE_SCHEDULE_TOOL_NAME,
@@ -88,6 +87,7 @@ export const SetReminderToolSchema = z
     at: RunAtSchema.describe('Due time, ISO 8601 with offset. A repeat keeps its time of day.'),
     repeat: z.enum(['daily', 'weekdays', 'weekly']).optional(),
     days: z.array(WeekdaySchema).optional(),
+    urgent: z.boolean().optional().describe('True only when the user says this reminder is urgent.'),
   })
   .strict();
 
@@ -123,6 +123,8 @@ export interface ScheduleTurnContext {
   /** Who a saved schedule runs as, in plain words. */
   runsAs: (schedule: ScheduleRecord) => Promise<string>;
   logger: Logger;
+  /** The chat this turn happens in; a reminder set here fires back into it. Null when there is no chat. */
+  session_id: string | null;
 }
 
 /** The store a host hands to chat turns where schedules run. */
@@ -140,15 +142,31 @@ interface ScheduleToolSetOptions extends ScheduleTurnContext {
 
 type Prepared<T> = { ok: true; value: T } | { ok: false; message: string };
 
-interface PreparedCreate {
+/** What a call that asks was settled on: the call the approval covers, and what its card shows. */
+interface PreparedAsk {
   approved: Record<string, unknown>;
+  review?: Tier3Schedule;
+  status?: ScheduleStatusReview;
+  reminder?: ReminderLine;
+}
+
+interface PreparedCreate extends PreparedAsk {
   review: Tier3Schedule;
   manifest: ScheduleManifest;
 }
 
-interface PreparedDelete {
-  approved: Record<string, unknown>;
+interface PreparedDelete extends PreparedAsk {
   review: Tier3Schedule;
+  schedule: ScheduleRecord;
+}
+
+interface PreparedStatus extends PreparedAsk {
+  status: ScheduleStatusReview;
+  schedule: ScheduleRecord;
+}
+
+interface PreparedCancel extends PreparedAsk {
+  reminder: ReminderLine;
   schedule: ScheduleRecord;
 }
 
@@ -164,6 +182,10 @@ function clock({ hour, minute }: { hour: number; minute: number }): string {
 
 function capitalized(word: string): string {
   return `${word.charAt(0).toUpperCase()}${word.slice(1)}`;
+}
+
+function uncapitalized(text: string): string {
+  return `${text.charAt(0).toLowerCase()}${text.slice(1)}`;
 }
 
 function joinedWithAnd(items: readonly string[]): string {
@@ -336,17 +358,19 @@ export class ScheduleToolSet extends LocalToolMCP {
       }),
       defineTool({
         name: PAUSE_SCHEDULE_TOOL_NAME,
-        description: 'Pause a schedule by name or id so it stops running until resumed. Runs without asking.',
+        description:
+          'Pause a schedule by name or id so it stops running until resumed. The user approves a card first.',
         schema: ScheduleRefToolSchema,
         annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
-        handler: input => this.#setStatus({ input, status: 'paused' }),
+        handler: (input, approval) => this.#setStatus({ input, status: 'paused', approval }),
       }),
       defineTool({
         name: RESUME_SCHEDULE_TOOL_NAME,
-        description: 'Resume a paused schedule by name or id so it runs again from its next time. Runs without asking.',
+        description:
+          'Resume a paused schedule by name or id so it runs again from its next time. The user approves a card first.',
         schema: ScheduleRefToolSchema,
         annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
-        handler: input => this.#setStatus({ input, status: 'active' }),
+        handler: (input, approval) => this.#setStatus({ input, status: 'active', approval }),
       }),
       defineTool({
         name: DELETE_SCHEDULE_TOOL_NAME,
@@ -372,10 +396,10 @@ export class ScheduleToolSet extends LocalToolMCP {
       }),
       defineTool({
         name: CANCEL_REMINDER_TOOL_NAME,
-        description: 'Cancel a reminder.',
+        description: 'Cancel a reminder, for good. The user approves a card first.',
         schema: CancelReminderToolSchema,
         annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
-        handler: input => this.#cancelReminder(input),
+        handler: (input, approval) => this.#cancelReminder({ input, approval }),
       }),
     ];
   }
@@ -389,8 +413,8 @@ export class ScheduleToolSet extends LocalToolMCP {
   }
 
   /**
-   * The host classifies every call. A create or delete card is built from what the host would really save or
-   * remove, and what it was settled on joins the approved call so a later change needs a new approval.
+   * The host classifies every call. A card is built from what the host would really save, remove, pause, resume
+   * or cancel, and what it was settled on joins the approved call so a later change needs a new approval.
    */
   override async toolCallInfo(
     params: CallToolRequest['params'],
@@ -402,13 +426,13 @@ export class ScheduleToolSet extends LocalToolMCP {
     if (resolveUnderlyingTool === false) {
       return info;
     }
-    const prepared = isScheduleWriteToolName(call.name) ? await this.#prepareWrite(call) : undefined;
+    const prepared = await this.#prepareAsked(call);
     if (prepared !== undefined && !prepared.ok) {
       // Not a permission wall: the model can fix the call or ask the user. A policy block would count toward
       // the turn's "tool not allowed here" stop.
       return { ...info, pre_dispatch_failure: { kind: 'pre_dispatch_failed', message: prepared.message } };
     }
-    const reminder = isReminderToolName(call.name) ? await this.#reminderLine(call) : undefined;
+    const reminder = call.name === SET_REMINDER_TOOL_NAME ? this.#reminderLine(call) : prepared?.value.reminder;
     const decision = await classifyHostToolCall({
       sentinel: this.#options.sentinel,
       repository_id: null,
@@ -423,7 +447,8 @@ export class ScheduleToolSet extends LocalToolMCP {
           destructive_hint: info.destructive_hint,
           open_world_hint: info.open_world_hint,
         },
-        ...(prepared === undefined ? {} : { schedule_write: prepared.value.review }),
+        ...(prepared?.value.review === undefined ? {} : { schedule_write: prepared.value.review }),
+        ...(prepared?.value.status === undefined ? {} : { schedule_status: prepared.value.status }),
         ...(reminder === undefined ? {} : { reminder }),
       },
     });
@@ -434,25 +459,35 @@ export class ScheduleToolSet extends LocalToolMCP {
     };
   }
 
-  /** Re-settles a create or delete at dispatch, so an approval ends when what it covered changed. */
+  /** Re-settles a call that asks at dispatch, so an approval ends when what it covered changed. */
   async liveMintParams(params: CallToolRequest['params']): Promise<Record<string, unknown> | undefined> {
-    if (!isScheduleWriteToolName(params.name)) {
+    const prepared = await this.#prepareAsked(withoutRetiredAgent(params));
+    if (prepared === undefined) {
       return undefined;
     }
-    const prepared = await this.#prepareWrite(withoutRetiredAgent(params));
     if (!prepared.ok) {
       throw new Error(prepared.message);
     }
     return prepared.value.approved;
   }
 
-  async #prepareWrite(
-    params: CallToolRequest['params'],
-  ): Promise<Prepared<{ approved: Record<string, unknown>; review: Tier3Schedule }>> {
-    if (params.name === CREATE_SCHEDULE_TOOL_NAME) {
-      return this.#prepareCreate(params.arguments ?? {});
+  /** What a call that asks would really do, settled from the store; undefined for a call that runs without asking. */
+  async #prepareAsked(params: CallToolRequest['params']): Promise<Prepared<PreparedAsk> | undefined> {
+    const args = params.arguments ?? {};
+    switch (params.name) {
+      case CREATE_SCHEDULE_TOOL_NAME:
+        return this.#prepareCreate(args);
+      case DELETE_SCHEDULE_TOOL_NAME:
+        return this.#prepareDelete(args);
+      case PAUSE_SCHEDULE_TOOL_NAME:
+        return this.#prepareStatus({ args, status: 'paused' });
+      case RESUME_SCHEDULE_TOOL_NAME:
+        return this.#prepareStatus({ args, status: 'active' });
+      case CANCEL_REMINDER_TOOL_NAME:
+        return this.#prepareCancel(args);
+      default:
+        return undefined;
     }
-    return this.#prepareDelete(params.arguments ?? {});
   }
 
   #prepareCreate(args: Record<string, unknown>): Prepared<PreparedCreate> {
@@ -732,6 +767,8 @@ export class ScheduleToolSet extends LocalToolMCP {
       timezone,
       status: 'active',
       kind: 'reminder',
+      urgent: input.urgent ?? false,
+      origin_session_id: this.#options.session_id,
     });
     try {
       validateManifest(manifest, now);
@@ -745,19 +782,36 @@ export class ScheduleToolSet extends LocalToolMCP {
     return { ok: true, value: { manifest, line: { when: formatRunTime({ at: first, timezone }), what: input.what } } };
   }
 
-  /** What the activity line says about a reminder call: read from the call itself, never from the model's claim of success. */
-  async #reminderLine(params: CallToolRequest['params']): Promise<ReminderLine | undefined> {
-    const args = params.arguments ?? {};
-    if (params.name === SET_REMINDER_TOOL_NAME) {
-      const prepared = this.#prepareReminder(args);
-      return prepared.ok ? prepared.value.line : undefined;
+  /** What the activity line says about a new reminder: read from the call itself, never from the model's claim of success. */
+  #reminderLine(params: CallToolRequest['params']): ReminderLine | undefined {
+    const prepared = this.#prepareReminder(params.arguments ?? {});
+    return prepared.ok ? prepared.value.line : undefined;
+  }
+
+  /** The reminder a cancel would remove, as the store holds it, for the card. */
+  async #prepareCancel(args: Record<string, unknown>): Promise<Prepared<PreparedCancel>> {
+    const parsed = CancelReminderToolSchema.safeParse(args);
+    if (!parsed.success) {
+      return { ok: false, message: 'Nothing was cancelled. Pass the reminder id or its exact words.' };
     }
-    if (params.name === CANCEL_REMINDER_TOOL_NAME) {
-      const parsed = CancelReminderToolSchema.safeParse(args);
-      const found = parsed.success ? await this.#findReminder(parsed.data) : undefined;
-      return found?.ok === true ? { when: null, what: found.value.manifest.task } : undefined;
+    const found = await this.#findReminder(parsed.data);
+    if (!found.ok) {
+      return found;
     }
-    return undefined;
+    const reminder = found.value;
+    const { manifest } = reminder;
+    const when =
+      manifest.run_at === null
+        ? uncapitalized(describeManifestTiming(manifest))
+        : formatRunTime({ at: new Date(manifest.run_at), timezone: manifest.timezone });
+    return {
+      ok: true,
+      value: {
+        approved: { ...args, [APPROVED_SCHEDULE_KEY]: reminder.id },
+        reminder: { when, what: manifest.task },
+        schedule: reminder,
+      },
+    };
   }
 
   async #setReminder(input: SetReminderToolInput) {
@@ -816,66 +870,104 @@ export class ScheduleToolSet extends LocalToolMCP {
     };
   }
 
-  async #cancelReminder(input: CancelReminderToolInput) {
-    const found = await this.#findReminder(input);
-    if (!found.ok) {
-      return errorResult(found.message);
+  async #cancelReminder(input: { input: CancelReminderToolInput; approval: ApprovalDecision | undefined }) {
+    if (input.approval?.status !== 'allow') {
+      return errorResult(NOT_APPROVED);
     }
-    const reminder = found.value;
+    const prepared = await this.#prepareCancel(input.input);
+    if (!prepared.ok) {
+      return errorResult(prepared.message);
+    }
+    const reminder = prepared.value.schedule;
     await this.#options.store.deleteSchedule({ tenant_id: this.#options.tenant_id, id: reminder.id });
-    await this.#audit({
-      tool_name: CANCEL_REMINDER_TOOL_NAME,
-      description: `Cancelled a reminder: ${reminder.manifest.task}`,
-    });
     return jsonResult({ cancelled: { id: reminder.id, what: reminder.manifest.task } });
   }
 
-  async #setStatus(input: { input: ScheduleRefToolInput; status: ScheduleStatus }) {
-    const found = await this.#find(input.input);
+  /**
+   * The schedule a pause or resume would change, as the store holds it, for the card. A call that would
+   * change nothing is answered with the reason instead of a card.
+   */
+  async #prepareStatus(input: {
+    args: Record<string, unknown>;
+    status: ScheduleStatus;
+  }): Promise<Prepared<PreparedStatus>> {
+    const parsed = ScheduleRefToolSchema.safeParse(input.args);
+    if (!parsed.success) {
+      return { ok: false, message: 'Nothing was changed. Pass the schedule name or id.' };
+    }
+    const found = await this.#find(parsed.data);
     if (!found.ok) {
-      return errorResult(found.message);
+      return found;
     }
     const existing = found.value;
     if (existing.status === 'done') {
-      return errorResult(
-        `Nothing was changed because the schedule "${existing.name}" has already run and will not run again. Make a new one if the user wants it again.`,
-      );
+      return {
+        ok: false,
+        message: `Nothing was changed because the schedule "${existing.name}" has already run and will not run again. Make a new one if the user wants it again.`,
+      };
+    }
+    if (existing.status === input.status) {
+      return {
+        ok: false,
+        message: `Nothing was changed because the schedule "${existing.name}" is already ${input.status}.`,
+      };
     }
     if (
       input.status === 'active' &&
       existing.manifest.run_at !== null &&
       new Date(existing.manifest.run_at).getTime() <= this.#options.now().getTime()
     ) {
+      return {
+        ok: false,
+        message: `Nothing was changed because the time for "${existing.name}" has passed. Make a new one for a later time.`,
+      };
+    }
+    return {
+      ok: true,
+      value: {
+        approved: { ...input.args, [APPROVED_SCHEDULE_KEY]: existing.id },
+        status: {
+          action: input.status === 'paused' ? 'pause' : 'resume',
+          name: plainScheduleName(existing.name),
+          when: describeManifestTiming(existing.manifest),
+          time_zone: existing.manifest.timezone,
+        },
+        schedule: existing,
+      },
+    };
+  }
+
+  async #setStatus(input: {
+    input: ScheduleRefToolInput;
+    status: ScheduleStatus;
+    approval: ApprovalDecision | undefined;
+  }) {
+    if (input.approval?.status !== 'allow') {
+      return errorResult(NOT_APPROVED);
+    }
+    const prepared = await this.#prepareStatus({ args: input.input, status: input.status });
+    if (!prepared.ok) {
+      return errorResult(prepared.message);
+    }
+    const existing = prepared.value.schedule;
+    const updated = await this.#options.withTransaction(transaction =>
+      this.#options.store.updateScheduleAndRun(
+        {
+          tenant_id: this.#options.tenant_id,
+          id: existing.id,
+          name: existing.name,
+          manifest: { ...existing.manifest, status: input.status },
+          runFrom: this.#options.now(),
+        },
+        transaction,
+      ),
+    );
+    if (updated === undefined) {
       return errorResult(
-        `Nothing was changed because the time for "${existing.name}" has passed. Make a new one for a later time.`,
+        `Nothing was changed because the schedule "${existing.name}" was deleted first. Call list_schedules to see what is left.`,
       );
     }
-    const verb = input.status === 'paused' ? 'Paused' : 'Resumed';
-    if (existing.status !== input.status) {
-      const updated = await this.#options.withTransaction(transaction =>
-        this.#options.store.updateScheduleAndRun(
-          {
-            tenant_id: this.#options.tenant_id,
-            id: existing.id,
-            name: existing.name,
-            manifest: { ...existing.manifest, status: input.status },
-            runFrom: this.#options.now(),
-          },
-          transaction,
-        ),
-      );
-      if (updated === undefined) {
-        return errorResult(
-          `Nothing was changed because the schedule "${existing.name}" was deleted first. Call list_schedules to see what is left.`,
-        );
-      }
-      await this.#audit({
-        tool_name: input.status === 'paused' ? PAUSE_SCHEDULE_TOOL_NAME : RESUME_SCHEDULE_TOOL_NAME,
-        description: `${verb} the schedule "${existing.name}".`,
-      });
-      return jsonResult({ [input.status === 'paused' ? 'paused' : 'resumed']: await this.#summary(updated.schedule) });
-    }
-    return jsonResult({ unchanged: await this.#summary(existing), note: `It was already ${input.status}.` });
+    return jsonResult({ [input.status === 'paused' ? 'paused' : 'resumed']: await this.#summary(updated.schedule) });
   }
 
   async #delete(input: { input: ScheduleRefToolInput; approval: ApprovalDecision | undefined }) {
@@ -891,7 +983,7 @@ export class ScheduleToolSet extends LocalToolMCP {
     return jsonResult({ deleted: { id: schedule.id, name: schedule.name } });
   }
 
-  /** A pause or resume runs without a card, so it is written to the activity log here. */
+  /** A new reminder is saved without a card, so it is written to the activity log here. */
   async #audit(input: { tool_name: string; description: string }): Promise<void> {
     const { sentinel, logger } = this.#options;
     try {

@@ -1971,6 +1971,7 @@ describe('TurnResourceResolver caches', () => {
       const sentinelServices = {
         ...defaultSentinelServices({ pinned_path: DEFAULT_PINNED_PATH }),
         tier2AutoAllow: () => Promise.resolve(new Set<'file_write'>(['file_write'])),
+        sandboxWithoutAsking: () => Promise.resolve(true),
       };
       const received: SentinelHostContext[] = [];
       const resolver = new TurnResourceResolver({
@@ -2029,6 +2030,10 @@ describe('TurnResourceResolver caches', () => {
         await runTurn({ unattended, previous_turn_id: 'none' });
         const granted = await received[0]?.services.tier2AutoAllow({ tenant_id: 't', created_by: 'user-1' });
         expect([...(granted ?? [])]).toEqual(relaxed);
+        // The sandbox switch is one of the owner's relaxations too.
+        expect(await received[0]?.services.sandboxWithoutAsking({ tenant_id: 't', created_by: 'user-1' })).toBe(
+          source === null,
+        );
         // A call that would ask is held for the owner only while nobody watches this turn.
         expect(received[0]?.services.unattended).toBe(unattended === true);
       },
@@ -2046,6 +2051,7 @@ describe('TurnResourceResolver caches', () => {
       expect([
         ...((await received[1]?.services.tier2AutoAllow({ tenant_id: 't', created_by: 'user-1' })) ?? []),
       ]).toEqual([]);
+      expect(await received[1]?.services.sandboxWithoutAsking({ tenant_id: 't', created_by: 'user-1' })).toBe(false);
     });
   });
 });

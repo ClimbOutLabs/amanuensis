@@ -39,11 +39,14 @@ import { createMcpOAuthRouter } from './apis/mcpOAuth';
 import { createMcpServersRouter } from './apis/mcpServers';
 import { createMemoryVaultRouter } from './apis/memoryVault';
 import { createModelsRouter } from './apis/models';
+import { createNotesFolderRouter, NOTES_FOLDER_SETTINGS_BASE_PATH } from './apis/notesFolder';
+import { createNoticingRouter } from './apis/noticing';
 import { createPermissionsRouter } from './apis/permissions';
 import { createPersonaKnowledgeRouter } from './apis/personaKnowledge';
 import { createPersonalizationRouter } from './apis/personalization';
 import { createPersonasRouter, createSessionPersonasRouter } from './apis/personas';
 import { createChatPrivacyRouter, createPrivateChatSweepRouter } from './apis/privateChats';
+import { createReachRouter } from './apis/reach';
 import { createRepositoriesRouter, createSessionRepositoryRouter } from './apis/repositories';
 import { createScheduleExecutionRouter, createSchedulesRouter } from './apis/schedules';
 import { createSentinelSettingsRouter } from './apis/sentinelSettings';
@@ -91,12 +94,15 @@ import type { ICompletedTurnEventStore } from './db/completedTurnEvents';
 import type { IDeliveryStore } from './db/deliveryStore';
 import type { IGlobalSettingsStore } from './db/globalSettingsStore';
 import type { IGoogleConnectionStore } from './db/googleConnectionStore';
+import type { ILocalUserStore } from './db/localUserStore';
 import type { IMcpServerWithAuthStore } from './db/mcpServerStore';
 import type { IMcpToolGrantStore } from './db/mcpToolGrantStore';
 import type { IModelProviderStore } from './db/modelProviderStore';
+import type { INoticingStore } from './db/noticingStore';
 import type { IPersonalizationStore } from './db/personalizationStore';
 import type { IPersonaStore } from './db/personaStore';
 import type { IPushSubscriptionStore } from './db/pushSubscriptionStore';
+import type { IReachSettingsStore } from './db/reachSettingsStore';
 import type { IRepositoryStore } from './db/repositoryStore';
 import type { ISandboxProviderStore } from './db/sandboxProviderStore';
 import type { IScheduleStore } from './db/scheduleStore';
@@ -126,11 +132,15 @@ import type { ChatSearchIndexer } from './runtime/chatSearchIndexing';
 import { resolveDefaultChatModel } from './runtime/defaultChatModel';
 import type { DeliveryService } from './runtime/delivery/deliveryService';
 import type { EventSubscriptionRegistry } from './runtime/event-subscription';
+import { createVaultClient } from './runtime/memory/vaultClient';
+import type { NoticingService } from './runtime/noticing/noticingService';
+import type { ReminderReach } from './runtime/noticing/reminderReach';
 import { resolveSandboxProvider } from './runtime/sessionResources';
 import { createSpacePictureService } from './runtime/spacePictures/spacePictureService';
 import { TokenFactoryDailyCapError, type TokenFactoryBudget } from './runtime/tokenFactoryBudget';
 import { envManagedModelProviderNames } from './runtime/tokenFactoryProvider';
 import type { TurnDrainRegistry } from './runtime/turnDrains';
+import type { ReachAvailability } from './schemas/reach';
 import { InvalidCronError } from './schemas/schedule';
 import { TENANT_ID } from './tenancy';
 import { zodErrorResponse, zodValidationHook } from './zodErrorResponse';
@@ -312,6 +322,14 @@ export interface ServerDeps<TTransaction> {
   pushSubscriptionStore: IPushSubscriptionStore;
   /** The one door into the feed; due reminders go through it. */
   deliveryService: DeliveryService;
+  reachSettingsStore: IReachSettingsStore;
+  noticingStore: Pick<INoticingStore, 'getCheckpoint'>;
+  /** Runs the watcher passes the controller asks for. */
+  noticingService: NoticingService;
+  /** Settles how loud a due reminder is. */
+  reminderReach: ReminderReach;
+  /** Which phone channels this server can use. Texts and calls are set up by later parts. */
+  reachChannels: () => ReachAvailability;
   /** The public key a browser needs to turn push on; undefined while push is off. */
   webPushPublicKey: string | undefined;
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
@@ -340,6 +358,8 @@ export interface ServerDeps<TTransaction> {
   logger: Logger;
   /** Background OIDC discovery; undefined when browser login is disabled. */
   oidcDiscovery: OidcDiscoveryHandle | undefined;
+  /** The local user store, present only in local sign-in mode. */
+  localUserStore: ILocalUserStore | undefined;
   /** Startup-selected authenticator; middleware is built from this once per app. */
   authenticator: Authenticator;
   /** Startup-selected agent authorization policy. */
@@ -502,6 +522,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     scheduleStore: deps.scheduleStore,
     briefItemStore: deps.briefItemStore,
     deliveryService: deps.deliveryService,
+    reminderReach: deps.reminderReach,
     sessions: deps.sessions,
     agentStore: deps.agentStore,
     personaStore: deps.personaStore,
@@ -603,6 +624,14 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       oidcDiscovery: deps.oidcDiscovery,
       logger: deps.logger,
       authMiddleware,
+      ...(deps.localUserStore === undefined
+        ? {}
+        : {
+            localSignIn: {
+              localUserStore: deps.localUserStore,
+              globalSettingsStore: deps.globalSettingsStore,
+            },
+          }),
     }),
   );
   app.route(
@@ -721,6 +750,10 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     withAuth(createScheduleExecutionRouter(scheduleTurnDeps), scheduleExecutionAuthMiddleware),
   );
   app.route(
+    '/api/internal/noticing',
+    withAuth(createNoticingRouter({ noticing: deps.noticingService }), scheduleExecutionAuthMiddleware),
+  );
+  app.route(
     '/api/internal/private-chats',
     withAuth(
       createPrivateChatSweepRouter({
@@ -771,6 +804,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         sentinelSettingsStore: deps.sentinelSettingsStore,
         sentinelAuditStore: deps.sentinelAuditStore,
         deliveryStore: deps.deliveryStore,
+        reachSettingsStore: deps.reachSettingsStore,
         turnArtifactStore: deps.turnArtifactStore,
         tokenStore: deps.tokenStore,
         resolveMcpServerStore: deps.resolveMcpServerStore,
@@ -795,6 +829,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       globalSettingsStore: deps.globalSettingsStore,
       sentinelAuditStore: deps.sentinelAuditStore,
       deliveryStore: deps.deliveryStore,
+      reachSettingsStore: deps.reachSettingsStore,
       turnArtifactStore: deps.turnArtifactStore,
       chatSearchIndexer: deps.chatSearchIndexer,
       tokenStore: deps.tokenStore,
@@ -904,6 +939,27 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     withAuth(createDeliveriesRouter({ deliveryStore: deps.deliveryStore, resolveRequestContext }), authMiddleware),
   );
   app.route(
+    '/api/v1/user/reach',
+    withAuth(
+      createReachRouter({
+        reachStore: deps.reachSettingsStore,
+        noticingStore: deps.noticingStore,
+        deliveryService: deps.deliveryService,
+        channels: deps.reachChannels,
+        memories: async ({ tenant_id }) => {
+          const outcome = await createVaultClient({ logger: deps.logger, tenantId: tenant_id })?.listEntries({
+            namespace: '',
+            timeoutMs: 10_000,
+          });
+          return outcome?.ok === true ? outcome.entries.map(entry => entry.text) : [];
+        },
+        resolveRequestContext,
+        logger: deps.logger,
+      }),
+      authMiddleware,
+    ),
+  );
+  app.route(
     '/api/v1/user/push',
     withAuth(
       createPushRouter({
@@ -989,6 +1045,21 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
           fetchImpl: undefined,
           logger: deps.logger,
           mcpServerStore: deps.resolveMcpServerStore(),
+        }),
+        adminAuthMiddleware,
+      ),
+      createUiSessionAuthMiddleware(deps.authenticator),
+    ),
+  );
+  // Same guard as the accounts: the notes folder belongs to the whole instance. It holds no
+  // secret; the path and the inbox file name are all that is saved.
+  app.route(
+    NOTES_FOLDER_SETTINGS_BASE_PATH,
+    withAuth(
+      withAdminAuth(
+        createNotesFolderRouter({
+          logger: deps.logger,
+          settingsStore: deps.globalSettingsStore,
         }),
         adminAuthMiddleware,
       ),
@@ -1201,6 +1272,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       createVoiceRouter({
         logger: deps.logger,
         resolveRequestContext,
+        app,
       }),
       authMiddleware,
     ),
@@ -1279,6 +1351,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     withAuth(
       createTurnsRouter({
         mcpCatalog: deps.mcpCatalog,
+        skillCatalog: deps.skillCatalog,
         sessions: deps.sessions,
         sessionStore: deps.sessionStore,
         activeTurns: deps.activeTurns,

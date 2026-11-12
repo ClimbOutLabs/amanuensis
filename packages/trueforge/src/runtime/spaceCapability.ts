@@ -72,10 +72,12 @@ import { googleCapability, sandboxAttachmentStager } from './googleCapability';
 import { googleSetupCapability } from './googleSetupCapability';
 import { mapsCapability } from './mapsCapability';
 import { MemoryTurnResourceResolver } from './MemoryTurnResourceResolver';
+import { notesFolderCapability, type NotesFolderTurnContext } from './notesFolderCapability';
 import { pastChatsCapability, type PastChatsTurnContext } from './pastChatsCapability';
 import { personaCapability, type PersonaTurnContext } from './personaCapability';
 import { privateChatCapability, toolsForChat } from './privateChat';
 import { scheduleCapability, type ScheduleTurnContext } from './scheduleCapability';
+import { skillCapability, type SkillTurnContext } from './skillCapability';
 import { maskDocumentationRegions } from './spaceDocumentationMask';
 import {
   dropDuplicateRows,
@@ -2768,6 +2770,8 @@ export interface SpaceTurnContext {
   store: SpaceToolStore;
   /** Per-user Google logins; absent, no Gmail tools mount. */
   googleConnections?: GoogleConnectionStore | undefined;
+  /** The notes folder service; absent, no notes tools mount. */
+  notesFolder?: NotesFolderTurnContext | undefined;
   authority: SpaceTurnAuthority;
   /** Chat session id: keys the delta-failure breaker per session (see SpaceCapabilityOptions). */
   sessionId: string;
@@ -2777,6 +2781,8 @@ export interface SpaceTurnContext {
   schedules?: ScheduleTurnContext | undefined;
   /** Present where the chat has a model to answer with; absent, no persona tool mounts. */
   personas?: PersonaTurnContext | undefined;
+  /** Present where this app keeps the skills itself; absent, no skill tools mount. */
+  skills?: SkillTurnContext | undefined;
   /** The request carries a new message from the person, not an approval resuming the same answer. */
   startsAnswer: boolean;
 }
@@ -2836,9 +2842,11 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
       return resolved;
     }
     const google = await this.#google(input);
+    const notesFolder = await this.#notesFolder(input);
     const sentinel = this.#sentinel(input);
     const schedules = this.#space.schedules;
     const personas = this.#space.personas;
+    const skills = this.#space.skills;
     const keepsNothing = this.keepsNothing;
     return {
       ...resolved,
@@ -2875,6 +2883,7 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
             ]
           : []),
         ...google,
+        ...notesFolder,
         ...(personas === undefined
           ? []
           : [
@@ -2886,6 +2895,9 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
                 keepsNothing,
               }),
             ]),
+        ...(skills === undefined
+          ? []
+          : [skillCapability({ ...skills, tracing: input.tracing, sentinel, keepsNothing })]),
         ...(schedules === undefined
           ? []
           : [
@@ -2943,6 +2955,28 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
     } catch (error) {
       this.#space.logger.warn(
         'Google tools not mounted: the Google login could not be read',
+        extractErrorLogFields(error),
+      );
+      return [];
+    }
+  }
+
+  /** A folder that cannot be checked costs the chat its notes tools, never the chat itself. */
+  async #notesFolder(input: Parameters<MemoryTurnResourceResolver['resolveAgentDefinition']>[0]) {
+    const notesFolder = this.#space.notesFolder;
+    if (notesFolder === undefined) {
+      return [];
+    }
+    try {
+      const capability = await notesFolderCapability({
+        service: notesFolder.service,
+        tracing: input.tracing,
+        keepsNothing: this.keepsNothing,
+      });
+      return capability === undefined ? [] : [capability];
+    } catch (error) {
+      this.#space.logger.warn(
+        'Notes tools not mounted: the notes folder could not be checked',
         extractErrorLogFields(error),
       );
       return [];

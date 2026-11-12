@@ -4,7 +4,14 @@ import type {
   ContextMessage,
 } from '@truefoundry/trueforge-core/core';
 import { HOST_SUMMARY_PREFACE, InstructionBuilder, InternalEventType } from '@truefoundry/trueforge-core/core';
-import { steeredLinks } from '@truefoundry/trueforge-core/core/permissions/provenance';
+import {
+  carriedPrivateDetails,
+  type ChatProvenance,
+  isTrustedLink,
+  isTrustedPicture,
+  steeredDestinations,
+  steeredLinks,
+} from '@truefoundry/trueforge-core/core/permissions/provenance';
 import { createWebSearchTurnState } from '@truefoundry/trueforge-core/core/permissions/webSearch';
 import winston from 'winston';
 import { BACKGROUND_NOT_WORK_SENTENCE } from '../../../../src/personalization/backgroundFraming';
@@ -952,6 +959,147 @@ describe('HindsightMemoryProcessor and where links come from', () => {
     webSearch.provenance.untrusted.hosts.add('photos.thrupp.example');
     expect(steeredLinks({ provenance: webSearch.provenance, values: ['https://photos.thrupp.example'] })).toEqual([]);
     expect(steeredLinks({ provenance: webSearch.provenance, values: [album] })).toEqual([album]);
+  });
+
+  // A finding is recalled only while it is fresh, so its date is today's.
+  const TODAY = new Date().toISOString().slice(0, 10);
+  const READ_ALBUM = 'https://photos.harbour-prints.example/album';
+  const READ_PICTURE = 'https://photos.harbour-prints.example/cover.png';
+  const READ_ADDRESS = 'bookings@harbour-prints.example';
+  const READ_TEXT = `Prints for Maya are at ${READ_ALBUM} with a cover at ${READ_PICTURE} and orders go to ${READ_ADDRESS}.`;
+
+  /** One recall into a fresh chat record, so each case reads only what that recall registered. */
+  async function provenanceAfterRecall(input: {
+    results?: RecallItem[];
+    entities?: EntitySummary[];
+    client?: Parameters<typeof makeClient>[0];
+    config?: MemoryConfig;
+    message?: string;
+  }) {
+    const webSearch = createWebSearchTurnState();
+    const capability = hindsightMemoryCapability({
+      client: makeClient({
+        recall: jest.fn().mockResolvedValue({ ok: true, results: input.results ?? [], entities: input.entities ?? [] }),
+        ...input.client,
+      }),
+      config: input.config ?? DEFAULT_CONFIG,
+      logger: makeLogger(),
+      sessionId: 's1',
+      previousTurnId: null,
+      webSearch,
+    });
+    const processor = capability.preLLMProcessors?.[0];
+    if (!processor) {
+      throw new Error('expected a preLLM processor');
+    }
+    const events = await collect(
+      processor.processPreLLM(makeExecution([{ role: 'user', content: input.message ?? 'where are my prints' }])),
+    );
+    return { provenance: webSearch.provenance, block: passthroughEvent(events)['injected_block'] ?? '' };
+  }
+
+  /** What a chat may do with a link, an address and a picture that only read content gave. */
+  function expectTreatedAsReadContent(provenance: ChatProvenance): void {
+    const withDetails = `${READ_ALBUM}?email=maya@example.org`;
+    expect(isTrustedLink({ provenance, url: READ_ALBUM })).toBe(false);
+    expect(isTrustedPicture({ provenance, url: READ_PICTURE })).toBe(false);
+    // Adding anything to the link is held; so is an action that goes to the address.
+    expect(steeredLinks({ provenance, values: [withDetails] })).toEqual([withDetails]);
+    expect(
+      steeredDestinations({ provenance, addresses: [READ_ADDRESS], values: [], reply_sender: null }).map(
+        destination => destination.value,
+      ),
+    ).toEqual([READ_ADDRESS]);
+    // Opening the link exactly as it was written still runs.
+    expect(steeredLinks({ provenance, values: [READ_ALBUM] })).toEqual([]);
+  }
+
+  it.each([
+    ['a tool result', { origin: 'tool_ingested' }],
+    ['an email the mail pipeline saved', { origin: 'email' }],
+    ['a document the mail pipeline saved', { origin: 'document' }],
+    ['a finding noted from an email', { origin: 'tool_ingested', note_source: 'email', note_date: TODAY }],
+  ])('keeps a remembered link, address and picture from %s as read content', async (_from, metadata) => {
+    const { provenance, block } = await provenanceAfterRecall({
+      results: [{ id: '1', occurred_start: TODAY, text: READ_TEXT, metadata }],
+    });
+    expect(block).toContain(READ_ALBUM);
+    expectTreatedAsReadContent(provenance);
+  });
+
+  it('keeps what a summary of a person says as read content, since a summary has no single source', async () => {
+    const { provenance, block } = await provenanceAfterRecall({
+      entities: [entitySummary({ name: 'Harbour Prints', observations: [{ text: READ_TEXT }] })],
+    });
+    expect(block).toContain(READ_ALBUM);
+    expectTreatedAsReadContent(provenance);
+  });
+
+  it('keeps what the profile, a mental model and the reflection say as read content', async () => {
+    const layers: MemoryConfig = {
+      ...DEFAULT_CONFIG,
+      curated: { enabled: true, maxModels: 3, maxTokens: 512 },
+      reflect: { enabled: true, budget: 'low', maxTokens: 512, timeoutMs: 8000 },
+    };
+    const model: MentalModel = { id: 'm1', name: 'Prints', content: READ_TEXT, tags: ['prints'], isStale: false };
+    const fromModel = await provenanceAfterRecall({
+      config: { ...layers, reflect: { ...layers.reflect, enabled: false } },
+      client: { listMentalModels: jest.fn().mockResolvedValue({ ok: true, models: [model] }) },
+    });
+    expect(fromModel.block).toContain(READ_ALBUM);
+    expectTreatedAsReadContent(fromModel.provenance);
+
+    const fromProfile = await provenanceAfterRecall({
+      config: { ...layers, reflect: { ...layers.reflect, enabled: false } },
+      client: {
+        getProfile: jest
+          .fn()
+          .mockResolvedValue({ ok: true, profile: { name: 'Aman', mission: READ_TEXT, background: undefined } }),
+      },
+    });
+    expect(fromProfile.block).toContain(READ_ALBUM);
+    expectTreatedAsReadContent(fromProfile.provenance);
+
+    const fromReflection = await provenanceAfterRecall({
+      config: { ...layers, curated: { ...layers.curated, enabled: false } },
+      client: { reflect: jest.fn().mockResolvedValue({ ok: true, text: READ_TEXT, basedOn: 3 }) },
+      message: 'Summarize my print orders',
+    });
+    expect(fromReflection.block).toContain(READ_ALBUM);
+    expectTreatedAsReadContent(fromReflection.provenance);
+  });
+
+  it('still counts what the person said as theirs when it is recalled beside something that was read', async () => {
+    const { provenance } = await provenanceAfterRecall({
+      results: [
+        { id: '1', occurred_start: '2026-08-14', text: READ_TEXT, metadata: { origin: 'tool_ingested' } },
+        {
+          id: '2',
+          occurred_start: '2026-08-15',
+          text: 'My framer is at https://frames.maya.example/orders and I write to dana@frames.maya.example.',
+          metadata: { origin: 'user_stated' },
+        },
+      ],
+    });
+    expectTreatedAsReadContent(provenance);
+    const order = 'https://frames.maya.example/orders?size=a3';
+    expect(isTrustedLink({ provenance, url: 'https://frames.maya.example/orders' })).toBe(true);
+    expect(steeredLinks({ provenance, values: [order] })).toEqual([]);
+    expect(
+      steeredDestinations({
+        provenance,
+        addresses: ['dana@frames.maya.example'],
+        values: [],
+        reply_sender: null,
+      }),
+    ).toEqual([]);
+  });
+
+  it('does not count an address from read content as one of the person’s own details', async () => {
+    const { provenance } = await provenanceAfterRecall({
+      results: [{ id: '1', occurred_start: '2026-08-14', text: READ_TEXT, metadata: { origin: 'tool_ingested' } }],
+    });
+    expect(carriedPrivateDetails({ provenance, values: [`prints ${READ_ADDRESS}`] })).toEqual([]);
   });
 });
 
@@ -2463,7 +2611,8 @@ describe('recall query with an attached document', () => {
 });
 
 describe('extractPreviousExchange origin', () => {
-  function exchangeWithTool(name: string): ContextMessage[] {
+  /** One earlier exchange in which a tool ran: one of the assistant's own, or a tool of the named connector. */
+  function exchangeWithTool(name: string, connector?: string): ContextMessage[] {
     return [
       { role: 'user', content: 'first question' },
       {
@@ -2475,9 +2624,9 @@ describe('extractPreviousExchange origin', () => {
             type: 'function',
             function: { name, arguments: '{}' },
             tool_info: {
-              type: 'truefoundry-system',
-              mcp_server_id: '',
-              mcp_server_name: '',
+              type: connector === undefined ? 'truefoundry-system' : 'mcp',
+              mcp_server_id: connector ?? '',
+              mcp_server_name: connector ?? '',
               original_tool_name: name,
             },
           },
@@ -2500,6 +2649,11 @@ describe('extractPreviousExchange origin', () => {
 
   it('leaves the exchange as the person own when only a task tool ran', () => {
     expect(extractPreviousExchange(exchangeWithTool('record_finding'))?.origin).toBe('user_stated');
+  });
+
+  it('marks the exchange as read content when a connector tool named like a task tool ran', () => {
+    expect(extractPreviousExchange(exchangeWithTool('record_finding', 'notes'))?.origin).toBe('tool_ingested');
+    expect(extractPreviousExchange(exchangeWithTool('replace_task_checklist', 'notes'))?.origin).toBe('tool_ingested');
   });
 });
 

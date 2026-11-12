@@ -32,8 +32,9 @@ import {
   upgradeQuestionLine,
   verifyNotListedProblem,
 } from '../messages.ts';
+import { windowsAssetName } from '../release/assetNames.ts';
 import type { FetchBytes } from '../release/download.ts';
-import { fetchLatestManifest, fetchReleaseFile, sourceArchiveName, windowsAssetName } from '../release/download.ts';
+import { fetchLatestManifest, fetchReleaseFile, sourceArchiveName } from '../release/download.ts';
 import { sha256Hex, type ReleaseManifest } from '../release/manifest.ts';
 import type { ProcessRunner } from '../runner/processRunner.ts';
 import type { StateStore, StateSummary } from '../state/state.ts';

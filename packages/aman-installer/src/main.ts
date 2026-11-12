@@ -1,13 +1,14 @@
 import { homedir, hostname, networkInterfaces } from 'node:os';
 import { basename } from 'node:path';
-import { createInterface } from 'node:readline/promises';
 
 import { runCli } from './cli.ts';
 import { resolvePendingSwap } from './commands/upgrade.ts';
 import { installerConfig } from './config.ts';
 import { hostForPlatform } from './host/hostFor.ts';
 import { systemWindowsJobs, windowsPaths } from './host/windowsJobs.ts';
+import { createLineInput, type LineInput } from './lineInput.ts';
 import { PRESS_ENTER_TO_CLOSE_LINE, UNEXPECTED_FAILURE, problemText } from './messages.ts';
+import { isSetupProgramName } from './release/assetNames.ts';
 import { fetchBytesFromNetwork } from './release/download.ts';
 import { SystemProcessRunner } from './runner/processRunner.ts';
 import { storeForHost } from './state/storeFor.ts';
@@ -23,31 +24,37 @@ const config = installerConfig({ env: process.env, homeDir: homedir() });
 // one; everywhere else the upgrade refuses before it would be used.
 const programsDir = host.kind === 'windows' ? windowsPaths(config.localAppDataDir).programsDir : null;
 
+// A piped input is read by one reader for the whole run, so answers
+// piped in together each reach their own question. A terminal gets a
+// reader per question, so nothing reads keys between questions (the
+// secret question reads them itself).
+let pipedLines: LineInput | null = null;
+
+async function readAnswer(question: string): Promise<string | null> {
+  process.stdout.write(question);
+  if (!process.stdin.isTTY) {
+    pipedLines ??= createLineInput(process.stdin);
+    return pipedLines.next();
+  }
+  const lines = createLineInput(process.stdin);
+  try {
+    return await lines.next();
+  } finally {
+    lines.close();
+  }
+}
+
 // The upgrade's one question, asked on the terminal. Anything but an
 // explicit yes is a no, and a closed terminal is a no.
 async function askConfirm(question: string): Promise<boolean> {
-  const terminal = createInterface({ input: process.stdin, output: process.stdout });
-  try {
-    const answer = await terminal.question(`${question} Type yes to go ahead: `);
-    return /^y(es)?$/i.test(answer.trim());
-  } catch {
-    return false;
-  } finally {
-    terminal.close();
-  }
+  const answer = await readAnswer(`${question} Type yes to go ahead: `);
+  return answer !== null && /^y(es)?$/i.test(answer.trim());
 }
 
 // The install command's questions, asked on the terminal. A closed
 // terminal is no answer.
 async function askLine(question: string): Promise<string | null> {
-  const terminal = createInterface({ input: process.stdin, output: process.stdout });
-  try {
-    return (await terminal.question(`${question} `)).trim();
-  } catch {
-    return null;
-  } finally {
-    terminal.close();
-  }
+  return (await readAnswer(`${question} `))?.trim() ?? null;
 }
 
 // The install command's secret questions: what is typed is not shown.
@@ -61,14 +68,7 @@ async function askLine(question: string): Promise<string | null> {
 async function askSecretLine(question: string): Promise<string | null> {
   const input = process.stdin;
   if (!input.isTTY) {
-    const terminal = createInterface({ input, output: process.stdout });
-    try {
-      return await terminal.question(`${question} `);
-    } catch {
-      return null;
-    } finally {
-      terminal.close();
-    }
+    return readAnswer(`${question} `);
   }
   process.stdout.write(`${question} `);
   return new Promise<string | null>(resolve => {
@@ -125,7 +125,7 @@ async function askSecretLine(question: string): Promise<string | null> {
 // command list decides which, from what is on the computer.
 function invokedAsSetup(): boolean {
   for (const path of [process.argv[1] ?? '', process.execPath]) {
-    if (/^aman-setup(\.exe)?$/i.test(basename(path))) {
+    if (isSetupProgramName(basename(path))) {
       return true;
     }
   }
@@ -143,6 +143,7 @@ const windowsJobs = systemWindowsJobs({
   runner,
   localAppDataDir: config.localAppDataDir,
   selfExePath: process.execPath,
+  selfPid: process.pid,
 });
 
 // Waits for Enter when the window would otherwise close unread.
@@ -207,4 +208,5 @@ void runCli(args, {
   .then(async exitCode => {
     process.exitCode = exitCode;
     await holdWindowIfNeeded(exitCode).catch(() => undefined);
+    pipedLines?.close();
   });
