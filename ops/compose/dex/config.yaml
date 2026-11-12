@@ -5,15 +5,16 @@
 # Dex shares the server container's network namespace (see
 # docker-compose.yml), so the issuer below is the same URL for the browser
 # on the host and for the server verifying tokens, which OIDC requires.
-issuer: https://localhost:5556/dex
+# Plain http, like an installed instance on this computer: the port is
+# published on the host's loopback address only, so there is no certificate
+# for a browser to warn about.
+issuer: http://localhost:5556/dex
 
 storage:
   type: memory
 
 web:
-  https: 0.0.0.0:5556
-  tlsCert: /etc/dex/tls/dex.crt
-  tlsKey: /etc/dex/tls/dex.key
+  http: 0.0.0.0:5556
 
 # Plain HTTP, never published: the container healthcheck reads /healthz here.
 telemetry:

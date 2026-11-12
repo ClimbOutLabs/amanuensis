@@ -238,3 +238,14 @@ test('the real repo pack includes at least one docs page', async () => {
     await rm(outDir, { recursive: true, force: true });
   }
 });
+
+test('a kind:name cover names another surface and is left to the coverage check', async () => {
+  const fx = await fixture({ topics: { 'a.md': topic({ id: 'a', covers: 'brief, settings:models' }) } });
+  try {
+    const result = await buildAmanGuide(fx.options);
+    assert.deepEqual(result.topics[0].covers, ['brief', 'settings:models']);
+    assert.deepEqual(result.uncoveredKeys, ['email', 'code']);
+  } finally {
+    await rm(fx.dir, { recursive: true, force: true });
+  }
+});

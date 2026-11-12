@@ -442,6 +442,6 @@ describe('model request safety net', () => {
     expect(create).not.toHaveBeenCalled();
     const done = expectErrorDone(events);
     expect(done.handoff_cause).toBe('fatal_error');
-    expect(done.error).toContain('safety ceiling');
+    expect(done.error).toBe('The chat is too long for this model. Start a new chat or use a different model.');
   });
 });

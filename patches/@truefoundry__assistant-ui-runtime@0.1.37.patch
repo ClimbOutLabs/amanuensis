@@ -117,7 +117,7 @@ diff --git a/dist/chunk-4O6D3YUJ.js.map b/dist/chunk-4O6D3YUJ.js.map
 deleted file mode 100644
 index 6fd3add4e62f65f2c46dcbb6b066317a3a7278de..0000000000000000000000000000000000000000
 diff --git a/dist/index.d.ts b/dist/index.d.ts
-index 6c2f1b9a90a9b2b690c8f6f938e875678cb87f3d..e01fbae8363dc3bcfb61bc02a55910394f65bdc9 100644
+index 6c2f1b9a90a9b2b690c8f6f938e875678cb87f3d..44e78d21713bd3e46c924a11c6552461b2116db8 100644
 --- a/dist/index.d.ts
 +++ b/dist/index.d.ts
 @@ -4,10 +4,6 @@ import { A as AgentSpec, a as AgentChatServer, T as TurnEvent, b as ThreadCreate
@@ -191,17 +191,22 @@ index 6c2f1b9a90a9b2b690c8f6f938e875678cb87f3d..e01fbae8363dc3bcfb61bc02a5591039
  /** Returns a function to reset (re-submit) a user turn from any render context. */
  declare const useTrueFoundryResetFromTurn: () => (turnId: string) => Promise<void>;
  /** Current draft agent spec and sync state (draft mode only). */
-@@ -381,4 +396,7 @@ declare function getSession(server: AgentChatServer, sessionId: string): Promise
+@@ -381,4 +396,12 @@ declare function getSession(server: AgentChatServer, sessionId: string): Promise
   */
  declare const trueFoundryAttachmentAdapter: AttachmentAdapter;
  
 -export { AgentChatServer, AgentSpec, type AgentSpecUpdate, type ConvertTurnsResult, type DraftAgentConfig, type DraftSession, type DraftSessionBridge, type McpAuthMessageCustomMetadata, McpAuthRequiredEvent, type NamedAgentConfig, type PendingApproval, type PendingToolResponse, ROOT_THREAD_ID, type SandboxMessageCustomMetadata, Session, type SubAgentArtifact, type SubAgentCustomMetadata, type SubAgentMessageCustomMetadata, TOOL_RESPONSE_THREAD_ID_CUSTOM_KEY, ThreadCreatedEvent, type ToolApprovalMessageCustomMetadata, type ToolResponseMessageCustomMetadata, type TrueFoundryAgentConfig, type TrueFoundryDraftRuntimeExtras, type TrueFoundryMessageCustomMetadata, type TrueFoundryRuntimeExtras, Turn, TurnEvent, TurnInputItem, type UseTrueFoundryAgentRuntimeOptions, type UserMessageContent, UserToolApprovalEvent, UserToolResponseEvent, buildEditedUserMessageContent, buildTurnAssistantContent, buildUserMessageContent, collectApprovalInputs, collectRequiredActionInputs, collectResponseInputs, convertTurnsToThreadMessages, createDraftSessionBridge, createTrueFoundryDraftThreadListAdapter, createTrueFoundryOwnedSessionsThreadListAdapter, createTrueFoundryThreadListAdapter, draftSessionTitle, findPausedAssistantMessage, getSession, getTrueFoundryExtras, getTurnMessageContent, mergeAgentSpec, messageHasPendingApprovals, messageHasPendingRequiredActions, messageHasPendingResponses, parseTurnIdFromMessageId, repositoryItemsFromMessages, toTrueFoundryApprovalInputs, trueFoundryAttachmentAdapter, trueFoundryExtras, tryGetTrueFoundryExtras, useTrueFoundryAdoptAgentSpec, useTrueFoundryAgentRuntime, useTrueFoundryAgentSpec, useTrueFoundryApprovals, useTrueFoundryCancel, useTrueFoundryDownloadSandboxFile, useTrueFoundryFlushAgentSpec, useTrueFoundryHistoryPagination, useTrueFoundryMcpAuth, useTrueFoundryReload, useTrueFoundryResetFromTurn, useTrueFoundryRespondToToolApproval, useTrueFoundryRespondToToolResponse, useTrueFoundryResumeMcpAuth, useTrueFoundryResumeUnavailable, useTrueFoundrySandboxId, useTrueFoundryToolResponses, useTrueFoundryTurnId, useTrueFoundryUpdateAgentSpec };
 +/** Server tool call id inside a tool invocation key; the input is returned unchanged when it is not a key. */
++/** Key a repeated server tool call id by the event that requested it, so two calls that reuse an id stay apart. */
++declare function toolInvocationKey({ sourceEventId, toolCallId, }: {
++    sourceEventId: string;
++    toolCallId: string;
++}): string;
 +declare function toolInvocationRawId(toolCallId: string): string;
 +
-+export { AgentChatServer, AgentSpec, type AgentSpecUpdate, type ConvertTurnsResult, type DraftAgentConfig, type DraftSession, type DraftSessionBridge, type McpAuthMessageCustomMetadata, McpAuthRequiredEvent, type NamedAgentConfig, type PendingApproval, type PendingToolResponse, ROOT_THREAD_ID, type SandboxMessageCustomMetadata, Session, type SubAgentArtifact, type SubAgentCustomMetadata, type SubAgentMessageCustomMetadata, TOOL_RESPONSE_THREAD_ID_CUSTOM_KEY, ThreadCreatedEvent, type ToolApprovalMessageCustomMetadata, type ToolResponseMessageCustomMetadata, type TrueFoundryAgentConfig, type TrueFoundryDraftRuntimeExtras, type TrueFoundryMessageCustomMetadata, type TrueFoundryRuntimeExtras, Turn, TurnEvent, TurnInputItem, type UseTrueFoundryAgentRuntimeOptions, type UserMessageContent, UserToolApprovalEvent, UserToolResponseEvent, buildEditedUserMessageContent, buildTurnAssistantContent, buildUserMessageContent, collectApprovalInputs, collectRequiredActionInputs, collectResponseInputs, convertTurnsToThreadMessages, createDraftSessionBridge, createTrueFoundryDraftThreadListAdapter, createTrueFoundryOwnedSessionsThreadListAdapter, createTrueFoundryThreadListAdapter, draftSessionTitle, findPausedAssistantMessage, getSession, getTrueFoundryExtras, getTurnMessageContent, mergeAgentSpec, messageHasPendingApprovals, messageHasPendingRequiredActions, messageHasPendingResponses, parseTurnIdFromMessageId, repositoryItemsFromMessages, toTrueFoundryApprovalInputs, toolInvocationRawId, trueFoundryAttachmentAdapter, trueFoundryExtras, tryGetTrueFoundryExtras, useTrueFoundryAdoptAgentSpec, useTrueFoundryAgentRuntime, useTrueFoundryAgentSpec, useTrueFoundryApprovals, useTrueFoundryCancel, useTrueFoundryDownloadSandboxFile, useTrueFoundryFlushAgentSpec, useTrueFoundryHistoryPagination, useTrueFoundryMcpAuth, useTrueFoundryReload, useTrueFoundryResetFromTurn, useTrueFoundryRespondToToolApproval, useTrueFoundryRespondToToolResponse, useTrueFoundryResumeMcpAuth, useTrueFoundryResumeUnavailable, useTrueFoundrySandboxId, useTrueFoundryTerminalError, useTrueFoundryCancelledTurn, useTrueFoundryToolResponses, useTrueFoundryTurnId, useTrueFoundryUpdateAgentSpec };
++export { AgentChatServer, AgentSpec, type AgentSpecUpdate, type ConvertTurnsResult, type DraftAgentConfig, type DraftSession, type DraftSessionBridge, type McpAuthMessageCustomMetadata, McpAuthRequiredEvent, type NamedAgentConfig, type PendingApproval, type PendingToolResponse, ROOT_THREAD_ID, type SandboxMessageCustomMetadata, Session, type SubAgentArtifact, type SubAgentCustomMetadata, type SubAgentMessageCustomMetadata, TOOL_RESPONSE_THREAD_ID_CUSTOM_KEY, ThreadCreatedEvent, type ToolApprovalMessageCustomMetadata, type ToolResponseMessageCustomMetadata, type TrueFoundryAgentConfig, type TrueFoundryDraftRuntimeExtras, type TrueFoundryMessageCustomMetadata, type TrueFoundryRuntimeExtras, Turn, TurnEvent, TurnInputItem, type UseTrueFoundryAgentRuntimeOptions, type UserMessageContent, UserToolApprovalEvent, UserToolResponseEvent, buildEditedUserMessageContent, buildTurnAssistantContent, buildUserMessageContent, collectApprovalInputs, collectRequiredActionInputs, collectResponseInputs, convertTurnsToThreadMessages, createDraftSessionBridge, createTrueFoundryDraftThreadListAdapter, createTrueFoundryOwnedSessionsThreadListAdapter, createTrueFoundryThreadListAdapter, draftSessionTitle, findPausedAssistantMessage, getSession, getTrueFoundryExtras, getTurnMessageContent, mergeAgentSpec, messageHasPendingApprovals, messageHasPendingRequiredActions, messageHasPendingResponses, parseTurnIdFromMessageId, repositoryItemsFromMessages, toTrueFoundryApprovalInputs, toolInvocationKey, toolInvocationRawId, trueFoundryAttachmentAdapter, trueFoundryExtras, tryGetTrueFoundryExtras, useTrueFoundryAdoptAgentSpec, useTrueFoundryAgentRuntime, useTrueFoundryAgentSpec, useTrueFoundryApprovals, useTrueFoundryCancel, useTrueFoundryDownloadSandboxFile, useTrueFoundryFlushAgentSpec, useTrueFoundryHistoryPagination, useTrueFoundryMcpAuth, useTrueFoundryReload, useTrueFoundryResetFromTurn, useTrueFoundryRespondToToolApproval, useTrueFoundryRespondToToolResponse, useTrueFoundryResumeMcpAuth, useTrueFoundryResumeUnavailable, useTrueFoundrySandboxId, useTrueFoundryTerminalError, useTrueFoundryCancelledTurn, useTrueFoundryToolResponses, useTrueFoundryTurnId, useTrueFoundryUpdateAgentSpec };
 diff --git a/dist/index.js b/dist/index.js
-index 7931deb018203ae9c0a616fa30e25aeb8c667d85..16a66484063f69e693a254e9d0d630786586d311 100644
+index 7931deb018203ae9c0a616fa30e25aeb8c667d85..0d22af7bb1d16de61c10d537865f2e7af19d4f33 100644
 --- a/dist/index.js
 +++ b/dist/index.js
 @@ -2,16 +2,6 @@ import {
@@ -1264,15 +1269,16 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..16a66484063f69e693a254e9d0d63078
    mergeAgentSpec,
    mergeEventDelta,
    messageHasPendingApprovals,
-@@ -4408,6 +4679,7 @@ export {
+@@ -4408,6 +4679,8 @@ export {
    parseTurnIdFromMessageId,
    repositoryItemsFromMessages,
    toTrueFoundryApprovalInputs,
++  toolInvocationKey,
 +  toolInvocationRawId,
    trueFoundryAttachmentAdapter,
    trueFoundryExtras,
    tryGetTrueFoundryExtras,
-@@ -4427,6 +4699,8 @@ export {
+@@ -4427,6 +4700,8 @@ export {
    useTrueFoundryResumeMcpAuth,
    useTrueFoundryResumeUnavailable,
    useTrueFoundrySandboxId,
@@ -1291,7 +1297,7 @@ diff --git a/dist/plugins/truefoundry-agent-server-adapter/index.js.map b/dist/p
 deleted file mode 100644
 index 84c51b288c478ac0d18748007ccfb8cddc797f3a..0000000000000000000000000000000000000000
 diff --git a/dist/types-hS8TQqBP.d.ts b/dist/types-hS8TQqBP.d.ts
-index bddf93d1f4ad64c3df464ec48e884fc6f586e816..1e38629c58a686fc109de87cc8b182bb52c311d6 100644
+index bddf93d1f4ad64c3df464ec48e884fc6f586e816..8de8ea1e3b57b5be6fd22e3d37f8abb8129ee026 100644
 --- a/dist/types-hS8TQqBP.d.ts
 +++ b/dist/types-hS8TQqBP.d.ts
 @@ -9,7 +9,12 @@ interface ToolCallFunction {
@@ -1414,7 +1420,15 @@ index bddf93d1f4ad64c3df464ec48e884fc6f586e816..1e38629c58a686fc109de87cc8b182bb
          path: string;
      }): Promise<Blob>;
  }
-@@ -671,7 +707,7 @@ interface ToolBase {
+@@ -565,6 +601,7 @@ interface AgentBuilderCapabilitiesResponse {
+     data: {
+         sandbox: {
+             enabled: boolean;
++            reason?: string;
+         };
+         skill: {
+             enabled: boolean;
+@@ -671,7 +708,7 @@ interface ToolBase {
      description: string;
  }
  /** Strict auth type id. Hosts widen branches via intersection + re-union. */
@@ -1423,7 +1437,7 @@ index bddf93d1f4ad64c3df464ec48e884fc6f586e816..1e38629c58a686fc109de87cc8b182bb
  type ConnectorAuthOAuth = {
      type: "dcr";
      authUrl?: string;
-@@ -684,7 +720,13 @@ type ConnectorAuthApiKey = {
+@@ -684,7 +721,13 @@ type ConnectorAuthApiKey = {
  type ConnectorAuthNone = {
      type: "none";
  };
@@ -1438,7 +1452,7 @@ index bddf93d1f4ad64c3df464ec48e884fc6f586e816..1e38629c58a686fc109de87cc8b182bb
  type ConnectorAuthPublicOAuth = {
      type: "dcr";
      authUrl?: string;
-@@ -696,7 +738,12 @@ type ConnectorAuthPublicApiKey = {
+@@ -696,7 +739,12 @@ type ConnectorAuthPublicApiKey = {
  type ConnectorAuthPublicNone = {
      type: "none";
  };
@@ -1452,7 +1466,7 @@ index bddf93d1f4ad64c3df464ec48e884fc6f586e816..1e38629c58a686fc109de87cc8b182bb
  /**
   * MCP / connector create-edit config. Host extends for extra fields, etc.
   */
-@@ -994,6 +1041,8 @@ interface Schedule {
+@@ -994,6 +1042,8 @@ interface Schedule {
      agentId: string;
      /** Display name; omit when the host only has `agentId`. */
      agentName?: string;
@@ -2209,7 +2223,7 @@ index 4db1a0c316be15f58b922ca15d223dd0cd948a1a..c133746d5e8c247be7b4bef1434be8c5
  export const useTrueFoundryResetFromTurn = () => {
      const aui = useAui();
 diff --git a/src/index.ts b/src/index.ts
-index b5873bc07df150d1d74d240acd50a4a1681523d9..c414b753a4667f0932d1cec198ee26f8653d2c09 100644
+index b5873bc07df150d1d74d240acd50a4a1681523d9..96492cf79af83c4a9a5301e2d0609551f660aa63 100644
 --- a/src/index.ts
 +++ b/src/index.ts
 @@ -62,12 +62,15 @@ export {
@@ -2224,7 +2238,7 @@ index b5873bc07df150d1d74d240acd50a4a1681523d9..c414b753a4667f0932d1cec198ee26f8
      messageHasPendingApprovals,
      toTrueFoundryApprovalInputs,
  } from "./toolApproval.js";
-+export { toolInvocationRawId } from "./modelMessageContent.js";
++export { toolInvocationKey, toolInvocationRawId } from "./modelMessageContent.js";
  export {
      collectResponseInputs,
      messageHasPendingResponses,
@@ -2766,7 +2780,7 @@ index 677d5b7bacd18aceb962c7f948bf1a92de5695e0..c928225c4a2a28ec929b4066909dad82
      | ThreadDoneEvent
      | McpAuthRequiredEvent
 diff --git a/src/server/types.ts b/src/server/types.ts
-index 68b20cbb0f3506b46ed72f7431c3b483ece82c0c..b52ff099c7e19aadc3cadea2a18afb635675b362 100644
+index 68b20cbb0f3506b46ed72f7431c3b483ece82c0c..27f23471cd6ba1e04ed3e73c18cb1d741ecb70f5 100644
 --- a/src/server/types.ts
 +++ b/src/server/types.ts
 @@ -168,6 +168,11 @@ export interface AgentSpec<
@@ -2806,6 +2820,15 @@ index 68b20cbb0f3506b46ed72f7431c3b483ece82c0c..b52ff099c7e19aadc3cadea2a18afb63
      path: string;
    }): Promise<Blob>;
  }
+@@ -432,7 +438,7 @@ export interface McpToolSelection {
+  */
+ export interface AgentBuilderCapabilitiesResponse {
+   data: {
+-    sandbox: { enabled: boolean };
++    sandbox: { enabled: boolean; reason?: string };
+     skill: { enabled: boolean; reason?: string };
+     settings?: { enabled: boolean };
+   };
 @@ -970,6 +976,8 @@ export interface Schedule {
    agentId: string;
    /** Display name; omit when the host only has `agentId`. */

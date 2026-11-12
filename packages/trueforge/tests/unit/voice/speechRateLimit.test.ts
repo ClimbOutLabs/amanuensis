@@ -31,6 +31,56 @@ describe('SpeechRateLimiter', () => {
     expect(limiter.acquire('alice').allowed).toBe(false);
   });
 
+  it('lets a voice conversation wait for the in-flight cap it shares, without spending the minute budget', async () => {
+    const limiter = new SpeechRateLimiter({ maxPerWindow: 5, maxInFlight: 1 });
+    const readAloud = limiter.acquire('alice');
+    const waiting = limiter.acquireInFlightWaiting({
+      key: 'alice',
+      signal: new AbortController().signal,
+      timeoutMs: 5_000,
+    });
+    if (readAloud.allowed) readAloud.release();
+    const release = await waiting;
+    // The conversation holds the one place; the minute budget was spent only by the read-aloud request.
+    expect(limiter.acquire('alice')).toEqual({ allowed: false, retryAfterSeconds: 1 });
+    release();
+    release();
+    expect(
+      (await limiter.acquireInFlightWaiting({ key: 'alice', signal: new AbortController().signal, timeoutMs: 50 }))
+        .name,
+    ).toBeDefined();
+  });
+
+  it('gives up waiting after the time allowed, or when the caller stops', async () => {
+    const limiter = new SpeechRateLimiter({ maxInFlight: 1 });
+    limiter.acquire('alice');
+    await expect(
+      limiter.acquireInFlightWaiting({ key: 'alice', signal: new AbortController().signal, timeoutMs: 30 }),
+    ).rejects.toThrow();
+    const stop = new AbortController();
+    const waiting = limiter.acquireInFlightWaiting({ key: 'alice', signal: stop.signal, timeoutMs: 5_000 });
+    stop.abort();
+    await expect(waiting).rejects.toThrow();
+  });
+
+  it('serves waiting callers in the order they came', async () => {
+    const limiter = new SpeechRateLimiter({ maxInFlight: 1 });
+    const first = limiter.acquire('alice');
+    const order: number[] = [];
+    const never = new AbortController().signal;
+    const second = limiter.acquireInFlightWaiting({ key: 'alice', signal: never, timeoutMs: 5_000 }).then(release => {
+      order.push(2);
+      release();
+    });
+    const third = limiter.acquireInFlightWaiting({ key: 'alice', signal: never, timeoutMs: 5_000 }).then(release => {
+      order.push(3);
+      release();
+    });
+    if (first.allowed) first.release();
+    await Promise.all([second, third]);
+    expect(order).toEqual([2, 3]);
+  });
+
   it('keeps each person separate', () => {
     const limiter = new SpeechRateLimiter({ maxPerWindow: 1 });
 

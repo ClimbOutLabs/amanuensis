@@ -6,10 +6,12 @@
  * exchange twice (the drain hook's own submission, and the capability's reliability-loop
  * resubmission for a vanished operation) is a no-op on the memory provider's side.
  */
+import type { SessionRecord } from '@truefoundry/trueforge-core/agent-session';
 import type { Logger } from 'winston';
 import configuration from '../../config';
 import type { IModelProviderStore } from '../../db/modelProviderStore';
 import type { TurnModelUsage } from '../modelUsage';
+import { sessionKeepsNothing } from '../privateChat';
 import type { TokenFactoryBudget } from '../tokenFactoryBudget';
 import { stripAssistantAbilityNotes, withoutAbilityNotes } from './assistantAbilityNotes';
 import type { RetainItem } from './hindsightClient';
@@ -157,6 +159,8 @@ export interface RetainOutcomeLog {
 
 export interface SubmitRetainParams {
   client: MemoryClient;
+  /** The chat the turn belongs to; a private chat keeps nothing, so nothing is decided or sent. */
+  session: Pick<SessionRecord, 'is_incognito'>;
   sessionId: string;
   turnId: string;
   userText: string;
@@ -466,6 +470,9 @@ async function attemptRetainSubmission(
    */
   precomputed?: TurnMemory,
 ): Promise<RetainSubmissionResult> {
+  if (sessionKeepsNothing({ session: params.session })) {
+    return 'skipped';
+  }
   // The decision is made once per turn: a repeat attempt must not call the model again.
   const memory = precomputed ?? (await decideTurnMemory(params));
   if (memory.kind === 'nothing') {
@@ -542,6 +549,10 @@ async function attemptRetainSubmission(
  * accepted by a retry), so callers can make claims about a save only on that outcome.
  */
 export async function submitRetainWithVerification(params: SubmitRetainParams): Promise<boolean> {
+  // Before the summary model runs: a private chat's words reach neither memory nor its notes.
+  if (sessionKeepsNothing({ session: params.session })) {
+    return false;
+  }
   // Decide once; the retry path below must reuse it rather than invoking the LLM a second
   // time (cost, latency, and non-determinism).
   const precomputed = await decideTurnMemory(params);

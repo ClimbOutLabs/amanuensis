@@ -12,7 +12,9 @@ Run aman network close to close Aman to your home network again.
 Run aman upgrade to update Aman on Windows to the newest version.
 Run aman backup to make a backup of Aman now, in the Backups folder on this computer.
 Run aman backups to list the backups kept on this computer.
+Run aman restore to put Aman back the way it was in one of those backups.
 Run aman verify and name a downloaded file to check it against its signed release record.
+Run aman uninstall to remove Aman from this Windows computer.
 Docker is not installed on this computer. Install Docker Desktop from its website, then run this check again.
 Docker Desktop is not running. Open Docker Desktop from the Start menu, then run this check again.
 Docker is installed without its Compose tool, which Aman needs. Update Docker Desktop to the newest version, then run this check again.
@@ -118,6 +120,32 @@ The backups kept on this computer could not be listed. Run aman doctor to find w
 No backups have been made on this computer yet.
 Backups are kept in the folder C:\Users\Friend\AppData\Local\Amanuensis\backups.
 20261009T120000Z
+This computer was not set up with the Aman Setup download, so aman restore has nothing to put back. Run aman status to see what is installed on this computer.
+Aman is not installed on this computer yet, so there is nothing to put back. Install Aman with the Aman Setup download first, then run aman restore again.
+Docker is not answering, so nothing can be put back. Open Docker Desktop from the Start menu, then run aman restore again.
+Docker could not download the small helper it needs to put a backup back. Check your internet connection, then run aman restore again.
+The record of what is installed could not be read. Run aman doctor to find what is wrong, then run aman restore again.
+The backups kept on this computer could not be listed. Run aman doctor to find what is wrong, then run aman restore again.
+There is no backup of main in C:\Users\Friend\AppData\Local\Amanuensis\backups, so there is nothing to put back. Run aman backup to make one now, or copy a backup folder from another computer into C:\Users\Friend\AppData\Local\Amanuensis\backups.
+No answer was given, so nothing was changed. Run aman restore in a window and type your answer.
+A note left by an earlier removal of Aman could not be deleted, so nothing was changed. Delete the file docker-removed in the folder %LOCALAPPDATA%\Programs\Amanuensis, then run aman restore again.
+Putting the backup back. This can take a few minutes, so leave this window open.
+Type yes to go ahead:
+Your password goes back to the one you had then, and you may need to sign in again on your devices.
+That is not a number from the list, so nothing was changed. Run aman restore again and type one of the numbers.
+aman restore was given both a backup and --latest. Run aman restore with one of them, or with neither to pick from a list.
+Another install is running right now, so nothing was changed. Wait for it to finish, or wait 2 minutes if you stopped an install a moment ago, then run aman restore again.
+The restore did not finish. Run aman doctor to find what is wrong, then run aman restore again.
+aman restore does not take the word "--force". Run aman restore on its own to pick a backup from a list.
+There is no backup named 20261009T120000Z on this computer. Run aman restore on its own to pick one from the list.
+There is no instance named work on this computer. Run aman status to see the names of your instances.
+This computer has more than one instance: main, work. Run aman restore again with the name of the one to put back.
+Nothing was changed.
+Backups kept on this computer, newest first:
+Put back which backup? Type its number:
+  1. 2026-10-09 12:00 UTC (before import)
+This replaces the chats and settings of main with the backup from 2026-10-09 12:00 UTC. A copy of how it is now is saved first. main is running now and is stopped while this happens. Put the backup back?
+This replaces the chats and settings of main with the backup from 2026-10-09 12:00 UTC. A copy of how it is now is saved first. Put the backup back?
 The files Aman keeps on this computer are private to you.
 The files Aman keeps on this computer are now private to you.
 Files Aman keeps on this computer can be read by other accounts on this computer. Run Check Aman again with Fix; it makes these files private to you.
@@ -140,13 +168,14 @@ Aman is open to the devices on your home network.
 Aman is closed to your home network, and only this computer can open it now.
 On your phone, open http://192.168.1.20:8791.
 The Aman Setup download sets Aman up on a Windows computer, and this is not one. Use the installer for this computer to set Aman up.
+A note left by an earlier removal of Aman could not be deleted, so the install did not start. Delete the file docker-removed in the folder %LOCALAPPDATA%\Programs\Amanuensis, then open Aman Setup again.
 Docker could not download the small helper it needs to read the record of what is installed. Check your internet connection, then open Aman Setup again.
 Docker Desktop could not be downloaded. Check your internet connection, then open Aman Setup again.
 The Docker Desktop download did not come from Docker Inc, so it was not run. Download Docker Desktop from desktop.docker.com yourself, then open Aman Setup again.
 Docker Desktop could not be installed. Install Docker Desktop from its website, then open Aman Setup again.
 Docker Desktop did not start. Open Docker Desktop from the Start menu, wait until it says it is running, then open Aman Setup again.
 Docker Desktop needs your computer to restart before it can run. Restart your computer, and Aman Setup will open again by itself and carry on.
-Docker Desktop needs a restart, but Aman Setup could not be set to open again by itself. Restart your computer, then open Aman Setup from the Start menu.
+Docker Desktop needs a restart, but Aman Setup could not be set to open again by itself. Restart your computer, then open the Aman Setup download again from where you saved it, usually your Downloads folder.
 Docker is not answering, so the setup cannot go ahead. Open Docker Desktop from the Start menu, then open Aman Setup again.
 No answer was given, so nothing was installed. Open Aman Setup again when you are ready to answer its questions.
 Every place Aman could answer on this computer is taken by another program. Stop a program you do not need, then open Aman Setup again.
@@ -178,3 +207,26 @@ It asks four questions: your email, a password, your model key, and whether to o
 It downloads the newest Aman and sets it up with daily backups and an https address on this computer.
 It puts the aman command and the Start menu entries in place, and opens Aman in your browser.
 It opens a short getting started page in your browser at the end.
+Press Enter to close this window.
+aman uninstall removes an Aman set up with the Aman Setup download, and this is not a Windows computer. Run installer/install.sh instance remove with the name of each instance and --purge-data instead.
+Docker is not answering, so Aman cannot be removed from it. Open Docker Desktop from the Start menu, wait until it says it is running, then run aman uninstall again.
+Docker could not download the small helper it needs to remove Aman. Check your internet connection, then run aman uninstall again.
+The record of what is installed could not be read, so nothing was removed. Run aman doctor to find what is wrong, then run aman uninstall again.
+Another install is running right now, so nothing was removed. Wait for it to finish, or wait 2 minutes if you stopped an install a moment ago, then run aman uninstall again.
+The last backup could not be made, so nothing was removed. Run Check Aman from the Start menu to see what is wrong, then run aman uninstall again.
+The instance main could not be removed, so the removal stopped there. Read the lines above for the cause, then run aman uninstall again; it carries on from where it stopped.
+Some of what Aman kept in Docker could not be deleted. Restart Docker Desktop, then run aman uninstall again; it carries on from where it stopped.
+Aman is removed from Docker, but some of its parts on this PC are still here. Open Remove Aman from the Start menu, or press the Windows key and R and enter "C:\Users\Friend\AppData\Local\Programs\Amanuensis\aman.exe" uninstall, then answer Yes if Windows asks.
+This removes Aman from this computer.
+It deletes your instances and everything they keep: chats, memory, files and settings.
+It deletes the Aman images in Docker Desktop, the aman command and the Start menu entries.
+It takes away the daily backup task, the home network rule and the certificate Aman added.
+Docker Desktop stays installed, because other programs may use it.
+Remove Aman and delete all of its data?
+Delete your backups folder C:\Users\Friend\AppData\Local\Amanuensis\backups too? A last backup is made in it first unless you say yes.
+Nothing was removed.
+Removing the instance main.
+Aman is removed from this computer.
+Your backups are kept in C:\Users\Friend\AppData\Local\Amanuensis\backups. Delete that folder when you no longer need them.
+Docker Desktop is still installed. If nothing else uses it, remove it in Windows Settings, under Apps.
+Docker Desktop is not on this computer any more, and it took what Aman kept in it when it went. Removing the rest.

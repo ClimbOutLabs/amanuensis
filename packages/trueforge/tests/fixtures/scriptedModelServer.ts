@@ -20,6 +20,42 @@ export const TEXT_DIRECTIVE_PREFIX = 'text:';
 const DEFAULT_TEXT_ARGUMENT = 'inert';
 const DEFAULT_CALL_TOOL_SERVER = 'inert';
 export const FINAL_TEXT = 'inert connector work is finished.';
+/** What `run:create_persona` asks to add, so a test can check the card and the saved persona against it. */
+export const SCRIPTED_PERSONA = {
+  name: 'Travel planner',
+  description: 'Plans trips and keeps the bookings in one place.',
+  instructions: 'Help plan trips. Keep answers short and list what is booked and what is not.',
+};
+/** What `run:install_skill` asks to add: one of the starter skills, so nothing is looked up outside. */
+export const SCRIPTED_SKILL = {
+  name: 'algorithmic-art',
+  url: 'https://github.com/anthropics/skills',
+  path: 'skills/algorithmic-art',
+};
+/** What `run:create_schedule` asks to add. */
+export const SCRIPTED_SCHEDULE = {
+  name: 'friday-review',
+  task: 'Tell me what I finished this week and what is still open.',
+  repeat: 'weekly',
+  days: ['friday'],
+  time: '16:00',
+  time_zone: 'Europe/London',
+};
+/** What `run:draft_email` asks to save, so a test can check the card and the saved draft against it. */
+export const SCRIPTED_DRAFT = {
+  to: ['rui.costa@example.com'],
+  subject: 'Lunch on Friday',
+  body: 'Hi Rui, are you free for lunch on Friday at one?',
+};
+/** What `run:create_event` asks to add: half an hour, a week from now, so the event is never in the past. */
+const EVENT_DAY = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+export const SCRIPTED_EVENT = {
+  title: 'Dentist check-up',
+  start: `${EVENT_DAY}T10:00`,
+  end: `${EVENT_DAY}T10:30`,
+  time_zone: 'Europe/Lisbon',
+  location: '12 Mill Lane, Kelvinton',
+};
 /** Answers with the text of the last tool result instead of FINAL_TEXT, so a test can read what the tool returned. */
 export const QUOTE_TOOL_RESULT_DIRECTIVE = 'quote_tool_result';
 export const VERIFY_THEN_COMMIT_DIRECTIVE = 'verify_then_commit';
@@ -60,12 +96,20 @@ const THINKING_CHUNK_INTERVAL_MS = 50;
  */
 export const JUDGE_REJECT_MARKER = 'judge_reject';
 const RELEVANCE_JUDGE_TAG = '<knowledge-relevance-judge';
+/** The host's request to name a new chat after its first reply. */
+const CHAT_TITLE_TAG = '<chat-title';
 
 export interface ScriptedModelServer {
   /** Value for a `custom` model provider `base_url`. */
   baseUrl: string;
   /** Chat-completion requests served so far, oldest first. */
   requests: () => readonly ChatCompletionRequest[];
+  /**
+   * Sets what the model does next without the person's message saying it, so a test can tell the model's
+   * words from the person's. `reply` is the next plain answer; `toolArguments` are the next tool call's arguments.
+   * Each is used once.
+   */
+  next: (step: { reply?: string; toolArguments?: unknown }) => void;
   /** Thinking streams still open: a cancelled turn must hang up every one of them. */
   openThinkingStreams: () => number;
   close: () => Promise<void>;
@@ -156,6 +200,31 @@ function personText(content: unknown): string {
   return own.join(' ');
 }
 
+/**
+ * The answer to the host's request to name a new chat, or undefined for any other request. Like a
+ * model naming a chat by its subject, it answers with the person's first message, so a chat keeps
+ * the name its script gave it; the directives quoted inside that message are never acted on.
+ */
+function chatTitleAnswer(messages: ChatMessage[]): string | undefined {
+  if (!messages.some(message => message.role === 'system' && messageText(message.content).includes(CHAT_TITLE_TAG))) {
+    return undefined;
+  }
+  for (const message of messages) {
+    if (message.role !== 'user') {
+      continue;
+    }
+    try {
+      const payload: unknown = JSON.parse(messageText(message.content));
+      if (isRecord(payload) && typeof payload['first_message'] === 'string') {
+        return payload['first_message'];
+      }
+    } catch {
+      // Not the title payload; the next user message may be.
+    }
+  }
+  return undefined;
+}
+
 /** The advertised name for a directive, matched by substring so harness renaming still resolves. */
 function resolveToolName({ directive, tools }: { directive: string; tools: AdvertisedTool[] }): string | undefined {
   for (const tool of tools) {
@@ -236,6 +305,29 @@ function argumentsJsonForTool({
   }
   if (name === 'usage_summary') {
     return '{}';
+  }
+  // Home Assistant's Assist tools name their target, never a free text field: the `text:`
+  // directive carries the entity id (it has a dot) or the entity's plain name instead.
+  if (name.includes('GetLiveContext')) {
+    return '{}';
+  }
+  if (name.includes('Hass')) {
+    return text.includes('.') ? JSON.stringify({ entity_id: text }) : JSON.stringify({ name: text });
+  }
+  if (name.endsWith('create_persona')) {
+    return JSON.stringify(SCRIPTED_PERSONA);
+  }
+  if (name.endsWith('install_skill')) {
+    return JSON.stringify({ url: SCRIPTED_SKILL.url, path: SCRIPTED_SKILL.path });
+  }
+  if (name.endsWith('create_schedule')) {
+    return JSON.stringify(SCRIPTED_SCHEDULE);
+  }
+  if (name.endsWith('draft_email')) {
+    return JSON.stringify(SCRIPTED_DRAFT);
+  }
+  if (name.endsWith('create_event')) {
+    return JSON.stringify(SCRIPTED_EVENT);
   }
   return name.includes('ask_memory') ? '{"question":"inert"}' : JSON.stringify({ text });
 }
@@ -388,12 +480,44 @@ function completionBody({ text, toolCalls }: { text: string | null; toolCalls: S
   };
 }
 
+/**
+ * Waits for the detached chat-title call a chat's first turn leaves behind. It lands in the request
+ * log whenever it happens to arrive, so a test that counts requests waits for it first. The call is
+ * matched by the first message it was asked to title.
+ */
+export async function waitForChatTitleCall({
+  model,
+  fromIndex,
+  firstMessage,
+}: {
+  model: ScriptedModelServer;
+  fromIndex: number;
+  firstMessage: string;
+}): Promise<void> {
+  const deadline = Date.now() + 20_000;
+  for (;;) {
+    const landed = model
+      .requests()
+      .slice(fromIndex)
+      .some(request => chatTitleAnswer(request.messages)?.includes(firstMessage) === true);
+    if (landed) {
+      return;
+    }
+    if (Date.now() > deadline) {
+      throw new Error('The chat title call never reached the scripted model. Check that the first turn finished.');
+    }
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
+}
+
 export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
   const requests: ChatCompletionRequest[] = [];
   // Stalled streams stay open until the caller hangs up or the fixture closes.
   const stalled = new Set<ServerResponse>();
   const thinking = new Set<ServerResponse>();
   let callCounter = 0;
+  let nextReply: string | undefined;
+  let nextToolArgumentsJson: string | undefined;
 
   async function dispatch(req: IncomingMessage, res: ServerResponse): Promise<void> {
     if (!req.url?.endsWith('/chat/completions')) {
@@ -411,6 +535,26 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
       chatTemplateKwargs: isRecord(body) ? body['chat_template_kwargs'] : undefined,
     };
     requests.push(parsed);
+
+    const title = chatTitleAnswer(parsed.messages);
+    if (title !== undefined) {
+      if (!parsed.stream) {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify(completionBody({ text: title, toolCalls: [] })));
+        return;
+      }
+      res.writeHead(200, {
+        'content-type': 'text/event-stream',
+        'cache-control': 'no-cache',
+        connection: 'keep-alive',
+      });
+      for (const chunk of textChunks(title)) {
+        res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+      }
+      res.write('data: [DONE]\n\n');
+      res.end();
+      return;
+    }
 
     const progress = directiveProgress(parsed.messages);
     const pending = pendingDirective(parsed.messages);
@@ -464,18 +608,20 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
       }
     } else if (toolName !== undefined) {
       callCounter += 1;
+      const scriptedArgumentsJson =
+        requestedTool?.argumentsJson === '' || requestedTool?.argumentsJson === undefined
+          ? argumentsJsonForTool({
+              name: toolName,
+              callToolServer: callToolServer(parsed.messages),
+              text: textArgument(parsed.messages),
+            })
+          : requestedTool.argumentsJson;
       toolCalls.push({
         name: toolName,
         callId: `call_${String(callCounter)}`,
-        argumentsJson:
-          requestedTool?.argumentsJson === '' || requestedTool?.argumentsJson === undefined
-            ? argumentsJsonForTool({
-                name: toolName,
-                callToolServer: callToolServer(parsed.messages),
-                text: textArgument(parsed.messages),
-              })
-            : requestedTool.argumentsJson,
+        argumentsJson: nextToolArgumentsJson ?? scriptedArgumentsJson,
       });
+      nextToolArgumentsJson = undefined;
     }
 
     const rejectingJudge =
@@ -484,9 +630,15 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
     const quoteToolResult = parsed.messages.some(message =>
       personText(message.content).includes(QUOTE_TOOL_RESULT_DIRECTIVE),
     );
+    const isChatAnswer = toolCalls.length === 0 && parsed.tools.length > 0 && !rejectingJudge;
     const replyText = rejectingJudge
       ? '{"helpful":[]}'
-      : ((quoteToolResult ? lastToolResultText(parsed.messages) : undefined) ?? FINAL_TEXT);
+      : ((quoteToolResult ? lastToolResultText(parsed.messages) : undefined) ??
+        (isChatAnswer ? nextReply : undefined) ??
+        FINAL_TEXT);
+    if (isChatAnswer) {
+      nextReply = undefined;
+    }
 
     if (!parsed.stream) {
       res.writeHead(200, { 'content-type': 'application/json' });
@@ -564,6 +716,11 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
   return {
     baseUrl: `http://127.0.0.1:${String(address.port)}/v1`,
     requests: () => requests,
+    next: step => {
+      nextReply = step.reply ?? nextReply;
+      nextToolArgumentsJson =
+        step.toolArguments === undefined ? nextToolArgumentsJson : JSON.stringify(step.toolArguments);
+    },
     openThinkingStreams: () => thinking.size,
     close: () =>
       new Promise<void>((resolve, reject) => {

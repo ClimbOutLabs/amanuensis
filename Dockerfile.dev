@@ -165,7 +165,13 @@ RUN mkdir -p /data/memory /data/persona-knowledge /data/app /data/mail-policy \
 # has no home directory, so the default under HOME would fail with EACCES at startup.
 ENV MEMORY_MARKDOWN_DIR=/data/memory \
   PERSONA_KNOWLEDGE_DIR=/data/persona-knowledge \
-  APP_DATA_DIR=/data/app
+  APP_DATA_DIR=/data/app \
+  VOICE_VAD_MODEL_DIR=/opt/aman-voice
+
+# Voice mode's listening model (Silero VAD v5.1.2, MIT), fetched at build time and checked against its
+# SHA-256, so the build fails on any other file and the running server never downloads it. The server
+# pins the same hash in packages/trueforge/src/voice/vad/sileroVad.ts; a test keeps the two equal.
+ADD --chmod=0644 --checksum=sha256:2623a2953f6ff3d2c1e61740c6cdb7168133479b267dfef114a4a3cc5bdd788f https://raw.githubusercontent.com/snakers4/silero-vad/v5.1.2/src/silero_vad/data/silero_vad.onnx /opt/aman-voice/silero_vad.onnx
 
 # `docker run --rm -i <image> aman <command>` (hash-password, backup, doctor, export-data).
 # /backup is the mount point for `aman backup --target /backup`; owning it here lets a fresh
