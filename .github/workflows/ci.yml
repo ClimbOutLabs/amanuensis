@@ -1034,12 +1034,14 @@ jobs:
           docker build -t aman-browser:arm64-check ops/browser-sidecar
           docker build -f ops/browser-sidecar/Dockerfile.gateway -t aman-browser-gateway:arm64-check ops/browser-sidecar
 
-      # The installer pulls these by digest; each must have an arm64 image behind it.
+      # The installer pulls these by digest; each must have an arm64 image behind it. Every non-empty
+      # `*_image` key is checked, so a newly pinned image is covered without editing this list.
       - name: Pull the pinned images for arm64
         if: matrix.image == 'pinned'
         run: |
-          for key in dex_image mail_email_image setup_image caddy_image; do
-            image=$(node -p "require('./installer/release.json').$key")
+          pins=$(jq -r 'to_entries[] | select((.key | endswith("_image")) and .value != "") | "\(.key) \(.value)"' installer/release.json)
+          [ -n "$pins" ] || { echo "installer/release.json has no pinned images. Check the file." >&2; exit 1; }
+          printf '%s\n' "$pins" | while read -r key image; do
             echo "Pulling $key: $image"
             docker pull --platform linux/arm64 "$image"
             arch=$(docker image inspect -f '{{.Architecture}}' "$image")
