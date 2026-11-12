@@ -9,6 +9,13 @@ import configuration from '../../../src/config';
 import { TurnStreamingEventSchema } from '../../../src/schemas/events';
 import { GetTurnResponseSchema } from '../../../src/schemas/turn';
 import { MODEL_FQN, startApprovalTestServer, type ApprovalTestServer } from '../../fixtures/approvalTestServer';
+import {
+  HA_CALL_ACTION_TOOL,
+  HA_LAMP,
+  HA_UNFAMILIAR_TOOL,
+  startHomeAssistantStub,
+  type HomeAssistantStub,
+} from '../../fixtures/homeAssistantMcpServer';
 import { INERT_GET_PAGE_TOOL, INERT_SERVER_NAME, INERT_WRITE_TOOL } from '../../fixtures/inertMcpServer';
 import {
   RUN_DIRECTIVE_PREFIX,
@@ -641,6 +648,94 @@ describe('reminders and schedules in a chat', () => {
       });
       expect(resume?.tier3_card?.plain_what).toContain('Resume the schedule');
       expect(resume?.can_chat_allow).toBe(false);
+    },
+    TURN_TIMEOUT_MS,
+  );
+});
+
+const HOME_AGENT_SPEC = {
+  ...AGENT_SPEC,
+  mcp_servers: [
+    { name: 'home-assistant', preload: true, require_approval_for_tools: ['@write', '@destructive', '@unclassified'] },
+  ],
+};
+
+describe('the Home Assistant connector', () => {
+  let server: ApprovalTestServer;
+  let home: HomeAssistantStub;
+  const TOKEN = 'stand-in-home-token';
+
+  beforeAll(async () => {
+    server = await startApprovalTestServer();
+    home = await startHomeAssistantStub({ token: TOKEN, newerTools: true });
+    const created = await server.request(
+      '/api/v1/settings/mcp-servers',
+      jsonInit({
+        manifest: {
+          type: 'remote',
+          name: 'home-assistant',
+          url: home.url,
+          description: 'See and control the Home Assistant devices you expose to voice assistants.',
+          auth: { type: 'header', headers: { Authorization: `Bearer ${TOKEN}` } },
+        },
+      }),
+    );
+    expect(created.status).toBe(201);
+  }, TURN_TIMEOUT_MS);
+
+  afterAll(async () => {
+    await home.stop();
+    await server.close();
+  });
+
+  /** Asks for one tool to act on the lamp and returns the cards that came up. */
+  async function onTheLamp({ chatId, tool }: { chatId: string; tool: string }) {
+    server.model.next({ toolArguments: { entity_id: HA_LAMP } });
+    return cards(await runTurn({ server, chatId, input: ask(tool) }));
+  }
+
+  it(
+    'does not run the tool that can call any action, and shows no card for it',
+    async () => {
+      const chatId = await createChat(server, HOME_AGENT_SPEC);
+      expect(await onTheLamp({ chatId, tool: HA_CALL_ACTION_TOOL })).toEqual([]);
+      expect(home.invocations(HA_CALL_ACTION_TOOL)).toBe(0);
+      const events = await (await server.request(`/api/v1/sessions/${chatId}/events`)).text();
+      expect(events).toContain('Aman does not control locks, alarms or garage doors. Do that in Home Assistant.');
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
+    'asks every time for a change tool it does not know, with no lasting answer on the card',
+    async () => {
+      const chatId = await createChat(server, HOME_AGENT_SPEC);
+      const [first] = await onTheLamp({ chatId, tool: HA_UNFAMILIAR_TOOL });
+      if (first === undefined) {
+        throw new Error('the change showed no card');
+      }
+      expect(first.can_chat_allow).toBe(false);
+      expect(first.can_always_allow).toBe(false);
+      await runTurn({ server, chatId, input: answer({ card: first, scope: 'once' }) });
+      expect(home.invocations(HA_UNFAMILIAR_TOOL)).toBe(1);
+
+      expect(await onTheLamp({ chatId, tool: HA_UNFAMILIAR_TOOL })).toHaveLength(1);
+      expect(home.invocations(HA_UNFAMILIAR_TOOL)).toBe(1);
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
+    'still turns a lamp off after one approval',
+    async () => {
+      const chatId = await createChat(server, HOME_AGENT_SPEC);
+      const [card] = await onTheLamp({ chatId, tool: 'HassTurnOff' });
+      if (card === undefined) {
+        throw new Error('turning the lamp off showed no card');
+      }
+      expect(card.tier3_card?.plain_what).toBe('Turn off Living room lamp');
+      await runTurn({ server, chatId, input: answer({ card, scope: 'once' }) });
+      expect(home.entityState(HA_LAMP)).toBe('off');
     },
     TURN_TIMEOUT_MS,
   );
