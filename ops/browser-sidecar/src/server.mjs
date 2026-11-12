@@ -514,7 +514,7 @@ async function setFrameGuards(tab, on) {
       .filter(frame => frame !== tab.page.mainFrame())
       .map(frame =>
         frame
-          .evaluate(([name, key, wanted]) => window[name]?.(key, wanted), [FRAME_GUARD_SWITCH, FRAME_GUARD_KEY, on])
+          .evaluate(([name, key, wanted]) => globalThis[name]?.(key, wanted), [FRAME_GUARD_SWITCH, FRAME_GUARD_KEY, on])
           .catch(() => undefined),
       ),
   );

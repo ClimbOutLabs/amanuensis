@@ -1,6 +1,6 @@
+import { personMessageIndex } from '@truefoundry/trueforge-core/core';
 import type { BrowserElementReview } from '@truefoundry/trueforge-core/core/llm/LLMTypes';
 import type { ToolInvocationContext } from '@truefoundry/trueforge-core/core/mcp/IMCPServer';
-import { personMessageIndex } from '@truefoundry/trueforge-core/core';
 import { NOOP_AGENT_TRACING } from '@truefoundry/trueforge-core/core/tracing/NoopAgentTracing';
 import { createLogger } from 'winston';
 

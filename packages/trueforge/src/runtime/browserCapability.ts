@@ -24,8 +24,8 @@ import type {
 import {
   BROWSER_CLICK_TOOL_NAME,
   BROWSER_SELECT_TOOL_NAME,
-  BROWSER_TYPE_TOOL_NAME,
   BROWSER_SERVER_ID,
+  BROWSER_TYPE_TOOL_NAME,
   defineTool,
   hostPictureMessage,
   LocalToolMCP,
