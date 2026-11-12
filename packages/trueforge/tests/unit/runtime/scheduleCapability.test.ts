@@ -424,6 +424,7 @@ describe('create_schedule', () => {
         task: 'Brief me.',
         cron: '0 8 * * *',
         run_at: null,
+        urgent: false,
         timezone: 'America/New_York',
         status: 'active',
         kind: 'task',

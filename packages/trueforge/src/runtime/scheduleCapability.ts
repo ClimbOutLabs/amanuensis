@@ -67,11 +67,8 @@ export const CreateScheduleToolSchema = z
       .boolean()
       .optional()
       .describe('True for a morning brief. The brief instructions are filled in for you, so leave task out.'),
-    repeat: z
-      .enum(['daily', 'weekdays', 'weekly'])
-      .optional()
-      .describe('daily, weekdays (Monday to Friday), or weekly on the given days.'),
-    days: z.array(WeekdaySchema).optional().describe('Days for a weekly schedule.'),
+    repeat: z.enum(['daily', 'weekdays', 'weekly']).optional().describe('weekly needs days.'),
+    days: z.array(WeekdaySchema).optional(),
     time: z.string().optional().describe('24-hour local time, like 08:00.'),
     time_zone: TimezoneSchema.optional(),
     // Kept bare to save prompt tokens: a call without them, or with a wrong name, is answered with what to pass.
@@ -94,6 +91,7 @@ export const SetReminderToolSchema = z
     at: RunAtSchema.describe('Due time, ISO 8601 with offset. A repeat keeps its time of day.'),
     repeat: z.enum(['daily', 'weekdays', 'weekly']).optional(),
     days: z.array(WeekdaySchema).optional(),
+    urgent: z.boolean().optional().describe('True only when the user says this reminder is urgent.'),
   })
   .strict();
 
@@ -362,7 +360,7 @@ export class ScheduleToolSet extends LocalToolMCP {
       defineTool({
         name: CREATE_SCHEDULE_TOOL_NAME,
         description:
-          "The only way to make a recurring task. For a plain reminder use set_reminder instead. Never say it is scheduled unless this succeeded. Ask first if how often or when is unclear. Times use the user's time zone. Morning brief: set morning_brief, not task. Name the connectors and skills it needs. The user approves a card first.",
+          "The only way to make a recurring task. For a plain reminder use set_reminder instead. Never say it is scheduled unless this succeeded. Ask first if how often or when is unclear. Times use the user's time zone. Name the connectors and skills it needs. The user approves a card first.",
         schema: CreateScheduleToolSchema,
         annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
         handler: (input, approval) => this.#create({ input, approval }),
@@ -919,6 +917,7 @@ export class ScheduleToolSet extends LocalToolMCP {
       timezone,
       status: 'active',
       kind: 'reminder',
+      urgent: input.urgent ?? false,
       origin_session_id: this.#options.session_id,
     });
     try {
