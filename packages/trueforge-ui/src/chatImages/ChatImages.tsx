@@ -17,7 +17,7 @@ import { CHAT_IMAGE_ERROR_TEXT, CHAT_IMAGE_REFUSAL_TEXT, emailImagesFailedText }
 
 type ShowState =
   | { kind: 'loading' }
-  | { kind: 'ask'; count: number; host: string | null }
+  | { kind: 'ask'; count: number; host: string | null; url: string | null }
   | { kind: 'done'; images: ChatImageOutcome[] }
   | { kind: 'error' };
 
@@ -76,7 +76,7 @@ function forgetShown(input: { scope: Pick<ChatImageScopeValue, 'sessionId' | 'tu
 
 function toState(result: TurnImagesResult): ShowState {
   return result.status === 'ask'
-    ? { kind: 'ask', count: result.count, host: result.host }
+    ? { kind: 'ask', count: result.count, host: result.host, url: result.url }
     : { kind: 'done', images: result.images };
 }
 
@@ -137,19 +137,29 @@ function HiddenImages({
   label,
   action,
   testId,
+  address,
   onShow,
 }: {
   label: string;
   action: string;
   testId: string;
+  /** The whole address the action would load, shown in full so nothing it carries is out of sight. */
+  address: string | null;
   onShow: () => void;
 }) {
   return (
-    <span className="my-1 flex flex-wrap items-center gap-2 text-sm text-text-secondary" data-testid={testId}>
-      <span>{label}</span>
-      <Button variant="secondary" size="small" onClick={onShow}>
-        {action}
-      </Button>
+    <span className="my-1 flex flex-col gap-1 text-sm text-text-secondary" data-testid={testId}>
+      <span className="flex flex-wrap items-center gap-2">
+        <span>{label}</span>
+        <Button variant="secondary" size="small" onClick={onShow}>
+          {action}
+        </Button>
+      </span>
+      {address !== null && (
+        <span className="break-all text-xs opacity-70" data-testid="aui-chat-image-address">
+          Showing it loads this address: {address}
+        </span>
+      )}
     </span>
   );
 }
@@ -279,6 +289,7 @@ export function ReplyChatImage({ url, alt }: { url: string; alt: string }) {
           label={`Image from ${state.host ?? 'the web'} hidden`}
           action="Show image"
           testId="aui-chat-image-hidden"
+          address={state.url}
           onShow={approve}
         />
       );
@@ -368,6 +379,7 @@ function EmailImagesLine({ emails }: { emails: TurnImageList['emails'] }) {
           label={heldEmailImagesLabel({ images: total, emails: emails.length })}
           action="Load images"
           testId="aui-email-images-hidden"
+          address={null}
           onShow={() => load({ retry: false })}
         />
       );
@@ -379,6 +391,7 @@ function EmailImagesLine({ emails }: { emails: TurnImageList['emails'] }) {
           label={emailImagesFailedText({ failed: total, total })}
           action="Try again"
           testId="aui-email-images-error"
+          address={null}
           onShow={() => load({ retry: true })}
         />
       );
@@ -406,6 +419,7 @@ function EmailImagesLine({ emails }: { emails: TurnImageList['emails'] }) {
               label={emailImagesFailedText({ failed, total: state.images.length })}
               action="Try again"
               testId="aui-email-images-failed"
+              address={null}
               onShow={() => load({ retry: true })}
             />
           )}
@@ -426,6 +440,7 @@ function ToolImagesCard({ images }: { images: TurnImageList['tool_images'] }) {
         label={single ? 'Image hidden' : 'Images hidden'}
         action={single ? 'Show image' : 'Show images'}
         testId="aui-tool-images-hidden"
+        address={null}
         onShow={() => setShown(true)}
       />
     );

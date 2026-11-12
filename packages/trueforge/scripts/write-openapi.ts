@@ -168,6 +168,7 @@ const app = createServerApp({
   eventSubscriptions: new EventSubscriptionRegistry<TurnStreamingEvent>(undefined),
   logger,
   oidcDiscovery: undefined,
+  localUserStore: undefined,
   authenticator: new StandaloneAuthenticator(),
   authorizer: new TrueForgeAuthorizer(),
   outboundSecrets: () => Promise.resolve([]),

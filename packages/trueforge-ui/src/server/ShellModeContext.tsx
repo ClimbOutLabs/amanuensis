@@ -83,6 +83,7 @@ export type SettingsSection =
   | 'permissions'
   | 'audit'
   | 'reach-me'
+  | 'account'
   | 'about';
 
 /**

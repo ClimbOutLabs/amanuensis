@@ -18,6 +18,8 @@ You can also use **Add MCP Server** to register any remote URL that is not in th
 
 The catalog entries under **Settings → Connectors** (Linear, Notion, GitHub, and others) come from the shipped MCP catalog — see [Initial Setup](/harness/initial-setup#what-is-supported-out-of-the-box) for how catalogs work and how to change what the UI offers.
 
+One catalog entry is your own server rather than a hosted one: **home-assistant** connects Aman to your Home Assistant, asking only for its address and a long-lived access token. See [Home Assistant](/connectors/home-assistant) for the recipe and for what Aman may and may not do in your home.
+
 Two entries are worth knowing by name. **notion** signs you in with OAuth. Signing in gives it the same access you have, so it can reach any page or database you can open. **github** connects with a personal access token from your GitHub settings, sent as a header; give the token only the repositories and permissions it needs. There is no **slack** entry: Slack's MCP server cannot register an app by itself, so a preset cannot complete its sign-in. To use Slack, first register your own Slack app with MCP turned on, then use **Add MCP Server** with the server address from Slack's MCP guide and OAuth (manual), pasting your app's client ID and secret. Slack's tools read and post as you, through tool calls; connecting Slack does not make it a chat channel.
 
 ## Authentication options

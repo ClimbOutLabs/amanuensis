@@ -203,6 +203,7 @@ function buildApp(input: {
     eventSubscriptions: new EventSubscriptionRegistry<TurnStreamingEvent>(undefined),
     logger: createLogger({ silent: true }),
     oidcDiscovery: undefined,
+    localUserStore: undefined,
     authenticator,
     authorizer: new TrueForgeAuthorizer(),
     outboundSecrets,

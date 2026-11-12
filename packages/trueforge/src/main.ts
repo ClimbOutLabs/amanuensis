@@ -98,6 +98,7 @@ import type { ICompletedTurnEventStore } from './db/completedTurnEvents';
 import { DeliveryStore, type IDeliveryStore } from './db/deliveryStore';
 import type { IGlobalSettingsStore } from './db/globalSettingsStore';
 import type { IGoogleConnectionStore } from './db/googleConnectionStore';
+import type { ILocalUserStore } from './db/localUserStore';
 import type { IMcpServerStore, IMcpServerWithAuthStore } from './db/mcpServerStore';
 import { McpServerWithAuthStore } from './db/McpServerWithAuthStore';
 import type { IMcpToolGrantStore } from './db/mcpToolGrantStore';
@@ -208,6 +209,8 @@ interface ServerPersistence<TTransaction> {
   tokenFactoryUsageStore: ITokenFactoryUsageStore<TTransaction>;
   mcpToolGrantStore: IMcpToolGrantStore<TTransaction>;
   googleConnectionStore: IGoogleConnectionStore;
+  /** The one local user for local sign-in; the table exists in every topology, the mode decides use. */
+  localUserStore: ILocalUserStore;
   sentinelAuditStore: ISentinelAuditStore;
   sentinelSettingsStore: ISentinelSettingsStore<TTransaction>;
   briefItemStore: IBriefItemCompletionStore;
@@ -384,6 +387,7 @@ async function createStandalonePersistence(options: {
       import('./db/sqlite/approval-token-store/SqliteApprovalTokenStore'),
       import('./db/sqlite/mcp-tool-grant-store/SqliteMcpToolGrantStore'),
       import('./db/sqlite/google-connection-store/SqliteGoogleConnectionStore'),
+      import('./db/sqlite/local-user-store/SqliteLocalUserStore'),
       import('./db/sqlite/chat-deletion-store/SqliteChatDeletionStore'),
     ]),
   ]);
@@ -409,6 +413,7 @@ async function createStandalonePersistence(options: {
     { SqliteApprovalTokenStore },
     { SqliteMcpToolGrantStore },
     { SqliteGoogleConnectionStore },
+    { SqliteLocalUserStore },
     { SqliteChatDeletionStore },
   ] = sqliteStores;
 
@@ -449,6 +454,7 @@ async function createStandalonePersistence(options: {
     tokenFactoryUsageStore: new SqliteTokenFactoryUsageStore(db),
     mcpToolGrantStore: new SqliteMcpToolGrantStore(db),
     googleConnectionStore: new SqliteGoogleConnectionStore(db),
+    localUserStore: new SqliteLocalUserStore(db),
     sentinelAuditStore: new SentinelAuditStore(db as Kysely<SentinelAuditDatabase>),
     sentinelSettingsStore: new SqliteSentinelSettingsStore(db),
     briefItemStore: new BriefItemCompletionStore(db),
@@ -511,6 +517,7 @@ async function createDistributedPersistence(options: {
       import('./db/postgres/approval-token-store/PostgresApprovalTokenStore'),
       import('./db/postgres/mcp-tool-grant-store/PostgresMcpToolGrantStore'),
       import('./db/postgres/google-connection-store/PostgresGoogleConnectionStore'),
+      import('./db/postgres/local-user-store/PostgresLocalUserStore'),
       import('./db/postgres/chat-deletion-store/PostgresChatDeletionStore'),
     ]),
   ]);
@@ -536,6 +543,7 @@ async function createDistributedPersistence(options: {
     { PostgresApprovalTokenStore },
     { PostgresMcpToolGrantStore },
     { PostgresGoogleConnectionStore },
+    { PostgresLocalUserStore },
     { PostgresChatDeletionStore },
   ] = postgresStores;
 
@@ -634,6 +642,7 @@ async function createDistributedPersistence(options: {
     tokenFactoryUsageStore: new PostgresTokenFactoryUsageStore(db),
     mcpToolGrantStore: new PostgresMcpToolGrantStore(db),
     googleConnectionStore: new PostgresGoogleConnectionStore(db),
+    localUserStore: new PostgresLocalUserStore(db),
     sentinelAuditStore: new SentinelAuditStore(db as Kysely<SentinelAuditDatabase>),
     sentinelSettingsStore: new PostgresSentinelSettingsStore(db),
     briefItemStore: new BriefItemCompletionStore(db),
@@ -679,6 +688,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     tokenFactoryUsageStore,
     mcpToolGrantStore,
     googleConnectionStore,
+    localUserStore,
     sentinelAuditStore,
     sentinelSettingsStore,
     briefItemStore,
@@ -839,8 +849,14 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
   });
 
   const oidc = isOidcConfigured(configuration) ? configuration.OIDC : undefined;
+  const localMode = getTrueForgeAuthMode(configuration) === TrueForgeAuthMode.Local;
   if (oidc) {
     logger.info('Auth is enabled', { issuer: oidc.OIDC_ISSUER_URL });
+  } else if (localMode) {
+    logger.info('Local sign-in is on; Aman asks for an email and password it keeps itself');
+    if (configuration.OIDC_SET_BUT_IGNORED) {
+      logger.info('OIDC settings are set but local sign-in is on, so they are not used');
+    }
   } else {
     logger.warn('Auth is disabled; browser login is off');
   }
@@ -860,6 +876,13 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     authorizer = new TrueFoundryAuthorizer(serviceFoundryClient);
   } else if (mode === TrueForgeAuthMode.Oidc) {
     authenticator = createAuthenticator({ mode: TrueForgeAuthMode.Oidc });
+    authorizer = new TrueForgeAuthorizer();
+  } else if (mode === TrueForgeAuthMode.Local) {
+    authenticator = createAuthenticator({
+      mode: TrueForgeAuthMode.Local,
+      localUserStore,
+      globalSettingsStore,
+    });
     authorizer = new TrueForgeAuthorizer();
   } else {
     authenticator = createAuthenticator({ mode: TrueForgeAuthMode.Standalone });
@@ -955,6 +978,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     eventSubscriptions,
     logger,
     oidcDiscovery,
+    localUserStore: localMode ? localUserStore : undefined,
     authenticator,
     authorizer,
     outboundSecrets,

@@ -69,6 +69,7 @@ export const TABLES_TO_MOVE = [
   'delivery',
   'delivery_attempt',
   'push_subscription',
+  'local_user',
 ] as const;
 
 /**
