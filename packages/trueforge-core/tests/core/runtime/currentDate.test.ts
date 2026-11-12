@@ -96,7 +96,7 @@ describe('AgentThread ambient current date', () => {
     const staticInstruction = request?.messages.find(m => m.role === 'system');
     expect(String(staticInstruction?.content)).not.toContain('Today');
     expect(systemMessage?.content).toContain('<current-date>');
-    expect(systemMessage?.content).toContain("Today's date is 2026-03-14 (UTC)");
+    expect(systemMessage?.content).toContain("Today's date is 2026-03-14 (Saturday, UTC)");
     // Date only: a time-of-day component would change the prompt prefix every
     // turn and defeat provider prefix caching.
     expect(systemMessage?.content).not.toMatch(/Today's date is [^<]*\d{2}:\d{2}/);
@@ -117,8 +117,31 @@ describe('AgentThread ambient current date', () => {
     const systemMessage = request?.messages.find(
       m => m.role === 'system' && String(m.content).includes('<reply-context>'),
     );
-    expect(systemMessage?.content).toContain("Today's date is 2026-03-14 (UTC)");
-    expect(systemMessage?.content).toContain("The user's local date is 2026-03-14 (America/Los_Angeles, UTC-07:00)");
+    expect(systemMessage?.content).toContain("Today's date is 2026-03-14 (Saturday, UTC)");
+    expect(systemMessage?.content).toContain(
+      "The user's local date is 2026-03-14 (Saturday, America/Los_Angeles, UTC-07:00)",
+    );
+  });
+
+  it("names the local weekday when the user's day differs from the UTC day", async () => {
+    // 2026-11-13T06:00:00Z is 2026-11-12 22:00 in Los Angeles (UTC-8, PST): Friday in UTC, Thursday there.
+    jest.setSystemTime(new Date('2026-11-13T06:00:00Z'));
+    const create = jest.fn((_request: LLMCreateParamsStreaming) => finalAnswerStream());
+    const modelClient: ILLM = { create, createNonStream: jest.fn() };
+
+    const thread = makeThread(modelClient, undefined, 'America/Los_Angeles');
+    for await (const _event of thread.execute({ signal: new AbortController().signal })) {
+      // Draining is enough; the assertion is on the request sent to the model.
+    }
+
+    const request = create.mock.calls[0]?.[0];
+    const systemMessage = request?.messages.find(
+      m => m.role === 'system' && String(m.content).includes('<reply-context>'),
+    );
+    expect(systemMessage?.content).toContain("Today's date is 2026-11-13 (Friday, UTC)");
+    expect(systemMessage?.content).toContain(
+      "The user's local date is 2026-11-12 (Thursday, America/Los_Angeles, UTC-08:00)",
+    );
   });
 
   it('falls back to UTC-only wording for an unrecognized clientTimezone', async () => {
@@ -135,7 +158,7 @@ describe('AgentThread ambient current date', () => {
     const systemMessage = request?.messages.find(
       m => m.role === 'system' && String(m.content).includes('<reply-context>'),
     );
-    expect(systemMessage?.content).toContain("Today's date is 2026-03-14 (UTC)");
+    expect(systemMessage?.content).toContain("Today's date is 2026-03-14 (Saturday, UTC)");
     expect(systemMessage?.content).not.toContain("The user's local date is");
   });
 
@@ -158,7 +181,7 @@ describe('AgentThread ambient current date', () => {
     const systemMessage = request?.messages.find(
       m => m.role === 'system' && String(m.content).includes('<reply-context>'),
     );
-    expect(systemMessage?.content).toContain("Today's date is 2026-03-14 (UTC)");
+    expect(systemMessage?.content).toContain("Today's date is 2026-03-14 (Saturday, UTC)");
   });
 });
 

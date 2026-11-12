@@ -13,6 +13,7 @@ import {
 } from '../../../src/core/permissions/provenance';
 import {
   createWebSearchTurnState,
+  hostToolStamp,
   PAGE_PICTURES_LABEL,
   pageImageUrls,
   pagePictures,
@@ -122,6 +123,7 @@ describe('pictures a search result lists', () => {
     recordToolResultProvenance({
       state,
       tool_name: 'web_search',
+      stamp: hostToolStamp({ type: 'mcp', search_provider_call: true }),
       argument_values: ['portuguese water dog pictures'],
       texts: [
         JSON.stringify({
@@ -184,6 +186,7 @@ describe('a page picture is a picture, not a trusted link', () => {
     recordToolResultProvenance({
       state,
       tool_name: 'web_fetch',
+      stamp: hostToolStamp({ type: 'mcp', search_provider_call: true }),
       argument_values: [COMMONS_PAGE],
       texts: [`# A page\n![x](${PLANTED})\n<img src="${FOX_IMAGE}" alt="Fox">`],
     });
