@@ -9,6 +9,7 @@ import {
 import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
 import { PERSONA_SERVER_ID } from '../../../src/core/personas/toolContract';
 import { SCHEDULE_SERVER_ID } from '../../../src/core/schedules/toolContract';
+import { SKILL_SERVER_ID } from '../../../src/core/skills/toolContract';
 import { SPACE_SERVER_ID } from '../../../src/core/spaces/toolContract';
 
 function makeCtx(services: SentinelServices): ClassifyContext {
@@ -62,6 +63,7 @@ describe('an incognito chat makes or changes nothing that outlives it', () => {
     ['a new reminder', ownTool(SCHEDULE_SERVER_ID, 'set_reminder', { text: 'Call Grace', when: 'tomorrow 9am' })],
     ['a cancelled reminder', ownTool(SCHEDULE_SERVER_ID, 'cancel_reminder', { id: 'r1' })],
     ['a new persona', ownTool(PERSONA_SERVER_ID, 'create_persona', { name: 'Planner' })],
+    ['a new skill', ownTool(SKILL_SERVER_ID, 'install_skill', { url: 'https://github.com/acme/skills' })],
     ['an entry in the notes inbox', ownTool(NOTES_FOLDER_SERVER_ID, 'append_to_inbox', { text: 'Buy milk' })],
     ['a new note', ownTool(NOTES_FOLDER_SERVER_ID, 'create_note', { path: 'ideas.md', text: 'An idea' })],
     ['a tool these sets do not have', ownTool(SPACE_SERVER_ID, 'purge_spaces')],
@@ -77,6 +79,7 @@ describe('an incognito chat makes or changes nothing that outlives it', () => {
     ['its schedules', ownTool(SCHEDULE_SERVER_ID, 'list_schedules')],
     ['its reminders', ownTool(SCHEDULE_SERVER_ID, 'list_reminders')],
     ['its personas', ownTool(PERSONA_SERVER_ID, 'list_personas')],
+    ['its skills', ownTool(SKILL_SERVER_ID, 'list_skills')],
     ['a note', ownTool(NOTES_FOLDER_SERVER_ID, 'read_note', { path: 'ideas.md' })],
     ['its notes', ownTool(NOTES_FOLDER_SERVER_ID, 'search_notes', { query: 'milk' })],
   ])('still reads %s without a card', async (_label, action) => {
