@@ -31,7 +31,11 @@ How to get there: Click **More** in the left bar, then **Settings**, then **Skil
 2. Click **Add-ons**, then the **Skills** tab.
 3. Select the skill.
 
-When a skill is on for a chat, Aman reads its instructions when the job comes up. Reading them doesn't ask you. Running a command the skill tells it to run follows the usual rules, so a command that downloads or changes something still shows a card.
+When a skill is on for a chat, Aman reads its instructions when the job comes up. Reading them doesn't ask you.
+
+Some skills come with their own scripts. Aman runs them in the sandbox, from the skill's folder. The first run in a chat shows a card. Click **Always allow in this chat** so later runs in that chat don't ask. A command that downloads something still shows a card every time.
+
+A skill script that needs a website or an extra package can't get it on its own. When that happens, Aman tells you instead of trying workarounds.
 
 ## Add your own skill from GitHub
 

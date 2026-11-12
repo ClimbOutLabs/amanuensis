@@ -94,7 +94,12 @@ import {
   type SandboxCommandEffect,
   type SandboxInvocationPurpose,
 } from './commandClassification';
-import { classifyExecCommand, interpreterInvocationRefusal, type ExecGuardHost } from './driver/ExecGuard';
+import {
+  classifyExecCommand,
+  interpreterInvocationRefusal,
+  type ExecGuardHost,
+  type ExecGuardSkills,
+} from './driver/ExecGuard';
 import { buildProvisioningEvent } from './driver/provisionEvents';
 import { RunCodeInputSchema, type RunCodeInput, type RunCodeResult } from './driver/RunCodeSchemas';
 import { type HarvestedFile, type RunCodeBackend, type TurnAttachment } from './driver/RunCodeService';
@@ -1835,6 +1840,7 @@ function execInterpreterGuardFailure(input: {
   command: string;
   env: Readonly<Record<string, string>> | undefined;
   resolveCache: Map<string, string | undefined>;
+  skills: ExecGuardSkills | undefined;
 }): string | undefined {
   const pathValue = input.env?.['PATH'];
   const searchDirs = pathValue === undefined || pathValue === '' ? [] : pathValue.split(pathDelimiter);
@@ -1871,7 +1877,7 @@ function execInterpreterGuardFailure(input: {
       }
     },
   };
-  const verdict = classifyExecCommand({ command: input.command, host });
+  const verdict = classifyExecCommand({ command: input.command, host, skills: input.skills });
   return verdict.verdict === 'reject' ? interpreterInvocationRefusal(verdict.reason) : undefined;
 }
 
@@ -1903,6 +1909,8 @@ function sandboxExecPreflightFailure(input: {
   /** True when the person approved network access for a skill mounted in this chat. */
   skillNetworkGranted: boolean;
   resolveCache: Map<string, string | undefined>;
+  /** This chat's skills folder, when skills are mounted: their own scripts run with exec. */
+  skills: ExecGuardSkills | undefined;
 }): string | undefined {
   const outputFailure = sandboxOutputPreflightFailure(input.output);
   if (outputFailure !== undefined) {
@@ -1912,6 +1920,7 @@ function sandboxExecPreflightFailure(input: {
     command: input.command,
     env: input.env,
     resolveCache: input.resolveCache,
+    skills: input.skills,
   });
   if (interpreterGuardFailure !== undefined) {
     return interpreterGuardFailure;
@@ -1952,7 +1961,7 @@ function sandboxExecPreflightFailure(input: {
     (input.purpose === 'inspect' || input.purpose === 'edit' || input.purpose === 'execute') &&
     sandboxCommandUsesUnstructuredOperation(input.command)
   ) {
-    return "Unstructured shell redirection, heredocs, tee, and inline Python evaluation are not allowed for inspect, edit, or execute-purpose exec calls. Use read_file for inspection, write_file for a new file, apply_patch/replace_text for an edit, or run_code for Python or Node code. To trim long output, use the exec tool's output.head_lines, output.tail_lines or output.grep fields instead of a shell pipe.";
+    return "Unstructured shell redirection, heredocs, tee, and inline Python evaluation are not allowed for inspect, edit, or execute-purpose exec calls. Inspect a file with a plain exec command such as cat, head or sed -n, use write_file for a new file, apply_patch/replace_text for an edit, or run_code for Python or Node code. To trim long output, use the exec tool's output.head_lines, output.tail_lines or output.grep fields instead of a shell pipe.";
   }
   // Verification has to stay observable: redirection, substitution, and
   // backgrounding hide what the check actually ran, so a green result would
@@ -2382,6 +2391,7 @@ export class Sandbox extends LocalToolMCP {
         packageDownloadBlock: this.packageDownloadBlock(),
         skillNetworkGranted: this.skillNetworkHostsForChat.length > 0,
         resolveCache: this.execGuardResolveCache,
+        skills: this.execGuardSkills(cwd),
       }) !== undefined;
     const invalidWriteFilePath =
       params.name === SANDBOX_WRITE_FILE_TOOL_NAME &&
@@ -3035,6 +3045,17 @@ export class Sandbox extends LocalToolMCP {
   /** Raw id for prompt layout paths before create (empty when this turn has no existing sandbox). */
   private promptSandboxId(): string {
     return this.existingSandboxId === undefined ? '' : rawSandboxId(this.existingSandboxId);
+  }
+
+  /** The skills folder the exec guard lets a skill's own scripts run from; undefined when no skill is mounted. */
+  private execGuardSkills(cwd: string | undefined): ExecGuardSkills | undefined {
+    if ((this.skillMounter?.skillNames() ?? []).length === 0) {
+      return undefined;
+    }
+    return {
+      skills_dir: this.provider.getSkillsDir(this.promptSandboxId()),
+      cwd: cwd ?? this.boundRepository?.workspace_cwd ?? this.provider.getWorkspaceDir() ?? '',
+    };
   }
 
   private buildMcpServersEnvelope(): Record<string, SandboxMcpServerConfig> {
@@ -5733,6 +5754,7 @@ export class Sandbox extends LocalToolMCP {
       packageDownloadBlock: this.packageDownloadBlock(),
       skillNetworkGranted: this.skillNetworkHostsForChat.length > 0,
       resolveCache: this.execGuardResolveCache,
+      skills: this.execGuardSkills(resolvedInput.cwd),
     });
     if (preflightFailure !== undefined) {
       await this.recordPreflightRefusal(preflightFailure);

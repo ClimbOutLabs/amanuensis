@@ -142,6 +142,51 @@ describe('classifyExecCommand', () => {
   });
 });
 
+describe("a skill's own scripts run with exec", () => {
+  const skills = { skills_dir: '/workspace/.aman/skills', cwd: '/workspace' };
+  const verdictWithSkills = (command: string, cwd = skills.cwd, host = makeHost()): 'allow' | 'reject' =>
+    classifyExecCommand({ command, host, skills: { ...skills, cwd } }).verdict;
+
+  it.each([
+    'python3 /workspace/.aman/skills/ai-news/scripts/fetch.py',
+    'python3 /workspace/.aman/skills/ai-news/scripts/fetch.py --limit 10 --hours 24',
+    'python3 -u /workspace/.aman/skills/ai-news/scripts/fetch.py',
+    'node /workspace/.aman/skills/tool/index.js --help',
+    'cd /workspace/.aman/skills/ai-news && python3 scripts/fetch.py',
+    'cd .aman/skills/ai-news && python3 scripts/fetch.py | head -50',
+    'python3 .aman/skills/ai-news/scripts/fetch.py',
+  ])('allows %s', command => {
+    expect(verdictWithSkills(command)).toBe('allow');
+  });
+
+  it('allows a relative script when the call itself starts in the skill folder', () => {
+    expect(verdictWithSkills('python3 scripts/fetch.py', '/workspace/.aman/skills/ai-news')).toBe('allow');
+  });
+
+  it('allows a skill script run by its shebang', () => {
+    const host = makeHost({ readShebang: () => '/usr/bin/env python3' });
+    expect(verdictWithSkills('/workspace/.aman/skills/ai-news/scripts/fetch.py', skills.cwd, host)).toBe('allow');
+    expect(verdictWithSkills('/workspace/tool.py', skills.cwd, host)).toBe('reject');
+  });
+
+  it.each([
+    ['python3 /workspace/analysis.py', 'a script outside the skills folder'],
+    ['python3 /workspace/.aman/skills/../analysis.py', 'a path that climbs out of the skills folder'],
+    ['python3 /workspace/.aman/skills', 'the skills folder itself'],
+    ['python3 /workspace/.aman/skills-evil/x.py', 'a folder that only starts with the same name'],
+    ['cd /workspace/.aman/skills/ai-news && cd /tmp && python3 x.py', 'a later cd that leaves the folder'],
+    ['python3 -c "print(1)" /workspace/.aman/skills/ai-news/scripts/fetch.py', 'inline code beside a skill script'],
+    ["python3 - <<'EOF'\nprint(1)\nEOF", 'heredoc input'],
+    ['python3 /workspace/.aman/skills/ai-news/scripts/fetch.py; python3 /workspace/x.py', 'a second script outside'],
+  ])('still rejects %s (%s)', command => {
+    expect(verdictWithSkills(command)).toBe('reject');
+  });
+
+  it('rejects a skill-folder script when no skill is mounted', () => {
+    expect(verdictOf('python3 /workspace/.aman/skills/ai-news/scripts/fetch.py')).toBe('reject');
+  });
+});
+
 describe('interpreterInvocationRefusal', () => {
   it('points at run_code and restates the anti-workaround rule', () => {
     const text = interpreterInvocationRefusal('exec must not run python3 -c/-e code strings');

@@ -1,3 +1,5 @@
+import { posix } from 'node:path';
+
 /**
  * Harness-level guard for the exec tool path (§2.10, D5/B1).
  *
@@ -26,6 +28,16 @@ export interface ExecGuardHost {
 }
 
 export type ExecGuardVerdict = { verdict: 'allow' } | { verdict: 'reject'; reason: string };
+
+/**
+ * Where this chat's skills are copied, and the directory the command starts in. A skill ships its own
+ * scripts, which the person added on purpose; run_code cannot see the skill's folder, so exec is where
+ * those scripts run. Paths are judged by name, the way the sandbox's own containment judges them.
+ */
+export interface ExecGuardSkills {
+  skills_dir: string;
+  cwd: string;
+}
 
 const DATA_INTERPRETERS = new Set(['python', 'python3', 'node', 'nodejs', 'ruby', 'perl']);
 
@@ -308,7 +320,23 @@ function shebangInterpreter(shebang: string): string | undefined {
   return first;
 }
 
-function classifySegment(input: { argv: string[]; hasHeredoc: boolean; host: ExecGuardHost }): ExecGuardVerdict {
+/** Whether `p`, read from `cwd`, names a file inside the skills directory. */
+function isSkillFile(input: { p: string; cwd: string; skills: ExecGuardSkills | undefined }): boolean {
+  if (input.skills === undefined || !input.cwd.startsWith('/') || input.p.includes('\0')) {
+    return false;
+  }
+  const root = posix.resolve(input.skills.skills_dir);
+  const target = posix.resolve(input.cwd, input.p);
+  return target.startsWith(`${root}/`);
+}
+
+function classifySegment(input: {
+  argv: string[];
+  hasHeredoc: boolean;
+  host: ExecGuardHost;
+  skills: ExecGuardSkills | undefined;
+  cwd: string;
+}): ExecGuardVerdict {
   // Leading `VAR=value` assignments (`FOO=1 python3 -c …`) are shell env
   // prefixes, not the command — strip them before classification.
   let argv = input.argv;
@@ -337,7 +365,11 @@ function classifySegment(input: { argv: string[]; hasHeredoc: boolean; host: Exe
   // multi-segment payloads (sh -c 'git status; python3 -c "…"') are caught.
   const inner = unwrapSegmentCommand(argv);
   if (inner !== undefined) {
-    return classifyExecCommand({ command: inner, host: input.host });
+    return classifyExecCommand({
+      command: inner,
+      host: input.host,
+      skills: input.skills === undefined ? undefined : { ...input.skills, cwd: input.cwd },
+    });
   }
   if (argv.length === 0) {
     return { verdict: 'allow' };
@@ -397,7 +429,11 @@ function classifySegment(input: { argv: string[]; hasHeredoc: boolean; host: Exe
         reason: `exec must not pipe code into ${base} via stdin: use the run_code tool instead`,
       };
     }
-    if (operands.some(op => !op.startsWith('-'))) {
+    const script = operands.find(op => !op.startsWith('-'));
+    if (script !== undefined) {
+      if (isSkillFile({ p: script, cwd: input.cwd, skills: input.skills })) {
+        return { verdict: 'allow' };
+      }
       return {
         verdict: 'reject',
         reason: `exec must not run ${base} on a script file: use the run_code tool instead`,
@@ -408,7 +444,7 @@ function classifySegment(input: { argv: string[]; hasHeredoc: boolean; host: Exe
   }
 
   // Not a data interpreter by name: check the shebang of directly-executed scripts.
-  if (invoked.includes('/')) {
+  if (invoked.includes('/') && !isSkillFile({ p: invoked, cwd: input.cwd, skills: input.skills })) {
     const shebang = input.host.readShebang(invoked);
     if (shebang !== undefined) {
       const interpreter = shebangInterpreter(shebang);
@@ -427,11 +463,22 @@ function classifySegment(input: { argv: string[]; hasHeredoc: boolean; host: Exe
  * Classify a full exec command. Rejects when ANY pipeline segment is an
  * interpreter invocation. Resolution results should be cached by the host.
  */
-export function classifyExecCommand(input: { command: string; host: ExecGuardHost }): ExecGuardVerdict {
+export function classifyExecCommand(input: {
+  command: string;
+  host: ExecGuardHost;
+  skills?: ExecGuardSkills | undefined;
+}): ExecGuardVerdict {
   const { tokens, hasHeredoc } = tokenize(input.command);
   const segments = splitSegments(tokens);
+  // A plain `cd <dir>` moves where later segments read relative paths from, as it does in the shell.
+  let cwd = input.skills?.cwd ?? '';
   for (const argv of segments) {
-    const verdict = classifySegment({ argv, hasHeredoc, host: input.host });
+    const [head, dir, ...extra] = argv;
+    if (head === 'cd' && dir !== undefined && extra.length === 0 && cwd.startsWith('/')) {
+      cwd = posix.resolve(cwd, dir);
+      continue;
+    }
+    const verdict = classifySegment({ argv, hasHeredoc, host: input.host, skills: input.skills, cwd });
     if (verdict.verdict === 'reject') {
       return verdict;
     }
@@ -448,7 +495,7 @@ export function interpreterInvocationRefusal(reason: string): string {
     `Invalid exec input: ${reason}. ` +
     `exec is for repository and workspace commands (git, build, test, file inspection) — ` +
     `it must not run python/node code. Use the run_code tool instead. ` +
-    `python3 -m pytest, -m pip, -m venv and -m unittest are allowed. ` +
+    `python3 -m pytest, -m pip, -m venv and -m unittest are allowed, and so is running a script that ships with a skill in this chat, by its path in the skill's folder. ` +
     `Do not work around this by renaming the interpreter or wrapping the invocation.`
   );
 }
