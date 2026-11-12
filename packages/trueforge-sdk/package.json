@@ -286,6 +286,17 @@
             },
             "default": "./dist/cjs/api/resources/deliveries/exports.js"
         },
+        "./reach": {
+            "import": {
+                "types": "./dist/esm/api/resources/reach/exports.d.mts",
+                "default": "./dist/esm/api/resources/reach/exports.mjs"
+            },
+            "require": {
+                "types": "./dist/cjs/api/resources/reach/exports.d.ts",
+                "default": "./dist/cjs/api/resources/reach/exports.js"
+            },
+            "default": "./dist/cjs/api/resources/reach/exports.js"
+        },
         "./voice": {
             "import": {
                 "types": "./dist/esm/api/resources/voice/exports.d.mts",
@@ -373,6 +384,28 @@
                 "default": "./dist/cjs/api/resources/internal/resources/metrics/exports.js"
             },
             "default": "./dist/cjs/api/resources/internal/resources/metrics/exports.js"
+        },
+        "./internal/noticing": {
+            "import": {
+                "types": "./dist/esm/api/resources/internal/resources/noticing/exports.d.mts",
+                "default": "./dist/esm/api/resources/internal/resources/noticing/exports.mjs"
+            },
+            "require": {
+                "types": "./dist/cjs/api/resources/internal/resources/noticing/exports.d.ts",
+                "default": "./dist/cjs/api/resources/internal/resources/noticing/exports.js"
+            },
+            "default": "./dist/cjs/api/resources/internal/resources/noticing/exports.js"
+        },
+        "./internal/privateChats": {
+            "import": {
+                "types": "./dist/esm/api/resources/internal/resources/privateChats/exports.d.mts",
+                "default": "./dist/esm/api/resources/internal/resources/privateChats/exports.mjs"
+            },
+            "require": {
+                "types": "./dist/cjs/api/resources/internal/resources/privateChats/exports.d.ts",
+                "default": "./dist/cjs/api/resources/internal/resources/privateChats/exports.js"
+            },
+            "default": "./dist/cjs/api/resources/internal/resources/privateChats/exports.js"
         },
         "./internal/schedules": {
             "import": {
@@ -615,6 +648,17 @@
                 "default": "./dist/cjs/api/resources/settings/resources/google/exports.js"
             },
             "default": "./dist/cjs/api/resources/settings/resources/google/exports.js"
+        },
+        "./settings/notes": {
+            "import": {
+                "types": "./dist/esm/api/resources/settings/resources/notes/exports.d.mts",
+                "default": "./dist/esm/api/resources/settings/resources/notes/exports.mjs"
+            },
+            "require": {
+                "types": "./dist/cjs/api/resources/settings/resources/notes/exports.d.ts",
+                "default": "./dist/cjs/api/resources/settings/resources/notes/exports.js"
+            },
+            "default": "./dist/cjs/api/resources/settings/resources/notes/exports.js"
         },
         "./package.json": "./package.json"
     },

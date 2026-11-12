@@ -346,6 +346,7 @@ describe('submitProfileLearning', () => {
     const resolveLlm = jest.fn().mockResolvedValue(llm);
     const { client: memoryClient, retain, deleteDocument } = retainingClient();
     const member: ProfileLearningDrainMember = {
+      session: { is_incognito: false },
       config: passConfig(),
       personalizationStore,
       eventStore,
@@ -370,6 +371,16 @@ describe('submitProfileLearning', () => {
       logger: makeLogger(),
     };
   }
+
+  it('learns nothing from a private chat, and never calls the model', async () => {
+    const harness = await makeHarness();
+    await submitProfileLearning({ ...harness.member, session: { is_incognito: true }, ...turnFields() });
+
+    expect(harness.resolveLlm).not.toHaveBeenCalled();
+    expect(harness.retain).not.toHaveBeenCalled();
+    const profile = await harness.personalizationStore.getProfile({ tenant_id: 'default', created_by: 'user-a' });
+    expect(profile?.learned_profile).not.toBe('# Learned');
+  });
 
   it('stores the rewritten document, appends the audit event, and mirrors it', async () => {
     const harness = await makeHarness();
@@ -1008,6 +1019,7 @@ describe('drainTurnEvents profile learning trigger', () => {
     const personalizationStore = new SqlitePersonalizationStore(db);
     await seedProfile({ store: personalizationStore });
     const member: ProfileLearningDrainMember = {
+      session: { is_incognito: false },
       config: passConfig(),
       personalizationStore,
       eventStore: new RecordingEventStore(),

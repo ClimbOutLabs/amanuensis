@@ -1,6 +1,7 @@
 /**
  * The `usage_summary` built-in: a read-only tool that tells the person what their own chats have
- * used and cost. It reads only sessions the person created, and the shared daily cap.
+ * used and cost. It reads only sessions the person created, the counts their deleted chats left,
+ * and the shared daily cap.
  */
 import type { ISessionStore } from '@truefoundry/trueforge-core/agent-session/store/ISessionStore';
 import {
@@ -13,8 +14,10 @@ import {
   type ToolDefinition,
 } from '@truefoundry/trueforge-core/core';
 import type { ToolBundleName } from '@truefoundry/trueforge-core/core/runtime/toolBundleCatalog';
+import type { IChatDeletionStore } from '../db/chatDeletionStore';
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import { MODEL_USAGE_EVENT_TYPE } from '../schemas/modelUsageEvents';
+import { sessionKeepsNothing } from './privateChat';
 import type { TokenFactoryBudget } from './tokenFactoryBudget';
 import {
   resolveUsagePeriod,
@@ -37,24 +40,45 @@ const EVENT_PAGE_SIZE = 100;
 /** The two reads the usage tool makes; any session store satisfies them. */
 export type UsageSessionReader = Pick<ISessionStore<SessionCustom, TurnCustom>, 'listSessions' | 'listSessionEvents'>;
 
+/** The counts deleted chats left behind. */
+export type DeletedChatUsageReader = Pick<IChatDeletionStore, 'listDeletedChatModelUsage'>;
+
 /**
- * Every usage entry the person's own chats recorded in `[from, to)`. Sessions are read by creator,
- * so another person's chats never enter the walk, and each event is kept only by its own time.
+ * Every usage entry the person's own chats recorded in `[from, to)`, deleted chats included.
+ * Sessions are read by creator, so another person's chats never enter the walk, and each event is
+ * kept only by its own time. A private chat counts but is never named.
  */
 export async function collectUsageEntries({
   sessionStore,
+  deletedChats,
   tenantId,
   userRef,
   from,
   to,
 }: {
   sessionStore: UsageSessionReader;
+  deletedChats: DeletedChatUsageReader;
   tenantId: string;
   userRef: string;
   from: Date;
   to: Date;
 }): Promise<UsageEntry[]> {
-  const entries: UsageEntry[] = [];
+  const deleted = await deletedChats.listDeletedChatModelUsage({
+    tenant_id: tenantId,
+    created_by_subject_id: userRef,
+    from,
+    to,
+  });
+  const entries: UsageEntry[] = deleted.map(row => ({
+    session_id: null,
+    title: null,
+    model_id: row.model_id,
+    display_name: row.display_name,
+    input_tokens: row.input_tokens,
+    output_tokens: row.output_tokens,
+    cost_usd: row.cost_usd,
+    created_at: row.created_at,
+  }));
   let pageToken: string | undefined;
   do {
     const page = await sessionStore.listSessions({
@@ -71,16 +95,18 @@ export async function collectUsageEntries({
       source_id: undefined,
       folder_id: undefined,
       no_folder: false,
+      include_private: true,
     });
     for (const session of page.data) {
       if (session.created_by_subject.subject_id !== userRef) {
         continue;
       }
+      const named = !sessionKeepsNothing({ session });
       entries.push(
         ...(await usageEntriesForSession({
           sessionStore,
           sessionId: session.session_id,
-          title: session.title,
+          chat: named ? { session_id: session.session_id, title: session.title } : { session_id: null, title: null },
           from,
           to,
         })),
@@ -94,13 +120,14 @@ export async function collectUsageEntries({
 async function usageEntriesForSession({
   sessionStore,
   sessionId,
-  title,
+  chat,
   from,
   to,
 }: {
   sessionStore: UsageSessionReader;
   sessionId: string;
-  title: string | null;
+  /** How the entries name their chat; nulls when the chat is never named. */
+  chat: Pick<UsageEntry, 'session_id' | 'title'>;
   from: Date;
   to: Date;
 }): Promise<UsageEntry[]> {
@@ -124,8 +151,7 @@ async function usageEntriesForSession({
         continue;
       }
       entries.push({
-        session_id: sessionId,
-        title,
+        ...chat,
         model_id: event.model_id,
         display_name: event.display_name,
         input_tokens: event.input_tokens,
@@ -196,10 +222,11 @@ function renderUsageSummaryText(summary: UsageSummary): string {
 }
 
 const USAGE_SUMMARY_DESCRIPTION =
-  "Read the signed-in person's own usage: tokens in and out, cost where priced, by model and by day, the top chats by cost (titles only), and the shared daily Token Factory cap left. The cap covers the whole instance. Periods: today, this_week, this_month (default) or date_range. Unpriced tokens are counted apart; a cost is not shown when any of its tokens have no known price. Say so; never guess a price. Answer in a few plain sentences; a small bar chart fits several days or models.";
+  "Read the signed-in person's own usage: tokens in and out, cost where priced, by model and by day, the top chats by cost (titles only; deleted and incognito chats count but are never named), and the shared daily Token Factory cap left. The cap covers the whole instance. Periods: today, this_week, this_month (default) or date_range. Unpriced tokens are counted apart; a cost is not shown when any of its tokens have no known price. Say so; never guess a price. Answer in a few plain sentences; a small bar chart fits several days or models.";
 
 export interface UsageSummaryTurnContext {
   sessionStore: UsageSessionReader;
+  deletedChats: DeletedChatUsageReader;
   budget: TokenFactoryBudget;
   authority: { tenantId: string; userRef: string };
 }
@@ -235,7 +262,7 @@ class UsageSummaryTool extends LocalToolMCP {
   }
 
   private async summarize(input: UsageSummaryInput): Promise<CallToolResponse> {
-    const { sessionStore, budget, authority } = this.options;
+    const { sessionStore, deletedChats, budget, authority } = this.options;
     let period: UsagePeriod;
     try {
       period = resolveUsagePeriod({
@@ -251,6 +278,7 @@ class UsageSummaryTool extends LocalToolMCP {
     }
     const entries = await collectUsageEntries({
       sessionStore,
+      deletedChats,
       tenantId: authority.tenantId,
       userRef: authority.userRef,
       from: period.from,

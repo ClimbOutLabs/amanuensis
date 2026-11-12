@@ -86,7 +86,7 @@ class AnswerRunner implements ProcessRunner {
 }
 
 function jobsWith(runner: ProcessRunner, selfExePath: string = SELF) {
-  return systemWindowsJobs({ runner, localAppDataDir: LOCAL_APP_DATA, selfExePath });
+  return systemWindowsJobs({ runner, localAppDataDir: LOCAL_APP_DATA, selfExePath, selfPid: 4242 });
 }
 
 test('the golden file holds every command line the Windows jobs run', async () => {
@@ -96,6 +96,8 @@ test('the golden file holds every command line the Windows jobs run', async () =
   assert.equal(await jobs.ensureProgramsFolderOnUserPath(), 'added');
   await jobs.listShortcuts();
   await jobs.pointShortcutAtOpen('C:\\Users\\Friend\\Desktop\\Aman.lnk');
+  await jobs.ensureOpenAmanShortcut();
+  await jobs.ensureRemoveAmanShortcut();
   await jobs.ensureCheckAmanShortcut();
   await jobs.addCaCertificateToUserStore();
   await jobs.startDockerDesktop();
@@ -115,6 +117,12 @@ test('the golden file holds every command line the Windows jobs run', async () =
   await jobs.clearRunOnceResume();
   assert.equal(await jobs.runOnceResumePending(), false);
   await jobs.keepComputerAwake();
+  await jobs.removeShortcut('C:\\Users\\Friend\\Desktop\\Aman.lnk');
+  await jobs.removeDailyBackupTask();
+  await jobs.removeFirewallRule();
+  await jobs.removeProgramsFolderFromUserPath();
+  await jobs.removeCaCertificateFromUserStore();
+  await jobs.removeProgramsFolderAfterExit();
   const golden = readFileSync(new URL('../golden/windows-jobs-commands.txt', import.meta.url), 'utf8');
   assert.equal(recording.goldenText(), golden);
 });
@@ -378,9 +386,19 @@ test('a page write that cannot happen fails as a Windows job error', async () =>
     // Far longer than any file name a disk allows, so the write fails.
     localAppDataDir: 'C:\\' + 'a'.repeat(300),
     selfExePath: SELF,
+    selfPid: 4242,
   });
   await assert.rejects(jobs.writeGettingStartedPage('page'), WindowsJobError);
   await assert.rejects(jobs.writeDockerDesktopInstaller(new Uint8Array([1, 2, 3])), WindowsJobError);
+});
+
+test('the PATH is read as UTF-8, so an accented folder name is written back unchanged', async () => {
+  const recording = new RecordingProcessRunner(new AnswerRunner(`C:\\Users\\José\\bin;${PROGRAMS_DIR}\r\n`));
+  const jobs = jobsWith(recording);
+  await jobs.removeProgramsFolderFromUserPath();
+  const lines = recording.lines();
+  assert.ok(lines[0]?.includes('[Console]::OutputEncoding = [Text.Encoding]::UTF8'));
+  assert.ok(lines.at(-1)?.includes("SetEnvironmentVariable('Path', 'C:\\Users\\José\\bin', 'User')"));
 });
 
 test('the forwarder golden file is the forwarder, byte for byte', () => {
@@ -394,6 +412,7 @@ test('a forwarder write that cannot happen fails as a Windows job error', async 
     // Far longer than any file name a disk allows, so the write fails.
     localAppDataDir: 'C:\\' + 'a'.repeat(300),
     selfExePath: SELF,
+    selfPid: 4242,
   });
   await assert.rejects(jobs.replaceSetupCmdCopyWithForwarder(), WindowsJobError);
 });
@@ -404,6 +423,7 @@ test('a certificate write that cannot happen fails as a Windows job error', asyn
     // Far longer than any file name a disk allows, so the write fails.
     localAppDataDir: 'C:\\' + 'a'.repeat(300),
     selfExePath: SELF,
+    selfPid: 4242,
   });
   await assert.rejects(jobs.writeCaCertificate('certificate'), WindowsJobError);
 });

@@ -286,7 +286,8 @@ test_install_without_sandbox() {
   INSTALL_EXTRA=(--no-sandbox)
   install_machine
   assert_eq "$RC" 0
-  assert_log_lacks "node "
+  # Host Node.js is what the sandbox setup runs on; the app image's own Node.js still makes the web push keys.
+  if grep -q '^node ' "$STUB_LOG"; then t_fail "host Node.js ran: $(grep '^node ' "$STUB_LOG" | head -n 1)"; else t_pass; fi
   assert_log_lacks "--entrypoint cat"
   assert_log_lacks "https://nodejs.org" "no runtime is downloaded for an install without the sandbox"
   assert_no_path "$AMAN_HOME/runtime"
