@@ -375,6 +375,13 @@ describe('create_schedule', () => {
     expect(Object.keys(create?.inputSchema.properties ?? {})).not.toContain('agent');
   });
 
+  it('says in its description that a schedule is not a calendar event', async () => {
+    const built = await setup();
+    const { result } = await built.tools.listTools();
+    const create = result.tools.find(tool => tool.name === 'create_schedule');
+    expect(create?.description).toContain('A schedule repeats a task for the person. It is not a calendar event.');
+  });
+
   it('still reports other unknown details as a fixable error', async () => {
     const built = await setup();
     const info = await built.tools.toolCallInfo({

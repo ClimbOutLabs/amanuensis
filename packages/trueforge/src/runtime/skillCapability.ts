@@ -32,7 +32,13 @@ import {
 } from '../schemas/skill';
 import type { CatalogSkill } from '../schemas/skillCatalog';
 import { toolsForChat } from './privateChat';
-import { parseSkillAddress, readPublishedSkill, SkillSourceError, type SkillAddress } from './skillSource';
+import {
+  parseSkillAddress,
+  readPublishedSkill,
+  SkillSourceError,
+  type SkillAddress,
+  type SkillLookupDeps,
+} from './skillSource';
 
 /** A description is shown whole on the card and to the model in every chat that uses the skill. */
 const SKILL_DESCRIPTION_MAX_LENGTH = 1024;
@@ -65,8 +71,8 @@ export interface SkillTurnContext {
   catalog: readonly CatalogSkill[];
   /** False when the sandbox is not set up: a skill can still be added, but it cannot run until it is. */
   sandboxReady: boolean;
-  /** Reads a skill from GitHub; a test passes its own. */
-  fetchImpl: typeof fetch;
+  /** How a skill is read from GitHub; a test passes its own. */
+  lookup: SkillLookupDeps;
 }
 
 interface SkillToolSetOptions extends SkillTurnContext {
@@ -296,7 +302,7 @@ export class SkillToolSet extends LocalToolMCP {
     }
     let published: Awaited<ReturnType<typeof readPublishedSkill>>;
     try {
-      published = await readPublishedSkill({ address, fetchImpl: this.#options.fetchImpl });
+      published = await readPublishedSkill({ address, deps: this.#options.lookup });
     } catch (error) {
       if (error instanceof SkillSourceError) {
         return { ok: false, message: error.message };
