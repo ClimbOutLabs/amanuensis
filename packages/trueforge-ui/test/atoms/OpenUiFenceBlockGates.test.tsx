@@ -156,7 +156,7 @@ describe('OpenUiFenceBlock image and link gates', () => {
   it('keeps a fence image hidden in a chat turn until the person asks, like a markdown image', async () => {
     const showTurnImages = vi.fn(
       (_input: Parameters<ChatImagesCatalog['showTurnImages']>[0]): Promise<TurnImagesResult> =>
-        Promise.resolve({ status: 'ask', count: 1, host: 'evil.example' }),
+        Promise.resolve({ status: 'ask', count: 1, host: 'evil.example', url: 'https://evil.example/p.png' }),
     );
     const port: ChatImagesCatalog = {
       listTurnImages: vi.fn(() => Promise.resolve({ artifacts: [], tool_images: [], emails: [] })),
