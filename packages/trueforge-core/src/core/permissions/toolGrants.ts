@@ -1,5 +1,5 @@
 /**
- * Standing per-user approvals for one connector tool ("Always allow this tool"). The server
+ * Standing per-user approvals for one connector tool ("Always allow everywhere"). The server
  * persists them; core only asks whether one exists and records a new one when the user chooses
  * it on an approval.
  */

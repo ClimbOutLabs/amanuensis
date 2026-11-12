@@ -95,6 +95,12 @@
   cursor: pointer;
 }
 
+/* Under takeover a touch drag drives the page, so it must not scroll this page or select anything. */
+.browser-live-frame-takeover img {
+  touch-action: none;
+  user-select: none;
+}
+
 .browser-live-input {
   flex: 1;
   min-width: 0;

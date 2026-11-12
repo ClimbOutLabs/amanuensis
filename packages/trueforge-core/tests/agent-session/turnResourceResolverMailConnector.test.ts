@@ -30,6 +30,17 @@ const MAILBOX = [1, 2, 9, 12, 20, 45, 90].map(daysAgo => ({
   date: new Date(NOW - daysAgo * DAY_MS).toISOString(),
 }));
 
+/** The account's folders as the real sidecar lists them: one JSON text block per folder, with special-use marks. */
+const FOLDERS = [
+  { name: 'INBOX', delimiter: '/', flags: ['\\HasNoChildren'] },
+  { name: '[Gmail]/Sent Mail', delimiter: '/', flags: ['\\HasNoChildren', '\\Sent'] },
+  { name: '[Gmail]/Drafts', delimiter: '/', flags: ['\\Drafts', '\\HasNoChildren'] },
+];
+
+/** The real sidecar's words when the mail server rejects a request, such as a folder it does not have. */
+const PROVIDER_FAILURE =
+  'Error executing tool list_emails_metadata: provider_failure: metadata provider request failed';
+
 const readAnnotations = { readOnlyHint: true, openWorldHint: false };
 const accountProperty = { type: 'string', description: 'The name of the email account.' };
 /** Like the real sidecar, which declares its dates as `datetime | None`, so null is valid input. */
@@ -57,7 +68,11 @@ const SIDECAR_TOOLS = [
   {
     name: 'get_emails_content',
     description: 'Read email bodies.',
-    inputSchema: { type: 'object' as const, properties: { account_name: accountProperty }, required: ['account_name'] },
+    inputSchema: {
+      type: 'object' as const,
+      properties: { account_name: accountProperty, mailbox: { type: 'string', description: 'The mailbox.' } },
+      required: ['account_name'],
+    },
     annotations: readAnnotations,
   },
   {
@@ -115,8 +130,10 @@ function scriptedSidecar({
   accountList,
   known = () => ['default'],
   draftResult = () => text({ ok: true, draft_id: 'draft-1' }),
+  mailboxListFails = false,
 }: {
   accountList: () => CallToolResult;
+  mailboxListFails?: boolean;
   known?: () => readonly string[];
   draftResult?: () => CallToolResult;
 }) {
@@ -131,7 +148,18 @@ function scriptedSidecar({
       return Promise.resolve(text(`Account ${String(args['account_name'])} was not found`, true));
     }
     if (params.name === 'list_mailboxes') {
-      return Promise.resolve(text({ mailboxes: ['INBOX', 'Sent'] }));
+      return Promise.resolve(
+        mailboxListFails
+          ? text('provider_failure: mailbox list failed', true)
+          : { content: FOLDERS.map(folder => ({ type: 'text' as const, text: JSON.stringify(folder) })) },
+      );
+    }
+    const mailbox = args['mailbox'];
+    if (typeof mailbox === 'string' && mailbox.toUpperCase() !== 'INBOX' && !FOLDERS.some(f => f.name === mailbox)) {
+      return Promise.resolve(text(PROVIDER_FAILURE, true));
+    }
+    if (params.name === 'get_emails_content') {
+      return Promise.resolve(text({ emails: [] }));
     }
     if (params.name === 'send_email') {
       return Promise.resolve(text({ sent: true }));
@@ -577,5 +605,89 @@ describe('Email connector attachments', () => {
       expect(tool?.description).toContain('call extract_document_text with that path');
       expect(tool?.description).toContain("Never pass an attachment's file name as the path");
     }
+  });
+});
+
+describe('Email connector folders', () => {
+  beforeEach(() => {
+    mockConnect.mockReset();
+  });
+
+  const since = new Date(NOW - 7 * DAY_MS).toISOString();
+
+  it("reads sent mail when the model names the folder 'Sent' and the account calls it something else", async () => {
+    const sidecar = scriptedSidecar({ accountList: oneAccount });
+    const toolSet = await emailToolSet(makeResolver(new MailAccountDirectory()));
+
+    const listed = resultText(
+      await toolSet.callTool({ name: 'list_emails_metadata', arguments: { mailbox: 'Sent', since } }),
+    );
+    const read = resultText(
+      await toolSet.callTool({ name: 'get_emails_content', arguments: { mailbox: 'sent items', email_ids: ['1'] } }),
+    );
+
+    expect(listed.isError).toBe(false);
+    expect(read.isError).toBe(false);
+    const reads = sidecar.calls.filter(
+      call => call['tool'] !== 'list_mailboxes' && call['tool'] !== 'list_available_accounts',
+    );
+    expect(reads.map(call => call['mailbox'])).toEqual(['[Gmail]/Sent Mail', '[Gmail]/Sent Mail']);
+  });
+
+  it('leaves the inbox and an exact folder name as given', async () => {
+    const sidecar = scriptedSidecar({ accountList: oneAccount });
+    const toolSet = await emailToolSet(makeResolver(new MailAccountDirectory()));
+
+    await toolSet.callTool({ name: 'list_emails_metadata', arguments: { mailbox: 'inbox', since } });
+    await toolSet.callTool({ name: 'list_emails_metadata', arguments: { mailbox: '[Gmail]/Drafts', since } });
+
+    const listCalls = sidecar.calls.filter(call => call['tool'] === 'list_emails_metadata');
+    expect(listCalls.map(call => call['mailbox'])).toEqual(['inbox', '[Gmail]/Drafts']);
+    // The inbox needs no folder list.
+    expect(sidecar.calls.filter(call => call['tool'] === 'list_mailboxes')).toHaveLength(1);
+  });
+
+  it('refuses a folder the account does not have, naming the folders it has, and sends nothing', async () => {
+    const sidecar = scriptedSidecar({ accountList: oneAccount });
+    const toolSet = await emailToolSet(makeResolver(new MailAccountDirectory()));
+
+    const { text: said, isError } = resultText(
+      await toolSet.callTool({ name: 'list_emails_metadata', arguments: { mailbox: 'Taxes', since } }),
+    );
+
+    expect(isError).toBe(true);
+    expect(JSON.parse(said)).toEqual({
+      error:
+        "This Email account has no folder named 'Taxes', so nothing was read or changed. Try again with one of its folders: 'INBOX', '[Gmail]/Sent Mail', '[Gmail]/Drafts'.",
+    });
+    expect(sidecar.calls.filter(call => call['tool'] === 'list_emails_metadata')).toEqual([]);
+  });
+
+  it("says what to do next when the mail server fails a read, instead of the server's bare words", async () => {
+    scriptedSidecar({ accountList: oneAccount, mailboxListFails: true });
+    const toolSet = await emailToolSet(makeResolver(new MailAccountDirectory()));
+
+    const { text: said, isError } = resultText(
+      await toolSet.callTool({ name: 'list_emails_metadata', arguments: { mailbox: 'Sent', since } }),
+    );
+
+    expect(isError).toBe(true);
+    expect(said).not.toContain('provider_failure');
+    expect(JSON.parse(said)).toEqual({
+      error:
+        'The mail server did not finish this request, so nothing was read. Try the same call once more. If it fails again, tell the person their mail server is not answering and to check the Email account in Settings.',
+    });
+  });
+
+  it('tells the model that common folder names are matched to the account', async () => {
+    scriptedSidecar({ accountList: oneAccount });
+    const toolSet = await emailToolSet(makeResolver(new MailAccountDirectory()));
+
+    const listed = await toolSet.listTools();
+    if (!('result' in listed)) {
+      throw new Error('Expected a tool list');
+    }
+    const tool = listed.result.tools.find(entry => entry.name === 'get_emails_content');
+    expect(JSON.stringify(tool?.inputSchema.properties?.['mailbox'])).toContain('Sent, Drafts, Trash or Spam');
   });
 });
