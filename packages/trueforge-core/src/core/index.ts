@@ -33,7 +33,12 @@ export type {
 export { AgentThreadOrchestrator } from './runtime/AgentThreadOrchestrator';
 export { stageAttachment } from './runtime/attachmentStaging';
 export type { StagedAttachment } from './runtime/attachmentStaging';
-export { isHostWrappedText, isUntrustedDocumentText, personMessageIndex } from './runtime/contextUtils';
+export {
+  hostPictureMessage,
+  isHostWrappedText,
+  isUntrustedDocumentText,
+  personMessageIndex,
+} from './runtime/contextUtils';
 export type { CreateDynamicSubAgentThread } from './runtime/CreateDynamicSubAgentThread';
 export { measurePromptRequest } from './runtime/promptReport';
 export type { PromptReport, PromptReportInput, PromptReportRow } from './runtime/promptReport';
@@ -73,6 +78,7 @@ export type {
   AgentThreadExecutionContext,
   PostToolCallAgentContextProcessor,
   PreLLMEphemeralAgentContextProcessor,
+  PreLLMEphemeralCall,
   PreSendContextProcessor,
 } from './capabilities/AgentContextProcessor';
 export type { ToolResponseProcessor, ToolResponseProcessorResult } from './capabilities/ToolResponseProcessor';
@@ -284,6 +290,17 @@ export {
 } from './errors';
 export { REDIS_KEY_NAMESPACE, redisKey } from './redisKeys';
 export { describeUnknownError, extractErrorLogFields } from './util/errorLogFields';
+export {
+  DEFAULT_MCP_HTTP_BODY_TIMEOUT_MS,
+  DEFAULT_MCP_HTTP_CONNECT_TIMEOUT_MS,
+  DEFAULT_MCP_HTTP_MAX_RETRIES,
+  DEFAULT_MODEL_HTTP_BODY_TIMEOUT_MS,
+  DEFAULT_MODEL_HTTP_CONNECT_TIMEOUT_MS,
+  DEFAULT_MODEL_HTTP_HEADERS_TIMEOUT_MS,
+  DEFAULT_MODEL_HTTP_MAX_RETRIES,
+  MCP_HTTP_HEADERS_TIMEOUT_MARGIN_MS,
+  configureOutboundFetches,
+} from './util/outboundFetch';
 export { PromiseTimeoutError, withTimeout } from './util/promiseUtils';
 export { isRedirectStatus, redirectTargetOrigin } from './util/redirects';
 
@@ -413,7 +430,7 @@ export {
   slotSocketPathsIn,
 } from './sandbox/slots/slotContract';
 export { SLOT_FIX_COMMAND, SLOT_NOT_READY_MESSAGE, SlotDriver } from './sandbox/slots/SlotDriver';
-export { SlotSandboxProvider } from './sandbox/slots/SlotSandboxProvider';
+export { SlotFullStateLog, SlotSandboxProvider } from './sandbox/slots/SlotSandboxProvider';
 export { extractStructuredEditPaths, repositoryRootsMatch } from './sandbox/structuredEditPaths';
 export type { StructuredEditPathRequest, StructuredEditPathResolution } from './sandbox/structuredEditPaths';
 
@@ -473,6 +490,7 @@ export {
   BROWSER_SCREENSHOT_TOOL_NAME,
   BROWSER_SCROLL_TOOL_NAME,
   BROWSER_SELECT_TOOL_NAME,
+  BROWSER_SERVER_ID,
   BROWSER_TOOL_NAMES,
   BROWSER_TYPE_TOOL_NAME,
   isBrowserToolName,
@@ -485,7 +503,7 @@ export {
   mapsDestinationHosts,
   shellBindingFromForm,
 } from './permissions/classifier';
-export type { ClassifyContext, ReminderLine, SentinelAction } from './permissions/classifier';
+export type { ClassifyContext, ReminderLine, ScheduleStatusReview, SentinelAction } from './permissions/classifier';
 export {
   DEFAULT_PINNED_PATH,
   classifyContextFor,
@@ -523,9 +541,10 @@ export {
   isTrustedPicture,
   recordPageImageUrls,
   recordPersonText,
+  recordUntrustedText,
   searchResultUrls,
 } from './permissions/provenance';
-export type { SearchResultUrls } from './permissions/provenance';
+export type { ChatProvenance, ReadSource, SearchResultUrls } from './permissions/provenance';
 export {
   AUTO_DENY_REASONS,
   TIER2_ACTION_KINDS,

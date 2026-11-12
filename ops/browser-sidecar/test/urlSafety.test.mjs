@@ -27,6 +27,13 @@ test('refuses a router-style private address', () => {
   assert.deepEqual(syntacticallySafeUrl('http://10.0.0.5/'), { ok: false, reason: 'private_network' });
 });
 
+test('refuses an address with a sign-in name or password before the site', () => {
+  assert.deepEqual(syntacticallySafeUrl('https://sam@hulu.com/account'), { ok: false, reason: 'sign_in_in_address' });
+  assert.deepEqual(syntacticallySafeUrl('https://sam:pw@hulu.com/'), { ok: false, reason: 'sign_in_in_address' });
+  assert.deepEqual(syntacticallySafeUrl('https://:pw@hulu.com/'), { ok: false, reason: 'sign_in_in_address' });
+  assert.deepEqual(syntacticallySafeUrl('https://hulu.com/@sam').ok, true);
+});
+
 test('refuses something that is not a URL at all', () => {
   assert.deepEqual(syntacticallySafeUrl('not a url'), { ok: false, reason: 'not_a_url' });
 });

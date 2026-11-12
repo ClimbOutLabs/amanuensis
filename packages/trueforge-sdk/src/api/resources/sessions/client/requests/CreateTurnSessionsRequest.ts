@@ -11,4 +11,6 @@ export interface CreateTurnSessionsRequest {
     /** Turn input items: user messages and/or approval/tool-response resumes. Do not mix user messages with approval or tool-response items. */
     input?: TrueForge.TurnInputItem[];
     previousTurnId?: TrueForge.PreviousTurnIdInput;
+    /** True when the person spoke this message and the client reads the reply aloud. The reply is then kept short and plain. */
+    spokenReply?: boolean;
 }

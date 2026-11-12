@@ -14,7 +14,7 @@ import { RuntimeHarness } from './RuntimeHarness.js';
 // This device could take notices but has not turned them on, so the offer is due.
 vi.mock('@/deliveries/pushDevice.js', () => ({
   pushSupport: () => ({ blocker: null, permission: 'default' }),
-  currentPushSubscription: () => Promise.resolve(null),
+  pushStatus: () => Promise.resolve({ serverReady: true, on: false }),
   enablePush: () => Promise.resolve(),
 }));
 
