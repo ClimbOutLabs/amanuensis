@@ -10,7 +10,6 @@ import { CALDAV_PRIVATE_READ_REASON } from './connectorTrust';
 import { escapeDisplayText } from './displayText';
 import { renderOutboundArguments, SEND_VALUE_MAX_CHARS } from './extractorRegistry';
 import { tier1Decision, tier3Decision, type Tier3Card, type TierDecision } from './tier';
-import { TOOL_GRANT_REASON } from './toolGrants';
 
 /**
  * Tier rules for the CalDAV connector. Only the mounted connector, marked first-party, gets them.
@@ -24,13 +23,11 @@ export async function classifyCaldavTool({
   action,
   review,
   mintToken,
-  hasStandingGrant,
   assistant,
 }: {
   action: Pick<SentinelAction, 'tool_name' | 'canonical_params' | 'tool_type' | 'mcp_server_name' | 'mcp_first_party'>;
   review: CaldavEventReview | null;
   mintToken: () => Promise<string>;
-  hasStandingGrant: () => Promise<boolean>;
   /** The assistant's display name, for the sentence that says who always asks. */
   assistant: string;
 }): Promise<TierDecision | undefined> {
@@ -64,13 +61,6 @@ export async function classifyCaldavTool({
     return undefined;
   }
   const reach = reachFor({ tool, assistant });
-  if (reach.own && (await hasStandingGrant())) {
-    return tier1Decision({
-      reason: TOOL_GRANT_REASON,
-      reason_detail: `Always allowed: \`${tool}\` on your calendar.`,
-      sensitive_read: true,
-    });
-  }
   return tier3Decision({
     card: reach.sentence === null ? card : { ...card, plain_what: `${card.plain_what}${reach.sentence}` },
     reason: reach.reason,
@@ -88,14 +78,12 @@ export async function classifyCaldavTool({
 function reachFor({ tool, assistant }: { tool: CaldavToolName; assistant: string }): {
   reason: string;
   reason_detail: string;
-  own: boolean;
   sentence: string | null;
 } {
   if (tool === 'respond_to_event') {
     return {
       reason: 'caldav_invitation_reply',
       reason_detail: 'Calendar change that reaches guests always asks.',
-      own: false,
       sentence: ` This reply goes to the event organizer, so ${assistant} always asks.`,
     };
   }
@@ -103,7 +91,6 @@ function reachFor({ tool, assistant }: { tool: CaldavToolName; assistant: string
     return {
       reason: 'caldav_calendar_change',
       reason_detail: 'Calendar change on your own calendar asks.',
-      own: true,
       sentence: null,
     };
   }
@@ -111,7 +98,6 @@ function reachFor({ tool, assistant }: { tool: CaldavToolName; assistant: string
   return {
     reason: 'caldav_calendar_guests',
     reason_detail: 'Change to an existing calendar event always asks.',
-    own: false,
     sentence: ` ${assistant} always asks before ${verb} an event in this calendar, because it cannot check who else is on it.`,
   };
 }

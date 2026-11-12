@@ -57,7 +57,13 @@ import {
   SET_REMINDER_TOOL_NAME,
 } from '../schedules/toolContract';
 import { tavilyApprovalWhat } from '../search/tavilyCardText';
-import { isSpaceReadToolName, isSpaceWriteToolName, SPACE_SERVER_ID, spaceActivityLine } from '../spaces/toolContract';
+import {
+  isSpaceReadToolName,
+  isSpaceWriteToolName,
+  SPACE_SERVER_ID,
+  SPACE_WRITE_REASON,
+  spaceActivityLine,
+} from '../spaces/toolContract';
 import { absolutePatchTarget, applyPatchTargets } from './applyPatchTargets';
 import {
   actionIdFor,
@@ -2343,6 +2349,8 @@ function gmailWriteCard(input: { action: SentinelAction; agent_intent: string | 
       subject: escapeDisplayText(content.subject),
       body: escapeDisplayText(content.body, { keepNewlines: true }),
       reply_to: content.replyTo === null ? null : escapeDisplayText(content.replyTo),
+      from_name: content.fromName === '' ? null : escapeDisplayText(content.fromName),
+      name_left_off: content.nameLeftOff || replaces?.nameLeftOff === true,
       replaces:
         replaces === undefined
           ? null
@@ -2580,6 +2588,8 @@ function calendarWriteCard(input: {
       attendees: review.attendees.map(show),
       guests_emailed: review.guests_emailed,
       one_of_repeating: review.one_of_repeating,
+      already_created: review.action === 'create' && review.already_created,
+      span_days: review.span_days,
       before:
         review.before === null
           ? null
@@ -2708,15 +2718,7 @@ async function classifyCalendarTool(action: SentinelAction, ctx: ClassifyContext
         });
       }
     }
-    // Only a change that reaches no guest can be covered by a standing grant; a guest change always asks.
     const reachesGuests = review.attendees.length > 0;
-    if (!reachesGuests && (await hasStandingToolGrant(ctx, action))) {
-      return tier1Decision({
-        reason: TOOL_GRANT_REASON,
-        reason_detail: `Always allowed: \`${action.tool_name}\` on your calendar.`,
-        sensitive_read: false,
-      });
-    }
     return tier3Decision({
       card: calendarWriteCard({ review, agent_intent: ctx.agent_intent, assistant: ctx.web_search.assistantName }),
       reason: reachesGuests ? 'calendar_write_guests' : 'calendar_write',
@@ -3130,7 +3132,11 @@ function classifyMemoryPagesTool(action: SentinelAction): TierDecision {
 function classifySpaceTool(action: SentinelAction): TierDecision {
   const line = spaceToolLine(action);
   if (line !== null && isSpaceWriteToolName(action.tool_name)) {
-    return tier1Decision({ reason: 'space_write', reason_detail: line, sensitive_read: false });
+    // The line rides with the call, so a scheduled run's saved change can be written to the activity log.
+    return {
+      ...tier1Decision({ reason: SPACE_WRITE_REASON, reason_detail: line, sensitive_read: false }),
+      audit_description: line,
+    };
   }
   if (line !== null && isSpaceReadToolName(action.tool_name)) {
     return tier1Decision({ reason: 'space_read', reason_detail: line, sensitive_read: false });
@@ -4061,7 +4067,6 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
       action,
       review: action.caldav_event ?? null,
       assistant: ctx.web_search.assistantName,
-      hasStandingGrant: () => hasStandingToolGrant(ctx, action),
       mintToken: () =>
         mintPlainToken({
           ctx,

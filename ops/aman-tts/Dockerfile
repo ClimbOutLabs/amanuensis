@@ -26,7 +26,7 @@ WORKDIR /app
 COPY requirements.txt ./
 RUN pip install --no-cache-dir --require-hashes --requirement requirements.txt
 COPY --from=assets /opt/aman-tts/assets /opt/aman-tts/assets
-COPY aman_tts.py phonemes.py pins.py kokoro_vocab.json ./
+COPY aman_tts.py audio_formats.py phonemes.py pins.py kokoro_vocab.json ./
 
 USER tts
 EXPOSE 8002

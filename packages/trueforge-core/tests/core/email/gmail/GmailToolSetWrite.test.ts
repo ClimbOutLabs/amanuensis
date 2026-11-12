@@ -782,7 +782,7 @@ describe('send_draft', () => {
     expect(sleeps.length).toBeGreaterThan(0);
   });
 
-  it('is never covered by a standing "Always allow" or by "Always allow this here"', async () => {
+  it('is never covered by a standing "Always allow" or by "Always allow in this chat"', async () => {
     const { tools } = await build({ features: [...COMPOSE], routes: [draftRoute()] });
     const info = await tools.toolCallInfo({ name: 'send_draft', arguments: { draft_id: 'd1' } });
     expect(info.tier).toBe(3);

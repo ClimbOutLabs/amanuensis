@@ -1,3 +1,4 @@
+import { isCallToolResponseResult, type CallToolResponse } from '../mcp/IMCPServer';
 import type { ContextMessage } from '../runtime/AgentThread.types';
 import { isLLMContextMessage } from '../runtime/contextUtils';
 import type { UnfinishedKind } from '../runtime/replyBudget';
@@ -41,6 +42,14 @@ function spaceWriteResult(content: string): Record<string, unknown> | undefined 
 /** True when a space write succeeded but saved nothing new, so it is neither a change nor progress. */
 export function spaceWriteSavedNothing(content: string): boolean {
   return spaceWriteResult(content)?.[SPACE_WRITE_NOTHING_SAVED_FIELD] === true;
+}
+
+/** The same check on a finished call's result, before it is wrapped for the model. */
+export function spaceWriteResponseSavedNothing(response: CallToolResponse): boolean {
+  return (
+    isCallToolResponseResult(response) &&
+    response.result.content.some(block => block.type === 'text' && spaceWriteSavedNothing(block.text))
+  );
 }
 
 /** The spaces this turn's create, edit and restore calls reached, in the order they were first written. */
