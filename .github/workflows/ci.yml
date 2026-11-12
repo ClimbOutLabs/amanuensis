@@ -67,6 +67,11 @@ jobs:
               - '.github/workflows/ci.yml'
             trueforge:
               - 'packages/trueforge/**'
+              # The voice tests read these to check the image carries the model the server pins.
+              - 'Dockerfile'
+              - 'Dockerfile.dev'
+              # A voice test runs the voice service's own read-back check on real calendar cards.
+              - 'ops/aman-tts/**'
               - 'package.json'
               - 'pnpm-workspace.yaml'
               - 'tsconfig.base.json'
@@ -357,6 +362,19 @@ jobs:
       - name: Install Pillow
         if: matrix.package == 'trueforge'
         run: python -m pip install pillow==12.3.0
+
+      # The voice tests listen to a recording with the pinned model. It is fetched once, checked against its
+      # fingerprint, and cached by that fingerprint, so no test downloads it.
+      - name: Cache the listening model
+        if: matrix.package == 'trueforge'
+        uses: actions/cache@v6.1.0
+        with:
+          path: packages/trueforge/.cache/voice-model
+          key: silero-vad-${{ hashFiles('packages/trueforge/src/voice/vad/sileroVad.ts', 'packages/trueforge/scripts/lib/vadModelDownload.ts') }}
+
+      - name: Fetch the listening model
+        if: matrix.package == 'trueforge'
+        run: pnpm --filter @truefoundry/trueforge voice:model:test
 
       # The voice service's own locked packages, plus the test client FastAPI's TestClient needs.
       - name: Install voice service packages

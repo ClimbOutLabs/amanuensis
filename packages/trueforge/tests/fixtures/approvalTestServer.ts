@@ -288,7 +288,13 @@ export async function startApprovalTestServer(options?: {
         {
           model_id: 'scripted-model',
           name: 'scripted-model',
-          properties: { context_length: 128000, max_output_tokens: 4096, reasoning_efforts: ['none'] },
+          // A custom model takes one request at a time by default; a test that holds two chats' turns open needs two.
+          properties: {
+            context_length: 128000,
+            max_output_tokens: 4096,
+            reasoning_efforts: ['none'],
+            max_concurrent_requests: 2,
+          },
         },
         {
           model_id: 'scripted-alt-model',
