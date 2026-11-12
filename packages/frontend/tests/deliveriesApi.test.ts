@@ -94,6 +94,19 @@ test('saves a push device with its keys and removes it by address', async () => 
   assert.deepEqual(calls[2]?.body, { endpoint: 'https://push.example.test/a' });
 });
 
+test('asks the server whether this device still gets notices, with the address in the body', async () => {
+  const { fetcher, calls } = recordingFetch(seen =>
+    Response.json({ data: { saved: JSON.stringify(seen.body).includes('/kept') } }),
+  );
+  const api = createDeliveriesApi(fetcher);
+  assert.equal(await api.pushDeviceSaved('https://push.example.test/kept'), true);
+  assert.equal(await api.pushDeviceSaved('https://push.example.test/dropped'), false);
+  assert.equal(calls[0]?.method, 'POST');
+  assert.equal(new URL(calls[0]?.url ?? '').pathname, '/api/v1/user/push/subscriptions/lookup');
+  assert.equal(new URL(calls[0]?.url ?? '').search, '');
+  assert.deepEqual(calls[0]?.body, { endpoint: 'https://push.example.test/kept' });
+});
+
 test('reports an address another account holds, and marks everything seen in one call', async () => {
   const taken = createDeliveriesApi(async () =>
     Response.json({ error: { message: 'Another account.' } }, { status: 409 }),

@@ -148,6 +148,23 @@ describe('SpokenReplyContainer', () => {
     expect(spokenTexts(synthesis)).toEqual(['You have two meetings today.']);
   });
 
+  // The chat shows a sent message under a temporary id, then renames it to the server's turn id.
+  it('reads the answer when the voice message is renamed while its turn runs', async () => {
+    markDraftFromVoice();
+    const reply = [{ type: 'text' as const, text: 'You have two meetings today.' }];
+    const { rerender } = render(thread({ messages: [], running: false }));
+    armSpokenReply({ fromVoice: takeDraftFromVoice(), text: PROMPT });
+    rerender(thread({ messages: [userMessage(PROMPT)], running: true }));
+    await settle();
+    const renamed: ThreadMessageLike = { ...userMessage(PROMPT), id: 'turn-1-user' };
+    rerender(thread({ messages: [renamed, streamingMessage(reply)], running: true }));
+    await settle();
+    rerender(thread({ messages: [renamed, assistantMessage(reply)], running: false }));
+    await settle();
+
+    expect(spokenTexts(synthesis)).toEqual(['You have two meetings today.']);
+  });
+
   // The blocker: a voice send that never reached the chat left its flag set, so the next finished run was read aloud.
   it('does not read a later typed reply after a voice send that never went through', async () => {
     const { rerender } = render(thread({ messages: [], running: false }));

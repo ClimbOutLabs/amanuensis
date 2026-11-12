@@ -113,6 +113,7 @@ describe("SchedulesClient", () => {
                 manifest: {
                     cron: "cron",
                     kind: "task",
+                    origin_session_id: "origin_session_id",
                     run_at: "2024-01-15T09:30:00Z",
                     status: "active",
                     task: "task",
@@ -153,6 +154,7 @@ describe("SchedulesClient", () => {
                 manifest: {
                     cron: "cron",
                     kind: "task",
+                    originSessionId: "origin_session_id",
                     runAt: new Date("2024-01-15T09:30:00.000Z"),
                     status: "active",
                     task: "task",
@@ -425,6 +427,7 @@ describe("SchedulesClient", () => {
                 manifest: {
                     cron: "cron",
                     kind: "task",
+                    origin_session_id: "origin_session_id",
                     run_at: "2024-01-15T09:30:00Z",
                     status: "active",
                     task: "task",
@@ -458,6 +461,7 @@ describe("SchedulesClient", () => {
                 manifest: {
                     cron: "cron",
                     kind: "task",
+                    originSessionId: "origin_session_id",
                     runAt: new Date("2024-01-15T09:30:00.000Z"),
                     status: "active",
                     task: "task",
@@ -525,6 +529,7 @@ describe("SchedulesClient", () => {
                 manifest: {
                     cron: "cron",
                     kind: "task",
+                    origin_session_id: "origin_session_id",
                     run_at: "2024-01-15T09:30:00Z",
                     status: "active",
                     task: "task",
@@ -564,6 +569,7 @@ describe("SchedulesClient", () => {
                 manifest: {
                     cron: "cron",
                     kind: "task",
+                    originSessionId: "origin_session_id",
                     runAt: new Date("2024-01-15T09:30:00.000Z"),
                     status: "active",
                     task: "task",

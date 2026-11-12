@@ -551,6 +551,26 @@ describe('VoiceInputButton hands-free', () => {
     return { api, transcribeMock, view };
   }
 
+  it('tells the mic and the hands-free switch apart when pointed at', async () => {
+    const { api } = makeApi();
+    render(composer(api));
+    fireEvent.mouseEnter(await screen.findByRole('button', { name: 'Record voice message' }));
+    expect(screen.getByRole('tooltip').textContent).toMatch(/^Voice message: tap to record/);
+    fireEvent.mouseLeave(screen.getByRole('button', { name: 'Record voice message' }));
+    fireEvent.focus(screen.getByRole('button', { name: 'Start hands-free conversation' }));
+    expect(screen.getByRole('tooltip').textContent).toMatch(/^Hands-free conversation: just talk/);
+    expect(screen.queryByTitle(/./)).toBeNull();
+  });
+
+  it('shows no mic hint while recording, since a hold and a tap end differently', async () => {
+    const { api } = makeApi();
+    render(composer(api));
+    fireEvent.click(await screen.findByRole('button', { name: 'Record voice message' }), { detail: 0 });
+    const stop = await screen.findByRole('button', { name: 'Stop and transcribe' });
+    fireEvent.mouseEnter(stop);
+    expect(screen.queryByRole('tooltip')).toBeNull();
+  });
+
   it('sends on a pause, waits for the answer, then listens again', async () => {
     const { transcribeMock } = await startHandsFree();
     expect(mockStartVoiceRecording).toHaveBeenCalledTimes(1);

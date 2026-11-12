@@ -19,6 +19,7 @@ export * as modelProviders from "./modelProviders/index.js";
 export * as runCode from "./runCode/index.js";
 export * from "./sandboxProviders/client/requests/index.js";
 export * as sandboxProviders from "./sandboxProviders/index.js";
+export * as sandboxWorkspaces from "./sandboxWorkspaces/index.js";
 export * from "./skills/client/requests/index.js";
 export * as skills from "./skills/index.js";
 export * as tokenFactoryUsage from "./tokenFactoryUsage/index.js";

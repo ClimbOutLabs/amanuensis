@@ -3,17 +3,24 @@ import { ConnectorAccountStateSchema } from './connectorAccount';
 
 export const CalendarProviderSchema = z
   .object({
-    key: z.string().describe('Stable provider key, such as fastmail or other.'),
+    key: z.string().describe('Stable provider key, such as google or other.'),
     name: z.string().describe('The name the person sees in the provider picker.'),
     server_url: z
       .string()
       .nullable()
-      .describe('The built-in calendar address; null when it depends on the email domain or is typed.'),
+      .describe(
+        'The built-in calendar address; null when it depends on the email domain, the email address or is typed.',
+      ),
+    account_url_template: z
+      .string()
+      .nullable()
+      .describe('A built-in calendar address made from the email address; null when the provider does not use one.'),
     help_url: z
       .string()
       .nullable()
       .describe("The provider's own help page for making an app password; null when none could be checked."),
     help_hint: z.string().describe('One plain sentence on how to get an app password.'),
+    setup_steps: z.array(z.string()).describe('Plain steps to show before the form; empty when the hint is enough.'),
   })
   .openapi('CalendarProvider');
 

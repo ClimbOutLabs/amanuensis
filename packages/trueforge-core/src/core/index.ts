@@ -33,7 +33,12 @@ export type {
 export { AgentThreadOrchestrator } from './runtime/AgentThreadOrchestrator';
 export { stageAttachment } from './runtime/attachmentStaging';
 export type { StagedAttachment } from './runtime/attachmentStaging';
-export { isHostWrappedText, isUntrustedDocumentText, personMessageIndex } from './runtime/contextUtils';
+export {
+  hostPictureMessage,
+  isHostWrappedText,
+  isUntrustedDocumentText,
+  personMessageIndex,
+} from './runtime/contextUtils';
 export type { CreateDynamicSubAgentThread } from './runtime/CreateDynamicSubAgentThread';
 export { measurePromptRequest } from './runtime/promptReport';
 export type { PromptReport, PromptReportInput, PromptReportRow } from './runtime/promptReport';
@@ -73,6 +78,7 @@ export type {
   AgentThreadExecutionContext,
   PostToolCallAgentContextProcessor,
   PreLLMEphemeralAgentContextProcessor,
+  PreLLMEphemeralCall,
   PreSendContextProcessor,
 } from './capabilities/AgentContextProcessor';
 export type { ToolResponseProcessor, ToolResponseProcessorResult } from './capabilities/ToolResponseProcessor';
@@ -284,6 +290,17 @@ export {
 } from './errors';
 export { REDIS_KEY_NAMESPACE, redisKey } from './redisKeys';
 export { describeUnknownError, extractErrorLogFields } from './util/errorLogFields';
+export {
+  DEFAULT_MCP_HTTP_BODY_TIMEOUT_MS,
+  DEFAULT_MCP_HTTP_CONNECT_TIMEOUT_MS,
+  DEFAULT_MCP_HTTP_MAX_RETRIES,
+  DEFAULT_MODEL_HTTP_BODY_TIMEOUT_MS,
+  DEFAULT_MODEL_HTTP_CONNECT_TIMEOUT_MS,
+  DEFAULT_MODEL_HTTP_HEADERS_TIMEOUT_MS,
+  DEFAULT_MODEL_HTTP_MAX_RETRIES,
+  MCP_HTTP_HEADERS_TIMEOUT_MARGIN_MS,
+  configureOutboundFetches,
+} from './util/outboundFetch';
 export { PromiseTimeoutError, withTimeout } from './util/promiseUtils';
 export { isRedirectStatus, redirectTargetOrigin } from './util/redirects';
 
@@ -399,12 +416,14 @@ export { SANDBOX_IMAGE_URI } from './sandbox/sandboxImage';
 export { existingSandboxIdForProvider, formatSandboxId, parseSandboxId, rawSandboxId } from './sandbox/sandboxRef';
 export type { SandboxRefParts } from './sandbox/sandboxRef';
 export {
+  SandboxWorkspaceHolderSchema,
   SandboxWorkspaceListingSchema,
   SandboxWorkspaceSchema,
   SandboxWorkspaceSlotSchema,
 } from './sandbox/sandboxWorkspaceSchemas';
 export type {
   SandboxWorkspace,
+  SandboxWorkspaceHolder,
   SandboxWorkspaceListing,
   SandboxWorkspaceSlot,
 } from './sandbox/sandboxWorkspaceSchemas';
@@ -485,6 +504,7 @@ export {
   BROWSER_SCREENSHOT_TOOL_NAME,
   BROWSER_SCROLL_TOOL_NAME,
   BROWSER_SELECT_TOOL_NAME,
+  BROWSER_SERVER_ID,
   BROWSER_TOOL_NAMES,
   BROWSER_TYPE_TOOL_NAME,
   isBrowserToolName,

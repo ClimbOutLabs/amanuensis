@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 
 import { useAssistantDisplayName } from '../components/PersonalizationContext.js';
 import { useOptionalDeliveries } from '../deliveries/DeliveriesContext.js';
-import { currentPushSubscription, enablePush, pushSupport } from '../deliveries/pushDevice.js';
+import { enablePush, pushStatus, pushSupport } from '../deliveries/pushDevice.js';
 
 type Offer = 'checking' | 'offer' | 'none';
 
@@ -25,11 +25,9 @@ export function ReminderNotificationPrompt() {
       return;
     }
     let cancelled = false;
-    void Promise.all([currentPushSubscription().catch(() => null), api.pushPublicKey().catch(() => null)]).then(
-      ([subscription, key]) => {
-        if (!cancelled) setOffer(subscription === null && key !== null ? 'offer' : 'none');
-      },
-    );
+    void pushStatus({ api }).then(status => {
+      if (!cancelled) setOffer(status.serverReady && !status.on ? 'offer' : 'none');
+    });
     return () => {
       cancelled = true;
     };

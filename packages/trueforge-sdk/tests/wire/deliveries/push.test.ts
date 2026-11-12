@@ -219,4 +219,73 @@ describe("PushClient", () => {
             });
         }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
     });
+
+    test("lookup_subscription (1)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { endpoint: "endpoint" };
+        const rawResponseBody = { data: { saved: true } };
+
+        server
+            .mockEndpoint()
+            .post("/api/v1/user/push/subscriptions/lookup")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(200)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        const response = await client.deliveries.push.lookupSubscription({
+            endpoint: "endpoint",
+        });
+        expect(response).toEqual({
+            data: {
+                saved: true,
+            },
+        });
+    });
+
+    test("lookup_subscription (2)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { endpoint: "endpoint" };
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .post("/api/v1/user/push/subscriptions/lookup")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(400)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.deliveries.push.lookupSubscription({
+                endpoint: "endpoint",
+            });
+        }).rejects.toThrow(TrueForgeTypes.BadRequestError);
+    });
+
+    test("lookup_subscription (3)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { endpoint: "endpoint" };
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .post("/api/v1/user/push/subscriptions/lookup")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(401)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.deliveries.push.lookupSubscription({
+                endpoint: "endpoint",
+            });
+        }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+    });
 });

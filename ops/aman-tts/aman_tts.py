@@ -268,8 +268,13 @@ def create_app(
             raise HTTPException(status_code=429, detail="Busy reading other text", headers={"Retry-After": "2"})
         state.queued += 1
         try:
-            async with state.in_flight:
-                audio = await _speak_until_disconnect(request, synthesizer, text, voice_id)
+            if await _wait_for_slot(request, state.in_flight):
+                try:
+                    audio = await _speak_until_disconnect(request, synthesizer, text, voice_id)
+                finally:
+                    state.in_flight.release()
+            else:
+                audio = None
         finally:
             state.queued -= 1
         if audio is None:
@@ -292,6 +297,35 @@ def create_app(
         )
 
     return app
+
+
+async def _wait_for_slot(request: Request, slot: asyncio.Semaphore) -> bool:
+    """Waits for the synthesis slot, giving up once the caller hangs up so a gone caller does not hold a place in line."""
+    acquire = asyncio.ensure_future(slot.acquire())
+    acquired = False
+    try:
+        while not acquired:
+            done, _ = await asyncio.wait({acquire}, timeout=DISCONNECT_POLL_SECONDS)
+            if done:
+                acquired = True
+            elif await request.is_disconnected():
+                break
+    finally:
+        if not acquired:
+            # Not awaited, so a cancel of this request still reaches its caller.
+            acquire.cancel()
+            acquire.add_done_callback(_pass_on_slot(slot))
+    return acquired
+
+
+def _pass_on_slot(slot: asyncio.Semaphore) -> Callable[[asyncio.Future], None]:
+    """Gives the slot back when it was handed over just as the wait ended."""
+
+    def done(acquire: asyncio.Future) -> None:
+        if not acquire.cancelled() and acquire.exception() is None:
+            slot.release()
+
+    return done
 
 
 async def _speak_until_disconnect(

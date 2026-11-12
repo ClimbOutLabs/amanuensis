@@ -138,6 +138,7 @@ async function setup(
     }),
     runsAs: scheduleRunsAs({ tenant_id: 'default', agentStore, personaStore, personalizationStore }),
     logger: winston.createLogger({ silent: true }),
+    session_id: 'chat-1',
     timeZone: 'timeZone' in input ? input.timeZone : 'America/New_York',
     sentinel,
     now: () => NOW,
@@ -620,6 +621,32 @@ describe('the schedule rule in the system prompt', () => {
 
 const MEDICINE = { what: 'Take the medicine', at: '2026-10-19T18:00:00-04:00' };
 
+describe('in an incognito chat', () => {
+  it('only lists schedules and reminders: anything set here would outlive the chat', async () => {
+    const built = await setup();
+    const tools = new ScheduleToolSet({ ...built.options, keepsNothing: true });
+    expect((await tools.listTools()).result.tools.map(tool => tool.name).sort()).toEqual([
+      'list_reminders',
+      'list_schedules',
+    ]);
+    const refused = await tools.callTool({ name: 'set_reminder', arguments: MEDICINE });
+    expect(isCallToolResponseResult(refused) && refused.result.isError).toBe(true);
+    expect(await built.listAll()).toEqual([]);
+    expect(built.audit).toEqual([]);
+  });
+
+  it('tells the model it cannot set or change one here', async () => {
+    const built = await setup();
+    const prompt = InstructionBuilder.createSystemPrompt('test');
+    for (const build of scheduleCapability({ ...built.options, keepsNothing: true }).instructionBuilders ?? []) {
+      build(prompt);
+    }
+    const text = prompt.build();
+    expect(text).toContain('This incognito chat cannot set, change or cancel a schedule or a reminder.');
+    expect(text).not.toContain('use set_reminder');
+  });
+});
+
 describe('reminder tools', () => {
   it('sets a one-time reminder without a card, records it, and tells the activity log in plain words', async () => {
     const built = await setup();
@@ -643,6 +670,7 @@ describe('reminder tools', () => {
         run_at: '2026-10-19T18:00:00-04:00',
         kind: 'reminder',
         timezone: 'America/New_York',
+        origin_session_id: 'chat-1',
       },
     });
     const pending = await built.store.getScheduledRunFor({ tenant_id: 'default', schedule_id: saved?.id ?? '' });
@@ -650,6 +678,14 @@ describe('reminder tools', () => {
     expect(built.audit.map(row => [row.tool_name, row.description, row.outcome])).toEqual([
       ['set_reminder', 'Set a reminder for Monday, October 19 at 6:00 PM: Take the medicine', 'ran'],
     ]);
+  });
+
+  it('records no origin chat when a reminder is set outside a chat', async () => {
+    const built = await setup();
+    const outsideChat = { ...built, tools: new ScheduleToolSet({ ...built.options, session_id: null }) };
+    await dispatch({ built: outsideChat, name: 'set_reminder', args: MEDICINE });
+    const [saved] = await built.listAll();
+    expect(saved?.manifest).toMatchObject({ kind: 'reminder', origin_session_id: null });
   });
 
   it('refuses a time in the past with a message that says what to do next', async () => {

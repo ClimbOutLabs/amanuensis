@@ -59,13 +59,16 @@ vi.mock('@/server/ServerContext.js', async importOriginal => ({
   useOptionalCatalogServer: () =>
     server.hasCatalog
       ? {
-          getGoogleStatus: async () => ({
-            features: ['gmail_read', 'calendar_read'].map(feature => ({
-              feature,
-              granted: server.grantedFeatures.includes(feature),
-              label: feature,
-            })),
-          }),
+          // The Google port sits on the connector catalog, as it does in the app.
+          connectorCatalog: {
+            getGoogleStatus: async () => ({
+              features: ['gmail_read', 'calendar_read'].map(feature => ({
+                feature,
+                granted: server.grantedFeatures.includes(feature),
+                label: feature,
+              })),
+            }),
+          },
         }
       : null,
   useServerCapabilities: () => ({ sandbox: { enabled: false } }),

@@ -100,6 +100,7 @@
     "remark-math": "^6.0.0",
     "remark-parse": "^11.0.0",
     "sqlite-vec": "^0.1.6",
+    "swagger-ui-dist": "5.34.0",
     "ulid": "^3.0.2",
     "undici": "7.29.1",
     "unified": "^11.0.5",

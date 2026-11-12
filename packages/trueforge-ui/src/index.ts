@@ -361,11 +361,15 @@ export { ThreadWorkOnRepoControls, WorkOnRepoControls } from './containers/WorkO
 export type { WorkOnRepoControlsProps } from './containers/WorkOnRepoControls.js';
 export { HELP_BUTTON_LABEL, IRIS_HELP_CHOICES } from './help/helpModel.js';
 export type {
+  HelpConnectorState,
+  HelpGoogleLoginState,
   HelpHealthCheck,
   HelpHealthItem,
   HelpHealthStatus,
   HelpHostReport,
   HelpHostReportState,
+  HelpSetupStep,
+  HelpState,
 } from './help/helpModel.js';
 export { HelpProvider, useOptionalHelp } from './help/HelpProvider.js';
 export type { HelpApi, HelpPhase, HelpSession } from './help/HelpProvider.js';
@@ -438,6 +442,7 @@ export {
   shouldDownscaleImage,
   withImageDownscaling,
 } from './server/imageAttachmentAdapter.js';
+export { useIsPrivateChat } from './server/privateChatStore.js';
 export { ServerVoiceRefusal } from './utils/spokenReplyPlayer.js';
 export type {
   ServerVoiceApi,
@@ -480,6 +485,7 @@ export type {
 export { AgentDetailsToggleButton } from './atoms/AgentDetailsToggleButton.js';
 export { ClearChatButton } from './atoms/ClearChatButton.js';
 export { railMenuRowClassName } from './atoms/lib/buttonClasses.js';
+export { menuTriggerFor } from './atoms/lib/menuTriggerFor.js';
 export {
   IS_CREATE_AGENT_METADATA_KEY,
   isCreateAgentMetadataValue,

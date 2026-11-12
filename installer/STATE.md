@@ -75,6 +75,7 @@ nested:
   "source_ref": "<the checkout commit the images were built from>",
   "app_image": "aman-app:<source id>",
   "stt_image": "aman-stt:<source id>",
+  "tts_image": "aman-tts:<source id>",
   "calendar_image": "aman-calendar-caldav:<source id>",
   "browser_image": "aman-browser:<source id>",
   "browser_gateway_image": "aman-browser-gateway:<source id>",
@@ -85,7 +86,8 @@ nested:
 
 On upgrade the old record is copied to `release/previous.release.json`
 before the new one is written. Readers treat the record as readable only
-when at least the app, speech and sign-in images are named.
+when at least the app, speech-to-text and sign-in images are named. A record
+from before the read-aloud voice has no `tts_image`; the next upgrade adds it.
 
 ## Backups
 
@@ -95,7 +97,9 @@ added when it carries a label, and `-1`, `-2` and so on when the name is
 already taken. Inside: one folder per instance that was backed up, a copy of
 `release/release.json`, a copy of the authority's `root.crt` under `tls/`
 (never its key), and `SHA256SUMS` with the hash of every file. Unlabelled
-backups are pruned to the newest seven.
+backups are pruned to the newest seven. The database copy in each backup
+holds no incognito chats: `aman backup` deletes them from its copy before the
+copy is checked, so an incognito chat open at backup time is not kept.
 
 ## The lock
 

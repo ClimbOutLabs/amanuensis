@@ -374,6 +374,17 @@
             },
             "default": "./dist/cjs/api/resources/internal/resources/metrics/exports.js"
         },
+        "./internal/privateChats": {
+            "import": {
+                "types": "./dist/esm/api/resources/internal/resources/privateChats/exports.d.mts",
+                "default": "./dist/esm/api/resources/internal/resources/privateChats/exports.mjs"
+            },
+            "require": {
+                "types": "./dist/cjs/api/resources/internal/resources/privateChats/exports.d.ts",
+                "default": "./dist/cjs/api/resources/internal/resources/privateChats/exports.js"
+            },
+            "default": "./dist/cjs/api/resources/internal/resources/privateChats/exports.js"
+        },
         "./internal/schedules": {
             "import": {
                 "types": "./dist/esm/api/resources/internal/resources/schedules/exports.d.mts",
@@ -549,6 +560,17 @@
                 "default": "./dist/cjs/api/resources/settings/resources/sandboxProviders/exports.js"
             },
             "default": "./dist/cjs/api/resources/settings/resources/sandboxProviders/exports.js"
+        },
+        "./settings/sandboxWorkspaces": {
+            "import": {
+                "types": "./dist/esm/api/resources/settings/resources/sandboxWorkspaces/exports.d.mts",
+                "default": "./dist/esm/api/resources/settings/resources/sandboxWorkspaces/exports.mjs"
+            },
+            "require": {
+                "types": "./dist/cjs/api/resources/settings/resources/sandboxWorkspaces/exports.d.ts",
+                "default": "./dist/cjs/api/resources/settings/resources/sandboxWorkspaces/exports.js"
+            },
+            "default": "./dist/cjs/api/resources/settings/resources/sandboxWorkspaces/exports.js"
         },
         "./settings/skills": {
             "import": {

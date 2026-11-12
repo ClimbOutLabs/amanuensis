@@ -105,6 +105,10 @@ export interface SessionTable {
   task_checklist: JsonbColumn<TaskChecklist> | null;
   /** Optional unique key within `tenant_id` when set. */
   external_id: string | null;
+  /** 1 for a private chat, fixed at create. */
+  is_incognito: number;
+  /** When a private chat is deleted; null exactly when `is_incognito` is 0. */
+  private_expires_at: string | null;
   custom: JsonbColumn<Record<string, unknown>> | null;
   metadata: JsonbColumn<SessionMetadata>;
   metrics: JsonbColumn<SessionMetrics>;
@@ -362,6 +366,19 @@ export interface TokenFactoryUsageTable {
   usage_date: string;
   used_tokens: number;
   updated_at: string;
+}
+
+/** Token counts of a deleted chat's model calls; no session id, no words. PRIMARY KEY (tenant_id, event_id). */
+export interface DeletedChatModelUsageTable {
+  tenant_id: string;
+  event_id: string;
+  created_by_subject_id: string;
+  model_id: string;
+  display_name: string;
+  input_tokens: number;
+  output_tokens: number;
+  cost_usd: number | null;
+  created_at: string;
 }
 
 /** One row per UTC day and upstream model id; not tenant-scoped. */
@@ -850,4 +867,5 @@ export interface Database {
   global_settings: GlobalSettingsTable;
   token_factory_usage: TokenFactoryUsageTable;
   token_factory_model_usage: TokenFactoryModelUsageTable;
+  deleted_chat_model_usage: DeletedChatModelUsageTable;
 }

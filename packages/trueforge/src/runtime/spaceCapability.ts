@@ -74,6 +74,7 @@ import { mapsCapability } from './mapsCapability';
 import { MemoryTurnResourceResolver } from './MemoryTurnResourceResolver';
 import { pastChatsCapability, type PastChatsTurnContext } from './pastChatsCapability';
 import { personaCapability, type PersonaTurnContext } from './personaCapability';
+import { privateChatCapability, toolsForChat } from './privateChat';
 import { scheduleCapability, type ScheduleTurnContext } from './scheduleCapability';
 import { maskDocumentationRegions } from './spaceDocumentationMask';
 import {
@@ -480,6 +481,13 @@ function buildSpaceInstruction(builder: InstructionBuilder): void {
   builder.addSection(SPACE_INSTRUCTION_SECTION, SPACE_INSTRUCTION);
 }
 
+const SPACE_READ_INSTRUCTION =
+  "Read the user's spaces with list_spaces, get_space and list_blocks. This incognito chat cannot make or change a space.";
+
+function buildSpaceReadInstruction(builder: InstructionBuilder): void {
+  builder.addSection(SPACE_INSTRUCTION_SECTION, SPACE_READ_INSTRUCTION);
+}
+
 /**
  * A space body is one string with real line breaks. The old array-of-lines form is gone from
  * the contract entirely: a caller that sends lines as an array gets a validation error, not a
@@ -780,6 +788,8 @@ export interface SpaceCapabilityOptions {
   logger?: Logger;
   /** This turn's search record: the links a search or page result returned, the only links a space may add. */
   webSearch: WebSearchTurnState;
+  /** True in an incognito chat: spaces can be read but not made or changed, since a page outlives the chat. */
+  keepsNothing?: boolean | undefined;
 }
 
 /**
@@ -1890,7 +1900,7 @@ class SpaceTool extends LocalToolMCP {
   ];
 
   protected getTools(): ToolDefinition[] {
-    return this.tools;
+    return toolsForChat({ tools: this.tools, keepsNothing: this.options.keepsNothing ?? false, chatOnly: new Set() });
   }
 
   /** The person's folders, and the name of the folder each filed space sits in (keyed by space id). */
@@ -2749,7 +2759,7 @@ class SpaceTool extends LocalToolMCP {
 export function spaceCapability(options: SpaceCapabilityOptions): AgentCapability {
   return {
     systemToolSets: [new SpaceTool(options)],
-    instructionBuilders: [buildSpaceInstruction],
+    instructionBuilders: [options.keepsNothing === true ? buildSpaceReadInstruction : buildSpaceInstruction],
     bundle: 'spaces',
   };
 }
@@ -2829,11 +2839,13 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
     const sentinel = this.#sentinel(input);
     const schedules = this.#space.schedules;
     const personas = this.#space.personas;
+    const keepsNothing = this.keepsNothing;
     return {
       ...resolved,
       extraCapabilities: [
         ...(resolved.extraCapabilities ?? []),
-        spaceCapability({ ...this.#space, tracing: input.tracing, webSearch: this.webSearchTurn }),
+        ...(keepsNothing ? [privateChatCapability()] : []),
+        spaceCapability({ ...this.#space, tracing: input.tracing, webSearch: this.webSearchTurn, keepsNothing }),
         mapsCapability({
           tracing: input.tracing,
           logger: this.#space.logger,
@@ -2852,7 +2864,8 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
               }),
             ]),
         toolImagesCapability(this.#toolImages),
-        ...(configuration.BROWSER_ENABLED
+        // The browser keeps one lasting profile per person, with its history and sign-ins, so it stays off.
+        ...(configuration.BROWSER_ENABLED && !keepsNothing
           ? [
               browserCapability({
                 tracing: input.tracing,
@@ -2864,7 +2877,15 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
         ...google,
         ...(personas === undefined
           ? []
-          : [personaCapability({ ...personas, switches: this.switches, tracing: input.tracing, sentinel })]),
+          : [
+              personaCapability({
+                ...personas,
+                switches: this.switches,
+                tracing: input.tracing,
+                sentinel,
+                keepsNothing,
+              }),
+            ]),
         ...(schedules === undefined
           ? []
           : [
@@ -2874,6 +2895,7 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
                 timeZone: this.clientTimezone,
                 sentinel,
                 now: () => new Date(),
+                keepsNothing,
               }),
             ]),
       ],

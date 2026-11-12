@@ -142,22 +142,19 @@ test(
           };
           probe.remove();
           const style = getComputedStyle(el);
-          // The sign-out confirmation is a closed dialog inside the menu, not a menu item.
-          const rows = Array.from(el.querySelectorAll('button, [role="group"] > p'))
-            .filter(row => row.closest('dialog') === null)
-            .map(row => {
-              const rowStyle = getComputedStyle(row);
-              const icon = row.querySelector('svg');
-              return {
-                text: (row.textContent ?? '').trim(),
-                visible: row.getBoundingClientRect().width > 0 && rowStyle.visibility !== 'hidden',
-                height: Math.round(row.getBoundingClientRect().height),
-                size: rowStyle.fontSize,
-                family: rowStyle.fontFamily,
-                color: rowStyle.color,
-                icon: icon === null ? null : Math.round(icon.getBoundingClientRect().width),
-              };
-            });
+          const rows = Array.from(el.querySelectorAll('button, [role="group"] > p')).map(row => {
+            const rowStyle = getComputedStyle(row);
+            const icon = row.querySelector('svg');
+            return {
+              text: (row.textContent ?? '').trim(),
+              visible: row.getBoundingClientRect().width > 0 && rowStyle.visibility !== 'hidden',
+              height: Math.round(row.getBoundingClientRect().height),
+              size: rowStyle.fontSize,
+              family: rowStyle.fontFamily,
+              color: rowStyle.color,
+              icon: icon === null ? null : Math.round(icon.getBoundingClientRect().width),
+            };
+          });
           return { surface: style.backgroundColor, border: style.borderTopColor, tokens, rows };
         });
 
@@ -189,6 +186,39 @@ test(
         assert.equal(new Set(icons).size, 1, `${label}: one icon size (${icons.join(', ')})`);
         await themed.close();
       }
+
+      // Sign out in the menu asks first, and the question outlives the menu that closes behind it.
+      const signOutContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+      const signOutPage = await signOutContext.newPage();
+      await asConnectedAccount(signOutPage);
+      let signOutRequests = 0;
+      await signOutPage.route('**/api/v1/auth/logout', async route => {
+        signOutRequests += 1;
+        await route.fulfill({ status: 204 });
+      });
+      await signOutPage.goto(`${origin}/`, { waitUntil: 'domcontentloaded', timeout: RENDER_TIMEOUT_MS });
+      const more = signOutPage.getByRole('button', { name: 'More', exact: true });
+      const signOutRow = signOutPage.getByRole('menu').getByRole('button', { name: 'Sign out', exact: true });
+      const question = signOutPage.getByRole('dialog', { name: 'Sign out?' });
+      await more.click({ timeout: RENDER_TIMEOUT_MS });
+      await signOutRow.click({ timeout: RENDER_TIMEOUT_MS });
+      await question.getByRole('button', { name: 'Stay' }).click({ timeout: RENDER_TIMEOUT_MS });
+      await question.waitFor({ state: 'hidden', timeout: RENDER_TIMEOUT_MS });
+      assert.equal(signOutRequests, 0, 'Stay signs nobody out');
+      assert.equal(
+        await more.evaluate(el => el === document.activeElement),
+        true,
+        'after Stay, the keyboard is back on More',
+      );
+      await more.click({ timeout: RENDER_TIMEOUT_MS });
+      await signOutRow.click({ timeout: RENDER_TIMEOUT_MS });
+      const leaves = signOutPage.waitForRequest(request => request.isNavigationRequest(), {
+        timeout: RENDER_TIMEOUT_MS,
+      });
+      await question.getByRole('button', { name: 'Sign out' }).click({ timeout: RENDER_TIMEOUT_MS });
+      await leaves;
+      assert.equal(signOutRequests, 1, 'Sign out asks the server once');
+      await signOutContext.close();
 
       // Once an agent exists, the picker is on every new chat, and a pick there answers the first message.
       const created = await api.request('/api/v1/personas', {

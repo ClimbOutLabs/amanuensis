@@ -28,11 +28,20 @@ import type { CancellationReason, TerminalTurnState } from '../schemas/turn';
 
 /**
  * Caller-supplied fields for creating a session; the store owns timestamps and tip state.
- * `agent` is a discriminated reference | inline binding.
+ * `agent` is a discriminated reference | inline binding. A private chat (`is_incognito`) carries
+ * its first deletion time; any other chat carries null.
  */
 export type CreateSessionInput<TSessionCustom extends object = Record<string, never>> = Pick<
   SessionRecord<TSessionCustom>,
-  'tenant_id' | 'session_id' | 'agent' | 'created_by_subject' | 'external_id' | 'metadata' | 'source'
+  | 'tenant_id'
+  | 'session_id'
+  | 'agent'
+  | 'created_by_subject'
+  | 'external_id'
+  | 'metadata'
+  | 'source'
+  | 'is_incognito'
+  | 'private_expires_at'
 > & {
   custom: TSessionCustom | null;
 };
@@ -68,6 +77,23 @@ export interface GetSessionInput {
   session_id: string;
 }
 
+export interface FindChatsBySandboxIdsInput {
+  tenant_id: string;
+  /** Sandbox ids exactly as chats record them; pass each form a chat may have stored. */
+  sandbox_ids: readonly string[];
+}
+
+/** A chat whose latest turn holds one of the asked sandbox ids. */
+export interface ChatBySandboxId {
+  session_id: string;
+  title: string | null;
+  created_by_subject_id: string;
+  /** True for a private chat, which listings show without its title. */
+  is_private: boolean;
+  /** The sandbox id as the chat recorded it. */
+  sandbox_id: string;
+}
+
 export interface GetOwnedIdsInput {
   tenant_id: string;
   ids: readonly string[];
@@ -80,6 +106,24 @@ export interface GetSessionByExternalIdInput {
 }
 
 export interface DeleteSessionInput {
+  tenant_id: string;
+  session_id: string;
+}
+
+export interface SetPrivateExpiryInput {
+  tenant_id: string;
+  session_id: string;
+  private_expires_at: Date;
+}
+
+export interface ListExpiredPrivateSessionsInput {
+  /** Private chats whose deletion time is at or before this instant are returned. */
+  now: Date;
+  limit: number;
+}
+
+/** A private chat past its deletion time, named across tenants for the sweep that deletes it. */
+export interface ExpiredPrivateSession {
   tenant_id: string;
   session_id: string;
 }
@@ -212,6 +256,8 @@ export interface ListSessionsInput {
    * Requires `source_type`.
    */
   source_id: string | undefined;
+  /** When false, private chats (`is_incognito`) are left out. */
+  include_private: boolean;
 }
 
 /** Turn row fields without assembled snapshot (create input / listTurns). */
@@ -524,6 +570,9 @@ export interface ISessionStore<
    * `session_id` is globally unique across tenants.
    * Persists caller-supplied `created_by_subject` (immutable after create).
    * Sets `last_activity_timestamp_ms` (= now) on create.
+   * `is_incognito` is fixed here for the session's life. A private chat must carry a
+   * `private_expires_at` and any other chat must carry null, or the create rejects with
+   * `SessionStoreInvariantError` and writes nothing.
    */
   createSession(input: CreateSessionInput<TSessionCustom>): Promise<void>;
 
@@ -540,6 +589,19 @@ export interface ISessionStore<
 
   /** Permanently removes a session and all related data; missing sessions are a no-op. */
   deleteSession(input: DeleteSessionInput): Promise<void>;
+
+  /**
+   * Moves a private chat's deletion time. A chat that is not private rejects with
+   * `SessionStoreInvariantError`; a missing one with `SessionNotFoundError`. Not session activity:
+   * `updated_at` and `last_activity_timestamp_ms` are left alone.
+   */
+  setPrivateExpiry(input: SetPrivateExpiryInput): Promise<void>;
+
+  /**
+   * Private chats in every tenant whose deletion time is at or before `now`, soonest first,
+   * at most `limit`. Read path: nothing is changed.
+   */
+  listExpiredPrivateSessions(input: ListExpiredPrivateSessionsInput): Promise<ExpiredPrivateSession[]>;
 
   /**
    * Replaces one turn's rows in the past-chat search index with `documents`. The index is
@@ -609,6 +671,12 @@ export interface ISessionStore<
   getOwnedIds(input: GetOwnedIdsInput): Promise<readonly string[]>;
 
   /**
+   * Chats in the tenant whose latest turn recorded one of `sandbox_ids`, in one read. Empty `sandbox_ids` → `[]`.
+   * Does **not** bump `last_activity_timestamp_ms`.
+   */
+  findChatsBySandboxIds(input: FindChatsBySandboxIdsInput): Promise<readonly ChatBySandboxId[]>;
+
+  /**
    * Lookup by tenant-scoped `external_id`. Missing or null external ids are not found.
    * Does **not** bump `last_activity_timestamp_ms` (read path).
    */
@@ -652,7 +720,8 @@ export interface ISessionStore<
    * `agent_id` filters ref-bound sessions. `created_by_or_agent_ids` matches
    * rows created by its subject OR bound to one of its agent ids; optional
    * `source_type` / `source_id` filter by JSON `source` (expression-indexed,
-   * no scalar columns). Does **not** bump `last_activity_timestamp_ms` (read path).
+   * no scalar columns). Private chats are returned only with `include_private`.
+   * Does **not** bump `last_activity_timestamp_ms` (read path).
    */
   listSessions(
     input: ListSessionsInput,

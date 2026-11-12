@@ -100,6 +100,8 @@ describePg('pre-sync (c764d444) Postgres chain upgrades to latest', () => {
         poolMax: 5,
         statementTimeoutMs: 60_000,
         idleInTransactionSessionTimeoutMs: 60_000,
+        connectionTimeoutMs: 70_000,
+        onIdleClientError: () => undefined,
       });
       try {
         await expect(migrateToLatest(db)).resolves.toBeUndefined();

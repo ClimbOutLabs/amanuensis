@@ -109,6 +109,7 @@ import {
   FAILED_BATCH_STOP_AT,
   IDENTICAL_CALL_NUDGE_AT,
   IDENTICAL_CALL_STOP_AT,
+  IDENTICAL_MOVE_STOP_AT,
   isReadOnlyCall,
   MAX_TOOL_MARKUP_RETRIES_PER_TURN,
   MAX_WRITE_CALLS_PER_TURN,
@@ -143,6 +144,7 @@ import {
 import { isExpiredApproval } from '../permissions/approvalExpiry';
 import type { ConnectorBinding } from '../permissions/approvalTokens';
 import { recordHeldActionAudit, recordNotPreparedRefusals } from '../permissions/audit';
+import { movesBrowserPage } from '../permissions/browserToolNames';
 import { isChangeRequestReason } from '../permissions/changeRequest';
 import { isHostVouchedReadReason } from '../permissions/connectorTrust';
 import {
@@ -267,6 +269,8 @@ import {
 import {
   BLOCKED_CALLS_PARENT_MESSAGE,
   blockedCallsStopMessage,
+  browserPageSeen,
+  changesSeenBy,
   changesState,
   countsTowardWriteCap,
   findUnbackedClaim,
@@ -2096,6 +2100,12 @@ export class AgentThread {
       'current-date',
       `Today's date is ${dateUtc} (UTC).${localDateClause} Reason about past and future relative to this date, not to your training data.`,
     );
+    if (!this.parent && this.definition.spokenReply === true) {
+      builder.addSection(
+        'spoken-reply',
+        'The person spoke this message, and the app reads your reply aloud in a voice. Answer in a few short, plain sentences, with no lists, tables, headings, links or code. Never say you cannot speak or have no voice.',
+      );
+    }
     const personName = this.parent ? undefined : this.definition.identity?.personName?.trim();
     if (personName) {
       // Escaped: the name is user-authored text, so it cannot close the wrapping tag.
@@ -3013,7 +3023,10 @@ export class AgentThread {
     });
 
     for (const processor of this.preEphemeralLLMContextProcessors) {
-      messages = processor.processPreLLMEphemeral(messages) ?? messages;
+      messages =
+        processor.processPreLLMEphemeral(messages, {
+          modelSupportsVision: this.definition.modelSupportsVision === true,
+        }) ?? messages;
     }
 
     // Host-owned task state: re-injected fresh on EVERY model call, after
@@ -4645,8 +4658,10 @@ export class AgentThread {
     calls: InternalEnrichedToolCall[];
     writeCapHit: boolean;
     repeatStop: boolean;
+    repeatedCallIds: ReadonlySet<string>;
   } {
     const seenInBatch = new Set<string>();
+    const repeatedCallIds = new Set<string>();
     let previous = turn.lastCallSignature;
     let writeCapBlocked = 0;
     let admittedCappedInBatch = 0;
@@ -4688,11 +4703,12 @@ export class AgentThread {
         (lastRun !== undefined &&
           (countsTowardCap ||
             (!retryIsDue({ lastKind: lastRun.lastKind, retried: lastRun.retried }) &&
-              lastRun.writesAtLastRun >= turn.changesThisTurn)));
+              lastRun.writesAtLastRun >= changesSeenBy(call.tool_info, turn))));
       const duplicateInStep = seenInBatch.has(signature);
       seenInBatch.add(signature);
       if (alreadySeen) {
         repeatedBlocked += 1;
+        repeatedCallIds.add(call.id);
         // A read gets a few identical calls in a row; a duplicate in one step is skipped and never counts.
         const readOnly = isReadOnlyCall(call.tool_info);
         const limit = readOnly ? REPEAT_LIMIT_READ_TOOLS : REPEAT_LIMIT_OTHER_TOOLS;
@@ -4727,7 +4743,7 @@ export class AgentThread {
         repeatStop,
       });
     }
-    return { calls: guarded, writeCapHit, repeatStop };
+    return { calls: guarded, writeCapHit, repeatStop, repeatedCallIds };
   }
 
   /**
@@ -5033,6 +5049,8 @@ export class AgentThread {
     if (approvalRequiredToolCalls.length > 0) {
       throw new Error('Unreachable');
     }
+    // The calls whose run changed something, so a call that changed only itself can tell (see below).
+    const changedByCallId = new Set<string>();
     for (const result of toolCallResults) {
       const toolCall = openCalls.find(call => call.id === result.message.tool_call_id);
       recordToolCallResult(this.metrics, {
@@ -5059,6 +5077,19 @@ export class AgentThread {
         }
         if (toolCall !== undefined && changesState(toolCall.tool_info, { countsTowardCap })) {
           nextToolCallMemo.turn.changesThisTurn += 1;
+        }
+        // The browser's page has a count of its own: a step counts only when it reaches a page not
+        // seen before in this turn, so a scroll at the bottom of a page, or back and forth between
+        // two pages, moved nothing new.
+        if (toolCall !== undefined) {
+          const page = browserPageSeen({ info: toolCall.tool_info, text: result.message.content });
+          if (page !== undefined && !nextToolCallMemo.turn.browserPagesSeen.includes(page.digest)) {
+            nextToolCallMemo.turn.browserPagesSeen.push(page.digest);
+            if (page.moves) {
+              nextToolCallMemo.turn.browserPageChangesThisTurn += 1;
+              changedByCallId.add(toolCall.id);
+            }
+          }
         }
         if (result.toolCallInfo !== undefined) {
           for (const kind of stepKindsOf(result.toolCallInfo)) {
@@ -5412,7 +5443,7 @@ export class AgentThread {
         }
       }
       const previous = replyTurn.callSignatures.get(toolCallSignature(call));
-      if (call.tool_info.pre_dispatch_failure?.message !== REPEATED_ACTION_RESULT) {
+      if (!loopGuard.repeatedCallIds.has(call.id)) {
         settledByCallId.set(
           call.id,
           settleRetry({ previousKind: previous?.lastKind ?? null, previousRetried: previous?.retried ?? false, kind }),
@@ -5494,17 +5525,25 @@ export class AgentThread {
       // snapshot, but not used for the stop/nudge decisions below (see callSignatureCountsThisTurn).
       const previousRecord = nextToolCallMemo.turn.callSignatures.get(signature);
       const settled = settledByCallId.get(callId);
+      // A browser step that moved the page starts from where it left it, so its own move does not
+      // count against it: the same scroll may run again, and is no loop. One that moved nothing is.
+      // A step that keeps moving still has a higher stop of its own (IDENTICAL_MOVE_STOP_AT) and no nudge.
+      const movedPage = movesBrowserPage(call.tool_info) && changedByCallId.has(callId);
       nextToolCallMemo.turn.callSignatures.set(signature, {
         count: (previousRecord?.count ?? 0) + 1,
-        writesAtLastRun: nextToolCallMemo.turn.changesThisTurn,
+        writesAtLastRun: changesSeenBy(call.tool_info, nextToolCallMemo.turn) - (movedPage ? 1 : 0),
         lastKind: settled?.kind ?? previousRecord?.lastKind ?? null,
         retried: settled?.retried ?? previousRecord?.retried ?? false,
       });
       const thisTurnCount = (this.callSignatureCountsThisTurn.get(signature) ?? 0) + 1;
       this.callSignatureCountsThisTurn.set(signature, thisTurnCount);
-      if (thisTurnCount >= IDENTICAL_CALL_STOP_AT && repeatedSignature === undefined) {
+      if (
+        thisTurnCount >= (movedPage ? IDENTICAL_MOVE_STOP_AT : IDENTICAL_CALL_STOP_AT) &&
+        repeatedSignature === undefined
+      ) {
         repeatedSignature = call;
       } else if (
+        !movedPage &&
         thisTurnCount >= IDENTICAL_CALL_NUDGE_AT &&
         !nudgedSignaturesThisBatch.has(signature) &&
         !hasSentHostNoteThisTurn(this.context, 'identical_call', signature)

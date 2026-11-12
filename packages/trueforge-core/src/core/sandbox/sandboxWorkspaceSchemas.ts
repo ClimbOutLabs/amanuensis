@@ -1,14 +1,23 @@
 import { z } from 'zod';
 
 /**
- * One chat's sandbox workspace on a slot, as the settings listing reports it. The chat fields are
- * null when no chat holds the workspace: its chat was deleted without its workspace being removed,
- * or the workspace was never recorded against a chat.
+ * Whose chat holds a workspace. `none`: no chat on this server is linked to it, for example its chat was deleted
+ * without the workspace being removed, or its chat's latest turn did not record it.
+ */
+export const SandboxWorkspaceHolderSchema = z.enum(['you', 'someone_else', 'none']);
+export type SandboxWorkspaceHolder = z.infer<typeof SandboxWorkspaceHolderSchema>;
+
+/**
+ * One chat's sandbox workspace on a slot, as the settings listing reports it. The chat fields are set only when
+ * the holder is `you`: another person's chat is never named, and your own private chat is never titled.
  */
 export const SandboxWorkspaceSchema = z.object({
+  holder: SandboxWorkspaceHolderSchema,
   chat_id: z.string().nullable(),
-  /** The chat's title; null when the chat has none, and when no chat holds the workspace. */
+  /** The chat's title; null when the chat has none, when it is private, and whenever the holder is not `you`. */
   chat_title: z.string().nullable(),
+  /** True when the holder is `you` and the chat is one of your private chats. */
+  chat_private: z.boolean(),
   /** The workspace's sandbox id, `s<slot>-<session id>`: the id chats record for their workspace. */
   sandbox_id: z.string(),
   /** Which slot the workspace lives on, 1-based. */

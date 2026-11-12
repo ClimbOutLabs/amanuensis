@@ -8,6 +8,7 @@ import type { Logger } from 'winston';
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 import type { IMcpServerStore } from '../db/mcpServerStore';
 import type { IModelProviderStore } from '../db/modelProviderStore';
+import type { IPersonalizationStore } from '../db/personalizationStore';
 import type { IOAuthTokenStore } from '../mcp/auth/types';
 import { resolveDefaultChatModel } from '../runtime/defaultChatModel';
 import { getMcpConnection, getModelDetails } from '../runtime/sessionResources';
@@ -107,7 +108,7 @@ export async function probeGoogleLogin({
 
 /**
  * Asks each enabled MCP connector for its tool list, the same call the settings page makes. Returns
- * names and ok/not ok only; a token or URL never leaves this function.
+ * names and what went wrong only; a token or URL never leaves this function.
  */
 export async function probeConnectors({
   tenantId,
@@ -142,7 +143,7 @@ export async function probeConnectors({
           userRef,
         });
         if (connection === undefined) {
-          return { name, ok: false };
+          return { name, problem: 'unreadable' };
         }
         const remote = new RemoteMCP({
           id: name,
@@ -156,11 +157,35 @@ export async function probeConnectors({
           signal: AbortSignal.timeout(CONNECTOR_PROBE_TIMEOUT_MS),
         });
         const response = await remote.listTools();
-        return { name, ok: !isAuthRequired(response) };
+        return { name, problem: isAuthRequired(response) ? 'needs_sign_in' : null };
       } catch (error) {
         logger.warn(`Help check: connector "${name}" did not answer`, extractErrorLogFields(error));
-        return { name, ok: false };
+        return { name, problem: 'no_answer' };
       }
     }),
   );
+}
+
+/**
+ * Whether the person saved their name in Personalization, the "Tell Aman about you" setup step.
+ * A failed read is logged and counts as not done, so the guide offers the step rather than skip it.
+ */
+export async function probeProfileNamed({
+  tenantId,
+  userId,
+  personalizationStore,
+  logger,
+}: {
+  tenantId: string;
+  userId: string;
+  personalizationStore: IPersonalizationStore;
+  logger: Logger;
+}): Promise<boolean> {
+  try {
+    const profile = await personalizationStore.getProfile({ tenant_id: tenantId, created_by: userId });
+    return (profile?.user_name ?? '').trim() !== '';
+  } catch (error) {
+    logger.warn('Help check: the Personalization profile could not be read', extractErrorLogFields(error));
+    return false;
+  }
 }

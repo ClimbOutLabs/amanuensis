@@ -125,6 +125,12 @@ export function createDeliveriesApi(fetcher: typeof fetch): DeliveriesApi {
       await readBody(response);
       return 'saved';
     },
+    async pushDeviceSaved(endpoint) {
+      // The address goes in the body, so it stays out of request logs.
+      const body = await readBody(await fetcher(apiPath(`${PUSH_URL}/subscriptions/lookup`), json({ endpoint })));
+      const data = isRecord(body) ? body.data : undefined;
+      return isRecord(data) && data.saved === true;
+    },
     async removePushDevice(endpoint) {
       // The address goes in the body, so it stays out of request logs.
       await readBody(await fetcher(apiPath(`${PUSH_URL}/subscriptions`), json({ endpoint }, 'DELETE')));

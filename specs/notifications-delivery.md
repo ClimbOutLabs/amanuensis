@@ -22,7 +22,7 @@ One server-side feed of things Aman wants a person to see, called deliveries. Ea
 
 **Push names no one.** The contact every push carries defaults to the project's public page, not the owner's email. The owner can set their own with `WEB_PUSH_SUBJECT`.
 
-**A bounded number of devices.** A person keeps notices on for at most 10 devices. Turning on another drops the one turned on longest ago. A notice goes to at most 4 devices at a time.
+**A bounded number of devices.** A person keeps notices on for at most 10 devices. Turning on another drops the one turned on longest ago. A notice goes to at most 4 devices at a time. Settings asks the server whether this device is still saved, so a device that was dropped, or that its push service reported gone, reads as off and can be turned on again.
 
 **New keys mean new subscriptions.** Each device records the key it was turned on with. After the keys change, a device on the old key is removed instead of sent to, and turning notices on again makes a fresh subscription with the new key.
 
@@ -38,7 +38,8 @@ One server-side feed of things Aman wants a person to see, called deliveries. Ea
 
 - `delivery` and `delivery_attempt` tables on SQLite and Postgres, bound by shared store contract tests
 - Routes under `/api/v1/user/deliveries`: list (newest first, paged), unread count, mark seen, get one
-- Reminders create a delivery after writing their line into the Reminders chat; the old browser polling and per-browser storage are removed
+- Reminders create a delivery, then write their line into the chat the reminder was set in, and the delivery links to that chat; a reply running in that chat holds the line, never the delivery; the old browser polling and per-browser storage are removed
+- A reminder set outside a chat, one saved before the origin chat was recorded, and one whose origin chat has been deleted create a delivery with no link and no chat line; no chat is made for them, and there is no shared Reminders chat anymore
 - A bell with the unread count in the main headers and a panel that lists deliveries; opening an item marks it seen
 - Web Push with a service worker, per-device opt-in in Settings, and plain words for iPhone (Home Screen needed), unsupported and blocked browsers
 - Every delivery and every channel attempt is written to the Activity log in plain words
@@ -57,13 +58,17 @@ One server-side feed of things Aman wants a person to see, called deliveries. Ea
 All tests use synthetic data, never a person's real data.
 
 - A due reminder with no open tab creates a delivery and a push
+- A due reminder lands in the chat it was set in, and its delivery links there
+- A due reminder with no origin chat, or whose origin chat was deleted, creates a delivery with no link and makes no chat
+- A due reminder that names a chat someone else started creates a delivery with no link and writes nothing in that chat
+- A due reminder whose chat has a reply running creates its delivery at once and writes its line when the reply ends
 - A tab that set nothing shows the unread count
 - Seen on one device is seen on another
 - One person never sees or marks another person's deliveries
 - The push payload holds no reminder text
 - A dead push subscription is removed
 - A device on an old key is removed, and turning notices on again re-subscribes
-- An 11th device drops the oldest
+- An 11th device drops the oldest, and the dropped device reads as off in Settings
 - A full export with many devices per item imports
 - An upgraded install gets push keys
 - The service worker takes no fetch events

@@ -20,6 +20,36 @@ export const TEXT_DIRECTIVE_PREFIX = 'text:';
 const DEFAULT_TEXT_ARGUMENT = 'inert';
 const DEFAULT_CALL_TOOL_SERVER = 'inert';
 export const FINAL_TEXT = 'inert connector work is finished.';
+/** What `run:create_persona` asks to add, so a test can check the card and the saved persona against it. */
+export const SCRIPTED_PERSONA = {
+  name: 'Travel planner',
+  description: 'Plans trips and keeps the bookings in one place.',
+  instructions: 'Help plan trips. Keep answers short and list what is booked and what is not.',
+};
+/** What `run:create_schedule` asks to add. */
+export const SCRIPTED_SCHEDULE = {
+  name: 'friday-review',
+  task: 'Tell me what I finished this week and what is still open.',
+  repeat: 'weekly',
+  days: ['friday'],
+  time: '16:00',
+  time_zone: 'Europe/London',
+};
+/** What `run:draft_email` asks to save, so a test can check the card and the saved draft against it. */
+export const SCRIPTED_DRAFT = {
+  to: ['rui.costa@example.com'],
+  subject: 'Lunch on Friday',
+  body: 'Hi Rui, are you free for lunch on Friday at one?',
+};
+/** What `run:create_event` asks to add: half an hour, a week from now, so the event is never in the past. */
+const EVENT_DAY = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+export const SCRIPTED_EVENT = {
+  title: 'Dentist check-up',
+  start: `${EVENT_DAY}T10:00`,
+  end: `${EVENT_DAY}T10:30`,
+  time_zone: 'Europe/Lisbon',
+  location: '12 Mill Lane, Kelvinton',
+};
 /** Answers with the text of the last tool result instead of FINAL_TEXT, so a test can read what the tool returned. */
 export const QUOTE_TOOL_RESULT_DIRECTIVE = 'quote_tool_result';
 export const VERIFY_THEN_COMMIT_DIRECTIVE = 'verify_then_commit';
@@ -236,6 +266,18 @@ function argumentsJsonForTool({
   }
   if (name === 'usage_summary') {
     return '{}';
+  }
+  if (name.endsWith('create_persona')) {
+    return JSON.stringify(SCRIPTED_PERSONA);
+  }
+  if (name.endsWith('create_schedule')) {
+    return JSON.stringify(SCRIPTED_SCHEDULE);
+  }
+  if (name.endsWith('draft_email')) {
+    return JSON.stringify(SCRIPTED_DRAFT);
+  }
+  if (name.endsWith('create_event')) {
+    return JSON.stringify(SCRIPTED_EVENT);
   }
   return name.includes('ask_memory') ? '{"question":"inert"}' : JSON.stringify({ text });
 }

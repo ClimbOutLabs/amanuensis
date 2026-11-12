@@ -1,0 +1,615 @@
+{
+  "_about": "Every outside host shipped Aman code may name, with why. scripts/check-external-hosts.mjs (pnpm run test:external-hosts) fails on any host not listed here, on a link-only host that is loaded, and on any forbidden host. Names on this machine or the private network (localhost, Docker service names, reserved test names, private addresses) are not outside hosts and are never listed.",
+  "categories": {
+    "provider": {
+      "meaning": "a model or sandbox service the person configures",
+      "link_only": false
+    },
+    "connector": {
+      "meaning": "a service the person connects",
+      "link_only": false
+    },
+    "docs_link": {
+      "meaning": "opens in a new tab, never fetched",
+      "link_only": true
+    },
+    "setup_guide": {
+      "meaning": "a console or setup page the person opens",
+      "link_only": true
+    },
+    "package_registry": {
+      "meaning": "a package or release source used to build images, install Aman or install packages",
+      "link_only": false
+    },
+    "model_download": {
+      "meaning": "pinned model files downloaded once and checked against their hashes",
+      "link_only": false
+    },
+    "installer_lookup": {
+      "meaning": "a lookup only the installer makes while setting Aman up",
+      "link_only": false
+    },
+    "identifier": {
+      "meaning": "a namespace name inside a file format, never fetched",
+      "link_only": true
+    }
+  },
+  "allowed": [
+    {
+      "host": "accounts.google.com",
+      "category": "connector",
+      "reason": "Google sign-in page for the Google connector the person sets up."
+    },
+    {
+      "host": "api.github.com",
+      "category": "connector",
+      "reason": "GitHub API, for repositories the person connects."
+    },
+    {
+      "host": "api.githubcopilot.com",
+      "category": "connector",
+      "reason": "GitHub MCP server preset in the MCP catalog; contacted only if the person adds it."
+    },
+    {
+      "host": "api.transitous.org",
+      "category": "connector",
+      "reason": "Default public transit routes for the maps card (Transitous); can be changed in settings."
+    },
+    {
+      "host": "caldav.calendar.yahoo.com",
+      "category": "connector",
+      "reason": "Yahoo calendar preset; contacted only if the person connects that calendar."
+    },
+    {
+      "host": "caldav.fastmail.com",
+      "category": "connector",
+      "reason": "Fastmail calendar preset; contacted only if the person connects that calendar."
+    },
+    {
+      "host": "caldav.gmx.com",
+      "category": "connector",
+      "reason": "GMX calendar preset; contacted only if the person connects that calendar."
+    },
+    {
+      "host": "caldav.gmx.net",
+      "category": "connector",
+      "reason": "GMX calendar preset; contacted only if the person connects that calendar."
+    },
+    {
+      "host": "caldav.web.de",
+      "category": "connector",
+      "reason": "WEB.DE calendar preset; contacted only if the person connects that calendar."
+    },
+    {
+      "host": "calendar.google.com",
+      "category": "connector",
+      "reason": "Google Calendar over CalDAV, when the person connects a Google calendar."
+    },
+    {
+      "host": "github.com",
+      "category": "connector",
+      "reason": "GitHub, for repositories, skills and releases the person connects or imports."
+    },
+    {
+      "host": "gitlab.com",
+      "category": "connector",
+      "reason": "GitLab, for skills the person imports from a GitLab repository."
+    },
+    {
+      "host": "gmail.googleapis.com",
+      "category": "connector",
+      "reason": "Gmail API for the Google connector the person sets up."
+    },
+    {
+      "host": "imap.aol.com",
+      "category": "connector",
+      "reason": "AOL mail server preset; contacted only if the person connects that mailbox."
+    },
+    {
+      "host": "imap.fastmail.com",
+      "category": "connector",
+      "reason": "Fastmail mail server preset; contacted only if the person connects that mailbox."
+    },
+    {
+      "host": "imap.gmail.com",
+      "category": "connector",
+      "reason": "Gmail mail server preset; contacted only if the person connects that mailbox."
+    },
+    {
+      "host": "imap.gmx.net",
+      "category": "connector",
+      "reason": "GMX mail server preset; contacted only if the person connects that mailbox."
+    },
+    {
+      "host": "imap.mail.me.com",
+      "category": "connector",
+      "reason": "iCloud mail server preset; contacted only if the person connects that mailbox."
+    },
+    {
+      "host": "imap.mail.yahoo.com",
+      "category": "connector",
+      "reason": "Yahoo mail server preset; contacted only if the person connects that mailbox."
+    },
+    {
+      "host": "imap.web.de",
+      "category": "connector",
+      "reason": "WEB.DE mail server preset; contacted only if the person connects that mailbox."
+    },
+    {
+      "host": "imap.zoho.com",
+      "category": "connector",
+      "reason": "Zoho mail server preset; contacted only if the person connects that mailbox."
+    },
+    {
+      "host": "mail.gmx.net",
+      "category": "connector",
+      "reason": "GMX mail server preset; contacted only if the person connects that mailbox."
+    },
+    {
+      "host": "mcp.atlassian.com",
+      "category": "connector",
+      "reason": "Atlassian (Jira, Confluence) MCP server preset in the MCP catalog; contacted only if the person adds it."
+    },
+    {
+      "host": "mcp.brightdata.com",
+      "category": "connector",
+      "reason": "Bright Data MCP server preset in the MCP catalog; contacted only if the person adds it."
+    },
+    {
+      "host": "mcp.deepwiki.com",
+      "category": "connector",
+      "reason": "DeepWiki MCP server preset in the MCP catalog; contacted only if the person adds it."
+    },
+    {
+      "host": "mcp.exa.ai",
+      "category": "connector",
+      "reason": "Exa MCP server preset in the MCP catalog; contacted only if the person adds it."
+    },
+    {
+      "host": "mcp.linear.app",
+      "category": "connector",
+      "reason": "Linear MCP server preset in the MCP catalog; contacted only if the person adds it."
+    },
+    {
+      "host": "mcp.notion.com",
+      "category": "connector",
+      "reason": "Notion MCP server preset in the MCP catalog; contacted only if the person adds it."
+    },
+    {
+      "host": "mcp.posthog.com",
+      "category": "connector",
+      "reason": "PostHog MCP server preset in the MCP catalog; contacted only if the person adds it."
+    },
+    {
+      "host": "mcp.sentry.dev",
+      "category": "connector",
+      "reason": "Sentry MCP server preset in the MCP catalog; contacted only if the person adds it."
+    },
+    {
+      "host": "mcp.stripe.com",
+      "category": "connector",
+      "reason": "Stripe MCP server preset in the MCP catalog; contacted only if the person adds it."
+    },
+    {
+      "host": "mcp.supabase.com",
+      "category": "connector",
+      "reason": "Supabase MCP server preset in the MCP catalog; contacted only if the person adds it."
+    },
+    {
+      "host": "mcp.tavily.com",
+      "category": "connector",
+      "reason": "Tavily MCP server preset in the MCP catalog; contacted only if the person adds it."
+    },
+    {
+      "host": "nominatim.openstreetmap.org",
+      "category": "connector",
+      "reason": "Default place search for the maps card (Nominatim); can be changed in settings."
+    },
+    {
+      "host": "oauth2.googleapis.com",
+      "category": "connector",
+      "reason": "Google token exchange for the Google connector the person sets up."
+    },
+    {
+      "host": "router.project-osrm.org",
+      "category": "connector",
+      "reason": "Default driving routes for the maps card (OSRM); can be changed in settings."
+    },
+    {
+      "host": "routing.openstreetmap.de",
+      "category": "connector",
+      "reason": "Default walking and cycling routes for the maps card; can be changed in settings."
+    },
+    {
+      "host": "search.parallel.ai",
+      "category": "connector",
+      "reason": "Parallel MCP server preset in the MCP catalog; contacted only if the person adds it."
+    },
+    {
+      "host": "smtp.aol.com",
+      "category": "connector",
+      "reason": "AOL mail server preset; contacted only if the person connects that mailbox."
+    },
+    {
+      "host": "smtp.fastmail.com",
+      "category": "connector",
+      "reason": "Fastmail mail server preset; contacted only if the person connects that mailbox."
+    },
+    {
+      "host": "smtp.gmail.com",
+      "category": "connector",
+      "reason": "Gmail mail server preset; contacted only if the person connects that mailbox."
+    },
+    {
+      "host": "smtp.mail.me.com",
+      "category": "connector",
+      "reason": "iCloud mail server preset; contacted only if the person connects that mailbox."
+    },
+    {
+      "host": "smtp.mail.yahoo.com",
+      "category": "connector",
+      "reason": "Yahoo mail server preset; contacted only if the person connects that mailbox."
+    },
+    {
+      "host": "smtp.web.de",
+      "category": "connector",
+      "reason": "WEB.DE mail server preset; contacted only if the person connects that mailbox."
+    },
+    {
+      "host": "smtp.zoho.com",
+      "category": "connector",
+      "reason": "Zoho mail server preset; contacted only if the person connects that mailbox."
+    },
+    {
+      "host": "tile.openstreetmap.org",
+      "category": "connector",
+      "reason": "Default map tiles for the maps card; can be changed in settings."
+    },
+    {
+      "host": "www.googleapis.com",
+      "category": "connector",
+      "reason": "Google Calendar and Gmail scopes and API for the Google connector the person sets up."
+    },
+    {
+      "host": "ai-sdk.dev",
+      "category": "docs_link",
+      "reason": "Library documentation named in a code comment."
+    },
+    {
+      "host": "dexidp.io",
+      "category": "docs_link",
+      "reason": "Sign-in server documentation, linked from the Aman guide."
+    },
+    {
+      "host": "docs.docker.com",
+      "category": "docs_link",
+      "reason": "Docker documentation, linked from sandbox errors and the Aman guide."
+    },
+    {
+      "host": "git-scm.com",
+      "category": "docs_link",
+      "reason": "Git download page, linked from the Aman guide."
+    },
+    {
+      "host": "help.aol.com",
+      "category": "docs_link",
+      "reason": "AOL help page for app passwords, linked from mail setup."
+    },
+    {
+      "host": "help.yahoo.com",
+      "category": "docs_link",
+      "reason": "Yahoo help page for app passwords, linked from mail and calendar setup."
+    },
+    {
+      "host": "kysely.dev",
+      "category": "docs_link",
+      "reason": "Library documentation named in a code comment."
+    },
+    {
+      "host": "learn.microsoft.com",
+      "category": "docs_link",
+      "reason": "Windows documentation, linked from the Aman guide."
+    },
+    {
+      "host": "lucide.dev",
+      "category": "docs_link",
+      "reason": "Source of an icon, named in a code comment."
+    },
+    {
+      "host": "ollama.com",
+      "category": "docs_link",
+      "reason": "Ollama download page, linked from the Aman guide."
+    },
+    {
+      "host": "platform.claude.com",
+      "category": "docs_link",
+      "reason": "Model provider documentation named in a code comment."
+    },
+    {
+      "host": "platform.openai.com",
+      "category": "docs_link",
+      "reason": "Model provider documentation named in a code comment."
+    },
+    {
+      "host": "pnpm.io",
+      "category": "docs_link",
+      "reason": "pnpm install page, linked from the Aman guide."
+    },
+    {
+      "host": "redis.io",
+      "category": "docs_link",
+      "reason": "Redis documentation named in a code comment."
+    },
+    {
+      "host": "scripts.sil.org",
+      "category": "docs_link",
+      "reason": "Font licence text bundled with the Newsreader font."
+    },
+    {
+      "host": "support.apple.com",
+      "category": "docs_link",
+      "reason": "Apple help page for app-specific passwords, linked from mail setup."
+    },
+    {
+      "host": "support.gmx.com",
+      "category": "docs_link",
+      "reason": "GMX help page, linked from mail and calendar setup."
+    },
+    {
+      "host": "support.google.com",
+      "category": "docs_link",
+      "reason": "Google help page for app passwords, linked from mail and calendar setup."
+    },
+    {
+      "host": "tokenfactory.nebius.com",
+      "category": "docs_link",
+      "reason": "Token Factory pricing page named in a code comment."
+    },
+    {
+      "host": "www.apache.org",
+      "category": "docs_link",
+      "reason": "Licence text bundled with the code it covers."
+    },
+    {
+      "host": "www.daytona.io",
+      "category": "docs_link",
+      "reason": "Daytona documentation, linked from the Aman guide."
+    },
+    {
+      "host": "www.fastmail.help",
+      "category": "docs_link",
+      "reason": "Fastmail help page for app passwords, linked from mail and calendar setup."
+    },
+    {
+      "host": "www.openstreetmap.org",
+      "category": "docs_link",
+      "reason": "Map attribution link on the maps card."
+    },
+    {
+      "host": "www.zoho.com",
+      "category": "docs_link",
+      "reason": "Zoho help page for app passwords, linked from mail setup."
+    },
+    {
+      "host": "x.com",
+      "category": "docs_link",
+      "reason": "Benchmark source cited in the Aman guide."
+    },
+    {
+      "host": "zod.dev",
+      "category": "docs_link",
+      "reason": "Library documentation named in a code comment."
+    },
+    {
+      "host": "json-schema.org",
+      "category": "identifier",
+      "reason": "JSON Schema version name in the release record schema."
+    },
+    {
+      "host": "schemas.openxmlformats.org",
+      "category": "identifier",
+      "reason": "Office document namespace names read when opening Word and Excel files."
+    },
+    {
+      "host": "www.apple.com",
+      "category": "identifier",
+      "reason": "Apple property list document type name in installer files."
+    },
+    {
+      "host": "www.w3.org",
+      "category": "identifier",
+      "reason": "XML and SVG namespace names."
+    },
+    {
+      "host": "api.ipify.org",
+      "category": "installer_lookup",
+      "reason": "Public address lookup the installer makes only for the HTTPS front end, before asking for a certificate; --public-ip skips it."
+    },
+    {
+      "host": "huggingface.co",
+      "category": "model_download",
+      "reason": "Memory search model files, downloaded once on first use and checked against pinned hashes."
+    },
+    {
+      "host": "desktop.docker.com",
+      "category": "package_registry",
+      "reason": "Docker Desktop download, which Aman Setup installs on Windows."
+    },
+    {
+      "host": "download.docker.com",
+      "category": "package_registry",
+      "reason": "Docker package repository the Linux installer adds when Docker is missing."
+    },
+    {
+      "host": "files.pythonhosted.org",
+      "category": "package_registry",
+      "reason": "Python package files, for image builds and the sandbox package mirror the person approves."
+    },
+    {
+      "host": "get.helm.sh",
+      "category": "package_registry",
+      "reason": "Helm download used while building the sandbox image."
+    },
+    {
+      "host": "index.crates.io",
+      "category": "package_registry",
+      "reason": "Rust crate index, for the sandbox package mirror the person approves."
+    },
+    {
+      "host": "nodejs.org",
+      "category": "package_registry",
+      "reason": "Pinned Node.js download for the sandbox setup, checked against its hash."
+    },
+    {
+      "host": "proxy.golang.org",
+      "category": "package_registry",
+      "reason": "Go module proxy, for the sandbox package mirror the person approves."
+    },
+    {
+      "host": "pypi.org",
+      "category": "package_registry",
+      "reason": "Python package index, for image builds and the sandbox package mirror the person approves."
+    },
+    {
+      "host": "registry.npmjs.org",
+      "category": "package_registry",
+      "reason": "npm registry, for image builds and the sandbox package mirror the person approves."
+    },
+    {
+      "host": "static.crates.io",
+      "category": "package_registry",
+      "reason": "Rust crate files, for the sandbox package mirror the person approves."
+    },
+    {
+      "host": "storage.googleapis.com",
+      "category": "package_registry",
+      "reason": "Pinned gVisor download used while building the sandbox slot image."
+    },
+    {
+      "host": "sum.golang.org",
+      "category": "package_registry",
+      "reason": "Go checksum database, for the sandbox package mirror the person approves."
+    },
+    {
+      "host": "api.anthropic.com",
+      "category": "provider",
+      "reason": "Anthropic API, used only when the person adds an Anthropic key."
+    },
+    {
+      "host": "api.fireworks.ai",
+      "category": "provider",
+      "reason": "Fireworks AI API, used only when the person adds a Fireworks key."
+    },
+    {
+      "host": "api.moonshot.ai",
+      "category": "provider",
+      "reason": "Moonshot AI API, used only when the person adds a Moonshot key."
+    },
+    {
+      "host": "api.openai.com",
+      "category": "provider",
+      "reason": "OpenAI API, used only when the person adds an OpenAI key."
+    },
+    {
+      "host": "api.together.xyz",
+      "category": "provider",
+      "reason": "Together AI API, used only when the person adds a Together key."
+    },
+    {
+      "host": "api.tokenfactory.nebius.com",
+      "category": "provider",
+      "reason": "Nebius Token Factory API, used only when the person adds a Token Factory key."
+    },
+    {
+      "host": "api.z.ai",
+      "category": "provider",
+      "reason": "Z.ai API, used only when the person adds a Z.ai key."
+    },
+    {
+      "host": "app.daytona.io",
+      "category": "provider",
+      "reason": "Daytona sandbox service, used only when the person picks Daytona as the sandbox provider."
+    },
+    {
+      "host": "dashscope-intl.aliyuncs.com",
+      "category": "provider",
+      "reason": "Alibaba Cloud model API, used only when the person adds an Alibaba key."
+    },
+    {
+      "host": "generativelanguage.googleapis.com",
+      "category": "provider",
+      "reason": "Google Gemini API, used only when the person adds a Gemini key."
+    },
+    {
+      "host": "console.cloud.google.com",
+      "category": "setup_guide",
+      "reason": "Google Cloud console pages the person opens to create the Google connector."
+    }
+  ],
+  "forbidden": [
+    {
+      "host": "fonts.googleapis.com",
+      "reason": "Google Fonts would load fonts from Google; Aman bundles its fonts."
+    },
+    {
+      "host": "fonts.gstatic.com",
+      "reason": "Google Fonts would load fonts from Google; Aman bundles its fonts."
+    },
+    {
+      "host": "truefoundry.com",
+      "reason": "Upstream project hosts; Aman links to its own pages and bundles its own assets."
+    },
+    {
+      "host": "truefoundry.cloud",
+      "reason": "Upstream project hosts; Aman links to its own pages and bundles its own assets."
+    },
+    {
+      "host": "tfy.app",
+      "reason": "Upstream project hosts; Aman links to its own pages and bundles its own assets."
+    },
+    {
+      "host": "trueforge.dev",
+      "reason": "Upstream project hosts; Aman links to its own pages and bundles its own assets."
+    },
+    {
+      "host": "posthog.com",
+      "reason": "Telemetry and analytics; Aman sends none."
+    },
+    {
+      "host": "i.posthog.com",
+      "reason": "Telemetry and analytics; Aman sends none."
+    },
+    {
+      "host": "sentry.io",
+      "reason": "Telemetry and analytics; Aman sends none."
+    },
+    {
+      "host": "segment.io",
+      "reason": "Telemetry and analytics; Aman sends none."
+    },
+    {
+      "host": "segment.com",
+      "reason": "Telemetry and analytics; Aman sends none."
+    },
+    {
+      "host": "amplitude.com",
+      "reason": "Telemetry and analytics; Aman sends none."
+    },
+    {
+      "host": "mixpanel.com",
+      "reason": "Telemetry and analytics; Aman sends none."
+    },
+    {
+      "host": "google-analytics.com",
+      "reason": "Telemetry and analytics; Aman sends none."
+    },
+    {
+      "host": "googletagmanager.com",
+      "reason": "Telemetry and analytics; Aman sends none."
+    },
+    {
+      "host": "scarf.sh",
+      "reason": "Telemetry and analytics; Aman sends none."
+    }
+  ]
+}

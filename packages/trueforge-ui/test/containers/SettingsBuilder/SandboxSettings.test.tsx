@@ -358,8 +358,10 @@ describe('Chat workspaces card', () => {
         slots: [{ slot: 1, workspace_count: 2, total_bytes: 6144, store_free_bytes: 1024 }],
         workspaces: [
           {
+            holder: 'you',
             chat_id: 'chat-1',
             chat_title: 'Trip planning',
+            chat_private: false,
             sandbox_id: `s1-${'a'.repeat(32)}`,
             slot: 1,
             bytes: 4096,
@@ -367,8 +369,10 @@ describe('Chat workspaces card', () => {
             last_used: '2026-11-01T10:00:00.000Z',
           },
           {
+            holder: 'none',
             chat_id: null,
             chat_title: null,
+            chat_private: false,
             sandbox_id: `s1-${'c'.repeat(32)}`,
             slot: 1,
             bytes: 2048,
@@ -385,7 +389,7 @@ describe('Chat workspaces card', () => {
     expect(card.getByText('Trip planning')).toBeInTheDocument();
     expect(card.getByText(/Slot 1 · 4 KB · Last used/)).toBeInTheDocument();
     expect(card.getByText('A workspace with no chat')).toBeInTheDocument();
-    expect(card.getByText(/Its chat is gone; the workspace was left behind/)).toBeInTheDocument();
+    expect(card.getByText(/No chat on this server is linked to this workspace/)).toBeInTheDocument();
   });
 
   it('shows an untitled chat as untitled', async () => {
@@ -395,8 +399,10 @@ describe('Chat workspaces card', () => {
         slots: [{ slot: 2, workspace_count: 1, total_bytes: 1024, store_free_bytes: 2048 }],
         workspaces: [
           {
+            holder: 'you',
             chat_id: 'chat-9',
             chat_title: null,
+            chat_private: false,
             sandbox_id: `s2-${'b'.repeat(32)}`,
             slot: 2,
             bytes: 1024,
@@ -412,6 +418,60 @@ describe('Chat workspaces card', () => {
     expect(await card.findByText('1 chat workspace, 1 KB used, 2 KB of room left')).toBeInTheDocument();
     expect(card.getByText('Untitled chat')).toBeInTheDocument();
     expect(card.getByText(/Slot 2 · 1 KB · Last used/)).toBeInTheDocument();
+  });
+
+  it('shows your incognito chat as an incognito chat, without its title', async () => {
+    renderPage({
+      getRunCodeStatus: slotsReady,
+      listSandboxWorkspaces: async () => ({
+        slots: [{ slot: 1, workspace_count: 1, total_bytes: 1024, store_free_bytes: 2048 }],
+        workspaces: [
+          {
+            holder: 'you',
+            chat_id: 'chat-private',
+            chat_title: null,
+            chat_private: true,
+            sandbox_id: `s1-${'e'.repeat(32)}`,
+            slot: 1,
+            bytes: 1024,
+            entries: 1,
+            last_used: '2026-11-02T08:00:00.000Z',
+          },
+        ],
+      }),
+    });
+
+    await screen.findByRole('heading', { name: 'Chat workspaces' });
+    const card = cardOf('Chat workspaces');
+    expect(await card.findByText('Incognito chat')).toBeInTheDocument();
+    expect(card.queryByText('Untitled chat')).not.toBeInTheDocument();
+  });
+
+  it("names another person's workspace without its chat title", async () => {
+    renderPage({
+      getRunCodeStatus: slotsReady,
+      listSandboxWorkspaces: async () => ({
+        slots: [{ slot: 1, workspace_count: 1, total_bytes: 1024, store_free_bytes: 2048 }],
+        workspaces: [
+          {
+            holder: 'someone_else',
+            chat_id: null,
+            chat_title: null,
+            chat_private: false,
+            sandbox_id: `s1-${'d'.repeat(32)}`,
+            slot: 1,
+            bytes: 1024,
+            entries: 2,
+            last_used: '2026-11-02T08:00:00.000Z',
+          },
+        ],
+      }),
+    });
+
+    await screen.findByRole('heading', { name: 'Chat workspaces' });
+    const card = cardOf('Chat workspaces');
+    expect(await card.findByText("Another person's chat")).toBeInTheDocument();
+    expect(card.queryByText(/No chat on this server is linked/)).not.toBeInTheDocument();
   });
 
   it('has an honest empty state when no chat holds a workspace', async () => {

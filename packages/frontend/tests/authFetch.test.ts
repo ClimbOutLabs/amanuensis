@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { AUTH_LOGIN_HREF, AUTH_LOGOUT_HREF, buildLoginHref, createAuthAwareFetch } from '../src/authFetch';
+import {
+  AUTH_LOGIN_HREF,
+  AUTH_LOGOUT_HREF,
+  buildLoginHref,
+  createAuthAwareFetch,
+  loginHrefReturningTo,
+} from '../src/authFetch';
 import { parseAuthErrorReason } from '../src/authStatusSearch';
 
 describe('buildLoginHref', () => {
@@ -13,6 +19,22 @@ describe('buildLoginHref', () => {
   it('encodes an explicit return_to path', () => {
     const href = buildLoginHref('/trueforge/sessions/abc');
     assert.equal(new URL(href, 'http://example.test').searchParams.get('return_to'), '/trueforge/sessions/abc');
+  });
+});
+
+describe('loginHrefReturningTo', () => {
+  it('comes back to the page that was opened, such as the live browser page', () => {
+    const href = loginHrefReturningTo({ pathname: '/browser-live', search: '', hash: '' });
+    assert.equal(new URL(href, 'http://example.test').searchParams.get('return_to'), '/browser-live');
+  });
+
+  it('keeps the query and hash of a deep link', () => {
+    const href = loginHrefReturningTo({ pathname: '/sessions/abc', search: '?x=1', hash: '#m2' });
+    assert.equal(new URL(href, 'http://example.test').searchParams.get('return_to'), '/sessions/abc?x=1#m2');
+  });
+
+  it('asks for no return path from the home page', () => {
+    assert.equal(loginHrefReturningTo({ pathname: '/', search: '', hash: '' }), AUTH_LOGIN_HREF);
   });
 });
 

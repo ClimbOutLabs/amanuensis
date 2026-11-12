@@ -81,8 +81,10 @@ about the machine's disk. Nothing leaves the device.
 From stage 2, the server joins that listing to chat titles to show who
 holds each workspace. The join happens on the server, and the joined list
 is served only on the instance's own admin settings surface, to the
-signed-in owner of the same instance. No title or workspace detail leaves
-the device.
+signed-in owner of the same instance. Another person's chat is shown only
+as theirs, without its title, and an incognito (private) chat is shown to
+its owner as "Incognito chat", without its title, so the card never
+becomes a list of incognito chats. No title or workspace detail leaves the device.
 
 ## Testing
 
@@ -96,7 +98,7 @@ Stage 2 is proved by server tests with a stubbed slot listing and a fake
 session store (sessions joined to the right chat titles, a session with no
 matching chat shown with no chat attached, several slots, and the empty
 case), by doctor tests for the new per-slot line, and by Settings page
-tests for the card: the holders list, an untitled chat, the orphan, the
+tests for the card: the holders list, an untitled chat, an incognito chat, the orphan, the
 empty state, and the card staying hidden on the Docker backend.
 
 Stage 3 is proved by provider tests against fake slot agents (slots

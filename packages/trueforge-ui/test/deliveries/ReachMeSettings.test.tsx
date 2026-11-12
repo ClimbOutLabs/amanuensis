@@ -6,80 +6,16 @@ import { DeliveriesProvider } from '@/deliveries/DeliveriesContext.js';
 import { ReachMeSettings } from '@/deliveries/ReachMeSettings.js';
 
 import { fakeServer, SERVER_KEY } from './fakeDeliveriesApi.js';
+import { removePushBrowser, stubPushBrowser } from './fakePushBrowser.js';
 
 afterEach(() => {
   vi.unstubAllGlobals();
-  Reflect.deleteProperty(navigator, 'serviceWorker');
-  Reflect.deleteProperty(window, 'PushManager');
+  removePushBrowser();
 });
 
-function keyBuffer(base64url: string): ArrayBuffer {
-  const raw = window.atob(base64url.replace(/-/g, '+').replace(/_/g, '/'));
-  const bytes = new Uint8Array(raw.length);
-  for (let i = 0; i < raw.length; i += 1) bytes[i] = raw.charCodeAt(i);
-  return bytes.buffer;
-}
-
-type StubSubscription = {
-  endpoint: string;
-  options: { applicationServerKey: ArrayBuffer | null };
-  getKey: (name: string) => ArrayBuffer;
-  unsubscribe: () => Promise<boolean>;
-};
-
-/** A browser that can take push. `existingKey` makes it start with a subscription made with that key. */
-function stubPushBrowser({ existingKey }: { existingKey?: string } = {}) {
-  let made = 0;
-  const unsubscribed: string[] = [];
-  const makeSubscription = (key: ArrayBuffer | null): StubSubscription => {
-    made += 1;
-    const endpoint = `https://push.example.test/device-${String(made)}`;
-    return {
-      endpoint,
-      options: { applicationServerKey: key },
-      getKey: (name: string) => new TextEncoder().encode(name).buffer,
-      unsubscribe: () => {
-        unsubscribed.push(endpoint);
-        current = null;
-        return Promise.resolve(true);
-      },
-    };
-  };
-  let current: StubSubscription | null = existingKey === undefined ? null : makeSubscription(keyBuffer(existingKey));
-  const registration = {
-    pushManager: {
-      getSubscription: vi.fn(() => Promise.resolve(current)),
-      subscribe: vi.fn((options: { applicationServerKey: Uint8Array<ArrayBuffer> }) => {
-        current = makeSubscription(options.applicationServerKey.buffer);
-        return Promise.resolve(current);
-      }),
-    },
-  };
-  Object.defineProperty(navigator, 'serviceWorker', {
-    configurable: true,
-    value: {
-      register: vi.fn(() => Promise.resolve(registration)),
-      ready: Promise.resolve(registration),
-      getRegistration: vi.fn(() => Promise.resolve(current === null ? undefined : registration)),
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-    },
-  });
-  Object.defineProperty(window, 'PushManager', { configurable: true, value: class {} });
-  const requestPermission = vi.fn(() => {
-    stub.permission = 'granted';
-    return Promise.resolve<NotificationPermission>('granted');
-  });
-  const stub = class {
-    static permission: NotificationPermission = 'default';
-    static requestPermission = requestPermission;
-  };
-  vi.stubGlobal('Notification', stub);
-  return { registration, requestPermission, unsubscribed };
-}
-
-function renderSettings() {
+function renderSettings({ savedEndpoints = [] }: { savedEndpoints?: string[] } = {}) {
   const server = fakeServer([]);
+  for (const endpoint of savedEndpoints) server.state.pushEndpoints.add(endpoint);
   render(
     <DeliveriesProvider api={server.api}>
       <ReachMeSettings />
@@ -138,9 +74,39 @@ describe('Settings, Reach me', () => {
     expect(await screen.findByText('On for this device.')).toBeTruthy();
   });
 
-  it('shows on for a subscription made with the current key', async () => {
+  it('shows on for a subscription made with the current key that the server still has', async () => {
     stubPushBrowser({ existingKey: SERVER_KEY });
-    renderSettings();
+    renderSettings({ savedEndpoints: ['https://push.example.test/device-1'] });
+    expect(await screen.findByText('On for this device.')).toBeTruthy();
+  });
+
+  it('keeps showing on when the server cannot be asked about this device', async () => {
+    stubPushBrowser({ existingKey: SERVER_KEY });
+    const server = fakeServer([]);
+    vi.mocked(server.api.pushDeviceSaved).mockRejectedValueOnce(new Error('offline'));
+    render(
+      <DeliveriesProvider api={server.api}>
+        <ReachMeSettings />
+      </DeliveriesProvider>,
+    );
+    expect(await screen.findByText('On for this device.')).toBeTruthy();
+  });
+
+  it('reads as off once the server dropped this device, and turning on saves it again', async () => {
+    stubPushBrowser({ existingKey: SERVER_KEY });
+    const { api } = renderSettings();
+    const on = await screen.findByRole('button', { name: 'Turn on for this device' });
+    await waitFor(() => expect(on).toHaveProperty('disabled', false));
+    expect(screen.getByText('Off for this device.')).toBeTruthy();
+    expect(api.pushDeviceSaved).toHaveBeenCalledWith('https://push.example.test/device-1');
+
+    fireEvent.click(on);
+
+    await waitFor(() =>
+      expect(api.savePushDevice).toHaveBeenCalledWith(
+        expect.objectContaining({ endpoint: 'https://push.example.test/device-1' }),
+      ),
+    );
     expect(await screen.findByText('On for this device.')).toBeTruthy();
   });
 

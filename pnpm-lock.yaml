@@ -17,7 +17,7 @@ overrides:
 
 patchedDependencies:
   '@openuidev/react-lang@0.2.15': bae446f8a8ee896e9071360fef5b684031680dc68358483a93ce1723ea19a7da
-  '@truefoundry/assistant-ui-runtime@0.1.37': ce67222aed906de356f43ec06db35891112fa187aff5a6211b967cfac47637b4
+  '@truefoundry/assistant-ui-runtime@0.1.37': 419b386cc819f10152837fd3479b8a3b81f55b0fbbdb1139a261fe380f436dae
 
 importers:
 
@@ -208,6 +208,9 @@ importers:
       '@anthropic-ai/sandbox-runtime':
         specifier: 0.0.76
         version: 0.0.76
+      '@block65/webcrypto-web-push':
+        specifier: 2.0.0
+        version: 2.0.0
       '@daytona/sdk':
         specifier: ^0.211.2
         version: 0.211.2(debug@4.4.3(supports-color@8.1.1))(supports-color@8.1.1)
@@ -307,6 +310,9 @@ importers:
       sqlite-vec:
         specifier: ^0.1.6
         version: 0.1.9
+      swagger-ui-dist:
+        specifier: 5.34.0
+        version: 5.34.0
       ulid:
         specifier: ^3.0.2
         version: 3.0.2
@@ -358,7 +364,7 @@ importers:
         version: 0.2.21(@assistant-ui/tap@0.9.5(@types/react@19.3.0)(react@19.3.0))(@types/react@19.3.0)(react@19.3.0)
       '@truefoundry/assistant-ui-runtime':
         specifier: 0.1.37
-        version: 0.1.37(patch_hash=ce67222aed906de356f43ec06db35891112fa187aff5a6211b967cfac47637b4)(@assistant-ui/tap@0.9.5(@types/react@19.3.0)(react@19.3.0))(@types/react@19.3.0)(assistant-cloud@0.1.35(redis@5.12.1(@opentelemetry/api@1.9.1)))(react@19.3.0)(redis@5.12.1(@opentelemetry/api@1.9.1))(zustand@5.0.15(@types/react@19.3.0)(react@19.3.0)(use-sync-external-store@1.6.0(react@19.3.0)))
+        version: 0.1.37(patch_hash=419b386cc819f10152837fd3479b8a3b81f55b0fbbdb1139a261fe380f436dae)(@assistant-ui/tap@0.9.5(@types/react@19.3.0)(react@19.3.0))(@types/react@19.3.0)(assistant-cloud@0.1.35(redis@5.12.1(@opentelemetry/api@1.9.1)))(react@19.3.0)(redis@5.12.1(@opentelemetry/api@1.9.1))(zustand@5.0.15(@types/react@19.3.0)(react@19.3.0)(use-sync-external-store@1.6.0(react@19.3.0)))
       '@truefoundry/trueforge-core':
         specifier: workspace:*
         version: link:../trueforge-core
@@ -510,6 +516,9 @@ importers:
       sqlite-vec:
         specifier: ^0.1.6
         version: 0.1.9
+      swagger-ui-dist:
+        specifier: 5.34.0
+        version: 5.34.0
       ulid:
         specifier: ^3.0.2
         version: 3.0.2
@@ -634,6 +643,9 @@ importers:
       ulid:
         specifier: ^3.0.2
         version: 3.0.2
+      undici:
+        specifier: 7.29.1
+        version: 7.29.1
       winston:
         specifier: ^3.19.0
         version: 3.19.0
@@ -730,7 +742,7 @@ importers:
         version: 0.13.10(@openuidev/react-headless@0.9.13(ai@7.0.99(zod@4.6.4))(react@19.3.0)(zustand@5.0.15(@types/react@19.3.0)(react@19.3.0)(use-sync-external-store@1.6.0(react@19.3.0))))(@openuidev/react-lang@0.2.15(patch_hash=bae446f8a8ee896e9071360fef5b684031680dc68358483a93ce1723ea19a7da)(@modelcontextprotocol/sdk@1.32.1(supports-color@8.1.1)(zod@4.6.4))(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(zod@4.6.4))(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(supports-color@8.1.1)(zod@4.6.4)(zustand@5.0.15(@types/react@19.3.0)(react@19.3.0)(use-sync-external-store@1.6.0(react@19.3.0)))
       '@truefoundry/assistant-ui-runtime':
         specifier: 0.1.37
-        version: 0.1.37(patch_hash=ce67222aed906de356f43ec06db35891112fa187aff5a6211b967cfac47637b4)(@assistant-ui/tap@0.9.5(@types/react@19.3.0)(react@19.3.0))(@types/react@19.3.0)(assistant-cloud@0.1.35(redis@5.12.1(@opentelemetry/api@1.9.1)))(react@19.3.0)(redis@5.12.1(@opentelemetry/api@1.9.1))(zustand@5.0.15(@types/react@19.3.0)(react@19.3.0)(use-sync-external-store@1.6.0(react@19.3.0)))
+        version: 0.1.37(patch_hash=419b386cc819f10152837fd3479b8a3b81f55b0fbbdb1139a261fe380f436dae)(@assistant-ui/tap@0.9.5(@types/react@19.3.0)(react@19.3.0))(@types/react@19.3.0)(assistant-cloud@0.1.35(redis@5.12.1(@opentelemetry/api@1.9.1)))(react@19.3.0)(redis@5.12.1(@opentelemetry/api@1.9.1))(zustand@5.0.15(@types/react@19.3.0)(react@19.3.0)(use-sync-external-store@1.6.0(react@19.3.0)))
       '@truefoundry/trueforge-core':
         specifier: workspace:*
         version: link:../trueforge-core
@@ -4098,6 +4110,9 @@ packages:
     resolution: {integrity: sha512-BfzEnDJOt9T8M989/lA37EcJgat01wLRnoi5dQf3QzOH7jzpqTAzdDbVfRljVr5r+jzKqpbHeyOfAaXxAd0PAA==}
     cpu: [x64]
     os: [win32]
+
+  '@scarf/scarf@1.4.0':
+    resolution: {integrity: sha512-xxeapPiUXdZAE3che6f3xogoJPeZgig6omHEy1rIY5WVsB3H2BHNnZH+gHG6x91SCWyQCzWGsuL2Hh3ClO5/qQ==}
 
   '@sinclair/typebox@0.27.12':
     resolution: {integrity: sha512-hhyNJ+nbR6ZR7pToHvllEFun9TL0sbL+tk/ON75lo+Xas054uez98qRbsuNt7MBCyZKK4+8Yli/OAGZhmfBZ/g==}
@@ -8582,6 +8597,9 @@ packages:
   svg-parser@2.0.4:
     resolution: {integrity: sha512-e4hG1hRwoOdRb37cIMSgzNsxyzKfayW6VOflrwvR+/bzrkyxY/31WkbgnQpgtrNp1SdpJvpUAGTa/ZoiPNDuRQ==}
 
+  swagger-ui-dist@5.34.0:
+    resolution: {integrity: sha512-H6tAIjr3XqE31PbkZl0OFya1ziRLDfTwh3J6OHdumPtPCLfjTnyLeagl/55kFNZcTOz9a9QI9WP0FXldwiGJag==}
+
   swr@2.5.1:
     resolution: {integrity: sha512-BRw55e8r0B7SpDN20CAzoQAHl7y1yP7/Zt7oqUjMv0vSt2u2Xnkm88Ws+VypbV9BXHQVuSuyVq7zMjO16wSExw==}
     peerDependencies:
@@ -12639,6 +12657,8 @@ snapshots:
   '@rollup/rollup-win32-x64-msvc@4.62.2':
     optional: true
 
+  '@scarf/scarf@1.4.0': {}
+
   '@sinclair/typebox@0.27.12': {}
 
   '@sinclair/typebox@0.34.52': {}
@@ -12936,7 +12956,7 @@ snapshots:
       '@types/react': 19.3.0
       '@types/react-dom': 19.3.0(@types/react@19.3.0)
 
-  '@truefoundry/assistant-ui-runtime@0.1.37(patch_hash=ce67222aed906de356f43ec06db35891112fa187aff5a6211b967cfac47637b4)(@assistant-ui/tap@0.9.5(@types/react@19.3.0)(react@19.3.0))(@types/react@19.3.0)(assistant-cloud@0.1.35(redis@5.12.1(@opentelemetry/api@1.9.1)))(react@19.3.0)(redis@5.12.1(@opentelemetry/api@1.9.1))(zustand@5.0.15(@types/react@19.3.0)(react@19.3.0)(use-sync-external-store@1.6.0(react@19.3.0)))':
+  '@truefoundry/assistant-ui-runtime@0.1.37(patch_hash=419b386cc819f10152837fd3479b8a3b81f55b0fbbdb1139a261fe380f436dae)(@assistant-ui/tap@0.9.5(@types/react@19.3.0)(react@19.3.0))(@types/react@19.3.0)(assistant-cloud@0.1.35(redis@5.12.1(@opentelemetry/api@1.9.1)))(react@19.3.0)(redis@5.12.1(@opentelemetry/api@1.9.1))(zustand@5.0.15(@types/react@19.3.0)(react@19.3.0)(use-sync-external-store@1.6.0(react@19.3.0)))':
     dependencies:
       '@assistant-ui/core': 0.2.22(@assistant-ui/store@0.2.21(@assistant-ui/tap@0.9.5(@types/react@19.3.0)(react@19.3.0))(@types/react@19.3.0)(react@19.3.0))(@assistant-ui/tap@0.9.5(@types/react@19.3.0)(react@19.3.0))(@types/react@19.3.0)(assistant-cloud@0.1.35(redis@5.12.1(@opentelemetry/api@1.9.1)))(react@19.3.0)(redis@5.12.1(@opentelemetry/api@1.9.1))(zustand@5.0.15(@types/react@19.3.0)(react@19.3.0)(use-sync-external-store@1.6.0(react@19.3.0)))
       '@assistant-ui/store': 0.2.21(@assistant-ui/tap@0.9.5(@types/react@19.3.0)(react@19.3.0))(@types/react@19.3.0)(react@19.3.0)
@@ -17987,6 +18007,10 @@ snapshots:
   supports-preserve-symlinks-flag@1.0.0: {}
 
   svg-parser@2.0.4: {}
+
+  swagger-ui-dist@5.34.0:
+    dependencies:
+      '@scarf/scarf': 1.4.0
 
   swr@2.5.1(react@19.3.0):
     dependencies:

@@ -22,8 +22,10 @@ describe("SessionsClient", () => {
                     },
                     folder_id: "folder_id",
                     id: "id",
+                    is_incognito: true,
                     metadata: { key: "value" },
                     metrics: { total_duration_ms: 1, total_turns: 1 },
+                    private_expires_at: "private_expires_at",
                     source: { id: "id", run_id: "run_id", type: "schedule" },
                     title: "title",
                     updated_at: "updated_at",
@@ -60,6 +62,7 @@ describe("SessionsClient", () => {
                     },
                     folderId: "folder_id",
                     id: "id",
+                    isIncognito: true,
                     metadata: {
                         key: "value",
                     },
@@ -67,6 +70,7 @@ describe("SessionsClient", () => {
                         totalDurationMs: 1,
                         totalTurns: 1,
                     },
+                    privateExpiresAt: "private_expires_at",
                     source: {
                         id: "id",
                         runId: "run_id",
@@ -119,8 +123,10 @@ describe("SessionsClient", () => {
                 },
                 folder_id: "folder_id",
                 id: "id",
+                is_incognito: true,
                 metadata: { key: "value" },
                 metrics: { total_cost_in_usd: 1.1, total_duration_ms: 1, total_turns: 1 },
+                private_expires_at: "private_expires_at",
                 source: { id: "id", run_id: "run_id", type: "schedule" },
                 title: "title",
                 updated_at: "updated_at",
@@ -160,6 +166,7 @@ describe("SessionsClient", () => {
                 },
                 folderId: "folder_id",
                 id: "id",
+                isIncognito: true,
                 metadata: {
                     key: "value",
                 },
@@ -168,6 +175,7 @@ describe("SessionsClient", () => {
                     totalDurationMs: 1,
                     totalTurns: 1,
                 },
+                privateExpiresAt: "private_expires_at",
                 source: {
                     id: "id",
                     runId: "run_id",
@@ -267,8 +275,10 @@ describe("SessionsClient", () => {
                 },
                 folder_id: "folder_id",
                 id: "id",
+                is_incognito: true,
                 metadata: { key: "value" },
                 metrics: { total_cost_in_usd: 1.1, total_duration_ms: 1, total_turns: 1 },
+                private_expires_at: "private_expires_at",
                 source: { id: "id", run_id: "run_id", type: "schedule" },
                 title: "title",
                 updated_at: "updated_at",
@@ -303,6 +313,7 @@ describe("SessionsClient", () => {
                 },
                 folderId: "folder_id",
                 id: "id",
+                isIncognito: true,
                 metadata: {
                     key: "value",
                 },
@@ -311,6 +322,7 @@ describe("SessionsClient", () => {
                     totalDurationMs: 1,
                     totalTurns: 1,
                 },
+                privateExpiresAt: "private_expires_at",
                 source: {
                     id: "id",
                     runId: "run_id",
@@ -405,8 +417,10 @@ describe("SessionsClient", () => {
                 },
                 folder_id: "folder_id",
                 id: "id",
+                is_incognito: true,
                 metadata: { key: "value" },
                 metrics: { total_cost_in_usd: 1.1, total_duration_ms: 1, total_turns: 1 },
+                private_expires_at: "private_expires_at",
                 source: { id: "id", run_id: "run_id", type: "schedule" },
                 title: "title",
                 updated_at: "updated_at",
@@ -442,6 +456,7 @@ describe("SessionsClient", () => {
                 },
                 folderId: "folder_id",
                 id: "id",
+                isIncognito: true,
                 metadata: {
                     key: "value",
                 },
@@ -450,6 +465,7 @@ describe("SessionsClient", () => {
                     totalDurationMs: 1,
                     totalTurns: 1,
                 },
+                privateExpiresAt: "private_expires_at",
                 source: {
                     id: "id",
                     runId: "run_id",
@@ -785,6 +801,26 @@ describe("SessionsClient", () => {
         }).rejects.toThrow(TrueForgeTypes.NotFoundError);
     });
 
+    test("create_bug_report (4)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = {};
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .post("/api/v1/sessions/session_id/bug-report")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(422)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.sessions.createBugReport("session_id");
+        }).rejects.toThrow(TrueForgeTypes.UnprocessableEntityError);
+    });
+
     test("cancel (1)", async () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
@@ -1047,6 +1083,28 @@ describe("SessionsClient", () => {
         }).rejects.toThrow(TrueForgeTypes.NotFoundError);
     });
 
+    test("set_folder (4)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { folder_id: "x" };
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .put("/api/v1/sessions/session_id/folder")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(422)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.sessions.setFolder("session_id", {
+                folderId: "x",
+            });
+        }).rejects.toThrow(TrueForgeTypes.UnprocessableEntityError);
+    });
+
     test("clear_folder (1)", async () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
@@ -1276,6 +1334,72 @@ describe("SessionsClient", () => {
         await expect(async () => {
             return await client.sessions.revokeImplementationPlanGrant("session_id", "grant_id");
         }).rejects.toThrow(TrueForgeTypes.ConflictError);
+    });
+
+    test("get_privacy (1)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { data: { hosted_providers: [{ name: "name", type: "type" }], leaves_machine: true } };
+
+        server
+            .mockEndpoint()
+            .get("/api/v1/sessions/session_id/privacy")
+            .respondWith()
+            .statusCode(200)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        const response = await client.sessions.getPrivacy("session_id");
+        expect(response).toEqual({
+            data: {
+                hostedProviders: [
+                    {
+                        name: "name",
+                        type: "type",
+                    },
+                ],
+                leavesMachine: true,
+            },
+        });
+    });
+
+    test("get_privacy (2)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .get("/api/v1/sessions/session_id/privacy")
+            .respondWith()
+            .statusCode(403)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.sessions.getPrivacy("session_id");
+        }).rejects.toThrow(TrueForgeTypes.ForbiddenError);
+    });
+
+    test("get_privacy (3)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .get("/api/v1/sessions/session_id/privacy")
+            .respondWith()
+            .statusCode(404)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.sessions.getPrivacy("session_id");
+        }).rejects.toThrow(TrueForgeTypes.NotFoundError);
     });
 
     test("list_turns (1)", async () => {

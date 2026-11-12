@@ -8,6 +8,7 @@ import type { ApprovalDecision } from '@truefoundry/trueforge-core/core/events/s
 import { InstructionBuilder } from '@truefoundry/trueforge-core/core/InstructionBuilder';
 import type { InternalEnrichedAssistantMessage } from '@truefoundry/trueforge-core/core/llm/LLMTypes';
 import { createToolCallMemoState, executeToolCalls } from '@truefoundry/trueforge-core/core/mcp/executeToolCalls';
+import { isCallToolResponseResult } from '@truefoundry/trueforge-core/core/mcp/IMCPServer';
 import { classifyUnstampedToolCall } from '@truefoundry/trueforge-core/core/runtime/AgentThread';
 import { NOOP_AGENT_TRACING } from '@truefoundry/trueforge-core/core/tracing/NoopAgentTracing';
 import winston from 'winston';
@@ -405,6 +406,31 @@ describe('persona tools through the route a chat classifies them on', () => {
     const built = await setup();
     const created = await classified(built, { name: 'create_persona', arguments: TRAVEL_PLANNER });
     expect(created).toMatchObject({ tier: 3, tier_reason: 'persona_write', is_approval_required: true });
+  });
+});
+
+describe('in an incognito chat', () => {
+  it('can list personas and switch to one, but not add one', async () => {
+    const built = await setup({ existing: ['Travel'] });
+    const tools = new PersonaToolSet({ ...built.options, keepsNothing: true });
+    expect((await tools.listTools()).result.tools.map(tool => tool.name).sort()).toEqual([
+      'list_personas',
+      'use_persona',
+    ]);
+    const refused = await tools.callTool({ name: 'create_persona', arguments: TRAVEL_PLANNER });
+    expect(isCallToolResponseResult(refused) && refused.result.isError).toBe(true);
+    expect((await built.listAll()).map(persona => persona.display_name)).toEqual(['Travel']);
+  });
+
+  it('tells the model it cannot add a persona here', async () => {
+    const built = await setup();
+    const instruction = new InstructionBuilder('system-prompt');
+    for (const build of personaCapability({ ...built.options, keepsNothing: true }).instructionBuilders ?? []) {
+      build(instruction);
+    }
+    const text = instruction.build();
+    expect(text).toContain('This incognito chat cannot add a persona.');
+    expect(text).not.toContain('create_persona');
   });
 });
 

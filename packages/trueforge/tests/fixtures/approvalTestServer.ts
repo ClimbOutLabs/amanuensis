@@ -37,6 +37,7 @@ import { migrateSqliteToLatest } from '../../src/db/migrateSqlite';
 import { SentinelAuditStore } from '../../src/db/sentinelAuditStore';
 import { SqliteAgentStore } from '../../src/db/sqlite/agent-store/SqliteAgentStore';
 import { SqliteApprovalTokenStore } from '../../src/db/sqlite/approval-token-store/SqliteApprovalTokenStore';
+import { SqliteChatDeletionStore } from '../../src/db/sqlite/chat-deletion-store/SqliteChatDeletionStore';
 import { SqliteChatImageStore } from '../../src/db/sqlite/chat-image-store/SqliteChatImageStore';
 import { createSqliteDb } from '../../src/db/sqlite/client';
 import { SqliteGlobalSettingsStore } from '../../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
@@ -56,6 +57,7 @@ import { SqliteSkillStore } from '../../src/db/sqlite/skill-store/SqliteSkillSto
 import { SqliteSpaceStore } from '../../src/db/sqlite/space-store/SqliteSpaceStore';
 import { SqliteOAuthTokenStore } from '../../src/db/sqlite/token-store/SqliteOAuthTokenStore';
 import { SqliteTurnArtifactStore } from '../../src/db/sqlite/turn-artifact-store/SqliteTurnArtifactStore';
+import { evalSources, type EvalSources } from '../../src/eval/fixtures';
 import { closePersonaKnowledgeIndexers } from '../../src/personaKnowledge/knowledgeIndexer';
 import { ActiveTurnRegistry } from '../../src/runtime/activeTurns';
 import { createChatImageService } from '../../src/runtime/chatImages/chatImageService';
@@ -94,6 +96,13 @@ export interface ApprovalTestServer {
   db: () => SqliteDb;
   /** Replaces the operator's first-party origin list, as booting with another `FIRST_PARTY_MCP_ORIGINS` would. */
   setFirstPartyOrigins: (origins: string[]) => void;
+  /**
+   * Turns eval mode on or off, as booting with another `AMAN_EVAL_MODE` would. While on, Gmail and Google Calendar
+   * are the invented inbox and calendar, and only their cards can be allowed.
+   */
+  setEvalMode: (on: boolean) => void;
+  /** The invented inbox and calendar eval mode reads and writes, so a test can see what a turn saved. */
+  evalSources: () => EvalSources;
   close: () => Promise<void>;
 }
 
@@ -142,6 +151,7 @@ function buildApp(input: {
   });
   const personaStore = new SqlitePersonaStore(db);
   return createServerApp({
+    chatDeletionStore: new SqliteChatDeletionStore({ db, turnArtifactStore: new SqliteTurnArtifactStore(db) }),
     chatSearchIndexer: new ChatSearchIndexer({
       sessionStore,
       globalSettingsStore,
@@ -296,6 +306,7 @@ export async function startApprovalTestServer(options?: {
   });
 
   const originalFirstPartyOrigins = configuration.FIRST_PARTY_MCP_ORIGINS;
+  const originalEvalMode = configuration.AMAN_EVAL_MODE;
   configuration.FIRST_PARTY_MCP_ORIGINS = options?.memoryProvider === true ? [mcp.origin] : [];
 
   // One registry for the server's life, so close() can wait for turn drains the way main.ts does.
@@ -324,8 +335,13 @@ export async function startApprovalTestServer(options?: {
     setFirstPartyOrigins: origins => {
       configuration.FIRST_PARTY_MCP_ORIGINS = origins;
     },
+    setEvalMode: on => {
+      configuration.AMAN_EVAL_MODE = on;
+    },
+    evalSources,
     close: async () => {
       configuration.FIRST_PARTY_MCP_ORIGINS = originalFirstPartyOrigins;
+      configuration.AMAN_EVAL_MODE = originalEvalMode;
       // The guide installs, and the indexing they queue, write into directories removed below, so they finish first.
       await app.guidesSettled();
       await closePersonaKnowledgeIndexers();

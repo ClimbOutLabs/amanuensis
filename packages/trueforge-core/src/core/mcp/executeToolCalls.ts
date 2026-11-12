@@ -23,6 +23,7 @@ import type {
   LLMToolMessage,
 } from '../llm/LLMTypes';
 import type { CallToolResponse, MCPAuthRequired } from '../mcp/IMCPServer';
+import { isAmanBrowserCall } from '../permissions/browserToolNames';
 import type { AgentThreadCreateSubAgent } from '../runtime/AgentThread.types';
 import { InternalEventType } from '../runtime/AgentThread.types';
 import { awaitWithAbort, signalAbortError, throwIfSignalAborted } from '../util/abort';
@@ -274,6 +275,9 @@ export interface ToolCallMemoSnapshot {
   successful_writes_this_turn: number;
   /** Calls that ran, succeeded and changed something in the current turn; an identical call may run again after one. */
   changes_this_turn: number;
+  /** Browser steps that reached a page not seen before in the turn, and digests of the pages seen. */
+  browser_page_changes_this_turn: number;
+  browser_pages_seen: string[];
   /** Kinds of step that ran and succeeded in the current turn; back clone, run, and read claims. */
   step_kinds_this_turn: TurnStepKind[];
   /** Prose of the steps that carried tool calls in the current turn, in step order. */
@@ -343,6 +347,8 @@ type LegacyToolCallMemoSnapshot = Omit<
   | 'write_calls_this_turn'
   | 'successful_writes_this_turn'
   | 'changes_this_turn'
+  | 'browser_page_changes_this_turn'
+  | 'browser_pages_seen'
   | 'step_kinds_this_turn'
   | 'step_texts_this_turn'
   | 'last_call_signature'
@@ -382,6 +388,9 @@ type LegacyToolCallMemoSnapshot = Omit<
   write_calls_this_turn?: number | undefined;
   successful_writes_this_turn?: number | undefined;
   changes_this_turn?: number | undefined;
+  // Added with the browser's own page count: a snapshot written before it omits these keys.
+  browser_page_changes_this_turn?: number | undefined;
+  browser_pages_seen?: string[] | undefined;
   step_kinds_this_turn?: TurnStepKind[] | undefined;
   // A snapshot written before step prose was kept for the claim check omits the key.
   step_texts_this_turn?: string[] | undefined;
@@ -425,6 +434,16 @@ export interface TurnToolCallLedger {
   successfulWritesThisTurn: number;
   /** Calls that ran, succeeded and changed something this turn (see changesState); an identical call may run again after one. */
   changesThisTurn: number;
+  /**
+   * Browser steps this turn that reached a page not seen before in the turn. An identical browser call
+   * may run again after one; nothing else in the turn counts it as a change.
+   */
+  browserPageChangesThisTurn: number;
+  /**
+   * Digests of the browser pages seen this turn. A step that lands on one of them moved nothing new,
+   * so a scroll at the bottom of a page, or going back and forth between two pages, is no progress.
+   */
+  browserPagesSeen: string[];
   /** Kinds of step that ran and succeeded this turn. Decides the unbacked-claim note for clones, runs, and reads. */
   stepKindsThisTurn: Set<TurnStepKind>;
   /**
@@ -461,6 +480,8 @@ export function createTurnToolCallLedger(): TurnToolCallLedger {
     writeCallsThisTurn: 0,
     successfulWritesThisTurn: 0,
     changesThisTurn: 0,
+    browserPageChangesThisTurn: 0,
+    browserPagesSeen: [],
     stepKindsThisTurn: new Set(),
     stepTextsThisTurn: [],
     toolMarkupLeaksThisTurn: 0,
@@ -518,6 +539,8 @@ export function mergeTurnToolCallLedgers(ledgers: readonly TurnToolCallLedger[])
     merged.writeCallsThisTurn = Math.max(merged.writeCallsThisTurn, ledger.writeCallsThisTurn);
     merged.successfulWritesThisTurn = Math.max(merged.successfulWritesThisTurn, ledger.successfulWritesThisTurn);
     merged.changesThisTurn = Math.max(merged.changesThisTurn, ledger.changesThisTurn);
+    merged.browserPagesSeen = [...new Set([...merged.browserPagesSeen, ...ledger.browserPagesSeen])];
+    merged.browserPageChangesThisTurn = Math.max(merged.browserPageChangesThisTurn, ledger.browserPageChangesThisTurn);
     for (const kind of ledger.stepKindsThisTurn) {
       merged.stepKindsThisTurn.add(kind);
     }
@@ -686,6 +709,8 @@ export function createToolCallMemoState(
   state.turn.writeCallsThisTurn = snapshot.write_calls_this_turn ?? 0;
   state.turn.successfulWritesThisTurn = snapshot.successful_writes_this_turn ?? 0;
   state.turn.changesThisTurn = snapshot.changes_this_turn ?? 0;
+  state.turn.browserPageChangesThisTurn = snapshot.browser_page_changes_this_turn ?? 0;
+  state.turn.browserPagesSeen = [...(snapshot.browser_pages_seen ?? [])];
   state.turn.stepKindsThisTurn = new Set(snapshot.step_kinds_this_turn ?? []);
   state.turn.stepTextsThisTurn = [...(snapshot.step_texts_this_turn ?? [])];
   state.turn.lastCallSignature = snapshot.last_call_signature;
@@ -781,6 +806,8 @@ export function toToolCallMemoSnapshot(state: ToolCallMemoState): ToolCallMemoSn
     write_calls_this_turn: state.turn.writeCallsThisTurn,
     successful_writes_this_turn: state.turn.successfulWritesThisTurn,
     changes_this_turn: state.turn.changesThisTurn,
+    browser_page_changes_this_turn: state.turn.browserPageChangesThisTurn,
+    browser_pages_seen: [...state.turn.browserPagesSeen],
     step_kinds_this_turn: [...state.turn.stepKindsThisTurn].sort(),
     step_texts_this_turn: [...state.turn.stepTextsThisTurn],
     last_call_signature: state.turn.lastCallSignature,
@@ -974,6 +1001,11 @@ export const POLICY_BLOCKED_NUDGE_AT = 2;
 export const POLICY_BLOCKED_STOP_AT = 3;
 /** Times the same call may be made in one turn before the host ends the turn. */
 export const IDENTICAL_CALL_STOP_AT = 4;
+/**
+ * The same limit for a browser step that reached a new page each time. Scrolling a long page is no
+ * loop, but a page whose text changes on every read (a clock, a rotating ad) still has an end.
+ */
+export const IDENTICAL_MOVE_STOP_AT = 8;
 /**
  * Identical calls in a row a reply may make before the next one ends it. A read leaves things as
  * they were, so a brief may list or search the same thing a few times.
@@ -1781,8 +1813,11 @@ export async function executeToolCalls({
           admissionProvenance: admission,
         };
       }
+      // Aman's browser shows a live page: the same scroll or read lands on whatever the page is now,
+      // so it is never answered from an earlier result. Its repeats are judged by the page's own count.
       const shouldMemoize =
-        isReadOnlyCall(toolCall.tool_info) || isGithubFileRead(toolInfo.toolSet.name, toolInfo.originalToolName);
+        (isReadOnlyCall(toolCall.tool_info) && !isAmanBrowserCall(toolCall.tool_info)) ||
+        isGithubFileRead(toolInfo.toolSet.name, toolInfo.originalToolName);
       const shouldReplayCompleted = shouldMemoize || toolCall.tool_info.effect === 'verify';
       const key = memoKey(
         toolInfo,

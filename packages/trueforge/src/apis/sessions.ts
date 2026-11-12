@@ -1,6 +1,8 @@
 /**
  * DB-backed sessions APIs (mounted at /api/v1/sessions and /api/internal/sessions).
  */
+import { join } from 'node:path';
+
 import { OpenAPIHono, type RouteHandler } from '@hono/zod-openapi';
 import {
   abnormalHandoffCauseForCancellation,
@@ -32,6 +34,7 @@ import { createdBySubjectFromRequestContext, type ResolveRequestContext } from '
 import type { McpCatalog } from '../catalog/McpCatalog';
 import configuration from '../config';
 import type { IAgentStore } from '../db/agentStore';
+import type { DeleteChatInput, IChatDeletionStore } from '../db/chatDeletionStore';
 import type { IMcpServerStore } from '../db/mcpServerStore';
 import type { IModelProviderStore } from '../db/modelProviderStore';
 import type { ISandboxProviderStore } from '../db/sandboxProviderStore';
@@ -52,13 +55,16 @@ import {
 } from '../routes/sessionRoutes';
 import type { ActiveTurnRegistry } from '../runtime/activeTurns';
 import { executorFromTurnId } from '../runtime/peeringIds';
-import { validateAgentSpec } from '../runtime/sessionResources';
+import { PRIVATE_CHAT_FLAG_CHANGE_MESSAGE, privateChatExpiry, sessionKeepsNothing } from '../runtime/privateChat';
+import { localSandboxSessionSegment, validateAgentSpec } from '../runtime/sessionResources';
+import type { TurnDrainRegistry } from '../runtime/turnDrains';
+import { removeLocalChatSandboxes } from '../sandbox/localLifecycle';
 import { packageMirrorTokens } from '../sandbox/mirrors/packageMirrorTokens';
 import { removeSlotWorkspace, slotsBackendEnabled } from '../sandbox/slotBackend';
 import { honoQueriesToRecord } from '../schemas/deepObjectQuery';
 import { isSessionAgentNameRef, parseListSessionsQuery, type Session } from '../schemas/session';
 import { newId } from '../utils/id';
-import { agentIfAccessible, canReadAgentBoundResource, resolveManagedAgentIds } from './agentAccess';
+import { agentIfAccessible, canReadSession, resolveManagedAgentIds } from './agentAccess';
 import type { ResolveSkillStore } from './skills';
 
 /** Request-reply path a replica serves to cancel a turn it owns. */
@@ -85,6 +91,8 @@ export function toWireSession(record: SessionRecord): Session {
     metrics: record.metrics,
     metadata: record.metadata,
     source: record.source,
+    is_incognito: record.is_incognito,
+    private_expires_at: record.private_expires_at === null ? null : record.private_expires_at.toISOString(),
   };
 }
 
@@ -111,8 +119,10 @@ export async function sandboxIdOfLastTurn(input: {
 export interface SessionsRouterDeps {
   sessions: Sessions<SessionCustom, TurnCustom>;
   sessionStore: ISessionStore<SessionCustom, TurnCustom>;
+  chatDeletionStore: IChatDeletionStore;
   sentinelAuditStore: ISentinelAuditStore;
   activeTurns: ActiveTurnRegistry;
+  turnDrains: TurnDrainRegistry;
   resolveModelProviderStore: (c: Context) => IModelProviderStore;
   resolveMcpServerStore: (c: Context) => IMcpServerStore;
   resolveSkillStore: ResolveSkillStore;
@@ -245,6 +255,86 @@ export async function cancelSessionTurn(
   await freezeTurnIgnoringMissing(deps.session, { turnId, reason: endReason });
 }
 
+/** What deleting a chat needs: its running turn stopped, its rows removed, its workspace freed. */
+export type DeleteChatDeps = Pick<
+  SessionsRouterDeps,
+  'sessions' | 'sessionStore' | 'chatDeletionStore' | 'activeTurns' | 'turnDrains' | 'redis' | 'logger'
+>;
+
+/** A sweep deletes only a private chat past its expiry; a chat a turn just renewed is left alone. */
+function isDueForDeletion({
+  record,
+  expiredBy,
+}: {
+  record: Pick<SessionRecord, 'is_incognito' | 'private_expires_at'>;
+  expiredBy: Date | undefined;
+}): boolean {
+  if (expiredBy === undefined) {
+    return true;
+  }
+  return record.is_incognito && record.private_expires_at !== null && record.private_expires_at <= expiredBy;
+}
+
+/** How long a delete waits for the stopped turn to finish saving its files. */
+const DELETE_CHAT_CAPTURE_WAIT_MS = 10_000;
+
+/**
+ * Deletes a chat for real: stops a turn still running in it, waits for that turn's file saving,
+ * then removes every row and blob the chat owns in one transaction. Approvals, held actions and
+ * the action audit are not the chat's and stay. Returns false when the chat was already gone.
+ */
+export async function deleteChat(deps: DeleteChatDeps, input: DeleteChatInput): Promise<boolean> {
+  const session = await deps.sessions.get({ tenant_id: input.tenant_id, session_id: input.session_id });
+  if (session === undefined || !isDueForDeletion({ record: session.record, expiredBy: input.expired_by })) {
+    return false;
+  }
+  deps.activeTurns.cancelAdmissions({ sessionId: input.session_id, abortReason: CancellationReason.ClientCancelled });
+  if (session.record.last_turn_id !== null) {
+    await cancelSessionTurn(
+      {
+        activeTurns: deps.activeTurns,
+        session,
+        sessionStore: deps.sessionStore,
+        redis: deps.redis,
+        logger: deps.logger,
+      },
+      { turnId: session.record.last_turn_id },
+    );
+  }
+  const stillSaving = await deps.turnDrains.waitForArtifactCapture({
+    sessionId: input.session_id,
+    timeoutMs: DELETE_CHAT_CAPTURE_WAIT_MS,
+  });
+  if (stillSaving !== undefined) {
+    // Files that land after the delete belong to no chat; the expiry sweep removes them.
+    deps.logger.warn('A deleted chat was still saving files', { session_id: input.session_id });
+  }
+  const sandboxId = slotsBackendEnabled() ? await sandboxIdOfLastTurn({ deps, record: session.record }) : undefined;
+  const deleted = await deps.chatDeletionStore.deleteChat(input);
+  // A deleted chat keeps no package download grant.
+  packageMirrorTokens.revokeSession(input.session_id);
+  if (sandboxId !== undefined) {
+    void removeSlotWorkspace({ sandboxId, logger: deps.logger });
+  }
+  const localSegment = localSandboxSessionSegment(input.session_id);
+  // Local sandboxes exist only in standalone mode, each chat's in its own folder; their files go with the chat.
+  if (
+    deleted &&
+    configuration.STANDALONE &&
+    !slotsBackendEnabled() &&
+    localSegment !== localSandboxSessionSegment(undefined)
+  ) {
+    const chatFolder = join(configuration.LOCAL_SANDBOX_ROOT_PARENT, localSegment);
+    await removeLocalChatSandboxes({ chatFolder }).catch((error: unknown) => {
+      deps.logger.warn('Could not remove the sandbox files of a deleted chat', {
+        session_id: input.session_id,
+        ...extractErrorLogFields(error),
+      });
+    });
+  }
+  return deleted;
+}
+
 /** Freeze a running turn; missing turns are a no-op (already gone). */
 async function freezeTurnIgnoringMissing(
   session: Pick<SessionHandle<SessionCustom, TurnCustom>, 'record' | 'freezeTurn'>,
@@ -329,12 +419,11 @@ function createGetOrCreateSessionByExternalIdHandler(
     });
     if (existing !== undefined) {
       if (
-        !(await canReadAgentBoundResource({
+        !(await canReadSession({
           store: deps.resolveAgentStore(c),
           context: requestContext,
           authorizer: deps.authorizer,
-          agent_id: existing.record.agent.type === 'reference' ? existing.record.agent.id : undefined,
-          created_by_subject_id: existing.record.created_by_subject.subject_id,
+          record: existing.record,
         }))
       ) {
         return c.json({ error: { message: FORBIDDEN_SESSION_ACCESS } }, 403);
@@ -379,12 +468,11 @@ function createGetOrCreateSessionByExternalIdHandler(
     });
     if (
       !created &&
-      !(await canReadAgentBoundResource({
+      !(await canReadSession({
         store: deps.resolveAgentStore(c),
         context: requestContext,
         authorizer: deps.authorizer,
-        agent_id: session.record.agent.type === 'reference' ? session.record.agent.id : undefined,
-        created_by_subject_id: session.record.created_by_subject.subject_id,
+        record: session.record,
       }))
     ) {
       return c.json({ error: { message: FORBIDDEN_SESSION_ACCESS } }, 403);
@@ -406,6 +494,10 @@ export function createSessionsRouter(deps: SessionsRouterDeps) {
     const body = c.req.valid('json');
     const sessionId = newId();
     const requestContext = deps.resolveRequestContext(c);
+    const privacy =
+      body.is_incognito === true
+        ? { is_incognito: true, private_expires_at: privateChatExpiry({ from: new Date() }) }
+        : { is_incognito: false, private_expires_at: null };
 
     if (isSessionAgentNameRef(body.agent)) {
       const agent = await agentIfAccessible({
@@ -427,6 +519,7 @@ export function createSessionsRouter(deps: SessionsRouterDeps) {
         agent: { type: 'reference', id: agent.id, name: agent.name },
         metadata: body.metadata,
         external_id: null,
+        ...privacy,
       });
       return c.json({ data: toWireSession(session.record) }, 201);
     }
@@ -447,6 +540,7 @@ export function createSessionsRouter(deps: SessionsRouterDeps) {
       agent: { type: 'inline', spec: body.agent.spec },
       metadata: body.metadata,
       external_id: null,
+      ...privacy,
     });
     return c.json({ data: toWireSession(session.record) }, 201);
   };
@@ -462,12 +556,11 @@ export function createSessionsRouter(deps: SessionsRouterDeps) {
       return c.json({ error: { message: `Session not found: ${sessionId}` } }, 404);
     }
     if (
-      !(await canReadAgentBoundResource({
+      !(await canReadSession({
         store: deps.resolveAgentStore(c),
         context: requestContext,
         authorizer: deps.authorizer,
-        agent_id: record.agent.type === 'reference' ? record.agent.id : undefined,
-        created_by_subject_id: record.created_by_subject.subject_id,
+        record,
       }))
     ) {
       return c.json({ error: { message: FORBIDDEN_SESSION_ACCESS } }, 403);
@@ -494,16 +587,7 @@ export function createSessionsRouter(deps: SessionsRouterDeps) {
     ) {
       return c.json({ error: { message: FORBIDDEN_SESSION_ACCESS } }, 403);
     }
-    const sandboxId = slotsBackendEnabled() ? await sandboxIdOfLastTurn({ deps, record }) : undefined;
-    await deps.sessionStore.deleteSession({
-      tenant_id: requestContext.tenant_id,
-      session_id: sessionId,
-    });
-    // A deleted chat keeps no package download grant.
-    packageMirrorTokens.revokeSession(sessionId);
-    if (sandboxId !== undefined) {
-      void removeSlotWorkspace({ sandboxId, logger: deps.logger });
-    }
+    await deleteChat(deps, { tenant_id: requestContext.tenant_id, session_id: sessionId, expired_by: undefined });
     return c.body(null, 204);
   };
 
@@ -525,6 +609,9 @@ export function createSessionsRouter(deps: SessionsRouterDeps) {
       })
     ) {
       return c.json({ error: { message: FORBIDDEN_SESSION_ACCESS } }, 403);
+    }
+    if (body.is_incognito !== undefined && body.is_incognito !== existing.is_incognito) {
+      return c.json({ error: { message: PRIVATE_CHAT_FLAG_CHANGE_MESSAGE } }, 422);
     }
     // Inline sessions may replace their agent; named (reference) sessions
     // cannot — the store rejects that with SessionStoreInvariantError → 422 below.
@@ -594,8 +681,15 @@ export function createSessionsRouter(deps: SessionsRouterDeps) {
         end_timestamp: query.end_timestamp,
         source_type: query.source_type,
         source_id: query.source_id,
+        include_private: query.include_private ?? false,
       });
-      return c.json({ data: data.map(toWireSession), pagination }, 200);
+      // A private chat is listed only to the person who started it, never to an agent's managers.
+      const visible = data.filter(
+        record =>
+          !sessionKeepsNothing({ session: record }) ||
+          isSessionOwner({ subject_id: requestContext.subject.id, created_by_subject: record.created_by_subject }),
+      );
+      return c.json({ data: visible.map(toWireSession), pagination }, 200);
     } catch (error) {
       if (error instanceof SessionStoreConflictError) {
         return c.json({ error: { message: error.message } }, 400);
@@ -645,12 +739,11 @@ export function createSessionsRouter(deps: SessionsRouterDeps) {
       return c.json({ error: { message: `Session not found: ${sessionId}` } }, 404);
     }
     if (
-      !(await canReadAgentBoundResource({
+      !(await canReadSession({
         store: deps.resolveAgentStore(c),
         context: requestContext,
         authorizer: deps.authorizer,
-        agent_id: session.record.agent.type === 'reference' ? session.record.agent.id : undefined,
-        created_by_subject_id: session.record.created_by_subject.subject_id,
+        record: session.record,
       }))
     ) {
       return c.json({ error: { message: FORBIDDEN_SESSION_ACCESS } }, 403);

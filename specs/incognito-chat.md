@@ -1,113 +1,96 @@
-# Spec: Incognito Chat
+# Spec: Incognito chats
 
-**Status:** draft
+**Status:** approved
 
 ## Problem
 
-Every chat teaches Aman something. Memory retain runs after each turn, profile learning rewrites the learned profile, the chat sits in history, and its files stay on disk. Sometimes you want to ask something once and leave no trace: a medical question, a gift, a draft you do not want remembered. Today the only way is to turn memory off in Settings and delete the chat by hand, and even then profile learning and leftover files remain.
+Every chat teaches Aman something. Memory retain runs after each turn, profile learning updates the learned profile, the chat joins past-chat search and sits in history, and its files stay on disk. Sometimes you want to ask something once and leave no trace: a medical question, a gift, a draft you do not want remembered. Today the only way is to turn memory off in Settings and delete the chat by hand, and even then profile learning and leftover files remain.
 
 ## Solution
 
-A chat you start on purpose that Aman is forbidden to remember. The server enforces every guarantee below from a flag on the session row; nothing depends on the model behaving.
+An incognito chat: a chat you start on purpose that Aman does not remember. When it closes it is gone. The server enforces every guarantee below from a flag on the session row; nothing depends on the model behaving.
 
-## 1. What incognito guarantees
+Two rules do not bend:
 
-In plain words, when a chat is incognito:
+1. **Read yes, write no.** An incognito chat may recall the vault but never writes to it, in any persona.
+2. **Actions still leave a receipt.** Approval tiers, held actions, approval tokens and the action audit work exactly as in a normal chat, and the receipts outlive the chat.
 
-- **Nothing from it is remembered.** No fact from the chat is written to any memory vault, and the learned profile is not updated. Settings › Memory shows nothing new afterwards.
-- **It still knows you.** Aman reads your memory and your profile, as in a normal chat, but only reads. Recommendation: reads on. Trade-off: with reads on the chat is as helpful as usual and nothing extra is stored; with reads off you get a stranger who cannot use what it already knows, and the only gain is that the recall lookup is not run (a lookup that stays on your computer with the Markdown backend, and goes to the Hindsight server if you use that). A per-chat switch "Use what Aman knows about me" on the start dialog, default on, lets you pick.
-- **It is not kept.** It never appears in your chat list. It is deleted the moment you end it, switch to another chat, or close the tab. If the tab vanishes without saying goodbye, the server deletes the chat after 1 hour without activity, and deletes every leftover incognito chat each time it starts.
-- **Nothing outlives it.** No schedule can be created from it (chats cannot create schedules today, and a scheduled run can never be incognito). Any approval it asks is answered now or dropped with the chat. "Allow in this chat" grants die with it. "Always allow" is not offered.
-- **Files go with it.** Uploads, sandbox working folders, and files Aman produced are deleted when the chat is deleted. Anything you already downloaded to your computer is yours and stays.
-- **Connectors and search still work, and still leave the machine.** A web search sends the query to the search provider. A Gmail action reads or sends real mail. Incognito changes what Aman keeps, not what it sends. The banner says so.
+## 1. Data model
 
-## 2. What it cannot guarantee
+- `session.is_incognito`: boolean, not null, default false. Set only when the chat is created. The update path refuses to change it with: "A chat is incognito from the start or not at all. Start a new incognito chat instead."
+- `session.private_expires_at`: the last turn time plus 24 hours, renewed on every completed turn. The chat is deleted at close or at expiry, whichever comes first.
+- Migrations for both backends. Both fields are carried on the create request and the session DTO.
+- Export skips incognito chats. An older export without the fields imports unchanged, through an import upgrade step with an older-format fixture.
 
-- **The model provider sees the chat.** A hosted model receives every message and may log it under its own policy. A local Ollama model does not send anything.
-- **Search and connector providers see what they are sent.** The query, the URL, the mail you asked for.
-- **Actions taken are real.** A mail sent, a file written outside the sandbox, a calendar event created: all stay done.
-- **Someone at your screen can read it while it is open.** Incognito is about memory, not about hiding the screen.
+## 2. One gate
 
-## 3. UX
+One function, `sessionKeepsNothing({ session })`, is called by every writer:
 
-**Starting one.** The New Chat button in the sidebar rail, the drawer, and the thread list gains a small menu: "New chat" and "New incognito chat". The keyboard shortcut is `Ctrl/Cmd+Shift+X` (the browser owns `Ctrl+Shift+N`, so a page cannot use it). Picking it opens a short start card: one line on what is and is not guaranteed, the "Use what Aman knows about me" switch, and "Start". The persona and model pickers work as usual.
+- memory retain (the turn drain hook and the reliability loop)
+- daily notes and summaries
+- profile learning
+- past-chat search indexing
+- brief items and the Home feed
+- bug reports, which leave an incognito chat out
 
-**The visual mode.** A banner sits directly under the chat header, above the messages, for the whole life of the chat. Left: the `venetian-mask` icon and "Incognito chat". Middle: "Not remembered. Deleted when you leave. Searches and connectors still send data." Right: "End chat". The composer border and the send button use the same accent. The header title reads "Incognito chat" and is never auto-generated. Styling uses new theme tokens only, defined for both the light and dark blocks in `styles.css` next to the approval banner tokens: `--incognito-banner-bg`, `--incognito-banner-fg`, `--incognito-banner-border`, `--incognito-banner-accent`. Light: a muted slate on the warm paper; dark: a deeper slate with the same accent. Lengths in `rem`: banner min height `2.75rem`, padding `0.5rem 1rem`, border `0.0625rem`, radius `var(--radius)`.
+The same gate decides which tools the chat is offered. Aman's own lasting things are read-only there: spaces, schedules and reminders can be listed and read but not made or changed, and personas can be listed and switched to but not added. A tool set offers only its tools marked read-only, plus tools that change nothing beyond the chat, so a new writing tool is left out until it says otherwise. The web browser is not mounted, because it keeps one lasting profile per person, with history and sign-ins. The model is told what it cannot do here and to point the person to a normal chat.
 
-**Ending.** "End chat" asks once: "Delete this incognito chat now? Nothing was saved to memory." Confirm shows an end card in place of the thread: the icon, "Incognito chat ended. Nothing was kept.", and two buttons, "New incognito chat" and "New chat". Switching to another chat or closing the tab ends it without the card; the server-side deletion is the same.
+`GET /api/v1/sessions` leaves incognito chats out unless `include_private=true`, and only the person who started an incognito chat can see it. The client keeps the one open incognito chat's id in memory, never in browser storage, and asks for it by name. Spaces in this app are the pages Aman keeps, so the chat-side grouping is folders: moving an incognito chat into a folder is refused with "Incognito chats cannot be added to a folder. Start a normal chat to keep it in one." Session metrics keep per-model token counts.
 
-**Converting to a normal chat.** Recommendation: no. A one-way mode is easy to explain and easy to trust. Conversion would need to replay retain and learning for turns that were never meant to be kept, and the model provider already has them anyway. Instead the banner menu offers "Copy chat as text", done entirely in the browser.
+## 3. Deletion
 
-**Phone layout.** In the drawer layout the banner collapses to one line: icon, "Incognito", and "End" on the right; the explanation moves into a tap-to-expand line. It stays pinned under the header while the thread scrolls. The 1rem side gutter is kept, nothing scrolls sideways, and the end card fills the thread area.
+- **Close and delete** deletes the chat for real, not with a flag: the session, turns, thread context, session events, chat images, turn artifacts and any blob no other chat uses, in one transaction. Its sandbox files go with it.
+- The per-model token counts of a deleted chat are kept, with no words and no chat id, so the usage summary stays right.
+- An expiry sweep runs on the controller loop, the same shape as the schedule dispatch, and once at boot. It deletes only incognito chats past their expiry.
+- On SQLite, deleted pages are overwritten and the write-ahead log is emptied after a delete, so the words cannot be read back from the file.
+- The nightly backup removes incognito chats from its copy of the database, so a chat open at backup time is not kept.
 
-## 4. Server enforcement
+## 4. Kept by design
 
-Each guarantee is enforced on the server from `session.incognito`. Paths are under `packages/`.
+- Approval tokens and held actions.
+- The action audit, whose lines can repeat an action's words, such as an email's address.
+- Anything a tool changed in the world, such as a sent email.
 
-**The flag on the wire.** `CreateSessionRequestSchema` in `trueforge/src/schemas/session.ts` gains `incognito: z.boolean().default(false)`, and `SessionSchema` in `trueforge-core/src/agent-session/schemas/session.ts` returns `incognito`. `UpdateSessionRequestSchema` does not accept it: the flag is set at birth and never changes. A new `memory_reads: z.boolean().default(true)` field on the create request carries the start-card switch; it is only honored when `incognito` is true. The frontend sends both from `createSession` in `trueforge-ui/src/plugins/trueforge-agent-server-adapter/chatServer.ts`. A session metadata key is deliberately not used: metadata is a client-editable map and can be changed by `PUT`.
+## 5. Honesty banner
 
-**Store and migration.** A new column `incognito BOOLEAN NOT NULL DEFAULT false` and `memory_reads BOOLEAN NOT NULL DEFAULT true` on `session`, added by one migration file with the same name in `trueforge/src/db/postgres/migrations/` and `trueforge/src/db/sqlite/migrations/`, following `20260904_000002_session_source.ts` (nullable-free `ADD COLUMN`, no rebuild), with a partial index on `incognito = true` for the sweeps. `SessionRecord`, `CreateSessionInput`, and `ListSessionsInput` in `trueforge-core/src/agent-session/store/ISessionStore.ts` carry the fields; `mapRowToSessionRecord`, `createSession`, and `listSessions` in both `queries/sessions.ts` files, `InMemorySessionStore`, and `storeContractSuite.ts` change together, per the store `AGENTS.md`. `listSessions` never returns incognito rows unless the caller passes `incognito: true`, which only the sweeps do. `updateSession` rejects any change to the two columns.
+A line above the composer says where the words go:
 
-**Memory retain and profile learning skip.** In the create-turn handler of `createTurnsRouter` in `trueforge/src/apis/turns.ts`, when the session is incognito: `memoryClient` for the drain is `undefined`, `profileLearning` is `undefined`, and `memorySummarize` is `undefined`. That leaves `runTurnEventDrain` with nothing to call, so `submitRetainWithVerification` in `trueforge/src/runtime/memory/memoryRetain.ts` and `submitProfileLearning` in `trueforge/src/runtime/profileLearning.ts` never run for the turn, and `mirrorLearnedProfile` cannot run either. The same gate is applied in `beginTurnExecution` and `startTurnInProcess`, which must refuse an incognito session with a `409` since those paths serve scheduled runs. `MemoryTurnContext` in `createTurnResolver` is built with `retainEnabled: false`, so `HindsightMemoryProcessor` in `memoryCapability.ts` never seeds or sweeps pending retains and `resolveVanishedPreviousTurn` is a no-op; `recallEnabled` follows `session.memory_reads`. Each guarantee is checked by a server-side assertion in the drain, not by trusting the resolver.
+- Hosted model: "Nothing from this chat is kept here. It is answered by <provider name>, so the words do leave this machine."
+- Local model: "Nothing from this chat is kept. It never leaves this machine."
 
-**Memory reads.** With `memory_reads` true the resolver runs recall as today and the `aman.memory.recall` event is written to `session_event`, which cascades on delete. `withMemoryProviderNarrowedToReads` in `MemoryTurnResourceResolver.ts` already limits provider tools to reads. `buildPersonalizationContext` and persona knowledge retrieval are read-only and unchanged.
+The client reads the banner again when a turn starts or ends, when the persona pill is used, and when the window regains focus, so a switch to a persona on a hosted model shows.
 
-**History and title.** `listSessionsHandler` in `trueforge/src/apis/sessions.ts` never passes `incognito: true`. `getSession` stays owner-only so the open tab can resume. The title is fixed at create time to "Incognito chat" and `useSyncSessionTitle` skips incognito sessions.
+A model counts as local only when its address is this machine (loopback, `localhost`, or `host.docker.internal`, or a name that resolves only to loopback). The check covers the chat's model, its helper models, and its persona's model.
 
-**Deletion.** `deleteSessionHandler` grows an `incognito` cleanup path shared with the sweeps: `deleteSession` (cascades turns, events, persona log, grants), then `deleteArtifactsBySession` (new on `ITurnArtifactStore` in `trueforge/src/db/turnArtifactStore.ts`, removing `turn_artifact` rows and blobs no other row references), then `removeLocalSandboxSession` (new in `trueforge/src/sandbox/local/provider/LocalSandboxProvider.ts`, deleting `<appData>/sandboxes/<sessionId>`), `removeSlotWorkspace` when slots are on, and `destroySandbox` on any provider that implements it. A new `endIncognitoSessionRoute` (`POST /api/v1/sessions/{session_id}/end`) does the same for the "End chat" button and the unload beacon; it is idempotent.
+## 6. UI
 
-**Sweeps.** `sweepIncognitoSessions` in `trueforge/src/main.ts`, next to `sweepExpiredTurnArtifacts`: at boot it deletes every incognito session; every 5 minutes it deletes those whose `last_activity_timestamp_ms` is older than `INCOGNITO_IDLE_TTL_MS` (default one hour, read through `config.ts`). A turn in flight is cancelled first through the active-turn registry. Redis turn streams expire on their own TTL.
-
-**Approvals and grants.** In `AgentThread.ts`, `can_always_allow` on `ToolApprovalRequiredEvent` is forced to `false` for incognito sessions, and a `USER_TOOL_APPROVAL` with `scope: 'always'` is rejected before `recordToolGrant` is reached, so no `mcp_tool_grant` row is ever written. `scope: 'chat'` works and lives in `session.approval_grants`, which is deleted with the row.
-
-**Schedules and held actions.** `createScheduleRoute` handlers in `trueforge/src/apis/schedules.ts` and `dispatchScheduledRuns` refuse an incognito source. `forUnattendedRun` is never applied to incognito sessions, so `holdApprovalCalls` never holds, and no `approval_token` is minted.
-
-**Audit log.** `SentinelAuditStore.record` writes incognito rows with tool and connector names, outcome, and time only, with no arguments and `incognito = true`; `deleteSessionHandler` leaves the rows in place. Recommendation: keep this short trail so a search or a mail send is still accounted for without keeping what was said.
-
-## 5. Edge cases
-
-- **Approvals** show the normal card without "Always allow". A card left unanswered when the chat ends is dropped with the turn; nothing is retried later.
-- **Always-allow made inside incognito** does not persist (above). Recommendation: do not even offer it, rather than offer and discard, so the user is never misled.
-- **Export and import.** `exportMemoryVaultRoute` is unaffected because nothing was retained. `createSessionBugReportRoute` answers `409` for an incognito session. The internal `importSessionRoute` rejects a record with `incognito: true`. Any future chat export reuses one guard, `assertSessionExportable`, in `apis/sessions.ts`.
-- **Crashes.** The boot sweep and the idle sweep clean rows, artifacts, and sandbox folders. A crash mid-turn leaves no retain, because the drain input never held a memory client.
-- **One account per instance.** Aman is single-user, so there is no other user to hide the chat from. Owner checks still apply: `getSession` is owner-only and the list hides incognito rows for everyone. With the login profile off, anyone who reaches the port is the owner, so incognito does not protect an open chat from someone at the machine.
-- **Persona in incognito.** Allowed. The persona vault is read, never written; the `session_persona` log cascades on delete.
-- **Settings › Memory** gains one line: "Incognito chats are never written here."
-
-## 6. Tests
-
-All tests use synthetic data, never the owner's real memory. Each guarantee has a server test in `packages/trueforge/tests/` and the UI parts a test in `packages/trueforge-ui/test/`.
-
-- **Retain skipped.** Create an incognito session, run a turn with a memorable fact, assert the Markdown vault has no new entry and `retainOperationId` was never submitted. Repeat with the Hindsight client stubbed. Then a normal session proves retain still runs.
-- **Learning skipped.** With `learning_enabled` on, an incognito turn emits no `aman.profile.learned` event and leaves the profile revision unchanged; a normal turn advances it.
-- **Reads honored.** With `memory_reads` true a seeded fact appears in `injected_block`; with it false `aman.memory.recall` reports `disabled_by_user`.
-- **Hidden from history.** `GET /api/v1/sessions` omits the incognito row; `GET /{id}` returns it to the owner; `PUT` with `incognito` or `memory_reads` is rejected; the title is fixed.
-- **Deleted on end.** `POST /{id}/end` removes the session, events, `turn_artifact` rows, orphan blobs, and the local sandbox folder, and a second call is a `204` no-op.
-- **Sweeps.** A row older than the idle TTL is deleted by the interval sweep; any incognito row is deleted at boot; a referenced blob survives.
-- **No grants.** The approval event carries `can_always_allow: false`; a `scope: 'always'` answer is rejected and `mcp_tool_grant` stays empty; `scope: 'chat'` works and vanishes with the row.
-- **No schedules or holds.** Schedule creation and dispatch from an incognito source fail; `holdApprovalCalls` is never reached.
-- **Audit shape.** Audit rows for an incognito session hold no arguments.
-- **Export guards.** Bug report and ops import refuse incognito sessions.
-- **Store contract.** `storeContractSuite` covers the new fields on all three stores, and the migration tests cover both backends.
-- **UI.** The menu, the shortcut, the banner in light and dark, the end card, the drawer layout at phone width, and that an incognito thread never appears in the thread list after reload.
-
-## 7. Build plan
-
-Small PRs, each green on its own, in this order:
-
-1. **Schema and store.** Columns, migrations for both backends, `SessionRecord` and DTO fields, list filter, contract suite.
-2. **Turn gates.** Drain inputs set to `undefined`, `retainEnabled`, scheduled-path refusal, fixed title, drain assertions and tests.
-3. **End route and cleanup.** `endIncognitoSessionRoute`, artifact and sandbox deletion, boot and idle sweeps, config value.
-4. **Approvals and audit.** `can_always_allow` off, `scope: 'always'` rejected, audit row shape, export and import guards.
-5. **UI.** New-chat menu, shortcut, start card, banner and tokens, end card, history hiding, unload beacon, phone layout.
-6. **Docs.** A short page under `docs/` and the Settings › Memory line.
+- **New chat:** a "Start incognito chat" choice on the new chat's composer, before the first message, with the line "Aman forgets this chat when it closes. It can still read what it already knows." Its hover text reads "Start a chat Aman forgets. Nothing from it is saved, and it is deleted when you close it."
+- **Open incognito chat:** an ink frame instead of the accent frame, the banner above the composer, the Close and delete control (it asks once first: "Everything in this chat is deleted for good: every message, picture and file. It cannot be brought back."), and no status line for the assistant. Existing theme tokens and `rem` only.
+- **Chat list:** a small "Incognito" label while the chat is open in that tab. It is never in search or recents.
+- **Personas:** an incognito chat with a persona reads that persona's vault, writes nothing, and shows the same banner.
 
 ## Privacy
 
-Incognito narrows what Aman keeps: no vault write, no learned-profile write, no history, no files, no grants. It does not narrow what leaves the machine: model, search, and connector traffic is unchanged and the banner says so. Memory and profile are read only when the owner leaves reads on. Audit rows keep only names and times.
+An incognito chat narrows what Aman keeps: no vault write, no learned-profile write, no past-chat search, no brief or Home item, no space, reminder, schedule or persona, no browser history, no history after it closes, no files, and no unsent text in browser storage. It does not narrow what leaves the machine: model, search and connector traffic is unchanged, and the banner says so. Only the receipts of actions and per-model token counts outlive the chat.
+
+## Testing
+
+All tests use synthetic data, never anyone's real memory or mail.
+
+- Schema and migration tests on both backends.
+- A pair test: an incognito turn produces no retain, daily note, embedding, brief item or Home item, and a normal turn produces all of them.
+- The receipts of an incognito chat's actions (approval tokens and the action audit) survive its deletion. Held actions exist only in unattended runs, which an incognito chat never is.
+- Delete removes every listed row and blob, on both backends.
+- The sweep deletes only past-expiry incognito chats.
+- Export omits incognito chats, and an older export imports with the default.
+- Update refuses the flip with the exact message.
+- An incognito chat is offered only the read tools for spaces, schedules and reminders, cannot add a persona, has no browser, and is told so; a normal chat keeps them all.
+- The banner reads again after a persona switch and shows the hosted line.
+- Unsent text in an incognito chat is never written to browser storage.
+- An end-to-end run over the HTTP surface: an approved action in an incognito chat, then Close and delete leaves only the receipts.
 
 ## Out of scope
 
-- Converting an incognito chat into a normal one.
-- Hiding the screen, locking the app, or an encrypted vault.
-- Per-tool network blocking inside incognito (see private-by-architecture).
+- A per-chat local-model pin (Phase 2).
+- "Forget this chat" for normal chats.
+- Any change to approval tiers.

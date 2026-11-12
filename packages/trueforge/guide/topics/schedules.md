@@ -1,7 +1,7 @@
 ---
 id: schedules
 title: Running things on a schedule
-covers: remember
+covers: remember, approval:schedule, route:schedule
 ---
 
 Aman can run a task at a set time, such as "Every weekday at 7:30, send me my morning brief". The result appears in a chat when the run finishes.
@@ -12,7 +12,7 @@ A schedule repeats. For something that should happen once, ask for a reminder in
 
 1. In any chat, ask with a time, such as "Remind me at 5 pm to call the pharmacy".
 2. Aman sets it without an approval card. A reminder only ever reaches you.
-3. When it is due, the reminder appears in a chat named Reminders. While Aman is open in a browser tab, you also see a notice, and the Reminders chat shows an unread mark.
+3. When it is due, the reminder shows in the bell at once and appears at the end of this same chat, under your earlier messages. If Aman is still answering in that chat, the reminder line waits until the answer ends. While Aman is open in a browser tab, you also see a notice, and this chat shows an unread mark.
 4. The first time, Aman asks if it may show notices. Allow them in your browser if you want them. The unread mark works either way.
 5. To see or cancel reminders, ask, such as "What reminders do I have?" or "Cancel the pharmacy reminder".
 

@@ -8,7 +8,11 @@ import { Spinner } from '@/atoms/primitives/Spinner.js';
 import { Switch } from '@/atoms/primitives/Switch.js';
 import { useOptionalRepositoryWork, type RepositorySummary } from '@/components/RepositoryWorkContext.js';
 import { useOptionalRunCodeStatus, type RunCodeStatus } from '@/components/RunCodeStatusContext.js';
-import { useOptionalSandboxWorkspaces, type SandboxWorkspaceListing } from '@/components/SandboxWorkspacesContext.js';
+import {
+  useOptionalSandboxWorkspaces,
+  type SandboxWorkspace,
+  type SandboxWorkspaceListing,
+} from '@/components/SandboxWorkspacesContext.js';
 import { useOptionalSentinelApiState } from '@/sentinel/SentinelApiContext.js';
 import { useServerCapabilities } from '@/server/ServerContext.js';
 import { getErrorMessage } from '@/utils/getErrorMessage.js';
@@ -203,6 +207,21 @@ function StatusCard({
   );
 }
 
+/** What a workspace row is called: your chat's title, or whose it is when it is not yours to name. */
+function workspaceTitle(workspace: SandboxWorkspace): string {
+  switch (workspace.holder) {
+    case 'you':
+      if (workspace.chat_private) {
+        return 'Incognito chat';
+      }
+      return workspace.chat_title ?? 'Untitled chat';
+    case 'someone_else':
+      return "Another person's chat";
+    case 'none':
+      return 'A workspace with no chat';
+  }
+}
+
 /**
  * Settings > Sandbox > Chat workspaces: which chats hold a workspace on which slot, how much space
  * each takes, and the room left on each slot. The server joins the slots' sessions to their chats;
@@ -266,15 +285,11 @@ function ChatWorkspacesCard({ status }: { status: RunCodeStatus | null }) {
             <ul className="mt-3 space-y-2">
               {listing.workspaces.map(workspace => (
                 <li key={workspace.sandbox_id} className="text-sm">
-                  <p className="text-text-primary">
-                    {workspace.chat_id === null
-                      ? 'A workspace with no chat'
-                      : (workspace.chat_title ?? 'Untitled chat')}
-                  </p>
+                  <p className="text-text-primary">{workspaceTitle(workspace)}</p>
                   <p className="text-text-secondary">
                     Slot {String(workspace.slot)} · {formatBytes(workspace.bytes)} · Last used{' '}
                     {formatLastUsed(workspace.last_used)}
-                    {workspace.chat_id === null ? ' · Its chat is gone; the workspace was left behind.' : ''}
+                    {workspace.holder === 'none' ? ' · No chat on this server is linked to this workspace.' : ''}
                   </p>
                 </li>
               ))}

@@ -87,6 +87,8 @@ export function runCompletedTurnEventStoreContractSuite(params: {
       metadata: {},
       agent: { type: 'inline', spec: makeAgentSpec() },
       custom: null,
+      is_incognito: false,
+      private_expires_at: null,
     });
     await store.createTurn(makeCreateTurnInput({ sessionId: SESSION_ID, turnId: TURN_ID }));
     const state = makeDoneTurnState();

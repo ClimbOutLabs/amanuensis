@@ -86,6 +86,8 @@
   "Delete space": "packages/trueforge-ui/src/containers/SpacesView.tsx",
   "More": "packages/trueforge-ui/src/layouts/SidebarLayout.tsx",
   "Build agent": "packages/trueforge-ui/src/layouts/SidebarLayout.tsx",
+  "Sign out": "packages/frontend/src/LogoutButton.tsx",
+  "Stay": "packages/frontend/src/LogoutButton.tsx",
   "Chats": "packages/trueforge-ui/src/layouts/SidebarLayout.tsx",
   "New chat": "packages/trueforge-ui/src/containers/ThreadListContainer.tsx",
   "Light": "packages/trueforge-ui/src/atoms/AppearanceChoices.tsx",
@@ -103,5 +105,13 @@
   "App password": "packages/trueforge-ui/src/containers/SettingsBuilder/CalendarSetupPanel.tsx",
   "How to make an app password": "packages/trueforge-ui/src/containers/SettingsBuilder/CalendarSetupPanel.tsx",
   "Remove": "packages/trueforge-ui/src/containers/SettingsBuilder/AccountSetupPanel.tsx",
-  "Cancel": "packages/trueforge-ui/src/containers/SettingsBuilder/AccountSetupPanel.tsx"
+  "Cancel": "packages/trueforge-ui/src/containers/SettingsBuilder/AccountSetupPanel.tsx",
+  "Start incognito chat": "packages/trueforge-ui/src/atoms/privateChat/PrivateChatToggle.tsx",
+  "Close and delete": "packages/trueforge-ui/src/atoms/privateChat/PrivateChatBanner.tsx",
+  "Delete for good": "packages/trueforge-ui/src/atoms/privateChat/PrivateChatBanner.tsx",
+  "Audit": "packages/trueforge-ui/src/containers/SettingsBuilder/index.tsx",
+  "Show": "packages/trueforge-ui/src/sentinel/AuditLogSettings.tsx",
+  "From": "packages/trueforge-ui/src/sentinel/AuditLogSettings.tsx",
+  "To": "packages/trueforge-ui/src/sentinel/AuditLogSettings.tsx",
+  "Clear dates": "packages/trueforge-ui/src/sentinel/AuditLogSettings.tsx"
 }

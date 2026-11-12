@@ -8,12 +8,16 @@ import { rm } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import path from 'node:path';
 import { URL } from 'node:url';
+import { Worker } from 'node:worker_threads';
 import { chromium } from 'playwright-core';
 
 import { elementAtPath } from './extract.mjs';
 import { RefAssigner, renderSnapshot, sensitivityOf } from './snapshot.mjs';
 
 const MAX_BODY_BYTES = 256 * 1024;
+/** The largest file the live view may upload into a page: 10 MiB, sent as base64. */
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+const MAX_UPLOAD_BODY_BYTES = Math.ceil((MAX_UPLOAD_BYTES * 4) / 3) + 64 * 1024;
 
 /**
  * extract.mjs as one script for the page. `page.evaluate(fn)` sends only the function's own source, so
@@ -22,6 +26,134 @@ const MAX_BODY_BYTES = 256 * 1024;
 const EXTRACT_MODULE = readFileSync(new URL('./extract.mjs', import.meta.url), 'utf8').replace(/^export /gm, '');
 
 const EXTRACT_SCRIPT = `(() => {\n${EXTRACT_MODULE}\nreturn extractSnapshotNodes();\n})()`;
+const VIEW_SCRIPT = `(() => {\n${EXTRACT_MODULE}\nreturn viewPosition();\n})()`;
+
+/** How long a scroll may take to come to rest before the page is read anyway. */
+const SCROLL_SETTLE_MS = 1000;
+
+/**
+ * Waits in the page until a scroll has come to rest: the position holds for a few frames, after it
+ * moved or after a short wait for a page that does not move (its end). The position counts the
+ * window and every scroll box under the middle of the view, since the wheel scrolls whichever is there.
+ */
+const SCROLL_SETTLE_SCRIPT = `(async () => {
+  const position = () => {
+    let sum = window.scrollY;
+    for (let box = document.elementFromPoint(innerWidth / 2, innerHeight / 2); box !== null; box = box.parentElement) {
+      sum += box.scrollTop;
+    }
+    return sum;
+  };
+  const start = position();
+  const began = performance.now();
+  let last = start;
+  let still = 0;
+  while (performance.now() - began < ${String(SCROLL_SETTLE_MS)}) {
+    await new Promise(resolve => requestAnimationFrame(resolve));
+    const now = position();
+    still = now === last ? still + 1 : 0;
+    last = now;
+    if (still >= 3 && (now !== start || performance.now() - began > 200)) {
+      return;
+    }
+  }
+})()`;
+
+/** A scroll's settle wait, bounded here too, so a page that stalls its own frames cannot hold the read. */
+async function scrollSettled(page) {
+  let timer;
+  const cap = new Promise(resolve => {
+    timer = setTimeout(resolve, SCROLL_SETTLE_MS + 500);
+  });
+  try {
+    await Promise.race([page.evaluate(SCROLL_SETTLE_SCRIPT).catch(() => undefined), cap]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** The same bundled module, ending in a read-only look at where the elements at `paths` sit in view. */
+function boxesInViewScript(paths) {
+  return `(() => {\n${EXTRACT_MODULE}\nreturn boxesInView(${JSON.stringify(paths)});\n})()`;
+}
+
+/** How long the model's copy of a screenshot may take to draw. */
+const PICTURE_WORKER_MS = 5000;
+
+/** The same bundled module, ending in the boxes the model's copy of a screenshot must cover. */
+const MASK_BOXES_SCRIPT = `(() => {\n${EXTRACT_MODULE}\nreturn maskBoxes();\n})()`;
+
+/**
+ * Runs a read-only script in a world of its own on the tab's main frame. The page's scripts share
+ * the DOM but not this world's JavaScript, so a page that hooks getBoundingClientRect or watches
+ * its own functions being called cannot bend the result or tell that the shot is being taken.
+ */
+async function isolatedWorld(cdp) {
+  const { frameTree } = await cdp.send('Page.getFrameTree');
+  const { executionContextId } = await cdp.send('Page.createIsolatedWorld', {
+    frameId: frameTree.frame.id,
+    worldName: 'aman-picture',
+  });
+  return executionContextId;
+}
+
+async function inIsolatedWorld({ cdp, executionContextId, expression }) {
+  const { result, exceptionDetails } = await cdp.send('Runtime.evaluate', {
+    expression,
+    contextId: executionContextId,
+    returnByValue: true,
+  });
+  if (exceptionDetails !== undefined) {
+    throw new Error('the layout read failed');
+  }
+  return result.value;
+}
+
+/**
+ * Whether a node of a DOM.getDocument tree holds a form field anywhere below it, shadow roots
+ * included. A frame or embed counts too: what it shows cannot be read here, so it is covered whole.
+ */
+function holdsField(node) {
+  if (['INPUT', 'TEXTAREA', 'SELECT', 'IFRAME', 'FRAME', 'EMBED', 'OBJECT'].includes(node.nodeName)) {
+    return true;
+  }
+  return [...(node.children ?? []), ...(node.shadowRoots ?? [])].some(holdsField);
+}
+
+/**
+ * The boxes of elements whose closed shadow root holds a form field. The page's own DOM cannot reach
+ * a closed root, so the browser's DOM view is asked instead, and the whole element is covered.
+ */
+async function closedShadowFieldBoxes(cdp) {
+  const { root } = await cdp.send('DOM.getDocument', { depth: -1, pierce: true });
+  const hosts = [];
+  const visit = node => {
+    for (const shadow of node.shadowRoots ?? []) {
+      if (shadow.shadowRootType === 'closed' && holdsField(shadow)) {
+        hosts.push(node.backendNodeId);
+      }
+      visit(shadow);
+    }
+    // A frame's own document is covered whole already; its tree is not walked here.
+    for (const child of node.children ?? []) {
+      visit(child);
+    }
+  };
+  visit(root);
+  const boxes = [];
+  for (const backendNodeId of hosts) {
+    const model = await cdp.send('DOM.getBoxModel', { backendNodeId }).catch(() => undefined);
+    if (model === undefined) {
+      continue;
+    }
+    const xs = [0, 2, 4, 6].map(at => model.model.border[at]);
+    const ys = [1, 3, 5, 7].map(at => model.model.border[at]);
+    const left = Math.min(...xs);
+    const top = Math.min(...ys);
+    boxes.push({ left, top, width: Math.max(...xs) - left, height: Math.max(...ys) - top });
+  }
+  return boxes;
+}
 
 /** The same bundled module, ending in a read of one element's field, submit and form context. */
 function elementInfoScript(domPath) {
@@ -88,7 +220,90 @@ function createTab({ page }) {
     goingBack: false,
     refusedRedirect: undefined,
     movedTo: undefined,
+    // The page's last open file picker, waiting for the person to upload a file from the live view.
+    fileChooser: undefined,
+    // The live view's acts, run one at a time in the order they arrived, so typed keys never swap.
+    liveActs: Promise.resolve(),
   };
+}
+
+/**
+ * A picture of a tab's page. A headed window that has not drawn its first frame yet cannot be
+ * captured, which is common right after a page opens, so that one error is tried again shortly.
+ */
+async function capturePage(page, options) {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await page.screenshot(options);
+    } catch (error) {
+      if (attempt >= 3 || !String(error).includes('Unable to capture screenshot')) {
+        throw error;
+      }
+      await new Promise(resolve => setTimeout(resolve, 200));
+    }
+  }
+}
+
+/** Runs one live-view act after every act sent before it has finished, whether or not that one worked. */
+function inLiveOrder(tab, act) {
+  const run = tab.liveActs.then(act);
+  tab.liveActs = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
+
+/**
+ * One pointer or keyboard act from the live view. A click read from a frame of another size is
+ * scaled to the viewport, so it lands where the person clicked on the picture.
+ */
+async function liveAct(page, input) {
+  switch (input.kind) {
+    case 'click': {
+      const viewport = page.viewportSize();
+      const scale =
+        viewport !== null && input.imageWidth !== undefined && input.imageHeight !== undefined
+          ? { x: viewport.width / input.imageWidth, y: viewport.height / input.imageHeight }
+          : { x: 1, y: 1 };
+      await page.mouse.click(input.x * scale.x, input.y * scale.y);
+      break;
+    }
+    case 'type':
+      await page.keyboard.type(input.text);
+      break;
+    case 'key':
+      await page.keyboard.press(input.key);
+      break;
+    case 'wheel':
+      await page.mouse.wheel(0, input.dy);
+      break;
+  }
+  return { status: 'ok' };
+}
+
+/**
+ * Fills the file picker the page opened, once. When there is none, or it can no longer take the
+ * file (its field went away), the page's first file field gets it instead.
+ */
+async function putFile(tab, file) {
+  const chooser = tab.fileChooser;
+  tab.fileChooser = undefined;
+  if (chooser !== undefined && !chooser.page().isClosed()) {
+    const filled = await chooser.setFiles(file).then(
+      () => true,
+      () => false,
+    );
+    if (filled) {
+      return { status: 'ok' };
+    }
+  }
+  const field = tab.page.locator('input[type="file"]').first();
+  if ((await field.count()) === 0) {
+    return { status: 'no_file_field' };
+  }
+  await field.setInputFiles(file);
+  return { status: 'ok' };
 }
 
 /**
@@ -252,6 +467,16 @@ export class BrowserSidecar {
         download.cancel().catch(() => undefined);
       });
       const tab = createTab({ page });
+      // A file picker never opens on the virtual screen; the live view fills it with the person's file.
+      page.on('filechooser', chooser => {
+        tab.fileChooser = chooser;
+      });
+      // A picker belongs to the page that opened it; once the page has moved on, its element is gone.
+      page.on('framenavigated', frame => {
+        if (frame === page.mainFrame()) {
+          tab.fileChooser = undefined;
+        }
+      });
       await guardRedirects({ tab, cdp: await profile.context.newCDPSession(page) });
       profile.tabs.set(tabId, tab);
       profile.tabsByPage.set(page, tab);
@@ -334,7 +559,8 @@ export class BrowserSidecar {
       try {
         const nodes = await tab.page.evaluate(EXTRACT_SCRIPT);
         const refs = tab.refs.refsFor(nodes);
-        const text = renderSnapshot({ title: await tab.page.title(), url: tab.page.url(), nodes, refs });
+        const view = await tab.page.evaluate(VIEW_SCRIPT);
+        const text = renderSnapshot({ title: await tab.page.title(), url: tab.page.url(), nodes, refs, view });
         return { status: 'ok', text };
       } catch (error) {
         if (attempt >= READ_ATTEMPTS || !String(error).includes('Execution context was destroyed')) {
@@ -350,7 +576,14 @@ export class BrowserSidecar {
     if (tab === undefined) {
       return NO_TAB;
     }
+    // The wheel scrolls whatever is under the pointer, so it is turned over the middle of the view,
+    // and the pointer goes back to the corner so nothing in the middle stays hovered for the read.
+    const viewport = tab.page.viewportSize() ?? { width: 1280, height: 800 };
+    await tab.page.mouse.move(viewport.width / 2, viewport.height / 2);
     await tab.page.mouse.wheel(0, direction === 'up' ? -800 : 800);
+    await tab.page.mouse.move(0, 0);
+    // The wheel only starts the scroll; reading before it ends would show where the page was.
+    await scrollSettled(tab.page);
     return this.#read(tab);
   }
 
@@ -375,8 +608,69 @@ export class BrowserSidecar {
     if (!checked.ok) {
       return checked.result;
     }
-    const buffer = await tab.page.screenshot({ type: 'png' });
-    return { status: 'ok', png_base64: buffer.toString('base64') };
+    const seen = await this.#pictureLayout(tab).catch(() => undefined);
+    const buffer = await capturePage(tab.page, { type: 'png' });
+    const model = seen === undefined ? undefined : await this.#modelCopy({ tab, seen, buffer });
+    return {
+      status: 'ok',
+      png_base64: buffer.toString('base64'),
+      ...(model === undefined ? {} : { model_png_base64: model.png.toString('base64'), text: model.text }),
+    };
+  }
+
+  /**
+   * The page as the model's copy of a screenshot needs it: its text snapshot, each control's ref and
+   * box, and every box to cover (hidden fields, frames, and closed shadow roots that hold a field).
+   * The layout is read in an isolated world, and nothing on the page is changed.
+   */
+  async #pictureLayout(tab) {
+    const nodes = await tab.page.evaluate(EXTRACT_SCRIPT);
+    const refs = tab.refs.refsFor(nodes);
+    const cdp = await tab.page.context().newCDPSession(tab.page);
+    try {
+      const executionContextId = await isolatedWorld(cdp);
+      const layout = await inIsolatedWorld({
+        cdp,
+        executionContextId,
+        expression: boxesInViewScript([...refs.keys()]),
+      });
+      const covered = await inIsolatedWorld({ cdp, executionContextId, expression: MASK_BOXES_SCRIPT });
+      // Where the view is, read with the layout so the page text says where the picture was taken.
+      const view = await inIsolatedWorld({ cdp, executionContextId, expression: VIEW_SCRIPT });
+      const text = renderSnapshot({ title: await tab.page.title(), url: tab.page.url(), nodes, refs, view });
+      const closed = await closedShadowFieldBoxes(cdp);
+      const boxOf = new Map(layout.boxes.map(({ path, ...box }) => [path, box]));
+      return {
+        text,
+        width: covered.width,
+        controls: [...refs].flatMap(([path, ref]) => {
+          const box = boxOf.get(path);
+          return box === undefined ? [] : [{ ref, box }];
+        }),
+        masks: [...covered.boxes, ...closed],
+      };
+    } finally {
+      await cdp.detach().catch(() => undefined);
+    }
+  }
+
+  /**
+   * The picture the model sees, with the text snapshot from the same moment: the person's picture
+   * with every password, card or one-time-code field covered and each control boxed with its ref,
+   * drawn here and never in the page. The page is looked at again after the shot; if a hidden
+   * field appeared or moved in between, or anything fails, the model gets no picture at all.
+   */
+  async #modelCopy({ tab, seen, buffer }) {
+    try {
+      const after = await this.#pictureLayout(tab);
+      if (JSON.stringify(after.masks) !== JSON.stringify(seen.masks) || after.width !== seen.width) {
+        return undefined;
+      }
+      const png = await markInWorker({ png: buffer, scale: pngWidth(buffer) / seen.width, ...seen });
+      return { png, text: seen.text };
+    } catch {
+      return undefined;
+    }
   }
 
   /**
@@ -471,6 +765,75 @@ export class BrowserSidecar {
     return this.#read(found.tab);
   }
 
+  /**
+   * The person's open tabs for the live view, most recently used first. Listing never launches a
+   * browser: a person who has not opened anything has no tabs to show.
+   */
+  async liveTabs({ owner }) {
+    const starting = this.#profiles.get(owner);
+    if (starting === undefined) {
+      return { status: 'ok', tabs: [] };
+    }
+    const profile = await starting.catch(() => undefined);
+    if (profile === undefined) {
+      return { status: 'ok', tabs: [] };
+    }
+    const tabs = [];
+    for (const [tabId, tab] of [...profile.tabs.entries()].reverse()) {
+      tabs.push({ tab: tabId, title: await tab.page.title().catch(() => ''), url: tab.page.url() });
+    }
+    return { status: 'ok', tabs };
+  }
+
+  /**
+   * One frame of the chat's tab for the live view. The live view is the person's own look at their
+   * own browser, so unlike `#read` it is not held to the opened site: the tab itself still cannot
+   * leave that site (see `guardNavigation`), and only the app server may ask, for the signed-in
+   * person's own profile.
+   */
+  async liveFrame({ owner, tab: tabId }) {
+    const tab = await this.#tabFor({ owner, tab: tabId, create: false });
+    if (tab === undefined) {
+      return NO_TAB;
+    }
+    const buffer = await capturePage(tab.page, { type: 'jpeg', quality: 60 });
+    const viewport = tab.page.viewportSize();
+    return {
+      status: 'ok',
+      jpeg_base64: buffer.toString('base64'),
+      ...(viewport === null ? {} : { width: viewport.width, height: viewport.height }),
+    };
+  }
+
+  /**
+   * One pointer or keyboard act in the chat's tab, from the live view. Clicks go through the real
+   * mouse, so a click that would take the page off the opened site is refused by the same route
+   * guard as every other navigation.
+   */
+  async liveInput({ owner, tab: tabId, input }) {
+    const tab = await this.#tabFor({ owner, tab: tabId, create: false });
+    if (tab === undefined) {
+      return NO_TAB;
+    }
+    return inLiveOrder(tab, () => liveAct(tab.page, input));
+  }
+
+  /**
+   * Puts a file the person chose in the live view into the page: into the file picker the page just
+   * opened, or else the page's first file field. Nothing is uploaded until the page itself sends it.
+   */
+  async liveUpload({ owner, tab: tabId, name, mime, data }) {
+    const tab = await this.#tabFor({ owner, tab: tabId, create: false });
+    if (tab === undefined) {
+      return NO_TAB;
+    }
+    const file = { name, mimeType: mime, buffer: Buffer.from(data, 'base64') };
+    if (file.buffer.length > MAX_UPLOAD_BYTES) {
+      return { status: 'bad_input' };
+    }
+    return inLiveOrder(tab, () => putFile(tab, file));
+  }
+
   async close() {
     for (const starting of this.#profiles.values()) {
       const profile = await starting.catch(() => undefined);
@@ -527,15 +890,57 @@ function ownerDirName(owner) {
 async function readJsonBody(req) {
   const chunks = [];
   let size = 0;
+  const limit = req.url === '/live/upload' ? MAX_UPLOAD_BODY_BYTES : MAX_BODY_BYTES;
   for await (const chunk of req) {
     size += chunk.length;
-    if (size > MAX_BODY_BYTES) {
+    if (size > limit) {
       throw new Error('request body too large');
     }
     chunks.push(chunk);
   }
   const text = Buffer.concat(chunks).toString('utf8');
   return text === '' ? {} : JSON.parse(text);
+}
+
+/** The most text one live-view input may type at once: a pasted code or a short form answer, not a document. */
+const MAX_LIVE_TEXT_LENGTH = 10000;
+
+const isFiniteNumber = value => typeof value === 'number' && Number.isFinite(value);
+
+/**
+ * A live-view input from the request body, or undefined when it is not one the page can be given:
+ * a click with its point (and the frame size the point was read from, when the caller measured one),
+ * typed text, one named key, or a scroll step.
+ */
+function parseLiveInput(body) {
+  switch (body.kind) {
+    case 'click': {
+      if (!isFiniteNumber(body.x) || !isFiniteNumber(body.y)) {
+        return undefined;
+      }
+      const imageWidth = isFiniteNumber(body.image_width) && body.image_width > 0 ? body.image_width : undefined;
+      const imageHeight = isFiniteNumber(body.image_height) && body.image_height > 0 ? body.image_height : undefined;
+      return {
+        kind: 'click',
+        x: body.x,
+        y: body.y,
+        ...(imageWidth === undefined ? {} : { imageWidth }),
+        ...(imageHeight === undefined ? {} : { imageHeight }),
+      };
+    }
+    case 'type':
+      return typeof body.text === 'string' && body.text !== '' && body.text.length <= MAX_LIVE_TEXT_LENGTH
+        ? { kind: 'type', text: body.text }
+        : undefined;
+    case 'key':
+      return typeof body.key === 'string' && body.key !== '' && body.key.length <= 64
+        ? { kind: 'key', key: body.key }
+        : undefined;
+    case 'wheel':
+      return isFiniteNumber(body.dy) ? { kind: 'wheel', dy: body.dy } : undefined;
+    default:
+      return undefined;
+  }
 }
 
 const ROUTES = {
@@ -548,6 +953,21 @@ const ROUTES = {
   'POST /click': (sidecar, where, body) => sidecar.click({ ...where, ref: body.ref }),
   'POST /type': (sidecar, where, body) => sidecar.type({ ...where, ref: body.ref, text: body.text }),
   'POST /select': (sidecar, where, body) => sidecar.select({ ...where, ref: body.ref, option: body.option }),
+  'POST /live/frame': (sidecar, where) => sidecar.liveFrame(where),
+  'POST /live/tabs': (sidecar, where) => sidecar.liveTabs(where),
+  'POST /live/upload': (sidecar, where, body) =>
+    typeof body.name === 'string' &&
+    body.name !== '' &&
+    body.name.length <= 255 &&
+    typeof body.mime === 'string' &&
+    body.mime.length <= 255 &&
+    typeof body.data === 'string'
+      ? sidecar.liveUpload({ ...where, name: body.name, mime: body.mime, data: body.data })
+      : { status: 'bad_input' },
+  'POST /live/input': (sidecar, where, body) => {
+    const input = parseLiveInput(body);
+    return input === undefined ? { status: 'bad_input' } : sidecar.liveInput({ ...where, input });
+  },
 };
 
 const MAX_ID_LENGTH = 256;
@@ -584,6 +1004,61 @@ export function createHttpServer({ sidecar, allowedPeers }) {
   });
 }
 
+/** Draws the model's copy in a worker of its own (see pictureWorker.mjs) and answers it as a PNG. */
+function markInWorker({ png, scale, controls, masks }) {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(new URL('./pictureWorker.mjs', import.meta.url), {
+      workerData: { png, scale, controls, masks },
+    });
+    // Drawing is bounded work; a worker that has not answered by now is stopped, and no copy is made.
+    const timer = setTimeout(() => {
+      reject(new Error('the picture worker took too long'));
+      void worker.terminate();
+    }, PICTURE_WORKER_MS);
+    worker.once('message', marked => {
+      clearTimeout(timer);
+      resolve(Buffer.from(marked));
+      void worker.terminate();
+    });
+    worker.once('error', error => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    worker.once('exit', code => {
+      clearTimeout(timer);
+      if (code !== 0) {
+        reject(new Error('the picture worker stopped'));
+      }
+    });
+  });
+}
+
+/** The width a PNG says it is, from its header. */
+function pngWidth(png) {
+  return png.readUInt32BE(16);
+}
+
+/**
+ * A fixed reason for a step that failed, never the error's own text: that text can come from the
+ * page (a script error it threw), so it must not reach the model as the browser's words.
+ */
+export function failureReason(error) {
+  const message = error instanceof Error ? error.message : '';
+  if (error instanceof Error && error.name === 'TimeoutError') {
+    return 'timeout';
+  }
+  if (/net::ERR_|NS_ERROR_|Navigation failed/.test(message)) {
+    return 'navigation_failed';
+  }
+  if (/not attached|detached|Target page, context or browser has been closed|Target closed/i.test(message)) {
+    return 'page_changed';
+  }
+  if (/^(page|frame|locator)\.evaluate:/.test(message) || /Execution context was destroyed/.test(message)) {
+    return 'page_script_error';
+  }
+  return 'unknown';
+}
+
 async function handleRequest({ req, res, sidecar }) {
   const route = ROUTES[`${req.method} ${req.url}`];
   if (route === undefined) {
@@ -592,16 +1067,21 @@ async function handleRequest({ req, res, sidecar }) {
   }
   try {
     const body = await readJsonBody(req);
-    // `owner` picks the person's browser profile; `tab` picks the chat's tab inside it.
-    if (!isId(body.owner) || !isId(body.tab)) {
+    // `owner` picks the person's browser profile; `tab` picks the chat's tab inside it. Listing the
+    // tabs is the one call that names no tab: the list is how the tabs are found in the first place.
+    if (!isId(body.owner) || (req.url !== '/live/tabs' && !isId(body.tab))) {
       res.writeHead(400).end(JSON.stringify({ status: 'error', message: 'owner and tab are required' }));
       return;
     }
     const result = await route(sidecar, { owner: body.owner, tab: body.tab }, body);
     res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(result));
   } catch (error) {
+    // The full message stays in the sidecar's own log; the caller gets only the fixed reason.
+    process.stderr.write(
+      `browser sidecar: ${req.url} failed: ${error instanceof Error ? error.message : String(error)}\n`,
+    );
     res
       .writeHead(500, { 'content-type': 'application/json' })
-      .end(JSON.stringify({ status: 'error', message: error instanceof Error ? error.message : 'unknown error' }));
+      .end(JSON.stringify({ status: 'error', reason: failureReason(error) }));
   }
 }

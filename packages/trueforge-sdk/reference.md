@@ -4631,6 +4631,69 @@ await client.sessions.revokeImplementationPlanGrant("session_id", "grant_id");
 </dl>
 </details>
 
+<details><summary><code>client.sessions.<a href="/src/api/resources/sessions/client/Client.ts">getPrivacy</a>(session_id) -> TrueForge.GetChatPrivacyResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Whether the models that may answer this chat run on this machine, and which providers run elsewhere.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.sessions.getPrivacy("session_id");
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**session_id:** `string` — Session identifier.
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `SessionsClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
 <details><summary><code>client.sessions.<a href="/src/api/resources/sessions/client/Client.ts">listTurns</a>(session_id, { ...params }) -> core.Page&lt;TrueForge.Turn, TrueForge.ListTurnsResponse&gt;</code></summary>
 <dl>
 <dd>
@@ -7585,6 +7648,71 @@ await client.deliveries.push.deleteSubscription({
 </dl>
 </details>
 
+<details><summary><code>client.deliveries.push.<a href="/src/api/resources/deliveries/resources/push/client/Client.ts">lookupSubscription</a>({ ...params }) -> TrueForge.LookupPushSubscriptionResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Says whether this device is still saved for the signed-in person. A device drops off when 10 newer ones are saved or its push service says it is gone.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.deliveries.push.lookupSubscription({
+    endpoint: "endpoint"
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.deliveries.LookupPushSubscriptionRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `PushClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
 ## Internal Metrics
 <details><summary><code>client.internal.metrics.<a href="/src/api/resources/internal/resources/metrics/client/Client.ts">listCharts</a>() -> TrueForge.GetSessionMetricsChartResponse</code></summary>
 <dl>
@@ -7765,6 +7893,62 @@ await client.internal.metrics.getMeters({
 <dd>
 
 **requestOptions:** `MetricsClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+## Internal PrivateChats
+<details><summary><code>client.internal.privateChats.<a href="/src/api/resources/internal/resources/privateChats/client/Client.ts">sweep</a>() -> TrueForge.SweepPrivateChatsResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Delete private chats whose expiry time has passed. Safe to call any time.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.internal.privateChats.sweep();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**requestOptions:** `PrivateChatsClient.RequestOptions`
 
 </dd>
 </dl>
@@ -8511,7 +8695,7 @@ await client.memory.vault.delete("entry_id");
 <dl>
 <dd>
 
-Lists the authenticated user’s Sentinel audit entries from every chat, newest first, including chats that were deleted. Read-only and paged.
+Lists the authenticated user’s Sentinel audit entries from every chat, newest first, including chats that were deleted. Can be narrowed by outcome and by a from and to time. Read-only and paged.
 </dd>
 </dl>
 </dd>
@@ -10056,6 +10240,62 @@ await client.settings.sandboxProviders.upgradeImage("provider_id");
 <dd>
 
 **requestOptions:** `SandboxProvidersClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+## Settings SandboxWorkspaces
+<details><summary><code>client.settings.sandboxWorkspaces.<a href="/src/api/resources/settings/resources/sandboxWorkspaces/client/Client.ts">list</a>() -> TrueForge.ListSandboxWorkspacesResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Asks every sandbox slot which chat workspaces it holds and joins them to their chats, with the space each takes and the room left on each slot. Read-only: nothing is created, moved or removed.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.sandboxWorkspaces.list();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**requestOptions:** `SandboxWorkspacesClient.RequestOptions`
 
 </dd>
 </dl>

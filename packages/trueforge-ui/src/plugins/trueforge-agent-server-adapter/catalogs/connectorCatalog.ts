@@ -30,7 +30,7 @@ import type {
   ToolBase,
   UpdateConnectorRequest,
 } from '../../../server/types.js';
-import { toSameOriginCatalogLogoUrl } from '../../../utils/catalogLogo.js';
+import { catalogLogoSrc, withLogo } from '../../../utils/catalogLogo.js';
 import { getErrorMessage } from '../../../utils/getErrorMessage.js';
 import type { CreateTrueForgeClientOptions } from '../client.js';
 import { createCalendarSetupApi } from './calendarSetup.js';
@@ -218,9 +218,7 @@ export function toUiCatalogEntry(
     name: server.name,
     url: server.url,
     description: server.description,
-    ...(server.logo === undefined
-      ? {}
-      : { logo: toSameOriginCatalogLogoUrl({ logo: server.logo, baseUrl: options.baseUrl ?? '/' }) }),
+    ...withLogo(catalogLogoSrc({ logo: server.logo, kind: 'mcp', name: server.name, baseUrl: options.baseUrl ?? '/' })),
     auth: toUiAuthPublic(server.auth),
     ...(server.searchProvider === undefined ? {} : { searchProvider: server.searchProvider }),
   };

@@ -296,7 +296,7 @@ export type SentinelUserSettings = {
  * server's HTTP API plus the SDK client; trueforge-ui only declares the contract.
  *
  * - `GET /api/v1/sessions/{sessionId}/audit-log?limit=N` -> `{ entries: [...] }`
- * - `GET /api/v1/user/audit-log?limit=N&page_token=T&outcome=O` -> `{ data: [...], pagination }`
+ * - `GET /api/v1/user/audit-log?limit=N&page_token=T&outcome=O&from=ISO&to=ISO` -> `{ data: [...], pagination }`
  * - `GET /api/v1/user/settings/sentinel` -> `{ data: settings }`
  * - `PATCH /api/v1/user/settings/sentinel` with a settings patch -> `{ data: settings }`
  * - `GET /api/v1/user/brief-items/completions` -> `{ data: [{ item_key, ... }] }`
@@ -309,6 +309,10 @@ export type SentinelApi = {
     limit?: number;
     pageToken?: string | undefined;
     outcome?: SentinelAuditOutcome | undefined;
+    /** Start of the shown days, as an ISO instant; no start bound when undefined. */
+    from?: string | undefined;
+    /** End of the shown days, as an ISO instant; entries before it show. No end bound when undefined. */
+    to?: string | undefined;
   }) => Promise<SentinelUserAuditPage>;
   getUserSettings: () => Promise<SentinelUserSettings>;
   updateUserSettings: (patch: Partial<SentinelUserSettings>) => Promise<SentinelUserSettings>;

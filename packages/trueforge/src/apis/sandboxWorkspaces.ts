@@ -1,24 +1,28 @@
 import { OpenAPIHono } from '@hono/zod-openapi';
 import type { ISessionStore } from '@truefoundry/trueforge-core/agent-session';
-import { rawSandboxId, type SandboxWorkspace, type SandboxWorkspaceSlot } from '@truefoundry/trueforge-core/core';
+import {
+  formatSandboxId,
+  rawSandboxId,
+  type SandboxWorkspace,
+  type SandboxWorkspaceSlot,
+} from '@truefoundry/trueforge-core/core';
 import { HTTPException } from 'hono/http-exception';
 import type { Logger } from 'winston';
 import type { ResolveRequestContext } from '../auth/identity';
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import { listSandboxWorkspacesRoute } from '../routes/sandboxWorkspaceRoutes';
 import type { SlotWorkspaceSessions } from '../sandbox/slotBackend';
-import { sandboxIdOfLastTurn } from './sessions';
+
+/** The provider type slot sandboxes record in a versioned sandbox id. */
+const SLOTS_PROVIDER_TYPE = 'slots';
 
 export interface SandboxWorkspacesRouterDeps {
-  sessionStore: Pick<ISessionStore<SessionCustom, TurnCustom>, 'listSessions' | 'getTurn'>;
+  sessionStore: Pick<ISessionStore<SessionCustom, TurnCustom>, 'findChatsBySandboxIds'>;
   logger: Logger;
   resolveRequestContext: ResolveRequestContext;
   /** Every slot's workspace sessions; empty when the slots backend is off. Throws when a slot cannot be asked. */
   listSlotWorkspaces: () => Promise<SlotWorkspaceSessions[]>;
 }
-
-/** Sessions per page while walking the tenant's chats to join them to their workspaces. */
-const SESSION_PAGE_LIMIT = 200;
 
 /** Admin/settings chat-workspace surface (mounted at /api/v1/settings/sandbox-workspaces). */
 export function createSandboxWorkspacesRouter(deps: SandboxWorkspacesRouterDeps) {
@@ -36,38 +40,15 @@ export function createSandboxWorkspacesRouter(deps: SandboxWorkspacesRouterDeps)
       });
     }
 
-    // Join key: the sandbox id a chat's last turn recorded for its workspace, in its raw form.
-    const chatBySandboxId = new Map<string, { chatId: string; title: string | null }>();
-    if (slotListings.length > 0) {
-      let pageToken: string | undefined;
-      do {
-        const page = await deps.sessionStore.listSessions({
-          tenant_id: requestContext.tenant_id,
-          limit: SESSION_PAGE_LIMIT,
-          page_token: pageToken,
-          order: undefined,
-          start_timestamp: undefined,
-          end_timestamp: undefined,
-          agent_id: undefined,
-          folder_id: undefined,
-          no_folder: false,
-          created_by_or_agent_ids: undefined,
-          metadata: undefined,
-          source_type: undefined,
-          source_id: undefined,
-        });
-        for (const record of page.data) {
-          const sandboxId = await sandboxIdOfLastTurn({
-            deps: { sessionStore: deps.sessionStore, logger: deps.logger },
-            record,
-          });
-          if (sandboxId !== undefined) {
-            chatBySandboxId.set(rawSandboxId(sandboxId), { chatId: record.session_id, title: record.title });
-          }
-        }
-        pageToken = page.pagination.next_page_token;
-      } while (pageToken !== undefined);
-    }
+    // Join key: the sandbox id a chat's latest turn recorded, which may be the raw slot id or its versioned form.
+    const reported = slotListings.flatMap(slotListing =>
+      slotListing.sessions.map(session => `s${String(slotListing.slot)}-${session.session_id}`),
+    );
+    const chats = await deps.sessionStore.findChatsBySandboxIds({
+      tenant_id: requestContext.tenant_id,
+      sandbox_ids: reported.flatMap(raw => [raw, formatSandboxId({ providerType: SLOTS_PROVIDER_TYPE, rawId: raw })]),
+    });
+    const chatBySandboxId = new Map(chats.map(chat => [rawSandboxId(chat.sandbox_id), chat]));
 
     const workspaces: SandboxWorkspace[] = [];
     const slots: SandboxWorkspaceSlot[] = [];
@@ -77,9 +58,15 @@ export function createSandboxWorkspacesRouter(deps: SandboxWorkspacesRouterDeps)
         totalBytes += session.bytes;
         const sandboxId = `s${String(slotListing.slot)}-${session.session_id}`;
         const chat = chatBySandboxId.get(sandboxId);
+        // Another person's chat is named only as theirs: its title is theirs to see.
+        const yours = chat?.created_by_subject_id === requestContext.subject.id;
+        // A private chat stays out of every list by title, even for its owner.
+        const yourPrivate = yours && chat.is_private;
         workspaces.push({
-          chat_id: chat?.chatId ?? null,
-          chat_title: chat?.title ?? null,
+          holder: chat === undefined ? 'none' : yours ? 'you' : 'someone_else',
+          chat_id: yours ? chat.session_id : null,
+          chat_title: yours && !chat.is_private ? chat.title : null,
+          chat_private: yourPrivate,
           sandbox_id: sandboxId,
           slot: slotListing.slot,
           bytes: session.bytes,

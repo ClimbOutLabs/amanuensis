@@ -235,12 +235,11 @@ None of these are required to chat with a model. Each is one sentence plus where
     ```
 
     ```bash
-    helm install trueforge oci://tfy.jfrog.io/tfy-helm/trueforge \
-      --version <x.y.z> \
+    helm install trueforge ./charts/trueforge \
       --values values.yaml
     ```
 
-    Find the version you want to install in the [published Helm charts](https://tfy.jfrog.io/ui/packages/oci:%2F%2Ftrueforge).
+    Run it from a clone of this repository; the chart lives in `charts/trueforge`.
     See the [chart README](https://github.com/ClimbOutLabs/amanuensis/blob/main/charts/trueforge/README.md#api-key) for full `apiKey` details.
 
     To expose TrueForge through an Istio gateway, save this `VirtualService` in
@@ -269,8 +268,7 @@ None of these are required to chat with a model. Each is one sentence plus where
     Then install (or upgrade) with the values file that includes both `apiKey` and `extraObjects`:
 
     ```bash
-    helm upgrade --install trueforge oci://tfy.jfrog.io/tfy-helm/trueforge \
-      --version <x.y.z> \
+    helm upgrade --install trueforge ./charts/trueforge \
       --values values.yaml
     ```
 

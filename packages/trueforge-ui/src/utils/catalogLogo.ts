@@ -1,3 +1,7 @@
+import type { FC, SVGProps } from 'react';
+
+import { CATALOG_LOGOS, type CatalogLogoKind } from '../icons/catalogLogos.js';
+
 function splitCatalogLogoUrl(src: string): { dir: string; base: string; ext: string; suffix: string } | undefined {
   const match = /^(.*\/)?([^/?#]+?)(\.[^./?#]+)([?#].*)?$/.exec(src);
   if (match == null) return undefined;
@@ -47,4 +51,38 @@ export function toSameOriginCatalogLogoUrl({ logo, baseUrl }: { logo: string; ba
   if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return logo;
   const base = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`;
   return `${base}catalog-logos/${parsed.protocol.slice(0, -1)}/${parsed.host}${parsed.pathname}`;
+}
+
+const BUNDLED_CATALOG_LOGO_PREFIX = 'catalog-logo:';
+
+/**
+ * Logo `src` for a catalog entry: a logo the catalog names is served same-origin, otherwise the
+ * bundled logo for that entry when Aman ships one. Undefined means no logo (the UI draws initials).
+ */
+export function catalogLogoSrc({
+  logo,
+  kind,
+  name,
+  baseUrl,
+}: {
+  logo: string | undefined;
+  kind: CatalogLogoKind;
+  name: string;
+  baseUrl: string;
+}): string | undefined {
+  if (logo !== undefined) return toSameOriginCatalogLogoUrl({ logo, baseUrl });
+  const key = `${kind}/${name}`;
+  return Object.hasOwn(CATALOG_LOGOS, key) ? `${BUNDLED_CATALOG_LOGO_PREFIX}${key}` : undefined;
+}
+
+/** Spreads `{ logo }` only when there is one, for shapes where `logo` is optional. */
+export function withLogo(logo: string | undefined): { logo?: string } {
+  return logo === undefined ? {} : { logo };
+}
+
+/** The bundled logo a `catalogLogoSrc` value points at, or undefined for an ordinary image URL. */
+export function bundledCatalogLogo(src: string): FC<SVGProps<SVGSVGElement>> | undefined {
+  if (!src.startsWith(BUNDLED_CATALOG_LOGO_PREFIX)) return undefined;
+  const key = src.slice(BUNDLED_CATALOG_LOGO_PREFIX.length);
+  return Object.hasOwn(CATALOG_LOGOS, key) ? CATALOG_LOGOS[key] : undefined;
 }
