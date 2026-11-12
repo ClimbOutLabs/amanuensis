@@ -81,7 +81,7 @@ export function effectiveToolAdmissions(input: {
  * *receive* chat scope; the scope's binding lives in the grant key: the tool and its destination, and for sandbox
  * exec an invocation digest over (purpose, command, cwd, env), so approving one command in a chat never authorizes a
  * different one or reaches another chat. A consequential action qualifies only when its card names a target for
- * the grant to be tied to; a send and a steered call never do.
+ * the grant to be tied to; a send, a mail draft and a steered call never do.
  */
 export function allowsChatApproval(info: InternalToolCallInfo): boolean {
   if (secretPathReadBarsDurableGrant(info)) {
@@ -103,19 +103,14 @@ export function allowsChatApproval(info: InternalToolCallInfo): boolean {
 }
 
 /**
- * Whether the card names who or where the action goes: a destination, a recipient, or the people a mail draft
- * is addressed to. An action whose card names none has nothing for a chat grant to be tied to: the grant would
- * cover any later call of the tool, whatever it carries. The connector's own address does not count: it is the
- * same on every call to that connector, so it tells one action from another no better than the tool name.
+ * Whether the card names who or where the action goes: a destination or a recipient. An action whose card names
+ * none has nothing for a chat grant to be tied to: the grant would cover any later call of the tool, whatever it
+ * carries. The connector's own address does not count: it is the same on every call to that connector, so it
+ * tells one action from another no better than the tool name.
  */
 function cardNamesTarget(info: InternalToolCallInfo): boolean {
   const card = info.tier3_card ?? null;
-  const mail = card?.email ?? null;
-  const mailRecipients = mail === null ? 0 : mail.to.length + mail.cc.length + mail.bcc.length;
-  return (
-    mailRecipients > 0 ||
-    [card?.destination, card?.recipient].some(target => typeof target === 'string' && target.trim() !== '')
-  );
+  return [card?.destination, card?.recipient].some(target => typeof target === 'string' && target.trim() !== '');
 }
 
 /** A change to the person's own calendar with no guests; a guest change never qualifies, whatever its effect. */

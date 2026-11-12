@@ -38,13 +38,15 @@ export const CONTENT_STEERED_REASON = 'content_steered';
 export const CONNECTOR_READ_GUARD_REASON = 'connector_read_guard';
 
 /**
- * Tier 3 reason codes for calls the classifier ranks as a send, destructive, install or hint-escalated
- * action. A standing approval is argument-blind, so these never get "Always allow" across chats, whatever the
- * hosting server declares about the tool. Only the chat grant below may cover some of them, inside one chat.
+ * Tier 3 reason codes for calls the classifier ranks as a send, a mail draft, destructive, install or
+ * hint-escalated action. A standing approval is argument-blind, so these never get "Always allow" across chats,
+ * whatever the hosting server declares about the tool. Only the chat grant below may cover some of them, inside
+ * one chat.
  */
 export const GRANT_BARRED_TIER_REASONS: ReadonlySet<string> = new Set([
   'external_service',
   'gmail_send',
+  'gmail_draft',
   'mail_new_recipient',
   'mail_send',
   'destructive_action',
@@ -67,11 +69,10 @@ export const GRANT_BARRED_TIER_REASONS: ReadonlySet<string> = new Set([
 /**
  * Consequential actions a person may answer once for the whole chat with "Always allow this here". The chat grant
  * binds the tool and its destination, never a standing grant across chats, so it is offered only when the card
- * names one. A send, a guest change, a steered call, and creating a schedule or a persona are never among them:
- * each of those asks every time.
+ * names one. A send, a mail draft, a guest change, a steered call, and creating a schedule or a persona are never
+ * among them: each of those asks every time.
  */
 export const CHAT_GRANTABLE_CONSEQUENCE_REASONS: ReadonlySet<string> = new Set([
-  'gmail_draft',
   'connector_outbound',
   'destructive_action',
   'mcp_destructive_hint',
