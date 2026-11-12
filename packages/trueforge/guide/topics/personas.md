@@ -39,3 +39,13 @@ Each persona in that list has a knowledge library. You can add documents to it t
 7. Click **Save changes**.
 
 To use it, click **More** in the left bar, then click **Agents**. Click **Try** on the row of your agent. You can also pick it when you make a schedule.
+
+## Choose when an agent summarizes a long chat
+
+A model can only read so much of a chat at once. When a chat gets long, Aman summarizes its oldest part so the model can keep going.
+
+1. In the **Agent Config** panel, click the edit button on **Run settings**.
+2. Find **When to summarize long chats**.
+3. Pick **Automatic (recommended)** to let Aman decide from the model's size limit. If that limit isn't known, Aman uses a safe default.
+4. Or pick **At a set size** and type the chat size to summarize at.
+5. Close the panel, then click **Save Agent**.
