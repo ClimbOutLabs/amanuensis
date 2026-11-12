@@ -142,8 +142,11 @@ export const UpdatePersonalizationProfileRequestSchema = z
       .number()
       .int()
       .positive()
+      .nullable()
       .optional()
-      .describe('The profile revision this save was made from. A save from an older revision is refused with 409.'),
+      .describe(
+        'The profile revision this save was made from, or null when no profile existed yet. A save made from an older state is refused with 409.',
+      ),
   })
   .strict()
   .openapi('UpdatePersonalizationProfileRequest', {

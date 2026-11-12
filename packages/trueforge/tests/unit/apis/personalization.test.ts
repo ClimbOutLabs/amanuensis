@@ -90,6 +90,55 @@ describe('personalization router', () => {
     });
   });
 
+  it('refuses a save from a page that read no profile once learning has created one', async () => {
+    const db = createSqliteDb(':memory:');
+    await migrateSqliteToLatest(db);
+    const store = new SqlitePersonalizationStore(db);
+    const router = createPersonalizationRouter({
+      personalizationStore: store,
+      resolveRequestContext: () => userA,
+      resolveMemoryClient: async () => undefined,
+      logger: winston.createLogger({ silent: true }),
+    });
+    const empty = {
+      assistant_name: null,
+      assistant_identity: null,
+      voice_guidance: null,
+      user_name: null,
+      address_as: null,
+      user_profile: null,
+      pinned_preferences: [],
+      help_areas: [],
+    };
+
+    // The page opened before any profile existed; the learning pass then wrote the first one.
+    await store.upsertProfile({
+      tenant_id: 'default',
+      created_by: 'user-a',
+      updated_by: PROFILE_LEARNING_ACTOR,
+      ...empty,
+      learned_profile: '- Likes hiking.',
+      learning_enabled: true,
+      expected_revision: null,
+    });
+
+    const stale = await router.request(
+      '/profile',
+      jsonInit('PUT', { profile: { ...empty, user_profile: 'Short replies.' }, expected_revision: null }),
+    );
+    expect(stale.status).toBe(409);
+    const kept = GetPersonalizationProfileResponseSchema.parse(await (await router.request('/profile')).json());
+    expect(kept.data).toMatchObject({ learned_profile: '- Likes hiking.', revision: 1 });
+
+    await router.request('/profile', { method: 'DELETE' });
+    const first = await router.request(
+      '/profile',
+      jsonInit('PUT', { profile: { ...empty, user_profile: 'Short replies.' }, expected_revision: null }),
+    );
+    expect(first.status).toBe(200);
+    await db.destroy();
+  });
+
   it('stores the user name and form of address, and reads them as unset when a client omits them', async () => {
     const db = createSqliteDb(':memory:');
     await migrateSqliteToLatest(db);
