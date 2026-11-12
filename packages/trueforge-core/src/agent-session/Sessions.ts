@@ -13,16 +13,19 @@ import type {
 } from './store/ISessionStore';
 import { SessionExternalIdConflictError } from './store/SessionStoreErrors';
 
+/** Create fields `Sessions.create` defaults when the caller leaves them out. */
+type DefaultedCreateField = 'custom' | 'metadata' | 'source' | 'is_incognito' | 'private_expires_at';
+
 /**
- * Domain create input: same as {@link CreateSessionInput}, but `custom`,
- * `metadata`, and `source` are optional — {@link Sessions.create} defaults them
- * (`null` / `{}` / `null`). The store contract requires those fields explicitly.
+ * Domain create input: same as `CreateSessionInput`, but `custom`, `metadata`, `source`,
+ * `is_incognito` and `private_expires_at` are optional — `Sessions.create` defaults them
+ * (`null` / `{}` / `null` / `false` / `null`). The store contract requires those fields explicitly.
  */
 export type SessionsCreateInput<TSessionCustom extends object> = Omit<
   CreateSessionInput<TSessionCustom>,
-  'custom' | 'metadata' | 'source'
+  DefaultedCreateField
 > & {
-  [K in 'custom' | 'metadata' | 'source']?: CreateSessionInput<TSessionCustom>[K] | undefined;
+  [K in DefaultedCreateField]?: CreateSessionInput<TSessionCustom>[K] | undefined;
 };
 
 export class Sessions<
@@ -49,6 +52,8 @@ export class Sessions<
       custom: input.custom ?? null,
       metadata: input.metadata ?? {},
       source: input.source ?? null,
+      is_incognito: input.is_incognito ?? false,
+      private_expires_at: input.private_expires_at ?? null,
     });
     const record = await this.store.getSession({
       tenant_id: input.tenant_id,

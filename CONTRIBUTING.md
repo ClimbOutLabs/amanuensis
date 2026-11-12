@@ -167,8 +167,10 @@ Workspace tasks go through `package.json` scripts - if a repeatable workflow is 
 | `pnpm lint` / `pnpm format`                          | ESLint (with fixes) / Prettier                        |
 | `pnpm smoke` / `pnpm smoke:down`                     | Full Docker Compose stack + health check              |
 | `pnpm smoke:npx`                                     | Pack the published CLI and boot it like `npx`         |
+| `pnpm smoke:npx:amanuensis`                          | Pack `amanuensis` and start it with `npx`; CI runs it |
 | `pnpm chart:lint` / `pnpm chart:template`            | Validate the Helm chart                               |
 | `pnpm clean` / `pnpm clean:all`                      | Remove build outputs (+ `node_modules` for `:all`)    |
+| `pnpm licenses:check`                                | Check dependency licenses (see below)                 |
 
 ## Testing
 
@@ -199,10 +201,19 @@ pnpm smoke:down
 
 Open [http://localhost:8791](http://localhost:8791). Credentials come from `packages/trueforge/.env`. The app is on host `:8791` (offset from local `pnpm dev` on `:8790`); Postgres and Redis stay on the compose network only.
 
+## Dependency licenses
+
+Aman is licensed under MPL-2.0. Every dependency must use a license from the accepted list in [`scripts/dependency-license-policy.mjs`](scripts/dependency-license-policy.mjs). That list holds permissive licenses (MIT, Apache-2.0, BSD, ISC and similar) and weak copyleft that stays with its own files or library (MPL-2.0, LGPL, EPL-2.0). Everything else fails: strong or network copyleft such as GPL and AGPL, source-available or non-commercial terms, proprietary terms, and packages that declare no license at all. A dual-licensed package passes when one of its choices is accepted.
+
+CI runs `pnpm licenses:check` when a pull request changes dependencies. It reads the pnpm workspace (including the macOS and Windows native packages in `pnpm-lock.yaml`, whose licenses come from the npm registry), every tracked `package-lock.json`, every tracked `requirements*.txt` and `requirements*.lock` (license data comes from PyPI for each pinned version), and every tracked `go.mod`. Requirements files must pin every package to one version; keep version ranges in a `.in` file and lock it with `uv pip compile`. Dockerfiles must install packages from these files rather than by name. Python packaging manifests (`pyproject.toml` with dependencies, `setup.py`, `setup.cfg`) are not read, so the check fails on them. OS packages installed with `apt` and the base images named in `FROM` lines are not covered.
+
+If a package's license metadata is missing or unclear, read its license text and add a line to [`scripts/dependency-licenses-reviewed.txt`](scripts/dependency-licenses-reviewed.txt) with the SPDX license you found and where you found it. That license must still be on the accepted list, and an entry is refused when the package's own metadata already names a license. A `WITH` exception must also be on the accepted exception list. Go modules have no license metadata, so each one needs a line there. If a package has no license, or one that is not accepted, replace it. To run the check locally, run `pnpm install` first.
+
 ## Generated code - do not edit by hand
 
 - [`packages/trueforge-sdk`](packages/trueforge-sdk), [`.github/fern/openapi/openapi.json`](.github/fern/openapi/openapi.json), and [`docs/openapi.json`](docs/openapi.json) are generated and committed. Edit route handlers under `packages/trueforge/src/routes/` instead; CI regenerates the outputs. To regenerate locally (Docker required): `pnpm sdk:generate`.
 - Catalog YAML files under `packages/trueforge/catalog/` are inlined at build time by `build:gen` scripts.
+- The help pack behind **Help, I'm stuck** (`packages/trueforge/src/personas/amanGuide/knowledgePack.generated.ts`) is built from the guide topics, the public docs pages and the Tour cards. Run `pnpm guide:build` and commit the result; CI runs `pnpm guide:check` and fails when it is stale. See [`packages/trueforge/guide/README.md`](packages/trueforge/guide/README.md).
 
 ## Server entry points
 
@@ -230,11 +241,68 @@ Prettier and ESLint run as pre-commit hooks via husky + lint-staged.
 
 1. Fork (or branch) and create a topic branch: `git checkout -b my-fix`.
 2. Make your change, with tests where it makes sense. Do not commit generated OpenAPI/SDK output (forks: source only; `main` regenerates after merge).
-3. Make sure `pnpm build`, `pnpm test`, `pnpm typecheck`, `pnpm lint:ci`, and `pnpm format:check` pass - CI runs exactly these.
+3. Make sure `pnpm build`, `pnpm test`, `pnpm typecheck`, `pnpm lint:ci`, and `pnpm format:check` pass. CI also runs the root script tests (`pnpm test:repo-policy`, `pnpm lint:theme` and the other root `test:*` scripts), the layout rules (`pnpm check:repo-rules`), a check that the PR adds no `as T` or non-null `!` assertions (`pnpm check:new-assertions`), and, when `installer/` changes, `pnpm lint:installer` and `pnpm test:installer`. If you added or changed a dependency, also run `pnpm licenses:check`.
    CI also installs, typechecks and builds on arm64, runs each changed package's tests on both x64 and arm64, and builds the Docker images the installer builds natively for arm64 (the app image is also started and must become healthy). An arm64-only failure usually means a native dependency, Python wheel, downloaded binary or base image without an arm64 build.
-4. Keep PRs focused and reasonably small; describe **what** changed and **why** in the description.
-5. Open the PR. The maintainer will review it; squash-merge is the norm.
-6. **Please avoid rebasing or force-pushing once a maintainer has started reviewing.** It can make iterative reviewing harder. To update your branch, merge `main` instead. We squash-merge at the end, so messy in-PR history is fine.
+4. If the PR changes a screen people see, update the help topic that covers it under `packages/trueforge/guide/topics`. When no topic needs to change, add the label `help: no change needed` and say why in the PR. The **Help changed with screens** check enforces this.
+5. Keep PRs focused and reasonably small; describe **what** changed and **why** in the description.
+6. Keep the description, commit messages and added lines free of AI-tool attribution: no generated-by footers, no AI `Co-Authored-By` or session trailers, and no links to private assistant workspaces. Leave out privacy or license checklists too; CI checks dependency licenses. The **PR hygiene** check fails on any of these and runs again when you edit the description.
+7. Open the PR. The maintainer will review it; squash-merge is the norm.
+8. **Please avoid rebasing or force-pushing once a maintainer has started reviewing.** It can make iterative reviewing harder. To update your branch, merge `main` instead. We squash-merge at the end, so messy in-PR history is fine.
+
+## Nightly run
+
+A pull request runs only the test suites its changed files select. The **Nightly** workflow ([`.github/workflows/nightly.yml`](.github/workflows/nightly.yml)) runs every suite on `main` each night, including all the browser tests, whatever changed that day. It reuses the CI workflow, so a suite added to CI is in the nightly run too.
+
+- When a nightly run fails, it opens an issue titled **Nightly tests failed** that lists the failed jobs and links the run. Later failures are added to the same issue. The next run that passes closes it. A cancelled run changes nothing.
+- To start a run by hand, open the **Actions** tab, pick **Nightly**, and choose **Run workflow**. A run started on a branch other than `main` does not open or close the issue.
+- The run uses a scripted model and needs no keys or accounts.
+
+### Every feature names its test
+
+[`tests/nightly-coverage.json`](tests/nightly-coverage.json) lists every feature: the Settings panels, approval cards, email and calendar presets, Home cards, installer commands and server route groups read from the code, plus the screens listed by hand under `screens`. Each row gives the feature's feature set (Chat, Memory, Reminders and so on) and the tests that exercise it. `pnpm nightly:coverage` prints how many features have a test and fails when:
+
+- a feature has no row, or a row names a feature that is gone;
+- a named test does not exist, or never mentions the feature's id;
+- a feature with no test is missing from `not_yet`.
+
+When you add a feature, add its row and its test in the same PR. Add it to `not_yet` only when the test truly cannot land yet, and say why in the PR.
+
+### Screenshots
+
+Browser tests save a picture at each named step with `featureShotPath({ surface, step })` from [`packages/frontend/tests/support/featureShots.ts`](packages/frontend/tests/support/featureShots.ts). The feature's id picks the folder, so pictures land in one folder per feature set. A failing test saves a picture of every open page with `FAILED` in its name.
+
+In CI the pictures go in a folder named for the run's date and time in UTC, such as `2026/11/10/0917/chat/`. The folder gets an `index.html` contact sheet and a `results.json`, and the run keeps it for 30 days as the **screenshots** download on the run's page. To see the same on your machine:
+
+```bash
+AMAN_SCREENSHOT_DIR=/tmp/aman-shots pnpm test:frontend
+pnpm nightly:gallery /tmp/aman-shots
+```
+
+### The signed-in journey
+
+`pnpm test:journey` runs one person's first hour on the built app, the way an installed Aman runs: sign in through the real sign-in service (Dex), land on first run, add a model in Settings, chat, come back to the chat, and sign out. The test is [`packages/frontend/tests/journeys/signedIn.journey.ts`](packages/frontend/tests/journeys/signedIn.journey.ts). CI runs it on every pull request and every night, right after the build, and its pictures join the same **screenshots** download.
+
+To run it on your machine, build first. It needs Docker for the sign-in service and reaches no outside host.
+
+```bash
+pnpm build
+pnpm test:journey
+```
+
+On a machine with no Docker, set `AMAN_DEX_DIR` to a folder that holds the `dex` program and its `web` folder.
+
+## Docs website
+
+The docs website is built from the pages in `docs/` and the help topics in `packages/trueforge/guide/topics/`. Those files are the only copy: edit them, never the site. [`docs/README.md`](docs/README.md) is the docs home, and the website's menu follows its sections, so a new page goes in that table too. The website leaves out the parts for people working on the code (the agent harness, measuring changes, and the project pages); `SITE_LEAVES_OUT` in `scripts/build-docs-site.mjs` names them. Their pages are still built, so links to them keep working.
+
+The "Docs site" workflow builds the website on every pull request that touches these pages and publishes it to GitHub Pages when the change reaches `main`. To build it on your own machine, install Python 3, then run:
+
+```bash
+pip install -r docs-site/requirements.txt
+pnpm docs:site:build
+```
+
+The finished site is in `docs-site/site/`. Open `docs-site/site/index.html`, or run `python3 -m http.server -d docs-site/site` and open `http://localhost:8000`.
 
 ## Releases
 

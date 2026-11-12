@@ -176,6 +176,56 @@ describe('browser live routes', () => {
     ]);
   });
 
+  it('forwards a pointer move, a press and a release from takeover', async () => {
+    const { app, sent } = buildApp(() => ({ json: { status: 'ok' } }));
+    for (const body of [
+      { tab: 'chat-1', kind: 'move', x: 30, y: 40, image_width: 640, image_height: 400 },
+      { tab: 'chat-1', kind: 'down', x: 30, y: 40 },
+      { tab: 'chat-1', kind: 'up', x: 35, y: 45 },
+    ]) {
+      const response = await call(app, { method: 'POST', path: '/api/browser/live/input', body });
+      expect(response.status).toBe(200);
+    }
+    expect(sent.map(entry => entry.body)).toEqual([
+      { owner: 'default:user-a', tab: 'chat-1', kind: 'move', x: 30, y: 40, image_width: 640, image_height: 400 },
+      { owner: 'default:user-a', tab: 'chat-1', kind: 'down', x: 30, y: 40 },
+      { owner: 'default:user-a', tab: 'chat-1', kind: 'up', x: 35, y: 45 },
+    ]);
+  });
+
+  it("hands the caller's own tab over, and back, and says which hand holds it", async () => {
+    const { app, sent } = buildApp(path =>
+      path === '/live/takeover' ? { json: { status: 'ok', takeover: true } } : { json: { status: 'ok' } },
+    );
+    const response = await call(app, {
+      method: 'POST',
+      path: '/api/browser/live/takeover',
+      body: { tab: 'chat-1', on: true },
+    });
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ data: { status: 'ok', takeover: true } });
+    expect(sent).toEqual([
+      {
+        url: 'http://browser-relay:8792/live/takeover',
+        headers: expect.objectContaining({ 'x-browser-secret': SECRET }),
+        body: { owner: 'default:user-a', tab: 'chat-1', on: true },
+      },
+    ]);
+  });
+
+  it('refuses a takeover request that names the profile or is not a yes or no, without calling the sidecar', async () => {
+    const { app, sent } = buildApp(() => ({ json: { status: 'ok', takeover: true } }));
+    for (const body of [
+      { tab: 'chat-1', on: true, owner: 'default:someone-else' },
+      { tab: 'chat-1', on: 'yes' },
+      { tab: 'chat-1' },
+    ]) {
+      const response = await call(app, { method: 'POST', path: '/api/browser/live/takeover', body });
+      expect(response.status).toBe(400);
+    }
+    expect(sent).toEqual([]);
+  });
+
   it('refuses an input it does not know, without calling the sidecar', async () => {
     const { app, sent } = buildApp(() => ({ json: { status: 'ok' } }));
     const response = await call(app, {
@@ -253,7 +303,12 @@ describe('browser live routes', () => {
   it('refuses a form posted from another site, without calling the sidecar', async () => {
     const { app, sent } = buildApp(() => ({ json: { status: 'ok' } }));
     const formBody = JSON.stringify({ tab: 'chat-1', kind: 'type', text: 'x' });
-    for (const path of ['/api/browser/live/input', '/api/browser/live/frame', '/api/browser/live/upload']) {
+    for (const path of [
+      '/api/browser/live/input',
+      '/api/browser/live/frame',
+      '/api/browser/live/upload',
+      '/api/browser/live/takeover',
+    ]) {
       const response = await app.request(`http://localhost${path}`, {
         method: 'POST',
         headers: { ...COOKIE, 'content-type': 'text/plain', origin: 'https://evil.example' },
