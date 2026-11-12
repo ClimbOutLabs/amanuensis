@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Test double for `ip`: lists the IPv4 addresses in $STUB_ADDRS (space separated, each ADDRESS or INTERFACE:ADDRESS)
-# the way `ip -4 -o addr show` does.
+# the way `ip -4 -o addr show` does, and the routes in $STUB_ROUTES (space separated destinations) like `ip -4 route show`.
 case "$*" in
   *"addr show"*)
     n=0
@@ -14,6 +14,9 @@ case "$*" in
       esac
       echo "$((n + 1)): $iface    inet $addr/24 brd 255.255.255.255 scope global $iface"
     done
+    ;;
+  *"route show"*)
+    for route in ${STUB_ROUTES:-}; do echo "$route dev eth0 proto kernel scope link"; done
     ;;
   *) exit 1 ;;
 esac

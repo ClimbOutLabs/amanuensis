@@ -338,6 +338,8 @@ After a normal install the assistant can run code (Python and shell, in a sandbo
 
 **Ports in use.** `instance add` tests each port with a real bind before using it. If it reports a port conflict, either free the port or pass `--port` and `--login-port` explicitly.
 
+**No free network addresses.** Docker gives each new network a large block from a short list, and a computer with many Docker projects can run out. Aman's own networks take small blocks the installer picks from 172.16.0.0/16, clear of the networks and routes already on the computer; a network that already exists keeps its addresses. If even those run out, the installer says so: remove networks nothing uses with `docker network prune`, then run the same command again. A failed upgrade still puts the previous version back.
+
 **Docker Desktop credential store.** If image pulls fail with credential errors, open Docker Desktop, sign the credential helper back in, and rerun the installer.
 
 **Clock skew.** If logins or certificate checks fail right after a sleep or a VM resume, check the machine clock. Set it to the right time and run doctor again.

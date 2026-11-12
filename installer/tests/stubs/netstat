@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Test double for macOS `netstat -rn -f inet`: prints the routes in $STUB_NETSTAT_ROUTES (space separated
+# destinations, written the short way netstat writes them) under its usual headings.
+echo "Routing tables"
+echo ""
+echo "Internet:"
+echo "Destination        Gateway            Flags               Netif Expire"
+echo "default            192.168.1.1        UGScg                 en0"
+for route in ${STUB_NETSTAT_ROUTES:-}; do echo "$route          link#4             UCS                   en0      !"; done

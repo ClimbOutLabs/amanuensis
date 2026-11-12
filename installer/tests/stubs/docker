@@ -120,6 +120,11 @@ case "$cmd" in
     exit 0
     ;;
   logs)
+    for last in "$@"; do :; done
+    if [ "$last" = c-tls ]; then
+      printf '%s\n' "${STUB_HEALTHY_LOG:-}"
+      exit 0
+    fi
     printf '%s\n' "${STUB_UP_FAIL_LOG:-}"
     exit 0
     ;;
@@ -141,6 +146,7 @@ case "$cmd" in
       exit 0
     fi
     case "$*" in
+      *State.Status*c-tls) echo "running exit 0 oom false healthy" && exit 0 ;;
       # The aliases a container has on one network: --format '{{with index .NetworkSettings.Networks "NET"}}...'.
       *NetworkSettings.Networks*)
         net=$(printf '%s' "$*" | sed -n 's/.*Networks "\([^"]*\)".*/\1/p')
@@ -178,6 +184,21 @@ case "$cmd" in
             echo
             exit 0
             ;;
+          # The subnets of networks listed in $S/network_subnets ("name subnet"), one line per network.
+          *--format*IPAM.Config*Subnet*)
+            touch "$S/network_subnets"
+            found=1
+            for n in "$@"; do
+              case "$n" in --format | '{{'*) continue ;; esac
+              if grep -q "^$n " "$S/network_subnets"; then
+                awk -v n="$n" '$1 == n { printf "%s ", $2 } END { print "" }' "$S/network_subnets"
+              else
+                found=0
+              fi
+            done
+            [ "$found" = 1 ] || { echo "Error: No such network" >&2; exit 1; }
+            exit 0
+            ;;
           *--format*) case "$1" in aman-*_default) echo "172.30.0.1 "; exit 0 ;; esac ;;
         esac
         grep -Fxq "$1" "$S/networks"
@@ -202,6 +223,7 @@ case "$cmd" in
       ls)
         # Leftover networks of a Compose project: lines "project id" in $S/leftover_networks.
         case "$*" in
+          -q) [ -f "$S/network_subnets" ] && awk '{ print $1 }' "$S/network_subnets" ;;
           *label=com.docker.compose.project=*)
             all_args="$*"
             proj=${all_args##*label=com.docker.compose.project=}
@@ -323,6 +345,8 @@ case "$cmd" in
     done
     if [ -n "$all" ] && [ -f "$S/failed/$proj" ]; then
       echo c-app
+      # A service that kept running beside the failed app, with the log in $STUB_HEALTHY_LOG.
+      if [ -n "${STUB_HEALTHY_LOG:-}" ]; then echo c-tls; fi
       exit 0
     fi
     # Leftover containers of a Compose project: lines "project id" in $S/leftover_containers.

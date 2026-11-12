@@ -125,6 +125,12 @@ function renderInstanceTemplate({ calendar }: { calendar: boolean }): unknown {
     'TLS_LEAF_DIR=/tmp/leaf',
     'TLS_TRUST_DIR=/tmp/trust',
     'TLS_HTTP_IN=8080',
+    'DEFAULT_SUBNET=172.16.0.0/27',
+    'LINK_SUBNET=172.16.0.32/28',
+    'CALENDAR_SUBNET=172.16.0.48/28',
+    'BROWSER_CONTROL_SUBNET=172.16.0.64/28',
+    'BROWSER_EGRESS_SUBNET=172.16.0.80/28',
+    'BROWSER_INTERNAL_SUBNET=172.16.0.96/28',
   ];
   // `die` lives in a library that needs the whole installer; the renderer only needs it to stop with a message.
   const script = 'die() { printf "%s\\n" "$*" >&2; exit 1; }; . "$1"; shift; render_template "$@"';

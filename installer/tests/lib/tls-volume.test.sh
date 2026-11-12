@@ -25,7 +25,10 @@ render_compose() { # if_tls_host if_tls_volume
       "APP_PORTS=      - '127.0.0.1:8791:8790'" \
       "IF_TLS=1" "IF_TLS_HOST=$1" "IF_TLS_VOLUME=$2" "CADDY_IMAGE=caddy:test" "TLS_USER=1000:1000" \
       "TLS_LEAF_DIR=/home/person/.amanuensis/tls/leaf/main" \
-      "TLS_TRUST_DIR=/home/person/.amanuensis/tls/trust/main" "TLS_HTTP_IN=8081"
+      "TLS_TRUST_DIR=/home/person/.amanuensis/tls/trust/main" "TLS_HTTP_IN=8081" \
+      "DEFAULT_SUBNET=172.16.0.0/27" "LINK_SUBNET=172.16.0.32/28" "CALENDAR_SUBNET=172.16.0.48/28" \
+      "BROWSER_CONTROL_SUBNET=172.16.0.64/28" "BROWSER_EGRESS_SUBNET=172.16.0.80/28" \
+      "BROWSER_INTERNAL_SUBNET=172.16.0.96/28"
   )
 }
 

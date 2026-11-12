@@ -36,7 +36,12 @@ upgrade_rollback() {
     if [ -n "$UPGRADE_BACKUP" ]; then
       (restore_sqlite "$name" "$UPGRADE_BACKUP" "$CUR_APP_TAG") || failed=1
     fi
-    instance_render "$name" "$CUR_APP_TAG" "$CUR_DEX_IMAGE"
+    # A render that stops (no free network addresses, say) ends only its own subshell, so the other instances are
+    # still put back.
+    if ! (instance_render "$name" "$CUR_APP_TAG" "$CUR_DEX_IMAGE"); then
+      failed=1
+      continue
+    fi
     instance_up "$name" || failed=1
   done
   if [ "$failed" = 0 ]; then

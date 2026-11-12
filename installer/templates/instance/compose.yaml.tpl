@@ -378,21 +378,42 @@ volumes:
 @@IF_SANDBOX@@    external: true
 
 networks:
+  # The installer picks each network's small block of addresses, so a computer whose Docker ranges are used up can
+  # still run the instance.
+  default:
+    ipam:
+      config:
+        - subnet: @@DEFAULT_SUBNET@@
   # Between the app and the relay only.
   link:
     internal: true
+    ipam:
+      config:
+        - subnet: @@LINK_SUBNET@@
   # Between the relay and the shared speech services only; the installer joins the services to it.
   speech:
     internal: true
     name: @@STT_NETWORK@@
   # Between the app's network holder and the calendar connector only. Not internal: the connector reaches the
   # calendar server on the internet.
-@@IF_CALENDAR@@  calendar: {}
+@@IF_CALENDAR@@  calendar:
+@@IF_CALENDAR@@    ipam:
+@@IF_CALENDAR@@      config:
+@@IF_CALENDAR@@        - subnet: @@CALENDAR_SUBNET@@
 @@IF_BROWSER@@  # The browser and its gateway only. Internal: the browser has no way out but the gateway.
 @@IF_BROWSER@@  browser-internal:
 @@IF_BROWSER@@    internal: true
+@@IF_BROWSER@@    ipam:
+@@IF_BROWSER@@      config:
+@@IF_BROWSER@@        - subnet: @@BROWSER_INTERNAL_SUBNET@@
 @@IF_BROWSER@@  # The app's network holder and the browser gateway only, for the app's calls to the browser.
 @@IF_BROWSER@@  browser-control:
 @@IF_BROWSER@@    internal: true
+@@IF_BROWSER@@    ipam:
+@@IF_BROWSER@@      config:
+@@IF_BROWSER@@        - subnet: @@BROWSER_CONTROL_SUBNET@@
 @@IF_BROWSER@@  # The gateway's own way out to the internet. Nothing else is on it.
-@@IF_BROWSER@@  browser-egress: {}
+@@IF_BROWSER@@  browser-egress:
+@@IF_BROWSER@@    ipam:
+@@IF_BROWSER@@      config:
+@@IF_BROWSER@@        - subnet: @@BROWSER_EGRESS_SUBNET@@

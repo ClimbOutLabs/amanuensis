@@ -340,6 +340,21 @@ test_a_failed_upgrade_from_before_the_browser_puts_back_a_version_without_it() {
   sandbox_drop
 }
 
+test_an_upgrade_with_no_free_network_addresses_still_finishes_putting_back() {
+  t_begin "an upgrade that finds no free network addresses says so plainly and still finishes putting the previous version back"
+  sandbox_new
+  install_machine
+  repo_commit_change "an app change"
+  printf 'full 172.16.0.0/16\n' >>"$SB_STATE/network_subnets"
+  run_install upgrade
+  assert_rc 2
+  assert_flat_contains "$ERR" "Aman found no free network addresses for instance main."
+  assert_flat_contains "$ERR" "Then run the same command again."
+  assert_not_contains "$ERR" "aman upgrade again"
+  assert_flat_contains "$ERR" "The previous version could not be fully put back."
+  sandbox_drop
+}
+
 test_failed_upgrade_restores_database_and_images() {
   t_begin "a failed health check restores the database and the previous images"
   sandbox_new
@@ -932,6 +947,7 @@ test_upgrade_without_an_old_calendar_account_file_stays_quiet
 test_upgrade_starts_the_calendar_connector_without_a_profile
 test_upgrade_turns_the_browser_on_for_an_install_from_before_it
 test_a_failed_upgrade_from_before_the_browser_puts_back_a_version_without_it
+test_an_upgrade_with_no_free_network_addresses_still_finishes_putting_back
 test_failed_upgrade_restores_database_and_images
 test_restore_goes_only_into_the_right_volume
 test_restore_does_not_wait_for_a_migration_marker
