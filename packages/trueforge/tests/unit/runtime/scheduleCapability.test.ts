@@ -936,6 +936,7 @@ async function dispatchUnattended(input: { built: Setup; name: string; args: Rec
     },
     alreadyHeld: 0,
     isSubAgent: false,
+    browserEditWaiting: false,
   });
   const result = await executeToolCalls({
     assistantMessage: message,
