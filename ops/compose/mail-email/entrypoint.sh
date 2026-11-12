@@ -72,14 +72,17 @@ read_listen_address() {
 
 # How long a start waits for the server to answer before it stops waiting, in seconds, counted
 # from the start and including each probe's own connect time. It stays well inside the app's
-# 45 second wait for the record.
-answer_wait=20
+# 45 second wait for the record. A server that answers later is recorded by the watch loop below.
+answer_wait=${AMAN_MAIL_ANSWER_WAIT_SECONDS:-20}
+case $answer_wait in
+  '' | *[!0-9]*) answer_wait=20 ;;
+esac
 
-# True once the started server answers on its port, within the answer wait. False as soon as the
-# server exits. A started process is not an answering server: it can still be loading its account
+# True once the started server answers on its port within the given seconds. False as soon as
+# the server exits. A started process is not an answering server: it can still be loading its account
 # and index, and a connection in that window is refused.
-server_answers() {
-  python3 - "$child" "$probe_host" "$probe_port" "$answer_wait" <<'PY'
+server_answers() { # seconds
+  python3 - "$child" "$probe_host" "$probe_port" "$1" <<'PY'
 import os
 import socket
 import sys
@@ -108,6 +111,14 @@ child=
 agent_pid=
 loaded=
 loaded_account=
+recorded=
+
+# Records this start's send list as loaded. Only called once the started server answers.
+record_loaded() {
+  printf '%s\n' "$loaded" >"$status.tmp"
+  mv "$status.tmp" "$status"
+  recorded=yes
+}
 
 # Puts this shell's mail account variables in the account file's state: its account, or none.
 load_account() {
@@ -122,6 +133,7 @@ start_server() {
   # nothing may read the previous start's record as this start's list. On an account change the
   # list hash is the same, so a leftover record would otherwise pass for the new server's own.
   rm -f "$status"
+  recorded=
   # Its own process group, so a stop reaches a launcher's workers too: forcing down only the first
   # process would leave a worker holding the port, and the restarted server could not bind it.
   if command -v setsid >/dev/null 2>&1; then
@@ -131,11 +143,10 @@ start_server() {
   fi
   child=$!
   # The list is recorded as loaded only once the server answers on its port. The wait is bounded
-  # well inside the server's own wait for the record: a server that never answers simply never
-  # gets a record, and the loop below keeps watching the one that was started.
-  if server_answers; then
-    printf '%s\n' "$loaded" >"$status.tmp"
-    mv "$status.tmp" "$status"
+  # well inside the server's own wait for the record; a server still starting after it is
+  # recorded by the loop below as soon as it answers.
+  if server_answers "$answer_wait"; then
+    record_loaded
   fi
   echo "mail server started (send list $loaded, account $loaded_account)"
   # A start that does not hold must be plain in the log, not a silent service: give the server a
@@ -145,7 +156,7 @@ start_server() {
   if ! kill -0 "$child" 2>/dev/null; then
     echo "the mail server stopped again right after it started; it will be started again"
   elif [ "$(cat "$status" 2>/dev/null || true)" != "$loaded" ]; then
-    echo "the mail server started but the loaded send list was not recorded"
+    echo "the mail server started but does not answer yet; the send list is recorded once it does"
   fi
 }
 
@@ -225,5 +236,8 @@ while :; do
     echo "the mail account changed (was $loaded_account); restarting the mail server"
     stop_server
     start_server "$@"
+  elif [ -z "$recorded" ] && server_answers 1; then
+    echo "the mail server answers now; recording the send list $loaded"
+    record_loaded
   fi
 done

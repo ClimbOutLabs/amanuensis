@@ -182,6 +182,62 @@ SHEOF
   sandbox_drop
 }
 
+# A server that answers only after the start's answer wait has run out must still get its loaded
+# record: the wrapper's watch loop records it once it answers, or every send would be refused until
+# the next restart. The wait is shortened here so the test does not take 20 seconds.
+test_entrypoint_records_a_server_that_answers_after_the_wait() {
+  t_begin "the mail wrapper records the send list when the server answers only after the start's wait"
+  sandbox_new
+  local wrap=$SB/wrap
+  mkdir -p "$wrap/bin" "$wrap/status"
+  cat >"$wrap/agent.py" <<'PYEOF'
+import sys
+import time
+
+if "--print-child-env" in sys.argv:
+    print("")
+else:
+    time.sleep(3600)
+PYEOF
+  cat >"$wrap/bin/mcp-email-server" <<'SHEOF'
+#!/bin/sh
+sleep 5
+exec python3 -c '
+import socket, time
+sock = socket.socket()
+sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+sock.bind(("127.0.0.1", 19558))
+sock.listen(1)
+time.sleep(3600)
+'
+SHEOF
+  chmod 755 "$wrap/bin/mcp-email-server"
+  printf 'db_location = "/data/db.sqlite3"\nallowed_recipients = []\n' >"$wrap/policy.toml"
+  printf 'account one\n' >"$wrap/account.toml"
+  local hash
+  hash=$(sha256sum "$wrap/policy.toml" | cut -d' ' -f1)
+  AMAN_MAIL_ANSWER_WAIT_SECONDS=2 PATH="$wrap/bin:$SB_BIN" \
+    MCP_EMAIL_SERVER_CONFIG_PATH="$wrap/policy.toml" \
+    AMAN_MAIL_STATUS_FILE="$wrap/status/loaded.sha256" \
+    AMAN_MAIL_ACCOUNT_FILE="$wrap/account.toml" \
+    AMAN_MAIL_ACCOUNT_AGENT="$wrap/agent.py" \
+    sh "$INSTALLER_DIR/../ops/compose/mail-email/entrypoint.sh" streamable-http --host 0.0.0.0 --port 19558 >"$wrap/log" 2>&1 &
+  local ep=$!
+  # The start's wait ends at 2 seconds; the server answers at 5.
+  sleep 4
+  assert_eq "$(cat "$wrap/status/loaded.sha256" 2>/dev/null || true)" "" "no loaded record while the server does not answer"
+  local tries=0
+  while [ "$(cat "$wrap/status/loaded.sha256" 2>/dev/null || true)" != "$hash" ] && [ "$tries" -lt 100 ]; do
+    sleep 0.2
+    tries=$((tries + 1))
+  done
+  assert_eq "$(cat "$wrap/status/loaded.sha256" 2>/dev/null || true)" "$hash" "loaded record names the list once the late server answers"
+  assert_eq "$(grep -c 'starting it again\|restarting the mail server' "$wrap/log")" "0" "the late server is not restarted"
+  kill -TERM "$ep" 2>/dev/null || true
+  wait "$ep" 2>/dev/null || true
+  sandbox_drop
+}
+
 test_presets_write_their_servers() {
   t_begin "each preset writes its servers, encryption and certificate check"
   sandbox_new
@@ -517,6 +573,7 @@ test_instance_email_needs_the_connector_installed() {
 
 test_entrypoint_records_the_list_once_the_server_answers
 test_entrypoint_probes_the_port_the_server_is_given
+test_entrypoint_records_a_server_that_answers_after_the_wait
 test_presets_write_their_servers
 test_instance_commands_keep_the_connector
 test_instance_email_needs_the_connector_installed
