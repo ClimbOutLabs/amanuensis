@@ -14,6 +14,12 @@
  * server sent an explicit `tier`.
  */
 import { toolInvocationKey, toolInvocationRawId } from '@truefoundry/assistant-ui-runtime';
+import {
+  NOT_SENT_REASONS,
+  SEND_RECEIPT_EVENT_TYPE,
+  type NotSentReason,
+  type SendReceiptMessage,
+} from '@truefoundry/trueforge-core/core/email/gmail/sendReceipt';
 import { changeRequestText } from '@truefoundry/trueforge-core/core/permissions/changeRequest';
 import { savedSearchHold, withHoldSay } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
 import { readStoredMailbox, type Tier3Mailbox } from '@truefoundry/trueforge-core/core/permissions/tierMailbox';
@@ -60,6 +66,8 @@ export type SentinelApprovalEmail = {
   bcc: SentinelApprovalMailbox[];
   subject: string;
   body: string;
+  /** Short code a send card and its receipt both show; null for a draft or a card from before codes. */
+  check_code: string | null;
   /** The saved draft a change replaces, or null. */
   replaces: { subject: string; to: SentinelApprovalMailbox[] } | null;
   /** The message a reply answers in its thread, or null when the message is not a reply. */
@@ -71,6 +79,24 @@ export type SentinelApprovalEmail = {
   /** True when a name was left off an address because it looked like an address; absent on an older card. */
   name_left_off?: boolean;
 };
+
+export type SentinelNotSentReason = NotSentReason;
+
+/** The message a receipt repeats, as the server verified it. */
+export type SentinelReceiptMessage = SendReceiptMessage;
+
+/** How a send ended, written by the server from what it verified. Keyed to the send's tool call. */
+export type SentinelSendReceipt =
+  | {
+      outcome: 'sent';
+      toolCallId: string;
+      /** ISO time Gmail accepted the send. */
+      sentAt: string;
+      sentMessageId: string;
+      checkCode: string;
+      message: SentinelReceiptMessage;
+    }
+  | { outcome: 'not_sent'; toolCallId: string; reason: SentinelNotSentReason };
 
 const APPROVAL_CALENDAR_ACTIONS = ['create', 'change'] as const;
 
@@ -452,6 +478,8 @@ export type SentinelSessionContext = {
   answers?: Record<string, ApprovalAnswer> | undefined;
   /** The words the owner typed with a "Change it" answer, by card key (`approvalKey`). Absent when the host reads none. */
   changeRequests?: Record<string, string> | undefined;
+  /** How each send ended, by tool call id. Absent when the host reads none. */
+  receipts?: Record<string, SentinelSendReceipt> | undefined;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -568,6 +596,7 @@ function parseEmail(value: unknown): SentinelApprovalEmail | null {
     bcc,
     subject,
     body,
+    check_code: optionalString(value, 'check_code') ?? optionalString(value, 'checkCode') ?? null,
     replaces:
       replacedSubject === undefined || replacedTo === undefined ? null : { subject: replacedSubject, to: replacedTo },
     reply_in_thread:
@@ -925,10 +954,53 @@ function toolCallsAskedBy(event: unknown): { eventId: string; toolCallIds: strin
 }
 
 /** Folds raw session events into per-tool-call Sentinel state (later events win). */
+function parseNotSentReason(value: unknown): SentinelNotSentReason | undefined {
+  return NOT_SENT_REASONS.find(reason => reason === value);
+}
+
+function parseReceiptMessage(value: unknown): SentinelReceiptMessage | undefined {
+  if (!isRecord(value)) return undefined;
+  const to = mailboxList(value.to);
+  const cc = mailboxList(value.cc);
+  const bcc = mailboxList(value.bcc);
+  const subject = optionalString(value, 'subject');
+  const body = optionalString(value, 'body');
+  if (to === undefined || cc === undefined || bcc === undefined || subject === undefined || body === undefined) {
+    return undefined;
+  }
+  const replyTo = optionalString(value, 'reply_to') ?? optionalString(value, 'replyTo') ?? null;
+  return { to, cc, bcc, subject, body, reply_to: replyTo };
+}
+
+/**
+ * Reads a send receipt off a raw or persisted event. A receipt that does not carry everything a sent
+ * message needs is dropped, so the chat never shows a half-filled "Sent".
+ */
+export function extractSendReceiptFromEvent(event: unknown): SentinelSendReceipt | undefined {
+  if (!isRecord(event) || event.type !== SEND_RECEIPT_EVENT_TYPE) return undefined;
+  const toolCallId = optionalString(event, 'tool_call_id') ?? optionalString(event, 'toolCallId');
+  const result = event.result;
+  if (toolCallId === undefined || !isRecord(result)) return undefined;
+  if (result.outcome === 'not_sent') {
+    const reason = parseNotSentReason(result.reason);
+    return reason === undefined ? undefined : { outcome: 'not_sent', toolCallId, reason };
+  }
+  if (result.outcome !== 'sent') return undefined;
+  const sentAt = optionalString(result, 'sent_at') ?? optionalString(result, 'sentAt');
+  const sentMessageId = optionalString(result, 'sent_message_id') ?? optionalString(result, 'sentMessageId');
+  const checkCode = optionalString(result, 'check_code') ?? optionalString(result, 'checkCode');
+  const message = parseReceiptMessage(result.message);
+  if (sentAt === undefined || sentMessageId === undefined || checkCode === undefined || message === undefined) {
+    return undefined;
+  }
+  return { outcome: 'sent', toolCallId, sentAt, sentMessageId, checkCode, message };
+}
+
 export function extractSentinelSessionContext(events: unknown[]): SentinelSessionContext {
   const approvals = new Map<string, SentinelApprovalInfo>();
   const answers: Record<string, ApprovalAnswer> = {};
   const changeRequests: Record<string, string> = {};
+  const receipts: Record<string, SentinelSendReceipt> = {};
   // The model message that last asked for each call id. A card that does not name its source event takes this
   // one, so every card and every answer is filed under the full key of the call it belongs to, and a later call
   // that reuses the id never matches it.
@@ -954,8 +1026,11 @@ export function extractSentinelSessionContext(events: unknown[]): SentinelSessio
     }
     for (const [toolCallId, answer] of answersFromEvent(event)) answers[keyFor(toolCallId)] = answer;
     for (const [toolCallId, words] of changeRequestsFromEvent(event)) changeRequests[keyFor(toolCallId)] = words;
+    // A receipt names only the call id, like an answer, so it is filed under the call it answers.
+    const receipt = extractSendReceiptFromEvent(event);
+    if (receipt !== undefined) receipts[keyFor(receipt.toolCallId)] = receipt;
   }
-  return { approvals: [...approvals.values()], answers, changeRequests };
+  return { approvals: [...approvals.values()], answers, changeRequests, receipts };
 }
 
 function parseAuditEntry(value: unknown): SentinelAuditEntry | undefined {
