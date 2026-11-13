@@ -54,6 +54,7 @@ export async function callsHarness({
   redeemGate,
   smsProvider: wireTexts,
   callProvider: wireCalls,
+  startSilence,
 }: {
   chat?: CallChat;
   assistantName?: string;
@@ -70,6 +71,8 @@ export async function callsHarness({
   /** Providers to send through instead of the recording ones, such as the real ones over a fake Twilio. */
   smsProvider?: SmsProvider;
   callProvider?: CallProvider;
+  /** Replaces the wait for an answer, so a test decides when it runs out instead of racing a clock. */
+  startSilence?: (fire: () => void, ms: number) => () => void;
 } = {}) {
   const db = createSqliteDb(':memory:');
   await migrateSqliteToLatest(db);
@@ -162,6 +165,7 @@ export async function callsHarness({
     listening,
     logger,
     ...(limits === undefined ? {} : { limits }),
+    ...(startSilence === undefined ? {} : { startSilence }),
     now: () => clock.now,
   });
   const deliveries = createDeliveryService({

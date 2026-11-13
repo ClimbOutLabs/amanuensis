@@ -906,22 +906,32 @@ describe('a conversation on the phone', () => {
     );
   });
 
-  it('waits out speech that starts just before the silence would end, instead of talking over it', async () => {
+  it('starts the wait for an answer over when someone begins to speak, instead of talking over them', async () => {
     const stt = new FakeStt();
     stt.hold = true;
+    // The wait for an answer is driven here, so what is proved does not depend on how fast the runner is.
+    const waits: { cancelled: boolean }[] = [];
     h = await callsHarness({
-      limits: { silenceMs: 2400 },
+      startSilence: () => {
+        const wait = { cancelled: false };
+        waits.push(wait);
+        return () => {
+          wait.cancelled = true;
+        };
+      },
       listening: () => Promise.resolve({ vad: new LoudnessVad(), stt }),
     });
     await h.readyToCall();
     await h.callDelivery();
     const media = await h.openMedia({ token: (await h.answer()).token });
-    await h.waitFor(() => h.tts.sentences.length >= 1 && media.frames.some(frame => frame.event === 'mark'));
-    // The fake line plays instantly, so wait out the opening's own length before speaking over nothing.
-    await pause(1900);
-    // A moment of someone starting to talk.
-    await sendSound(media, hum(300));
-    await pause(500);
+    // The opening has played to the end, so the wait for an answer is running.
+    await h.waitFor(() => waits.length === 1);
+    expect(h.tts.sentences).toHaveLength(1);
+    // Someone starts to talk. A second of sound counts as speech whether or not the opening is still playing out, and
+    // it must start the wait over rather than let it run out.
+    await sendSound(media, hum(1000));
+    await h.waitFor(() => waits.length === 2);
+    expect(waits.map(wait => wait.cancelled)).toEqual([true, false]);
     expect(h.tts.sentences).toHaveLength(1);
     media.socket.close();
     await h.waitFor(async () => (await h.calls.getBySid(CALL_SID))?.status === 'ended');

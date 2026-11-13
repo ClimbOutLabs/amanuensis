@@ -151,6 +151,8 @@ interface PhoneCallDeps {
   listening: () => Promise<CallListening>;
   logger: Logger;
   limits?: Partial<CallLimits>;
+  /** Starts the wait for an answer and returns how to cancel it; a test supplies its own to control when it runs out. */
+  startSilence?: (fire: () => void, ms: number) => () => void;
   now?: () => Date;
   newToken?: () => string;
 }
@@ -183,6 +185,14 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
   const now = deps.now ?? (() => new Date());
   const newToken = deps.newToken ?? (() => randomBytes(32).toString('base64url'));
   const limits: CallLimits = { ...DEFAULT_LIMITS, ...deps.limits };
+  const startSilence =
+    deps.startSilence ??
+    ((fire: () => void, ms: number) => {
+      const timer = setTimeout(fire, ms);
+      return () => {
+        clearTimeout(timer);
+      };
+    });
   const { store, logger } = deps;
   const twilio = deps.twilio;
   const streamUrlFor = (call_id: string): string | undefined =>
@@ -515,7 +525,7 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
     /** Why the call was not heard through, when the voice could not say the opening or the message. */
     let unheard: string | undefined;
     /** The wait for an answer, while one is running. */
-    let silence: NodeJS.Timeout | undefined;
+    let cancelSilence: (() => void) | undefined;
     let ending: Promise<void> | undefined;
     /** The conversation opened by a yes. */
     let opened: CallChat | undefined;
@@ -582,9 +592,9 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
           return;
         }
         const heard = turns.replies;
-        clearTimeout(silence);
-        silence = setTimeout(() => {
-          silence = undefined;
+        cancelSilence?.();
+        cancelSilence = startSilence(() => {
+          cancelSilence = undefined;
           if (turns.replies !== heard) {
             return;
           }
@@ -680,7 +690,7 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
         },
         // Someone who starts to answer just before the wait runs out is not talked over.
         onSpeechStarted: () => {
-          if (silence !== undefined) {
+          if (cancelSilence !== undefined) {
             listenForAnswer();
           }
         },
@@ -725,7 +735,7 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
         ending ??= (async () => {
           ended = true;
           timers.forEach(clearTimeout);
-          clearTimeout(silence);
+          cancelSilence?.();
           if (talking === undefined || unheard !== undefined) {
             await talking?.session.end();
             // The person never heard the assistant, so they hear through a text and a push instead.

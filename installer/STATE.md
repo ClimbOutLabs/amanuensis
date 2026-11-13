@@ -120,6 +120,28 @@ before the new one is written. Readers treat the record as readable only
 when at least the app, speech-to-text and sign-in images are named. A record
 from before the read-aloud voice has no `tts_image`; the next upgrade adds it.
 
+### Source ids and published images
+
+Each `<source id>` names what an image is built from: the first 12
+characters of the git tree of `ops/aman-stt`, `ops/aman-tts`,
+`ops/calendar-sidecar` or `ops/browser-sidecar`, and for the app a hash of
+`Dockerfile.dev`, `.dockerignore` and every path `Dockerfile.dev` copies.
+Local changes add `-d<hash>`. `pnpm images:ids` prints them. An id from
+before November 2026 named the app by its commit, so the first upgrade after
+that reads as an update and puts the app image in place again.
+
+The pins manifest `installer/release.json` can carry a
+`published_<image>` entry for each Aman image:
+`ghcr.io/climboutlabs/<name>:<source id>@sha256:<index digest>`, written
+by the Images workflow (see `RELEASING.md`). When an entry's source id
+equals the checkout's, the installer pulls that exact digest and tags it
+with the local name instead of building. Otherwise, with
+`--build-from-source`, or when the download fails, it builds as before.
+The app is also built when `Dockerfile.dev` has a step the id cannot
+follow: a JSON-form, continued or heredoc `COPY`, an `ADD` of a local file,
+or a mount of the checkout.
+The sandbox slot image is always built on the computer.
+
 ## Backups
 
 Each backup is one folder under `backups/`, named with the UTC time it was

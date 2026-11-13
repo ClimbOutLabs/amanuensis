@@ -209,10 +209,10 @@ describe('the guided Google setup mount', () => {
     return undefined;
   }
 
-  it('mounts the setup read and its guidance for a person who never connected', async () => {
+  it('mounts the setup read, with no standing guidance, for a person who never connected', async () => {
     const mounted = await setupCapabilityOf(await resolved());
     expect(mounted?.tools).toEqual(['google_setup_status']);
-    expect(mounted?.instructionBuilders).toBe(1);
+    expect(mounted?.instructionBuilders).toBe(0);
   });
 
   it('still mounts it when the login allows only some of mail and calendar', async () => {

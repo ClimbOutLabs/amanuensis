@@ -16,6 +16,9 @@ DL_HOSTS=
 # 1 when this checkout differs from the recorded release: the run then updates the installed version first.
 INSTALL_UPGRADE=0
 PLAN_UPGRADE_NOTE=
+# Whether the plan builds the app here, and whether it downloads any of Aman's own published images.
+PLAN_BUILDS_APP=1
+PLAN_DOWNLOADS_AMAN=0
 PLAN_FS=$'\037'
 PLAN_RS=$'\036'
 INSTALL_T0=0
@@ -231,7 +234,11 @@ print_plan() {
   fi
   if [ -n "$PLAN_UPGRADE_NOTE" ]; then ui_line "$PLAN_UPGRADE_NOTE"; fi
   print_plan_rows
-  ui_hint "Everything is built on this computer. Nothing is sent anywhere."
+  if [ "${PLAN_DOWNLOADS_AMAN:-0}" = 1 ]; then
+    ui_hint "Aman's own parts are downloaded where a release published them, checked by their pinned digest, and the rest is built on this computer. Nothing is sent anywhere."
+  else
+    ui_hint "Everything is built on this computer. Nothing is sent anywhere."
+  fi
   if [ "$PLAN_ROOT" -gt 0 ]; then
     ui_hint "Steps marked needs admin change this computer and run only after you say yes. --yes alone does not allow them; --install-docker, --add-docker-group, --sandbox-root and --tls-root do."
   fi
@@ -242,7 +249,11 @@ print_plan() {
     total_gb=$(awk -v mb="$DL_TOTAL_MB" 'BEGIN {printf "%.1f", mb / 1024}')
     hosts=$(printf '%s' "$DL_HOSTS" | tr ' ' '\n' | sort -u | tr '\n' ' ')
     for host in $hosts; do count=$((count + 1)); done
-    ui_hint "Downloads: about $total_gb GB from $count sites. The first run takes several minutes, mostly to build the app."
+    if [ "${PLAN_BUILDS_APP:-1}" = 1 ]; then
+      ui_hint "Downloads: about $total_gb GB from $count sites. The first run takes several minutes, mostly to build the app."
+    else
+      ui_hint "Downloads: about $total_gb GB from $count sites. The first run takes several minutes."
+    fi
     if [ "$UI_VERBOSE" = 1 ]; then
       say "  First-run downloads (approximate):$DL_LINES"
       say "    total: about $DL_TOTAL_MB MB ($total_gb GB)"
@@ -344,11 +355,25 @@ plan_build() {
     fi
   fi
 
-  plan_image "$REL_APP_TAG" "The Aman app is built" "Build the Aman app" app-base app-deps vad-model dockerfile-frontend
-  plan_image "$REL_STT_TAG" "The speech-to-text service is built" "Build the speech-to-text service" stt-base stt-deps
-  plan_image "$REL_TTS_TAG" "The voice that reads replies aloud is built" "Build the voice that reads replies aloud" tts-deps tts-voice
-  plan_image "$REL_CALENDAR_TAG" "The calendar connector is built" "Build the calendar connector"
-  plan_image "$REL_BROWSER_TAG $REL_BROWSER_GATEWAY_TAG" "Aman's browser is built" "Build Aman's browser" browser-base browser-deps browser-gateway-base
+  PLAN_BUILDS_APP=1
+  PLAN_DOWNLOADS_AMAN=0
+  if [ -n "$(published_image_for published_app_image "$REL_APP_TAG")" ]; then
+    PLAN_BUILDS_APP=0
+    PLAN_DOWNLOADS_AMAN=1
+    plan_image "$REL_APP_TAG" "The Aman app is downloaded" "Download the Aman app" app-image
+  else
+    plan_image "$REL_APP_TAG" "The Aman app is built" "Build the Aman app" app-base app-deps vad-model dockerfile-frontend
+  fi
+  plan_aman_image "$REL_STT_TAG" published_stt_image "the speech-to-text service" stt-image stt-base stt-deps
+  plan_aman_image "$REL_TTS_TAG" published_tts_image "the voice that reads replies aloud" tts-image tts-deps tts-voice
+  plan_aman_image "$REL_CALENDAR_TAG" published_calendar_image "the calendar connector" calendar-image
+  if [ -n "$(published_image_for published_browser_image "$REL_BROWSER_TAG")" ] &&
+    [ -n "$(published_image_for published_browser_gateway_image "$REL_BROWSER_GATEWAY_TAG")" ]; then
+    PLAN_DOWNLOADS_AMAN=1
+    plan_image "$REL_BROWSER_TAG $REL_BROWSER_GATEWAY_TAG" "Aman's browser is downloaded" "Download Aman's browser" browser-image
+  else
+    plan_image "$REL_BROWSER_TAG $REL_BROWSER_GATEWAY_TAG" "Aman's browser is built" "Build Aman's browser" browser-base browser-deps browser-gateway-base
+  fi
   plan_image "$REL_DEX_IMAGE" "The sign-in service is downloaded" "Download the sign-in service" dex
   plan_image "$REL_MAIL_EMAIL_IMAGE" "The email connector is downloaded" "Download the email connector" mail-email
   plan_tls
@@ -504,6 +529,19 @@ plan_backups() {
 
 docker_available_for_probes() {
   case "$DOCKER_ACCESS" in direct | sg) return 0 ;; *) return 1 ;; esac
+}
+
+# One Aman image with a single build step: downloaded when a release published it for this source, built otherwise.
+plan_aman_image() { # local tag, release.json key, what, download id when published, download ids when built...
+  local tag=$1 key=$2 what=$3 published=$4 first
+  shift 4
+  first=$(printf '%s' "${what:0:1}" | tr '[:lower:]' '[:upper:]')${what:1}
+  if [ -n "$(published_image_for "$key" "$tag")" ]; then
+    PLAN_DOWNLOADS_AMAN=1
+    plan_image "$tag" "$first is downloaded" "Download $what" "$published"
+  else
+    plan_image "$tag" "$first is built" "Build $what" "$@"
+  fi
 }
 
 # plan_image TAG TEXT download-ids...

@@ -699,14 +699,16 @@ describe("the operator's own Calendar sidecar, under a standing grant the person
     expect(info).toMatchObject({ tier: 3, tier_reason: 'caldav_calendar_change', is_approval_required: true });
   });
 
-  it('still asks for a destructive calendar call, granted or not', async () => {
+  it('refuses a destructive calendar call whose event cannot be read, granted or not', async () => {
     const calendar = makeToolSet({
       tools: [deleteEvent],
       services: calendarServices(['delete_event']),
       firstParty: true,
       serverName: 'Calendar',
     });
+    // The fake calendar answers get_event with no event, so the delete cannot be described:
+    // it is refused outright rather than carded, and no grant is consulted first.
     const info = await calendar.toolCallInfo({ name: 'delete_event', arguments: { id: 'evt-1' } });
-    expect(info).toMatchObject({ tier: 3, is_approval_required: true });
+    expect(info).toMatchObject({ tier: 3, is_approval_required: false });
   });
 });
