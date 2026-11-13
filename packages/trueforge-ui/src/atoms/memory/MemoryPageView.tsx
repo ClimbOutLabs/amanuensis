@@ -10,6 +10,7 @@ import type {
   MemoryPageLine,
 } from '@/plugins/trueforge-agent-server-adapter/catalogs/memoryPagesCatalog.js';
 import { copyText } from '@/utils/copyText.js';
+import { useAssistantDisplayName } from '../../components/PersonalizationContext.js';
 import type { MemoryPagesState } from './useMemoryPagesState.js';
 
 const COPIED_NOTE_MS = 2000;
@@ -197,12 +198,13 @@ function PageLineRow({
 
 /** Two lines the nightly check found that cannot both be true. Nothing on the page changed; the person settles it by editing. */
 function DisagreementBlock({ pairs, state }: { pairs: MemoryPageDisagreement[]; state: MemoryPagesState }) {
+  const assistant = useAssistantDisplayName();
   if (pairs.length === 0) return null;
   return (
     <section aria-label="These lines disagree" className="flex flex-col gap-2">
       <h4 className="text-xs font-semibold text-text-secondary">These lines disagree</h4>
       <p className="text-xs text-text-secondary">
-        Aman changed nothing. Edit the page to fix the line that is wrong, or choose Not a problem.
+        {assistant} changed nothing. Edit the page to fix the line that is wrong, or choose Not a problem.
       </p>
       <ul className="m-0 flex list-none flex-col gap-2 p-0">
         {pairs.map(pair => (
@@ -228,6 +230,7 @@ function DisagreementBlock({ pairs, state }: { pairs: MemoryPageDisagreement[]; 
 }
 
 function PageSections({ page, state }: { page: MemoryPageDetail; state: MemoryPagesState }) {
+  const assistant = useAssistantDisplayName();
   if (page.sections.every(section => section.lines.length === 0)) {
     return <p className="text-sm text-text-secondary">This page has no lines yet.</p>;
   }
@@ -263,8 +266,8 @@ function PageSections({ page, state }: { page: MemoryPageDetail; state: MemoryPa
             <h4 className="text-xs font-semibold text-text-secondary">{section.name}</h4>
             {section.name === 'Unconfirmed' ? (
               <p className="text-xs text-text-secondary">
-                Aman read or guessed these. It uses them as facts, never as your instructions. You do not need to do
-                anything.
+                {assistant} read or guessed these. It uses them as facts, never as your instructions. You do not need to
+                do anything.
               </p>
             ) : null}
             {list}
@@ -276,6 +279,7 @@ function PageSections({ page, state }: { page: MemoryPageDetail; state: MemoryPa
 }
 
 function PageEditor({ page, state, onDone }: { page: MemoryPageDetail; state: MemoryPagesState; onDone: () => void }) {
+  const assistant = useAssistantDisplayName();
   const [draft, setDraft] = useState(page.text);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -299,8 +303,8 @@ function PageEditor({ page, state, onDone }: { page: MemoryPageDetail; state: Me
         Edit page text
       </label>
       <p id="memory-page-editor-help" className="text-xs text-text-secondary">
-        The first line is the page’s name. Each line that starts with a dash is one thing Aman remembers. A line you
-        change or add counts as coming from you. Lines you leave alone keep where they came from.
+        The first line is the page’s name. Each line that starts with a dash is one thing {assistant} remembers. A line
+        you change or add counts as coming from you. Lines you leave alone keep where they came from.
       </p>
       <textarea
         id="memory-page-editor"
