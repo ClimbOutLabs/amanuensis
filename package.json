@@ -105,6 +105,8 @@
     "test:external-hosts": "node scripts/check-external-hosts.mjs",
     "test:external-hosts-scanner": "node --test tests/external-hosts-scan.test.mjs",
     "nightly:report": "node scripts/nightly-report.mjs",
+    "nightly:obsidian-notes:start": "node scripts/obsidian-notes/start-obsidian.mjs",
+    "nightly:obsidian-notes": "pnpm --filter @truefoundry/trueforge test:obsidian-notes",
     "nightly:coverage": "node scripts/check-nightly-coverage.mjs",
     "nightly:gallery": "node scripts/build-nightly-gallery.mjs",
     "test:nightly-coverage": "node --test tests/nightly-coverage.test.mjs",
