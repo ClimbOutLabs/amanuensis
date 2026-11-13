@@ -82,9 +82,9 @@
     --surface-elevated: #fffdf8;
     --dropdown-selected-item-bg: #e9ddc9;
     --dropdown-selected-item-text: #2c2a26;
-    --user-message-bg: #2c2a26;
-    --user-message-text: #fffdf8;
-    --assistant-message-bg: transparent;
+    --user-message-bg: #ebe2d3;
+    --user-message-text: var(--text-primary);
+    --assistant-message-bg: var(--card-bg);
     --assistant-message-text: var(--text-primary);
     --primary-button-bg: #b5894c;
     --primary-button-hover: #c69c5d;
@@ -173,9 +173,9 @@
     --surface-elevated: #38332a;
     --dropdown-selected-item-bg: #3e382b;
     --dropdown-selected-item-text: #f2ecdd;
-    --user-message-bg: #b5894c;
-    --user-message-text: #221f19;
-    --assistant-message-bg: transparent;
+    --user-message-bg: #3a332a;
+    --user-message-text: #f2ecdd;
+    --assistant-message-bg: var(--card-bg);
     --assistant-message-text: #f2ecdd;
     --primary-button-bg: #b5894c;
     --primary-button-hover: #c69c5d;

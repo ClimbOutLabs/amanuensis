@@ -13,6 +13,7 @@ import { parseMorningBrief, unreadableBriefText } from '@truefoundry/trueforge-c
 import { useState, type ReactNode } from 'react';
 
 import { copyText } from '@/utils/copyText.js';
+import { AssistantTextCard } from '../atoms/AssistantMessageBubble.js';
 import type { AgentStepsPhase } from '../atoms/adapters/AgentStepsCardAdapter.js';
 import { AgentInternalsDisclosure } from '../atoms/agent-chat/AgentInternalsDisclosure.js';
 import { MemoryContextCard } from '../atoms/agent-chat/MemoryContextCard.js';
@@ -360,7 +361,11 @@ export function AssistantMessageContainer() {
             case 'group-interimText':
               return null;
             case 'text':
-              return briefHidesText ? null : <AssistantTextContainer />;
+              return briefHidesText ? null : (
+                <AssistantTextCard>
+                  <AssistantTextContainer />
+                </AssistantTextCard>
+              );
             case 'reasoning':
               return isMessageRunning && agentDetailsVisible ? <AssistantLeafPartContainer part={part} /> : null;
             case 'tool-call':
