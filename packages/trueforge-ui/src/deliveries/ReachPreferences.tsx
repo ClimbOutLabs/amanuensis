@@ -273,7 +273,9 @@ export function ReachPreferences({ reach }: { reach: ReachApi }) {
           ? devicesReached > 0
             ? `Sent to ${String(devicesReached)} ${devicesReached === 1 ? 'device' : 'devices'}.`
             : 'Sent, but no device has notices turned on.'
-          : 'Sent. Look under the bell.';
+          : channel === 'call'
+            ? `Calling your phone now. Answer it to hear ${assistant}.`
+            : 'Sent. Look under the bell.';
       setTrial(current => ({ ...current, [channel]: text }));
     } catch (caught) {
       setTrial(current => ({
@@ -353,7 +355,7 @@ export function ReachPreferences({ reach }: { reach: ReachApi }) {
             note={availability.calls.note}
             onChange={next => change({ callsOn: next })}
           />
-          {tryButton('call', !availability.calls.available)}
+          {tryButton('call', !availability.calls.available || !view.settings.callsOn)}
         </div>
       </Card>
 

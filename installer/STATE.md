@@ -68,8 +68,10 @@ not published: the installer names the line to change. The registry also keeps
 instance when the port or that digest differs from the recorded one, so turning
 texts on or off, or changing the port, the auth token or any other texts line,
 needs no upgrade. New instances never pick a recorded `sms_port`. The listener
-behind it serves only Twilio's routes. The app port is never opened for it, and
-a `.env` without the provider line opens nothing. See `docs/text-messages.md`.
+behind it serves only Twilio's routes, for texts and for phone calls (including
+the call's `wss://` media stream on the same port). The app port is never opened
+for it, and a `.env` without the provider line opens nothing. See
+`docs/text-messages.md` and `docs/phone-calls.md`.
 
 The `release.json` in a checkout's `installer/` folder is a different file:
 it is the pins manifest the installer ships (image digests, among them the

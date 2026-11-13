@@ -133,6 +133,31 @@ describe('Settings, Reach me preferences', () => {
     expect(screen.getByRole('button', { name: 'Try calls' })).toHaveProperty('disabled', true);
   });
 
+  it('offers calls once the server has them, with the privacy note beside Calls and a test call after saving', async () => {
+    const server = fakeServer([]);
+    const note =
+      "Calls and texts travel through Twilio and the phone company. The assistant's voice and the transcript are made on your computer.";
+    server.state.reach = {
+      ...server.state.reach,
+      availability: { ...server.state.reach.availability, calls: { available: true, note, problem: null } },
+    };
+    render(<ReachPreferences reach={server.api.reach} />);
+    const calls = await screen.findByRole('checkbox', { name: /Phone calls/ });
+    expect(calls).toHaveProperty('disabled', false);
+    expect(screen.getByText(note)).toBeTruthy();
+    expect(screen.queryByText('Call settings appear here once phone calls are set up.')).toBeNull();
+    expect(screen.getByRole('checkbox', { name: 'Call me for reminders I mark urgent' })).toBeTruthy();
+    expect(screen.getByLabelText('Fewest hours between two calls')).toBeTruthy();
+    // A test call is offered only once calls are saved as on.
+    expect(screen.getByRole('button', { name: 'Try calls' })).toHaveProperty('disabled', true);
+    fireEvent.click(calls);
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Try calls' })).toHaveProperty('disabled', false));
+    fireEvent.click(screen.getByRole('button', { name: 'Try calls' }));
+    await waitFor(() => expect(server.api.reach.test).toHaveBeenCalledWith('call'));
+    expect(await screen.findByText(/Calling your phone now\./)).toBeTruthy();
+  });
+
   it('hides what only matters for calls until phone calls are set up, and says so', async () => {
     renderPreferences();
     expect(await screen.findByText('Call settings appear here once phone calls are set up.')).toBeTruthy();

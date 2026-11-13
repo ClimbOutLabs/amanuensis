@@ -6,6 +6,8 @@ import {
   codeTextLimits,
   deliveryTextLimits,
   HOUR_MS,
+  MAX_TEST_CALLS_PER_DAY,
+  testCallLimits,
   testTextLimit,
   waitWords,
 } from '../../../../src/runtime/texts/textLimits';
@@ -72,5 +74,14 @@ describe('text limits', () => {
     const owner = { tenant_id: 'default', created_by: 'alice' };
     const own = codeTextLimits({ secret: 'secret', owner, phone: '+15550111', confirmed_by_owner: true });
     expect(own.map(limit => limit.key.split(':')[1])).toEqual(['person-hour', 'person-day']);
+  });
+
+  it('keeps one person’s test calls apart from another’s, with a short gap and a day’s cap', () => {
+    const alice = testCallLimits({ tenant_id: 'default', created_by: 'alice' });
+    const bob = testCallLimits({ tenant_id: 'default', created_by: 'bob' });
+    expect(alice.gap).toMatchObject({ window_ms: 2 * 60_000, max: 1 });
+    expect(alice.day).toMatchObject({ window_ms: 24 * HOUR_MS, max: MAX_TEST_CALLS_PER_DAY });
+    expect(new Set([alice.gap.key, alice.day.key, bob.gap.key, bob.day.key]).size).toBe(4);
+    expect(alice.gap.key.startsWith('test:')).toBe(true);
   });
 });

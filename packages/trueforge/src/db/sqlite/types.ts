@@ -48,6 +48,7 @@ import type { DeliveryAttemptTable, DeliveryTable } from '../deliveryStore';
 import type { LocalUserTable } from '../localUserStore';
 import type { OAuthClient, OAuthPendingAuthorizationData, OAuthServer, OAuthToken } from '../mcpServerStore';
 import type { NoticingCheckpointTable, NoticingEventTable, ReachLeaseTable } from '../noticingStore';
+import type { PhoneCallTable } from '../phoneCallStore';
 import type { PushSubscriptionTable } from '../pushSubscriptionStore';
 import type { ReachSettingsTable } from '../reachSettingsStore';
 import type { TextContactTable, TextSendCountTable, TextWordTable } from '../textContactStore';
@@ -532,6 +533,10 @@ export interface SkillTable {
   manifest: JsonbColumn<SkillManifest>;
   /** The person's approved site list for this skill's network access, or null when not approved */
   network_approval: JsonbColumn<string[]> | null;
+  /** Sites the person allowed one by one for this skill */
+  network_allowed_hosts: JsonbColumn<string[]>;
+  /** Sites the person turned down for this skill */
+  network_denied_hosts: JsonbColumn<string[]>;
   created_at: string;
   updated_at: string;
 }
@@ -833,6 +838,7 @@ export interface Database {
   delivery_attempt: DeliveryAttemptTable;
   reach_settings: ReachSettingsTable;
   text_contact: TextContactTable;
+  phone_call: PhoneCallTable;
   text_send_count: TextSendCountTable;
   text_word: TextWordTable;
   noticing_event: NoticingEventTable;

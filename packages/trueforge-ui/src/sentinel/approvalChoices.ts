@@ -44,6 +44,27 @@ export const EMAIL_CHOICES = {
  */
 export const SAVE_DRAFT_OPTION_ID = 'save_draft';
 
+/**
+ * The choices on a skill network card. Approving once covers this chat, always covers the skill
+ * until cleared in skill settings, and denying remembers the sites as turned down for the skill.
+ */
+export const SKILL_NETWORK_CHOICES = {
+  approve: {
+    label: 'Allow once',
+    hint: 'Allow these sites for this chat only. The command runs again with them, unless it needs an approval of its own.',
+  },
+  alwaysAllow: {
+    label: 'Always allow for this skill',
+    hint: 'Let this skill reach these sites in every chat, until you remove it in skill settings.',
+  },
+  deny: { label: 'Deny', hint: 'Do not run this call, and do not ask about these sites for this skill again.' },
+} as const;
+
+/** A card asking whether a skill may reach the sites it names. */
+export function isSkillNetworkCard(card: SentinelApprovalCard): boolean {
+  return card.skill_network !== null && card.skill_network !== undefined;
+}
+
 export function isNewRecipientCard(card: SentinelApprovalCard): boolean {
   return (card.mail_new_recipients ?? []).length > 0;
 }

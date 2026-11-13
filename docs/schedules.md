@@ -103,12 +103,12 @@ A schedule is a morning brief when its name is `morning-brief`, or when its task
 A reminder is for something that should happen at a set time. In any chat, ask with a time, such as "Remind me at 5 pm to call the pharmacy". A reminder can also repeat daily, on weekdays, or weekly on the days you choose.
 
 - Setting a reminder needs no card, because it only adds a note for you. It is written to the activity log.
-- When it is due, the reminder shows in the bell with the reason you got it. It also reaches you the way you chose in Settings, Reach me, such as a notice on your devices or, if you set them up, [texts](/text-messages). Its line also appears at the end of the chat you set it in.
-- To mark a reminder urgent, say so when you ask, such as "Remind me at 5 pm to call the pharmacy, it's urgent". An urgent reminder can call you once phone calls are set up and you allow it.
+- When it is due, the reminder shows under the **For you** bell with the reason you got it. It also reaches you the way you chose in Settings, Reach me, such as a notice on your devices or, if you set them up, [texts](/text-messages). Its line also appears at the end of the chat you set it in.
+- To mark a reminder urgent, say so when you ask, such as "Remind me at 5 pm to call the pharmacy, it's urgent". An urgent reminder can call you once [phone calls](/phone-calls) are set up and you allow it.
 - If Aman is still answering in that chat, the line waits until the answer ends.
 - No model is called to deliver a reminder, so it costs nothing.
 - A reminder whose chat was deleted still shows in the bell.
-- Reminders don't show on the Schedules page. To see them all, click Reminders in the left panel. It lists what is coming up and what has already reminded you, with the persona that set each one. Click a reminder to open the chat you set it in; a reminder set outside a chat, or whose chat was deleted, has no link. To change or cancel one, ask in a chat, such as "What reminders do I have?"
+- Reminders don't show on the Schedules page. To see them all, click Reminders in the left panel. It lists what is coming up and what has already reminded you, with the persona that set each one. Each row shows the day, how far off it is, and whether it repeats or is paused. Click a reminder that says **Open chat** to go to the chat you set it in; a reminder set outside a chat, or whose chat was deleted, says **No chat to open**. To change or cancel one, ask in a chat, such as "What reminders do I have?"
 - Before Aman cancels one, a card shows the reminder and waits for your OK. A canceled reminder is gone for good.
 
 ## Related

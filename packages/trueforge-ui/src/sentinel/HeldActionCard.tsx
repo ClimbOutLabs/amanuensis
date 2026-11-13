@@ -11,8 +11,10 @@ import {
   APPROVAL_CHOICES,
   isNewRecipientCard,
   isNewRecipientDraftCard,
+  isSkillNetworkCard,
   NEW_RECIPIENT_CHOICES,
   NEW_RECIPIENT_DRAFT_CHOICES,
+  SKILL_NETWORK_CHOICES,
 } from './approvalChoices.js';
 import {
   approvalFacts,
@@ -115,20 +117,45 @@ export const HeldActionCard: FC<HeldActionCardProps> = ({
   // in draft words when the card saves a draft instead of sending.
   const newRecipients = isNewRecipientCard(card);
   const newRecipientDraft = isNewRecipientDraftCard(card);
-  const approveChoice = newRecipientDraft
-    ? NEW_RECIPIENT_DRAFT_CHOICES.approve
-    : newRecipients
-      ? NEW_RECIPIENT_CHOICES.approve
-      : APPROVAL_CHOICES.approve;
-  const denyChoice = newRecipientDraft
-    ? NEW_RECIPIENT_DRAFT_CHOICES.cancel
-    : newRecipients
-      ? NEW_RECIPIENT_CHOICES.cancel
-      : APPROVAL_CHOICES.deny;
+  // A skill network card answers a question about the skill's sites, not about this one call, so
+  // its choices name the skill and what each answer remembers.
+  const skillNetwork = isSkillNetworkCard(card) ? (card.skill_network ?? null) : null;
+  const approveChoice =
+    skillNetwork !== null
+      ? SKILL_NETWORK_CHOICES.approve
+      : newRecipientDraft
+        ? NEW_RECIPIENT_DRAFT_CHOICES.approve
+        : newRecipients
+          ? NEW_RECIPIENT_CHOICES.approve
+          : APPROVAL_CHOICES.approve;
+  const denyChoice =
+    skillNetwork !== null
+      ? SKILL_NETWORK_CHOICES.deny
+      : newRecipientDraft
+        ? NEW_RECIPIENT_DRAFT_CHOICES.cancel
+        : newRecipients
+          ? NEW_RECIPIENT_CHOICES.cancel
+          : APPROVAL_CHOICES.deny;
+  // A card for a refused site cannot say which skill reached for the site, but its answers are
+  // filed under one skill, so that card's Always choice names the skill it is filed under.
+  const alwaysAllowChoice =
+    skillNetwork !== null && skillNetwork.reason === 'undeclared_host'
+      ? {
+          label: `Always allow for the ${skillNetwork.skill_name} skill`,
+          hint: `Let the ${skillNetwork.skill_name} skill reach these sites in every chat, until you remove it in skill settings.`,
+          title: `Always allow for the ${skillNetwork.skill_name} skill?`,
+        }
+      : {
+          label: SKILL_NETWORK_CHOICES.alwaysAllow.label,
+          hint: SKILL_NETWORK_CHOICES.alwaysAllow.hint,
+          title: 'Always allow for this skill?',
+        };
   // Allow always leads the row and no choice is filled. On a card the server marks safe-first (irreversible,
   // or reaching other people) the no at the end keeps its safe words, such as "Keep it".
   const denyLabel =
-    card.safe_choice === true && !newRecipients && !newRecipientDraft ? safeVerb(card) : denyChoice.label;
+    card.safe_choice === true && skillNetwork === null && !newRecipients && !newRecipientDraft
+      ? safeVerb(card)
+      : denyChoice.label;
   const consequence = cardConsequence(card);
 
   return (
@@ -187,7 +214,22 @@ export const HeldActionCard: FC<HeldActionCardProps> = ({
           <ApprovalButton title={approveChoice.hint} onClick={onApprove} disabled={disabled}>
             {approveChoice.label}
           </ApprovalButton>
-          {alwaysAllowOffered && !newRecipients && (
+          {alwaysAllowOffered && !newRecipients && skillNetwork !== null && (
+            <AlwaysAllowToolControl
+              size="large"
+              disabled={disabled}
+              label={alwaysAllowChoice.label}
+              title={alwaysAllowChoice.title}
+              confirm={{
+                hint: alwaysAllowChoice.hint,
+                description: `${assistant} will let ${skillNetwork.skill_name} reach ${skillNetwork.hosts.join(', ')} without asking, in every chat.`,
+                undo: 'You can remove this later in skill settings.',
+              }}
+              onConfirm={onAlwaysAllow}
+              className="aui-approval-card__choice"
+            />
+          )}
+          {alwaysAllowOffered && !newRecipients && skillNetwork === null && (
             <AlwaysAllowToolControl
               size="large"
               disabled={disabled}

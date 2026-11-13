@@ -2813,6 +2813,10 @@
         "properties": {},
         "type": "object"
       },
+      "DeleteSkillNetworkHostResponse": {
+        "properties": {},
+        "type": "object"
+      },
       "DeleteSkillResponse": {
         "properties": {},
         "type": "object"
@@ -2936,7 +2940,8 @@
         "enum": [
           "in_app",
           "web_push",
-          "sms"
+          "sms",
+          "call"
         ],
         "type": "string"
       },
@@ -11989,6 +11994,15 @@
       "SkillNetworkApproval": {
         "additionalProperties": false,
         "properties": {
+          "allowed_hosts": {
+            "items": {
+              "description": "One exact site name the skill needs to reach.",
+              "maxLength": 253,
+              "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$",
+              "type": "string"
+            },
+            "type": "array"
+          },
           "approved_hosts": {
             "items": {
               "description": "One exact site name the skill needs to reach.",
@@ -12012,14 +12026,35 @@
             "maxItems": 20,
             "type": "array"
           },
+          "denied_hosts": {
+            "items": {
+              "description": "One exact site name the skill needs to reach.",
+              "maxLength": 253,
+              "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$",
+              "type": "string"
+            },
+            "type": "array"
+          },
           "send_capable": {
             "description": "True when a declared site can send mail or change a calendar.",
             "type": "boolean"
+          },
+          "session_hosts": {
+            "items": {
+              "description": "One exact site name the skill needs to reach.",
+              "maxLength": 253,
+              "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$",
+              "type": "string"
+            },
+            "type": "array"
           }
         },
         "required": [
           "declared_hosts",
           "approved_hosts",
+          "allowed_hosts",
+          "denied_hosts",
+          "session_hosts",
           "send_capable"
         ],
         "type": "object"
@@ -12906,6 +12941,42 @@
           "skill": {
             "$ref": "#/components/schemas/Tier3Skill"
           },
+          "skill_network": {
+            "description": "For a skill network card: the skill, the sites it asks for, and why. Otherwise null.",
+            "properties": {
+              "code_pin": {
+                "description": "The code version the approval is pinned to, or null when no pin is in force.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "hosts": {
+                "description": "The sites the skill asks to reach.",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "reason": {
+                "$ref": "#/components/schemas/Tier3SkillNetworkReason"
+              },
+              "skill_name": {
+                "description": "Name of the skill asking for network access.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "skill_name",
+              "hosts",
+              "reason",
+              "code_pin"
+            ],
+            "type": [
+              "object",
+              "null"
+            ]
+          },
           "why_asked_again": {
             "description": "Actual cause of re-escalation, or null on first ask.",
             "type": [
@@ -13260,6 +13331,14 @@
           "object",
           "null"
         ]
+      },
+      "Tier3SkillNetworkReason": {
+        "description": "Why the card is asked: the skill’s first use, or a site it did not declare.",
+        "enum": [
+          "first_use",
+          "undeclared_host"
+        ],
+        "type": "string"
       },
       "Timezone": {
         "default": "UTC",
@@ -15596,6 +15675,32 @@
         ],
         "type": "object"
       },
+      "UpdateSkillNetworkHostRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "host": {
+            "description": "One exact site name the skill needs to reach.",
+            "maxLength": 253,
+            "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "host"
+        ],
+        "type": "object"
+      },
+      "UpdateSkillNetworkHostResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/SkillNetworkApproval"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "UpdateSkillRequest": {
         "additionalProperties": false,
         "properties": {
@@ -15750,6 +15855,13 @@
             ],
             "type": "string"
           },
+          "session_title": {
+            "description": "Title of the chat the entry came from; null when the chat is deleted or has no title yet.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "tier": {
             "maximum": 3,
             "minimum": 1,
@@ -15768,7 +15880,8 @@
           "outcome",
           "auto_deny_reason",
           "created_at",
-          "chat_exists"
+          "chat_exists",
+          "session_title"
         ],
         "type": "object"
       },
@@ -25823,6 +25936,290 @@
         "x-fern-sdk-method-name": "create_or_update_network_approval"
       }
     },
+    "/api/v1/settings/skills/{name}/network-approval/allowed-host": {
+      "delete": {
+        "description": "Clears the one-site allowance. The skill cannot reach the site from the next run on.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ResourceName"
+            }
+          },
+          {
+            "description": "One exact site name the skill needs to reach.",
+            "in": "query",
+            "name": "host",
+            "required": true,
+            "schema": {
+              "description": "One exact site name the skill needs to reach.",
+              "maxLength": 253,
+              "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteSkillNetworkHostResponse"
+                }
+              }
+            },
+            "description": "Allowance removed."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "No skill with this name"
+          },
+          "424": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Unsupported because skills are managed by an external system."
+          }
+        },
+        "summary": "Remove one allowed site for a skill",
+        "tags": [
+          "Skills"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "skills"
+        ],
+        "x-fern-sdk-method-name": "delete_network_allowed_host"
+      },
+      "put": {
+        "description": "Allows one site for the skill on its own, apart from the declared list approval.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ResourceName"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSkillNetworkHostRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateSkillNetworkHostResponse"
+                }
+              }
+            },
+            "description": "The stored approval state."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request body."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "No skill with this name"
+          },
+          "424": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Unsupported because skills are managed by an external system."
+          }
+        },
+        "summary": "Allow one site for a skill",
+        "tags": [
+          "Skills"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "skills"
+        ],
+        "x-fern-sdk-method-name": "create_or_update_network_allowed_host"
+      }
+    },
+    "/api/v1/settings/skills/{name}/network-approval/denied-host": {
+      "delete": {
+        "description": "Clears the site being turned down, so a card can ask about it again.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ResourceName"
+            }
+          },
+          {
+            "description": "One exact site name the skill needs to reach.",
+            "in": "query",
+            "name": "host",
+            "required": true,
+            "schema": {
+              "description": "One exact site name the skill needs to reach.",
+              "maxLength": 253,
+              "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteSkillNetworkHostResponse"
+                }
+              }
+            },
+            "description": "Decision cleared."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "No skill with this name"
+          },
+          "424": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Unsupported because skills are managed by an external system."
+          }
+        },
+        "summary": "Clear one turned-down site for a skill",
+        "tags": [
+          "Skills"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "skills"
+        ],
+        "x-fern-sdk-method-name": "delete_network_denied_host"
+      },
+      "put": {
+        "description": "Stores the site as turned down for the skill, so it is not granted and raises no card.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ResourceName"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSkillNetworkHostRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateSkillNetworkHostResponse"
+                }
+              }
+            },
+            "description": "The stored approval state."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request body."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "No skill with this name"
+          },
+          "424": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Unsupported because skills are managed by an external system."
+          }
+        },
+        "summary": "Turn down one site for a skill",
+        "tags": [
+          "Skills"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "skills"
+        ],
+        "x-fern-sdk-method-name": "create_or_update_network_denied_host"
+      }
+    },
     "/api/v1/settings/token-factory-usage": {
       "get": {
         "description": "Tokens and cost per model counted today (UTC), and the daily cap with what is left under it. Counts come from the usage the provider reported.",
@@ -27784,7 +28181,7 @@
     },
     "/api/v1/user/reach/test": {
       "post": {
-        "description": "Sends the signed-in person a test item on one channel. A channel that is not set up answers 409. Test texts are limited to a few an hour.",
+        "description": "Sends the signed-in person a test item on one channel. A channel that is not set up answers 409. Test texts and test calls are limited, and a test past the limit answers 429.",
         "requestBody": {
           "content": {
             "application/json": {
@@ -27834,7 +28231,7 @@
                 }
               }
             },
-            "description": "That channel is not set up yet."
+            "description": "That channel is not set up yet, or the number is not confirmed."
           },
           "429": {
             "content": {
@@ -27844,7 +28241,7 @@
                 }
               }
             },
-            "description": "Too many test texts this hour, or a day’s limit on texts is reached. The message says how long to wait."
+            "description": "Too many test texts or test calls for now, or a day’s limit on texts is reached. The message says how long to wait."
           },
           "502": {
             "content": {
@@ -27854,7 +28251,7 @@
                 }
               }
             },
-            "description": "The test text could not be sent."
+            "description": "The test text could not be sent, or the test call could not be started."
           }
         },
         "summary": "Try a channel",

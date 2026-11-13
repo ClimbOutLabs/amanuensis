@@ -2,7 +2,7 @@
 
 **Status:** implemented
 
-**Scope note:** This spec covers texts as a channel of the delivery feed in [Reaching You](notifications-delivery.md): confirming a person's number, what a text says, the one-way STOP rule, the separate listener Twilio talks to, and the Settings, Reach me flow. When a text is sent is decided by [Noticing](noticing.md). Phone calls are separate work and will use the same listener.
+**Scope note:** This spec covers texts as a channel of the delivery feed in [Reaching You](notifications-delivery.md): confirming a person's number, what a text says, the one-way STOP rule, the separate listener Twilio talks to, and the Settings, Reach me flow. When a text is sent is decided by [Noticing](noticing.md). Phone calls use the same listener (see [Phone Calls](phone-calls.md)).
 
 ## Problem
 
@@ -16,7 +16,7 @@ One text provider, Twilio, behind a small interface. The person enters a number,
 
 - **Private (default):** `<assistant name>: a reminder is due. Open the app to see it.` The words by kind are "a reminder is due", "something needs you", "something is waiting for your ok" and "a note is waiting". No names, amounts, message content or reasons.
 - **Full:** for a reminder or a test, `<assistant name>: <its words>`, in plain characters (accents dropped, curly quotes and dashes made plain, emoji left out) so the phone company never switches to its costlier long form, and cut at a word so the whole text fits two segments (306 characters), ending with `...`. Anything noticed gets the Private words, because the model's wording stays in the feed.
-- The assistant's name is the one in the person's own Personalization settings, kept to letters, spaces, apostrophes and dashes and at most 20 of them, so a name cannot carry a link, a number to call or a message of its own. A name that holds a phone number, a site or an address is not used. When nothing is left, or they have not named it, the text says "Your assistant". No name is written into the code.
+- The assistant's name is the one in the person's own Personalization settings, kept to letters, spaces, and apostrophes and dashes between letters, at most 20 of them, so a name cannot carry a link, a number to call or a message of its own. A name that holds a phone number, a site or an address is not used. When nothing is left, or they have not named it, the text says "Your assistant". No name is written into the code.
 - The confirmation code text reads `Your confirmation code is 123456. It works for 10 minutes. If you did not ask for it, ignore this text.` It names no assistant, because it goes to a number nobody has proved yet.
 - The server sends the Private words for a reminder with the number's status, so the Settings page shows exactly what a text says.
 
@@ -45,7 +45,7 @@ One text provider, Twilio, behind a small interface. The person enters a number,
 - Twilio posts incoming texts to a **separate listener** on its own port, `TWILIO_WEBHOOK_PORT` (default 9201, outside the ranges the installer picks other ports from). It is only started when `REACH_SMS_PROVIDER` is `twilio`, and a port it cannot open stops the server, because Twilio sends STOP replies to it. It serves only Twilio's routes and shares no routes with the main app, so sign-in and the rest of Aman are never reachable through it. Any other address answers 404 with an empty body.
 - Every request is checked with Twilio's `X-Twilio-Signature` (HMAC-SHA1 of the public address plus the sorted form fields, signed with the auth token, compared in constant time). An unsigned or badly signed request is refused with 403 before any route runs. The address is built from `TWILIO_WEBHOOK_PUBLIC_URL`, never from a header the caller sent.
 - Only form posts up to 64 KB are read. A request from another Twilio account is refused. A message id seen in the last day is answered and not acted on again, so a copied request cannot be replayed soon after. The id is marked before the work starts, so two copies at once are acted on once, and forgotten again if the work fails, so Twilio can send it again. A route that fails answers 500 with empty TwiML, and only the address and the kind of error are logged.
-- The route is `POST /twilio/sms`. Routes are listed in one place, so the voice webhook and the media WebSocket of phone calls plug into the same listener, behind the same signature check.
+- The route is `POST /twilio/sms`. Routes are listed in one place. The voice webhook, the call status route and the media WebSocket of [phone calls](phone-calls.md) plug into the same listener, behind the same signature check. A route also receives the query of its signed address, which the call routes use to carry Aman's own call id.
 - The person exposes the port in one of two ways, written in plain words in the Text messages page of the docs: Tailscale Funnel on that port only, or their own domain with HTTPS in front of that port. The main app port is never published.
 - When the server starts, it points the Twilio number at itself: it looks up `TWILIO_FROM_NUMBER` in the account's numbers through Twilio's API and sets that number's incoming-text address to `TWILIO_WEBHOOK_PUBLIC_URL` plus `/twilio/sms`, method POST, so nothing is set by hand in the Twilio console. Nothing else on the number or the account changes. A number already pointed there is left alone. When it replaces another address, the log names that address's host only, since another app or another Aman sharing the number stops getting its texts. A failure is logged by its kind with the setting to check, and does not stop the server. Reach me shows it beside texts as `availability.texts.problem`: the person who runs Aman gets the one thing to do, and everyone else is told to ask them. While Twilio cannot be reached, the server tries again with waits that double from 30 seconds up to an hour, and the problem clears once it works. Texts still go out meanwhile, since Twilio itself blocks a number that replied STOP.
 
@@ -117,7 +117,7 @@ All tests use synthetic data, never a person's real data.
 
 ## Out of Scope
 
-- Phone calls and the voice webhook
+- Phone calls, covered in [Phone Calls](phone-calls.md)
 - Replies other than STOP, and any two-way texting
 - Providers other than Twilio
 - Per-person Twilio numbers: one Twilio number serves the instance
