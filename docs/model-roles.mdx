@@ -20,14 +20,14 @@ Two Settings pages work together:
 | **Main chat model**         | Answers you directly (`model` on the agent spec).                     | You need to choose one.   |
 | **Coding / subagent model** | Runs the helper tasks Aman hands off (`auxiliary_models.delegation`). | Uses the main chat model. |
 | **Compaction model**        | Summarizes older parts of a long chat (`auxiliary_models.compaction`). | Uses the main chat model. |
-| **Helper model**            | Does the background work after each chat. It picks out what to remember, files it on your pages, tidies the pages and names the chat. | Uses the main chat model. |
+| **Background model**            | Saves what to remember after each chat, tidies your pages and names the chat. | Uses the main chat model. |
 
 - A job left empty follows the main chat model at the moment it runs. So when you change the main chat model, every job left empty changes with it.
 - Clearing a job removes its own choice. It does not copy today's main chat model into it.
 - A helper task that asks for a specific model still gets that model. Your default never overrides a deliberate request.
-- A poor compaction or helper model hurts later answers and memories, so choose one you trust.
-- The helper model is one choice for all of Aman. It is kept on the computer Aman runs on, so it is the same in every browser. The daily tidy-up follows it too. A smaller, faster model works well here.
-- If you later remove the helper model under **Models**, the background work goes back to the main chat model. Settings then shows a note under the choice.
+- A poor compaction or background model hurts later answers and memories, so choose one you trust.
+- The background model is one choice for all of Aman. It is kept on the computer Aman runs on, so it is the same in every browser. The daily tidy-up follows it too. A smaller, faster model works well here.
+- If you later remove the background model under **Models**, the background work goes back to the main chat model. Settings then shows a note under the choice.
 - An agent that names its own summarization model (`auxiliary_models.summarization`) keeps that model for its chats.
 
 !!! note "Short background checks"

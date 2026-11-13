@@ -137,7 +137,7 @@
   "Dismiss": "packages/trueforge-ui/src/atoms/memory/MemoryPageView.tsx",
   "These lines disagree": "packages/trueforge-ui/src/atoms/memory/MemoryPageView.tsx",
   "Not a problem": "packages/trueforge-ui/src/atoms/memory/MemoryPageView.tsx",
-  "Helper model": "packages/trueforge-ui/src/containers/SettingsBuilder/ModelRoleSettings.tsx",
+  "Background model": "packages/trueforge-ui/src/containers/SettingsBuilder/ModelRoleSettings.tsx",
   "Sort what Aman saves onto pages": "packages/trueforge-ui/src/containers/SettingsBuilder/MemoryHelpersCard.tsx",
   "Only note what it would do": "packages/trueforge-ui/src/containers/SettingsBuilder/MemoryHelpersCard.tsx",
   "Start the daily tidy-up at": "packages/trueforge-ui/src/containers/SettingsBuilder/MemoryHelpersCard.tsx",

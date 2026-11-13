@@ -36,7 +36,7 @@ const QUIET_TIDY = {
   unsortedReasons: [],
 };
 
-/** The app's own server keeps the helper model; a server without this port does not offer the role. */
+/** The app's own server keeps the background model; a server without this port does not offer the role. */
 function nightlyPort() {
   const stored = () => ({
     enabled: false,
@@ -90,47 +90,47 @@ describe('ModelRoleSettings', () => {
     expect(screen.getByRole('heading', { name: 'Main chat model' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Coding / subagent model' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Compaction model' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Helper model' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Background model' })).toBeInTheDocument();
   });
 
-  it('keeps the helper model on the server, not in the chat being set up', async () => {
+  it('keeps the background model on the server, not in the chat being set up', async () => {
     renderPage();
 
-    fireEvent.click(await screen.findByTitle('Select Helper model'));
+    fireEvent.click(await screen.findByTitle('Select Background model'));
     fireEvent.click(await screen.findByRole('option', { name: /haiku/ }));
 
     await waitFor(() => expect(helperWrites).toEqual(['anthropic/haiku']));
     expect(updateAgentSpec).not.toHaveBeenCalled();
-    await waitFor(() => expect(screen.getByTitle('Select Helper model')).toHaveTextContent('haiku'));
+    await waitFor(() => expect(screen.getByTitle('Select Background model')).toHaveTextContent('haiku'));
   });
 
   it('goes back to the main model when Default is chosen for the helper', async () => {
     helperModel = 'anthropic/haiku';
     renderPage();
 
-    await waitFor(() => expect(screen.getByTitle('Select Helper model')).toHaveTextContent('haiku'));
-    fireEvent.click(screen.getByTitle('Select Helper model'));
+    await waitFor(() => expect(screen.getByTitle('Select Background model')).toHaveTextContent('haiku'));
+    fireEvent.click(screen.getByTitle('Select Background model'));
     fireEvent.click(await screen.findByRole('option', { name: /^Default/ }));
 
     await waitFor(() => expect(helperWrites).toEqual([null]));
   });
 
-  it('says so when the stored helper model is no longer listed', async () => {
+  it('says so when the stored background model is no longer listed', async () => {
     helperModel = 'mystery/gone-model';
     renderPage();
 
-    const row = (await screen.findByRole('heading', { name: 'Helper model' })).closest('article');
+    const row = (await screen.findByRole('heading', { name: 'Background model' })).closest('article');
     expect(row).not.toBeNull();
     await waitFor(() =>
       expect(within(row ?? document.body).getByText('Not in the current model catalog')).toBeInTheDocument(),
     );
   });
 
-  it('offers no helper model on a server that does not keep one', async () => {
+  it('offers no background model on a server that does not keep one', async () => {
     renderPage({ ownServer: false });
 
     expect(await screen.findByRole('heading', { name: 'Compaction model' })).toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: 'Helper model' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Background model' })).not.toBeInTheDocument();
   });
 
   it('shows no sub-tab strip when the host has no personas', async () => {

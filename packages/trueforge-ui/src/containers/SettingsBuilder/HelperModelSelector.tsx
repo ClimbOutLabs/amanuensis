@@ -4,18 +4,18 @@ import { RoleModelPicker } from '@/atoms/draft/RoleModelPicker.js';
 import { useToasterOptional } from '../ToasterContainer.js';
 import type { MemoryNightlyState } from './memoryHelperSettings.js';
 
-/** The helper model is kept on the server, so the background work that runs with no chat open follows it too. */
+/** The background model is kept on the server, so the background work that runs with no chat open follows it too. */
 export function HelperModelSelector({ setting }: { setting: MemoryNightlyState }) {
   const toaster = useToasterOptional();
   return (
     <>
       <RoleModelPicker
-        roleLabel="Helper"
+        roleLabel="Background"
         roleModelName={setting.helperModel ?? undefined}
         disabled={setting.saving || setting.enabled === null}
         onChoose={model => {
           void setting.setHelperModel(model ?? null).then(saved => {
-            if (saved) toaster?.showSuccess({ title: 'Helper model saved' });
+            if (saved) toaster?.showSuccess({ title: 'Background model saved' });
           });
         }}
       />

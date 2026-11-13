@@ -27,7 +27,7 @@ const MODEL_ROLES_TABS: ReadonlyArray<{ id: ModelRolesTab; label: string }> = [
  * page only assigns models to roles. Every role here has a real, separate
  * model call behind it. Uploaded images ride the ordinary chat message and
  * approval is a pure function, so neither can be given a setting that changes
- * anything. The helper model is kept on the server, unlike the other roles,
+ * anything. The background model is kept on the server, unlike the other roles,
  * because its work also runs when no chat is open.
  *
  * The two halves sit on sub-tabs (the underlined tablist Settings > Memory
@@ -116,11 +116,9 @@ const ModelRoleSettings = () => {
               {helper.supported ? (
                 <article className="flex flex-col gap-3 border-b border-border p-3 last:border-b-0 sm:flex-row sm:items-start sm:justify-between">
                   <div className="min-w-0 flex-1">
-                    <h5 className="text-sm font-medium text-text-primary">Helper model</h5>
+                    <h5 className="text-sm font-medium text-text-primary">Background model</h5>
                     <p className="mt-0.5 text-sm text-text-secondary">
-                      Does the background work after each chat. It picks out what to remember, files it on your pages,
-                      tidies the pages and names the chat. A smaller, faster model works well here. A poor one means
-                      less useful memories later.
+                      Saves what to remember after each chat, tidies your pages and names the chat.
                     </p>
                   </div>
                   <div className="w-full shrink-0 sm:w-80">
