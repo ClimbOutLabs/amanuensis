@@ -282,6 +282,9 @@ describe('AmanRuntimeRail', () => {
     expect(summaryRule).toMatch(/font-weight: 500;/);
     expect(ruleOf('.aman-runtime-rail__details-body')).toMatch(/font-size: var\(--text-sm\);/);
     expect(ruleOf('.aman-runtime-rail__waiting')).toMatch(/font-size: var\(--text-sm\);/);
+    // The desk's own lines, such as "Free after 6:00 PM.", match the rows they sit under.
+    expect(ruleOf('.aman-runtime-rail__desk-row-detail')).toMatch(/font-size: var\(--text-sm\);/);
+    expect(ruleOf('.aman-runtime-rail__desk-note')).toMatch(/font-size: var\(--text-sm\);/);
     // The Activity row's receipt list (SentinelAuditFeed) must not fall back to the stray
     // 0.875rem the base .aui-receipt rule used before the rail stepped it onto the scale.
     const railReceiptRule = ruleOf('.aman-runtime-rail .aui-receipt');

@@ -664,6 +664,127 @@
   font-size: var(--text-sm);
 }
 
+/* The desk sections (Today, Due, Needs your OK, Using, In this chat): one quiet list of rows,
+ * each a title over its detail. Rows that open something are buttons; the rest are plain. */
+.aman-runtime-rail__desk-list {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.aman-runtime-rail__desk-row {
+  display: grid;
+  gap: 0.125rem;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+button.aman-runtime-rail__desk-row {
+  cursor: pointer;
+}
+
+button.aman-runtime-rail__desk-row:hover .aman-runtime-rail__desk-row-title {
+  text-decoration: underline;
+  text-underline-offset: 0.125rem;
+}
+
+.aman-runtime-rail__desk-row-title {
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.aman-runtime-rail__desk-row-detail {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: 1.4;
+}
+
+.aman-runtime-rail__desk-row-more {
+  margin: 0.25rem 0 0;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: 1.4;
+}
+
+.aman-runtime-rail__desk-stale,
+.aman-runtime-rail__desk-note {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: 1.4;
+}
+
+/* One memory fact on the chat desk: the fact, its pull-out button, where it came from. */
+.aman-runtime-rail__desk-fact {
+  display: grid;
+  gap: 0.125rem;
+}
+
+.aman-runtime-rail__desk-fact-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.375rem;
+}
+
+.aman-runtime-rail__desk-fact-head .aman-runtime-rail__desk-row-title {
+  flex: 1;
+}
+
+.aman-runtime-rail__desk-pull {
+  flex: none;
+  width: 1.25rem;
+  height: 1.25rem;
+  padding: 0;
+  border: 0;
+  border-radius: 999rem;
+  background: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  line-height: 1;
+}
+
+.aman-runtime-rail__desk-pull:hover {
+  background: var(--gold-soft);
+  color: var(--text-primary);
+}
+
+/* The Check tag on facts that came from something read or found: an outline pill, never a seal. */
+.aman-runtime-rail__desk-check {
+  padding: 0 0.375rem;
+  border: 0.0625rem solid var(--gold-line);
+  border-radius: 999rem;
+  color: var(--text-primary);
+  font-size: 0.6875rem;
+  font-weight: 600;
+}
+
+.aman-runtime-rail__desk-forget {
+  justify-self: start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.aman-runtime-rail__desk-forget:hover {
+  text-decoration: underline;
+  text-underline-offset: 0.125rem;
+}
+
 /* Every placeholder reads as a hint: the muted token at normal weight, AA against the input background. */
 ::placeholder {
   color: var(--text-muted);
