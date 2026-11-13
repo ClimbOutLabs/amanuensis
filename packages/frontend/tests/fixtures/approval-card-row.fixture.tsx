@@ -71,6 +71,7 @@ const mail = {
   bcc: [],
   subject: 'Picnic plans',
   body: 'Saturday still works for us.\n\nBest,\nAda',
+  check_code: 'A7F39C',
   replaces: null,
   reply_in_thread: null,
   reply_to: null,

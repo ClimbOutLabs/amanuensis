@@ -47,6 +47,7 @@ const reply: SentinelApprovalCard['email'] = {
   bcc: [],
   subject: 'Lease renewal',
   body: 'Thursday works.',
+  check_code: null,
   replaces: null,
   reply_in_thread: { subject: 'Lease renewal', from: 'rui@example.com' },
   reply_to: null,

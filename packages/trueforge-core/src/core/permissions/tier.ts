@@ -127,6 +127,12 @@ export const Tier3EmailSchema = z
     bcc: z.array(Tier3MailboxSchema).describe('Hidden copy recipients.'),
     subject: z.string().describe('Subject line.'),
     body: z.string().describe('The whole message text, exactly as it will be sent.'),
+    // Cards stored before this field existed carry no code.
+    check_code: z
+      .string()
+      .nullable()
+      .default(null)
+      .describe('Short code for a send, repeated on its receipt; null for a draft.'),
     replaces: z
       .object({
         subject: z.string().describe('Subject of the draft being replaced.'),

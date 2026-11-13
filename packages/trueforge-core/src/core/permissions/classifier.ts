@@ -19,7 +19,7 @@ import type { CalendarWriteReview } from '../calendar/eventWrite';
 import { CALENDAR_SERVER_ID, isCalendarReadToolName, isCalendarWriteToolName } from '../calendar/toolContract';
 import { DRIVE_SERVER_ID, isDriveReadToolName, isDriveWriteToolName } from '../drive/toolContract';
 import type { DriveWriteReview } from '../drive/writeReview';
-import type { ReviewableDraft } from '../email/gmail/draftReview';
+import { checkCodeOf, hashDraft, type ReviewableDraft } from '../email/gmail/draftReview';
 import type { AnsweredMessage } from '../email/gmail/replyThread';
 import {
   GMAIL_SERVER_ID,
@@ -2444,6 +2444,18 @@ function escapedMailbox(mailbox: Tier3Mailbox): Tier3Mailbox {
   return { name: escapeDisplayText(mailbox.name), address: escapeDisplayText(mailbox.address) };
 }
 
+/** The message as a card shows it. The send receipt shows this same text, so both read it from here. */
+export function messageForDisplay(content: ReviewableDraft) {
+  return {
+    to: content.to.map(escapedMailbox),
+    cc: content.cc.map(escapedMailbox),
+    bcc: content.bcc.map(escapedMailbox),
+    subject: escapeDisplayText(content.subject),
+    body: escapeDisplayText(content.body, { keepNewlines: true }),
+    reply_to: content.replyTo === null ? null : escapeDisplayText(content.replyTo),
+  };
+}
+
 function cardText(text: string): string {
   const chars = Array.from(escapeDisplayText(text));
   return chars.length > GMAIL_CARD_SUBJECT_MAX_CHARS
@@ -2501,14 +2513,10 @@ function gmailWriteCard(input: { action: SentinelAction; agent_intent: string | 
     (content.nameLeftOff || replaces?.nameLeftOff === true ? NAME_LEFT_OFF_LINE : '');
   const email: Tier3Email = {
     action: kind,
-    to: content.to.map(escapedMailbox),
-    cc: content.cc.map(escapedMailbox),
-    bcc: content.bcc.map(escapedMailbox),
-    subject: escapeDisplayText(content.subject),
-    body: escapeDisplayText(content.body, { keepNewlines: true }),
-    reply_to: content.replyTo === null ? null : escapeDisplayText(content.replyTo),
+    ...messageForDisplay(content),
     from_name: content.fromName === '' ? null : escapeDisplayText(content.fromName),
     name_left_off: content.nameLeftOff || replaces?.nameLeftOff === true,
+    check_code: kind === 'send' ? checkCodeOf(hashDraft(content)) : null,
     replaces:
       replaces === undefined
         ? null
