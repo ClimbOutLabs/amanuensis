@@ -120,6 +120,8 @@ To change this:
 
 - Your recordings, the words written down from them, and the spoken replies never leave your computer. No speech service on the internet is used.
 - Recordings are not saved. Only the messages themselves stay in the chat, like typed ones.
+- If the microphone heard nothing, it says "Nothing was heard" instead of leaving the message box empty. Tap the microphone and try again.
+- A recording also stops if you switch chats or the app moves to the background. The microphone says so when you come back, so a recording never disappears without a word.
 - If the browser says the microphone is blocked, the microphone button shows a line through it. Tap it for help, allow the microphone in your browser's site settings, then click **Try again**.
 - To paste copied text into your message, click **Add**, then "Paste from clipboard".
 - How the voice runs, and the settings that need a terminal, are in [Voice setup](../../../../docs/voice-input.mdx).
