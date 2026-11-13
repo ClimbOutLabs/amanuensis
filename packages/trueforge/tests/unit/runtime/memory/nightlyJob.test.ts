@@ -95,7 +95,14 @@ describe('the nightly job', () => {
 
     expect(outcome).toEqual({
       status: 'ran',
-      counts: { movedToEarlier: 1, notesAsked: 1, notesSorted: 1, pagesAsked: 1, pairsListed: 1 },
+      counts: {
+        movedToEarlier: 1,
+        notesAsked: 1,
+        notesSorted: 1,
+        pagesAsked: 1,
+        pairsListed: 1,
+        vaultsWithoutModel: 0,
+      },
     });
     expect(history(vaultDir)).toContain('Aman moved 1 ended line to Earlier');
     expect(await readPage(vaultDir, 'matter', 'wendy')).toContain('## Earlier\n- Booked the movie.');
@@ -123,7 +130,20 @@ describe('the nightly job', () => {
 
     const outcome = await runNightlyForVault({ vault: SHARED, deps });
 
-    expect(outcome).toMatchObject({ status: 'ran', counts: { movedToEarlier: 1, notesAsked: 0, pagesAsked: 0 } });
+    expect(outcome).toMatchObject({
+      status: 'ran',
+      counts: { movedToEarlier: 1, notesAsked: 0, pagesAsked: 0, vaultsWithoutModel: 1 },
+    });
+  });
+
+  it('does not count a vault as missing a model when sorting is off', async () => {
+    const { baseDir, vaultDir } = await makeBase();
+    await writePage(vaultDir, 'matter', 'wendy', TWO_LINES);
+    const { deps } = setUpDeps({ baseDir, mode: 'off' });
+
+    const outcome = await runNightlyForVault({ vault: SHARED, deps });
+
+    expect(outcome).toMatchObject({ status: 'ran', counts: { vaultsWithoutModel: 0 } });
   });
 
   it('runs once a day per vault, and again the next day', async () => {

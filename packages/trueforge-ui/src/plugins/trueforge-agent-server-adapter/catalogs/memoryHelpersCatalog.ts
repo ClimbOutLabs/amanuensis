@@ -26,8 +26,15 @@ export interface MemoryNightlySetting {
 export interface MemoryTidyRun {
   status: 'ran' | 'busy';
   movedToEarlier: number;
+  /** Saved notes the model was asked about. */
+  notesAsked: number;
+  /** Of those, the notes whose answer was understood. */
   notesSorted: number;
   pairsListed: number;
+  /** The sorting choice the run worked under. */
+  sorting: PageSortMode;
+  /** True when sorting was not off and no model was found to ask. */
+  modelMissing: boolean;
 }
 
 export interface MemoryPageSortingCatalog {
@@ -65,8 +72,11 @@ const TidyRunResponseSchema = z.object({
   data: z.object({
     status: z.enum(['ran', 'busy']),
     moved_to_earlier: z.number(),
+    notes_asked: z.number(),
     notes_sorted: z.number(),
     pairs_listed: z.number(),
+    sorting: z.enum(['off', 'report', 'on']),
+    model_missing: z.boolean(),
   }),
 });
 
@@ -134,8 +144,16 @@ export function createMemoryNightlyCatalog(options: CreateTrueForgeClientOptions
       if (!parsed.success) {
         throw new Error('The server sent back something unexpected. Reload the page and try again.');
       }
-      const { status, moved_to_earlier, notes_sorted, pairs_listed } = parsed.data.data;
-      return { status, movedToEarlier: moved_to_earlier, notesSorted: notes_sorted, pairsListed: pairs_listed };
+      const run = parsed.data.data;
+      return {
+        status: run.status,
+        movedToEarlier: run.moved_to_earlier,
+        notesAsked: run.notes_asked,
+        notesSorted: run.notes_sorted,
+        pairsListed: run.pairs_listed,
+        sorting: run.sorting,
+        modelMissing: run.model_missing,
+      };
     },
   };
 }

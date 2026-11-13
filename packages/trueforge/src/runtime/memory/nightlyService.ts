@@ -21,6 +21,7 @@ import { createMemoryClient } from './createMemoryClient';
 import { personaVaultNamespace, sanitizeNamespace, vaultFilesystemNamespace } from './markdownMemoryFiles';
 import type { SummarizeTurnContext } from './memoryRetain';
 import { inQuietHours, runNightlyJob, type NightlyCounts, type NightlyDeps, type NightlyVault } from './nightlyJob';
+import type { PageSortMode } from './pageSortMode';
 import { similarPagesFinder } from './pageSortRun';
 
 /** How often the server looks at the clock; the job itself runs at most once a day per vault. */
@@ -45,7 +46,7 @@ async function personaVaults(personaStore: PersonaLister): Promise<NightlyVault[
 }
 
 /** What a tidy-up the person asked for did, or `busy` when one was already running. */
-export type TidyNowResult = { status: 'ran'; counts: NightlyCounts } | { status: 'busy' };
+export type TidyNowResult = { status: 'ran'; counts: NightlyCounts; sorting: PageSortMode } | { status: 'busy' };
 
 export interface NightlyMemoryJob {
   /** Tidies every vault now, whatever the hour and whether or not the daily tidy-up is switched on. */
@@ -146,7 +147,7 @@ export function startNightlyMemoryJob({
           deps: { ...deps, mode: sorting.mode, hour: nightly.hour },
           onRequest: true,
         });
-        return { status: 'ran', counts };
+        return { status: 'ran', counts, sorting: sorting.mode };
       } finally {
         running = false;
       }

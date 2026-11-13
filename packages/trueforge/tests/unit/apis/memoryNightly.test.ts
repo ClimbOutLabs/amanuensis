@@ -166,12 +166,28 @@ describe('memoryNightly router', () => {
     const { router, tidyNow } = await createRouter();
     tidyNow.mockResolvedValue({
       status: 'ran',
-      counts: { movedToEarlier: 3, notesAsked: 4, notesSorted: 2, pagesAsked: 5, pairsListed: 1 },
+      counts: {
+        movedToEarlier: 3,
+        notesAsked: 4,
+        notesSorted: 2,
+        pagesAsked: 5,
+        pairsListed: 1,
+        vaultsWithoutModel: 0,
+      },
+      sorting: 'on',
     });
     const response = await router.request('/run', { method: 'POST' });
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
-      data: { status: 'ran', moved_to_earlier: 3, notes_sorted: 2, pairs_listed: 1 },
+      data: {
+        status: 'ran',
+        moved_to_earlier: 3,
+        notes_asked: 4,
+        notes_sorted: 2,
+        pairs_listed: 1,
+        sorting: 'on',
+        model_missing: false,
+      },
     });
   });
 
@@ -180,8 +196,34 @@ describe('memoryNightly router', () => {
     tidyNow.mockResolvedValue({ status: 'busy' });
     const response = await router.request('/run', { method: 'POST' });
     expect(await response.json()).toEqual({
-      data: { status: 'busy', moved_to_earlier: 0, notes_sorted: 0, pairs_listed: 0 },
+      data: {
+        status: 'busy',
+        moved_to_earlier: 0,
+        notes_asked: 0,
+        notes_sorted: 0,
+        pairs_listed: 0,
+        sorting: 'off',
+        model_missing: false,
+      },
     });
+  });
+
+  it('POST /run says when no model was found for a run with sorting on', async () => {
+    const { router, tidyNow } = await createRouter();
+    tidyNow.mockResolvedValue({
+      status: 'ran',
+      counts: {
+        movedToEarlier: 0,
+        notesAsked: 0,
+        notesSorted: 0,
+        pagesAsked: 0,
+        pairsListed: 0,
+        vaultsWithoutModel: 1,
+      },
+      sorting: 'on',
+    });
+    const response = await router.request('/run', { method: 'POST' });
+    expect(await response.json()).toMatchObject({ data: { status: 'ran', sorting: 'on', model_missing: true } });
   });
 
   it('PUT with a non-boolean enabled is rejected', async () => {

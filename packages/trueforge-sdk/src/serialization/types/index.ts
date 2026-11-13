@@ -367,6 +367,7 @@ export * from "./MemoryScreenRecord.js";
 export * from "./MemoryScreenRecordReason.js";
 export * from "./MemorySummarize.js";
 export * from "./MemoryTidyRun.js";
+export * from "./MemoryTidyRunSorting.js";
 export * from "./MemoryTidyRunStatus.js";
 export * from "./MemoryVaultEntry.js";
 export * from "./MemoryVaultExport.js";

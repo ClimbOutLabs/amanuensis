@@ -93,18 +93,38 @@ function tidyResultCopy({ run, assistant }: { run: MemoryTidyRun; assistant: str
   if (run.status === 'busy') {
     return 'A tidy-up is already running. Try again in a few minutes.';
   }
+  const unread = run.notesAsked - run.notesSorted;
+  const unreadNote =
+    unread > 0
+      ? ` It could not file ${count(unread, { one: 'other note', many: 'other notes' })}, because the model's answer could not be read. Those stay on the Memories tab.`
+      : '';
   const done = [
     ...(run.movedToEarlier > 0
       ? [`moved ${count(run.movedToEarlier, { one: 'ended line', many: 'ended lines' })} to Earlier`]
       : []),
-    ...(run.notesSorted > 0 ? [`sorted ${count(run.notesSorted, { one: 'note', many: 'notes' })} onto pages`] : []),
+    ...(run.notesSorted > 0
+      ? [
+          run.sorting === 'report'
+            ? `wrote down where ${count(run.notesSorted, { one: 'note', many: 'notes' })} would go, without changing a page`
+            : `went through ${count(run.notesSorted, { one: 'saved note', many: 'saved notes' })} and filed what belongs on a page`,
+        ]
+      : []),
     ...(run.pairsListed > 0
       ? [`listed ${count(run.pairsListed, { one: 'pair of lines', many: 'pairs of lines' })} that disagree`]
       : []),
   ];
-  return done.length === 0
-    ? 'Done. Nothing needed tidying.'
-    : `Done. ${assistant} ${new Intl.ListFormat('en', { type: 'conjunction' }).format(done)}.`;
+  if (done.length > 0) {
+    return `Done. ${assistant} ${new Intl.ListFormat('en', { type: 'conjunction' }).format(done)}.${unreadNote}`;
+  }
+  if (run.modelMissing) {
+    return `Nothing changed. ${assistant} found no model to work with, so it only looked for facts that are over, and found none. Choose a model in Settings, then try again.`;
+  }
+  if (unread > 0) {
+    return `Nothing changed. ${assistant} looked at ${count(unread, { one: 'saved note', many: 'saved notes' })} but could not file ${unread === 1 ? 'it' : 'any'}, because the model's answer could not be read. Try again, or choose another model in Settings.`;
+  }
+  return run.sorting === 'off'
+    ? `Done. Nothing changed. Sorting is off, so ${assistant} only looked for facts that are over, and found none.`
+    : 'Done. Nothing needed tidying. Every saved note was already looked at.';
 }
 
 function NightlyControl() {
@@ -120,10 +140,13 @@ function NightlyControl() {
           <label htmlFor="memory-nightly-toggle" className="text-sm font-medium text-text-primary">
             Tidy pages once a day
           </label>
-          <p className="mt-0.5 text-xs text-text-secondary">Once a day, {assistant} goes through your pages and:</p>
+          <p className="mt-0.5 text-xs text-text-secondary">
+            Once a day, {assistant} moves facts that are over, such as a trip that has ended, to the Earlier part of
+            their page.
+          </p>
+          <p className="mt-1 text-xs text-text-secondary">When sorting above is not off, it also:</p>
           <ul className="mt-1 list-disc pl-4 text-xs text-text-secondary">
-            <li>moves facts that are over, such as a trip that has ended, to the Earlier part of the page</li>
-            <li>files any saved notes that were not filed yet, if sorting above is on</li>
+            <li>files any saved notes that were not filed yet</li>
             <li>points out two facts that cannot both be true, so you can fix one</li>
           </ul>
           <p className="mt-1 text-xs text-text-secondary">It never deletes anything.</p>
@@ -175,7 +198,9 @@ function NightlyControl() {
           size="small"
           disabled={setting.tidying}
           onClick={() => {
-            void setting.tidyNow();
+            void setting.tidyNow().then(run => {
+              if (run !== null) toaster?.showSuccess({ title: tidyResultCopy({ run, assistant }) });
+            });
           }}
         >
           {setting.tidying ? 'Tidying…' : 'Tidy now'}

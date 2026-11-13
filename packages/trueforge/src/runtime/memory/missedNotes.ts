@@ -47,6 +47,7 @@ export async function sortMissedNotes({
   options,
   askModel,
   similarPages,
+  countFailedNight,
 }: {
   mode: PageSortMode;
   baseDir: string;
@@ -55,6 +56,8 @@ export async function sortMissedNotes({
   options: PageChangeOptions;
   askModel: SortModel;
   similarPages: ((text: string) => Promise<PageListing[]>) | undefined;
+  /** Whether a note that fails in this run moves one night closer to being left alone. */
+  countFailedNight: boolean;
 }): Promise<MissedNotesResult> {
   const result: MissedNotesResult = { asked: 0, sorted: 0 };
   if (mode === 'off') {
@@ -109,7 +112,7 @@ export async function sortMissedNotes({
     }
   }
 
-  if (failed.size > 0 || Object.keys(tries).length > 0) {
+  if (countFailedNight && (failed.size > 0 || Object.keys(tries).length > 0)) {
     const inWindow = new Set(entries.map(entry => entry.id));
     await changeNightlyState({
       vaultDir,

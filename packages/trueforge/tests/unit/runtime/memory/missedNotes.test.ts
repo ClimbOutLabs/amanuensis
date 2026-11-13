@@ -34,12 +34,15 @@ function run({
   base,
   mode,
   model,
+  countFailedNight = true,
 }: {
   base: { baseDir: string; vaultDir: string };
   mode: PageSortMode;
   model: SortModel;
+  countFailedNight?: boolean;
 }) {
   return sortMissedNotes({
+    countFailedNight,
     mode,
     baseDir: base.baseDir,
     namespace: NAMESPACE,
@@ -180,6 +183,18 @@ describe('notes the sorter missed', () => {
     }
 
     expect(model.prompts).toHaveLength(3);
+  });
+
+  it('does not give up on a note over runs the person asked for', async () => {
+    const base = await setUp();
+    await writeDay({ vaultDir: base.vaultDir, day: '2026-11-09', notes: ['Hard note.'] });
+    const model = modelAnswering(() => 'not json');
+
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      await run({ base, mode: 'on', model, countFailedNight: false });
+    }
+
+    expect(model.prompts).toHaveLength(5);
   });
 });
 

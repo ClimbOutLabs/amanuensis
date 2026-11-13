@@ -1,5 +1,7 @@
 import { z } from '@hono/zod-openapi';
 
+import { PageSortModeSchema } from '../runtime/memory/pageSortMode';
+
 export const MemoryNightlySchema = z
   .object({
     enabled: z
@@ -41,8 +43,19 @@ export const MemoryTidyRunSchema = z
       .enum(['ran', 'busy'])
       .describe('`ran`: the tidy-up finished. `busy`: one was already running, so nothing was started.'),
     moved_to_earlier: z.number().int().nonnegative().describe('Lines that had ended and were moved to Earlier.'),
-    notes_sorted: z.number().int().nonnegative().describe('Missed notes that were sorted onto pages.'),
+    notes_asked: z.number().int().nonnegative().describe('Missed notes the model was asked about.'),
+    notes_sorted: z
+      .number()
+      .int()
+      .nonnegative()
+      .describe('Missed notes whose answer was understood: sorted onto pages, or only noted in trial mode.'),
     pairs_listed: z.number().int().nonnegative().describe('Pairs of lines newly listed as disagreeing.'),
+    sorting: PageSortModeSchema.describe(
+      'The sorting choice the run followed; with `off` it only moved ended lines. `off` when nothing was started.',
+    ),
+    model_missing: z
+      .boolean()
+      .describe('True when sorting was not off but no model was found, so the steps that ask a model were skipped.'),
   })
   .openapi('MemoryTidyRun');
 

@@ -35,7 +35,14 @@ describe('the nightly timer', () => {
     configuration.MEMORY_PAGE_SORTING = 'off';
     jest.useFakeTimers({ now: new Date(2026, 10, 11, 1, 0, 0) });
     run.mockReset();
-    run.mockResolvedValue({ movedToEarlier: 2, notesAsked: 0, notesSorted: 1, pagesAsked: 0, pairsListed: 0 });
+    run.mockResolvedValue({
+      movedToEarlier: 2,
+      notesAsked: 0,
+      notesSorted: 1,
+      pagesAsked: 0,
+      pairsListed: 0,
+      vaultsWithoutModel: 0,
+    });
   });
 
   afterEach(() => {
@@ -109,7 +116,15 @@ describe('the nightly timer', () => {
 
     expect(await job.tidyNow()).toEqual({
       status: 'ran',
-      counts: { movedToEarlier: 2, notesAsked: 0, notesSorted: 1, pagesAsked: 0, pairsListed: 0 },
+      counts: {
+        movedToEarlier: 2,
+        notesAsked: 0,
+        notesSorted: 1,
+        pagesAsked: 0,
+        pairsListed: 0,
+        vaultsWithoutModel: 0,
+      },
+      sorting: 'off',
     });
     expect(run.mock.calls[0]?.[0]).toMatchObject({ onRequest: true });
   });
@@ -119,7 +134,15 @@ describe('the nightly timer', () => {
     run.mockImplementationOnce(
       () =>
         new Promise(resolve => {
-          finish = () => resolve({ movedToEarlier: 0, notesAsked: 0, notesSorted: 0, pagesAsked: 0, pairsListed: 0 });
+          finish = () =>
+            resolve({
+              movedToEarlier: 0,
+              notesAsked: 0,
+              notesSorted: 0,
+              pagesAsked: 0,
+              pairsListed: 0,
+              vaultsWithoutModel: 0,
+            });
         }),
     );
     const job = start(inMemoryGlobalSettingsStore());

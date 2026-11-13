@@ -100,8 +100,11 @@ export function createMemoryNightlyRouter<TTransaction>(deps: MemoryNightlyRoute
         data: {
           status: result.status,
           moved_to_earlier: counts?.movedToEarlier ?? 0,
+          notes_asked: counts?.notesAsked ?? 0,
           notes_sorted: counts?.notesSorted ?? 0,
           pairs_listed: counts?.pairsListed ?? 0,
+          sorting: result.status === 'ran' ? result.sorting : 'off',
+          model_missing: (counts?.vaultsWithoutModel ?? 0) > 0,
         },
       },
       200,

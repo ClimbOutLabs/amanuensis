@@ -50,6 +50,8 @@ export interface NightlyCounts {
   notesSorted: number;
   pagesAsked: number;
   pairsListed: number;
+  /** Vaults where sorting was not off but no model could be found, so the steps that ask one were skipped. */
+  vaultsWithoutModel: number;
 }
 
 export type NightlyOutcome =
@@ -126,7 +128,14 @@ export async function runNightlyForVault({
   }
 
   const options = { vaultDir, runner: deps.runner, today, logger };
-  const counts: NightlyCounts = { movedToEarlier: 0, notesAsked: 0, notesSorted: 0, pagesAsked: 0, pairsListed: 0 };
+  const counts: NightlyCounts = {
+    movedToEarlier: 0,
+    notesAsked: 0,
+    notesSorted: 0,
+    pagesAsked: 0,
+    pairsListed: 0,
+    vaultsWithoutModel: 0,
+  };
   counts.movedToEarlier =
     (await attempt({ step: 'ended statements', logger, work: () => moveEndedStatements({ options }) })) ?? 0;
 
@@ -134,6 +143,9 @@ export async function runNightlyForVault({
     mode === 'off'
       ? undefined
       : await attempt({ step: 'find the model', logger, work: () => deps.summarizeFor(vault) });
+  if (mode !== 'off' && summarize === undefined) {
+    counts.vaultsWithoutModel = 1;
+  }
   const sortModel = summarize === undefined ? undefined : summaryModelForSorting({ summarize, logger });
   const disagreementModel = summarize === undefined ? undefined : summaryModelForDisagreements({ summarize, logger });
   if (sortModel !== undefined) {
@@ -148,6 +160,8 @@ export async function runNightlyForVault({
           options,
           askModel: sortModel,
           similarPages: deps.similarPagesFor(vault),
+          // A run the person asked for can be repeated at once, so it is not a night a note failed on.
+          countFailedNight: !onRequest,
         }),
     });
     counts.notesAsked = missed?.asked ?? 0;
@@ -177,7 +191,14 @@ export async function runNightlyJob({
   deps: NightlyDeps;
   onRequest?: boolean;
 }): Promise<NightlyCounts> {
-  const total: NightlyCounts = { movedToEarlier: 0, notesAsked: 0, notesSorted: 0, pagesAsked: 0, pairsListed: 0 };
+  const total: NightlyCounts = {
+    movedToEarlier: 0,
+    notesAsked: 0,
+    notesSorted: 0,
+    pagesAsked: 0,
+    pairsListed: 0,
+    vaultsWithoutModel: 0,
+  };
   for (const vault of await deps.vaults()) {
     if (!onRequest && !inQuietHours({ now: deps.now(), hour: deps.hour })) {
       break;
@@ -190,6 +211,7 @@ export async function runNightlyJob({
         total.notesSorted += outcome.counts.notesSorted;
         total.pagesAsked += outcome.counts.pagesAsked;
         total.pairsListed += outcome.counts.pairsListed;
+        total.vaultsWithoutModel += outcome.counts.vaultsWithoutModel;
       }
     } catch (error) {
       deps.logger.warn('The nightly memory tidy failed for a vault.', {

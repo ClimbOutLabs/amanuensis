@@ -92,13 +92,26 @@ describe('createMemoryNightlyCatalog', () => {
     const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       expect(String(input)).toBe('/api/v1/settings/memory-nightly/run');
       expect(init?.method).toBe('POST');
-      return okJson({ data: { status: 'ran', moved_to_earlier: 2, notes_sorted: 1, pairs_listed: 0 } });
+      return okJson({
+        data: {
+          status: 'ran',
+          moved_to_earlier: 2,
+          notes_asked: 3,
+          notes_sorted: 1,
+          pairs_listed: 0,
+          sorting: 'on',
+          model_missing: false,
+        },
+      });
     });
     await expect(createMemoryNightlyCatalog({ fetch: fetchImpl }).tidyMemoryNow()).resolves.toEqual({
       status: 'ran',
       movedToEarlier: 2,
+      notesAsked: 3,
       notesSorted: 1,
       pairsListed: 0,
+      sorting: 'on',
+      modelMissing: false,
     });
   });
 });

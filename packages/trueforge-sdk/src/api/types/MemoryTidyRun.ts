@@ -3,12 +3,18 @@
 import type * as TrueForge from "../index.js";
 
 export interface MemoryTidyRun {
+    /** True when sorting was not off but no model was found, so the steps that ask a model were skipped. */
+    modelMissing: boolean;
     /** Lines that had ended and were moved to Earlier. */
     movedToEarlier: number;
-    /** Missed notes that were sorted onto pages. */
+    /** Missed notes the model was asked about. */
+    notesAsked: number;
+    /** Missed notes whose answer was understood: sorted onto pages, or only noted in trial mode. */
     notesSorted: number;
     /** Pairs of lines newly listed as disagreeing. */
     pairsListed: number;
+    /** The sorting choice the run followed; with `off` it only moved ended lines. `off` when nothing was started. */
+    sorting: TrueForge.MemoryTidyRunSorting;
     /** `ran`: the tidy-up finished. `busy`: one was already running, so nothing was started. */
     status: TrueForge.MemoryTidyRunStatus;
 }

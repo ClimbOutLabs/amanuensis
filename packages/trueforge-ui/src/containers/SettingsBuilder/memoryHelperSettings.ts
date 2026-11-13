@@ -136,7 +136,8 @@ export interface MemoryNightlyState {
   /** What the last tidy-up asked for here did; `null` before the first one and while one runs. */
   tidied: MemoryTidyRun | null;
   tidyError: string | null;
-  tidyNow(): Promise<void>;
+  /** Resolves with what the tidy-up did, or `null` when it could not run (the reason is then in `tidyError`). */
+  tidyNow(): Promise<MemoryTidyRun | null>;
 }
 
 type NightlyChange = { enabled?: boolean; hour?: number };
@@ -160,14 +161,17 @@ export function useMemoryNightlySetting(): MemoryNightlyState {
   const [tidied, setTidied] = useState<MemoryTidyRun | null>(null);
   const [tidyError, setTidyError] = useState<string | null>(null);
   const tidyNow = useCallback(async () => {
-    if (catalog === null) return;
+    if (catalog === null) return null;
     setTidying(true);
     setTidied(null);
     setTidyError(null);
     try {
-      setTidied(await catalog.tidyMemoryNow());
+      const run = await catalog.tidyMemoryNow();
+      setTidied(run);
+      return run;
     } catch (caught) {
       setTidyError(memoryHelperErrorMessage(caught));
+      return null;
     } finally {
       setTidying(false);
     }

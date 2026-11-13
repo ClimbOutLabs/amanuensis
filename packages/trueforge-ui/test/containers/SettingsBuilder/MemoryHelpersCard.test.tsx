@@ -3,10 +3,21 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
 import { MemoryHelpersCard } from '@/containers/SettingsBuilder/MemoryHelpersCard.js';
+import type { MemoryTidyRun } from '@/plugins/trueforge-agent-server-adapter/catalogs/memoryHelpersCatalog.js';
 import { ServerProvider } from '@/server/ServerContext.js';
 import { createMockAgentUIServer, createMockCatalog } from '../../server/mockServer.js';
 
 type Mode = 'off' | 'report' | 'on';
+
+const QUIET_RUN: MemoryTidyRun = {
+  status: 'ran',
+  movedToEarlier: 0,
+  notesAsked: 0,
+  notesSorted: 0,
+  pairsListed: 0,
+  sorting: 'on',
+  modelMissing: false,
+};
 
 /** The trueforge adapter's two ports, backed by memory so a save reads back as the server would answer. */
 function renderCard({
@@ -14,9 +25,9 @@ function renderCard({
   enabled = false,
   withPorts = true,
   failSave = false,
-  tidy = { status: 'ran' as const, movedToEarlier: 2, notesSorted: 1, pairsListed: 0 },
+  tidy = { ...QUIET_RUN, movedToEarlier: 2, notesAsked: 1, notesSorted: 1 },
 }: {
-  tidy?: { status: 'ran' | 'busy'; movedToEarlier: number; notesSorted: number; pairsListed: number };
+  tidy?: MemoryTidyRun;
   mode?: Mode;
   enabled?: boolean;
   withPorts?: boolean;
@@ -93,9 +104,8 @@ describe('MemoryHelpersCard', () => {
     expect(screen.getByText(/added as not confirmed until you confirm it/)).toBeInTheDocument();
     expect(screen.getByRole('switch', { name: 'Tidy pages once a day' })).not.toBeChecked();
     expect(screen.getByText(/moves facts that are over, such as a trip that has ended/)).toBeInTheDocument();
-    expect(
-      screen.getByText(/files any saved notes that were not filed yet, if sorting above is on/),
-    ).toBeInTheDocument();
+    expect(screen.getByText('When sorting above is not off, it also:')).toBeInTheDocument();
+    expect(screen.getByText(/files any saved notes that were not filed yet/)).toBeInTheDocument();
     expect(screen.getByText(/points out two facts that cannot both be true/)).toBeInTheDocument();
     expect(screen.getByText('It never deletes anything.')).toBeInTheDocument();
     expect(screen.getByText(/Both are off until you turn them on/)).toBeInTheDocument();
@@ -160,17 +170,51 @@ describe('MemoryHelpersCard', () => {
     renderCard();
     fireEvent.click(await screen.findByRole('button', { name: 'Tidy now' }));
     expect(await screen.findByRole('status')).toHaveTextContent(
-      'Done. Aman moved 2 ended lines to Earlier and sorted 1 note onto pages.',
+      'Done. Aman moved 2 ended lines to Earlier and went through 1 saved note and filed what belongs on a page.',
+    );
+  });
+
+  it('says a trial run changed no page', async () => {
+    const status = renderCardAndTidy({ ...QUIET_RUN, sorting: 'report', notesAsked: 2, notesSorted: 2 });
+    expect(await status).toHaveTextContent('Done. Aman wrote down where 2 notes would go, without changing a page.');
+  });
+
+  it('says which notes it could not file beside what it did', async () => {
+    const status = renderCardAndTidy({ ...QUIET_RUN, notesAsked: 3, notesSorted: 1 });
+    expect(await status).toHaveTextContent(
+      "It could not file 2 other notes, because the model's answer could not be read. Those stay on the Memories tab.",
+    );
+  });
+
+  it('says why when the model could not be understood and nothing changed', async () => {
+    const status = renderCardAndTidy({ ...QUIET_RUN, notesAsked: 4 });
+    expect(await status).toHaveTextContent(
+      "Nothing changed. Aman looked at 4 saved notes but could not file any, because the model's answer could not be read. Try again, or choose another model in Settings.",
+    );
+  });
+
+  it('says when no model was found', async () => {
+    const status = renderCardAndTidy({ ...QUIET_RUN, modelMissing: true });
+    expect(await status).toHaveTextContent(
+      'Nothing changed. Aman found no model to work with, so it only looked for facts that are over, and found none. Choose a model in Settings, then try again.',
+    );
+  });
+
+  it('says sorting is off when a run with sorting off changed nothing', async () => {
+    const status = renderCardAndTidy({ ...QUIET_RUN, sorting: 'off' });
+    expect(await status).toHaveTextContent(
+      'Done. Nothing changed. Sorting is off, so Aman only looked for facts that are over, and found none.',
     );
   });
 
   it('says so when nothing needed tidying', async () => {
-    const first = renderCardAndTidy({ status: 'ran', movedToEarlier: 0, notesSorted: 0, pairsListed: 0 });
-    expect(await first).toHaveTextContent('Done. Nothing needed tidying.');
+    expect(await renderCardAndTidy(QUIET_RUN)).toHaveTextContent(
+      'Done. Nothing needed tidying. Every saved note was already looked at.',
+    );
   });
 
   it('says to try again when a tidy-up is already running', async () => {
-    const status = renderCardAndTidy({ status: 'busy', movedToEarlier: 0, notesSorted: 0, pairsListed: 0 });
+    const status = renderCardAndTidy({ ...QUIET_RUN, status: 'busy' });
     expect(await status).toHaveTextContent('A tidy-up is already running. Try again in a few minutes.');
   });
 

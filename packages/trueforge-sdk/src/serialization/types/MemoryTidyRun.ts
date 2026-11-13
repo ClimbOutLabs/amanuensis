@@ -3,21 +3,28 @@
 import type * as TrueForge from "../../api/index.js";
 import * as core from "../../core/index.js";
 import type * as serializers from "../index.js";
+import { MemoryTidyRunSorting } from "./MemoryTidyRunSorting.js";
 import { MemoryTidyRunStatus } from "./MemoryTidyRunStatus.js";
 
 export const MemoryTidyRun: core.serialization.ObjectSchema<serializers.MemoryTidyRun.Raw, TrueForge.MemoryTidyRun> =
     core.serialization.object({
+        modelMissing: core.serialization.property("model_missing", core.serialization.boolean()),
         movedToEarlier: core.serialization.property("moved_to_earlier", core.serialization.number()),
+        notesAsked: core.serialization.property("notes_asked", core.serialization.number()),
         notesSorted: core.serialization.property("notes_sorted", core.serialization.number()),
         pairsListed: core.serialization.property("pairs_listed", core.serialization.number()),
+        sorting: MemoryTidyRunSorting,
         status: MemoryTidyRunStatus,
     });
 
 export declare namespace MemoryTidyRun {
     export interface Raw {
+        model_missing: boolean;
         moved_to_earlier: number;
+        notes_asked: number;
         notes_sorted: number;
         pairs_listed: number;
+        sorting: MemoryTidyRunSorting.Raw;
         status: MemoryTidyRunStatus.Raw;
     }
 }
