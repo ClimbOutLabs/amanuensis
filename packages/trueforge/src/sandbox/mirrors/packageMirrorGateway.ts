@@ -16,6 +16,8 @@ import path from 'node:path';
 import { Transform, type Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import type { Logger } from 'winston';
+import { checkGoMirrorPath, DEFAULT_GO_MODULE_HOSTS, type GoMirrorPathCheck } from './goMirrorPath';
+import type { PackageMirrorAllowanceCheck } from './packageMirrorAllowance';
 import type { PackageMirrorGrant, PackageMirrorTokenRegistry } from './packageMirrorTokens';
 
 export type MirrorEcosystem = 'pypi' | 'npm' | 'go' | 'cargo';
@@ -45,10 +47,14 @@ const UPSTREAM_TIMEOUT_MS = 10 * 60 * 1000;
 
 export interface PackageMirrorGatewayOptions {
   registry: PackageMirrorTokenRegistry;
+  /** Whether a grant's allowance still holds in the shared database; a grant that fails it is taken back. */
+  allowanceHolds: PackageMirrorAllowanceCheck;
   cacheDir: string;
   logger: Logger;
   maxDownloadBytes?: number;
   maxCacheBytes?: number;
+  /** Further code hosts the Go mirror serves modules from, besides its built-in list. */
+  extraGoModuleHosts?: readonly string[];
   /**
    * Test seam only: replaces the fixed upstream addresses with local stand-ins, and with them the
    * public-address check that only makes sense for the real ones. The server never sets this; its
@@ -233,6 +239,9 @@ function headerValue(headers: Record<string, string | string[] | undefined>, nam
   return Array.isArray(value) ? value[0] : value;
 }
 
+/** The checksum database's support probe, which the mirror answers itself. */
+const GO_SUMDB_SUPPORTED = /^\/(?:sumdb|via)\/sum\.golang\.org\/supported$/;
+
 /**
  * The host-side package mirrors: one caching, download-only gateway that speaks the four standard
  * read protocols (PEP 503 for Python, the npm registry read interface, the Go module proxy
@@ -241,20 +250,24 @@ function headerValue(headers: Record<string, string | string[] | undefined>, nam
  */
 export class PackageMirrorGateway {
   readonly #registry: PackageMirrorTokenRegistry;
+  readonly #allowanceHolds: PackageMirrorAllowanceCheck;
   readonly #cacheDir: string;
   readonly #logger: Logger;
   readonly #maxDownloadBytes: number;
   readonly #maxCacheBytes: number;
   readonly #bases: Record<MirrorEcosystem, readonly string[]>;
+  readonly #goModuleHosts: ReadonlySet<string>;
   readonly #testMode: boolean;
   readonly #servers: Server[] = [];
 
   constructor(options: PackageMirrorGatewayOptions) {
     this.#registry = options.registry;
+    this.#allowanceHolds = options.allowanceHolds;
     this.#cacheDir = options.cacheDir;
     this.#logger = options.logger;
     this.#maxDownloadBytes = options.maxDownloadBytes ?? DEFAULT_MIRROR_DOWNLOAD_MAX_BYTES;
     this.#maxCacheBytes = options.maxCacheBytes ?? DEFAULT_MIRROR_CACHE_MAX_BYTES;
+    this.#goModuleHosts = new Set([...DEFAULT_GO_MODULE_HOSTS, ...(options.extraGoModuleHosts ?? [])]);
     this.#testMode = options.upstreamBases !== undefined;
     this.#bases = {
       pypi: options.upstreamBases?.pypi ?? MIRROR_UPSTREAM_BASES.pypi,
@@ -341,15 +354,72 @@ export class PackageMirrorGateway {
     const token = Array.isArray(tokenHeader) ? tokenHeader[0] : tokenHeader;
     const grant = token === undefined ? undefined : this.#registry.resolve(token);
     if (grant === undefined || token === undefined) {
-      this.#plain(res, 403, 'This sandbox has no package download grant. Allow downloads for this repo first.');
+      this.#plain(
+        res,
+        403,
+        'This sandbox has no package download grant. Allow package downloads in this chat first, then try again.',
+      );
       return;
     }
-    // The rest of the path goes upstream exactly as written, trailing slash and all.
-    const rest = rawPath.length > ecosystem.length + 1 ? rawPath.slice(ecosystem.length + 1) : '/';
+    const allowance = await this.#allowanceHolds(grant);
+    if (allowance === 'unavailable') {
+      // The check could not be read, so nothing is decided: the grant stays in place and
+      // the person is told to try again, not that downloads were turned off.
+      this.#plain(
+        res,
+        503,
+        'Package downloads cannot be checked right now, so this download did not go ahead. Try again in a moment.',
+      );
+      this.#log({ grant, ecosystem, path: rawPath, status: 503, bytes: 0, cached: false, at: startedAt });
+      return;
+    }
+    if (allowance === 'off' || allowance === 'chat_deleted') {
+      this.#registry.revoke(token);
+      this.#plain(
+        res,
+        403,
+        allowance === 'chat_deleted'
+          ? 'This chat was deleted, so this download was stopped. Start a new chat to keep working.'
+          : 'Package downloads were turned off for this chat, so this download was stopped. Turn them on again in Settings, then try again.',
+      );
+      this.#log({ grant, ecosystem, path: rawPath, status: 403, bytes: 0, cached: false, at: startedAt });
+      return;
+    }
+    // The rest of the path goes upstream exactly as written, trailing slash and all, except on the Go
+    // mirror, which sends only the decoded form it has just checked.
+    let rest = rawPath.length > ecosystem.length + 1 ? rawPath.slice(ecosystem.length + 1) : '/';
     if (segments[1] === 'off-list' && segments.length >= 3) {
       this.#plain(res, 403, "That package file is not on this mirror's own list, so it was not fetched.");
       this.#log({ grant, ecosystem, path: rest, status: 403, bytes: 0, cached: false, at: startedAt });
       return;
+    }
+    if (ecosystem === 'go') {
+      // Go clients never send a query string, so one is refused rather than passed along unchecked.
+      const checked: GoMirrorPathCheck =
+        query === ''
+          ? checkGoMirrorPath({ rawRest: rest, hosts: this.#goModuleHosts })
+          : { allowed: false, reason: 'shape' };
+      if (!checked.allowed) {
+        const status = checked.reason === 'host' ? 403 : 404;
+        this.#plain(
+          res,
+          status,
+          checked.reason === 'host'
+            ? `This mirror does not fetch Go modules from ${checked.host}. Ask the server owner to add ${checked.host} to SANDBOX_MIRROR_GO_EXTRA_HOSTS.`
+            : 'The Go mirror does not serve that address. Let the go command ask for modules itself, for example with go mod download.',
+        );
+        this.#log({ grant, ecosystem, path: rest, status, bytes: 0, cached: false, at: startedAt });
+        return;
+      }
+      rest = checked.path;
+      // The real checksum database answers /supported with 404, which makes go contact it directly and
+      // fail in the sandbox. Answering 200 here keeps every checksum lookup going through the mirror.
+      if (GO_SUMDB_SUPPORTED.test(rest)) {
+        res.writeHead(200, { 'content-type': 'text/plain', 'content-length': 0 });
+        res.end();
+        this.#log({ grant, ecosystem, path: rest, status: 200, bytes: 0, cached: false, at: startedAt });
+        return;
+      }
     }
     const publicBase = `http://127.0.0.1:${String(SLOT_MIRROR_GUEST_PORT)}/m/${token}`;
     if (ecosystem === 'cargo' && rest === '/config.json') {

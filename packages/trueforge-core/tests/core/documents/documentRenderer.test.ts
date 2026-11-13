@@ -161,7 +161,9 @@ describe('createStructuredDocumentDocx report modes', () => {
       sections: [{ heading: 'A', rows: [{ label: longLabel, value: 'v', status: 'info', sources: [] }] }],
       notes: [],
     };
-    await expect(createStructuredDocumentDocx(report, { mode: 'full' })).rejects.toThrow(/bounded renderer contract/);
+    await expect(createStructuredDocumentDocx(report, { mode: 'full' })).rejects.toThrow(
+      /Report row exceeds its caps: label 160 characters/,
+    );
   });
 
   it('documents the compact caps as exported constants', () => {

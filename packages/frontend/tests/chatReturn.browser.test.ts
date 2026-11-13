@@ -14,7 +14,9 @@ import {
   STALLED_ANSWER_START,
 } from '../../trueforge/tests/fixtures/scriptedModelServer.ts';
 import { inProcessApi } from './support/approvalChat.ts';
+import { featureShotPath, saveFailureShots } from './support/featureShots.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.ts';
+import { FIRST_LOAD_TIMEOUT_MS } from './support/firstLoad.ts';
 import { privateViteCache } from './support/viteCache.ts';
 
 const RENDER_TIMEOUT_MS = 45_000;
@@ -107,7 +109,7 @@ async function send({ page, text }: { page: Page; text: string }): Promise<void>
 
 /** A chat with one finished reply, made the way a person makes one. */
 async function finishedChat({ page, origin, text }: { page: Page; origin: string; text: string }): Promise<string> {
-  await page.goto(`${origin}/`, { waitUntil: 'domcontentloaded', timeout: RENDER_TIMEOUT_MS });
+  await page.goto(`${origin}/`, { waitUntil: 'domcontentloaded', timeout: FIRST_LOAD_TIMEOUT_MS });
   await composer(page).waitFor({ timeout: RENDER_TIMEOUT_MS });
   await send({ page, text });
   await page.locator('main').getByText(FINAL_TEXT).first().waitFor({ timeout: RENDER_TIMEOUT_MS });
@@ -264,6 +266,9 @@ test('a chat left while its reply runs comes back live', { timeout: 900_000 }, a
         turnStartDelayMs = 0;
       }
       await expectLiveReply({ page, message });
+      await page.screenshot({
+        path: await featureShotPath({ surface: 'screen:chat-return', step: 'reply-live-after-return' }),
+      });
       assert.deepEqual(await userMessages(page), await reloadedUserMessages({ page, message }));
       await cancelStopsReply({ page, api, sessionId: charlie });
     });
@@ -375,6 +380,9 @@ test('a chat left while its reply runs comes back live', { timeout: 900_000 }, a
       assert.equal(await chatNotice(page).filter({ hasText: STILL_WORKING }).count(), 0);
       await cancelStopsReply({ page, api, sessionId: alpha });
     });
+  } catch (error) {
+    await saveFailureShots({ browser, surface: 'screen:chat-return' });
+    throw error;
   } finally {
     await browser?.close();
     await vite.close();

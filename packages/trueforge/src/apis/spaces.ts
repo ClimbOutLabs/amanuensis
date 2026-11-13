@@ -20,7 +20,7 @@ import {
 import type { Space } from '../schemas/space';
 import { TENANT_ID } from './sessions';
 
-function toSpaceWire(record: SpaceRecord): Space {
+function toSpaceWire({ record, folder_id }: { record: SpaceRecord; folder_id: string | null }): Space {
   return {
     id: record.id,
     name: record.name,
@@ -28,6 +28,7 @@ function toSpaceWire(record: SpaceRecord): Space {
     status: record.status,
     body: record.body,
     format: record.format,
+    folder_id,
     revision: record.revision,
     created_at: record.created_at,
     updated_at: record.updated_at,
@@ -68,6 +69,18 @@ export interface SpacesRouterDeps<TTransaction> {
 
 /** Spaces CRUD (mounted at /api/v1/spaces). */
 export function createSpacesRouter<TTransaction>(deps: SpacesRouterDeps<TTransaction>) {
+  const folderIdsBySpace = async (created_by: string, records: readonly SpaceRecord[]) => {
+    const assignments = await deps.spaceStore.listSpaceFolderAssignments({
+      tenant_id: TENANT_ID,
+      created_by,
+      space_ids: records.map(record => record.id),
+    });
+    return new Map(assignments.map(assignment => [assignment.space_id, assignment.folder_id]));
+  };
+
+  const toWire = async (created_by: string, record: SpaceRecord) =>
+    toSpaceWire({ record, folder_id: (await folderIdsBySpace(created_by, [record])).get(record.id) ?? null });
+
   const listHandler: RouteHandler<typeof listSpacesRoute> = async c => {
     const created_by = deps.resolveRequestContext(c).subject.id;
     const query = c.req.valid('query');
@@ -86,9 +99,13 @@ export function createSpacesRouter<TTransaction>(deps: SpacesRouterDeps<TTransac
     if (conflictMessage !== undefined) {
       return c.json({ error: { message: conflictMessage } }, 409);
     }
+    const folderIds = await folderIdsBySpace(created_by, result.records);
     return c.json(
       {
-        data: { spaces: result.records.map(toSpaceWire), aggregate_revision: result.aggregate_revision },
+        data: {
+          spaces: result.records.map(record => toSpaceWire({ record, folder_id: folderIds.get(record.id) ?? null })),
+          aggregate_revision: result.aggregate_revision,
+        },
         pagination: { has_more: result.has_more, next_offset: result.next_offset },
       },
       200,
@@ -107,7 +124,12 @@ export function createSpacesRouter<TTransaction>(deps: SpacesRouterDeps<TTransac
         expected_aggregate_revision,
       });
       return c.json(
-        { data: { space: toSpaceWire(result.record), aggregate_revision: result.aggregate_revision } },
+        {
+          data: {
+            space: toSpaceWire({ record: result.record, folder_id: null }),
+            aggregate_revision: result.aggregate_revision,
+          },
+        },
         201,
       );
     } catch (error) {
@@ -129,7 +151,7 @@ export function createSpacesRouter<TTransaction>(deps: SpacesRouterDeps<TTransac
     if (space === undefined) {
       return c.json({ error: { message: `Space not found: ${space_id}` } }, 404);
     }
-    return c.json({ data: toSpaceWire(space) }, 200);
+    return c.json({ data: await toWire(created_by, space) }, 200);
   };
 
   const updateHandler: RouteHandler<typeof updateSpaceRoute> = async c => {
@@ -146,7 +168,7 @@ export function createSpacesRouter<TTransaction>(deps: SpacesRouterDeps<TTransac
         expected_aggregate_revision,
       });
       return c.json(
-        { data: { space: toSpaceWire(result.record), aggregate_revision: result.aggregate_revision } },
+        { data: { space: await toWire(created_by, result.record), aggregate_revision: result.aggregate_revision } },
         200,
       );
     } catch (error) {
@@ -192,7 +214,7 @@ export function createSpacesRouter<TTransaction>(deps: SpacesRouterDeps<TTransac
         expected_aggregate_revision,
       });
       return c.json(
-        { data: { space: toSpaceWire(result.record), aggregate_revision: result.aggregate_revision } },
+        { data: { space: await toWire(created_by, result.record), aggregate_revision: result.aggregate_revision } },
         200,
       );
     } catch (error) {

@@ -10,6 +10,9 @@
 # the download layer stays cached when only package.json / scripts change.
 # See https://pnpm.io/cli/fetch. BuildKit cache mounts are avoided so the same
 # file builds on Railway Metal (which requires a hardcoded service id in mount ids).
+#
+# `pnpm fetch` also writes a full node_modules/.pnpm; remove it so --prod install
+# does not inherit build tooling into the runtime image.
 
 FROM node:24-slim@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20 AS base
 ENV PNPM_HOME=/pnpm
@@ -29,7 +32,8 @@ COPY pnpm-lock.yaml pnpm-workspace.yaml ./
 # Patched dependencies are part of the lockfile's install contract. They must
 # be available during `pnpm fetch`, before the workspace source is copied.
 COPY patches patches
-RUN pnpm fetch
+# Populate /pnpm/store only; drop the full virtual store fetch also writes.
+RUN pnpm fetch && rm -rf node_modules
 
 # ---------------------------------------------------------------------------
 # workspace: install inputs shared by every stage below — the manifests plus the
@@ -65,13 +69,12 @@ RUN pnpm --filter @truefoundry/trueforge-core build && pnpm --filter @truefoundr
 
 # ---------------------------------------------------------------------------
 # frontend-builder: build the UI the server serves (parallel to builder above).
-# Bundlers read SDK src/ (trueforge-dev); the UI prebuild emits the declarations
-# tsc needs, so this stage never compiles SDK JavaScript.
+# `frontend build` builds its own dependencies first (frontend -> UI -> SDK), so
+# one command builds each of them exactly once.
 # ---------------------------------------------------------------------------
 FROM workspace AS frontend-builder
 RUN pnpm install --frozen-lockfile --offline --filter frontend...
 COPY packages/trueforge-sdk packages/trueforge-sdk
-RUN pnpm --filter @truefoundry/trueforge-sdk build
 # The UI and frontend import public subpaths from trueforge-core. A clean
 # Docker build has no host dist artifacts, so make the core build produced by
 # the parallel builder stage available before generating UI declarations.
@@ -85,7 +88,6 @@ COPY packages/trueforge-core/src packages/trueforge-core/src
 COPY packages/trueforge-ui packages/trueforge-ui
 # Vite alone peaks above 3 GB; the cap trades build time for staying inside a 6 GB Docker VM.
 ENV NODE_OPTIONS=--max-old-space-size=3072
-RUN pnpm --filter @truefoundry/trueforge-ui build
 COPY packages/frontend packages/frontend
 RUN pnpm --filter frontend build
 
@@ -161,7 +163,13 @@ RUN mkdir -p /data/memory /data/persona-knowledge /data/app /data/mail-policy \
 # has no home directory, so the default under HOME would fail with EACCES at startup.
 ENV MEMORY_MARKDOWN_DIR=/data/memory \
   PERSONA_KNOWLEDGE_DIR=/data/persona-knowledge \
-  APP_DATA_DIR=/data/app
+  APP_DATA_DIR=/data/app \
+  VOICE_VAD_MODEL_DIR=/opt/aman-voice
+
+# Voice mode's listening model (Silero VAD v5.1.2, MIT), fetched at build time and checked against its
+# SHA-256, so the build fails on any other file and the running server never downloads it. The server
+# pins the same hash in packages/trueforge/src/voice/vad/sileroVad.ts; a test keeps the two equal.
+ADD --chmod=0644 --checksum=sha256:2623a2953f6ff3d2c1e61740c6cdb7168133479b267dfef114a4a3cc5bdd788f https://raw.githubusercontent.com/snakers4/silero-vad/v5.1.2/src/silero_vad/data/silero_vad.onnx /opt/aman-voice/silero_vad.onnx
 
 # `docker run --rm -i <image> aman <command>` (hash-password, backup, doctor, export-data).
 # /backup is the mount point for `aman backup --target /backup`; owning it here lets a fresh

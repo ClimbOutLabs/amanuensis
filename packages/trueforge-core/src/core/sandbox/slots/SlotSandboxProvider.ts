@@ -53,6 +53,33 @@ export interface SlotSandboxProviderOptions {
   sleepMs: ((ms: number) => Promise<void>) | undefined;
   /** Carries out network git on the host; without it, git commands that need the network simply fail offline. */
   gitBridge: GitBridge | undefined;
+  /**
+   * Remembers whether the slots were last seen full, so the warning is logged when that changes rather than on
+   * every check. A host that makes a provider per call passes one shared log; without it each provider keeps its own.
+   */
+  fullStateLog?: SlotFullStateLog | undefined;
+}
+
+/** Logs "every sandbox slot is full" once when the slots fill up, and again only after room came back. */
+export class SlotFullStateLog {
+  #full = false;
+
+  report(input: {
+    logger: Logger;
+    full: readonly { index: number; sessions: number; capacity: number }[] | null;
+  }): void {
+    if (input.full === null) {
+      this.#full = false;
+      return;
+    }
+    if (this.#full) {
+      return;
+    }
+    this.#full = true;
+    input.logger.warn('every sandbox slot is full', {
+      slots: input.full.map(slot => ({ slot: slot.index + 1, sessions: slot.sessions, capacity: slot.capacity })),
+    });
+  }
 }
 
 function parseSandboxId(sandboxId: string): { slot: number; sessionId: string } | undefined {
@@ -117,6 +144,7 @@ export class SlotSandboxProvider implements SandboxProvider {
   private readonly logger: Logger;
   private readonly sleepMs: (ms: number) => Promise<void>;
   private readonly gitBridge: GitBridge | undefined;
+  private readonly fullStateLog: SlotFullStateLog;
   private gitToken: string | null = null;
   readonly hostGit: HostGitCapability | undefined;
 
@@ -128,6 +156,7 @@ export class SlotSandboxProvider implements SandboxProvider {
     this.logger = options.logger.child({ module: 'SlotSandboxProvider' });
     this.sleepMs = options.sleepMs ?? (ms => new Promise(resolve => setTimeout(resolve, ms)));
     this.gitBridge = options.gitBridge;
+    this.fullStateLog = options.fullStateLog ?? new SlotFullStateLog();
     this.hostGit = options.gitBridge === undefined ? undefined : this.createHostGit(options.gitBridge);
   }
 
@@ -414,9 +443,23 @@ export class SlotSandboxProvider implements SandboxProvider {
     }
   }
 
+  /** The slot a retired slot's chats went to, as an index: slot 3 to slot 1, slot 4 to slot 2, and no other slot. */
+  private retiredIndex(slot: number): number | undefined {
+    const target = slot === 2 ? 0 : slot === 3 ? 1 : undefined;
+    return target !== undefined && target < this.clients.length ? target : undefined;
+  }
+
   private resolve(sandboxId: string): { client: SlotClient; sessionId: string } {
     const parsed = parseSandboxId(sandboxId);
-    const client = parsed === undefined ? undefined : this.clients[parsed.slot];
+    // Installs from before had four slots; the setup moved the chats of slots 3 and 4 into slots 1 and 2
+    // before removing the old slots, so an old id still resolves: slot 3 to slot 1, slot 4 to slot 2. That
+    // mapping is fixed and does not follow the number of slots in use: with one slot in use a slot 4 id
+    // does not resolve, because its chats are on slot 2, and a slot 2 id does not resolve either.
+    let index: number | undefined;
+    if (parsed !== undefined && this.clients.length > 0) {
+      index = parsed.slot < this.clients.length ? parsed.slot : this.retiredIndex(parsed.slot);
+    }
+    const client = index === undefined ? undefined : this.clients[index];
     if (parsed === undefined || client === undefined) {
       throw new SandboxNotAvailableError(sandboxId);
     }
@@ -437,7 +480,7 @@ export class SlotSandboxProvider implements SandboxProvider {
       })),
     );
     const problems: string[] = [];
-    const full: string[] = [];
+    const full: { index: number; sessions: number; capacity: number }[] = [];
     const usable: { index: number; sessions: number }[] = [];
     for (const { index, health } of probes) {
       if (!health.ok) {
@@ -449,7 +492,7 @@ export class SlotSandboxProvider implements SandboxProvider {
         // On a slot with its own fixed disk the chats' quotas must fit, or one slot filling up fails for all its chats.
         const capacity = chatCapacity({ facts: health.value.attestation.facts, treeDiskMb: this.treeDiskMb });
         if (capacity !== undefined && health.value.sessions >= capacity) {
-          full.push(`slot ${String(index + 1)} holds ${String(capacity)} chats`);
+          full.push({ index, sessions: health.value.sessions, capacity });
         } else {
           usable.push({ index, sessions: health.value.sessions });
         }
@@ -461,12 +504,16 @@ export class SlotSandboxProvider implements SandboxProvider {
     const emptiest = usable.filter(slot => slot.sessions === fewest);
     const chosen = emptiest[Math.floor(Math.random() * emptiest.length)];
     if (chosen !== undefined) {
+      this.fullStateLog.report({ logger: this.logger, full: null });
       return { ok: true, index: chosen.index };
     }
     if (problems.length === 0 && full.length > 0) {
+      this.fullStateLog.report({ logger: this.logger, full });
       return {
         ok: false,
-        reason: `The sandbox is full: every slot already holds as many chats as its disk fits (${full.join('; ')}). Delete old chats, then try again.`,
+        reason: `The sandbox is full: every slot already holds as many chats as its disk fits (${full
+          .map(slot => `slot ${String(slot.index + 1)} holds ${String(slot.capacity)} chats`)
+          .join('; ')}). Delete old chats, then try again.`,
       };
     }
     this.logger.warn('no sandbox slot is usable', { problems });

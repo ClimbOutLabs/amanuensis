@@ -17,7 +17,7 @@ test_doctor_reads_what_the_installer_wrote() {
   out=$(real_doctor --json --instance main) || rc=$?
   assert_eq "$rc" 0 "doctor exit code on a fresh install"
   assert_contains "$out" '"instances":{"main":[' "instance discovered under instances/"
-  assert_contains "$out" '"id":"images","state":"ok","detail":"All 3 images are ready.' "app_image, dex_image and stt_image read from release.json"
+  assert_contains "$out" '"id":"images","state":"ok","detail":"All 8 images are ready.' "every image the installer recorded in release.json, the voice, the connectors and the browser too"
   assert_contains "$out" '"id":"config","state":"ok"' ".env mode 0600 accepted"
   assert_contains "$out" '"id":"containers","state":"ok","detail":"All 3 parts of instance main are running.'
   assert_contains "$out" '"id":"backup","state":"ok","detail":"Daily backups are on' "a fresh install is not warned about backups"
@@ -41,6 +41,16 @@ test_installer_calls_the_shim_as_documented() {
   assert_eq "$(basename "$INSTALLER_DIR/doctor/aman")" aman "the shipped shim carries the name the installer looks for"
   assert_eq "$([ -x "$INSTALLER_DIR/doctor/aman" ] && echo yes)" yes "the shipped shim is executable"
   sandbox_drop
+}
+
+# The installer is run directly as ./installer/install.sh, and aman upgrade, aman backup and the
+# Windows starter run the script directly too, so the files they start from must carry the
+# executable bit in the checkout itself. The suites run scripts through bash, which cannot see a
+# missing bit, so the checkout is checked here instead.
+test_shipped_scripts_are_executable() {
+  t_begin "install.sh and the network suite carry the executable bit"
+  assert_eq "$([ -x "$INSTALLER_DIR/install.sh" ] && echo yes)" yes "install.sh is executable in the checkout"
+  assert_eq "$([ -x "$INSTALLER_DIR/tests/lib/network.test.sh" ] && echo yes)" yes "the network suite is executable in the checkout"
 }
 
 test_doctor_sandbox_reads_what_the_installer_wrote() {
@@ -80,6 +90,7 @@ test_layout_and_release_record() {
   release=$(cat "$AMAN_HOME/release/release.json")
   assert_contains "$release" '"app_image": "aman-app:'
   assert_contains "$release" '"stt_image": "aman-stt:'
+  assert_contains "$release" '"tts_image": "aman-tts:'
   assert_contains "$release" "\"dex_image\": \"$(sed -n 's/.*"dex_image"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$INSTALLER_DIR/release.json")\""
   assert_mode "$AMAN_HOME/release/release.json" 600
   sandbox_drop
@@ -157,7 +168,8 @@ test_image_keeps_app_data_on_the_data_volume() {
   assert_not_contains "$dockerfile" "useradd --create-home" "the runtime user gets no home"
   assert_contains "$dockerfile" "APP_DATA_DIR=/data/app" "the app data dir is under /data"
   assert_contains "$dockerfile" "mkdir -p /data/memory /data/persona-knowledge /data/app" "the dir exists and is owned by the runtime user"
-  assert_contains "$(cat "$repo/packages/trueforge/src/config.ts")" "'APP_DATA_DIR'" "the server reads APP_DATA_DIR"
+  assert_contains "$(cat "$repo/packages/trueforge/src/appDataDir.ts")" "env['APP_DATA_DIR']" "the server reads APP_DATA_DIR"
+  assert_contains "$(cat "$repo/packages/trueforge/src/config.ts")" "appDataDirFromEnv(process.env)" "the server config takes its data dir from that reader"
   assert_contains "$(cat "$INSTALLER_DIR/templates/instance/compose.yaml.tpl")" "      - data:/data" "the instance mounts its data volume at /data"
 }
 
@@ -191,7 +203,7 @@ test_slot_image_creates_the_mirror_dir() {
     assert_contains "$(cat "$dockerfile")" "USER 10001:10001" "$dockerfile runs as the server user the mirror dir belongs to"
   done
   assert_contains "$(cat "$repo/docker-compose.slots.yml")" "user: '65532:65532'" "the slots run as 65532, the user who connects through the mirror socket"
-  for slot in 1 2 3 4; do
+  for slot in 1 2; do
     assert_contains "$(cat "$INSTALLER_DIR/templates/instance/compose.yaml.tpl")" "- slot_mirror_$slot:/run/aman-slots/$slot/mirror" "the instance mounts mirror volume $slot where the server binds its socket"
     assert_contains "$(cat "$repo/docker-compose.slots.yml")" "- slot_mirror_$slot:/run/aman/mirror" "slot $slot mounts the same volume at the dir its image creates"
   done
@@ -215,6 +227,7 @@ test_slot_image_creates_the_mirror_dir
 test_in_image_check_ids_match
 test_doctor_reads_what_the_installer_wrote
 test_installer_calls_the_shim_as_documented
+test_shipped_scripts_are_executable
 test_doctor_sandbox_reads_what_the_installer_wrote
 test_doctor_sandbox_fix_uses_the_same_entry
 test_layout_and_release_record

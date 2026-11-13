@@ -5,6 +5,7 @@ import { AuthClient } from "./api/resources/auth/client/Client.js";
 import { BugReportsClient } from "./api/resources/bugReports/client/Client.js";
 import { CatalogsClient } from "./api/resources/catalogs/client/Client.js";
 import { DataClient } from "./api/resources/data/client/Client.js";
+import { DeliveriesClient } from "./api/resources/deliveries/client/Client.js";
 import { HelpClient } from "./api/resources/help/client/Client.js";
 import { InternalClient } from "./api/resources/internal/client/Client.js";
 import { McpServersClient } from "./api/resources/mcpServers/client/Client.js";
@@ -12,6 +13,8 @@ import { MemoryClient } from "./api/resources/memory/client/Client.js";
 import { ModelsClient } from "./api/resources/models/client/Client.js";
 import { PersonalizationClient } from "./api/resources/personalization/client/Client.js";
 import { PersonasClient } from "./api/resources/personas/client/Client.js";
+import { ReachClient } from "./api/resources/reach/client/Client.js";
+import { RemindersClient } from "./api/resources/reminders/client/Client.js";
 import { RepositoriesClient } from "./api/resources/repositories/client/Client.js";
 import { RepositoryCommandProposalsClient } from "./api/resources/repositoryCommandProposals/client/Client.js";
 import { RepositoryCommandsClient } from "./api/resources/repositoryCommands/client/Client.js";
@@ -23,6 +26,7 @@ import { SessionRepositoryClient } from "./api/resources/sessionRepository/clien
 import { SessionsClient } from "./api/resources/sessions/client/Client.js";
 import { SettingsClient } from "./api/resources/settings/client/Client.js";
 import { SkillsClient } from "./api/resources/skills/client/Client.js";
+import { SpaceFoldersClient } from "./api/resources/spaceFolders/client/Client.js";
 import { SpacesClient } from "./api/resources/spaces/client/Client.js";
 import { VoiceClient } from "./api/resources/voice/client/Client.js";
 import type { BaseClientOptions, BaseRequestOptions } from "./BaseClient.js";
@@ -57,7 +61,11 @@ export class TrueForge {
     protected _sessionPersonas: SessionPersonasClient | undefined;
     protected _sessionRepository: SessionRepositoryClient | undefined;
     protected _skills: SkillsClient | undefined;
+    protected _spaceFolders: SpaceFoldersClient | undefined;
     protected _spaces: SpacesClient | undefined;
+    protected _deliveries: DeliveriesClient | undefined;
+    protected _reach: ReachClient | undefined;
+    protected _reminders: RemindersClient | undefined;
     protected _voice: VoiceClient | undefined;
     protected _catalogs: CatalogsClient | undefined;
     protected _memory: MemoryClient | undefined;
@@ -147,8 +155,24 @@ export class TrueForge {
         return (this._skills ??= new SkillsClient(this._options));
     }
 
+    public get spaceFolders(): SpaceFoldersClient {
+        return (this._spaceFolders ??= new SpaceFoldersClient(this._options));
+    }
+
     public get spaces(): SpacesClient {
         return (this._spaces ??= new SpacesClient(this._options));
+    }
+
+    public get deliveries(): DeliveriesClient {
+        return (this._deliveries ??= new DeliveriesClient(this._options));
+    }
+
+    public get reach(): ReachClient {
+        return (this._reach ??= new ReachClient(this._options));
+    }
+
+    public get reminders(): RemindersClient {
+        return (this._reminders ??= new RemindersClient(this._options));
     }
 
     public get voice(): VoiceClient {

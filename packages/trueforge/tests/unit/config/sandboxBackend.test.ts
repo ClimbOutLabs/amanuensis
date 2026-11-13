@@ -31,10 +31,10 @@ async function loadConfig(env: Partial<Record<(typeof KEYS)[number], string>>): 
 }
 
 describe('sandbox backend config', () => {
-  it('defaults to docker with four slots and a 2 GiB workspace quota', async () => {
+  it('defaults to docker with two slots and a 2 GiB workspace quota', async () => {
     const { default: configuration } = await loadConfig({});
     expect(configuration.SANDBOX_BACKEND).toBe('docker');
-    expect(configuration.SANDBOX_SLOTS).toBe(4);
+    expect(configuration.SANDBOX_SLOTS).toBe(2);
     expect(configuration.SANDBOX_SLOTS_DIR).toBe('');
     expect(configuration.SANDBOX_SESSION_DISK_MB).toBe(2048);
   });
@@ -55,7 +55,7 @@ describe('sandbox backend config', () => {
 
   it('refuses more slots than the compose file defines', async () => {
     await expect(loadConfig({ SANDBOX_BACKEND: 'slots', SANDBOX_SLOTS_DIR: '/x', SANDBOX_SLOTS: '9' })).rejects.toThrow(
-      'at most 4',
+      'at most 2',
     );
   });
 

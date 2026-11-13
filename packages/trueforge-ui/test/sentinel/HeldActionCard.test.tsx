@@ -10,6 +10,7 @@ import type { SentinelApprovalCard } from '@/sentinel/types.js';
 function card(overrides: Partial<SentinelApprovalCard> = {}): SentinelApprovalCard {
   return {
     plain_what: 'Send a note to Ana?',
+    copy: { headline: 'Send a note to Ana?', consequence: "Once this is sent, it can't be unsent.", reason: null },
     plain_why: 'It was on the Monday list.',
     cannot_be_undone: "Once this is sent, it can't be unsent.",
     why_asked_again: null,
@@ -24,6 +25,7 @@ function card(overrides: Partial<SentinelApprovalCard> = {}): SentinelApprovalCa
     calendar_event: null,
     schedule: null,
     persona: null,
+    skill: null,
     ...overrides,
   };
 }
@@ -101,26 +103,26 @@ describe('HeldActionCard', () => {
     expect(onDeny).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole('button', { name: /this chat/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Always deny/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Always allow this tool' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Always allow everywhere' })).not.toBeInTheDocument();
   });
 
-  it('offers Always allow this tool only when the server said it may', () => {
+  it('offers Always allow everywhere only when the server said it may', () => {
     renderCard({ alwaysAllowOffered: false });
-    expect(screen.queryByRole('button', { name: 'Always allow this tool' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Always allow everywhere' })).not.toBeInTheDocument();
   });
 
-  it('asks the owner to confirm Always allow this tool before it records anything', () => {
+  it('asks the owner to confirm Always allow everywhere before it records anything', () => {
     const { onAlwaysAllow } = renderCard({ alwaysAllowOffered: true });
-    fireEvent.click(screen.getByRole('button', { name: 'Always allow this tool' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Always allow everywhere' }));
 
-    expect(screen.getByRole('heading', { name: 'Always allow this tool?' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Always allow everywhere?' })).toBeInTheDocument();
     expect(screen.getByText(/You can remove this later in connector settings/)).toBeInTheDocument();
     expect(onAlwaysAllow).not.toHaveBeenCalled();
   });
 
   it('says who will run the tool in the confirm step, in the assistant name and never as an agent', () => {
     renderCard({ alwaysAllowOffered: true });
-    fireEvent.click(screen.getByRole('button', { name: 'Always allow this tool' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Always allow everywhere' }));
 
     expect(
       screen.getByText('Aman will run this tool on this connector without asking, in every chat.'),
@@ -130,7 +132,7 @@ describe('HeldActionCard', () => {
 
   it('calls nothing when the owner cancels the Always allow confirm step', () => {
     const { onAlwaysAllow, onApprove } = renderCard({ alwaysAllowOffered: true });
-    fireEvent.click(screen.getByRole('button', { name: 'Always allow this tool' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Always allow everywhere' }));
     fireEvent.click(screen.getByTestId('always-allow-cancel'));
 
     expect(onAlwaysAllow).not.toHaveBeenCalled();
@@ -139,10 +141,47 @@ describe('HeldActionCard', () => {
 
   it('calls the Always allow handler once when the owner confirms', () => {
     const { onAlwaysAllow } = renderCard({ alwaysAllowOffered: true });
-    fireEvent.click(screen.getByRole('button', { name: 'Always allow this tool' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Always allow everywhere' }));
     fireEvent.click(screen.getByTestId('always-allow-confirm'));
 
     expect(onAlwaysAllow).toHaveBeenCalledTimes(1);
+  });
+
+  it('names the skill the answer is filed under in the Always choice on a refused-site card', () => {
+    const { onAlwaysAllow } = renderCard(
+      { alwaysAllowOffered: true },
+      {
+        plain_what: 'Allow a connection to api.example.com in this chat?',
+        plain_why:
+          'A command in this chat tried to reach api.example.com, which is not one of the sites approved for the skills in this chat, and the connection was refused. Aman cannot tell which skill, if any, made the attempt.',
+        skill_network: {
+          skill_name: 'Trail Weather',
+          hosts: ['api.example.com'],
+          reason: 'undeclared_host',
+          code_pin: null,
+        },
+      },
+    );
+    expect(screen.queryByRole('button', { name: 'Always allow for this skill' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Always allow for the Trail Weather skill' }));
+
+    expect(screen.getByRole('heading', { name: 'Always allow for the Trail Weather skill?' })).toBeInTheDocument();
+    expect(
+      screen.getByText('Aman will let Trail Weather reach api.example.com without asking, in every chat.'),
+    ).toBeInTheDocument();
+    expect(onAlwaysAllow).not.toHaveBeenCalled();
+  });
+
+  it('keeps the plain Always allow wording on a first-use card, whose question names the skill', () => {
+    renderCard(
+      { alwaysAllowOffered: true },
+      {
+        plain_what: 'Let the Trail Weather skill reach api.example.com?',
+        skill_network: { skill_name: 'Trail Weather', hosts: ['api.example.com'], reason: 'first_use', code_pin: null },
+      },
+    );
+    expect(screen.getByRole('button', { name: 'Always allow for this skill' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Always allow for the Trail Weather skill' })).not.toBeInTheDocument();
   });
 
   it.each([
@@ -191,6 +230,7 @@ describe('HeldActionCard', () => {
       {},
       {
         plain_what: 'Add "Dentist" to your Google Calendar.',
+        copy: null,
         recipient: null,
         destination: null,
         destination_host: null,

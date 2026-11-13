@@ -1,8 +1,10 @@
 import {
   execFileRunner,
   extractErrorLogFields,
+  forgetShownSkillNotices,
   GitBridge,
   rawSandboxId,
+  SlotFullStateLog,
   slotMirrorSocketPathsIn,
   SlotSandboxProvider,
   slotSkillNetworkSocketPathsIn,
@@ -12,6 +14,7 @@ import {
 } from '@truefoundry/trueforge-core/core';
 import type { Logger } from 'winston';
 import configuration from '../config';
+import type { PackageMirrorAllowanceCheck } from './mirrors/packageMirrorAllowance';
 import { PackageMirrorGateway } from './mirrors/packageMirrorGateway';
 import { packageMirrorTokens } from './mirrors/packageMirrorTokens';
 import { SkillNetworkGateway } from './skillnet/skillNetworkGateway';
@@ -72,7 +75,13 @@ let mirrorGatewayStarted = false;
  * the sockets cannot be opened, package downloads stay unavailable and every other sandbox call
  * keeps working offline, so a mirror problem never takes the sandbox down.
  */
-export async function startPackageMirrorGateway({ logger }: { logger: Logger }): Promise<void> {
+export async function startPackageMirrorGateway({
+  logger,
+  allowanceHolds,
+}: {
+  logger: Logger;
+  allowanceHolds: PackageMirrorAllowanceCheck;
+}): Promise<void> {
   if (mirrorGatewayStarted || !slotsBackendEnabled()) {
     return;
   }
@@ -80,10 +89,12 @@ export async function startPackageMirrorGateway({ logger }: { logger: Logger }):
   try {
     const gateway = new PackageMirrorGateway({
       registry: packageMirrorTokens,
+      allowanceHolds,
       cacheDir: configuration.SANDBOX_MIRROR_CACHE_DIR,
       logger: logger.child({ module: 'package-mirrors' }),
       maxDownloadBytes: configuration.SANDBOX_MIRROR_DOWNLOAD_MAX_BYTES,
       maxCacheBytes: configuration.SANDBOX_MIRROR_CACHE_MAX_BYTES,
+      extraGoModuleHosts: configuration.SANDBOX_MIRROR_GO_EXTRA_HOSTS,
     });
     await gateway.listenOnSockets(slotMirrorSocketPaths());
     logger.info('Package mirrors are listening for the sandbox slots');
@@ -127,6 +138,9 @@ export async function startSkillNetworkGateway({
   }
 }
 
+/** One per process: a provider is made per call, and the full warning should follow the slots, not the calls. */
+const slotFullStateLog = new SlotFullStateLog();
+
 export function createSlotSandboxProvider({ logger }: { logger: Logger }): SlotSandboxProvider {
   return new SlotSandboxProvider({
     socketPaths: slotSocketPaths(),
@@ -136,6 +150,7 @@ export function createSlotSandboxProvider({ logger }: { logger: Logger }): SlotS
     logger,
     sleepMs: undefined,
     gitBridge: gitBridge({ logger }),
+    fullStateLog: slotFullStateLog,
   });
 }
 
@@ -153,6 +168,7 @@ export async function slotSandboxBuildStatus({ logger }: { logger: Logger }): Pr
 export async function removeSlotWorkspace({ sandboxId, logger }: { sandboxId: string; logger: Logger }): Promise<void> {
   try {
     await createSlotSandboxProvider({ logger }).destroySandbox({ sandboxId: rawSandboxId(sandboxId) });
+    forgetShownSkillNotices(rawSandboxId(sandboxId));
   } catch (error) {
     logger.warn('Could not remove the sandbox workspace of a deleted chat', extractErrorLogFields(error));
   }

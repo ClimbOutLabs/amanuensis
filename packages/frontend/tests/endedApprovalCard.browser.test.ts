@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
@@ -9,8 +8,9 @@ import { createServer } from 'vite';
 
 import { startApprovalTestServer, type ApprovalTestServer } from '../../trueforge/tests/fixtures/approvalTestServer.ts';
 import { inProcessApi, pausedSession, waitingCallIds } from './support/approvalChat.ts';
+import { featureShotPath, saveFailureShots } from './support/featureShots.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.ts';
-import { screenshotDir } from './support/screenshotDir.ts';
+import { FIRST_LOAD_TIMEOUT_MS } from './support/firstLoad.ts';
 import { privateViteCache } from './support/viteCache.ts';
 
 const RENDER_TIMEOUT_MS = 45_000;
@@ -66,7 +66,7 @@ async function endRequest(api: ApprovalTestServer, ids: { sessionId: string; pau
 }
 
 async function openChat(page: Page, origin: string, sessionId: string): Promise<void> {
-  await page.goto(`${origin}/sessions/${sessionId}`, { waitUntil: 'domcontentloaded', timeout: RENDER_TIMEOUT_MS });
+  await page.goto(`${origin}/sessions/${sessionId}`, { waitUntil: 'domcontentloaded', timeout: FIRST_LOAD_TIMEOUT_MS });
   await page.getByText('run:inert_write please').first().waitFor({ timeout: RENDER_TIMEOUT_MS });
 }
 
@@ -104,7 +104,6 @@ test('an ended approval card can be cleared but never run', { timeout: 600_000 }
     server: { host: '127.0.0.1', port: 0, strictPort: false },
   });
   let browser: Browser | undefined;
-  const outDir = await screenshotDir('aman-ended-card-');
   try {
     await vite.listen();
     const address = vite.httpServer?.address();
@@ -119,17 +118,29 @@ test('an ended approval card can be cleared but never run', { timeout: 600_000 }
       const page = await context.newPage();
       await openChat(page, origin, ids.sessionId);
       await page.waitForTimeout(5_000);
-      await page.screenshot({ path: join(outDir, 'ended-0-opened.png'), fullPage: true });
+      await page.screenshot({
+        path: await featureShotPath({ surface: 'screen:approval-ended', step: '0-opened' }),
+        fullPage: true,
+      });
       await page.getByText(ENDED_NOTE).waitFor({ timeout: RENDER_TIMEOUT_MS });
       assert.equal(await page.getByRole('button', { name: ALLOW }).count(), 0, 'an ended card offers no Allow');
-      await page.screenshot({ path: join(outDir, 'ended-1-before-dismiss.png'), fullPage: true });
+      await page.screenshot({
+        path: await featureShotPath({ surface: 'screen:approval-ended', step: '1-before-dismiss' }),
+        fullPage: true,
+      });
 
       await page.getByRole('button', { name: 'Dismiss' }).click();
       await page.getByText(ENDED_NOTE).waitFor({ state: 'detached', timeout: RENDER_TIMEOUT_MS });
-      await page.screenshot({ path: join(outDir, 'ended-2-after-dismiss.png'), fullPage: true });
+      await page.screenshot({
+        path: await featureShotPath({ surface: 'screen:approval-ended', step: '2-after-dismiss' }),
+        fullPage: true,
+      });
       await assertNotWaitingAfterReload(page, 'dismiss');
       assert.equal(await page.getByText(ENDED_NOTE).count(), 0, 'the dismissed card stays cleared');
-      await page.screenshot({ path: join(outDir, 'ended-3-dismiss-reloaded.png'), fullPage: true });
+      await page.screenshot({
+        path: await featureShotPath({ surface: 'screen:approval-ended', step: '3-dismiss-reloaded' }),
+        fullPage: true,
+      });
       assert.equal(api.mcp.writeInvocations(), 0, 'Dismiss runs nothing');
       await page.close();
     });
@@ -146,11 +157,17 @@ test('an ended approval card can be cleared but never run', { timeout: 600_000 }
       if (await clickUnlessEnded(page, ALLOW)) {
         await page.getByText(ENDED_NOTE).first().waitFor({ timeout: RENDER_TIMEOUT_MS });
       }
-      await page.screenshot({ path: join(outDir, 'ended-4-allow-refused.png'), fullPage: true });
+      await page.screenshot({
+        path: await featureShotPath({ surface: 'screen:approval-ended', step: '4-allow-refused' }),
+        fullPage: true,
+      });
       assert.equal(api.mcp.writeInvocations(), 0, 'Allow on an ended request runs nothing');
       await assertNotWaitingAfterReload(page, 'allow');
       await page.getByText(ENDED_NOTE).waitFor({ timeout: RENDER_TIMEOUT_MS });
-      await page.screenshot({ path: join(outDir, 'ended-5-allow-reloaded.png'), fullPage: true });
+      await page.screenshot({
+        path: await featureShotPath({ surface: 'screen:approval-ended', step: '5-allow-reloaded' }),
+        fullPage: true,
+      });
       assert.equal(api.mcp.writeInvocations(), 0, 'still nothing ran');
       await page.close();
     });
@@ -165,10 +182,16 @@ test('an ended approval card can be cleared but never run', { timeout: 600_000 }
 
       await clickUnlessEnded(page, DENY);
       await page.waitForTimeout(3_000);
-      await page.screenshot({ path: join(outDir, 'ended-6-deny-clicked.png'), fullPage: true });
+      await page.screenshot({
+        path: await featureShotPath({ surface: 'screen:approval-ended', step: '6-deny-clicked' }),
+        fullPage: true,
+      });
       assert.equal(api.mcp.writeInvocations(), 0, 'Not now runs nothing');
       await assertNotWaitingAfterReload(page, 'deny');
-      await page.screenshot({ path: join(outDir, 'ended-7-deny-reloaded.png'), fullPage: true });
+      await page.screenshot({
+        path: await featureShotPath({ surface: 'screen:approval-ended', step: '7-deny-reloaded' }),
+        fullPage: true,
+      });
       assert.equal(
         await waitingCallIds({ api, sessionId: ids.sessionId, turnId: `${ids.pausedTurnId}-next` }),
         0,
@@ -176,7 +199,9 @@ test('an ended approval card can be cleared but never run', { timeout: 600_000 }
       );
       await page.close();
     });
-    console.log(`ended-card screenshots written to ${outDir}`);
+  } catch (error) {
+    await saveFailureShots({ browser, surface: 'screen:approval-ended' });
+    throw error;
   } finally {
     await browser?.close();
     await vite.close();

@@ -7,7 +7,11 @@ import {
   SandboxPathIsDirectoryError,
 } from '../../../../src/core/sandbox/SandboxErrors';
 import { SLOT_NOT_READY_MESSAGE } from '../../../../src/core/sandbox/slots/SlotDriver';
-import { chatCapacity, SlotSandboxProvider } from '../../../../src/core/sandbox/slots/SlotSandboxProvider';
+import {
+  chatCapacity,
+  SlotFullStateLog,
+  SlotSandboxProvider,
+} from '../../../../src/core/sandbox/slots/SlotSandboxProvider';
 import { makeSilentLogger } from '../../harnessMocks';
 import { attestation, bodyOf, errorBody, FakeAgent, type FakeHandler } from './fakeAgent';
 
@@ -131,6 +135,40 @@ describe('SlotSandboxProvider', () => {
     const [granted, plain] = started[0]?.requests.map(request => request.body) ?? [];
     expect(granted).toMatchObject({ skill_network_token: token });
     expect(plain).not.toHaveProperty('skill_network_token');
+  });
+
+  test('ids of the retired slots 3 and 4 resolve to slots 1 and 2 with the same session', async () => {
+    const { provider, agents: started } = await providerFor([healthy, healthy]);
+    const fromSlot3 = await provider.exec({ sandboxId: `s3-${'a'.repeat(32)}`, command: 'echo ok' });
+    expect(fromSlot3.success).toBe(true);
+    expect(started[0]?.requests).toHaveLength(1);
+    expect(started[0]?.requests[0]?.body).toMatchObject({ session_id: 'a'.repeat(32) });
+    expect(started[1]?.requests).toHaveLength(0);
+    const fromSlot4 = await provider.exec({ sandboxId: `s4-${'b'.repeat(32)}`, command: 'echo ok' });
+    expect(fromSlot4.success).toBe(true);
+    expect(started[1]?.requests).toHaveLength(1);
+    expect(started[1]?.requests[0]?.body).toMatchObject({ session_id: 'b'.repeat(32) });
+    // Slots past the four an install ever had do not resolve.
+    await expect(provider.exec({ sandboxId: `s5-${'c'.repeat(32)}`, command: 'x' })).rejects.toBeInstanceOf(
+      SandboxNotAvailableError,
+    );
+  });
+
+  test('with one slot in use, only slot 3 ids resolve, to slot 1; slot 2 and slot 4 ids do not', async () => {
+    const { provider, agents: started } = await providerFor([healthy]);
+    const fromSlot3 = await provider.exec({ sandboxId: `s3-${'a'.repeat(32)}`, command: 'echo ok' });
+    expect(fromSlot3.success).toBe(true);
+    expect(started[0]?.requests).toHaveLength(1);
+    expect(started[0]?.requests[0]?.body).toMatchObject({ session_id: 'a'.repeat(32) });
+    // Slot 2 was a working slot, not a retired one, and slot 4's chats were moved to slot 2, which is
+    // not in use here: neither id's files are on slot 1, so neither resolves to it.
+    await expect(provider.exec({ sandboxId: `s2-${'b'.repeat(32)}`, command: 'x' })).rejects.toBeInstanceOf(
+      SandboxNotAvailableError,
+    );
+    await expect(provider.exec({ sandboxId: `s4-${'c'.repeat(32)}`, command: 'x' })).rejects.toBeInstanceOf(
+      SandboxNotAvailableError,
+    );
+    expect(started[0]?.requests).toHaveLength(1);
   });
 
   test('a non-zero exit is still a successful call', async () => {
@@ -285,6 +323,62 @@ describe('SlotSandboxProvider', () => {
     test('when every slot is at capacity the answer says to delete chats, not to run the doctor command', async () => {
       const { provider } = await providerFor([hard(2), hard(2)]);
       await expect(provider.createSandbox()).rejects.toThrow(/sandbox is full.*Delete old chats/);
+    });
+
+    test('when every slot is at capacity the full state is logged once with each slot count', async () => {
+      const logger = makeSilentLogger();
+      const warn = jest.spyOn(logger, 'warn');
+      const started = [new FakeAgent(hard(2)), new FakeAgent(hard(2))];
+      agents.push(...started);
+      const socketPaths = await Promise.all(started.map(agent => agent.start()));
+      const provider = new SlotSandboxProvider({
+        socketPaths,
+        defaultExecTimeoutSeconds: 60,
+        treeDiskMb: 2048,
+        fileMaxBytesForDownload: 1024,
+        logger,
+        sleepMs: () => Promise.resolve(),
+        gitBridge: undefined,
+      });
+      await expect(provider.createSandbox()).rejects.toThrow(/sandbox is full.*Delete old chats/);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledWith('every sandbox slot is full', {
+        slots: [
+          { slot: 1, sessions: 2, capacity: 2 },
+          { slot: 2, sessions: 2, capacity: 2 },
+        ],
+      });
+    });
+
+    test('a shared full-state log warns once while the slots stay full, across providers, and again after room came back', async () => {
+      const logger = makeSilentLogger();
+      const warn = jest.spyOn(logger, 'warn');
+      const fullStateLog = new SlotFullStateLog();
+      const started = [new FakeAgent(hard(2)), new FakeAgent(hard(2))];
+      agents.push(...started);
+      const socketPaths = await Promise.all(started.map(agent => agent.start()));
+      const makeProvider = () =>
+        new SlotSandboxProvider({
+          socketPaths,
+          defaultExecTimeoutSeconds: 60,
+          treeDiskMb: 2048,
+          fileMaxBytesForDownload: 1024,
+          logger,
+          sleepMs: () => Promise.resolve(),
+          gitBridge: undefined,
+          fullStateLog,
+        });
+
+      await makeProvider().getImageBuildStatus();
+      await makeProvider().getImageBuildStatus();
+      await expect(makeProvider().createSandbox()).rejects.toThrow(/sandbox is full/);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenLastCalledWith('every sandbox slot is full', expect.anything());
+
+      fullStateLog.report({ logger, full: null });
+      await makeProvider().getImageBuildStatus();
+      expect(warn).toHaveBeenCalledTimes(2);
+      expect(warn).toHaveBeenLastCalledWith('every sandbox slot is full', expect.anything());
     });
 
     test('a shared disk (Docker VM or none) is not capped by chats', async () => {

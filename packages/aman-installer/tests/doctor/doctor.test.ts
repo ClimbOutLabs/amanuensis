@@ -604,6 +604,49 @@ test('images: no release record warns, a missing image fails, a wrong CPU type f
   });
 });
 
+test('images: every image the release record names is checked, the connectors and the browser too', async () => {
+  const connectors = [
+    ['calendar_image', 'aman-calendar-caldav:test1'],
+    ['browser_image', 'aman-browser:test1'],
+    ['browser_gateway_image', 'aman-browser-gateway:test1'],
+    ['mail_email_image', 'ghcr.io/example/mail@sha256:test1'],
+  ] as const;
+  const release = JSON.stringify({
+    schema: '1',
+    app_image: APP_IMAGE,
+    stt_image: 'aman-stt:test1',
+    dex_image: 'aman-dex:test1',
+    ...Object.fromEntries(connectors),
+  });
+  let answers = readyAnswers();
+  for (const [, ref] of connectors) {
+    answers = withAnswer(
+      answers,
+      commandLine('docker', ['image', 'inspect', '--format', '{{.Architecture}}', ref]),
+      okResult('amd64\n'),
+    );
+  }
+  const ready = await makeWorld({ release, answers });
+  assert.equal(recordById((await runJson(ready)).doc.machine, 'images').detail, 'All 7 images are ready.');
+  for (const [key, ref] of connectors) {
+    const missing = await makeWorld({
+      release,
+      answers: withAnswer(answers, commandLine('docker', ['image', 'inspect', '--format', '{{.Architecture}}', ref]), {
+        started: true,
+        exitCode: 1,
+        stdout: '',
+        stderr: 'No such image',
+      }),
+    });
+    assert.deepEqual(recordById((await runJson(missing)).doc.machine, 'images'), {
+      id: 'images',
+      state: 'fail',
+      detail: `Some of Aman is not built on this computer: ${key}.`,
+      fix: 'Run aman upgrade',
+    });
+  }
+});
+
 test('images: a release record with no images warns that none are listed', async () => {
   const world = await makeWorld({ release: JSON.stringify({ schema: '1', source_ref: 'abc123' }) });
   assert.deepEqual(recordById((await runJson(world)).doc.machine, 'images'), {

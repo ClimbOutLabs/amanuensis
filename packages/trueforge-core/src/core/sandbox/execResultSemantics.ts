@@ -1,16 +1,13 @@
-// eslint-disable-next-line @typescript-eslint/triple-slash-reference -- bash-parser ships no types; the ambient declaration must be visible to every package that compiles this source, and a reference directive is the only form that follows the file.
-/// <reference path="../../types/bash-parser.d.ts" />
-import parseShell from 'bash-parser';
-import type { CommandNode, CommandPart, WordExpansion, WordNode } from './bashParserTypes';
+import { parseSimpleShellCommand, type SimpleShellCommand } from './simpleShellCommand';
 
 /**
  * Exit code semantics for sandbox commands.
  *
  * A command that ran has exactly two possible statuses:
- * - "ok": exit 0, or a non-zero exit from a single simple command (bash-parser resolves it to
- *   exactly one `Command` node with no pipeline, list, redirection, background execution, leading
- *   assignment, or substitution anywhere in its name or arguments) whose bare name - or, for
- *   `git grep`, the literal adjacent name pair - is in the search/diff table below.
+ * - "ok": exit 0, or a non-zero exit from a single simple command (`parseSimpleShellCommand`
+ *   accepts it: no pipeline, list, redirection, background execution, leading assignment, or
+ *   substitution anywhere in its name or arguments) whose bare name - or, for `git grep`, the
+ *   literal adjacent name pair - is in the search/diff table below.
  * - "exited": every other non-zero exit, from any command shape (a pipeline, a list, a wrapped
  *   command like `env`/`timeout`/`sudo`, a substitution, a redirection, a plain command not in
  *   the table, or an unparseable command). This never guesses at success or failure: it reports
@@ -68,109 +65,6 @@ const COMMAND_EXIT_CODE_SEMANTICS: Record<string, (exitCode: number) => boolean>
 const SEARCH_COMMAND_NAMES = new Set(['grep', 'egrep', 'fgrep', 'rg', 'ag', 'git grep']);
 
 /**
- * The expansion types that make a word's runtime value depend on something
- * other than its literal text: a subprocess (command or process
- * substitution) or an arithmetic evaluation. Parameter expansions ($VAR,
- * ${VAR}) are excluded on purpose - substituting an environment variable
- * does not run anything and does not make the command's own exit status
- * unreliable. A parameter expansion's default/alternative value
- * (`${VAR:-...}` and friends) is itself a nested Word, though, and *that*
- * can carry a disqualifying expansion - so the check below recurses into it
- * rather than only looking at the top-level expansion list.
- */
-const DISQUALIFYING_EXPANSION_TYPES = new Set(['CommandExpansion', 'ArithmeticExpansion', 'ProcessSubstitution']);
-
-/**
- * True if none of the given expansions (nor anything nested inside a
- * parameter expansion's default/alternative word) is a command, process, or
- * arithmetic substitution.
- */
-function isPlainExpansionList(expansions: WordExpansion[] | undefined): boolean {
-  if (!expansions) {
-    return true;
-  }
-  return expansions.every(expansion => {
-    if (DISQUALIFYING_EXPANSION_TYPES.has(expansion.type)) {
-      return false;
-    }
-    // A parameter expansion's default/alternative value (`${VAR:-word}`,
-    // `${VAR:=word}`, etc.) is itself parsed as a Word and can nest a
-    // command, process, or arithmetic substitution inside it.
-    if (expansion.word && !isPlainExpansionList(expansion.word.expansion)) {
-      return false;
-    }
-    return true;
-  });
-}
-
-/**
- * A word is "plain" if it carries no expansion that could run a subprocess or
- * evaluate arithmetic, including nested inside a parameter expansion's
- * default value. Anything that is not a Word node at all (e.g. a Redirect,
- * or a raw here-doc operator token) is never plain.
- */
-function isPlainWord(part: CommandPart | undefined): part is WordNode {
-  if (part?.type !== 'Word') {
-    return false;
-  }
-  return isPlainExpansionList((part as WordNode).expansion);
-}
-
-/**
- * True if the given node is a `Command` whose name and every argument are
- * plain Word nodes: no redirections, background execution, here-documents,
- * leading assignments, or command/process/arithmetic substitution anywhere
- * in the name or arguments.
- */
-function isSimpleCommandNode(node: CommandNode | { type: string }): node is CommandNode {
-  if (node.type !== 'Command') {
-    return false;
-  }
-  const commandNode = node as CommandNode;
-  if (commandNode.async) {
-    return false; // backgrounded with `&`
-  }
-  if (commandNode.prefix && commandNode.prefix.length > 0) {
-    return false; // leading redirect or variable assignment
-  }
-  if (!isPlainWord(commandNode.name)) {
-    return false;
-  }
-  if (!(commandNode.suffix ?? []).every(isPlainWord)) {
-    return false; // trailing redirect, or an argument with a disqualifying expansion
-  }
-  return true;
-}
-
-/**
- * If `command` parses to exactly one bash-parser `Command` node with no
- * pipeline, list, redirection, background execution, leading assignment, or
- * substitution anywhere in it, return that node. Otherwise (a pipeline, a
- * list via `;`/`&&`/`||`, a subshell, a here-document, or a command the
- * parser can't make sense of) return null: none of those get an "ok"
- * verdict, only "exited".
- */
-function asSingleSimpleCommand(command: string): CommandNode | null {
-  let script;
-  try {
-    script = parseShell(command);
-  } catch {
-    return null;
-  }
-
-  if (script.commands.length !== 1) {
-    return null; // sequential list, e.g. via `;` or a newline (includes here-docs)
-  }
-
-  const node = script.commands[0];
-  if (!node) {
-    return null;
-  }
-
-  return isSimpleCommandNode(node) ? node : null;
-}
-
-/**
  * Extract the command name a simple command's exit-code semantics should be
  * looked up under: the bare command name with any directory prefix
  * stripped (e.g. `/usr/bin/grep` -> `grep`), with one exception - `git
@@ -179,14 +73,10 @@ function asSingleSimpleCommand(command: string): CommandNode | null {
  * behind git's own global options, does not match and falls through to a
  * plain `git` lookup (a miss).
  */
-function extractCommandName(node: CommandNode): string {
-  const firstWord = node.name.text;
-  const commandName = firstWord.split('/').pop() ?? firstWord;
-  if (commandName === 'git') {
-    const firstArg = (node.suffix ?? [])[0];
-    if (firstArg?.type === 'Word' && (firstArg as WordNode).text === 'grep') {
-      return 'git grep';
-    }
+function extractCommandName(command: SimpleShellCommand): string {
+  const commandName = command.name.split('/').pop() ?? command.name;
+  if (commandName === 'git' && command.args[0] === 'grep') {
+    return 'git grep';
   }
   return commandName;
 }
@@ -205,12 +95,12 @@ export function classifyExecStatus(command: string, exitCode: number): 'ok' | 'e
     return 'ok';
   }
 
-  const node = asSingleSimpleCommand(command.trim());
-  if (!node) {
+  const simple = parseSimpleShellCommand(command.trim());
+  if (!simple) {
     return 'exited';
   }
 
-  const commandName = extractCommandName(node);
+  const commandName = extractCommandName(simple);
   const semanticsFn = COMMAND_EXIT_CODE_SEMANTICS[commandName];
   return semanticsFn?.(exitCode) ? 'ok' : 'exited';
 }
@@ -225,11 +115,11 @@ function isSearchCommandNoMatches(command: string, exitCode: number): boolean {
   if (exitCode === 0) {
     return false;
   }
-  const node = asSingleSimpleCommand(command.trim());
-  if (!node) {
+  const simple = parseSimpleShellCommand(command.trim());
+  if (!simple) {
     return false;
   }
-  const commandName = extractCommandName(node);
+  const commandName = extractCommandName(simple);
   if (!SEARCH_COMMAND_NAMES.has(commandName)) {
     return false;
   }

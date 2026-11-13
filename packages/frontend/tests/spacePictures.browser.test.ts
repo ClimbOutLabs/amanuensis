@@ -9,7 +9,9 @@ import { chromium, type Browser } from 'playwright-core';
 import { createServer, defaultClientConditions, type Plugin } from 'vite';
 
 import { DEV_OPTIMIZE_DEPS } from '../src/devPrebundle.ts';
+import { featureShotPath, saveFailureShots } from './support/featureShots.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.js';
+import { FIRST_LOAD_TIMEOUT_MS } from './support/firstLoad.ts';
 import { privateViteCache } from './support/viteCache.ts';
 
 const RENDER_TIMEOUT_MS = 45_000;
@@ -95,12 +97,6 @@ test(
       server: { host: '127.0.0.1', port: 0 },
       resolve: {
         conditions: ['trueforge-dev', ...defaultClientConditions],
-        alias: [
-          {
-            find: /^truefoundry-gateway-sdk(\/.*)?$/,
-            replacement: fileURLToPath(new URL('../src/gatewaySdkStub.ts', import.meta.url)),
-          },
-        ],
         dedupe: ['react', 'react-dom', '@assistant-ui/core', '@assistant-ui/store', '@assistant-ui/react'],
       },
       plugins: [spacePictureRoute(gradientPng(), seen)],
@@ -134,7 +130,7 @@ test(
 
       await page.goto(`${origin}/tests/fixtures/space-pictures.fixture.html`, {
         waitUntil: 'domcontentloaded',
-        timeout: RENDER_TIMEOUT_MS,
+        timeout: FIRST_LOAD_TIMEOUT_MS,
       });
 
       const states = await page.waitForFunction(
@@ -152,6 +148,7 @@ test(
       const result = await states.jsonValue();
       assert.ok(result !== null, 'both frame pictures should finish loading');
       assert.ok(result.proxyWidth > 0, 'the proxied picture in the space frame should load');
+      await page.screenshot({ path: await featureShotPath({ surface: 'screen:space-pictures', step: 'loaded' }) });
       assert.equal(result.directWidth, 0, 'the direct outside link in the same frame should stay blank');
       assert.equal(seen.length, 1, 'the frame should ask the proxy once');
       assert.ok(
@@ -159,6 +156,9 @@ test(
         'the proxy request should name the picture',
       );
       assert.equal(offOriginImages.length, 0, 'no image request should leave the page');
+    } catch (error) {
+      await saveFailureShots({ browser, surface: 'screen:space-pictures' });
+      throw error;
     } finally {
       await browser?.close();
       await server.close();

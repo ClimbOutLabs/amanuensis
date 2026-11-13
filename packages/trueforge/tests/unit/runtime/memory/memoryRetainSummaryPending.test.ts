@@ -38,6 +38,7 @@ function makeLogger() {
 /** Minimal fake; the mocked summarizeTurnContent never dereferences the store. */
 function fakeModelProviderStore(): IModelProviderStore {
   return {
+    managedElsewhere: false,
     listProviders: jest.fn(),
     getProvider: jest.fn(),
     getProviderForUpdate: jest.fn(),
@@ -86,6 +87,7 @@ describe('submitRetain summary-pending marker', () => {
     });
 
     await submitRetain({
+      session: { is_incognito: false },
       client: zaraClient,
       sessionId: 's1',
       turnId: 't1',
@@ -108,6 +110,7 @@ describe('submitRetain summary-pending marker', () => {
     // summary is stored, and the mark clears.
     mockSummarize.mockResolvedValue({ status: 'summarized', facts: ['The test robot is named Bleep-Bloop.'] });
     await submitRetain({
+      session: { is_incognito: false },
       client: zaraClient,
       sessionId: 's1',
       turnId: 't2',
@@ -131,6 +134,7 @@ describe('submitRetain summary-pending marker', () => {
     mockSummarize.mockResolvedValue({ status: 'skipped', reason: 'no-model-configured' });
 
     await submitRetain({
+      session: { is_incognito: false },
       client: zaraClient,
       sessionId: 's1',
       turnId: 't1',
@@ -150,6 +154,7 @@ describe('submitRetain summary-pending marker', () => {
     mockSummarize.mockResolvedValue({ status: 'skipped', reason: 'empty-exchange' });
 
     await submitRetain({
+      session: { is_incognito: false },
       client: zaraClient,
       sessionId: 's1',
       turnId: 't1',
@@ -174,6 +179,7 @@ describe('submitRetain summary-pending marker', () => {
     mockSummarize.mockResolvedValue({ status: 'failed', reason: 'boom', fallback: 'model_failed' });
 
     await submitRetain({
+      session: { is_incognito: false },
       client,
       sessionId: 's1',
       turnId: 't1',

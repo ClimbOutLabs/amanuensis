@@ -314,7 +314,7 @@ export async function buildMcpAuthorizationUrl(params: {
   mcpServerUrl: string;
   mcpServerName: string;
   returnTo?: string;
-}): Promise<URL> {
+}): Promise<{ authorizationUrl: URL; state: string }> {
   const state = generateOAuthState();
   const redirectUri = mcpOAuthCallbackUrl();
   let started: Awaited<ReturnType<typeof startAuthorization>>;
@@ -339,7 +339,7 @@ export async function buildMcpAuthorizationUrl(params: {
     codeVerifier: started.codeVerifier,
     returnTo: params.returnTo ?? null,
   });
-  return started.authorizationUrl;
+  return { authorizationUrl: started.authorizationUrl, state };
 }
 
 export async function resolveMcpAuth(params: {
@@ -390,7 +390,7 @@ export async function resolveMcpAuth(params: {
   if (token) {
     await params.tokenStore.deleteToken(tokenKey);
   }
-  const authUrl = await buildMcpAuthorizationUrl({
+  const { authorizationUrl: authUrl } = await buildMcpAuthorizationUrl({
     tokenStore: params.tokenStore,
     client,
     serverId: params.serverId,

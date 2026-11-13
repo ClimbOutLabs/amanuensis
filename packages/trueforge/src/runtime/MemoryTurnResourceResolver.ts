@@ -56,6 +56,8 @@ export interface MemoryTurnContext {
    * the turn's tool policy can block web_search as a substitute for recall.
    */
   internalSourceState?: InternalSourceState | undefined;
+  /** True in a private chat: memory is read as usual and nothing from the chat is saved. */
+  keepsNothing: boolean;
 }
 
 /** Root-only: sub-agent threads get no memory capability (same gating as personalization/persona). */
@@ -81,6 +83,7 @@ function memoryCapabilitiesForTurn(input: {
       timeZone: memory.clientTimezone,
       internalSourceState: memory.internalSourceState,
       webSearch: input.webSearch,
+      keepsNothing: memory.keepsNothing,
     }),
   ];
 }
@@ -193,9 +196,28 @@ export class MemoryTurnResourceResolver extends PersonaTurnResourceResolver {
     personaKnowledgeHits?: readonly PersonaKnowledgeHit[],
     switchNotice?: PersonaSwitchNotice,
   ) {
-    super(deps, profile, persona, personaKnowledgeBlock, personaKnowledgeHits, switchNotice);
+    super(deps, profile, persona, personaKnowledgeBlock, personaKnowledgeHits, switchNotice, {
+      // A chat that turned the search provider off keeps it off for the guide too:
+      // the lookup the guide's tool is built from answers as if nothing were designated.
+      searchProviderServerName:
+        memory.searchProviderServerName === undefined
+          ? undefined
+          : async () => {
+              const designated = await memory.searchProviderServerName?.();
+              if (designated === undefined) {
+                return undefined;
+              }
+              const turnedOff = new Set(memory.turnedOffConnectorKeys ?? []);
+              return turnedOff.has(connectorOffKey(designated)) ? undefined : designated;
+            },
+    });
     this.#memory = memory;
     this.#toolOutputScreen = toolOutputScreen;
+  }
+
+  /** True in an incognito chat: nothing from it may outlive it. */
+  protected get keepsNothing(): boolean {
+    return this.#memory.keepsNothing;
   }
 
   /**

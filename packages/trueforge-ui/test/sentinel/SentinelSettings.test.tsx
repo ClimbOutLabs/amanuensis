@@ -13,6 +13,8 @@ function stubApi(): { api: SentinelApi; updateUserSettings: ReturnType<typeof vi
     search_without_asking: true,
     maps_without_asking: false,
     sandbox_without_asking: true,
+    chat_search_enabled: false,
+    package_downloads_without_project_allowed: false,
     ...patch,
   }));
   const api: SentinelApi = {
@@ -27,6 +29,8 @@ function stubApi(): { api: SentinelApi; updateUserSettings: ReturnType<typeof vi
       search_without_asking: true,
       maps_without_asking: false,
       sandbox_without_asking: true,
+      chat_search_enabled: false,
+      package_downloads_without_project_allowed: false,
     })),
     updateUserSettings,
     listSentinelSessionContext: vi.fn(async () => ({ approvals: [] })),
@@ -34,15 +38,15 @@ function stubApi(): { api: SentinelApi; updateUserSettings: ReturnType<typeof vi
   return { api, updateUserSettings };
 }
 
-describe('SentinelSettings Always allow', () => {
-  it('renders an Always allow toggle for each Tier 2 kind, off by default', async () => {
+describe('SentinelSettings Always allow everywhere', () => {
+  it('renders an Always allow everywhere toggle for each Tier 2 kind, off by default', async () => {
     const { api, updateUserSettings } = stubApi();
     render(
       <SentinelApiProvider api={api}>
         <SentinelSettings />
       </SentinelApiProvider>,
     );
-    const fileToggle = await screen.findByRole('switch', { name: 'Always allow: file_write' });
+    const fileToggle = await screen.findByRole('switch', { name: 'Always allow everywhere: Write files' });
     await waitFor(() => {
       expect(fileToggle).toBeEnabled();
     });
@@ -55,7 +59,7 @@ describe('SentinelSettings Always allow', () => {
     });
     // The saved settings come back through the provider, so the switch follows them.
     await waitFor(() => {
-      expect(screen.getByRole('switch', { name: 'Always allow: file_write' })).toBeChecked();
+      expect(screen.getByRole('switch', { name: 'Always allow everywhere: Write files' })).toBeChecked();
     });
   });
 
@@ -67,13 +71,15 @@ describe('SentinelSettings Always allow', () => {
       search_without_asking: true,
       maps_without_asking: false,
       sandbox_without_asking: true,
+      chat_search_enabled: false,
+      package_downloads_without_project_allowed: false,
     }));
     render(
       <SentinelApiProvider api={api}>
         <SentinelSettings />
       </SentinelApiProvider>,
     );
-    const fileToggle = await screen.findByRole('switch', { name: 'Always allow: file_write' });
+    const fileToggle = await screen.findByRole('switch', { name: 'Always allow everywhere: Write files' });
     await waitFor(() => {
       expect(fileToggle).toBeChecked();
     });
@@ -91,13 +97,15 @@ describe('SentinelSettings Always allow', () => {
       search_without_asking: true,
       maps_without_asking: false,
       sandbox_without_asking: true,
+      chat_search_enabled: false,
+      package_downloads_without_project_allowed: false,
     }));
     render(
       <SentinelApiProvider api={api}>
         <SentinelSettings />
       </SentinelApiProvider>,
     );
-    const fileToggle = await screen.findByRole('switch', { name: 'Always allow: file_write' });
+    const fileToggle = await screen.findByRole('switch', { name: 'Always allow everywhere: Write files' });
     await waitFor(() => {
       expect(fileToggle).toBeChecked();
     });

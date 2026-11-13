@@ -32,6 +32,8 @@ function stubApi(entries: SentinelAuditEntry[]): SentinelApi {
       search_without_asking: true,
       maps_without_asking: false,
       sandbox_without_asking: true,
+      chat_search_enabled: false,
+      package_downloads_without_project_allowed: false,
     })),
     updateUserSettings: vi.fn(async () => ({
       offline_mode: false,
@@ -39,6 +41,8 @@ function stubApi(entries: SentinelAuditEntry[]): SentinelApi {
       search_without_asking: true,
       maps_without_asking: false,
       sandbox_without_asking: true,
+      chat_search_enabled: false,
+      package_downloads_without_project_allowed: false,
     })),
     listSentinelSessionContext: vi.fn(async () => ({ approvals: [] })),
   };
@@ -109,6 +113,11 @@ describe('SentinelAuditFeed', () => {
     renderFeed([makeEntry({ id: 'entry-1', action_type: 'mystery_tool', outcome: 'ran' })]);
     expect(await screen.findByText('Used a connected app')).toBeInTheDocument();
     expect(screen.queryByText('mystery_tool')).not.toBeInTheDocument();
+  });
+
+  it('heads the rows with Recent actions', async () => {
+    renderFeed([makeEntry({ id: 'entry-1' })]);
+    expect(await screen.findByText('Recent actions')).toBeInTheDocument();
   });
 
   it('shows only the latest five rows and no Show all control', async () => {

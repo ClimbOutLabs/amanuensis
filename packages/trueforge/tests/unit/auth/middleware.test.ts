@@ -10,6 +10,7 @@ import {
   createAdminAuthMiddleware,
   createApiKeyAuthMiddleware,
   createAuthMiddleware,
+  tryAuthenticate,
 } from '../../../src/auth/middleware';
 import { disableOidcAuth, enableOidcAuth, initOidc } from '../../../src/auth/oidc';
 import { OidcAuthenticator } from '../../../src/auth/oidcAuthenticator';
@@ -69,6 +70,47 @@ function createApp(authenticator: Authenticator) {
 }
 
 describe('createAuthMiddleware / createAdminAuthMiddleware', () => {
+  it('propagates non-401 authenticate failures instead of turning them into 401', async () => {
+    const authenticator: Authenticator = {
+      authenticate: async () => {
+        throw new HTTPException(500, { message: 'TrueFoundry ServiceFoundry session request failed' });
+      },
+    };
+    const res = await createApp(authenticator).request('/api/v1/models');
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({
+      error: { message: 'TrueFoundry ServiceFoundry session request failed' },
+    });
+  });
+
+  it('tryAuthenticate returns undefined for a 401 and throws other failures again', async () => {
+    const probe = (authenticator: Authenticator) => {
+      const app = new OpenAPIHono();
+      app.get('/probe', async c => {
+        const requestContext = await tryAuthenticate({ authenticator, context: c });
+        return c.json({ authenticated: requestContext !== undefined });
+      });
+      return app;
+    };
+
+    const missing: Authenticator = {
+      authenticate: async () => {
+        throw new HTTPException(401, { message: 'Authentication required' });
+      },
+    };
+    const missingRes = await probe(missing).request('/probe');
+    expect(missingRes.status).toBe(200);
+    expect(await missingRes.json()).toEqual({ authenticated: false });
+
+    const failing: Authenticator = {
+      authenticate: async () => {
+        throw new HTTPException(500, { message: 'Session request failed' });
+      },
+    };
+    const failingRes = await probe(failing).request('/probe');
+    expect(failingRes.status).toBe(500);
+  });
+
   it('allows settings for standalone authenticator (always admin)', async () => {
     const res = await createApp(new StandaloneAuthenticator()).request('/api/v1/settings');
     expect(res.status).toBe(200);
@@ -430,9 +472,14 @@ describe('createApiKeyAuthMiddleware', () => {
     expect(spy2).toHaveBeenCalledTimes(1);
   });
 
-  it('rejects different-length keys without calling timingSafeEqual', () => {
+  it('compares keys of different lengths the same way, without a shortcut', () => {
     const spy = jest.fn(timingSafeEqual);
     expect(apiKeysEqual('short', 'service-key', spy)).toBe(false);
-    expect(spy).not.toHaveBeenCalled();
+    expect(apiKeysEqual('service-key-and-more', 'service-key', spy)).toBe(false);
+    expect(apiKeysEqual('', 'service-key', spy)).toBe(false);
+    expect(spy).toHaveBeenCalledTimes(3);
+    for (const [provided, expected] of spy.mock.calls) {
+      expect(provided.byteLength).toBe(expected.byteLength);
+    }
   });
 });

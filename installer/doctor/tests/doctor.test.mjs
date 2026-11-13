@@ -29,7 +29,7 @@ import {
 } from './world.mjs';
 
 // The document a healthy world prints: same shape and keys as before the text report was restyled.
-const HEALTHY_JSON = `{"machine":[{"id":"docker","state":"ok","detail":"Docker 28.0.1 is running and Compose 2.29.1 is available.","fix":""},{"id":"runtime","state":"ok","detail":"A supported Docker runtime is in use.","fix":""},{"id":"credentials","state":"ok","detail":"No Docker settings file, so no credential store is in use.","fix":""},{"id":"images","state":"ok","detail":"All 3 images are ready.","fix":""},{"id":"disk","state":"ok","detail":"50.0 GB is free for Docker data.","fix":""},{"id":"docker_memory","state":"ok","detail":"Docker has 16.0 GB of memory.","fix":""},{"id":"clock","state":"ok","detail":"This machine and Docker agree on the time.","fix":""},{"id":"backup","state":"ok","detail":"No backup yet; one is made automatically before your first upgrade.","fix":""}],"instances":{"main":[{"id":"config","state":"ok","detail":"The settings files exist and are private to you.","fix":""},{"id":"containers","state":"ok","detail":"All 2 parts of instance main are running.","fix":""},{"id":"ports","state":"ok","detail":"Aman listens on this computer only.","fix":""},{"id":"service","state":"ok","detail":"The app answers its health check.","fix":""},{"id":"login","state":"ok","detail":"The login provider answers.","fix":""},{"id":"database","state":"ok","detail":"The database can be written to.","fix":""},{"id":"disk","state":"ok","detail":"50.0 GB is free where the data lives.","fix":""},{"id":"clock","state":"ok","detail":"The clock is within 60 seconds of the login provider.","fix":""},{"id":"run_code","state":"off","detail":"run_code is not available: no sandbox isolation driver is configured for this deployment.","fix":""},{"id":"attachments","state":"off","detail":"Reading attachments is off: this instance was installed without the sandbox, so the assistant cannot read PDFs, images or email attachments.","fix":""},{"id":"demo","state":"off","detail":"Demo mode is off.","fix":""},{"id":"model","state":"off","detail":"No Token Factory key is set (NEBIUS_API_KEY), so the hosted model is not checked.","fix":""}]}}
+const HEALTHY_JSON = `{"machine":[{"id":"docker","state":"ok","detail":"Docker 28.0.1 is running and Compose 2.29.1 is available.","fix":""},{"id":"runtime","state":"ok","detail":"A supported Docker runtime is in use.","fix":""},{"id":"credentials","state":"ok","detail":"No Docker settings file, so no credential store is in use.","fix":""},{"id":"images","state":"ok","detail":"All 7 images are ready.","fix":""},{"id":"disk","state":"ok","detail":"50.0 GB is free for Docker data.","fix":""},{"id":"docker_memory","state":"ok","detail":"Docker has 16.0 GB of memory.","fix":""},{"id":"clock","state":"ok","detail":"This machine and Docker agree on the time.","fix":""},{"id":"backup","state":"ok","detail":"No backup yet; one is made automatically before your first upgrade.","fix":""}],"instances":{"main":[{"id":"config","state":"ok","detail":"The settings files exist and are private to you.","fix":""},{"id":"containers","state":"ok","detail":"All 2 parts of instance main are running.","fix":""},{"id":"ports","state":"ok","detail":"Aman listens on this computer only.","fix":""},{"id":"service","state":"ok","detail":"The app answers its health check.","fix":""},{"id":"login","state":"ok","detail":"The login provider answers.","fix":""},{"id":"database","state":"ok","detail":"The database can be written to.","fix":""},{"id":"disk","state":"ok","detail":"50.0 GB is free where the data lives.","fix":""},{"id":"clock","state":"ok","detail":"The clock is within 60 seconds of the login provider.","fix":""},{"id":"run_code","state":"off","detail":"run_code is not available: no sandbox isolation driver is configured for this deployment.","fix":""},{"id":"attachments","state":"off","detail":"Reading attachments is off: this instance was installed without the sandbox, so the assistant cannot read PDFs, images or email attachments.","fix":""},{"id":"demo","state":"off","detail":"Demo mode is off.","fix":""},{"id":"model","state":"off","detail":"No Token Factory key is set (NEBIUS_API_KEY), so the hosted model is not checked.","fix":""}]}}
 `;
 
 let world;
@@ -474,9 +474,32 @@ describe('images check', () => {
     assert.equal(check.state, 'fail');
     assert.match(check.detail, /app_image\(arm64\)/);
     world.info({ arch: 'aarch64' });
-    world.set(ref('aman-stt:local'), { out: 'arm64\n', rc: 0 });
-    world.set(ref('dexidp/dex@sha256:abc'), { out: 'arm64\n', rc: 0 });
+    for (const other of [
+      'aman-stt:local',
+      'dexidp/dex@sha256:abc',
+      'aman-calendar-caldav:local',
+      'aman-browser:local',
+      'aman-browser-gateway:local',
+      'example/mail@sha256:def',
+    ]) {
+      world.set(ref(other), { out: 'arm64\n', rc: 0 });
+    }
     assert.equal(machine(world.json(), 'images').state, 'ok');
+  });
+
+  it("checks the connectors' and the browser's images too", () => {
+    for (const [key, image] of [
+      ['calendar_image', 'aman-calendar-caldav:local'],
+      ['browser_image', 'aman-browser:local'],
+      ['browser_gateway_image', 'aman-browser-gateway:local'],
+      ['mail_email_image', 'example/mail@sha256:def'],
+    ]) {
+      make();
+      world.set(ref(image), { err: 'No such image', rc: 1 });
+      const check = machine(world.json(), 'images');
+      assert.equal(check.state, 'fail');
+      assert.equal(check.detail, `Some of Aman is not built on this computer: ${key}.`);
+    }
   });
 
   it('warns, not fails, when the release record is missing or lists no images', () => {
@@ -648,6 +671,14 @@ describe('backup age check', () => {
 });
 
 describe('instance settings file', () => {
+  it('names the restore command when the settings file is missing', () => {
+    make();
+    rmSync(path.join(world.instanceDir('main'), '.env'));
+    const check = find(world.json().doc.instances.main, 'config');
+    assert.equal(check.state, 'fail');
+    assert.equal(check.fix, 'Put it back from a backup with: aman restore main');
+  });
+
   it('fails with a chmod fix when the file is readable by others', () => {
     make();
     world.writeEnv('main', 0o644);
@@ -675,12 +706,29 @@ describe('instance settings file', () => {
     const OWNER = 'owner@x.invalid';
     const fixCommand = 'Run aman doctor instance --fix';
 
-    function setUp({ allowed, envText, hashes = [], registered = true, records = '' }) {
+    const dexYamlWith = entries =>
+      [
+        'issuer: https://login.x.invalid/dex',
+        'enablePasswordDB: true',
+        'staticPasswords:',
+        `  - email: '${OWNER}'`,
+        '    hashFromEnv: DEX_USER_PASSWORD_HASH',
+        "    username: 'Owner'",
+        "    userID: 'owner'",
+        ...entries,
+        'staticClients: []',
+        '',
+      ].join('\n');
+
+    function setUp({ allowed, envText, hashes = [], registered = true, records = '', dex = '' }) {
       world?.dispose();
       make();
       const file = path.join(world.instanceDir('main'), 'dex.env');
       writeFileSync(file, ["DEX_USER_PASSWORD_HASH='SENTINEL-owner-hash'", ...hashes, ''].join('\n'));
       chmodSync(file, 0o600);
+      if (dex) {
+        writeFileSync(path.join(world.instanceDir('main'), 'dex.yaml'), dex);
+      }
       world.writeEnv('main', 0o600, envText ?? (allowed === undefined ? '' : `OIDC_ALLOWED_EMAILS=${allowed}\n`));
       if (registered) {
         const dir = path.join(world.home, 'state', 'instances');
@@ -734,6 +782,59 @@ describe('instance settings file', () => {
       const check = setUp({ allowed: OWNER, hashes: ["DEX_USER_PASSWORD_HASH_JUDGE1='SENTINEL-judge1-hash'"] });
       assert.equal(check.state, 'warn');
       assert.equal(check.detail, 'More than the owner can sign in: judge1.');
+      assert.equal(check.fix, fixCommand);
+      assert.doesNotMatch(world.json().stdout, /SENTINEL/);
+    });
+
+    for (const [what, line] of [
+      ['an indented line', "  DEX_USER_PASSWORD_HASH_GHOST='SENTINEL-ghost-hash'"],
+      ['an export word', "export DEX_USER_PASSWORD_HASH_GHOST='SENTINEL-ghost-hash'"],
+      ['blanks around the equals sign', "DEX_USER_PASSWORD_HASH_GHOST = 'SENTINEL-ghost-hash'"],
+      ['mixed case in the variable name', "Dex_User_Password_Hash_GHOST='SENTINEL-ghost-hash'"],
+    ]) {
+      it(`reads a left-over password hash line Compose also reads: ${what}`, () => {
+        const check = setUp({ allowed: OWNER, hashes: [line] });
+        assert.equal(check.state, 'warn');
+        assert.equal(check.detail, 'More than the owner can sign in: ghost.');
+        assert.equal(check.fix, fixCommand);
+        assert.doesNotMatch(world.json().stdout, /SENTINEL/);
+      });
+    }
+
+    it("is quiet when dex.yaml holds the owner's entry alone", () => {
+      const check = setUp({ allowed: OWNER, dex: dexYamlWith([]) });
+      assert.equal(check.state, 'ok');
+      assert.equal(check.detail, 'The settings files exist and are private to you.');
+    });
+
+    it('warns about a sign-in entry that exists only in dex.yaml', () => {
+      const check = setUp({
+        allowed: OWNER,
+        dex: dexYamlWith([
+          "  - email: 'judge@x.invalid'",
+          "    hash: 'SENTINEL-planted-hash'",
+          "    username: 'judge'",
+          "    userID: 'judge'",
+        ]),
+      });
+      assert.equal(check.state, 'warn');
+      assert.equal(check.detail, 'More than the owner can sign in: judge@x.invalid.');
+      assert.equal(check.fix, fixCommand);
+      assert.doesNotMatch(world.json().stdout, /SENTINEL/);
+    });
+
+    it("warns about a second entry under the owner's own email with a password of its own", () => {
+      const check = setUp({
+        allowed: OWNER,
+        dex: dexYamlWith([
+          `  - email: '${OWNER}'`,
+          "    hash: 'SENTINEL-planted-hash'",
+          "    username: 'owner'",
+          "    userID: 'owner-copy'",
+        ]),
+      });
+      assert.equal(check.state, 'warn');
+      assert.equal(check.detail, 'More than the owner can sign in: owner-copy.');
       assert.equal(check.fix, fixCommand);
       assert.doesNotMatch(world.json().stdout, /SENTINEL/);
     });
@@ -864,10 +965,7 @@ describe('instance service health', () => {
       }),
     ]);
     const result = world.json();
-    assert.match(
-      find(result.doc.instances.main, 'containers').detail,
-      /The main secure connection is not running\./,
-    );
+    assert.match(find(result.doc.instances.main, 'containers').detail, /The main secure connection is not running\./);
   });
 
   it('ignores a one-shot container that exited cleanly', () => {
@@ -1710,6 +1808,14 @@ describe('aman backup and aman upgrade', () => {
     assert.ok(world.calls().includes(`install.sh --home ${world.home} upgrade --check`));
   });
 
+  it('run aman restore through the installer with the arguments given', () => {
+    make();
+    const repo = world.sandbox();
+    world.installerStub(repo);
+    assert.equal(world.shim(['restore', 'main', '--latest']).code, 0);
+    assert.ok(world.calls().includes(`install.sh --home ${world.home} restore main --latest`));
+  });
+
   it('aman password runs the installer to set a new owner password, with the arguments given', () => {
     make();
     const repo = world.sandbox();
@@ -2004,7 +2110,22 @@ describe('doctor docker, disk and backup', () => {
   it('disk shows the check and --fix removes only old Aman images that nothing uses, after asking', () => {
     make();
     world.df(1 * GIB_KB);
-    world.set('images', { out: 'aman-app:local\naman-app:old1\naman-stt:old2\ndexidp/dex:v2\naman-stt:local\n' });
+    world.set('images', {
+      out: [
+        'aman-app:local',
+        'aman-app:old1',
+        'aman-stt:old2',
+        'dexidp/dex:v2',
+        'aman-stt:local',
+        'aman-calendar-caldav:old3',
+        'aman-calendar-caldav:local',
+        'aman-browser:old4',
+        'aman-browser:local',
+        'aman-browser-gateway:old4',
+        'aman-browser-gateway:local',
+        '',
+      ].join('\n'),
+    });
     world.set('rmi', { rc: 0 });
     world.set('builder', { rc: 0 });
     const repoWorld = world.sandbox();
@@ -2016,7 +2137,13 @@ describe('doctor docker, disk and backup', () => {
     const fixed = world.shim(['doctor', 'disk', '--fix', '--yes']);
     assert.equal(fixed.code, 0, fixed.stdout + fixed.stderr);
     const removed = world.calls().filter(line => line.startsWith('rmi '));
-    assert.deepEqual(removed, ['rmi aman-app:old1', 'rmi aman-stt:old2']);
+    assert.deepEqual(removed, [
+      'rmi aman-app:old1',
+      'rmi aman-stt:old2',
+      'rmi aman-calendar-caldav:old3',
+      'rmi aman-browser:old4',
+      'rmi aman-browser-gateway:old4',
+    ]);
     assert.ok(world.calls().includes('builder prune -f'));
   });
 

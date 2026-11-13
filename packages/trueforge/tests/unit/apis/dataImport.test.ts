@@ -10,10 +10,13 @@ import type { RequestContext } from '../../../src/auth/identity';
 import configuration from '../../../src/config';
 import { EXPORT_SCHEMA_VERSION } from '../../../src/dataExport/exportService';
 import { ZipStreamWriter } from '../../../src/dataExport/zipStreamWriter';
+import { DeliveryStore } from '../../../src/db/deliveryStore';
+import { ReachSettingsStore } from '../../../src/db/reachSettingsStore';
 import { SentinelAuditStore } from '../../../src/db/sentinelAuditStore';
 import { SqliteAgentStore } from '../../../src/db/sqlite/agent-store/SqliteAgentStore';
 import { SqliteGlobalSettingsStore } from '../../../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
 import { SqliteMcpServerStore } from '../../../src/db/sqlite/mcp-server-store/SqliteMcpServerStore';
+import { SqliteModelProviderStore } from '../../../src/db/sqlite/model-provider-store/SqliteModelProviderStore';
 import { SqlitePersonaStore } from '../../../src/db/sqlite/persona-store/SqlitePersonaStore';
 import { SqlitePersonalizationStore } from '../../../src/db/sqlite/personalization-store/SqlitePersonalizationStore';
 import { SqliteScheduleStore } from '../../../src/db/sqlite/schedule-store/SqliteScheduleStore';
@@ -22,6 +25,7 @@ import { SqliteSessionStore } from '../../../src/db/sqlite/session-store/SqliteS
 import { SqliteSpaceStore } from '../../../src/db/sqlite/space-store/SqliteSpaceStore';
 import { SqliteTurnArtifactStore } from '../../../src/db/sqlite/turn-artifact-store/SqliteTurnArtifactStore';
 import type { Database } from '../../../src/db/sqlite/types';
+import { TextContactStore } from '../../../src/db/textContactStore';
 import { ImportDataResponseSchema } from '../../../src/schemas/dataImport';
 import { resolveMcpAuthStatus } from '../../../src/schemas/mcpServer';
 import { startApprovalTestServer, type ApprovalTestServer } from '../../fixtures/approvalTestServer';
@@ -101,8 +105,12 @@ describe('Data import route', () => {
       globalSettingsStore: new SqliteGlobalSettingsStore(db),
       sentinelSettingsStore: new SqliteSentinelSettingsStore(db),
       auditStore: new SentinelAuditStore(db),
+      deliveryStore: new DeliveryStore(db),
+      reachSettingsStore: new ReachSettingsStore(db),
+      textContactStore: new TextContactStore(db),
       turnArtifactStore: new SqliteTurnArtifactStore(db),
       mcpServerStore: new SqliteMcpServerStore(db),
+      modelProviderStore: new SqliteModelProviderStore(db),
     };
     await seedRichInstance({
       stores,
@@ -185,7 +193,9 @@ describe('Data import route', () => {
     expect(body.data.spaces).toBe(1);
     expect(body.data.schedules).toBe(2);
     expect(body.data.schedules_off).toBe(true);
-    expect(body.data.summary).toContain('Imported:\n  3 chats\n  3 memories\n  2 personas\n  1 space\n  1 agent');
+    expect(body.data.summary).toContain(
+      'Imported:\n  3 chats\n  3 memories\n  2 personas\n  1 model provider\n  1 space\n  1 agent',
+    );
     expect(body.data.summary).toContain('2 schedules (they will be off)');
     expect(body.data.summary).toContain('Permissions start fresh, so each tool will ask again.');
 

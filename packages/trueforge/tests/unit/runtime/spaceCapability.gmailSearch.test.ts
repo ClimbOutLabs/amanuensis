@@ -30,6 +30,7 @@ import { FakeTurnArtifactStore } from '../../fixtures/fakeTurnArtifactStore';
 import { INERT_WEB_SEARCH_TOOL, startInertMcpServer, type InertMcpServer } from '../../fixtures/inertMcpServer';
 import { installRecordedMail, MAIL_SENDER_NAME } from '../../fixtures/recordedMail';
 import { uncappedTokenFactoryBudget } from '../../fixtures/uncappedTokenFactoryBudget';
+import { noSpaceFolders } from './spaceFolderStoreFake';
 
 const READ = 'https://www.googleapis.com/auth/gmail.readonly';
 const OWNER = { tenant_id: 't1', created_by: 'u1' };
@@ -51,6 +52,7 @@ const MEMORY_CONFIG: MemoryConfig = {
 };
 const NO_SCREEN: ToolOutputScreenConfig = { enabled: false, url: '', authToken: '', threshold: 0.5, timeoutMs: 1500 };
 const memory: MemoryTurnContext = {
+  keepsNothing: false,
   client: undefined,
   config: MEMORY_CONFIG,
   sessionId: 's1',
@@ -65,6 +67,7 @@ const STORE: SpaceToolStore = {
   revertSpace: jest.fn(),
   listSpacesWithAggregate: jest.fn(),
   getSpace: jest.fn(),
+  ...noSpaceFolders,
   getSpaceRevision: jest.fn(),
 };
 
@@ -176,10 +179,12 @@ describe('a web search after the chat read mail', () => {
         logger: createLogger({ silent: true }),
       },
       {
+        deletedChats: { listDeletedChatModelUsage: () => Promise.resolve([]) },
         sessionStore: new SqliteSessionStore(env.db),
         budget: uncappedTokenFactoryBudget,
         authority: { tenantId: OWNER.tenant_id, userRef: OWNER.created_by },
       },
+      undefined,
     );
   }
 

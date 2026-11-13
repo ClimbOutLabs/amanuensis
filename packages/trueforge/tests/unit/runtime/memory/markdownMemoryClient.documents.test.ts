@@ -38,6 +38,28 @@ async function recalledTexts(client: MarkdownMemoryClient): Promise<string[]> {
 }
 
 describe('MarkdownMemoryClient documents', () => {
+  // These tests check what is stored, not how fast. Each call races its own timer, and a stalled
+  // test process lets that timer win even after the file work is done, so only the timers are frozen.
+  beforeEach(() => {
+    jest.useFakeTimers({
+      doNotFake: [
+        'Date',
+        'hrtime',
+        'nextTick',
+        'performance',
+        'queueMicrotask',
+        'setImmediate',
+        'clearImmediate',
+        'setInterval',
+        'clearInterval',
+      ],
+    });
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
   it('keeps one entry when a profile is retained twice under the same document id', async () => {
     await withClient(async client => {
       await client.retain({ items: [profileItem('Profile: likes tea')], operationId: 'op-1', timeoutMs: 1000 });

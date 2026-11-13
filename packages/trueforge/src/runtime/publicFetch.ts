@@ -3,7 +3,7 @@ import { isIP } from 'node:net';
 import { Agent, fetch as undiciFetch, type Dispatcher } from 'undici';
 
 /**
- * Host-side GET of a URL on the public internet. Every hop is checked (http or https, no credentials,
+ * Host-side request to a URL on the public internet (a GET unless told otherwise). Every hop is checked (http or https, no credentials,
  * ports 80 and 443, every resolved address public) and the connection is pinned to the checked
  * address, so neither a redirect nor DNS rebinding can reach this machine or its network.
  */
@@ -228,6 +228,9 @@ export interface PublicFetchOptions {
   timeoutMs: number;
   maxRedirects: number;
   headers: Record<string, string>;
+  /** Defaults to GET. A POST is never repeated after a redirect, so give it `maxRedirects: 0`. */
+  method?: 'GET' | 'POST';
+  body?: Uint8Array<ArrayBuffer>;
   /** Extra check run on every hop's URL before it is requested; false refuses the hop. */
   allowHop: ((url: URL) => boolean) | undefined;
   describe: (problem: PublicFetchProblem) => string;
@@ -242,7 +245,7 @@ export interface PublicFetchResult {
 }
 
 /**
- * GETs a public URL, following at most `maxRedirects` redirects and re-checking each hop. Sends only
+ * Requests a public URL, following at most `maxRedirects` redirects and re-checking each hop. Sends only
  * the given headers: never cookies, a Referer or credentials.
  */
 export async function fetchPublicUrl(rawUrl: string, options: PublicFetchOptions): Promise<PublicFetchResult> {
@@ -262,7 +265,14 @@ export async function fetchPublicUrl(rawUrl: string, options: PublicFetchOptions
     const dispatcher = pinnedDispatcher(address);
     let fetched: Response;
     try {
-      fetched = await fetchImpl(current, { dispatcher, signal, redirect: 'manual', headers: options.headers });
+      fetched = await fetchImpl(current, {
+        dispatcher,
+        signal,
+        redirect: 'manual',
+        headers: options.headers,
+        ...(options.method === undefined ? {} : { method: options.method }),
+        ...(options.body === undefined ? {} : { body: options.body }),
+      });
     } catch (error) {
       // A throwing fetch never returns a response whose dispatcher we close
       // later — release its sockets here instead of leaking them.

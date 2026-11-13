@@ -12,9 +12,9 @@ import { cn } from '../atoms/lib/cn.js';
 import { CompactHostProvider } from '../atoms/lib/CompactLayoutContext.js';
 import { IS_CREATE_AGENT_METADATA_KEY, isCreateAgentMetadataValue } from '../atoms/lib/sessionCreateAgent.js';
 import { CurrentUserProvider, type CurrentUser } from '../contexts/CurrentUserContext.js';
+import { DeliveryPushLinks } from '../deliveries/DeliveryPushLinks.js';
 import type { AmanAvatarActivity } from '../hooks/useAvatarActivity.js';
 import { WidgetVisibilityProvider } from '../layouts/WidgetVisibilityContext.js';
-import { RemindersProvider } from '../reminders/RemindersContext.js';
 import { HistorySessionSwitchBridge } from '../routing/HistorySessionSwitchBridge.js';
 import { LibrarySessionShareBoot } from '../routing/LibrarySessionShareBoot.js';
 import { RemoteIdRouteBridge } from '../routing/RemoteIdRouteBridge.js';
@@ -30,6 +30,7 @@ import {
 import { ChatFolderProvider, type ChatFolderStore } from '../server/ChatFolderContext.js';
 import { CustomActionRenderersProvider, type CustomActionRenderers } from '../server/CustomActionRenderersContext.js';
 import { withSendableSkills } from '../server/draftSpecPreferences.js';
+import { adoptPrivateChat, readPrivateChatState, setPendingPrivateChat } from '../server/privateChatStore.js';
 import { ServerProvider, useServerCapabilities } from '../server/ServerContext.js';
 import { createSessionListCache, withSessionListCache } from '../server/sessionListCache.js';
 import {
@@ -144,7 +145,7 @@ function LayoutFallback({ className }: { className?: string }) {
   );
 }
 
-/** Shown while `type: "truefoundry"` resolves the agent UI server. */
+/** Shown while `type: "trueforge"` resolves the agent UI server. */
 export function ServerInitLoader({ className }: { className?: string }) {
   // Outside ThemeProvider (Suspense), useThemeMode falls back to light.
   const themeMode = useThemeMode();
@@ -237,6 +238,8 @@ function ChatProviderFromShell({
   const connectorChoice = useChatConnectorChoiceStore();
   // A new chat starts with nothing chosen; a choice made on an abandoned draft must not carry over.
   useEffect(() => connectorChoice?.clearPending(), [connectorChoice, runtimeKey]);
+  // Likewise the Private choice, which belongs to the new chat it was made on.
+  useEffect(() => setPendingPrivateChat(false), [runtimeKey]);
 
   const sandboxEnabled = useServerCapabilities()?.sandbox.enabled;
   const serverWithCreateIntent = useMemo((): AgentUIServer => {
@@ -244,16 +247,21 @@ function ChatProviderFromShell({
     const sending = isCreateAgent ? server : withSendableSkills({ server, sandboxEnabled });
     return {
       ...sending,
-      createSession: request => {
-        if (request.agentSpec === undefined) {
-          return sending.createSession(request);
-        }
-        return createSessionWithConnectorChoice({
-          server: sending,
-          store: connectorChoice,
-          metadata: { [IS_CREATE_AGENT_METADATA_KEY]: isCreateAgentMetadataValue(isCreateAgent) },
-          request,
-        });
+      createSession: async request => {
+        // An agent being built is never private; the choice is offered only on a normal new chat.
+        const isIncognito = !isCreateAgent && readPrivateChatState().pending;
+        const withPrivacy = isIncognito ? { ...request, isIncognito } : request;
+        const session =
+          request.agentSpec === undefined
+            ? await sending.createSession(withPrivacy)
+            : await createSessionWithConnectorChoice({
+                server: sending,
+                store: connectorChoice,
+                metadata: { [IS_CREATE_AGENT_METADATA_KEY]: isCreateAgentMetadataValue(isCreateAgent) },
+                request: withPrivacy,
+              });
+        if (isIncognito) adoptPrivateChat(session.id);
+        return session;
       },
     };
   }, [server, isCreateAgent, connectorChoice, sandboxEnabled]);
@@ -410,6 +418,8 @@ export function TrueForgeUIShell(props: TrueForgeUIShellProps) {
           {layoutTree}
           {/* Once, outside any layout or menu, so every BugReportButton can open it. */}
           <BugReportDialog />
+          {/* Opens the item a tapped notice names. */}
+          <DeliveryPushLinks />
         </CompactHostProvider>
       </ChatProviderFromShell>
     </ShellModeProvider>
@@ -427,13 +437,11 @@ export function TrueForgeUIShell(props: TrueForgeUIShellProps) {
               <ChatConnectorChoiceProvider store={connectorChoice}>
                 <ChatFolderProvider store={chatFolders}>
                   <SpaceProvider store={spaces}>
-                    <RemindersProvider>
-                      {resolvedRoutes != null ? (
-                        <ResolvedRoutesProvider routes={resolvedRoutes}>{visibilityTree}</ResolvedRoutesProvider>
-                      ) : (
-                        visibilityTree
-                      )}
-                    </RemindersProvider>
+                    {resolvedRoutes != null ? (
+                      <ResolvedRoutesProvider routes={resolvedRoutes}>{visibilityTree}</ResolvedRoutesProvider>
+                    ) : (
+                      visibilityTree
+                    )}
                   </SpaceProvider>
                 </ChatFolderProvider>
               </ChatConnectorChoiceProvider>

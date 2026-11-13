@@ -23,6 +23,7 @@ import type {
   LLMToolMessage,
 } from '../llm/LLMTypes';
 import type { CallToolResponse, MCPAuthRequired } from '../mcp/IMCPServer';
+import { isAmanBrowserCall } from '../permissions/browserToolNames';
 import type { AgentThreadCreateSubAgent } from '../runtime/AgentThread.types';
 import { InternalEventType } from '../runtime/AgentThread.types';
 import { awaitWithAbort, signalAbortError, throwIfSignalAborted } from '../util/abort';
@@ -38,12 +39,14 @@ import {
 } from '../permissions';
 import { APPROVAL_EXPIRED_REASON_CODE, isExpiredApproval } from '../permissions/approvalExpiry';
 import { toJsonSafeParams } from '../permissions/approvalTokens';
-import { heldCallAuditText, recordNotPreparedRefusals } from '../permissions/audit';
+import { heldCallAuditText, recordNotPreparedRefusals, recordUnattendedSpaceChange } from '../permissions/audit';
 import type { SentinelDispatchContext } from '../permissions/context';
 import { HELD_REASON_CODE, HELD_RESULT_TEXT } from '../permissions/heldActions';
-import { MAPS_ASK_REASON } from '../permissions/mapsToolNames';
+import type { SkillNetworkCardRequest } from '../permissions/skillNetworkCards';
+import { isMapsCardReason } from '../permissions/mapsToolNames';
 import { collectOutboundStrings } from '../permissions/outboundGuard';
 import {
+  hostToolStamp,
   isSearchAskReason,
   isSilentSearchReason,
   recordToolResultProvenance,
@@ -51,8 +54,11 @@ import {
 } from '../permissions/webSearch';
 import { identicalCallNudgeMessage } from '../runtime/contextUtils';
 import { CALL_TOOL_NAME, tryParseCallToolWrapper } from '../runtime/DeferredTool';
+import { REPLY_CALL_NOT_RUN_OWNER_MESSAGE } from '../runtime/modelReplyGuard';
 import { connectorUnreachableText, type ToolResultKind, type UnfinishedKind } from '../runtime/replyBudget';
 import type { SandboxInfo, WorkspaceVerificationReceiptCandidate } from '../sandbox/Sandbox';
+import { SPACE_WRITE_REASON } from '../spaces/toolContract';
+import { spaceWriteResponseSavedNothing } from '../spaces/turnSpaceWrites';
 import { approvalGrantKey } from './approvalGrant';
 import type { MappedMCPTool } from './convertMCPServers';
 import { isGithubFileContentUnavailable, isGithubFileRead } from './githubFileContents';
@@ -96,6 +102,8 @@ export interface ToolCallResult {
   blockedPrivateFallback: boolean;
   repeatedSideEffect: boolean;
   verificationReceiptCandidate: WorkspaceVerificationReceiptCandidate | undefined;
+  /** Skill network cards this result's command asked for, carried from the sandbox; absent when it asked for none. */
+  skillNetworkCards?: readonly SkillNetworkCardRequest[] | undefined;
   disposition: ToolResultDisposition;
   remediation: ToolResultRemediation | undefined;
   /** Set by a response processor that changed the result text; absent when the model saw it as returned. */
@@ -268,10 +276,15 @@ export interface ToolCallMemoSnapshot {
   no_progress_nudge_generation: number;
   /** Policy-denied calls in the current turn; the per-turn guard budget. */
   policy_blocked_calls_this_turn: number;
-  /** Write calls admitted to dispatch in the current turn; the per-turn write cap. */
+  /** Actions outside the sandbox workspace that ran and succeeded in the current turn; the per-turn write cap. */
   write_calls_this_turn: number;
   /** Write calls that ran and succeeded in the current turn; decides the unbacked-claim notice. */
   successful_writes_this_turn: number;
+  /** Calls that ran, succeeded and changed something in the current turn; an identical call may run again after one. */
+  changes_this_turn: number;
+  /** Browser steps that reached a page not seen before in the turn, and digests of the pages seen. */
+  browser_page_changes_this_turn: number;
+  browser_pages_seen: string[];
   /** Kinds of step that ran and succeeded in the current turn; back clone, run, and read claims. */
   step_kinds_this_turn: TurnStepKind[];
   /** Prose of the steps that carried tool calls in the current turn, in step order. */
@@ -340,6 +353,9 @@ type LegacyToolCallMemoSnapshot = Omit<
   | 'policy_blocked_calls_this_turn'
   | 'write_calls_this_turn'
   | 'successful_writes_this_turn'
+  | 'changes_this_turn'
+  | 'browser_page_changes_this_turn'
+  | 'browser_pages_seen'
   | 'step_kinds_this_turn'
   | 'step_texts_this_turn'
   | 'last_call_signature'
@@ -378,6 +394,10 @@ type LegacyToolCallMemoSnapshot = Omit<
   // Same as the policy counter: a snapshot written before the write cap omits the key.
   write_calls_this_turn?: number | undefined;
   successful_writes_this_turn?: number | undefined;
+  changes_this_turn?: number | undefined;
+  // Added with the browser's own page count: a snapshot written before it omits these keys.
+  browser_page_changes_this_turn?: number | undefined;
+  browser_pages_seen?: string[] | undefined;
   step_kinds_this_turn?: TurnStepKind[] | undefined;
   // A snapshot written before step prose was kept for the claim check omits the key.
   step_texts_this_turn?: string[] | undefined;
@@ -399,7 +419,7 @@ type LegacyToolCallMemoSnapshot = Omit<
 export interface CallSignatureRecord {
   /** How many times the call ran this turn. */
   count: number;
-  /** Write calls admitted this turn when the call last ran. It may run again once this has risen. */
+  /** changesThisTurn when the call last ran. It may run again once this has risen. */
   writesAtLastRun: number;
   /** Kind of the call's last result; a retryable error may be tried once more. */
   lastKind: ToolResultKind | null;
@@ -415,10 +435,22 @@ export interface TurnToolCallLedger {
   callSignatures: Map<string, CallSignatureRecord>;
   /** Signature of the call made last, across every thread; undefined before the first call. */
   lastCallSignature: string | undefined;
-  /** Write calls (tier 3) admitted to dispatch this turn. Enforces the per-turn write cap. */
+  /** Actions outside the sandbox workspace that ran and succeeded this turn (see countsTowardWriteCap). Enforces the per-turn write cap. */
   writeCallsThisTurn: number;
   /** Write calls that ran and succeeded this turn. Decides the unbacked-claim note. */
   successfulWritesThisTurn: number;
+  /** Calls that ran, succeeded and changed something this turn (see changesState); an identical call may run again after one. */
+  changesThisTurn: number;
+  /**
+   * Browser steps this turn that reached a page not seen before in the turn. An identical browser call
+   * may run again after one; nothing else in the turn counts it as a change.
+   */
+  browserPageChangesThisTurn: number;
+  /**
+   * Digests of the browser pages seen this turn. A step that lands on one of them moved nothing new,
+   * so a scroll at the bottom of a page, or going back and forth between two pages, is no progress.
+   */
+  browserPagesSeen: string[];
   /** Kinds of step that ran and succeeded this turn. Decides the unbacked-claim note for clones, runs, and reads. */
   stepKindsThisTurn: Set<TurnStepKind>;
   /**
@@ -454,6 +486,9 @@ export function createTurnToolCallLedger(): TurnToolCallLedger {
     lastCallSignature: undefined,
     writeCallsThisTurn: 0,
     successfulWritesThisTurn: 0,
+    changesThisTurn: 0,
+    browserPageChangesThisTurn: 0,
+    browserPagesSeen: [],
     stepKindsThisTurn: new Set(),
     stepTextsThisTurn: [],
     toolMarkupLeaksThisTurn: 0,
@@ -510,6 +545,9 @@ export function mergeTurnToolCallLedgers(ledgers: readonly TurnToolCallLedger[])
     }
     merged.writeCallsThisTurn = Math.max(merged.writeCallsThisTurn, ledger.writeCallsThisTurn);
     merged.successfulWritesThisTurn = Math.max(merged.successfulWritesThisTurn, ledger.successfulWritesThisTurn);
+    merged.changesThisTurn = Math.max(merged.changesThisTurn, ledger.changesThisTurn);
+    merged.browserPagesSeen = [...new Set([...merged.browserPagesSeen, ...ledger.browserPagesSeen])];
+    merged.browserPageChangesThisTurn = Math.max(merged.browserPageChangesThisTurn, ledger.browserPageChangesThisTurn);
     for (const kind of ledger.stepKindsThisTurn) {
       merged.stepKindsThisTurn.add(kind);
     }
@@ -648,7 +686,7 @@ export function createToolCallMemoState(
   for (const entry of snapshot.call_signatures ?? []) {
     state.turn.callSignatures.set(entry.key, {
       count: entry.count,
-      writesAtLastRun: entry.writes_at_last_run ?? snapshot.write_calls_this_turn ?? 0,
+      writesAtLastRun: entry.writes_at_last_run ?? snapshot.changes_this_turn ?? 0,
       // A snapshot written before the retry rule omits these: the call has no retry left to spend.
       lastKind: entry.last_kind ?? null,
       retried: entry.retried ?? true,
@@ -677,6 +715,9 @@ export function createToolCallMemoState(
   state.policyBlockedCallsThisTurn = snapshot.policy_blocked_calls_this_turn ?? 0;
   state.turn.writeCallsThisTurn = snapshot.write_calls_this_turn ?? 0;
   state.turn.successfulWritesThisTurn = snapshot.successful_writes_this_turn ?? 0;
+  state.turn.changesThisTurn = snapshot.changes_this_turn ?? 0;
+  state.turn.browserPageChangesThisTurn = snapshot.browser_page_changes_this_turn ?? 0;
+  state.turn.browserPagesSeen = [...(snapshot.browser_pages_seen ?? [])];
   state.turn.stepKindsThisTurn = new Set(snapshot.step_kinds_this_turn ?? []);
   state.turn.stepTextsThisTurn = [...(snapshot.step_texts_this_turn ?? [])];
   state.turn.lastCallSignature = snapshot.last_call_signature;
@@ -771,6 +812,9 @@ export function toToolCallMemoSnapshot(state: ToolCallMemoState): ToolCallMemoSn
     policy_blocked_calls_this_turn: state.policyBlockedCallsThisTurn,
     write_calls_this_turn: state.turn.writeCallsThisTurn,
     successful_writes_this_turn: state.turn.successfulWritesThisTurn,
+    changes_this_turn: state.turn.changesThisTurn,
+    browser_page_changes_this_turn: state.turn.browserPageChangesThisTurn,
+    browser_pages_seen: [...state.turn.browserPagesSeen],
     step_kinds_this_turn: [...state.turn.stepKindsThisTurn].sort(),
     step_texts_this_turn: [...state.turn.stepTextsThisTurn],
     last_call_signature: state.turn.lastCallSignature,
@@ -965,6 +1009,11 @@ export const POLICY_BLOCKED_STOP_AT = 3;
 /** Times the same call may be made in one turn before the host ends the turn. */
 export const IDENTICAL_CALL_STOP_AT = 4;
 /**
+ * The same limit for a browser step that reached a new page each time. Scrolling a long page is no
+ * loop, but a page whose text changes on every read (a clock, a rotating ad) still has an end.
+ */
+export const IDENTICAL_MOVE_STOP_AT = 8;
+/**
  * Identical calls in a row a reply may make before the next one ends it. A read leaves things as
  * they were, so a brief may list or search the same thing a few times.
  */
@@ -979,9 +1028,10 @@ export const REPEAT_LIMIT_OTHER_TOOLS = 1;
  */
 export const IDENTICAL_CALL_NUDGE_AT = 2;
 /**
- * Tier 3 calls a turn may run before the host stops it. Only reads the host itself vouches for
- * (isHostVouchedRead) never count: searches have their own limits. The call past the cap never runs; the
- * turn ends once the batch that reached the cap has resolved.
+ * Actions outside the sandbox workspace (sends, connector writes, git pushes) a turn may make before
+ * the host stops it. Reads and work inside the sandbox workspace never count; see
+ * countsTowardWriteCap. Only calls that ran and succeeded count. The call past the cap never runs;
+ * the turn ends once the batch that reached the cap has resolved.
  */
 export const MAX_WRITE_CALLS_PER_TURN = 5;
 
@@ -1016,7 +1066,7 @@ function isSearchProviderRead(info: Pick<InternalToolCallInfo, 'search_provider_
  * wrongly calls read-only still counts.
  */
 export function isHostVouchedRead(info: Pick<InternalToolCallInfo, 'search_provider_call' | 'tier_reason'>): boolean {
-  return isSearchProviderRead(info) || info.tier_reason === MAPS_ASK_REASON;
+  return isSearchProviderRead(info) || isMapsCardReason(info.tier_reason);
 }
 /** Tool calls written as text that the model is asked to redo in one turn; past this the turn ends. */
 export const MAX_TOOL_MARKUP_RETRIES_PER_TURN = 2;
@@ -1770,8 +1820,11 @@ export async function executeToolCalls({
           admissionProvenance: admission,
         };
       }
+      // Aman's browser shows a live page: the same scroll or read lands on whatever the page is now,
+      // so it is never answered from an earlier result. Its repeats are judged by the page's own count.
       const shouldMemoize =
-        isReadOnlyCall(toolCall.tool_info) || isGithubFileRead(toolInfo.toolSet.name, toolInfo.originalToolName);
+        (isReadOnlyCall(toolCall.tool_info) && !isAmanBrowserCall(toolCall.tool_info)) ||
+        isGithubFileRead(toolInfo.toolSet.name, toolInfo.originalToolName);
       const shouldReplayCompleted = shouldMemoize || toolCall.tool_info.effect === 'verify';
       const key = memoKey(
         toolInfo,
@@ -1788,7 +1841,15 @@ export async function executeToolCalls({
       // describe a world that no longer exists, so only an entry stamped
       // with the current mutation epoch may be replayed. A stale entry
       // falls through to a fresh dispatch, whose result replaces it below.
-      const previous = completedEntry?.mutationEpoch === memoState.workspaceMutationEpoch ? completedEntry : undefined;
+      // An approved replay is never served from the memo either: the owner just answered for
+      // this call, so handing back its stored result would defeat the answer (a skill network
+      // card's command must run again under the grant the answer recorded).
+      const previous =
+        approvalDecision?.status === 'allow'
+          ? undefined
+          : completedEntry?.mutationEpoch === memoState.workspaceMutationEpoch
+            ? completedEntry
+            : undefined;
       if (previous !== undefined) {
         previous.count += 1;
         return {
@@ -1965,6 +2026,9 @@ export async function executeToolCalls({
             ...(toolCall.tool_info.git_remote_precondition === undefined
               ? {}
               : { git_remote_precondition: toolCall.tool_info.git_remote_precondition }),
+            ...(toolCall.tool_info.browser_element === undefined
+              ? {}
+              : { browser_element_precondition: toolCall.tool_info.browser_element }),
           },
         );
       };
@@ -2291,7 +2355,7 @@ export async function executeToolCalls({
               {
                 toolName: toolCall.tool_info.original_tool_name,
                 tier: toolCall.tool_info.tier,
-                message: failure.owner_message ?? failure.message,
+                message: failure.owner_message ?? REPLY_CALL_NOT_RUN_OWNER_MESSAGE,
               },
             ];
       }),
@@ -2304,6 +2368,22 @@ export async function executeToolCalls({
     const audit = sentinel.services.audit;
     for (const { toolCall, disposition, response, admissionProvenance: admitted } of results) {
       const info = toolCall.tool_info;
+      if (
+        sentinel.services.unattended &&
+        info.tier_reason === SPACE_WRITE_REASON &&
+        disposition === 'executed_ok' &&
+        !spaceWriteResponseSavedNothing(response)
+      ) {
+        // The change is saved; a log that is down must not turn it into a failed call the run would repeat.
+        try {
+          await recordUnattendedSpaceChange({ services: sentinel.services, identity: sentinel.identity, info });
+        } catch (error) {
+          logger?.warn('Could not record a space change in the activity log', {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+        continue;
+      }
       if ((info.tier !== 2 && info.tier !== 3) || info.tier3_card === null) {
         continue;
       }
@@ -2433,6 +2513,7 @@ export async function executeToolCalls({
       recordToolResultProvenance({
         state: sentinel.web_search,
         tool_name: toolCall.tool_info.original_tool_name,
+        stamp: hostToolStamp(toolCall.tool_info),
         argument_values: sent === undefined ? [] : [...sent.values, ...sent.plumbing],
         texts: resultTexts(result),
       });
@@ -2496,6 +2577,7 @@ export async function executeToolCalls({
       blockedPrivateFallback,
       repeatedSideEffect,
       verificationReceiptCandidate: response.verificationReceiptCandidate,
+      ...(response.skillNetworkCards === undefined ? {} : { skillNetworkCards: response.skillNetworkCards }),
       disposition,
       remediation: resultRemediation,
       admissionProvenance: resultAdmissionProvenance,

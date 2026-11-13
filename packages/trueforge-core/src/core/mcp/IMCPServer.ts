@@ -7,8 +7,9 @@ import type {
   MCPServerInitInfo,
   ToolAdmissionProvenance,
 } from '../events/schema';
-import type { InternalToolCallInfo } from '../llm/LLMTypes';
+import type { BrowserElementReview, InternalToolCallInfo } from '../llm/LLMTypes';
 import type { ConnectorBinding } from '../permissions/approvalTokens';
+import type { SkillNetworkCardRequest } from '../permissions/skillNetworkCards';
 import type { SandboxInfo, WorkspaceVerificationReceiptCandidate } from '../sandbox/Sandbox';
 import type { StructuredEditPrecondition } from '../sandbox/structuredEditPrecondition';
 import type { GitRemotePrecondition } from '../sandbox/gitRemoteObservation';
@@ -26,6 +27,11 @@ export interface ToolInvocationContext {
   structured_edit_precondition?: StructuredEditPrecondition | undefined;
   /** The params the approval was minted over, for tools that tie an approval to state outside the call. */
   approved_params?: Record<string, unknown> | undefined;
+  /**
+   * What the live page said about a browser click's element when the call was classified. The click
+   * runs only while the element still reads exactly this way, so it never lands on an element nobody checked.
+   */
+  browser_element_precondition?: BrowserElementReview | undefined;
   /** Host-observed git remotes captured before approval; the call runs authenticated only against these. */
   git_remote_precondition?: GitRemotePrecondition | undefined;
   /**
@@ -67,6 +73,9 @@ export interface CallToolResolvedResponse {
   // Host-only candidate. AgentThread activates it only after the terminal
   // response has crossed the durable context-persistence boundary.
   verificationReceiptCandidate: WorkspaceVerificationReceiptCandidate | undefined;
+  // Host-only skill network cards this call's outcome asks for, or undefined when it asks for
+  // none. AgentThread raises them as held cards after the result is persisted.
+  skillNetworkCards?: readonly SkillNetworkCardRequest[] | undefined;
   events?: readonly RegisteredPassthroughEvent[] | undefined;
 }
 
@@ -162,10 +171,20 @@ export interface IToolSet {
   isHostVouchedReadTool?(name: string): boolean;
 
   /**
+   * Whether a call to this tool, with these arguments, can only change things inside this server's
+   * own contained workspace, so nothing it does reaches past it. Such calls do not count toward the
+   * per-reply cap on outside actions. Absent means never.
+   */
+  staysInWorkspace?(input: { name: string; argumentsText: string }): boolean;
+
+  /**
    * The connector this call goes to as of now, for re-checking an approval at dispatch. Absent on
    * tool sets whose approvals are not bound to a connector.
    */
   resolveConnector?(params: CallToolRequest['params']): ConnectorBinding | undefined;
+
+  /** What an "Always allow" grant for this call binds to as of now (see `ToolGrantKey`); absent when none. */
+  resolveGrantBinding?(params: CallToolRequest['params']): string | undefined;
 
   /**
    * The canonical params an approval for this call is minted over, derived from the wire arguments the same way
@@ -201,6 +220,8 @@ export interface ToolSource {
   readonly description?: string | undefined;
   /** Host of the remote server's configured URL, shown on approval cards; absent for local sources. */
   readonly serverHost?: string | undefined;
+  /** What an "Always allow" grant on this source binds to (see `ToolGrantKey`); absent when the host set none. */
+  readonly grantBinding?: string | undefined;
 
   listTools(): Promise<ListToolsResolvedResponse | AuthRequiredResponse>;
 

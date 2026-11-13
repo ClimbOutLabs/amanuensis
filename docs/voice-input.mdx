@@ -1,39 +1,149 @@
 ---
-title: 'Voice input'
-sidebarTitle: 'Voice input'
-description: 'Record a voice message in the chat composer and have it transcribed locally by the aman-stt sidecar.'
+title: 'Voice setup'
+sidebarTitle: 'Voice setup'
+description: 'How Aman turns your voice into words and reads replies aloud on your own computer, the settings that need a terminal, and the limits.'
 ---
 
-The chat composer has a microphone button beside Send. Tap it to start recording, tap it again to stop: the recording is transcribed locally and the text is inserted into the composer, where it stays editable before sending. Typed input keeps working exactly as before, whether or not transcription is available.
+This page explains how voice works inside Aman, and the settings you change in a terminal. For everyday use, such as recording a message, voice mode and approving a card by voice, see [Talk to Aman](../packages/trueforge/guide/topics/voice.md).
 
-Transcription runs fully on your own hardware. The browser encodes the recording as 16 kHz mono WAV and posts it to the agent server (`POST /api/v1/voice/transcribe`); the server forwards the bytes to the `aman-stt` sidecar, which runs Whisper `small` (int8, CPU) via faster-whisper and returns the transcript. The browser never talks to the sidecar directly, and no audio or transcript ever leaves your machine. When the sidecar is unreachable, the mic button shows as unavailable and everything else keeps working.
+Everything voice does runs on your own computer. No speech service on the internet is used.
 
-## Deployment
+## The parts
 
-`docker-compose.yml` runs `aman-stt` as a sidecar next to the server:
+Aman's voice uses two small helper programs, each in its own container. A container is a sealed box that Docker runs next to Aman.
 
-- Built from `ops/aman-stt` (Python 3.11 slim, CPU-only; the image has no CUDA userspace and the app pins `device=cpu`).
-- Pinned to cores `16-19` with a 2 GB memory limit, so transcription work never contends with chat or embedding work, which stay on cores `0-15`.
-- No host port is published; the sidecar is reachable only inside the compose network at `http://aman-stt:8001`.
-- The Whisper model (~464 MB) downloads once at first startup into the persistent `stt-model-cache` volume; container recreates reuse it.
-- `restart: unless-stopped`, matching the server.
+- **`aman-stt`** turns speech into text. It runs the Whisper `small` model (int8, on the processor) through faster-whisper.
+- **`aman-tts`** turns reply text into speech. It runs the Kokoro voice model (Apache-2.0) on the processor. The model and its twelve voices are built into the container, so it never goes online.
 
-The server reads the sidecar address from `STT_URL` (default `http://aman-stt:8001`; compose sets it explicitly). The server does not wait for the sidecar to be healthy before starting: typed chat stays available when transcription is down.
+Voice mode also uses a small speech-detection model inside Aman itself. It finds where each sentence starts and ends.
+
+When `aman-stt` is not reachable, the microphone and voice mode buttons are hidden, and typing keeps working. When `aman-tts` is not running, your browser's built-in voice reads replies instead, and voice mode does not start.
+
+## Where your voice goes
+
+- **A recorded message.** The browser records only while the microphone is on. It turns the recording into 16 kHz mono WAV and sends it to the Aman server (`POST /api/v1/voice/transcribe`). The server passes it to `aman-stt` and gets the words back. The browser never talks to `aman-stt` directly. The recording is not saved.
+- **Voice mode.** The browser sends the microphone sound to the Aman server over one private connection. The connection only works for the person who opened it, only from Aman's own page, and its ticket lasts at most 30 seconds before it is used. The server decides from the sound whether you are talking, so a forgotten tab cannot keep the microphone open past the 2 minute and 30 minute limits. It passes each sentence to `aman-stt` and streams the answer's audio back as it is made. The microphone is asked to cancel echo and noise, so it does not hear the answer from your speakers.
+- **A reply read aloud.** The reply's text goes to the Aman server, which passes it to `aman-tts` and sends the audio back. When `aman-tts` is not running, the browser's own voice reads it, and the text stays in the browser.
+- **What is kept.** Only the messages themselves, like any typed message. Neither the sound nor the reply audio is saved. The server logs sizes, timings and status codes, never what was said.
+
+## How voice approval reads a card
+
+Aman reads a card aloud only when it can say all of it exactly as written. The voice decides this in the same step that speaks the card. The whole card goes to the voice as one text, and nothing is cut out first, so a hidden part cannot slip past.
+
+If any part would be said differently from how it is written, none of it is read. Aman says "I can't read that one out exactly, so I've left it in the app for you to approve." If the voice cannot be reached, or fails part way, the card stays on the screen, and a part already spoken stays heard.
+
+A card is read in a fixed order, so nothing can be hidden or swapped. Aman first says how many addresses, events or schedules the card holds. An extra address would not match that count. A name or title is read last, on its own line after a label such as "The subject is", so one that sounds like another line is still heard as a name. An event or schedule card ends by saying the real time again. The name an email is sent as, a note that a name was left off an address, a duplicate event and an event over several days are read too. When an email is a reply, the message it answers is shown, not read.
+
+Aman ignores sound that matches what it just said, so its own voice cannot approve a card. A card you answer on the screen while Aman waits is not waiting any more, and your next words are a new message.
+
+If the voice service is out of date, Aman shows "The voice service is out of date. Run aman upgrade, then try again." and says only that it left the card in the app.
+
+## Limits
+
+- A recorded message stops at 3 minutes. The server takes at most 30 MB of audio, about 16 minutes, and a transcription times out after 120 seconds.
+- Voice mode ends after 2 minutes with nothing said, and after 30 minutes in any case.
+- Each person can start voice mode 10 times a minute.
+- Each person can have two voice requests at once, shared between voice mode and replies read aloud by hand. One waits for the other.
+- Each person has one voice conversation per account they sign in to, and at most 3 in all. A new one on the same account replaces the old one.
+- The server holds at most 20 voice conversations at once. Voice mode keeps its tickets in one server's memory, so run a single copy of the server.
+- A reading holds at most 4,000 characters. Longer replies are read in parts. Each person can ask for 30 readings a minute.
+
+## Settings that need a terminal
+
+Set these in `packages/trueforge/.env` for host development, or in the environment of the server container.
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| `TTS_ENABLED` | `true` | `false` turns the voice on your computer off. Voice mode does not start, and replies read aloud use the browser's voice. |
+| `TTS_URL` | `http://aman-tts:8002` | Where the server finds `aman-tts`. |
+| `STT_URL` | `http://aman-stt:8001` | Where the server finds `aman-stt`. |
+| `VOICE_VAD_MODEL_DIR` | `<app data folder>/voice-model` (the images set `/opt/aman-voice`) | Where the speech-detection model is. |
+| `AMAN_STT_MODEL` | `small` | Which Whisper model `aman-stt` uses. Larger models are more accurate and need more memory. |
+| `AMAN_STT_FALLBACK_MODEL` | `base` | The model used when the main one fails to load. |
+| `AMAN_STT_CPU_THREADS` | `4` | How many threads transcription uses. Keep it equal to the cores given to `aman-stt`. |
+| `AMAN_STT_MAX_BODY_BYTES` | 30 MB | The largest recording `aman-stt` accepts. |
+
+The Aman image carries the 2 MB speech-detection model, checked against a fixed fingerprint when the image is built. Voice mode makes no download. If the file is missing or does not match, voice mode refuses to start.
+
+## Turn the reading voice off
+
+Stop the `aman-tts` container, and replies are read by your browser's voice instead.
+
+=== "Installer"
+
+    ```bash
+    docker stop aman-tts
+    ```
+
+    It starts again the next time the installer or `aman upgrade` runs.
+
+=== "docker-compose.yml"
+
+    ```bash
+    docker compose stop aman-tts
+    ```
+
+=== "pnpm dev:infra"
+
+    ```bash
+    docker compose -f docker-compose.dev.yml stop aman-tts
+    ```
+
+    Or remove the `aman-tts` service from `docker-compose.dev.yml`.
+
+## How the full stack runs it
+
+`docker-compose.yml` runs `aman-stt` next to the server:
+
+- It is built from `ops/aman-stt` (Python 3.11 slim, processor only, with no CUDA). The app pins `device=cpu`.
+- It has a 2 GB memory limit. It is not tied to particular cores, so the stack starts on any computer. See Tuning to give it cores of its own.
+- It publishes no port on your computer. It is reachable only inside the compose network at `http://aman-stt:8001`.
+- The Whisper model (about 464 MB) downloads once at first start into the `stt-model-cache` volume. Recreated containers reuse it.
+- It restarts unless stopped, like the server.
+
+Compose sets `STT_URL` itself. The server does not wait for `aman-stt` to be healthy, so typed chat works while transcription is down.
 
 ## Host development
 
-`pnpm dev:infra` starts `aman-stt` from `docker-compose.dev.yml` next to Postgres and Redis, while the server and UI run on the host with `pnpm dev`. The service uses the same build, image, memory limit and thread count as the full stack, with two differences: it publishes `127.0.0.1:8001` (loopback only, since the sidecar has no authentication) and it has no `cpuset` pin, because the host-run server cannot be pinned to a disjoint core set and a fixed range would fail on hosts with fewer than 20 cores. The first `pnpm dev:infra` builds the image and downloads the model (~464 MB) into the dev project's own `stt-model-cache` volume, separate from the full stack's.
+`pnpm dev:infra` starts `aman-stt` from `docker-compose.dev.yml` next to Postgres and Redis. The server and UI run on your computer with `pnpm dev`.
 
-Point the server at the published port by setting `STT_URL=http://localhost:8001` in `packages/trueforge/.env` (already present in `packages/trueforge/.env.example`), then restart `pnpm dev`. Without it the server looks for `http://aman-stt:8001`, which only resolves inside the compose network, and the mic button stays hidden.
+The service uses the same build, image, memory limit and thread count as the full stack, with two differences:
+
+- It publishes `127.0.0.1:8001`, on your own computer only, because `aman-stt` has no sign-in.
+- Do not give it cores of its own here. The server runs on your computer and cannot be kept off them.
+
+`pnpm dev:infra` rebuilds the images each time, so an older voice service is never reused. The first run builds the image and downloads the model (about 464 MB) into the dev project's own `stt-model-cache` volume.
+
+Set these in `packages/trueforge/.env` (both are already in `packages/trueforge/.env.example`), then restart `pnpm dev`:
+
+```bash
+STT_URL=http://localhost:8001
+TTS_URL=http://localhost:8002
+```
+
+Without `STT_URL`, the server looks for `http://aman-stt:8001`, which only works inside the compose network, and the microphone stays hidden.
+
+`pnpm dev` fetches the speech-detection model by itself when you are online. If you were offline, run this once you are back online:
+
+```bash
+pnpm voice:model
+```
+
+`pnpm test` keeps its own copy in `packages/trueforge/.cache/voice-model` and fetches it first.
 
 ## Tuning
 
-**Fewer or more CPU cores.** The `16-19` / `0-15` split assumes a 20-core host. On a host with a different core count, move both pins together and keep them disjoint: give the sidecar 4 cores and the server the rest. For example, on a 12-core host, pin `aman-stt` to `8-11` and the server to `0-7`. The server pin lives on the `server` service (`cpuset`), the sidecar pin on `aman-stt`.
+- **Cores of its own.** On a computer with many cores, you can keep voice work from slowing chat. Give the voice services and the server separate cores in a `docker-compose.override.yml` file next to `docker-compose.yml`. Compose reads that file by itself. For example, on 20 cores:
 
-**Transcription threads.** `AMAN_STT_CPU_THREADS` (default `4`) sets the Whisper encoder thread count; keep it equal to the number of cores pinned to the sidecar.
+    ```yaml
+    services:
+      server:
+        cpuset: '0-15'
+      aman-stt:
+        cpuset: '16-19'
+      aman-tts:
+        cpuset: '16-19'
+    ```
 
-**Model size.** `AMAN_STT_MODEL` (default `small`) selects the Whisper model; `AMAN_STT_FALLBACK_MODEL` (default `base`) is used when the primary fails to load. Larger models transcribe more accurately and need more RAM; raise the service `mem_limit` accordingly.
-
-**Memory.** The default 2 GB limit covers the `small` int8 model with headroom. If the container is OOM-killed during warmup, raise `mem_limit` before changing anything else.
-
-**Request limits.** The sidecar caps audio bodies at 30 MB (`AMAN_STT_MAX_BODY_BYTES`); the server caps them at 6.4 MB, which is 200 seconds of 16 kHz mono 16-bit audio, enforcing the 3 minute recording cap server-side. The browser also caps recordings at 3 minutes client-side. Transcription requests time out after 120 seconds server-side.
+    On 12 cores, use `0-7` for the server and `8-11` for the voice services. Give the voice services 4 cores and the server the rest, and keep the two sets apart. A range your computer does not have stops the stack with "Requested CPUs are not available".
+- **Memory.** The 2 GB limit covers the `small` model with room to spare. If the container is stopped for running out of memory while it warms up, raise `mem_limit` before changing anything else. Raise it too when you choose a larger model.

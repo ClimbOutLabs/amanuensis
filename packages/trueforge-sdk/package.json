@@ -253,6 +253,17 @@
             },
             "default": "./dist/cjs/api/resources/skills/exports.js"
         },
+        "./spaceFolders": {
+            "import": {
+                "types": "./dist/esm/api/resources/spaceFolders/exports.d.mts",
+                "default": "./dist/esm/api/resources/spaceFolders/exports.mjs"
+            },
+            "require": {
+                "types": "./dist/cjs/api/resources/spaceFolders/exports.d.ts",
+                "default": "./dist/cjs/api/resources/spaceFolders/exports.js"
+            },
+            "default": "./dist/cjs/api/resources/spaceFolders/exports.js"
+        },
         "./spaces": {
             "import": {
                 "types": "./dist/esm/api/resources/spaces/exports.d.mts",
@@ -263,6 +274,39 @@
                 "default": "./dist/cjs/api/resources/spaces/exports.js"
             },
             "default": "./dist/cjs/api/resources/spaces/exports.js"
+        },
+        "./deliveries": {
+            "import": {
+                "types": "./dist/esm/api/resources/deliveries/exports.d.mts",
+                "default": "./dist/esm/api/resources/deliveries/exports.mjs"
+            },
+            "require": {
+                "types": "./dist/cjs/api/resources/deliveries/exports.d.ts",
+                "default": "./dist/cjs/api/resources/deliveries/exports.js"
+            },
+            "default": "./dist/cjs/api/resources/deliveries/exports.js"
+        },
+        "./reach": {
+            "import": {
+                "types": "./dist/esm/api/resources/reach/exports.d.mts",
+                "default": "./dist/esm/api/resources/reach/exports.mjs"
+            },
+            "require": {
+                "types": "./dist/cjs/api/resources/reach/exports.d.ts",
+                "default": "./dist/cjs/api/resources/reach/exports.js"
+            },
+            "default": "./dist/cjs/api/resources/reach/exports.js"
+        },
+        "./reminders": {
+            "import": {
+                "types": "./dist/esm/api/resources/reminders/exports.d.mts",
+                "default": "./dist/esm/api/resources/reminders/exports.mjs"
+            },
+            "require": {
+                "types": "./dist/cjs/api/resources/reminders/exports.d.ts",
+                "default": "./dist/cjs/api/resources/reminders/exports.js"
+            },
+            "default": "./dist/cjs/api/resources/reminders/exports.js"
         },
         "./voice": {
             "import": {
@@ -330,6 +374,17 @@
             },
             "default": "./dist/cjs/api/resources/catalogs/resources/skills/exports.js"
         },
+        "./deliveries/push": {
+            "import": {
+                "types": "./dist/esm/api/resources/deliveries/resources/push/exports.d.mts",
+                "default": "./dist/esm/api/resources/deliveries/resources/push/exports.mjs"
+            },
+            "require": {
+                "types": "./dist/cjs/api/resources/deliveries/resources/push/exports.d.ts",
+                "default": "./dist/cjs/api/resources/deliveries/resources/push/exports.js"
+            },
+            "default": "./dist/cjs/api/resources/deliveries/resources/push/exports.js"
+        },
         "./internal/metrics": {
             "import": {
                 "types": "./dist/esm/api/resources/internal/resources/metrics/exports.d.mts",
@@ -340,6 +395,28 @@
                 "default": "./dist/cjs/api/resources/internal/resources/metrics/exports.js"
             },
             "default": "./dist/cjs/api/resources/internal/resources/metrics/exports.js"
+        },
+        "./internal/noticing": {
+            "import": {
+                "types": "./dist/esm/api/resources/internal/resources/noticing/exports.d.mts",
+                "default": "./dist/esm/api/resources/internal/resources/noticing/exports.mjs"
+            },
+            "require": {
+                "types": "./dist/cjs/api/resources/internal/resources/noticing/exports.d.ts",
+                "default": "./dist/cjs/api/resources/internal/resources/noticing/exports.js"
+            },
+            "default": "./dist/cjs/api/resources/internal/resources/noticing/exports.js"
+        },
+        "./internal/privateChats": {
+            "import": {
+                "types": "./dist/esm/api/resources/internal/resources/privateChats/exports.d.mts",
+                "default": "./dist/esm/api/resources/internal/resources/privateChats/exports.mjs"
+            },
+            "require": {
+                "types": "./dist/cjs/api/resources/internal/resources/privateChats/exports.d.ts",
+                "default": "./dist/cjs/api/resources/internal/resources/privateChats/exports.js"
+            },
+            "default": "./dist/cjs/api/resources/internal/resources/privateChats/exports.js"
         },
         "./internal/schedules": {
             "import": {
@@ -417,6 +494,17 @@
                 "default": "./dist/cjs/api/resources/personalization/resources/briefItems/exports.js"
             },
             "default": "./dist/cjs/api/resources/personalization/resources/briefItems/exports.js"
+        },
+        "./reach/texts": {
+            "import": {
+                "types": "./dist/esm/api/resources/reach/resources/texts/exports.d.mts",
+                "default": "./dist/esm/api/resources/reach/resources/texts/exports.mjs"
+            },
+            "require": {
+                "types": "./dist/cjs/api/resources/reach/resources/texts/exports.d.ts",
+                "default": "./dist/cjs/api/resources/reach/resources/texts/exports.js"
+            },
+            "default": "./dist/cjs/api/resources/reach/resources/texts/exports.js"
         },
         "./settings": {
             "import": {
@@ -582,6 +670,17 @@
                 "default": "./dist/cjs/api/resources/settings/resources/google/exports.js"
             },
             "default": "./dist/cjs/api/resources/settings/resources/google/exports.js"
+        },
+        "./settings/notes": {
+            "import": {
+                "types": "./dist/esm/api/resources/settings/resources/notes/exports.d.mts",
+                "default": "./dist/esm/api/resources/settings/resources/notes/exports.mjs"
+            },
+            "require": {
+                "types": "./dist/cjs/api/resources/settings/resources/notes/exports.d.ts",
+                "default": "./dist/cjs/api/resources/settings/resources/notes/exports.js"
+            },
+            "default": "./dist/cjs/api/resources/settings/resources/notes/exports.js"
         },
         "./package.json": "./package.json"
     },

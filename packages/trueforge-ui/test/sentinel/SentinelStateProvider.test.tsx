@@ -43,6 +43,7 @@ const CARD = {
   calendar_event: null,
   schedule: null,
   persona: null,
+  skill: null,
 };
 
 describe('SentinelStateProvider', () => {
@@ -86,6 +87,8 @@ describe('SentinelStateProvider', () => {
         search_without_asking: true,
         maps_without_asking: false,
         sandbox_without_asking: true,
+        chat_search_enabled: false,
+        package_downloads_without_project_allowed: false,
       })),
       updateUserSettings: vi.fn(async () => ({
         offline_mode: false,
@@ -93,6 +96,8 @@ describe('SentinelStateProvider', () => {
         search_without_asking: true,
         maps_without_asking: false,
         sandbox_without_asking: true,
+        chat_search_enabled: false,
+        package_downloads_without_project_allowed: false,
       })),
       listSentinelSessionContext: vi.fn(
         () =>
@@ -137,6 +142,8 @@ describe('SentinelStateProvider', () => {
         search_without_asking: true,
         maps_without_asking: false,
         sandbox_without_asking: true,
+        chat_search_enabled: false,
+        package_downloads_without_project_allowed: false,
       })),
       updateUserSettings: vi.fn(async () => ({
         offline_mode: false,
@@ -144,6 +151,8 @@ describe('SentinelStateProvider', () => {
         search_without_asking: true,
         maps_without_asking: false,
         sandbox_without_asking: true,
+        chat_search_enabled: false,
+        package_downloads_without_project_allowed: false,
       })),
       listSentinelSessionContext: vi.fn(async () => ({
         approvals: [{ toolCallId: 'call-9', tier: 3 as const, card: CARD, eventId: null, threadId: null }],

@@ -50,6 +50,7 @@ function makeLogger() {
 /** Minimal fake; the mocked summarizeTurnContent never dereferences the store. */
 function fakeModelProviderStore(): IModelProviderStore {
   return {
+    managedElsewhere: false,
     listProviders: jest.fn(),
     getProvider: jest.fn(),
     getProviderForUpdate: jest.fn(),
@@ -103,6 +104,7 @@ describe('submitRetain with MEMORY_SUMMARIZE=true', () => {
     });
 
     await submitRetain({
+      session: { is_incognito: false },
       ...TURN,
       client,
       userText: 'Please remember that my synthetic test robot is named Bleep-Bloop.',
@@ -135,6 +137,7 @@ describe('submitRetain with MEMORY_SUMMARIZE=true', () => {
     });
 
     await submitRetain({
+      session: { is_incognito: false },
       ...TURN,
       client,
       userText: 'My friend Harry has my book. I need the car back tomorrow.',
@@ -155,6 +158,7 @@ describe('submitRetain with MEMORY_SUMMARIZE=true', () => {
     mockSummarize.mockResolvedValue({ status: 'nothing_to_keep' });
 
     await submitRetain({
+      session: { is_incognito: false },
       ...TURN,
       client,
       userText: 'Dog',
@@ -171,6 +175,7 @@ describe('submitRetain with MEMORY_SUMMARIZE=true', () => {
     mockSummarize.mockResolvedValue({ status: 'skipped', reason: 'empty-exchange' });
 
     await submitRetain({
+      session: { is_incognito: false },
       ...TURN,
       client,
       userText: '',
@@ -195,6 +200,7 @@ describe('submitRetain with MEMORY_SUMMARIZE=true', () => {
     mockSummarize.mockResolvedValue(result);
 
     await submitRetain({
+      session: { is_incognito: false },
       ...TURN,
       client,
       userText: 'My friend Harry has my book and I want it back by Friday.',
@@ -211,6 +217,7 @@ describe('submitRetain with MEMORY_SUMMARIZE=true', () => {
     mockSummarize.mockRejectedValue(new Error('should be caught inside'));
 
     await submitRetain({
+      session: { is_incognito: false },
       ...TURN,
       client,
       userText: 'yes',
@@ -227,6 +234,7 @@ describe('submitRetain with MEMORY_SUMMARIZE=true', () => {
     retain.mockResolvedValue({ ok: true });
 
     await submitRetain({
+      session: { is_incognito: false },
       ...TURN,
       client,
       userText: 'hi',
@@ -244,6 +252,27 @@ describe('submitRetainWithVerification with MEMORY_SUMMARIZE=true', () => {
     mockSummarize.mockReset();
   });
 
+  it('writes and summarizes nothing for a private chat', async () => {
+    const { client, retain } = retainingClient();
+    retain.mockResolvedValue({ ok: true });
+    mockSummarize.mockResolvedValue({ status: 'summarized', facts: ['The person keeps a synthetic diary.'] });
+    const privateTurn = {
+      session: { is_incognito: true },
+      ...TURN,
+      client,
+      userText: 'Please remember that I keep a synthetic diary.',
+      assistantText: 'Got it.',
+      logger: makeLogger(),
+      summarize: summarizeContext(),
+    };
+
+    expect(await submitRetainWithVerification(privateTurn)).toBe(false);
+    await submitRetain(privateTurn);
+
+    expect(mockSummarize).not.toHaveBeenCalled();
+    expect(retain).not.toHaveBeenCalled();
+  });
+
   it('invokes the summarizer exactly once across submission and verification resubmission', async () => {
     const { client, retain } = retainingClient();
     retain.mockResolvedValue({ ok: true });
@@ -255,6 +284,7 @@ describe('submitRetainWithVerification with MEMORY_SUMMARIZE=true', () => {
     });
 
     await submitRetainWithVerification({
+      session: { is_incognito: false },
       ...TURN,
       client,
       userText: 'Please remember that my synthetic test robot is named Bleep-Bloop.',
@@ -280,6 +310,7 @@ describe('submitRetainWithVerification with MEMORY_SUMMARIZE=true', () => {
 
     await expect(
       submitRetainWithVerification({
+        session: { is_incognito: false },
         ...TURN,
         client,
         userText: 'Dog',
@@ -331,7 +362,12 @@ describe('summarization observability', () => {
     mockSummarize.mockResolvedValue({ status: 'summarized', facts: ['The person has a cactus named Gerald.'] });
     const { logger, lines } = capturingLogger();
 
-    await submitRetain({ ...baseSubmit(logger), client, summarize: summarizeContext() });
+    await submitRetain({
+      session: { is_incognito: false },
+      ...baseSubmit(logger),
+      client,
+      summarize: summarizeContext(),
+    });
 
     expect(lines.some(line => line.includes('Turn summarized'))).toBe(true);
   });
@@ -342,7 +378,12 @@ describe('summarization observability', () => {
     mockSummarize.mockResolvedValue({ status: 'skipped', reason: 'no-model-configured' });
     const { logger, lines } = capturingLogger();
 
-    await submitRetain({ ...baseSubmit(logger), client, summarize: summarizeContext() });
+    await submitRetain({
+      session: { is_incognito: false },
+      ...baseSubmit(logger),
+      client,
+      summarize: summarizeContext(),
+    });
 
     expect(lines.some(line => line.includes('Memory summarization skipped'))).toBe(true);
     expect(lines.some(line => line.includes('no-model-configured'))).toBe(true);
@@ -354,7 +395,12 @@ describe('summarization observability', () => {
     mockSummarize.mockResolvedValue({ status: 'failed', reason: 'provider down', fallback: 'model_failed' });
     const { logger, lines } = capturingLogger();
 
-    await submitRetain({ ...baseSubmit(logger), client, summarize: summarizeContext() });
+    await submitRetain({
+      session: { is_incognito: false },
+      ...baseSubmit(logger),
+      client,
+      summarize: summarizeContext(),
+    });
 
     expect(lines.some(line => line.includes('Memory summarization failed'))).toBe(true);
   });
@@ -364,7 +410,7 @@ describe('summarization observability', () => {
     retain.mockResolvedValue({ ok: true });
     const { logger, lines } = capturingLogger();
 
-    await submitRetain({ ...baseSubmit(logger), client });
+    await submitRetain({ session: { is_incognito: false }, ...baseSubmit(logger), client });
 
     expect(mockSummarize).not.toHaveBeenCalled();
     expect(lines.some(line => line.includes('context not provided'))).toBe(true);
@@ -397,6 +443,7 @@ describe('markdown round trip (synthetic end-to-end)', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'summarize-e2e-'));
     try {
       await submitRetainWithVerification({
+        session: { is_incognito: false },
         ...TURN,
         client: markdownClient(dir),
         userText: 'Please remember that my houseplant is a cactus named Gerald.',
@@ -442,6 +489,7 @@ describe('markdown round trip (synthetic end-to-end)', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'summarize-nothing-'));
     try {
       await submitRetainWithVerification({
+        session: { is_incognito: false },
         ...TURN,
         client: markdownClient(dir),
         userText: 'Dog',
@@ -460,6 +508,7 @@ describe('markdown round trip (synthetic end-to-end)', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'summarize-failed-'));
     try {
       await submitRetainWithVerification({
+        session: { is_incognito: false },
         ...TURN,
         client: markdownClient(dir),
         userText: 'Please remember that my houseplant is a cactus named Gerald.',
@@ -529,6 +578,7 @@ describe('a summary model that reasons until it hits the length limit', () => {
       throw new Error('expected a markdown memory client');
     }
     await submitRetainWithVerification({
+      session: { is_incognito: false },
       ...TURN,
       client,
       userText: 'Please remember that my houseplant is a cactus named Gerald.',
@@ -621,6 +671,7 @@ describe('turn outcome log at info', () => {
   function submitFor(params: { client: MemoryClient; logger: winston.Logger; interactive: boolean }) {
     return {
       ...TURN,
+      session: { is_incognito: false },
       client: params.client,
       userText,
       assistantText,

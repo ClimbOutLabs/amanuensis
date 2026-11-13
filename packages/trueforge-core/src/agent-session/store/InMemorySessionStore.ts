@@ -14,6 +14,7 @@ import type { TokenPagination } from '../schemas/pagination';
 import { emptyTaskChecklist, TaskChecklistSchema } from '../schemas/taskChecklist';
 import type { TerminalTurnState } from '../schemas/turn';
 import { assertCreateTurnThreadDelta } from './assertCreateTurnThreadDelta';
+import { buildChatSearchSnippet, chatSearchIndexWords, chatSearchQueryTerms } from './chatSearchText';
 import type {
   AddThreadsAndAppendEventsInput,
   AddThreadsInput,
@@ -24,6 +25,8 @@ import type {
   ApprovalDismissalRecord,
   BeginImplementationPlanDispatchInput,
   BeginImplementationPlanDispatchResult,
+  ChatSearchHit,
+  ClearChatSearchIndexInput,
   CommandExecutionRecord,
   CompleteImplementationPlanDispatchInput,
   CreateSessionFolderInput,
@@ -31,6 +34,7 @@ import type {
   CreateTurnInput,
   DeleteSessionFolderInput,
   DeleteSessionInput,
+  ExpiredPrivateSession,
   FreezeAndGetTurnInput,
   GetCommandExecutionInput,
   GetOwnedIdsInput,
@@ -40,14 +44,17 @@ import type {
   GetTaskChecklistInput,
   GetTurnInput,
   ImplementationPlanTurnOwner,
+  IndexChatMessagesInput,
   ISessionStore,
   ListApprovalDismissalsInput,
+  ListExpiredPrivateSessionsInput,
   ListImplementationPlanGrantsInput,
   ListSessionEventsInput,
   ListSessionFoldersInput,
   ListSessionsInput,
   ListTurnEventsInput,
   ListTurnsInput,
+  MergeSessionMetadataInput,
   NewThreadInit,
   OverwriteThreadContextInput,
   PatchMCPServersInput,
@@ -58,9 +65,12 @@ import type {
   RecoverRunningCommandExecutionsInput,
   RemoveThreadsInput,
   RenewCommandExecutionLeaseInput,
+  ReplaceSessionTitleIfCurrentInput,
   ReplaceTaskChecklistInput,
   RevokeImplementationPlanGrantInput,
   RevokeImplementationPlanGrantResult,
+  SearchChatHistoryInput,
+  SetPrivateExpiryInput,
   SetSessionFolderInput,
   StampImportedSessionInput,
   TurnContextAppend,
@@ -70,6 +80,7 @@ import type {
   UpdateTurnStateInput,
 } from './ISessionStore';
 import { decodeOffsetPageToken, encodeOffsetPageToken } from './OffsetPageToken';
+import { assertPrivateExpiryMatches } from './privateSession';
 import {
   decodeSessionEventPageToken,
   paginateSessionEventRows,
@@ -251,6 +262,11 @@ function paginate<T>(items: T[], limit: number, pageToken?: string): { data: T[]
   };
 }
 
+interface StoredChatSearchTurn {
+  persona_id: string | null;
+  messages: { message_id: string; text: string; created_at: Date; words: ReadonlySet<string> }[];
+}
+
 /**
  * Reference ISessionStore implementation. Proves the contract without SSE/subscription
  * hooks. Deep-copies on read/write boundaries so callers cannot mutate stored state.
@@ -267,8 +283,11 @@ export class InMemorySessionStore<
   private readonly implementationPlanGrants = new Map<string, Map<string, StoredImplementationPlanGrant>>();
   private readonly implementationPlanDispatches = new Map<string, StoredImplementationPlanDispatch>();
   private readonly approvalDismissals = new Map<string, Map<string, ApprovalDismissalRecord>>();
+  /** Per session, per turn: the turn's persona and its indexed messages with their searchable words. */
+  private readonly chatSearchDocuments = new Map<string, Map<string, StoredChatSearchTurn>>();
 
   async createSession(input: CreateSessionInput<TSessionCustom>): Promise<void> {
+    assertPrivateExpiryMatches(input);
     const key = sessionKey(input.session_id);
     if (this.sessions.has(key)) {
       throw new SessionAlreadyExistsError(input.session_id);
@@ -294,6 +313,8 @@ export class InMemorySessionStore<
       last_turn_id: null,
       external_id: externalId,
       source: input.source !== null ? deepCopy(input.source) : null,
+      is_incognito: input.is_incognito,
+      private_expires_at: input.private_expires_at === null ? null : new Date(input.private_expires_at),
       created_at: now,
       updated_at: now,
       last_activity_timestamp_ms: Date.now(),
@@ -332,6 +353,31 @@ export class InMemorySessionStore<
     stored.record.metrics = deepCopy(input.metrics);
   }
 
+  async setPrivateExpiry(input: SetPrivateExpiryInput): Promise<void> {
+    const stored = this.sessions.get(sessionKey(input.session_id));
+    if (stored?.record.tenant_id !== input.tenant_id) {
+      throw new SessionNotFoundError(input.session_id);
+    }
+    if (!stored.record.is_incognito) {
+      throw new SessionStoreInvariantError(`Session ${input.session_id} is not private; it has no deletion time`);
+    }
+    stored.record.private_expires_at = new Date(input.private_expires_at);
+  }
+
+  async listExpiredPrivateSessions(input: ListExpiredPrivateSessionsInput): Promise<ExpiredPrivateSession[]> {
+    const due: { record: SessionRecord<TSessionCustom>; expiresAt: number }[] = [];
+    for (const stored of this.sessions.values()) {
+      const expiresAt = stored.record.private_expires_at;
+      if (stored.record.is_incognito && expiresAt !== null && expiresAt.getTime() <= input.now.getTime()) {
+        due.push({ record: stored.record, expiresAt: expiresAt.getTime() });
+      }
+    }
+    due.sort((a, b) => a.expiresAt - b.expiresAt || compareSessionId(a.record.session_id, b.record.session_id));
+    return due
+      .slice(0, input.limit)
+      .map(({ record }) => ({ tenant_id: record.tenant_id, session_id: record.session_id }));
+  }
+
   async deleteSession(input: DeleteSessionInput): Promise<void> {
     const sKey = sessionKey(input.session_id);
     const stored = this.sessions.get(sKey);
@@ -350,12 +396,118 @@ export class InMemorySessionStore<
     }
     this.implementationPlanGrants.delete(sKey);
     this.approvalDismissals.delete(sKey);
+    this.chatSearchDocuments.delete(sKey);
     for (const [dispatchKey, dispatch] of this.implementationPlanDispatches) {
       if (dispatch.session_id === input.session_id) {
         this.implementationPlanDispatches.delete(dispatchKey);
       }
     }
     this.sessions.delete(sKey);
+  }
+
+  async indexChatMessages(input: IndexChatMessagesInput): Promise<void> {
+    const sKey = sessionKey(input.session_id);
+    const stored = this.sessions.get(sKey);
+    if (stored?.record.tenant_id !== input.tenant_id) {
+      return;
+    }
+    let byTurn = this.chatSearchDocuments.get(sKey);
+    if (byTurn === undefined) {
+      byTurn = new Map();
+      this.chatSearchDocuments.set(sKey, byTurn);
+    }
+    byTurn.set(input.turn_id, {
+      persona_id: input.persona_id,
+      messages: input.documents.map(document => ({
+        message_id: document.message_id,
+        text: document.text,
+        created_at: document.created_at,
+        words: new Set(chatSearchIndexWords(document.text)),
+      })),
+    });
+  }
+
+  async searchChatHistory(input: SearchChatHistoryInput): Promise<ChatSearchHit[]> {
+    const terms = chatSearchQueryTerms(input.query);
+    if (terms.length === 0 || input.limit <= 0) {
+      return [];
+    }
+    const personaIds = input.personas.kind === 'only' ? new Set(input.personas.persona_ids) : undefined;
+    const newestBySession = new Map<
+      string,
+      { session: SessionRecord<TSessionCustom>; text: string; matchedAt: Date; order: string }
+    >();
+    for (const [sKey, byTurn] of this.chatSearchDocuments) {
+      const stored = this.sessions.get(sKey);
+      if (stored === undefined) {
+        continue;
+      }
+      const { record } = stored;
+      if (
+        record.tenant_id !== input.tenant_id ||
+        record.created_by_subject.subject_id !== input.created_by_subject_id ||
+        (input.exclude_session_id !== null && record.session_id === input.exclude_session_id)
+      ) {
+        continue;
+      }
+      for (const [turnId, turn] of byTurn) {
+        if (turn.persona_id !== null && personaIds !== undefined && !personaIds.has(turn.persona_id)) {
+          continue;
+        }
+        for (const message of turn.messages) {
+          if (input.from !== null && message.created_at < input.from) {
+            continue;
+          }
+          if (input.to !== null && message.created_at >= input.to) {
+            continue;
+          }
+          if (!terms.every(term => message.words.has(term))) {
+            continue;
+          }
+          // Within a chat the newest message wins; equal times fall to the larger turn id, then message id.
+          const order = `${turnId}\0${message.message_id}`;
+          const current = newestBySession.get(record.session_id);
+          if (
+            current === undefined ||
+            message.created_at > current.matchedAt ||
+            (message.created_at.getTime() === current.matchedAt.getTime() && order > current.order)
+          ) {
+            newestBySession.set(record.session_id, {
+              session: record,
+              text: message.text,
+              matchedAt: message.created_at,
+              order,
+            });
+          }
+        }
+      }
+    }
+    return [...newestBySession.values()]
+      .sort(
+        (a, b) =>
+          b.matchedAt.getTime() - a.matchedAt.getTime() ||
+          (a.session.session_id < b.session.session_id ? -1 : a.session.session_id > b.session.session_id ? 1 : 0),
+      )
+      .slice(0, input.limit)
+      .map(entry => ({
+        session_id: entry.session.session_id,
+        title: entry.session.title,
+        created_at: entry.session.created_at,
+        snippet: buildChatSearchSnippet(entry.text, input.query),
+        matched_at: entry.matchedAt,
+      }));
+  }
+
+  async clearChatSearchIndex(input: ClearChatSearchIndexInput): Promise<void> {
+    for (const sKey of [...this.chatSearchDocuments.keys()]) {
+      const record = this.sessions.get(sKey)?.record;
+      if (
+        record === undefined ||
+        (record.tenant_id === input.tenant_id && record.created_by_subject.subject_id === input.created_by_subject_id)
+      ) {
+        this.chatSearchDocuments.delete(sKey);
+      }
+    }
   }
 
   private implementationPlanOwnerMatches(input: ListImplementationPlanGrantsInput): boolean {
@@ -601,6 +753,32 @@ export class InMemorySessionStore<
     return;
   }
 
+  async mergeSessionMetadata(input: MergeSessionMetadataInput): Promise<void> {
+    const key = sessionKey(input.session_id);
+    const stored = this.sessions.get(key);
+    if (stored?.record.tenant_id !== input.tenant_id) {
+      throw new SessionNotFoundError(input.session_id);
+    }
+    stored.record.metadata = { ...stored.record.metadata, [input.key]: input.value };
+    const now = Date.now();
+    stored.record.updated_at = new Date(now);
+    stored.record.last_activity_timestamp_ms = now;
+    return;
+  }
+
+  async replaceSessionTitleIfCurrent(input: ReplaceSessionTitleIfCurrentInput): Promise<boolean> {
+    const stored = this.sessions.get(sessionKey(input.session_id));
+    if (stored?.record.tenant_id !== input.tenant_id) {
+      return false;
+    }
+    if (stored.record.title !== input.current_title) {
+      return false;
+    }
+    stored.record.title = input.title;
+    stored.record.updated_at = new Date();
+    return true;
+  }
+
   async createSessionFolder(input: CreateSessionFolderInput): Promise<SessionFolderRecord> {
     const now = new Date();
     const record: SessionFolderRecord = {
@@ -697,6 +875,9 @@ export class InMemorySessionStore<
     const createdByOrAgentIds = input.created_by_or_agent_ids;
     for (const stored of this.sessions.values()) {
       if (stored.record.tenant_id !== input.tenant_id) {
+        continue;
+      }
+      if (!input.include_private && stored.record.is_incognito) {
         continue;
       }
       if (

@@ -36,12 +36,24 @@ const FIRST_PARTY_REQUIRES_NETWORK: Record<string, boolean> = {
   get_openui_instructions: false,
   replace_task_checklist: false,
   load_bundle: false,
+  list_skills: false,
   // Networked builtins.
   web_search: true,
+  // Adding a skill reads it from the site it comes from.
+  install_skill: true,
   // Embedded maps: geocoding, routing, and tiles all leave the machine.
   render_map: true,
   render_route: true,
   render_places: true,
+  // Aman's own browser: every tool reaches the browser sidecar, which goes on to the open internet.
+  browser_open: true,
+  browser_read: true,
+  browser_scroll: true,
+  browser_back: true,
+  browser_screenshot: true,
+  browser_type: true,
+  browser_select: true,
+  browser_click: true,
 };
 
 /**

@@ -1,7 +1,21 @@
 import type { CompletionUsage } from './LLMTypes';
 
+/** The one owner of the characters-per-token figure behind every token estimate. */
+export const CHARS_PER_TOKEN = 4;
+
 export function estimateTokensForString(s: string): number {
-  return s.length / 4;
+  return s.length / CHARS_PER_TOKEN;
+}
+
+/**
+ * What one picture is counted as when a request is sized. Providers size a picture by its
+ * dimensions, and a full-size one comes to about this much.
+ */
+export const PICTURE_TOKEN_ESTIMATE = 1_500;
+
+/** Size label for prompts replacing full content, so the model can size reads without guessing. */
+export function describeContentSize(content: string): string {
+  return `${content.length.toLocaleString('en-US')} characters`;
 }
 
 function sumOptional(a: number | undefined, b: number | undefined): number | undefined {

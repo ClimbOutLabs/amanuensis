@@ -382,6 +382,7 @@ function sleep(ms: number): Promise<void> {
  */
 interface RequestTimeout {
   signal: AbortSignal;
+  /** The caller's own timeout, which a timeout failure names even when a retry ran on what was left of it. */
   timeoutMs: number;
 }
 
@@ -595,7 +596,7 @@ export class HindsightClient implements MemoryClient {
     if (remainingMs <= 0) {
       return fromConfig;
     }
-    const legacy = await this.getProfileLegacy(remainingMs);
+    const legacy = await this.getProfileLegacy({ timeoutMs: remainingMs, callerTimeoutMs: timeoutMs });
     if (legacy.ok) {
       return legacy;
     }
@@ -633,8 +634,8 @@ export class HindsightClient implements MemoryClient {
   }
 
   /** Legacy `/profile` endpoint for pre-0.10.0 servers (retired upstream in 0.10.0). */
-  private async getProfileLegacy(timeoutMs: number): Promise<GetProfileOutcome> {
-    const sent = await this.send({ path: '/profile', method: 'GET', timeoutMs });
+  private async getProfileLegacy(input: { timeoutMs: number; callerTimeoutMs: number }): Promise<GetProfileOutcome> {
+    const sent = await this.send({ path: '/profile', method: 'GET', ...input });
     if (!sent.ok) {
       return sent;
     }
@@ -768,10 +769,12 @@ export class HindsightClient implements MemoryClient {
     path: string;
     method: 'GET' | 'POST' | 'DELETE';
     timeoutMs: number;
+    /** Set when `timeoutMs` is only what is left of a longer budget, so a timeout names the budget the caller gave. */
+    callerTimeoutMs?: number;
     body?: unknown;
   }): Promise<SentRequest | MemoryFailure> {
     const timeoutSignal = AbortSignal.timeout(input.timeoutMs);
-    const timeout: RequestTimeout = { signal: timeoutSignal, timeoutMs: input.timeoutMs };
+    const timeout: RequestTimeout = { signal: timeoutSignal, timeoutMs: input.callerTimeoutMs ?? input.timeoutMs };
     try {
       const resolved = await Promise.race([resolveHeadersSafely(this.headers), rejectOnAbort(timeoutSignal)]);
       if (!resolved.ok) {
@@ -790,7 +793,7 @@ export class HindsightClient implements MemoryClient {
       return { ok: true, response, timeout };
     } catch (error) {
       if (isTimeoutError(error)) {
-        return timeoutFailure(input.timeoutMs);
+        return timeoutFailure(timeout.timeoutMs);
       }
       return {
         ok: false,
@@ -804,8 +807,8 @@ export class HindsightClient implements MemoryClient {
    * `send` plus bounded 503/Retry-After retries for the read-only lanes (recall, reflect).
    * The refusal body is drained on each attempt so the socket can be reused, and every attempt
    * and wait shares the caller's timeout through a deadline: an overloaded provider cannot hold
-   * a turn open past `timeoutMs`, and an exhausted budget reports the provider's own refusal
-   * rather than a synthetic timeout.
+   * a turn open past `timeoutMs`, a wait that would reach the deadline is skipped, and an
+   * exhausted budget reports the provider's own refusal rather than a synthetic timeout.
    */
   private async sendWithOverloadRetry(input: {
     path: string;
@@ -825,6 +828,7 @@ export class HindsightClient implements MemoryClient {
         path: input.path,
         method: input.method,
         timeoutMs: remainingMs,
+        callerTimeoutMs: input.timeoutMs,
         body: input.body,
       });
       if (!sent.ok || sent.response.status !== 503) {
@@ -835,11 +839,12 @@ export class HindsightClient implements MemoryClient {
         break;
       }
       const waitMs = parseRetryAfterMs(sent.response.headers.get('retry-after')) ?? DEFAULT_OVERLOAD_RETRY_WAIT_MS;
-      const budgetMs = deadline - Date.now();
-      if (budgetMs <= 0) {
+      // A retry the provider asks us to delay past the deadline could never run, so report the
+      // refusal now instead of holding the turn until the budget runs out.
+      if (waitMs >= deadline - Date.now()) {
         break;
       }
-      await sleep(Math.min(waitMs, budgetMs));
+      await sleep(waitMs);
     }
     return lastRefusal ?? timeoutFailure(input.timeoutMs);
   }

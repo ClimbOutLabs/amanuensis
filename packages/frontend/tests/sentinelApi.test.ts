@@ -65,18 +65,32 @@ test('audit entries list parses the envelope and pages by limit', async () => {
 test('user audit log sends the page token and outcome and keeps deleted-chat rows', async () => {
   const { api, seen } = recordingApi(() => ({
     data: [
-      { ...auditEntry, chat_exists: false },
+      { ...auditEntry, chat_exists: false, session_title: 'Kept plan' },
       { ...auditEntry, id: 'entry-2', chat_exists: 'unknown' },
     ],
     pagination: { limit: 10, next_page_token: 'next' },
   }));
   const page = await api.listUserAuditEntries({ limit: 10, pageToken: 'tok en', outcome: 'denied' });
   assert.deepEqual(
-    page.entries.map(entry => [entry.id, entry.chat_exists]),
-    [['entry-1', false]],
+    page.entries.map(entry => [entry.id, entry.chat_exists, entry.session_title]),
+    [['entry-1', false, 'Kept plan']],
   );
   assert.equal(page.nextPageToken, 'next');
   assert.equal(seen[0]?.url, '/api/v1/user/audit-log?limit=10&page_token=tok+en&outcome=denied');
+});
+
+test('user audit log sends the date bounds when set', async () => {
+  const { api, seen } = recordingApi(() => ({ data: [], pagination: { limit: 10 } }));
+  const page = await api.listUserAuditEntries({
+    limit: 10,
+    from: '2026-10-01T00:00:00.000Z',
+    to: '2026-10-04T00:00:00.000Z',
+  });
+  assert.deepEqual(page.entries, []);
+  assert.equal(
+    seen[0]?.url,
+    '/api/v1/user/audit-log?limit=10&from=2026-10-01T00%3A00%3A00.000Z&to=2026-10-04T00%3A00%3A00.000Z',
+  );
 });
 
 test('user settings read and patch the server envelope', async () => {
@@ -95,6 +109,8 @@ test('user settings read and patch the server envelope', async () => {
     search_without_asking: false,
     maps_without_asking: true,
     sandbox_without_asking: true,
+    chat_search_enabled: false,
+    package_downloads_without_project_allowed: false,
   });
   assert.equal(seen[0]?.url, '/api/v1/user/settings/sentinel');
   assert.equal(seen[0]?.method, 'GET');

@@ -8,7 +8,9 @@ import { runBackups } from './commands/backups.ts';
 import { runInstall } from './commands/install.ts';
 import { runNetwork } from './commands/network.ts';
 import { runOpen } from './commands/open.ts';
+import { parseRestoreArgs, runRestore } from './commands/restore.ts';
 import { runStatus } from './commands/status.ts';
+import { runUninstall } from './commands/uninstall.ts';
 import { runUpgrade } from './commands/upgrade.ts';
 import { runVerify } from './commands/verify.ts';
 import { checkDocker } from './doctor/dockerDoctor.ts';
@@ -199,8 +201,44 @@ export async function runCli(args: readonly string[], deps: CliDeps): Promise<nu
   if (first === 'backups') {
     return runBackups({ host: deps.host, jobs: deps.windowsJobs, print: deps.print });
   }
+  if (first === 'restore') {
+    const request = parseRestoreArgs(args.slice(1));
+    if ('happened' in request) {
+      deps.print(problemText(request));
+      return 1;
+    }
+    return runRestore(
+      {
+        host: deps.host,
+        runner: deps.runner,
+        store: deps.store,
+        jobs: deps.windowsJobs,
+        print: deps.print,
+        ask:
+          deps.ask ??
+          ((): Promise<string | null> => {
+            return Promise.resolve(null);
+          }),
+      },
+      request,
+    );
+  }
   if (first === 'verify') {
     return runVerify(deps, { file: second });
+  }
+  if (first === 'uninstall') {
+    return runUninstall({
+      host: deps.host,
+      runner: deps.runner,
+      store: deps.store,
+      jobs: deps.windowsJobs,
+      print: deps.print,
+      confirm:
+        deps.confirm ??
+        ((): Promise<boolean> => {
+          return Promise.resolve(false);
+        }),
+    });
   }
   deps.print(problemText(unknownCommandProblem(first)));
   return 1;

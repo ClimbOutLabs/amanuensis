@@ -30,7 +30,10 @@ const RELEASE: ReleaseRecord = {
   sourceRef: 'abc123',
   appImage: 'aman-app:abc123',
   sttImage: 'aman-stt:abc123',
+  ttsImage: null,
   calendarImage: 'aman-calendar-caldav:abc123',
+  browserImage: 'aman-browser:abc123',
+  browserGatewayImage: 'aman-browser-gateway:abc123',
   dexImage: 'ghcr.io/example/dex@sha256:aaaa',
   mailEmailImage: 'ghcr.io/example/mail@sha256:bbbb',
 };
@@ -101,13 +104,17 @@ function busyModeStore(summary: StateSummary): StateStore {
 }
 
 function jobsWith(
-  options: { selfExePath?: string; failSteps?: ReadonlySet<FakeWindowsJobStep> } = {},
+  options: {
+    selfExePath?: string;
+    failSteps?: ReadonlySet<FakeWindowsJobStep>;
+    shortcuts?: readonly { path: string; target: string; args: string }[];
+  } = {},
 ): FakeWindowsJobs {
   return new FakeWindowsJobs({
     localAppDataDir: LOCAL_APP_DATA,
     selfExePath: options.selfExePath ?? 'C:\\Users\\Friend\\Downloads\\aman-windows-x64.exe',
     startMenuProgramsDir: START_MENU_PROGRAMS,
-    shortcuts: [
+    shortcuts: options.shortcuts ?? [
       { path: 'C:\\Users\\Friend\\Desktop\\Aman.lnk', target: SETUP_CMD_COPY, args: 'open' },
       { path: `${START_MENU_PROGRAMS}\\Aman.lnk`, target: SETUP_CMD_COPY, args: 'open' },
       { path: 'C:\\Users\\Friend\\Desktop\\Aman doctor.lnk', target: SETUP_CMD_COPY, args: 'doctor' },
@@ -140,12 +147,16 @@ test('adopt moves the shortcuts, makes the Check Aman entry and replaces the sta
   assert.equal(code, 0);
   assert.deepEqual(lines, [ADOPTED_LINE]);
   assert.deepEqual(jobs.ops, [
+    'clear-docker-mark',
     'copy',
     'path',
     'list',
     'point',
     'point',
+    'open-entry',
     'check',
+    'update',
+    'remove-entry',
     'forwarder',
     'task',
     'backupsShortcut',
@@ -163,6 +174,21 @@ test('adopt moves the shortcuts, makes the Check Aman entry and replaces the sta
   assert.equal(check?.args, 'doctor');
   assert.equal(jobs.forwarderContents, SETUP_CMD_FORWARDER);
   assert.ok(jobs.userPath.includes('C:\\Users\\Friend\\AppData\\Local\\Programs\\Amanuensis'));
+});
+
+test('adopt on a fresh install makes the Aman, Update Aman and Remove Aman entries', async () => {
+  const jobs = jobsWith({ shortcuts: [] });
+  const { code } = await run(storeWith(summaryWith({ release: RELEASE })), jobs);
+  assert.equal(code, 0);
+  const open = jobs.shortcuts.find(shortcut => shortcut.path === `${START_MENU_PROGRAMS}\\Aman.lnk`);
+  assert.equal(open?.target, PROGRAMS_EXE);
+  assert.equal(open?.args, 'open');
+  const update = jobs.shortcuts.find(shortcut => shortcut.path === `${START_MENU_PROGRAMS}\\Update Aman.lnk`);
+  assert.equal(update?.target, PROGRAMS_EXE);
+  assert.equal(update?.args, 'upgrade');
+  const remove = jobs.shortcuts.find(shortcut => shortcut.path === `${START_MENU_PROGRAMS}\\Remove Aman.lnk`);
+  assert.equal(remove?.target, PROGRAMS_EXE);
+  assert.equal(remove?.args, 'uninstall');
 });
 
 test('adopt turns the daily backup on: the task, the Backups entry and the record', async () => {

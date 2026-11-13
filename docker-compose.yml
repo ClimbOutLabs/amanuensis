@@ -42,7 +42,7 @@ services:
 
   # Holds the network namespace that `server` and, with the login profile,
   # `dex` share, and publishes their ports. Sharing one namespace is what lets
-  # the OIDC issuer https://localhost:5556/dex be the same URL for the browser
+  # the OIDC issuer http://localhost:5556/dex be the same URL for the browser
   # on the host and for the server verifying tokens. The namespace lives in
   # this idle container so either of the two can restart without stranding
   # the other in a dead namespace.
@@ -66,10 +66,15 @@ services:
     # another's namespace, and the joined containers read this hosts file.
     extra_hosts:
       - 'host.docker.internal:host-gateway'
-    # The calendar network is shared with the calendar connector only (see calendar-caldav).
+    # The calendar network is shared with the calendar connector only (see calendar-caldav); the
+    # browser-control network, with the browser gateway only (see browser-gateway), never with the
+    # browser itself; and the voice network with the voice only (see aman-tts). Harmless when the
+    # `browser` profile does not run: an unused network costs nothing.
     networks:
       - default
       - calendar
+      - browser-control
+      - voice
     restart: unless-stopped
 
   # Serves both the API and the UI on one port.
@@ -79,11 +84,8 @@ services:
       # From-source image; root Dockerfile is the npm-install prod recipe.
       dockerfile: Dockerfile.dev
     image: truefoundry-server:latest
-    # The aman-stt sidecar owns cores 16-19 (see below); the server and its
-    # in-process embedding workload stay on the remaining cores so a
-    # transcription never steals latency from chat. Adjust both pins together
-    # on hosts with a different core count (see docs/voice-input.mdx).
-    cpuset: '0-15'
+    # No core pins here, so the stack starts on any core count. To give voice
+    # and chat their own cores, see "Dedicated cores" in docs/voice-input.mdx.
     # Ports are published by `loopback` above. Compose DNS therefore has no
     # `server` entry; other services reach this one as `loopback`.
     network_mode: 'service:loopback'
@@ -121,6 +123,9 @@ services:
       # the server forwards recorded WAV audio and degrades gracefully when
       # the sidecar is unreachable (typed chat keeps working).
       STT_URL: http://aman-stt:8001
+      # Local text-to-speech sidecar for spoken replies. When it is down the
+      # browser reads replies with its own built-in voice instead.
+      TTS_URL: http://aman-tts:8002
       # Email send list the server writes, and the sidecar's status file it reads (see mail-email).
       MAIL_POLICY_FILE: /data/mail-policy/allowed_recipients.toml
       MAIL_POLICY_STATUS_FILE: /data/mail-policy-status/loaded.sha256
@@ -131,6 +136,12 @@ services:
       # Guards the calendar account port; the same value goes to calendar-caldav. There is no default: `pnpm smoke`
       # makes a random one for each run, and for plain `docker compose` set it in the shell (openssl rand -hex 32).
       CALENDAR_ACCOUNT_SECRET: ${CALENDAR_ACCOUNT_SECRET:?set CALENDAR_ACCOUNT_SECRET to a random value of 32 or more characters, for example from openssl rand -hex 32}
+      # Aman's browser, reached through its gateway (see browser-gateway). Used only when BROWSER_ENABLED is true in
+      # packages/trueforge/.env and the stack runs with the browser profile.
+      BROWSER_URL: http://browser-relay:8792
+      # Guards the browser's API; the same value goes to browser-gateway. Made like the calendar secret above:
+      # `pnpm smoke` makes a random one, and plain `docker compose` needs it set in the shell.
+      BROWSER_SECRET: ${BROWSER_SECRET:?set BROWSER_SECRET to a random value of 32 or more characters, for example from openssl rand -hex 32}
     # Secrets and Postgres credentials (POSTGRES_USER, …).
     # `environment` above overrides any colliding keys from this file.
     # TRUEFORGE_API_KEY is deliberately not overridden: set it here and the server and controller
@@ -138,10 +149,7 @@ services:
     env_file:
       - path: packages/trueforge/.env
         required: true
-    # The login profile's self-signed Dex certificate lives here. Empty, and
-    # unused, unless NODE_EXTRA_CA_CERTS in .env points into it.
     volumes:
-      - dex-tls:/etc/dex-tls:ro
       # Persistent Markdown memory ; without this, memories vanish
       # on container recreate.
       - memory-data:/data/memory
@@ -190,12 +198,9 @@ services:
     build:
       context: ops/aman-stt
     image: amanuensis-aman-stt:latest
-    # Dedicated cores, disjoint from the server's 0-15 pin above, so a
-    # transcription never contends with chat or embedding work.
-    cpuset: '16-19'
     mem_limit: 2g
     environment:
-      # Whisper encoder threads; 4 matches the 4 pinned cores.
+      # Whisper encoder threads; match the core count when the sidecar has its own cores.
       AMAN_STT_CPU_THREADS: '4'
       # Model cache location; matches the stt-model-cache volume below.
       AMAN_STT_MODEL_DIR: /data/stt-cache
@@ -205,6 +210,23 @@ services:
       - stt-model-cache:/data/stt-cache
     # CPU-only by construction: the image has no CUDA userspace and the app
     # pins device=cpu. No GPU reservations here.
+    restart: unless-stopped
+
+  # Local text-to-speech sidecar (Kokoro-82M int8 ONNX, CPU-only). The server
+  # posts reply text here and returns the audio to the browser. No host port
+  # is published, and the voice files are baked into the image, so it sits
+  # only on the internal voice network: no way out, and nothing but the app
+  # can reach it.
+  aman-tts:
+    build:
+      context: ops/aman-tts
+    image: amanuensis-aman-tts:latest
+    mem_limit: 1g
+    environment:
+      # onnxruntime threads; 4 matches the 4 pinned cores.
+      AMAN_TTS_CPU_THREADS: '4'
+    networks:
+      - voice
     restart: unless-stopped
 
   # Email connector sidecar. Private to the Compose network: `expose` only, never `ports`.
@@ -274,6 +296,84 @@ services:
       - '9560'
     restart: unless-stopped
 
+  # Aman's own browser (ops/browser-sidecar): a real, headed Chromium under Xvfb. The installer turns it
+  # on in every instance; this development stack runs it only with the `browser` profile, so an
+  # ordinary `up` does not build Chromium.
+  #
+  # It reads hostile pages, so it is walled off: its only network is `browser-internal`, which is
+  # internal (no route out) and holds nothing but `browser-gateway`. Every request Chromium makes
+  # goes through the gateway's egress proxy, which refuses anything on this computer or a private
+  # network, and the app server reaches the sidecar's API only through the gateway's relay. Nothing
+  # of Aman's (the server, sign-in, the calendar, the host) is on a network the browser is on.
+  browser:
+    build:
+      context: ./ops/browser-sidecar
+    profiles: ['browser']
+    # xvfb-run waits for a signal from Xvfb that never arrives when it runs as PID 1, so a small init
+    # runs first.
+    init: true
+    environment:
+      BROWSER_PROXY: http://browser-proxy:3128
+      # The sidecar answers only the gateway, which checks the server's secret first; this container never holds it.
+      BROWSER_API_PEER: browser-gateway
+    networks:
+      - browser-internal
+    volumes:
+      # One persistent Chromium profile per person (cookies, saved logins) under /profiles/<owner
+      # hash>. Treated as sensitive: nothing but this sidecar reads it.
+      - browser-profiles:/profiles
+    expose:
+      - '8792'
+    # Chromium runs with its own sandbox on. It needs user namespaces, which Docker's default
+    # seccomp profile refuses; this is Playwright's profile for exactly that (Docker's default plus
+    # the namespace calls). No capabilities, no privilege gain, a read-only root.
+    security_opt:
+      - no-new-privileges:true
+      - seccomp=./ops/browser-sidecar/seccomp_profile.json
+    cap_drop: [ALL]
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m
+      - /home/pwuser:size=256m,uid=1001,gid=1001
+    shm_size: 512m
+    pids_limit: 512
+    # Chromium's own memory footprint, headed, on top of the virtual screen.
+    mem_limit: 2g
+    restart: unless-stopped
+
+  # The browser's only way out, and the server's only way in (ops/browser-sidecar/src/egressProxy.mjs).
+  # An egress proxy on 3128 that resolves each request's host once, refuses private addresses, and
+  # connects to the address it checked; and a relay on 8792 that checks the server's secret and passes its
+  # calls through to the sidecar's API. The server reaches the browser as http://browser-relay:8792.
+  browser-gateway:
+    build:
+      context: ./ops/browser-sidecar
+      dockerfile: Dockerfile.gateway
+    profiles: ['browser']
+    environment:
+      BROWSER_SIDECAR_HOST: browser
+      # The same value the server sends (see the server's BROWSER_SECRET), checked on every relayed call.
+      BROWSER_SECRET: ${BROWSER_SECRET:?set BROWSER_SECRET to a random value of 32 or more characters, for example from openssl rand -hex 32}
+      # The proxy listens only on the browser's network, and the relay only on the server's.
+      BROWSER_PROXY_BIND: browser-proxy
+      BROWSER_RELAY_BIND: browser-relay
+    networks:
+      browser-internal:
+        aliases: [browser-proxy]
+      browser-control:
+        aliases: [browser-relay]
+      browser-egress: {}
+    expose:
+      - '3128'
+      - '8792'
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    read_only: true
+    pids_limit: 128
+    mem_limit: 256m
+    restart: unless-stopped
+
   # Schedule controller: runs the periodic control loops (schedule dispatch) as a separate service.
   controller:
     # Runs the image the `server` service builds. Building it here too makes Compose build
@@ -302,45 +402,26 @@ services:
     restart: unless-stopped
 
   # Login profile. Start with `docker compose --profile login up --build` after
-  # setting the OIDC_*, DEX_* and NODE_EXTRA_CA_CERTS values in
+  # setting the OIDC_* and DEX_* values in
   # packages/trueforge/.env (docs/quickstart.mdx walks through it). The app
   # then shows a real sign-in screen backed by one local account, on Aman's own
   # sign-in service. Standalone also needs OIDC_ALLOWED_EMAILS (the owner).
-
-  # One-shot: mints a self-signed certificate for https://localhost:5556 the
-  # first time the profile runs. OIDC issuers must be HTTPS; the server trusts
-  # this certificate through NODE_EXTRA_CA_CERTS, and the browser asks once.
-  dex-tls:
-    image: alpine/openssl:3.5.1
-    profiles: ['login']
-    entrypoint: ['sh', '-c']
-    command:
-      - |
-        test -f /tls/dex.crt && exit 0
-        openssl req -x509 -newkey rsa:2048 -nodes -days 825           -keyout /tls/dex.key -out /tls/dex.crt           -subj '/CN=localhost'           -addext 'subjectAltName=DNS:localhost,IP:127.0.0.1'
-        # Dex runs unprivileged; the key protects a loopback-only login.
-        chmod 644 /tls/dex.key /tls/dex.crt
-    volumes:
-      - dex-tls:/tls
 
   dex:
     image: ghcr.io/dexidp/dex:v2.41.1
     profiles: ['login']
     # Same network namespace as the server (see `loopback`), so the issuer
-    # https://localhost:5556/dex is one URL for the browser and the server.
+    # http://localhost:5556/dex is one URL for the browser and the server.
     network_mode: 'service:loopback'
     command: ['dex', 'serve', '/etc/dex/config.yaml']
     volumes:
       - ./ops/compose/dex/config.yaml:/etc/dex/config.yaml:ro
-      - dex-tls:/etc/dex/tls:ro
     env_file:
       - path: packages/trueforge/.env
         required: true
     depends_on:
       loopback:
         condition: service_started
-      dex-tls:
-        condition: service_completed_successfully
     # Dex's plain-HTTP telemetry listener serves /healthz; see config.yaml.
     healthcheck:
       test: ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://127.0.0.1:5558/healthz']
@@ -353,9 +434,19 @@ networks:
   # Between the app's `loopback` and the calendar connector only. Not internal: the connector reaches the calendar
   # server on the internet.
   calendar: {}
+  # Between the app's `loopback` and the voice only. Internal: the voice needs no network access.
+  voice:
+    internal: true
+  # The browser and its gateway only. Internal: no route out, so the browser can reach nothing but the gateway.
+  browser-internal:
+    internal: true
+  # The app's `loopback` and the browser gateway only, for the server's calls to the sidecar's API.
+  browser-control:
+    internal: true
+  # The gateway's own way out to the internet. Nothing else is on it.
+  browser-egress: {}
 
 volumes:
-  dex-tls:
   # The Email send list. Holds only addresses, never credentials.
   mail-policy:
   # Records which send list the Email sidecar loaded. Written by the sidecar, read by the server.
@@ -366,6 +457,8 @@ volumes:
   mail-account:
   # The Calendar login file, owned by the connector. Holds the app password; nothing else reads it.
   calendar-account:
+  # One Chromium profile per person, owned by the browser sidecar. Holds session cookies; nothing else reads it.
+  browser-profiles:
   # Persistent Markdown memory files .
   memory-data:
   # Persistent persona knowledge libraries (SQLite per persona).

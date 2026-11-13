@@ -457,15 +457,19 @@ test_instances_are_isolated_and_images_stay_local() {
   assert_not_contains "$(printf '%s\n' "$main" | sed -n '/^networks:/,$p')" "external: true" "no network is shared with other instances"
   assert_not_contains "$main" "aman_machine"
   assert_contains "$machine" "container_name: aman-stt"
+  assert_contains "$machine" "container_name: aman-tts"
   assert_log_has "network connect --alias aman-stt-engine aman_main_speech aman-stt"
   assert_log_has "network connect --alias aman-stt-engine aman_second_speech aman-stt"
-  assert_eq "$(sort "$SB_STATE/network_links" | tr '\n' ',')" "aman_main_speech aman-stt,aman_second_speech aman-stt," "the speech service is the only thing joined to each"
-  assert_eq "$(grep -c 'pull_policy: never' "$AMAN_HOME/instances/main/compose.yaml")" 5 "app, holder, speech relay, calendar and email connector are never pulled"
+  assert_log_has "network connect --alias aman-tts-engine aman_main_speech aman-tts"
+  assert_log_has "network connect --alias aman-tts-engine aman_second_speech aman-tts"
+  assert_eq "$(sort "$SB_STATE/network_links" | tr '\n' ',')" "aman_main_speech aman-stt,aman_main_speech aman-tts,aman_second_speech aman-stt,aman_second_speech aman-tts," "the speech services are the only things joined to each"
+  assert_eq "$(grep -c 'pull_policy: never' "$AMAN_HOME/instances/main/compose.yaml")" 7 "app, holder, speech relay, calendar and email connector, the browser and its gateway are never pulled"
   assert_contains "$machine" "pull_policy: never"
   assert_not_contains "$(sed -n '/^  dex:/,/^configs:/p' "$AMAN_HOME/instances/main/compose.yaml")" "pull_policy" "the login image is pulled by digest"
   run_install instance remove second
   assert_rc 0
   assert_log_has "network disconnect -f aman_second_speech aman-stt"
+  assert_log_has "network disconnect -f aman_second_speech aman-tts"
   assert_not_contains "$(cat "$SB_STATE/network_links")" "aman_second_speech"
   sandbox_drop
 }
@@ -524,8 +528,9 @@ test_speech_service_joined_without_its_name_is_joined_again() {
   run_install upgrade
   assert_rc 0
   assert_log_has "network disconnect -f aman_main_speech aman-stt"
-  assert_eq "$(cat "$SB_STATE/network_aliases")" "aman_main_speech aman-stt aman-stt-engine"
+  assert_eq "$(sort "$SB_STATE/network_aliases" | tr '\n' ',')" "aman_main_speech aman-stt aman-stt-engine,aman_main_speech aman-tts aman-tts-engine,"
   assert_eq "$(grep -c 'aman_main_speech aman-stt$' "$SB_STATE/network_links")" 1 "joined once"
+  assert_eq "$(grep -c 'aman_main_speech aman-tts$' "$SB_STATE/network_links")" 1 "the voice is joined once too"
   sandbox_drop
 }
 
@@ -556,16 +561,29 @@ test_speech_service_is_hardened_and_cannot_reach_the_instance() {
   assert_contains "$machine" "tmpfs:"
   assert_contains "$machine" "mem_limit: 2g"
   assert_contains "$machine" "pids_limit: 256"
+  local voice_block
+  voice_block=$(printf '%s\n' "$machine" | sed -n '/^  aman-tts:/,/^volumes:/p' | sed '$d')
+  assert_contains "$voice_block" "user: '10001:10001'" "the voice is not root"
+  assert_contains "$voice_block" "- ALL" "the voice has no capabilities"
+  assert_contains "$voice_block" "read_only: true"
+  assert_contains "$voice_block" "mem_limit: 1g"
+  assert_contains "$voice_block" "pull_policy: never"
+  assert_not_contains "$voice_block" "volumes:" "the voice keeps nothing on disk"
+  assert_contains "$voice_block" "- voice" "the voice is on its own network"
+  assert_not_contains "$voice_block" "- machine" "the voice is not on the network with a way out"
+  assert_contains "$(printf '%s\n' "$machine" | sed -n '/^  voice:/,$p')" "internal: true" "the voice network has no way out"
   relay_block=$(printf '%s\n' "$main" | sed -n '/^  speech-link:/,/^  app:/p')
   loopback_block=$(printf '%s\n' "$main" | sed -n '/^  loopback:/,/^  speech-link:/p')
   assert_contains "$relay_block" "- aman-stt" "the app finds speech under the name it always used"
+  assert_contains "$relay_block" "- aman-tts" "the app finds the voice by its own name"
+  assert_contains "$relay_block" "r(8002,'aman-tts-engine')" "the relay carries the voice port"
   assert_contains "$relay_block" "read_only: true"
   assert_contains "$relay_block" "no-new-privileges:true"
   assert_contains "$relay_block" "pids_limit"
   assert_contains "$loopback_block" "- link"
   assert_not_contains "$loopback_block" "- stt" "the shared network of app, login and front end is not on the speech network"
   assert_contains "$(printf '%s\n' "$main" | sed -n '/^networks:/,$p')" "internal: true"
-  assert_eq "$(printf '%s\n' "$main" | sed -n '/^networks:/,$p' | grep -c 'internal: true')" 2 "both speech networks are internal"
+  assert_eq "$(printf '%s\n' "$main" | sed -n '/^networks:/,$p' | grep -c 'internal: true')" 4 "both speech networks and the browser's two are internal"
   sandbox_drop
 }
 
@@ -612,10 +630,12 @@ test_refresh_puts_back_lost_settings() {
     after=$(cat "$env")
     for other in $keys; do
       [ "$other" = "$key" ] && continue
+      # The two push keys only work as a pair, so losing one makes a new pair.
+      case "$key:$other" in WEB_PUSH_PUBLIC_KEY:WEB_PUSH_PRIVATE_KEY | WEB_PUSH_PRIVATE_KEY:WEB_PUSH_PUBLIC_KEY) continue ;; esac
       assert_eq "$(printf '%s\n' "$after" | grep "^$other=")" "$(printf '%s\n' "$before" | grep "^$other=")" "$other is unchanged"
     done
     case "$key" in
-      OIDC_CLIENT_SECRET | TRUEFORGE_API_KEY | CALENDAR_ACCOUNT_SECRET) ;;
+      OIDC_CLIENT_SECRET | TRUEFORGE_API_KEY | CALENDAR_ACCOUNT_SECRET | BROWSER_SECRET | WEB_PUSH_PUBLIC_KEY | WEB_PUSH_PRIVATE_KEY) ;;
       *) assert_eq "$(printf '%s\n' "$after" | grep "^$key=")" "$(printf '%s\n' "$before" | grep "^$key=")" "$key comes back as it was" ;;
     esac
   done

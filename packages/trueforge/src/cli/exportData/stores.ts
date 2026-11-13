@@ -1,17 +1,20 @@
 import type { ISessionStore } from '@truefoundry/trueforge-core/agent-session';
 import type { IAgentStore } from '../../db/agentStore';
+import type { IDeliveryStore } from '../../db/deliveryStore';
 import type { IGlobalSettingsStore } from '../../db/globalSettingsStore';
 import type { IGoogleConnectionStore } from '../../db/googleConnectionStore';
 import type { IMcpServerStore } from '../../db/mcpServerStore';
 import type { IModelProviderStore } from '../../db/modelProviderStore';
 import type { IPersonalizationStore } from '../../db/personalizationStore';
 import type { IPersonaStore } from '../../db/personaStore';
+import type { IReachSettingsStore } from '../../db/reachSettingsStore';
 import type { ISandboxProviderStore } from '../../db/sandboxProviderStore';
 import type { IScheduleStore } from '../../db/scheduleStore';
 import type { ISentinelAuditStore } from '../../db/sentinelAuditStore';
 import type { ISentinelSettingsStore } from '../../db/sentinelSettingsStore';
 import type { SessionCustom, TurnCustom } from '../../db/sessionCustom';
 import type { ISpaceStore } from '../../db/spaceStore';
+import type { ITextContactStore } from '../../db/textContactStore';
 import type { ITurnArtifactStore } from '../../db/turnArtifactStore';
 import type { IOAuthTokenStore } from '../../mcp/auth/types';
 
@@ -32,6 +35,9 @@ export interface ExportStores<TTransaction> {
   tokenStore: IOAuthTokenStore<TTransaction>;
   googleConnectionStore: IGoogleConnectionStore;
   auditStore: ISentinelAuditStore;
+  deliveryStore: IDeliveryStore;
+  reachSettingsStore: IReachSettingsStore;
+  textContactStore: ITextContactStore;
   close(): Promise<void>;
 }
 

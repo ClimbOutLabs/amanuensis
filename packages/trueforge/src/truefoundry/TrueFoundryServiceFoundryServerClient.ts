@@ -41,14 +41,27 @@ const GetSessionUserSchema = z.object({
   subject: SessionSubjectSchema,
 });
 
-const GetSessionWireSchema = z.object({
-  user: GetSessionUserSchema.nullable(),
+const GetSessionUnauthenticatedSchema = z.object({
+  user: z.null(),
 });
 
-/** Authenticated session payload (`user` is non-null after {@link TrueFoundryServiceFoundryServerClient.getSession}). */
-export interface GetSessionResponse {
-  user: z.infer<typeof GetSessionUserSchema>;
-}
+const GetSessionAuthenticatedSchema = z
+  .object({
+    user: GetSessionUserSchema,
+    // Null and empty both mean the session carries no address, the same as
+    // the field being absent.
+    controlPlaneURL: z.union([z.url(), z.literal('')]).nullish(),
+  })
+  .transform(({ user, controlPlaneURL }): { user: z.infer<typeof GetSessionUserSchema>; public_base_url?: string } =>
+    controlPlaneURL === undefined || controlPlaneURL === null || controlPlaneURL === ''
+      ? { user }
+      : { user, public_base_url: controlPlaneURL },
+  );
+
+const GetSessionWireSchema = z.union([GetSessionUnauthenticatedSchema, GetSessionAuthenticatedSchema]);
+
+/** Authenticated session payload returned by TrueFoundryServiceFoundryServerClient.getSession. */
+export type GetSessionResponse = z.infer<typeof GetSessionAuthenticatedSchema>;
 
 const ListResponseSchema = z.union([
   z.array(z.unknown()),
@@ -472,8 +485,11 @@ export class TrueFoundryServiceFoundryServerClient {
   }
 
   /**
-   * `GET v1/session` for RequestContext mapping.
-   * `user: null` (invalid/missing auth on a 200) → 401; all other failures → 500.
+   * `GET v1/session` for RequestContext mapping (always called with a bearer token).
+   * ServiceFoundry optional-auth soft failure (`user: null` on 200) → 401; malformed → 500.
+   * `controlPlaneURL` is optional on the wire and may be null or empty: a
+   * session without an address still authenticates, and MCP OAuth refuses
+   * later at authorize time instead.
    */
   async getSession(accessToken: string): Promise<GetSessionResponse> {
     let payload: unknown;
@@ -502,7 +518,7 @@ export class TrueFoundryServiceFoundryServerClient {
     if (parsed.data.user === null) {
       throw new HTTPException(401, { message: 'Authentication required' });
     }
-    return { user: parsed.data.user };
+    return parsed.data;
   }
 
   async getAgentPermissions(input: {

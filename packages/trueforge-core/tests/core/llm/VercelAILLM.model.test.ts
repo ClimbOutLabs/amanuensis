@@ -12,6 +12,19 @@ import {
   TOKEN_FACTORY_DEFAULT_BASE_URL,
 } from '../../../src/core/llm/VercelAILLM';
 
+// Model HTTP rides the configured outbound fetch in production (util/outboundFetch);
+// in these suites it delegates to the global fetch the tests stub.
+jest.mock('../../../src/core/util/outboundFetch', () => {
+  const actual = jest.requireActual<typeof import('../../../src/core/util/outboundFetch')>(
+    '../../../src/core/util/outboundFetch',
+  );
+  return {
+    ...actual,
+    modelOutboundFetch: (input: string | URL | Request, init?: RequestInit): Promise<Response> =>
+      globalThis.fetch(input, init),
+  };
+});
+
 function makeConfig(
   overrides: Omit<Partial<VercelAIProviderConfig>, 'provider' | 'model'> & {
     provider: VercelAIProviderName;

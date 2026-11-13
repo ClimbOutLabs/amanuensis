@@ -18,14 +18,18 @@ import {
   threadListIndicesByRecency,
   threadListItemIsMutable,
 } from '../atoms/lib/threadListMeta.js';
+import { useOptionalChatAnswerMarks } from '../chatAnswers/ChatAnswerMarksContext.js';
+import { useOptionalDeliveries } from '../deliveries/DeliveriesContext.js';
+import { useOpenChatById } from '../hooks/useOpenChatById.js';
 import { useResourcePermissions } from '../hooks/useResourcePermissions.js';
 import { Icon } from '../icons/Icon.js';
-import { useOptionalReminders } from '../reminders/RemindersContext.js';
 import { useOptionalChatFolders, type ChatFolderSession } from '../server/ChatFolderContext.js';
+import { useIsPrivateChat, usePrivateChatState } from '../server/privateChatStore.js';
 import { useOptionalServer } from '../server/ServerContext.js';
 import { useOptionalShellMode } from '../server/ShellModeContext.js';
 import { useSlot } from '../theme/SlotsProvider.js';
 import { ChatFolderSection, NewFolderButton, ThreadListItemActions } from './ChatFolderControls.js';
+import { ChatMessageMatches } from './ChatMessageMatches.js';
 import { RecentChatsGroups, type RecentChat } from './RecentChatsGroups.js';
 
 /**
@@ -64,18 +68,35 @@ function ThreadListItemRow({
   const custom = useAuiState(s => s.threadListItem.custom);
   const mainThreadId = useAuiState(s => s.threads.mainThreadId);
   const agentName = readThreadAgentName(custom);
-  const sidebarNavOpen = shell?.libraryOpen === true || shell?.sessionsOpen === true || shell?.schedulesOpen === true;
-  const reminders = useOptionalReminders();
-  const isRemindersChat = remoteId != null && remoteId === reminders?.remindersSessionId;
-  const unread = isRemindersChat && reminders?.unread === true;
+  const sidebarNavOpen =
+    shell?.libraryOpen === true ||
+    shell?.sessionsOpen === true ||
+    shell?.schedulesOpen === true ||
+    shell?.remindersOpen === true;
+  const deliveries = useOptionalDeliveries();
+  const answerMarks = useOptionalChatAnswerMarks();
+  // A chat with an unread item in the feed (a reminder, say) is marked until it is opened.
+  const feedUnread = remoteId != null && deliveries?.unreadChatIds.has(remoteId) === true;
+  // A chat whose latest answer landed after the person last opened it is marked the same way.
+  const answerUnseen = remoteId != null && answerMarks?.unseenAnswerChatIds.has(remoteId) === true;
+  const answerStamp = remoteId == null ? undefined : answerMarks?.answerStampsByChatId.get(remoteId);
+  const unread = feedUnread || answerUnseen;
   const isOpen = id === mainThreadId && !sidebarNavOpen;
-  const markRemindersSeen = reminders?.markSeen;
-  // The mark clears once the chat is open, however it was opened.
+  const markChatSeen = deliveries?.markChatSeen;
+  const markAnswerSeen = answerMarks?.markAnswerSeen;
+  // The marks clear once the chat is open, however it was opened.
   useEffect(() => {
-    if (isRemindersChat && isOpen && unread) markRemindersSeen?.();
-  }, [isRemindersChat, isOpen, unread, markRemindersSeen]);
+    if (remoteId != null && isOpen && feedUnread) void markChatSeen?.(remoteId);
+  }, [remoteId, isOpen, feedUnread, markChatSeen]);
+  // An open chat is read as far as its newest stamp: mark it seen when it opens and
+  // again on every stamp update while it stays open, so an answer the person watched
+  // land never dots the chat once they switch away.
+  useEffect(() => {
+    if (remoteId != null && isOpen && answerStamp !== undefined) markAnswerSeen?.(remoteId);
+  }, [remoteId, isOpen, answerStamp, markAnswerSeen]);
   const canDelete = canDeleteSession && remoteId != null && canDeleteResource(remoteId);
   const canRename = canRenameSession && remoteId != null;
+  const isPrivate = useIsPrivateChat(remoteId);
   // The "..." actions menu holds Rename, Delete, and/or Move to folder (the "Show agent
   // details" item moved to a header button next to Clear chat), so it stays gated on those.
   const showActions = remoteId != null && (canDelete || chatFolders !== null || canRename);
@@ -89,8 +110,8 @@ function ThreadListItemRow({
         agentName={agentName}
         lastMessageAt={lastMessageAt}
         unread={unread}
+        isPrivate={isPrivate}
         onSelect={() => {
-          if (isRemindersChat) markRemindersSeen?.();
           onThreadOpen?.();
           shell?.setSettingsOpen(false);
           shell?.setLibraryOpen(false);
@@ -340,7 +361,11 @@ function useRenderChatEntry({
   const server = useOptionalServer();
   const shell = useOptionalShellMode();
   const activeRemoteId = useAuiState(s => s.threadListItem.remoteId);
-  const sidebarNavOpen = shell?.libraryOpen === true || shell?.sessionsOpen === true || shell?.schedulesOpen === true;
+  const sidebarNavOpen =
+    shell?.libraryOpen === true ||
+    shell?.sessionsOpen === true ||
+    shell?.schedulesOpen === true ||
+    shell?.remindersOpen === true;
 
   // Failures reach the delete dialog, which says so and keeps the chat.
   const deleteFolderSession = async (sessionId: string) => {
@@ -547,6 +572,7 @@ export function ThreadListContainer({ onThreadOpen, variant = 'default' }: Threa
   const AgentsLibraryButton = useSlot('AgentsLibraryButton');
   const SessionsBrowserButton = useSlot('SessionsBrowserButton');
   const SchedulesButton = useSlot('SchedulesButton');
+  const RemindersButton = useSlot('RemindersButton');
   const SpacesButton = useSlot('SpacesButton');
   const ThreadListRowSkeleton = useSlot('ThreadListRowSkeleton');
   const ThreadListEmptyState = useSlot('ThreadListEmptyState');
@@ -554,6 +580,7 @@ export function ThreadListContainer({ onThreadOpen, variant = 'default' }: Threa
   const indices = useThreadListIndicesByRecency(variant);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const openChatById = useOpenChatById();
   const viewportRef = useRef<HTMLDivElement>(null);
   const hasMoreRef = useRef(hasMore);
   const auiRef = useRef(aui);
@@ -654,6 +681,7 @@ export function ThreadListContainer({ onThreadOpen, variant = 'default' }: Threa
     };
   }, [hasMore, isIdle, isLoading, isLoadingMore, threadIds.length]);
 
+  const { openSessionId: openPrivateChatId } = usePrivateChatState();
   const handleNewChat = () => {
     onThreadOpen?.();
     shell?.setLibraryOpen(false);
@@ -671,10 +699,24 @@ export function ThreadListContainer({ onThreadOpen, variant = 'default' }: Threa
   const loadedRemoteSessionIdSet = new Set(loadedRemoteSessionIds);
   const hasFolderOnlySessions = remoteSessionIds.some(sessionId => !loadedRemoteSessionIdSet.has(sessionId));
   const hasFolders = chatFolders !== null && (chatFolders.folders.length > 0 || hasFolderOnlySessions);
-  const shownEntries = isRecentHistory
-    ? filterChatsByTitle({ chats: entries, query: searchOpen ? searchQuery : '' })
-    : entries;
+  const titleQuery = searchOpen ? searchQuery : '';
+  // A private chat is shown while it is open, but a search never finds it.
+  const searchableEntries =
+    titleQuery.trim() === '' ? entries : entries.filter(entry => entry.remoteId !== openPrivateChatId);
+  const shownEntries = isRecentHistory ? filterChatsByTitle({ chats: searchableEntries, query: titleQuery }) : entries;
   const openKey = activeRemoteId == null ? undefined : entries.find(entry => entry.remoteId === activeRemoteId)?.key;
+  const messageSearchActive = isRecentHistory && searchOpen && searchQuery.trim().length > 0;
+  const titleMatchSessionIds = new Set(
+    shownEntries.flatMap(entry => (entry.remoteId === undefined ? [] : [entry.remoteId])),
+  );
+  const openMessageMatch = (sessionId: string) => {
+    onThreadOpen?.();
+    shell?.setSettingsOpen(false);
+    shell?.setLibraryOpen(false);
+    shell?.setSessionsOpen(false);
+    shell?.setSchedulesOpen(false);
+    openChatById(sessionId);
+  };
 
   let listBody: ReactNode;
   if (isIdle) {
@@ -684,10 +726,14 @@ export function ThreadListContainer({ onThreadOpen, variant = 'default' }: Threa
   } else if (entries.length === 0 && !hasFolders) {
     listBody = <ThreadListEmptyState message={emptyMessage} />;
   } else if (shownEntries.length === 0 && !hasFolders) {
-    listBody = <ThreadListEmptyState message="No chats match that search." />;
+    listBody = messageSearchActive ? (
+      <p className="px-2.5 py-1 text-xs text-text-secondary">No chat titles match that search.</p>
+    ) : (
+      <ThreadListEmptyState message="No chats match that search." />
+    );
   } else {
     listBody = (
-      <ThreadListPrimitive.Root className="flex min-h-0 flex-col gap-0.5">
+      <ThreadListPrimitive.Root className="flex shrink-0 flex-col gap-0.5">
         {isRecentHistory ? (
           <RecentChatsGroups chats={shownEntries} openKey={openKey} renderRow={renderEntry} />
         ) : (
@@ -713,6 +759,7 @@ export function ThreadListContainer({ onThreadOpen, variant = 'default' }: Threa
             <AgentsLibraryButton />
             <SessionsBrowserButton />
             <SchedulesButton />
+            <RemindersButton />
             <SpacesButton />
           </div>
         )
@@ -743,6 +790,13 @@ export function ThreadListContainer({ onThreadOpen, variant = 'default' }: Threa
           </p>
         ) : null}
         {listBody}
+        {messageSearchActive && !isIdle ? (
+          <ChatMessageMatches
+            query={searchQuery}
+            titleMatchSessionIds={titleMatchSessionIds}
+            onOpen={openMessageMatch}
+          />
+        ) : null}
         {!isIdle && hasMore ? <div className="h-4 shrink-0" aria-hidden /> : null}
       </RecentChatsSection>
     </ThreadListShell>

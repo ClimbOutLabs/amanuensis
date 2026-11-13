@@ -166,9 +166,12 @@ export class TurnResourceResolver<
         headers?: RemoteMcpHeaders;
         first_party?: boolean;
         search_provider?: SearchProviderGrant | undefined;
+        /** What an "Always allow" grant on this connector binds to, from the host's record of it; see `ToolGrantKey`. */
+        grant_binding?: string | undefined;
       }>;
       mcpRequestTimeoutMs: number;
       mcpConnectTimeoutMs: number;
+      mcpMaxResponseBytes?: number | undefined;
       /** One sandbox type per runtime. Omit = no sandbox support. */
       sandboxProvider?: TurnSandboxFactory | undefined;
       /**
@@ -226,6 +229,8 @@ export class TurnResourceResolver<
       serverSandboxAvailable?: boolean | undefined;
       /** IANA timezone name the client sent with this turn. See ITurnResourceResolver.clientTimezone. */
       clientTimezone?: string | undefined;
+      /** See ITurnResourceResolver.spokenReply. */
+      spokenReply?: boolean | undefined;
       /**
        * Host-configured model catalog for the model-identity section's
        * host-owned-facts list (e.g. IModelProviderStore.listModels, mapped and
@@ -337,6 +342,10 @@ export class TurnResourceResolver<
 
   get clientTimezone(): string | undefined {
     return this.deps.clientTimezone;
+  }
+
+  get spokenReply(): boolean | undefined {
+    return this.deps.spokenReply;
   }
 
   /** Default: no-op tracing. Override to plug in a real tracer. */
@@ -458,7 +467,7 @@ export class TurnResourceResolver<
         const source = await this.getOrCreateToolSource({
           id: entry.name,
           create: async () => {
-            const { url, headers, first_party, search_provider } = await this.deps.mcp(entry.name);
+            const { url, headers, first_party, search_provider, grant_binding } = await this.deps.mcp(entry.name);
             if (first_party === true) {
               this.#firstPartyServers.add(entry.name);
             }
@@ -486,8 +495,12 @@ export class TurnResourceResolver<
               sessionId: previousTurn?.snapshot.mcp_servers?.[entry.name]?.session_id,
               requestTimeoutMs: this.deps.mcpRequestTimeoutMs,
               connectTimeoutMs: this.deps.mcpConnectTimeoutMs,
+              ...(this.deps.mcpMaxResponseBytes !== undefined
+                ? { maxResponseBytes: this.deps.mcpMaxResponseBytes }
+                : {}),
               // A vouched-for or designated connector must not hand its trust to wherever it redirects.
               refuseRedirects: first_party === true || search_provider !== undefined,
+              grantBinding: grant_binding,
               logger: this.deps.logger,
               tracing,
               signal,
@@ -591,6 +604,7 @@ export class TurnResourceResolver<
         configuredModels,
         modelProperties: resolvedModel.modelProperties,
         clientTimezone: this.deps.clientTimezone,
+        spokenReply: this.deps.spokenReply,
         // Sub-agents receive the delegated task as a user message; their system
         // prompt is SUB_AGENT_IDENTITY (added by AgentThread), not user instructions.
         instruction: agentInfo ? undefined : spec.instructions,

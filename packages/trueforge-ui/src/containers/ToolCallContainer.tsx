@@ -19,7 +19,6 @@ import { changeRequestReason, changeRequestText } from '@truefoundry/trueforge-c
 import { isMapsToolName } from '@truefoundry/trueforge-core/core/permissions/mapsToolNames';
 import { isSearchHoldCardText } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
 import { CREATE_PERSONA_TOOL_NAME } from '@truefoundry/trueforge-core/core/personas/toolContract';
-import { SET_REMINDER_TOOL_NAME } from '@truefoundry/trueforge-core/core/schedules/toolContract';
 import { useCallback, useEffect, useState } from 'react';
 
 import { useIsMobile } from '../atoms/lib/useIsMobile.js';
@@ -27,11 +26,10 @@ import { Button } from '../atoms/primitives/Button.js';
 import { MapCard, type MapRefusedPlace } from '../components/MapCard.js';
 import { useOptionalPersonas } from '../components/PersonaContext.js';
 import { RefusedPlaceList } from '../components/RefusedPlaceList.js';
+import { useInstalledSkill } from '../hooks/useInstalledSkill.js';
 import { useActiveSessionCanManage } from '../hooks/useResourcePermissions.js';
 import { useHighlightedCard } from '../hooks/useRewardLedger.js';
 import { useWaitingToolCallIds } from '../hooks/useWaitingToolCallIds.js';
-import { ReminderNotificationPrompt } from '../reminders/ReminderNotificationPrompt.js';
-import { useOptionalReminders } from '../reminders/RemindersContext.js';
 import { ALWAYS_ALLOW_TOOL_OPTION_ID, offersChangeIt, SAVE_DRAFT_OPTION_ID } from '../sentinel/approvalChoices.js';
 import { EmailApprovalCard } from '../sentinel/EmailApprovalCard.js';
 import { PermissionApprovalCard } from '../sentinel/PermissionApprovalCard.js';
@@ -290,6 +288,7 @@ function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
         onApprove={() => onSelectOption(allowOnceId)}
         onApproveForChat={allowChatId === undefined ? undefined : () => onSelectOption(allowChatId)}
         onApproveAlways={approvalInfo.alwaysAllowOffered === true ? respondAlwaysAllow : undefined}
+        alwaysAllowCovers={approvalInfo.alwaysAllowCovers}
         onDeny={onDeny}
         onChangeRequest={onChangeRequest}
         onApproveAll={approveAll}
@@ -483,13 +482,7 @@ function ToolCallPart(part: ToolCallMessagePartProps) {
   useEffect(() => {
     if (personaAdded) void reloadPersonas?.();
   }, [personaAdded, reloadPersonas]);
-  // A reminder set in this chat: look for the Reminders chat now, and offer browser notices once.
-  const reminders = useOptionalReminders();
-  const reminderSet = part.toolName === SET_REMINDER_TOOL_NAME && part.status?.type === 'complete';
-  const reminderSetNotice = reminders?.reminderSet;
-  useEffect(() => {
-    if (reminderSet) reminderSetNotice?.();
-  }, [reminderSet, reminderSetNotice]);
+  useInstalledSkill({ toolName: part.toolName, complete: part.status?.type === 'complete', result: part.result });
   const isRequiresAction = part.status?.type === 'requires-action';
   const stateApproval = useAuiState(s => (s.part.type === 'tool-call' ? s.part.approval : undefined));
   const approval = stateApproval ?? part.approval;
@@ -748,11 +741,5 @@ function ToolCallPart(part: ToolCallMessagePartProps) {
       approvalId={showApproval ? approval?.id : undefined}
     />
   );
-  if (!reminderSet) return card;
-  return (
-    <>
-      {card}
-      <ReminderNotificationPrompt />
-    </>
-  );
+  return card;
 }

@@ -163,7 +163,20 @@ export class TavilyClient {
     return this.#auth.kind === 'keyless';
   }
 
-  async search({ query, signal }: { query: string; signal: AbortSignal | undefined }): Promise<TavilySearchOutcome> {
+  async search({
+    query,
+    signal,
+    includeDomains,
+  }: {
+    query: string;
+    signal: AbortSignal | undefined;
+    /**
+     * When set, Tavily is asked to restrict results to these domains. A request-side
+     * narrowing only: callers that must keep other domains out filter the results
+     * themselves, because a domain still covers every path under it.
+     */
+    includeDomains?: readonly string[] | undefined;
+  }): Promise<TavilySearchOutcome> {
     // Pictures cost no extra credit, and a space may only show a picture the chat has seen, so every
     // search asks for them rather than guessing when the person will want one.
     const body = await this.#post({
@@ -176,6 +189,9 @@ export class TavilyClient {
         include_raw_content: false,
         include_images: true,
         include_image_descriptions: true,
+        ...(includeDomains === undefined || includeDomains.length === 0
+          ? {}
+          : { include_domains: [...includeDomains], include_domains_mode: 'restrict' }),
       },
       timeoutMs: SEARCH_TIMEOUT_MS,
       signal,

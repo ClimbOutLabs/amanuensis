@@ -39,6 +39,7 @@ import {
   type UpdateSpaceInput,
 } from '../../../src/db/spaceStore';
 import { spaceCapability, type SpaceToolStore } from '../../../src/runtime/spaceCapability';
+import { noSpaceFolders } from './spaceFolderStoreFake';
 
 const NOOP_EXECUTION_TRACE: AgentExecutionTrace = {
   runInContext: operation => operation(),
@@ -74,6 +75,10 @@ const SPACE_REVISION_HISTORY_LIMIT = 20;
  * verifies actual behavior, not canned responses.
  */
 class InMemorySpaceStore implements SpaceToolStore {
+  listSpaceFolders = noSpaceFolders.listSpaceFolders;
+  createSpaceFolder = noSpaceFolders.createSpaceFolder;
+  setSpaceFolder = noSpaceFolders.setSpaceFolder;
+  listSpaceFolderAssignments = noSpaceFolders.listSpaceFolderAssignments;
   private spaces = new Map<string, SpaceRecord>();
   private history = new Map<string, SpaceRecord[]>();
   private aggregateRevision = 0;
@@ -752,5 +757,206 @@ describe('edit_space delta edits: Madrid board journey', () => {
     const body = await readBody(store, spaceId);
     expect(body).toContain('€1,646.91');
     expect(body).toContain('Iberia Express I21691');
+  });
+});
+
+describe('edit_space preamble anchor', () => {
+  const HEADER = '<div class="page-header"><h1>Madrid Trip</h1><p class="subtitle">Sep 22 – Oct 6, 2026</p></div>';
+  const MARKED_BOARD = `${HEADER}\n<!-- @block:stats -->\n<div class="card"><h3>Hotel</h3><p>Petit Palace Santa Bárbara</p></div>\n<!-- @block:notes -->\n<p>Confirm Sep 23-24 extra night.</p>`;
+
+  async function createMarkedBoard(store: SpaceToolStore): Promise<string> {
+    const created = await callTool(store, CREATE_SPACE_TOOL_NAME, { ...BOARD_META, body: MARKED_BOARD });
+    return expectSpaceId(store, created);
+  }
+
+  it('the preamble is listed first by list_blocks and get_space, and replaces by its anchor with the rest byte-identical', async () => {
+    const store = new InMemorySpaceStore();
+    const spaceId = await createMarkedBoard(store);
+
+    const listed = await callTool(store, LIST_BLOCKS_TOOL_NAME, { space_name: BOARD_META.name });
+    expect((resultJson(listed).blocks ?? []).map(b => b.anchor)).toEqual(['preamble', 'stats', 'notes']);
+    const read = await callTool(store, GET_SPACE_TOOL_NAME, { space_name: BOARD_META.name });
+    expect((resultJson(read).blocks ?? []).map(b => b.anchor)).toEqual(['preamble', 'stats', 'notes']);
+
+    // The fix for the reported trap: the page header sits before the first marker,
+    // and it can now be updated like any other block.
+    const newHeader = '<div class="page-header"><h1>Madrid Trip</h1><p class="subtitle">Sep 22 – Oct 8, 2026</p></div>';
+    const updated = await callTool(store, EDIT_SPACE_TOOL_NAME, {
+      space_name: BOARD_META.name,
+      expected_revision: 1,
+      edits: [
+        {
+          type: 'block',
+          anchor: 'preamble',
+          fingerprint: await fingerprintOf(store, { spaceName: BOARD_META.name, anchor: 'preamble' }),
+          new_content: newHeader,
+        },
+      ],
+    });
+    expect(isErrorResponse(updated)).toBe(false);
+    expect((resultJson(updated).blocks ?? []).map(b => b.anchor)).toEqual(['preamble', 'stats', 'notes']);
+
+    // Byte-identical outside the preamble: the separator after it and every block survive.
+    expect(await readBody(store, spaceId)).toBe(MARKED_BOARD.replace(HEADER, newHeader));
+  });
+
+  it('a wrong fingerprint on the preamble refuses and saves nothing', async () => {
+    const store = new InMemorySpaceStore();
+    const spaceId = await createMarkedBoard(store);
+
+    const failed = await callTool(store, EDIT_SPACE_TOOL_NAME, {
+      space_name: BOARD_META.name,
+      expected_revision: 1,
+      edits: [{ type: 'block', anchor: 'preamble', fingerprint: '00000000', new_content: '<p>hacked</p>' }],
+    });
+    expect(isErrorResponse(failed)).toBe(true);
+    expect(resultJson(failed).error).toContain('does not hold the content fingerprint');
+    expect(await readBody(store, spaceId)).toBe(MARKED_BOARD);
+    const read = await callTool(store, GET_SPACE_TOOL_NAME, { space_name: BOARD_META.name });
+    expect(expectSpace(read).revision).toBe(1);
+  });
+
+  it('a marker named "preamble" owns the anchor: the marked block edits and the text before it stays put', async () => {
+    const store = new InMemorySpaceStore();
+    const body =
+      '<p>Fixed framing.</p>\n<!-- @block:preamble -->\n<p>Section body</p>\n<!-- @block:main -->\n<p>Main</p>';
+    const created = await callTool(store, CREATE_SPACE_TOOL_NAME, { ...BOARD_META, body });
+    const spaceId = await expectSpaceId(store, created);
+
+    // One "preamble" anchor only: the marker's. No second block appears for the framing.
+    const listed = await callTool(store, LIST_BLOCKS_TOOL_NAME, { space_name: BOARD_META.name });
+    expect((resultJson(listed).blocks ?? []).map(b => b.anchor)).toEqual(['preamble', 'main']);
+
+    const updated = await callTool(store, EDIT_SPACE_TOOL_NAME, {
+      space_name: BOARD_META.name,
+      expected_revision: 1,
+      edits: [
+        {
+          type: 'block',
+          anchor: 'preamble',
+          fingerprint: await fingerprintOf(store, { spaceName: BOARD_META.name, anchor: 'preamble' }),
+          new_content: '<p>Section body, updated.</p>',
+        },
+      ],
+    });
+    expect(isErrorResponse(updated)).toBe(false);
+    const finalBody = await readBody(store, spaceId);
+    expect(finalBody.startsWith('<p>Fixed framing.</p>\n<!-- @block:preamble -->')).toBe(true);
+    expect(finalBody).toContain('<p>Section body, updated.</p>');
+    expect(finalBody).not.toContain('<p>Section body</p>');
+    expect(finalBody).toContain('<!-- @block:main -->\n<p>Main</p>');
+  });
+
+  it('an edit written against a read from before the preamble changed refuses as stale', async () => {
+    const store = new InMemorySpaceStore();
+    const spaceId = await createMarkedBoard(store);
+    const notesFingerprint = await fingerprintOf(store, { spaceName: BOARD_META.name, anchor: 'notes' });
+
+    // Another edit moves the space to revision 2 by changing only the preamble.
+    const moved = await callTool(store, EDIT_SPACE_TOOL_NAME, {
+      space_name: BOARD_META.name,
+      expected_revision: 1,
+      edits: [
+        {
+          type: 'block',
+          anchor: 'preamble',
+          fingerprint: await fingerprintOf(store, { spaceName: BOARD_META.name, anchor: 'preamble' }),
+          new_content: HEADER.replace('Oct 6', 'Oct 8'),
+        },
+      ],
+    });
+    expect(isErrorResponse(moved)).toBe(false);
+
+    // The notes edit was written against revision 1. The preamble sits before its
+    // block and changed since that read, so the edit refuses and nothing is saved.
+    const stale = await callTool(store, EDIT_SPACE_TOOL_NAME, {
+      space_name: BOARD_META.name,
+      expected_revision: 1,
+      edits: [{ type: 'block', anchor: 'notes', fingerprint: notesFingerprint, new_content: '<p>Confirmed.</p>' }],
+    });
+    expect(isErrorResponse(stale)).toBe(true);
+    expect(resultJson(stale).revision).toBe(2);
+    const body = await readBody(store, spaceId);
+    expect(body).toContain('Confirm Sep 23-24 extra night.');
+    expect(body).not.toContain('<p>Confirmed.</p>');
+  });
+
+  it('emptying the preamble leaves the space starting at its first marker', async () => {
+    const store = new InMemorySpaceStore();
+    const spaceId = await createMarkedBoard(store);
+
+    const emptied = await callTool(store, EDIT_SPACE_TOOL_NAME, {
+      space_name: BOARD_META.name,
+      expected_revision: 1,
+      edits: [
+        {
+          type: 'block',
+          anchor: 'preamble',
+          fingerprint: await fingerprintOf(store, { spaceName: BOARD_META.name, anchor: 'preamble' }),
+          new_content: '',
+        },
+      ],
+    });
+    expect(isErrorResponse(emptied)).toBe(false);
+    expect(resultJson(emptied).block_results).toContainEqual({ anchor: 'preamble', new_length: 0, deleted: true });
+
+    // The header and the separator after it are gone; the blocks are untouched and
+    // the body is not empty, and no preamble block is listed any more.
+    expect(await readBody(store, spaceId)).toBe(MARKED_BOARD.slice(HEADER.length + 1));
+    const listed = await callTool(store, LIST_BLOCKS_TOOL_NAME, { space_name: BOARD_META.name });
+    expect((resultJson(listed).blocks ?? []).map(b => b.anchor)).toEqual(['stats', 'notes']);
+  });
+
+  it('an insert after the preamble lands between the header and the first marker', async () => {
+    const store = new InMemorySpaceStore();
+    const spaceId = await createMarkedBoard(store);
+
+    const updated = await callTool(store, EDIT_SPACE_TOOL_NAME, {
+      space_name: BOARD_META.name,
+      expected_revision: 1,
+      edits: [
+        {
+          type: 'insert',
+          after: 'preamble',
+          fingerprint: await fingerprintOf(store, { spaceName: BOARD_META.name, anchor: 'preamble' }),
+          new_content: '<p>Inserted line.</p>',
+        },
+      ],
+    });
+    expect(isErrorResponse(updated)).toBe(false);
+    expect(await readBody(store, spaceId)).toBe(
+      `${HEADER}\n<p>Inserted line.</p>\n${MARKED_BOARD.slice(HEADER.length + 1)}`,
+    );
+  });
+
+  it('a link the chat never saw is left out of a preamble replacement like any other block edit', async () => {
+    const store = new InMemorySpaceStore();
+    const body = '# Trip notes\n<!-- @block:main -->\nStay near the centre.';
+    const created = await callTool(store, CREATE_SPACE_TOOL_NAME, {
+      name: 'Links',
+      purpose: 'Link check on the preamble.',
+      status: 'active',
+      format: 'markdown',
+      body,
+    });
+    const spaceId = await expectSpaceId(store, created);
+
+    const updated = await callTool(store, EDIT_SPACE_TOOL_NAME, {
+      space_name: 'Links',
+      expected_revision: 1,
+      edits: [
+        {
+          type: 'block',
+          anchor: 'preamble',
+          fingerprint: await fingerprintOf(store, { spaceName: 'Links', anchor: 'preamble' }),
+          new_content: '# Trip notes\n\nSee [the guide](https://www.madrid-unseen-guide.com/guide).',
+        },
+      ],
+    });
+    expect(isErrorResponse(updated)).toBe(false);
+    const finalBody = await readBody(store, spaceId);
+    expect(finalBody).not.toContain('madrid-unseen-guide.com');
+    expect(finalBody).toContain('# Trip notes');
+    expect(finalBody).toContain('Stay near the centre.');
   });
 });

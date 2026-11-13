@@ -1,12 +1,22 @@
 #!/usr/bin/env bash
 # Test double for `tailscale`: the address in $STUB_TS_IP and the MagicDNS name in $STUB_TS_NAME, with another machine
-# on the tailnet listed after this one. $STUB_TS_HANG makes it hang, like a wedged tailscaled.
+# on the tailnet listed after this one. $STUB_TS_HANG makes it hang, like a wedged tailscaled. $STUB_TS_SERVE_PORTS lists
+# the ports Tailscale serve is set up for, in the shape of `tailscale serve status --json`.
 if [ -n "${STUB_TS_HANG:-}" ]; then sleep 30; fi
 case "$*" in
   "ip -4") echo "${STUB_TS_IP:-}" ;;
   "status --json")
     printf '{\n  "Self": {\n    "HostName": "me",\n    "DNSName": "%s.",\n    "TailscaleIPs": ["%s"]\n  },\n  "Peer": {\n    "nodekey:abc": {\n      "DNSName": "other.example.ts.net.",\n      "TailscaleIPs": ["100.64.9.9"]\n    }\n  }\n}\n' \
       "${STUB_TS_NAME:-}" "${STUB_TS_IP:-}"
+    ;;
+  "serve status --json")
+    printf '{\n  "TCP": {'
+    sep=
+    for port in ${STUB_TS_SERVE_PORTS:-}; do
+      printf '%s\n    "%s": {\n      "HTTPS": true\n    }' "$sep" "$port"
+      sep=,
+    done
+    printf '\n  },\n  "Web": {\n    "me.example.ts.net:443": {\n      "Handlers": {\n        "/": {\n          "Proxy": "http://127.0.0.1:8791"\n        }\n      }\n    }\n  }\n}\n'
     ;;
   *) exit 1 ;;
 esac

@@ -17,11 +17,18 @@ import { cn } from '@/atoms/lib/cn.js';
 import { useCompactLayout } from '@/atoms/lib/CompactLayoutContext.js';
 import { tablistTargetIndex } from '@/atoms/lib/tablistKeys.js';
 import { Spinner } from '@/atoms/primitives/Spinner.js';
+import { useOptionalLocalAccount } from '@/components/LocalAccountContext.js';
 import { useOptionalPersonalization } from '@/components/PersonalizationContext.js';
 import { useOptionalRunCodeStatus } from '@/components/RunCodeStatusContext.js';
+import { useOptionalDeliveries } from '@/deliveries/DeliveriesContext.js';
 import { Icon } from '@/icons/Icon.js';
+import { readSignInMode } from '@/plugins/trueforge-agent-server-adapter/lists.js';
 import { useOptionalSentinelApiState } from '@/sentinel/SentinelApiContext.js';
-import { useOptionalCatalogServer, useOptionalRefreshServerCapabilities } from '@/server/ServerContext.js';
+import {
+  useOptionalCatalogServer,
+  useOptionalRefreshServerCapabilities,
+  useServerCapabilities,
+} from '@/server/ServerContext.js';
 import { useShellMode, type SettingsSection } from '@/server/ShellModeContext.js';
 
 // Section modules (and their list/catalog APIs) load only when that tab mounts.
@@ -43,6 +50,10 @@ const SentinelSettings = lazy(() =>
 const AuditLogSettings = lazy(() =>
   import('@/sentinel/AuditLogSettings.js').then(module => ({ default: module.AuditLogSettings })),
 );
+const ReachMeSettings = lazy(() =>
+  import('@/deliveries/ReachMeSettings.js').then(module => ({ default: module.ReachMeSettings })),
+);
+const AccountSettings = lazy(() => import('./AccountSettings.js'));
 const AboutSettings = lazy(() => import('./AboutSettings.js'));
 
 type SettingsNavItem = {
@@ -59,6 +70,7 @@ type SettingsNavItem = {
     | 'palette'
     | 'lock'
     | 'clock-rotate-left'
+    | 'bell'
     | 'info';
 };
 
@@ -90,6 +102,11 @@ const TruefoundrySettingsBuilder = () => {
   const hasSandbox = useOptionalRunCodeStatus() != null;
   const hasPersonalization = useOptionalPersonalization() != null;
   const hasSentinel = useOptionalSentinelApiState() != null;
+  const hasDeliveries = useOptionalDeliveries() != null;
+  // Account exists only for local sign-in: the host provides the surface and the server says so.
+  const localAccount = useOptionalLocalAccount();
+  const serverCapabilities = useServerCapabilities();
+  const hasAccount = localAccount != null && readSignInMode(serverCapabilities) === 'local';
 
   const closeSettings = useCallback(() => {
     setSettingsOpen(false);
@@ -117,7 +134,23 @@ const TruefoundrySettingsBuilder = () => {
     if (!hasSentinel && (section === 'permissions' || section === 'audit')) {
       setSettingsOpen(settingsOpen, 'models');
     }
-  }, [hasSkills, hasSandbox, hasPersonalization, hasSentinel, section, settingsOpen, setSettingsOpen]);
+    if (!hasDeliveries && section === 'reach-me') {
+      setSettingsOpen(settingsOpen, 'models');
+    }
+    if (!hasAccount && section === 'account') {
+      setSettingsOpen(settingsOpen, 'models');
+    }
+  }, [
+    hasSkills,
+    hasSandbox,
+    hasPersonalization,
+    hasSentinel,
+    hasDeliveries,
+    hasAccount,
+    section,
+    settingsOpen,
+    setSettingsOpen,
+  ]);
 
   useEffect(() => {
     if (!settingsOpen) return;
@@ -139,7 +172,7 @@ const TruefoundrySettingsBuilder = () => {
       // Not gated on a capability: memory is configured by pointing at a bank, so the section has
       // to be reachable while none is configured. It reads as off until one is.
       { id: 'memory', label: 'Memory', icon: 'box-archive' },
-      { id: 'themes', label: 'Themes', icon: 'palette' },
+      { id: 'themes', label: 'Appearance', icon: 'palette' },
     ];
     if (hasSkills) {
       baseSections.push({ id: 'skills', label: 'Skills', icon: 'lightbulb' });
@@ -154,9 +187,15 @@ const TruefoundrySettingsBuilder = () => {
       baseSections.push({ id: 'permissions', label: 'Permissions', icon: 'lock' });
       baseSections.push({ id: 'audit', label: 'Audit', icon: 'clock-rotate-left' });
     }
+    if (hasDeliveries) {
+      baseSections.push({ id: 'reach-me', label: 'Reach me', icon: 'bell' });
+    }
+    if (hasAccount) {
+      baseSections.push({ id: 'account', label: 'Account', icon: 'lock' });
+    }
     baseSections.push({ id: 'about', label: 'About', icon: 'info' });
     return baseSections;
-  }, [hasSkills, hasSandbox, hasPersonalization, hasSentinel]);
+  }, [hasSkills, hasSandbox, hasPersonalization, hasSentinel, hasDeliveries, hasAccount]);
 
   // The one section both the tab strip and the body show. A stored section the host no longer
   // offers falls back to Models here, so the highlighted tab and the content cannot disagree.
@@ -296,6 +335,8 @@ const TruefoundrySettingsBuilder = () => {
               {activeSection === 'personalization' ? <PersonalizationSettings /> : null}
               {activeSection === 'permissions' ? <SentinelSettings /> : null}
               {activeSection === 'audit' ? <AuditLogSettings /> : null}
+              {activeSection === 'reach-me' ? <ReachMeSettings /> : null}
+              {activeSection === 'account' ? <AccountSettings /> : null}
               {activeSection === 'about' ? <AboutSettings /> : null}
             </Suspense>
           </div>

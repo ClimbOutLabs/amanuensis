@@ -7,6 +7,7 @@ import {
 } from '@truefoundry/trueforge-core/core/mcp/toolArgumentCheck';
 import { EDIT_SPACE_TOOL_NAME } from '@truefoundry/trueforge-core/core/spaces/toolContract';
 import { spaceCapability, type SpaceToolStore } from '../../../src/runtime/spaceCapability';
+import { noSpaceFolders } from './spaceFolderStoreFake';
 
 const NOOP_TRACING: AgentTracing = {
   withInitSpan: operation => operation(),
@@ -27,6 +28,7 @@ const UNUSED_STORE: SpaceToolStore = {
   revertSpace: () => Promise.reject(new Error('not used in this test')),
   listSpacesWithAggregate: () => Promise.reject(new Error('not used in this test')),
   getSpace: () => Promise.reject(new Error('not used in this test')),
+  ...noSpaceFolders,
   getSpaceRevision: () => Promise.reject(new Error('not used in this test')),
 };
 

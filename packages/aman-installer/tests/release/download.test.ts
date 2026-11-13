@@ -6,7 +6,6 @@ import {
   fetchLatestManifest,
   fetchReleaseFile,
   sourceArchiveName,
-  windowsAssetName,
   type FetchBytes,
 } from '../../src/release/download.ts';
 import { buildManifest, manifestToBytes, type SourceIds } from '../../src/release/manifest.ts';
@@ -16,7 +15,9 @@ import { TEST_PUBLIC_KEY_MINISIGN, testKeyNum, testPrivateKeyDer } from './testK
 const IDS: SourceIds = {
   'aman-app': 'aman-app:0123456789ab',
   'aman-stt': 'aman-stt:0123456789cd',
+  'aman-tts': 'aman-tts:0123456789cd',
   'aman-calendar-caldav': 'aman-calendar-caldav:0123456789ef',
+  'aman-browser': 'aman-browser:0123456789ef',
 };
 const BASE = 'https://github.com/ClimbOutLabs/amanuensis/releases';
 const EXE_BYTES = new TextEncoder().encode('the windows build');
@@ -156,9 +157,4 @@ test('the source archive is the one archive the record names', () => {
     sourceIds: IDS,
   });
   assert.equal(sourceArchiveName(bare), null);
-});
-
-test('the windows asset name follows the release naming', () => {
-  assert.equal(windowsAssetName('x64'), 'aman-windows-x64.exe');
-  assert.equal(windowsAssetName('arm64'), 'aman-windows-arm64.exe');
 });

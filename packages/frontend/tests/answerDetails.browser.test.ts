@@ -6,7 +6,9 @@ import { chromium, type Browser } from 'playwright-core';
 import { createServer, defaultClientConditions } from 'vite';
 
 import { DEV_OPTIMIZE_DEPS } from '../src/devPrebundle.ts';
+import { featureShotPath, saveFailureShots } from './support/featureShots.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.ts';
+import { FIRST_LOAD_TIMEOUT_MS } from './support/firstLoad.ts';
 import { privateViteCache } from './support/viteCache.ts';
 
 const RENDER_TIMEOUT_MS = 45_000;
@@ -37,7 +39,7 @@ test('answer details open and close from the keyboard', { timeout: 180_000 }, as
     const page = await browser.newPage({ viewport: { width: 1024, height: 768 } });
     await page.goto(`http://127.0.0.1:${address.port}/tests/fixtures/answer-details.fixture.html`, {
       waitUntil: 'domcontentloaded',
-      timeout: RENDER_TIMEOUT_MS,
+      timeout: FIRST_LOAD_TIMEOUT_MS,
     });
 
     const toggle = page.getByRole('button', { name: 'Details' });
@@ -52,10 +54,14 @@ test('answer details open and close from the keyboard', { timeout: 180_000 }, as
     await page.keyboard.press('Enter');
     assert.equal(await toggle.getAttribute('aria-expanded'), 'true');
     assert.equal(await usage.isVisible(), true, 'Enter did not open the details');
+    await page.screenshot({ path: await featureShotPath({ surface: 'screen:answer-details', step: 'open' }) });
 
     await page.keyboard.press('Space');
     assert.equal(await toggle.getAttribute('aria-expanded'), 'false');
     assert.equal(await usage.isVisible(), false, 'Space did not close the details');
+  } catch (error) {
+    await saveFailureShots({ browser, surface: 'screen:answer-details' });
+    throw error;
   } finally {
     await browser?.close();
     await server.close();

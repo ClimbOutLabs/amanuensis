@@ -298,10 +298,14 @@
   color: var(--text-primary);
 }
 
-/* Keep the send action in the narrow composer footer instead of allowing the
- * selector row to push it beyond a 320px viewport. The breakpoint is below
- * the supported 390px layout, so ordinary mobile and desktop stay unchanged. */
-@media (max-width: 359px) {
+/* Narrow phones: below the supported 390px layout the composer footer stacks
+ * instead of squeezing into one line. The add row takes a line of its own.
+ * At 360px and wider the model picker shares the controls line, left aligned,
+ * because that line still has room for it; below 360px the picker takes a
+ * full line of its own so the selected model name stays readable, and the
+ * mic, voice and send controls take the line below. Send and Stop keep their
+ * 44px touch target at every narrow width. */
+@media (max-width: 389px) {
   [data-slot='aui_composer-shell'] .aui-composer-footer {
     align-items: flex-start;
   }
@@ -314,19 +318,55 @@
 
   [data-slot='aui_composer-shell'] .aui-composer-actions {
     flex-wrap: wrap;
-    justify-content: flex-end;
+    justify-content: flex-start;
     margin-left: 0;
   }
 
-  [data-slot='aui_composer-shell'] .aui-composer-model-button {
-    max-width: 7rem;
+  /* The right group stops being a box here, so the model picker and the voice
+   * controls inside it can land on separate lines of the actions row when the
+   * picker takes its own line. */
+  [data-slot='aui_composer-shell'] .aui-composer-right-group {
+    display: contents;
   }
 
-  /* Send and its running-state Stop are 32px; give both the 44px touch target here. */
+  [data-slot='aui_composer-shell'] .aui-composer-model-button {
+    max-width: 100%;
+  }
+
+  [data-slot='aui_composer-shell'] .aui-composer-model-label {
+    flex-basis: 100%;
+    max-width: 100%;
+  }
+
+  /* Send and its running-state Stop are small at rest; give both the 44px
+   * touch target here, as the narrow rules below 360px have always done. */
   [data-slot='aui_composer-shell'] [data-slot='aui_composer-send'],
   [data-slot='aui_composer-shell'] [data-slot='aui_composer-stop'] {
     width: 2.75rem;
     height: 2.75rem;
+  }
+}
+
+/* Very narrow phones: only the model picker in the right group takes a full
+ * line, so the selected model name stays readable. Other model pickers in
+ * the footer, such as the one in the fixture's own right section, keep the
+ * room they need on the shared controls line. */
+@media (max-width: 359px) {
+  [data-slot='aui_composer-shell'] .aui-composer-right-group > .aui-composer-model-selector {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+
+  [data-slot='aui_composer-shell'] .aui-composer-right-group > .aui-composer-model-selector .aui-composer-model-button {
+    width: 100%;
+  }
+}
+
+/* Narrow phones: the home suggestion cards stack in one column sized to the
+ * screen, so no card or line of its text runs past the right edge. */
+@media (max-width: 389px) {
+  .aman-home-cards {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
@@ -1570,6 +1610,15 @@
   font-weight: 600;
   line-height: 1.35;
   letter-spacing: normal;
+  overflow-wrap: anywhere;
+}
+
+/* Every text block on a card wraps anywhere, so no word or string can push the card sideways. */
+.aui-approval-card p,
+.aui-approval-card dt,
+.aui-approval-card dd,
+.aui-approval-card li {
+  overflow-wrap: anywhere;
 }
 
 /* The badge and the stub's lines: plain body text, no capitals or spacing. */
@@ -1797,6 +1846,16 @@
   .aui-ticket__stub {
     border-left: 0;
     border-top: 0.125rem dashed var(--border);
+  }
+
+  /* On a phone the choices stack full width in a column, in the order the card puts them. */
+  .aui-approval-card__choices {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .aui-approval-card__choices > * {
+    width: 100%;
   }
 }
 

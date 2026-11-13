@@ -177,10 +177,7 @@ export default defineConfig(
       curly: 'off',
       // The vendored code signals intentionally-unused params with a `_`
       // prefix; honor that convention instead of rewriting call signatures.
-      '@typescript-eslint/no-unused-vars': [
-        'error',
-        { argsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' },
-      ],
+      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' }],
       // The vendored tree pins @modelcontextprotocol/sdk ^1.29.0; SDK-side
       // deprecation renames are upstream's migration to make, not this fork's.
       '@typescript-eslint/no-deprecated': 'off',
@@ -265,6 +262,18 @@ export default defineConfig(
       curly: 'off',
       'no-empty': 'off',
       '@typescript-eslint/no-unused-vars': 'off',
+    },
+  },
+  {
+    // The browser sidecar's page extractor runs inside `page.evaluate()`, in page context, not Node.
+    files: ['ops/browser-sidecar/src/extract.mjs'],
+    languageOptions: {
+      globals: {
+        document: 'readonly',
+        window: 'readonly',
+        CSS: 'readonly',
+        URL: 'readonly',
+      },
     },
   },
 );

@@ -1,9 +1,10 @@
+import { isCallToolResponseResult, type CallToolResponse } from '../mcp/IMCPServer';
 import type { ContextMessage } from '../runtime/AgentThread.types';
 import { isLLMContextMessage } from '../runtime/contextUtils';
 import type { UnfinishedKind } from '../runtime/replyBudget';
 import { envelopedResult, turnBoundaryIndex } from '../runtime/replyToolDumpRepair';
 import { isRecord } from '../util/records';
-import { CREATE_SPACE_TOOL_NAME, isSpaceWriteToolName, SPACE_WRITE_NOTHING_SAVED_FIELD } from './toolContract';
+import { CREATE_SPACE_TOOL_NAME, isSpaceContentWriteToolName, SPACE_WRITE_NOTHING_SAVED_FIELD } from './toolContract';
 
 /** What this turn's space writes did to one space. `changes` counts the saved writes, a creation included. */
 export interface SpaceWrites {
@@ -43,6 +44,14 @@ export function spaceWriteSavedNothing(content: string): boolean {
   return spaceWriteResult(content)?.[SPACE_WRITE_NOTHING_SAVED_FIELD] === true;
 }
 
+/** The same check on a finished call's result, before it is wrapped for the model. */
+export function spaceWriteResponseSavedNothing(response: CallToolResponse): boolean {
+  return (
+    isCallToolResponseResult(response) &&
+    response.result.content.some(block => block.type === 'text' && spaceWriteSavedNothing(block.text))
+  );
+}
+
 /** The spaces this turn's create, edit and restore calls reached, in the order they were first written. */
 export function spaceWritesThisTurn(context: readonly ContextMessage[]): SpaceWrites[] {
   const boundary = turnBoundaryIndex(context);
@@ -63,7 +72,8 @@ export function spaceWritesThisTurn(context: readonly ContextMessage[]): SpaceWr
       continue;
     }
     const call = calls.get(message.tool_call_id);
-    if (call === undefined || !isSpaceWriteToolName(call.tool)) {
+    // Filing a space in a folder changes nothing in the space, so it is never reported as a saved change.
+    if (call === undefined || !isSpaceContentWriteToolName(call.tool)) {
       continue;
     }
     const result = spaceWriteResult(message.content);

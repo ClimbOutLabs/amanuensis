@@ -30,7 +30,7 @@ Defaults may ship TFY look; every surface must accept a host override.
 ## Constraint
 
 All work in **`@truefoundry/trueforge-ui`**. No runtime package changes for this
-track (orthogonal to [`docs/server.md`](./server.md)).
+track.
 
 ## Locked decisions
 
@@ -418,13 +418,13 @@ Ship as CSS variable maps under `src/theme/presets/`:
 | --------------- | ---------------------------------- |
 | `paper`         | Warm paper, ink and gold (default) |
 | `forest`        | Calm greens, natural tones         |
-| `midnight`      | Deep blue-grays, navy accents      |
+| `midnight`      | Deep blue-grays, ice blue accents  |
 | `high-contrast` | Maximum legibility, stark surfaces |
 
-Each preset defines **light + dark** token sets. Gold is the highlight in every
-preset; a preset changes surfaces, never the highlight. Saved preferences for
-removed presets resolve to `paper`, and the old `chatgpt` and `mint` ids resolve
-to `high-contrast`.
+Each preset defines **light + dark** token sets. Gold is the highlight in
+every preset except Midnight, which uses ice blue; a preset changes surfaces,
+never the highlight. Saved preferences for removed presets resolve to `paper`,
+and the old `chatgpt` and `mint` ids resolve to `high-contrast`.
 
 ## Markdown / OpenUI / syntax-highlighter / Monaco
 
@@ -553,13 +553,17 @@ no longer depends on tfy.
 - Style content engines via `theme.classNames` or `.aui-markdown` /
   `.aui-syntax-highlighter` / `.aui-openui` / `.aui-monaco`.
 
+## Chat text size
+
+Settings > Appearance has a Chat text size choice: Smaller, Default, Larger and Largest. The choice is kept in this browser under the local storage key `aman.chat_font_size`. It only changes the chat: the thread root redefines the six type scale variables (`--text-xs` to `--text-2xl`) as the resolved theme's own `textXs` to `text2xl` tokens times the chosen factor, so a host that sets its own text sizes is the base that gets scaled. The sidebar, chat header, settings and right rail keep the theme's scale. Default sets no override at all.
+
 ## Non-goals (v1)
 
 - Pixel-perfect Claude / ChatGPT / Gemini clones
 - Dual-running tfy + shadcn
 - Moving structural atom overrides into `theme` (those stay in `overrides`;
   full chrome uses `layout` instead)
-- Runtime / Server abstraction work (see [`docs/server.md`](./server.md))
+- Runtime / Server abstraction work
 
 ## PR sequence
 

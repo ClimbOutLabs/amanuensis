@@ -15,6 +15,7 @@ import {
 } from '@truefoundry/trueforge-core/core/spaces/toolContract';
 import { SpaceNotFoundError, type SpaceRecord } from '../../../src/db/spaceStore';
 import { spaceCapability, type SpaceToolStore } from '../../../src/runtime/spaceCapability';
+import { noSpaceFolders } from './spaceFolderStoreFake';
 
 const NOOP_EXECUTION_TRACE: AgentExecutionTrace = {
   runInContext: operation => operation(),
@@ -114,6 +115,7 @@ function makeMemoryStore(initial: SpaceRecord[] = [], options: { hasMore?: boole
       return replace({ ...current, revision: current.revision + 1 });
     },
     getSpace: async input => rows.get(input.space_id),
+    ...noSpaceFolders,
     getSpaceRevision: async () => undefined,
     listSpacesWithAggregate: async () => ({
       records: mine(),

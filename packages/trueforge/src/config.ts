@@ -18,12 +18,18 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import envPaths from 'env-paths';
-
 import {
+  DEFAULT_MCP_HTTP_BODY_TIMEOUT_MS,
+  DEFAULT_MCP_HTTP_CONNECT_TIMEOUT_MS,
+  DEFAULT_MCP_HTTP_MAX_RETRIES,
+  DEFAULT_MODEL_HTTP_BODY_TIMEOUT_MS,
+  DEFAULT_MODEL_HTTP_CONNECT_TIMEOUT_MS,
+  DEFAULT_MODEL_HTTP_HEADERS_TIMEOUT_MS,
+  DEFAULT_MODEL_HTTP_MAX_RETRIES,
   DEFAULT_OCR_LANGUAGES,
   DEFAULT_SESSION_DISK_MB,
   GIT_NETWORK_ENV_NAMES,
+  MCP_HTTP_HEADERS_TIMEOUT_MARGIN_MS,
   pickGitNetworkEnv,
   TOKEN_FACTORY_DEFAULT_BASE_URL,
   validateRunCodeStartupConfig,
@@ -33,6 +39,7 @@ import {
   MEMORY_SETTINGS_LIMITS,
 } from '@truefoundry/trueforge-core/core/memory/memorySettingsLimits';
 
+import { appDataDirFromEnv, voiceModelDirFromEnv } from './appDataDir';
 import { ARCHIVE_DEFAULT_MAX_BYTES } from './dataExport/archiveLimits';
 import { ZIP_MAX_ARCHIVE_BYTES } from './dataExport/zipStreamWriter';
 import { normalizedOrigin } from './mcp/firstParty';
@@ -42,6 +49,8 @@ import type { ReflectBudget } from './runtime/memory/hindsightClient';
 import { parseModelPrices, type ModelPrices } from './runtime/modelPricing';
 import { DEFAULT_TOKEN_FACTORY_MODEL } from './runtime/tokenFactoryDefaults';
 import { MAX_CODE_MODE_SOCKET_PARENT_BYTES } from './sandbox/local/core/CodeModeUdsTransport';
+import { isGoModuleHostName } from './sandbox/mirrors/goMirrorPath';
+import { E164_PATTERN } from './schemas/textMessages';
 
 const DEFAULT_PORT = 8790;
 /** Loopback default; container images set HOST=0.0.0.0 so probes and Service traffic reach the process. */
@@ -59,8 +68,6 @@ const DEFAULT_MAX_REQUEST_BODY_BYTES = 36 * 1024 * 1024;
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 /** Turn ids minted by a standalone process; no peer can ever own them. */
 const LOCAL_EXECUTOR_ID = 'local';
-/** OS-standard data dir for SQLite in standalone mode. */
-const ENV_PATHS_APP_NAME = 'trueforge';
 const DEFAULT_POSTGRES_USER = 'trueforge';
 const DEFAULT_POSTGRES_PASSWORD = process.env['POSTGRES_PASSWORD'] ?? 'changeme';
 const DEFAULT_POSTGRES_DB = 'trueforge';
@@ -385,6 +392,195 @@ export function parseCalendarAccountSecret(raw: string | undefined): string | un
   return trimmed;
 }
 
+/** A web push (VAPID) key pair and contact, or none. Push stays off unless all three settings are set. */
+export interface WebPushSettings {
+  publicKey: string;
+  privateKey: string;
+  subject: string;
+}
+
+const VAPID_PUBLIC_KEY_BYTES = 65;
+const VAPID_PRIVATE_KEY_BYTES = 32;
+
+function base64UrlByteLength(value: string): number | undefined {
+  if (!/^[A-Za-z0-9_-]+$/.test(value)) {
+    return undefined;
+  }
+  return Buffer.from(value, 'base64url').length;
+}
+
+/**
+ * The contact every push names when WEB_PUSH_SUBJECT is unset. Push services see it on each notice, so it is the
+ * project's public page rather than anything about the person.
+ */
+export const DEFAULT_WEB_PUSH_SUBJECT = 'https://github.com/ClimbOutLabs/amanuensis';
+
+/**
+ * Parses `WEB_PUSH_PUBLIC_KEY`, `WEB_PUSH_PRIVATE_KEY` and the optional `WEB_PUSH_SUBJECT`. No keys means push is off.
+ * One key without the other, or a value that is not a key, fails the boot with the one thing to do next.
+ */
+export function parseWebPushSettings(raw: {
+  publicKey: string | undefined;
+  privateKey: string | undefined;
+  subject: string | undefined;
+}): WebPushSettings | undefined {
+  const publicKey = blankToUndefined(raw.publicKey?.trim());
+  const privateKey = blankToUndefined(raw.privateKey?.trim());
+  const subject = blankToUndefined(raw.subject?.trim()) ?? DEFAULT_WEB_PUSH_SUBJECT;
+  if (publicKey === undefined && privateKey === undefined) {
+    return undefined;
+  }
+  if (publicKey === undefined || privateKey === undefined) {
+    throw new Error(
+      'WEB_PUSH_PUBLIC_KEY and WEB_PUSH_PRIVATE_KEY must both be set, or both left out. Run the installer again to make a new pair.',
+    );
+  }
+  if (base64UrlByteLength(publicKey) !== VAPID_PUBLIC_KEY_BYTES) {
+    throw new Error('WEB_PUSH_PUBLIC_KEY is not a push key. Run the installer again to make a new pair.');
+  }
+  if (base64UrlByteLength(privateKey) !== VAPID_PRIVATE_KEY_BYTES) {
+    throw new Error('WEB_PUSH_PRIVATE_KEY is not a push key. Run the installer again to make a new pair.');
+  }
+  if (!/^(mailto:[^\s@]+@[^\s@]+|https:\/\/\S+)$/.test(subject)) {
+    throw new Error(
+      'WEB_PUSH_SUBJECT must start with mailto: or https://. Fix it, or remove the line to use the default.',
+    );
+  }
+  return { publicKey, privateKey, subject };
+}
+
+/** Twilio, as the one text-message provider. Texts stay off unless `REACH_SMS_PROVIDER` is `twilio` and every value is set. */
+export interface TwilioSettings {
+  accountSid: string;
+  authToken: string;
+  /** The number texts come from, in international form such as +15550100. */
+  fromNumber: string;
+  /** The port of the listener that answers Twilio, apart from the main app. */
+  webhookPort: number;
+  /** The public address Twilio reaches that listener at, without a trailing slash. Request signatures are checked against it. */
+  webhookPublicUrl: string;
+  /** Texts the whole server sends in a day, codes apart, so many accounts together cannot run up the bill. */
+  maxTextsPerDay: number;
+}
+
+export const DEFAULT_MAX_TEXTS_PER_DAY = 500;
+
+/** Outside the ranges the installer picks app, sign-in and https ports from, so no instance lands on it. */
+export const DEFAULT_TWILIO_WEBHOOK_PORT = 9201;
+
+function isPlainHttpsAddress(url: URL | undefined): url is URL {
+  return (
+    url?.protocol === 'https:' && url.username === '' && url.password === '' && url.search === '' && url.hash === ''
+  );
+}
+
+/**
+ * Parses `REACH_SMS_PROVIDER` (default `none`) and the Twilio settings. With no provider, texts are off and the
+ * Twilio values are ignored. With `twilio`, a missing or malformed value fails the boot with the one thing to do next.
+ */
+export function parseTwilioSettings(raw: {
+  provider: string | undefined;
+  accountSid: string | undefined;
+  authToken: string | undefined;
+  fromNumber: string | undefined;
+  webhookPort: string | undefined;
+  webhookPublicUrl: string | undefined;
+  maxTextsPerDay: string | undefined;
+  mainPort: number;
+}): TwilioSettings | undefined {
+  const provider = blankToUndefined(raw.provider)?.toLowerCase() ?? 'none';
+  if (provider === 'none') {
+    return undefined;
+  }
+  if (provider !== 'twilio') {
+    throw new Error('Set REACH_SMS_PROVIDER to none or twilio.');
+  }
+  const accountSid = blankToUndefined(raw.accountSid);
+  const authToken = blankToUndefined(raw.authToken);
+  const fromNumber = blankToUndefined(raw.fromNumber);
+  if (accountSid === undefined || !/^AC[0-9a-fA-F]{32}$/.test(accountSid)) {
+    throw new Error(
+      'TWILIO_ACCOUNT_SID must be your Twilio account id, which starts with AC. Copy it from the Twilio console.',
+    );
+  }
+  if (authToken === undefined) {
+    throw new Error('TWILIO_AUTH_TOKEN is not set. Copy the auth token from the Twilio console.');
+  }
+  if (fromNumber === undefined || !E164_PATTERN.test(fromNumber)) {
+    throw new Error('TWILIO_FROM_NUMBER must be your Twilio number with the country code, such as +15550100.');
+  }
+  const portText = blankToUndefined(raw.webhookPort);
+  const webhookPort = portText === undefined ? DEFAULT_TWILIO_WEBHOOK_PORT : Number(portText);
+  if (!Number.isInteger(webhookPort) || webhookPort < 1 || webhookPort > 65535 || webhookPort === raw.mainPort) {
+    throw new Error(
+      'TWILIO_WEBHOOK_PORT must be a whole number from 1 to 65535 that is not the main app port. Pick another port.',
+    );
+  }
+  const publicUrl = blankToUndefined(raw.webhookPublicUrl);
+  let parsed: URL | undefined;
+  try {
+    parsed = publicUrl === undefined ? undefined : new URL(publicUrl);
+  } catch {
+    parsed = undefined;
+  }
+  if (!isPlainHttpsAddress(parsed)) {
+    throw new Error(
+      'TWILIO_WEBHOOK_PUBLIC_URL must be the https address Twilio reaches, such as https://aman.example.com. Set it to that address.',
+    );
+  }
+  const capText = blankToUndefined(raw.maxTextsPerDay);
+  const maxTextsPerDay = capText === undefined ? DEFAULT_MAX_TEXTS_PER_DAY : Number(capText);
+  if (!Number.isInteger(maxTextsPerDay) || maxTextsPerDay < 1) {
+    throw new Error(
+      'REACH_SMS_MAX_TEXTS_PER_DAY must be a whole number of 1 or more. Set it to the most texts this server may send in a day.',
+    );
+  }
+  return {
+    accountSid,
+    authToken,
+    fromNumber,
+    webhookPort,
+    webhookPublicUrl: parsed.href.replace(/\/+$/, ''),
+    maxTextsPerDay,
+  };
+}
+
+/**
+ * Parses `BROWSER_URL`: the browser sidecar's private HTTP address, such as the compose sidecar's
+ * `http://browser-relay:8792`. Unset or blank means no browser sidecar is configured. Anything else that is not
+ * an http(s) URL fails the boot.
+ */
+export function parseBrowserUrl(raw: string | undefined): string | undefined {
+  if (raw === undefined || raw.trim() === '') {
+    return undefined;
+  }
+  const trimmed = raw.trim();
+  if (normalizedOrigin(trimmed) === undefined) {
+    throw new Error(`BROWSER_URL must be an http(s) URL such as http://browser-relay:8792, got: ${trimmed}`);
+  }
+  return trimmed;
+}
+
+/** The shortest secret the browser sidecar accepts; a shorter one keeps its port closed. */
+const BROWSER_SECRET_MIN_LENGTH = 32;
+
+/**
+ * Parses `BROWSER_SECRET`: the value every request to the browser sidecar must carry. Unset or blank means
+ * none. A value that is too short fails the boot, since the sidecar would refuse it.
+ */
+export function parseBrowserSecret(raw: string | undefined): string | undefined {
+  if (raw === undefined || raw.trim() === '') {
+    return undefined;
+  }
+  const trimmed = raw.trim();
+  if (trimmed.length < BROWSER_SECRET_MIN_LENGTH) {
+    throw new Error(
+      `BROWSER_SECRET must be at least ${String(BROWSER_SECRET_MIN_LENGTH)} characters. Set a longer random value, or remove the line to leave the browser off.`,
+    );
+  }
+  return trimmed;
+}
+
 /**
  * The first-party origins: the operator's list, plus the Calendar connector's origin when one is configured.
  */
@@ -535,7 +731,7 @@ function parseSandboxBackend(options: { envKey: string; raw: string | undefined 
 }
 
 /** Most slot services the compose files define. */
-export const SANDBOX_MAX_SLOTS = 4;
+export const SANDBOX_MAX_SLOTS = 2;
 
 /** Which long-term memory backend Aman uses. */
 export type MemoryBackend = 'markdown' | 'hindsight';
@@ -645,6 +841,28 @@ export function parsePublicBaseUrl(raw: string | undefined, options: { allowPath
   }
   const path = segments.length === 0 ? '' : `/${segments.join('/')}`;
   return `${parsed.origin}${path}`;
+}
+
+/**
+ * Parses `SANDBOX_MIRROR_GO_EXTRA_HOSTS`: comma-separated lower-case host names such as `modules.example.com` (never IP addresses).
+ * A port, path, wildcard or upper-case letter fails the boot, since a dropped typo would quietly leave a
+ * module host blocked and a loose entry would suggest a wider match than the mirror makes.
+ */
+export function parseGoModuleHosts(raw: string | undefined): string[] {
+  const hosts = new Set<string>();
+  for (const entry of (raw ?? '').split(',')) {
+    const text = entry.trim();
+    if (text === '') {
+      continue;
+    }
+    if (!isGoModuleHostName(text)) {
+      throw new Error(
+        `SANDBOX_MIRROR_GO_EXTRA_HOSTS has an entry that is not a valid host name: "${text}". Each entry must be a lower-case host name with a dot, like example.com: no port, path, wildcard, IP address or single word such as localhost. Fix or remove that entry in the .env file, then restart the server.`,
+      );
+    }
+    hosts.add(text);
+  }
+  return [...hosts];
 }
 
 /** The addresses of proxies believed about visitor addresses: plain IP addresses only, so a name cannot widen it. */
@@ -1039,6 +1257,20 @@ function parseAuthCookieSuffix(raw: string | undefined): string {
   return value;
 }
 
+/** Only `local` can be named; every other mode is derived from the rest of the configuration. */
+function parseTrueForgeAuthMode(raw: string | undefined): 'local' | undefined {
+  const value = raw?.trim().toLowerCase() ?? '';
+  if (value === '') {
+    return undefined;
+  }
+  if (value === 'local') {
+    return 'local';
+  }
+  throw new Error(
+    'TRUEFORGE_AUTH_MODE can only be set to "local". Remove it to sign in with the sign-in service instead.',
+  );
+}
+
 function resolveOIDCConfig({ standalone }: { standalone: boolean }): OIDCConfig | undefined {
   const issuerUrl = getEnv('OIDC_ISSUER_URL');
   const clientId = getEnv('OIDC_CLIENT_ID');
@@ -1166,6 +1398,17 @@ export interface SharedServerConfiguration {
    */
   OIDC: OIDCConfig | undefined;
   /**
+   * Sign-in mode chosen by name. Env: `TRUEFORGE_AUTH_MODE`. Only `local` can be named: Aman then
+   * signs its one owner in itself, with an email and password it stores, and the OIDC settings are
+   * ignored. Unset derives the mode from the rest of the configuration.
+   */
+  TRUEFORGE_AUTH_MODE: 'local' | undefined;
+  /**
+   * True when OIDC settings were provided while `TRUEFORGE_AUTH_MODE=local`: they are ignored
+   * (OIDC resolves as unset) and startup says so in one line.
+   */
+  OIDC_SET_BUT_IGNORED: boolean;
+  /**
    * Suffix appended to every auth cookie name so instances sharing a hostname (cookies ignore
    * ports) do not read each other's sessions. Env: `AUTH_COOKIE_SUFFIX`. Default empty.
    */
@@ -1206,6 +1449,52 @@ export interface SharedServerConfiguration {
   MCP_REQUEST_TIMEOUT_MS: number;
   /** Max milliseconds for an MCP transport connection. Env: `MCP_CONNECT_TIMEOUT_MS`. Default 30 seconds. */
   MCP_CONNECT_TIMEOUT_MS: number;
+  /** Max bytes for one remote MCP tool-call HTTP response body (not GET SSE). Env: `MCP_TOOL_CALL_MAX_RESPONSE_BYTES`. Default 50 MB. */
+  MCP_TOOL_CALL_MAX_RESPONSE_BYTES: number;
+  /**
+   * undici connect timeout for model-provider outbound fetch.
+   * Env: `MODEL_HTTP_CONNECT_TIMEOUT_MS`. Default 5000.
+   */
+  MODEL_HTTP_CONNECT_TIMEOUT_MS: number;
+  /**
+   * undici headersTimeout for model-provider outbound fetch.
+   * Env: `MODEL_HTTP_HEADERS_TIMEOUT_MS`. Default 300000, the same as the model's first-chunk wait.
+   */
+  MODEL_HTTP_HEADERS_TIMEOUT_MS: number;
+  /**
+   * undici bodyTimeout for model-provider outbound fetch (idle between body chunks).
+   * Env: `MODEL_HTTP_BODY_TIMEOUT_MS`. Default 300000.
+   */
+  MODEL_HTTP_BODY_TIMEOUT_MS: number;
+  /**
+   * Retries after the first model fetch for connect timeouts and 408/409/429/520-524/530
+   * (honors Retry-After up to 5s; a longer one is not retried). 0 turns retries off.
+   * Env: `MODEL_HTTP_MAX_RETRIES`. Default 2.
+   */
+  MODEL_HTTP_MAX_RETRIES: number;
+  /**
+   * undici connect timeout for MCP outbound fetch.
+   * Env: `MCP_HTTP_CONNECT_TIMEOUT_MS`. Default 5000.
+   */
+  MCP_HTTP_CONNECT_TIMEOUT_MS: number;
+  /**
+   * undici headersTimeout for MCP outbound fetch. A JSON-response MCP server sends headers only
+   * after the tool finishes, so this must outlast `MCP_REQUEST_TIMEOUT_MS` and a slow tool is
+   * reported as a slow tool. Env: `MCP_HTTP_HEADERS_TIMEOUT_MS`. Default and minimum
+   * `MCP_REQUEST_TIMEOUT_MS` plus 5 seconds.
+   */
+  MCP_HTTP_HEADERS_TIMEOUT_MS: number;
+  /**
+   * undici bodyTimeout for MCP outbound fetch (idle between body chunks). Default 30m so an idle
+   * event stream is not killed at undici's 300s. Env: `MCP_HTTP_BODY_TIMEOUT_MS`.
+   */
+  MCP_HTTP_BODY_TIMEOUT_MS: number;
+  /**
+   * Retries after the first MCP fetch for connect timeouts and 408/429/521-523/530 only (not
+   * 409/520/524: upstream may already have started the tool; honors Retry-After up to 5s, a
+   * longer one is not retried). 0 turns retries off. Env: `MCP_HTTP_MAX_RETRIES`. Default 2.
+   */
+  MCP_HTTP_MAX_RETRIES: number;
   /**
    * Origins of the operator's own memory provider, as normalized `scheme://host[:port]` strings.
    * A connector saved as the memory provider on one of these origins is first-party: its tools that
@@ -1220,7 +1509,7 @@ export interface SharedServerConfiguration {
   MAIL_EMAIL_MCP_URL: string | undefined;
   /**
    * The mail sidecar's account agent, such as `http://mail-email:9559`. The Settings Email card reads and
-   * changes the saved account through it. When set without MAIL_EMAIL_MCP_URL, the MCP endpoint is derived
+   * changes the saved account through it, and noticing lists new mail through it. When set without MAIL_EMAIL_MCP_URL, the MCP endpoint is derived
    * from it for registration once an account exists. Env: `MAIL_EMAIL_ACCOUNT_URL`. Default unset.
    */
   MAIL_EMAIL_ACCOUNT_URL: string | undefined;
@@ -1253,6 +1542,38 @@ export interface SharedServerConfiguration {
    * Env: `CALENDAR_ACCOUNT_SECRET`. Default unset.
    */
   CALENDAR_ACCOUNT_SECRET: string | undefined;
+  /**
+   * The VAPID key pair the server signs web push with, and the contact push services see. Push is off when the keys
+   * are unset. Env: `WEB_PUSH_PUBLIC_KEY`, `WEB_PUSH_PRIVATE_KEY`, `WEB_PUSH_SUBJECT` (defaults to the project page).
+   */
+  WEB_PUSH: WebPushSettings | undefined;
+  /**
+   * Text messages through Twilio. Undefined (the default) means texts are off. Env: `REACH_SMS_PROVIDER` (`none` or
+   * `twilio`), `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER`, and for the separate Twilio listener
+   * `TWILIO_WEBHOOK_PORT` (default 9201) and `TWILIO_WEBHOOK_PUBLIC_URL`. `REACH_SMS_MAX_TEXTS_PER_DAY` (default 500)
+   * caps the texts the whole server sends in a day.
+   */
+  TWILIO: TwilioSettings | undefined;
+  /**
+   * Turns on Aman's own browser. Off by default: with it off, the browser_* tools do not exist, whatever
+   * BROWSER_URL and BROWSER_SECRET are set to. Env: `BROWSER_ENABLED`. Default false.
+   */
+  BROWSER_ENABLED: boolean;
+  /**
+   * The browser sidecar's private HTTP address, such as the compose sidecar's `http://browser-relay:8792`.
+   * Required when BROWSER_ENABLED is true. Env: `BROWSER_URL`. Default unset.
+   */
+  BROWSER_URL: string | undefined;
+  /**
+   * The shared secret every request to the browser sidecar must carry. Required when BROWSER_ENABLED is
+   * true; the same value is given to the sidecar. Env: `BROWSER_SECRET`. Default unset.
+   */
+  BROWSER_SECRET: string | undefined;
+  /**
+   * Max milliseconds the browser waits for a page to finish opening before giving up.
+   * Env: `BROWSER_NAV_TIMEOUT_MS`. Default 30000.
+   */
+  BROWSER_NAV_TIMEOUT_MS: number;
   /**
    * The Email send list the server writes (`allowed_recipients.toml`). Set with the sidecar; the sidecar reads it
    * read-only. Env: `MAIL_POLICY_FILE`. Default unset, which means no send list is written.
@@ -1332,13 +1653,20 @@ export interface SharedServerConfiguration {
   SANDBOX_BACKEND: SandboxBackend;
   /** Name of the installer instance this server runs as; empty outside the installer. Env: `INSTALLER_INSTANCE`. */
   INSTALLER_INSTANCE: string;
-  /** Number of slot agents to use, 1 to 4. Env: `SANDBOX_SLOTS`. Default 4. */
+  /** Number of slot agents to use, 1 to 2. Env: `SANDBOX_SLOTS`. Default 2. */
   SANDBOX_SLOTS: number;
   /**
    * Directory holding one control directory per slot (`<dir>/<n>/agent.sock`). Env: `SANDBOX_SLOTS_DIR`.
    * Required when SANDBOX_BACKEND=slots.
    */
   SANDBOX_SLOTS_DIR: string;
+  /**
+   * Root the slot workspace disks live under, one folder per installer instance (`<root>/<instance>`).
+   * The slot tooling creates them there; the server only needs the root to know the place is its own.
+   * Env: `AMAN_SLOT_DISK_ROOT` (the override the installer's own checks use). Default '/var/lib/aman-slots',
+   * the root the installer always uses.
+   */
+  SANDBOX_SLOTS_DISK_ROOT: string;
   /** Disk quota of one chat's sandbox workspace on a slot, MiB. Env: `SANDBOX_SESSION_DISK_MB`. Default 2048. */
   SANDBOX_SESSION_DISK_MB: number;
   /**
@@ -1347,10 +1675,21 @@ export interface SharedServerConfiguration {
    * only thing that lives here.
    */
   SANDBOX_MIRROR_CACHE_DIR: string;
+  /**
+   * The app data folder itself: the root the database, the sandbox workspaces and the notes
+   * folder index live under. Env: `APP_DATA_DIR` (optional absolute path). Default: the
+   * env-paths data dir, which sits under the home directory.
+   */
+  APP_DATA_DIR: string;
   /** Largest single package file the mirrors will fetch, bytes. Env: `SANDBOX_MIRROR_DOWNLOAD_MAX_BYTES`. Default 1 GiB. */
   SANDBOX_MIRROR_DOWNLOAD_MAX_BYTES: number;
   /** Largest total mirror cache, bytes. Env: `SANDBOX_MIRROR_CACHE_MAX_BYTES`. Default 10 GiB. */
   SANDBOX_MIRROR_CACHE_MAX_BYTES: number;
+  /**
+   * Further code hosts the Go mirror serves modules from, besides its built-in list: lower-case host names,
+   * comma-separated. Env: `SANDBOX_MIRROR_GO_EXTRA_HOSTS`. Default none.
+   */
+  SANDBOX_MIRROR_GO_EXTRA_HOSTS: string[];
   /**
    * Expected sandbox image as `<tag>@sha256:<64 hex chars>`. Never a bare
    * tag: the digest pin is enforced before any pull. Env: `SANDBOX_IMAGE`.
@@ -1516,6 +1855,11 @@ export interface SharedServerConfiguration {
    */
   TURN_SUBSCRIBE_TIMEOUT_MS: number;
   /**
+   * Max ms to wait for one create-turn SSE write before dropping that client
+   * and keeping the turn drain running. Env: `TURN_SSE_STREAM_WRITE_TIMEOUT_MS`. Default 60000.
+   */
+  TURN_SSE_STREAM_WRITE_TIMEOUT_MS: number;
+  /**
    * Max ms to wait for a peer executor's reply before failing with 424.
    * Env: `REDIS_REQUEST_REPLY_TIMEOUT_MS`. Default 60000.
    * Only used when a Redis client is wired (distributed mode).
@@ -1650,6 +1994,25 @@ export interface SharedServerConfiguration {
    * Env: `STT_URL`. Default `http://aman-stt:8001`.
    */
   STT_URL: string;
+  /**
+   * Base URL of the `aman-tts` text-to-speech sidecar (`POST {url}/v1/speak`).
+   * The browser never calls it directly; `POST /api/v1/voice/speak` proxies through this server.
+   * Env: `TTS_URL`. Default `http://aman-tts:8002`.
+   */
+  TTS_URL: string;
+  /**
+   * Whether spoken replies and voice mode may use the `aman-tts` sidecar. Off, voice mode does not start
+   * and replies are read by the browser's own voice.
+   * Env: `TTS_ENABLED`. Default true.
+   */
+  TTS_ENABLED: boolean;
+  /**
+   * Folder that holds the small listening model voice mode uses to find where speech starts and
+   * ends. The image carries it, and it is checked against a pinned hash before use. Host
+   * development fetches it with `pnpm voice:model`.
+   * Env: `VOICE_VAD_MODEL_DIR`. Default `<APP_DATA_DIR>/voice-model`.
+   */
+  VOICE_VAD_MODEL_DIR: string;
   /**
    * Base URL of the Nominatim-compatible geocoder used by the embedded maps tools.
    * Env: `MAPS_GEOCODER_URL`. Default `https://nominatim.openstreetmap.org`.
@@ -2006,6 +2369,13 @@ export type DistributedServerConfiguration = SharedServerConfiguration & {
    * Env: `POSTGRES_IDLE_IN_TRANSACTION_SESSION_TIMEOUT_MS`. Default 60000.
    */
   POSTGRES_IDLE_IN_TRANSACTION_SESSION_TIMEOUT_MS: number;
+  /**
+   * How long a query waits for a Postgres connection: to open a new one, or for a busy pool to
+   * free one (pg uses one limit for both). Default `POSTGRES_STATEMENT_TIMEOUT_MS` plus 10 seconds,
+   * so a full pool of slow queries is waited out instead of failing the queries queued behind it.
+   * Env: `POSTGRES_CONNECT_TIMEOUT_MS`.
+   */
+  POSTGRES_CONNECT_TIMEOUT_MS: number;
   /** Peering URL shared by all replicas. Env: `REDIS_URL`. Default `redis://localhost:6379`. */
   REDIS_URL: string;
   /**
@@ -2076,6 +2446,53 @@ const serverExecutionTimeoutSeconds = parsePositiveInt({
   defaultValue: 1380,
 });
 
+/**
+ * The MCP headers wait must outlast the MCP request timeout, so a slow tool is reported as a slow
+ * tool and not as a dropped connection.
+ */
+function parseMcpHttpHeadersTimeoutMs(options: { raw: string | undefined; mcpRequestTimeoutMs: number }): number {
+  const minimum = options.mcpRequestTimeoutMs + MCP_HTTP_HEADERS_TIMEOUT_MARGIN_MS;
+  const value = parsePositiveInt({ envKey: 'MCP_HTTP_HEADERS_TIMEOUT_MS', raw: options.raw, defaultValue: minimum });
+  if (value < minimum) {
+    throw new Error(
+      `MCP_HTTP_HEADERS_TIMEOUT_MS is ${String(value)}, but it must be at least ${String(minimum)}: MCP_REQUEST_TIMEOUT_MS plus 5000, so a slow tool is reported as slow. Raise it, or remove it to use ${String(minimum)}.`,
+    );
+  }
+  return value;
+}
+
+/** Distributed mode's Postgres session limits; the connection wait defaults from the statement timeout. */
+function parsePostgresTimeouts(): {
+  POSTGRES_STATEMENT_TIMEOUT_MS: number;
+  POSTGRES_IDLE_IN_TRANSACTION_SESSION_TIMEOUT_MS: number;
+  POSTGRES_CONNECT_TIMEOUT_MS: number;
+} {
+  const statementTimeoutMs = parsePositiveInt({
+    envKey: 'POSTGRES_STATEMENT_TIMEOUT_MS',
+    raw: getEnv('POSTGRES_STATEMENT_TIMEOUT_MS'),
+    defaultValue: 60_000,
+  });
+  return {
+    POSTGRES_STATEMENT_TIMEOUT_MS: statementTimeoutMs,
+    POSTGRES_IDLE_IN_TRANSACTION_SESSION_TIMEOUT_MS: parsePositiveInt({
+      envKey: 'POSTGRES_IDLE_IN_TRANSACTION_SESSION_TIMEOUT_MS',
+      raw: getEnv('POSTGRES_IDLE_IN_TRANSACTION_SESSION_TIMEOUT_MS'),
+      defaultValue: 60_000,
+    }),
+    POSTGRES_CONNECT_TIMEOUT_MS: parsePositiveInt({
+      envKey: 'POSTGRES_CONNECT_TIMEOUT_MS',
+      raw: getEnv('POSTGRES_CONNECT_TIMEOUT_MS'),
+      defaultValue: statementTimeoutMs + 10_000,
+    }),
+  };
+}
+
+const mcpRequestTimeoutMs = parsePositiveInt({
+  envKey: 'MCP_REQUEST_TIMEOUT_MS',
+  raw: getEnv('MCP_REQUEST_TIMEOUT_MS'),
+  defaultValue: 4 * 60 * 1000,
+});
+
 const standalone = parseBoolean({
   envKey: 'STANDALONE',
   raw: getEnv('STANDALONE'),
@@ -2087,17 +2504,7 @@ const standalone = parseBoolean({
  * Env: `APP_DATA_DIR` (optional absolute path). Default: the env-paths data dir, which sits under the
  * home directory. Images that run as a user with no home set this to a path on the data volume.
  */
-export function resolveAppDataDir({ override, suffix }: { override: string | undefined; suffix: string }): string {
-  if (override !== undefined && override.trim() !== '') {
-    return path.resolve(override);
-  }
-  return envPaths(ENV_PATHS_APP_NAME, { suffix }).data;
-}
-
-const appDataDir = resolveAppDataDir({
-  override: getEnv('APP_DATA_DIR'),
-  suffix: getEnv('APP_DATA_DIR_SUFFIX', { defaultValue: '' }) ?? '',
-});
+const appDataDir = appDataDirFromEnv(process.env);
 
 const port = parsePort(getEnv('PORT'));
 const host = getEnv('HOST', { defaultValue: DEFAULT_HOST }) ?? DEFAULT_HOST;
@@ -2112,6 +2519,19 @@ const calendarSidecarMcpUrl = hostCalendarMcpUrl({
 });
 const mailSidecarMcpUrl = hostMailMcpUrl({ mailMcpUrl: mailEmailMcpUrl, mailAccountUrl: mailEmailAccountUrl });
 
+const browserEnabled = parseBoolean({ envKey: 'BROWSER_ENABLED', raw: getEnv('BROWSER_ENABLED'), defaultValue: false });
+const browserUrl = parseBrowserUrl(getEnv('BROWSER_URL'));
+const browserSecret = parseBrowserSecret(getEnv('BROWSER_SECRET'));
+if (browserEnabled && (browserUrl === undefined || browserSecret === undefined)) {
+  throw new Error('BROWSER_ENABLED is true, so BROWSER_URL and BROWSER_SECRET must both be set.');
+}
+
+const requestedAuthMode = parseTrueForgeAuthMode(getEnv('TRUEFORGE_AUTH_MODE'));
+/** In local mode the OIDC settings are ignored whole, even a partial set; startup names that once. */
+const oidcSetButIgnored =
+  requestedAuthMode === 'local' &&
+  ['OIDC_ISSUER_URL', 'OIDC_CLIENT_ID', 'OIDC_CLIENT_SECRET'].some(key => (getEnv(key) ?? '') !== '');
+
 const shared: SharedServerConfiguration = {
   LOG_LEVEL: getEnv('LOG_LEVEL', { defaultValue: 'info' }) ?? 'info',
   ACCESS_LOGS: parseBoolean({ envKey: 'ACCESS_LOGS', raw: getEnv('ACCESS_LOGS'), defaultValue: true }),
@@ -2123,7 +2543,9 @@ const shared: SharedServerConfiguration = {
   PORT: port,
   HOST: host,
   REQUIRE_AUTH: parseBoolean({ envKey: 'REQUIRE_AUTH', raw: getEnv('REQUIRE_AUTH'), defaultValue: true }),
-  OIDC: resolveOIDCConfig({ standalone }),
+  OIDC: requestedAuthMode === 'local' ? undefined : resolveOIDCConfig({ standalone }),
+  TRUEFORGE_AUTH_MODE: requestedAuthMode,
+  OIDC_SET_BUT_IGNORED: oidcSetButIgnored,
   AUTH_COOKIE_SUFFIX: parseAuthCookieSuffix(getEnv('AUTH_COOKIE_SUFFIX')),
   EXECUTOR_ID: standalone ? LOCAL_EXECUTOR_ID : randomAlphanumeric(6),
   MODEL_CATALOG_PATH: resolveOptionalPathEnv('MODEL_CATALOG_PATH'),
@@ -2132,15 +2554,57 @@ const shared: SharedServerConfiguration = {
   SANDBOX_CATALOG_PATH: resolveOptionalPathEnv('SANDBOX_CATALOG_PATH'),
   FRONTEND_DIR: resolveFrontendDir(),
 
-  MCP_REQUEST_TIMEOUT_MS: parsePositiveInt({
-    envKey: 'MCP_REQUEST_TIMEOUT_MS',
-    raw: getEnv('MCP_REQUEST_TIMEOUT_MS'),
-    defaultValue: 4 * 60 * 1000,
-  }),
+  MCP_REQUEST_TIMEOUT_MS: mcpRequestTimeoutMs,
   MCP_CONNECT_TIMEOUT_MS: parsePositiveInt({
     envKey: 'MCP_CONNECT_TIMEOUT_MS',
     raw: getEnv('MCP_CONNECT_TIMEOUT_MS'),
     defaultValue: 30 * 1000,
+  }),
+  MCP_TOOL_CALL_MAX_RESPONSE_BYTES: parsePositiveInt({
+    envKey: 'MCP_TOOL_CALL_MAX_RESPONSE_BYTES',
+    raw: getEnv('MCP_TOOL_CALL_MAX_RESPONSE_BYTES'),
+    defaultValue: 50 * 1024 * 1024,
+  }),
+  MODEL_HTTP_CONNECT_TIMEOUT_MS: parsePositiveInt({
+    envKey: 'MODEL_HTTP_CONNECT_TIMEOUT_MS',
+    raw: getEnv('MODEL_HTTP_CONNECT_TIMEOUT_MS'),
+    defaultValue: DEFAULT_MODEL_HTTP_CONNECT_TIMEOUT_MS,
+  }),
+  MODEL_HTTP_HEADERS_TIMEOUT_MS: parsePositiveInt({
+    envKey: 'MODEL_HTTP_HEADERS_TIMEOUT_MS',
+    raw: getEnv('MODEL_HTTP_HEADERS_TIMEOUT_MS'),
+    defaultValue: DEFAULT_MODEL_HTTP_HEADERS_TIMEOUT_MS,
+  }),
+  MODEL_HTTP_BODY_TIMEOUT_MS: parsePositiveInt({
+    envKey: 'MODEL_HTTP_BODY_TIMEOUT_MS',
+    raw: getEnv('MODEL_HTTP_BODY_TIMEOUT_MS'),
+    defaultValue: DEFAULT_MODEL_HTTP_BODY_TIMEOUT_MS,
+  }),
+  MODEL_HTTP_MAX_RETRIES: parsePositiveInt({
+    envKey: 'MODEL_HTTP_MAX_RETRIES',
+    raw: getEnv('MODEL_HTTP_MAX_RETRIES'),
+    defaultValue: DEFAULT_MODEL_HTTP_MAX_RETRIES,
+    minValue: 0,
+  }),
+  MCP_HTTP_CONNECT_TIMEOUT_MS: parsePositiveInt({
+    envKey: 'MCP_HTTP_CONNECT_TIMEOUT_MS',
+    raw: getEnv('MCP_HTTP_CONNECT_TIMEOUT_MS'),
+    defaultValue: DEFAULT_MCP_HTTP_CONNECT_TIMEOUT_MS,
+  }),
+  MCP_HTTP_HEADERS_TIMEOUT_MS: parseMcpHttpHeadersTimeoutMs({
+    raw: getEnv('MCP_HTTP_HEADERS_TIMEOUT_MS'),
+    mcpRequestTimeoutMs,
+  }),
+  MCP_HTTP_BODY_TIMEOUT_MS: parsePositiveInt({
+    envKey: 'MCP_HTTP_BODY_TIMEOUT_MS',
+    raw: getEnv('MCP_HTTP_BODY_TIMEOUT_MS'),
+    defaultValue: DEFAULT_MCP_HTTP_BODY_TIMEOUT_MS,
+  }),
+  MCP_HTTP_MAX_RETRIES: parsePositiveInt({
+    envKey: 'MCP_HTTP_MAX_RETRIES',
+    raw: getEnv('MCP_HTTP_MAX_RETRIES'),
+    defaultValue: DEFAULT_MCP_HTTP_MAX_RETRIES,
+    minValue: 0,
   }),
   FIRST_PARTY_MCP_ORIGINS: withMailSidecarOrigin({
     origins: firstPartyOriginsFor({
@@ -2152,12 +2616,35 @@ const shared: SharedServerConfiguration = {
   MAIL_EMAIL_MCP_URL: mailEmailMcpUrl,
   MAIL_SIDECAR_MCP_URL: mailSidecarMcpUrl,
   MAIL_EMAIL_ACCOUNT_URL: mailEmailAccountUrl,
+  WEB_PUSH: parseWebPushSettings({
+    publicKey: getEnv('WEB_PUSH_PUBLIC_KEY'),
+    privateKey: getEnv('WEB_PUSH_PRIVATE_KEY'),
+    subject: getEnv('WEB_PUSH_SUBJECT'),
+  }),
+  TWILIO: parseTwilioSettings({
+    provider: getEnv('REACH_SMS_PROVIDER'),
+    accountSid: getEnv('TWILIO_ACCOUNT_SID'),
+    authToken: getEnv('TWILIO_AUTH_TOKEN'),
+    fromNumber: getEnv('TWILIO_FROM_NUMBER'),
+    webhookPort: getEnv('TWILIO_WEBHOOK_PORT'),
+    webhookPublicUrl: getEnv('TWILIO_WEBHOOK_PUBLIC_URL'),
+    maxTextsPerDay: getEnv('REACH_SMS_MAX_TEXTS_PER_DAY'),
+    mainPort: port,
+  }),
   MAIL_POLICY_FILE: parseOptionalPath(getEnv('MAIL_POLICY_FILE')),
   MAIL_POLICY_STATUS_FILE: parseOptionalPath(getEnv('MAIL_POLICY_STATUS_FILE')),
   CALENDAR_CONNECTOR_URL: calendarConnectorUrl,
   CALENDAR_SIDECAR_MCP_URL: calendarSidecarMcpUrl,
   CALENDAR_ACCOUNT_URL: calendarAccountUrl,
   CALENDAR_ACCOUNT_SECRET: parseCalendarAccountSecret(getEnv('CALENDAR_ACCOUNT_SECRET')),
+  BROWSER_ENABLED: browserEnabled,
+  BROWSER_URL: browserUrl,
+  BROWSER_SECRET: browserSecret,
+  BROWSER_NAV_TIMEOUT_MS: parsePositiveInt({
+    envKey: 'BROWSER_NAV_TIMEOUT_MS',
+    raw: getEnv('BROWSER_NAV_TIMEOUT_MS'),
+    defaultValue: 30_000,
+  }),
   TOOL_DISPATCH_MAX_CONCURRENCY: parsePositiveInt({
     envKey: 'TOOL_DISPATCH_MAX_CONCURRENCY',
     raw: getEnv('TOOL_DISPATCH_MAX_CONCURRENCY'),
@@ -2220,12 +2707,15 @@ const shared: SharedServerConfiguration = {
     defaultValue: SANDBOX_MAX_SLOTS,
   }),
   SANDBOX_SLOTS_DIR: getEnv('SANDBOX_SLOTS_DIR', { defaultValue: '' }) ?? '',
+  SANDBOX_SLOTS_DISK_ROOT:
+    getEnv('AMAN_SLOT_DISK_ROOT', { defaultValue: '/var/lib/aman-slots' }) ?? '/var/lib/aman-slots',
   SANDBOX_SESSION_DISK_MB: parsePositiveInt({
     envKey: 'SANDBOX_SESSION_DISK_MB',
     raw: getEnv('SANDBOX_SESSION_DISK_MB'),
     defaultValue: DEFAULT_SESSION_DISK_MB,
   }),
   SANDBOX_MIRROR_CACHE_DIR: path.join(appDataDir, 'package-mirror-cache'),
+  APP_DATA_DIR: appDataDir,
   SANDBOX_MIRROR_DOWNLOAD_MAX_BYTES: parsePositiveInt({
     envKey: 'SANDBOX_MIRROR_DOWNLOAD_MAX_BYTES',
     raw: getEnv('SANDBOX_MIRROR_DOWNLOAD_MAX_BYTES'),
@@ -2236,6 +2726,7 @@ const shared: SharedServerConfiguration = {
     raw: getEnv('SANDBOX_MIRROR_CACHE_MAX_BYTES'),
     defaultValue: 10 * 1024 * 1024 * 1024,
   }),
+  SANDBOX_MIRROR_GO_EXTRA_HOSTS: parseGoModuleHosts(getEnv('SANDBOX_MIRROR_GO_EXTRA_HOSTS')),
   SANDBOX_IMAGE: getEnv('SANDBOX_IMAGE', { defaultValue: '' }) ?? '',
   SANDBOX_RUNS_DIR: path.join(appDataDir, 'sandbox-runs'),
   SANDBOX_STATE_DIR: path.join(appDataDir, 'sandbox-state'),
@@ -2349,6 +2840,11 @@ const shared: SharedServerConfiguration = {
     raw: getEnv('TURN_SUBSCRIBE_TIMEOUT_MS'),
     defaultValue: 600_000,
   }),
+  TURN_SSE_STREAM_WRITE_TIMEOUT_MS: parsePositiveInt({
+    envKey: 'TURN_SSE_STREAM_WRITE_TIMEOUT_MS',
+    raw: getEnv('TURN_SSE_STREAM_WRITE_TIMEOUT_MS'),
+    defaultValue: 60_000,
+  }),
   REDIS_REQUEST_REPLY_TIMEOUT_MS: parsePositiveInt({
     envKey: 'REDIS_REQUEST_REPLY_TIMEOUT_MS',
     raw: getEnv('REDIS_REQUEST_REPLY_TIMEOUT_MS'),
@@ -2435,6 +2931,9 @@ const shared: SharedServerConfiguration = {
   }),
   MEMORY_SCREEN_URL: getEnv('MEMORY_SCREEN_URL', { defaultValue: '' }) ?? '',
   STT_URL: getEnv('STT_URL', { defaultValue: 'http://aman-stt:8001' }) ?? 'http://aman-stt:8001',
+  TTS_URL: getEnv('TTS_URL', { defaultValue: 'http://aman-tts:8002' }) ?? 'http://aman-tts:8002',
+  TTS_ENABLED: parseBoolean({ envKey: 'TTS_ENABLED', raw: getEnv('TTS_ENABLED'), defaultValue: true }),
+  VOICE_VAD_MODEL_DIR: voiceModelDirFromEnv(process.env),
   MAPS_GEOCODER_URL: parseMapsUrl({
     envKey: 'MAPS_GEOCODER_URL',
     raw: getEnv('MAPS_GEOCODER_URL'),
@@ -2640,16 +3139,7 @@ const configuration: ServerConfiguration = standalone
         raw: getEnv('DATABASE_POOL_MAX'),
         defaultValue: 10,
       }),
-      POSTGRES_STATEMENT_TIMEOUT_MS: parsePositiveInt({
-        envKey: 'POSTGRES_STATEMENT_TIMEOUT_MS',
-        raw: getEnv('POSTGRES_STATEMENT_TIMEOUT_MS'),
-        defaultValue: 60_000,
-      }),
-      POSTGRES_IDLE_IN_TRANSACTION_SESSION_TIMEOUT_MS: parsePositiveInt({
-        envKey: 'POSTGRES_IDLE_IN_TRANSACTION_SESSION_TIMEOUT_MS',
-        raw: getEnv('POSTGRES_IDLE_IN_TRANSACTION_SESSION_TIMEOUT_MS'),
-        defaultValue: 60_000,
-      }),
+      ...parsePostgresTimeouts(),
       REDIS_URL: resolveRedisUrl(),
       TRUEFOUNDRY_SERVICEFOUNDRY_SERVER_URL: getEnv('TRUEFOUNDRY_SERVICEFOUNDRY_SERVER_URL', { required: false }),
       TRUEFOUNDRY_API_KEY: getEnv('TRUEFOUNDRY_API_KEY', { required: false }),
@@ -2692,6 +3182,8 @@ export const SECRET_SETTING_NAMES = [
   'TRUEFOUNDRY_API_KEY',
   'TRUEFOUNDRY_SANDBOX_API_KEY',
   'POSTGRES_PASSWORD',
+  'WEB_PUSH_PRIVATE_KEY',
+  'TWILIO_AUTH_TOKEN',
 ] as const;
 
 /** Connection URL settings: secret as a whole, and for the password inside. */
@@ -2724,6 +3216,7 @@ export type ConfiguredSecretSettings = Pick<
   SharedServerConfiguration,
   'TRUEFORGE_API_KEY' | 'NEBIUS_API_KEY' | 'MEMORY_SCREEN_AUTH_TOKEN' | 'OIDC'
 > &
+  Partial<Pick<SharedServerConfiguration, 'WEB_PUSH' | 'TWILIO'>> &
   (
     | { STANDALONE: true }
     | ({ STANDALONE: false } & Pick<
@@ -2744,6 +3237,8 @@ export function getConfiguredSecretValues(config: ConfiguredSecretSettings = con
     NEBIUS_API_KEY: config.NEBIUS_API_KEY,
     MEMORY_SCREEN_AUTH_TOKEN: config.MEMORY_SCREEN_AUTH_TOKEN,
     OIDC_CLIENT_SECRET: config.OIDC?.OIDC_CLIENT_SECRET,
+    WEB_PUSH_PRIVATE_KEY: config.WEB_PUSH?.privateKey,
+    TWILIO_AUTH_TOKEN: config.TWILIO?.authToken,
     ...(config.STANDALONE
       ? {}
       : {
@@ -2757,6 +3252,36 @@ export function getConfiguredSecretValues(config: ConfiguredSecretSettings = con
 
 export function isOidcConfigured(value: ServerConfiguration): value is ServerConfiguration & { OIDC: OIDCConfig } {
   return value.OIDC !== undefined;
+}
+
+/** The refusal shown when local sign-in would be offered over a plain-http address beyond this computer. */
+export const LOCAL_SIGN_IN_ORIGIN_REFUSAL =
+  'Local sign-in works on this computer or behind https. Set PUBLIC_BASE_URL to an https address, or use the Docker install.';
+
+/**
+ * Local sign-in is allowed only when every address the app is opened at is on this computer, or the
+ * person has set an https public address. A plain-http address beyond this computer refuses to start:
+ * the password would travel unprotected. Runs at load, before the server starts.
+ */
+export function assertLocalSignInOrigins(
+  config: Pick<
+    ServerConfiguration,
+    'TRUEFORGE_AUTH_MODE' | 'PUBLIC_BASE_URL' | 'ALLOWED_ORIGINS' | 'PORT' | 'STANDALONE'
+  >,
+): void {
+  if (config.TRUEFORGE_AUTH_MODE !== 'local') {
+    return;
+  }
+  if (config.PUBLIC_BASE_URL.startsWith('https://')) {
+    return;
+  }
+  const origins = [effectivePublicBaseUrl(config), ...config.ALLOWED_ORIGINS].filter(origin => origin !== '');
+  for (const origin of origins) {
+    const url = new URL(origin);
+    if (url.protocol === 'http:' && !isLoopbackHost(url.hostname)) {
+      throw new Error(LOCAL_SIGN_IN_ORIGIN_REFUSAL);
+    }
+  }
 }
 
 /**
@@ -2774,13 +3299,18 @@ export enum TrueForgeAuthMode {
   Standalone = 'standalone',
   Oidc = 'oidc',
   TrueFoundry = 'truefoundry',
+  Local = 'local',
 }
 
 /**
  * Resolve the active {@link TrueForgeAuthMode} from configuration.
+ * A mode named with `TRUEFORGE_AUTH_MODE` wins over the derived ones; otherwise
  * TrueFoundry wins over OIDC when both would otherwise be set (startup already rejects that combo).
  */
 export function getTrueForgeAuthMode(config: ServerConfiguration = configuration): TrueForgeAuthMode {
+  if (config.TRUEFORGE_AUTH_MODE === 'local') {
+    return TrueForgeAuthMode.Local;
+  }
   if (isTrueFoundryModeEnabled(config)) {
     return TrueForgeAuthMode.TrueFoundry;
   }
@@ -2983,6 +3513,7 @@ export function assertNetworkAuthRequirement(requirement: NetworkAuthRequirement
     throw new Error(
       'Refusing to start without login: standalone mode requires OIDC. ' +
         'Set OIDC_ISSUER_URL, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET and OIDC_ALLOWED_EMAILS (REQUIRE_AUTH=false no longer opts out). ' +
+        'To sign in with a password Aman keeps itself, set TRUEFORGE_AUTH_MODE=local instead. ' +
         'For local development run `pnpm dev:login` and add the lines it prints to packages/trueforge/.env; ' +
         'see docs/authentication/overview.mdx.',
     );
@@ -3033,6 +3564,8 @@ export function assertSingleOwnerSignIn({ standalone, oidc }: SingleOwnerSignIn)
 }
 
 assertSingleOwnerSignIn({ standalone: configuration.STANDALONE, oidc: configuration.OIDC });
+
+assertLocalSignInOrigins(configuration);
 
 if (isTrueFoundryModeEnabled(configuration)) {
   // TrueFoundry authenticates each caller with their own gateway token, so browser SSO must be off.

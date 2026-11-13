@@ -20,18 +20,23 @@ import { DataImportError } from '../dataImport/importError';
 import type { MemoryImportTarget } from '../dataImport/importPreflight';
 import { runDataImport } from '../dataImport/importService';
 import type { AgentRecord, IAgentStore } from '../db/agentStore';
+import type { IDeliveryStore } from '../db/deliveryStore';
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 import type { IMcpServerWithAuthStore } from '../db/mcpServerStore';
+import type { IModelProviderStore } from '../db/modelProviderStore';
 import type { IPersonaStore } from '../db/personaStore';
 import type { IPersonalizationStore } from '../db/personalizationStore';
+import type { IReachSettingsStore } from '../db/reachSettingsStore';
 import type { IScheduleStore } from '../db/scheduleStore';
 import type { ISentinelAuditStore } from '../db/sentinelAuditStore';
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import type { ISpaceStore } from '../db/spaceStore';
+import type { ITextContactStore } from '../db/textContactStore';
 import type { WithTransaction } from '../db/transaction';
 import type { ITurnArtifactStore } from '../db/turnArtifactStore';
 import type { IOAuthTokenStore } from '../mcp/auth/types';
 import { importDataRoute } from '../routes/dataImportRoutes';
+import type { ChatSearchIndexer } from '../runtime/chatSearchIndexing';
 import { createMemoryClient } from '../runtime/memory/createMemoryClient';
 import { getSharedEmbeddingModel } from '../runtime/memory/embeddingModel';
 import type { MemoryClient } from '../runtime/memory/memoryClient';
@@ -46,9 +51,15 @@ export interface DataImportRouterDeps<TTransaction> {
   scheduleStore: IScheduleStore<TTransaction>;
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
   sentinelAuditStore: ISentinelAuditStore;
+  deliveryStore: IDeliveryStore;
+  reachSettingsStore: IReachSettingsStore;
+  textContactStore: ITextContactStore;
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
+  /** Runs the past-chat search pass an import asks for, without waiting for the next start. */
+  chatSearchIndexer: Pick<ChatSearchIndexer, 'resumePending'>;
   tokenStore: IOAuthTokenStore<TTransaction>;
   resolveMcpServerStore: (c?: Context, runAsAgent?: AgentRecord) => IMcpServerWithAuthStore<TTransaction>;
+  resolveModelProviderStore: (c: Context) => IModelProviderStore<TTransaction>;
   resolveAgentStore: (c: Context) => IAgentStore<TTransaction>;
   mcpCatalog: McpCatalog;
   withTransaction: WithTransaction<TTransaction>;
@@ -156,8 +167,12 @@ export function createDataImportRouter<TTransaction>(deps: DataImportRouterDeps<
           scheduleStore: deps.scheduleStore,
           globalSettingsStore: deps.globalSettingsStore,
           auditStore: deps.sentinelAuditStore,
+          deliveryStore: deps.deliveryStore,
+          reachSettingsStore: deps.reachSettingsStore,
+          textContactStore: deps.textContactStore,
           turnArtifactStore: deps.turnArtifactStore,
           mcpServerStore: deps.resolveMcpServerStore(c),
+          modelProviderStore: deps.resolveModelProviderStore(c),
           agentStore,
           mcpCatalog: deps.mcpCatalog,
           withTransaction: deps.withTransaction,
@@ -184,6 +199,7 @@ export function createDataImportRouter<TTransaction>(deps: DataImportRouterDeps<
         chats: result.chats,
         schedules: result.schedules,
       });
+      void deps.chatSearchIndexer.resumePending();
       try {
         await deps.sentinelAuditStore.record({
           tenant_id: tenantId,

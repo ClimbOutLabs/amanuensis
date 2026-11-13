@@ -136,6 +136,8 @@ async function seedSession(
     metadata: {},
     external_id: null,
     source: null,
+    is_incognito: false,
+    private_expires_at: null,
   });
   if (input.folderId !== undefined) {
     await store.setSessionFolder({
@@ -292,6 +294,8 @@ describe('Data export route', () => {
         status: 'active',
         run_at: null,
         kind: 'task',
+        urgent: false,
+        origin_session_id: null,
       },
       created_by_subject: subject('alice'),
       runFrom: new Date(),
@@ -309,6 +313,8 @@ describe('Data export route', () => {
         status: 'paused',
         run_at: null,
         kind: 'task',
+        urgent: false,
+        origin_session_id: null,
       },
       created_by_subject: subject('bob'),
       runFrom: new Date(),
@@ -447,6 +453,8 @@ describe('Data export route', () => {
       search_without_asking: undefined,
       maps_without_asking: undefined,
       sandbox_without_asking: undefined,
+      chat_search_enabled: undefined,
+      package_downloads_without_project_allowed: undefined,
     });
 
     // Uploaded files: a text artifact quoting the OAuth token, a binary, and a path that tries to escape.
@@ -583,12 +591,17 @@ describe('Data export route', () => {
       'folders.json',
       'personas.json',
       'personalization.json',
+      'space_folders.json',
       'spaces.json',
       'agents.json',
       'schedules.json',
       'connectors.json',
+      'model_providers.json',
       'settings.json',
       'audit.json',
+      'deliveries.json',
+      'reach.json',
+      'texts.json',
     ]);
     for (const section of manifest.sections) {
       expect(names).toContain(section);
@@ -764,6 +777,20 @@ describe('Data export route', () => {
     const planted = connectors.find(connector => connector.name === 'planted-connector');
     expect(planted?.manifest).not.toHaveProperty('auth');
     expect(planted?.manifest.url).toBe('https://connector.example.com/mcp/[redacted]/v1');
+  });
+
+  it('exports model provider setups without their keys', async () => {
+    const entries = readZipEntries(await exportZip('alice'));
+    const providers = z
+      .array(z.object({ name: z.string(), manifest: z.object({ type: z.string() }).passthrough() }))
+      .parse(zipEntryJson(entries, 'model_providers.json'));
+    const planted = providers.find(provider => provider.name === 'planted-provider');
+    expect(planted?.manifest).not.toHaveProperty('auth');
+    expect(planted?.manifest).toMatchObject({
+      type: 'custom',
+      base_url: 'https://provider.example.com/v1',
+      models: [{ model_id: 'planted-model', name: 'planted-model' }],
+    });
   });
 
   it('leaves out deployment-bound session fields', async () => {

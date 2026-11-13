@@ -9,6 +9,38 @@ export type { ApprovalTokenStore } from './approvalTokens';
 export { recordClassificationAudit, recordStandingTrustRun } from './audit';
 export type { AuditLogWriter, AuditOutcome, AuditRecordInput } from './audit';
 export {
+  BROWSER_CANCEL_QUALIFIERS,
+  BROWSER_COMMIT_WORDS,
+  classifyBrowserClickKind,
+  matchesCommitWord,
+} from './browserTier';
+export {
+  BROWSER_BACK_TOOL_NAME,
+  BROWSER_CLICK_TOOL_NAME,
+  BROWSER_COMMIT_REASON,
+  BROWSER_EXPLORE_REASON,
+  BROWSER_OPEN_TOOL_NAME,
+  BROWSER_PREPARE_REASON,
+  BROWSER_READ_TOOL_NAME,
+  BROWSER_SCREENSHOT_TOOL_NAME,
+  BROWSER_SCROLL_TOOL_NAME,
+  BROWSER_SELECT_TOOL_NAME,
+  BROWSER_TOOL_NAMES,
+  BROWSER_TYPE_TOOL_NAME,
+  isBrowserToolName,
+} from './browserToolNames';
+export type { BrowserToolName } from './browserToolNames';
+export {
+  browserCardCopy,
+  calendarCardCopy,
+  emailCardCopy,
+  fileCardCopy,
+  joinLine,
+  paymentCardCopy,
+  sandboxCardCopy,
+  simpleCardCopy,
+} from './cardCopy';
+export {
   approvalCardForGatedCall,
   canonicalShellForm,
   classifyHostToolCall,
@@ -16,12 +48,13 @@ export {
   mapsDestinationHosts,
   shellBindingFromForm,
 } from './classifier';
-export type { ClassifyContext, ReminderLine, SentinelAction } from './classifier';
+export type { ClassifyContext, ReminderLine, ScheduleStatusReview, SentinelAction } from './classifier';
 export {
   DEFAULT_PINNED_PATH,
   classifyContextFor,
   createSentinelHostContext,
   defaultSentinelServices,
+  forIncognitoChat,
   forUnattendedRun,
   toDispatchSentinelContext,
   withoutRelaxations,
@@ -43,10 +76,14 @@ export type { ToolProvenance } from './networkRequirements';
 export { RUNNER_WORKFLOWS, isRunnerWorkflow } from './runner';
 export type { RunnerWorkflow } from './runner';
 export { DEMO_CONNECTOR_REFUSAL, DEMO_SEND_REFUSAL, recipientsAllowed } from './sendAllowlist';
+export { buildSkillNetworkCard, skillNetworkAnswerFor } from './skillNetworkCards';
+export type { SkillNetworkAnswer, SkillNetworkCardRequest } from './skillNetworkCards';
 export {
   AUTO_DENY_REASONS,
+  ApprovalCardCopySchema,
   TIER2_ACTION_KINDS,
   Tier3CardSchema,
+  Tier3SkillNetworkSchema,
   TierSchema,
   autoDenyDecision,
   failClosedDecision,
@@ -54,7 +91,17 @@ export {
   tier2Decision,
   tier3Decision,
 } from './tier';
-export type { AutoDenyReason, Tier, Tier2ActionKind, Tier3Card, TierDecision, TrackedExecutionBinding } from './tier';
+export type {
+  ApprovalCardCopy,
+  AutoDenyReason,
+  Tier,
+  Tier2ActionKind,
+  Tier3Card,
+  Tier3Email,
+  Tier3SkillNetwork,
+  TierDecision,
+  TrackedExecutionBinding,
+} from './tier';
 export type { ToolGrantIdentity, ToolGrantKey, ToolGrantStore } from './toolGrants';
 export {
   InMemoryTrackedExecutableStore,

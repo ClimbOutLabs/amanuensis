@@ -68,7 +68,9 @@ const KEY = 'tf-key-1234567890';
 const IDS: SourceIds = {
   'aman-app': 'aman-app:0123456789ab',
   'aman-stt': 'aman-stt:0123456789cd',
+  'aman-tts': 'aman-tts:0123456789cd',
   'aman-calendar-caldav': 'aman-calendar-caldav:0123456789ef',
+  'aman-browser': 'aman-browser:0123456789ef',
 };
 const RELEASE_BASE = 'https://github.com/ClimbOutLabs/amanuensis/releases';
 const MANIFEST_URL = `${RELEASE_BASE}/latest/download/manifest.json`;
@@ -484,7 +486,10 @@ class FreshVolumeRunner implements ProcessRunner {
         sourceRef: RELEASE_TAG,
         appImage: IDS['aman-app'],
         sttImage: IDS['aman-stt'],
+        ttsImage: IDS['aman-tts'],
         calendarImage: IDS['aman-calendar-caldav'],
+        browserImage: 'aman-browser:abc123',
+        browserGatewayImage: 'aman-browser-gateway:abc123',
         dexImage: 'ghcr.io/example/dex@sha256:aaaa',
         mailEmailImage: 'ghcr.io/example/mail@sha256:bbbb',
       }),
@@ -646,6 +651,18 @@ test('a Docker Desktop download that is not from Docker Inc is refused before it
   assert.deepEqual(world.runner.installerRuns, []);
   assert.deepEqual(world.asked, []);
   assert.deepEqual(world.jobs.browserUrls, []);
+});
+
+test('an install clears an earlier removal note at the start, even one that then stops', async () => {
+  const world = await makeWorld({
+    dockerInstalled: false,
+    dockerRunning: false,
+    installerSigner: 'CN=Somebody Else, O=Somebody Else',
+  });
+  world.jobs.dockerRemovedMark = true;
+  const code = await runInstall(world.deps, { dryRun: false });
+  assert.equal(code, 1);
+  assert.equal(world.jobs.dockerRemovedMark, false);
 });
 
 test('a Docker Desktop download that cannot be checked is refused the same way', async () => {

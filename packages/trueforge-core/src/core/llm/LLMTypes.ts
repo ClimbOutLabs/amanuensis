@@ -13,7 +13,13 @@ import {
   ImplementationPlanGrantScopeSchema,
 } from '../mcp/implementationPlanGrant';
 import { ShellApprovalBindingSchema } from '../permissions/approvalTokens';
-import { TIER2_ACTION_KINDS, Tier3CardSchema, TierSchema, TrackedExecutionBindingSchema } from '../permissions/tier';
+import {
+  TIER2_ACTION_KINDS,
+  Tier3CardSchema,
+  Tier3SkillNetworkSchema,
+  TierSchema,
+  TrackedExecutionBindingSchema,
+} from '../permissions/tier';
 import { GitRemotePreconditionSchema } from '../sandbox/gitRemoteObservation';
 import { StructuredEditPreconditionSchema } from '../sandbox/structuredEditPrecondition';
 import {
@@ -106,6 +112,30 @@ export const DocumentScopeSchema = z
   })
   .describe('Host-derived folders the document reader may read without asking. Never model-authored.');
 
+export const BrowserElementReviewSchema = z
+  .object({
+    site: z.string().describe('Host of the page the element is on.'),
+    accessible_name: z.string().describe("The element's name as a person reads it on the live page."),
+    // A read stored before this field existed matches no live element, so acting on it is refused.
+    role: z
+      .string()
+      .default('')
+      .describe('What kind of control the element is: link, button, textbox, combobox and so on.'),
+    is_form_submit: z
+      .boolean()
+      .describe('True when the element submits a form: type=submit, or a plain button inside a form.'),
+    form_values: z
+      .record(z.string(), z.string())
+      .describe("Named field values on the element's form, sensitive ones already masked."),
+    // A read stored before this field existed counts as not a plain link, so it asks first.
+    link_url: z
+      .string()
+      .nullable()
+      .default(null)
+      .describe('The http or https address the element is a plain link to, or null for anything else.'),
+  })
+  .describe('Host-read context for the element a browser action acts on, used to classify it and build its card.');
+
 export const InternalToolCallInfoSchema = z.object({
   type: z.enum(['truefoundry-system', 'mcp']).describe('Whether the tool is a system tool or MCP tool.'),
   mcp_server_id: z.string().describe('Internal MCP server id (empty for system tools).'),
@@ -176,6 +206,9 @@ export const InternalToolCallInfoSchema = z.object({
   document_scope: DocumentScopeSchema.optional().describe(
     'Host-derived folders the document reader may read without asking. Never model-authored or client supplied.',
   ),
+  browser_element: BrowserElementReviewSchema.optional().describe(
+    'Host-read context for the element a browser click, type or select acts on, read from the live page first. Never model-authored.',
+  ),
   // Sentinel host-only classification. Populated by the classifier in
   // ToolSet/Sandbox; always present on classified calls, never wire-visible.
   tier: TierSchema.optional().describe('Server-owned Sentinel permission tier. Never model-authored.'),
@@ -200,12 +233,18 @@ export const InternalToolCallInfoSchema = z.object({
     .string()
     .optional()
     .describe('Text of a web search the host ran without asking, shown as a chip. Never model-authored.'),
-  grant_host: z
+  grant_binding: z
     .string()
     .nullable()
     .optional()
     .describe(
-      'Connector host a standing grant for this call binds to, set on a grant-eligible ask. Never model-authored.',
+      'Connector setup a standing grant for this call binds to, set on a grant-eligible ask. Never model-authored.',
+    ),
+  grant_tool_name: z
+    .string()
+    .optional()
+    .describe(
+      'Scope key a standing grant for this call is recorded under, when it covers more than the one tool. Never model-authored.',
     ),
   audit_description: z
     .string()
@@ -216,6 +255,11 @@ export const InternalToolCallInfoSchema = z.object({
     .optional()
     .describe(
       'Set when an unattended run held this call for the owner instead of asking; duplicate marks a repeat of a call already held in the same batch. Never model-authored.',
+    ),
+  skill_network: Tier3SkillNetworkSchema.nullable()
+    .optional()
+    .describe(
+      'Set on a held call that carries a skill network card: the skill, the sites it asks for, and why. The answer is recorded against the skill, and approving re-runs the command. Never model-authored.',
     ),
   search_provider_call: z
     .literal(true)
@@ -373,6 +417,7 @@ export type RedactedThinkingBlock = z.infer<typeof RedactedThinkingBlockSchema>;
 export type ToolEffectHints = z.infer<typeof ToolEffectHintsSchema>;
 export type MapsHosts = z.infer<typeof MapsHostsSchema>;
 export type DocumentScope = z.infer<typeof DocumentScopeSchema>;
+export type BrowserElementReview = z.infer<typeof BrowserElementReviewSchema>;
 export type InternalToolCallInfo = z.infer<typeof InternalToolCallInfoSchema>;
 export type RegisteredCommandExecution = z.infer<typeof RegisteredCommandExecutionSchema>;
 export type TrueFoundrySystemToolInfo = z.infer<typeof TrueFoundrySystemToolInfoSchema>;

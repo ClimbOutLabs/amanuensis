@@ -25,15 +25,19 @@ import {
   ZipSizeCapExceededError,
 } from '../dataExport/zipStreamWriter';
 import type { IAgentStore } from '../db/agentStore';
+import type { IDeliveryStore } from '../db/deliveryStore';
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 import type { IMcpServerWithAuthStore } from '../db/mcpServerStore';
+import type { IModelProviderStore } from '../db/modelProviderStore';
 import type { IPersonalizationStore } from '../db/personalizationStore';
 import type { IPersonaStore } from '../db/personaStore';
+import type { IReachSettingsStore } from '../db/reachSettingsStore';
 import type { IScheduleStore } from '../db/scheduleStore';
 import type { ISentinelAuditStore } from '../db/sentinelAuditStore';
 import type { ISentinelSettingsStore } from '../db/sentinelSettingsStore';
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import type { ISpaceStore } from '../db/spaceStore';
+import type { ITextContactStore } from '../db/textContactStore';
 import type { ITurnArtifactStore } from '../db/turnArtifactStore';
 import type { IOAuthTokenStore } from '../mcp/auth/types';
 import { PACKAGE_VERSION } from '../packageVersion';
@@ -49,9 +53,13 @@ export interface DataExportRouterDeps<TTransaction> {
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
   sentinelSettingsStore: ISentinelSettingsStore<TTransaction>;
   sentinelAuditStore: ISentinelAuditStore;
+  deliveryStore: IDeliveryStore;
+  reachSettingsStore: IReachSettingsStore;
+  textContactStore: ITextContactStore;
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
   tokenStore: IOAuthTokenStore<TTransaction>;
   resolveMcpServerStore: (c?: Context) => IMcpServerWithAuthStore<TTransaction>;
+  resolveModelProviderStore: (c: Context) => IModelProviderStore<TTransaction>;
   resolveAgentStore: (c: Context) => IAgentStore<TTransaction>;
   authorizer: Authorizer;
   /** Every secret value this server holds; the same source the outbound secret guard reads. */
@@ -132,8 +140,12 @@ export function createDataExportRouter<TTransaction>(deps: DataExportRouterDeps<
               globalSettingsStore: deps.globalSettingsStore,
               sentinelSettingsStore: deps.sentinelSettingsStore,
               auditStore: deps.sentinelAuditStore,
+              deliveryStore: deps.deliveryStore,
+              reachSettingsStore: deps.reachSettingsStore,
+              textContactStore: deps.textContactStore,
               turnArtifactStore: deps.turnArtifactStore,
               mcpServerStore,
+              modelProviderStore: deps.resolveModelProviderStore(c),
               listAgents: () =>
                 listManageableAgents({ store: agentStore, context: requestContext, authorizer: deps.authorizer }),
               memorySource,

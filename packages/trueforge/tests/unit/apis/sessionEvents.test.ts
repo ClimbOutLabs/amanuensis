@@ -22,13 +22,16 @@ import type { Database as PostgresDatabase } from '../../../src/db/postgres/type
 import { SentinelAuditStore } from '../../../src/db/sentinelAuditStore';
 import type { SessionCustom, TurnCustom } from '../../../src/db/sessionCustom';
 import { SqliteAgentStore } from '../../../src/db/sqlite/agent-store/SqliteAgentStore';
+import { SqliteChatDeletionStore } from '../../../src/db/sqlite/chat-deletion-store/SqliteChatDeletionStore';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqliteMcpServerStore } from '../../../src/db/sqlite/mcp-server-store/SqliteMcpServerStore';
 import { SqliteModelProviderStore } from '../../../src/db/sqlite/model-provider-store/SqliteModelProviderStore';
 import { SqliteSandboxProviderStore } from '../../../src/db/sqlite/sandbox-provider-store/SqliteSandboxProviderStore';
 import { SqliteSessionStore } from '../../../src/db/sqlite/session-store/SqliteSessionStore';
 import { SqliteSkillStore } from '../../../src/db/sqlite/skill-store/SqliteSkillStore';
+import { SqliteTurnArtifactStore } from '../../../src/db/sqlite/turn-artifact-store/SqliteTurnArtifactStore';
 import { ActiveTurnRegistry } from '../../../src/runtime/activeTurns';
+import { TurnDrainRegistry } from '../../../src/runtime/turnDrains';
 import {
   ListSessionEventsResponseSchema,
   MAX_EVENT_ID_LENGTH,
@@ -103,6 +106,11 @@ function createApp({ store, ancillary }: { store: SessionStore; ancillary: Retur
   app.route(
     '/',
     createSessionsRouter({
+      chatDeletionStore: new SqliteChatDeletionStore({
+        db: ancillary,
+        turnArtifactStore: new SqliteTurnArtifactStore(ancillary),
+      }),
+      turnDrains: new TurnDrainRegistry(),
       sessions: new Sessions({ sessionStore: store }),
       sessionStore: store,
       sentinelAuditStore: new SentinelAuditStore(ancillary),
@@ -147,6 +155,8 @@ async function createSession({ store, sessionId }: { store: SessionStore; sessio
     metadata: {},
     external_id: null,
     source: null,
+    is_incognito: false,
+    private_expires_at: null,
   });
 }
 

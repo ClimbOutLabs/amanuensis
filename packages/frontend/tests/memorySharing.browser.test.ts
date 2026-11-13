@@ -1,7 +1,4 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
@@ -9,7 +6,9 @@ import { chromium, type Browser, type Locator, type Page } from 'playwright-core
 import { createServer, defaultClientConditions } from 'vite';
 
 import { DEV_OPTIMIZE_DEPS } from '../src/devPrebundle.ts';
+import { featureShotPath, saveFailureShots } from './support/featureShots.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.js';
+import { FIRST_LOAD_TIMEOUT_MS } from './support/firstLoad.ts';
 import { privateViteCache } from './support/viteCache.ts';
 
 const RENDER_TIMEOUT_MS = 45_000;
@@ -19,15 +18,6 @@ const VIEWPORTS = [
 ] as const;
 const THEMES = ['light', 'dark'] as const;
 const GRID_NAME = 'Which notes each persona can read';
-
-async function screenshotDir(): Promise<string> {
-  const configured = process.env.AMAN_SCREENSHOT_DIR;
-  if (configured != null && configured !== '') {
-    await mkdir(configured, { recursive: true });
-    return configured;
-  }
-  return await mkdtemp(join(tmpdir(), 'aman-memory-sharing-'));
-}
 
 /** Opens Settings > Memory > Sharing from the shell, the way a person reaches it. */
 async function openSharingTab(page: Page) {
@@ -130,7 +120,6 @@ test(
       server: { host: '127.0.0.1', port: 0 },
     });
     let browser: Browser | undefined;
-    const outDir = await screenshotDir();
 
     try {
       await server.listen();
@@ -150,7 +139,10 @@ test(
             ...(viewport.name === 'phone' ? { hasTouch: true, isMobile: true } : {}),
           });
           const page = await context.newPage();
-          await page.goto(`${fixtureUrl}?mode=${theme}`, { waitUntil: 'domcontentloaded', timeout: RENDER_TIMEOUT_MS });
+          await page.goto(`${fixtureUrl}?mode=${theme}`, {
+            waitUntil: 'domcontentloaded',
+            timeout: FIRST_LOAD_TIMEOUT_MS,
+          });
           await openSharingTab(page);
 
           const { rowBottom, footerTop, viewport: viewportHeight } = await lastRowAboveFooter(page);
@@ -165,10 +157,18 @@ test(
           );
           assertGridInsidePanel(await sharingGeometry(page), `${viewport.name} ${theme}`);
 
-          await page.screenshot({ path: join(outDir, `memory-sharing-${viewport.name}-${theme}.png`) });
+          await page.screenshot({
+            path: await featureShotPath({
+              surface: 'screen:memory-sharing',
+              step: `${viewport.name}-${theme}`,
+            }),
+          });
           await context.close();
         }
       }
+    } catch (error) {
+      await saveFailureShots({ browser, surface: 'screen:memory-sharing' });
+      throw error;
     } finally {
       await browser?.close();
       await server.close();

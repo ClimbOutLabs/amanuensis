@@ -1,7 +1,4 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
@@ -9,20 +6,13 @@ import { chromium, type Browser } from 'playwright-core';
 import { createServer, defaultClientConditions } from 'vite';
 
 import { DEV_OPTIMIZE_DEPS } from '../src/devPrebundle.ts';
+import { featureShotPath, saveFailureShots } from './support/featureShots.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.ts';
+import { FIRST_LOAD_TIMEOUT_MS } from './support/firstLoad.ts';
 import { privateViteCache } from './support/viteCache.ts';
 
 const RENDER_TIMEOUT_MS = 45_000;
 const PHONE = { width: 390, height: 844 };
-
-async function screenshotDir(): Promise<string> {
-  const configured = process.env.AMAN_SCREENSHOT_DIR;
-  if (configured != null && configured !== '') {
-    await mkdir(configured, { recursive: true });
-    return configured;
-  }
-  return await mkdtemp(join(tmpdir(), 'aman-approval-phone-'));
-}
 
 test('both approval cards fit a 390 px phone with every choice in reach', { timeout: 180_000 }, async () => {
   const frontendRoot = fileURLToPath(new URL('../', import.meta.url));
@@ -50,13 +40,13 @@ test('both approval cards fit a 390 px phone with every choice in reach', { time
     const page = await browser.newPage({ viewport: PHONE, isMobile: true, hasTouch: true });
     await page.goto(`http://127.0.0.1:${address.port}/tests/fixtures/approval-card-phone.fixture.html`, {
       waitUntil: 'domcontentloaded',
-      timeout: RENDER_TIMEOUT_MS,
+      timeout: FIRST_LOAD_TIMEOUT_MS,
     });
 
     const ticket = page.getByTestId('ticket-card');
     const plain = page.getByTestId('plain-card');
-    const ticketChoices = ['Allow', 'Not now', 'Always allow this here'];
-    const plainChoices = ['Allow', 'Not now', 'Always allow this here'];
+    const ticketChoices = ['Allow', 'Not now', 'Always allow in this chat'];
+    const plainChoices = ['Allow', 'Not now', 'Always allow in this chat'];
     await ticket
       .getByRole('button', { name: ticketChoices[0], exact: true })
       .waitFor({ state: 'visible', timeout: RENDER_TIMEOUT_MS });
@@ -88,9 +78,11 @@ test('both approval cards fit a 390 px phone with every choice in reach', { time
       'the recipient runs off the screen',
     );
 
-    const dir = await screenshotDir();
-    await ticket.screenshot({ path: join(dir, 'approval-ticket-390.png') });
-    await plain.screenshot({ path: join(dir, 'approval-plain-390.png') });
+    await ticket.screenshot({ path: await featureShotPath({ surface: 'screen:approval-card', step: 'phone-ticket' }) });
+    await plain.screenshot({ path: await featureShotPath({ surface: 'screen:approval-card', step: 'phone-plain' }) });
+  } catch (error) {
+    await saveFailureShots({ browser, surface: 'screen:approval-card' });
+    throw error;
   } finally {
     await browser?.close();
     await server.close();

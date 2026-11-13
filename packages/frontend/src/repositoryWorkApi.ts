@@ -52,6 +52,7 @@ function parseRepository(value: unknown): RepositorySummary {
     clone_url: parseString(value.clone_url, 'clone_url'),
     default_branch: parseNullableString(value.default_branch, 'default_branch'),
     revision: parseNumber(value.revision, 'revision'),
+    package_downloads_allowed: parseBoolean(value.package_downloads_allowed, 'package_downloads_allowed'),
   };
 }
 
@@ -190,6 +191,25 @@ export function createRepositoryWorkApi(fetcher: typeof fetch): RepositoryWorkAp
     async getRepository(repositoryId) {
       return parseRepository(
         await parseData(fetcher(apiPath(`/api/v1/repositories/${encodeURIComponent(repositoryId)}`))),
+      );
+    },
+
+    async listRepositories() {
+      const data = await parseData(fetcher(apiPath('/api/v1/repositories')));
+      if (!Array.isArray(data)) {
+        throw new Error('Repository response is not readable. Reload the page and try again.');
+      }
+      return data.map(parseRepository);
+    },
+
+    async setRepositoryPackageDownloads({ repositoryId, allowed }) {
+      return parseRepository(
+        await parseData(
+          fetcher(
+            apiPath(`/api/v1/repositories/${encodeURIComponent(repositoryId)}/package-downloads`),
+            jsonInit('POST', { allowed }),
+          ),
+        ),
       );
     },
 

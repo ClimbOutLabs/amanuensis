@@ -16,6 +16,9 @@ DL_HOSTS=
 # 1 when this checkout differs from the recorded release: the run then updates the installed version first.
 INSTALL_UPGRADE=0
 PLAN_UPGRADE_NOTE=
+# Whether the plan builds the app here, and whether it downloads any of Aman's own published images.
+PLAN_BUILDS_APP=1
+PLAN_DOWNLOADS_AMAN=0
 PLAN_FS=$'\037'
 PLAN_RS=$'\036'
 INSTALL_T0=0
@@ -231,7 +234,11 @@ print_plan() {
   fi
   if [ -n "$PLAN_UPGRADE_NOTE" ]; then ui_line "$PLAN_UPGRADE_NOTE"; fi
   print_plan_rows
-  ui_hint "Everything is built on this computer. Nothing is sent anywhere."
+  if [ "${PLAN_DOWNLOADS_AMAN:-0}" = 1 ]; then
+    ui_hint "Aman's own parts are downloaded where a release published them, checked by their pinned digest, and the rest is built on this computer. Nothing is sent anywhere."
+  else
+    ui_hint "Everything is built on this computer. Nothing is sent anywhere."
+  fi
   if [ "$PLAN_ROOT" -gt 0 ]; then
     ui_hint "Steps marked needs admin change this computer and run only after you say yes. --yes alone does not allow them; --install-docker, --add-docker-group, --sandbox-root and --tls-root do."
   fi
@@ -242,7 +249,11 @@ print_plan() {
     total_gb=$(awk -v mb="$DL_TOTAL_MB" 'BEGIN {printf "%.1f", mb / 1024}')
     hosts=$(printf '%s' "$DL_HOSTS" | tr ' ' '\n' | sort -u | tr '\n' ' ')
     for host in $hosts; do count=$((count + 1)); done
-    ui_hint "Downloads: about $total_gb GB from $count sites. The first run takes several minutes, mostly to build the app."
+    if [ "${PLAN_BUILDS_APP:-1}" = 1 ]; then
+      ui_hint "Downloads: about $total_gb GB from $count sites. The first run takes several minutes, mostly to build the app."
+    else
+      ui_hint "Downloads: about $total_gb GB from $count sites. The first run takes several minutes."
+    fi
     if [ "$UI_VERBOSE" = 1 ]; then
       say "  First-run downloads (approximate):$DL_LINES"
       say "    total: about $DL_TOTAL_MB MB ($total_gb GB)"
@@ -334,7 +345,7 @@ plan_build() {
   INSTALL_UPGRADE=0
   PLAN_UPGRADE_NOTE=
   if [ "$have_release" = 1 ] && release_load "$RELEASE_DIR/release.json"; then
-    if [ "$CUR_APP_TAG" != "$REL_APP_TAG" ] || [ "$CUR_STT_TAG" != "$REL_STT_TAG" ] || [ "$CUR_CALENDAR_TAG" != "$REL_CALENDAR_TAG" ] || [ "$CUR_DEX_IMAGE" != "$REL_DEX_IMAGE" ] || [ "$CUR_MAIL_EMAIL_IMAGE" != "$REL_MAIL_EMAIL_IMAGE" ]; then
+    if [ "$CUR_APP_TAG" != "$REL_APP_TAG" ] || [ "$CUR_STT_TAG" != "$REL_STT_TAG" ] || [ "$CUR_TTS_TAG" != "$REL_TTS_TAG" ] || [ "$CUR_CALENDAR_TAG" != "$REL_CALENDAR_TAG" ] || [ "$CUR_BROWSER_TAG" != "$REL_BROWSER_TAG" ] || [ "$CUR_BROWSER_GATEWAY_TAG" != "$REL_BROWSER_GATEWAY_TAG" ] || [ "$CUR_DEX_IMAGE" != "$REL_DEX_IMAGE" ] || [ "$CUR_MAIL_EMAIL_IMAGE" != "$REL_MAIL_EMAIL_IMAGE" ]; then
       # A re-run never quietly reuses older images: this checkout is what gets installed.
       INSTALL_UPGRADE=1
       PLAN_UPGRADE_NOTE="This copy of Aman is newer than the installed one, so it will be updated."
@@ -344,9 +355,25 @@ plan_build() {
     fi
   fi
 
-  plan_image "$REL_APP_TAG" "The Aman app is built" "Build the Aman app" app-base app-deps dockerfile-frontend
-  plan_image "$REL_STT_TAG" "The speech-to-text service is built" "Build the speech-to-text service" stt-base stt-deps
-  plan_image "$REL_CALENDAR_TAG" "The calendar connector is built" "Build the calendar connector"
+  PLAN_BUILDS_APP=1
+  PLAN_DOWNLOADS_AMAN=0
+  if [ -n "$(published_image_for published_app_image "$REL_APP_TAG")" ]; then
+    PLAN_BUILDS_APP=0
+    PLAN_DOWNLOADS_AMAN=1
+    plan_image "$REL_APP_TAG" "The Aman app is downloaded" "Download the Aman app" app-image
+  else
+    plan_image "$REL_APP_TAG" "The Aman app is built" "Build the Aman app" app-base app-deps vad-model dockerfile-frontend
+  fi
+  plan_aman_image "$REL_STT_TAG" published_stt_image "the speech-to-text service" stt-image stt-base stt-deps
+  plan_aman_image "$REL_TTS_TAG" published_tts_image "the voice that reads replies aloud" tts-image tts-deps tts-voice
+  plan_aman_image "$REL_CALENDAR_TAG" published_calendar_image "the calendar connector" calendar-image
+  if [ -n "$(published_image_for published_browser_image "$REL_BROWSER_TAG")" ] &&
+    [ -n "$(published_image_for published_browser_gateway_image "$REL_BROWSER_GATEWAY_TAG")" ]; then
+    PLAN_DOWNLOADS_AMAN=1
+    plan_image "$REL_BROWSER_TAG $REL_BROWSER_GATEWAY_TAG" "Aman's browser is downloaded" "Download Aman's browser" browser-image
+  else
+    plan_image "$REL_BROWSER_TAG $REL_BROWSER_GATEWAY_TAG" "Aman's browser is built" "Build Aman's browser" browser-base browser-deps browser-gateway-base
+  fi
   plan_image "$REL_DEX_IMAGE" "The sign-in service is downloaded" "Download the sign-in service" dex
   plan_image "$REL_MAIL_EMAIL_IMAGE" "The email connector is downloaded" "Download the email connector" mail-email
   plan_tls
@@ -370,10 +397,14 @@ plan_build() {
     for name in $(reg_names); do
       extra=$(extra_sign_in_users "$(reg_file "$name")" "$(instance_dir "$name")")
       if [ -n "$extra" ]; then plan_add todo "Remove $extra from instance $name"; fi
+      # Says which line to change when the Twilio port the settings file asks for cannot be opened.
+      sms_webhook_port "$name" >/dev/null
       if [ "$INSTALL_UPGRADE" = 1 ]; then
         plan_add todo "Restart instance $name on the new version"
       elif [ -n "$(instance_address_change "$name")" ]; then
         plan_existing_addresses "$name"
+      elif sms_settings_changed "$name"; then
+        plan_add todo "Restart instance $name with the texts settings from its settings file"
       elif docker_available_for_probes && [ "$(instance_state "$name")" = running ]; then
         plan_add have "Instance $name is running"
       else
@@ -427,7 +458,7 @@ plan_aman_command() {
 }
 
 # An instance from before addresses were listed is opened on the network like a new one, unless --local-only says not to.
-# One already open on the network changes between https and plain http when --tls says so, or moves to https by default.
+# One already open on the network is served over https; an older record that still says plain http moves to https.
 plan_existing_addresses() { # name
   local name=$1 hosts port
   port=$(reg_get "$name" app_port)
@@ -442,15 +473,9 @@ plan_existing_addresses() { # name
   fi
   # shellcheck disable=SC2086 # the extra hosts are checked hosts without spaces
   hosts=$(network_origin_list "$port" '' ${OPT_ADDRESSES:-$(reg_get "$name" extra_hosts)} | sed "s|http://||g; s|:$port||g; s|,|, |g")
-  if [ "$(tls_target "$name")" = local ]; then
-    plan_add todo "Serve instance $name over https on your network" \
-      "It will open at: $hosts, with a certificate Aman makes on this computer. The old plain http address sends devices to https." \
-      "Each device trusts that certificate once. Its data and sign-in stay as they are."
-    return 0
-  fi
-  plan_add todo "Open instance $name on your network" \
-    "It will open at: $hosts. Sign-in works from each. Only devices on your private network can reach it." \
-    "Its data and sign-in stay as they are."
+  plan_add todo "Serve instance $name over https on your network" \
+    "It will open at: $hosts, with a certificate Aman makes on this computer. The old plain http address sends devices to https." \
+    "Each device trusts that certificate once. Its data and sign-in stay as they are."
 }
 
 # The https front end and the local authority, when an instance is about to be served over https.
@@ -459,7 +484,7 @@ plan_tls() {
   if need_new_instance && [ -n "${I_TLS_PORT:-}" ]; then need=1; fi
   for name in $(reg_names); do
     change=$(instance_address_change "$name")
-    if tls_active "$name" || { [ -n "$change" ] && [ "$change" != close ] && [ "$(tls_target "$name")" = local ]; }; then need=1; fi
+    if tls_active "$name" || { [ -n "$change" ] && [ "$change" != close ]; }; then need=1; fi
   done
   if tls_authority_needs_replacing && [ -n "$(tls_instances)" ]; then
     plan_add todo "Make this computer's root certificate again" \
@@ -506,11 +531,33 @@ docker_available_for_probes() {
   case "$DOCKER_ACCESS" in direct | sg) return 0 ;; *) return 1 ;; esac
 }
 
+# One Aman image with a single build step: downloaded when a release published it for this source, built otherwise.
+plan_aman_image() { # local tag, release.json key, what, download id when published, download ids when built...
+  local tag=$1 key=$2 what=$3 published=$4 first
+  shift 4
+  first=$(printf '%s' "${what:0:1}" | tr '[:lower:]' '[:upper:]')${what:1}
+  if [ -n "$(published_image_for "$key" "$tag")" ]; then
+    PLAN_DOWNLOADS_AMAN=1
+    plan_image "$tag" "$first is downloaded" "Download $what" "$published"
+  else
+    plan_image "$tag" "$first is built" "Build $what" "$@"
+  fi
+}
+
 # plan_image TAG TEXT download-ids...
-plan_image() { # tag, have text, todo text, download ids...
-  local tag=$1 have=$2 text=$3 dl
+plan_image() { # tags (one, or several built by the same step, space separated), have text, todo text, download ids...
+  local tags=$1 have=$2 text=$3 dl tag built=1
   shift 3
-  if docker_available_for_probes && docker_image_exists "$tag"; then
+  # A step with no image to look for would otherwise always read as done.
+  [ -n "${tags// /}" ] || die "The installer could not name the images for this step: $text. Run the installer from a complete copy of the Aman code."
+  if docker_available_for_probes; then
+    for tag in $tags; do
+      docker_image_exists "$tag" || built=0
+    done
+  else
+    built=0
+  fi
+  if [ "$built" = 1 ]; then
     plan_add have "$have"
   else
     plan_add todo "$text"
@@ -594,6 +641,8 @@ install_execute() {
   ensure_private_dir "$MACHINE_DIR"
   ensure_private_dir "$INSTANCES_DIR"
   install_doctor_shim
+  # Before the build and the backup, so a port Tailscale would take stops the run with nothing changed.
+  for name in $(reg_names); do instance_tailscale_port_check "$name"; done
   if need_new_instance && [ -z "$AMAN_PASSWORD" ]; then
     ui_hint "Asked now so the rest of the setup runs on its own."
     ask_password AMAN_PASSWORD
@@ -613,18 +662,19 @@ install_execute() {
   for name in $(reg_names); do
     change=$(instance_address_change "$name")
     if [ -n "$change" ]; then
-      instance_apply_addresses "$name" "$change"
+      instance_apply_addresses "$name" "$change" "$REL_APP_TAG"
       ADDRESS_CHANGED="$ADDRESS_CHANGED $name "
     fi
   done
   if [ "$INSTALL_UPGRADE" = 1 ]; then
     upgrade_switch
   else
-    machine_up "$REL_STT_TAG"
+    machine_up "$REL_STT_TAG" "$REL_TTS_TAG"
     for name in $(reg_names); do
       recreate=
       case "$ADDRESS_CHANGED" in *" $name "*) recreate=recreate ;; esac
       if instance_enforce_single_owner "$name"; then recreate=recreate; fi
+      if sms_settings_changed "$name"; then recreate=recreate; fi
       if [ "$(instance_state "$name")" != running ] || [ -n "$recreate" ] || { instance_sandbox_wanted "$name" && ! instance_sandbox_wired "$name"; } ||
         { instance_sandbox_wanted "$name" && ! sandbox_slots_use_current_image "$name"; }; then
         if [ "$name" = "$enabled" ]; then recreate=recreate; fi
@@ -639,7 +689,7 @@ install_execute() {
     instance_create
     AMAN_PASSWORD=
   fi
-  if [ -n "$CAL_TARGET" ] && [ -n "$CAL_EMAIL" ] && [ -z "$CAL_SKIP" ]; then calendar_apply "$CAL_TARGET"; fi
+  if [ -n "$CAL_TARGET" ] && [ -n "$CAL_EMAIL" ]; then calendar_apply "$CAL_TARGET"; fi
   if [ -n "$EM_TARGET" ] && [ -n "$EM_ADDRESS" ] && [ -z "$EM_SKIP" ]; then email_apply "$EM_TARGET"; fi
   tf_rotation_apply
   if tls_authority_needs_replacing && [ -n "$(tls_instances)" ]; then

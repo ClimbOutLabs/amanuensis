@@ -25,8 +25,13 @@ import { SkillCatalog } from '../src/catalog/SkillCatalog';
 import configuration from '../src/config';
 import { McpServerWithAuthStore } from '../src/db/McpServerWithAuthStore';
 import { BriefItemCompletionStore } from '../src/db/briefItemCompletionStore';
+import { DeliveryStore } from '../src/db/deliveryStore';
+import { NoticingStore } from '../src/db/noticingStore';
+import { PushSubscriptionStore } from '../src/db/pushSubscriptionStore';
+import { ReachSettingsStore } from '../src/db/reachSettingsStore';
 import { SentinelAuditStore, type SentinelAuditDatabase } from '../src/db/sentinelAuditStore';
 import { SqliteAgentStore } from '../src/db/sqlite/agent-store/SqliteAgentStore';
+import { SqliteChatDeletionStore } from '../src/db/sqlite/chat-deletion-store/SqliteChatDeletionStore';
 import { SqliteChatImageStore } from '../src/db/sqlite/chat-image-store/SqliteChatImageStore';
 import { createSqliteDb } from '../src/db/sqlite/client';
 import { SqliteGlobalSettingsStore } from '../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
@@ -47,10 +52,16 @@ import { SqliteSpaceStore } from '../src/db/sqlite/space-store/SqliteSpaceStore'
 import { SqliteTokenFactoryUsageStore } from '../src/db/sqlite/token-factory-usage-store/SqliteTokenFactoryUsageStore';
 import { SqliteOAuthTokenStore } from '../src/db/sqlite/token-store/SqliteOAuthTokenStore';
 import { SqliteTurnArtifactStore } from '../src/db/sqlite/turn-artifact-store/SqliteTurnArtifactStore';
+import { TextContactStore } from '../src/db/textContactStore';
 import { ActiveTurnRegistry } from '../src/runtime/activeTurns';
 import { createChatImageService } from '../src/runtime/chatImages/chatImageService';
 import { createImageReencoder } from '../src/runtime/chatImages/reencodeInSandbox';
+import { ChatSearchIndexer } from '../src/runtime/chatSearchIndexing';
+import { createDeliveryService } from '../src/runtime/delivery/deliveryService';
 import { EventSubscriptionRegistry } from '../src/runtime/event-subscription';
+import { NO_PHONE_CHANNELS } from '../src/runtime/noticing/reachChannels';
+import { createReminderReach } from '../src/runtime/noticing/reminderReach';
+import { createTextNumberService } from '../src/runtime/texts/textNumber';
 import { createTokenFactoryBudget } from '../src/runtime/tokenFactoryBudget';
 import { TurnDrainRegistry } from '../src/runtime/turnDrains';
 
@@ -86,7 +97,20 @@ const skillStore = new SqliteSkillStore(db);
 const sandboxProviderStore = new SqliteSandboxProviderStore(db);
 const modelProviderStore = new SqliteModelProviderStore(db);
 const turnArtifactStore = new SqliteTurnArtifactStore(db);
+const chatDeletionStore = new SqliteChatDeletionStore({ db, turnArtifactStore });
+const deliveryStore = new DeliveryStore(db);
+const personaStore = new SqlitePersonaStore(db);
+const globalSettingsStore = new SqliteGlobalSettingsStore(db);
+const sentinelSettingsStore = new SqliteSentinelSettingsStore(db);
+const logger = winston.createLogger({ silent: true });
 const app = createServerApp({
+  chatSearchIndexer: new ChatSearchIndexer({
+    sessionStore,
+    globalSettingsStore,
+    sentinelSettingsStore,
+    personaStore,
+    logger,
+  }),
   modelCatalog: ModelCatalog.load(),
   mcpCatalog: McpCatalog.load(configuration.MCP_CATALOG_PATH),
   skillCatalog: SkillCatalog.load(),
@@ -97,7 +121,7 @@ const app = createServerApp({
   mcpToolGrantStore: new SqliteMcpToolGrantStore(db),
   googleConnectionStore: new SqliteGoogleConnectionStore(db),
   personalizationStore: new SqlitePersonalizationStore(db),
-  personaStore: new SqlitePersonaStore(db),
+  personaStore,
   modelProviderStore,
   spaceStore: new SqliteSpaceStore(db),
   repositoryStore: new SqliteRepositoryStore(db),
@@ -115,14 +139,46 @@ const app = createServerApp({
   withTransaction: callback => db.transaction().execute(callback),
   scheduleStore: new SqliteScheduleStore(db),
   turnArtifactStore,
-  globalSettingsStore: new SqliteGlobalSettingsStore(db),
+  chatDeletionStore,
+  globalSettingsStore,
   tokenFactoryBudget: createTokenFactoryBudget({ store: new SqliteTokenFactoryUsageStore(db), cap: undefined }),
   tokenStore,
   sessionStore,
   sessionMetricsStore: new SqliteSessionMetricsStore(db),
   sentinelAuditStore: new SentinelAuditStore(db as Kysely<SentinelAuditDatabase>),
-  sentinelSettingsStore: new SqliteSentinelSettingsStore(db),
+  sentinelSettingsStore,
   briefItemStore: new BriefItemCompletionStore(db),
+  deliveryStore,
+  pushSubscriptionStore: new PushSubscriptionStore(db),
+  deliveryService: createDeliveryService({
+    store: deliveryStore,
+    senders: [],
+    audit: { record: () => Promise.resolve() },
+    logger,
+  }),
+  reachSettingsStore: new ReachSettingsStore(db),
+  noticingStore: new NoticingStore(db),
+  noticingService: { run: () => Promise.resolve({ owners: 0, raised: 0 }) },
+  reminderReach: createReminderReach({
+    reachSettings: new ReachSettingsStore(db),
+    store: new NoticingStore(db),
+    history: deliveryStore,
+    channels: () => NO_PHONE_CHANNELS,
+    logger,
+  }),
+  reachChannels: () => NO_PHONE_CHANNELS,
+  isInstanceOwner: () => false,
+  textContactStore: new TextContactStore(db),
+  textNumbers: createTextNumberService({
+    store: new TextContactStore(db),
+    reachSettings: new ReachSettingsStore(db),
+    personalization: new SqlitePersonalizationStore(db),
+    provider: undefined,
+    audit: { record: () => Promise.resolve() },
+    logger,
+    codeKey: 'openapi',
+  }),
+  webPushPublicKey: undefined,
   sessions: new Sessions({ sessionStore }),
   chatImages: createChatImageService({
     store: new SqliteChatImageStore(db),
@@ -136,8 +192,9 @@ const app = createServerApp({
   turnDrains: new TurnDrainRegistry(),
   requestReplyRouter: new RequestReplyRouter(),
   eventSubscriptions: new EventSubscriptionRegistry<TurnStreamingEvent>(undefined),
-  logger: winston.createLogger({ silent: true }),
+  logger,
   oidcDiscovery: undefined,
+  localUserStore: undefined,
   authenticator: new StandaloneAuthenticator(),
   authorizer: new TrueForgeAuthorizer(),
   outboundSecrets: () => Promise.resolve([]),

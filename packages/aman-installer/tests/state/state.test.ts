@@ -73,7 +73,10 @@ const RELEASE_TEXT = `{
   "source_ref": "abc123",
   "app_image": "aman-app:abc123",
   "stt_image": "aman-stt:abc123",
+  "tts_image": "aman-tts:abc123",
   "calendar_image": "aman-calendar-caldav:abc123",
+  "browser_image": "aman-browser:abc123",
+  "browser_gateway_image": "aman-browser-gateway:abc123",
   "dex_image": "ghcr.io/example/dex@sha256:aaaa",
   "mail_email_image": "ghcr.io/example/mail@sha256:bbbb"
 }
@@ -83,6 +86,7 @@ test('a release record parses and renders back to the same text', () => {
   const record = parseRelease(RELEASE_TEXT);
   assert.ok(record !== null);
   assert.equal(record.appImage, 'aman-app:abc123');
+  assert.equal(record.ttsImage, 'aman-tts:abc123');
   assert.equal(renderRelease(record), RELEASE_TEXT);
 });
 

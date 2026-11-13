@@ -520,6 +520,38 @@ describe('HindsightClient', () => {
       expect(fetchImpl).toHaveBeenCalledTimes(2);
     });
 
+    it('names the timeout the caller asked for when a retry runs out of time', async () => {
+      const fetchImpl = jest
+        .fn()
+        .mockImplementationOnce(async () => {
+          // The first answer takes a moment, so the retry has less than the full time left.
+          await new Promise(resolve => setTimeout(resolve, 10));
+          return jsonResponse({ detail: 'lane saturated' }, { status: 503, headers: { 'retry-after': '0' } });
+        })
+        .mockImplementationOnce(() => {
+          const error = new Error('The operation was aborted');
+          error.name = 'TimeoutError';
+          return Promise.reject(error);
+        });
+      const client = new HindsightClient({
+        apiBase: 'https://hindsight.example',
+        bank: 'aman',
+        headers: {},
+        fetchImpl,
+      });
+
+      const outcome = await client.recall({
+        query: 'q',
+        maxTokens: 100,
+        entityTokens: 10,
+        queryTimestamp: '2026-08-30T00:00:00Z',
+        timeoutMs: 5000,
+      });
+
+      expect(outcome).toEqual({ ok: false, code: 'timeout', reason: 'request timed out after 5000ms' });
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+    });
+
     it('gives up after three retries and reports the provider refusal', async () => {
       // A fresh Response per attempt, like a real server would send: reusing one Response
       // would hand every attempt the same already-consumed body stream.
@@ -610,27 +642,33 @@ describe('HindsightClient', () => {
       }
     });
 
-    it('stops retrying once the caller timeout is exhausted and reports the 503', async () => {
-      const fetchImpl = jest
-        .fn()
-        .mockResolvedValue(jsonResponse({ detail: 'busy' }, { status: 503, headers: { 'retry-after': '30' } }));
-      const client = new HindsightClient({
-        apiBase: 'https://hindsight.example',
-        bank: 'aman',
-        headers: {},
-        fetchImpl,
-      });
+    it('reports the 503 without waiting when Retry-After outlasts the caller timeout', async () => {
+      jest.useFakeTimers();
+      try {
+        const fetchImpl = jest
+          .fn()
+          .mockResolvedValueOnce(jsonResponse({ detail: 'busy' }, { status: 503, headers: { 'retry-after': '30' } }));
+        const client = new HindsightClient({
+          apiBase: 'https://hindsight.example',
+          bank: 'aman',
+          headers: {},
+          fetchImpl,
+        });
 
-      const outcome = await client.recall({
-        query: 'q',
-        maxTokens: 100,
-        entityTokens: 10,
-        queryTimestamp: '2026-08-30T00:00:00Z',
-        timeoutMs: 100,
-      });
+        // No timers are advanced, so this resolves only if the client does not sleep.
+        const outcome = await client.recall({
+          query: 'q',
+          maxTokens: 100,
+          entityTokens: 10,
+          queryTimestamp: '2026-08-30T00:00:00Z',
+          timeoutMs: 100,
+        });
 
-      expect(outcome).toMatchObject({ ok: false, code: 'http_error', httpStatus: 503 });
-      expect(fetchImpl).toHaveBeenCalledTimes(1);
+        expect(outcome).toMatchObject({ ok: false, code: 'http_error', httpStatus: 503 });
+        expect(fetchImpl).toHaveBeenCalledTimes(1);
+      } finally {
+        jest.useRealTimers();
+      }
     });
   });
 
@@ -818,6 +856,25 @@ describe('HindsightClient', () => {
       expect(fetchImpl).toHaveBeenCalledTimes(2);
       expect(String(fetchImpl.mock.calls[0]?.[0])).toBe('https://hindsight.example/v1/default/banks/aman/config');
       expect(String(fetchImpl.mock.calls[1]?.[0])).toBe('https://hindsight.example/v1/default/banks/aman/profile');
+    });
+
+    it('names the timeout the caller asked for when the legacy read runs out of time', async () => {
+      const fetchImpl = jest
+        .fn()
+        .mockImplementationOnce(async () => {
+          await new Promise(resolve => setTimeout(resolve, 10));
+          return jsonResponse({ detail: 'Bank configuration API is disabled' }, { status: 404 });
+        })
+        .mockImplementationOnce(() => {
+          const error = new Error('The operation was aborted');
+          error.name = 'TimeoutError';
+          return Promise.reject(error);
+        });
+
+      const outcome = await makeProfileClient(fetchImpl).getProfile(5000);
+
+      expect(outcome).toEqual({ ok: false, code: 'timeout', reason: 'request timed out after 5000ms' });
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
     });
 
     it('reports the config 404 when the legacy endpoint is also gone (410)', async () => {

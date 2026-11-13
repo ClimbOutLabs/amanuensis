@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 
 import type { ProcessRunner } from '../runner/processRunner.ts';
-import type { SourceIds } from './manifest.ts';
+import { sourceIdKeys, type SourceIds } from './manifest.ts';
 
 // The image tags for a checkout, read from the shell that owns them:
 // installer/lib/release.sh computes them from git, and this runs its
@@ -15,7 +15,9 @@ const SCRIPT = [
   '. "$2/release.sh"',
   'checkout_app_tag',
   'printf \'aman-stt:%s\\n\' "$(source_id ops/aman-stt)"',
+  'printf \'aman-tts:%s\\n\' "$(source_id ops/aman-tts)"',
   'printf \'aman-calendar-caldav:%s\\n\' "$(source_id ops/calendar-sidecar)"',
+  'printf \'aman-browser:%s\\n\' "$(source_id ops/browser-sidecar)"',
 ].join('\n');
 
 export async function sourceIdsFromCheckout({
@@ -34,7 +36,7 @@ export async function sourceIdsFromCheckout({
   const found: Partial<Record<keyof SourceIds, string>> = {};
   for (const line of result.stdout.split('\n')) {
     const trimmed = line.trim();
-    for (const key of ['aman-app', 'aman-stt', 'aman-calendar-caldav'] as const) {
+    for (const key of sourceIdKeys()) {
       if (trimmed.startsWith(`${key}:`)) {
         found[key] = trimmed;
       }
@@ -42,11 +44,19 @@ export async function sourceIdsFromCheckout({
   }
   const app = found['aman-app'];
   const stt = found['aman-stt'];
+  const tts = found['aman-tts'];
   const calendar = found['aman-calendar-caldav'];
-  if (app === undefined || stt === undefined || calendar === undefined) {
+  const browser = found['aman-browser'];
+  if (app === undefined || stt === undefined || tts === undefined || calendar === undefined || browser === undefined) {
     return null;
   }
-  return { 'aman-app': app, 'aman-stt': stt, 'aman-calendar-caldav': calendar };
+  return {
+    'aman-app': app,
+    'aman-stt': stt,
+    'aman-tts': tts,
+    'aman-calendar-caldav': calendar,
+    'aman-browser': browser,
+  };
 }
 
 export function installerLibDir(checkoutDir: string): string {

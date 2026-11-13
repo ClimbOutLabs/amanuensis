@@ -31,6 +31,8 @@ const RELEASE_TEXT = `{
   "app_image": "aman-app:abc123",
   "stt_image": "aman-stt:abc123",
   "calendar_image": "aman-calendar-caldav:abc123",
+  "browser_image": "aman-browser:abc123",
+  "browser_gateway_image": "aman-browser-gateway:abc123",
   "dex_image": "ghcr.io/example/dex@sha256:aaaa",
   "mail_email_image": "ghcr.io/example/mail@sha256:bbbb"
 }

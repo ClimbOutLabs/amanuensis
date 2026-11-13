@@ -5,6 +5,8 @@ import type * as TrueForge from "../index.js";
 export interface Space {
     body: string;
     createdAt: Date;
+    /** The folder the space sits in, or null when it is not in one. */
+    folderId: string | null;
     format?: TrueForge.SpaceFormat;
     id: string;
     name: string;

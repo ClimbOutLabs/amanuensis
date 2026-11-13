@@ -1,5 +1,7 @@
 import { spawnSync } from 'node:child_process';
-import { resolve } from 'node:path';
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 
 const SCRIPT = resolve(__dirname, '..', '..', '..', '..', '..', '..', 'ops', 'sandbox-slot', 'disks', 'setup-disks.sh');
 
@@ -32,5 +34,30 @@ describe('setup-disks.sh refuses unsafe input before it changes anything', () =>
     const result = run(['setup', '/var/lib/aman', '16', '4']);
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('must run as root');
+  });
+
+  test('retire removes only the disks past the slots kept, and never a slot past 4', () => {
+    if (process.getuid?.() !== 0) {
+      return;
+    }
+    const dir = mkdtempSync(join(tmpdir(), 'aman-disks-'));
+    const fstab = join(dir, 'fstab');
+    const lines: string[] = [];
+    for (const slot of [3, 4, 5]) {
+      writeFileSync(join(dir, `ws-${String(slot)}.img`), '');
+      mkdirSync(join(dir, `ws-${String(slot)}`));
+      lines.push(`# aman-sandbox-slots: ${dir}/ws-${String(slot)}.img`);
+      lines.push(`${dir}/ws-${String(slot)}.img ${dir}/ws-${String(slot)} ext4 loop 0 0`);
+    }
+    writeFileSync(fstab, `${lines.join('\n')}\n`);
+    const result = spawnSync('sh', [SCRIPT, 'retire', dir, '2'], {
+      encoding: 'utf8',
+      env: { ...process.env, AMAN_SLOTS_FSTAB: fstab },
+    });
+    expect(result.status).toBe(0);
+    expect(existsSync(join(dir, 'ws-3.img'))).toBe(false);
+    expect(existsSync(join(dir, 'ws-4.img'))).toBe(false);
+    // No install ever had a slot 5, so its disk is not this script's to remove.
+    expect(existsSync(join(dir, 'ws-5.img'))).toBe(true);
   });
 });

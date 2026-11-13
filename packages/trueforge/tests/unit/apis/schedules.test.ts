@@ -20,10 +20,13 @@ import type { SessionCustom, TurnCustom } from '../../../src/db/sessionCustom';
 import { SqliteAgentStore } from '../../../src/db/sqlite/agent-store/SqliteAgentStore';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqliteGlobalSettingsStore } from '../../../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
+import { SqlitePersonaStore } from '../../../src/db/sqlite/persona-store/SqlitePersonaStore';
 import { SqliteScheduleStore } from '../../../src/db/sqlite/schedule-store/SqliteScheduleStore';
+import { SqliteSentinelSettingsStore } from '../../../src/db/sqlite/sentinel-settings-store/SqliteSentinelSettingsStore';
 import { SqliteSessionStore } from '../../../src/db/sqlite/session-store/SqliteSessionStore';
 import { ActiveTurnRegistry } from '../../../src/runtime/activeTurns';
 import { CHAT_ASSISTANT_DESCRIPTION, getOrCreateChatAssistantAgent } from '../../../src/runtime/chatAssistant';
+import { ChatSearchIndexer } from '../../../src/runtime/chatSearchIndexing';
 import { EventSubscriptionRegistry } from '../../../src/runtime/event-subscription';
 import { validateAgentSpec } from '../../../src/runtime/sessionResources';
 import { TurnDrainRegistry } from '../../../src/runtime/turnDrains';
@@ -35,6 +38,7 @@ import {
   ListSchedulesResponseSchema,
   ScheduleManifestSchema,
 } from '../../../src/schemas/schedule';
+import { deliveryDeps } from '../../fixtures/deliveryDeps';
 import { FakeTurnArtifactStore } from '../../fixtures/fakeTurnArtifactStore';
 import { uncappedTokenFactoryBudget } from '../../fixtures/uncappedTokenFactoryBudget';
 
@@ -97,8 +101,10 @@ function stubTurnExecutionDeps(
   const sessionStore = new InMemorySessionStore<SessionCustom, TurnCustom>();
   return {
     mcpCatalog: McpCatalog.loadShipped(),
+    chatDeletionStore: { listDeletedChatModelUsage: () => Promise.resolve([]) },
     scheduleStore,
     briefItemStore: new BriefItemCompletionStore(db),
+    ...deliveryDeps(db),
     sessions: new Sessions<SessionCustom, TurnCustom>({ sessionStore }),
     agentStore,
     personaStore: { getPersona: () => Promise.resolve(undefined) },
@@ -287,6 +293,56 @@ describe('schedule RBAC', () => {
   });
 });
 
+describe('the chat a reminder lands in', () => {
+  const reminderManifest = {
+    task: 'Take the medicine',
+    run_at: '2099-01-01T09:00:00.000Z',
+    timezone: 'UTC',
+    kind: 'reminder',
+  };
+
+  it('refuses a caller that names the chat on create or edit', async () => {
+    const { asUser, postJson } = await setup();
+    asUser(ALICE);
+    const named = { ...reminderManifest, origin_session_id: 'someone-elses-chat' };
+
+    expect((await postJson('/', 'POST', { ...scheduleBody, name: 'r-named', manifest: named })).status).toBe(400);
+    const created = await postJson('/', 'POST', { ...scheduleBody, name: 'r-plain', manifest: reminderManifest });
+    expect(created.status).toBe(201);
+    const { id, manifest } = GetScheduleResponseSchema.parse(await created.json()).data;
+    expect(manifest.origin_session_id).toBeNull();
+    expect((await postJson(`/${id}`, 'PUT', { name: 'r-plain', manifest: named })).status).toBe(400);
+  });
+
+  it('keeps the chat a reminder was set in when the reminder is edited', async () => {
+    const { asUser, postJson, agentStore, scheduleStore } = await setup();
+    asUser(ALICE);
+    const agent = await agentStore.getAgent({ tenant_id: 'default', name: 'reporter' });
+    if (agent === undefined) {
+      throw new Error('Expected the test agent');
+    }
+    const { schedule } = await scheduleStore.createScheduleAndRun({
+      tenant_id: 'default',
+      agent_id: agent.id,
+      agent_name: agent.name,
+      persona_id: null,
+      name: 'r-set-in-chat',
+      manifest: ScheduleManifestSchema.parse({ ...reminderManifest, origin_session_id: 'alice-chat' }),
+      created_by_subject: { subject_id: 'alice', subject_type: 'user', subject_display_name: 'alice' },
+      runFrom: new Date(),
+    });
+
+    const edited = await postJson(`/${schedule.id}`, 'PUT', {
+      name: 'r-set-in-chat',
+      manifest: { ...reminderManifest, task: 'Take the blue pill' },
+    });
+
+    expect(edited.status).toBe(200);
+    const stored = await scheduleStore.getSchedule({ tenant_id: 'default', id: schedule.id });
+    expect(stored?.manifest).toMatchObject({ task: 'Take the blue pill', origin_session_id: 'alice-chat' });
+  });
+});
+
 describe('who a schedule runs as', () => {
   it('names a saved agent by its name and a chat-made schedule by its assistant, never the stored agent name', async () => {
     const { app, asUser, postJson, agentStore, scheduleStore } = await setup();
@@ -317,6 +373,8 @@ describe('who a schedule runs as', () => {
         status: 'active',
         run_at: null,
         kind: 'task',
+        urgent: false,
+        origin_session_id: null,
       },
       created_by_subject: alice,
       runFrom: new Date(),
@@ -539,7 +597,16 @@ describe('internal schedule execution', () => {
       agent_name: agent.name,
       persona_id: null,
       name: 'daily-report',
-      manifest: { task: 'Say hi', cron: '0 13 * * *', timezone, status: 'active', run_at: null, kind: 'task' },
+      manifest: {
+        task: 'Say hi',
+        cron: '0 13 * * *',
+        timezone,
+        status: 'active',
+        run_at: null,
+        kind: 'task',
+        urgent: false,
+        origin_session_id: null,
+      },
       created_by_subject: alice,
       runFrom: new Date(),
     });
@@ -592,6 +659,7 @@ describe('internal schedule execution', () => {
       userRef: 'alice',
       agent,
       persona: undefined,
+      session_title: 'Daily report · Monday, August 31',
     });
     mockedStartTurnInProcess.mockReset();
 
@@ -601,7 +669,7 @@ describe('internal schedule execution', () => {
     expect(mockedStartTurnInProcess).toHaveBeenCalledWith(expect.objectContaining({ unattended: true }));
   });
 
-  it('lets a scheduled chat take its title from its task, with no fixed schedule title', async () => {
+  it('names the run chat for its schedule, from the prepared title, never from its task', async () => {
     const { agent, run, execute } = await seedRun();
     const session = await new Sessions<SessionCustom, TurnCustom>({
       sessionStore: new InMemorySessionStore<SessionCustom, TurnCustom>(),
@@ -620,6 +688,7 @@ describe('internal schedule execution', () => {
       userRef: 'alice',
       agent,
       persona: undefined,
+      session_title: 'Daily report · Monday, August 31',
     });
     mockedStartTurnInProcess.mockReset();
 
@@ -627,7 +696,10 @@ describe('internal schedule execution', () => {
 
     expect(response.status).toBe(204);
     expect(mockedStartTurnInProcess).toHaveBeenCalledTimes(1);
-    expect(mockedStartTurnInProcess.mock.calls[0]?.[0]).not.toHaveProperty('title_seed');
+    expect(mockedStartTurnInProcess.mock.calls[0]?.[0]).toHaveProperty(
+      'session_title',
+      'Daily report · Monday, August 31',
+    );
   });
 
   it("runs the turn in the schedule's own time zone, so today and times match the owner's day", async () => {
@@ -649,6 +721,7 @@ describe('internal schedule execution', () => {
       userRef: 'alice',
       agent,
       persona: undefined,
+      session_title: 'Daily report · Monday, August 31',
     });
     mockedStartTurnInProcess.mockReset();
 
@@ -690,6 +763,7 @@ describe('internal schedule execution', () => {
         updated_at: '2026-08-31T00:00:00.000Z',
         updated_by: 'alice',
       },
+      session_title: 'Daily report · Monday, August 31',
     });
     mockedStartTurnInProcess.mockReset();
 
@@ -851,6 +925,9 @@ describe('what a schedule runs with', () => {
     expect(response.status).toBe(204);
     const started = mockedStartTurnInProcess.mock.calls[0]?.[0];
     expect(started?.unattended).toBe(true);
+    // The run's chat is named for the schedule, never for its task text.
+    expect(started?.session_title).toContain('Morning brief');
+    expect(started?.session_title).not.toContain('Say hi');
     // The tools changed what the run can reach, not how it asks: the dispatcher's own flag still decides.
     expect(started).toEqual(expect.objectContaining({ unattended: true, userRef: 'alice' }));
   });
@@ -1020,12 +1097,25 @@ describe('audit rows for schedule firings', () => {
     ]);
   });
 
-  it('writes the firing row and the delivery row for a reminder, both keyed on the Reminders chat', async () => {
+  it('writes the delivery row and the firing row for a reminder, both keyed on the chat it was set in', async () => {
     const built = await setup();
     const agent = await built.agentStore.getAgent({ tenant_id: 'default', name: 'reporter' });
     if (agent === undefined) {
       throw new Error('The reporter agent was not created.');
     }
+    const originStore = new SqliteSessionStore(built.db);
+    await originStore.createSession({
+      tenant_id: 'default',
+      session_id: 'origin-chat',
+      created_by_subject: ALICE_SUBJECT,
+      agent: { type: 'reference', id: agent.id, name: agent.name },
+      custom: null,
+      metadata: {},
+      external_id: null,
+      source: null,
+      is_incognito: false,
+      private_expires_at: null,
+    });
     const { schedule, pendingRun } = await built.scheduleStore.createScheduleAndRun({
       tenant_id: 'default',
       agent_id: agent.id,
@@ -1037,6 +1127,7 @@ describe('audit rows for schedule firings', () => {
         run_at: '2026-10-19T18:00:00-04:00',
         timezone: 'America/New_York',
         kind: 'reminder',
+        origin_session_id: 'origin-chat',
       }),
       created_by_subject: ALICE_SUBJECT,
       runFrom: new Date('2026-10-18T12:00:00.000Z'),
@@ -1052,6 +1143,8 @@ describe('audit rows for schedule firings', () => {
       sessions: new Sessions<SessionCustom, TurnCustom>({ sessionStore }),
       sessionStore,
       audit,
+      deliveryService: deliveryDeps(built.db, audit).deliveryService,
+      reminderReach: deliveryDeps(built.db, audit).reminderReach,
     });
 
     const response = await execution.request('/runs/execute', {
@@ -1066,10 +1159,10 @@ describe('audit rows for schedule firings', () => {
       tenant_id: 'default',
       created_by: 'alice',
       tier: 1,
-      tool_name: 'set_reminder',
-      description: 'Delivered the reminder: Take the medicine',
+      tool_name: 'delivery.created',
       outcome: 'logged',
     });
+    expect(records[0]?.description).toContain('Take the medicine');
     expect(records[1]).toMatchObject({
       tenant_id: 'default',
       created_by: 'alice',
@@ -1078,6 +1171,155 @@ describe('audit rows for schedule firings', () => {
       description: 'The reminder ran: Take the medicine',
       outcome: 'logged',
     });
+    expect(records[0]?.conversation_id).toBe('origin-chat');
     expect(records[1]?.conversation_id).toBe(records[0]?.conversation_id);
+  });
+
+  it('still runs a reminder whose origin chat was deleted, and leaves a feed item with no link', async () => {
+    const built = await setup();
+    const agent = await built.agentStore.getAgent({ tenant_id: 'default', name: 'reporter' });
+    if (agent === undefined) {
+      throw new Error('The reporter agent was not created.');
+    }
+    const originStore = new SqliteSessionStore(built.db);
+    await originStore.createSession({
+      tenant_id: 'default',
+      session_id: 'origin-chat',
+      created_by_subject: ALICE_SUBJECT,
+      agent: { type: 'reference', id: agent.id, name: agent.name },
+      custom: null,
+      metadata: {},
+      external_id: null,
+      source: null,
+      is_incognito: false,
+      private_expires_at: null,
+    });
+    const { pendingRun } = await built.scheduleStore.createScheduleAndRun({
+      tenant_id: 'default',
+      agent_id: agent.id,
+      agent_name: agent.name,
+      name: 'reminder-medicine',
+      persona_id: null,
+      manifest: ScheduleManifestSchema.parse({
+        task: 'Take the medicine',
+        run_at: '2026-10-19T18:00:00-04:00',
+        timezone: 'America/New_York',
+        kind: 'reminder',
+        origin_session_id: 'origin-chat',
+      }),
+      created_by_subject: ALICE_SUBJECT,
+      runFrom: new Date('2026-10-18T12:00:00.000Z'),
+    });
+    if (pendingRun === undefined) {
+      throw new Error('Expected the reminder to queue a run');
+    }
+    await originStore.deleteSession({ tenant_id: 'default', session_id: 'origin-chat' });
+    const { records, audit } = auditRecorder();
+    const deps = deliveryDeps(built.db, audit);
+    const execution = createScheduleExecutionRouter({
+      ...stubTurnExecutionDeps(built.agentStore, built.scheduleStore, built.db),
+      sessions: new Sessions<SessionCustom, TurnCustom>({ sessionStore: originStore }),
+      sessionStore: originStore,
+      audit,
+      deliveryService: deps.deliveryService,
+    });
+
+    const response = await execution.request('/runs/execute', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ schedule_run_id: pendingRun.id }),
+    });
+
+    expect(response.status).toBe(204);
+    const page = await deps.deliveryStore.list({ tenant_id: 'default', created_by: 'alice', limit: 10 });
+    expect(page.deliveries).toHaveLength(1);
+    expect(page.deliveries[0]).toMatchObject({ kind: 'reminder', text: 'Take the medicine', link: null });
+    expect(records.map(record => record.tool_name)).toEqual(['delivery.created', 'set_reminder']);
+    expect(records[1]?.conversation_id).toBe('');
+    await expect(originStore.getSession({ tenant_id: 'default', session_id: 'origin-chat' })).resolves.toBeUndefined();
+  });
+
+  it('adds a delivered reminder to the past-chat search as soon as it is written', async () => {
+    const built = await setup();
+    const agent = await built.agentStore.getAgent({ tenant_id: 'default', name: 'reporter' });
+    if (agent === undefined) {
+      throw new Error('The reporter agent was not created.');
+    }
+    const { pendingRun } = await built.scheduleStore.createScheduleAndRun({
+      tenant_id: 'default',
+      agent_id: agent.id,
+      agent_name: agent.name,
+      name: 'reminder-medicine',
+      persona_id: null,
+      manifest: ScheduleManifestSchema.parse({
+        task: 'Take the medicine',
+        run_at: '2026-10-19T18:00:00-04:00',
+        timezone: 'America/New_York',
+        kind: 'reminder',
+        origin_session_id: 'origin-chat',
+      }),
+      created_by_subject: ALICE_SUBJECT,
+      runFrom: new Date('2026-10-18T12:00:00.000Z'),
+    });
+    if (pendingRun === undefined) {
+      throw new Error('Expected the reminder to queue a run');
+    }
+    const sessionStore = new SqliteSessionStore(built.db);
+    await sessionStore.createSession({
+      tenant_id: 'default',
+      session_id: 'origin-chat',
+      created_by_subject: ALICE_SUBJECT,
+      agent: { type: 'reference', id: agent.id, name: agent.name },
+      custom: null,
+      metadata: {},
+      external_id: null,
+      source: null,
+      is_incognito: false,
+      private_expires_at: null,
+    });
+    const sentinelSettingsStore = new SqliteSentinelSettingsStore(built.db);
+    await sentinelSettingsStore.patch({
+      tenant_id: 'default',
+      created_by: 'alice',
+      offline_mode: undefined,
+      tier2_auto_allow: undefined,
+      search_without_asking: undefined,
+      maps_without_asking: undefined,
+      sandbox_without_asking: undefined,
+      chat_search_enabled: true,
+      package_downloads_without_project_allowed: undefined,
+    });
+    const execution = createScheduleExecutionRouter({
+      ...stubTurnExecutionDeps(built.agentStore, built.scheduleStore, built.db),
+      sessions: new Sessions<SessionCustom, TurnCustom>({ sessionStore }),
+      sessionStore,
+      chatSearchIndexer: new ChatSearchIndexer({
+        sessionStore,
+        globalSettingsStore: new SqliteGlobalSettingsStore(built.db),
+        sentinelSettingsStore,
+        personaStore: new SqlitePersonaStore(built.db),
+        logger: winston.createLogger({ silent: true }),
+      }),
+    });
+
+    const response = await execution.request('/runs/execute', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ schedule_run_id: pendingRun.id }),
+    });
+
+    expect(response.status).toBe(204);
+    const hits = await sessionStore.searchChatHistory({
+      tenant_id: 'default',
+      query: 'medicine',
+      created_by_subject_id: 'alice',
+      exclude_session_id: null,
+      personas: { kind: 'only', persona_ids: [] },
+      from: null,
+      to: null,
+      limit: 8,
+    });
+    expect(hits).toHaveLength(1);
+    expect(hits[0]?.snippet).toContain('Take the medicine');
   });
 });

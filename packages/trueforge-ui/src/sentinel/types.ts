@@ -13,6 +13,7 @@
  * UI rule for consumers: never infer a tier. Tier-specific UI renders only when the
  * server sent an explicit `tier`.
  */
+import { toolInvocationKey, toolInvocationRawId } from '@truefoundry/assistant-ui-runtime';
 import { changeRequestText } from '@truefoundry/trueforge-core/core/permissions/changeRequest';
 import { savedSearchHold, withHoldSay } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
 import { readStoredMailbox, type Tier3Mailbox } from '@truefoundry/trueforge-core/core/permissions/tierMailbox';
@@ -65,6 +66,10 @@ export type SentinelApprovalEmail = {
   reply_in_thread: { subject: string; from: string } | null;
   /** The address replies go to when it is not the sender, or null when replies go to the sender. */
   reply_to: string | null;
+  /** The display name the message is sent as, null when none is set; absent on a card from before it was carried. */
+  from_name?: string | null;
+  /** True when a name was left off an address because it looked like an address; absent on an older card. */
+  name_left_off?: boolean;
 };
 
 const APPROVAL_CALENDAR_ACTIONS = ['create', 'change'] as const;
@@ -90,6 +95,10 @@ export type SentinelApprovalCalendarEvent = {
   guests_emailed: boolean;
   /** True when a change touches one date of a repeating event. */
   one_of_repeating: boolean;
+  /** True when the same event was created in this chat a few minutes ago; absent on an older card. */
+  already_created?: boolean;
+  /** How many days the event runs over; absent on an older card. */
+  span_days?: number;
   /** The event as it is now, for a change; null for a new event. */
   before: { title: string; when: string; duration: string; location: string } | null;
 };
@@ -97,6 +106,21 @@ export type SentinelApprovalCalendarEvent = {
 const APPROVAL_SCHEDULE_ACTIONS = ['create', 'delete'] as const;
 
 export type SentinelApprovalScheduleAction = (typeof APPROVAL_SCHEDULE_ACTIONS)[number];
+
+/** One connector or skill a new schedule may run with. */
+export type SentinelScheduleToolChoice = { name: string; on: boolean };
+
+/** What a new schedule runs with, as it will be saved. */
+export type SentinelScheduleTools = {
+  /** True when the person may ask for other choices before approving. */
+  editable: boolean;
+  /** The agent the schedule runs as. */
+  agent_name: string;
+  connectors: SentinelScheduleToolChoice[];
+  skills: SentinelScheduleToolChoice[];
+  run_code: boolean;
+  memory: boolean;
+};
 
 /** The whole schedule a chat call creates or deletes, in plain words. */
 export type SentinelApprovalSchedule = {
@@ -112,6 +136,23 @@ export type SentinelApprovalSchedule = {
   runs_as: string;
   /** The next three runs in plain words for a new schedule; empty for a delete. */
   next_runs: string[];
+  /** What a new schedule runs with; absent for a delete and on an older card. */
+  tools?: SentinelScheduleTools | undefined;
+};
+
+/**
+ * The words an approval card is made of, produced by the server by one owner per action kind.
+ * The UI renders the three parts and never builds sentences of its own. Absent on cards saved
+ * before copy existed; those build their headline from their own fields, or show the generic
+ * headline when they have none, never their stored plain_what.
+ */
+export type SentinelApprovalCopy = {
+  /** What will happen, in one sentence, in words the person recognises. */
+  headline: string;
+  /** What follows from approving, in one line, or null when nothing needs saying. */
+  consequence: string | null;
+  /** Why the tier asks, in plain words, shown behind "Why I'm asking", or null. */
+  reason: string | null;
 };
 
 /**
@@ -123,6 +164,12 @@ export type SentinelApprovalSchedule = {
 export type SentinelApprovalCard = {
   /** One plain-language sentence describing what will happen. No jargon. Always present. */
   plain_what: string;
+  /** The headline, consequence and reason the card renders, or null on cards saved before copy existed. */
+  copy?: SentinelApprovalCopy | null | undefined;
+  /** True when the safe choice is the primary button: the action is irreversible or reaches other people. */
+  safe_choice?: boolean | undefined;
+  /** True when the action destroys or sends something for good, so its button wears the destructive ink. */
+  destructive?: boolean | undefined;
   /** One sentence on why the agent wants this, from agent intent when available. */
   plain_why: string | null;
   /** What cannot be undone, or null when fully reversible. */
@@ -153,10 +200,27 @@ export type SentinelApprovalCard = {
   schedule: SentinelApprovalSchedule | null;
   /** The whole persona when the action adds one, or null. */
   persona: SentinelApprovalPersona | null;
+  /** The skill when the action adds one, or null. */
+  skill: SentinelApprovalSkill | null;
   /** For a mail send to addresses not on the Email list: those addresses. Approving adds them. Otherwise null. */
   mail_new_recipients?: string[] | null;
   /** True when a card carrying mail_new_recipients approves saving a draft rather than sending. */
   mail_draft?: boolean | undefined;
+  /** The network question when the card asks about a skill's sites, or null. */
+  skill_network?: SentinelApprovalSkillNetwork | null;
+};
+
+const APPROVAL_SKILL_NETWORK_REASONS = ['first_use', 'undeclared_host'] as const;
+
+export type SentinelApprovalSkillNetworkReason = (typeof APPROVAL_SKILL_NETWORK_REASONS)[number];
+
+/** The network question a skill network card asks: the skill, the sites, and why it is asked. */
+export type SentinelApprovalSkillNetwork = {
+  skill_name: string;
+  hosts: string[];
+  reason: SentinelApprovalSkillNetworkReason;
+  /** The code version the approval is pinned to, or null when no pin is in force. */
+  code_pin: string | null;
 };
 
 /** The whole persona a chat call adds, in plain words. */
@@ -169,6 +233,21 @@ export type SentinelApprovalPersona = {
   instructions: string;
   /** The model the persona answers with. */
   model_name: string;
+};
+
+/** The skill a chat call adds, as the server read it from where it comes from. */
+export type SentinelApprovalSkill = {
+  name: string;
+  /** What the skill is for, as the skill itself says. */
+  description: string;
+  /** The repository the skill comes from, and the folder in it when there is one. */
+  source: string;
+  /** The exact commit that is added. */
+  version: string;
+  /** True when this is one of the starter skills that come with the app. */
+  starter: boolean;
+  /** The skill's own instruction file, or null for a starter skill. */
+  instructions: string | null;
 };
 
 /** What the server says about an action a scheduled run held for its owner instead of asking. */
@@ -186,15 +265,44 @@ export type SentinelApprovalInfo = {
   eventId: string | null;
   /** Thread that owns the call; a sub-agent's calls carry its own thread id. */
   threadId: string | null;
+  /** The model message event that requested the call; tells apart two calls that reuse one call id. */
+  sourceEventId?: string | undefined;
   /** False when the server refuses chat scope for this call; absent from servers that do not say. */
   chatAllowOffered?: boolean | undefined;
   /** True when the server lets the owner always allow this tool; the server refuses it for other tools. */
   alwaysAllowOffered?: boolean | undefined;
+  /** Set when the every-chat answer on this card lets maps run without asking, instead of allowing one tool. */
+  alwaysAllowCovers?: 'maps' | undefined;
   /** Present only for an action a scheduled run held; such a card never pauses the chat. */
   held?: HeldActionInfo | undefined;
   /** Present only for an action a scheduled run could not save for the owner, and why. */
   notSaved?: NotSavedReason | undefined;
 };
+
+/**
+ * The key a card is filed under: the same key the runtime gives the chat part, so a call id the model reuses in a
+ * later message never lands on an earlier call's card. A card without its source event is filed by its call id.
+ */
+export function approvalKey(info: Pick<SentinelApprovalInfo, 'toolCallId' | 'sourceEventId'>): string {
+  return info.sourceEventId === undefined
+    ? info.toolCallId
+    : toolInvocationKey({ sourceEventId: info.sourceEventId, toolCallId: info.toolCallId });
+}
+
+/**
+ * The entry for a chat part, from a map filed by `approvalKey`. A part id that carries its source event matches
+ * exactly, or falls back to an entry filed by call id alone. A bare call id (the part's event is not known) takes
+ * the newest entry for that call id, since the newest call is the one a part without an event can be.
+ */
+export function entryForPart<T>(entries: ReadonlyMap<string, T>, partToolCallId: string): T | undefined {
+  const exact = entries.get(partToolCallId);
+  if (exact !== undefined) return exact;
+  const rawId = toolInvocationRawId(partToolCallId);
+  if (rawId !== partToolCallId) return entries.get(rawId);
+  let newest: T | undefined;
+  for (const [key, value] of entries) if (toolInvocationRawId(key) === rawId) newest = value;
+  return newest;
+}
 
 /** Why a scheduled run could not save an action that needed the owner's OK. */
 export type NotSavedReason = 'too_many' | 'helper_agent';
@@ -262,6 +370,8 @@ export type SentinelAuditEntry = {
 export type SentinelUserAuditEntry = SentinelAuditEntry & {
   /** False once the chat the entry came from has been deleted. */
   chat_exists: boolean;
+  /** Title of the chat the entry came from; null when deleted or not yet titled. */
+  session_title: string | null;
 };
 
 /** One page of the owner's audit log; `nextPageToken` is absent on the last page. */
@@ -282,6 +392,13 @@ export type SentinelUserSettings = {
   maps_without_asking: boolean;
   /** While on, code, commands and workspace files in the sandbox run without asking. Default: on. */
   sandbox_without_asking: boolean;
+  /** While on, the assistant can search your own past chats when you ask. Default: off. */
+  chat_search_enabled: boolean;
+  /**
+   * While on, the sandbox may download packages in chats that are not working on a project, through
+   * the download-only mirrors. The allowance also covers scheduled runs. Default: off.
+   */
+  package_downloads_without_project_allowed: boolean;
 };
 
 /**
@@ -289,7 +406,7 @@ export type SentinelUserSettings = {
  * server's HTTP API plus the SDK client; trueforge-ui only declares the contract.
  *
  * - `GET /api/v1/sessions/{sessionId}/audit-log?limit=N` -> `{ entries: [...] }`
- * - `GET /api/v1/user/audit-log?limit=N&page_token=T&outcome=O` -> `{ data: [...], pagination }`
+ * - `GET /api/v1/user/audit-log?limit=N&page_token=T&outcome=O&from=ISO&to=ISO` -> `{ data: [...], pagination }`
  * - `GET /api/v1/user/settings/sentinel` -> `{ data: settings }`
  * - `PATCH /api/v1/user/settings/sentinel` with a settings patch -> `{ data: settings }`
  * - `GET /api/v1/user/brief-items/completions` -> `{ data: [{ item_key, ... }] }`
@@ -302,6 +419,10 @@ export type SentinelApi = {
     limit?: number;
     pageToken?: string | undefined;
     outcome?: SentinelAuditOutcome | undefined;
+    /** Start of the shown days, as an ISO instant; no start bound when undefined. */
+    from?: string | undefined;
+    /** End of the shown days, as an ISO instant; entries before it show. No end bound when undefined. */
+    to?: string | undefined;
   }) => Promise<SentinelUserAuditPage>;
   getUserSettings: () => Promise<SentinelUserSettings>;
   updateUserSettings: (patch: Partial<SentinelUserSettings>) => Promise<SentinelUserSettings>;
@@ -327,9 +448,9 @@ export type SentinelApi = {
 /** Durable per-tool-call Sentinel state for one session. */
 export type SentinelSessionContext = {
   approvals: SentinelApprovalInfo[];
-  /** Answers already given, by tool call id. Absent when the host reads none. */
+  /** Answers already given, by the key of the card they answered (`approvalKey`). Absent when the host reads none. */
   answers?: Record<string, ApprovalAnswer> | undefined;
-  /** The words the owner typed with a "Change it" answer, by tool call id. Absent when the host reads none. */
+  /** The words the owner typed with a "Change it" answer, by card key (`approvalKey`). Absent when the host reads none. */
   changeRequests?: Record<string, string> | undefined;
 };
 
@@ -435,6 +556,11 @@ function parseEmail(value: unknown): SentinelApprovalEmail | null {
   const threadFrom = isRecord(thread) ? optionalString(thread, 'from') : undefined;
   // A card from before this field existed has no reply address, so it replies to the sender as it did then.
   const replyTo = optionalString(value, 'reply_to') ?? optionalString(value, 'replyTo') ?? null;
+  const fromName =
+    value.from_name === null || value.fromName === null
+      ? null
+      : (optionalString(value, 'from_name') ?? optionalString(value, 'fromName'));
+  const nameLeftOff = optionalBoolean(value, 'name_left_off') ?? optionalBoolean(value, 'nameLeftOff');
   return {
     action,
     to,
@@ -447,6 +573,8 @@ function parseEmail(value: unknown): SentinelApprovalEmail | null {
     reply_in_thread:
       threadSubject === undefined || threadFrom === undefined ? null : { subject: threadSubject, from: threadFrom },
     reply_to: replyTo,
+    ...(fromName === undefined ? {} : { from_name: fromName }),
+    ...(nameLeftOff === undefined ? {} : { name_left_off: nameLeftOff }),
   };
 }
 
@@ -478,6 +606,14 @@ function parseCalendarEvent(value: unknown): SentinelApprovalCalendarEvent | nul
   const attendees = stringList(value.attendees);
   const guests_emailed = optionalBoolean(value, 'guests_emailed') ?? optionalBoolean(value, 'guestsEmailed');
   const one_of_repeating = optionalBoolean(value, 'one_of_repeating') ?? optionalBoolean(value, 'oneOfRepeating');
+  const alreadyCreated = optionalBoolean(value, 'already_created') ?? optionalBoolean(value, 'alreadyCreated');
+  const rawSpanDays = value.span_days ?? value.spanDays;
+  // The server only sends whole days of at least one; anything else is not a card this reader can trust.
+  const spanDays =
+    typeof rawSpanDays === 'number' && Number.isInteger(rawSpanDays) && rawSpanDays >= 1 ? rawSpanDays : undefined;
+  if (rawSpanDays !== undefined && spanDays === undefined) {
+    return null;
+  }
   if (
     action === undefined ||
     calendar === undefined ||
@@ -505,6 +641,8 @@ function parseCalendarEvent(value: unknown): SentinelApprovalCalendarEvent | nul
     attendees,
     guests_emailed,
     one_of_repeating,
+    ...(alreadyCreated === undefined ? {} : { already_created: alreadyCreated }),
+    ...(spanDays === undefined ? {} : { span_days: spanDays }),
     before: parseCalendarBefore(value.before),
   };
 }
@@ -520,6 +658,58 @@ function parsePersona(value: unknown): SentinelApprovalPersona | null {
     return null;
   }
   return { name, description, instructions, model_name };
+}
+
+function parseToolChoices(value: unknown): SentinelScheduleToolChoice[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const choices: SentinelScheduleToolChoice[] = [];
+  for (const item of value) {
+    if (!isRecord(item) || typeof item.name !== 'string' || typeof item.on !== 'boolean') return undefined;
+    choices.push({ name: item.name, on: item.on });
+  }
+  return choices;
+}
+
+/** Tools missing any field are not shown, so a partial list is never approved as if it were whole. */
+function parseScheduleTools(value: unknown): SentinelScheduleTools | undefined {
+  if (!isRecord(value)) return undefined;
+  const agent_name = optionalString(value, 'agent_name') ?? optionalString(value, 'agentName');
+  const connectors = parseToolChoices(value.connectors);
+  const skills = parseToolChoices(value.skills);
+  const { editable, memory } = value;
+  const run_code = value.run_code ?? value.runCode;
+  if (
+    agent_name === undefined ||
+    connectors === undefined ||
+    skills === undefined ||
+    typeof editable !== 'boolean' ||
+    typeof run_code !== 'boolean' ||
+    typeof memory !== 'boolean'
+  ) {
+    return undefined;
+  }
+  return { editable, agent_name, connectors, skills, run_code, memory };
+}
+
+/** A card missing any field is not shown as a skill, so a partial one is never approved as if it were whole. */
+function parseSkill(value: unknown): SentinelApprovalSkill | null {
+  if (!isRecord(value)) return null;
+  const name = optionalString(value, 'name');
+  const description = optionalString(value, 'description');
+  const source = optionalString(value, 'source');
+  const version = optionalString(value, 'version');
+  const { starter, instructions } = value;
+  if (
+    name === undefined ||
+    description === undefined ||
+    source === undefined ||
+    version === undefined ||
+    typeof starter !== 'boolean' ||
+    (instructions !== null && typeof instructions !== 'string')
+  ) {
+    return null;
+  }
+  return { name, description, source, version, starter, instructions };
 }
 
 /** A card missing any field is not shown as a schedule, so a partial schedule is never approved as if it were whole. */
@@ -543,7 +733,37 @@ function parseSchedule(value: unknown): SentinelApprovalSchedule | null {
   ) {
     return null;
   }
-  return { action, name, when, time_zone, task, runs_as, next_runs };
+  const tools = parseScheduleTools(value.tools);
+  // Tools that were sent but cannot be read make the whole card unreadable, never a card without them.
+  if (value.tools !== undefined && value.tools !== null && tools === undefined) {
+    return null;
+  }
+  return { action, name, when, time_zone, task, runs_as, next_runs, ...(tools === undefined ? {} : { tools }) };
+}
+
+/** The card's copy, read from the wire shape or its camel twin; undefined when the card predates copy. */
+function parseApprovalCopy(value: unknown): SentinelApprovalCopy | undefined {
+  if (!isRecord(value)) return undefined;
+  const headline = optionalString(value, 'headline');
+  if (headline === undefined) return undefined;
+  return {
+    headline,
+    consequence: cardString(value, { snake: 'consequence', camel: 'consequence' }),
+    reason: cardString(value, { snake: 'reason', camel: 'reason' }),
+  };
+}
+
+/** A card missing any field is not shown as a network question, so a partial one is never approved as if whole. */
+function parseSkillNetwork(value: unknown): SentinelApprovalSkillNetwork | null {
+  if (!isRecord(value)) return null;
+  const skill_name = optionalString(value, 'skill_name') ?? optionalString(value, 'skillName');
+  const hosts = stringList(value.hosts);
+  const reason = APPROVAL_SKILL_NETWORK_REASONS.find(candidate => candidate === value.reason);
+  const code_pin = value.code_pin === null ? null : optionalString(value, 'code_pin');
+  if (skill_name === undefined || hosts === undefined || reason === undefined || code_pin === undefined) {
+    return null;
+  }
+  return { skill_name, hosts, reason, code_pin };
 }
 
 function parseApprovalCard(value: unknown): SentinelApprovalCard | undefined {
@@ -552,6 +772,9 @@ function parseApprovalCard(value: unknown): SentinelApprovalCard | undefined {
   if (plain_what === undefined) return undefined;
   return readSavedHoldReason({
     plain_what,
+    copy: parseApprovalCopy(value.copy),
+    safe_choice: cardFlag(value, { snake: 'safe_choice', camel: 'safeChoice' }),
+    destructive: cardFlag(value, { snake: 'destructive', camel: 'destructive' }),
     plain_why: cardString(value, { snake: 'plain_why', camel: 'plainWhy' }),
     cannot_be_undone: cardString(value, { snake: 'cannot_be_undone', camel: 'cannotBeUndone' }),
     why_asked_again: cardString(value, { snake: 'why_asked_again', camel: 'whyAskedAgain' }),
@@ -567,8 +790,10 @@ function parseApprovalCard(value: unknown): SentinelApprovalCard | undefined {
     calendar_event: parseCalendarEvent(value.calendar_event ?? value.calendarEvent),
     schedule: parseSchedule(value.schedule),
     persona: parsePersona(value.persona),
+    skill: parseSkill(value.skill),
     mail_new_recipients: parseNewRecipients(value.mail_new_recipients ?? value.mailNewRecipients),
     mail_draft: cardFlag(value, { snake: 'mail_draft', camel: 'mailDraft' }),
+    skill_network: parseSkillNetwork(value.skill_network ?? value.skillNetwork),
   });
 }
 
@@ -609,13 +834,17 @@ function parseApprovalInfo(
   const notSaved = parseNotSaved(ref);
   const chatAllowOffered = ref.can_chat_allow ?? ref.canChatAllow;
   const alwaysAllowOffered = ref.can_always_allow ?? ref.canAlwaysAllow;
+  const sourceEventId = optionalString(ref, 'source_event_id') ?? optionalString(ref, 'sourceEventId');
+  const alwaysAllowCovers = ref.always_allow_covers ?? ref.alwaysAllowCovers;
   return {
     toolCallId,
     tier,
     card,
     ...origin,
+    ...(sourceEventId === undefined ? {} : { sourceEventId }),
     ...(typeof chatAllowOffered === 'boolean' ? { chatAllowOffered } : {}),
     ...(typeof alwaysAllowOffered === 'boolean' ? { alwaysAllowOffered } : {}),
+    ...(alwaysAllowCovers === 'maps' ? { alwaysAllowCovers } : {}),
     ...(held === undefined ? {} : { held }),
     ...(notSaved === undefined ? {} : { notSaved }),
   };
@@ -679,15 +908,52 @@ function changeRequestsFromEvent(event: unknown): [string, string][] {
   return requests;
 }
 
+/**
+ * The call ids a model message asked for, with that message's event id: the same source event id the runtime
+ * gives the chat part of each call.
+ */
+function toolCallsAskedBy(event: unknown): { eventId: string; toolCallIds: string[] } | undefined {
+  if (!isRecord(event) || event.type !== 'model.message') return undefined;
+  const eventId = optionalString(event, 'id');
+  const calls = event.tool_calls ?? event.toolCalls;
+  if (eventId === undefined || !Array.isArray(calls)) return undefined;
+  const toolCallIds = calls.filter(isRecord).flatMap(call => {
+    const id = optionalString(call, 'id');
+    return id === undefined ? [] : [id];
+  });
+  return { eventId, toolCallIds };
+}
+
 /** Folds raw session events into per-tool-call Sentinel state (later events win). */
 export function extractSentinelSessionContext(events: unknown[]): SentinelSessionContext {
   const approvals = new Map<string, SentinelApprovalInfo>();
   const answers: Record<string, ApprovalAnswer> = {};
   const changeRequests: Record<string, string> = {};
+  // The model message that last asked for each call id. A card that does not name its source event takes this
+  // one, so every card and every answer is filed under the full key of the call it belongs to, and a later call
+  // that reuses the id never matches it.
+  const askedBy = new Map<string, string>();
+  // An answer names only the call id. It answers the newest call for that id asked before it, so it is filed
+  // under that call's key and never marks a later call that reuses the id as answered.
+  const latestKey = new Map<string, string>();
+  const keyFor = (toolCallId: string) => latestKey.get(toolCallId) ?? toolCallId;
   for (const event of events) {
-    for (const approval of extractSentinelFromEvent(event)) approvals.set(approval.toolCallId, approval);
-    for (const [toolCallId, answer] of answersFromEvent(event)) answers[toolCallId] = answer;
-    for (const [toolCallId, words] of changeRequestsFromEvent(event)) changeRequests[toolCallId] = words;
+    const asked = toolCallsAskedBy(event);
+    if (asked !== undefined) {
+      for (const toolCallId of asked.toolCallIds) {
+        askedBy.set(toolCallId, asked.eventId);
+        latestKey.set(toolCallId, toolInvocationKey({ sourceEventId: asked.eventId, toolCallId }));
+      }
+    }
+    for (const parsed of extractSentinelFromEvent(event)) {
+      const sourceEventId = parsed.sourceEventId ?? askedBy.get(parsed.toolCallId);
+      const approval = sourceEventId === undefined ? parsed : { ...parsed, sourceEventId };
+      const key = approvalKey(approval);
+      approvals.set(key, approval);
+      latestKey.set(approval.toolCallId, key);
+    }
+    for (const [toolCallId, answer] of answersFromEvent(event)) answers[keyFor(toolCallId)] = answer;
+    for (const [toolCallId, words] of changeRequestsFromEvent(event)) changeRequests[keyFor(toolCallId)] = words;
   }
   return { approvals: [...approvals.values()], answers, changeRequests };
 }
@@ -748,7 +1014,8 @@ export function parseUserAuditPage(body: unknown): SentinelUserAuditPage {
   for (const item of body.data) {
     const entry = parseAuditEntry(item);
     if (entry === undefined || !isRecord(item) || typeof item.chat_exists !== 'boolean') continue;
-    entries.push({ ...entry, chat_exists: item.chat_exists });
+    const session_title = typeof item.session_title === 'string' ? item.session_title : null;
+    entries.push({ ...entry, chat_exists: item.chat_exists, session_title });
   }
   const pagination = isRecord(body.pagination) ? body.pagination : undefined;
   const nextPageToken = pagination === undefined ? undefined : optionalString(pagination, 'next_page_token');
@@ -765,6 +1032,8 @@ export function parseUserSettings(body: unknown): SentinelUserSettings {
       search_without_asking: true,
       maps_without_asking: true,
       sandbox_without_asking: true,
+      chat_search_enabled: false,
+      package_downloads_without_project_allowed: false,
     };
   }
   return {
@@ -773,5 +1042,8 @@ export function parseUserSettings(body: unknown): SentinelUserSettings {
     search_without_asking: optionalBoolean(settings, 'search_without_asking') ?? true,
     maps_without_asking: optionalBoolean(settings, 'maps_without_asking') ?? true,
     sandbox_without_asking: optionalBoolean(settings, 'sandbox_without_asking') ?? true,
+    chat_search_enabled: optionalBoolean(settings, 'chat_search_enabled') ?? false,
+    package_downloads_without_project_allowed:
+      optionalBoolean(settings, 'package_downloads_without_project_allowed') ?? false,
   };
 }

@@ -15,6 +15,7 @@ import {
 import type { SpaceRecord } from '../../../src/db/spaceStore';
 import { spaceCapability, type SpaceToolStore } from '../../../src/runtime/spaceCapability';
 import { isRecord } from '../../fixtures/jsonGuards';
+import { noSpaceFolders } from './spaceFolderStoreFake';
 
 /**
  * The owner's Oct 21 request, run as a scripted model: the calls a well-behaved model makes,
@@ -158,6 +159,7 @@ function makeStore(): SpaceToolStore {
       throw new Error('not used in this run');
     },
     getSpace: async input => rows.get(input.space_id),
+    ...noSpaceFolders,
     getSpaceRevision: async () => undefined,
     listSpacesWithAggregate: async () => ({
       records: [...rows.values()],

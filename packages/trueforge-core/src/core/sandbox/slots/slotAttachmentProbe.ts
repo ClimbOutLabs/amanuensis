@@ -4,14 +4,14 @@ import { shellEscape } from '../provider/Provider';
 import { SlotSandboxProvider } from './SlotSandboxProvider';
 
 /** What the document pipeline runs in the guest; a slot image built before attachments were supported lacks them. */
-const GUEST_DOCUMENT_TOOLS = ['pdfinfo', 'pdftotext', 'pdftoppm', 'tesseract'] as const;
+const GUEST_DOCUMENT_TOOLS = ['pdfinfo', 'pdftotext', 'pdftoppm', 'tesseract', 'python3'] as const;
 /** Marks the lines of the probe command's output that name something missing; every other line is ignored. */
 const MISSING_MARKER = 'AMAN_MISSING:';
 /** Cleanup gets its own short allowance so a probe that timed out can still remove its throwaway workspace. */
 const CLEANUP_TIMEOUT_MS = 5_000;
 
 export type SlotAttachmentProbeResult =
-  /** A file went in and came back, and the guest has the PDF and OCR tools. */
+  /** A file went in and came back, and the guest has the PDF, Word and OCR tools. */
   | { state: 'ready' }
   /** The probe ran out of time, for example because every slot was busy; nothing is known to be wrong. */
   | { state: 'busy' }

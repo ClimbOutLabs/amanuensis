@@ -8,9 +8,9 @@ Do one person at a time. The short way is two commands (see "The one command" be
 
 ## What moves and what does not
 
-Moves: chats with their original dates, the files uploaded to them, folders, agents and their instructions, personas and their knowledge documents, memories, spaces with their current content, schedules (all switched off), connector entries (unused: no agent is attached to them), and your permission history. Imported chats never carry live approvals or approval grants: a chat that was waiting for an answer comes over with that request expired, and "Always allow this here" choices start over.
+Moves: chats with their original dates, the files uploaded to them, folders, agents and their instructions, personas and their knowledge documents, memories, spaces with their current content, schedules (all switched off), connector entries (unused: no agent is attached to them), model settings without their keys (each provider's type, address and models), and your permission history. Imported chats never carry live approvals or approval grants: a chat that was waiting for an answer comes over with that request expired, and "Always allow in this chat" choices start over.
 
-The recall and tool-output checks of Settings, Memory come along. Permission settings (offline mode, web search without asking) and Always allow choices start fresh, so each tool asks again; re-asking is the safe default.
+The recall and tool-output checks of Settings, Memory come along. Permission settings (offline mode, web search without asking) and "Always allow everywhere" choices start fresh, so each tool asks again; re-asking is the safe default.
 
 Does not move: model keys, connector sign-ins and saved credentials, and your own skills and registered repositories. A connector that points at a value on the server, such as an environment variable or a file, is refused. Step 7 lists what to redo by hand.
 
@@ -72,16 +72,11 @@ echo "postgres container: $PG"; echo "memory volume: $MEM_VOL"; echo "knowledge 
 
 All three of the last values must be filled in. If the Postgres service is not called `postgres`, use the name that `docker compose -p "$OLD" ps` shows. If a folder is a bind mount rather than a named volume, the volume name is empty: copy that folder with `cp -a` instead and use its path in step 3.
 
-Dump the database. This is a consistent snapshot and does not stop anything:
+Then dump the database and copy the memory and knowledge folders into new volumes. The dump is a consistent snapshot and does not stop anything. The new volumes are yours to read and change; the originals are only read:
 
 ```bash
 docker exec "$PG" pg_dump -U "$PGUSER" -d "$PGDB" -Fc > "$WORK/prod.dump"
 ls -l "$WORK/prod.dump"
-```
-
-Copy the memory and knowledge folders into new volumes. The new volumes are yours to read and change; the originals are only read:
-
-```bash
 for kind in memory knowledge; do
   src=$MEM_VOL; [ "$kind" = knowledge ] && src=$KNOW_VOL
   docker volume create "mig-$PERSON-$kind"
@@ -93,25 +88,20 @@ If someone is chatting while the copy runs, a knowledge file can be caught mid-w
 
 ## 2. Get the new code
 
+Get the code, then build the new app image. The installer in step 4 builds the same image and reuses these layers, so this costs nothing twice. If you already have a checkout, leave out the `git clone` line.
+
 ```bash
 cd ~
 git clone <repository-url> amanuensis
 cd amanuensis
 git checkout main
 git pull origin main
-```
-
-If you already have a checkout, skip the clone.
-
-Build the new app image. The installer in step 4 builds the same image and reuses these layers, so this costs nothing twice:
-
-```bash
 docker build -f Dockerfile.dev --build-arg BUILD_REF="$(git rev-parse HEAD)" -t aman-migrate:new .
 ```
 
 ## 3. Export from a restored copy
 
-Never point the export at the live database. Start a temporary Postgres and restore the dump into it:
+Never point the export at the live database. These lines start a temporary Postgres and restore the dump into it. Then they make a volume for the export and copy the old settings file into your private work folder. The export runs as the app user (uid 10001), which owns the copied folders, so it can write into that volume and read the settings copy, and keys that lived only in the settings file are blanked too. Next they define a short helper, `aman_copy`, that runs the new image against the copies. Last, they list the people who own chats in the copy:
 
 ```bash
 docker network create "mig-$PERSON-net"
@@ -119,21 +109,11 @@ docker run -d --name "mig-$PERSON-pg" --network "mig-$PERSON-net" \
   -e POSTGRES_USER="$PGUSER" -e POSTGRES_PASSWORD="$PGPASS" -e POSTGRES_DB="$PGDB" postgres:17
 until docker exec "mig-$PERSON-pg" pg_isready -U "$PGUSER" -q; do sleep 1; done; sleep 2
 docker exec -i "mig-$PERSON-pg" pg_restore -U "$PGUSER" -d "$PGDB" --no-owner < "$WORK/prod.dump"
-```
-
-The export runs as the app user (uid 10001), which owns the copied folders, and writes into a volume that user owns. The old settings file goes into your private work folder, readable by that user, so keys that lived only there are blanked too:
-
-```bash
 docker volume create "mig-$PERSON-out"
 docker run --rm -v "mig-$PERSON-out":/out alpine:3.21 chown 10001:10001 /out
 OLD_ENV=~/aman-prod/$PERSON/packages/trueforge/.env
 [ -f "$OLD_ENV" ] || OLD_ENV=~/aman-prod/$PERSON/.env
 install -m 644 "$OLD_ENV" "$WORK/old.env"
-```
-
-`$WORK` is mode 0700, so nobody else on this computer can reach the copy. Define a short helper that runs the new image against the copies:
-
-```bash
 aman_copy() {
   docker run --rm --network "mig-$PERSON-net" --user 10001:10001 -e HOME=/tmp \
     -e STANDALONE=false -e NODE_ENV=production -e TRUEFORGE_API_KEY=unused-export-only \
@@ -143,26 +123,23 @@ aman_copy() {
     -v "mig-$PERSON-memory":/data/memory -v "mig-$PERSON-knowledge":/data/persona-knowledge \
     -v "$WORK/old.env":/migrate/old.env:ro -v "mig-$PERSON-out":/out aman-migrate:new aman "$@"
 }
+aman_copy export-data --migrate --list-users
 ```
 
-List the people who own chats in the copy, then export the owner. Use the id exactly as the list shows it (the old sign-in id). A line named `trueforge-default` with 0 sessions is always listed; ignore it.
+`$WORK` is mode 0700, so nobody else on this computer can reach the settings copy. A line named `trueforge-default` with 0 sessions is always listed; ignore it.
+
+Export the owner, copy the file out of the volume into your private folder, and check it. Put the owner's id in place of `<user-id>`, exactly as the list shows it (the old sign-in id):
 
 ```bash
-aman_copy export-data --migrate --list-users
 aman_copy export-data --migrate --include-uploads --secrets-env /migrate/old.env --user '<user-id>' --out /out/$PERSON.zip
+docker run --rm -v "mig-$PERSON-out":/out:ro alpine:3.21 cat "/out/$PERSON.zip" > "$WORK/out/$PERSON.zip"
+chmod 600 "$WORK/out/$PERSON.zip"
+ls -l "$WORK/out"
 ```
 
 `--migrate` brings the old database forward to the new schema. It changes only the temporary copy. `--include-uploads` brings the files uploaded to chats; they are kept in the database, so nothing more needs to be mounted. The export prints one line of JSON and exits 0.
 
 Shared memories (what the assistant remembered outside any persona) are left out by default, because on a stack that more than one person used they mix everyone's memories. If `--list-users` shows only this person, export again with `--include-instance-data` added to bring them too. The export also leaves out a persona's memory when another person on the stack has a persona with the same name, and says so. Exit codes are 0 for success, 1 for a failure (one plain line says why) and 2 for a bad command line.
-
-Copy the file out of the volume into your private folder, then check it:
-
-```bash
-docker run --rm -v "mig-$PERSON-out":/out:ro alpine:3.21 cat "/out/$PERSON.zip" > "$WORK/out/$PERSON.zip"
-chmod 600 "$WORK/out/$PERSON.zip"
-ls -l "$WORK/out"
-```
 
 Tidy up the temporary Postgres, the output volume and the settings copy (keep the safety copies from step 1):
 
@@ -224,11 +201,11 @@ Only that person's data should be there. If the old stack held more than one per
 
 ## 7. What to redo by hand
 
-- Model keys and the model server address: Settings, Models. Keys are never exported.
+- Model keys: Settings, Models. Keys are never exported. The provider, its address and its models come over, and the import summary names each provider that needs its key. An export from an older Aman has no model settings, so add your model there too. On an instance whose models TrueFoundry manages, model settings do not come over, and personas use the models already there.
 - Connector sign-ins: a connector that signs in through its own website arrives with a "sign in" button; click it. A connector that used a header token or a fixed client id and secret arrives without those values: open it in Settings, Connectors, and enter them again.
 - Imported connectors: each one arrives unused, with no agent attached. Attach the ones you want to your agents again. If you ran a web search or memory connector, set that role again too.
 - Permission settings: in Settings, open Permissions and set offline mode and web search again if you want them. The recall and tool-output checks came along.
-- "Always allow" choices: each tool asks again the first time, which is the safe default, and you can pick Always allow once more.
+- "Always allow everywhere" choices: each tool asks again the first time, which is the safe default, and you can pick it once more.
 - Schedules: they arrive switched off. Review each one and switch on the ones you want.
 
 ## 8. Roll back

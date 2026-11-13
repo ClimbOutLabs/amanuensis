@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
@@ -8,13 +7,11 @@ import { createServer } from 'vite';
 
 import { startApprovalTestServer } from '../../trueforge/tests/fixtures/approvalTestServer.ts';
 import { inProcessApi } from './support/approvalChat.ts';
+import { featureShotPath, saveFailureShots } from './support/featureShots.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.ts';
-import { screenshotDir } from './support/screenshotDir.ts';
+import { FIRST_LOAD_TIMEOUT_MS } from './support/firstLoad.ts';
 import { privateViteCache } from './support/viteCache.ts';
 
-const RENDER_TIMEOUT_MS = 45_000;
-/** The first page waits for the dev server's cold compile, which is slow while other suites run. */
-const FIRST_LOAD_TIMEOUT_MS = 120_000;
 const VIEWPORTS = [
   { width: 1440, height: 900, label: 'desktop' },
   { width: 390, height: 844, label: 'phone' },
@@ -100,7 +97,6 @@ test('home is one left-aligned column whose edges the composer and the cards sha
     if (address == null || typeof address === 'string') throw new Error('Vite did not bind a TCP port');
     const origin = `http://127.0.0.1:${address.port}`;
     browser = await chromium.launch({ executablePath: findChromiumExecutable(chromium.executablePath()) });
-    const shots = await screenshotDir('aman-home-column-');
 
     for (const viewport of VIEWPORTS) {
       const context = await browser.newContext({ viewport: { width: viewport.width, height: viewport.height } });
@@ -108,7 +104,7 @@ test('home is one left-aligned column whose edges the composer and the cards sha
         localStorage.setItem('aui-theme-preference', 'light');
       });
       const page = await context.newPage();
-      await page.goto(`${origin}/`, { waitUntil: 'domcontentloaded', timeout: RENDER_TIMEOUT_MS });
+      await page.goto(`${origin}/`, { waitUntil: 'domcontentloaded', timeout: FIRST_LOAD_TIMEOUT_MS });
       const edges = await homeEdges(page);
       const label = viewport.label;
       for (const [name, left] of Object.entries({
@@ -126,10 +122,17 @@ test('home is one left-aligned column whose edges the composer and the cards sha
       assert.deepEqual(await cutOffCards(page), [], `${label}: no description is cut off under any pill`);
       assert.equal(edges.truncated, 0, `${label}: no card description is cut off`);
       console.log(`${label} edges: ${JSON.stringify(edges)}`);
-      await page.screenshot({ path: join(shots, `home-${viewport.width}x${viewport.height}-light.png`) });
+      await page.screenshot({
+        path: await featureShotPath({
+          surface: 'screen:home',
+          step: `column-${String(viewport.width)}x${String(viewport.height)}-light`,
+        }),
+      });
       await context.close();
     }
-    console.log(`screenshots: ${shots}`);
+  } catch (error) {
+    await saveFailureShots({ browser, surface: 'screen:home' });
+    throw error;
   } finally {
     await browser?.close();
     await vite.close();

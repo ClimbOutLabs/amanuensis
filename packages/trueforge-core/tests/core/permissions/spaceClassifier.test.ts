@@ -154,6 +154,7 @@ describe('Space tool classification', () => {
     ['edit_space', { space_name: 'Dog breeds' }, 'Updated the space Dog breeds.'],
     ['edit_space', { space_id: 'sp1' }, 'Updated a space.'],
     ['revert_space', { space_id: 'sp1', revision: 2 }, 'Restored an earlier version of a space.'],
+    ['move_space', { space_name: 'Dog breeds', folder_name: 'Pets' }, 'Moved a space to a folder.'],
   ])('labels %s in plain words', async (name, params, line) => {
     const decision = await classifyTier(spaceAction(name, params), makeCtx());
     expect(decision.card).toBeNull();
@@ -168,10 +169,22 @@ describe('Space tool classification', () => {
     expect(card.plain_what).toBe('Created the space Dog breeds.');
   });
 
+  it('carries the line for the activity log on a write, and none on a read', async () => {
+    const write = await classifyTier(spaceAction('create_space', { name: 'Home renovation' }), makeCtx());
+    expect(write.audit_description).toBe('Created the space Home renovation.');
+    const read = await classifyTier(spaceAction('get_space', { space_name: 'Home renovation' }), makeCtx());
+    expect(read.audit_description).toBeNull();
+  });
+
   it('runs revert_space without asking', async () => {
     const decision = await classifyTier(spaceAction('revert_space', { space_id: 'sp1', revision: 2 }), makeCtx());
     expect(decision).toMatchObject({ tier: 1, reason: 'space_write', card: null, auto_deny: null });
     expect(decision.reason_detail).toBe('Restored an earlier version of a space.');
+  });
+
+  it('runs move_space without asking', async () => {
+    const decision = await classifyTier(spaceAction('move_space', { space_name: 'Dog breeds' }), makeCtx());
+    expect(decision).toMatchObject({ tier: 1, reason: 'space_write', card: null, auto_deny: null });
   });
 
   it.each(['list_spaces', 'get_space', 'list_blocks'])('runs %s without asking', async name => {

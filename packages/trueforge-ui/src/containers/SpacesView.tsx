@@ -18,6 +18,7 @@ import { TOKEN_CSS_VARS } from '@/theme/types.js';
 
 import { useAssistantDisplayName } from '../components/PersonalizationContext.js';
 import { setComposerPrefill } from '../hooks/useComposerDraft.js';
+import { FolderMoveDialog, FolderSection, NewFolderControl } from './FolderControls.js';
 import { SPACE_PAGE_BASE_STYLE, spaceThemeDeclarations } from './spacePageBase.js';
 
 /** Strips a leading H1 that repeats the space name (the model echoes it in the body). Markdown only. */
@@ -147,16 +148,33 @@ function SpacesListPage({
   );
   if (ctx == null) return null;
   const showSkeleton = ctx.loading && ctx.spaces.length === 0;
-  const showEmpty = !ctx.loading && ctx.error == null && ctx.spaces.length === 0;
+  const showEmpty = !ctx.loading && ctx.error == null && ctx.spaces.length === 0 && ctx.folders.length === 0;
+  const knownFolderIds = new Set(ctx.folders.map(folder => folder.id));
+  // A space whose folder is not in the list still shows, with the unfiled ones.
+  const unfiled = newestFirst.filter(space => space.folder_id === null || !knownFolderIds.has(space.folder_id));
+  const card = (space: Space) => <SpaceCard key={space.id} space={space} now={now} onOpen={onOpen} />;
 
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-3 px-6 py-6">
       {ctx.error != null ? <p className="text-sm text-failure-bg">{ctx.error}</p> : null}
       {showSkeleton ? <SpacesListSkeleton /> : null}
       {showEmpty ? <SpacesEmptyState onStartChat={onStartChat} /> : null}
-      {!showSkeleton && newestFirst.length > 0
-        ? newestFirst.map(space => <SpaceCard key={space.id} space={space} now={now} onOpen={onOpen} />)
+      {!showSkeleton && !showEmpty ? (
+        <div className="flex justify-end">
+          <NewFolderControl kind="space" createFolder={ctx.createFolder} labeled />
+        </div>
+      ) : null}
+      {!showSkeleton
+        ? ctx.folders.map(folder => {
+            const inFolder = newestFirst.filter(space => space.folder_id === folder.id);
+            return (
+              <FolderSection key={folder.id} kind="space" folder={folder} count={inFolder.length} operations={ctx}>
+                {inFolder.map(card)}
+              </FolderSection>
+            );
+          })
         : null}
+      {!showSkeleton && unfiled.length > 0 ? unfiled.map(card) : null}
     </div>
   );
 }
@@ -355,12 +373,17 @@ function SpaceHtmlFrame({ html }: { html: string }) {
 }
 
 /**
- * Overflow menu on the space page holding the one destructive action a person can take here.
- * Deliberately not placed beside the title/status row: deletion is rare and irreversible, so it
- * sits apart from anything read on every visit rather than beside a "primary" action (there isn't
- * one to be next to; the space itself has no other person-facing controls).
+ * Overflow menu on the space page holding filing and the one destructive action a person can take
+ * here. Deliberately not placed beside the title/status row: deletion is rare and irreversible, so
+ * it sits apart from anything read on every visit rather than beside a "primary" action.
  */
-function SpaceOverflowMenu({ onRequestDelete }: { onRequestDelete: () => void }) {
+function SpaceOverflowMenu({
+  onRequestMove,
+  onRequestDelete,
+}: {
+  onRequestMove: () => void;
+  onRequestDelete: () => void;
+}) {
   return (
     <DropdownMenu
       trigger={
@@ -374,6 +397,10 @@ function SpaceOverflowMenu({ onRequestDelete }: { onRequestDelete: () => void })
         </button>
       }
     >
+      <DropdownMenuItem onClick={onRequestMove}>
+        <Icon name="folder" className="size-4" aria-hidden />
+        Move to folder
+      </DropdownMenuItem>
       <DropdownMenuItem onClick={onRequestDelete} className="text-failure-bg">
         <Icon name="trash" className="size-4" aria-hidden />
         Delete space
@@ -492,6 +519,7 @@ function SpaceDetailPage({
   const assistant = useAssistantDisplayName();
   const space = useMemo(() => ctx?.spaces.find(s => s.id === spaceId), [ctx, spaceId]);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [moveOpen, setMoveOpen] = useState(false);
 
   if (ctx == null) return null;
   if (space == null) {
@@ -529,7 +557,7 @@ function SpaceDetailPage({
                 Ask {assistant} to change this
               </Button>
             ) : null}
-            <SpaceOverflowMenu onRequestDelete={() => setDeleteOpen(true)} />
+            <SpaceOverflowMenu onRequestMove={() => setMoveOpen(true)} onRequestDelete={() => setDeleteOpen(true)} />
           </div>
         </div>
         <PurposeLine purpose={space.purpose} />
@@ -540,6 +568,15 @@ function SpaceDetailPage({
       ) : (
         <Markdown content={body} readOnly spacePictures className="space-markdown max-w-none" />
       )}
+      <FolderMoveDialog
+        kind="space"
+        folders={ctx.folders}
+        currentFolderId={space.folder_id}
+        createFolder={ctx.createFolder}
+        onMove={folderId => ctx.moveSpace({ spaceId: space.id, folderId })}
+        open={moveOpen}
+        onOpenChange={setMoveOpen}
+      />
       <DeleteSpaceModal space={space} open={deleteOpen} onOpenChange={setDeleteOpen} onDeleted={onDeleted} />
     </div>
   );

@@ -273,6 +273,29 @@ function renderThreadList({
 }
 
 describe('ThreadListContainer', () => {
+  it('sizes the search field and the Folders heading on the type scale, not a one-off literal', async () => {
+    renderThreadList({
+      adapter: { threads: [] },
+      variant: 'recent-history',
+      chatFolders: {
+        load: async () => ({ folders: [], assignments: [], folderSessions: [], unfiledSessions: [] }),
+        createFolder: async () => ({ id: 'f1', name: 'Research' }),
+        renameFolder: async ({ folderId, name }) => ({ id: folderId, name }),
+        deleteFolder: async () => {},
+        setSessionFolder: async () => {},
+      },
+    });
+
+    const heading = await screen.findByRole('heading', { name: 'Folders' });
+    expect(heading).toHaveClass('text-xs');
+    expect(heading.className).not.toMatch(/text-\[0\.75rem\]/);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Search chats' }));
+    const searchField = screen.getByRole('searchbox', { name: 'Search chats' });
+    expect(searchField).toHaveClass('text-sm');
+    expect(searchField.className).not.toMatch(/text-\[0\.8125rem\]/);
+  });
+
   it('renders loading and empty list states from the runtime', () => {
     const { unmount } = renderThreadList({
       adapter: {
@@ -374,6 +397,34 @@ describe('ThreadListContainer', () => {
     expect(screen.getByRole('heading', { name: 'Chats' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Chats' })).not.toBeInTheDocument();
     expect(container.querySelector('[data-slot="aui_thread-list-viewport"]')).toHaveClass('aui-scrollbar-hidden');
+  });
+
+  it('keeps the chat list at its full height in the scrolling panel, so a long list scrolls instead of spilling over what follows', () => {
+    const { container } = renderThreadList({
+      adapter: {
+        threadId: 'draft-1',
+        threads: [
+          {
+            status: 'regular',
+            id: 'draft-1',
+            remoteId: 'session-draft-1',
+            title: 'Draft chat',
+            custom: { isMutable: true },
+          },
+          {
+            status: 'regular',
+            id: 'named-1',
+            remoteId: 'session-named-1',
+            title: 'Named chat',
+            custom: { isMutable: false },
+          },
+        ],
+      },
+      variant: 'recent-history',
+    });
+
+    const viewport = container.querySelector('[data-slot="aui_thread-list-viewport"]');
+    expect(viewport?.firstElementChild).toHaveClass('shrink-0');
   });
 
   it('uses filter intent to distinguish Try Agent from a filtered agent session', () => {
@@ -820,6 +871,80 @@ describe('ThreadListContainer', () => {
     await waitFor(() => {
       expect(within(screen.getByRole('region', { name: 'Work' })).getByTestId('thread-row-Unfiled chat')).toBeVisible();
     });
+  });
+
+  it('shows a plain sentence, not the server reply, when a chat folder cannot be renamed', async () => {
+    const chatFolders: ChatFolderStore = {
+      load: async () => ({
+        folders: [{ id: 'folder-work', name: 'Work' }],
+        assignments: [],
+        folderSessions: [{ folderId: 'folder-work', sessions: [] }],
+        unfiledSessions: [],
+      }),
+      createFolder: async ({ name }) => ({ id: 'folder-new', name }),
+      renameFolder: async () => {
+        throw new Error('{"error":{"code":"session_folder_not_found"}}');
+      },
+      deleteFolder: async () => {},
+      setSessionFolder: async () => {},
+    };
+
+    renderThreadList({
+      adapter: {
+        threadId: 'thread-1',
+        threads: [{ status: 'regular', id: 'thread-1', remoteId: 'session-1', title: 'Unfiled chat' }],
+      },
+      chatFolders,
+    });
+
+    await screen.findByRole('region', { name: 'Work' });
+    fireEvent.click(screen.getByRole('button', { name: 'Manage Work' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Folder name' }), { target: { value: 'Office' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Rename' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Could not rename the folder. The folder may no longer exist. Refresh the page and try again.',
+    );
+    expect(screen.queryByText(/session_folder_not_found/)).not.toBeInTheDocument();
+  });
+
+  it('shows a plain sentence, not the server reply, and keeps the chat put when a move fails', async () => {
+    const chatFolders: ChatFolderStore = {
+      load: async () => ({
+        folders: [{ id: 'folder-work', name: 'Work' }],
+        assignments: [],
+        folderSessions: [{ folderId: 'folder-work', sessions: [] }],
+        unfiledSessions: [],
+      }),
+      createFolder: async ({ name }) => ({ id: 'folder-new', name }),
+      renameFolder: async ({ folderId, name }) => ({ id: folderId, name }),
+      deleteFolder: async () => {},
+      setSessionFolder: async () => {
+        throw new Error('{"error":{"code":"session_folder_not_found"}}');
+      },
+    };
+
+    renderThreadList({
+      adapter: {
+        threadId: 'thread-1',
+        threads: [{ status: 'regular', id: 'thread-1', remoteId: 'session-1', title: 'Unfiled chat' }],
+      },
+      chatFolders,
+    });
+
+    await screen.findByRole('region', { name: 'Work' });
+    const row = screen.getByTestId('thread-row-Unfiled chat');
+    const actionButton = row.querySelector<HTMLButtonElement>('[aria-label="Session actions"]');
+    if (actionButton === null) throw new Error('Expected session actions button');
+    fireEvent.click(actionButton);
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Move to folder' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Work' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Could not move the chat. The folder may no longer exist. Refresh the page and try again.',
+    );
+    expect(screen.queryByText(/session_folder_not_found/)).not.toBeInTheDocument();
+    expect(within(screen.getByRole('region', { name: 'Work' })).queryByTestId('thread-row-Unfiled chat')).toBeNull();
   });
 
   it('shows every chat in a folder even when the recent list only has the first page', async () => {
