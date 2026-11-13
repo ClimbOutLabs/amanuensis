@@ -798,6 +798,7 @@ jobs:
         run: |
           pnpm test:eval-tokens
           pnpm test:eval-spaces
+          pnpm test:eval-models
 
   # AGENTS.md forbids `as T` and `x!`. Older ones are still being removed, so this reads only the
   # lines a pull request adds; a merge queue, manual or nightly run has no base to compare with.
