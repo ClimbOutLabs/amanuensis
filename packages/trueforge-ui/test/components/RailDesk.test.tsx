@@ -19,7 +19,6 @@ function turnContext(turnId: string, block: string): MemoryTurnContext {
       injectedBlock: block,
       stats: {
         items: 1,
-        entities: 0,
         droppedOverBudget: 0,
         droppedBelowThreshold: 0,
         estimatedTokens: 10,
