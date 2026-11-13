@@ -24,7 +24,7 @@ How to get there: Click **More** in the left bar, then **Build agent**.
 
 1. Click **More** in the left bar, then **Build agent**. A new chat opens with the **Set up your agent** panel beside it.
 2. Under **What should it do?**, click **Edit Instructions** and write the job in your own words, such as "Every week, sum up my unpaid bills in a short list."
-3. To let it use your apps, click **Add a connector**. To give it extra know-how, click **Add a skill**.
+3. To let it use your apps, click **Add a connector**. To let it run code and work with files, turn on **Sandbox**. To give it extra know-how, click **Add a skill**. Skills need the sandbox, so it stays on while the agent has skills.
 4. The model and run settings sit under **More settings**. The usual choices work for most agents. To pick another model, open **More settings** and click **Edit Model**.
 5. Try it out in the chat until it does what you want.
 6. Click **Save Agent**.

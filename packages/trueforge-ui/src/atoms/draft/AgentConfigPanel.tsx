@@ -8,6 +8,7 @@ import { useSlot } from '../../theme/SlotsProvider.js';
 import { auiButtonClass } from '../lib/buttonClasses.js';
 import { cn } from '../lib/cn.js';
 import { ResponsiveDropdownMenu } from '../primitives/ResponsiveDropdownMenu.js';
+import { Switch } from '../primitives/Switch.js';
 import { Tooltip } from '../primitives/Tooltip.js';
 import type { AgentConfigEditor } from './AgentConfigEditors.js';
 import { initialUserMessagesFromSpec } from './agentConfigMessages.js';
@@ -33,6 +34,7 @@ export type AgentConfigPanelProps = {
   modelsError: string | null;
   skills?: AgentSkill[];
   skillsAvailable: boolean;
+  sandboxAvailable: boolean;
   instructions: string;
   onOpenEditor: (editor: AgentConfigEditor) => void;
   onChange?: (spec: AgentSpec) => void;
@@ -296,6 +298,7 @@ export function AgentConfigPanel({
   modelsError,
   skills: catalogSkills = [],
   skillsAvailable,
+  sandboxAvailable,
   instructions,
   onOpenEditor,
   onChange,
@@ -312,6 +315,7 @@ export function AgentConfigPanel({
   const [modelQuery, setModelQuery] = useState('');
   const mcp = editableMountsFromSpec(spec.mcpServers);
   const skillMounts = editableMountsFromSpec(spec.skills);
+  const sandboxEnabled = spec.config?.sandbox?.enabled ?? false;
   const modelParams = modelParamSummary(spec.model.params);
   const runtimeConfig = runtimeConfigSummary(spec.config);
   const instructionPreview = instructions.trim();
@@ -417,6 +421,31 @@ export function AgentConfigPanel({
           ) : (
             <p className="text-text-secondary text-xs">None yet.</p>
           )}
+        </Section>
+
+        <Section
+          title="Sandbox"
+          description="A separate, safe space where it can run code and work with files. Skills need it."
+        >
+          <div className="flex items-center justify-between gap-4">
+            <p className="text-text-secondary text-xs">
+              {!sandboxAvailable
+                ? 'The sandbox is not set up yet. Turn it on in Settings, under Sandbox.'
+                : skillMounts.length > 0
+                  ? 'Stays on while it has skills.'
+                  : sandboxEnabled
+                    ? 'On.'
+                    : 'Off.'}
+            </p>
+            <Switch
+              checked={sandboxEnabled}
+              aria-label="Sandbox"
+              disabled={disabled || !sandboxAvailable || skillMounts.length > 0 || onChange === undefined}
+              onCheckedChange={enabled =>
+                onChange?.({ ...spec, config: { ...spec.config, sandbox: { ...spec.config?.sandbox, enabled } } })
+              }
+            />
+          </div>
         </Section>
 
         <Section
