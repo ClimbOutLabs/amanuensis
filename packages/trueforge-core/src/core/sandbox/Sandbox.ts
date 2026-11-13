@@ -1022,6 +1022,9 @@ function injectMCPClientEnv(params: {
   };
 }
 
+/** The longest a model may ask one shell command to run; installs, builds and long test runs need more than the default. */
+export const SANDBOX_EXEC_MAX_TIMEOUT_SECONDS = 600;
+
 export const sandboxExecSchema = z.object({
   intent: z.string().describe('Why you are running this command (user-facing).'),
   purpose: z
@@ -1032,6 +1035,7 @@ export const sandboxExecSchema = z.object({
   command: z.string().describe('Shell command to execute.'),
   cwd: z.string().optional().describe('Working directory.'),
   env: z.record(z.string(), z.string()).optional(),
+  timeout_seconds: z.number().int().min(1).max(SANDBOX_EXEC_MAX_TIMEOUT_SECONDS).optional(),
   output: z
     .object({
       head_lines: z.number().int().min(1).max(1000).optional(),
@@ -1517,6 +1521,7 @@ export function createSandboxExecDescription({
   return `Run a shell command in the persistent sandbox. cwd sets the repository; HOME does not. Never list, print or expose environment variables. The sandbox holds no git credentials: never ask for or search for tokens.
 Create files with write_file; edit with apply_patch or replace_text. Never bypass them with sed, Perl, Python, heredocs or temp patch files.
 Large output: use output.head_lines, output.tail_lines or output.grep.
+Stops after 60s; set timeout_seconds (up to 600) for an install, build or long test run.
 Python and Node go to run_code; interpreter invocations are rejected.
 Status: "ok", "exited" (see exit_code) or "failed" (the host could not run it).
 ${execNetworkSentences({ offline, skillNetworkHosts: skillNetworkHosts ?? [] })} Make separate tool calls in one response; the host runs read-only calls concurrently.${fileOutput}
@@ -5859,9 +5864,12 @@ export class Sandbox extends LocalToolMCP {
     context?: ToolInvocationContext,
     planScope?: ImplementationPlanGrantScope,
   ): Promise<CallToolResponse> {
+    // A host-set limit (a registered command's own) wins over the one the model asked for.
+    const timeoutSeconds = input.timeoutSeconds ?? input.timeout_seconds;
     const resolvedInput: SandboxRuntimeExecInput = {
       ...input,
       cwd: input.cwd ?? this.boundRepository?.workspace_cwd ?? this.provider.getWorkspaceDir(),
+      ...(timeoutSeconds === undefined ? {} : { timeoutSeconds }),
     };
     const preflightFailure = sandboxExecPreflightFailure({
       command: resolvedInput.command,

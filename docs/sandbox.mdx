@@ -249,6 +249,10 @@ passed as they are, with no shell in between. A skill's script runs without aski
 can't reach the internet. It asks when the sandbox can reach the internet, or when Aman edited a file
 in that skill's folder with its file tools earlier in the chat.
 
+A shell command is stopped after 60 seconds unless Aman asks for longer. It can ask for up to 10
+minutes for one command, which is what a package install, a build or a long test run needs. When a
+command is stopped for taking too long, the result says so and says how to ask for more time.
+
 A reply can do as much work inside the sandbox workspace as the task needs: writing and editing
 files, running code, builds and tests. Two limits still apply to every reply:
 
