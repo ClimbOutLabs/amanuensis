@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { withoutKeys } from '../scripts/eval-models/fresh.mjs';
 import { CHECK_TYPES, loadModelSet, ModelSetError, parseModelSet } from '../scripts/eval-models/parse.mjs';
 import {
   addEvalProviders,
@@ -184,4 +185,16 @@ test('a provider with a plain http address or a bad name is refused', () => {
       }),
     /https address/,
   );
+});
+
+test('the eval runner and the build step get the environment without any model key', () => {
+  const providers = parseEvalProviders({
+    version: 1,
+    providers: [
+      { name: 'one', base_url: 'https://one.example', api_key_env: 'ONE_KEY', models: [{ model_id: 'a', name: 'a1' }] },
+    ],
+  });
+  assert.deepEqual(withoutKeys({ env: { ONE_KEY: 'x', NEBIUS_API_KEY: 'y', PATH: '/bin' }, providers }), {
+    PATH: '/bin',
+  });
 });

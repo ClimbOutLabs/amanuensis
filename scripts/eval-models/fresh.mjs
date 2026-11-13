@@ -28,6 +28,16 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+/**
+ * The caller's environment without any model key: the Token Factory key and every key named in
+ * eval-providers.json. Only the instance, and the request that adds a provider to it, see a key.
+ * @param {{ env: Record<string, string | undefined>, providers: import('./providers.mjs').EvalProvider[] }} options
+ */
+export function withoutKeys({ env, providers }) {
+  const keys = new Set(['NEBIUS_API_KEY', ...providers.map(provider => provider.api_key_env)]);
+  return Object.fromEntries(Object.entries(env).filter(([name]) => !keys.has(name)));
+}
+
 async function freePort() {
   const server = createServer();
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -114,10 +124,12 @@ export async function main({ argv, env = process.env, stdout, stderr, rootDir = 
   const trueforge = path.join(rootDir, 'packages', 'trueforge');
   let child;
   try {
+    const providers = await loadEvalProviders(path.join(trueforge, 'evals', 'eval-providers.json'));
+    const keyFree = withoutKeys({ env, providers });
     stderr('Preparing the eval instance...\n');
     await run('pnpm', ['run', 'build:gen'], {
       cwd: trueforge,
-      env: { ...env },
+      env: keyFree,
       stdio: ['ignore', 'ignore', 'inherit'],
     });
     child = spawn('pnpm', ['run', 'serve:eval'], {
@@ -128,14 +140,13 @@ export async function main({ argv, env = process.env, stdout, stderr, rootDir = 
     });
     await waitForHealth({ origin, child });
     const token = await createSignIn({ origin });
-    const providers = await loadEvalProviders(path.join(trueforge, 'evals', 'eval-providers.json'));
     const added = await addEvalProviders({ providers, env, origin, token });
     stderr(
       `Eval instance ready at ${origin}${added.length > 0 ? `, with ${added.map(provider => provider.name).join(', ')}` : ''}.\n`,
     );
     return await runModels({
       argv: ['--instance', origin, ...args],
-      env: { ...env, TRUEFORGE_TOKEN: token },
+      env: { ...keyFree, TRUEFORGE_TOKEN: token },
       stdout,
       stderr,
       rootDir,
