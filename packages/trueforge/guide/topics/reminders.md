@@ -26,7 +26,7 @@ A reminder can also repeat every day, every weekday, or on the days you choose, 
 
 ## Use the bell
 
-1. Click the bell at the top of the left panel. On a phone, tap the menu button first. The **Notifications** panel opens.
+1. Click the bell at the top of the left panel. It is labelled **For you**. On a phone, tap the menu button first. The **For you** panel opens.
 2. Each item says what it is, when it came, and why you got it.
 3. An item that came from a chat ends with **Open chat**. Click the item to go to that chat.
 4. Click **Mark all seen** to clear the count.
@@ -50,7 +50,7 @@ Say so when you ask, such as "Remind me at 5 pm to call the pharmacy, it's urgen
 
 ## See or cancel reminders
 
-1. Click **Reminders** in the left panel. It lists what is coming up and what has already reminded you, with the persona that set each one. Click a reminder that says **Open chat** to go to the chat you set it in. A reminder says **No chat to open** when its chat was deleted, or when it was set before Aman kept track of the chat. Or, in any chat, ask "What reminders do I have?"
+1. Click **Reminders** in the left panel. It lists what is coming up and what has already reminded you, with the persona that set each one. Each reminder shows its day, how far off it is, such as "In 3 weeks", and whether it repeats or is paused. Click a reminder that says **Open chat** to go to the chat you set it in. A reminder says **No chat to open** when its chat was deleted, or when it was set before Aman kept track of the chat. Or, in any chat, ask "What reminders do I have?"
 2. To cancel one, ask, such as "Cancel the pharmacy reminder".
 3. A card shows the reminder. Click **Allow** to cancel it, or **Not now** to keep it.
 
