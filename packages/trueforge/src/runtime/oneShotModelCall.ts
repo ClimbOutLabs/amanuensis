@@ -4,7 +4,7 @@ import type { Logger } from 'winston';
 import type { IModelProviderStore } from '../db/modelProviderStore';
 import type { ModelProperties } from '../schemas/modelProvider';
 import type { ModelUsageRole } from '../schemas/modelUsageEvents';
-import { lightReasoningRequestFields } from './memory/memorySummarize';
+import { lightReasoningRequestFields, withRequestFields } from './memory/memorySummarize';
 import { modelIdentity, type TurnModelUsage } from './modelUsage';
 import { getModelDetails } from './sessionResources';
 import { meterHelperLlm, type TokenFactoryBudget } from './tokenFactoryBudget';
@@ -85,8 +85,7 @@ export async function askModelOnce({
     temperature: 0,
     top_p: 1,
   };
-  Object.assign(request, fields.reasoning);
-  const llm = meterHelperLlm({
+  const metered = meterHelperLlm({
     llm: new VercelAILLM({
       providerConfig,
       logger,
@@ -100,6 +99,12 @@ export async function askModelOnce({
     role,
     budget: tokenFactoryBudget,
     usage,
+    logger,
+  });
+  const llm = withRequestFields({
+    llm: metered,
+    fields: fields.reasoning,
+    modelKey: `${tenantId}/${modelName}`,
     logger,
   });
   const result = await llm.createNonStream(request);
