@@ -61,6 +61,7 @@ function summarizeContext(): SummarizeTurnContext {
     getProviderForUpdate: jest.fn(),
     createProvider: jest.fn(),
     upsertProvider: jest.fn(),
+    recordProviderCheck: jest.fn(async () => undefined),
     listModels: jest.fn(),
     deleteProvider: jest.fn(),
   };

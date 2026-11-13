@@ -141,6 +141,7 @@ import type { EventSubscriptionRegistry } from './runtime/event-subscription';
 import { createMemoryClient } from './runtime/memory/createMemoryClient';
 import type { NightlyMemoryJob } from './runtime/memory/nightlyService';
 import { createVaultClient } from './runtime/memory/vaultClient';
+import { createModelProviderChecker } from './runtime/modelProviderCheck';
 import type { NoticingService } from './runtime/noticing/noticingService';
 import type { ChannelViewer } from './runtime/noticing/reachChannels';
 import type { ReminderReach } from './runtime/noticing/reminderReach';
@@ -897,6 +898,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         tokenFactoryBudget: deps.tokenFactoryBudget,
         memoryTidy: deps.memoryTidy,
         envManagedModelProviderNames: envManagedProviders,
+        checkSavedProvider: createModelProviderChecker({ logger: deps.logger }),
         withTransaction: deps.withTransaction,
         logger: deps.logger,
         resolveRequestContext,

@@ -4,6 +4,9 @@ import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
+/** The secret the agent under test asks every caller for; synthetic and long enough to be accepted. */
+export const MAIL_AGENT_SECRET = 'test-mail-agent-secret-0123456789abcdef';
+
 const REPO_ROOT = resolve(__dirname, '..', '..', '..', '..', '..');
 const AGENT = resolve(REPO_ROOT, 'ops/compose/mail-email/account_agent.py');
 const FAKE_IMAP = resolve(REPO_ROOT, 'installer/tests/fake_imap.py');
@@ -131,6 +134,7 @@ export async function startMailAgent({
       AMAN_MAIL_ACCOUNT_FILE: accountFile,
       AMAN_MAIL_ACCOUNT_PORT: String(port),
       AMAN_MAIL_LIST_SECONDS: String(list_seconds),
+      AMAN_MAIL_ACCOUNT_SECRET: MAIL_AGENT_SECRET,
       SSL_CERT_FILE: cert,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -143,7 +147,7 @@ export async function startMailAgent({
   });
   let up = false;
   await eventually(() => {
-    fetch(`${url}/account`)
+    fetch(`${url}/account`, { headers: { authorization: `Bearer ${MAIL_AGENT_SECRET}` } })
       .then(response => {
         up = response.ok;
       })

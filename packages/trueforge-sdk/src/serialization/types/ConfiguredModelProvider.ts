@@ -3,6 +3,7 @@
 import type * as TrueForge from "../../api/index.js";
 import * as core from "../../core/index.js";
 import type * as serializers from "../index.js";
+import { ModelProviderCheck } from "./ModelProviderCheck.js";
 import { ModelProviderManifest } from "./ModelProviderManifest.js";
 import { ResourceName } from "./ResourceName.js";
 
@@ -11,6 +12,7 @@ export const ConfiguredModelProvider: core.serialization.ObjectSchema<
     TrueForge.ConfiguredModelProvider
 > = core.serialization.object({
     envManaged: core.serialization.property("env_managed", core.serialization.boolean().optional()),
+    lastCheck: core.serialization.property("last_check", ModelProviderCheck.optional()),
     manifest: ModelProviderManifest,
     name: ResourceName,
 });
@@ -18,6 +20,7 @@ export const ConfiguredModelProvider: core.serialization.ObjectSchema<
 export declare namespace ConfiguredModelProvider {
     export interface Raw {
         env_managed?: boolean | null;
+        last_check?: ModelProviderCheck.Raw | null;
         manifest: ModelProviderManifest.Raw;
         name: ResourceName.Raw;
     }

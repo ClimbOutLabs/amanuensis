@@ -68,6 +68,7 @@ const unusedStore: IModelProviderStore = {
   upsertProvider: jest.fn(),
   listModels: jest.fn(),
   deleteProvider: jest.fn(),
+  recordProviderCheck: jest.fn(),
 };
 
 const CLAIMED_ADDRESS = 'recovery@elsewhere.example';

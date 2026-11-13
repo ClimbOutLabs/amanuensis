@@ -203,6 +203,8 @@ export {
   TOKEN_FACTORY_DEFAULT_BASE_URL,
   VERCEL_AI_PROVIDER_NAMES,
   VercelAILLM,
+  classifyProviderCallError,
+  describeAuthRefusal,
 } from './llm/VercelAILLM';
 export type { StreamTimeout, VercelAILLMConfig, VercelAIProviderConfig, VercelAIProviderName } from './llm/VercelAILLM';
 

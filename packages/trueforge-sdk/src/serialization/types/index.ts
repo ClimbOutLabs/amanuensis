@@ -395,6 +395,8 @@ export * from "./ModelMessageUsageInputTokensBreakdown.js";
 export * from "./ModelParams.js";
 export * from "./ModelProperties.js";
 export * from "./ModelProviderAuth.js";
+export * from "./ModelProviderCheck.js";
+export * from "./ModelProviderCheckKind.js";
 export * from "./ModelProviderManifest.js";
 export * from "./ModelProviderStreamTimeout.js";
 export * from "./ModelUsagePersistedEvent.js";

@@ -17,6 +17,7 @@ import type { ISandboxProviderStore } from '../db/sandboxProviderStore';
 import type { WithTransaction } from '../db/transaction';
 import type { IOAuthTokenStore } from '../mcp/auth/types';
 import type { NightlyMemoryJob } from '../runtime/memory/nightlyService';
+import type { CheckSavedModelProvider } from '../runtime/modelProviderCheck';
 import { getSharedRunCodeService } from '../runtime/sessionResources';
 import type { TokenFactoryBudget } from '../runtime/tokenFactoryBudget';
 import { sandboxDisabledByInstaller } from '../sandbox/slotBackend';
@@ -48,6 +49,8 @@ export interface SettingsRouterDeps<TTransaction> {
   memoryTidy: NightlyMemoryJob;
   /** Model providers the environment owns (see `envManagedModelProviderNames`). */
   envManagedModelProviderNames: ReadonlySet<string>;
+  /** Runs the one test call for a just-saved model provider; its outcome is stored on the provider. */
+  checkSavedProvider: CheckSavedModelProvider;
   withTransaction: WithTransaction<TTransaction>;
   logger: Logger;
   resolveRequestContext: ResolveRequestContext;
@@ -62,6 +65,8 @@ export function createSettingsRouter<TTransaction>(deps: SettingsRouterDeps<TTra
       withTransaction: deps.withTransaction,
       resolveRequestContext: deps.resolveRequestContext,
       envManagedNames: deps.envManagedModelProviderNames,
+      checkSavedProvider: deps.checkSavedProvider,
+      logger: deps.logger,
     }),
   );
   router.route(
