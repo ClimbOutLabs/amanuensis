@@ -155,7 +155,7 @@ function sharedDeps(): SharedDeps {
     skillCatalog: SkillCatalog.load(),
     sandboxCatalog: SandboxCatalog.load(),
     tokenFactoryBudget: uncappedTokenFactoryBudget,
-    memoryTidy: { tidyNow: () => Promise.resolve({ status: 'busy' }), tidyState: () => ({ status: 'idle' }) },
+    memoryTidy: { tidyNow: () => undefined, tidyState: () => ({ status: 'idle' }) },
     activeTurns: new ActiveTurnRegistry(),
     turnDrains: new TurnDrainRegistry(),
     requestReplyRouter: new RequestReplyRouter(),

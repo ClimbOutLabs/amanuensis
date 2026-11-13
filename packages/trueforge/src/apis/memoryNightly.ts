@@ -141,8 +141,10 @@ export function createMemoryNightlyRouter<TTransaction>(deps: MemoryNightlyRoute
     );
   };
 
-  const runHandler: RouteHandler<typeof runMemoryNightlyRoute> = async c =>
-    c.json({ data: toMemoryTidyRun(await deps.memoryTidy.tidyNow()) }, 200);
+  const runHandler: RouteHandler<typeof runMemoryNightlyRoute> = c => {
+    deps.memoryTidy.tidyNow();
+    return c.json({ data: toMemoryTidyRun(deps.memoryTidy.tidyState()) }, 200);
+  };
 
   const getRunHandler: RouteHandler<typeof getMemoryNightlyRunRoute> = c =>
     c.json({ data: toMemoryTidyRun(deps.memoryTidy.tidyState()) }, 200);

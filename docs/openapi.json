@@ -7154,7 +7154,7 @@
           },
           "model_wait_minutes": {
             "description": "How many minutes one sorting or tidying question may wait for the model. `10` is the default.",
-            "maximum": 60,
+            "maximum": 20,
             "minimum": 1,
             "type": "integer"
           },
@@ -7932,7 +7932,7 @@
             "type": "integer"
           },
           "sorting": {
-            "description": "The sorting choice the run followed; with `off` it only moved ended lines. `off` when nothing was started.",
+            "description": "The sorting choice the run followed; with `off` it only moved ended lines. `off` unless the status is `ran`.",
             "enum": [
               "off",
               "report",
@@ -7941,9 +7941,10 @@
             "type": "string"
           },
           "status": {
-            "description": "`ran`: the tidy-up finished. `busy`: one is running, so nothing was started. `idle`: none is running and none finished lately; only a read answers this.",
+            "description": "`busy`: a tidy-up is running. `ran`: the last one finished. `failed`: the last one stopped on an error. `idle`: none is running and none ended lately.",
             "enum": [
               "ran",
+              "failed",
               "busy",
               "idle"
             ],
@@ -15746,8 +15747,8 @@
             "type": "integer"
           },
           "model_wait_minutes": {
-            "description": "Minutes one sorting or tidying question may wait for the model, `1` to `60`. Left out, it stays as it is.",
-            "maximum": 60,
+            "description": "Minutes one sorting or tidying question may wait for the model, `1` to `20`. Left out, it stays as it is.",
+            "maximum": 20,
             "minimum": 1,
             "type": "integer"
           }
@@ -26318,7 +26319,7 @@
     },
     "/api/v1/settings/memory-nightly/run": {
       "get": {
-        "description": "Tells whether a tidy-up is running now (`busy`), what one that finished in the last hour did (`ran`), or that there is neither (`idle`). It starts nothing.",
+        "description": "Tells whether a tidy-up is running now (`busy`), what one that finished in the last hour did (`ran`), that it stopped on an error (`failed`), or that there is none (`idle`). It starts nothing.",
         "responses": {
           "200": {
             "content": {
@@ -26362,7 +26363,7 @@
         "x-fern-sdk-method-name": "get_run"
       },
       "post": {
-        "description": "Tidies the memory pages now, whatever the hour and whether or not the daily tidy-up is on. Answers when it has finished, with what it did.",
+        "description": "Starts tidying the memory pages, whatever the hour and whether or not the daily tidy-up is on. It answers at once with `busy` and does not wait for the end. With a tidy-up already running, it starts nothing. Read the same path to see what it did.",
         "responses": {
           "200": {
             "content": {
@@ -26372,7 +26373,7 @@
                 }
               }
             },
-            "description": "What the tidy-up did, or that one was already running."
+            "description": "A tidy-up is running."
           },
           "401": {
             "content": {
@@ -26395,7 +26396,7 @@
             "description": "Admin access required."
           }
         },
-        "summary": "Run the tidy-up now",
+        "summary": "Start the tidy-up now",
         "tags": [
           "Capabilities"
         ],

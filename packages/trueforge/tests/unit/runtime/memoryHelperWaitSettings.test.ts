@@ -17,14 +17,20 @@ describe('readMemoryHelperWaitMinutes', () => {
   });
 
   it('is the stored choice', async () => {
-    const store = inMemoryGlobalSettingsStore({ [MEMORY_HELPER_WAIT_SETTING_KEY]: '30' });
-    expect(await readMemoryHelperWaitMinutes({ globalSettingsStore: store, logger })).toBe(30);
+    const store = inMemoryGlobalSettingsStore({ [MEMORY_HELPER_WAIT_SETTING_KEY]: '15' });
+    expect(await readMemoryHelperWaitMinutes({ globalSettingsStore: store, logger })).toBe(15);
   });
 
-  it.each(['0', '61', '2.5', 'ten', ''])('reads the stored value %p as not set', async value => {
+  it.each(['0', '100', '2.5', 'ten', ''])('reads the stored value %p as not set', async value => {
     expect(parseHelperWaitMinutes(value)).toBeUndefined();
     const store = inMemoryGlobalSettingsStore({ [MEMORY_HELPER_WAIT_SETTING_KEY]: value });
     expect(await readMemoryHelperWaitMinutes({ globalSettingsStore: store, logger })).toBe(10);
+  });
+
+  it.each(['21', '30', '60'])('reads the longer stored wait %p as twenty minutes', async value => {
+    expect(parseHelperWaitMinutes(value)).toBe(20);
+    const store = inMemoryGlobalSettingsStore({ [MEMORY_HELPER_WAIT_SETTING_KEY]: value });
+    expect(await readMemoryHelperWaitMinutes({ globalSettingsStore: store, logger })).toBe(20);
   });
 
   it('is ten minutes when the store cannot be read', async () => {

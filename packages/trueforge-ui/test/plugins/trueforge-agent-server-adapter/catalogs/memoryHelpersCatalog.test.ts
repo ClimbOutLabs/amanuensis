@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   createMemoryNightlyCatalog,
   createMemoryPageSortingCatalog,
+  memoryHelperErrorMessage,
 } from '@/plugins/trueforge-agent-server-adapter/catalogs/memoryHelpersCatalog.js';
 
 function okJson(body: unknown) {
@@ -82,12 +83,12 @@ describe('createMemoryNightlyCatalog', () => {
     });
     await catalog.setMemoryNightly({ enabled: false });
     await catalog.setMemoryNightly({ hour: 6 });
-    await catalog.setMemoryNightly({ modelWaitMinutes: 30 });
+    await catalog.setMemoryNightly({ modelWaitMinutes: 20 });
     expect(seen).toEqual([
       { url: '/api/v1/settings/memory-nightly', method: 'GET', body: undefined },
       { url: '/api/v1/settings/memory-nightly', method: 'PUT', body: JSON.stringify({ enabled: false }) },
       { url: '/api/v1/settings/memory-nightly', method: 'PUT', body: JSON.stringify({ hour: 6 }) },
-      { url: '/api/v1/settings/memory-nightly', method: 'PUT', body: JSON.stringify({ model_wait_minutes: 30 }) },
+      { url: '/api/v1/settings/memory-nightly', method: 'PUT', body: JSON.stringify({ model_wait_minutes: 20 }) },
     ]);
   });
 
@@ -140,5 +141,19 @@ describe('createMemoryNightlyCatalog', () => {
     await expect(createMemoryNightlyCatalog({ fetch: fetchImpl }).getMemoryTidyState()).resolves.toMatchObject({
       status: 'idle',
     });
+  });
+});
+
+describe('memoryHelperErrorMessage', () => {
+  it('says what to do when the request never reached the server', () => {
+    expect(memoryHelperErrorMessage(new TypeError('Failed to fetch'))).toBe(
+      'The app could not be reached. Check that it is running, then try again.',
+    );
+  });
+
+  it('keeps the sentence the server sent', () => {
+    expect(memoryHelperErrorMessage(new Error('The server is busy. Try again in a moment.'))).toBe(
+      'The server is busy. Try again in a moment.',
+    );
   });
 });

@@ -29,9 +29,10 @@ function renderCard({
   tidy = { ...QUIET_RUN, movedToEarlier: 2, notesAsked: 1, notesSorted: 1 },
   tidyState = () => ({ ...QUIET_RUN, status: 'idle' }),
 }: {
-  /** What the server says about a tidy-up when the page asks. */
+  /** What the server says about a tidy-up when the page asks, until one is started here. */
   tidyState?: () => MemoryTidyRun;
-  tidy?: MemoryTidyRun;
+  /** How a tidy-up started here ends; `null` to keep following `tidyState`. */
+  tidy?: MemoryTidyRun | null;
   mode?: Mode;
   enabled?: boolean;
   withPorts?: boolean;
@@ -43,6 +44,7 @@ function renderCard({
   let hour = 0;
   const waitWrites: number[] = [];
   let modelWaitMinutes = 10;
+  let tidyStarts = 0;
   const sorting = (next: Mode) => ({
     mode: next,
     overridden: true,
@@ -83,8 +85,11 @@ function renderCard({
             }
             return nightly();
           },
-          tidyMemoryNow: async () => tidy,
-          getMemoryTidyState: async () => tidyState(),
+          tidyMemoryNow: async () => {
+            tidyStarts += 1;
+            return { ...QUIET_RUN, status: 'busy' as const };
+          },
+          getMemoryTidyState: async () => (tidyStarts > 0 && tidy !== null ? tidy : tidyState()),
         },
       }
     : {};
@@ -166,13 +171,13 @@ describe('MemoryHelpersCard', () => {
     });
     expect(picker).toHaveValue('10');
 
-    fireEvent.change(picker, { target: { value: '30' } });
+    fireEvent.change(picker, { target: { value: '20' } });
 
     await waitFor(() => {
-      expect(waitWrites).toEqual([30]);
+      expect(waitWrites).toEqual([20]);
     });
     await waitFor(() => {
-      expect(picker).toHaveValue('30');
+      expect(picker).toHaveValue('20');
     });
     expect(hourWrites).toEqual([]);
   });
@@ -268,9 +273,42 @@ describe('MemoryHelpersCard', () => {
     expect(await screen.findByRole('status')).toHaveTextContent('Done. Aman moved 3 ended lines to Earlier.');
   });
 
-  it('says to try again when a tidy-up is already running', async () => {
-    const status = renderCardAndTidy({ ...QUIET_RUN, status: 'busy' });
-    expect(await status).toHaveTextContent('A tidy-up is already running. Try again in a few minutes.');
+  it('waits for a tidy-up it started, however long it takes, and then shows what it did', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      let state: MemoryTidyRun = { ...QUIET_RUN, status: 'idle' };
+      renderCard({ tidy: null, tidyState: () => state });
+      const button = await screen.findByRole('button', { name: 'Tidy now' });
+      state = { ...QUIET_RUN, status: 'busy' };
+      fireEvent.click(button);
+
+      expect(await screen.findByRole('button', { name: 'Tidying…' })).toBeDisabled();
+      await vi.advanceTimersByTimeAsync(30 * 60 * 1000);
+      expect(screen.getByRole('button', { name: 'Tidying…' })).toBeDisabled();
+      state = { ...QUIET_RUN, movedToEarlier: 1 };
+      await vi.advanceTimersByTimeAsync(5000);
+
+      expect(await screen.findByRole('status')).toHaveTextContent('Done. Aman moved 1 ended line to Earlier.');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('says what to do when a tidy-up stopped on an error', async () => {
+    renderCard({ tidy: { ...QUIET_RUN, status: 'failed' } });
+    fireEvent.click(await screen.findByRole('button', { name: 'Tidy now' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'The tidy-up stopped because something went wrong. Your pages are as they were. Choose Tidy now to try again.',
+    );
+    expect(screen.getByRole('button', { name: 'Tidy now' })).toBeEnabled();
+  });
+
+  it('says what to do when the app restarted in the middle of a tidy-up', async () => {
+    renderCard({ tidy: { ...QUIET_RUN, status: 'idle' } });
+    fireEvent.click(await screen.findByRole('button', { name: 'Tidy now' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'The tidy-up stopped before it finished, because the app restarted. Choose Tidy now to start it again.',
+    );
   });
 
   it('says what to do when a save fails, and keeps the old choice', async () => {

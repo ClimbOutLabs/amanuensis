@@ -1,6 +1,7 @@
 import { z } from '@hono/zod-openapi';
 
 import { PageSortModeSchema, SortStopCauseSchema } from '../runtime/memory/pageSortMode';
+import { MAX_MEMORY_HELPER_WAIT_MINUTES } from '../runtime/memoryHelperWaitSettings';
 
 export const MemoryNightlySchema = z
   .object({
@@ -19,7 +20,7 @@ export const MemoryNightlySchema = z
       .number()
       .int()
       .min(1)
-      .max(60)
+      .max(MAX_MEMORY_HELPER_WAIT_MINUTES)
       .describe('How many minutes one sorting or tidying question may wait for the model. `10` is the default.'),
   })
   .openapi('MemoryNightly');
@@ -44,10 +45,10 @@ export const UpdateMemoryNightlyRequestSchema = z
       .number()
       .int()
       .min(1)
-      .max(60)
+      .max(MAX_MEMORY_HELPER_WAIT_MINUTES)
       .optional()
       .describe(
-        'Minutes one sorting or tidying question may wait for the model, `1` to `60`. Left out, it stays as it is.',
+        'Minutes one sorting or tidying question may wait for the model, `1` to `20`. Left out, it stays as it is.',
       ),
   })
   .openapi('UpdateMemoryNightlyRequest', { example: { enabled: true, hour: 0 } });
@@ -55,9 +56,9 @@ export const UpdateMemoryNightlyRequestSchema = z
 export const MemoryTidyRunSchema = z
   .object({
     status: z
-      .enum(['ran', 'busy', 'idle'])
+      .enum(['ran', 'failed', 'busy', 'idle'])
       .describe(
-        '`ran`: the tidy-up finished. `busy`: one is running, so nothing was started. `idle`: none is running and none finished lately; only a read answers this.',
+        '`busy`: a tidy-up is running. `ran`: the last one finished. `failed`: the last one stopped on an error. `idle`: none is running and none ended lately.',
       ),
     moved_to_earlier: z.number().int().nonnegative().describe('Lines that had ended and were moved to Earlier.'),
     notes_asked: z.number().int().nonnegative().describe('Missed notes the model was asked about.'),
@@ -68,7 +69,7 @@ export const MemoryTidyRunSchema = z
       .describe('Missed notes whose answer was understood: sorted onto pages, or only noted in trial mode.'),
     pairs_listed: z.number().int().nonnegative().describe('Pairs of lines newly listed as disagreeing.'),
     sorting: PageSortModeSchema.describe(
-      'The sorting choice the run followed; with `off` it only moved ended lines. `off` when nothing was started.',
+      'The sorting choice the run followed; with `off` it only moved ended lines. `off` unless the status is `ran`.',
     ),
     model_missing: z
       .boolean()

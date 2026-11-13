@@ -119,7 +119,7 @@ async function createRouters(options: { envManagedNames?: ReadonlySet<string> } 
       resolveSandboxProviderStore: () => new SqliteSandboxProviderStore(db),
       globalSettingsStore,
       tokenFactoryBudget: uncappedTokenFactoryBudget,
-      memoryTidy: { tidyNow: () => Promise.resolve({ status: 'busy' }), tidyState: () => ({ status: 'idle' }) },
+      memoryTidy: { tidyNow: () => undefined, tidyState: () => ({ status: 'idle' }) },
       envManagedModelProviderNames: options.envManagedNames ?? new Set(),
       withTransaction: callback => db.transaction().execute(callback),
       logger: winston.createLogger({ silent: true }),

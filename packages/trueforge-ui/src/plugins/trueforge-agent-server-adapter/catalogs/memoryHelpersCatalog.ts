@@ -20,13 +20,13 @@ export interface MemoryNightlySetting {
   defaultEnabled: boolean;
   /** The hour of the server's day the tidy-up starts at, 0 to 23. */
   hour: number;
-  /** How many minutes one sorting or tidying question may wait for the model, 1 to 60. */
+  /** How many minutes one sorting or tidying question may wait for the model, 1 to 20. */
   modelWaitMinutes: number;
 }
 
-/** What a tidy-up did. `busy` means one is running; `idle`, only from a read, means none ran lately. */
+/** Where a tidy-up stands. `busy`: one is running. `ran`: the last one finished, with what it did. `failed`: it stopped on an error. `idle`: none ended lately. */
 export interface MemoryTidyRun {
-  status: 'ran' | 'busy' | 'idle';
+  status: 'ran' | 'failed' | 'busy' | 'idle';
   movedToEarlier: number;
   /** Saved notes the model was asked about. */
   notesAsked: number;
@@ -54,6 +54,7 @@ export interface MemoryNightlyCatalog {
     hour?: number;
     modelWaitMinutes?: number;
   }): Promise<MemoryNightlySetting>;
+  /** Starts a tidy-up unless one is running. It answers at once; ask `getMemoryTidyState` for how it ended. */
   tidyMemoryNow(): Promise<MemoryTidyRun>;
   /** Where a tidy-up stands, without starting one: running, finished a short while ago, or neither. */
   getMemoryTidyState(): Promise<MemoryTidyRun>;
@@ -75,13 +76,13 @@ const NightlyResponseSchema = z.object({
     overridden: z.boolean(),
     default_enabled: z.boolean(),
     hour: z.number().int().min(0).max(23),
-    model_wait_minutes: z.number().int().min(1).max(60),
+    model_wait_minutes: z.number().int().min(1).max(20),
   }),
 });
 
 const TidyRunResponseSchema = z.object({
   data: z.object({
-    status: z.enum(['ran', 'busy', 'idle']),
+    status: z.enum(['ran', 'failed', 'busy', 'idle']),
     moved_to_earlier: z.number(),
     notes_asked: z.number(),
     notes_sorted: z.number(),
@@ -176,5 +177,9 @@ export function createMemoryNightlyCatalog(options: CreateTrueForgeClientOptions
 
 /** Human-readable error for the controls; callers render it inline. */
 export function memoryHelperErrorMessage(error: unknown): string {
+  // The browser words a request that never reached the server as "Failed to fetch", which tells a person nothing.
+  if (error instanceof TypeError) {
+    return 'The app could not be reached. Check that it is running, then try again.';
+  }
   return getErrorMessage(error, 'That did not work. Try again in a moment.');
 }

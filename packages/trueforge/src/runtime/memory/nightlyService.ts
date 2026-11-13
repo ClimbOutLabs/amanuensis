@@ -45,19 +45,22 @@ async function personaVaults(personaStore: PersonaLister): Promise<NightlyVault[
   return vaults;
 }
 
-/** What a tidy-up the person asked for did, or `busy` when one was already running. */
-export type TidyNowResult = { status: 'ran'; counts: NightlyCounts; sorting: PageSortMode } | { status: 'busy' };
+/** How a tidy-up the person asked for ended: what it did, or `failed` when it stopped on an error. */
+export type TidyResult = { status: 'ran'; counts: NightlyCounts; sorting: PageSortMode } | { status: 'failed' };
 
-/** Where a tidy-up the person asked for stands: running (`busy`), finished a short while ago, or neither (`idle`). */
-export type TidyState = TidyNowResult | { status: 'idle' };
+/** Where a tidy-up the person asked for stands: running (`busy`), ended a short while ago, or neither (`idle`). */
+export type TidyState = TidyResult | { status: 'busy' } | { status: 'idle' };
 
 /** How long the result of a finished tidy-up is still told to a page that asks. */
 const LAST_TIDY_KEPT_MS = 60 * 60 * 1000;
 
 export interface NightlyMemoryJob {
-  /** Tidies every vault now, whatever the hour and whether or not the daily tidy-up is switched on. */
-  tidyNow: () => Promise<TidyNowResult>;
-  /** Lets a page that was closed during a tidy-up find out that one is running, or what the last one did. */
+  /**
+   * Starts tidying every vault, whatever the hour and whether or not the daily tidy-up is switched on. It does not
+   * wait for the end, because a slow model can take longer than a web request lasts. With one running, it starts nothing.
+   */
+  tidyNow: () => void;
+  /** Lets a page find out that a tidy-up is running, or how the last one ended. */
   tidyState: () => TidyState;
 }
 
@@ -120,7 +123,7 @@ export function startNightlyMemoryJob({
   };
 
   let running = false;
-  let lastTidy: { result: TidyNowResult; finishedAt: number } | undefined;
+  let lastTidy: { result: TidyResult; finishedAt: number } | undefined;
   const look = (): void => {
     if (running) {
       return;
@@ -144,24 +147,29 @@ export function startNightlyMemoryJob({
   setInterval(look, LOOK_INTERVAL_MS).unref();
 
   return {
-    tidyNow: async () => {
+    tidyNow: () => {
       if (running) {
-        return { status: 'busy' };
+        return;
       }
       running = true;
-      try {
+      lastTidy = undefined;
+      void (async (): Promise<TidyResult> => {
         const nightly = await readMemoryNightlySetting({ globalSettingsStore, logger });
         const sorting = await readMemoryPageSortingSetting({ globalSettingsStore, logger });
         const counts = await runNightlyJob({
           deps: { ...deps, mode: sorting.mode, hour: nightly.hour },
           onRequest: true,
         });
-        const result: TidyNowResult = { status: 'ran', counts, sorting: sorting.mode };
-        lastTidy = { result, finishedAt: deps.now().getTime() };
-        return result;
-      } finally {
-        running = false;
-      }
+        return { status: 'ran', counts, sorting: sorting.mode };
+      })()
+        .catch((error: unknown): TidyResult => {
+          logger.warn('A tidy-up asked for now stopped on an error.', extractErrorLogFields(error));
+          return { status: 'failed' };
+        })
+        .then(result => {
+          lastTidy = { result, finishedAt: deps.now().getTime() };
+          running = false;
+        });
     },
     tidyState: () => {
       if (running) {

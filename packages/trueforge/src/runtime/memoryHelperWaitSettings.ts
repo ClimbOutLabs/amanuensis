@@ -3,18 +3,19 @@ import type { Logger } from 'winston';
 
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 
-/** Global-settings key for how many minutes a sorting or tidying question may wait for the model; anything but `1` to `60` reads as unset. */
+/** Global-settings key for how many minutes a sorting or tidying question may wait for the model, `1` to `20`. */
 export const MEMORY_HELPER_WAIT_SETTING_KEY = 'memory_helper_model_wait_minutes';
 
 /** Long enough for a slow model that is still answering; the model client gives up sooner on one that went silent. */
 export const DEFAULT_MEMORY_HELPER_WAIT_MINUTES = 10;
 
-export const MAX_MEMORY_HELPER_WAIT_MINUTES = 60;
+/** One slow question holds a summary slot for this long, so chat summaries never wait longer. */
+export const MAX_MEMORY_HELPER_WAIT_MINUTES = 20;
 
-/** The minutes a stored value names, or undefined when it is not a whole number from 1 to 60. */
+/** The minutes a stored value names. A longer wait chosen before the limit came down reads as the limit; anything else that is not a whole number from 1 reads as unset. */
 export function parseHelperWaitMinutes(value: string): number | undefined {
   const minutes = /^\d{1,2}$/.test(value) ? Number(value) : undefined;
-  return minutes !== undefined && minutes >= 1 && minutes <= MAX_MEMORY_HELPER_WAIT_MINUTES ? minutes : undefined;
+  return minutes !== undefined && minutes >= 1 ? Math.min(minutes, MAX_MEMORY_HELPER_WAIT_MINUTES) : undefined;
 }
 
 /** Read for each question, so a change in Settings applies without a restart. A failed read gives the default. */

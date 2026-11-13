@@ -72,10 +72,10 @@ describe('how long a sorting question waits for the model', () => {
   });
 
   it('follows the choice at the next question, with no restart', async () => {
-    const settings = inMemoryGlobalSettingsStore({ [MEMORY_HELPER_WAIT_SETTING_KEY]: '30' });
+    const settings = inMemoryGlobalSettingsStore({ [MEMORY_HELPER_WAIT_SETTING_KEY]: '20' });
 
     await askWith(settings);
-    expect(resolver).toHaveBeenLastCalledWith(expect.objectContaining({ timeoutMs: 30 * 60_000 }));
+    expect(resolver).toHaveBeenLastCalledWith(expect.objectContaining({ timeoutMs: 20 * 60_000 }));
 
     await settings.setSetting({ key: MEMORY_HELPER_WAIT_SETTING_KEY, value: '3' });
     await askWith(settings);

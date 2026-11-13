@@ -72,15 +72,15 @@ export const runMemoryNightlyRoute = createRoute({
   method: 'post',
   path: '/run',
   tags: [OpenApiTag.CAPABILITIES],
-  summary: 'Run the tidy-up now',
+  summary: 'Start the tidy-up now',
   description:
-    'Tidies the memory pages now, whatever the hour and whether or not the daily tidy-up is on. Answers when it has finished, with what it did.',
+    'Starts tidying the memory pages, whatever the hour and whether or not the daily tidy-up is on. It answers at once with `busy` and does not wait for the end. With a tidy-up already running, it starts nothing. Read the same path to see what it did.',
   'x-fern-sdk-group-name': ['settings', 'memoryNightly'],
   'x-fern-sdk-method-name': 'run',
   responses: {
     200: {
       content: { 'application/json': { schema: RunMemoryNightlyResponseSchema } },
-      description: 'What the tidy-up did, or that one was already running.',
+      description: 'A tidy-up is running.',
     },
     401: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },
@@ -99,7 +99,7 @@ export const getMemoryNightlyRunRoute = createRoute({
   tags: [OpenApiTag.CAPABILITIES],
   summary: 'See where a tidy-up stands',
   description:
-    'Tells whether a tidy-up is running now (`busy`), what one that finished in the last hour did (`ran`), or that there is neither (`idle`). It starts nothing.',
+    'Tells whether a tidy-up is running now (`busy`), what one that finished in the last hour did (`ran`), that it stopped on an error (`failed`), or that there is none (`idle`). It starts nothing.',
   'x-fern-sdk-group-name': ['settings', 'memoryNightly'],
   'x-fern-sdk-method-name': 'get_run',
   responses: {

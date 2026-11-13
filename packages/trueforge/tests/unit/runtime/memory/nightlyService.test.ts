@@ -111,60 +111,75 @@ describe('the nightly timer', () => {
     expect(run.mock.calls[0]?.[0]).toMatchObject({ deps: { hour: 2 } });
   });
 
+  const QUIET_COUNTS = {
+    movedToEarlier: 0,
+    notesAsked: 0,
+    notesSorted: 0,
+    pagesAsked: 0,
+    pairsListed: 0,
+    vaultsWithoutModel: 0,
+    unsortedReasons: [],
+  };
+
   it('tidies now when asked, at any hour and with the daily tidy-up off', async () => {
     jest.setSystemTime(new Date(2026, 10, 11, 14, 0, 0));
     const job = start(inMemoryGlobalSettingsStore());
 
-    expect(await job.tidyNow()).toEqual({
+    job.tidyNow();
+    await jest.advanceTimersByTimeAsync(0);
+
+    expect(job.tidyState()).toEqual({
       status: 'ran',
-      counts: {
-        movedToEarlier: 2,
-        notesAsked: 0,
-        notesSorted: 1,
-        pagesAsked: 0,
-        pairsListed: 0,
-        vaultsWithoutModel: 0,
-        unsortedReasons: [],
-      },
+      counts: { ...QUIET_COUNTS, movedToEarlier: 2, notesSorted: 1 },
       sorting: 'off',
     });
     expect(run.mock.calls[0]?.[0]).toMatchObject({ onRequest: true });
   });
 
-  it('says it is busy when a tidy-up is already running', async () => {
+  it('answers at once and goes on tidying, and starts no second tidy-up meanwhile', async () => {
     let finish: (() => void) | undefined;
     run.mockImplementationOnce(
       () =>
         new Promise(resolve => {
-          finish = () =>
-            resolve({
-              movedToEarlier: 0,
-              notesAsked: 0,
-              notesSorted: 0,
-              pagesAsked: 0,
-              pairsListed: 0,
-              vaultsWithoutModel: 0,
-              unsortedReasons: [],
-            });
+          finish = () => resolve(QUIET_COUNTS);
         }),
     );
     const job = start(inMemoryGlobalSettingsStore());
-    const first = job.tidyNow();
+    job.tidyNow();
     await jest.advanceTimersByTimeAsync(0);
-
-    expect(await job.tidyNow()).toEqual({ status: 'busy' });
     expect(job.tidyState()).toEqual({ status: 'busy' });
+
+    job.tidyNow();
+    await jest.advanceTimersByTimeAsync(0);
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(job.tidyState()).toEqual({ status: 'busy' });
+
     finish?.();
-    expect((await first).status).toBe('ran');
+    await jest.advanceTimersByTimeAsync(0);
+    expect(job.tidyState()).toMatchObject({ status: 'ran' });
+  });
+
+  it('says a tidy-up failed when it stopped on an error, and can start again', async () => {
+    run.mockRejectedValueOnce(new Error('disk full'));
+    const job = start(inMemoryGlobalSettingsStore());
+
+    job.tidyNow();
+    await jest.advanceTimersByTimeAsync(0);
+    expect(job.tidyState()).toEqual({ status: 'failed' });
+
+    job.tidyNow();
+    await jest.advanceTimersByTimeAsync(0);
+    expect(job.tidyState()).toMatchObject({ status: 'ran' });
   });
 
   it('tells a page that comes back what the last tidy-up did, for an hour', async () => {
     const job = start(inMemoryGlobalSettingsStore());
     expect(job.tidyState()).toEqual({ status: 'idle' });
 
-    const ran = await job.tidyNow();
+    job.tidyNow();
+    await jest.advanceTimersByTimeAsync(0);
 
-    expect(job.tidyState()).toEqual(ran);
+    expect(job.tidyState()).toMatchObject({ status: 'ran' });
     jest.setSystemTime(Date.now() + 61 * 60 * 1000);
     expect(job.tidyState()).toEqual({ status: 'idle' });
   });

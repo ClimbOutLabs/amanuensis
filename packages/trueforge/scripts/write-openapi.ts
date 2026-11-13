@@ -142,7 +142,7 @@ const app = createServerApp({
   chatDeletionStore,
   globalSettingsStore,
   tokenFactoryBudget: createTokenFactoryBudget({ store: new SqliteTokenFactoryUsageStore(db), cap: undefined }),
-  memoryTidy: { tidyNow: () => Promise.resolve({ status: 'busy' }), tidyState: () => ({ status: 'idle' }) },
+  memoryTidy: { tidyNow: () => undefined, tidyState: () => ({ status: 'idle' }) },
   tokenStore,
   sessionStore,
   sessionMetricsStore: new SqliteSessionMetricsStore(db),

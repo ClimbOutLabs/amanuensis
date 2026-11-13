@@ -13,9 +13,9 @@ export interface MemoryTidyRun {
     notesSorted: number;
     /** Pairs of lines newly listed as disagreeing. */
     pairsListed: number;
-    /** The sorting choice the run followed; with `off` it only moved ended lines. `off` when nothing was started. */
+    /** The sorting choice the run followed; with `off` it only moved ended lines. `off` unless the status is `ran`. */
     sorting: TrueForge.MemoryTidyRunSorting;
-    /** `ran`: the tidy-up finished. `busy`: one is running, so nothing was started. `idle`: none is running and none finished lately; only a read answers this. */
+    /** `busy`: a tidy-up is running. `ran`: the last one finished. `failed`: the last one stopped on an error. `idle`: none is running and none ended lately. */
     status: TrueForge.MemoryTidyRunStatus;
     /** Why notes were left unsorted in this run, each different cause once. Empty when none were. */
     unsortedReasons: TrueForge.MemoryTidyRunUnsortedReasonsItem[];

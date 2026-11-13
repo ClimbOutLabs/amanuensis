@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   memoryHelperErrorMessage,
@@ -140,7 +140,7 @@ export interface MemoryNightlyState {
   /** What the last tidy-up did, if it finished within the hour; `null` otherwise and while one runs. */
   tidied: MemoryTidyRun | null;
   tidyError: string | null;
-  /** Resolves with what the tidy-up did, or `null` when it could not run (the reason is then in `tidyError`). */
+  /** Starts a tidy-up and resolves when it has ended: with what it did, or `null` when it could not finish (the reason is then in `tidyError`). */
   tidyNow(): Promise<MemoryTidyRun | null>;
 }
 
@@ -167,49 +167,76 @@ export function useMemoryNightlySetting(): MemoryNightlyState {
   const [tidying, setTidying] = useState(false);
   const [tidied, setTidied] = useState<MemoryTidyRun | null>(null);
   const [tidyError, setTidyError] = useState<string | null>(null);
-  // A tidy-up goes on after the page is left, so a page that opens asks where one stands and waits for it.
-  useEffect(() => {
-    if (catalog === null) return undefined;
-    let left = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const ask = async (): Promise<void> => {
-      let state: MemoryTidyRun;
-      try {
-        state = await catalog.getMemoryTidyState();
-      } catch {
-        return;
-      }
-      if (left) return;
-      if (state.status === 'busy') {
+  const left = useRef(false);
+  // A tidy-up outlasts a web request and goes on after the page is left, so the page asks where it stands until it ends.
+  const followTidy = useCallback(
+    async ({ started }: { started: boolean }): Promise<MemoryTidyRun | null> => {
+      if (catalog === null) return null;
+      let waiting = started;
+      for (;;) {
+        let state: MemoryTidyRun | undefined;
+        try {
+          state = await catalog.getMemoryTidyState();
+        } catch (caught) {
+          if (!waiting) return null;
+          if (!(caught instanceof TypeError)) {
+            setTidying(false);
+            setTidyError(memoryHelperErrorMessage(caught));
+            return null;
+          }
+          // The server could not be reached for a moment; the tidy-up goes on there, so keep asking.
+        }
+        if (left.current) return null;
+        if (state?.status === 'ran') {
+          setTidying(false);
+          setTidied(state);
+          return state;
+        }
+        if (state?.status === 'failed') {
+          setTidying(false);
+          setTidyError(
+            'The tidy-up stopped because something went wrong. Your pages are as they were. Choose Tidy now to try again.',
+          );
+          return null;
+        }
+        if (state?.status === 'idle') {
+          if (waiting) {
+            setTidying(false);
+            setTidyError(
+              'The tidy-up stopped before it finished, because the app restarted. Choose Tidy now to start it again.',
+            );
+          }
+          return null;
+        }
+        waiting = true;
         setTidying(true);
-        timer = setTimeout(() => void ask(), TIDY_STATE_ASK_MS);
-        return;
+        await new Promise(resolve => setTimeout(resolve, TIDY_STATE_ASK_MS));
+        if (left.current) return null;
       }
-      setTidying(false);
-      if (state.status === 'ran') setTidied(state);
-    };
-    void ask();
+    },
+    [catalog],
+  );
+  useEffect(() => {
+    left.current = false;
+    void followTidy({ started: false });
     return () => {
-      left = true;
-      clearTimeout(timer);
+      left.current = true;
     };
-  }, [catalog]);
+  }, [followTidy]);
   const tidyNow = useCallback(async () => {
     if (catalog === null) return null;
     setTidying(true);
     setTidied(null);
     setTidyError(null);
     try {
-      const run = await catalog.tidyMemoryNow();
-      setTidied(run);
-      return run;
+      await catalog.tidyMemoryNow();
     } catch (caught) {
       setTidyError(memoryHelperErrorMessage(caught));
-      return null;
-    } finally {
       setTidying(false);
+      return null;
     }
-  }, [catalog]);
+    return followTidy({ started: true });
+  }, [catalog, followTidy]);
   const { change } = state;
   return {
     supported: catalog !== null,

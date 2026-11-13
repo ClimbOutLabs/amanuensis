@@ -78,7 +78,7 @@ function PageSortingControl() {
 const HOURS = Array.from({ length: 24 }, (_, hour) => hour);
 
 /** The waits offered; a value stored another way is added to the list so it still shows. */
-const MODEL_WAIT_MINUTES = [1, 3, 5, 10, 20, 30, 60];
+const MODEL_WAIT_MINUTES = [1, 3, 5, 10, 15, 20];
 
 function minutesLabel(minutes: number): string {
   return minutes === 1 ? '1 minute' : `${String(minutes)} minutes`;
@@ -112,11 +112,8 @@ function unsortedReasonCopy({ cause, assistant }: { cause: string; assistant: st
   return known[cause] ?? 'something went wrong';
 }
 
-/** One plain sentence on what a tidy-up asked for now did. */
+/** Plain sentences on what a finished tidy-up did. */
 function tidyResultCopy({ run, assistant }: { run: MemoryTidyRun; assistant: string }): string {
-  if (run.status === 'busy') {
-    return 'A tidy-up is already running. Try again in a few minutes.';
-  }
   const unread = run.notesAsked - run.notesSorted;
   const reasons = [...new Set(run.unsortedReasons.map(cause => unsortedReasonCopy({ cause, assistant })))];
   const why =

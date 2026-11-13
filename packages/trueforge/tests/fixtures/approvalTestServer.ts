@@ -191,7 +191,7 @@ function buildApp(input: {
     }),
     globalSettingsStore,
     tokenFactoryBudget: uncappedTokenFactoryBudget,
-    memoryTidy: { tidyNow: () => Promise.resolve({ status: 'busy' }), tidyState: () => ({ status: 'idle' }) },
+    memoryTidy: { tidyNow: () => undefined, tidyState: () => ({ status: 'idle' }) },
     sessionStore,
     sentinelAuditStore,
     sentinelSettingsStore,

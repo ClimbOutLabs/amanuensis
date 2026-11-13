@@ -247,7 +247,7 @@ export class MemoryNightlyClient {
     }
 
     /**
-     * Tells whether a tidy-up is running now (`busy`), what one that finished in the last hour did (`ran`), or that there is neither (`idle`). It starts nothing.
+     * Tells whether a tidy-up is running now (`busy`), what one that finished in the last hour did (`ran`), that it stopped on an error (`failed`), or that there is none (`idle`). It starts nothing.
      *
      * @param {MemoryNightlyClient.RequestOptions} requestOptions - Request-specific configuration.
      *
@@ -344,7 +344,7 @@ export class MemoryNightlyClient {
     }
 
     /**
-     * Tidies the memory pages now, whatever the hour and whether or not the daily tidy-up is on. Answers when it has finished, with what it did.
+     * Starts tidying the memory pages, whatever the hour and whether or not the daily tidy-up is on. It answers at once with `busy` and does not wait for the end. With a tidy-up already running, it starts nothing. Read the same path to see what it did.
      *
      * @param {MemoryNightlyClient.RequestOptions} requestOptions - Request-specific configuration.
      *

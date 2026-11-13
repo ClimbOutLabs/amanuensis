@@ -16,7 +16,7 @@ import type {
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqliteGlobalSettingsStore } from '../../../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
-import type { TidyNowResult, TidyState } from '../../../src/runtime/memory/nightlyService';
+import type { TidyState } from '../../../src/runtime/memory/nightlyService';
 
 const silentLogger = createLogger({ silent: true });
 
@@ -55,7 +55,7 @@ async function createRouter() {
   const db = createSqliteDb(':memory:');
   await migrateSqliteToLatest(db);
   const globalSettingsStore = new SqliteGlobalSettingsStore(db);
-  const tidyNow = jest.fn<Promise<TidyNowResult>, []>();
+  const tidyNow = jest.fn<undefined, []>();
   const tidyState = jest.fn<TidyState, []>(() => ({ status: 'idle' }));
   const router = createMemoryNightlyRouter({
     globalSettingsStore,
@@ -154,16 +154,16 @@ describe('memoryNightly router', () => {
     const put = await router.request('/', {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ model_wait_minutes: 30 }),
+      body: JSON.stringify({ model_wait_minutes: 20 }),
     });
     expect(await put.json()).toEqual({
-      data: { enabled: false, overridden: false, default_enabled: false, hour: 0, model_wait_minutes: 30 },
+      data: { enabled: false, overridden: false, default_enabled: false, hour: 0, model_wait_minutes: 20 },
     });
-    expect((await globalSettingsStore.getSetting({ key: 'memory_helper_model_wait_minutes' }))?.value).toBe('30');
-    expect(await (await router.request('/')).json()).toMatchObject({ data: { model_wait_minutes: 30 } });
+    expect((await globalSettingsStore.getSetting({ key: 'memory_helper_model_wait_minutes' }))?.value).toBe('20');
+    expect(await (await router.request('/')).json()).toMatchObject({ data: { model_wait_minutes: 20 } });
   });
 
-  it.each([0, 61, 2.5, '5'])('PUT with model_wait_minutes %p is rejected', async minutes => {
+  it.each([0, 21, 60, 2.5, '5'])('PUT with model_wait_minutes %p is rejected', async minutes => {
     const { router } = await createRouter();
     const response = await router.request('/', {
       method: 'PUT',
@@ -191,41 +191,15 @@ describe('memoryNightly router', () => {
     });
   });
 
-  it('POST /run tidies now and reports what was done', async () => {
-    const { router, tidyNow } = await createRouter();
-    tidyNow.mockResolvedValue({
-      status: 'ran',
-      counts: {
-        movedToEarlier: 3,
-        notesAsked: 4,
-        notesSorted: 2,
-        pagesAsked: 5,
-        pairsListed: 1,
-        vaultsWithoutModel: 0,
-        unsortedReasons: ['reply_too_long'],
-      },
-      sorting: 'on',
+  it('POST /run starts a tidy-up and answers at once that one is running', async () => {
+    const { router, tidyNow, tidyState } = await createRouter();
+    tidyNow.mockImplementation(() => {
+      tidyState.mockReturnValue({ status: 'busy' });
+      return undefined;
     });
     const response = await router.request('/run', { method: 'POST' });
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({
-      data: {
-        status: 'ran',
-        moved_to_earlier: 3,
-        notes_asked: 4,
-        notes_sorted: 2,
-        pairs_listed: 1,
-        sorting: 'on',
-        model_missing: false,
-        unsorted_reasons: ['reply_too_long'],
-      },
-    });
-  });
-
-  it('POST /run says so when a tidy-up is already running', async () => {
-    const { router, tidyNow } = await createRouter();
-    tidyNow.mockResolvedValue({ status: 'busy' });
-    const response = await router.request('/run', { method: 'POST' });
+    expect(tidyNow).toHaveBeenCalledTimes(1);
     expect(await response.json()).toEqual({
       data: {
         status: 'busy',
@@ -238,25 +212,6 @@ describe('memoryNightly router', () => {
         unsorted_reasons: [],
       },
     });
-  });
-
-  it('POST /run says when no model was found for a run with sorting on', async () => {
-    const { router, tidyNow } = await createRouter();
-    tidyNow.mockResolvedValue({
-      status: 'ran',
-      counts: {
-        movedToEarlier: 0,
-        notesAsked: 0,
-        notesSorted: 0,
-        pagesAsked: 0,
-        pairsListed: 0,
-        vaultsWithoutModel: 1,
-        unsortedReasons: [],
-      },
-      sorting: 'on',
-    });
-    const response = await router.request('/run', { method: 'POST' });
-    expect(await response.json()).toMatchObject({ data: { status: 'ran', sorting: 'on', model_missing: true } });
   });
 
   it('GET /run tells where a tidy-up stands and starts nothing', async () => {
@@ -281,8 +236,37 @@ describe('memoryNightly router', () => {
       sorting: 'on',
     });
     expect(await (await router.request('/run')).json()).toMatchObject({
-      data: { status: 'ran', moved_to_earlier: 1, notes_asked: 2, notes_sorted: 1, unsorted_reasons: ['model_slow'] },
+      data: {
+        status: 'ran',
+        moved_to_earlier: 1,
+        notes_asked: 2,
+        notes_sorted: 1,
+        pairs_listed: 0,
+        sorting: 'on',
+        model_missing: false,
+        unsorted_reasons: ['model_slow'],
+      },
     });
+
+    tidyState.mockReturnValue({
+      status: 'ran',
+      counts: {
+        movedToEarlier: 0,
+        notesAsked: 0,
+        notesSorted: 0,
+        pagesAsked: 0,
+        pairsListed: 1,
+        vaultsWithoutModel: 1,
+        unsortedReasons: [],
+      },
+      sorting: 'on',
+    });
+    expect(await (await router.request('/run')).json()).toMatchObject({
+      data: { status: 'ran', pairs_listed: 1, model_missing: true },
+    });
+
+    tidyState.mockReturnValue({ status: 'failed' });
+    expect(await (await router.request('/run')).json()).toMatchObject({ data: { status: 'failed', sorting: 'off' } });
     expect(tidyNow).not.toHaveBeenCalled();
   });
 
@@ -302,7 +286,7 @@ describe('memoryNightly router', () => {
     await migrateSqliteToLatest(db);
     const router = createMemoryNightlyRouter({
       globalSettingsStore: new ReadFailingGlobalSettingsStore(new SqliteGlobalSettingsStore(db)),
-      memoryTidy: { tidyNow: () => Promise.resolve({ status: 'busy' }), tidyState: () => ({ status: 'idle' }) },
+      memoryTidy: { tidyNow: () => undefined, tidyState: () => ({ status: 'idle' }) },
       logger: silentLogger,
     });
 
