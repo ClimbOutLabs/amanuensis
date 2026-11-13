@@ -118,14 +118,15 @@ if [ "$(id -u)" = 0 ] && command -v setpriv >/dev/null 2>&1 && command -v python
   agent_remove "$owned" | grep -qx 'removed' ||
     agent_fail "the capability-free agent could not remove the sidecar's own account file"
   [ ! -s "$owned" ] || agent_fail "the account file is not empty after remove"
-  agent_env "$owned" | grep -q 'unset MCP_EMAIL_SERVER_EMAIL_ADDRESS' ||
+  # With no account left, the agent prints no config at all.
+  [ -z "$(agent_env "$owned")" ] ||
     agent_fail "a removed account still reads as connected"
   # Another user's file: the old bind-mounted layout, which the volume replaces.
   foreign="$agent_tmp/foreign.env"
   printf '%s\n' "$account_text" >"$foreign"
   chmod 600 "$foreign"
   chown 1000 "$foreign"
-  agent_env "$foreign" | grep -q 'unset MCP_EMAIL_SERVER_EMAIL_ADDRESS' ||
+  [ -z "$(agent_env "$foreign")" ] ||
     agent_fail "the capability-free agent read another user's account file"
   if agent_write "$foreign" "$changed_text" >/dev/null 2>&1; then
     agent_fail "the capability-free agent wrote another user's account file"
