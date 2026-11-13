@@ -14,7 +14,10 @@ import {
   open,
   openChat,
   openChatList,
+  openForYou,
   openMoreMenu,
+  openReminders,
+  pickTab,
   press,
   rowButton,
   see,
@@ -39,6 +42,8 @@ export interface Shot {
    * keep the whole window.
    */
   crop?: readonly string[];
+  /** Only the computer size, for a screen a phone does not show. */
+  computerOnly?: boolean;
 }
 
 const SETTINGS_PANEL = ['[role="tabpanel"]'];
@@ -77,6 +82,19 @@ export const SHOTS: readonly Shot[] = [
     steps: [openChat('morningBrief'), see('Needs a decision')],
     crop: ['[data-testid="aman-brief"]'],
   },
+  {
+    name: 'reminders-bell',
+    world: 'full',
+    steps: [openChat('dinner'), openForYou],
+    crop: ['[data-role="delivery-bell"]', '[role="dialog"][aria-label="For you"]'],
+  },
+  { name: 'reminders-page', world: 'full', steps: [openReminders, see("Book Pepper's checkup")] },
+  {
+    name: 'personas-list',
+    world: 'full',
+    steps: [settingsTab('Roles and Personas'), pickTab('Personas'), see('Add persona')],
+    crop: SETTINGS_PANEL,
+  },
   { name: 'schedules-page', world: 'full', steps: [open('/schedules'), see('morning-brief')] },
   { name: 'spaces-list', world: 'full', steps: [open('/spaces'), see('Kitchen refresh')] },
   { name: 'memory-list', world: 'full', steps: [settingsTab('Memory'), see('Sam is vegetarian and loves Thai food.')] },
@@ -88,12 +106,14 @@ export const SHOTS: readonly Shot[] = [
     steps: [settingsTab('Skills'), enableSkill('algorithmic-art')],
     crop: SETTINGS_PANEL,
   },
-  { name: 'appearance-themes', world: 'full', steps: [settingsTab('Themes')], crop: SETTINGS_PANEL },
+  { name: 'appearance-themes', world: 'full', steps: [settingsTab('Appearance')], crop: SETTINGS_PANEL },
   {
-    name: 'appearance-more-menu',
+    name: 'appearance-light-dark-button',
     world: 'full',
-    steps: [open('/'), openMoreMenu],
-    crop: ['button[aria-label="More"]', '[role="menu"]'],
+    steps: [openChat('dinner')],
+    crop: ['header:has(button[aria-label="Switch to dark"])'],
+    // A phone does not show the button.
+    computerOnly: true,
   },
   { name: 'connect-mail-calendar-connectors', world: 'full', steps: [settingsTab('Connectors')], crop: SETTINGS_PANEL },
   {
@@ -147,7 +167,12 @@ export const SHOTS: readonly Shot[] = [
     steps: [ask('incognito', { incognito: true }), see('Close and delete')],
     crop: ['main'],
   },
-  { name: 'calendar-event-card', world: 'full', steps: [ask('calendarEvent'), see(/to your calendar\?/)], crop: CARD },
+  {
+    name: 'calendar-event-card',
+    world: 'full',
+    steps: [ask('calendarEvent'), see(/to your Google Calendar on/)],
+    crop: CARD,
+  },
   { name: 'approvals-card', world: 'full', steps: [ask('deletePlants'), see('Allow')], crop: CARD },
   {
     name: 'getting-help-guide',

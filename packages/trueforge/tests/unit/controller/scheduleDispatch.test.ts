@@ -1,6 +1,9 @@
 import { DOCUMENT_REPORT_TOOL_NAMES } from '@truefoundry/trueforge-core/core';
 import { SANDBOX_FILE_WRITE_TOOLS } from '@truefoundry/trueforge-core/core/permissions/dispatch';
-import { MORNING_BRIEF_PROMPT } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
+import {
+  MORNING_BRIEF_PROMPT,
+  MORNING_BRIEF_SCHEDULE_NAME,
+} from '@truefoundry/trueforge-core/core/schedules/morningBrief';
 import { SPACE_READ_TOOL_NAMES, SPACE_WRITE_TOOL_NAMES } from '@truefoundry/trueforge-core/core/spaces/toolContract';
 import configuration from '../../../src/config';
 import {
@@ -11,6 +14,7 @@ import {
   SchedulePersonaNotFoundError,
   scheduleRunFailureReason,
   ScheduleRunNotFoundError,
+  scheduleRunSessionTitle,
   scheduleTaskText,
   scheduleWithheldTools,
   startScheduleRun,
@@ -177,7 +181,37 @@ describe('startScheduleRun', () => {
       userRef: 'tester',
       agent: { id: 'agent-1', name: 'reporter' },
       persona: undefined,
+      session_title: 'Daily · Monday, August 31',
     });
+  });
+
+  it('titles the morning brief run chat with the plain schedule name, never the brief task', async () => {
+    const dispatchItem = item();
+    const briefItem: ScheduleDispatchItem = {
+      run: dispatchItem.run,
+      schedule: {
+        ...dispatchItem.schedule,
+        name: MORNING_BRIEF_SCHEDULE_NAME,
+        manifest: ScheduleManifestSchema.parse({
+          task: MORNING_BRIEF_PROMPT,
+          cron: '0 7 * * *',
+          timezone: 'UTC',
+          status: 'active',
+        }),
+      },
+    };
+    const session = { listTurns: jest.fn().mockResolvedValue({ data: [] }) };
+
+    const prepared = await startScheduleRun({
+      item: briefItem,
+      sessions: { getOrCreateByExternalId: jest.fn().mockResolvedValue({ session, created: true }) },
+      agentStore: { getAgent: jest.fn().mockResolvedValue({ id: 'agent-1', name: 'reporter' }) },
+      personaStore: { getPersona: jest.fn() },
+      briefItems: noBriefItemsDone(),
+    });
+
+    expect(prepared?.session_title).toBe('Morning brief · Monday, August 31');
+    expect(prepared?.session_title).not.toContain('Give me my morning brief');
   });
 
   it('runs as the persona the schedule kept from its chat', async () => {
@@ -255,6 +289,50 @@ describe('startScheduleRun', () => {
         briefItems: noBriefItemsDone(),
       }),
     ).rejects.toBeInstanceOf(ScheduleAgentNotFoundError);
+  });
+});
+
+describe('scheduleRunSessionTitle', () => {
+  it('names the chat for the schedule in plain words, with the run date', () => {
+    expect(
+      scheduleRunSessionTitle({ name: 'morning-brief', scheduled_for: '2026-11-10T15:00:00.000Z', timezone: 'UTC' }),
+    ).toBe('Morning brief · Tuesday, November 10');
+  });
+
+  it('tells runs on different days apart', () => {
+    const monday = scheduleRunSessionTitle({
+      name: 'morning-brief',
+      scheduled_for: '2026-08-31T07:00:00.000Z',
+      timezone: 'UTC',
+    });
+    const tuesday = scheduleRunSessionTitle({
+      name: 'morning-brief',
+      scheduled_for: '2026-09-01T07:00:00.000Z',
+      timezone: 'UTC',
+    });
+    expect(monday).toBe('Morning brief · Monday, August 31');
+    expect(tuesday).toBe('Morning brief · Tuesday, September 1');
+    expect(monday).not.toBe(tuesday);
+  });
+
+  it('reads the date in the schedule time zone, not in UTC', () => {
+    expect(
+      scheduleRunSessionTitle({
+        name: 'morning-brief',
+        scheduled_for: '2026-09-01T02:00:00.000Z',
+        timezone: 'America/Los_Angeles',
+      }),
+    ).toBe('Morning brief · Monday, August 31');
+  });
+
+  it('keeps the title within the title cap when the schedule name is long', () => {
+    const title = scheduleRunSessionTitle({
+      name: 'a-very-long-schedule-name-that-goes-on-and-on-and-on',
+      scheduled_for: '2026-08-31T07:00:00.000Z',
+      timezone: 'UTC',
+    });
+    expect(title.length).toBeLessThanOrEqual(50);
+    expect(title).toContain('Monday, August 31');
   });
 });
 

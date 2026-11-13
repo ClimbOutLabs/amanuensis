@@ -26,6 +26,8 @@ module.exports = {
   },
   // pnpm stores packages under node_modules/.pnpm/; AI SDK + transitive deps ship as ESM.
   transformIgnorePatterns: [],
+  // A fixed place for compiled files, so CI can keep them between runs. Jest checks each file's content, so an old entry is never used for a changed file.
+  cacheDirectory: '<rootDir>/node_modules/.cache/jest',
   moduleNameMapper: {
     '^(\\.{1,2}/.*)\\.js$': '$1',
     '^@truefoundry/trueforge-sdk$': '<rootDir>/../trueforge-sdk/src/index.ts',
@@ -48,5 +50,6 @@ module.exports = {
   // pattern is exact.
   testMatch: ['**/tests/unit/**/*.test.ts'],
   // SRT contract suites need a real host sandbox; run via `pnpm test:local-sandbox:contract`.
-  testPathIgnorePatterns: ['contract\\.test\\.ts$'],
+  // Suites that need a real outside app running have their own config and script.
+  testPathIgnorePatterns: ['contract\\.test\\.ts$', 'live\\.test\\.ts$'],
 };

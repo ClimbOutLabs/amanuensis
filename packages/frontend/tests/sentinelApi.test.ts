@@ -65,15 +65,15 @@ test('audit entries list parses the envelope and pages by limit', async () => {
 test('user audit log sends the page token and outcome and keeps deleted-chat rows', async () => {
   const { api, seen } = recordingApi(() => ({
     data: [
-      { ...auditEntry, chat_exists: false },
+      { ...auditEntry, chat_exists: false, session_title: 'Kept plan' },
       { ...auditEntry, id: 'entry-2', chat_exists: 'unknown' },
     ],
     pagination: { limit: 10, next_page_token: 'next' },
   }));
   const page = await api.listUserAuditEntries({ limit: 10, pageToken: 'tok en', outcome: 'denied' });
   assert.deepEqual(
-    page.entries.map(entry => [entry.id, entry.chat_exists]),
-    [['entry-1', false]],
+    page.entries.map(entry => [entry.id, entry.chat_exists, entry.session_title]),
+    [['entry-1', false, 'Kept plan']],
   );
   assert.equal(page.nextPageToken, 'next');
   assert.equal(seen[0]?.url, '/api/v1/user/audit-log?limit=10&page_token=tok+en&outcome=denied');

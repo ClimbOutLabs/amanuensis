@@ -7,7 +7,7 @@
     "node": ">=22.14.0"
   },
   "scripts": {
-    "build": "pnpm guide:build && pnpm --filter @truefoundry/trueforge-core build && pnpm --filter @truefoundry/trueforge-sdk build && pnpm --filter @truefoundry/trueforge-ui build && pnpm --filter frontend build && pnpm --filter @truefoundry/trueforge build && pnpm --filter amanuensis build",
+    "build": "pnpm guide:build && pnpm --filter @truefoundry/trueforge-core build && pnpm --filter frontend build && pnpm --filter amanuensis build",
     "images:ids": "bash installer/image-ids.sh",
     "build:aman-installer": "pnpm --filter @truefoundry/aman-installer build",
     "build:setup-image": "docker build -t aman-setup:local installer/setup-image",
@@ -105,6 +105,8 @@
     "test:external-hosts": "node scripts/check-external-hosts.mjs",
     "test:external-hosts-scanner": "node --test tests/external-hosts-scan.test.mjs",
     "nightly:report": "node scripts/nightly-report.mjs",
+    "nightly:obsidian-notes:start": "node scripts/obsidian-notes/start-obsidian.mjs",
+    "nightly:obsidian-notes": "pnpm --filter @truefoundry/trueforge test:obsidian-notes",
     "nightly:coverage": "node scripts/check-nightly-coverage.mjs",
     "nightly:gallery": "node scripts/build-nightly-gallery.mjs",
     "test:nightly-coverage": "node --test tests/nightly-coverage.test.mjs",
@@ -132,7 +134,7 @@
     "test:trueforge-ui": "pnpm --filter @truefoundry/trueforge-ui test",
     "test": "pnpm test:aman-guide && pnpm test:help-coverage && pnpm test:trueforge-core &&pnpm test:trueforge-sdk && pnpm test:trueforge-ui && pnpm test:trueforge && pnpm test:frontend",
     "verify": "pnpm run test:private-data && pnpm run test:conflict-markers && pnpm run test:external-hosts && pnpm run format:check && pnpm run typecheck && pnpm run lint:ci && pnpm run build && pnpm run test",
-    "typecheck": "pnpm --filter @truefoundry/trueforge-sdk build && pnpm --filter @truefoundry/trueforge-ui build && pnpm --filter @truefoundry/trueforge-ui --filter @truefoundry/trueforge --filter frontend --parallel typecheck:only && pnpm --filter @truefoundry/trueforge-core --filter amanuensis --parallel typecheck",
+    "typecheck": "pnpm --filter @truefoundry/trueforge-ui build && pnpm --filter @truefoundry/trueforge-ui --filter @truefoundry/trueforge --filter frontend --parallel typecheck:only && pnpm --filter @truefoundry/trueforge-core --filter amanuensis --parallel typecheck",
     "version": "node scripts/version.mjs"
   },
   "devDependencies": {

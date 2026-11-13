@@ -72,6 +72,7 @@ RUN pip install --no-cache-dir --break-system-packages --no-deps --require-hashe
 # These are only the image copies on /usr/local/bin: a project's own pinned tools, in its node_modules/.bin
 # or its Python environment, are what its test commands resolve first, and nothing here changes that.
 RUN pytest --version \
+ && python3 -c "import requests, yaml, httpx, bs4" \
  && ruff --version \
  && mypy --version \
  && vitest --version \
@@ -97,6 +98,17 @@ RUN apt-get update \
 # build context, not copied, so they add nothing to the image beyond the installed toolchain.
 ARG AMAN_PACKS=""
 RUN --mount=type=bind,source=packs,target=/tmp/packs sh /tmp/packs/install-packs.sh /tmp/packs "${AMAN_PACKS}"
+
+# Python packages the person added with `--add-python`, from their own packs/python-packages.txt; none by default.
+# That file stays on their machine and is never part of what Aman ships. Ready-made wheels only, so no package code
+# runs during the install, and every package already in the image is held at its version, so an added one can never
+# change what Aman ships. `pnpm sandbox:slots` rewrites the file before each build, one name or name==version a line.
+RUN --mount=type=bind,source=packs,target=/tmp/packs \
+    if [ -s /tmp/packs/python-packages.txt ]; then \
+      pip freeze --all > /tmp/shipped.txt \
+ && pip install --no-cache-dir --break-system-packages --only-binary=:all: -c /tmp/shipped.txt -r /tmp/packs/python-packages.txt \
+ && rm -rf /tmp/shipped.txt /root/.cache; \
+    fi
 
 # Mount points for the call directories.
 RUN mkdir -p /ingress /scratch /egress /workspace /tmp \
