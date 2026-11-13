@@ -59,8 +59,11 @@ The browser reads pages from anywhere, and some of them are hostile. So it share
 ## What Aman checks before it acts
 
 - Opening a page sends its address to a site, so it gets the same checks as a web search.
-- Reading, scrolling, going back, a screenshot, typing and picking from a list only work on the open page and send nothing.
-- Whether a click needs your OK is decided by Aman's server from what the live page says about the clicked button, never from what the model says. A click that would submit a form asks first.
+- Reading, scrolling, going back and a screenshot only work on the open page and send nothing.
+- Only a plain link to another page runs without asking. Aman opens its address instead of pressing it, so the page's own scripts don't run.
+- A button, tab or menu runs the page's own script, which can send anything whatever its label says, so a click on one always asks first. Typing and picking an option ask first too, with the exact text on the card, because a page can send what is typed the moment it changes.
+- Typing never presses Enter or Tab. Input that would land anywhere but the checked element, including a frame inside the page, is stopped.
+- Every action runs only on the element that was checked, read where the page's scripts can't change what Aman sees. If the page changed in between, the action is refused and Aman reads the page again.
 - The page text Aman reads never shows the value of a password, payment or one-time-code field.
 - A page Aman reads comes from your signed-in browser, so Aman treats its content like your email: as information, not instructions.
 

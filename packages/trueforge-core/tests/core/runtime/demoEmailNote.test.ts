@@ -4,7 +4,7 @@ import { createSentinelHostContext, defaultSentinelServices } from '../../../src
 import { AgentThread } from '../../../src/core/runtime/AgentThread';
 import { DEMO_EMAIL_PROMPT } from '../../../src/core/runtime/contextUtils';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
-import { finalAnswerStream, makeSilentLogger } from '../harnessMocks';
+import { finalAnswerStream, makeMockIMCPServer, makeSilentLogger } from '../harnessMocks';
 
 /** Runs one turn and returns the system prompt the model was sent. */
 async function systemPromptFor(input: {
@@ -12,7 +12,11 @@ async function systemPromptFor(input: {
   emailSetUp: boolean;
   sentinel?: boolean;
   subAgent?: boolean;
+  /** Whether this chat is given the Email tools. Defaults to whenever Email is set up. */
+  holdsEmail?: boolean;
+  readOnly?: boolean;
 }): Promise<string> {
+  const holdsEmail = input.holdsEmail ?? input.emailSetUp;
   const requests: LLMCreateParamsStreaming[] = [];
   const create = jest.fn((request: LLMCreateParamsStreaming) => {
     requests.push(request);
@@ -33,7 +37,8 @@ async function systemPromptFor(input: {
       modelId: undefined,
       configuredModels: undefined,
       instruction: 'test',
-      toolSets: [],
+      toolSets: holdsEmail ? [makeMockIMCPServer({ name: MAIL_CONNECTOR_NAME, preload: false })] : [],
+      readOnly: input.readOnly === true,
       setUpConnectorNames: input.emailSetUp ? [MAIL_CONNECTOR_NAME] : [],
     },
     parent: input.subAgent === true ? { thread_id: 'root', tool_call_id: 'launch' } : undefined,
@@ -59,6 +64,14 @@ async function systemPromptFor(input: {
 }
 
 describe('the demo email note', () => {
+  it('is left out of a chat that is not given the Email tools', async () => {
+    expect(await systemPromptFor({ demo: true, emailSetUp: true, holdsEmail: false })).not.toContain(DEMO_EMAIL_PROMPT);
+  });
+
+  it('is left out of a read-only chat, which is given no tools', async () => {
+    expect(await systemPromptFor({ demo: true, emailSetUp: true, readOnly: true })).not.toContain(DEMO_EMAIL_PROMPT);
+  });
+
   it('is in the prompt on a demo instance with Email set up', async () => {
     expect(await systemPromptFor({ demo: true, emailSetUp: true })).toContain(DEMO_EMAIL_PROMPT);
   });

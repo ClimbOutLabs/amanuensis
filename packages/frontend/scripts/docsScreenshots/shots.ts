@@ -39,6 +39,8 @@ export interface Shot {
    * keep the whole window.
    */
   crop?: readonly string[];
+  /** Only the computer size, for a screen a phone does not show. */
+  computerOnly?: boolean;
 }
 
 const SETTINGS_PANEL = ['[role="tabpanel"]'];
@@ -88,12 +90,14 @@ export const SHOTS: readonly Shot[] = [
     steps: [settingsTab('Skills'), enableSkill('algorithmic-art')],
     crop: SETTINGS_PANEL,
   },
-  { name: 'appearance-themes', world: 'full', steps: [settingsTab('Themes')], crop: SETTINGS_PANEL },
+  { name: 'appearance-themes', world: 'full', steps: [settingsTab('Appearance')], crop: SETTINGS_PANEL },
   {
-    name: 'appearance-more-menu',
+    name: 'appearance-light-dark-button',
     world: 'full',
-    steps: [open('/'), openMoreMenu],
-    crop: ['button[aria-label="More"]', '[role="menu"]'],
+    steps: [openChat('dinner')],
+    crop: ['header:has(button[aria-label="Switch to dark"])'],
+    // A phone does not show the button.
+    computerOnly: true,
   },
   { name: 'connect-mail-calendar-connectors', world: 'full', steps: [settingsTab('Connectors')], crop: SETTINGS_PANEL },
   {
@@ -147,7 +151,12 @@ export const SHOTS: readonly Shot[] = [
     steps: [ask('incognito', { incognito: true }), see('Close and delete')],
     crop: ['main'],
   },
-  { name: 'calendar-event-card', world: 'full', steps: [ask('calendarEvent'), see(/to your calendar\?/)], crop: CARD },
+  {
+    name: 'calendar-event-card',
+    world: 'full',
+    steps: [ask('calendarEvent'), see(/to your Google Calendar on/)],
+    crop: CARD,
+  },
   { name: 'approvals-card', world: 'full', steps: [ask('deletePlants'), see('Allow')], crop: CARD },
   {
     name: 'getting-help-guide',

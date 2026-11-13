@@ -45,8 +45,10 @@ import type { DeliveryAttemptTable, DeliveryTable } from '../deliveryStore';
 import type { LocalUserTable } from '../localUserStore';
 import type { OAuthClient, OAuthPendingAuthorizationData, OAuthServer, OAuthToken } from '../mcpServerStore';
 import type { NoticingCheckpointTable, NoticingEventTable, ReachLeaseTable } from '../noticingStore';
+import type { PhoneCallTable } from '../phoneCallStore';
 import type { PushSubscriptionTable } from '../pushSubscriptionStore';
 import type { ReachSettingsTable } from '../reachSettingsStore';
+import type { TextContactTable, TextSendCountTable, TextWordTable } from '../textContactStore';
 
 /**
  * Trace-level state for one thread at one turn (`turn_thread.checkpoint`).
@@ -330,8 +332,8 @@ export interface McpToolGrantTable {
   created_by: string;
   mcp_server_name: string;
   tool_name: string;
-  /** Connector host the grant was given for; null for a connector with no URL. */
-  mcp_server_host: string | null;
+  /** What the grant binds to: the connector's setup digest (`connectorGrantBinding`), or null for a source with none. */
+  connector_binding: string | null;
   created_at: Date;
 }
 
@@ -1006,6 +1008,10 @@ export interface Database {
   delivery: DeliveryTable;
   delivery_attempt: DeliveryAttemptTable;
   reach_settings: ReachSettingsTable;
+  text_contact: TextContactTable;
+  phone_call: PhoneCallTable;
+  text_send_count: TextSendCountTable;
+  text_word: TextWordTable;
   noticing_event: NoticingEventTable;
   noticing_checkpoint: NoticingCheckpointTable;
   reach_lease: ReachLeaseTable;

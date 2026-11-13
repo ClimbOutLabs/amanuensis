@@ -278,25 +278,8 @@ describe('TrueForgeUI', () => {
     expect(await screen.findByRole('status')).toHaveTextContent('Select Sandbox first');
   });
 
-  it('summarizes model, connectors, and skills in Save Agent with their own editors', async () => {
-    const getModels = vi.fn(async () => [
-      {
-        id: 'openai-main/gpt-4.1',
-        name: 'openai-main/gpt-4.1',
-        provider: { name: 'OpenAI' },
-        properties: {},
-      },
-    ]);
-    const getMcp = vi.fn(async () => [{ id: 'github', name: 'GitHub', authenticated: true }]);
-    const getSkills = vi.fn(async () => [{ id: 'research', name: 'Research' }]);
-
-    render(
-      <TrueForgeUI
-        server={createMockAgentUIServer({ getModels, getMcp, getSkills })}
-        agentConfig={{ mode: 'AgentComposer' }}
-        layout="sidebar"
-      />,
-    );
+  it('asks only for a name and purpose in Save Agent, beside the setup panel that holds the rest', async () => {
+    render(<TrueForgeUI server={createMockAgentUIServer()} agentConfig={{ mode: 'AgentComposer' }} layout="sidebar" />);
 
     openRailMenu();
     fireEvent.click(await screen.findByRole('button', { name: 'Start new agent' }));
@@ -304,13 +287,8 @@ describe('TrueForgeUI', () => {
     const saveDialog = await screen.findByRole('dialog', { name: 'Save agent' });
     expect(within(saveDialog).getByLabelText('Name')).toBeInTheDocument();
     expect(within(saveDialog).getByLabelText("What it's for")).toBeInTheDocument();
-    fireEvent.click(within(saveDialog).getByRole('button', { name: 'More settings' }));
-    expect(within(saveDialog).getByRole('button', { name: 'Edit Model' })).toBeInTheDocument();
-    expect(within(saveDialog).getByRole('button', { name: 'Edit Connectors' })).toBeInTheDocument();
-    expect(within(saveDialog).getByRole('button', { name: 'Edit Skills' })).toBeInTheDocument();
-    expect(getModels).toHaveBeenCalled();
-    expect(getMcp).toHaveBeenCalled();
-    expect(getSkills).toHaveBeenCalled();
+    expect(within(saveDialog).queryByRole('button', { name: 'Edit Connectors' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add a connector' })).toBeInTheDocument();
   });
 
   it('renders only the MCP authorization screen when requested by the URL', async () => {
@@ -688,7 +666,7 @@ describe('SidebarLayout', () => {
     expect(current()).toEqual(['More']);
   });
 
-  it('chooses an appearance from the More menu and shows settings only when catalog is provided', async () => {
+  it('offers light and dark on the chat header, not in the More menu, and shows settings only when catalog is provided', async () => {
     const { rerender } = render(
       <SlotsProvider theme={{ brand: { mode: 'icon-title', name: 'Acme' } }}>
         <ServerProvider server={mockServer(stubCatalog)}>
@@ -706,10 +684,10 @@ describe('SidebarLayout', () => {
     openRailMenu();
     expect(await screen.findAllByRole('button', { name: 'Settings' })).toHaveLength(1);
     expect(await screen.findAllByRole('button', { name: 'Agents' })).not.toHaveLength(0);
-    fireEvent.click(screen.getByRole('menuitemradio', { name: 'Dark' }));
-    // Choosing an appearance closes the More menu, so reopen it to check the choice moved.
-    openRailMenu();
-    expect(screen.getByRole('menuitemradio', { name: 'Dark' })).toHaveAttribute('aria-checked', 'true');
+    // The More menu holds no appearance choice. Light and dark is the chat header button.
+    expect(screen.queryAllByRole('menuitemradio')).toHaveLength(0);
+    fireEvent.click(screen.getByRole('button', { name: 'Switch to dark' }));
+    expect(screen.getByRole('button', { name: 'Switch to light' })).toBeInTheDocument();
 
     // Settings stays available with a locked agentName when catalog is present.
     rerender(
@@ -780,7 +758,8 @@ describe('SidebarLayout', () => {
     );
     openRailMenu();
     expect(screen.queryByRole('button', { name: 'Settings' })).not.toBeInTheDocument();
-    expect(screen.getByRole('group', { name: 'Appearance' })).toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Appearance' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Switch to light' })).toBeInTheDocument();
   });
 });
 

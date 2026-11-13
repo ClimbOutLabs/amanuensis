@@ -84,7 +84,7 @@ import {
   type StreamDeadlineDetails,
 } from '../llm/streamDeadline';
 import { toOpenAIChatMessage } from '../llm/toOpenAIChatMessage';
-import { estimateTokensForString } from '../llm/usage';
+import { estimateTokensForString, PICTURE_TOKEN_ESTIMATE } from '../llm/usage';
 import {
   isContextLengthError,
   isRetryableProviderError,
@@ -160,6 +160,7 @@ import {
   type NotSavedReason,
 } from '../permissions/heldActions';
 import type { Tier, Tier3Card } from '../permissions/tier';
+import type { ToolGrantKey } from '../permissions/toolGrants';
 import { assistantDisplayName } from '../personas/assistantName';
 import {
   SANDBOX_EXEC_TOOL_NAME,
@@ -210,6 +211,7 @@ import {
   EMAIL_PASSWORD_PROMPT,
   EMPTY_ANSWER_NUDGE_MESSAGE,
   emptyInspectionNudgeMessage,
+  estimateTokensForChatMessageContent,
   estimateTokensForContextMessages,
   failedBatchNudgeMessage,
   findHeldToolCalls,
@@ -235,6 +237,7 @@ import {
   NO_TASK_NO_TOOLS_PROMPT,
   noProgressNudgeMessage,
   personMessageIndex,
+  pictureCount,
   PLAIN_SPEECH_PROMPT,
   policyBlockedNudgeMessage,
   remapToolCallIdSet,
@@ -246,6 +249,7 @@ import {
   UNTRUSTED_TOOL_OUTPUT_PROMPT,
   WEB_IMAGES_PROMPT,
   withHostUniqueToolCallIds,
+  withoutEarlierThinking,
 } from './contextUtils';
 import { CALL_TOOL_NAME, DeferredTool, tryParseCallToolWrapper, tryUnwrapCallToolInput } from './DeferredTool';
 import { applyHostToolCallPolicy, type HostToolCallPolicy, type HostToolCallPolicyLogger } from './HostToolCallPolicy';
@@ -1560,8 +1564,10 @@ export async function classifyUnstampedToolCall(input: {
   info: InternalToolCallInfo;
   /** The connector the call goes to, bound into the approval token; absent when the tool set has none. */
   connector?: ConnectorBinding | undefined;
+  /** What a standing grant for this call binds to; absent when the tool set has none. */
+  grant_binding?: string | undefined;
 }): Promise<InternalToolCallInfo> {
-  const { sentinel, canonical_params, info, connector } = input;
+  const { sentinel, canonical_params, info, connector, grant_binding } = input;
   if (
     sentinel === undefined ||
     info.tier !== undefined ||
@@ -1596,6 +1602,7 @@ export async function classifyUnstampedToolCall(input: {
             mcp_server_id: connector.server_id,
             ...(connector.destination_host === null ? {} : { mcp_server_host: connector.destination_host }),
           }),
+      ...(grant_binding === undefined ? {} : { mcp_grant_binding: grant_binding }),
       mcp_hints: {
         read_only_hint: info.read_only_hint,
         destructive_hint: info.destructive_hint,
@@ -1747,6 +1754,10 @@ async function enrichAssistantMessage({
       canonical_params: params.arguments ?? {},
       info: policed,
       connector: toolInfo.toolSet.resolveConnector?.({
+        name: toolInfo.originalToolName,
+        arguments: tryParseToolArgs(toolCall.function.arguments),
+      }),
+      grant_binding: toolInfo.toolSet.resolveGrantBinding?.({
         name: toolInfo.originalToolName,
         arguments: tryParseToolArgs(toolCall.function.arguments),
       }),
@@ -2035,6 +2046,17 @@ export class AgentThread {
             this.addBundleGuidance(builder, bundle);
             return builder.build();
           },
+          // A saved tool result is a JSON envelope, so the text sits in it as a JSON string.
+          inChat: text => {
+            const saved = JSON.stringify(text);
+            return this.context.some(
+              message =>
+                isLLMContextMessage(message) &&
+                message.role === 'tool' &&
+                typeof message.content === 'string' &&
+                message.content.includes(saved),
+            );
+          },
         });
     const capabilities = [
       ...(this.toolBundles === undefined ? [] : [this.toolBundles.capability()]),
@@ -2047,9 +2069,11 @@ export class AgentThread {
     this.postToolCallContextProcessor = capabilities.flatMap(c => c.postToolCallProcessors ?? []);
     this.toolResponseProcessors = capabilities.flatMap(c => c.toolResponseProcessors ?? []);
     this.untrustedTextScreens = capabilities.flatMap(c => c.untrustedTextScreens ?? []);
-    this.instructionBuilders = capabilities.flatMap(c =>
-      (c.instructionBuilders ?? []).map(build => ({ bundle: c.bundle, build })),
-    );
+    // A capability's instructions say how to use its tools. A read-only definition gets none of those tools,
+    // so it gets none of their instructions either; context with no tools behind it still goes out.
+    this.instructionBuilders = capabilities
+      .filter(c => !this.definition.readOnly || (c.systemToolSets ?? []).length === 0)
+      .flatMap(c => (c.instructionBuilders ?? []).map(build => ({ bundle: c.bundle, build })));
     const capabilityPreSend = capabilities.flatMap(c => c.preSendProcessors ?? []);
     // OpenToolCallCloser is fixed core before contributed preSend processors.
     this.preSendContextProcessors = [
@@ -2156,6 +2180,11 @@ export class AgentThread {
     }
   }
 
+  /** Whether this thread is given the named connector's tools. A read-only thread is given none. */
+  private holdsConnector(name: string): boolean {
+    return !this.definition.readOnly && (this.definition.toolSets ?? []).some(toolSet => toolSet.name === name);
+  }
+
   private buildInstruction(userInstruction?: string): string {
     const identity = this.parent ? SUB_AGENT_IDENTITY : rootAgentIdentity(this.definition.identity ?? {});
     const builder = InstructionBuilder.createSystemPrompt(identity);
@@ -2201,7 +2230,8 @@ export class AgentThread {
     capabilities.addSection('plain-speech', PLAIN_SPEECH_PROMPT);
     if (this.definition.setUpConnectorNames?.includes(MAIL_CONNECTOR_NAME)) {
       capabilities.addSection('email-passwords', EMAIL_PASSWORD_PROMPT);
-      if (this.sentinel?.services.demoSendAllowlist != null) {
+      // The demo note tells the model to save a draft with the Email tools, so it goes only where those tools do.
+      if (this.sentinel?.services.demoSendAllowlist != null && this.holdsConnector(MAIL_CONNECTOR_NAME)) {
         capabilities.addSection('demo-email', DEMO_EMAIL_PROMPT);
       }
     }
@@ -2338,6 +2368,11 @@ export class AgentThread {
           heldById,
           signal,
         });
+        // The wider scopes a decision asks for take effect only once the decision itself is committed below, so a
+        // decision that never lands (its write fails, or the turn stops first) leaves no grant behind.
+        const chatGrants: string[] = [];
+        const standingGrants: ToolGrantKey[] = [];
+        let mapsLastingAnswer = false;
         for (const approval of approvals) {
           if (approval.approval.status !== 'allow') {
             continue;
@@ -2351,7 +2386,7 @@ export class AgentThread {
             pending.tool_info.implementation_plan_grant === undefined &&
             allowsChatApproval(pending.tool_info)
           ) {
-            this.chatApprovalGrants.add(approvalGrantKey(pending.tool_info));
+            chatGrants.push(approvalGrantKey(pending.tool_info));
           }
           if (
             approval.approval.scope === 'always' &&
@@ -2359,17 +2394,14 @@ export class AgentThread {
             allowsToolGrant(pending.tool_info)
           ) {
             if (mapsCardTakesLastingAnswer(pending.tool_info)) {
-              await this.sentinel.services.allowMapsWithoutAsking({
-                tenant_id: this.sentinel.tenant_id,
-                created_by: this.sentinel.created_by,
-              });
+              mapsLastingAnswer = true;
             } else {
-              await this.sentinel.services.tool_grants.recordToolGrant({
+              standingGrants.push({
                 tenant_id: this.sentinel.tenant_id,
                 created_by: this.sentinel.created_by,
                 mcp_server_name: pending.tool_info.mcp_server_name,
                 tool_name: pending.tool_info.grant_tool_name ?? pending.tool_info.original_tool_name,
-                mcp_server_host: pending.tool_info.grant_host ?? null,
+                connector_binding: pending.tool_info.grant_binding ?? null,
               });
             }
           }
@@ -2425,6 +2457,18 @@ export class AgentThread {
           usage: undefined,
           toolCallMemo: nudgeFlush.toolCallMemoAfterFlush ?? this.toolCallMemo,
         });
+        for (const key of chatGrants) {
+          this.chatApprovalGrants.add(key);
+        }
+        for (const grant of standingGrants) {
+          await this.sentinel?.services.tool_grants.recordToolGrant(grant);
+        }
+        if (mapsLastingAnswer && this.sentinel !== undefined) {
+          await this.sentinel.services.allowMapsWithoutAsking({
+            tenant_id: this.sentinel.tenant_id,
+            created_by: this.sentinel.created_by,
+          });
+        }
         this.pendingHeldReplayEvents = heldReplay.events;
         this.heldReplayOutput = heldReplay.events.at(-1);
         if (nudgeFlush.toolCallMemoAfterFlush !== undefined) {
@@ -2967,11 +3011,12 @@ export class AgentThread {
    * is assembled. Mirrors the message assembly in transformToLLMRequest without
    * building the full request body.
    *
-   * Context messages are estimated text-only (see contextMessageTextTokens):
-   * toOpenAIChatMessage preserves image_url / input_audio / file parts with
-   * their full base64 payloads, which the length/4 heuristic would inflate
-   * wildly (a 1MB image reads as ~340k tokens) while the provider does not
-   * bill those bytes as text tokens.
+   * Context messages are estimated with estimateTokensForContextMessages, the
+   * same count compaction sizes its kept tail with: text, tool calls and replayed
+   * thinking. The base64 bytes of a picture are never counted as text (a 1MB image
+   * would read as ~340k tokens); each picture counts as a fixed amount instead,
+   * because the model does take it into its context. What is added for this one
+   * request (recalled memories, screenshots) is counted too.
    *
    * Bails out early once the running total already exceeds `limit`: this runs on
    * every turn, and precision past the guard threshold buys nothing. Pass
@@ -3000,11 +3045,20 @@ export class AgentThread {
         }
       }
     }
-    for (const message of this.context) {
-      total += contextMessageTextTokens(message);
+    // A model that cannot read pictures is sent a line of text in place of each one.
+    const countPictures = this.definition.modelSupportsVision === true;
+    for (const message of withoutEarlierThinking(this.context)) {
+      total += estimateTokensForContextMessages([message]).prompt_tokens;
+      if (countPictures && isLLMContextMessage(message)) {
+        total += pictureCount(message.content) * PICTURE_TOKEN_ESTIMATE;
+      }
       if (total > limit) {
         return total;
       }
+    }
+    total += this.estimateEphemeralTokens();
+    if (total > limit) {
+      return total;
     }
     const taskStateBlock = renderTaskStateBlock({
       state: this.taskState,
@@ -3018,6 +3072,39 @@ export class AgentThread {
     }
     total += estimateTokensForString(JSON.stringify(tools));
     return total;
+  }
+
+  /** The saved chat as it is sent: no `tool_info`, no approval rows, no thinking from earlier replies. */
+  private contextAsChatMessages(): ChatCompletionMessageParam[] {
+    return withoutEarlierThinking(this.context)
+      .filter(message => !isLegacyIncompleteReasoningMessage(message))
+      .filter(isLLMContextMessage)
+      .map(msg => withoutHostNotices(toOpenAIChatMessage(msg)));
+  }
+
+  /**
+   * Tokens of what is added to this one request and never saved: recalled memories, the latest
+   * screenshots. They are sent like any other message, so the size check has to count them.
+   */
+  private estimateEphemeralTokens(): number {
+    if (this.preEphemeralLLMContextProcessors.length === 0) {
+      return 0;
+    }
+    const saved = this.contextAsChatMessages();
+    const modelSupportsVision = this.definition.modelSupportsVision === true;
+    let messages = saved;
+    for (const processor of this.preEphemeralLLMContextProcessors) {
+      messages = processor.processPreLLMEphemeral(messages, { modelSupportsVision }) ?? messages;
+    }
+    // The difference in size, not the new objects: a processor may hand back a saved message as
+    // a copy, and that copy must not count twice.
+    const size = (list: readonly ChatCompletionMessageParam[]): number =>
+      list.reduce(
+        (total, message) =>
+          total + estimateTokensForChatMessageContent({ content: message.content, countPictures: modelSupportsVision }),
+        0,
+      );
+    return Math.max(0, size(messages) - size(saved));
   }
 
   private transformToLLMRequest(tools: ChatCompletionTool[]): LLMCreateParamsStreaming {
@@ -3037,14 +3124,7 @@ export class AgentThread {
       }
     }
 
-    // NOTE: all this code-golf is to remove `tool_info` before sending the message to Gateway
-    // ApprovalDecisionMessage rows are persisted in context but must not be sent to the LLM.
-    const contextMessages = this.context
-      .filter(message => !isLegacyIncompleteReasoningMessage(message))
-      .filter(isLLMContextMessage)
-      .map(msg => withoutHostNotices(toOpenAIChatMessage(msg)));
-
-    messages.push(...contextMessages);
+    messages.push(...this.contextAsChatMessages());
 
     // Order is the cache order: static instruction, history, then this reply's fixed block
     // and the ephemeral recall block, both just before the current message. The history and
@@ -3835,7 +3915,9 @@ export class AgentThread {
     let result: IteratorResult<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage>;
     // The request's size in tokens, estimated from the context it is built from; the silence
     // report names it, so an oversized request is visible in the one line that reports the ending.
-    const requestTokenEstimate = Math.round(estimateTokensForContextMessages(this.context).prompt_tokens);
+    const requestTokenEstimate = Math.round(
+      estimateTokensForContextMessages(withoutEarlierThinking(this.context)).prompt_tokens,
+    );
     // A step that goes silent is retried once before the turn ends: the finished tool results
     // behind it stay in the history the retry sends, and a partial tool call never runs because
     // calls only execute from a completed step. Only a second silence ends the step.
@@ -6213,11 +6295,6 @@ function contextMessageTextLength(message: ContextMessage): number {
     return total;
   }
   return 0;
-}
-
-/** Token estimate for one context message counting text only; see contextMessageTextLength. */
-function contextMessageTextTokens(message: ContextMessage): number {
-  return contextMessageTextLength(message) / 4;
 }
 
 function estimateRawContextTextLength(context: readonly ContextMessage[]): number {

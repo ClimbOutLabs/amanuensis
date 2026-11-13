@@ -55,6 +55,7 @@ import {
   classifyContextFor,
   classifyHostToolCall,
   isNewWriteTarget,
+  sandboxCardCopy,
   type SentinelHostContext,
 } from '../permissions';
 import { toJsonSafeParams } from '../permissions/approvalTokens';
@@ -1511,7 +1512,7 @@ function runCodeEnvironmentSentences({
     const packages = packageDownloads
       ? `Packages can be downloaded for this chat: if one is missing, install it from ${packageDownloadSitesText()}, then run again.`
       : `Packages cannot be downloaded here, so if one is missing, ${PACKAGE_UNAVAILABLE_RULE}`;
-    return `Preinstalled: Python with pandas, numpy, matplotlib, openpyxl, pdfplumber, pypdf, Pillow, python-docx and reportlab; Node with tsx and typescript. This sandbox has no internet access. Never use it to fetch web content. ${packages}`;
+    return `Preinstalled: Python with pandas, numpy, matplotlib, openpyxl, pdfplumber, pypdf, Pillow, python-docx, reportlab, requests, pyyaml, httpx and beautifulsoup4; Node with tsx and typescript. This sandbox has no internet access. Never use it to fetch web content. ${packages}`;
   }
   if (packageDownloads) {
     return `Preinstalled: pandas, numpy, matplotlib, seaborn, plotly, openpyxl, pdfplumber, Pillow, requests, genson, pydantic, pyyaml, beautifulsoup4, poppler-utils, tesseract-ocr. Packages can be downloaded for this chat: if one is missing, install it from ${packageDownloadSitesText()}, then run again. Never use the network to fetch web content.`;
@@ -7550,6 +7551,12 @@ function withHostGitCard(input: {
   return {
     ...input.card,
     plain_what: input.hostGitCard.plain_what,
+    // The card renders its copy, so the push wording goes through the sandbox copy owner as well.
+    copy: sandboxCardCopy({
+      headline: input.hostGitCard.plain_what,
+      undo: input.hostGitCard.cannot_be_undone,
+      reason: input.card.copy?.reason ?? null,
+    }),
     cannot_be_undone: input.hostGitCard.cannot_be_undone,
     destination: input.hostGitCard.destination,
     parsed_command: input.hostGitCard.parsed_command,
@@ -7572,6 +7579,7 @@ function withPackageDownloadCard(input: {
   if (input.card === null || input.card === undefined) {
     return {
       plain_what: input.packageCard.plain_what,
+      copy: sandboxCardCopy({ headline: input.packageCard.plain_what, undo: null, reason: null }),
       plain_why: null,
       cannot_be_undone: null,
       why_asked_again: null,
@@ -7584,5 +7592,14 @@ function withPackageDownloadCard(input: {
       outbound_truncated: false,
     };
   }
-  return { ...input.card, plain_what: input.packageCard.plain_what };
+  return {
+    ...input.card,
+    plain_what: input.packageCard.plain_what,
+    // The card renders its copy, so the download wording goes through the sandbox copy owner as well.
+    copy: sandboxCardCopy({
+      headline: input.packageCard.plain_what,
+      undo: input.card.cannot_be_undone,
+      reason: input.card.copy?.reason ?? null,
+    }),
+  };
 }

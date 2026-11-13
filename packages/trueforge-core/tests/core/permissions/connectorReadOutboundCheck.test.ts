@@ -13,6 +13,7 @@ const HELD_KEY = 'zq-held-key-93-synthetic';
 
 const SERVER = 'chatlog';
 const SERVER_HOST = 'chatlog.example';
+const SERVER_BINDING = 'binding-chatlog';
 
 async function servicesWithGrants(tools: readonly string[]): Promise<SentinelServices> {
   const services = defaultSentinelServices({ pinned_path: '/usr/bin:/bin' });
@@ -23,7 +24,7 @@ async function servicesWithGrants(tools: readonly string[]): Promise<SentinelSer
       created_by: 'u1',
       mcp_server_name: SERVER,
       tool_name,
-      mcp_server_host: SERVER_HOST,
+      connector_binding: SERVER_BINDING,
     });
   }
   return services;
@@ -53,6 +54,7 @@ function grantedRead(tool_name: string, canonical_params: Record<string, unknown
     tool_type: 'mcp',
     mcp_server_name: SERVER,
     mcp_server_host: SERVER_HOST,
+    mcp_grant_binding: SERVER_BINDING,
     mcp_hints: tool_name === 'search_messages' ? {} : { read_only_hint: true, open_world_hint: false },
   };
 }

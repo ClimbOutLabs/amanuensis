@@ -215,15 +215,12 @@ describe('SaveAgentButton', () => {
       'focus-visible:ring-focus-ring/40',
     );
     expect(within(dialog).getByLabelText("What it's for")).toBeInTheDocument();
-    // The dialog summarizes what the agent will be saved with; each section opens its own
-    // picker. Runtime configuration stays in the agent config drawer, not in Save Agent.
-    // The model sits under More settings, folded away until asked for.
-    expect(within(dialog).queryByRole('button', { name: 'Edit Model' })).not.toBeInTheDocument();
-    fireEvent.click(within(dialog).getByRole('button', { name: 'More settings' }));
-    expect(within(dialog).getByRole('button', { name: 'Edit Model' })).toHaveClass('bg-ghost-button-bg');
-    expect(within(dialog).getByRole('button', { name: 'Edit Connectors' })).toHaveClass('bg-ghost-button-bg');
-    expect(within(dialog).getByRole('button', { name: 'Edit Skills' })).toHaveClass('bg-ghost-button-bg');
-    expect(within(dialog).queryByRole('button', { name: 'Edit Run settings' })).not.toBeInTheDocument();
+    // The setup panel already shows instructions, connectors, skills and the model, so the Save
+    // window asks only for a name and what the agent is for.
+    for (const label of ['Edit Model', 'Edit Connectors', 'Edit Skills', 'More settings']) {
+      expect(within(dialog).queryByRole('button', { name: label })).not.toBeInTheDocument();
+    }
+    expect(within(dialog).queryByLabelText('What should it do?')).not.toBeInTheDocument();
   });
 
   it('preserves configuration without exposing unsupported fields', async () => {

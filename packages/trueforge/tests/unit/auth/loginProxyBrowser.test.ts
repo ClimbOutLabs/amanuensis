@@ -57,7 +57,12 @@ describe('signing in through the proxied page in a real browser', () => {
   let passwordPosts: string[];
 
   beforeAll(async () => {
-    browser = await chromium.launch({ executablePath: findChromiumExecutable(chromium.executablePath()) });
+    // Under the hook's 30 seconds, so a browser that stalls while starting fails with its own log
+    // (what it was waiting on) instead of a bare hook timeout.
+    browser = await chromium.launch({
+      executablePath: findChromiumExecutable(chromium.executablePath()),
+      timeout: 20_000,
+    });
     passwordPosts = [];
     upstream = signInService(passwordPosts);
     const upstreamPort = await listen(upstream);

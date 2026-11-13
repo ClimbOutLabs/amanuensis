@@ -17,6 +17,7 @@ import {
   type HelpHealthCheck,
   type HelpHealthItem,
   type HelpHealthStatus,
+  type HelpSettingsSection,
 } from './helpModel.js';
 import { useOptionalHelp, type HelpContextValue, type HelpSession } from './HelpProvider.js';
 
@@ -125,7 +126,7 @@ function ItemRow({ item }: { item: HelpHealthItem }) {
       <p className="text-sm text-text-primary">{item.message}</p>
       {item.next_step === null ? null : (
         <p className={cn('text-sm', item.status === 'fail' ? 'text-danger' : 'text-text-secondary')}>
-          {item.next_step}
+          <NextStep step={item.next_step} section={item.settings_section} />
         </p>
       )}
     </li>
@@ -149,21 +150,28 @@ function HostReportLine({ help }: { help: HelpContextValue }) {
   );
 }
 
-/** Opens Settings › Models in place when the shell is there; plain text otherwise. */
-function SettingsModelsLink() {
+const SETTINGS_LINK_CLASS =
+  'border-0 bg-transparent p-0 text-left underline underline-offset-2 hover:text-primary-button-bg';
+
+/** Opens Settings at one section in place when the shell is there; plain text otherwise. */
+function SettingsLink({ section, children }: { section: HelpSettingsSection; children: ReactNode }) {
   const shell = useOptionalShellMode();
   if (shell === null) {
-    return <>Settings</>;
+    return <>{children}</>;
   }
   return (
-    <button
-      type="button"
-      className="text-text-primary underline underline-offset-2 hover:text-primary-button-bg"
-      onClick={() => shell.setSettingsOpen(true, 'models')}
-    >
-      Settings
+    <button type="button" className={SETTINGS_LINK_CLASS} onClick={() => shell.setSettingsOpen(true, section)}>
+      {children}
     </button>
   );
+}
+
+/** A line's next step. When the step is done in Settings, the step itself opens that section. */
+function NextStep({ step, section }: { step: string; section: HelpSettingsSection | null }) {
+  if (section === null) {
+    return <>{step}</>;
+  }
+  return <SettingsLink section={section}>{step}</SettingsLink>;
 }
 
 function phaseLine(session: HelpSession): ReactNode {
@@ -180,7 +188,7 @@ function phaseLine(session: HelpSession): ReactNode {
     case 'no_model':
       return (
         <>
-          Add a model in <SettingsModelsLink /> to get started.
+          Add a model in <SettingsLink section="models">Settings</SettingsLink> to get started.
         </>
       );
     case 'joined':
