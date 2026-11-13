@@ -48,6 +48,7 @@ import type { NoticingCheckpointTable, NoticingEventTable, ReachLeaseTable } fro
 import type { PhoneCallTable } from '../phoneCallStore';
 import type { PushSubscriptionTable } from '../pushSubscriptionStore';
 import type { ReachSettingsTable } from '../reachSettingsStore';
+import type { RecallExclusionTable } from '../recallExclusionStore';
 import type { TextContactTable, TextSendCountTable, TextWordTable } from '../textContactStore';
 
 /**
@@ -1011,6 +1012,7 @@ export interface Database {
   space_folder_assignment: SpaceFolderAssignmentTable;
   sentinel_audit: SentinelAuditTable;
   brief_item_completion: BriefItemCompletionTable;
+  recall_exclusion: RecallExclusionTable;
   delivery: DeliveryTable;
   delivery_attempt: DeliveryAttemptTable;
   reach_settings: ReachSettingsTable;

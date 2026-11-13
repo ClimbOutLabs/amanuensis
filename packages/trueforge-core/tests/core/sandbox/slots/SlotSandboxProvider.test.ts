@@ -6,6 +6,7 @@ import {
   SandboxNotAvailableError,
   SandboxPathIsDirectoryError,
 } from '../../../../src/core/sandbox/SandboxErrors';
+import { buildHostAuthenticatedGitProbe } from '../../../../src/core/sandbox/hostAuthenticatedGit';
 import { SLOT_NOT_READY_MESSAGE } from '../../../../src/core/sandbox/slots/SlotDriver';
 import {
   chatCapacity,
@@ -141,6 +142,34 @@ describe('SlotSandboxProvider', () => {
     });
   });
 
+  test('a host-built git question reaches the agent without the names the agent refuses', async () => {
+    const { provider, agents: started } = await providerFor([healthy]);
+    const sandboxId = `s1-${'d'.repeat(32)}`;
+    const probe = buildHostAuthenticatedGitProbe({
+      gitArguments: ['remote', 'get-url', 'origin'],
+      workspaceRoot: '/workspace/repo',
+    });
+    await provider.exec({ sandboxId, command: probe.command, cwd: '/workspace/repo', env: probe.env });
+    const sent = bodyOf(started[0]?.requests[0], z.object({ env: z.record(z.string(), z.string()) })).env;
+    const refusedByTheAgent = ['HOME', 'XDG_CONFIG_HOME', 'PATH', 'GIT_ASKPASS', 'GIT_EDITOR', 'GIT_MERGE_AUTOEDIT'];
+    expect(Object.keys(sent).filter(name => refusedByTheAgent.includes(name))).toEqual([]);
+    expect(sent).toMatchObject({ GIT_TERMINAL_PROMPT: '0', GIT_CONFIG_NOSYSTEM: '1' });
+    expect(Number(sent['GIT_CONFIG_COUNT'])).toBeGreaterThan(0);
+  });
+
+  test("a home or PATH of the caller's own choosing still reaches the agent, which refuses it", async () => {
+    const { provider, agents: started } = await providerFor([healthy]);
+    const sandboxId = `s1-${'d'.repeat(32)}`;
+    await provider.exec({
+      sandboxId,
+      command: 'ls',
+      env: { HOME: '/workspace', PATH: '/workspace/bin', GIT_EDITOR: 'vi' },
+    });
+    expect(started[0]?.requests[0]?.body).toMatchObject({
+      env: { HOME: '/workspace', PATH: '/workspace/bin', GIT_EDITOR: 'vi' },
+    });
+  });
+
   test('exec carries the skill network token to the agent only when one was granted', async () => {
     const { provider, agents: started } = await providerFor([healthy]);
     const sandboxId = `s1-${'d'.repeat(32)}`;
@@ -210,6 +239,22 @@ describe('SlotSandboxProvider', () => {
       expect(result.success).toBe(false);
       expect(!result.success && result.error).toContain(expected);
     }
+  });
+
+  test('a timeout below the cap says how to ask for longer, and one at the cap does not', async () => {
+    const timedOut = (): ReturnType<FakeHandler> => ({
+      status: 200,
+      body: execResponse({ terminated_by: 'timeout', output: '' }),
+    });
+    const short = await (
+      await providerFor([timedOut])
+    ).provider.exec({ sandboxId: `s1-${'e'.repeat(32)}`, command: 'x', timeoutSeconds: 60 });
+    expect(!short.success && short.error).toContain('run it again with a larger timeout_seconds');
+    const longest = await (
+      await providerFor([timedOut])
+    ).provider.exec({ sandboxId: `s1-${'e'.repeat(32)}`, command: 'x', timeoutSeconds: 600 });
+    expect(!longest.success && longest.error).toContain('timed out after 600s');
+    expect(!longest.success && longest.error).not.toContain('timeout_seconds');
   });
 
   test('a busy slot is retried until it is free', async () => {

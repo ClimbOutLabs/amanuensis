@@ -1,15 +1,16 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  approvalFacts,
   approvalQuestion,
   approvalSentLine,
-  approvalStub,
   approveVerb,
   cardConsequence,
   cardHeadline,
   cardReason,
   declineVerb,
   GENERIC_CARD_HEADLINE,
+  outboundRepeatsFacts,
   safeVerb,
 } from '../../src/sentinel/approvalCopy.js';
 import type { SentinelApprovalCard } from '../../src/sentinel/types.js';
@@ -60,15 +61,49 @@ describe('approval copy', () => {
     expect(declineVerb(card)).toBe('Not now');
   });
 
-  it('never shows a search connector id on a held search stub', () => {
+  it('names a held search by its provider, never by a connector id', () => {
     const card = cardWith({
-      plain_what: 'Search the web with Tavily for harbour tides?',
+      copy: { headline: 'Search the web with Tavily for harbour tides?', consequence: null, reason: null },
       destination: null,
       destination_host: 'Tavily',
     });
-    const stub = approvalStub(card);
-    expect(stub.detail).not.toMatch(/tavily-|mcp\./i);
-    expect(stub.detail).toBe(GENERIC_CARD_HEADLINE);
+    expect(approvalFacts(card)).toEqual([]);
+  });
+
+  it('lists a page address once, without the site it already names', () => {
+    const card = cardWith({
+      copy: { headline: 'Open a page on example.org?', consequence: null, reason: null },
+      destination: 'https://www.example.org/tickets',
+      destination_host: 'www.example.org',
+      outbound_text: 'https://www.example.org/tickets',
+    });
+    expect(approvalFacts(card)).toEqual([{ label: 'Address', value: 'https://www.example.org/tickets' }]);
+    expect(outboundRepeatsFacts(card, 'https://www.example.org/tickets')).toBe(true);
+    expect(outboundRepeatsFacts(card, 'url: https://www.example.org/other')).toBe(false);
+  });
+
+  it('drops a site the question already names, but always lists who it goes to, an amount and a command', () => {
+    const card = cardWith({
+      copy: { headline: 'Type "Grace" into "Name" on shop.example?', consequence: null, reason: null },
+      destination: 'shop.example',
+      destination_host: 'shop.example',
+      recipient: 'Grace',
+      amount: '2',
+      parsed_command: 'rm -r old',
+    });
+    expect(approvalFacts(card)).toEqual([
+      { label: 'To', value: 'Grace' },
+      { label: 'Amount', value: '2' },
+      { label: 'Command', value: 'rm -r old', mono: true },
+    ]);
+  });
+
+  it('lists a site that differs from the address it receives the call', () => {
+    const card = cardWith({ destination: 'acme-corp', destination_host: 'api.acme.example' });
+    expect(approvalFacts(card)).toEqual([
+      { label: 'Where', value: 'acme-corp' },
+      { label: 'Sends to', value: 'api.acme.example' },
+    ]);
   });
 
   it('asks "Send this email to a@x.com and 1 more?" for a new message, whatever the number of recipients', () => {
@@ -128,7 +163,6 @@ describe('approval copy', () => {
       },
     });
     expect(approvalQuestion(card)).toBe('Add the persona "Tax helper"?');
-    expect(approvalStub(card)).toEqual({ what: 'New persona', detail: 'Tax helper' });
   });
 
   it('asks a new schedule to be created', () => {
@@ -154,13 +188,10 @@ describe('approval copy', () => {
     expect(declineVerb(card)).toBe('Not now');
   });
 
-  it('shows the time in the sent line once a ticket is done, and the stub carries no state', () => {
+  it('shows the time in the line of an answered card', () => {
     const card = cardWith({ calendar_event: null });
-    expect(approvalSentLine(card, '09:14')).toBe('Done · 09:14');
+    expect(approvalSentLine(card, '09:14')).toBe('Allowed · 09:14');
     expect(approvalSentLine(cardWith({ email: reply }), '09:14')).toBe('Sent to Rui · 09:14');
-    const stub = approvalStub(card);
-    expect(stub).toEqual({ what: 'Approval', detail: GENERIC_CARD_HEADLINE });
-    expect('state' in stub).toBe(false);
   });
 
   it('reads the headline, consequence and reason from the server copy when the card carries it', () => {
@@ -192,10 +223,8 @@ describe('approval copy', () => {
     const card = cardWith({ plain_what: `Delete the event with id ${idToken}? Its title could not be read.` });
     expect(cardHeadline(card)).toBe(GENERIC_CARD_HEADLINE);
     expect(approvalQuestion(card)).toBe(GENERIC_CARD_HEADLINE);
-    expect(approvalStub(card).detail).toBe(GENERIC_CARD_HEADLINE);
     expect(approvalSpeechLine(cardHeadline(card))).not.toContain(idToken);
     expect(cardHeadline(card)).not.toContain(idToken);
-    expect(approvalStub(card).detail).not.toContain(idToken);
   });
 
   it('names the safe choice for the card kind', () => {

@@ -58,7 +58,7 @@ Aman sorts every action into one of three groups before it runs.
 
 ### What the card offers
 
-The card shows what will happen, including what will be sent, before anything leaves your computer. In a chat, the card offers **Allow** and **Not now**. A held action in a scheduled run's list offers **Approve** and **Deny**.
+The card shows what will happen, including what will be sent, before anything leaves your computer. In a chat, the card offers **Allow** and **Not now**. A held action in a scheduled run's list offers **Allow** and **Deny**.
 
 These ask every time, so their cards offer only a yes or a no:
 
@@ -169,7 +169,7 @@ You can let file writes run without a card, and let work in the sandbox run with
 
 A skill can name the sites it needs to reach. Naming a site grants nothing on its own, and a skill can only ever reach named sites it has been allowed.
 
-- The first time a skill with named sites runs in a chat, a card asks whether the skill may reach the sites it names. **Allow once** covers this chat only. **Always allow** remembers the sites for that skill in every chat. **Deny** remembers the refusal. You can change any of these later in Settings, then Skills.
+- The first time a skill with named sites runs in a chat, a card asks whether the skill may reach the sites it names. **Allow** covers this chat only. **Always allow** remembers the sites for that skill in every chat. **Deny** remembers the refusal. You can change any of these later in Settings, then Skills.
 - Turning down one named site does not switch off the others. The sites you approved still work, and the turned-down site stays out. Clearing its refusal in Settings grants nothing by itself, because your approval never named that site. A card asks about the list again first.
 - If a command tries to reach a site no skill named, the connection is refused and a card asks about that one site. The card names no skill, because a refused connection cannot show which skill, if any, made the attempt. Its Always choice names the skill the answer is kept under.
 - Connections to bare addresses are always refused, and no card can allow them. That covers addresses on your own machine, such as 127.0.0.1, addresses on your home network, and the address a cloud machine keeps its own settings behind.
@@ -194,7 +194,7 @@ A scheduled run has nobody watching it, so it never sends anything by itself. Th
 
 ### The Needs your OK list
 
-When the run finishes, its chat ends with a **Needs your OK** list: "Aman held these for you. Nothing has been done yet." Each item shows what will happen, with **Approve** and **Deny**. Some read-only connector tools also offer **Always allow everywhere**.
+When the run finishes, its chat ends with a **Needs your OK** list: "Aman held these for you. Nothing has been done yet." Each item shows what will happen, with **Allow** and **Deny**. Some read-only connector tools also offer **Always allow everywhere**.
 
 - The app builds the list from what was held, not from the model's words. So the model can't hide an item or add a fake one.
 - When you approve a held action, Aman checks it again first. If anything the card showed has changed since it was held, such as the guests of an event or the text of a message, nothing is done. Aman says to ask again in chat.

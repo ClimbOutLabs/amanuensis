@@ -102,7 +102,7 @@ import { buildProvisioningEvent } from './driver/provisionEvents';
 import { RunCodeInputSchema, type RunCodeInput, type RunCodeResult } from './driver/RunCodeSchemas';
 import { type HarvestedFile, type RunCodeBackend, type TurnAttachment } from './driver/RunCodeService';
 import { buildExecResultShape } from './execResultSemantics';
-import { getGithubConnectorHint, type GithubConnectorState } from './githubConnectorHint';
+import { getGithubConnectorHint, getOfflineGitFormHint, type GithubConnectorState } from './githubConnectorHint';
 import {
   GIT_REMOTE_CHANGED_REFUSAL,
   gitProbeRunner,
@@ -169,7 +169,7 @@ import {
 } from './workspaceStateCapture';
 // Import submodules, not the ./skills barrel, to avoid a cycle (the mounters import from Sandbox).
 import { createHash, randomUUID } from 'node:crypto';
-import { accessSync, constants as fsConstants, readFileSync } from 'node:fs';
+import { accessSync, constants as fsConstants } from 'node:fs';
 import { dirname, join, delimiter as pathDelimiter, posix, relative } from 'node:path';
 import { convertOpenAIPatchToGitDiff, detectApplyPatchFormat } from './openaiPatchFormat';
 import { matchReplaceText } from './replaceTextDiagnostics';
@@ -1022,6 +1022,9 @@ function injectMCPClientEnv(params: {
   };
 }
 
+/** The longest a model may ask one shell command to run; installs, builds and long test runs need more than the default. */
+export const SANDBOX_EXEC_MAX_TIMEOUT_SECONDS = 600;
+
 export const sandboxExecSchema = z.object({
   intent: z.string().describe('Why you are running this command (user-facing).'),
   purpose: z
@@ -1032,6 +1035,7 @@ export const sandboxExecSchema = z.object({
   command: z.string().describe('Shell command to execute.'),
   cwd: z.string().optional().describe('Working directory.'),
   env: z.record(z.string(), z.string()).optional(),
+  timeout_seconds: z.number().int().min(1).max(SANDBOX_EXEC_MAX_TIMEOUT_SECONDS).optional(),
   output: z
     .object({
       head_lines: z.number().int().min(1).max(1000).optional(),
@@ -1517,7 +1521,8 @@ export function createSandboxExecDescription({
   return `Run a shell command in the persistent sandbox. cwd sets the repository; HOME does not. Never list, print or expose environment variables. The sandbox holds no git credentials: never ask for or search for tokens.
 Create files with write_file; edit with apply_patch or replace_text. Never bypass them with sed, Perl, Python, heredocs or temp patch files.
 Large output: use output.head_lines, output.tail_lines or output.grep.
-Python and Node go to run_code; interpreter invocations are rejected.
+Stops after 60s; set timeout_seconds (up to 600) for an install, build or long test run.
+Run a script file with python3 or node; other code goes to run_code.
 Status: "ok", "exited" (see exit_code) or "failed" (the host could not run it).
 ${execNetworkSentences({ offline, skillNetworkHosts: skillNetworkHosts ?? [] })} Make separate tool calls in one response; the host runs read-only calls concurrently.${fileOutput}
 `;
@@ -1562,7 +1567,7 @@ export function createSandboxRunCodeDescription({
   return `Run Python or Node.js code in an isolated, offline sandbox: language is 'python' (3.13) or 'node' (22). Pass exactly one of code or script_path (a file you wrote under ${workspaceDir}; the run reads a copy of it). cwd is /scratch: read /ingress/<name>, write results to /egress (files left in /scratch are collected too). Returns stdout and stderr (each capped at 256 KiB), the verbatim exit_code, and files_out metadata (name, size, sha256); bytes are never inlined. To give the user a file, list it in a sandbox_artifacts block as [name](run_code/<name>). A non-zero exit is the program's result, not an infra failure.
 ${runCodeEnvironmentSentences({ offline, packageDownloads })}
 files_in is for content you compose; never re-upload an /ingress file.
-If run_code fails, do NOT fall back to exec (or any shell tool) to run the code; interpreter invocations in exec are rejected by a harness guard. If a network call fails, do not retry it through exec or any shell. Fix the code, reduce the input, or report the failure. When you report a run_code failure, quote the error text exactly as returned, including any links; do not paraphrase or reword it. If the code did not run, it produced no output: NEVER state or predict what it would have printed.
+If run_code fails, do NOT fall back to exec (or any shell tool) to run the code; inline code in exec is rejected by a harness guard. If a network call fails, do not retry it through exec or any shell. Fix the code, reduce the input, or report the failure. When you report a run_code failure, quote the error text exactly as returned, including any links; do not paraphrase or reword it. If the code did not run, it produced no output: NEVER state or predict what it would have printed.
 `;
 }
 
@@ -1849,15 +1854,15 @@ function applyExecOutputBounds(rawOutput: string, output: SandboxExecOutputInput
  * Host binding for the exec interpreter guard (classifier in `./driver/ExecGuard`).
  * Threat model: `exec` is a trusted-operator tool — the operator already consented
  * to shell access in this session. This guard does not try to contain a malicious
- * model (a determined one has git, npm, and awk); it prevents accidental drift back
- * to shell-based code execution now that `run_code` is the supported path, and it
- * stops a run_code failure from becoming an exec workaround.
+ * model (a determined one has git, npm, and awk); it keeps code that is not a file
+ * in `run_code`, and it stops a run_code failure from becoming an exec workaround.
+ * A program that is a file in the workspace runs here, behind the permission rules.
  *
- * Runs inside `sandboxExecPreflightFailure`, so interpreter invocations are rejected
+ * Runs inside `sandboxExecPreflightFailure`, so code that is not a file is rejected
  * before approval and before the provider ever sees the command. Resolution is
  * best-effort: bare interpreter names are caught without any filesystem access;
  * PATH lookup (from the call's own `env` when it sets PATH — no ambient
- * `process.env` read in core) and shebang reads only sharpen evasion cases.
+ * `process.env` read in core) only sharpens evasion cases.
  * Resolutions are cached per Sandbox because preflight runs on every exec call.
  */
 function execInterpreterGuardFailure(input: {
@@ -1888,16 +1893,6 @@ function execInterpreterGuardFailure(input: {
       }
       input.resolveCache.set(name, resolved);
       return resolved;
-    },
-    readShebang: path => {
-      try {
-        const head = readFileSync(path, 'utf8').slice(0, 128);
-        const newline = head.indexOf('\n');
-        const first = newline === -1 ? head : head.slice(0, newline);
-        return first.startsWith('#!') ? first.slice(2).trim() : undefined;
-      } catch {
-        return undefined;
-      }
     },
   };
   const verdict = classifyExecCommand({ command: input.command, host });
@@ -4682,20 +4677,19 @@ export class Sandbox extends LocalToolMCP {
     if (result.response.exitCode === 0) {
       return withStatus;
     }
+    const unplannedGitNetworkCommand =
+      isGitNetworkCommand(input.command) && planHostAuthenticatedGit({ command: input.command }) === undefined;
     const connectorState: GithubConnectorState = !this.githubConnectorAttached
       ? 'not-attached'
       : this.githubGitToken === null
         ? 'unresolved'
-        : isGitNetworkCommand(input.command) &&
-            (planHostAuthenticatedGit({ command: input.command }) === undefined ||
-              Object.keys(input.env ?? {}).length > 0)
+        : unplannedGitNetworkCommand || (isGitNetworkCommand(input.command) && Object.keys(input.env ?? {}).length > 0)
           ? 'unauthenticated-form'
           : 'attached';
-    const remediation = getGithubConnectorHint({
-      command: input.command,
-      output: execResultOutputText(result),
-      connectorState,
-    });
+    const output = execResultOutputText(result);
+    const remediation =
+      getGithubConnectorHint({ command: input.command, output, connectorState }) ??
+      getOfflineGitFormHint({ output, offline: !this.hasNetwork(), ranInSandbox: unplannedGitNetworkCommand });
     return remediation === undefined ? withStatus : { ...withStatus, remediation };
   }
 
@@ -4908,26 +4902,19 @@ export class Sandbox extends LocalToolMCP {
     const requiresDurableCoordination = guarded && this.boundRepository !== undefined;
     if (!requiresDurableCoordination) {
       const workspaceRoot = await this.resolveWorkspaceRoot(sandboxId, input.cwd);
+      // A folder that is not a Git repository has no lock to take, but the command still gets the
+      // chat's download and skill site grants: those belong to the chat, not to a repository.
       const run = (): Promise<ExecResult> =>
-        workspaceRoot === undefined
-          ? this.sandboxPathExec({
-              sandboxId,
-              command: input.command,
-              cwd: input.cwd,
-              env,
-              ...(input.timeoutSeconds === undefined ? {} : { timeoutSeconds: input.timeoutSeconds }),
-              ...(approvedGitRemotes === undefined ? {} : { approvedGitRemotes }),
-            })
-          : this.execWorkspaceExclusive({
-              hostAuthored: false,
-              sandboxId,
-              workspaceRoot,
-              command: input.command,
-              cwd: input.cwd,
-              env,
-              timeoutSeconds: input.timeoutSeconds,
-              approvedGitRemotes,
-            });
+        this.execWorkspaceExclusive({
+          hostAuthored: false,
+          sandboxId,
+          workspaceRoot,
+          command: input.command,
+          cwd: input.cwd,
+          env,
+          timeoutSeconds: input.timeoutSeconds,
+          approvedGitRemotes,
+        });
       // Workspace-root discovery above (unbound path) is complete; the target
       // command is about to reach the provider. A SandboxNotAvailableError from
       // this point on means the target may have run, so replay must stop being
@@ -5859,9 +5846,12 @@ export class Sandbox extends LocalToolMCP {
     context?: ToolInvocationContext,
     planScope?: ImplementationPlanGrantScope,
   ): Promise<CallToolResponse> {
+    // A host-set limit (a registered command's own) wins over the one the model asked for.
+    const timeoutSeconds = input.timeoutSeconds ?? input.timeout_seconds;
     const resolvedInput: SandboxRuntimeExecInput = {
       ...input,
       cwd: input.cwd ?? this.boundRepository?.workspace_cwd ?? this.provider.getWorkspaceDir(),
+      ...(timeoutSeconds === undefined ? {} : { timeoutSeconds }),
     };
     const preflightFailure = sandboxExecPreflightFailure({
       command: resolvedInput.command,

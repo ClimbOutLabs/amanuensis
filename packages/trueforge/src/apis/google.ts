@@ -27,6 +27,7 @@ import {
   googleConsentCallbackRoute,
   testGoogleConnectionRoute,
 } from '../routes/googleRoutes';
+import { invalidateTodayCalendarCache } from '../runtime/todayCalendar';
 import { browserUrlOf, requireJsonOrSameOrigin } from './crossSite';
 
 interface GoogleRouterDeps {
@@ -177,6 +178,8 @@ export function createGoogleRouter(deps: GoogleRouterDeps) {
     }
     try {
       await serviceNow().complete({ owner: ownerOf(c), state, code });
+      // A new or changed Google login changes what the rail's calendar read can see.
+      invalidateTodayCalendarCache();
       return c.html(resultPage(['Google is connected. You can close this window and go back to Aman.']), 200);
     } catch (caught) {
       if (caught instanceof GoogleConsentError) {
@@ -196,6 +199,7 @@ export function createGoogleRouter(deps: GoogleRouterDeps) {
     const owner = ownerOf(c);
     try {
       const record = await serviceNow().complete({ owner, state: parsed.state, code: parsed.code });
+      invalidateTodayCalendarCache();
       return c.json({ data: statusBody({ record, setup: setupFor(c), locked: lockedFor(record) }) }, 200);
     } catch (caught) {
       if (caught instanceof GoogleConsentError) {
@@ -212,6 +216,7 @@ export function createGoogleRouter(deps: GoogleRouterDeps) {
 
   const disconnectHandler: RouteHandler<typeof disconnectGoogleRoute> = async c => {
     const outcome = await serviceNow().disconnect(ownerOf(c));
+    invalidateTodayCalendarCache();
     return c.json({ data: { revocation_confirmed: outcome === 'revoked' } }, 200);
   };
 

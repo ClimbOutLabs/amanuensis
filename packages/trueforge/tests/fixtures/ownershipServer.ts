@@ -44,6 +44,7 @@ import { PostgresSkillStore } from '../../src/db/postgres/skill-store/PostgresSk
 import { PostgresSpaceStore } from '../../src/db/postgres/space-store/PostgresSpaceStore';
 import { PostgresOAuthTokenStore } from '../../src/db/postgres/token-store/PostgresOAuthTokenStore';
 import { PostgresTurnArtifactStore } from '../../src/db/postgres/turn-artifact-store/PostgresTurnArtifactStore';
+import { RecallExclusionStore } from '../../src/db/recallExclusionStore';
 import { SentinelAuditStore } from '../../src/db/sentinelAuditStore';
 import { SqliteAgentStore } from '../../src/db/sqlite/agent-store/SqliteAgentStore';
 import { SqliteApprovalTokenStore } from '../../src/db/sqlite/approval-token-store/SqliteApprovalTokenStore';
@@ -318,6 +319,7 @@ async function startSqlite(): Promise<OwnershipServer> {
     sentinelAuditStore,
     sentinelSettingsStore,
     briefItemStore: new BriefItemCompletionStore(db),
+    recallExclusionStore: new RecallExclusionStore(db),
     ...deliveryDeps(db),
     sessions: new Sessions({ sessionStore, sentinelServices }),
     resolveModelProviderStore: () => modelProviderStore,
@@ -424,6 +426,7 @@ async function startPostgres(): Promise<OwnershipServer | undefined> {
     sentinelAuditStore,
     sentinelSettingsStore,
     briefItemStore: new BriefItemCompletionStore(db),
+    recallExclusionStore: new RecallExclusionStore(db),
     ...deliveryDeps(db),
     sessions: new Sessions({ sessionStore, sentinelServices }),
     resolveModelProviderStore: () => modelProviderStore,

@@ -69,6 +69,7 @@ import type { IMcpServerWithAuthStore } from '../db/mcpServerStore';
 import type { IModelProviderStore } from '../db/modelProviderStore';
 import type { IPersonalizationStore } from '../db/personalizationStore';
 import type { IPersonaStore } from '../db/personaStore';
+import type { IRecallExclusionStore } from '../db/recallExclusionStore';
 import type { IRepositoryStore } from '../db/repositoryStore';
 import type { ISandboxProviderStore } from '../db/sandboxProviderStore';
 import type { ISentinelSettingsStore } from '../db/sentinelSettingsStore';
@@ -315,6 +316,8 @@ export interface TurnsRouterDeps {
   tokenFactoryBudget: TokenFactoryBudget;
   /** The usage counts deleted chats left, for the usage tool. */
   chatDeletionStore: DeletedChatUsageReader;
+  /** Facts pulled out of a chat's recall, read by the recall path. Absent, nothing is excluded. */
+  recallExclusionStore?: Pick<IRecallExclusionStore, 'listForSession'> | undefined;
   /** Resumable live turn-event transport: create-turn writes, subscribe polls. */
   eventSubscriptions: EventSubscriptionRegistry<TurnStreamingEvent>;
   resolveSandboxProviderStore: (c: Context) => ISandboxProviderStore;
@@ -358,6 +361,8 @@ export type BeginTurnExecutionDeps = Pick<
   spaceStore: ISpaceStore;
   /** Per-user Google logins; absent, no Gmail tools mount. */
   googleConnectionStore?: IGoogleConnectionStore | undefined;
+  /** Facts pulled out of a chat's recall, read by the recall path. Absent, nothing is excluded. */
+  recallExclusionStore?: Pick<IRecallExclusionStore, 'listForSession'> | undefined;
   /**
    * Per-person settings, for the past-chat search switch and the package download allowance of
    * chats without a project. Absent, the search tool stays off and those chats get no download wiring.
@@ -427,6 +432,8 @@ function createTurnResolver(deps: {
   memoryClient?: MemoryClient | undefined;
   /** The Settings switch for the recall screen, when the person set one. */
   memoryScreenOverride?: boolean | undefined;
+  /** Facts pulled out of a chat's recall, read by the recall path. Absent, nothing is excluded. */
+  recallExclusionStore?: Pick<IRecallExclusionStore, 'listForSession'> | undefined;
   /** No person watches this turn (a scheduled run): recall stays off, so a recalled earlier task cannot fingerprint-block the run's own searches. Retain and summarize still run. */
   unattended?: boolean | undefined;
   previousTurnId?: string | null;
@@ -498,6 +505,7 @@ function createTurnResolver(deps: {
     sessionStore,
     memoryClient,
     memoryScreenOverride,
+    recallExclusionStore,
     previousTurnId,
     memorySummarize,
     memoryRecallEnabled,
@@ -943,6 +951,10 @@ function createTurnResolver(deps: {
       sessionId,
       previousTurnId: previousTurnId ?? null,
       keepsNothing: sessionKeepsNothing({ session: session.record }),
+      loadRecallExclusions:
+        recallExclusionStore === undefined
+          ? undefined
+          : () => recallExclusionStore.listForSession({ tenant_id, session_id: sessionId }),
       searchProviderServerName: async () => {
         const servers = await mcpServerStore.listServers({ tenant_id, names: undefined });
         return servers.find(server => server.manifest.type === 'remote' && server.manifest.search_provider === true)
@@ -1937,6 +1949,7 @@ async function beginAcceptedTurnExecution(
         sessionStore: deps.sessionStore,
         spaceStore: deps.spaceStore,
         googleConnectionStore: deps.googleConnectionStore,
+        recallExclusionStore: deps.recallExclusionStore,
         globalSettingsStore: deps.globalSettingsStore,
         logger: deps.logger,
         signal: abortController.signal,
@@ -2860,6 +2873,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       repositoryStore: deps.repositoryStore,
       sentinelSettingsStore: deps.sentinelSettingsStore,
       sessionStore: deps.sessionStore,
+      recallExclusionStore: deps.recallExclusionStore,
       memoryClient,
       memoryScreenOverride: memoryScreenSetting.overridden ? memoryScreenSetting.enabled : undefined,
       previousTurnId: memoryPreviousTurnId,

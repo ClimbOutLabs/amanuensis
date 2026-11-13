@@ -76,11 +76,14 @@ import {
   sanitizeMemoryText,
 } from './memoryPageLoader';
 import { retainOperationId, submitRetain } from './memoryRetain';
+import { recallFactExcluded } from './recallExclusions';
 import { rankNamedPeopleFirst } from './recallNameBoost';
 import { ScreenClient, type ScreenClassifyResult } from './screenClient';
 import { TurnReadWatch } from './turnReadWatch';
 
 const MEMORY_STATE_KEY = 'aman.memory';
+/** Shared empty set for turns with no stored recall exclusions. */
+const EMPTY_RECALL_EXCLUSIONS: ReadonlySet<string> = new Set();
 const MAX_QUERY_CHARS = 2000;
 const RECALL_QUERY_SEPARATOR = '\n';
 const MAX_PENDING_ENTRIES = 50;
@@ -1038,6 +1041,11 @@ export class MemoryProcessor implements PreLLMProcessor, PreLLMEphemeralAgentCon
   private readonly now: () => number;
   /** True in a private chat: recall still runs, but no turn of it is saved, retried or rebuilt. */
   readonly keepsNothing: boolean;
+  /**
+   * Reads the facts the person pulled out of this chat's recall, from where they are stored
+   * with the chat. Undefined when the host wired no store: then nothing is excluded.
+   */
+  private readonly loadRecallExclusions: (() => Promise<readonly string[]>) | undefined;
 
   // A thread is per-turn, so instance state (never persisted itself) is naturally per-turn.
   private ranForThisTurn = false;
@@ -1064,6 +1072,7 @@ export class MemoryProcessor implements PreLLMProcessor, PreLLMEphemeralAgentCon
     timeZone?: string | undefined;
     now?: (() => number) | undefined;
     keepsNothing?: boolean | undefined;
+    loadRecallExclusions?: (() => Promise<readonly string[]>) | undefined;
   }) {
     this.client = input.client;
     this.config = input.config;
@@ -1079,6 +1088,7 @@ export class MemoryProcessor implements PreLLMProcessor, PreLLMEphemeralAgentCon
     this.timeZone = input.timeZone;
     this.now = input.now ?? Date.now;
     this.keepsNothing = input.keepsNothing ?? false;
+    this.loadRecallExclusions = input.loadRecallExclusions;
   }
 
   /** Hydrates durable pending-retain and post-compaction-damping state from the previous turn's capability_state. */
@@ -1363,6 +1373,16 @@ export class MemoryProcessor implements PreLLMProcessor, PreLLMEphemeralAgentCon
         message: parts[parts.length - 1] ?? '',
       });
       items = gated.items.map(item => withLocalDay({ item, timeZone: this.timeZone }));
+      // A fact the person pulled out of this chat stays out of its recall: the bank keeps it
+      // and other chats still recall it. Matched on the words the block would show for the
+      // item, so the rail's row and the recalled item meet on the same text, including when
+      // one side was shortened to fit a token budget (see recallFactExcluded).
+      const exclusions = await this.readRecallExclusions();
+      if (exclusions.size > 0) {
+        items = items.filter(
+          item => !recallFactExcluded({ exclusions, shownText: sanitizeMemoryLine(withoutNoteTrailer(item.text)) }),
+        );
+      }
       // The tool policy reads this to block web_search as a substitute for
       // recall: a web query about material recall already surfaced can never
       // be a legitimate open-web question.
@@ -1493,6 +1513,24 @@ export class MemoryProcessor implements PreLLMProcessor, PreLLMEphemeralAgentCon
         reason: error instanceof Error ? error.message : String(error),
       });
       return { entries: [], stats: undefined };
+    }
+  }
+
+  /**
+   * This chat's stored recall exclusions. A read that fails leaves recall unfiltered rather
+   * than failing the turn (design invariant 1); the failure is logged, never hidden.
+   */
+  private async readRecallExclusions(): Promise<ReadonlySet<string>> {
+    if (this.loadRecallExclusions === undefined) {
+      return EMPTY_RECALL_EXCLUSIONS;
+    }
+    try {
+      return new Set(await this.loadRecallExclusions());
+    } catch (error) {
+      this.logger.warn('Recall exclusions could not be read; continuing with recall unfiltered', {
+        reason: error instanceof Error ? error.message : String(error),
+      });
+      return EMPTY_RECALL_EXCLUSIONS;
     }
   }
 
@@ -1885,6 +1923,8 @@ export function memoryCapability(input: {
   keepsNothing?: boolean | undefined;
   /** Present when the memory page tools are offered this turn: the instruction then names them, and the block's contents are reported to it. */
   pageToolsWatch?: TurnReadWatch | undefined;
+  /** Reads the facts the person pulled out of this chat's recall, from where they are stored with the chat. */
+  loadRecallExclusions?: (() => Promise<readonly string[]>) | undefined;
 }): AgentCapability {
   const processor = new MemoryProcessor({
     ...input,

@@ -1679,6 +1679,18 @@ function isSandboxFileEditCall({
   );
 }
 
+/** Whether the call goes to the sandbox's own shell tool, looked up by the tool it maps to. */
+function isSandboxCommandCall({
+  call,
+  toolMapping,
+}: {
+  call: Pick<InternalEnrichedToolCall, 'function'>;
+  toolMapping: Map<string, MappedMCPTool>;
+}): boolean {
+  const mapped = toolMapping.get(call.function.name);
+  return mapped?.toolSet.name === SANDBOX_MCP_SERVER_ID && mapped.originalToolName === SANDBOX_EXEC_TOOL_NAME;
+}
+
 /** Whether a call reached its tool, whatever it answered. Refused, blocked and unsent calls did not. */
 function toolCallWasAttempted(disposition: ToolResultDisposition): boolean {
   return disposition !== 'denied' && disposition !== 'policy_blocked' && disposition !== 'never_ran';
@@ -5708,8 +5720,8 @@ export class AgentThread {
         this.noteUnfinished(unfinished);
       }
     }
-    // A step that landed a space write or a sandbox file edit is progress, not spent budget; a build in
-    // parts needs many such steps.
+    // A step that landed a space write or a sandbox file edit, or ran a sandbox command, is progress, not
+    // spent budget; a build in parts needs many such steps.
     const refundsSoFar = replyTurn.progressRefundsByThread.get(this.threadId) ?? 0;
     const refund = progressRefundFor({
       refundsSoFar,
@@ -5725,6 +5737,7 @@ export class AgentThread {
                 failure: result.failure,
                 savedNothing: spaceWriteSavedNothing(result.message.content),
                 sandboxFileEdit: isSandboxFileEditCall({ call, toolMapping }),
+                sandboxCommand: isSandboxCommandCall({ call, toolMapping }),
               },
             ];
       }),

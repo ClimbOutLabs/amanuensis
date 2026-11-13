@@ -180,7 +180,11 @@ func (s *Server) exec(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, ErrInternal, "the session tree could not be prepared")
 		return
 	}
-	env := guestEnv(req.PackageMirrorToken)
+	env := append(guestEnv(req.PackageMirrorToken, execHome), "npm_config_cache="+execNpmCache)
+	// Keeps the cache out of a project that sits at the top of the workspace. Best effort: npm works without it.
+	if _, err := tree.Read(root, tree.GuestRoot+"/"+npmCacheIgnore); errors.Is(err, os.ErrNotExist) {
+		_ = tree.Write(root, tree.GuestRoot+"/"+npmCacheIgnore, []byte("*\n"), 0o644)
+	}
 	for name, value := range req.Env {
 		env = append(env, name+"="+value)
 	}
@@ -204,14 +208,16 @@ func (s *Server) exec(w http.ResponseWriter, r *http.Request) {
 	limit := int64(req.DiskMB) << 20
 	spec.MaxFileBytes = limit
 	spec.MaxProcesses = guestMaxProcesses
+	started := time.Now()
+	// Taken before anything runs, so everything this call writes counts as new when the tree is trimmed.
+	mark := lease.Mark(root)
 	// A tree left over its limit by an earlier overshoot is trimmed before anything new runs in it.
-	notices := reclaimNotice(lease.Reclaim(root, limit), req.DiskMB, nil)
+	notices := reclaimNotice(lease.Reclaim(root, limit, mark), req.DiskMB, nil)
 	watch, err := newDiskWatch(s.VolumeDir, s.MinFreeBytes, limit, root)
 	if err != nil {
 		writeStorageError(w, err)
 		return
 	}
-	started := time.Now()
 	oomBefore := s.OOMKills()
 	endGrant := s.beginMirrorGrant(req.PackageMirrorToken)
 	endSkillNetworkGrant := s.beginSkillNetworkGrant(req.SkillNetworkToken)
@@ -222,10 +228,12 @@ func (s *Server) exec(w http.ResponseWriter, r *http.Request) {
 		Guard:         watch.guard,
 		GuardInterval: guardIntervalMS * time.Millisecond,
 	})
+	hideProjectEnvironment(root, spec.Cwd)
 	endSkillNetworkGrant()
 	endGrant()
-	// Whatever a fast writer got in before the kill is removed, largest files first, so the overshoot never stays.
-	notices = reclaimNotice(lease.Reclaim(root, limit), req.DiskMB, notices)
+	// Whatever a fast writer got in before the kill is removed, so the overshoot never stays. Only what
+	// this call wrote goes: files from before it, a project's history above all, are left alone.
+	notices = reclaimNotice(lease.Reclaim(root, limit, mark), req.DiskMB, notices)
 	writeJSON(w, http.StatusOK, execResponse{
 		ExitCode:      res.ExitCode,
 		Output:        string(res.Stdout),
@@ -234,6 +242,18 @@ func (s *Server) exec(w http.ResponseWriter, r *http.Request) {
 		Notices:       notices,
 		DurationMS:    time.Since(started).Milliseconds(),
 	})
+}
+
+// hideProjectEnvironment keeps a Python environment made in the command's folder out of `git status`, as
+// newer Python versions do themselves. Best effort: the environment works without it.
+func hideProjectEnvironment(root, cwd string) {
+	env := path.Join(cwd, projectEnvDir)
+	if _, err := tree.Read(root, env+"/pyvenv.cfg"); err != nil {
+		return
+	}
+	if _, err := tree.Read(root, env+"/.gitignore"); errors.Is(err, os.ErrNotExist) {
+		_ = tree.Write(root, env+"/.gitignore", []byte("*\n"), 0o644)
+	}
 }
 
 // reclaimNotice appends the sentence about deleted files, if any, to the call's notices; never nil.

@@ -65,6 +65,21 @@ export const INERT_MAIL_TOOLS = ['list_emails_metadata', 'get_emails_content', '
  */
 export const INERT_CALENDAR_TOOLS = CALDAV_TOOL_NAMES;
 
+/** One event in the Calendar sidecar's `list_events` answer shape, as the rail's CalDAV read parses it. */
+export interface InertCalendarEvent {
+  summary?: string | undefined;
+  location?: string | undefined;
+  start: { value: string; tzid?: string | undefined; all_day: boolean };
+  end?: { value: string; tzid?: string | undefined; all_day: boolean } | undefined;
+  [key: string]: unknown;
+}
+
+/** The Calendar sidecar's `list_events` answer: the events under `structuredContent`. */
+export interface InertCalendarEventsResult {
+  events: InertCalendarEvent[];
+  [key: string]: unknown;
+}
+
 /**
  * The structured `get_event` answer, in the shape the event review reads: a title, a start, and
  * an explicit empty guest list (a missing guest list means the list cannot be read, which is a
@@ -172,6 +187,11 @@ export interface InertMcpServer {
   restore: () => void;
   /** Sets the result shape the next (and every subsequent) `ask_memory` call answers with. */
   setAskMemoryMode: (mode: MemoryToolMode) => void;
+  /**
+   * Sets the events the calendar tools' `list_events` answers with, in the sidecar's shape.
+   * `undefined` restores the default empty text answer.
+   */
+  setCalendarEvents: (events: readonly InertCalendarEvent[] | undefined) => void;
   /** Sets the result shape the next (and every subsequent) `search_memory` call answers with. */
   setSearchMemoryMode: (mode: MemoryToolMode) => void;
   /**
@@ -208,6 +228,10 @@ interface Counters {
 
 interface SearchResults {
   current: ((query: string) => string[]) | undefined;
+}
+
+interface CalendarEvents {
+  current: readonly InertCalendarEvent[] | undefined;
 }
 
 interface MemoryModes {
@@ -252,6 +276,10 @@ function memoryResult(structuredContent: MemoryToolResult) {
   return { content: [], structuredContent, isError: false };
 }
 
+function calendarEventsResult(structuredContent: InertCalendarEventsResult) {
+  return { content: [], structuredContent, isError: false };
+}
+
 /** The `get_event` answer: the one readable event, as structured content with its JSON text beside it. */
 function calendarEventResult() {
   return {
@@ -271,6 +299,7 @@ function buildMcpServer({
   gates,
   memoryModes,
   searchResults,
+  calendarEvents,
   webSearch,
   searchProvider,
   mail,
@@ -283,6 +312,7 @@ function buildMcpServer({
   gates: WriteGate[];
   memoryModes: MemoryModes;
   searchResults: SearchResults;
+  calendarEvents: CalendarEvents;
   webSearch: boolean;
   searchProvider: boolean;
   mail: boolean;
@@ -518,9 +548,16 @@ function buildMcpServer({
             ? { annotations: { readOnlyHint: true, openWorldHint: false } }
             : {}),
         },
-        // A change reads its event first: `get_event` answers with the one readable event, so a
-        // change to it asks. Every other tool still answers with nothing.
-        name === 'get_event' ? () => calendarEventResult() : () => textResult('[]'),
+        () => {
+          // A change reads its event first: `get_event` answers with the one readable event, so a
+          // change to it asks. Once a test sets events, `list_events` answers with them in the
+          // sidecar's shape. Every other tool answers with nothing.
+          if (name === 'get_event') {
+            return calendarEventResult();
+          }
+          const events = name === 'list_events' ? calendarEvents.current : undefined;
+          return events === undefined ? textResult('[]') : calendarEventsResult({ events: [...events] });
+        },
       );
     }
   }
@@ -581,6 +618,8 @@ export async function startInertMcpServer(options?: {
   mail?: boolean;
   /** Adds the Calendar sidecar's tool names; the reads declare read-only and closed-world. */
   calendar?: boolean;
+  /** The events the calendar tools' `list_events` starts out answering with; changeable via `setCalendarEvents`. */
+  calendarEvents?: readonly InertCalendarEvent[];
   /** Adds `inert_get_page`, a read by id. */
   pageById?: boolean;
   /** Adds `search_messages`, a search known as a lookup by its name. */
@@ -610,6 +649,7 @@ export async function startInertMcpServer(options?: {
   };
   const memoryModes: MemoryModes = { ask: 'result', search: 'result' };
   const searchResults: SearchResults = { current: undefined };
+  const calendarEvents: CalendarEvents = { current: options?.calendarEvents };
   const gates: WriteGate[] = [];
   const transports = new Map<string, StreamableHTTPServerTransport>();
   let severed = false;
@@ -671,6 +711,7 @@ export async function startInertMcpServer(options?: {
       gates,
       memoryModes,
       searchResults,
+      calendarEvents,
       webSearch,
       searchProvider,
       mail,
@@ -798,6 +839,9 @@ export async function startInertMcpServer(options?: {
     },
     setAskMemoryMode: mode => {
       memoryModes.ask = mode;
+    },
+    setCalendarEvents: events => {
+      calendarEvents.current = events;
     },
     setSearchMemoryMode: mode => {
       memoryModes.search = mode;
