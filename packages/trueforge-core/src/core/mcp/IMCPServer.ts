@@ -9,6 +9,7 @@ import type {
 } from '../events/schema';
 import type { BrowserElementReview, InternalToolCallInfo } from '../llm/LLMTypes';
 import type { ConnectorBinding } from '../permissions/approvalTokens';
+import type { SkillNetworkCardRequest } from '../permissions/skillNetworkCards';
 import type { SandboxInfo, WorkspaceVerificationReceiptCandidate } from '../sandbox/Sandbox';
 import type { StructuredEditPrecondition } from '../sandbox/structuredEditPrecondition';
 import type { GitRemotePrecondition } from '../sandbox/gitRemoteObservation';
@@ -72,6 +73,9 @@ export interface CallToolResolvedResponse {
   // Host-only candidate. AgentThread activates it only after the terminal
   // response has crossed the durable context-persistence boundary.
   verificationReceiptCandidate: WorkspaceVerificationReceiptCandidate | undefined;
+  // Host-only skill network cards this call's outcome asks for, or undefined when it asks for
+  // none. AgentThread raises them as held cards after the result is persisted.
+  skillNetworkCards?: readonly SkillNetworkCardRequest[] | undefined;
   events?: readonly RegisteredPassthroughEvent[] | undefined;
 }
 

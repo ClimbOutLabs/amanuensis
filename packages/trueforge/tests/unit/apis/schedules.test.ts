@@ -659,6 +659,7 @@ describe('internal schedule execution', () => {
       userRef: 'alice',
       agent,
       persona: undefined,
+      session_title: 'Daily report · Monday, August 31',
     });
     mockedStartTurnInProcess.mockReset();
 
@@ -668,7 +669,7 @@ describe('internal schedule execution', () => {
     expect(mockedStartTurnInProcess).toHaveBeenCalledWith(expect.objectContaining({ unattended: true }));
   });
 
-  it('lets a scheduled chat take its title from its task, with no fixed schedule title', async () => {
+  it('names the run chat for its schedule, from the prepared title, never from its task', async () => {
     const { agent, run, execute } = await seedRun();
     const session = await new Sessions<SessionCustom, TurnCustom>({
       sessionStore: new InMemorySessionStore<SessionCustom, TurnCustom>(),
@@ -687,6 +688,7 @@ describe('internal schedule execution', () => {
       userRef: 'alice',
       agent,
       persona: undefined,
+      session_title: 'Daily report · Monday, August 31',
     });
     mockedStartTurnInProcess.mockReset();
 
@@ -694,7 +696,10 @@ describe('internal schedule execution', () => {
 
     expect(response.status).toBe(204);
     expect(mockedStartTurnInProcess).toHaveBeenCalledTimes(1);
-    expect(mockedStartTurnInProcess.mock.calls[0]?.[0]).not.toHaveProperty('title_seed');
+    expect(mockedStartTurnInProcess.mock.calls[0]?.[0]).toHaveProperty(
+      'session_title',
+      'Daily report · Monday, August 31',
+    );
   });
 
   it("runs the turn in the schedule's own time zone, so today and times match the owner's day", async () => {
@@ -716,6 +721,7 @@ describe('internal schedule execution', () => {
       userRef: 'alice',
       agent,
       persona: undefined,
+      session_title: 'Daily report · Monday, August 31',
     });
     mockedStartTurnInProcess.mockReset();
 
@@ -757,6 +763,7 @@ describe('internal schedule execution', () => {
         updated_at: '2026-08-31T00:00:00.000Z',
         updated_by: 'alice',
       },
+      session_title: 'Daily report · Monday, August 31',
     });
     mockedStartTurnInProcess.mockReset();
 
@@ -918,6 +925,9 @@ describe('what a schedule runs with', () => {
     expect(response.status).toBe(204);
     const started = mockedStartTurnInProcess.mock.calls[0]?.[0];
     expect(started?.unattended).toBe(true);
+    // The run's chat is named for the schedule, never for its task text.
+    expect(started?.session_title).toContain('Morning brief');
+    expect(started?.session_title).not.toContain('Say hi');
     // The tools changed what the run can reach, not how it asks: the dispatcher's own flag still decides.
     expect(started).toEqual(expect.objectContaining({ unattended: true, userRef: 'alice' }));
   });

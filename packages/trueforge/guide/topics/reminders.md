@@ -19,19 +19,27 @@ A reminder can also repeat every day, every weekday, or on the days you choose, 
 
 ## When a reminder is due
 
-- It shows under the bell at the top of the left panel. A number on the bell counts what you haven't seen. On a phone, tap the menu button to see the bell; that button shows the count too.
+- It shows under **For you**, the bell at the top of the left panel. A number on the bell counts what you haven't seen. On a phone, tap the menu button to see the bell; that button shows the count too.
 - It also appears at the end of the chat you set it in. If Aman is still answering in that chat, the line waits until the answer ends.
 - That chat shows an unread mark in your chat list until you open it.
 - If you turned on notices, your device shows one too, even when Aman is closed. The notice only says "Reminder". The words open in Aman. You choose how reminders reach you in **Settings**, then **Reach me**. See [Reach me](reach-me.md).
 
 ## Use the bell
 
-1. Click the bell at the top of the left panel. On a phone, tap the menu button first. The **Notifications** panel opens.
+1. Click the bell at the top of the left panel. It is labeled **For you**. On a phone, tap the menu button first. The **For you** panel opens.
 2. Each item says what it is, when it came, and why you got it.
-3. Click an item to open its chat.
+3. An item that came from a chat ends with **Open chat**. Click the item to go to that chat.
 4. Click **Mark all seen** to clear the count.
 
-A reminder whose chat was deleted still shows under the bell.
+=== "Computer"
+
+    ![The For you panel open from the bell, with a reminder to call the pharmacy](../../../../docs/screenshots/app/reminders-bell-desktop.png)
+
+=== "Phone"
+
+    ![The For you panel open from the bell, with a reminder to call the pharmacy](../../../../docs/screenshots/app/reminders-bell-phone.png)
+
+A reminder whose chat was deleted still shows under the bell. It has no **Open chat** line.
 
 ## Turn on notices
 
@@ -50,7 +58,15 @@ Say so when you ask, such as "Remind me at 5 pm to call the pharmacy, it's urgen
 
 ## See or cancel reminders
 
-1. Click **Reminders** in the left panel. It lists what is coming up and what has already reminded you, with the persona that set each one. Click a reminder to open the chat you set it in. Or, in any chat, ask "What reminders do I have?"
+=== "Computer"
+
+    ![The Reminders page, with a reminder coming up in 7 days and an Open chat link](../../../../docs/screenshots/app/reminders-page-desktop.png)
+
+=== "Phone"
+
+    ![The Reminders page, with a reminder coming up in 7 days and an Open chat link](../../../../docs/screenshots/app/reminders-page-phone.png)
+
+1. Click **Reminders** in the left panel. It lists what is coming up and what has already reminded you, with the persona that set each one. Each reminder shows its day, how far off it is, such as "In 3 weeks", and whether it repeats or is paused. Click a reminder that says **Open chat** to go to the chat you set it in. A reminder says **No chat to open** when its chat was deleted, or when it was set before Aman kept track of the chat. Or, in any chat, ask "What reminders do I have?"
 2. To cancel one, ask, such as "Cancel the pharmacy reminder".
 3. A card shows the reminder. Click **Allow** to cancel it, or **Not now** to keep it.
 

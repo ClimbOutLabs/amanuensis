@@ -7,8 +7,9 @@ import type { IAgentStore } from '../db/agentStore';
 import type { IModelProviderStore } from '../db/modelProviderStore';
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import type { EventSubscription } from './event-subscription';
-import { resolveSummarizationModelFqn } from './memory/memorySummarize';
+import { resolveSummarizationModelFqn, withRequestFields } from './memory/memorySummarize';
 import { flushModelUsage, modelIdentity, type ModelUsageDrainMember, type TurnModelUsage } from './modelUsage';
+import { shortCallRequestFields } from './oneShotModelCall';
 import { getModelDetails } from './sessionResources';
 import { meterHelperLlm, type TokenFactoryBudget } from './tokenFactoryBudget';
 
@@ -216,18 +217,14 @@ export async function generateChatSubjectTitle(params: {
     name: params.modelName,
     store: params.modelProviderStore,
   });
+  const fields = shortCallRequestFields({ modelProperties, maxTokens: CHAT_TITLE_MAX_TOKENS });
   const request: LLMCreateParams = {
     messages: buildChatTitleMessages({ userText: params.userText, assistantText: params.assistantText }),
-    max_completion_tokens: CHAT_TITLE_MAX_TOKENS,
+    max_completion_tokens: fields.max_completion_tokens,
     temperature: 0,
     top_p: 1,
   };
-  // Same provider-extension discipline as the knowledge relevance check:
-  // extensions only when the configured model explicitly advertises `none`.
-  if (modelProperties.reasoning_efforts?.includes('none') === true) {
-    Object.assign(request, { enable_thinking: false, reasoning_effort: 'none' });
-  }
-  const llm = meterHelperLlm({
+  const metered = meterHelperLlm({
     llm: new VercelAILLM({
       providerConfig,
       logger: params.logger,
@@ -238,6 +235,12 @@ export async function generateChatSubjectTitle(params: {
     role: 'summarization',
     budget: params.tokenFactoryBudget,
     usage: params.modelUsage,
+    logger: params.logger,
+  });
+  const llm = withRequestFields({
+    llm: metered,
+    fields: fields.reasoning,
+    modelKey: `${params.tenantId}/${params.modelName}`,
     logger: params.logger,
   });
   const result = await llm.createNonStream(request);

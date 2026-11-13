@@ -53,6 +53,7 @@ import { SqliteSpaceStore } from '../src/db/sqlite/space-store/SqliteSpaceStore'
 import { SqliteTokenFactoryUsageStore } from '../src/db/sqlite/token-factory-usage-store/SqliteTokenFactoryUsageStore';
 import { SqliteOAuthTokenStore } from '../src/db/sqlite/token-store/SqliteOAuthTokenStore';
 import { SqliteTurnArtifactStore } from '../src/db/sqlite/turn-artifact-store/SqliteTurnArtifactStore';
+import { TextContactStore } from '../src/db/textContactStore';
 import { ActiveTurnRegistry } from '../src/runtime/activeTurns';
 import { createChatImageService } from '../src/runtime/chatImages/chatImageService';
 import { createImageReencoder } from '../src/runtime/chatImages/reencodeInSandbox';
@@ -61,6 +62,7 @@ import { createDeliveryService } from '../src/runtime/delivery/deliveryService';
 import { EventSubscriptionRegistry } from '../src/runtime/event-subscription';
 import { NO_PHONE_CHANNELS } from '../src/runtime/noticing/reachChannels';
 import { createReminderReach } from '../src/runtime/noticing/reminderReach';
+import { createTextNumberService } from '../src/runtime/texts/textNumber';
 import { createTokenFactoryBudget } from '../src/runtime/tokenFactoryBudget';
 import { TurnDrainRegistry } from '../src/runtime/turnDrains';
 
@@ -167,6 +169,17 @@ const app = createServerApp({
     logger,
   }),
   reachChannels: () => NO_PHONE_CHANNELS,
+  isInstanceOwner: () => false,
+  textContactStore: new TextContactStore(db),
+  textNumbers: createTextNumberService({
+    store: new TextContactStore(db),
+    reachSettings: new ReachSettingsStore(db),
+    personalization: new SqlitePersonalizationStore(db),
+    provider: undefined,
+    audit: { record: () => Promise.resolve() },
+    logger,
+    codeKey: 'openapi',
+  }),
   webPushPublicKey: undefined,
   sessions: new Sessions({ sessionStore }),
   chatImages: createChatImageService({

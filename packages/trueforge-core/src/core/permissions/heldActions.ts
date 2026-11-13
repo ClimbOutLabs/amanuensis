@@ -312,12 +312,28 @@ export async function checkHeldReplay(input: {
       return { ok: false, reason: 'changed' };
     }
   }
+  // A skill network card holds no approval token of its own: the person answered a question
+  // about a skill's sites, and the card never showed this call. When the call as classified
+  // now asks for an approval of its own, the network answer cannot stand in for it, so the
+  // replay is refused and the call can be asked about on its own card instead. A call that
+  // does not ask on its own (the standing-grant case these cards are built for) still runs.
+  if (held.skill_network != null && heldTokenId === null && fresh.is_approval_required === true) {
+    return { ok: false, reason: 'changed' };
+  }
   if (!heldRemotesUnchanged({ held, fresh }) || !heldElementUnchanged({ held, fresh })) {
     return { ok: false, reason: 'changed' };
   }
   const heldCard = held.tier3_card ?? undefined;
   const freshCard = fresh.tier3_card ?? undefined;
-  if (heldCard !== undefined && freshCard !== undefined && !readsAsHeld({ held: heldCard, fresh: freshCard })) {
+  // A skill network card asks about the skill's sites, not about this call, so what its card
+  // shows is not compared with the fresh call's card: the fresh classification governs the call
+  // itself, and the network answer was recorded against the skill before the replay.
+  if (
+    held.skill_network == null &&
+    heldCard !== undefined &&
+    freshCard !== undefined &&
+    !readsAsHeld({ held: heldCard, fresh: freshCard })
+  ) {
     return { ok: false, reason: 'changed' };
   }
   // A fresh call that no longer asks (a standing grant was added meanwhile) runs without the token.

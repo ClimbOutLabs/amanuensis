@@ -10,11 +10,11 @@ How to get there: Approval cards show up in the chat, right where Aman is workin
 
 === "Computer"
 
-    ![An approval card in a chat, with Allow, Change it and Not now](../../../../docs/screenshots/app/approvals-card-desktop.png)
+    ![A card asking to delete a schedule, with the safe choice, Keep it, first and Allow after it](../../../../docs/screenshots/app/approvals-card-desktop.png)
 
 === "Phone"
 
-    ![An approval card in a chat, with Allow, Change it and Not now](../../../../docs/screenshots/app/approvals-card-phone.png)
+    ![A card asking to delete a schedule, with the safe choice, Keep it, first and Allow after it](../../../../docs/screenshots/app/approvals-card-phone.png)
 
 Reading is free. Aman doesn't ask before it reads your mail, searches the web or opens a page. It asks before it sends, saves, deletes or changes something.
 

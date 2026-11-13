@@ -407,6 +407,10 @@
       "set": "spaces",
       "tests": []
     },
+    "route:text": {
+      "set": "reach",
+      "tests": []
+    },
     "route:today": {
       "set": "home",
       "tests": []
@@ -816,6 +820,7 @@
     "route:skill",
     "route:space",
     "route:spaceFolder",
+    "route:text",
     "route:today",
     "route:tokenFactoryUsage",
     "route:toolOutputScreen",

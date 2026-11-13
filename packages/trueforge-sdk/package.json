@@ -506,6 +506,17 @@
             },
             "default": "./dist/cjs/api/resources/personalization/resources/briefItems/exports.js"
         },
+        "./reach/texts": {
+            "import": {
+                "types": "./dist/esm/api/resources/reach/resources/texts/exports.d.mts",
+                "default": "./dist/esm/api/resources/reach/resources/texts/exports.mjs"
+            },
+            "require": {
+                "types": "./dist/cjs/api/resources/reach/resources/texts/exports.d.ts",
+                "default": "./dist/cjs/api/resources/reach/resources/texts/exports.js"
+            },
+            "default": "./dist/cjs/api/resources/reach/resources/texts/exports.js"
+        },
         "./sessions/recallExclusions": {
             "import": {
                 "types": "./dist/esm/api/resources/sessions/resources/recallExclusions/exports.d.mts",

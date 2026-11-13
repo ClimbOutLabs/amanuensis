@@ -86,6 +86,8 @@ usage() {
 Usage: aman doctor [--json] [--verbose] [--only ID] [--instance NAME] [--deep] [--local]
        aman doctor instance|network [--fix [--yes]] [--instance NAME]
        aman doctor sandbox [--fix [--yes]] [--instance NAME] [--disk-gb N] [--no-hard-disk-limit]
+         [--add go,rust,java] [--remove go,rust,java] [--add-python PACKAGES] [--remove-python PACKAGES]
+         --add and --add-python put toolchains or your own Python packages in the sandbox and rebuild it
        aman doctor docker|disk|backup|checkout|tls [--fix [--yes]]
        aman backup [NAME]
        aman restore [NAME] [TIME | --latest]
@@ -1367,6 +1369,13 @@ doctor_sandbox() {
       --yes) yes=1 ;;
       --verbose) UI_VERBOSE=1 ;;
       --no-hard-disk-limit) passthru+=(--no-hard-disk-limit) ;;
+      --add | --remove | --add-python | --remove-python)
+        # Each changes what is in the sandbox, so it rebuilds it the way --fix does.
+        [ $# -ge 2 ] || die_usage "$1 needs a comma-separated list."
+        passthru+=("$1" "$2")
+        fix=1
+        shift
+        ;;
       --disk-gb)
         [ $# -ge 2 ] || die_usage "--disk-gb needs a number."
         passthru+=(--disk-gb "$2")
