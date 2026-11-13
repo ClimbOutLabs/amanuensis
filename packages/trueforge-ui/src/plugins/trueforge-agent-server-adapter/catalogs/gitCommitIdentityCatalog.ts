@@ -51,7 +51,7 @@ export function createGitCommitIdentityCatalog(options: CreateTrueForgeClientOpt
       throw new Error(
         failure.success
           ? failure.data.error.message
-          : `The commit name failed with HTTP ${String(response.status)}. Try again in a moment.`,
+          : 'The commit name could not be read or saved. Try again in a moment.',
       );
     }
     const parsed = ResponseSchema.safeParse(responseBody);

@@ -366,6 +366,8 @@ export class SlotSandboxProvider implements SandboxProvider {
       guest: this.guestFor(params.sandboxId),
       sandboxId: params.sandboxId,
       cwd: params.cwd === undefined ? WORKSPACE_DIR : posix.resolve(WORKSPACE_DIR, params.cwd),
+      // Past the check above, the environment holds the commit name and nothing else.
+      commitIdentityEnv: params.env,
       timeoutSeconds: params.timeoutSeconds,
       signal: params.signal,
     });
@@ -390,6 +392,7 @@ export class SlotSandboxProvider implements SandboxProvider {
           guest: this.guestFor(input.sandboxId),
           sandboxId: input.sandboxId,
           cwd: input.cwd === undefined ? WORKSPACE_DIR : posix.resolve(WORKSPACE_DIR, input.cwd),
+          commitIdentityEnv: undefined,
           timeoutSeconds: undefined,
           signal: input.signal,
         });

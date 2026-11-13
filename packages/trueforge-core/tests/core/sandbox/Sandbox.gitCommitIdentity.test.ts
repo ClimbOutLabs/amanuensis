@@ -1,7 +1,9 @@
 import { isCallToolResponseResult } from '../../../src/core/mcp/IMCPServer';
 import {
   DEFAULT_GIT_COMMIT_IDENTITY,
+  gitCommitIdentityEnv,
   GitCommitIdentitySchema,
+  hasEnvBeyondCommitIdentity,
   type GitCommitIdentity,
 } from '../../../src/core/sandbox/gitCommitIdentity';
 import type { ExecResult, SandboxExecParams, SandboxProvider } from '../../../src/core/sandbox/provider/Provider';
@@ -99,6 +101,15 @@ describe('the name on commits made in the sandbox', () => {
     });
     expect(env?.['GIT_AUTHOR_NAME']).toBe('Pair Partner');
     expect(env?.['GIT_COMMITTER_NAME']).toBe('Sidd Example');
+  });
+
+  it('tells the commit name apart from other environment, so plain network Git still goes through the server', () => {
+    const identityOnly = gitCommitIdentityEnv({ name: 'Sidd Example', email: 'sidd@example.com' });
+    expect(hasEnvBeyondCommitIdentity(undefined)).toBe(false);
+    expect(hasEnvBeyondCommitIdentity({})).toBe(false);
+    expect(hasEnvBeyondCommitIdentity(identityOnly)).toBe(false);
+    expect(hasEnvBeyondCommitIdentity({ ...identityOnly, GIT_SSL_NO_VERIFY: '1' })).toBe(true);
+    expect(hasEnvBeyondCommitIdentity({ GIT_AUTHOR_DATE: 'now' })).toBe(true);
   });
 
   it('refuses a name or email that could break the commit header', () => {
