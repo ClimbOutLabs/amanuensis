@@ -23,6 +23,7 @@ import {
   SANDBOX_EXEC_TOOL_NAME,
   SANDBOX_REPLACE_TEXT_TOOL_NAME,
   SANDBOX_RUN_REGISTERED_COMMAND_TOOL_NAME,
+  SANDBOX_RUN_SKILL_SCRIPT_TOOL_NAME,
   SANDBOX_SUBMIT_IMPLEMENTATION_PLAN_TOOL_NAME,
   SANDBOX_WRITE_FILE_TOOL_NAME,
   type BoundRepository,
@@ -38,9 +39,12 @@ import type {
 } from '../AgentContextProcessor';
 import { formatBoundRepositoryContext } from './RepositoryBindingContext';
 import { TaskChecklistRequestState, type TaskChecklistAccess } from './TaskChecklist';
-import { TOKEN_BUDGET_SAFETY_MARGIN } from './tokenBudgetConstants';
+import {
+  DEFAULT_CONTEXT_COMPACTION_RATIO,
+  DEFAULT_CONTEXT_COMPACTION_THRESHOLD_TOKENS,
+  TOKEN_BUDGET_SAFETY_MARGIN,
+} from './tokenBudgetConstants';
 
-export const DEFAULT_CONTEXT_COMPACTION_THRESHOLD_TOKENS = 50 * 1000;
 export const MAX_COMPACTION_TOUCHED_PATHS = 200;
 export const COMPACTION_TOUCHED_PATHS_STATE_KEY = 'tfy.context_compaction.touched_paths';
 /** Fraction of the threshold to keep verbatim as a recent tail after compaction. */
@@ -55,7 +59,6 @@ export const MAX_REJECTED_OUTPUT_PREVIEW_CHARS = 2_000;
 export const MAX_CONSECUTIVE_COMPACTION_SKIPS = 3;
 /** Unused: retained for API compatibility. The truncation fallback supersedes the skip circuit breaker. */
 export const COMPACTION_BACKOFF_TOKEN_DELTA = 10_000;
-export const DEFAULT_CONTEXT_COMPACTION_RATIO = 0.8;
 
 /** A separately configured summarizing model; its own context length bounds the summarization request. */
 export interface CompactionModel {
@@ -206,12 +209,13 @@ const SANDBOX_TOOL_NAMES: ReadonlySet<string> = new Set([
   SANDBOX_REPLACE_TEXT_TOOL_NAME,
   SANDBOX_WRITE_FILE_TOOL_NAME,
   SANDBOX_RUN_REGISTERED_COMMAND_TOOL_NAME,
+  SANDBOX_RUN_SKILL_SCRIPT_TOOL_NAME,
   SANDBOX_SUBMIT_IMPLEMENTATION_PLAN_TOOL_NAME,
 ]);
 
 /**
  * True when `context` contains at least one assistant tool call naming a sandbox tool
- * (exec, apply_patch, replace_text, write_file, run_registered_command, or
+ * (exec, apply_patch, replace_text, write_file, run_registered_command, run_skill_script, or
  * submit_implementation_plan). A sandbox being attached to the thread is not by itself evidence
  * of engineering work: Amanuensis attaches a sandbox to ordinary assistant chats too, so mode
  * selection looks for actual use, not attachment. See CompactionSessionMode.

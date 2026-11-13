@@ -152,6 +152,7 @@ function buildApp(input: {
     approvalTokens: new SqliteApprovalTokenStore(db),
     toolGrants: mcpToolGrantStore,
     outboundSecrets,
+    skillStore,
   });
   const personaStore = new SqlitePersonaStore(db);
   const localUserStore = input.localSignIn ? new SqliteLocalUserStore(db) : undefined;

@@ -60,7 +60,13 @@ export class SkillNetworkTokenRegistry {
     if (existing !== undefined && this.resolve(existing) !== undefined) {
       return existing;
     }
-    this.revokeSession(input.session_id);
+    // Only the chat's earlier token goes: its allow-once sites, refusals and raised cards are
+    // what the new grant was built from, so dropping them here would undo an answer just given.
+    for (const grant of this.#byToken.values()) {
+      if (grant.session_id === input.session_id) {
+        this.#delete(grant);
+      }
+    }
     const now = Date.now();
     const token = randomBytes(16).toString('hex');
     const grant: SkillNetworkGrant = {

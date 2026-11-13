@@ -39,6 +39,7 @@ const draftApproval = {
           bcc: [],
           subject: 'Picnic plans',
           body: 'Bring the blue blanket.',
+          check_code: null,
           replaces: null,
           reply_in_thread: { subject: 'Picnic plans', from: 'robin@example.test' },
         },
