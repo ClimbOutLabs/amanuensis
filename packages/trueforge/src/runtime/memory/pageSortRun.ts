@@ -20,10 +20,11 @@ import { sortNote, type SortModel, type SortNote } from './pageSorter';
 const SORT_MAX_OUTPUT_TOKENS = 1600;
 
 /**
- * The longest one try at a helper job's question may take. These questions show whole pages and ask for a longer
- * answer than a turn summary, and nobody waits on them, so a slow model gets more time than a summary does.
+ * The longest one try at a helper job's question may take. Nobody waits on these questions, so a slow model that is
+ * still answering is left to finish: the model client already gives up on one that has stopped sending anything.
+ * This only bounds a model that keeps sending without ever finishing.
  */
-const HELPER_JOB_TIMEOUT_MS = 180_000;
+const HELPER_JOB_TIMEOUT_MS = 600_000;
 
 /** The longest the search by meaning may hold up one note. */
 const SIMILAR_PAGES_TIMEOUT_MS = 10_000;
@@ -50,7 +51,13 @@ export function summaryModelFor({
   const resolveLlm =
     summarize.resolveLlm ?? summaryLlmResolver({ ...summarize, logger, timeoutMs: HELPER_JOB_TIMEOUT_MS });
   return async messages => {
+    const askedAt = Date.now();
     const answer = await askSummaryModel({ messages, modelFqn, resolveLlm, isReadable, maxOutputTokens, logger });
+    // How long the model takes says whether a helper job suits it; the question and the answer are not logged.
+    logger.info('A memory helper question came back from the model.', {
+      seconds: Math.round((Date.now() - askedAt) / 1000),
+      answered: answer.status === 'answered' && answer.reply !== '',
+    });
     if (answer.status === 'failed') {
       return answer.fallback === 'model_timeout'
         ? { ok: false, reason: answer.reason, cause: 'model_slow' }
