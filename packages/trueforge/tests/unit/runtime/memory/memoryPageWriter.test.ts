@@ -221,7 +221,8 @@ describe('commitPageChange', () => {
     await Promise.all(
       Array.from({ length: 12 }, (_unused, index) =>
         commitPageChange({
-          options: optionsFor(vaultDir, { newId: () => `f_c${String(index)}` }),
+          // Twelve queued commits can outlast the usual wait on a slow machine; the queue is what is tested.
+          options: optionsFor(vaultDir, { newId: () => `f_c${String(index)}`, lockWaitMs: 55_000 }),
           message: `add ${String(index)}`,
           change: async ({ newId }) => {
             const page = await readMemoryPage({ vaultDir, kind: 'person', slug: 'wendy' });

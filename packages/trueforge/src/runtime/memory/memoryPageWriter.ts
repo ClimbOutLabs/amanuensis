@@ -46,6 +46,8 @@ export interface PageChangeOptions {
   logger: Logger;
   /** Makes fact ids; tests supply their own. */
   newId?: (() => string) | undefined;
+  /** How long to wait for another change to the vault to finish; the usual wait when left out. */
+  lockWaitMs?: number | undefined;
 }
 
 /** Vaults whose history was skipped because git is missing, so the plain log line appears once per vault. */
@@ -197,7 +199,7 @@ export async function commitPageChange<T>({
   change: (context: { newId: () => string }) => Promise<T>;
 }): Promise<T> {
   const newId = options.newId ?? newFactId;
-  return withVaultLock({ vaultDir: options.vaultDir }, async lock => {
+  return withVaultLock({ vaultDir: options.vaultDir, waitMs: options.lockWaitMs }, async lock => {
     const history = await readyHistory({
       options,
       history: { vaultDir: options.vaultDir, runner: options.runner },
