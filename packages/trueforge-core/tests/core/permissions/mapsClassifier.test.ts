@@ -103,6 +103,14 @@ describe('maps classifier branch', () => {
     expect(decision.card?.plain_what).toContain('"Eiffel Tower"');
   });
 
+  it('gives the card copy from the maps wording, with why maps asks as the reason', async () => {
+    const decision = await classifyTier(mapsAction('render_map', { place_name: 'Eiffel Tower' }), makeCtx());
+    expect(decision.card?.copy?.headline).toBe(decision.card?.plain_what);
+    expect(decision.card?.copy?.headline).toContain('"Eiffel Tower"');
+    expect(decision.card?.copy?.consequence).toBeNull();
+    expect(decision.card?.copy?.reason).toBe('Maps are set to ask, so Aman is checking with you first.');
+  });
+
   it('names both place strings verbatim for render_route', async () => {
     const decision = await classifyTier(
       mapsAction('render_route', { from_place: 'Madrid', to_place: 'Barcelona' }),

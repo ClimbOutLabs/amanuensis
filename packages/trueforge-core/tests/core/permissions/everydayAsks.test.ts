@@ -306,9 +306,7 @@ describe('sends, mail drafts and guest changes ask every time, with only Allow a
   it('asks before creating a calendar event with a guest, and never offers the chat-wide answer', async () => {
     const decision = await classifyTier(calendarCreate(['dana@example.org']), makeCtx());
     expect(decision).toMatchObject({ tier: 3, reason: 'calendar_write_guests' });
-    expect(decision.card?.plain_what).toContain(
-      'This change sends an invitation to other people, so Aman always asks.',
-    );
+    expect(decision.card?.copy?.reason).toBe('This change sends an invitation to other people, so Aman always asks.');
     expect(
       allowsChatApproval({
         type: 'truefoundry-system',
@@ -321,11 +319,11 @@ describe('sends, mail drafts and guest changes ask every time, with only Allow a
     ).toBe(false);
   });
 
-  it("names the assistant on a guest change's card", async () => {
+  it("names the assistant in a guest change's reason", async () => {
     const ctx = makeCtx();
     ctx.web_search.assistantName = 'Mannie';
     const decision = await classifyTier(calendarCreate(['dana@example.org']), ctx);
-    expect(decision.card?.plain_what).toContain('so Mannie always asks.');
+    expect(decision.card?.copy?.reason).toContain('so Mannie always asks.');
   });
 
   it('asks before saving a draft every time, and never offers the chat-wide answer or a standing one', async () => {
@@ -414,6 +412,22 @@ describe('what is held, because content steered it', () => {
         tier_reason: decision.reason,
       }),
     ).toBe(false);
+  });
+
+  it('shows the steering warning in the words the card renders, not only in its older sentence', async () => {
+    const ctx = makeCtx();
+    read(ctx, { tool_name: 'read_email', args: ['m1'], text: PHISH });
+    const decision = await classifyTier(
+      sendDraft(draft({ to: [{ name: 'Mom', address: 'collect@evil.example' }] })),
+      ctx,
+    );
+    expect(decision).toMatchObject({ tier: 3, reason: 'content_steered' });
+    // The card renders its copy, so the warning has to be in the copy: the headline names Mom,
+    // and the consequence carries where her address came from.
+    expect(decision.card?.copy?.headline).toBe('Send this email to Mom?');
+    expect(decision.card?.copy?.consequence).toBe(
+      "Once this is sent, it can't be unsent. This goes to Mom (collect@evil.example), whose address was in an email Aman read.",
+    );
   });
 
   it("holds a forward to the Reply-To of a stranger's mail, and never lets the chat-wide answer cover it", async () => {

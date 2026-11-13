@@ -99,6 +99,7 @@
   "Light": "packages/trueforge-ui/src/containers/SettingsBuilder/ThemeSettings.tsx",
   "Dark": "packages/trueforge-ui/src/containers/SettingsBuilder/ThemeSettings.tsx",
   "Allow": "packages/trueforge-ui/src/sentinel/approvalCopy.ts",
+  "Why I'm asking": "packages/trueforge-ui/src/sentinel/WhyIAmAsking.tsx",
   "Always allow in this chat": "packages/trueforge-ui/src/sentinel/approvalChoices.ts",
   "Save as draft": "packages/trueforge-ui/src/sentinel/approvalChoices.ts",
   "Add and send": "packages/trueforge-ui/src/sentinel/approvalChoices.ts",
