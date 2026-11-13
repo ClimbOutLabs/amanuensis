@@ -42,6 +42,7 @@ jobs:
       chart: ${{ inputs.all_packages || steps.filter.outputs.chart }}
       store: ${{ inputs.all_packages || steps.filter.outputs.store }}
       local_sandbox: ${{ inputs.all_packages || steps.filter.outputs.local_sandbox }}
+      twilio: ${{ inputs.all_packages || steps.filter.outputs.twilio }}
       installer: ${{ inputs.all_packages || steps.filter.outputs.installer }}
       screenshot_folder: ${{ steps.stamp.outputs.folder }}
       dependencies: ${{ inputs.all_packages || steps.filter.outputs.dependencies }}
@@ -189,6 +190,17 @@ jobs:
               - 'packages/trueforge-core/package.json'
               - 'packages/trueforge-core/src/core/sandbox/**'
               - 'packages/trueforge-core/tests/core/sandbox/**'
+              - 'package.json'
+              - 'pnpm-workspace.yaml'
+              - 'tsconfig.base.json'
+              - '.github/workflows/ci.yml'
+            twilio:
+              - 'packages/trueforge/src/runtime/twilio/**'
+              - 'packages/trueforge/src/runtime/texts/smsProvider.ts'
+              - 'packages/trueforge/src/runtime/calls/twilioCalls.ts'
+              - 'packages/trueforge/tests/unit/runtime/twilio/**'
+              - 'packages/trueforge/jest.twilio-live.config.cjs'
+              - 'packages/trueforge/package.json'
               - 'package.json'
               - 'pnpm-workspace.yaml'
               - 'tsconfig.base.json'
@@ -748,6 +760,37 @@ jobs:
       - name: Sandbox contract tests
         run: pnpm test:local-sandbox:contract
 
+  # Our text and call providers against Twilio's test credentials. Skips with one line when the secrets are absent,
+  # as on a pull request from a fork.
+  twilio-live:
+    name: Twilio test credentials
+    needs: detect-changes
+    if: needs.detect-changes.outputs.twilio == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Twilio test credentials
+        env:
+          TWILIO_TEST_ACCOUNT_SID: ${{ secrets.TWILIO_TEST_ACCOUNT_SID }}
+          TWILIO_TEST_AUTH_TOKEN: ${{ secrets.TWILIO_TEST_AUTH_TOKEN }}
+        run: pnpm test:twilio-live
+
   # Root-level script tests. Each is small, so they run on every change. The guide's tests run in Help guide.
   root-script-tests:
     name: Root script tests
@@ -1104,6 +1147,7 @@ jobs:
       - store-tests
       - dependency-licenses
       - local-sandbox-contract
+      - twilio-live
       - root-script-tests
       - new-assertions
       - repo-rules
@@ -1131,6 +1175,7 @@ jobs:
           STORE_TESTS: ${{ needs.store-tests.result }}
           DEPENDENCY_LICENSES: ${{ needs.dependency-licenses.result }}
           LOCAL_SANDBOX_CONTRACT: ${{ needs.local-sandbox-contract.result }}
+          TWILIO_LIVE: ${{ needs.twilio-live.result }}
           ROOT_SCRIPT_TESTS: ${{ needs.root-script-tests.result }}
           NEW_ASSERTIONS: ${{ needs.new-assertions.result }}
           REPO_RULES: ${{ needs.repo-rules.result }}
@@ -1143,7 +1188,7 @@ jobs:
           COMPOSE_SMOKE: ${{ needs.compose-smoke.result }}
         run: |
           ok() { [ "$1" = success ] || [ "$1" = skipped ]; }
-          echo "detect-changes=$DETECT_CHANGES migration-order=$MIGRATION_ORDER typecheck-and-build=$TYPECHECK_AND_BUILD npx-smoke=$NPX_SMOKE package-checks=$PACKAGE_CHECKS screenshots=$SCREENSHOTS installer-shell=$INSTALLER_SHELL chart-checks=$CHART_CHECKS store-tests=$STORE_TESTS local-sandbox-contract=$LOCAL_SANDBOX_CONTRACT root-script-tests=$ROOT_SCRIPT_TESTS new-assertions=$NEW_ASSERTIONS repo-rules=$REPO_RULES dependency-licenses=$DEPENDENCY_LICENSES private-data-scan=$PRIVATE_DATA_SCAN help-guide=$HELP_GUIDE feature-coverage=$FEATURE_COVERAGE generated-contract-drift=$GENERATED_CONTRACT_DRIFT arm64-build=$ARM64_BUILD arm64-images=$ARM64_IMAGES compose-smoke=$COMPOSE_SMOKE"
+          echo "detect-changes=$DETECT_CHANGES migration-order=$MIGRATION_ORDER typecheck-and-build=$TYPECHECK_AND_BUILD npx-smoke=$NPX_SMOKE package-checks=$PACKAGE_CHECKS screenshots=$SCREENSHOTS installer-shell=$INSTALLER_SHELL chart-checks=$CHART_CHECKS store-tests=$STORE_TESTS local-sandbox-contract=$LOCAL_SANDBOX_CONTRACT twilio-live=$TWILIO_LIVE root-script-tests=$ROOT_SCRIPT_TESTS new-assertions=$NEW_ASSERTIONS repo-rules=$REPO_RULES dependency-licenses=$DEPENDENCY_LICENSES private-data-scan=$PRIVATE_DATA_SCAN help-guide=$HELP_GUIDE feature-coverage=$FEATURE_COVERAGE generated-contract-drift=$GENERATED_CONTRACT_DRIFT arm64-build=$ARM64_BUILD arm64-images=$ARM64_IMAGES compose-smoke=$COMPOSE_SMOKE"
           [ "$DETECT_CHANGES" = success ] || exit 1
           [ "$MIGRATION_ORDER" = success ] || exit 1
           [ "$TYPECHECK_AND_BUILD" = success ] || exit 1
@@ -1156,6 +1201,7 @@ jobs:
           ok "$STORE_TESTS" || exit 1
           ok "$DEPENDENCY_LICENSES" || exit 1
           ok "$LOCAL_SANDBOX_CONTRACT" || exit 1
+          ok "$TWILIO_LIVE" || exit 1
           [ "$ROOT_SCRIPT_TESTS" = success ] || exit 1
           ok "$NEW_ASSERTIONS" || exit 1
           [ "$REPO_RULES" = success ] || exit 1
