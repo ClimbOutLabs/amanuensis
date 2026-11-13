@@ -12,7 +12,8 @@ How to get there: Click **More** in the left bar, then **Settings**, then **Reac
 
 - The **For you** bell. Everything Aman sends you waits under the bell labeled **For you**, at the top of the left panel. On a phone, tap the menu button to see it. A number on the bell shows how many you haven't seen. Each item says what it is, when it came and why you got it.
 - Notices on your devices. When you turn notices on for a device, it shows a notice even when Aman is closed. The notice says only that something is there. The details open in Aman.
-- Phone calls. Calls are not set up yet, so nothing calls you.
+- Texts. Once texts are set up and you turn them on, Aman can text your phone when something needs you. See [Text messages from Aman](text-messages.md).
+- Phone calls. Once texts are set up, you can also let Aman phone you when something urgent needs you. Calls are off until you turn them on. See [Phone calls from Aman](phone-calls.md).
 
 A reminder also shows up as a line in the chat where you set it.
 
@@ -37,13 +38,13 @@ The first time you turn it on, Aman starts from that moment, so old mail doesn't
 
 ## How loudly Aman tells you
 
-- A note is quiet. It waits under the bell. Most things are notes.
+- A note is quiet. It waits under the **For you** bell. Most things are notes.
 - A nudge is a notice on the devices where you turned notices on.
 - A call is a phone call, once the owner sets up Twilio, the voice parts are running and you switch calls on. Until then it comes as a nudge.
 
 A model suggests how loudly to tell you, and your settings decide. The model's words show only under the bell, never in a notice or a text on your phone. In Full mode, a text carries only a reminder's own words. Words in a message, such as "urgent", can never make it louder than a note. Aman sends at most 5 nudges a day unless you change that. Reminders you set never count toward that limit.
 
-To have an urgent reminder call you once calls are set up, tick **Call me for reminders I mark urgent**.
+To have an urgent reminder phone you, turn on calls, then tick **Call me for reminders I mark urgent**.
 
 ## Turn on notices for a device
 
@@ -107,4 +108,6 @@ When Aman leaves some mail unread for good, it tells you once for each stretch o
 
 - [Reminders](reminders.md): set a reminder.
 - [Phone and other devices](phone.md): open Aman on your phone.
+- [Text messages from Aman](text-messages.md): get texts when you are away.
+- [Phone calls from Aman](phone-calls.md): let Aman call you about urgent things.
 - [Your privacy](privacy.md): what Aman sends to a model when it notices something.
