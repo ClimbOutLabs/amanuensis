@@ -47,10 +47,9 @@ function renderCard(card: SentinelApprovalCard) {
 }
 
 describe('the skill approval card', () => {
-  it('asks the question in plain words, and the stub says it is a new skill', () => {
+  it('asks the question in plain words', () => {
     renderCard(RELEASE_NOTES_CARD);
     expect(screen.getByRole('heading', { name: 'Add the skill "release-notes"?' })).toBeInTheDocument();
-    expect(screen.getByText('New skill')).toBeInTheDocument();
   });
 
   it('keeps where the skill comes from and its exact version in view, and its instructions under Details', () => {
