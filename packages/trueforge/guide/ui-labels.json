@@ -115,7 +115,16 @@
   "Reach me": "packages/trueforge-ui/src/help/helpScreen.ts",
   "Open Reach me": "packages/trueforge-ui/src/deliveries/WatchMailNote.tsx",
   "Try it": "packages/trueforge-ui/src/deliveries/ReachPreferences.tsx",
+  "Phone calls": "packages/trueforge-ui/src/deliveries/ReachPreferences.tsx",
   "Call me for reminders I mark urgent": "packages/trueforge-ui/src/deliveries/ReachPreferences.tsx",
+  "Send code": "packages/trueforge-ui/src/deliveries/TextsSettings.tsx",
+  "Confirm": "packages/trueforge-ui/src/deliveries/TextsSettings.tsx",
+  "Change number": "packages/trueforge-ui/src/deliveries/TextsSettings.tsx",
+  "Remove number": "packages/trueforge-ui/src/deliveries/TextsSettings.tsx",
+  "Words Aman may text": "packages/trueforge-ui/src/deliveries/TextsSettings.tsx",
+  "Private (recommended)": "packages/trueforge-ui/src/deliveries/TextsSettings.tsx",
+  "Full": "packages/trueforge-ui/src/deliveries/TextsSettings.tsx",
+  "Send me texts": "packages/trueforge-ui/src/deliveries/TextsSettings.tsx",
   "Notes folder": "packages/trueforge-ui/src/containers/SettingsBuilder/NotesFolderSetupPanel.tsx",
   "Folder": "packages/trueforge-ui/src/containers/SettingsBuilder/NotesFolderSetupPanel.tsx",
   "Inbox file": "packages/trueforge-ui/src/containers/SettingsBuilder/NotesFolderSetupPanel.tsx",
@@ -331,5 +340,8 @@
   "Smaller": "packages/trueforge-ui/src/utils/chatFontSizePreference.ts",
   "Default": "packages/trueforge-ui/src/utils/chatFontSizePreference.ts",
   "Larger": "packages/trueforge-ui/src/utils/chatFontSizePreference.ts",
-  "Largest": "packages/trueforge-ui/src/utils/chatFontSizePreference.ts"
+  "Largest": "packages/trueforge-ui/src/utils/chatFontSizePreference.ts",
+  "Allow once": "packages/trueforge-ui/src/sentinel/approvalChoices.ts",
+  "Always allow for this skill": "packages/trueforge-ui/src/sentinel/approvalChoices.ts",
+  "Clear": "packages/trueforge-ui/src/containers/SettingsBuilder/SkillSettings.tsx"
 }

@@ -23,6 +23,20 @@
           }
         ]
       },
+      "AddTextWordRequest": {
+        "properties": {
+          "word": {
+            "description": "A name or word Aman may text, in letters only. A web ending or a number word is refused.",
+            "maxLength": 60,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "word"
+        ],
+        "type": "object"
+      },
       "Agent": {
         "additionalProperties": false,
         "properties": {
@@ -2064,6 +2078,20 @@
         ],
         "type": "object"
       },
+      "ConfirmTextCodeRequest": {
+        "properties": {
+          "code": {
+            "description": "The code that was texted.",
+            "maxLength": 12,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "type": "object"
+      },
       "ConfirmVerifyCommandProposalRequest": {
         "additionalProperties": false,
         "properties": {
@@ -2785,6 +2813,10 @@
         "properties": {},
         "type": "object"
       },
+      "DeleteSkillNetworkHostResponse": {
+        "properties": {},
+        "type": "object"
+      },
       "DeleteSkillResponse": {
         "properties": {},
         "type": "object"
@@ -2795,6 +2827,10 @@
       },
       "DeleteSpaceResponse": {
         "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
+      "DeleteTextNumberResponse": {
         "properties": {},
         "type": "object"
       },
@@ -2903,7 +2939,9 @@
       "DeliveryChannel": {
         "enum": [
           "in_app",
-          "web_push"
+          "web_push",
+          "sms",
+          "call"
         ],
         "type": "string"
       },
@@ -4039,6 +4077,17 @@
         "properties": {
           "data": {
             "$ref": "#/components/schemas/Space"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "GetTextStatusResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/TextStatus"
           }
         },
         "required": [
@@ -9381,11 +9430,19 @@
           "note": {
             "description": "A plain-words line about the channel, shown beside its switch.",
             "type": "string"
+          },
+          "problem": {
+            "description": "Set when the channel works but has a problem to fix, in plain words with what to do. Null otherwise.",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
           "available",
-          "note"
+          "note",
+          "problem"
         ],
         "type": "object"
       },
@@ -10877,6 +10934,20 @@
         ],
         "type": "object"
       },
+      "SendTextCodeRequest": {
+        "properties": {
+          "phone": {
+            "description": "The number to send a code to, with the country code, such as +15550100.",
+            "maxLength": 40,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "phone"
+        ],
+        "type": "object"
+      },
       "SentinelAuditRecord": {
         "properties": {
           "auto_deny_reason": {
@@ -11923,6 +11994,15 @@
       "SkillNetworkApproval": {
         "additionalProperties": false,
         "properties": {
+          "allowed_hosts": {
+            "items": {
+              "description": "One exact site name the skill needs to reach.",
+              "maxLength": 253,
+              "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$",
+              "type": "string"
+            },
+            "type": "array"
+          },
           "approved_hosts": {
             "items": {
               "description": "One exact site name the skill needs to reach.",
@@ -11946,14 +12026,35 @@
             "maxItems": 20,
             "type": "array"
           },
+          "denied_hosts": {
+            "items": {
+              "description": "One exact site name the skill needs to reach.",
+              "maxLength": 253,
+              "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$",
+              "type": "string"
+            },
+            "type": "array"
+          },
           "send_capable": {
             "description": "True when a declared site can send mail or change a calendar.",
             "type": "boolean"
+          },
+          "session_hosts": {
+            "items": {
+              "description": "One exact site name the skill needs to reach.",
+              "maxLength": 253,
+              "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$",
+              "type": "string"
+            },
+            "type": "array"
           }
         },
         "required": [
           "declared_hosts",
           "approved_hosts",
+          "allowed_hosts",
+          "denied_hosts",
+          "session_hosts",
           "send_capable"
         ],
         "type": "object"
@@ -12409,6 +12510,69 @@
         ],
         "type": "object"
       },
+      "TextMode": {
+        "description": "Private texts say only the kind of thing. Full texts carry a reminder’s own words.",
+        "enum": [
+          "private",
+          "full"
+        ],
+        "type": "string"
+      },
+      "TextStatus": {
+        "properties": {
+          "code_pending": {
+            "description": "Whether a code was sent and can still be entered.",
+            "type": "boolean"
+          },
+          "confirmed": {
+            "description": "Whether the person proved the number with a code. Nothing is sent before then.",
+            "type": "boolean"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/TextMode"
+          },
+          "opted_out": {
+            "description": "Whether the person replied STOP. They confirm the number again to use texts.",
+            "type": "boolean"
+          },
+          "pending_phone": {
+            "description": "A new number waiting for its code. Texts keep going to the confirmed number until then.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "phone": {
+            "description": "The number the person entered, or null before one is entered.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "private_preview": {
+            "description": "What a Private text says, word for word, for a reminder.",
+            "type": "string"
+          },
+          "words": {
+            "description": "The words the person lets Aman text besides the common words, such as a name.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "phone",
+          "confirmed",
+          "mode",
+          "opted_out",
+          "pending_phone",
+          "code_pending",
+          "private_preview",
+          "words"
+        ],
+        "type": "object"
+      },
       "ThreadCreatedEvent": {
         "properties": {
           "agent_info": {
@@ -12777,6 +12941,42 @@
           "skill": {
             "$ref": "#/components/schemas/Tier3Skill"
           },
+          "skill_network": {
+            "description": "For a skill network card: the skill, the sites it asks for, and why. Otherwise null.",
+            "properties": {
+              "code_pin": {
+                "description": "The code version the approval is pinned to, or null when no pin is in force.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "hosts": {
+                "description": "The sites the skill asks to reach.",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "reason": {
+                "$ref": "#/components/schemas/Tier3SkillNetworkReason"
+              },
+              "skill_name": {
+                "description": "Name of the skill asking for network access.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "skill_name",
+              "hosts",
+              "reason",
+              "code_pin"
+            ],
+            "type": [
+              "object",
+              "null"
+            ]
+          },
           "why_asked_again": {
             "description": "Actual cause of re-escalation, or null on first ask.",
             "type": [
@@ -13131,6 +13331,14 @@
           "object",
           "null"
         ]
+      },
+      "Tier3SkillNetworkReason": {
+        "description": "Why the card is asked: the skill’s first use, or a site it did not declare.",
+        "enum": [
+          "first_use",
+          "undeclared_host"
+        ],
+        "type": "string"
       },
       "Timezone": {
         "default": "UTC",
@@ -15467,6 +15675,32 @@
         ],
         "type": "object"
       },
+      "UpdateSkillNetworkHostRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "host": {
+            "description": "One exact site name the skill needs to reach.",
+            "maxLength": 253,
+            "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "host"
+        ],
+        "type": "object"
+      },
+      "UpdateSkillNetworkHostResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/SkillNetworkApproval"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "UpdateSkillRequest": {
         "additionalProperties": false,
         "properties": {
@@ -15527,6 +15761,17 @@
         },
         "required": [
           "data"
+        ],
+        "type": "object"
+      },
+      "UpdateTextModeRequest": {
+        "properties": {
+          "mode": {
+            "$ref": "#/components/schemas/TextMode"
+          }
+        },
+        "required": [
+          "mode"
         ],
         "type": "object"
       },
@@ -25683,6 +25928,290 @@
         "x-fern-sdk-method-name": "create_or_update_network_approval"
       }
     },
+    "/api/v1/settings/skills/{name}/network-approval/allowed-host": {
+      "delete": {
+        "description": "Clears the one-site allowance. The skill cannot reach the site from the next run on.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ResourceName"
+            }
+          },
+          {
+            "description": "One exact site name the skill needs to reach.",
+            "in": "query",
+            "name": "host",
+            "required": true,
+            "schema": {
+              "description": "One exact site name the skill needs to reach.",
+              "maxLength": 253,
+              "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteSkillNetworkHostResponse"
+                }
+              }
+            },
+            "description": "Allowance removed."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "No skill with this name"
+          },
+          "424": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Unsupported because skills are managed by an external system."
+          }
+        },
+        "summary": "Remove one allowed site for a skill",
+        "tags": [
+          "Skills"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "skills"
+        ],
+        "x-fern-sdk-method-name": "delete_network_allowed_host"
+      },
+      "put": {
+        "description": "Allows one site for the skill on its own, apart from the declared list approval.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ResourceName"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSkillNetworkHostRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateSkillNetworkHostResponse"
+                }
+              }
+            },
+            "description": "The stored approval state."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request body."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "No skill with this name"
+          },
+          "424": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Unsupported because skills are managed by an external system."
+          }
+        },
+        "summary": "Allow one site for a skill",
+        "tags": [
+          "Skills"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "skills"
+        ],
+        "x-fern-sdk-method-name": "create_or_update_network_allowed_host"
+      }
+    },
+    "/api/v1/settings/skills/{name}/network-approval/denied-host": {
+      "delete": {
+        "description": "Clears the site being turned down, so a card can ask about it again.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ResourceName"
+            }
+          },
+          {
+            "description": "One exact site name the skill needs to reach.",
+            "in": "query",
+            "name": "host",
+            "required": true,
+            "schema": {
+              "description": "One exact site name the skill needs to reach.",
+              "maxLength": 253,
+              "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteSkillNetworkHostResponse"
+                }
+              }
+            },
+            "description": "Decision cleared."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "No skill with this name"
+          },
+          "424": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Unsupported because skills are managed by an external system."
+          }
+        },
+        "summary": "Clear one turned-down site for a skill",
+        "tags": [
+          "Skills"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "skills"
+        ],
+        "x-fern-sdk-method-name": "delete_network_denied_host"
+      },
+      "put": {
+        "description": "Stores the site as turned down for the skill, so it is not granted and raises no card.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ResourceName"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSkillNetworkHostRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateSkillNetworkHostResponse"
+                }
+              }
+            },
+            "description": "The stored approval state."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request body."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "No skill with this name"
+          },
+          "424": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Unsupported because skills are managed by an external system."
+          }
+        },
+        "summary": "Turn down one site for a skill",
+        "tags": [
+          "Skills"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "skills"
+        ],
+        "x-fern-sdk-method-name": "create_or_update_network_denied_host"
+      }
+    },
     "/api/v1/settings/token-factory-usage": {
       "get": {
         "description": "Tokens and cost per model counted today (UTC), and the daily cap with what is left under it. Counts come from the usage the provider reported.",
@@ -27644,7 +28173,7 @@
     },
     "/api/v1/user/reach/test": {
       "post": {
-        "description": "Sends the signed-in person a test item on one channel. A channel that is not set up answers 409.",
+        "description": "Sends the signed-in person a test item on one channel. A channel that is not set up answers 409. Test texts and test calls are limited, and a test past the limit answers 429.",
         "requestBody": {
           "content": {
             "application/json": {
@@ -27694,7 +28223,27 @@
                 }
               }
             },
-            "description": "That channel is not set up yet."
+            "description": "That channel is not set up yet, or the number is not confirmed."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Too many test texts or test calls for now, or a day’s limit on texts is reached. The message says how long to wait."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The test text could not be sent, or the test call could not be started."
           }
         },
         "summary": "Try a channel",
@@ -27705,6 +28254,398 @@
           "reach"
         ],
         "x-fern-sdk-method-name": "test_channel"
+      }
+    },
+    "/api/v1/user/reach/texts": {
+      "delete": {
+        "description": "Forgets the number and switches texts off.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteTextNumberResponse"
+                }
+              }
+            },
+            "description": "The number is gone."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          }
+        },
+        "summary": "Remove the number",
+        "tags": [
+          "Deliveries"
+        ],
+        "x-fern-sdk-group-name": [
+          "reach",
+          "texts"
+        ],
+        "x-fern-sdk-method-name": "delete"
+      },
+      "get": {
+        "description": "Reads the signed-in person’s number for texts and whether it is confirmed.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetTextStatusResponse"
+                }
+              }
+            },
+            "description": "The status."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          }
+        },
+        "summary": "Get text number status",
+        "tags": [
+          "Deliveries"
+        ],
+        "x-fern-sdk-group-name": [
+          "reach",
+          "texts"
+        ],
+        "x-fern-sdk-method-name": "get"
+      },
+      "put": {
+        "description": "Chooses Private (only the kind of thing) or Full (a reminder’s own words).",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateTextModeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetTextStatusResponse"
+                }
+              }
+            },
+            "description": "The saved choice."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Texts are not set up on this server, or there is no number yet."
+          }
+        },
+        "summary": "Choose what texts say",
+        "tags": [
+          "Deliveries"
+        ],
+        "x-fern-sdk-group-name": [
+          "reach",
+          "texts"
+        ],
+        "x-fern-sdk-method-name": "update"
+      }
+    },
+    "/api/v1/user/reach/texts/code": {
+      "post": {
+        "description": "Texts a one-time code to a number. Nothing else is sent to a number until it is confirmed.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SendTextCodeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetTextStatusResponse"
+                }
+              }
+            },
+            "description": "The code was sent."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Texts are not set up on this server, or there is no number yet."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Too many codes were sent. Try again later."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The code could not be sent."
+          }
+        },
+        "summary": "Send a confirmation code",
+        "tags": [
+          "Deliveries"
+        ],
+        "x-fern-sdk-group-name": [
+          "reach",
+          "texts"
+        ],
+        "x-fern-sdk-method-name": "send_code"
+      }
+    },
+    "/api/v1/user/reach/texts/confirm": {
+      "post": {
+        "description": "Checks the one-time code. A right code confirms the number. Too many wrong tries void the code.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmTextCodeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetTextStatusResponse"
+                }
+              }
+            },
+            "description": "The number is confirmed."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          }
+        },
+        "summary": "Confirm a number",
+        "tags": [
+          "Deliveries"
+        ],
+        "x-fern-sdk-group-name": [
+          "reach",
+          "texts"
+        ],
+        "x-fern-sdk-method-name": "confirm"
+      }
+    },
+    "/api/v1/user/reach/texts/words": {
+      "post": {
+        "description": "Lets a Full text carry a name or word that is not a common word. Letters only. A web ending or a number word is refused.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddTextWordRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetTextStatusResponse"
+                }
+              }
+            },
+            "description": "The word is added."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The person has as many words as are allowed."
+          }
+        },
+        "summary": "Add a word Aman may text",
+        "tags": [
+          "Deliveries"
+        ],
+        "x-fern-sdk-group-name": [
+          "reach",
+          "texts"
+        ],
+        "x-fern-sdk-method-name": "add_word"
+      }
+    },
+    "/api/v1/user/reach/texts/words/{word}": {
+      "delete": {
+        "description": "Takes a word off the person’s list. A word that is not on it changes nothing.",
+        "parameters": [
+          {
+            "description": "The word to remove.",
+            "in": "path",
+            "name": "word",
+            "required": true,
+            "schema": {
+              "description": "The word to remove.",
+              "maxLength": 60,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetTextStatusResponse"
+                }
+              }
+            },
+            "description": "The status without the word."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          }
+        },
+        "summary": "Remove a word Aman may text",
+        "tags": [
+          "Deliveries"
+        ],
+        "x-fern-sdk-group-name": [
+          "reach",
+          "texts"
+        ],
+        "x-fern-sdk-method-name": "remove_word"
       }
     },
     "/api/v1/user/reminders": {

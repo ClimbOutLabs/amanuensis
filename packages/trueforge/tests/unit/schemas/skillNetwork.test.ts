@@ -1,5 +1,10 @@
 import type { ApiServiceDeclaration } from '@truefoundry/trueforge-core/core/connectors/apiServices';
-import { SkillManifestSchema, effectiveSkillNetworkHosts, skillNetworkHostsCanSend } from '../../../src/schemas/skill';
+import {
+  SkillManifestSchema,
+  effectiveSkillNetworkHosts,
+  isSkillNetworkHostName,
+  skillNetworkHostsCanSend,
+} from '../../../src/schemas/skill';
 
 const GIT_SKILL = {
   type: 'git' as const,
@@ -58,26 +63,82 @@ describe('the skill manifest network_hosts declaration', () => {
 
 describe('effectiveSkillNetworkHosts', () => {
   it('grants the declared list when the person approved exactly it', () => {
-    expect(effectiveSkillNetworkHosts({ declared: TEN_X_HOSTS, approved: TEN_X_HOSTS })).toEqual(TEN_X_HOSTS);
+    expect(effectiveSkillNetworkHosts({ declared: TEN_X_HOSTS, approved: TEN_X_HOSTS, denied: [] })).toEqual(
+      TEN_X_HOSTS,
+    );
   });
 
   it('grants nothing when there is no approval', () => {
-    expect(effectiveSkillNetworkHosts({ declared: TEN_X_HOSTS, approved: null })).toBeNull();
+    expect(effectiveSkillNetworkHosts({ declared: TEN_X_HOSTS, approved: null, denied: [] })).toBeNull();
   });
 
   it('shrinks on its own when a host is removed from the declaration', () => {
-    expect(effectiveSkillNetworkHosts({ declared: ['github.com'], approved: TEN_X_HOSTS })).toEqual(['github.com']);
+    expect(effectiveSkillNetworkHosts({ declared: ['github.com'], approved: TEN_X_HOSTS, denied: [] })).toEqual([
+      'github.com',
+    ]);
   });
 
   it('grants nothing when a host was added after the approval: the new full list needs its own approval', () => {
     expect(
-      effectiveSkillNetworkHosts({ declared: [...TEN_X_HOSTS, 'uploads.github.com'], approved: TEN_X_HOSTS }),
+      effectiveSkillNetworkHosts({
+        declared: [...TEN_X_HOSTS, 'uploads.github.com'],
+        approved: TEN_X_HOSTS,
+        denied: [],
+      }),
     ).toBeNull();
   });
 
   it('grants nothing for a skill that declares no hosts, approved or not', () => {
-    expect(effectiveSkillNetworkHosts({ declared: undefined, approved: TEN_X_HOSTS })).toBeNull();
-    expect(effectiveSkillNetworkHosts({ declared: [], approved: [] })).toBeNull();
+    expect(effectiveSkillNetworkHosts({ declared: undefined, approved: TEN_X_HOSTS, denied: [] })).toBeNull();
+    expect(effectiveSkillNetworkHosts({ declared: [], approved: [], denied: [] })).toBeNull();
+  });
+
+  it('stays in force for the approved sites when another declared site was turned down', () => {
+    expect(
+      effectiveSkillNetworkHosts({ declared: TEN_X_HOSTS, approved: ['github.com'], denied: ['api.github.com'] }),
+    ).toEqual(['github.com']);
+  });
+
+  it('still grants nothing when a site that was not turned down is missing from the approval', () => {
+    expect(effectiveSkillNetworkHosts({ declared: TEN_X_HOSTS, approved: [], denied: ['api.github.com'] })).toBeNull();
+  });
+
+  it('a newly declared site that was not turned down still needs its own approval', () => {
+    expect(
+      effectiveSkillNetworkHosts({
+        declared: [...TEN_X_HOSTS, 'uploads.github.com'],
+        approved: ['github.com'],
+        denied: ['api.github.com'],
+      }),
+    ).toBeNull();
+  });
+
+  it('grants nothing when every declared site was turned down', () => {
+    expect(
+      effectiveSkillNetworkHosts({ declared: TEN_X_HOSTS, approved: TEN_X_HOSTS, denied: TEN_X_HOSTS }),
+    ).toBeNull();
+  });
+});
+
+describe('isSkillNetworkHostName', () => {
+  it('accepts the exact site names a skill may declare', () => {
+    expect(isSkillNetworkHostName('github.com')).toBe(true);
+    expect(isSkillNetworkHostName('gmail.googleapis.com')).toBe(true);
+    expect(isSkillNetworkHostName('xn--mnchen-3ya.de')).toBe(true);
+  });
+
+  it.each([
+    ['a loopback address', '127.0.0.1'],
+    ['a private network address', '10.0.0.5'],
+    ['a link-local address', '169.254.169.254'],
+    ['an IPv6 address', '::1'],
+    ['a bracketed IPv6 address', '[::1]'],
+    ['a single label', 'localhost'],
+    ['a trailing dot', 'github.com.'],
+    ['credentials in front', 'user@github.com'],
+    ['uppercase', 'GitHub.com'],
+  ])('refuses %s', (_label, host) => {
+    expect(isSkillNetworkHostName(host)).toBe(false);
   });
 });
 

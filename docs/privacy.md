@@ -55,6 +55,31 @@ For a short overview, see [Your privacy](../packages/trueforge/guide/topics/priv
     - It also sees this computer's internet address.
     - It sees the project's public page as the sender's contact.
 
+??? note "To Twilio and the phone company, only if you set up texts and switch them on"
+
+    Twilio and the phone company get your phone number and each text.
+
+    - In Private mode, the default, a text holds only the assistant's name and the kind of thing, such as "a reminder is due". It has no names, amounts or message content.
+    - In Full mode, a reminder's text holds the reminder, but only when every word is one Aman knows.
+    - Anything your assistant noticed gets the Private words, never the model's own words.
+    - The confirmation code is texted once, to prove the number is yours.
+    - Aman never writes the number, the text or Twilio's auth token to its logs.
+
+    See [Text messages](/text-messages).
+
+??? note "To Twilio and the phone company, only if you set up calls and switch them on"
+
+    Twilio and the phone company get your phone number and the sound of each call.
+
+    - The assistant's voice and the transcript are made on your computer. No speech service on the internet is used.
+    - A call says only who is calling, who it is for and the kind of thing until you give a short yes. A voicemail says only that something needs you.
+    - After your yes, the assistant on the call knows only the thing it called about. It cannot see your mail, calendar, memories or files, and it cannot change anything. What it is sent is that one thing and what was said on the call.
+    - Aman keeps no recording, and never writes your number or what was said to its logs.
+    - What was said is written only in the call's chat, as a quoted record of the call, never as your own request.
+    - Whoever says yes hears the message, because the phone cannot tell if it is you. If a kind of thing is too private for that, untick it under "What may call you".
+
+    See [Phone calls](/phone-calls).
+
 ??? note "To a connector's service"
 
     Whatever a connector call sends, such as an email you approved. Calls that send or change something show a card first. See [Safety rules in detail](safety.md).
