@@ -37,21 +37,21 @@ export function errorTextForCode(input: { error_code: RunCodeErrorCode; detail: 
       return (
         `The code exceeded its time limit and was stopped${detail}. ` +
         `If run_code fails, do NOT fall back to exec (or any shell tool) to run the code — ` +
-        `interpreter invocations in exec are rejected by a harness guard. ` +
+        `inline code in exec is rejected by a harness guard. ` +
         `Make the code faster, split the work, or report the failure.`
       );
     case 'memory_exceeded':
       return (
         `The code exceeded its memory limit and was stopped${detail}. ` +
         `If run_code fails, do NOT fall back to exec (or any shell tool) to run the code — ` +
-        `interpreter invocations in exec are rejected by a harness guard. ` +
+        `inline code in exec is rejected by a harness guard. ` +
         `Reduce the data held in memory, process in chunks, or report the failure.`
       );
     case 'disk_exceeded':
       return (
         `The code exceeded its disk quota and was stopped${detail}. ` +
         `If run_code fails, do NOT fall back to exec (or any shell tool) to run the code — ` +
-        `interpreter invocations in exec are rejected by a harness guard. ` +
+        `inline code in exec is rejected by a harness guard. ` +
         `Write less data to /scratch and /egress, or report the failure.`
       );
     case 'output_exceeded':
