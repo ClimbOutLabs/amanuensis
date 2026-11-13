@@ -223,9 +223,12 @@ describe('classifyUnstampedToolCall on a connector call', () => {
 
   async function dispatchAgainst(moved: boolean): Promise<string | undefined> {
     const sentinel = makeSentinel();
+    // The call carries nothing: an unknown tool carrying an id and no destination is refused
+    // under the unverifiable-destination rule, so the connector binding is exercised with a
+    // call that still gets the fail-closed card.
     const stamped = await classifyUnstampedToolCall({
       sentinel,
-      canonical_params: { id: '1' },
+      canonical_params: {},
       info,
       connector,
     });
@@ -234,7 +237,7 @@ describe('classifyUnstampedToolCall on a connector call', () => {
       call: {
         tool_name: 'frobnicate',
         tool_type: 'mcp',
-        canonical_params: { id: '1' },
+        canonical_params: {},
         tier: 3,
         approval_token_id: stamped.approval_token_id ?? null,
         approval_binding: null,
