@@ -60,7 +60,7 @@ const PANELS: readonly PanelCheck[] = [
   },
   {
     surface: 'settings:themes',
-    tab: 'Themes',
+    tab: 'Appearance',
     check: async ({ page, panel }) => {
       const dark = panel.getByRole('button', { name: 'Dark', exact: true });
       await shows(dark);
