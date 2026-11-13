@@ -7387,7 +7387,7 @@ await client.reach.listSuggestions();
 <dl>
 <dd>
 
-Sends the signed-in person a test item on one channel. A channel that is not set up answers 409. Test texts are limited to a few an hour.
+Sends the signed-in person a test item on one channel. A channel that is not set up answers 409. Test texts and test calls are limited, and a test past the limit answers 429.
 </dd>
 </dl>
 </dd>

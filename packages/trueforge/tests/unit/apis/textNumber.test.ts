@@ -26,6 +26,7 @@ async function build({
   const h = await textsHarness({ provider, ...(maxTextsPerDay === undefined ? {} : { maxTextsPerDay }) });
   const channels = reachChannelsFor({
     twilio: provider ? { accountSid: 'AC' } : undefined,
+    voice: 'ready',
     numberProblem: undefined,
     viewer: 'person',
   });

@@ -57,6 +57,7 @@ export function deliveryDeps(
       logger: winston.createLogger({ silent: true }),
       codeKey: 'test-code-key',
     }),
+    phoneCalls: { place: () => Promise.reject(new Error('No calls in this test.')) },
     webPushPublicKey: undefined,
   };
 }

@@ -22,6 +22,9 @@ export const MAX_TEXTS_PER_PERSON_PER_DAY = 30;
 export const MAX_TEXTS_PER_NUMBER_PER_DAY = 30;
 /** Test texts an hour from the Try it button. */
 export const MAX_TEST_TEXTS_PER_HOUR = 3;
+/** Each Try it call is paid and rings a real phone, so the button waits between calls and stops for the day. */
+const TEST_CALL_GAP_MS = 2 * 60_000;
+export const MAX_TEST_CALLS_PER_DAY = 5;
 
 /** What the delivery limits need from the server: the secret that keys number counts, and the server's day cap. */
 export interface DeliveryLimitSettings {
@@ -46,7 +49,7 @@ type LimitResult = { ok: true } | LimitRefusal;
 
 /** Each family of limits, codes, delivery texts and tests, keeps its keys under its own prefix. */
 type LimitFamily = 'code' | 'text' | 'test';
-type LimitWindow = 'hour' | 'day';
+type LimitWindow = 'hour' | 'day' | 'call-gap' | 'call-day';
 
 function personKey({
   family,
@@ -188,6 +191,18 @@ export function testTextLimit(owner: PersonOwner): TextSendLimit {
     key: personKey({ family: 'test', window: 'hour', owner }),
     window_ms: HOUR_MS,
     max: MAX_TEST_TEXTS_PER_HOUR,
+  };
+}
+
+/** The two limits one Try it call counts against: the wait between calls and the day's calls. */
+export function testCallLimits(owner: PersonOwner): { gap: TextSendLimit; day: TextSendLimit } {
+  return {
+    gap: { key: personKey({ family: 'test', window: 'call-gap', owner }), window_ms: TEST_CALL_GAP_MS, max: 1 },
+    day: {
+      key: personKey({ family: 'test', window: 'call-day', owner }),
+      window_ms: DAY_MS,
+      max: MAX_TEST_CALLS_PER_DAY,
+    },
   };
 }
 

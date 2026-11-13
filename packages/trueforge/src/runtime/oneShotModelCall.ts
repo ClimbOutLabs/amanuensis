@@ -30,6 +30,7 @@ export async function askModelOnce({
   messages,
   maxTokens,
   timeoutMs,
+  signal,
 }: {
   tenantId: string;
   modelName: string;
@@ -41,6 +42,8 @@ export async function askModelOnce({
   messages: LLMCreateParams['messages'];
   maxTokens: number;
   timeoutMs: number;
+  /** Stops the call early, such as when the person spoke again. */
+  signal?: AbortSignal;
 }): Promise<string> {
   const { providerConfig, modelProperties, streamTimeout } = await getModelDetails({
     tenant_id: tenantId,
@@ -52,7 +55,15 @@ export async function askModelOnce({
     Object.assign(request, { enable_thinking: false, reasoning_effort: 'none' });
   }
   const llm = meterHelperLlm({
-    llm: new VercelAILLM({ providerConfig, logger, signal: AbortSignal.timeout(timeoutMs), streamTimeout }),
+    llm: new VercelAILLM({
+      providerConfig,
+      logger,
+      signal:
+        signal === undefined
+          ? AbortSignal.timeout(timeoutMs)
+          : AbortSignal.any([AbortSignal.timeout(timeoutMs), signal]),
+      streamTimeout,
+    }),
     identity: modelIdentity({ name: modelName, providerConfig }),
     role,
     budget: tokenFactoryBudget,

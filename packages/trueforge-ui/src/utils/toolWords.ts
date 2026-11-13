@@ -130,6 +130,7 @@ const TOOL_WORDS: ReadonlyMap<string, ToolWords> = new Map([
     ['delivery.web_push'],
   ),
   ...words({ doing: 'Sending you a text', done: 'Sent you a text', thing: 'A text for you' }, ['delivery.sms']),
+  ...words({ doing: 'Calling you', done: 'Called you', thing: 'A phone call to you' }, ['delivery.call']),
   ...words({ doing: 'Turning texts off', done: 'Turned texts off after a STOP', thing: 'A STOP reply' }, [
     'delivery.sms_stop',
   ]),

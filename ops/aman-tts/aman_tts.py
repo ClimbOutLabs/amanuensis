@@ -7,7 +7,7 @@ loads.
 
 HTTP contract:
   GET  /healthz   -> {"status": "ok", "model_loaded": bool, "model_error": str | None,
-                      "voices": [str], "default_voice": str}
+                      "voices": [str], "default_voice": str, "exact": true}
   POST /v1/speak  -> audio/wav (24 kHz mono 16-bit PCM) by default
 
 The speak body is JSON `{"text": str, "voice": str | null, "format": str | null,
@@ -296,6 +296,8 @@ def create_app(
             "model_error": state.model_error,
             "voices": list(synthesizer.voices) if synthesizer else [],
             "default_voice": settings.default_voice,
+            # Callers that must speak a text only as written check this before relying on `exact`.
+            "exact": True,
         }
 
     @app.post("/v1/speak")
