@@ -171,7 +171,12 @@ import { convertOpenAIPatchToGitDiff, detectApplyPatchFormat } from './openaiPat
 import { matchReplaceText } from './replaceTextDiagnostics';
 import type { ISkillMounter } from './skills/ISkillMounter';
 import { detectSkillUsedEvents } from './skills/skillEvents';
-import { skillScriptRun, type SkillScriptRun } from './skills/skillScript';
+import {
+  skillScriptRealPathOperands,
+  skillScriptRun,
+  skillScriptStaysInFolder,
+  type SkillScriptRun,
+} from './skills/skillScript';
 import {
   extractStructuredEditPaths,
   repositoryRelativeStructuredEditPath,
@@ -5773,7 +5778,7 @@ export class Sandbox extends LocalToolMCP {
       command: resolvedInput.command,
       purpose: resolvedInput.purpose,
       cwd: resolvedInput.cwd,
-      env: resolvedInput.env,
+      env: input.env,
       output: resolvedInput.output,
       webConnectorAttached: this.webConnectorAttached,
       webConnectorToolHint: this.webConnectorToolHint,
@@ -5813,23 +5818,6 @@ export class Sandbox extends LocalToolMCP {
         return hostRefusalResponse(allowanceRefusal);
       }
     }
-    return await this.runExecInSandbox({ resolvedInput, effect, context, planScope, approvedRemotes });
-  }
-
-  /** Runs a command that has passed its checks and approval, retrying once in a new sandbox when that is safe. */
-  private async runExecInSandbox({
-    resolvedInput,
-    effect,
-    context,
-    planScope,
-    approvedRemotes,
-  }: {
-    resolvedInput: SandboxRuntimeExecInput;
-    effect: SandboxCommandEffect;
-    context: ToolInvocationContext | undefined;
-    planScope: ImplementationPlanGrantScope | undefined;
-    approvedRemotes: ToolInvocationContext['git_remote_precondition'];
-  }): Promise<CallToolResponse> {
     let sandboxInfo: SandboxInfo;
     let sandboxCreated: SandboxInfo | undefined;
     try {
@@ -5855,7 +5843,7 @@ export class Sandbox extends LocalToolMCP {
     });
     const codeModeEnv = await this.ensureCodeModeStarted(rawId);
     const mcpClientEnv = injectMCPClientEnv({
-      env: resolvedInput.env,
+      env: input.env,
       mcpServers: this.buildMcpServersEnvelope(),
       codeModeEnv,
       mcpClientInstall: this.mcpClientInstall,
@@ -5919,7 +5907,7 @@ export class Sandbox extends LocalToolMCP {
         this.prepareAllowlistedExec({ sandboxId: recreatedRawId, exec: resolvedInput });
       const retryEnv = {
         ...injectMCPClientEnv({
-          env: resolvedInput.env,
+          env: input.env,
           mcpServers: this.buildMcpServersEnvelope(),
           codeModeEnv: retryCodeModeEnv,
           mcpClientInstall: this.mcpClientInstall,
@@ -5997,9 +5985,9 @@ export class Sandbox extends LocalToolMCP {
   }
 
   /**
-   * Runs a script that ships with a skill turned on in this chat. The host builds the command from the skill,
-   * the script's path and its arguments, so no shell text from the model runs, and the shell tool's own
-   * limits on starting Python or Node stay as they are.
+   * Runs a script that ships with a skill turned on in this chat. The host picks the program and passes the
+   * script and its arguments as separate arguments with no shell, and the shell tool's own limits on starting
+   * Python or Node stay as they are.
    */
   private async handleRunSkillScript(
     input: SandboxRunSkillScriptInput,
@@ -6020,13 +6008,66 @@ export class Sandbox extends LocalToolMCP {
         return { approvalRequired: { tool_info } };
       }
     }
-    return await this.runExecInSandbox({
-      resolvedInput: { intent: input.intent, purpose: 'execute', command: run.command, cwd: run.skill_folder },
-      effect: 'execute',
-      context,
-      planScope: undefined,
-      approvedRemotes: undefined,
+    let sandboxInfo: SandboxInfo;
+    let sandboxCreated: SandboxInfo | undefined;
+    try {
+      ({ sandboxInfo, sandboxCreated } = await this.ensureReadySandbox());
+    } catch (e) {
+      this.logger.error('Sandbox initialization failed', extractErrorLogFields(e));
+      return hostRefusalResponse(SANDBOX_START_FAILED_MESSAGE);
+    }
+    const rawId = this.providerSandboxId(sandboxInfo.sandbox_id);
+    const skillsDir = this.provider.getSkillsDir(rawId);
+    // Checked where it runs, through any links, since the server cannot see the sandbox's files.
+    const located = await this.hostExec({
+      sandboxId: rawId,
+      // A host-built check on the trusted PATH, so a program planted in the workspace cannot answer for realpath.
+      command: ['realpath', '-e', '--', ...skillScriptRealPathOperands({ skillsDir, run })].map(shellEscape).join(' '),
+      signal: context?.signal,
     });
+    if (
+      !located.success ||
+      located.response.exitCode !== 0 ||
+      !skillScriptStaysInFolder({ skillsDir, skill: input.skill, resolved: located.response.result })
+    ) {
+      return hostRefusalResponse(
+        `The script ${input.script} is not a file inside the ${input.skill} skill's folder, so it did not run. Check the script's path in the skill's instructions.`,
+      );
+    }
+    const skillNetworkGrant = await this.resolveSkillNetworkGrant();
+    const execInput: SandboxRuntimeExecInput = {
+      intent: input.intent,
+      purpose: 'execute',
+      command: run.command,
+      cwd: run.skill_folder,
+    };
+    const result = await this.provider.exec({
+      sandboxId: rawId,
+      command: run.command,
+      argv: run.argv,
+      cwd: run.skill_folder,
+      signal: context?.signal,
+      ...(skillNetworkGrant === undefined
+        ? {}
+        : { skillNetworkToken: skillNetworkGrant.token, skillNetworkHosts: skillNetworkGrant.hosts }),
+    });
+    const skillUsedEvents = detectSkillUsedEvents({
+      command: run.command,
+      cwd: run.skill_folder,
+      skillsDir,
+      skillNames: this.skillMounter?.skillNames() ?? [],
+    });
+    return {
+      result: {
+        content: [{ type: 'text', text: this.execResultText(await this.decorateExecResult(result, rawId, execInput)) }],
+        isError: !isExecResultOk(result),
+      },
+      wasInitialized: undefined,
+      sandboxCreated: Boolean(sandboxCreated),
+      sandboxInfo,
+      verificationReceiptCandidate: undefined,
+      events: skillUsedEvents.length > 0 ? skillUsedEvents : undefined,
+    };
   }
 
   /**

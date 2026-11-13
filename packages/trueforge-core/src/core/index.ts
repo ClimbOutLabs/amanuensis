@@ -359,6 +359,7 @@ export {
   ensureExecSuccess,
   executeVerifiedWorkspaceCommit,
   shellEscape,
+  withArgvAsCommandLine,
   withTrustedPath,
   workspaceTerminationCommand,
 } from './sandbox/provider/Provider';
