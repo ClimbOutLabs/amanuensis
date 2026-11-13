@@ -10,7 +10,7 @@ How to get there: Click **More** in the left bar, then **Settings**, then **Reac
 
 ## Where Aman's messages go
 
-- The bell at the top. Everything Aman sends you waits under the bell at the top of the left panel. On a phone, tap the menu button to see it. A number on the bell shows how many you haven't seen. Each item says what it is, when it came and why you got it.
+- The **For you** bell. Everything Aman sends you waits under the bell labeled **For you**, at the top of the left panel. On a phone, tap the menu button to see it. A number on the bell shows how many you haven't seen. Each item says what it is, when it came and why you got it.
 - Notices on your devices. When you turn notices on for a device, it shows a notice even when Aman is closed. The notice says only that something is there. The details open in Aman.
 - Phone calls. Calls are not set up yet, so nothing calls you.
 
@@ -70,8 +70,16 @@ To stop notices on a device, open the same page on that device and click **Turn 
 
 ## Read what Aman sent
 
-1. Click the bell at the top of the left panel. On a phone, tap the menu button first.
-2. Click an item to open it. If it belongs to a chat, Aman takes you there.
+=== "Computer"
+
+    ![The For you panel open from the bell, with a reminder to call the pharmacy](../../../../docs/screenshots/app/reminders-bell-desktop.png)
+
+=== "Phone"
+
+    ![The For you panel open from the bell, with a reminder to call the pharmacy](../../../../docs/screenshots/app/reminders-bell-phone.png)
+
+1. Click **For you**, the bell at the top of the left panel. On a phone, tap the menu button first.
+2. An item that came from a chat ends with **Open chat**. Click the item to go to that chat.
 3. To clear the count, click **Mark all seen**.
 
 ## If notices won't turn on

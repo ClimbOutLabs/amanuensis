@@ -33,7 +33,7 @@ Mail is checked every 10 minutes, the calendar every 30 minutes, and approvals e
 
 ## How loudly
 
-Everything lands under the bell with the reason you got it. The bell is at the top of the left panel. On a phone it is inside the menu, and the menu button shows how many items you have not seen.
+Everything lands under the bell with the reason you got it. The bell is labeled **For you** and sits at the top of the left panel. On a phone it is inside the menu, and the menu button shows how many items you have not seen.
 
 - **Note:** a quiet item under the bell. It never makes a sound. Most things are notes.
 - **Nudge:** a notice on the devices where you turned notices on.
