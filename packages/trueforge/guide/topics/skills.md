@@ -28,7 +28,7 @@ How to get there: Click **More** in the left bar, then **Settings**, then **Skil
 ## Use a skill in a chat
 
 1. In the chat, click **Add files and tools** beside the message box.
-2. Click **Add-ons**, then the **Skills** tab.
+2. Click **Add-ons**, then the **Skills** tab. The list opens just above the message box. If you have many skills, type in **Search skills** to find one.
 3. Select the skill.
 
 When a skill is on for a chat, Aman reads its instructions when the job comes up.

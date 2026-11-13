@@ -99,6 +99,8 @@ describe('the Reminders page', () => {
     expect(shell?.setRemindersOpen).toHaveBeenCalledWith(false);
     expect(shell?.openHistorySession).toHaveBeenCalledWith({ sessionId: 'chat-7', isMutable: false });
     expect(screen.queryByRole('button', { name: /Water the plants/ })).toBeNull();
+    expect(screen.getAllByText('Open chat')).toHaveLength(1);
+    expect(screen.getByText('No chat to open')).toBeTruthy();
   });
 
   it('says there are no reminders yet when none were set', async () => {
@@ -136,6 +138,18 @@ describe('the Reminders button in the left panel', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Reminders' }));
     expect(shell?.setRemindersOpen).toHaveBeenCalledWith(true);
+  });
+
+  it('shows an alarm clock, so the bell in the left panel means notifications only', () => {
+    render(
+      <ReminderListProvider api={api}>
+        <RemindersButton />
+      </ReminderListProvider>,
+    );
+
+    const icon = screen.getByRole('button', { name: 'Reminders' }).querySelector('svg');
+    expect(icon?.getAttribute('class')).toContain('alarm-clock');
+    expect(icon?.getAttribute('class')).not.toContain('bell');
   });
 
   it('is not shown where there is no reminders list to open', () => {
