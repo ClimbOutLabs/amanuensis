@@ -81,6 +81,7 @@ export const CARD_FIELD_RULES: Record<keyof Tier3Card, FieldRule> = {
   skill: 'empty',
   mail_new_recipients: 'empty',
   mail_draft: 'context',
+  skill_network: 'empty',
 };
 
 function isEmpty(value: unknown): boolean {

@@ -1,6 +1,6 @@
 import { execFile, execFileSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
@@ -28,6 +28,7 @@ import {
   serializeImplementationPlanGrant,
 } from '../../../src/core/mcp/implementationPlanGrant';
 import { deniedToolCallText } from '../../../src/core/mcp/ToolSet';
+import type { SkillNetworkCardRequest } from '../../../src/core/permissions/skillNetworkCards';
 import { AgentThread } from '../../../src/core/runtime/AgentThread';
 import type { CodeModeTransport } from '../../../src/core/sandbox/codeMode/CodeModeTransport';
 import type { SandboxInvocationPurpose } from '../../../src/core/sandbox/commandClassification';
@@ -47,6 +48,7 @@ import {
   SANDBOX_MCP_SERVER_ID,
   SANDBOX_REPLACE_TEXT_TOOL_NAME,
   SANDBOX_RUN_REGISTERED_COMMAND_TOOL_NAME,
+  SANDBOX_RUN_SKILL_SCRIPT_TOOL_NAME,
   SANDBOX_SUBMIT_IMPLEMENTATION_PLAN_TOOL_NAME,
   SANDBOX_WRITE_FILE_TOOL_NAME,
   sandboxCommandApprovalIdentity,
@@ -270,6 +272,7 @@ function makeSandbox(
     onRepositorySources?: RepositoryCommandSourceObserver;
     ocrLanguages?: string;
     skillMounter?: SkillMounter;
+    drainSkillNetworkCards?: () => Promise<readonly SkillNetworkCardRequest[]>;
   } = {},
 ): Sandbox {
   return new Sandbox({
@@ -285,6 +288,7 @@ function makeSandbox(
       (options.boundRepository === undefined ? undefined : new TestDurableWorkspaceCoordinator()),
     workspaceLeaseOwnerId: options.boundRepository === undefined ? undefined : 'test-replica',
     skillMounter: options.skillMounter,
+    drainSkillNetworkCards: options.drainSkillNetworkCards,
     blockDestructiveToolsInCodeMode: true,
     mcpRequestTimeoutMs: 60_000,
     mcpConnectTimeoutMs: 5_000,
@@ -4135,11 +4139,18 @@ describe('Sandbox provider-owned paths', () => {
 });
 
 /** Runs a guest command for real, in `cwd`, with only the env the test allows. */
-function runGuestCommand(input: { command: string; cwd: string; env: Record<string, string> }): Promise<ExecResult> {
+function runGuestCommand(input: {
+  command: string;
+  argv?: readonly string[] | undefined;
+  cwd: string;
+  env: Record<string, string>;
+}): Promise<ExecResult> {
+  // Like the slot agent: an argv call runs its program directly, anything else through the shell.
+  const [program, ...args] = input.argv ?? ['/bin/sh', '-c', input.command];
   return new Promise(resolve => {
     execFile(
-      '/bin/sh',
-      ['-c', input.command],
+      program ?? '/bin/sh',
+      args,
       { cwd: input.cwd, env: { PATH: '/usr/bin:/bin', ...input.env }, timeout: 60_000 },
       (error, stdout, stderr) => {
         const exitCode = error === null ? 0 : typeof error.code === 'number' ? error.code : 1;
@@ -4170,7 +4181,7 @@ function slotLikeProvider(input: {
       if (refused.length > 0) {
         return Promise.resolve({ success: false, error: `env names are not allowed: ${refused.join(', ')}` });
       }
-      return runGuestCommand({ command: params.command, cwd: root, env });
+      return runGuestCommand({ command: params.command, argv: params.argv, cwd: params.cwd ?? root, env });
     },
     getWorkspaceDir: () => join(root, 'workspace'),
     getDocumentSnapshotDir: () => transferDir,
@@ -4208,10 +4219,14 @@ function bigSkillArchive(input: { root: string; name: string; bytes: number }): 
 }
 
 /** A registry skill tarball holding one SKILL.md, built with the host's tar. */
-function skillArchive(input: { root: string; name: string }): Buffer {
+function skillArchive(input: { root: string; name: string; files?: Record<string, string> }): Buffer {
   const { root, name } = input;
   const source = mkdtempSync(join(root, `${name}-src-`));
   writeFileSync(join(source, 'SKILL.md'), `# ${name}\n`);
+  for (const [path, content] of Object.entries(input.files ?? {})) {
+    mkdirSync(dirname(join(source, path)), { recursive: true });
+    writeFileSync(join(source, path), content);
+  }
   const archive = join(root, `${name}.tar`);
   execFileSync('/usr/bin/tar', ['-cf', archive, '-C', source, '.']);
   return readFileSync(archive);
@@ -4334,6 +4349,145 @@ describe('Sandbox skills without a network', () => {
       expect(builder.build()).not.toContain('unavailable');
     } finally {
       await archives.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  /** Alpha ships scripts/fetch.py, which prints where it ran and the arguments it got. */
+  async function withAlphaScript(
+    run: (input: {
+      sandbox: Sandbox;
+      skillsDir: string;
+      root: string;
+      execCalls: SandboxExecParams[];
+    }) => Promise<void>,
+    drainSkillNetworkCards?: () => Promise<readonly SkillNetworkCardRequest[]>,
+  ): Promise<void> {
+    const root = mkdtempSync(join(tmpdir(), 'sandbox-skills-'));
+    const script = 'import os, sys\nprint(os.getcwd())\nprint(sys.argv[1:])\n';
+    const archives = await serveArchives(
+      new Map([['/alpha.tar', skillArchive({ root, name: 'alpha', files: { 'scripts/fetch.py': script } })]]),
+    );
+    try {
+      const skillsDir = join(root, 'skills');
+      const execCalls: SandboxExecParams[] = [];
+      const provider = slotLikeProvider({ root, skillsDir, execCalls });
+      const alpha = registrySkill({ name: 'alpha', presignedUrl: archives.urlFor('/alpha.tar') });
+      const sandbox = makeSandbox(provider, {
+        skillMounter: new SkillMounter({ skills: [alpha] }),
+        ...(drainSkillNetworkCards === undefined ? {} : { drainSkillNetworkCards }),
+      });
+      await sandbox.callTool(execTrue, { status: 'allow', scope: 'once' });
+      await run({ sandbox, skillsDir, root, execCalls });
+    } finally {
+      await archives.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+
+  function runFetch(sandbox: Sandbox, script = 'scripts/fetch.py') {
+    return sandbox.callTool(
+      {
+        name: SANDBOX_RUN_SKILL_SCRIPT_TOOL_NAME,
+        arguments: { intent: 'Get news', skill: 'alpha', script, args: ['--q', '$(touch pwned)', "it's"] },
+      },
+      { status: 'allow', scope: 'once' },
+    );
+  }
+
+  function resultText(response: Awaited<ReturnType<Sandbox['callTool']>>): string {
+    return isCallToolResponseResult(response) ? JSON.stringify(response.result.content) : '';
+  }
+
+  it("runs a skill's own script from its folder as separate arguments, with no shell", async () => {
+    await withAlphaScript(async ({ sandbox, skillsDir, root, execCalls }) => {
+      expect((await sandbox.listTools()).result.tools.map(tool => tool.name)).toContain(
+        SANDBOX_RUN_SKILL_SCRIPT_TOOL_NAME,
+      );
+      const response = await runFetch(sandbox);
+
+      expect(isCallToolResponseResult(response) && response.result.isError).toBe(false);
+      const scriptRun = execCalls.find(call => call.argv?.[0] === 'python3');
+      expect(scriptRun?.argv).toEqual(['python3', 'scripts/fetch.py', '--q', '$(touch pwned)', "it's"]);
+      expect(scriptRun?.cwd).toBe(join(skillsDir, 'alpha'));
+      const text = resultText(response);
+      expect(text).toContain(join(skillsDir, 'alpha'));
+      expect(text).toContain('$(touch pwned)');
+      expect(existsSync(join(skillsDir, 'alpha', 'pwned'))).toBe(false);
+      expect(existsSync(join(root, 'pwned'))).toBe(false);
+    });
+  });
+
+  it("raises the skill network cards a script's refused sites leave, the same way a shell command does", async () => {
+    const card: SkillNetworkCardRequest = {
+      skill_name: 'alpha',
+      hosts: ['news.example.com'],
+      reason: 'undeclared_host',
+    };
+    let owed: SkillNetworkCardRequest[] = [];
+    await withAlphaScript(
+      async ({ sandbox }) => {
+        owed = [card];
+        const response = await runFetch(sandbox);
+        expect(isCallToolResponseResult(response) && response.skillNetworkCards).toEqual([card]);
+      },
+      () => {
+        const cards = owed;
+        owed = [];
+        return Promise.resolve(cards);
+      },
+    );
+  });
+
+  it('refuses a script path that leaves the skill folder before anything runs', async () => {
+    await withAlphaScript(async ({ sandbox, execCalls }) => {
+      const refused = await runFetch(sandbox, '../beta/x.py');
+      expect(isCallToolResponseResult(refused) && refused.result.isError).toBe(true);
+      expect(execCalls.some(call => call.argv?.[0] === 'python3')).toBe(false);
+    });
+  });
+
+  it('refuses a script that is a link to a file outside the skill folder', async () => {
+    await withAlphaScript(async ({ sandbox, skillsDir, root, execCalls }) => {
+      writeFileSync(join(root, 'outside.py'), 'print("outside ran")\n');
+      symlinkSync(join(root, 'outside.py'), join(skillsDir, 'alpha', 'scripts', 'link.py'));
+      const refused = await runFetch(sandbox, 'scripts/link.py');
+      expect(isCallToolResponseResult(refused) && refused.result.isError).toBe(true);
+      expect(resultText(refused)).toContain("is not a file inside the alpha skill's folder");
+      expect(execCalls.some(call => call.argv?.[0] === 'python3')).toBe(false);
+    });
+  });
+
+  it('refuses a script in a skill folder that was swapped for a link to somewhere else', async () => {
+    await withAlphaScript(async ({ sandbox, skillsDir, root, execCalls }) => {
+      const elsewhere = join(root, 'elsewhere');
+      mkdirSync(join(elsewhere, 'scripts'), { recursive: true });
+      writeFileSync(join(elsewhere, 'scripts', 'fetch.py'), 'print("elsewhere ran")\n');
+      rmSync(join(skillsDir, 'alpha'), { recursive: true, force: true });
+      symlinkSync(elsewhere, join(skillsDir, 'alpha'));
+      const refused = await runFetch(sandbox);
+      expect(isCallToolResponseResult(refused) && refused.result.isError).toBe(true);
+      expect(execCalls.some(call => call.argv?.[0] === 'python3')).toBe(false);
+    });
+  });
+
+  it('refuses a script that does not exist', async () => {
+    await withAlphaScript(async ({ sandbox, execCalls }) => {
+      const refused = await runFetch(sandbox, 'scripts/missing.py');
+      expect(isCallToolResponseResult(refused) && refused.result.isError).toBe(true);
+      expect(execCalls.some(call => call.argv?.[0] === 'python3')).toBe(false);
+    });
+  });
+
+  it('offers no skill script action when no skill is turned on', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'sandbox-skills-'));
+    try {
+      const provider = slotLikeProvider({ root, skillsDir: join(root, 'skills'), execCalls: [] });
+      const sandbox = makeSandbox(provider);
+      expect((await sandbox.listTools()).result.tools.map(tool => tool.name)).not.toContain(
+        SANDBOX_RUN_SKILL_SCRIPT_TOOL_NAME,
+      );
+    } finally {
       rmSync(root, { recursive: true, force: true });
     }
   });

@@ -31,6 +31,7 @@ import type { IScheduleStore } from '../db/scheduleStore';
 import type { ISentinelAuditStore } from '../db/sentinelAuditStore';
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import type { ISpaceStore } from '../db/spaceStore';
+import type { ITextContactStore } from '../db/textContactStore';
 import type { WithTransaction } from '../db/transaction';
 import type { ITurnArtifactStore } from '../db/turnArtifactStore';
 import type { IOAuthTokenStore } from '../mcp/auth/types';
@@ -52,6 +53,7 @@ export interface DataImportRouterDeps<TTransaction> {
   sentinelAuditStore: ISentinelAuditStore;
   deliveryStore: IDeliveryStore;
   reachSettingsStore: IReachSettingsStore;
+  textContactStore: ITextContactStore;
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
   /** Runs the past-chat search pass an import asks for, without waiting for the next start. */
   chatSearchIndexer: Pick<ChatSearchIndexer, 'resumePending'>;
@@ -167,6 +169,7 @@ export function createDataImportRouter<TTransaction>(deps: DataImportRouterDeps<
           auditStore: deps.sentinelAuditStore,
           deliveryStore: deps.deliveryStore,
           reachSettingsStore: deps.reachSettingsStore,
+          textContactStore: deps.textContactStore,
           turnArtifactStore: deps.turnArtifactStore,
           mcpServerStore: deps.resolveMcpServerStore(c),
           modelProviderStore: deps.resolveModelProviderStore(c),
