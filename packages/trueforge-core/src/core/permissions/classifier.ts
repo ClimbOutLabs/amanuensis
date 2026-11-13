@@ -1206,9 +1206,14 @@ async function classifySkillScript(action: SentinelAction, ctx: ClassifyContext)
       sensitive_read: false,
     });
   }
+  const plainWhat = `Run a script from the ${skill} skill?`;
+  const askReason = changedByAman
+    ? "Aman changed a file in this skill's folder in this chat."
+    : 'The sandbox can reach the internet.';
   return tier3Decision({
     card: {
-      plain_what: `Run a script from the ${skill} skill?`,
+      plain_what: plainWhat,
+      copy: sandboxCardCopy({ headline: plainWhat, undo: "Once this runs, it can't be undone.", reason: askReason }),
       plain_why: plainWhy(ctx.agent_intent),
       cannot_be_undone: "Once this runs, it can't be undone.",
       why_asked_again: null,
@@ -1221,9 +1226,7 @@ async function classifySkillScript(action: SentinelAction, ctx: ClassifyContext)
       outbound_truncated: false,
     },
     reason: 'arbitrary_code_execution',
-    reason_detail: changedByAman
-      ? "Aman changed a file in this skill's folder in this chat."
-      : 'The sandbox can reach a network.',
+    reason_detail: askReason,
     sensitive_read: false,
     approval_token_id: await mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params }),
   });
