@@ -194,6 +194,7 @@
   "Memory": "packages/trueforge-ui/src/containers/SettingsBuilder/index.tsx",
   "Skills": "packages/trueforge-ui/src/containers/SettingsBuilder/index.tsx",
   "Open chat": "packages/trueforge-ui/src/layouts/WidgetLayout.tsx",
+  "No chat to open": "packages/trueforge-ui/src/atoms/reminders/RemindersPage.tsx",
   "Load more": "packages/trueforge-ui/src/sentinel/AuditLogSettings.tsx",
   "Approved": "packages/trueforge-ui/src/sentinel/types.ts",
   "Denied": "packages/trueforge-ui/src/sentinel/types.ts",

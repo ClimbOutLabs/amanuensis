@@ -80,7 +80,7 @@ describe('the bell', () => {
 
     const row = await screen.findByRole('button', { name: /Call the dentist/ });
     expect(row.textContent).toContain('Why you got this: You asked to be reminded on Monday.');
-    expect(row.textContent).toContain('Open');
+    expect(within(row).getByText('Open chat')).toBeTruthy();
 
     fireEvent.click(row);
     await waitFor(() => expect(api.markSeen).toHaveBeenCalledWith(['a']));
