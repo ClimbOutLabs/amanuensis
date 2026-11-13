@@ -19,9 +19,11 @@ import { EmptyScreen } from '../EmptyScreen.js';
 import { cn } from '../lib/cn.js';
 import { PageHeader } from '../PageHeader.js';
 import { Button } from '../primitives/Button.js';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../primitives/Dialog.js';
+import { IconButton } from '../primitives/IconButton.js';
 import { Skeleton } from '../primitives/Skeleton.js';
 
-const ROW_CLASS = 'flex w-full items-center gap-3 px-4 py-3 text-left sm:gap-4';
+const ROW_CLASS = 'flex min-w-0 flex-1 items-center gap-3 py-3 pr-2 pl-4 text-left sm:gap-4';
 const PILL_CLASS = 'inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-medium';
 
 /** The square at the start of a row: the day it is about, or a mark for a reminder with no day queued. */
@@ -61,10 +63,12 @@ function ReminderRow({
   item,
   now,
   onOpenChat,
+  onDelete,
 }: {
   item: ReminderItem;
   now: Date;
   onOpenChat: (sessionId: string) => void;
+  onDelete: (item: ReminderItem) => void;
 }) {
   const sessionId = item.sessionId;
   const moment = reminderMoment(item);
@@ -94,19 +98,30 @@ function ReminderRow({
       )}
     </>
   );
-  if (sessionId === null) {
-    return <li className={cn(ROW_CLASS, 'border-b border-border last:border-b-0')}>{content}</li>;
-  }
   return (
-    <li className="border-b border-border last:border-b-0">
-      <button
+    <li className="flex items-center border-b border-border last:border-b-0">
+      {sessionId === null ? (
+        <div className={ROW_CLASS}>{content}</div>
+      ) : (
+        <button
+          type="button"
+          className={cn(ROW_CLASS, 'hover:bg-secondary-button-hover')}
+          onClick={() => onOpenChat(sessionId)}
+          aria-label={`${item.what}. Opens the chat it was set in.`}
+        >
+          {content}
+        </button>
+      )}
+      <IconButton
         type="button"
-        className={cn(ROW_CLASS, 'hover:bg-secondary-button-hover')}
-        onClick={() => onOpenChat(sessionId)}
-        aria-label={`${item.what}. Opens the chat it was set in.`}
+        variant="ghost"
+        aria-label={`Delete the reminder: ${item.what}`}
+        tooltip="Delete"
+        className="mr-2 shrink-0 text-text-secondary hover:text-failure-bg"
+        onClick={() => onDelete(item)}
       >
-        {content}
-      </button>
+        <Icon name="trash" className="size-4" />
+      </IconButton>
     </li>
   );
 }
@@ -117,12 +132,14 @@ function ReminderGroup({
   emptyText,
   now,
   onOpenChat,
+  onDelete,
 }: {
   title: string;
   items: ReminderItem[];
   emptyText: string;
   now: Date;
   onOpenChat: (sessionId: string) => void;
+  onDelete: (item: ReminderItem) => void;
 }) {
   return (
     <section aria-label={title} className="flex flex-col gap-2">
@@ -139,7 +156,7 @@ function ReminderGroup({
       ) : (
         <ul className="flex flex-col overflow-hidden rounded-xl border border-border bg-paper">
           {items.map(item => (
-            <ReminderRow key={item.id} item={item} now={now} onOpenChat={onOpenChat} />
+            <ReminderRow key={item.id} item={item} now={now} onOpenChat={onOpenChat} onDelete={onDelete} />
           ))}
         </ul>
       )}
@@ -149,7 +166,7 @@ function ReminderGroup({
 
 /**
  * Every reminder the person set, in one place: what is still to come, and what has already gone out.
- * Read-only on purpose. Reminders are set, changed and cancelled in chat, with the persona that set them.
+ * Reminders are set and changed in chat, with the persona that set them. The page can delete one, after asking.
  */
 export function RemindersPage() {
   const { api } = useReminderList();
@@ -159,6 +176,9 @@ export function RemindersPage() {
   const [now, setNow] = useState(() => new Date());
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const [pendingDelete, setPendingDelete] = useState<ReminderItem | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -192,6 +212,35 @@ export function RemindersPage() {
     setList(null);
     setReloadKey(key => key + 1);
   }, []);
+
+  const askDelete = useCallback((item: ReminderItem) => {
+    setDeleteError(null);
+    setPendingDelete(item);
+  }, []);
+
+  const closeDelete = useCallback(() => {
+    setPendingDelete(null);
+    setDeleteError(null);
+  }, []);
+
+  const confirmDelete = useCallback(
+    (item: ReminderItem) => {
+      setDeleting(true);
+      setDeleteError(null);
+      api.deleteReminder(item.id).then(
+        () => {
+          setDeleting(false);
+          setPendingDelete(null);
+          setList(current => (current === null ? null : current.filter(entry => entry.id !== item.id)));
+        },
+        () => {
+          setDeleting(false);
+          setDeleteError('That reminder could not be deleted. Check your connection, then try again.');
+        },
+      );
+    },
+    [api],
+  );
 
   const nothingAtAll = groups !== null && groups.comingUp.length === 0 && groups.alreadyReminded.length === 0;
 
@@ -228,6 +277,7 @@ export function RemindersPage() {
               emptyText="Nothing coming up. Ask in any chat to be reminded."
               now={now}
               onOpenChat={openChat}
+              onDelete={askDelete}
             />
             <ReminderGroup
               title="Already reminded"
@@ -235,10 +285,44 @@ export function RemindersPage() {
               emptyText="Nothing yet. A reminder moves here once its time has come."
               now={now}
               onOpenChat={openChat}
+              onDelete={askDelete}
             />
           </div>
         ) : null}
       </div>
+      {pendingDelete !== null ? (
+        <Dialog
+          open
+          onOpenChange={open => {
+            if (!open) closeDelete();
+          }}
+          aria-label="Delete reminder"
+          className="max-w-md"
+        >
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Delete reminder</DialogTitle>
+              <p className="text-sm text-text-secondary">
+                “{pendingDelete.what}” will be deleted{pendingDelete.repeats ? ' and will not remind you again' : ''}.
+                This cannot be undone.
+              </p>
+              {deleteError !== null ? (
+                <p className="text-sm text-failure-bg" role="alert">
+                  {deleteError}
+                </p>
+              ) : null}
+            </DialogHeader>
+          </DialogContent>
+          <DialogFooter>
+            <Button.Secondary type="button" onClick={closeDelete}>
+              Cancel
+            </Button.Secondary>
+            <Button.Destructive type="button" disabled={deleting} onClick={() => confirmDelete(pendingDelete)}>
+              Delete
+            </Button.Destructive>
+          </DialogFooter>
+        </Dialog>
+      ) : null}
     </div>
   );
 }
