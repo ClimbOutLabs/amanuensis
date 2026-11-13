@@ -33,6 +33,7 @@ import { useWaitingToolCallIds } from '../hooks/useWaitingToolCallIds.js';
 import { ALWAYS_ALLOW_TOOL_OPTION_ID, offersChangeIt, SAVE_DRAFT_OPTION_ID } from '../sentinel/approvalChoices.js';
 import { EmailApprovalCard } from '../sentinel/EmailApprovalCard.js';
 import { PermissionApprovalCard } from '../sentinel/PermissionApprovalCard.js';
+import { SendReceiptCard } from '../sentinel/SendReceiptCard.js';
 import { useOptionalSentinelState } from '../sentinel/SentinelStateProvider.js';
 import { standInApprovalCard } from '../sentinel/standInCard.js';
 import { useSlot } from '../theme/SlotsProvider.js';
@@ -558,6 +559,31 @@ function ToolCallPart(part: ToolCallMessagePartProps) {
   const onToggle = () => setExpanded(prev => !prev);
   const expandSubAgent = useCallback(() => setExpanded(true), []);
   useRegisterApprovalExpand(isSubAgent ? part.toolCallId : '', expandSubAgent);
+  const sendReceipt = sentinelState?.receiptFor(part.toolCallId);
+  const aui = useAui();
+
+  // Once the server says how a send ended, its card becomes the receipt (or the plain reason it did not go).
+  if (sendReceipt !== undefined) {
+    return (
+      <div data-slot="tool-call-card" data-variant="send-receipt" className="w-full">
+        <SendReceiptCard
+          receipt={sendReceipt}
+          approvedCheckCode={
+            sentinelState?.answerFor(part.toolCallId) === 'approved'
+              ? (sentinelState.approvalFor(part.toolCallId)?.card.email?.check_code ?? null)
+              : null
+          }
+          onReviewAgain={
+            isNewestMessage
+              ? () => {
+                  aui.thread().append({ role: 'user', content: [{ type: 'text', text: 'Send that draft again.' }] });
+                }
+              : undefined
+          }
+        />
+      </div>
+    );
+  }
 
   if (part.toolName === ASK_USER_TOOL_NAME) {
     if (hasPendingAskUserResponse(part)) {

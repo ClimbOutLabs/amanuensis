@@ -43,7 +43,7 @@ A reminder whose chat was deleted still shows under the bell. It has no **Open c
 
 ## Turn on notices
 
-After you set your first reminder, Aman offers to show notices on this device. Click **Turn on notices**, then allow them when your browser asks. Click **Not now** to skip. Aman offers again with your next reminder.
+After you set your first reminder, Aman offers to show notices on this device. Click **Turn on notices**, then allow them when your browser asks. Click **Not now** to skip. Aman does not offer again on this device.
 
 To change it later:
 

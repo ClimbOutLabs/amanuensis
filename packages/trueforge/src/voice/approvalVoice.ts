@@ -119,7 +119,8 @@ type Schedule = NonNullable<Tier3Card['schedule']>;
  * `checked` is a choice that decides whether the card is readable at all, `empty` must carry nothing.
  * A field added to a shape is missing here, so the card stays on the screen until someone decides.
  * `reply_in_thread` is deliberately not read: the reply's own recipients, subject and body are, and the
- * message it answers stays on the screen.
+ * message it answers stays on the screen. `check_code` is not read either: it changes nothing that is sent,
+ * and the voice cannot say a run of digits exactly as written.
  */
 export const EMAIL_FIELD_RULES: Record<keyof Email, NestedRule> = {
   action: 'checked',
@@ -128,6 +129,7 @@ export const EMAIL_FIELD_RULES: Record<keyof Email, NestedRule> = {
   bcc: 'empty',
   subject: 'spoken',
   body: 'spoken',
+  check_code: 'checked',
   replaces: 'empty',
   reply_in_thread: 'checked',
   reply_to: 'spoken',

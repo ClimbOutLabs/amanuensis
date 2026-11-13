@@ -191,6 +191,9 @@ When you disconnect, Aman asks Google to take back its access and deletes the sa
 - Email is treated as untrusted. Text inside a message can't change what Aman does or skip an approval.
 - A reply stays in its conversation. Aman reads the thread from Gmail itself. The approval card says which thread it's for ("Reply in the thread", with the original subject and sender).
 - A reply whose thread links don't match that thread is refused. If a send is refused, nothing is sent, and any new or changed draft asks for a new approval.
+- A send card shows a short check code, such as A7F39C. Once Gmail accepts the send, the card turns into a receipt. It shows the same recipients, subject, text and check code, with "Sent at 09:12, exactly as approved".
+- Until Gmail accepts it, the card says Sending. If the send didn't go out, the card says why in plain words and never shows a receipt.
+- If Gmail didn't answer, the card says the message may have gone through. Check your Sent folder before you try again.
 - Aman connects one Google account per person.
 
 ### Attachments
