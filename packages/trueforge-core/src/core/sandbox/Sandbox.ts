@@ -1022,6 +1022,9 @@ function injectMCPClientEnv(params: {
   };
 }
 
+/** The longest a model may ask one shell command to run; installs, builds and long test runs need more than the default. */
+export const SANDBOX_EXEC_MAX_TIMEOUT_SECONDS = 600;
+
 export const sandboxExecSchema = z.object({
   intent: z.string().describe('Why you are running this command (user-facing).'),
   purpose: z
@@ -1032,6 +1035,7 @@ export const sandboxExecSchema = z.object({
   command: z.string().describe('Shell command to execute.'),
   cwd: z.string().optional().describe('Working directory.'),
   env: z.record(z.string(), z.string()).optional(),
+  timeout_seconds: z.number().int().min(1).max(SANDBOX_EXEC_MAX_TIMEOUT_SECONDS).optional(),
   output: z
     .object({
       head_lines: z.number().int().min(1).max(1000).optional(),
@@ -1517,6 +1521,7 @@ export function createSandboxExecDescription({
   return `Run a shell command in the persistent sandbox. cwd sets the repository; HOME does not. Never list, print or expose environment variables. The sandbox holds no git credentials: never ask for or search for tokens.
 Create files with write_file; edit with apply_patch or replace_text. Never bypass them with sed, Perl, Python, heredocs or temp patch files.
 Large output: use output.head_lines, output.tail_lines or output.grep.
+Stops after 60s; set timeout_seconds (up to 600) for an install, build or long test run.
 Run a script file with python3 or node; other code goes to run_code.
 Status: "ok", "exited" (see exit_code) or "failed" (the host could not run it).
 ${execNetworkSentences({ offline, skillNetworkHosts: skillNetworkHosts ?? [] })} Make separate tool calls in one response; the host runs read-only calls concurrently.${fileOutput}
@@ -2557,8 +2562,7 @@ export class Sandbox extends LocalToolMCP {
       // The workspace classification judges this call against: the bound repository, else the
       // session's, else the provider's default. Recorded on the call below so pre-dispatch
       // verification re-checks containment against this same root.
-      classificationWorkspaceCwd =
-        this.boundRepository?.workspace_cwd ?? sentinelHost.workspace_cwd ?? this.provider.getWorkspaceDir() ?? null;
+      classificationWorkspaceCwd = this.sentinelWorkspaceCwd();
       const sentinelDecision = await classifyHostToolCall({
         sentinel: sentinelHost,
         repository_id: this.boundRepository?.repository_id ?? null,
@@ -2567,7 +2571,12 @@ export class Sandbox extends LocalToolMCP {
         // Chosen by the provider, never by a path. A remote sandbox's paths are judged by name because the server
         // cannot follow its symlinks; the slot agent's O_NOFOLLOW walk and the guest's own view contain those.
         path_resolution: this.provider.filesystem,
-        ...(this.provider.filesystem === 'remote' ? { file_digest: (path: string) => this.fileDigest(path) } : {}),
+        ...(this.provider.filesystem === 'remote'
+          ? {
+              file_digest: (path: string) => this.fileDigest(path),
+              path_missing: (path: string) => this.pathMissing(path),
+            }
+          : {}),
         sandbox_network: await this.networkForUnaskedWork(),
         action: {
           tool_name: params.name,
@@ -3692,6 +3701,20 @@ export class Sandbox extends LocalToolMCP {
       return createHash('sha256').update(content).digest('hex');
     } catch {
       return null;
+    }
+  }
+
+  /** True only when the sandbox says nothing exists at the path. A link, a folder or a failed read is not missing. */
+  async pathMissing(absolutePath: string): Promise<boolean> {
+    try {
+      const { sandboxInfo } = await this.ensureReadySandbox();
+      await this.provider.downloadFile({
+        sandboxId: this.providerSandboxId(sandboxInfo.sandbox_id),
+        path: absolutePath,
+      });
+      return false;
+    } catch (error) {
+      return error instanceof SandboxFileNotFoundError;
     }
   }
 
@@ -5508,26 +5531,41 @@ export class Sandbox extends LocalToolMCP {
     });
   }
 
+  /** The workspace Sentinel judges this sandbox's calls against: the bound repository, else the session's, else the provider's. */
+  private sentinelWorkspaceCwd(): string | null {
+    return (
+      this.boundRepository?.workspace_cwd ??
+      this.sentinelContext?.workspace_cwd ??
+      this.provider.getWorkspaceDir() ??
+      null
+    );
+  }
+
   /**
    * The paths a write is about to create, checked before it runs. Tracking records only these, so an edit to
    * a file that already existed (a repo file) never makes it a file Aman wrote.
    */
-  private createdWriteTargets(input: { paths: readonly string[]; cwd: string }): string[] {
+  private async createdWriteTargets(input: { paths: readonly string[]; cwd: string }): Promise<string[]> {
     const resolution = this.provider.filesystem;
-    return input.paths.filter(p => isNewWriteTarget({ p, cwd: input.cwd, resolution }));
+    const path_missing = resolution === 'remote' ? (path: string) => this.pathMissing(path) : undefined;
+    const created = await Promise.all(
+      input.paths.map(p => isNewWriteTarget({ p, cwd: input.cwd, resolution, path_missing })),
+    );
+    return input.paths.filter((_, index) => created[index] === true);
   }
 
   /**
    * Sentinel: record agent-created or agent-modified files as tracked
    * executables, so a later attempt to execute them escalates for approval.
-   * Best effort and host-side: paths that do not resolve on the host (for
-   * example a remote sandbox checkout) are skipped silently.
+   * Best effort: a path that cannot be resolved is skipped silently. A remote
+   * sandbox's files are recorded by name.
    */
   private observeSentinelWrites(input: { paths: readonly string[]; cwd: string }): void {
     const ctx = classifyContextFor({
       host: this.sentinelContext,
       repository_id: this.boundRepository?.repository_id ?? null,
-      workspace_cwd: this.boundRepository?.workspace_cwd ?? null,
+      // The workspace calls are classified against, or a file recorded here would never be found again.
+      workspace_cwd: this.sentinelWorkspaceCwd(),
     });
     const resolution = this.provider.filesystem;
     const store = ctx.services.tracked_store;
@@ -5816,9 +5854,12 @@ export class Sandbox extends LocalToolMCP {
     context?: ToolInvocationContext,
     planScope?: ImplementationPlanGrantScope,
   ): Promise<CallToolResponse> {
+    // A host-set limit (a registered command's own) wins over the one the model asked for.
+    const timeoutSeconds = input.timeoutSeconds ?? input.timeout_seconds;
     const resolvedInput: SandboxRuntimeExecInput = {
       ...input,
       cwd: input.cwd ?? this.boundRepository?.workspace_cwd ?? this.provider.getWorkspaceDir(),
+      ...(timeoutSeconds === undefined ? {} : { timeoutSeconds }),
     };
     const preflightFailure = sandboxExecPreflightFailure({
       command: resolvedInput.command,
@@ -6222,7 +6263,7 @@ export class Sandbox extends LocalToolMCP {
     // failed even though the file was written. Only request the lock when a repository
     // is actually bound; a scratch write has no concurrent-checkout to guard against.
     const workspaceLockRoot = this.boundRepository === undefined ? undefined : workspaceRoot;
-    const createdPaths = this.createdWriteTargets({ paths: [normalizedPath], cwd: scopeResolution.scope.cwd });
+    const createdPaths = await this.createdWriteTargets({ paths: [normalizedPath], cwd: scopeResolution.scope.cwd });
     const observedWrite = await this.runObservedWorkspaceMutation({
       sandboxId: rawId,
       cwd: canonicalScope.cwd,
@@ -6531,7 +6572,7 @@ export class Sandbox extends LocalToolMCP {
     // same root the paths are relative to, rather than the (possibly different) Git toplevel.
     const observationRoot = this.boundRepository?.workspace_cwd ?? input.cwd;
     const createdPaths =
-      workspaceRoot === undefined ? [] : this.createdWriteTargets({ paths: finalPaths, cwd: workspaceRoot });
+      workspaceRoot === undefined ? [] : await this.createdWriteTargets({ paths: finalPaths, cwd: workspaceRoot });
     const observedMutation = await this.runObservedWorkspaceMutation({
       sandboxId: rawId,
       cwd: input.cwd,
@@ -6717,7 +6758,7 @@ export class Sandbox extends LocalToolMCP {
     // observation joins the same root the paths are relative to, rather than the (possibly
     // different) Git toplevel.
     const observationRoot = this.boundRepository?.workspace_cwd ?? input.cwd;
-    const createdPaths = this.createdWriteTargets({ paths: [normalizedPath], cwd: input.cwd });
+    const createdPaths = await this.createdWriteTargets({ paths: [normalizedPath], cwd: input.cwd });
     const observedReplace = await this.runObservedWorkspaceMutation({
       sandboxId: rawId,
       cwd: input.cwd,

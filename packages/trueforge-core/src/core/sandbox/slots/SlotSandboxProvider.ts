@@ -536,7 +536,9 @@ export class SlotSandboxProvider implements SandboxProvider {
         return {
           success: false,
           error: withTail(
-            `The command timed out after ${String(Math.round(input.timeoutMs / 1000))}s and was stopped.`,
+            `The command timed out after ${String(Math.round(input.timeoutMs / 1000))}s and was stopped.${
+              input.timeoutMs < MAX_TIMEOUT_MS ? ' If it needs longer, run it again with a larger timeout_seconds.' : ''
+            }`,
           ),
         };
       case 'oom':

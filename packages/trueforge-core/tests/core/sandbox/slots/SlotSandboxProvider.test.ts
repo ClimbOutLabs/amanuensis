@@ -212,6 +212,22 @@ describe('SlotSandboxProvider', () => {
     }
   });
 
+  test('a timeout below the cap says how to ask for longer, and one at the cap does not', async () => {
+    const timedOut = (): ReturnType<FakeHandler> => ({
+      status: 200,
+      body: execResponse({ terminated_by: 'timeout', output: '' }),
+    });
+    const short = await (
+      await providerFor([timedOut])
+    ).provider.exec({ sandboxId: `s1-${'e'.repeat(32)}`, command: 'x', timeoutSeconds: 60 });
+    expect(!short.success && short.error).toContain('run it again with a larger timeout_seconds');
+    const longest = await (
+      await providerFor([timedOut])
+    ).provider.exec({ sandboxId: `s1-${'e'.repeat(32)}`, command: 'x', timeoutSeconds: 600 });
+    expect(!longest.success && longest.error).toContain('timed out after 600s');
+    expect(!longest.success && longest.error).not.toContain('timeout_seconds');
+  });
+
   test('a busy slot is retried until it is free', async () => {
     let calls = 0;
     const flaky: FakeHandler = () => {

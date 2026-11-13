@@ -42,11 +42,13 @@ function providerTable(): EmailAccountStatus['providers'] {
 export function createEmailAccountRouter(deps: EmailAccountRouterDeps) {
   const clientDeps = () => ({
     accountUrl: configuration.MAIL_EMAIL_ACCOUNT_URL,
+    secret: configuration.MAIL_EMAIL_ACCOUNT_SECRET,
     fetchImpl: deps.fetchImpl,
     logger: deps.logger,
   });
   const handlers = createConnectorAccountHandlers<PublicMailAccount, SaveEmailAccountRequest, EmailAccountStatus>({
-    isAvailable: () => configuration.MAIL_EMAIL_ACCOUNT_URL !== undefined,
+    isAvailable: () =>
+      configuration.MAIL_EMAIL_ACCOUNT_URL !== undefined && configuration.MAIL_EMAIL_ACCOUNT_SECRET !== undefined,
     unavailableBody: () => ({
       available: false,
       state: 'not_connected',
