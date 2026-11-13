@@ -190,6 +190,27 @@ describe('"Always allow in this chat" is offered only when the card names who or
   );
 
   it(
+    'a schedule made in a chat gets its own agent, named after it, only once the card is approved',
+    async () => {
+      const agentNames = async () =>
+        z
+          .object({ data: z.array(z.object({ name: z.string() }).loose()) })
+          .parse(JSON.parse(await savedNames({ server, path: '/api/v1/agents' })))
+          .data.map(agent => agent.name);
+      const chatId = await createChat(server);
+      const before = await agentNames();
+      const card = onlyCard(await runTurn({ server, chatId, input: ask('create_schedule') }));
+      expect(await agentNames()).toEqual(before);
+
+      await runTurn({ server, chatId, input: answer({ card, scope: 'once' }) });
+      const added = (await agentNames()).filter(name => !before.includes(name));
+      expect(added).toHaveLength(1);
+      expect(added[0]).toContain(SCRIPTED_SCHEDULE.name);
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
     'creating a persona takes no chat-wide answer',
     async () => {
       const chatId = await createChat(server);
