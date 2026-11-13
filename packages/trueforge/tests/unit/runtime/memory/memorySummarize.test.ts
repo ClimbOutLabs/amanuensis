@@ -773,7 +773,11 @@ describe('summarizeTurnContent', () => {
 
   it('fails, and stores no text, when the model is still cut off after the retry', async () => {
     const { llm, caps } = fakeReasoningSummarizer({ thinkingTokens: 100_000, answer: '{"facts": []}' });
-    const result = await summarizeTurnContent({ ...base, resolveLlm: async () => llm });
+    const result = await summarizeTurnContent({
+      ...base,
+      summarizationModelFqn: 'test/still-cut-off',
+      resolveLlm: async () => llm,
+    });
     expect(result).toEqual({ status: 'failed', reason: 'summary-cut-short', fallback: 'summary_cut_short' });
     expect(caps).toEqual([800, 4000]);
   });
@@ -785,7 +789,11 @@ describe('summarizeTurnContent', () => {
       usage: { input_tokens: 0, output_tokens: 800, total_tokens: 800 },
       finish_reason: 'length',
     });
-    const retried = await summarizeTurnContent({ ...base, resolveLlm: async () => cutOff });
+    const retried = await summarizeTurnContent({
+      ...base,
+      summarizationModelFqn: 'test/half-answer',
+      resolveLlm: async () => cutOff,
+    });
     expect(retried.status).toBe('failed');
     expect(cutOff.createNonStream).toHaveBeenCalledTimes(2);
 
@@ -803,6 +811,7 @@ describe('summarizeTurnContent', () => {
     let resolutions = 0;
     const result = await summarizeTurnContent({
       ...base,
+      summarizationModelFqn: 'test/same-client',
       resolveLlm: async () => {
         resolutions += 1;
         return llm;
@@ -811,6 +820,31 @@ describe('summarizeTurnContent', () => {
     expect(result).toEqual({ status: 'summarized', facts: ['The synthetic test robot is named Bleep-Bloop.'] });
     expect(caps).toEqual([800, 4000]);
     expect(resolutions).toBe(1);
+  });
+
+  it('starts with more room from then on, once a model needed it', async () => {
+    const { llm, caps } = fakeReasoningSummarizer({
+      thinkingTokens: 2000,
+      answer: '{"facts": ["The synthetic test robot is named Bleep-Bloop."]}',
+    });
+    const ask = () =>
+      summarizeTurnContent({ ...base, summarizationModelFqn: 'test/always-thinks', resolveLlm: async () => llm });
+    await ask();
+    const second = await ask();
+    expect(second).toEqual({ status: 'summarized', facts: ['The synthetic test robot is named Bleep-Bloop.'] });
+    expect(caps).toEqual([800, 4000, 4000]);
+  });
+
+  it('keeps the short cap for a model that answered inside it', async () => {
+    const { llm, caps } = fakeReasoningSummarizer({
+      thinkingTokens: 100,
+      answer: '{"facts": ["The synthetic test robot is named Bleep-Bloop."]}',
+    });
+    const ask = () =>
+      summarizeTurnContent({ ...base, summarizationModelFqn: 'test/answers-short', resolveLlm: async () => llm });
+    await ask();
+    await ask();
+    expect(caps).toEqual([800, 800]);
   });
 
   it('flattens multi-part content responses', async () => {

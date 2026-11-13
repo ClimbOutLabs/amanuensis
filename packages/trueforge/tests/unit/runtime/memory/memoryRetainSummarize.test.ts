@@ -607,7 +607,8 @@ describe('a summary model that reasons until it hits the length limit', () => {
     try {
       await retainTurn(dir);
 
-      expect(caps).toHaveLength(2);
+      // The model may already be known to need more room, so only the cap it ended on is checked.
+      expect(caps.at(-1)).toBeGreaterThan(FIRST_CAP);
       expect(storedLogs(dir)).toEqual([]);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });

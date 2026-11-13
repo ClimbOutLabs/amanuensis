@@ -73,6 +73,13 @@ const SUMMARIZE_MAX_OUTPUT_TOKENS = 800;
 const SUMMARIZE_RETRY_MAX_OUTPUT_TOKENS = 4000;
 
 /**
+ * Models, by name, whose reply was once cut off by the first cap with no answer in it. They are asked with the
+ * larger cap from the start for the life of the process, so a model that always thinks pays for one question,
+ * not two, on every turn. The cap only bounds output, so a model that needs less still writes less.
+ */
+const modelsNeedingMoreRoom = new Set<string>();
+
+/**
  * Discriminated outcome of one summarization attempt.
  *
  * - `summarized`: one or more durable facts, each a standalone sentence about the person.
@@ -770,7 +777,8 @@ export type HelperModelAnswer =
 
 /**
  * Asks the summarization model one question, under the shared limit on concurrent calls. The reply is cut off
- * by the token cap at most once more: when it holds no readable answer it is asked again with more room. A
+ * by the token cap at most once more: when it holds no readable answer it is asked again with more room, and
+ * that model starts with the larger cap from then on. A
  * timeout or a repetition stop gets one retry through a fresh client. Never throws.
  */
 export async function askSummaryModel({
@@ -805,16 +813,16 @@ export async function askSummaryModel({
     const runAttempt = async (attemptLlm: ILLM): Promise<HelperModelAnswer> => {
       // Cap the generation so the model cannot burn tokens for the full call budget on output that
       // would be discarded anyway.
-      let result = await attemptLlm.createNonStream({ messages, max_tokens: maxOutputTokens });
+      const roomyCap = Math.max(maxOutputTokens, SUMMARIZE_RETRY_MAX_OUTPUT_TOKENS);
+      const firstCap = modelsNeedingMoreRoom.has(modelFqn) ? roomyCap : maxOutputTokens;
+      let result = await attemptLlm.createNonStream({ messages, max_tokens: firstCap });
       let reply = flattenLlmContent(result.output.content ?? null).trim();
       // A reply cut off by the cap with no answer in it (a model that spent the cap thinking)
       // gets one retry with more room, never a guess.
-      if (result.finish_reason === 'length' && (reply === '' || !isReadable(reply))) {
+      if (firstCap < roomyCap && result.finish_reason === 'length' && (reply === '' || !isReadable(reply))) {
         logger.debug('Memory summarization was cut off by its token cap; retrying with more room');
-        result = await attemptLlm.createNonStream({
-          messages,
-          max_tokens: Math.max(maxOutputTokens, SUMMARIZE_RETRY_MAX_OUTPUT_TOKENS),
-        });
+        modelsNeedingMoreRoom.add(modelFqn);
+        result = await attemptLlm.createNonStream({ messages, max_tokens: roomyCap });
         reply = flattenLlmContent(result.output.content ?? null).trim();
       }
       return { status: 'answered', reply, cutShort: result.finish_reason === 'length' && reply === '' };
