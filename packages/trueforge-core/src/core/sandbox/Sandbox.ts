@@ -102,7 +102,7 @@ import { buildProvisioningEvent } from './driver/provisionEvents';
 import { RunCodeInputSchema, type RunCodeInput, type RunCodeResult } from './driver/RunCodeSchemas';
 import { type HarvestedFile, type RunCodeBackend, type TurnAttachment } from './driver/RunCodeService';
 import { buildExecResultShape } from './execResultSemantics';
-import { getGithubConnectorHint, type GithubConnectorState } from './githubConnectorHint';
+import { getGithubConnectorHint, getOfflineGitFormHint, type GithubConnectorState } from './githubConnectorHint';
 import {
   GIT_REMOTE_CHANGED_REFUSAL,
   gitProbeRunner,
@@ -4663,20 +4663,19 @@ export class Sandbox extends LocalToolMCP {
     if (result.response.exitCode === 0) {
       return withStatus;
     }
+    const unplannedGitNetworkCommand =
+      isGitNetworkCommand(input.command) && planHostAuthenticatedGit({ command: input.command }) === undefined;
     const connectorState: GithubConnectorState = !this.githubConnectorAttached
       ? 'not-attached'
       : this.githubGitToken === null
         ? 'unresolved'
-        : isGitNetworkCommand(input.command) &&
-            (planHostAuthenticatedGit({ command: input.command }) === undefined ||
-              Object.keys(input.env ?? {}).length > 0)
+        : unplannedGitNetworkCommand || (isGitNetworkCommand(input.command) && Object.keys(input.env ?? {}).length > 0)
           ? 'unauthenticated-form'
           : 'attached';
-    const remediation = getGithubConnectorHint({
-      command: input.command,
-      output: execResultOutputText(result),
-      connectorState,
-    });
+    const output = execResultOutputText(result);
+    const remediation =
+      getGithubConnectorHint({ command: input.command, output, connectorState }) ??
+      getOfflineGitFormHint({ output, offline: !this.hasNetwork(), ranInSandbox: unplannedGitNetworkCommand });
     return remediation === undefined ? withStatus : { ...withStatus, remediation };
   }
 
