@@ -177,7 +177,7 @@ function mailCalendarItem({
     ...base,
     status: 'not_set_up',
     message: 'Email and calendar are not set up yet.',
-    next_step: 'Open Settings, Connectors and choose Google to connect them.',
+    next_step: 'Open Settings, Connectors and connect your email and your calendar there.',
   };
 }
 

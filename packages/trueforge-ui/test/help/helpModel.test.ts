@@ -47,7 +47,9 @@ describe('buildIrisHelpMessage', () => {
     expect(message.startsWith('Iris, ')).toBe(true);
     expect(message).toContain('Where are you stuck?');
     expect(message).toContain('- Your model: ok. The model answered.');
-    expect(message).toContain('- Connectors: failed. These connectors did not answer: notion.');
+    expect(message).toContain(
+      '- Connectors: failed. These connectors did not answer: notion. Open Settings, Connectors and check each one.',
+    );
     expect(message).toContain('You were on: Settings, Connectors.');
     expect(message).toContain('Last error: Request failed (500): The connector did not answer.');
   });

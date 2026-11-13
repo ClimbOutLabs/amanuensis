@@ -1,5 +1,7 @@
 /**
- * Leading a person through connecting Google, from chat. The chat holds no secret and starts no sign-in:
+ * Leading a person through connecting Google, from chat, once they ask for the Google card. Mail or a
+ * calendar alone goes to the Connectors page, where the person picks the card for their account.
+ * The chat holds no secret and starts no sign-in:
  * it reads the saved login's state, says the one next step in plain words, and sends the person to the
  * Google page in Settings, Connectors for every step that touches the client file, the secret, the client
  * check, or the consent itself. That page is where the secret is entered, the check runs, and consent
@@ -26,7 +28,7 @@ function jsonResult(value: unknown) {
 }
 
 const NOT_CONNECTED_NEXT =
-  'Not connected. Lead the person through the setup steps one at a time, starting with the Google Cloud project. The client file and the secret go into the form in Settings, then Connectors, then Google, never into this chat.';
+  'The Google card is not connected. If the person asked for the Google card or Google Drive, lead them through the setup steps one at a time, starting with the Google Cloud project. If they only want mail or a calendar, send them to Settings, then Connectors, to pick the card for their account. The client file and the secret go into the form in Settings, then Connectors, then Google, never into this chat.';
 
 const NEEDS_RECONNECT_NEXT =
   'The sign-in expired, so mail, calendar and Drive files are paused. Ask the person to open Settings, then Connectors, then Google, and choose Reconnect. If this keeps happening about once a week, their Google project is still in Testing; the same page says how to publish it.';
@@ -106,7 +108,8 @@ export class GoogleSetupToolSet extends LocalToolMCP {
 
 const GOOGLE_SETUP_INSTRUCTION_SECTION = 'google_setup';
 
-export const GOOGLE_SETUP_INSTRUCTION = `Connecting Google: when the person asks to connect Google, or wants mail or calendar that is not connected yet, offer to lead the setup and call google_setup_status first. Then lead one step at a time, in this order, waiting for the person to say each step is done before giving the next:
+export const GOOGLE_SETUP_INSTRUCTION = `Connecting mail or a calendar: when the person wants mail or a calendar that is not connected yet, send them to Settings, then Connectors, and say they pick the card for their account there. Do not start the Google steps below for that.
+Connecting Google: lead the steps below only when the person asks for the Google card or Google Drive by name. Call google_setup_status first. Then lead one step at a time, in this order, waiting for the person to say each step is done before giving the next:
 1. Make a Google Cloud project at https://console.cloud.google.com/projectcreate (an existing project is fine).
 2. Turn on the Gmail API at https://console.cloud.google.com/apis/library/gmail.googleapis.com and the Google Calendar API at https://console.cloud.google.com/apis/library/calendar-json.googleapis.com (click Enable on each page). For Google Drive, turn on the Drive API at https://console.cloud.google.com/apis/library/drive.googleapis.com, the Docs API at https://console.cloud.google.com/apis/library/docs.googleapis.com and the Sheets API at https://console.cloud.google.com/apis/library/sheets.googleapis.com. Only the ones for what the person picked need turning on.
 3. Set up the consent screen at https://console.cloud.google.com/apis/credentials/consent : choose External, an app name, and their email address.

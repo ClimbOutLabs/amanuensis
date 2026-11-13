@@ -191,6 +191,13 @@ describe('buildHelpHealthCheck', () => {
     });
   });
 
+  it('sends a person with no mail or calendar to the Connectors page, not to one card', () => {
+    const next = item(build(), 'mail_calendar')?.next_step ?? '';
+
+    expect(next).toContain('Settings, Connectors');
+    expect(next).not.toContain('Google');
+  });
+
   it('reports mail and calendar OK when a configured mail or calendar connector answers', () => {
     const check = build({ connectors: [{ name: 'Email', problem: null }] });
 

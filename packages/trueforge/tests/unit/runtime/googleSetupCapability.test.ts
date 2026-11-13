@@ -177,6 +177,18 @@ describe('googleSetupCapability', () => {
     expect(GOOGLE_SETUP_INSTRUCTION).toContain('which still asks before creating a Doc or adding rows to a Sheet');
   });
 
+  it('sends mail or calendar alone to the Connectors page, and keeps the Google steps for the Google card', async () => {
+    // A person who only wants mail or a calendar picks the card for their account; the Cloud project
+    // walkthrough is for someone who asked for the Google card.
+    expect(GOOGLE_SETUP_INSTRUCTION).toContain(
+      'when the person wants mail or a calendar that is not connected yet, send them to Settings, then Connectors',
+    );
+    expect(GOOGLE_SETUP_INSTRUCTION).toContain('Do not start the Google steps below for that.');
+    expect(GOOGLE_SETUP_INSTRUCTION).toContain('only when the person asks for the Google card or Google Drive by name');
+    const next = (await statusResult(await mount()))['next_step'];
+    expect(typeof next === 'string' && next.includes('If they only want mail or a calendar')).toBe(true);
+  });
+
   it('pins that secrets live only in the Settings form, never in chat', () => {
     expect(GOOGLE_SETUP_INSTRUCTION).toContain('go only into the form in Settings');
     expect(GOOGLE_SETUP_INSTRUCTION).toContain('Never ask for the secret or the file in this chat');

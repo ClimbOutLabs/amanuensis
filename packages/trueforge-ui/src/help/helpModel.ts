@@ -126,7 +126,14 @@ export function helpStateLines(state: HelpState): string[] {
  * and the last error text. It never carries chat, mail, calendar or file content.
  */
 export function buildIrisHelpMessage({ check, screen, lastError }: IrisHelpMessageInput): string {
-  const lines = check.items.map(item => `- ${item.name}: ${statusWord(item.status)}. ${item.message}`);
+  // Each line carries the check's own next step, so Iris and the list above her give the same advice.
+  const lines = check.items.map(item =>
+    [
+      `- ${item.name}: ${statusWord(item.status)}.`,
+      item.message,
+      ...(item.next_step === null ? [] : [item.next_step]),
+    ].join(' '),
+  );
   const report = check.host_report;
   if (report.checked_at !== null && report.message !== null) {
     lines.push(`- Last full check at ${report.checked_at}: ${report.message}.`);
