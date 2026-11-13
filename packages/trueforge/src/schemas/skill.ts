@@ -4,6 +4,11 @@
  * SkillManifest is a `type`-discriminated oneOf of GitSkill | TrueFoundryRegistrySkill.
  */
 import { z } from '@hono/zod-openapi';
+import {
+  API_SERVICE_DECLARATIONS,
+  apiServiceHostsCanSend,
+  type ApiServiceDeclaration,
+} from '@truefoundry/trueforge-core/core/connectors/apiServices';
 import { NameSchema } from './common';
 
 const SKILL_TYPES = ['git', 'truefoundry'] as const;
@@ -101,21 +106,18 @@ export const SkillNetworkHostsSchema = z
   .describe('Exact site names the skill needs to reach. The person approves this list in Settings.');
 
 /**
- * Built-in list of sites where a skill can send mail or change a calendar. When a declared list
- * names one of these, the approval in Settings says so in plain words, because approving the site
+ * True when any of the given sites belongs to a service that declares it can send mail or change
+ * a calendar. The fact lives on the service's own declaration in the API service registry, so a
+ * new service brings its answer with it and no list of sites is kept here. When a declared list
+ * names such a site, the approval in Settings says so in plain words, because approving the site
  * approves the sending too: the gateway cannot see inside the encrypted connection to tell a read
- * from a send.
+ * from a send. A site no service declares counts as read-only reach.
  */
-export const SKILL_NETWORK_SEND_CAPABLE_HOSTS: readonly string[] = [
-  'gmail.googleapis.com',
-  'www.googleapis.com',
-  'graph.microsoft.com',
-  'outlook.office365.com',
-];
-
-/** True when any of the given sites can send mail or change a calendar. */
-export function skillNetworkHostsCanSend(hosts: readonly string[]): boolean {
-  return hosts.some(host => SKILL_NETWORK_SEND_CAPABLE_HOSTS.includes(host));
+export function skillNetworkHostsCanSend(
+  hosts: readonly string[],
+  declarations: readonly ApiServiceDeclaration[] = API_SERVICE_DECLARATIONS,
+): boolean {
+  return apiServiceHostsCanSend({ hosts, declarations });
 }
 
 /**
