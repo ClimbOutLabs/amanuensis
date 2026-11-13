@@ -34,7 +34,7 @@ These defaults are a snapshot and are meant to be edited. Set `TOKEN_FACTORY_PRI
 - With **Show agent details** on for the chat, each answer's details show a quiet line with the model, its provider, and the tokens and cost of the whole turn, for example `Nemotron 3 Super · Token Factory · 2,140 tokens (1,800 in, 340 out) · $0.0011 at list price · + 2 helper calls on Nemotron 3 Super`. Helper calls are included in the total.
 - In the same details, each role that ran appears with its model, calls, tokens and cost.
 - **Settings, Models** shows today's tokens and cost per Token Factory model and the daily cap remaining.
-- **Settings, Themes, Answers** switches the line and the helper rows off for you. This changes only what is shown; usage is still counted.
+- **Settings, Appearance, Answers** switches the line and the helper rows off for you. This changes only what is shown; usage is still counted.
 
 Token counts are the usage the provider reported for each call and are never estimated: if a provider reports no usage for a call, the line says `usage not reported`. Cost is an estimate from the price table above, labelled "at list price", not your bill. Usage is recorded for completed turns; a turn that errors or is cancelled shows no line, though its tokens still count toward the daily total.
 

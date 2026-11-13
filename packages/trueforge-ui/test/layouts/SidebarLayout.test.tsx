@@ -364,7 +364,10 @@ describe('SidebarLayout More menu', () => {
 
     // Report a bug renders only when the bug-report feature is wired, as it does on main.
     expect(names).toEqual(expect.arrayContaining(['Start new agent', 'Settings']));
-    expect(within(menu).getByRole('group', { name: 'Appearance' })).toBeInTheDocument();
+    // Light and dark is not in this menu: it has its own button on the chat header.
+    expect(within(menu).queryByRole('group', { name: 'Appearance' })).toBeNull();
+    expect(names).not.toContain('Light');
+    expect(names).not.toContain('Dark');
     for (const railItem of ['Chats', 'New chat', 'Spaces']) {
       expect(names).not.toContain(railItem);
     }
