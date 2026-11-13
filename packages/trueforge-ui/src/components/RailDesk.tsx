@@ -92,6 +92,7 @@ export type RailRecallFact = {
 const READ_LABEL = 'from something read for the person';
 const FINDING_LABEL = 'found earlier by the assistant';
 const REPLY_LABEL = "the assistant's earlier reply";
+const SENT_LABEL = 'a message the person sent';
 const ITEM_LINE = /^\[([^\]]+)\] (.*)$/;
 /** How long ago the day was, which newer records carry between the day and the label. */
 const AGE_PART = /^(today|yesterday|\d+ (day|week|month|year)s? ago)$/;
@@ -122,6 +123,9 @@ function parseBlockLine(line: string): RailRecallFact | undefined {
   }
   if (label === REPLY_LABEL) {
     return { text, date, source: 'assistant', needsCheck: false, origin: `From an earlier reply${when}` };
+  }
+  if (label === SENT_LABEL) {
+    return { text, date, source: 'person', needsCheck: false, origin: `From a message you sent${when}` };
   }
   return { text, date, source: 'person', needsCheck: false, origin: `You said this${when}` };
 }

@@ -1320,6 +1320,8 @@ export class MemoryProcessor implements PreLLMProcessor, PreLLMEphemeralAgentCon
    */
   private async recallAndCache(context: readonly ContextMessage[], applyDamping: boolean): Promise<RecallStats> {
     const budgetReason: BudgetReason = applyDamping ? 'post_compaction' : 'normal';
+    // Read once, so the lines the screen judges and the lines the model sees agree even across midnight.
+    const today = this.today();
     const parts = extractQueryParts(context, this.config.recallQueryWindow);
     if (parts === undefined) {
       return {
@@ -1351,7 +1353,7 @@ export class MemoryProcessor implements PreLLMProcessor, PreLLMEphemeralAgentCon
     });
     const [recall, pages] = await Promise.all([
       this.timedRecall(query, recallBudgetTokens, gate),
-      this.fetchPages(parts, gate),
+      this.fetchPages({ parts, gate, today }),
     ]);
 
     let recallStats: RecallStats;
@@ -1424,11 +1426,12 @@ export class MemoryProcessor implements PreLLMProcessor, PreLLMEphemeralAgentCon
       items,
       pages: pages.entries,
       recallMs: recall.recallMs,
+      today,
     });
     const formatted = formatMemoryBlock({
       results: screening.injectedItems,
       budgetTokens: recallBudgetTokens,
-      today: this.today(),
+      today,
       withheldItems: screening.withheld,
       pages: screening.injectedPages,
       pagesBudgetTokens: this.config.pages.maxTokens,
@@ -1448,7 +1451,7 @@ export class MemoryProcessor implements PreLLMProcessor, PreLLMEphemeralAgentCon
       recordRecallProvenance({
         provenance: this.webSearch.provenance,
         items: screening.injectedItems.slice(0, formatted.includedItems),
-        today: this.today(),
+        today,
       });
       // On a page only the person's own lines make a link or address theirs to use. A line Aman read stays
       // read content, in this chat and every later one.
@@ -1488,10 +1491,15 @@ export class MemoryProcessor implements PreLLMProcessor, PreLLMEphemeralAgentCon
    * sanitized, with the counts the event records. `parts` are the query messages, oldest first.
    * `stats` is undefined on a client without pages. Never fails the turn.
    */
-  private async fetchPages(
-    parts: readonly string[],
-    gate: Promise<MeaningGate> | undefined,
-  ): Promise<{ entries: PageEntry[]; stats: MemoryPagesStats | undefined }> {
+  private async fetchPages({
+    parts,
+    gate,
+    today,
+  }: {
+    parts: readonly string[];
+    gate: Promise<MeaningGate> | undefined;
+    today: string;
+  }): Promise<{ entries: PageEntry[]; stats: MemoryPagesStats | undefined }> {
     const message = parts[parts.length - 1] ?? '';
     if (this.client.loadPages === undefined || message === '') {
       return { entries: [], stats: undefined };
@@ -1500,7 +1508,7 @@ export class MemoryProcessor implements PreLLMProcessor, PreLLMEphemeralAgentCon
       const loaded = await this.client.loadPages({
         message,
         earlierMessages: parts.slice(0, -1),
-        today: this.today(),
+        today,
         maxPages: this.config.pages.maxCount,
         maxTokens: this.config.pages.maxTokens,
         gate: await gate,
@@ -1613,8 +1621,9 @@ export class MemoryProcessor implements PreLLMProcessor, PreLLMEphemeralAgentCon
     items: RecallItem[];
     pages: PageEntry[];
     recallMs: number;
+    today: string;
   }): Promise<ScreenPartition> {
-    const { items, pages, recallMs } = input;
+    const { items, pages, recallMs, today } = input;
     if (!this.config.screen.enabled || this.screenClient === undefined) {
       return {
         injectedItems: items,
@@ -1626,7 +1635,6 @@ export class MemoryProcessor implements PreLLMProcessor, PreLLMEphemeralAgentCon
     }
     const budgetMs = Math.min(this.config.screen.timeoutMs, Math.max(0, this.config.recallTimeoutMs - recallMs));
     const screenDeadline = this.now() + budgetMs;
-    const today = this.today();
 
     // Items first, then pages: input order is preserved through the pool, so per-kind indices and
     // the injected order both stay stable.

@@ -77,6 +77,7 @@ describe('parseRecallFacts', () => {
         '[2026-10-01, 6 weeks ago, found earlier by the assistant] The office is on 5th',
         "[2026-11-13, today, the assistant's earlier reply] The train was booked",
         '[undated, said by the person] The spare key is under the mat',
+        '[2026-11-10, 3 days ago, a message the person sent] See you at the ferry',
       ]),
     );
     const facts = parseRecallFacts([turn]);
@@ -86,12 +87,14 @@ describe('parseRecallFacts', () => {
       'The office is on 5th',
       'The train was booked',
       'The spare key is under the mat',
+      'See you at the ferry',
     ]);
     expect(facts[0]).toMatchObject({ source: 'person', needsCheck: false, origin: 'You said this on 2024-11-02' });
     expect(facts[1]).toMatchObject({ source: 'read', needsCheck: true, date: '2026-11-12' });
     expect(facts[2]).toMatchObject({ source: 'finding', needsCheck: true });
     expect(facts[3]).toMatchObject({ source: 'assistant', needsCheck: false });
     expect(facts[4]).toMatchObject({ source: 'person', origin: 'You said this' });
+    expect(facts[5]).toMatchObject({ source: 'person', origin: 'From a message you sent on 2026-11-10' });
   });
 
   it('caps the list at six', () => {
