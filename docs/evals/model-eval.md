@@ -26,50 +26,58 @@ Use one fixed judge when you compare runs over time. A model that judges its own
 
 ## The weekly run
 
-The workflow `Model evals` starts a throwaway Aman in eval mode on a GitHub runner, runs the models, and posts a score table on the run page. It compares two Nemotron models on Token Factory, with Nemotron 3 Ultra as the judge. To change the weekly models, edit `WEEKLY_MODELS` at the top of `.github/workflows/model-evals.yml`.
+The workflow `Model evals` starts a throwaway Aman in eval mode on a GitHub runner, runs the models, and posts a score table on the run page. By default it runs Meta's Muse Spark 1.1, which also judges the checklist items. To change the weekly models or the judge, edit `WEEKLY_MODELS` and `JUDGE_MODEL` at the top of `.github/workflows/model-evals.yml`.
+
+Models outside Token Factory are listed in `packages/trueforge/evals/eval-providers.json`: the provider's address, the name of the environment variable that holds its key, its models and their prices. Meta's API takes the same requests as OpenAI's, so it is added as a custom provider, the same way a person adds one in Settings. To try another Meta model, add it to that file.
 
 The run turns red when a model's pass rate falls more than 10 points below its last run on the same case set. The score history is kept with the runs on GitHub for 90 days, so a gap of more than 90 days starts a new history.
 
+A model that judges its own replies may be too kind. When you have a second model's key, use it as the judge.
+
+### What a run costs
+
+One run of Muse Spark 1.1 on all 43 cases, with Muse as the judge, should cost about 2 to 3 US dollars at Meta's list price of $1.25 per million input tokens and $4.25 per million output tokens. That is an estimate: the run page shows the cost of each run. It counts the tokens of the eval's chats, so Aman's background work, such as saving memories, can add a little more on the Meta bill.
+
 ### Add the model key once
 
-The weekly run needs a Token Factory key. It is kept in a GitHub environment called `model-evals` that only `main` can use, and the workflow never runs for pull requests, so code in a pull request can never read the key. Only someone who can change the repository's settings can set this up.
+The weekly run needs a Meta API key. It is kept in a GitHub environment called `model-evals` that only `main` can use, and the workflow never runs for pull requests, so code in a pull request can never read the key. Only someone who can change the repository's settings can set this up.
 
 With the GitHub command line tool, run these three commands. The last one asks for the key, so it never shows on screen or in your shell history:
 
 ```sh
 gh api -X PUT repos/ClimbOutLabs/amanuensis/environments/model-evals --input - <<< '{"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true}}'
 gh api -X POST repos/ClimbOutLabs/amanuensis/environments/model-evals/deployment-branch-policies -f name=main -f type=branch
-gh secret set MODEL_EVAL_NEBIUS_API_KEY --env model-evals --repo ClimbOutLabs/amanuensis
+gh secret set MODEL_EVAL_META_API_KEY --env model-evals --repo ClimbOutLabs/amanuensis
 ```
 
-Or on GitHub: open the repository, then **Settings**, then **Environments**, then **New environment**. Name it `model-evals`. Under **Deployment branches and tags**, choose **Selected branches and tags** and add `main`. Then, under **Environment secrets**, add `MODEL_EVAL_NEBIUS_API_KEY` with the key as its value.
+Or on GitHub: open the repository, then **Settings**, then **Environments**, then **New environment**. Name it `model-evals`. Under **Deployment branches and tags**, choose **Selected branches and tags** and add `main`. Then, under **Environment secrets**, add `MODEL_EVAL_META_API_KEY` with the key as its value.
 
-A key with a spending limit is a good choice. One weekly run of the two default models should cost a few dollars. The run page shows the real cost.
+To also run Token Factory models, add a Token Factory key the same way as `MODEL_EVAL_NEBIUS_API_KEY`, and name its models in the run, for example `tokenfactory/nemotron-3-super-120b-a12b`.
 
-Every file the run keeps is checked for the key before it is saved. If the key is ever found, the files are deleted and the run fails.
+Every file the run keeps is checked for the keys before it is saved. If a key is ever found, the files are deleted and the run fails.
 
 ### Run it now, with other models
 
-On GitHub, open **Actions**, then **Model evals**, then **Run workflow**. You can name other models, and add one more Token Factory model by its id.
+On GitHub, open **Actions**, then **Model evals**, then **Run workflow**. You can name other models, and add one more Token Factory model by its id. A Token Factory model needs the Token Factory key.
 
 Or from the command line:
 
 ```sh
-gh workflow run model-evals.yml --repo ClimbOutLabs/amanuensis -f models=tokenfactory/nemotron-3-super-120b-a12b,tokenfactory/nvidia-nemotron-3-nano-30b-a3b
+gh workflow run model-evals.yml --repo ClimbOutLabs/amanuensis -f models=meta/muse-spark-1-1,tokenfactory/nemotron-3-super-120b-a12b
 ```
 
 ## Run it on your own computer
 
 ### With a throwaway instance
 
-This starts a new Aman in eval mode from your checkout, runs the eval, then stops it and deletes its data. It uses Token Factory models, so set your key in the terminal first:
+This starts a new Aman in eval mode from your checkout, runs the eval, then stops it and deletes its data. It adds each provider in `eval-providers.json` whose key you set, and Token Factory when `NEBIUS_API_KEY` is set. Set the key in the terminal first, without it showing on screen:
 
 ```sh
-export NEBIUS_API_KEY=<your key>
-pnpm eval:models:fresh -- --models tokenfactory/nemotron-3-super-120b-a12b,tokenfactory/nvidia-nemotron-3-nano-30b-a3b --judge tokenfactory/nemotron-3-ultra-550b-a55b --label compare
+read -rs META_API_KEY && export META_API_KEY
+pnpm eval:models:fresh -- --models meta/muse-spark-1-1 --judge meta/muse-spark-1-1 --label compare
 ```
 
-To add one more Token Factory model, also set `TOKEN_FACTORY_MODEL` to its id before the run. It then shows in `--models` by its short name, for example `deepseek-ai/DeepSeek-V3.2` becomes `tokenfactory/deepseek-v3-2`.
+To compare with Token Factory models, also set `NEBIUS_API_KEY` and add them to `--models`, for example `--models meta/muse-spark-1-1,tokenfactory/nemotron-3-super-120b-a12b`. To add one more Token Factory model, set `TOKEN_FACTORY_MODEL` to its id before the run. It then shows in `--models` by its short name, for example `deepseek-ai/DeepSeek-V3.2` becomes `tokenfactory/deepseek-v3-2`.
 
 ### With your own eval instance
 

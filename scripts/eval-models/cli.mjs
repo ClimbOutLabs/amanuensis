@@ -187,7 +187,7 @@ async function readHistory(file) {
 
 /**
  * Runs the command. Returns the exit code: 0 ok, 1 failure, 2 usage, 3 a model scored worse than before.
- * @param {{ argv: readonly string[], env?: Record<string, string | undefined>, stdout: (text: string) => void, stderr: (text: string) => void, now?: Date, rootDir?: string, fetchImpl?: typeof fetch, pollIntervalMs?: number, memorySettleMs?: number }} options
+ * @param {{ argv: readonly string[], env?: Record<string, string | undefined>, stdout: (text: string) => void, stderr: (text: string) => void, now?: Date, rootDir?: string, fetchImpl?: typeof fetch, pollIntervalMs?: number, memorySettleMs?: number, extraPrices?: Record<string, { input_per_million: number, output_per_million: number }> }} options
  */
 export async function main({
   argv,
@@ -199,6 +199,7 @@ export async function main({
   fetchImpl = fetch,
   pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
   memorySettleMs,
+  extraPrices = {},
 }) {
   let args;
   try {
@@ -221,7 +222,7 @@ export async function main({
     if (!isRecord(health) || health.eval_mode !== true) {
       throw new Error(NOT_EVAL_INSTANCE_MESSAGE);
     }
-    const prices = await loadPrices(args.pricesPath);
+    const prices = { ...extraPrices, ...(await loadPrices(args.pricesPath)) };
     const tokenSet = await loadTokenSet(path.join(rootDir, ...EVALS_DIR, 'token-set.json'));
     const modelSet = await loadModelSet(path.join(rootDir, ...EVALS_DIR, 'model-set.json'));
     const space = await loadSpaceFixture(path.join(rootDir, ...EVALS_DIR, 'fixtures', 'space.json'));

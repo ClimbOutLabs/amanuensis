@@ -24,6 +24,7 @@ A model eval that runs real models on a fixed set of cases, grades every reply b
 - **Cost from the server.** For Token Factory models the cost comes from the instance's own priced counters, so it matches what Settings shows and includes Aman's background work. Other models are priced from an optional file, or shown as not known.
 - **Eval mode only.** Both commands refuse an instance that is not in eval mode, where mail and calendar are invented, nothing is sent, and only safe approvals go through.
 - **The key stays on main.** The workflow runs only on its schedule or by hand, never for a pull request. The key is a secret of a GitHub environment that only `main` may use, every action is pinned to a commit, the job has read-only permissions, and the run fails and deletes its files if the key appears in anything it keeps.
+- **Providers as data.** Models outside Token Factory are listed in `packages/trueforge/evals/eval-providers.json` with their address, the name of the variable holding their key, and their prices. The throwaway instance adds each one whose key is set as a custom provider, the same way a person adds one in Settings, so no new provider type is needed. The weekly run starts with Meta's Muse Spark, whose API takes OpenAI-style requests.
 - **History as an artifact.** Scores are not committed, so the run needs no write access to the repository.
 
 ## Privacy
@@ -38,4 +39,4 @@ Unit tests use synthetic data and a stand-in instance: the set parser, every rul
 
 - Grading the space eval's prompts, which already score themselves.
 - Web pages with planted instructions, because the eval page host is only served with a web search provider the weekly runner does not have.
-- Models that need keys other than Token Factory in the weekly run. They can be run with `pnpm eval:models` against an instance that has them.
+- Models reachable only on a private network. They can be run with `pnpm eval:models` against an eval instance on that network.

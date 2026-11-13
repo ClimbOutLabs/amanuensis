@@ -1,6 +1,6 @@
 // `pnpm eval:models:fresh`: starts a throwaway eval Aman from this checkout, signs in to it, runs the
-// model eval against it, then stops it and deletes its data. Token Factory models need NEBIUS_API_KEY
-// in the environment; the key goes only to the throwaway instance.
+// model eval against it, then stops it and deletes its data. Token Factory models need NEBIUS_API_KEY,
+// and each provider in evals/eval-providers.json needs the key it names. Keys go only to the instance.
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -10,6 +10,7 @@ import path from 'node:path';
 import { URLSearchParams } from 'node:url';
 import { DEFAULT_ROOT_DIR } from '../eval-tokens/cli.mjs';
 import { main as runModels } from './cli.mjs';
+import { addEvalProviders, loadEvalProviders, providerPrices } from './providers.mjs';
 
 const START_TIMEOUT_MS = 5 * 60 * 1000;
 const EVAL_EMAIL = 'eval@example.com';
@@ -127,13 +128,18 @@ export async function main({ argv, env = process.env, stdout, stderr, rootDir = 
     });
     await waitForHealth({ origin, child });
     const token = await createSignIn({ origin });
-    stderr(`Eval instance ready at ${origin}.\n`);
+    const providers = await loadEvalProviders(path.join(trueforge, 'evals', 'eval-providers.json'));
+    const added = await addEvalProviders({ providers, env, origin, token });
+    stderr(
+      `Eval instance ready at ${origin}${added.length > 0 ? `, with ${added.map(provider => provider.name).join(', ')}` : ''}.\n`,
+    );
     return await runModels({
       argv: ['--instance', origin, ...args],
       env: { ...env, TRUEFORGE_TOKEN: token },
       stdout,
       stderr,
       rootDir,
+      extraPrices: providerPrices(added),
     });
   } catch (error) {
     stderr(`${error instanceof Error ? error.message : 'The eval stopped for an unknown reason.'}\n`);

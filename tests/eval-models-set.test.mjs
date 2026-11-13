@@ -4,6 +4,12 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { CHECK_TYPES, loadModelSet, ModelSetError, parseModelSet } from '../scripts/eval-models/parse.mjs';
+import {
+  addEvalProviders,
+  loadEvalProviders,
+  parseEvalProviders,
+  providerPrices,
+} from '../scripts/eval-models/providers.mjs';
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const evalsDir = path.join(rootDir, 'packages', 'trueforge', 'evals');
@@ -108,4 +114,74 @@ test('duplicate ids, unknown groups and bad memories are refused', () => {
   assert.match(problems, /used more than once/);
   assert.match(problems, /group must be one of memory, safety/);
   assert.match(problems, /needs text and a timestamp/);
+});
+
+test('the shipped eval providers parse, and each priced model is keyed by provider/model', async () => {
+  const providers = await loadEvalProviders(path.join(evalsDir, 'eval-providers.json'));
+  assert.ok(providers.length > 0);
+  for (const provider of providers) {
+    assert.match(provider.base_url, /^https:\/\//);
+  }
+  assert.ok('meta/muse-spark-1-1' in providerPrices(providers));
+});
+
+test('a provider is added only when its key is set, and the key goes only to the instance', async () => {
+  const providers = parseEvalProviders({
+    version: 1,
+    providers: [
+      {
+        name: 'one',
+        base_url: 'https://one.example',
+        api_key_env: 'ONE_KEY',
+        models: [{ model_id: 'm.1', name: 'm-1' }],
+      },
+      {
+        name: 'two',
+        base_url: 'https://two.example',
+        api_key_env: 'TWO_KEY',
+        models: [{ model_id: 'm', name: 'm-2' }],
+      },
+    ],
+  });
+  const sent = [];
+  const fetchImpl = async (url, init) => {
+    sent.push({ url, body: JSON.parse(init.body), authorization: init.headers.authorization });
+    return { ok: true, status: 201 };
+  };
+  const added = await addEvalProviders({
+    providers,
+    env: { ONE_KEY: 'secret-one' },
+    origin: 'http://127.0.0.1:1',
+    token: 'tok',
+    fetchImpl,
+  });
+  assert.deepEqual(
+    added.map(provider => provider.name),
+    ['one'],
+  );
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].url, 'http://127.0.0.1:1/api/v1/settings/model-providers');
+  assert.equal(sent[0].body.manifest.auth.api_key, 'secret-one');
+  assert.equal(sent[0].body.manifest.type, 'custom');
+});
+
+test('a provider with a plain http address or a bad name is refused', () => {
+  assert.throws(
+    () =>
+      parseEvalProviders({
+        version: 1,
+        providers: [{ name: 'Bad Name', base_url: 'http://x.example', api_key_env: 'K', models: [] }],
+      }),
+    /name must be lower-case/,
+  );
+  assert.throws(
+    () =>
+      parseEvalProviders({
+        version: 1,
+        providers: [
+          { name: 'ok', base_url: 'http://x.example', api_key_env: 'K', models: [{ model_id: 'a', name: 'a1' }] },
+        ],
+      }),
+    /https address/,
+  );
 });

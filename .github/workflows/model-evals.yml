@@ -4,8 +4,8 @@ name: Model evals
 # questions, graded by rule checks and a judge model. Each run adds to a score history kept as a
 # run artifact, and the run fails when a model scores clearly worse than its last run.
 #
-# The model key lives only in the `model-evals` environment, which runs on main alone. This workflow
-# never runs for pull requests, so code from a pull request can never see the key.
+# The model keys live only in the `model-evals` environment, which runs on main alone. This workflow
+# never runs for pull requests, so code from a pull request can never see a key.
 on:
   schedule:
     # Mondays 10:41 UTC, off the hour, when scheduled runs start late.
@@ -13,11 +13,11 @@ on:
   workflow_dispatch:
     inputs:
       models:
-        description: 'Models to compare, comma separated, as provider/model. Empty uses the weekly list.'
+        description: 'Models to compare, comma separated, as provider/model, e.g. meta/muse-spark-1-1. Empty uses the weekly list.'
         required: false
         default: ''
       extra_token_factory_model:
-        description: 'Optional extra Token Factory model id, e.g. deepseek-ai/DeepSeek-V3.2. It is then also named in models as tokenfactory/<its short name>.'
+        description: 'Optional extra Token Factory model id (needs the Token Factory key), e.g. deepseek-ai/DeepSeek-V3.2. Name it in models as tokenfactory/<its short name>.'
         required: false
         default: ''
       runs:
@@ -33,10 +33,11 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  # The weekly comparison. Change this line to change which models run every Monday.
-  WEEKLY_MODELS: 'tokenfactory/nemotron-3-super-120b-a12b,tokenfactory/nemotron-3-ultra-550b-a55b'
+  # The weekly models. Change this line to change which models run every Monday. Models come from
+  # packages/trueforge/evals/eval-providers.json, and Token Factory models from its own key.
+  WEEKLY_MODELS: 'meta/muse-spark-1-1'
   # One fixed judge, so scores stay comparable from week to week.
-  JUDGE_MODEL: 'tokenfactory/nemotron-3-ultra-550b-a55b'
+  JUDGE_MODEL: 'meta/muse-spark-1-1'
 
 jobs:
   model-evals:
@@ -49,12 +50,12 @@ jobs:
       actions: read
 
     steps:
-      - name: Check that the model key is set
+      - name: Check that a model key is set
         env:
-          HAS_KEY: ${{ secrets.MODEL_EVAL_NEBIUS_API_KEY != '' }}
+          HAS_KEY: ${{ secrets.MODEL_EVAL_META_API_KEY != '' || secrets.MODEL_EVAL_NEBIUS_API_KEY != '' }}
         run: |
           if [ "$HAS_KEY" != 'true' ]; then
-            echo '::error::The model eval needs a Token Factory key. Add it as the repository secret MODEL_EVAL_NEBIUS_API_KEY, then run this workflow again.'
+            echo '::error::The model eval needs a model key. Add MODEL_EVAL_META_API_KEY to the model-evals environment, then run this workflow again.'
             exit 1
           fi
 
@@ -88,13 +89,16 @@ jobs:
 
       - name: Run the model eval
         env:
+          META_API_KEY: ${{ secrets.MODEL_EVAL_META_API_KEY }}
           NEBIUS_API_KEY: ${{ secrets.MODEL_EVAL_NEBIUS_API_KEY }}
           TOKEN_FACTORY_MODEL: ${{ inputs.extra_token_factory_model }}
           MODELS: ${{ inputs.models || env.WEEKLY_MODELS }}
           RUNS: ${{ inputs.runs || '1' }}
           LABEL: ${{ github.event_name == 'schedule' && 'weekly' || 'on-demand' }}
         run: |
-          if [ -z "$TOKEN_FACTORY_MODEL" ]; then unset TOKEN_FACTORY_MODEL; fi
+          for name in META_API_KEY NEBIUS_API_KEY TOKEN_FACTORY_MODEL; do
+            if [ -z "${!name}" ]; then unset "$name"; fi
+          done
           pnpm eval:models:fresh -- \
             --models "$MODELS" \
             --judge "$JUDGE_MODEL" \
@@ -103,22 +107,26 @@ jobs:
             --history "$RUNNER_TEMP/history/history.json" \
             --out "$RUNNER_TEMP/results"
 
-      # Nothing the run keeps may hold the key. If it ever does, the files are deleted and the run fails.
-      - name: Check that no output holds the model key
+      # Nothing the run keeps may hold a key. If one ever does, the files are deleted and the run fails.
+      - name: Check that no output holds a model key
         if: always()
         env:
+          META_API_KEY: ${{ secrets.MODEL_EVAL_META_API_KEY }}
           NEBIUS_API_KEY: ${{ secrets.MODEL_EVAL_NEBIUS_API_KEY }}
         run: |
-          if [ -z "$NEBIUS_API_KEY" ]; then exit 0; fi
           found=0
-          for dir in "$RUNNER_TEMP/results" "$RUNNER_TEMP/history"; do
-            if [ -d "$dir" ] && grep -rqF -- "$NEBIUS_API_KEY" "$dir"; then
-              rm -rf "$dir"
-              found=1
-            fi
+          for name in META_API_KEY NEBIUS_API_KEY; do
+            key="${!name}"
+            if [ -z "$key" ]; then continue; fi
+            for dir in "$RUNNER_TEMP/results" "$RUNNER_TEMP/history"; do
+              if [ -d "$dir" ] && grep -rqF -- "$key" "$dir"; then
+                rm -rf "$dir"
+                found=1
+              fi
+            done
           done
           if [ "$found" = 1 ]; then
-            echo '::error::An output file held the model key, so the results were deleted and not kept. Do not rerun until the cause is fixed.'
+            echo '::error::An output file held a model key, so the results were deleted and not kept. Do not rerun until the cause is fixed.'
             exit 1
           fi
 
