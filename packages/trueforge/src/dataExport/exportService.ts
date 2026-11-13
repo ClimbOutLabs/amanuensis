@@ -47,6 +47,7 @@ import type { ITurnArtifactStore, TurnArtifactRecord } from '../db/turnArtifactS
 import { personaKnowledgeLocation } from '../personaKnowledge/knowledgePaths';
 import { openPersonaKnowledgeRepository } from '../personaKnowledge/sqliteKnowledgeRepository';
 import type { Persona } from '../personas/persona';
+import { HANDLED_NOTES_FILE } from '../runtime/memory/handledNotes';
 import {
   CURATED_MEMORY_FILE,
   DAILY_LOG_FILE_PATTERN,
@@ -690,7 +691,12 @@ async function writeUploadedFiles<TTransaction>(
   return stored;
 }
 
-const MARKDOWN_MEMORY_FILES = [CURATED_MEMORY_FILE, VAULT_TOMBSTONES_FILE, REVIEWED_FROM_YOU_FILE] as const;
+const MARKDOWN_MEMORY_FILES = [
+  CURATED_MEMORY_FILE,
+  VAULT_TOMBSTONES_FILE,
+  REVIEWED_FROM_YOU_FILE,
+  HANDLED_NOTES_FILE,
+] as const;
 
 /** Persona names held by everyone else who has chats on this instance. */
 async function personaNamesOfOthers<TTransaction>(

@@ -7,7 +7,7 @@ import { appendFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 
-const HANDLED_NOTES_FILE = '.handled-notes';
+export const HANDLED_NOTES_FILE = '.handled-notes';
 const NOTE_ID_PATTERN = /^md:[^:\s]+:\d{4}-\d{2}-\d{2}\.md#\d+$/;
 
 /**

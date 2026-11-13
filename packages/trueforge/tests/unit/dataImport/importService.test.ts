@@ -50,6 +50,7 @@ import { openPersonaKnowledgeRepository } from '../../../src/personaKnowledge/sq
 import { amanGuidePersonaId, legacyAmanGuidePersonaId } from '../../../src/personas/amanGuide/identity';
 import { loadAliasIndex, matchAliases } from '../../../src/runtime/memory/aliasIndex';
 import { EMBEDDING_DIMENSIONS } from '../../../src/runtime/memory/embeddingModel';
+import { appendHandledNote, readHandledNotes } from '../../../src/runtime/memory/handledNotes';
 import { MarkdownMemoryClient } from '../../../src/runtime/memory/markdownMemoryClient';
 import { markReviewedNotesFromYou } from '../../../src/runtime/memory/memorySourceLines';
 import { findReviewCandidates } from '../../../src/runtime/memory/reviewOlderNotes';
@@ -2561,6 +2562,36 @@ describe('runDataImport keeps a review of older notes', () => {
         /^md:default:2026-09-03\.md#0\t[0-9a-f]{64}\n$/,
       );
       expect(await restoredEntryText(target)).toMatch(/> From you$/);
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('carries the list of sorted notes, so an imported note is not sorted onto a page twice', async () => {
+    const source = await makeInstance('source-handled');
+    const target = await makeInstance('target-handled');
+    try {
+      await seedRichInstance({
+        stores: source.stores,
+        tenantId: TENANT,
+        userId: 'alice',
+        memoryDir: source.memoryDir,
+        knowledgeDir: source.knowledgeDir,
+      });
+      const vaultDir = join(source.memoryDir, TENANT);
+      const dayDir = join(vaultDir, 'memory');
+      await mkdir(dayDir, { recursive: true });
+      await writeFile(join(dayDir, `${NOTE_DAY}.md`), `${reviewedNote(`${NOTE_DAY}T10:00:00.000Z`)}\n\n`, 'utf8');
+      await writeFile(join(source.memoryDir, '.source-lines.json'), '{"done":true}\n', 'utf8');
+      const noteId = `md:${TENANT}:${NOTE_DAY}.md#0`;
+      await appendHandledNote({ vaultDir, noteId, outcome: 'chat' });
+
+      const archive = await exportArchive(source, false);
+      expect(readZipEntries(archive).map(entry => entry.name)).toContain(`memory/${TENANT}/.handled-notes`);
+      await runDataImport(importDeps(target), importRequest(archive));
+      const handled = await readHandledNotes(join(target.memoryDir, TENANT));
+      expect([...handled]).toEqual([[`md:default:${NOTE_DAY}.md#0`, 'chat']]);
     } finally {
       await source.close();
       await target.close();

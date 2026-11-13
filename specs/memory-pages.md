@@ -113,7 +113,7 @@ Incognito chats are not involved: this is Settings.
 - Sorting at save time sends the new note and the pages it could belong to, to the same model the chat already uses. With a local model nothing leaves the machine.
 - An incognito chat reads pages and writes none. Every writer here asks the same question every other writer asks.
 - Text Aman read elsewhere is kept apart from the person's own words, is labelled with its source in the words a note uses (`External source: ...`), and is never treated as an instruction. A note's origin is read from its closing line: a note with no line, or an older "no record" line, is read content for sorting, and one closing with `From you`, or reviewed as theirs, is the person's own.
-- Pages travel with an export and come back on import. The history and the index stay behind and are rebuilt.
+- Pages travel with an export and come back on import. The list of handled notes travels with them, so a note that was already sorted is not sorted again after an import. The history and the index stay behind and are rebuilt.
 
 ## Testing
 

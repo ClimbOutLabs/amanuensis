@@ -52,6 +52,7 @@ import { personaKnowledgeLocation } from '../personaKnowledge/knowledgePaths';
 import { amanGuidePersonaId, isAmanGuidePersona, isAnyAmanGuideId } from '../personas/amanGuide/identity';
 import { PERSISTED_ARTIFACT_MIME } from '../runtime/artifacts/persistTurnArtifacts';
 import { requestChatSearchBackfill } from '../runtime/chatSearchIndexing';
+import { HANDLED_NOTES_FILE } from '../runtime/memory/handledNotes';
 import {
   applyVaultTombstones,
   CURATED_MEMORY_FILE,
@@ -1360,7 +1361,8 @@ function planMarkdownMemory(
   const targets = new Set<string>();
   let unusablePages = 0;
   let unreadableNames = 0;
-  const knownFiles = new Set([CURATED_MEMORY_FILE, VAULT_TOMBSTONES_FILE, REVIEWED_FROM_YOU_FILE]);
+  const noteIdFiles = new Set([VAULT_TOMBSTONES_FILE, REVIEWED_FROM_YOU_FILE, HANDLED_NOTES_FILE]);
+  const knownFiles = new Set([CURATED_MEMORY_FILE, ...noteIdFiles]);
   for (const [name, data] of contents.files) {
     const file = memoryFileAt(name);
     if (file === undefined) {
@@ -1388,9 +1390,9 @@ function planMarkdownMemory(
       throw new DataImportError('The memory section of this export belongs to a different account.', 400);
     }
     let bytes = data;
-    if ((inner === VAULT_TOMBSTONES_FILE || inner === REVIEWED_FROM_YOU_FILE) && targetSeg !== sourceSeg) {
-      // Marker entry ids embed the vault namespace segment; retarget them
-      // so edits, deletes and reviews still apply under the new tenant.
+    if (noteIdFiles.has(inner) && targetSeg !== sourceSeg) {
+      // Note ids embed the vault namespace segment; retarget them so edits,
+      // deletes, reviews and the list of sorted notes still apply under the new tenant.
       const text = data.toString('utf8').split(`md:${sourceSeg}:`).join(`md:${targetSeg}:`);
       bytes = Buffer.from(text, 'utf8');
     }
