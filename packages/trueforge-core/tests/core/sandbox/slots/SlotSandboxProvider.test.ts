@@ -6,6 +6,7 @@ import {
   SandboxNotAvailableError,
   SandboxPathIsDirectoryError,
 } from '../../../../src/core/sandbox/SandboxErrors';
+import { buildHostAuthenticatedGitProbe } from '../../../../src/core/sandbox/hostAuthenticatedGit';
 import { SLOT_NOT_READY_MESSAGE } from '../../../../src/core/sandbox/slots/SlotDriver';
 import {
   chatCapacity,
@@ -138,6 +139,34 @@ describe('SlotSandboxProvider', () => {
     expect(started[0]?.requests[0]?.body).toMatchObject({
       argv: ['python3', 'scripts/run.py', '$(id)'],
       cwd: '/workspace/.aman/skills/alpha',
+    });
+  });
+
+  test('a host-built git question reaches the agent without the names the agent refuses', async () => {
+    const { provider, agents: started } = await providerFor([healthy]);
+    const sandboxId = `s1-${'d'.repeat(32)}`;
+    const probe = buildHostAuthenticatedGitProbe({
+      gitArguments: ['remote', 'get-url', 'origin'],
+      workspaceRoot: '/workspace/repo',
+    });
+    await provider.exec({ sandboxId, command: probe.command, cwd: '/workspace/repo', env: probe.env });
+    const sent = bodyOf(started[0]?.requests[0], z.object({ env: z.record(z.string(), z.string()) })).env;
+    const refusedByTheAgent = ['HOME', 'XDG_CONFIG_HOME', 'PATH', 'GIT_ASKPASS', 'GIT_EDITOR', 'GIT_MERGE_AUTOEDIT'];
+    expect(Object.keys(sent).filter(name => refusedByTheAgent.includes(name))).toEqual([]);
+    expect(sent).toMatchObject({ GIT_TERMINAL_PROMPT: '0', GIT_CONFIG_NOSYSTEM: '1' });
+    expect(Number(sent['GIT_CONFIG_COUNT'])).toBeGreaterThan(0);
+  });
+
+  test("a home or PATH of the caller's own choosing still reaches the agent, which refuses it", async () => {
+    const { provider, agents: started } = await providerFor([healthy]);
+    const sandboxId = `s1-${'d'.repeat(32)}`;
+    await provider.exec({
+      sandboxId,
+      command: 'ls',
+      env: { HOME: '/workspace', PATH: '/workspace/bin', GIT_EDITOR: 'vi' },
+    });
+    expect(started[0]?.requests[0]?.body).toMatchObject({
+      env: { HOME: '/workspace', PATH: '/workspace/bin', GIT_EDITOR: 'vi' },
     });
   });
 
