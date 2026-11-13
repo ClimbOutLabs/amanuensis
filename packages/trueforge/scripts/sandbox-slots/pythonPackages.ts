@@ -1,7 +1,8 @@
 /**
  * Python packages the person adds to the sandbox image themselves, on top of the ones Aman ships. The list lives
- * next to the toolchain pack choice and stays until removed; the image build installs it from the Python package
- * site, as ready-made wheels only, without changing any version Aman ships.
+ * next to the toolchain pack choice as a requirements file, one package per line, and stays until removed; the
+ * image build installs it from the Python package site, as ready-made wheels only, without changing any version
+ * Aman ships.
  */
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -46,9 +47,9 @@ export interface PythonPackagesPort {
   update(input: { add: string[]; remove: string[] }): Promise<string[]>;
 }
 
-/** The list is kept in `dir` (ops/sandbox-slot/packs) as python-packages.json, which is local to this machine. */
+/** The list is kept in `dir` (ops/sandbox-slot/packs) as python-packages.txt, which is local to this machine. */
 export function createPythonPackagesPort({ dir }: { dir: string }): PythonPackagesPort {
-  const file = join(dir, 'python-packages.json');
+  const file = join(dir, 'python-packages.txt');
 
   async function selected(): Promise<string[]> {
     let raw: string;
@@ -60,21 +61,22 @@ export function createPythonPackagesPort({ dir }: { dir: string }): PythonPackag
       }
       throw error;
     }
-    const parsed: unknown = JSON.parse(raw);
-    // A hand-edited entry that is not a plain spec is dropped, so it never reaches the image build.
-    return Array.isArray(parsed)
-      ? parsed.filter((item): item is string => typeof item === 'string' && PACKAGE_SPEC.test(item))
-      : [];
+    return raw
+      .split('\n')
+      .map(line => line.trim())
+      .filter(line => PACKAGE_SPEC.test(line));
   }
 
   return {
     async update({ add, remove }) {
       const current = await selected();
       const next = nextPythonPackages({ current, add, remove });
-      if (add.length > 0 || remove.length > 0) {
+      // Written on every run, so a hand-edited line that is not a plain spec (an option such as another package
+      // site, a path, an address) is gone before the image build reads the file.
+      if (next.length > 0 || current.length > 0 || add.length > 0 || remove.length > 0) {
         await mkdir(dir, { recursive: true });
         const partial = `${file}.part`;
-        await writeFile(partial, `${JSON.stringify(next, null, 2)}\n`);
+        await writeFile(partial, next.map(spec => `${spec}\n`).join(''));
         await rename(partial, file);
       }
       return next;

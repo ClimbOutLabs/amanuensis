@@ -162,7 +162,6 @@ describe('runSandboxSlots', () => {
       expect(entry.env).toEqual({
         AMAN_SLOTS_INSTANCE: 'lab',
         AMAN_SLOTS_PACKS: '',
-        AMAN_SLOTS_PYTHON: '',
         AMAN_SLOTS_DISK_MODE: 'vm',
       });
     }
@@ -1179,11 +1178,6 @@ describe('your own Python packages', () => {
     });
     expect(result.ok).toBe(true);
     expect(asked).toEqual([{ add: ['arxiv==2.1.0'], remove: ['lxml'] }]);
-    const compose = calls.filter(call => call.args[0] === 'compose' && call.args[1] !== 'version');
-    expect(compose.length).toBeGreaterThan(0);
-    for (const call of compose) {
-      expect(call.env['AMAN_SLOTS_PYTHON']).toBe('feedparser arxiv==2.1.0');
-    }
     expect(checks).toContain('Your own Python packages in the sandbox: feedparser, arxiv==2.1.0');
   });
 

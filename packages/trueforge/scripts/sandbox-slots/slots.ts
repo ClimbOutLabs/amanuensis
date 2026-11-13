@@ -312,7 +312,6 @@ class Slots {
     const env: Record<string, string> = {
       [INSTANCE_ENV]: this.options.instance,
       AMAN_SLOTS_PACKS: this.packs.join(','),
-      AMAN_SLOTS_PYTHON: this.pythonPackages.join(' '),
       AMAN_SLOTS_DISK_MODE: this.diskMode === 'vm' ? 'vm' : 'none',
     };
     if (this.disksReady && this.diskBytes !== undefined) {

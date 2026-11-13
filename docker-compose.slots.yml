@@ -51,7 +51,6 @@ services:
       context: ops/sandbox-slot
       args:
         AMAN_PACKS: ${AMAN_SLOTS_PACKS:-}
-        AMAN_PYTHON_EXTRA: ${AMAN_SLOTS_PYTHON:-}
     volumes:
       - slot_ws_1:/workspace
       - slot_ctl_1:/run/aman

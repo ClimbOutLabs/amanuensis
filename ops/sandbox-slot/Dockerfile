@@ -98,14 +98,15 @@ RUN apt-get update \
 ARG AMAN_PACKS=""
 RUN --mount=type=bind,source=packs,target=/tmp/packs sh /tmp/packs/install-packs.sh /tmp/packs "${AMAN_PACKS}"
 
-# Python packages the person added with `--add-python`; none by default. Ready-made wheels only, so no package
-# code runs during the install, and every package already in the image is held at its version, so an added one
-# can never change what Aman ships. The list is checked before it gets here; each word is a name or name==version.
-ARG AMAN_PYTHON_EXTRA=""
-RUN if [ -n "${AMAN_PYTHON_EXTRA}" ]; then \
+# Python packages the person added with `--add-python`, from their own packs/python-packages.txt; none by default.
+# That file stays on their machine and is never part of what Aman ships. Ready-made wheels only, so no package code
+# runs during the install, and every package already in the image is held at its version, so an added one can never
+# change what Aman ships. `pnpm sandbox:slots` rewrites the file before each build, one name or name==version a line.
+RUN --mount=type=bind,source=packs,target=/tmp/packs \
+    if [ -s /tmp/packs/python-packages.txt ]; then \
       pip freeze --all > /tmp/shipped.txt \
- && pip install --no-cache-dir --break-system-packages --only-binary=:all: -c /tmp/shipped.txt ${AMAN_PYTHON_EXTRA} \
- && rm -rf /tmp/* /root/.cache; \
+ && pip install --no-cache-dir --break-system-packages --only-binary=:all: -c /tmp/shipped.txt -r /tmp/packs/python-packages.txt \
+ && rm -rf /tmp/shipped.txt /root/.cache; \
     fi
 
 # Mount points for the call directories.

