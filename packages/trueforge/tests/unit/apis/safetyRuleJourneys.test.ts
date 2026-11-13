@@ -1414,7 +1414,7 @@ describe('a skill that reaches a site on the internet', () => {
   );
 
   it(
-    '"Allow once" lets the skill reach its site for the rest of this chat only',
+    '"Allow" lets the skill reach its site for the rest of this chat only',
     async () => {
       const chatId = await startChat();
       const [card] = (await fetchFrom({ chatId, host: SKILL_SITE })).asked;
