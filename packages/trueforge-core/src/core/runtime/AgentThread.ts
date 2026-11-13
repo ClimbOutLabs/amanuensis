@@ -2044,6 +2044,17 @@ export class AgentThread {
             this.addBundleGuidance(builder, bundle);
             return builder.build();
           },
+          // A saved tool result is a JSON envelope, so the text sits in it as a JSON string.
+          inChat: text => {
+            const saved = JSON.stringify(text);
+            return this.context.some(
+              message =>
+                isLLMContextMessage(message) &&
+                message.role === 'tool' &&
+                typeof message.content === 'string' &&
+                message.content.includes(saved),
+            );
+          },
         });
     const capabilities = [
       ...(this.toolBundles === undefined ? [] : [this.toolBundles.capability()]),
