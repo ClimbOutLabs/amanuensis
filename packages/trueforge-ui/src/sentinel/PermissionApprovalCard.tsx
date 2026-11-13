@@ -54,7 +54,7 @@ export type PermissionApprovalCardProps = {
    * only for a Tier 2 card with other Tier 2 calls waiting; Tier 3 never gets it.
    */
   onApproveAll?: (() => void) | undefined;
-  /** How many Tier 2 calls "Approve all" covers, shown on its button. */
+  /** How many Tier 2 calls "Allow all" covers, shown on its button. */
   batchSize?: number | undefined;
   disabled?: boolean;
   /**
@@ -260,7 +260,7 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
         )}
         {onApproveAll !== undefined && (
           <ApprovalButton onClick={onApproveAll} disabled={disabled}>
-            {batchSize === undefined ? 'Approve all' : `Approve all (${String(batchSize)})`}
+            {batchSize === undefined ? 'Allow all' : `Allow all (${String(batchSize)})`}
           </ApprovalButton>
         )}
         {onChangeRequest !== undefined && (

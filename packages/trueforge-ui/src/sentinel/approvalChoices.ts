@@ -3,7 +3,7 @@ import type { SentinelApprovalCard } from './types.js';
 
 /** The approval choices, in the order every approval surface shows them. */
 export const APPROVAL_CHOICES = {
-  approve: { label: 'Approve', hint: 'Allow this one call only.' },
+  approve: { label: 'Allow', hint: 'Allow this one call only.' },
   approveForChat: { label: 'Always allow in this chat', hint: "Don't ask again for this kind of action in this chat." },
   alwaysAllow: { label: 'Always allow everywhere', hint: 'Remember this for every chat.' },
   alwaysAllowTool: {
@@ -29,9 +29,12 @@ export const NEW_RECIPIENT_DRAFT_CHOICES = {
   cancel: { label: "Don't save", hint: 'Do not save this draft. Nothing is added to your send list.' },
 } as const;
 
-/** The buttons on a mail card. Edit is the same path as Change it: the persona revises the mail first. */
+/** The buttons on a mail card. Change it shares the label of every other card; only its hint names sending. */
 export const EMAIL_CHOICES = {
-  edit: { label: 'Edit', hint: 'Ask the persona to change this first. Nothing is sent now.' },
+  changeIt: {
+    label: APPROVAL_CHOICES.changeIt.label,
+    hint: 'Ask the persona to change this first. Nothing is sent now.',
+  },
   saveDraft: { label: 'Save as draft', hint: 'Save this as a draft. Nothing is sent.' },
 } as const;
 

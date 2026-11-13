@@ -95,9 +95,9 @@ describe('HeldActionCard', () => {
     expect(screen.getByText('You have not allowed email to this address before.')).toBeInTheDocument();
   });
 
-  it('offers Approve and Deny, and never a chat-wide or permanent refusal', () => {
+  it('offers Allow and Deny, and never a chat-wide or permanent refusal', () => {
     const { onApprove, onDeny } = renderCard();
-    fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Allow' }));
     fireEvent.click(screen.getByRole('button', { name: 'Deny' }));
     expect(onApprove).toHaveBeenCalledTimes(1);
     expect(onDeny).toHaveBeenCalledTimes(1);
@@ -106,14 +106,14 @@ describe('HeldActionCard', () => {
     expect(screen.queryByRole('button', { name: 'Always allow everywhere' })).not.toBeInTheDocument();
   });
 
-  it('puts Approve first and Keep it last on a safe-first destructive card, with no filled button', () => {
+  it('puts Allow first and Keep it last on a safe-first destructive card, with no filled button', () => {
     const { onApprove, onDeny } = renderCard(
       { alwaysAllowOffered: true, onChangeRequest: vi.fn() },
       { safe_choice: true, destructive: true },
     );
     const buttons = screen.getAllByRole('button');
     expect(buttons.map(button => button.textContent)).toEqual([
-      'Approve',
+      'Allow',
       'Always allow everywhere',
       'Change it',
       'Keep it',
@@ -199,13 +199,13 @@ describe('HeldActionCard', () => {
 
   it('takes the buttons away once the action is answered or has expired', () => {
     renderCard({ status: { kind: 'expired' } });
-    expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Allow' })).not.toBeInTheDocument();
     expect(HELD_EXPIRED_TEXT).toBe('Expired, nothing was done. Ask again in chat.');
   });
 
   it('lets someone who cannot manage the chat read the card without answering it', () => {
     renderCard({ disabled: true });
-    expect(screen.getByRole('button', { name: 'Approve' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Allow' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Deny' })).toBeDisabled();
   });
 

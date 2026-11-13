@@ -291,15 +291,15 @@ describe('PermissionApprovalCard', () => {
     expect(onApprove).not.toHaveBeenCalled();
   });
 
-  it('offers Approve all only when the container passes a batch handler', () => {
+  it('offers Allow all only when the container passes a batch handler', () => {
     renderCard();
-    expect(screen.queryByRole('button', { name: /Approve all/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Allow all/ })).not.toBeInTheDocument();
   });
 
-  it('calls the batch handler from Approve all and shows how many calls it covers', () => {
+  it('calls the batch handler from Allow all and shows how many calls it covers', () => {
     const onApproveAll = vi.fn();
     const { onApprove } = renderCard({}, { onApproveAll, batchSize: 3 });
-    fireEvent.click(screen.getByRole('button', { name: 'Approve all (3)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Allow all (3)' }));
     expect(onApproveAll).toHaveBeenCalledTimes(1);
     expect(onApprove).not.toHaveBeenCalled();
   });
@@ -433,7 +433,7 @@ describe('PermissionApprovalCard always allow this tool', () => {
 });
 
 describe('PermissionApprovalCard "Change it"', () => {
-  // A new persona is a card the person may change; a mail card has its own Edit button.
+  // A new persona is a card the person may change; a mail card has its own Change it button.
   const changeableCard: SentinelApprovalCard = {
     ...baseCard(),
     persona: { name: 'Tax helper', description: 'Files receipts', instructions: 'Keep receipts.', model_name: 'm' },
@@ -455,7 +455,7 @@ describe('PermissionApprovalCard "Change it"', () => {
     return handlers;
   }
 
-  it('shows Change it between Approve and Deny when the container passes a handler', () => {
+  it('shows Change it between Allow and Deny when the container passes a handler', () => {
     renderChangeable();
     const labels = screen.getAllByRole('button').map(button => button.textContent);
     expect(labels).toEqual(['Allow', 'Change it', 'Not now']);

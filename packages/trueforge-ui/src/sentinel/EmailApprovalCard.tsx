@@ -224,14 +224,14 @@ export const EmailApprovalCard: FC<EmailApprovalCardProps> = ({
           </ApprovalButton>
           {onChangeRequest !== undefined && (
             <ApprovalButton
-              title={EMAIL_CHOICES.edit.hint}
+              title={EMAIL_CHOICES.changeIt.hint}
               aria-expanded={changing}
               onClick={() => {
                 setChanging(true);
               }}
               disabled={disabled}
             >
-              {EMAIL_CHOICES.edit.label}
+              {EMAIL_CHOICES.changeIt.label}
             </ApprovalButton>
           )}
           {sending && onSaveDraft !== undefined && (

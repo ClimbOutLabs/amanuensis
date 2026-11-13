@@ -696,7 +696,7 @@ describe('ToolCallContainer', () => {
     expect(screen.getByText('Reviewed result')).toBeInTheDocument();
   });
 
-  it('routes Approve inside a sub-agent to the nested tool approval id', () => {
+  it('routes Allow inside a sub-agent to the nested tool approval id', () => {
     respondToToolApproval.mockClear();
     const SubAgentCard = createSubAgentCardProbe();
     const nestedMessage: ThreadMessage = {
@@ -817,7 +817,7 @@ describe('ToolCallContainer', () => {
     expect(screen.getByRole('button', { name: 'Not now' })).toBeInTheDocument();
   });
 
-  it('routes a root Approve through the runtime onRespondToToolApproval callback', () => {
+  it('routes a root Allow through the runtime onRespondToToolApproval callback', () => {
     const onRespondToToolApproval = vi.fn();
     renderPendingApprovalMessage(
       [
@@ -1046,7 +1046,7 @@ describe('ToolCallContainer', () => {
       ]);
 
       expect(screen.getByText('This request ended. Ask again if you still need it.')).toBeInTheDocument();
-      expect(screen.queryByRole('radio', { name: 'Approve' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('radio', { name: 'Allow' })).not.toBeInTheDocument();
       expect(screen.queryByRole('radio', { name: 'Deny' })).not.toBeInTheDocument();
     });
 

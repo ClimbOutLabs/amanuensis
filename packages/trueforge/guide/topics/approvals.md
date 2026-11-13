@@ -68,7 +68,7 @@ From then on, Aman asks before it uses that tool again.
 A mail card shows who the mail goes to and its full text.
 
 - Click **Allow** to send it.
-- Click **Edit** to ask Aman to change it first.
+- Click **Change it** to ask Aman to change it first.
 - Click **Save as draft** to keep it in your drafts without sending.
 - Click **Don't send** to stop it.
 
@@ -87,13 +87,13 @@ A scheduled run has nobody watching it, so it never acts on its own. It holds ea
 
 1. Open the chat of the scheduled run.
 2. Read each item in the **Needs your OK** list.
-3. Click **Approve** to do it, or **Deny** to drop it. Some items also offer **Always allow everywhere** or **Change it**.
+3. Click **Allow** to do it, or **Deny** to drop it. Some items also offer **Always allow everywhere** or **Change it**.
 
 Held actions expire after 24 hours. [Schedules](schedules.md) explains how runs work.
 
 ## Good to know
 
-- When several actions wait at the same moment, a card may show **Approve all**. It allows all of them together. Some actions never join it, so they still need their own answer.
+- When several actions wait at the same moment, a card may show **Allow all**. It allows all of them together. Some actions never join it, so they still need their own answer.
 - Some cards say "Part of this is not shown in full. Check it before you approve." Open the card and read all of it before you answer.
 - In voice mode, Aman reads an email, calendar or schedule card out loud. It waits for you to say exactly "yes, send it", "yes, approve", "yes, delete it" or "no". Say the whole phrase in one go. Anything else leaves the card waiting.
 - Aman only reads out a card it can say in full: a plain email, a new calendar event with no guests, or deleting a scheduled task. Cards with web links, code, words that are not plain English letters, commands, payments or new addresses stay on the screen. So does a card Aman could not read all the way through.

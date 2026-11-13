@@ -58,7 +58,7 @@ Aman sorts every action into one of three groups before it runs.
 
 ### What the card offers
 
-The card shows what will happen, including what will be sent, before anything leaves your computer. In a chat, the card offers **Allow** and **Not now**. A held action in a scheduled run's list offers **Approve** and **Deny**.
+The card shows what will happen, including what will be sent, before anything leaves your computer. In a chat, the card offers **Allow** and **Not now**. A held action in a scheduled run's list offers **Allow** and **Deny**.
 
 These ask every time, so their cards offer only a yes or a no:
 
@@ -181,7 +181,7 @@ A scheduled run has nobody watching it, so it never sends anything by itself. Th
 
 ### The Needs your OK list
 
-When the run finishes, its chat ends with a **Needs your OK** list: "Aman held these for you. Nothing has been done yet." Each item shows what will happen, with **Approve** and **Deny**. Some read-only connector tools also offer **Always allow everywhere**.
+When the run finishes, its chat ends with a **Needs your OK** list: "Aman held these for you. Nothing has been done yet." Each item shows what will happen, with **Allow** and **Deny**. Some read-only connector tools also offer **Always allow everywhere**.
 
 - The app builds the list from what was held, not from the model's words. So the model can't hide an item or add a fake one.
 - When you approve a held action, Aman checks it again first. If anything the card showed has changed since it was held, such as the guests of an event or the text of a message, nothing is done. Aman says to ask again in chat.

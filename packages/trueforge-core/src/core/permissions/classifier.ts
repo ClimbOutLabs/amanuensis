@@ -1677,7 +1677,7 @@ async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext
         ctx,
         plain_what: `Save ${namedWriteTargets(toolTargets)} in a folder where this workspace keeps programs it can run?`,
         cannot_be_undone:
-          'A program saved here could run instead of a trusted one. Approve only if you asked for this file.',
+          'A program saved here could run instead of a trusted one. Allow only if you asked for this file.',
       }),
       reason: 'sandbox_tool_write',
       reason_detail: 'Writes into the sandbox tool folders always require approval.',

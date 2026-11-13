@@ -21,11 +21,11 @@ const CARDS = ['search', 'calendar', 'email', 'email-new-recipient', 'command', 
  * but the ones it shows always keep this order, so each choice sits in the same place on every card.
  */
 const SLOTS: readonly (readonly string[])[] = [
-  ['Allow', 'Approve', 'Add and send', 'Add and save draft'],
+  ['Allow', 'Add and send', 'Add and save draft'],
   ['Always allow in this chat'],
   ['Always allow everywhere'],
-  ['Approve all', 'Approve all (3)'],
-  ['Change it', 'Edit'],
+  ['Allow all', 'Allow all (3)'],
+  ['Change it'],
   ['Save as draft'],
   ['Not now', 'Deny', 'Keep it', "Don't send", "Don't save"],
 ];
