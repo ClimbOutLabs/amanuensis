@@ -41,7 +41,7 @@ The first time you turn it on, Aman starts from that moment, so old mail doesn't
 - A nudge is a notice on the devices where you turned notices on.
 - A call is a phone call. Calls are not set up yet.
 
-A model suggests how loudly to tell you, and your settings decide. The model's words show only under the bell, never in a notice on your phone. Words in a message, such as "urgent", can never make it louder than a note. Aman sends at most 5 nudges a day unless you change that. Reminders you set never count toward that limit.
+A model suggests how loudly to tell you, and your settings decide. The model's words show only under the bell, never in a notice or a text on your phone. In Full mode, a text carries only a reminder's own words. Words in a message, such as "urgent", can never make it louder than a note. Aman sends at most 5 nudges a day unless you change that. Reminders you set never count toward that limit.
 
 To have an urgent reminder call you once calls are set up, tick **Call me for reminders I mark urgent**.
 

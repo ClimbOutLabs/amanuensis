@@ -59,6 +59,7 @@ import { createAvailableSkillsRouter, type ResolveSkillStore } from './apis/skil
 import { createSpaceFolderAssignmentsRouter, createSpaceFoldersRouter } from './apis/spaceFolders';
 import { createSpacePicturesRouter } from './apis/spacePictures';
 import { createSpacesRouter } from './apis/spaces';
+import { createTextNumberRouter } from './apis/textNumber';
 import { createTurnsRouter } from './apis/turns';
 import { createVoiceRouter } from './apis/voice';
 import type { Authenticator } from './auth/authenticator';
@@ -102,6 +103,7 @@ import type { IModelProviderStore } from './db/modelProviderStore';
 import type { INoticingStore } from './db/noticingStore';
 import type { IPersonalizationStore } from './db/personalizationStore';
 import type { IPersonaStore } from './db/personaStore';
+import type { PersonOwner } from './db/personOwner';
 import type { IPushSubscriptionStore } from './db/pushSubscriptionStore';
 import type { IReachSettingsStore } from './db/reachSettingsStore';
 import type { IRepositoryStore } from './db/repositoryStore';
@@ -113,6 +115,7 @@ import type { SessionCustom, TurnCustom } from './db/sessionCustom';
 import type { ISessionMetricsStore } from './db/sessionMetricsStore';
 import type { ISkillStore } from './db/skillStore';
 import type { ISpaceStore } from './db/spaceStore';
+import type { ITextContactStore } from './db/textContactStore';
 import type { WithTransaction } from './db/transaction';
 import type { ITurnArtifactStore } from './db/turnArtifactStore';
 import type { SchedulerProbe } from './help/healthCheck';
@@ -135,9 +138,11 @@ import type { DeliveryService } from './runtime/delivery/deliveryService';
 import type { EventSubscriptionRegistry } from './runtime/event-subscription';
 import { createVaultClient } from './runtime/memory/vaultClient';
 import type { NoticingService } from './runtime/noticing/noticingService';
+import type { ChannelViewer } from './runtime/noticing/reachChannels';
 import type { ReminderReach } from './runtime/noticing/reminderReach';
 import { resolveSandboxProvider } from './runtime/sessionResources';
 import { createSpacePictureService } from './runtime/spacePictures/spacePictureService';
+import type { TextNumberService } from './runtime/texts/textNumber';
 import { TokenFactoryDailyCapError, type TokenFactoryBudget } from './runtime/tokenFactoryBudget';
 import { envManagedModelProviderNames } from './runtime/tokenFactoryProvider';
 import type { TurnDrainRegistry } from './runtime/turnDrains';
@@ -329,8 +334,13 @@ export interface ServerDeps<TTransaction> {
   noticingService: NoticingService;
   /** Settles how loud a due reminder is. */
   reminderReach: ReminderReach;
-  /** Which phone channels this server can use. Texts and calls are set up by later parts. */
-  reachChannels: () => ReachAvailability;
+  /** Which phone channels this server can use. */
+  reachChannels: (input?: { viewer: ChannelViewer }) => ReachAvailability;
+  /** Whether this person runs Aman, so a problem with the server's setup is worded for them. */
+  isInstanceOwner: (owner: PersonOwner) => boolean;
+  /** The person's number for texts and its confirming. */
+  textNumbers: TextNumberService;
+  textContactStore: ITextContactStore;
   /** The public key a browser needs to turn push on; undefined while push is off. */
   webPushPublicKey: string | undefined;
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
@@ -806,6 +816,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         sentinelAuditStore: deps.sentinelAuditStore,
         deliveryStore: deps.deliveryStore,
         reachSettingsStore: deps.reachSettingsStore,
+        textContactStore: deps.textContactStore,
         turnArtifactStore: deps.turnArtifactStore,
         tokenStore: deps.tokenStore,
         resolveMcpServerStore: deps.resolveMcpServerStore,
@@ -832,6 +843,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       sentinelAuditStore: deps.sentinelAuditStore,
       deliveryStore: deps.deliveryStore,
       reachSettingsStore: deps.reachSettingsStore,
+      textContactStore: deps.textContactStore,
       turnArtifactStore: deps.turnArtifactStore,
       chatSearchIndexer: deps.chatSearchIndexer,
       tokenStore: deps.tokenStore,
@@ -946,9 +958,11 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     withAuth(
       createReachRouter({
         reachStore: deps.reachSettingsStore,
+        textContacts: deps.textContactStore,
         noticingStore: deps.noticingStore,
         deliveryService: deps.deliveryService,
         channels: deps.reachChannels,
+        isInstanceOwner: deps.isInstanceOwner,
         memories: async ({ tenant_id }) => {
           const outcome = await createVaultClient({ logger: deps.logger, tenantId: tenant_id })?.listEntries({
             namespace: '',
@@ -958,6 +972,17 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         },
         resolveRequestContext,
         logger: deps.logger,
+      }),
+      authMiddleware,
+    ),
+  );
+  app.route(
+    '/api/v1/user/reach/texts',
+    withAuth(
+      createTextNumberRouter({
+        textNumbers: deps.textNumbers,
+        available: () => deps.reachChannels().texts.available,
+        resolveRequestContext,
       }),
       authMiddleware,
     ),
