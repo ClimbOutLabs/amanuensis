@@ -43,7 +43,7 @@ describe('approval choices', () => {
         onDeny={vi.fn()}
       />,
     );
-    expect(buttonNames()).toEqual(['Allow', 'Not now', 'Always allow in this chat']);
+    expect(buttonNames()).toEqual(['Allow', 'Always allow in this chat', 'Not now']);
     // A choice the server offers is never folded into the closed Details block.
     expect(screen.getByRole('button', { name: 'Always allow in this chat' }).closest('details')).toBeNull();
     expect(screen.getByRole('button', { name: 'Allow' })).toHaveAttribute('title', 'Allow this one call only.');
@@ -54,7 +54,7 @@ describe('approval choices', () => {
     expect(screen.queryByText(/Always deny/i)).not.toBeInTheDocument();
   });
 
-  it('shows Approve, Always allow everywhere, Deny in that order on a held action, and never Always deny', () => {
+  it('shows Allow, Always allow everywhere, Deny in that order on a held action, and never Always deny', () => {
     render(
       <HeldActionCard
         card={card}
@@ -65,7 +65,7 @@ describe('approval choices', () => {
         onDeny={vi.fn()}
       />,
     );
-    expect(buttonNames()).toEqual(['Approve', 'Always allow everywhere', 'Deny']);
+    expect(buttonNames()).toEqual(['Allow', 'Always allow everywhere', 'Deny']);
     expect(screen.getByRole('button', { name: 'Always allow everywhere' })).toHaveAttribute(
       'title',
       'Run this tool on this connector without asking, in every chat, until you remove it in settings.',
@@ -99,16 +99,16 @@ describe('approval choices', () => {
       </SentinelApiProvider>,
     );
     const terms = (await screen.findAllByRole('term')).map(term => term.textContent);
-    expect(terms).toEqual(['Approve', 'Always allow in this chat', 'Always allow everywhere', 'Deny']);
+    expect(terms).toEqual(['Allow', 'Always allow in this chat', 'Always allow everywhere', 'Deny']);
     expect(screen.queryByText(/Always deny/i)).not.toBeInTheDocument();
   });
 });
 
 describe('grant hint wording', () => {
-  it('never calls the chat persona an agent in a Change it or Edit hint, and says persona', () => {
+  it('never calls the chat persona an agent in a chat or mail Change it hint, and says persona', () => {
     expect(APPROVAL_CHOICES.changeIt.hint).toBe('Ask the persona to change this first. Nothing runs now.');
-    expect(EMAIL_CHOICES.edit.hint).toBe('Ask the persona to change this first. Nothing is sent now.');
-    for (const hint of [APPROVAL_CHOICES.changeIt.hint, EMAIL_CHOICES.edit.hint]) {
+    expect(EMAIL_CHOICES.changeIt.hint).toBe('Ask the persona to change this first. Nothing is sent now.');
+    for (const hint of [APPROVAL_CHOICES.changeIt.hint, EMAIL_CHOICES.changeIt.hint]) {
       expect(hint).not.toMatch(/\bagent\b/i);
     }
   });
@@ -119,7 +119,7 @@ describe('grant hint wording', () => {
     );
   });
 
-  it('shows that hint as the Allow once title on a skill network card', () => {
+  it('shows that hint as the Allow title on a skill network card', () => {
     render(
       <HeldActionCard
         card={{
@@ -133,7 +133,7 @@ describe('grant hint wording', () => {
         onDeny={vi.fn()}
       />,
     );
-    expect(screen.getByRole('button', { name: 'Allow once' })).toHaveAttribute(
+    expect(screen.getByRole('button', { name: 'Allow' })).toHaveAttribute(
       'title',
       'Allow these sites for this chat only. The command runs again with them, unless it needs an approval of its own.',
     );

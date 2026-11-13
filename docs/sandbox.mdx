@@ -40,6 +40,8 @@ The image and the limits for each run come from the server settings, and change 
 
 A script Aman wrote in the chat's workspace runs with `run_code` by name (`script_path`). The run reads a copy of that one file and never changes it.
 
+A program that is a file in the workspace, such as a project's `main.py` or `server.js`, also runs from the shell: `python3 main.py` or `node server.js`. It runs in the workspace, so it can use the project's other files. It asks first, like any other command that is not on the safe list. Code that is not in a file (`python3 -c`, code piped in) is refused in the shell and goes to `run_code`.
+
 Package installs work only on a sandbox that can reach the package mirrors (sandbox slots). They also need downloads allowed: for the repository a chat is working on, or for your chats without a project. The Docker sandbox has no network for packages, so an install there is refused before any approval card. Build, test and run commands still run there as ordinary commands.
 
 Settings no longer offers a choice of sandbox provider. Docker is the only option offered there.

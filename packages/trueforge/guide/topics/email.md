@@ -34,7 +34,7 @@ Click **Answer the one that's waiting** on the new chat screen. Aman finds the o
 
 - **Allow** sends it.
 - **Save as draft** keeps it in your drafts without sending.
-- **Edit** asks Aman to change it first. Tell it what to change.
+- **Change it** asks Aman to change it first. Tell it what to change.
 - **Not now** stops it. Nothing is sent.
 
 When Aman only saves a draft, the card asks "Save this draft?" Saving a draft asks every time too.

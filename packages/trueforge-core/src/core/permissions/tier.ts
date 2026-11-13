@@ -298,7 +298,7 @@ export const Tier3SkillSchema = z
 /**
  * The words an approval card is made of, produced in trueforge-core by one owner per action kind
  * (see cardCopy.ts). The UI renders these three parts and never builds sentences of its own: one
- * headline, one consequence line when it matters, and the tier reason behind "Why I'm asking".
+ * headline, one consequence line when it matters, and the tier reason on its own line.
  * None of the three ever carries an internal id: things are named the way the person names them.
  */
 export const ApprovalCardCopySchema = z
@@ -329,11 +329,13 @@ export const Tier3CardSchema = z
     safe_choice: z
       .boolean()
       .optional()
-      .describe('True when the safe choice is the primary button: the action is irreversible or reaches other people.'),
+      .describe(
+        "True when the action is irreversible or reaches other people, so the no choice uses safe words such as Keep it or Don't send.",
+      ),
     destructive: z
       .boolean()
       .optional()
-      .describe('True when the action destroys or sends something for good, so its button wears the destructive ink.'),
+      .describe('True when the action destroys or sends something for good, so the no choice says Keep it.'),
     plain_why: z
       .string()
       .nullable()

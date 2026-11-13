@@ -79,7 +79,7 @@ Gmail is stricter. A scheduled run can read your Gmail, but it never saves a Gma
 
 When the run finishes, its chat ends with a **Needs your OK** list: "Aman held these for you. Nothing has been done yet."
 
-- Each item shows what will happen, with **Approve** and **Deny**. Some read-only connector tools also offer **Always allow everywhere**.
+- Each item shows what will happen, with **Allow** and **Deny**. Some read-only connector tools also offer **Always allow everywhere**.
 - The app builds the list from what was held, not from the model's words. The model can't hide an item or add a fake one.
 - When you approve an item, Aman checks it again first. If anything the card showed has changed since, such as the guests of an event or the text of a message, nothing is done and Aman says to ask again in chat.
 - Held items expire after 24 hours.

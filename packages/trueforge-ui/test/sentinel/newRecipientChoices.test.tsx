@@ -142,7 +142,7 @@ describe('HeldActionCard for a new recipient', () => {
       />,
     );
     expect(screen.getByRole('button', { name: 'Always allow everywhere' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Allow' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Deny' })).toBeInTheDocument();
   });
 });
