@@ -415,6 +415,7 @@ class HealthTest(unittest.TestCase):
                 "model_error": None,
                 "voices": ["af_heart", "am_michael"],
                 "default_voice": "af_heart",
+                "exact": True,
             },
         )
 

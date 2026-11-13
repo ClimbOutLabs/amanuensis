@@ -34,7 +34,7 @@ A voice loop with three parts: speech input (push-to-talk and hotkey), local tex
 
 ## Voice engine
 
-**One owner.** `VoiceSession` takes audio frames in and puts audio frames out through a `VoiceTransport` (input format, output format, `voiceApprovals`, send audio, clear audio, send event, close). The browser WebSocket is the first transport. A phone line (Twilio Media Streams, 8 kHz mu-law) is a second transport with `voiceApprovals: false` and needs no engine change; the engine decodes mu-law input and asks the voice for mu-law output.
+**One owner.** `VoiceSession` takes audio frames in and puts audio frames out through a `VoiceTransport` (input format, output format, `voiceApprovals`, send audio, clear audio, send event, close). The browser WebSocket is the first transport. A phone line (Twilio Media Streams, 8 kHz mu-law) is a second transport with `voiceApprovals: false` (see [Phone Calls](phone-calls.md)); the engine decodes mu-law input and asks the voice for mu-law output. The one engine addition for it is `say`, which speaks a line no turn asked for, such as a call's opening, and can be interrupted like any reply.
 
 **The loop.** Audio, then speech detection, then `/v1/transcribe` on `aman-stt` (contract unchanged), then a normal agent turn exactly as for a typed message (the app's own turn route, with the person's own session, so auth, tenant scoping and approvals are the same), then sentence splitting, then streaming `aman-tts`, then audio out. Turns are saved as normal chat text.
 
