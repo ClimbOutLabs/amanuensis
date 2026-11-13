@@ -99,6 +99,16 @@ function ActivePersonaChip({
   });
   sessionIdRef.current = sessionId;
 
+  // The menu is rendered at the end of the page, away from its button, so Tab would never reach it.
+  // Move focus to the current choice once it is placed.
+  const menuPlaced = menuStyle !== null;
+  useEffect(() => {
+    if (!menuOpen || !menuPlaced) return;
+    const items = menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]');
+    const chosen = menuRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"][data-chosen="true"]');
+    (chosen ?? items?.item(0))?.focus();
+  }, [menuOpen, menuPlaced]);
+
   useEffect(() => {
     dropHeldPersonaUnlessFor(threadId);
     setHeldId(heldPersonaFor(threadId));
@@ -300,6 +310,7 @@ function ActivePersonaChip({
               <button
                 type="button"
                 role="menuitem"
+                data-chosen={chosenId === null}
                 disabled={triggerDisabled}
                 className={itemClass}
                 onClick={() => applyPersona(null)}
@@ -313,6 +324,7 @@ function ActivePersonaChip({
                   type="button"
                   role="menuitem"
                   aria-label={persona.display_name}
+                  data-chosen={chosenId === persona.id}
                   disabled={triggerDisabled}
                   className={itemClass}
                   onClick={() => applyPersona(persona.id)}

@@ -158,7 +158,10 @@ export function DraftCompositeSelector({ disabled, isRunning, onAttach }: DraftC
       setOpenAndFlush(false);
     };
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpenAndFlush(false);
+      if (e.key !== 'Escape') return;
+      setOpenAndFlush(false);
+      // The picker is rendered away from its button, so hand focus back to Add.
+      containerRef.current?.querySelector<HTMLButtonElement>('button')?.focus();
     };
     document.addEventListener('mousedown', handler);
     document.addEventListener('focusin', handler);
@@ -171,6 +174,14 @@ export function DraftCompositeSelector({ disabled, isRunning, onAttach }: DraftC
   }, [open, setOpenAndFlush]);
 
   useEffect(() => () => clearFlushTimer(), [clearFlushTimer]);
+
+  // The picker is rendered at the end of the page, away from Add, so Tab would never reach it.
+  // Move focus to its open tab once it is placed.
+  const pickerPlaced = pickerStyle !== null;
+  useEffect(() => {
+    if (!open || !pickerPlaced) return;
+    pickerRef.current?.querySelector<HTMLButtonElement>('button[aria-pressed="true"]')?.focus();
+  }, [open, pickerPlaced]);
 
   const toggleConnector = (connector: ConnectorState) => {
     const selected = selectedMcp.some(mount => mount.id === connector.id);
@@ -263,6 +274,7 @@ export function DraftCompositeSelector({ disabled, isRunning, onAttach }: DraftC
                 'text-text-secondary flex flex-1 items-center justify-center gap-1.5 px-2 py-2.5 text-xs font-medium',
                 active && 'text-primary-button-bg border-b-2 border-primary-button-bg',
               )}
+              aria-pressed={active}
               onClick={() => setTab(t.id)}
             >
               <Icon name={t.icon} className="size-3.5" />

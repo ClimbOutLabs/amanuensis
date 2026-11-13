@@ -265,6 +265,21 @@ describe('DraftCompositeSelector', () => {
     }
   });
 
+  it('moves keyboard focus into the add-ons picker, and back to Add on Escape', async () => {
+    renderSelector();
+    openAddOns();
+
+    const picker = await screen.findByRole('dialog', { name: 'Add to composer' });
+    await waitFor(() =>
+      expect(picker).toContainElement(document.activeElement instanceof HTMLElement ? document.activeElement : null),
+    );
+    expect(document.activeElement).toHaveAttribute('aria-pressed', 'true');
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('dialog', { name: 'Add to composer' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add' })).toHaveFocus();
+  });
+
   it('shows Add with its words on the plus button, never a bare icon', () => {
     renderSelector();
     const add = screen.getByRole('button', { name: 'Add' });
