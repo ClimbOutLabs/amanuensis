@@ -622,6 +622,16 @@ doctor_fail_details() {
     sed -e 's/^"state":"fail","detail":"//' -e 's/"$//' -e 's/\\"/"/g' -e 's/\\\\/\\/g' || true
 }
 
+# The fix of the first failing check in a doctor --json report, the one thing to do next. Checks of this computer come
+# before the checks of an instance, so a machine problem an instance failure follows from is named first.
+doctor_first_fail_fix() {
+  local line
+  line=$(printf '%s' "$1" | grep -oE '"state":"fail","detail":"(([^"\\]|\\.)*)","fix":"(([^"\\]|\\.)*)"' | head -n 1 || true)
+  [ -n "$line" ] || return 0
+  line=${line##*'","fix":"'}
+  printf '%s' "${line%'"'}" | sed -e 's/\\"/"/g' -e 's/\\\\/\\/g'
+}
+
 # ---- inputs -----------------------------------------------------------------------------------
 
 # Fills I_* from flags and prompts. Plan-time calls (dry run) never prompt. Which address the app answers at is

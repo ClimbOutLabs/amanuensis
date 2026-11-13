@@ -225,6 +225,7 @@ Common checks and what they mean:
 | disk          | Under 2 GB free is a fail                       | Free space or prune unused images                               |
 | clock         | Machine clock disagrees with the containers     | Set the computer's clock to the right time                     |
 | run_code      | The app cannot reach the sandbox slots, or a slot fails a safety check | Run `aman doctor sandbox --fix`                   |
+| sandbox       | A sandbox slot is stopped or unhealthy. The check says which safety check failed, or why Docker could not start the slot (for example its AppArmor profile is not loaded) | Run `aman doctor sandbox --fix` |
 | model         | Token Factory refuses the key, does not list the model, or the model answers a tool call without `tool_calls` | The check says which; fix `NEBIUS_API_KEY` or `TOKEN_FACTORY_MODEL` in the instance `.env` and restart |
 | public_url    | The public https address does not answer the health check (https instances only) | Check DNS, Caddy (`sudo systemctl status caddy`) and port 443 |
 | public_login  | The login discovery document is not served over https with the configured issuer | Same as above; the issuer in the instance `.env` must be the address Caddy serves for sign-in |
@@ -261,7 +262,7 @@ installer/install.sh upgrade --check   # compare the installed version with the 
 installer/install.sh upgrade           # back up, rebuild, restart, health-check
 ```
 
-Upgrade refuses to start unless doctor shows no failures, unless you pass `--force`. It backs up every instance first, downloads or rebuilds the images, restarts each stack, and checks health. If the upgrade fails after the restart begins, it restores the backup and the previous images, then tells you what it did.
+Upgrade refuses to start unless doctor shows no failures, unless you pass `--force`. When it refuses, it names each failing check and the fix of the first one, which is the one to run before trying again: a sandbox or Docker problem has its own fix, which restarting the instance would not repair. It backs up every instance first, downloads or rebuilds the images, restarts each stack, and checks health. If the upgrade fails after the restart begins, it restores the backup and the previous images, then tells you what it did.
 
 ### Exporting one person's data
 

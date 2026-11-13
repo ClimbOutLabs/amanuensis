@@ -897,11 +897,19 @@ async function checkSandbox(deps: DoctorDeps, list: CheckList, ctx: MachineConte
     }
   }
   if (failedLine === '') {
+    // A slot Docker refused to start (its safety profile not loaded, a
+    // disk not mounted) never ran, so its log is empty; Docker keeps the
+    // reason on the container itself.
+    const inspect = await capture(deps, 'docker', ['inspect', '--format', '{{.State.Error}}', bad]);
+    const startError = inspect.exitCode === 0 ? firstLine(inspect.stdout) : '';
     list.record({
       scope: 'machine',
       id: 'sandbox',
       state: 'fail',
-      detail: 'One of the sandbox slots is not running properly, and its log does not say which check failed.',
+      detail:
+        startError === ''
+          ? 'One of the sandbox slots is not running properly, and its log does not say which check failed.'
+          : `Docker could not start a sandbox slot: ${startError}`,
       fix: 'Run aman doctor sandbox --fix',
     });
     return;

@@ -330,6 +330,40 @@ describe('runSandboxSlots', () => {
       expect(calls.find(call => call.command === 'install')?.args).toContain('/etc/apparmor.d/aman-sandbox-slot');
     });
 
+    test('a profile that is loaded but not kept in /etc/apparmor.d fails, since it is gone after a restart', async () => {
+      const { result, calls } = await run(call => (call.command === 'cmp' ? { exitCode: 1 } : appArmorHost(call)));
+      expect(result).toMatchObject({ ok: false, step: 'apparmor' });
+      expect(!result.ok && result.error).toContain('gone after the next restart');
+      expect(!result.ok && result.fix).toBe(
+        'Run pnpm sandbox:slots --fix. It asks for your password once to keep the profile in /etc/apparmor.d.',
+      );
+      expect(calls.find(call => call.command === 'cmp')?.args).toEqual([
+        '-s',
+        '/repo/ops/sandbox-slot/apparmor/aman-sandbox-slot',
+        '/etc/apparmor.d/aman-sandbox-slot',
+      ]);
+      expect(calls.some(call => call.command === 'sudo')).toBe(false);
+    });
+
+    test('--fix copies a loaded profile that is not kept into /etc/apparmor.d', async () => {
+      let kept = false;
+      const { result, calls } = await run(call => {
+        if (call.command === 'sudo') {
+          kept = true;
+          return undefined;
+        }
+        if (call.command === 'cmp') {
+          return kept ? undefined : { exitCode: 1 };
+        }
+        return appArmorHost(call);
+      }, true);
+      expect(result.ok).toBe(true);
+      expect(calls.filter(call => call.command === 'sudo').map(call => call.args[0])).toEqual([
+        'install',
+        'apparmor_parser',
+      ]);
+    });
+
     test('a profile that cannot be copied into place is a failure that names the fix', async () => {
       const { result, calls } = await run(call => {
         if (call.command === 'sudo') {

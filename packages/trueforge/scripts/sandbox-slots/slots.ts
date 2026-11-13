@@ -1021,17 +1021,33 @@ class Slots {
     return probe.exitCode === 0;
   }
 
+  /**
+   * Whether /etc/apparmor.d holds this profile as it is now, so the system loads it again at boot. A profile that is
+   * only loaded (by hand, or by an older setup) works until the next restart, after which Docker refuses to start
+   * the slots; so a loaded profile alone is not enough.
+   */
+  private async profileKept(profile: string): Promise<boolean> {
+    const same = await this.run({ command: 'cmp', args: ['-s', profile, APPARMOR_INSTALLED_PATH] });
+    return same.exitCode === 0;
+  }
+
   private async ensureProfile(): Promise<void> {
-    if (await this.profileLoaded()) {
+    const profile = join(this.options.repoRoot, PROFILE_PATH);
+    const inUse = await this.profileLoaded();
+    const kept = await this.profileKept(profile);
+    if (inUse && kept) {
       this.record({ step: 'apparmor', status: 'ok', message: `AppArmor profile ${APPARMOR_PROFILE} is loaded` });
       return;
     }
-    const profile = join(this.options.repoRoot, PROFILE_PATH);
     if (!this.mayFix) {
       throw new StepFailure(
         'apparmor',
-        `The AppArmor profile ${APPARMOR_PROFILE} is not loaded on this machine.`,
-        `Run ${this.options.command} --fix. It asks for your password once to load the profile.`,
+        inUse
+          ? `The AppArmor profile ${APPARMOR_PROFILE} is loaded now, but ${APPARMOR_INSTALLED_PATH} does not hold it, so it is gone after the next restart and the sandboxes cannot start then.`
+          : `The AppArmor profile ${APPARMOR_PROFILE} is not loaded on this machine.`,
+        inUse
+          ? `Run ${this.options.command} --fix. It asks for your password once to keep the profile in /etc/apparmor.d.`
+          : `Run ${this.options.command} --fix. It asks for your password once to load the profile.`,
       );
     }
     const asRoot = (args: string[]): { command: string; args: string[] } =>
