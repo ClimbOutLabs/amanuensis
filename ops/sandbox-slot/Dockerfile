@@ -43,7 +43,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       bash coreutils findutils grep sed gawk diffutils patch tar gzip unzip zip \
-      git python3 python3-pip gcc g++ make libc6-dev \
+      git python3 python3-pip python3-venv gcc g++ make libc6-dev \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/* /usr/share/doc /usr/share/man /usr/share/info /usr/share/locale /var/cache/* /var/log/*
 

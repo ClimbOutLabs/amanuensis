@@ -137,6 +137,7 @@ import { resolveDefaultChatModel } from './runtime/defaultChatModel';
 import type { DeliveryService } from './runtime/delivery/deliveryService';
 import type { EventSubscriptionRegistry } from './runtime/event-subscription';
 import { createVaultClient } from './runtime/memory/vaultClient';
+import { createModelProviderChecker } from './runtime/modelProviderCheck';
 import type { NoticingService } from './runtime/noticing/noticingService';
 import type { ChannelViewer } from './runtime/noticing/reachChannels';
 import type { ReminderReach } from './runtime/noticing/reminderReach';
@@ -870,6 +871,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         globalSettingsStore: deps.globalSettingsStore,
         tokenFactoryBudget: deps.tokenFactoryBudget,
         envManagedModelProviderNames: envManagedProviders,
+        checkSavedProvider: createModelProviderChecker({ logger: deps.logger }),
         withTransaction: deps.withTransaction,
         logger: deps.logger,
         resolveRequestContext,

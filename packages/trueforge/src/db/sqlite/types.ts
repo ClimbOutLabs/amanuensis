@@ -34,7 +34,7 @@ import type { CurrentContextUsage } from '@truefoundry/trueforge-core/core/runti
 import type { HelpAreaId } from '@truefoundry/trueforge-core/schemas/personalizationHelpAreas';
 import type { ColumnType, Generated, JSONColumnType } from 'kysely';
 import type { McpServerManifest } from '../../schemas/mcpServer';
-import type { ModelProviderManifest } from '../../schemas/modelProvider';
+import type { ModelProviderCheck, ModelProviderManifest } from '../../schemas/modelProvider';
 import type {
   SandboxBuildMetadata,
   SandboxBuildStatus,
@@ -517,6 +517,8 @@ export interface ModelProviderTable {
   name: string;
   /** ModelProviderManifest document; replaced whole on every upsert */
   manifest: JsonbColumn<ModelProviderManifest>;
+  /** Outcome of the save-time connection check; null when no check has run */
+  last_check: JsonbColumn<ModelProviderCheck> | null;
   created_at: string;
   updated_at: string;
 }

@@ -10,7 +10,7 @@ import {
 } from '../SandboxErrors';
 import type { CodeModeTransport } from '../codeMode/CodeModeTransport';
 import { GIT_PROCESS_PINS } from '../hostAuthenticatedGit';
-import { PACKAGE_UNAVAILABLE_RULE } from '../packageMirrors';
+import { PACKAGE_UNAVAILABLE_RULE, PYTHON_PROJECT_ENVIRONMENT_RULE } from '../packageMirrors';
 import {
   executeVerifiedWorkspaceCommit,
   type ExecResult,
@@ -314,8 +314,10 @@ export class SlotSandboxProvider implements SandboxProvider {
       'SANDBOX RULES:',
       '- Every command starts in a fresh, offline sandbox. Files under /workspace persist between commands; processes do not, so a background process ends when its command returns.',
       '- Python 3, Node.js with TypeScript, bash, git and gcc/g++/make are installed.',
-      '- No general network from code or the shell, by design. The one exception is package downloads: when the person has allowed downloads for the repo this chat is working on, pip, npm, Go and Cargo can fetch packages from the public package sites. Packages that come from a git address cannot be fetched. When downloads are not allowed for the repo, packages cannot be downloaded; ' +
+      '- No general network from code or the shell, by design. The one exception is package downloads: when the person has allowed downloads for this chat (per repository, or one switch for chats without a project), pip, npm, Go and Cargo can fetch packages from the public package sites. Packages that come from a git address cannot be fetched. When downloads are not allowed, packages cannot be downloaded; ' +
         PACKAGE_UNAVAILABLE_RULE,
+      `- ${PYTHON_PROJECT_ENVIRONMENT_RULE}`,
+      "- run_code runs only the code it is given, in an empty folder: it cannot see /workspace or anything installed there. Check a project's files with exec and its code with its tests, not with run_code.",
     ].join('\n');
   }
 
