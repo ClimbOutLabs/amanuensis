@@ -62,7 +62,6 @@ describe('createMemoryPagesCatalog', () => {
                 other_names: [],
                 summary: null,
                 changed_on: '2026-11-01',
-                unconfirmed_count: 2,
                 disagreement_count: 1,
               },
             ],
@@ -75,7 +74,6 @@ describe('createMemoryPagesCatalog', () => {
     const catalog = createMemoryPagesCatalog({ fetch: fetchStub });
 
     const listing = await catalog.listPages('persona:Ada');
-    assert.equal(listing.pages[0]?.unconfirmedCount, 2);
     assert.equal(listing.pages[0]?.disagreementCount, 1);
     assert.deepEqual(listing.skippedFiles, ['people/Bob.md']);
     const page = await catalog.getPage({ kind: 'person', slug: 'wendy' });

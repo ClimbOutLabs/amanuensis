@@ -13,6 +13,4 @@ export interface MemoryPageSummary {
     /** The line under the title, or null when the page has none. */
     summary: string | null;
     title: string;
-    /** Lines waiting under Unconfirmed. */
-    unconfirmedCount: number;
 }

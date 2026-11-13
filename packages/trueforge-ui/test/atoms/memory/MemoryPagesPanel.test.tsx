@@ -70,7 +70,7 @@ const PAIR: MemoryPageDisagreement = {
   foundOn: '2026-11-11',
 };
 
-function summaryOf(page: MemoryPageDetail, unconfirmedCount: number) {
+function summaryOf(page: MemoryPageDetail) {
   return {
     kind: page.kind,
     slug: page.slug,
@@ -78,7 +78,6 @@ function summaryOf(page: MemoryPageDetail, unconfirmedCount: number) {
     otherNames: page.otherNames,
     summary: page.summary,
     changedOn: '2026-11-01',
-    unconfirmedCount,
     disagreementCount: page.disagreements.length,
   };
 }
@@ -99,9 +98,7 @@ function createCatalog({ pages = [WENDY, MADRID] }: { pages?: MemoryPageDetail[]
   };
   const catalog: MemoryPagesCatalog = {
     listPages: async () => ({
-      pages: stored.map(page =>
-        summaryOf(page, page.sections.find(section => section.name === 'Unconfirmed')?.lines.length ?? 0),
-      ),
+      pages: stored.map(page => summaryOf(page)),
       skippedFiles: [],
     }),
     getPage: async ({ slug }) => find(slug),
@@ -189,11 +186,11 @@ describe('MemoryPagesPanel', () => {
     expect(screen.getByText(/fills pages as you talk/)).toBeInTheDocument();
   });
 
-  it('lists people and matters with a count of lines to confirm, and searches names and other names', async () => {
+  it('lists people and matters with no count of lines to confirm, and searches names and other names', async () => {
     renderPanel(createCatalog({}).catalog);
     const people = await screen.findByRole('region', { name: 'People' });
     expect(within(people).getByText('Wendy')).toBeInTheDocument();
-    expect(within(people).getByText('1 to confirm')).toBeInTheDocument();
+    expect(within(people).queryByText(/to confirm/)).not.toBeInTheDocument();
     expect(within(screen.getByRole('region', { name: 'Matters' })).getByText('The Madrid move')).toBeInTheDocument();
     expect(within(people).getByText('The owner’s wife.')).toBeInTheDocument();
     expect(within(people).getByText(/^Updated .*2026/)).toBeInTheDocument();
@@ -209,10 +206,12 @@ describe('MemoryPagesPanel', () => {
     renderPanel(createCatalog({}).catalog);
     await openWendy();
     const unconfirmed = screen.getByRole('region', { name: 'Unconfirmed' });
-    expect(within(unconfirmed).getByText('Not confirmed')).toBeInTheDocument();
+    expect(within(unconfirmed).getByText(/You do not need to do anything/)).toBeInTheDocument();
     expect(within(unconfirmed).getByText('External source: read content')).toBeInTheDocument();
+    expect(within(unconfirmed).queryByRole('button', { name: /^Confirm:/ })).not.toBeInTheDocument();
+    expect(within(unconfirmed).queryByRole('button', { name: /^Dismiss:/ })).not.toBeInTheDocument();
     const now = screen.getByRole('region', { name: 'Now' });
-    expect(within(now).queryByText('Not confirmed')).not.toBeInTheDocument();
+    expect(within(now).queryByRole('button', { name: /^More for:/ })).not.toBeInTheDocument();
     expect(within(now).getByText('From you')).toBeInTheDocument();
     expect(within(now).getByText(/^since .*Nov.*2026$/)).toBeInTheDocument();
     expect(within(now).queryByText(/2026-11-11/)).not.toBeInTheDocument();
@@ -224,6 +223,7 @@ describe('MemoryPagesPanel', () => {
     const { catalog, calls } = createCatalog({});
     renderPanel(catalog);
     await openWendy();
+    fireEvent.click(screen.getByRole('button', { name: 'More for: Might travel in November.' }));
     fireEvent.click(screen.getByRole('button', { name: 'Confirm: Might travel in November.' }));
     await waitFor(() =>
       expect(calls.confirm).toHaveBeenCalledWith(
@@ -237,6 +237,7 @@ describe('MemoryPagesPanel', () => {
     const { catalog, calls } = createCatalog({});
     renderPanel(catalog);
     await openWendy();
+    fireEvent.click(screen.getByRole('button', { name: 'More for: Might travel in November.' }));
     fireEvent.click(screen.getByRole('button', { name: 'Dismiss: Might travel in November.' }));
     await waitFor(() => expect(calls.dismiss).toHaveBeenCalledWith(expect.objectContaining({ factId: 'f_03' })));
     await waitFor(() => expect(screen.queryByText('Might travel in November.')).not.toBeInTheDocument());

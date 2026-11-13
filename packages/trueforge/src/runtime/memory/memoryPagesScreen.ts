@@ -315,11 +315,6 @@ function sectionLines(section: PageSectionBlock): MemoryPageLine[] {
   });
 }
 
-function unconfirmedCount(page: MemoryPage): number {
-  const section = page.sections.find(candidate => candidate.name === 'Unconfirmed');
-  return section === undefined ? 0 : sectionLines(section).length;
-}
-
 function disagreementView(pair: LiveDisagreement): MemoryPageDisagreement {
   return { id: pair.id, first: pair.first, second: pair.second, reason: pair.reason, found_on: pair.foundOn };
 }
@@ -348,7 +343,6 @@ export async function listPagesForScreen(vaultDir: string): Promise<MemoryPageLi
       other_names: page.frontMatter.aliases,
       summary: pageDescription(page) ?? null,
       changed_on: changed,
-      unconfirmed_count: unconfirmedCount(page),
       disagreement_count: disagreementsOf({ kind, slug, page }).length,
     });
   }

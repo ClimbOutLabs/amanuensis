@@ -116,16 +116,14 @@ describe('memory pages API', () => {
     await rm(baseDir, { recursive: true, force: true });
   });
 
-  it('lists pages with summary, unconfirmed count and the files it could not read', async () => {
+  it('lists pages with summary and the files it could not read', async () => {
     await seed();
     await writeFile(join(vault(), 'people', 'Bob Smith.md'), '# Bob\n');
     const body = PageListSchema.parse(await (await call('')).json());
-    expect(body.data.pages.map(page => [page['kind'], page['slug'], page['title'], page['unconfirmed_count']])).toEqual(
-      [
-        ['person', 'wendy', 'Wendy', 1],
-        ['matter', 'the-madrid-move', 'The Madrid move', 0],
-      ],
-    );
+    expect(body.data.pages.map(page => [page['kind'], page['slug'], page['title']])).toEqual([
+      ['person', 'wendy', 'Wendy'],
+      ['matter', 'the-madrid-move', 'The Madrid move'],
+    ]);
     expect(body.data.pages[0]?.['summary']).toBe("The owner's wife. Lives with them; plans are shared.");
     expect(body.data.pages[0]?.['other_names']).toEqual(['Wendy', 'my wife', 'wendy@example.com']);
     expect(body.data.pages[0]?.['changed_on']).toMatch(/^\d{4}-\d{2}-\d{2}$/);

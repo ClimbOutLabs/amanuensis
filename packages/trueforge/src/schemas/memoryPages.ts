@@ -20,7 +20,6 @@ export const MemoryPageSummarySchema = z
     other_names: z.array(z.string()),
     summary: z.string().nullable().describe('The line under the title, or null when the page has none.'),
     changed_on: z.string().nullable().describe('The day the page file last changed, as `YYYY-MM-DD` in UTC.'),
-    unconfirmed_count: z.number().int().min(0).describe('Lines waiting under Unconfirmed.'),
     disagreement_count: z.number().int().min(0).describe('Pairs of lines the nightly check found that disagree.'),
   })
   .openapi('MemoryPageSummary');

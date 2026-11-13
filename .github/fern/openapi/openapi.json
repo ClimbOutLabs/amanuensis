@@ -7561,11 +7561,6 @@
           },
           "title": {
             "type": "string"
-          },
-          "unconfirmed_count": {
-            "description": "Lines waiting under Unconfirmed.",
-            "minimum": 0,
-            "type": "integer"
           }
         },
         "required": [
@@ -7575,7 +7570,6 @@
           "other_names",
           "summary",
           "changed_on",
-          "unconfirmed_count",
           "disagreement_count"
         ],
         "type": "object"

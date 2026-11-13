@@ -125,20 +125,32 @@ function PageLineRow({
   state: MemoryPagesState;
 }) {
   const [section, setSection] = useState('Now');
+  // The choices stay folded away: an unconfirmed line is safe as it is, so nothing here asks to be cleared.
+  const [choosing, setChoosing] = useState(false);
   const dates = lineDates(line);
   return (
     <li className="pl-1 marker:text-text-secondary">
       <span className="flex flex-col gap-1">
         <span className="whitespace-pre-wrap break-words text-sm text-text-primary">{line.text}</span>
         <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-text-secondary">
-          {unconfirmed ? <span className="font-medium">Not confirmed</span> : null}
           <span>{line.sourceLabel}</span>
           {dates === null ? null : <span>{dates}</span>}
+          {unconfirmed && line.id !== null ? (
+            <button
+              type="button"
+              aria-label={`More for: ${line.text}`}
+              aria-expanded={choosing}
+              onClick={() => setChoosing(open => !open)}
+              className="rounded underline underline-offset-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus-ring"
+            >
+              More
+            </button>
+          ) : null}
         </span>
         {unconfirmed ? (
           line.id === null ? (
             <span className="text-xs text-text-secondary">Edit the page to change this line.</span>
-          ) : (
+          ) : !choosing ? null : (
             <span className="flex flex-wrap items-center gap-2">
               {sections.length > 1 ? (
                 <select
@@ -249,6 +261,12 @@ function PageSections({ page, state }: { page: MemoryPageDetail; state: MemoryPa
         return (
           <section key={section.name} aria-label={section.name} className="flex flex-col gap-2">
             <h4 className="text-xs font-semibold text-text-secondary">{section.name}</h4>
+            {section.name === 'Unconfirmed' ? (
+              <p className="text-xs text-text-secondary">
+                Aman read or guessed these. It uses them as facts, never as your instructions. You do not need to do
+                anything.
+              </p>
+            ) : null}
             {list}
           </section>
         );

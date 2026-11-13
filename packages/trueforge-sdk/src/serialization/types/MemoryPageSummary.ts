@@ -16,7 +16,6 @@ export const MemoryPageSummary: core.serialization.ObjectSchema<
     slug: core.serialization.string(),
     summary: core.serialization.string().nullable(),
     title: core.serialization.string(),
-    unconfirmedCount: core.serialization.property("unconfirmed_count", core.serialization.number()),
 });
 
 export declare namespace MemoryPageSummary {
@@ -28,6 +27,5 @@ export declare namespace MemoryPageSummary {
         slug: string;
         summary?: string | null;
         title: string;
-        unconfirmed_count: number;
     }
 }

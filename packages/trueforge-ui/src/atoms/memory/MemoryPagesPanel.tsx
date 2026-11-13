@@ -27,11 +27,6 @@ function PageRow({ page, state }: { page: MemoryPageSummary; state: MemoryPagesS
       >
         <span className="flex flex-wrap items-center gap-2 text-sm font-medium text-text-primary">
           <span className="min-w-0 break-words">{page.title}</span>
-          {page.unconfirmedCount > 0 ? (
-            <span className="rounded-full border border-border px-2 text-xs font-normal text-text-secondary">
-              {String(page.unconfirmedCount)} to confirm
-            </span>
-          ) : null}
           {page.disagreementCount > 0 ? (
             <span className="rounded-full border border-border px-2 text-xs font-normal text-text-secondary">
               {String(page.disagreementCount)} {page.disagreementCount === 1 ? 'pair disagrees' : 'pairs disagree'}

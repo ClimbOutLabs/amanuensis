@@ -15,7 +15,6 @@ const PageSummarySchema = z
     other_names: z.array(z.string()),
     summary: z.string().nullable(),
     changed_on: z.string().nullable(),
-    unconfirmed_count: z.number(),
     // Absent from a server that predates the nightly check.
     disagreement_count: z.number().default(0),
   })
@@ -26,7 +25,6 @@ const PageSummarySchema = z
     otherNames: page.other_names,
     summary: page.summary,
     changedOn: page.changed_on,
-    unconfirmedCount: page.unconfirmed_count,
     disagreementCount: page.disagreement_count,
   }));
 
