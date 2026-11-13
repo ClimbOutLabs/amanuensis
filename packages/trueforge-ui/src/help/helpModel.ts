@@ -5,12 +5,16 @@ import { AMAN_GUIDE_NAME } from '@truefoundry/trueforge-core/core/personas/guide
  */
 export type HelpHealthStatus = 'pass' | 'warn' | 'fail' | 'not_set_up';
 
+/** The Settings section where a line's next step is done, so the step can open it. */
+export type HelpSettingsSection = 'models' | 'connectors' | 'sandbox';
+
 export interface HelpHealthItem {
   id: string;
   name: string;
   status: HelpHealthStatus;
   message: string;
   next_step: string | null;
+  settings_section: HelpSettingsSection | null;
 }
 
 export type HelpHostReportState = 'ok' | 'missing' | 'invalid' | 'stale';
@@ -33,13 +37,10 @@ export interface HelpConnectorState {
   last_error: string | null;
 }
 
-export type HelpGoogleLoginState = 'answered' | 'needs_reconnect' | 'no_answer' | 'not_set_up';
-
 /** What the guide reads to say the one thing to do next. Field names match the server's, so the guide can name them. */
 export interface HelpState {
   setup_steps: HelpSetupStep[];
   connectors: HelpConnectorState[];
-  google_login: HelpGoogleLoginState;
   sandbox_ready: boolean;
   app_version: string;
   build_ref: string | null;
@@ -115,7 +116,6 @@ export function helpStateLines(state: HelpState): string[] {
   return [
     `- setup_steps: ${steps}`,
     `- connectors: ${connectors}`,
-    `- google_login: ${state.google_login}`,
     `- sandbox_ready: ${state.sandbox_ready ? 'yes' : 'no'}`,
     `- app_version: ${state.app_version}${build}`,
   ];
@@ -126,7 +126,14 @@ export function helpStateLines(state: HelpState): string[] {
  * and the last error text. It never carries chat, mail, calendar or file content.
  */
 export function buildIrisHelpMessage({ check, screen, lastError }: IrisHelpMessageInput): string {
-  const lines = check.items.map(item => `- ${item.name}: ${statusWord(item.status)}. ${item.message}`);
+  // Each line carries the check's own next step, so Iris and the list above her give the same advice.
+  const lines = check.items.map(item =>
+    [
+      `- ${item.name}: ${statusWord(item.status)}.`,
+      item.message,
+      ...(item.next_step === null ? [] : [item.next_step]),
+    ].join(' '),
+  );
   const report = check.host_report;
   if (report.checked_at !== null && report.message !== null) {
     lines.push(`- Last full check at ${report.checked_at}: ${report.message}.`);

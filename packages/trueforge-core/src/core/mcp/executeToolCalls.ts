@@ -42,6 +42,7 @@ import { toJsonSafeParams } from '../permissions/approvalTokens';
 import { heldCallAuditText, recordNotPreparedRefusals, recordUnattendedSpaceChange } from '../permissions/audit';
 import type { SentinelDispatchContext } from '../permissions/context';
 import { HELD_REASON_CODE, HELD_RESULT_TEXT } from '../permissions/heldActions';
+import type { SkillNetworkCardRequest } from '../permissions/skillNetworkCards';
 import { isMapsCardReason } from '../permissions/mapsToolNames';
 import { collectOutboundStrings } from '../permissions/outboundGuard';
 import {
@@ -101,6 +102,8 @@ export interface ToolCallResult {
   blockedPrivateFallback: boolean;
   repeatedSideEffect: boolean;
   verificationReceiptCandidate: WorkspaceVerificationReceiptCandidate | undefined;
+  /** Skill network cards this result's command asked for, carried from the sandbox; absent when it asked for none. */
+  skillNetworkCards?: readonly SkillNetworkCardRequest[] | undefined;
   disposition: ToolResultDisposition;
   remediation: ToolResultRemediation | undefined;
   /** Set by a response processor that changed the result text; absent when the model saw it as returned. */
@@ -1838,7 +1841,15 @@ export async function executeToolCalls({
       // describe a world that no longer exists, so only an entry stamped
       // with the current mutation epoch may be replayed. A stale entry
       // falls through to a fresh dispatch, whose result replaces it below.
-      const previous = completedEntry?.mutationEpoch === memoState.workspaceMutationEpoch ? completedEntry : undefined;
+      // An approved replay is never served from the memo either: the owner just answered for
+      // this call, so handing back its stored result would defeat the answer (a skill network
+      // card's command must run again under the grant the answer recorded).
+      const previous =
+        approvalDecision?.status === 'allow'
+          ? undefined
+          : completedEntry?.mutationEpoch === memoState.workspaceMutationEpoch
+            ? completedEntry
+            : undefined;
       if (previous !== undefined) {
         previous.count += 1;
         return {
@@ -2566,6 +2577,7 @@ export async function executeToolCalls({
       blockedPrivateFallback,
       repeatedSideEffect,
       verificationReceiptCandidate: response.verificationReceiptCandidate,
+      ...(response.skillNetworkCards === undefined ? {} : { skillNetworkCards: response.skillNetworkCards }),
       disposition,
       remediation: resultRemediation,
       admissionProvenance: resultAdmissionProvenance,

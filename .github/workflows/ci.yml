@@ -268,7 +268,7 @@ jobs:
           if (changed('GMAIL_MCP')) changedPackages.push('gmail-mcp');
           if (changed('PROMPT_GUARD')) changedPackages.push('prompt-guard');
           console.log(`list=${JSON.stringify(changedPackages)}`);
-          const arm64Images = ['app'];
+          const arm64Images = [];
           if (changed('AMAN_STT_IMAGE')) arm64Images.push('aman-stt');
           if (changed('AMAN_TTS_IMAGE')) arm64Images.push('aman-tts');
           if (changed('CALENDAR_IMAGE')) arm64Images.push('calendar');
@@ -460,6 +460,15 @@ jobs:
         if: matrix.arch == 'arm64' && (matrix.package == 'frontend' || matrix.package == 'trueforge')
         working-directory: packages/${{ matrix.package }}
         run: pnpm exec playwright-core install --with-deps chromium
+
+      # These suites compile every dependency they load, which takes longer than the tests themselves on a cold run.
+      - name: Cache compiled test files
+        if: matrix.package == 'trueforge' || matrix.package == 'trueforge-core'
+        uses: actions/cache@v6.1.0
+        with:
+          path: packages/${{ matrix.package }}/node_modules/.cache/jest
+          key: jest-${{ matrix.package }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: jest-${{ matrix.package }}-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Test
         env:
@@ -997,10 +1006,11 @@ jobs:
 
   # Aman runs in Docker, and on Apple silicon and arm servers the installer builds every image for arm64.
   # Each image is built natively on an arm64 runner the way installer/lib/release.sh builds it. The app
-  # image is also started the way an instance starts it, which builds the sandbox slot image too.
+  # image is built and started in the arm64 compose smoke job below, so it is not built a second time here.
   arm64-images:
     name: Image (${{ matrix.image }}, arm64)
     needs: detect-changes
+    if: needs.detect-changes.outputs.arm64-images != '[]'
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 45
     strategy:
@@ -1011,10 +1021,6 @@ jobs:
     steps:
       - name: Check out repository code
         uses: actions/checkout@v7
-
-      - name: Build and start the app image
-        if: matrix.image == 'app'
-        run: bash installer/tests/image-runtime.sh
 
       - name: Build the speech-to-text image
         if: matrix.image == 'aman-stt'
@@ -1049,7 +1055,8 @@ jobs:
           done
 
   # `docker compose up` from source, the documented way to run the full stack, on both architectures:
-  # every image must build and every service must report healthy.
+  # every image must build and every service must report healthy. On arm64 the app image this job built
+  # is then started the way an instance starts it, which builds the sandbox slot image too.
   compose-smoke:
     name: Compose smoke (${{ matrix.arch }})
     runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
@@ -1087,6 +1094,13 @@ jobs:
       - name: Stop the stack
         if: always()
         run: pnpm smoke:down -v
+
+      # Reuses the image the stack built, after the stack is gone so the two do not share the runner's memory.
+      - name: Start the app image the way an instance does
+        if: matrix.arch == 'arm64'
+        env:
+          AMAN_TEST_IMAGE: truefoundry-server:latest
+        run: pnpm test:installer-image
 
   # https://github.com/marketplace/actions/alls-green#why
   check:
@@ -1164,5 +1178,5 @@ jobs:
           [ "$FEATURE_COVERAGE" = success ] || exit 1
           [ "$GENERATED_CONTRACT_DRIFT" = success ] || exit 1
           [ "$ARM64_BUILD" = success ] || exit 1
-          [ "$ARM64_IMAGES" = success ] || exit 1
+          ok "$ARM64_IMAGES" || exit 1
           [ "$COMPOSE_SMOKE" = success ] || exit 1

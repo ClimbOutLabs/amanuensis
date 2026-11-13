@@ -137,10 +137,6 @@ Here are a few more things to try:
 
 Your chats and settings stay on the computer. They are there when you sign in again.
 
-## New answers in your chats
-
-In the list of chats, a dot and a bold title mark a chat with an answer you have not opened yet. Open the chat and the mark goes away. Each browser keeps its own marks, so reading a chat on your phone does not clear its mark on your laptop.
-
 ## Related
 
 - [Ideas to try](ideas.md)

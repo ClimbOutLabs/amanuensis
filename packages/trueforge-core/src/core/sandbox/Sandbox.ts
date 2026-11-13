@@ -31,6 +31,7 @@ import type { MappedMCPTool } from '../mcp/convertMCPServers';
 import {
   isCallToolResponseResult,
   toolResultResponse,
+  type CallToolResolvedResponse,
   type CallToolResponse,
   type IToolSet,
   type ToolInvocationContext,
@@ -66,6 +67,7 @@ import {
   pinReadOnlyList,
   type PinnedReadOnlyList,
 } from '../permissions/shellAllowlist';
+import type { SkillNetworkCardRequest } from '../permissions/skillNetworkCards';
 import type { Tier3Card } from '../permissions/tier';
 import type { AbnormalHandoffEvidence } from '../runtime/AbnormalHandoff';
 import {
@@ -295,6 +297,13 @@ export interface SandboxOptions {
    * undefined when no mounted skill has approved sites.
    */
   loadSkillNetworkGrant?: (() => Promise<{ token: string; hosts: readonly string[] } | undefined>) | undefined;
+  /**
+   * Drains the skill network cards this chat is owed: a first-use card for each mounted skill
+   * whose declared sites are not in force, and a card for each site the gateway refused. Read
+   * after every model command, so a card is raised with the command that showed the need.
+   * Absent outside the server runtime.
+   */
+  drainSkillNetworkCards?: (() => Promise<readonly SkillNetworkCardRequest[]>) | undefined;
   /**
    * Whether the person has allowed package downloads for this chat's scope. Re-read whenever a
    * download command is stamped, so the first download in a scope shows its own approval card.
@@ -1512,7 +1521,7 @@ function runCodeEnvironmentSentences({
     const packages = packageDownloads
       ? `Packages can be downloaded for this chat: if one is missing, install it from ${packageDownloadSitesText()}, then run again.`
       : `Packages cannot be downloaded here, so if one is missing, ${PACKAGE_UNAVAILABLE_RULE}`;
-    return `Preinstalled: Python with pandas, numpy, matplotlib, openpyxl, pdfplumber, pypdf, Pillow, python-docx and reportlab; Node with tsx and typescript. This sandbox has no internet access. Never use it to fetch web content. ${packages}`;
+    return `Preinstalled: Python with pandas, numpy, matplotlib, openpyxl, pdfplumber, pypdf, Pillow, python-docx, reportlab, requests, pyyaml, httpx and beautifulsoup4; Node with tsx and typescript. This sandbox has no internet access. Never use it to fetch web content. ${packages}`;
   }
   if (packageDownloads) {
     return `Preinstalled: pandas, numpy, matplotlib, seaborn, plotly, openpyxl, pdfplumber, Pillow, requests, genson, pydantic, pyyaml, beautifulsoup4, poppler-utils, tesseract-ocr. Packages can be downloaded for this chat: if one is missing, install it from ${packageDownloadSitesText()}, then run again. Never use the network to fetch web content.`;
@@ -2173,6 +2182,7 @@ export class Sandbox extends LocalToolMCP {
   private readonly loadPackageMirrorToken: (() => Promise<string | undefined>) | undefined;
   private readonly loadSkillNetworkGrant:
     (() => Promise<{ token: string; hosts: readonly string[] } | undefined>) | undefined;
+  private readonly drainSkillNetworkCardsOption: (() => Promise<readonly SkillNetworkCardRequest[]>) | undefined;
   private readonly loadPackageDownloadsAllowed: (() => Promise<boolean>) | undefined;
   private readonly allowPackageDownloads: (() => Promise<void>) | undefined;
   private implementationPlanGrantContext: ImplementationPlanGrantContext | undefined;
@@ -2206,6 +2216,8 @@ export class Sandbox extends LocalToolMCP {
   private skillCopyFailures: ReadonlyMap<string, SkillCopyFailure> = new Map<string, SkillCopyFailure>();
   // Plain lines for the person, shown once on the next tool result.
   private pendingSkillNotices: SkillNotice[] = [];
+  // Skill network cards drained after a command, carried on the next tool result for the runtime to raise.
+  private pendingSkillNetworkCards: SkillNetworkCardRequest[] = [];
   // Notices already put on a tool result in this turn, not yet recorded in the sandbox.
   private deliveredSkillNotices: SkillNotice[] = [];
   /** Flag to track if we've already checked prerequisites. */
@@ -2281,6 +2293,7 @@ export class Sandbox extends LocalToolMCP {
     this.loadBoundRepository = options.loadBoundRepository;
     this.loadPackageMirrorToken = options.loadPackageMirrorToken;
     this.loadSkillNetworkGrant = options.loadSkillNetworkGrant;
+    this.drainSkillNetworkCardsOption = options.drainSkillNetworkCards;
     this.loadPackageDownloadsAllowed = options.loadPackageDownloadsAllowed;
     this.allowPackageDownloads = options.allowPackageDownloads;
     this.onRepositorySources = options.onRepositorySources;
@@ -3265,21 +3278,37 @@ export class Sandbox extends LocalToolMCP {
     context?: ToolInvocationContext,
   ): Promise<CallToolResponse> {
     const response = await super.callTool(params, approvalDecision, context);
-    if (this.pendingSkillNotices.length === 0 || !isCallToolResponseResult(response)) {
+    if (!isCallToolResponseResult(response)) {
       this.recordDeliveredSkillNotices();
       return response;
     }
+    // Skill network cards drained by the command ride on this result, beside its text, for the
+    // runtime to raise as held cards; they are not part of what the model reads.
+    const withCards: CallToolResolvedResponse =
+      this.pendingSkillNetworkCards.length === 0
+        ? response
+        : { ...response, skillNetworkCards: this.takeSkillNetworkCards() };
+    if (this.pendingSkillNotices.length === 0) {
+      this.recordDeliveredSkillNotices();
+      return withCards;
+    }
     const notices = this.takeSkillNotices();
     this.recordDeliveredSkillNotices();
-    const [first, ...rest] = response.result.content;
+    const [first, ...rest] = withCards.result.content;
     const head: TextContentPart =
       first?.type === 'text'
         ? { type: 'text', text: withNoticesField({ text: first.text, notices }) }
         : { type: 'text', text: JSON.stringify({ notices }) };
     return {
-      ...response,
-      result: { ...response.result, content: [head, ...(first?.type === 'text' ? rest : response.result.content)] },
+      ...withCards,
+      result: { ...withCards.result, content: [head, ...(first?.type === 'text' ? rest : withCards.result.content)] },
     };
+  }
+
+  private takeSkillNetworkCards(): SkillNetworkCardRequest[] {
+    const cards = this.pendingSkillNetworkCards;
+    this.pendingSkillNetworkCards = [];
+    return cards;
   }
 
   private takeSkillNotices(): string[] {
@@ -4106,6 +4135,9 @@ export class Sandbox extends LocalToolMCP {
     const operation = input.hostAuthored ? this.hostExec(params) : this.sandboxPathExec(params);
     const result =
       input.signal === undefined ? await operation : await awaitWithAbort({ operation, signal: input.signal });
+    if (!input.hostAuthored) {
+      await this.collectSkillNetworkCards();
+    }
     if (
       !input.hostAuthored &&
       packageMirrorToken === undefined &&
@@ -4194,6 +4226,28 @@ export class Sandbox extends LocalToolMCP {
         error: error instanceof Error ? error.message : String(error),
       });
       return undefined;
+    }
+  }
+
+  /**
+   * Drains the skill network cards this chat is owed into the pending list the next tool result
+   * carries. A failed drain raises no card, never a wrong one; the need is read again after the
+   * next command.
+   */
+  private async collectSkillNetworkCards(): Promise<void> {
+    const drain = this.drainSkillNetworkCardsOption;
+    if (drain === undefined) {
+      return;
+    }
+    try {
+      const cards = await drain();
+      if (cards.length > 0) {
+        this.pendingSkillNetworkCards.push(...cards);
+      }
+    } catch (error) {
+      this.logger.warn('Could not read the skill network cards for this chat; no card is raised', {
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 

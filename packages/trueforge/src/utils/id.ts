@@ -4,3 +4,6 @@ import { ulid } from 'ulid';
 export function newId(): string {
   return ulid().toLowerCase();
 }
+
+/** What `newId` makes, for checking an id that arrived from outside. */
+export const ID_SHAPE = /^[0-9a-z]{26}$/;
