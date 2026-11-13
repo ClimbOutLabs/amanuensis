@@ -61,3 +61,22 @@ test("passes on the server's plain error words", async () => {
     message: 'That page of your reminders is out of date. Reload to start again.',
   });
 });
+
+test('deletes a reminder through the schedule it is stored as', async () => {
+  const calls: { url: string; method: string | undefined }[] = [];
+  const fetcher: typeof fetch = async (input, init) => {
+    calls.push({ url: new URL(String(input), 'http://localhost').toString(), method: init?.method });
+    return Response.json({});
+  };
+  await createRemindersApi(fetcher).deleteReminder('rem 1');
+
+  assert.deepEqual(calls, [{ url: 'http://localhost/api/v1/schedules/rem%201', method: 'DELETE' }]);
+});
+
+test('says why a reminder could not be deleted', async () => {
+  const fetcher: typeof fetch = async () =>
+    Response.json({ error: { message: 'You can only change your own schedules.' } }, { status: 403 });
+  await assert.rejects(createRemindersApi(fetcher).deleteReminder('r1'), {
+    message: 'You can only change your own schedules.',
+  });
+});
