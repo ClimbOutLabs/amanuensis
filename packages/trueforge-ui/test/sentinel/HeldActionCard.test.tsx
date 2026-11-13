@@ -95,15 +95,36 @@ describe('HeldActionCard', () => {
     expect(screen.getByText('You have not allowed email to this address before.')).toBeInTheDocument();
   });
 
-  it('offers Approve and Deny, and never a chat-wide or permanent refusal', () => {
+  it('offers Allow and Deny, and never a chat-wide or permanent refusal', () => {
     const { onApprove, onDeny } = renderCard();
-    fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Allow' }));
     fireEvent.click(screen.getByRole('button', { name: 'Deny' }));
     expect(onApprove).toHaveBeenCalledTimes(1);
     expect(onDeny).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole('button', { name: /this chat/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Always deny/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Always allow everywhere' })).not.toBeInTheDocument();
+  });
+
+  it('puts Allow first and Keep it last on a safe-first destructive card, with no filled button', () => {
+    const { onApprove, onDeny } = renderCard(
+      { alwaysAllowOffered: true, onChangeRequest: vi.fn() },
+      { safe_choice: true, destructive: true },
+    );
+    const buttons = screen.getAllByRole('button');
+    expect(buttons.map(button => button.textContent)).toEqual([
+      'Allow',
+      'Always allow everywhere',
+      'Change it',
+      'Keep it',
+    ]);
+    for (const button of buttons) {
+      expect(button.className).toMatch(/bg-secondary-button-bg/);
+      expect(button.className).not.toMatch(/bg-primary-button-bg|text-failure-bg/);
+    }
+    fireEvent.click(screen.getByRole('button', { name: 'Keep it' }));
+    expect(onDeny).toHaveBeenCalledTimes(1);
+    expect(onApprove).not.toHaveBeenCalled();
   });
 
   it('offers Always allow everywhere only when the server said it may', () => {
@@ -215,13 +236,13 @@ describe('HeldActionCard', () => {
 
   it('takes the buttons away once the action is answered or has expired', () => {
     renderCard({ status: { kind: 'expired' } });
-    expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Allow' })).not.toBeInTheDocument();
     expect(HELD_EXPIRED_TEXT).toBe('Expired, nothing was done. Ask again in chat.');
   });
 
   it('lets someone who cannot manage the chat read the card without answering it', () => {
     renderCard({ disabled: true });
-    expect(screen.getByRole('button', { name: 'Approve' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Allow' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Deny' })).toBeDisabled();
   });
 

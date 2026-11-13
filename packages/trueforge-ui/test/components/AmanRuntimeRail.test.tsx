@@ -857,7 +857,7 @@ describe('AmanRuntimeRail recent actions, rules and Needs you', () => {
     );
     expect(container.querySelector('[data-section="needs-you"]')).toBeNull();
     expect(screen.queryByText(/Needs you/)).not.toBeInTheDocument();
-    expect(container.querySelectorAll('.aui-ticket--selected')).toHaveLength(0);
+    expect(container.querySelectorAll('.aui-approval-card--selected')).toHaveLength(0);
     expect(container.querySelector('.aman-runtime-rail__status')).toHaveTextContent('Waiting for you');
   });
 

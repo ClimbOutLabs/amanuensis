@@ -83,6 +83,10 @@ describe('parseTwilioSettings', () => {
         NEBIUS_API_KEY: 'key-for-tests',
         MEMORY_SCREEN_AUTH_TOKEN: 'key-for-tests',
         OIDC: undefined,
+        MAIL_EMAIL_ACCOUNT_SECRET: undefined,
+        CALENDAR_ACCOUNT_SECRET: undefined,
+        BROWSER_SECRET: undefined,
+        TAVILY_API_KEY: undefined,
         TWILIO: settings,
       }),
     ).toContain('token-for-tests');

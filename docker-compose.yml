@@ -66,13 +66,15 @@ services:
     # another's namespace, and the joined containers read this hosts file.
     extra_hosts:
       - 'host.docker.internal:host-gateway'
-    # The calendar network is shared with the calendar connector only (see calendar-caldav); the
-    # browser-control network, with the browser gateway only (see browser-gateway), never with the
-    # browser itself; and the voice network with the voice only (see aman-tts). Harmless when the
-    # `browser` profile does not run: an unused network costs nothing.
+    # The calendar network is shared with the calendar connector only (see calendar-caldav); the mail
+    # network with the mail connector only (see mail-email); the browser-control network, with the
+    # browser gateway only (see browser-gateway), never with the browser itself; and the voice network
+    # with the voice only (see aman-tts). Harmless when the `browser` profile does not run: an unused
+    # network costs nothing.
     networks:
       - default
       - calendar
+      - mail
       - browser-control
       - voice
     restart: unless-stopped
@@ -131,6 +133,9 @@ services:
       MAIL_POLICY_STATUS_FILE: /data/mail-policy-status/loaded.sha256
       # The sidecar's account agent, which the Settings Email card talks to (see mail-email).
       MAIL_EMAIL_ACCOUNT_URL: http://mail-email:9559
+      # Guards the mail account port; the same value goes to mail-email. Made like the calendar secret below:
+      # `pnpm smoke` makes a random one for each run, and for plain `docker compose` set it in the shell.
+      MAIL_EMAIL_ACCOUNT_SECRET: ${MAIL_EMAIL_ACCOUNT_SECRET:?set MAIL_EMAIL_ACCOUNT_SECRET to a random value of 32 or more characters, for example from openssl rand -hex 32}
       # The calendar sidecar's account agent, which the Settings Calendar card talks to (see calendar-caldav).
       CALENDAR_ACCOUNT_URL: http://calendar-caldav:9560
       # Guards the calendar account port; the same value goes to calendar-caldav. There is no default: `pnpm smoke`
@@ -229,9 +234,9 @@ services:
       - voice
     restart: unless-stopped
 
-  # Email connector sidecar. Private to the Compose network: `expose` only, never `ports`.
+  # Email connector sidecar. Private: `expose` only, never `ports`, on its own network.
   # The server reaches it as http://mail-email:9557/mcp. The server has no login of its own,
-  # so nothing outside this network may reach it.
+  # so nothing but the app may reach it.
   mail-email:
     image: ghcr.io/wh1isper/mcp-email-server@sha256:1c4d5333028a6b86867b5c73db121060086a8fb96e40ceb4262d14aae37f8852
     # The wrapper starts the sidecar on the send list the server writes, and restarts it when that list changes.
@@ -250,10 +255,15 @@ services:
       # The account agent: the account file it owns, its private-network port, and its own path in the image.
       AMAN_MAIL_ACCOUNT_FILE: /account/.env.mail-email
       AMAN_MAIL_ACCOUNT_PORT: '9559'
+      # Only a caller that presents this secret can read, replace or remove the account (same value as the server).
+      AMAN_MAIL_ACCOUNT_SECRET: ${MAIL_EMAIL_ACCOUNT_SECRET:?set MAIL_EMAIL_ACCOUNT_SECRET to a random value of 32 or more characters, for example from openssl rand -hex 32}
       AMAN_MAIL_ACCOUNT_AGENT: /usr/local/bin/aman-mail-account-agent
       AMAN_MAIL_EMAIL_CHECK: /usr/local/bin/aman-mail-email-check
       # Attachment content is read only so the server can hand it to the agent as data, never as instructions.
       MCP_EMAIL_SERVER_ENABLE_ATTACHMENT_CONTENT: 'true'
+    # A network of its own, shared with the app's `loopback` only, so no other service can reach either port.
+    networks:
+      - mail
     volumes:
       - ./ops/compose/mail-email/entrypoint.sh:/usr/local/bin/aman-mail-entrypoint:ro
       - ./ops/compose/mail-email/account_agent.py:/usr/local/bin/aman-mail-account-agent:ro
@@ -434,6 +444,9 @@ networks:
   # Between the app's `loopback` and the calendar connector only. Not internal: the connector reaches the calendar
   # server on the internet.
   calendar: {}
+  # Between the app's `loopback` and the mail connector only. Not internal: the connector reaches the mail server
+  # on the internet.
+  mail: {}
   # Between the app's `loopback` and the voice only. Internal: the voice needs no network access.
   voice:
     internal: true
