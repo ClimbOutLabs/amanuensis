@@ -258,7 +258,7 @@ function PageSections({ page, state }: { page: MemoryPageDetail; state: MemoryPa
 }
 
 function PageEditor({ page, state, onDone }: { page: MemoryPageDetail; state: MemoryPagesState; onDone: () => void }) {
-  const [draft, setDraft] = useState(page.markdown);
+  const [draft, setDraft] = useState(page.text);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -266,7 +266,7 @@ function PageEditor({ page, state, onDone }: { page: MemoryPageDetail; state: Me
     setBusy(true);
     setError(null);
     try {
-      await state.savePage({ markdown: draft, version: page.version });
+      await state.savePage({ text: draft, version: page.version });
       onDone();
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : 'Could not save this page. Try again.');
@@ -280,8 +280,13 @@ function PageEditor({ page, state, onDone }: { page: MemoryPageDetail; state: Me
       <label htmlFor="memory-page-editor" className="text-xs font-medium text-text-secondary">
         Edit page text
       </label>
+      <p id="memory-page-editor-help" className="text-xs text-text-secondary">
+        The first line is the page’s name. Each line that starts with a dash is one thing Aman remembers. A line you
+        change or add counts as coming from you. Lines you leave alone keep where they came from.
+      </p>
       <textarea
         id="memory-page-editor"
+        aria-describedby="memory-page-editor-help"
         value={draft}
         onChange={event => setDraft(event.target.value)}
         rows={20}
@@ -301,7 +306,7 @@ function PageEditor({ page, state, onDone }: { page: MemoryPageDetail; state: Me
         <button
           type="button"
           onClick={() => void save()}
-          disabled={busy || draft === page.markdown}
+          disabled={busy || draft === page.text}
           className={auiButtonClass({ variant: 'primary', size: 'small' })}
         >
           {busy ? 'Saving…' : 'Save'}

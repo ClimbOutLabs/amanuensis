@@ -76,7 +76,7 @@ const PageSchema = z
     other_names: z.array(z.string()),
     summary: z.string().nullable(),
     sections: z.array(z.object({ name: z.string(), lines: z.array(PageLineSchema) })),
-    markdown: z.string(),
+    text: z.string(),
     confirmable_sections: z.array(z.string()),
     version: z.string(),
     disagreements: z.array(DisagreementSchema).default([]),
@@ -88,7 +88,7 @@ const PageSchema = z
     otherNames: page.other_names,
     summary: page.summary,
     sections: page.sections,
-    markdown: page.markdown,
+    text: page.text,
     confirmableSections: page.confirmable_sections,
     version: page.version,
     disagreements: page.disagreements,
@@ -114,7 +114,7 @@ export interface MemoryPageTarget {
 export interface MemoryPagesCatalog {
   listPages(namespace?: string): Promise<MemoryPageListing>;
   getPage(target: MemoryPageTarget): Promise<MemoryPageDetail>;
-  savePage(options: MemoryPageTarget & { markdown: string; version: string }): Promise<MemoryPageDetail>;
+  savePage(options: MemoryPageTarget & { text: string; version: string }): Promise<MemoryPageDetail>;
   confirmLine(options: MemoryPageTarget & { factId: string; section?: string | undefined }): Promise<MemoryPageDetail>;
   dismissLine(options: MemoryPageTarget & { factId: string }): Promise<MemoryPageDetail>;
   dismissDisagreement(options: MemoryPageTarget & { disagreementId: string }): Promise<MemoryPageDetail>;
@@ -147,8 +147,8 @@ export function createMemoryPagesCatalog(options: CreateTrueForgeClientOptions =
   return {
     listPages: namespace => request('GET', `${BASE}${namespaceQuery(namespace)}`, undefined, parseData(ListingSchema)),
     getPage: target => request('GET', pagePath(target), undefined, parseData(PageSchema)),
-    savePage: ({ markdown, version, ...target }) =>
-      request('PUT', pagePath(target), { markdown, version }, parseData(PageSchema)),
+    savePage: ({ text, version, ...target }) =>
+      request('PUT', pagePath(target), { text, version }, parseData(PageSchema)),
     confirmLine: ({ factId, section, ...target }) =>
       request(
         'POST',

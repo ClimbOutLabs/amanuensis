@@ -78,7 +78,7 @@ Open a page to read it. The top shows the day it last changed and a short summar
 
 - Choose **Confirm** to keep an unconfirmed line as yours. You can pick which section it goes to. The default is Now.
 - Choose **Dismiss** to remove an unconfirmed line.
-- Choose **Edit** to change the whole page as text, then **Save**. If the page changed while you were editing, Aman asks you to reload it and try again. Nothing is lost.
+- Choose **Edit** to change the whole page as text, then **Save**. The first line is the page's name, and changing it renames the page. Each line that starts with a dash is one thing Aman remembers. A line you leave alone keeps where it came from. A line you change or add counts as coming from you. If the page changed while you were editing, Aman asks you to reload it and try again. Nothing is lost.
 - Choose **Delete** to remove a page. For a few seconds you can choose **Undo** to cancel it.
 
 Once a day Aman also checks each page for two lines that cannot both be true. When it finds some, the page row says how many pairs disagree, and the page shows **These lines disagree** at the top with both lines and a short reason. Aman changes nothing on the page. If one line is wrong, use **Edit** to fix it. If the pair is fine, choose **Not a problem** and Aman will not list those two lines again. In the same nightly tidy, a line whose end day has passed moves to Earlier by itself.

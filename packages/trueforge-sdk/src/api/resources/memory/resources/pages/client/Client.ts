@@ -616,7 +616,7 @@ export class PagesClient {
      *
      * @example
      *     await client.memory.pages.update("person", "slug", {
-     *         markdown: "markdown",
+     *         text: "text",
      *         version: "version"
      *     })
      */

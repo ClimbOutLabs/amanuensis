@@ -8,11 +8,12 @@ export interface MemoryPage {
     /** Pairs of lines that disagree and are not dismissed. */
     disagreements: TrueForge.MemoryPageDisagreement[];
     kind: TrueForge.MemoryPageKind;
-    markdown: string;
     otherNames: string[];
     sections: TrueForge.MemoryPageSection[];
     slug: string;
     summary: string | null;
+    /** The page as a person edits it: its name, headings and lines, without settings or hidden notes. */
+    text: string;
     title: string;
     /** Send this back with an edit. It says which text the edit started from. */
     version: string;

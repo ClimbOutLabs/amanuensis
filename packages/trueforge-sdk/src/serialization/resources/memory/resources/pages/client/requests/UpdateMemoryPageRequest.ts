@@ -8,13 +8,13 @@ export const UpdateMemoryPageRequest: core.serialization.Schema<
     serializers.memory.UpdateMemoryPageRequest.Raw,
     Omit<TrueForge.memory.UpdateMemoryPageRequest, "namespace">
 > = core.serialization.object({
-    markdown: core.serialization.string(),
+    text: core.serialization.string(),
     version: core.serialization.string(),
 });
 
 export declare namespace UpdateMemoryPageRequest {
     export interface Raw {
-        markdown: string;
+        text: string;
         version: string;
     }
 }

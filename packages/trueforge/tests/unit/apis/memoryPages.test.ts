@@ -36,7 +36,7 @@ const LineSchema = z.object({
 const PageSchema = z.object({
   title: z.string(),
   summary: z.string().nullable(),
-  markdown: z.string(),
+  text: z.string(),
   confirmable_sections: z.array(z.string()),
   version: z.string(),
   sections: z.array(z.object({ name: z.string(), lines: z.array(LineSchema) })),
@@ -82,6 +82,10 @@ describe('memory pages API', () => {
     const response = await call(path);
     expect(response.status).toBe(200);
     return PageSchema.parse(DataSchema.parse(await response.json()).data);
+  }
+
+  function fileText(slug = 'wendy') {
+    return readFile(pagePath({ vaultDir: vault(), kind: 'person', slug }), 'utf8');
   }
 
   async function changes() {
@@ -162,7 +166,7 @@ describe('memory pages API', () => {
       source_label: 'From you',
       own: true,
     });
-    expect(page.markdown).toContain('## Unconfirmed');
+    expect(page.text).toContain('## Unconfirmed');
     expect(page.confirmable_sections).toEqual(['How you write to them', 'Now']);
     expect((await call('/person/nobody')).status).toBe(404);
     expect((await call('/person/..%2Fx')).status).toBe(404);
@@ -184,10 +188,10 @@ describe('memory pages API', () => {
   it('saves an edit as one history entry and makes the new lines the person’s own', async () => {
     await seed();
     const page = await readPage();
-    const edited = page.markdown
+    const edited = page.text
       .replace('## Now\n', '## Now\n- Likes tea in the morning.\n')
       .replace('Worked at Acme.', 'Worked at Acme Corp.');
-    const response = await call('/person/wendy', json('PUT', { markdown: edited, version: page.version }));
+    const response = await call('/person/wendy', json('PUT', { text: edited, version: page.version }));
     expect(response.status).toBe(200);
     const saved = await readPage();
     const now = saved.sections.find(section => section.name === 'Now');
@@ -203,41 +207,149 @@ describe('memory pages API', () => {
     expect(list.map(change => change.message)).toContain('Your edits');
   });
 
+  it('shows the page for editing without its settings or hidden notes', async () => {
+    await seed();
+    const { text } = await readPage();
+    expect(text.startsWith('# Wendy\n')).toBe(true);
+    expect(text).not.toContain('---');
+    expect(text).not.toContain('<!--');
+    expect(text).not.toContain('household');
+    expect(text).toContain('## Unconfirmed\n- Might be travelling the week of Nov 16.\n');
+  });
+
+  it('keeps the source, id and dates of every line the person left alone', async () => {
+    await seed();
+    const before = await fileText();
+    const page = await readPage();
+    const response = await call(
+      '/person/wendy',
+      json('PUT', {
+        text: page.text.replace('## Now\n', '## Now\n- Likes tea in the morning.\n'),
+        version: page.version,
+      }),
+    );
+    expect(response.status).toBe(200);
+    const after = await fileText();
+    for (const line of before.split('\n').filter(stored => stored.includes('<!-- fact:'))) {
+      expect(after).toContain(`${line}\n`);
+    }
+    expect(after.startsWith(before.slice(0, before.indexOf('# Wendy')))).toBe(true);
+    const saved = await readPage();
+    const unconfirmed = saved.sections.find(section => section.name === 'Unconfirmed');
+    expect(unconfirmed?.lines[0]).toMatchObject({ id: 'f_03', source: 'read_content', own: false });
+  });
+
+  it('keeps a line’s source when the person moves it to another section', async () => {
+    await seed();
+    const page = await readPage();
+    const moved = page.text
+      .replace('- Might be travelling the week of Nov 16.\n', '')
+      .replace('## Now\n', '## Now\n- Might be travelling the week of Nov 16.\n');
+    expect((await call('/person/wendy', json('PUT', { text: moved, version: page.version }))).status).toBe(200);
+    const now = (await readPage()).sections.find(section => section.name === 'Now');
+    expect(now?.lines.find(line => line.id === 'f_03')).toMatchObject({ source: 'read_content', own: false });
+  });
+
+  it('makes a reworded line the person’s own and leaves a twin line its own source', async () => {
+    await writePageFile({
+      vaultDir: vault(),
+      kind: 'person',
+      slug: 'wendy',
+      content: `${WENDY}- Twin line. <!-- fact: id=f_30 src=you_said since=2026-01 -->\n\n## Open\n- Twin line. <!-- fact: id=f_31 src=mail since=2026-02 -->\n`,
+    });
+    const page = await readPage();
+    const response = await call(
+      '/person/wendy',
+      json('PUT', {
+        text: page.text.replace('Might be travelling the week of Nov 16.', 'Travelling the week of Nov 16.'),
+        version: page.version,
+      }),
+    );
+    expect(response.status).toBe(200);
+    const saved = await readPage();
+    const lineIn = (name: string, text: string) =>
+      saved.sections.find(section => section.name === name)?.lines.find(line => line.text === text);
+    expect(lineIn('Unconfirmed', 'Travelling the week of Nov 16.')).toMatchObject({ source: 'you_edited' });
+    expect(lineIn('Unconfirmed', 'Travelling the week of Nov 16.')?.id).not.toBe('f_03');
+    expect(lineIn('Earlier', 'Twin line.')).toMatchObject({ id: 'f_30', source: 'you_said' });
+    expect(lineIn('Open', 'Twin line.')).toMatchObject({ id: 'f_31', source: 'mail' });
+  });
+
+  it('never turns a line with a broken hidden note into the person’s own', async () => {
+    await writePageFile({
+      vaultDir: vault(),
+      kind: 'person',
+      slug: 'wendy',
+      content: `${WENDY}- Note on the next line.\n<!-- fact: id=f_40 src=mail since=2026-02 -->\n- Broken note. <!-- fact: id= -->\n`,
+    });
+    const page = await readPage();
+    expect(page.text).toContain('- Note on the next line.\n- Broken note.\n');
+    const response = await call(
+      '/person/wendy',
+      json('PUT', { text: page.text.replace('## Now\n', '## Now\n- Likes tea.\n'), version: page.version }),
+    );
+    expect(response.status).toBe(200);
+    const earlier = (await readPage()).sections.find(section => section.name === 'Earlier');
+    expect(earlier?.lines.find(line => line.text === 'Note on the next line.')).toMatchObject({
+      source: 'unreadable',
+      own: false,
+    });
+    expect(earlier?.lines.find(line => line.text === 'Broken note.')).toMatchObject({
+      source: 'unreadable',
+      own: false,
+    });
+  });
+
+  it('renames the page from its first line and puts a missing name line back', async () => {
+    await seed();
+    const page = await readPage();
+    const renamed = await call(
+      '/person/wendy',
+      json('PUT', { text: page.text.replace('# Wendy', '# Wendy Smith'), version: page.version }),
+    );
+    expect(renamed.status).toBe(200);
+    const saved = await readPage();
+    expect(saved.title).toBe('Wendy Smith');
+    expect(await fileText()).toContain('title: Wendy Smith\n');
+    expect(await fileText()).toContain('aliases: [Wendy, my wife, wendy@example.com]\n');
+    const unnamed = await call(
+      '/person/wendy',
+      json('PUT', { text: saved.text.replace('# Wendy Smith\n', ''), version: saved.version }),
+    );
+    expect(unnamed.status).toBe(200);
+    expect((await readPage()).text.startsWith('# Wendy Smith\n')).toBe(true);
+  });
+
   it('refuses a stale save and text that is not a page', async () => {
     await seed();
     const page = await readPage();
-    await call(
-      '/person/wendy',
-      json('PUT', { markdown: page.markdown.replace('Acme', 'Beta'), version: page.version }),
-    );
-    const stale = await call('/person/wendy', json('PUT', { markdown: page.markdown, version: page.version }));
+    await call('/person/wendy', json('PUT', { text: page.text.replace('Acme', 'Beta'), version: page.version }));
+    const stale = await call('/person/wendy', json('PUT', { text: page.text, version: page.version }));
     expect(stale.status).toBe(409);
     expect(ErrorSchema.parse(await stale.json()).error.message).toContain('Reload');
     const fresh = await readPage();
-    const noSettings = await call(
+    const hiddenNote = await call(
       '/person/wendy',
-      json('PUT', { markdown: '# Wendy\n- hi\n', version: fresh.version }),
+      json('PUT', { text: `${fresh.text}\n- bad <!-- oops\n`, version: fresh.version }),
     );
-    expect(noSettings.status).toBe(400);
-    expect(ErrorSchema.parse(await noSettings.json()).error.message).toContain('settings');
-    const noTitle = await call(
+    expect(hiddenNote.status).toBe(400);
+    expect(ErrorSchema.parse(await hiddenNote.json()).error.message).toContain('<!--');
+    const noteEnd = await call(
       '/person/wendy',
-      json('PUT', { markdown: '---\nkind: person\n---\n# W\n', version: fresh.version }),
+      json('PUT', { text: `${fresh.text}\n- bad --> oops\n`, version: fresh.version }),
     );
-    expect(ErrorSchema.parse(await noTitle.json()).error.message).toContain('title');
-    const brokenNote = await call(
+    expect(noteEnd.status).toBe(400);
+    const noName = await call(
       '/person/wendy',
-      json('PUT', { markdown: `${fresh.markdown}\n- bad <!-- oops\n`, version: fresh.version }),
+      json('PUT', { text: fresh.text.replace('# Wendy', '# '), version: fresh.version }),
     );
-    expect(brokenNote.status).toBe(400);
-    expect(ErrorSchema.parse(await brokenNote.json()).error.message).toContain('<!--');
-    const blank = await call('/person/wendy', json('PUT', { markdown: '   \n', version: fresh.version }));
+    expect(noName.status).toBe(400);
+    expect(ErrorSchema.parse(await noName.json()).error.message).toContain('no name');
+    const blank = await call('/person/wendy', json('PUT', { text: '   \n', version: fresh.version }));
     expect(blank.status).toBe(400);
-    const huge = await call('/person/wendy', json('PUT', { markdown: 'x'.repeat(60_001), version: fresh.version }));
+    const huge = await call('/person/wendy', json('PUT', { text: 'x'.repeat(60_001), version: fresh.version }));
     expect(huge.status).toBe(400);
-    expect(
-      (await call('/person/nobody', json('PUT', { markdown: fresh.markdown, version: fresh.version }))).status,
-    ).toBe(404);
+    expect((await call('/person/nobody', json('PUT', { text: fresh.text, version: fresh.version }))).status).toBe(404);
   });
 
   it('confirms a line into the chosen section as the person’s own', async () => {
@@ -263,7 +375,7 @@ describe('memory pages API', () => {
     await seed();
     expect((await call('/person/wendy/lines/f_03/dismiss', json('POST', {}))).status).toBe(200);
     const page = await readPage();
-    expect(page.markdown).not.toContain('Might be travelling');
+    expect(page.text).not.toContain('Might be travelling');
     expect((await changes()).changes[0]?.message).toContain('You: dismissed');
     expect((await call('/matter/the-madrid-move', { method: 'DELETE' })).status).toBe(200);
     expect((await call('/matter/the-madrid-move')).status).toBe(404);
@@ -273,23 +385,20 @@ describe('memory pages API', () => {
 
   it('undoes an edit, a confirm, a dismiss and a delete', async () => {
     await seed();
-    const original = await readPage();
+    const original = await fileText();
     await call('/person/wendy/lines/f_03/confirm', json('POST', {}));
-    const afterConfirm = await readPage();
+    const afterConfirm = await fileText();
     await undo(0);
-    expect((await readPage()).markdown).toBe(original.markdown);
+    expect(await fileText()).toBe(original);
 
     await call('/person/wendy/lines/f_03/dismiss', json('POST', {}));
     await undo(0);
-    expect((await readPage()).markdown).toBe(original.markdown);
+    expect(await fileText()).toBe(original);
 
     const base = await readPage();
-    await call(
-      '/person/wendy',
-      json('PUT', { markdown: base.markdown.replace('Acme', 'Beta'), version: base.version }),
-    );
+    await call('/person/wendy', json('PUT', { text: base.text.replace('Acme', 'Beta'), version: base.version }));
     await undo(0);
-    expect((await readPage()).markdown).toBe(original.markdown);
+    expect(await fileText()).toBe(original);
 
     await call('/matter/the-madrid-move', { method: 'DELETE' });
     await undo(0);
@@ -297,7 +406,7 @@ describe('memory pages API', () => {
     expect(await readFile(pagePath({ vaultDir: vault(), kind: 'matter', slug: 'the-madrid-move' }), 'utf8')).toContain(
       'Lease on Calle Mayor',
     );
-    expect(afterConfirm.markdown).not.toBe(original.markdown);
+    expect(afterConfirm).not.toBe(original);
 
     async function undo(index: number) {
       const target = (await changes()).changes[index];
@@ -312,10 +421,7 @@ describe('memory pages API', () => {
     await call('/person/wendy/lines/f_03/dismiss', json('POST', {}));
     const first = (await changes()).changes[0];
     const page = await readPage();
-    await call(
-      '/person/wendy',
-      json('PUT', { markdown: page.markdown.replace('Acme', 'Beta'), version: page.version }),
-    );
+    await call('/person/wendy', json('PUT', { text: page.text.replace('Acme', 'Beta'), version: page.version }));
     const second = (await changes()).changes[0];
     const listed = (await changes()).changes;
     expect(listed.find(change => change.id === first?.id)?.undo_blocked_by).toBe(second?.message);
@@ -324,7 +430,7 @@ describe('memory pages API', () => {
     expect(ErrorSchema.parse(await refused.json()).error.message).toContain('Undo that change first');
     expect((await call(`/changes/${second?.id ?? ''}/undo`, { method: 'POST' })).status).toBe(200);
     expect((await call(`/changes/${first?.id ?? ''}/undo`, { method: 'POST' })).status).toBe(200);
-    expect((await readPage()).markdown).toContain('Might be travelling');
+    expect((await readPage()).text).toContain('Might be travelling');
     expect((await call(`/changes/${'0'.repeat(40)}/undo`, { method: 'POST' })).status).toBe(404);
     expect((await call('/changes/not-an-id/undo', { method: 'POST' })).status).toBe(400);
   });

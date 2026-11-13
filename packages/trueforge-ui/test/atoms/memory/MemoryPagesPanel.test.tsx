@@ -32,7 +32,7 @@ const WENDY: MemoryPageDetail = {
   otherNames: ['my wife'],
   summary: 'The owner’s wife.',
   confirmableSections: ['How you write to them', 'Now'],
-  markdown: '---\ntitle: Wendy\n---\n',
+  text: '# Wendy\n\n## Now\n- Likes tea.\n',
   version: 'v1',
   disagreements: [],
   sections: [
@@ -254,14 +254,12 @@ describe('MemoryPagesPanel', () => {
     await openWendy();
     fireEvent.click(screen.getByRole('button', { name: /^Edit page/ }));
     const editor = screen.getByRole('textbox', { name: 'Edit page text' });
-    expect(editor).toHaveValue(WENDY.markdown);
+    expect(editor).toHaveValue(WENDY.text);
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
-    fireEvent.change(editor, { target: { value: `${WENDY.markdown}- hi\n` } });
+    fireEvent.change(editor, { target: { value: `${WENDY.text}- hi\n` } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     expect(await screen.findByRole('alert')).toHaveTextContent(refusal);
-    expect(calls.save).toHaveBeenCalledWith(
-      expect.objectContaining({ version: 'v1', markdown: `${WENDY.markdown}- hi\n` }),
-    );
+    expect(calls.save).toHaveBeenCalledWith(expect.objectContaining({ version: 'v1', text: `${WENDY.text}- hi\n` }));
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(screen.queryByRole('textbox', { name: 'Edit page text' })).not.toBeInTheDocument();
   });
@@ -331,7 +329,7 @@ describe('MemoryPagesPanel', () => {
       'Wendy\n\nThe owner’s wife.\n\nNow\n- Plays tennis on Fridays.\n\nUnconfirmed\n- Might travel in November.\n\nEarlier\n- Worked at Acme.',
     );
     fireEvent.click(screen.getByRole('button', { name: 'Edit page: Wendy' }));
-    expect(await screen.findByRole('textbox', { name: 'Edit page text' })).toHaveValue(WENDY.markdown);
+    expect(await screen.findByRole('textbox', { name: 'Edit page text' })).toHaveValue(WENDY.text);
     fireEvent.click(screen.getByRole('button', { name: 'Back to all pages' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Delete page: The Madrid move' }));
     expect(await screen.findByText('Page deleted.')).toBeInTheDocument();

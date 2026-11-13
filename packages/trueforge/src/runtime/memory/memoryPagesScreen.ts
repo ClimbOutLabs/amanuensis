@@ -35,6 +35,7 @@ import {
   removeMemoryPage,
   renderMemoryPage,
   unmarkedBulletText,
+  withPageTitle,
   writeMemoryPage,
   type MemoryPage,
   type PageKind,
@@ -58,9 +59,6 @@ import {
 
 /** How many history entries the screen lists. */
 const CHANGES_SHOWN = 10;
-
-/** The title a page is read with when its settings give none, so a missing title can be told from a real one. */
-const NO_TITLE = '\u0000no title';
 
 /** Why a change was refused, so the route can answer with the right status. */
 type RefusalCode = 'not_found' | 'invalid' | 'conflict';
@@ -104,6 +102,175 @@ function pageVersion(markdown: string): string {
 
 function withoutMarkers(markdown: string): string {
   return markdown.replace(COMMENT_PATTERN, '').replace(/[ \t]+$/gm, '');
+}
+
+/** A stored line as the person reads it: no hidden note and no space at its end. */
+function visibleText(raw: string): string {
+  return raw.replace(/\r$/, '').replace(COMMENT_PATTERN, '').trimEnd();
+}
+
+/**
+ * Stored lines the editor shows as one line: a line on its own, or a line with the lines its hidden note runs
+ * over. `shown` is what the person reads; `stored` is what goes back in the file when they leave it alone.
+ */
+interface EditorLine {
+  heading: string | undefined;
+  shown: string;
+  stored: string[];
+}
+
+function withEnding(line: PageLine): string {
+  return `${line.raw}${line.crlf ? '\r' : ''}`;
+}
+
+/** A section's lines for the editor. A hidden note that runs on to later lines keeps those lines with its own. */
+function sectionEditorLines(section: PageSectionBlock): EditorLine[] {
+  const grouped: PageLine[][] = [];
+  let open = false;
+  for (const [index, line] of section.lines.entries()) {
+    const previous = section.lines[index - 1];
+    // A note wrapped onto its own line belongs to the bullet above, which is read as unconfirmed because of it.
+    const wrapped =
+      previous?.kind === 'unreadable' && !previous.raw.includes('<!--') && line.raw.trimStart().startsWith('<!--');
+    const last = grouped.at(-1);
+    if (last !== undefined && (open || wrapped)) {
+      last.push(line);
+    } else {
+      grouped.push([line]);
+    }
+    open = line.raw.lastIndexOf('<!--') > line.raw.lastIndexOf('-->') || (open && !line.raw.includes('-->'));
+  }
+  return grouped.map(lines => ({
+    heading: section.heading,
+    shown: lines
+      .map(line => visibleText(line.raw))
+      .filter(text => text.trim() !== '')
+      .join(' '),
+    stored: lines.map(withEnding),
+  }));
+}
+
+/** Every line of the page body for the editor, in page order: the lines above the first heading, then each section. */
+function editorLines(page: MemoryPage): EditorLine[] {
+  const one = (raw: string, heading: string | undefined): EditorLine => ({
+    heading,
+    shown: visibleText(raw),
+    stored: [raw],
+  });
+  return [
+    ...page.preamble.map(raw => one(raw, undefined)),
+    ...page.sections.flatMap(section => [
+      one(`${section.rawHeading}${section.crlf ? '\r' : ''}`, section.heading),
+      ...sectionEditorLines(section),
+    ]),
+  ];
+}
+
+const NAME_LINE_START = '# ';
+const SECTION_LINE_START = '## ';
+
+/**
+ * The page as the person edits it: its name, its headings and its lines, with the settings and hidden notes left
+ * out. The first line is always the name from the settings, whatever the title line in the file says, because
+ * saving reads the name back from that line.
+ */
+function pageEditText(page: MemoryPage): string {
+  const shown = editorLines(page).map(line => line.shown);
+  const first = shown.findIndex(line => line !== '');
+  const rest = shown[first]?.startsWith(NAME_LINE_START) === true ? shown.slice(first + 1) : ['', ...shown];
+  const nameLine = `${NAME_LINE_START}${singleLine(page.frontMatter.title)}`;
+  return `${[nameLine, ...rest].join('\n').trimEnd()}\n`;
+}
+
+function refusedEdit(message: string): Refusal {
+  return { ok: false, code: 'invalid', message };
+}
+
+/**
+ * The page the person's edited text stands for. A line they left as it was shown goes back as it is stored, so it
+ * keeps where it came from and its dates; it is looked for under the same heading first, then anywhere on the page.
+ * Every other line is theirs as typed. The first line names the page. The settings block is never theirs to break.
+ */
+function pageFromEditText({
+  text,
+  from,
+  kind,
+  slug,
+}: {
+  text: string;
+  from: MemoryPage;
+  kind: PageKind;
+  slug: string;
+}): ScreenOutcome<MemoryPage> {
+  if (text.trim() === '') {
+    return refusedEdit('Nothing was saved. The page is empty. Write the page again, or use Delete page to remove it.');
+  }
+  if (text.includes('<!--') || text.includes('-->')) {
+    return refusedEdit(
+      'Nothing was saved. A line holds "<!--" or "-->", which Aman keeps for its own hidden notes. Remove those marks and save again.',
+    );
+  }
+  const typed = text
+    .replace(/\r\n?/g, '\n')
+    .trimEnd()
+    .split('\n')
+    .map(line => line.trimEnd());
+  const firstWritten = typed.findIndex(line => line !== '');
+  const nameLine = typed[firstWritten] ?? '';
+  // Line ends are trimmed, so a name line with its name deleted is a lone "#".
+  const named = nameLine === '#' || nameLine.startsWith(NAME_LINE_START);
+  const title = named ? singleLine(nameLine.slice(NAME_LINE_START.length)).trim() : from.frontMatter.title;
+  if (title === '') {
+    return refusedEdit(
+      'Nothing was saved. The page has no name. Write the name on the first line after "# " and save again.',
+    );
+  }
+  const renamed = title === from.frontMatter.title ? from : withPageTitle(from, title);
+  if (renamed === undefined) {
+    return refusedEdit(
+      `Nothing was saved. This page's name cannot be changed here. Put the first line back to "# ${clip(singleLine(from.frontMatter.title))}" and save again.`,
+    );
+  }
+  const body = named
+    ? [`${NAME_LINE_START}${title}`, ...typed.slice(firstWritten + 1)]
+    : [`${NAME_LINE_START}${title}`, '', ...typed.slice(firstWritten)];
+
+  // Only lines that hold something hidden need putting back; the rest are the same typed or stored.
+  const kept = editorLines(from)
+    .filter(line => line.shown !== '' && (line.stored.length > 1 || line.stored[0] !== line.shown))
+    .map(line => ({ ...line, used: false }));
+  const out: (string[] | undefined)[] = body.map(() => undefined);
+  const headings: (string | undefined)[] = [];
+  let heading: string | undefined;
+  for (const line of body) {
+    if (line.startsWith(SECTION_LINE_START)) {
+      heading = line.slice(SECTION_LINE_START.length).trim();
+    }
+    headings.push(heading);
+  }
+  for (const sameHeading of [true, false]) {
+    for (const [index, line] of body.entries()) {
+      if (out[index] !== undefined || line === '') {
+        continue;
+      }
+      const match = kept.find(
+        candidate =>
+          !candidate.used && candidate.shown === line && (!sameHeading || candidate.heading === headings[index]),
+      );
+      if (match !== undefined) {
+        match.used = true;
+        out[index] = match.stored;
+      }
+    }
+  }
+  const lines = [...renamed.frontMatterLines, ...body.flatMap((line, index) => out[index] ?? [line])];
+  return {
+    ok: true,
+    value: parseMemoryPage({
+      content: `${from.hasBom ? '\uFEFF' : ''}${lines.join('\n')}\n`,
+      fallback: { kind, title: slug },
+    }),
+  };
 }
 
 function lineView({ line, section }: { line: PageLine; section: PageSectionBlock }): MemoryPageLine | undefined {
@@ -208,7 +375,7 @@ async function pageView({
     other_names: page.frontMatter.aliases,
     summary: pageDescription(page) ?? null,
     sections: page.sections.map(section => ({ name: section.heading, lines: sectionLines(section) })),
-    markdown,
+    text: pageEditText(page),
     confirmable_sections: ConfirmableMemoryPageSectionSchema.options.filter(section =>
       kindHasSection({ kind, section }),
     ),
@@ -234,49 +401,21 @@ export async function readPageForScreen(input: {
 
 const MISSING_PAGE = 'There is no page with that name. Reload the list.';
 
-function lineIsUnreadable(line: PageLine): boolean {
-  return line.kind === 'unreadable';
-}
-
-function unreadableLines(page: MemoryPage): string[] {
-  return page.sections.flatMap(section => section.lines.filter(lineIsUnreadable).map(line => line.raw));
-}
-
-/** What to fix in a page the person wrote, or undefined when it can be saved. */
-function problemWithEditedText({ markdown, before }: { markdown: string; before: MemoryPage }): string | undefined {
-  if (markdown.trim() === '') {
-    return 'Nothing was saved. The page is empty. Write the page again, or use Delete page to remove it.';
-  }
-  const edited = parseMemoryPage({ content: markdown, fallback: { kind: before.frontMatter.kind, title: NO_TITLE } });
-  if (edited.frontMatterLines.length === 0) {
-    return 'Nothing was saved. The page must start with its settings, between two lines of three dashes (---). Put them back at the top and save again.';
-  }
-  if (edited.frontMatter.title === NO_TITLE) {
-    return 'Nothing was saved. The settings at the top have no title. Add a line such as "title: Wendy" and save again.';
-  }
-  const known = new Set(unreadableLines(before));
-  const unreadable = unreadableLines(edited).find(raw => !known.has(raw));
-  if (unreadable !== undefined) {
-    return `Nothing was saved. This line has a hidden note that Aman cannot read: "${clip(singleLine(unreadable))}". Remove the part that starts with "<!--" and save again.`;
-  }
-  return undefined;
-}
-
 /**
- * Saves the person's new text for a page as one history entry, marked exactly as a hand edit made in the file is.
+ * Saves the person's edited text for a page as one history entry, marked exactly as a hand edit made in the file is.
  * Refused when the page is no longer the version they started from, or when the text is not a page.
  */
 export async function savePageEdit({
   options,
   kind,
   slug,
-  markdown,
+  text,
   version,
 }: {
   options: PageChangeOptions;
   kind: PageKind;
   slug: string;
-  markdown: string;
+  text: string;
   version: string;
 }): Promise<ScreenOutcome<WirePage>> {
   const { vaultDir, runner } = options;
@@ -289,9 +428,9 @@ export async function savePageEdit({
   if (pageVersion(startedFrom) !== version) {
     return refused('conflict', staleMessage);
   }
-  const problem = problemWithEditedText({ markdown, before });
-  if (problem !== undefined) {
-    return refused('invalid', problem);
+  const problem = pageFromEditText({ text, from: before, kind, slug });
+  if (!problem.ok) {
+    return problem;
   }
   return commitPageChange({
     options,
@@ -306,11 +445,14 @@ export async function savePageEdit({
       if (pageVersion(current) !== version && withoutMarkers(current) !== withoutMarkers(startedFrom)) {
         return refused('conflict', staleMessage);
       }
-      const edited = parseMemoryPage({ content: markdown, fallback: { kind, title: slug } });
+      const edited = pageFromEditText({ text, from: now, kind, slug });
+      if (!edited.ok) {
+        return edited;
+      }
       const marked = await markEditedPage({
         history: { vaultDir, runner },
         relativePath: `${pageFolder(kind)}/${slug}.md`,
-        page: edited,
+        page: edited.value,
         today: options.today,
         newId,
       });

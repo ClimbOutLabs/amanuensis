@@ -8931,7 +8931,7 @@ Replace a page with the person’s Markdown. New or changed lines become their o
 
 ```typescript
 await client.memory.pages.update("person", "slug", {
-    markdown: "markdown",
+    text: "text",
     version: "version"
 });
 

@@ -239,27 +239,52 @@ export function pageDescription(page: MemoryPage): string | undefined {
 }
 
 /**
- * The page with Aman's line on what it covers set in its settings block. The block's other lines stay as read.
- * A page with no settings block, or one whose line was spread over several lines by hand, is returned unchanged.
+ * The settings block with one key set to a single-line value; its other lines stay as read. Undefined for a page
+ * with no settings block, or one where that key is written twice or spread over several lines by hand.
  */
-export function withPageAbout(page: MemoryPage, about: string): MemoryPage {
+function frontMatterLinesWith({
+  page,
+  key,
+  value,
+}: {
+  page: MemoryPage;
+  key: string;
+  value: string;
+}): string[] | undefined {
   const close = page.frontMatterLines.length - 1;
   if (close < 1) {
-    return page;
+    return undefined;
   }
-  const keyLines = page.frontMatterLines.flatMap((line, index) => (line.startsWith(ABOUT_PREFIX) ? [index] : []));
+  const keyLines = page.frontMatterLines.flatMap((line, index) => (line.startsWith(`${key}:`) ? [index] : []));
   const [at] = keyLines;
   const next = at === undefined ? undefined : page.frontMatterLines[at + 1];
   if (keyLines.length > 1 || (next !== undefined && /^\s/.test(next))) {
-    return page;
+    return undefined;
   }
   const closing = page.frontMatterLines[close] ?? FENCE;
-  const line = `${ABOUT_KEY}: ${stringify(about, YAML_LINE).trimEnd()}${closing.endsWith('\r') ? '\r' : ''}`;
-  const frontMatterLines =
-    at === undefined
-      ? [...page.frontMatterLines.slice(0, close), line, closing]
-      : page.frontMatterLines.map((existing, index) => (index === at ? line : existing));
-  return { ...page, frontMatter: { ...page.frontMatter, about }, frontMatterLines };
+  const line = `${key}: ${stringify(value, YAML_LINE).trimEnd()}${closing.endsWith('\r') ? '\r' : ''}`;
+  return at === undefined
+    ? [...page.frontMatterLines.slice(0, close), line, closing]
+    : page.frontMatterLines.map((existing, index) => (index === at ? line : existing));
+}
+
+/**
+ * The page with Aman's line on what it covers set in its settings block. A page whose block cannot take the line
+ * is returned unchanged.
+ */
+export function withPageAbout(page: MemoryPage, about: string): MemoryPage {
+  const frontMatterLines = frontMatterLinesWith({ page, key: ABOUT_KEY, value: about });
+  return frontMatterLines === undefined
+    ? page
+    : { ...page, frontMatter: { ...page.frontMatter, about }, frontMatterLines };
+}
+
+/** The page with a new name in its settings block, or undefined when the block cannot take it. */
+export function withPageTitle(page: MemoryPage, title: string): MemoryPage | undefined {
+  const frontMatterLines = frontMatterLinesWith({ page, key: 'title', value: title });
+  return frontMatterLines === undefined
+    ? undefined
+    : { ...page, frontMatter: { ...page.frontMatter, title }, frontMatterLines };
 }
 
 /** The sections a fresh page of each kind may list, in page order. "How you write to them" is for people only. */
@@ -608,7 +633,6 @@ const MAX_FILE_NAME_BYTES = 255;
 
 const FENCE = '---';
 const ABOUT_KEY = 'about';
-const ABOUT_PREFIX = `${ABOUT_KEY}:`;
 const BOM = '\uFEFF';
 const YAML_LINE: ToStringOptions = { lineWidth: 0 };
 const BULLET_PREFIX_PATTERN = /^\s*[-*]\s+/;

@@ -98,8 +98,8 @@ export function createMemoryPagesRouter(deps: MemoryPagesRouterDeps) {
   const updateHandler: RouteHandler<typeof updateMemoryPageRoute> = async c => {
     const { kind, slug } = c.req.valid('param');
     const options = scope(c, c.req.valid('query').namespace);
-    const { markdown, version } = c.req.valid('json');
-    const outcome = await savePageEdit({ options, kind, slug, markdown, version });
+    const { text, version } = c.req.valid('json');
+    const outcome = await savePageEdit({ options, kind, slug, text, version });
     return outcome.ok ? c.json({ data: outcome.value }, 200) : refusal(c, outcome);
   };
 

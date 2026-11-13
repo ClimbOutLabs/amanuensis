@@ -7202,9 +7202,6 @@
             ],
             "type": "string"
           },
-          "markdown": {
-            "type": "string"
-          },
           "other_names": {
             "items": {
               "type": "string"
@@ -7226,6 +7223,10 @@
               "null"
             ]
           },
+          "text": {
+            "description": "The page as a person edits it: its name, headings and lines, without settings or hidden notes.",
+            "type": "string"
+          },
           "title": {
             "type": "string"
           },
@@ -7241,7 +7242,7 @@
           "other_names",
           "summary",
           "sections",
-          "markdown",
+          "text",
           "confirmable_sections",
           "version",
           "disagreements"
@@ -15758,7 +15759,8 @@
       },
       "UpdateMemoryPageRequest": {
         "properties": {
-          "markdown": {
+          "text": {
+            "description": "The edited page text. The first line names the page. A line left as it was keeps its source.",
             "maxLength": 60000,
             "minLength": 1,
             "type": "string"
@@ -15770,7 +15772,7 @@
           }
         },
         "required": [
-          "markdown",
+          "text",
           "version"
         ],
         "type": "object"

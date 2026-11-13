@@ -85,7 +85,7 @@ export type MemoryPageDisagreement = z.infer<typeof MemoryPageDisagreementSchema
 /** The section a confirmed line moves to. */
 export const ConfirmableMemoryPageSectionSchema = PageSectionSchema.exclude(['Unconfirmed', 'Earlier']);
 
-/** One page: its sections in order, and its Markdown for the editor. */
+/** One page: its sections in order, and its text for the editor. */
 export const MemoryPageSchema = z
   .object({
     kind: PageKindSchema,
@@ -94,7 +94,9 @@ export const MemoryPageSchema = z
     other_names: z.array(z.string()),
     summary: z.string().nullable(),
     sections: z.array(MemoryPageSectionSchema),
-    markdown: z.string(),
+    text: z
+      .string()
+      .describe('The page as a person edits it: its name, headings and lines, without settings or hidden notes.'),
     confirmable_sections: z
       .array(ConfirmableMemoryPageSectionSchema)
       .describe('The sections an unconfirmed line on this page can move to.'),
@@ -109,10 +111,14 @@ export type MemoryPage = z.infer<typeof MemoryPageSchema>;
 
 export const GetMemoryPageResponseSchema = z.object({ data: MemoryPageSchema }).openapi('GetMemoryPageResponse');
 
-/** The person's new Markdown text for a page, and the version they started from. */
+/** The person's edited text for a page, and the version they started from. */
 export const UpdateMemoryPageRequestSchema = z
   .object({
-    markdown: z.string().min(1).max(MAX_PAGE_MARKDOWN_CHARS),
+    text: z
+      .string()
+      .min(1)
+      .max(MAX_PAGE_MARKDOWN_CHARS)
+      .describe('The edited page text. The first line names the page. A line left as it was keeps its source.'),
     version: z.string().min(1).max(128),
   })
   .openapi('UpdateMemoryPageRequest');

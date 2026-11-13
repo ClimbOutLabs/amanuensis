@@ -16,11 +16,11 @@ export const MemoryPage: core.serialization.ObjectSchema<serializers.MemoryPage.
         ),
         disagreements: core.serialization.list(MemoryPageDisagreement),
         kind: MemoryPageKind,
-        markdown: core.serialization.string(),
         otherNames: core.serialization.property("other_names", core.serialization.list(core.serialization.string())),
         sections: core.serialization.list(MemoryPageSection),
         slug: core.serialization.string(),
         summary: core.serialization.string().nullable(),
+        text: core.serialization.string(),
         title: core.serialization.string(),
         version: core.serialization.string(),
     });
@@ -30,11 +30,11 @@ export declare namespace MemoryPage {
         confirmable_sections: MemoryPageConfirmableSectionsItem.Raw[];
         disagreements: MemoryPageDisagreement.Raw[];
         kind: MemoryPageKind.Raw;
-        markdown: string;
         other_names: string[];
         sections: MemoryPageSection.Raw[];
         slug: string;
         summary?: string | null;
+        text: string;
         title: string;
         version: string;
     }

@@ -3,13 +3,14 @@
 /**
  * @example
  *     {
- *         markdown: "markdown",
+ *         text: "text",
  *         version: "version"
  *     }
  */
 export interface UpdateMemoryPageRequest {
     /** Vault namespace: omit for the shared vault, `persona:<name>` for a persona vault. */
     namespace?: string;
-    markdown: string;
+    /** The edited page text. The first line names the page. A line left as it was keeps its source. */
+    text: string;
     version: string;
 }

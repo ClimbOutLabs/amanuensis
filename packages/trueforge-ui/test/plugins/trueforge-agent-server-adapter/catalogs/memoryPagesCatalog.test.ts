@@ -26,7 +26,7 @@ const PAGE = {
       ],
     },
   ],
-  markdown: '---\n---\n',
+  text: '# Wendy\n',
   confirmable_sections: ['Now'],
   version: 'v1',
   disagreements: [
@@ -82,7 +82,7 @@ describe('createMemoryPagesCatalog', () => {
     assert.equal(page.sections[0]?.lines[0]?.sourceLabel, 'External source: read content');
     assert.deepEqual(page.confirmableSections, ['Now']);
     assert.equal(page.disagreements[0]?.foundOn, '2026-11-11');
-    await catalog.savePage({ kind: 'person', slug: 'wendy', markdown: 'x', version: 'v1' });
+    await catalog.savePage({ kind: 'person', slug: 'wendy', text: 'x', version: 'v1' });
     await catalog.confirmLine({ kind: 'person', slug: 'wendy', factId: 'f_03', section: 'Now' });
     await catalog.dismissLine({ kind: 'person', slug: 'wendy', factId: 'f_03', namespace: 'persona:Ada' });
     await catalog.dismissDisagreement({ kind: 'person', slug: 'wendy', disagreementId: 'p1' });
@@ -91,7 +91,7 @@ describe('createMemoryPagesCatalog', () => {
     assert.deepEqual(calls, [
       { path: '/api/v1/memory/pages?namespace=persona%3AAda', method: 'GET', body: undefined },
       { path: '/api/v1/memory/pages/person/wendy', method: 'GET', body: undefined },
-      { path: '/api/v1/memory/pages/person/wendy', method: 'PUT', body: { markdown: 'x', version: 'v1' } },
+      { path: '/api/v1/memory/pages/person/wendy', method: 'PUT', body: { text: 'x', version: 'v1' } },
       { path: '/api/v1/memory/pages/person/wendy/lines/f_03/confirm', method: 'POST', body: { section: 'Now' } },
       {
         path: '/api/v1/memory/pages/person/wendy/lines/f_03/dismiss?namespace=persona%3AAda',
@@ -107,7 +107,7 @@ describe('createMemoryPagesCatalog', () => {
     const catalog = createMemoryPagesCatalog({
       fetch: async () => Response.json({ error: { message: 'Reload the page.' } }, { status: 409 }),
     });
-    await assert.rejects(catalog.savePage({ kind: 'person', slug: 'wendy', markdown: 'x', version: 'v' }), {
+    await assert.rejects(catalog.savePage({ kind: 'person', slug: 'wendy', text: 'x', version: 'v' }), {
       message: 'Reload the page.',
     });
   });

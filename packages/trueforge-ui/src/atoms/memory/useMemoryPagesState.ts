@@ -160,9 +160,9 @@ export function useMemoryPagesState() {
   }
 
   /** Saves the editor's text. A refusal throws so the editor can show it beside the text. */
-  async function savePage({ markdown, version }: { markdown: string; version: string }) {
+  async function savePage({ text, version }: { text: string; version: string }) {
     if (pagesPort === null || open === null) return;
-    setPage(await pagesPort.savePage({ ...target(open), markdown, version }));
+    setPage(await pagesPort.savePage({ ...target(open), text, version }));
     await refresh();
   }
 

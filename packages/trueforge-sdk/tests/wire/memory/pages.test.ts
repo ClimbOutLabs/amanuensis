@@ -435,7 +435,6 @@ describe("PagesClient", () => {
                     },
                 ],
                 kind: "person",
-                markdown: "markdown",
                 other_names: ["other_names"],
                 sections: [
                     {
@@ -456,6 +455,7 @@ describe("PagesClient", () => {
                 ],
                 slug: "slug",
                 summary: "summary",
+                text: "text",
                 title: "title",
                 version: "version",
             },
@@ -489,7 +489,6 @@ describe("PagesClient", () => {
                     },
                 ],
                 kind: "person",
-                markdown: "markdown",
                 otherNames: ["other_names"],
                 sections: [
                     {
@@ -510,6 +509,7 @@ describe("PagesClient", () => {
                 ],
                 slug: "slug",
                 summary: "summary",
+                text: "text",
                 title: "title",
                 version: "version",
             },
@@ -614,7 +614,7 @@ describe("PagesClient", () => {
     test("update (1)", async () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-        const rawRequestBody = { markdown: "markdown", version: "version" };
+        const rawRequestBody = { text: "text", version: "version" };
         const rawResponseBody = {
             data: {
                 confirmable_sections: ["How you write to them"],
@@ -628,7 +628,6 @@ describe("PagesClient", () => {
                     },
                 ],
                 kind: "person",
-                markdown: "markdown",
                 other_names: ["other_names"],
                 sections: [
                     {
@@ -649,6 +648,7 @@ describe("PagesClient", () => {
                 ],
                 slug: "slug",
                 summary: "summary",
+                text: "text",
                 title: "title",
                 version: "version",
             },
@@ -664,7 +664,7 @@ describe("PagesClient", () => {
             .build();
 
         const response = await client.memory.pages.update("person", "slug", {
-            markdown: "markdown",
+            text: "text",
             version: "version",
         });
         expect(response).toEqual({
@@ -686,7 +686,6 @@ describe("PagesClient", () => {
                     },
                 ],
                 kind: "person",
-                markdown: "markdown",
                 otherNames: ["other_names"],
                 sections: [
                     {
@@ -707,6 +706,7 @@ describe("PagesClient", () => {
                 ],
                 slug: "slug",
                 summary: "summary",
+                text: "text",
                 title: "title",
                 version: "version",
             },
@@ -716,7 +716,7 @@ describe("PagesClient", () => {
     test("update (2)", async () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-        const rawRequestBody = { markdown: "x", version: "x" };
+        const rawRequestBody = { text: "x", version: "x" };
         const rawResponseBody = { error: { message: "message" } };
 
         server
@@ -730,7 +730,7 @@ describe("PagesClient", () => {
 
         await expect(async () => {
             return await client.memory.pages.update("person", "slug", {
-                markdown: "x",
+                text: "x",
                 version: "x",
             });
         }).rejects.toThrow(TrueForgeTypes.BadRequestError);
@@ -739,7 +739,7 @@ describe("PagesClient", () => {
     test("update (3)", async () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-        const rawRequestBody = { markdown: "x", version: "x" };
+        const rawRequestBody = { text: "x", version: "x" };
         const rawResponseBody = { error: { message: "message" } };
 
         server
@@ -753,7 +753,7 @@ describe("PagesClient", () => {
 
         await expect(async () => {
             return await client.memory.pages.update("person", "slug", {
-                markdown: "x",
+                text: "x",
                 version: "x",
             });
         }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
@@ -762,7 +762,7 @@ describe("PagesClient", () => {
     test("update (4)", async () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-        const rawRequestBody = { markdown: "x", version: "x" };
+        const rawRequestBody = { text: "x", version: "x" };
         const rawResponseBody = { error: { message: "message" } };
 
         server
@@ -776,7 +776,7 @@ describe("PagesClient", () => {
 
         await expect(async () => {
             return await client.memory.pages.update("person", "slug", {
-                markdown: "x",
+                text: "x",
                 version: "x",
             });
         }).rejects.toThrow(TrueForgeTypes.NotFoundError);
@@ -785,7 +785,7 @@ describe("PagesClient", () => {
     test("update (5)", async () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-        const rawRequestBody = { markdown: "x", version: "x" };
+        const rawRequestBody = { text: "x", version: "x" };
         const rawResponseBody = { error: { message: "message" } };
 
         server
@@ -799,7 +799,7 @@ describe("PagesClient", () => {
 
         await expect(async () => {
             return await client.memory.pages.update("person", "slug", {
-                markdown: "x",
+                text: "x",
                 version: "x",
             });
         }).rejects.toThrow(TrueForgeTypes.ConflictError);
@@ -808,7 +808,7 @@ describe("PagesClient", () => {
     test("update (6)", async () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-        const rawRequestBody = { markdown: "x", version: "x" };
+        const rawRequestBody = { text: "x", version: "x" };
         const rawResponseBody = { error: { message: "message" } };
 
         server
@@ -822,7 +822,7 @@ describe("PagesClient", () => {
 
         await expect(async () => {
             return await client.memory.pages.update("person", "slug", {
-                markdown: "x",
+                text: "x",
                 version: "x",
             });
         }).rejects.toThrow(TrueForgeTypes.InternalServerError);
@@ -958,7 +958,6 @@ describe("PagesClient", () => {
                     },
                 ],
                 kind: "person",
-                markdown: "markdown",
                 other_names: ["other_names"],
                 sections: [
                     {
@@ -979,6 +978,7 @@ describe("PagesClient", () => {
                 ],
                 slug: "slug",
                 summary: "summary",
+                text: "text",
                 title: "title",
                 version: "version",
             },
@@ -1012,7 +1012,6 @@ describe("PagesClient", () => {
                     },
                 ],
                 kind: "person",
-                markdown: "markdown",
                 otherNames: ["other_names"],
                 sections: [
                     {
@@ -1033,6 +1032,7 @@ describe("PagesClient", () => {
                 ],
                 slug: "slug",
                 summary: "summary",
+                text: "text",
                 title: "title",
                 version: "version",
             },
@@ -1151,7 +1151,6 @@ describe("PagesClient", () => {
                     },
                 ],
                 kind: "person",
-                markdown: "markdown",
                 other_names: ["other_names"],
                 sections: [
                     {
@@ -1172,6 +1171,7 @@ describe("PagesClient", () => {
                 ],
                 slug: "slug",
                 summary: "summary",
+                text: "text",
                 title: "title",
                 version: "version",
             },
@@ -1206,7 +1206,6 @@ describe("PagesClient", () => {
                     },
                 ],
                 kind: "person",
-                markdown: "markdown",
                 otherNames: ["other_names"],
                 sections: [
                     {
@@ -1227,6 +1226,7 @@ describe("PagesClient", () => {
                 ],
                 slug: "slug",
                 summary: "summary",
+                text: "text",
                 title: "title",
                 version: "version",
             },
@@ -1350,7 +1350,6 @@ describe("PagesClient", () => {
                     },
                 ],
                 kind: "person",
-                markdown: "markdown",
                 other_names: ["other_names"],
                 sections: [
                     {
@@ -1371,6 +1370,7 @@ describe("PagesClient", () => {
                 ],
                 slug: "slug",
                 summary: "summary",
+                text: "text",
                 title: "title",
                 version: "version",
             },
@@ -1404,7 +1404,6 @@ describe("PagesClient", () => {
                     },
                 ],
                 kind: "person",
-                markdown: "markdown",
                 otherNames: ["other_names"],
                 sections: [
                     {
@@ -1425,6 +1424,7 @@ describe("PagesClient", () => {
                 ],
                 slug: "slug",
                 summary: "summary",
+                text: "text",
                 title: "title",
                 version: "version",
             },
