@@ -25,6 +25,7 @@ function baseCard(overrides: Partial<SentinelApprovalCard> = {}): SentinelApprov
     calendar_event: null,
     schedule: null,
     persona: null,
+    skill: null,
     ...overrides,
   };
 }
@@ -180,6 +181,7 @@ describe('approval card content', () => {
     const { container } = renderTicket(
       baseCard({
         plain_what: 'Run this command?',
+        copy: { headline: 'Run this command?', consequence: 'Commands can change or delete files.', reason: null },
         parsed_command: command,
         cannot_be_undone: 'Commands can change or delete files.',
       }),
@@ -195,6 +197,7 @@ describe('approval card content', () => {
     const { container } = renderTicket(
       baseCard({
         plain_what: 'Send an email to ana@example.com?',
+        copy: { headline: 'Send an email to ana@example.com?', consequence: null, reason: null },
         recipient: 'ana@example.com',
         destination_host: 'mcp.example.com',
         outbound_text: 'to: ana@example.com',
@@ -216,7 +219,13 @@ describe('approval card content', () => {
       say: 'Searches are set to ask, so Mannie is checking with you first.',
       page: false,
     });
-    const { container } = renderTicket(baseCard({ plain_what: what, destination_host: 'Tavily' }));
+    const { container } = renderTicket(
+      baseCard({
+        plain_what: what,
+        copy: { headline: what, consequence: null, reason: null },
+        destination_host: 'Tavily',
+      }),
+    );
     expect(screen.getByRole('heading', { name: what })).toBeInTheDocument();
     expect(what.startsWith('Search the web for harbour tides?')).toBe(true);
     expect(container.textContent).not.toMatch(/api\.tavily|tavily_/);
@@ -228,6 +237,12 @@ describe('approval card content', () => {
       baseCard({
         plain_what:
           'Send Lisbon to maps.example.org to find it, then load map tiles for that area from tiles.example.org?',
+        copy: {
+          headline:
+            'Send Lisbon to maps.example.org to find it, then load map tiles for that area from tiles.example.org?',
+          consequence: null,
+          reason: null,
+        },
         destination_host: 'maps.example.org, tiles.example.org',
       }),
     );
@@ -243,15 +258,12 @@ describe('approval card content', () => {
   it('asks a calendar delete through a connector as a question, with raw arguments folded', () => {
     renderTicket(
       baseCard({
-        plain_what: 'Delete "Dentist", Friday? The guest list could not be read, so anyone invited may be emailed.',
+        plain_what: 'Delete "Dentist", Friday?',
+        copy: { headline: 'Delete "Dentist", Friday?', consequence: null, reason: null },
         outbound_text: 'calendar_id: home',
       }),
     );
-    expect(
-      screen.getByRole('heading', {
-        name: 'Delete "Dentist", Friday? The guest list could not be read, so anyone invited may be emailed.',
-      }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Delete "Dentist", Friday?' })).toBeInTheDocument();
     expect(screen.getAllByText('Waiting for you')).toHaveLength(1);
     expect(detailsDisclosure().open).toBe(false);
   });
@@ -265,7 +277,9 @@ describe('approval card content', () => {
         mail_new_recipients: ['new@example.com'],
       }),
     );
-    expect(screen.getByText(/You have never emailed new@example\.com/)).toBeInTheDocument();
+    // The new address is named in the card's details; the sentence about never having emailed
+    // them is part of the mail card's own text, shown on the mail card itself.
+    expect(screen.getAllByText('new@example.com').length).toBeGreaterThan(0);
     expect(screen.getByRole('button', { name: 'Add and send' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: "Don't send" })).toBeInTheDocument();
     expect(screen.getAllByText('Waiting for you')).toHaveLength(1);

@@ -8,6 +8,7 @@ import {
   approvalGrantKey,
   effectiveApprovalDecisions,
   effectiveToolAdmissions,
+  mapsCardTakesLastingAnswer,
 } from '../../../src/core/mcp/approvalGrant';
 import type { ToolSchema } from '../../../src/core/mcp/IMCPServer';
 import {
@@ -18,6 +19,7 @@ import { connectRemoteMcp } from '../../../src/core/mcp/remoteMcpClient';
 import type { ToolSelectorConfig } from '../../../src/core/mcp/ToolSelectorPolicy';
 import { stampSentinelDecision } from '../../../src/core/mcp/ToolSet';
 import { createSentinelHostContext, defaultSentinelServices } from '../../../src/core/permissions';
+import { MAPS_ASK_REASON, MAPS_HOLD_REASON } from '../../../src/core/permissions/mapsToolNames';
 import { tier1Decision } from '../../../src/core/permissions/tier';
 import { sandboxCommandApprovalIdentity } from '../../../src/core/sandbox/Sandbox';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
@@ -234,6 +236,7 @@ describe('chat grant key', () => {
     const base = { ...toolInfo('notes', 'lookup_note'), effect: 'inspect' as const };
     const card = ({ destination, recipient }: { destination: string | null; recipient: string | null }) => ({
       plain_what: 'x',
+      copy: null,
       plain_why: null,
       cannot_be_undone: null,
       why_asked_again: null,
@@ -264,6 +267,7 @@ describe('chat grant key', () => {
     const base = { ...toolInfo('notes', 'lookup_note'), effect: 'inspect' as const };
     const card = (overrides: Partial<NonNullable<InternalToolCallInfo['tier3_card']>>) => ({
       plain_what: 'x',
+      copy: null,
       plain_why: null,
       cannot_be_undone: null,
       why_asked_again: null,
@@ -303,6 +307,93 @@ describe('chat grant key', () => {
       expect(effective.has('call')).toBe(false);
       expect(allowsChatApproval(info)).toBe(false);
     }
+  });
+});
+
+describe('a chat grant is tied to the target the card names', () => {
+  const card = (target: { destination?: string; recipient?: string; destination_host?: string }) => ({
+    plain_what: 'x',
+    copy: null,
+    plain_why: null,
+    cannot_be_undone: null,
+    why_asked_again: null,
+    destination: target.destination ?? null,
+    recipient: target.recipient ?? null,
+    amount: null,
+    parsed_command: null,
+    outbound_text: null,
+    destination_host: target.destination_host ?? null,
+    outbound_truncated: false,
+  });
+  const consequence = (reason: string): InternalToolCallInfo => ({
+    ...toolInfo('tracker', 'archive_item'),
+    tier: 3,
+    tier_reason: reason,
+  });
+
+  it.each([
+    ['a destination', { destination: 'Team notes' }],
+    ['a recipient', { recipient: 'ana@example.com' }],
+  ])('offers chat scope for a consequential action whose card names %s', (_label, target) => {
+    expect(allowsChatApproval({ ...consequence('destructive_action'), tier3_card: card(target) })).toBe(true);
+  });
+
+  it.each(['connector_outbound', 'destructive_action', 'mcp_destructive_hint', 'mcp_open_world_hint'])(
+    'offers no chat scope for a %s action whose card names no target',
+    reason => {
+      expect(allowsChatApproval({ ...consequence(reason), tier3_card: card({}) })).toBe(false);
+      expect(allowsChatApproval({ ...consequence(reason), tier3_card: card({ destination: '  ' }) })).toBe(false);
+      expect(allowsChatApproval(consequence(reason))).toBe(false);
+    },
+  );
+
+  it.each(['connector_outbound', 'destructive_action', 'mcp_destructive_hint', 'mcp_open_world_hint'])(
+    "offers no chat scope for a %s action whose card names only the connector's own address",
+    reason => {
+      const onConnector = card({ destination_host: 'tracker.example.com' });
+      expect(allowsChatApproval({ ...consequence(reason), tier3_card: onConnector })).toBe(false);
+    },
+  );
+
+  it('asks again for a second delete through the same connector when neither card names what is deleted', () => {
+    const onConnector = card({ destination_host: 'tracker.example.com' });
+    const first = { ...consequence('mcp_destructive_hint'), tier3_card: onConnector };
+    const second = { ...consequence('mcp_destructive_hint'), tier3_card: onConnector };
+    const effective = effectiveToolAdmissions({
+      calls: [toolCall('second', second)],
+      decisions: new Map(),
+      chatApprovalGrants: new Set([approvalGrantKey(first)]),
+      implementationPlanGrants: new Set(),
+    });
+    expect(effective.get('second')).toEqual({ decision: undefined, admission_provenance: { source: 'automatic' } });
+  });
+
+  it.each(['schedule_write', 'persona_write', 'skill_install'])('offers no chat scope for a %s card', reason => {
+    expect(allowsChatApproval({ ...consequence(reason), tier3_card: card({}) })).toBe(false);
+  });
+
+  it('does not admit a second call from a grant stored for an action that names no target', () => {
+    const first = { ...consequence('destructive_action'), tier3_card: card({}) };
+    const effective = effectiveToolAdmissions({
+      calls: [toolCall('later', first)],
+      decisions: new Map(),
+      chatApprovalGrants: new Set([approvalGrantKey(first)]),
+      implementationPlanGrants: new Set(),
+    });
+    expect(effective.get('later')).toEqual({ decision: undefined, admission_provenance: { source: 'automatic' } });
+  });
+
+  it('still admits a second call to the same target from its grant, and not one to another target', () => {
+    const toNotes = { ...consequence('destructive_action'), tier3_card: card({ destination: 'Team notes' }) };
+    const toOther = { ...consequence('destructive_action'), tier3_card: card({ destination: 'Public page' }) };
+    const effective = effectiveToolAdmissions({
+      calls: [toolCall('same', toNotes), toolCall('other', toOther)],
+      decisions: new Map(),
+      chatApprovalGrants: new Set([approvalGrantKey(toNotes)]),
+      implementationPlanGrants: new Set(),
+    });
+    expect(effective.get('same')?.decision).toEqual({ status: 'allow', scope: 'chat' });
+    expect(effective.get('other')?.decision).toBeUndefined();
   });
 });
 
@@ -757,4 +848,87 @@ describe('calendar changes that reach guests never get a durable grant', () => {
       expect(admissions.get('call-1')).toEqual({ decision: undefined, admission_provenance: { source: 'automatic' } });
     },
   );
+});
+
+describe('Drive writes to the person own files can take a durable grant', () => {
+  it.each(['create_doc', 'append_rows'])('admits chat and always scope for %s', tool_name => {
+    const info: InternalToolCallInfo = {
+      type: 'truefoundry-system',
+      mcp_server_id: 'google_drive',
+      mcp_server_name: 'google_drive',
+      original_tool_name: tool_name,
+      is_approval_required: true,
+      tier: 3,
+      tier_reason: 'google_drive_write',
+    };
+    expect(allowsChatApproval(info)).toBe(true);
+    expect(allowsToolGrant(info)).toBe(true);
+  });
+
+  it('does not admit a Drive read, which never asks', () => {
+    const info: InternalToolCallInfo = {
+      type: 'truefoundry-system',
+      mcp_server_id: 'google_drive',
+      mcp_server_name: 'google_drive',
+      original_tool_name: 'list_files',
+      is_approval_required: false,
+      tier: 1,
+      tier_reason: 'google_drive_read',
+    };
+    expect(allowsToolGrant(info)).toBe(false);
+  });
+});
+
+describe('lasting answers on a maps card', () => {
+  function mapsInfo(overrides: Partial<InternalToolCallInfo>): InternalToolCallInfo {
+    return {
+      type: 'truefoundry-system',
+      mcp_server_id: 'maps',
+      mcp_server_name: 'maps',
+      original_tool_name: 'render_map',
+      is_approval_required: true,
+      tier: 3,
+      tier_reason: MAPS_ASK_REASON,
+      ...overrides,
+    };
+  }
+
+  it('offers both for a map that asks only because maps are set to ask', () => {
+    const info = mapsInfo({});
+    expect(mapsCardTakesLastingAnswer(info)).toBe(true);
+    expect(allowsChatApproval(info)).toBe(true);
+    expect(allowsToolGrant(info)).toBe(true);
+  });
+
+  it('offers neither for a map that would send something that looks like a secret', () => {
+    const info = mapsInfo({ tier_reason: MAPS_HOLD_REASON });
+    expect(mapsCardTakesLastingAnswer(info)).toBe(false);
+    expect(allowsChatApproval(info)).toBe(false);
+    expect(allowsToolGrant(info)).toBe(false);
+  });
+
+  it('does not let an answer given for the chat cover a later map that would send a secret', () => {
+    const plain = mapsInfo({});
+    const secret = mapsInfo({ tier_reason: MAPS_HOLD_REASON });
+    const admissions = effectiveToolAdmissions({
+      calls: [toolCall('plain-again', plain), toolCall('secret', secret)],
+      decisions: new Map(),
+      chatApprovalGrants: new Set([approvalGrantKey(plain), approvalGrantKey(secret)]),
+      implementationPlanGrants: new Set(),
+    });
+    expect(admissions.get('plain-again')?.decision).toEqual({ status: 'allow', scope: 'chat' });
+    expect(admissions.get('secret')).toEqual({ decision: undefined, admission_provenance: { source: 'automatic' } });
+  });
+
+  it('offers neither for such a map even if the maps tool were marked as only reading', () => {
+    const info = mapsInfo({ tier_reason: MAPS_HOLD_REASON, effect: 'inspect' });
+    expect(allowsChatApproval(info)).toBe(false);
+    expect(allowsToolGrant(info)).toBe(false);
+  });
+
+  it("offers neither for a connector's tool that only carries the maps reason", () => {
+    const info = mapsInfo({ type: 'mcp' });
+    expect(mapsCardTakesLastingAnswer(info)).toBe(false);
+    expect(allowsToolGrant(info)).toBe(false);
+  });
 });

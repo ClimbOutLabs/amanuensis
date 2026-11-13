@@ -472,9 +472,14 @@ describe('createApiKeyAuthMiddleware', () => {
     expect(spy2).toHaveBeenCalledTimes(1);
   });
 
-  it('rejects different-length keys without calling timingSafeEqual', () => {
+  it('compares keys of different lengths the same way, without a shortcut', () => {
     const spy = jest.fn(timingSafeEqual);
     expect(apiKeysEqual('short', 'service-key', spy)).toBe(false);
-    expect(spy).not.toHaveBeenCalled();
+    expect(apiKeysEqual('service-key-and-more', 'service-key', spy)).toBe(false);
+    expect(apiKeysEqual('', 'service-key', spy)).toBe(false);
+    expect(spy).toHaveBeenCalledTimes(3);
+    for (const [provided, expected] of spy.mock.calls) {
+      expect(provided.byteLength).toBe(expected.byteLength);
+    }
   });
 });

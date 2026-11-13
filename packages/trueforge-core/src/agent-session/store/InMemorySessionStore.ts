@@ -34,6 +34,7 @@ import type {
   CreateTurnInput,
   DeleteSessionFolderInput,
   DeleteSessionInput,
+  ExpiredPrivateSession,
   FreezeAndGetTurnInput,
   GetCommandExecutionInput,
   GetOwnedIdsInput,
@@ -46,12 +47,14 @@ import type {
   IndexChatMessagesInput,
   ISessionStore,
   ListApprovalDismissalsInput,
+  ListExpiredPrivateSessionsInput,
   ListImplementationPlanGrantsInput,
   ListSessionEventsInput,
   ListSessionFoldersInput,
   ListSessionsInput,
   ListTurnEventsInput,
   ListTurnsInput,
+  MergeSessionMetadataInput,
   NewThreadInit,
   OverwriteThreadContextInput,
   PatchMCPServersInput,
@@ -62,10 +65,12 @@ import type {
   RecoverRunningCommandExecutionsInput,
   RemoveThreadsInput,
   RenewCommandExecutionLeaseInput,
+  ReplaceSessionTitleIfCurrentInput,
   ReplaceTaskChecklistInput,
   RevokeImplementationPlanGrantInput,
   RevokeImplementationPlanGrantResult,
   SearchChatHistoryInput,
+  SetPrivateExpiryInput,
   SetSessionFolderInput,
   StampImportedSessionInput,
   TurnContextAppend,
@@ -75,6 +80,7 @@ import type {
   UpdateTurnStateInput,
 } from './ISessionStore';
 import { decodeOffsetPageToken, encodeOffsetPageToken } from './OffsetPageToken';
+import { assertPrivateExpiryMatches } from './privateSession';
 import {
   decodeSessionEventPageToken,
   paginateSessionEventRows,
@@ -281,6 +287,7 @@ export class InMemorySessionStore<
   private readonly chatSearchDocuments = new Map<string, Map<string, StoredChatSearchTurn>>();
 
   async createSession(input: CreateSessionInput<TSessionCustom>): Promise<void> {
+    assertPrivateExpiryMatches(input);
     const key = sessionKey(input.session_id);
     if (this.sessions.has(key)) {
       throw new SessionAlreadyExistsError(input.session_id);
@@ -306,6 +313,8 @@ export class InMemorySessionStore<
       last_turn_id: null,
       external_id: externalId,
       source: input.source !== null ? deepCopy(input.source) : null,
+      is_incognito: input.is_incognito,
+      private_expires_at: input.private_expires_at === null ? null : new Date(input.private_expires_at),
       created_at: now,
       updated_at: now,
       last_activity_timestamp_ms: Date.now(),
@@ -342,6 +351,31 @@ export class InMemorySessionStore<
     stored.record.updated_at = new Date(input.updated_at);
     stored.record.last_activity_timestamp_ms = input.last_activity_timestamp_ms;
     stored.record.metrics = deepCopy(input.metrics);
+  }
+
+  async setPrivateExpiry(input: SetPrivateExpiryInput): Promise<void> {
+    const stored = this.sessions.get(sessionKey(input.session_id));
+    if (stored?.record.tenant_id !== input.tenant_id) {
+      throw new SessionNotFoundError(input.session_id);
+    }
+    if (!stored.record.is_incognito) {
+      throw new SessionStoreInvariantError(`Session ${input.session_id} is not private; it has no deletion time`);
+    }
+    stored.record.private_expires_at = new Date(input.private_expires_at);
+  }
+
+  async listExpiredPrivateSessions(input: ListExpiredPrivateSessionsInput): Promise<ExpiredPrivateSession[]> {
+    const due: { record: SessionRecord<TSessionCustom>; expiresAt: number }[] = [];
+    for (const stored of this.sessions.values()) {
+      const expiresAt = stored.record.private_expires_at;
+      if (stored.record.is_incognito && expiresAt !== null && expiresAt.getTime() <= input.now.getTime()) {
+        due.push({ record: stored.record, expiresAt: expiresAt.getTime() });
+      }
+    }
+    due.sort((a, b) => a.expiresAt - b.expiresAt || compareSessionId(a.record.session_id, b.record.session_id));
+    return due
+      .slice(0, input.limit)
+      .map(({ record }) => ({ tenant_id: record.tenant_id, session_id: record.session_id }));
   }
 
   async deleteSession(input: DeleteSessionInput): Promise<void> {
@@ -719,6 +753,32 @@ export class InMemorySessionStore<
     return;
   }
 
+  async mergeSessionMetadata(input: MergeSessionMetadataInput): Promise<void> {
+    const key = sessionKey(input.session_id);
+    const stored = this.sessions.get(key);
+    if (stored?.record.tenant_id !== input.tenant_id) {
+      throw new SessionNotFoundError(input.session_id);
+    }
+    stored.record.metadata = { ...stored.record.metadata, [input.key]: input.value };
+    const now = Date.now();
+    stored.record.updated_at = new Date(now);
+    stored.record.last_activity_timestamp_ms = now;
+    return;
+  }
+
+  async replaceSessionTitleIfCurrent(input: ReplaceSessionTitleIfCurrentInput): Promise<boolean> {
+    const stored = this.sessions.get(sessionKey(input.session_id));
+    if (stored?.record.tenant_id !== input.tenant_id) {
+      return false;
+    }
+    if (stored.record.title !== input.current_title) {
+      return false;
+    }
+    stored.record.title = input.title;
+    stored.record.updated_at = new Date();
+    return true;
+  }
+
   async createSessionFolder(input: CreateSessionFolderInput): Promise<SessionFolderRecord> {
     const now = new Date();
     const record: SessionFolderRecord = {
@@ -815,6 +875,9 @@ export class InMemorySessionStore<
     const createdByOrAgentIds = input.created_by_or_agent_ids;
     for (const stored of this.sessions.values()) {
       if (stored.record.tenant_id !== input.tenant_id) {
+        continue;
+      }
+      if (!input.include_private && stored.record.is_incognito) {
         continue;
       }
       if (

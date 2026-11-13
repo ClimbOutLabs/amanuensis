@@ -382,7 +382,7 @@ describe('an unattended run', () => {
       ...OWNER,
       mcp_server_name: 'mail',
       tool_name: 'read_note',
-      mcp_server_host: null,
+      connector_binding: null,
     });
     const { brief } = await runBrief(h);
 
@@ -667,13 +667,32 @@ describe('approving a held action later', () => {
     expect(h.callTool).not.toHaveBeenCalled();
   });
 
+  it('records no standing grant when the Always allow decision is never saved', async () => {
+    const h = makeHarness([() => toolCallsStream([{ id: 'call-read', name: 'read_note', args: '{}' }])]);
+    const { thread } = await runBrief(h);
+    const grantKey = { ...OWNER, mcp_server_name: 'mail', tool_name: 'read_note', connector_binding: null };
+
+    const replay = h.build({ unattended: false, context: heldContext(thread), stopAfterToolResponse: true });
+    // The host fails to save what the decision appended, so the decision never lands.
+    const saveFails = async () => {
+      for await (const _event of replay.orchestrator.send([approve('call-read', 'always')])) {
+        void _event;
+        throw new Error('the decision could not be saved');
+      }
+    };
+    await expect(saveFails()).rejects.toThrow('the decision could not be saved');
+
+    expect(await h.base.tool_grants.hasToolGrant(grantKey)).toBe(false);
+    expect(h.callTool).not.toHaveBeenCalled();
+  });
+
   it('records a standing grant when the owner picks Always allow on a read-only tool', async () => {
     const h = makeHarness([() => toolCallsStream([{ id: 'call-read', name: 'read_note', args: '{}' }])]);
     const { thread, brief } = await runBrief(h);
     expect(brief.events.find(event => event.type === EventType.TOOL_APPROVAL_REQUIRED)).toMatchObject({
       tool_calls: [{ id: 'call-read', held: true, can_always_allow: true }],
     });
-    const grantKey = { ...OWNER, mcp_server_name: 'mail', tool_name: 'read_note', mcp_server_host: null };
+    const grantKey = { ...OWNER, mcp_server_name: 'mail', tool_name: 'read_note', connector_binding: null };
     expect(await h.base.tool_grants.hasToolGrant(grantKey)).toBe(false);
 
     const replay = h.build({ unattended: false, context: heldContext(thread), stopAfterToolResponse: true });
@@ -1167,7 +1186,7 @@ describe('audit rows for a web search held before its audit text was stored', ()
     expect(h.audit.at(-1)?.description).not.toContain('Held');
   });
 
-  it.each(cases)('answered %s after a scheduled run held it (saved reason %s)', async (status, why) => {
+  async function heldByScheduledRun(why: (typeof savedReasons)[number]) {
     const h = makeHarness(
       [() => toolCallsStream([{ id: 'call-search', name: 'web_search', args: JSON.stringify({ query }) }])],
       {
@@ -1181,13 +1200,33 @@ describe('audit rows for a web search held before its audit text was stored', ()
       context: savedByEarlierRelease(heldContext(thread), why),
       stopAfterToolResponse: true,
     });
-    await runTurn({ orchestrator: replay.orchestrator, sendBatch: [answer(status)] });
+    return { h, replay };
+  }
+
+  it.each(savedReasons)('answered deny after a scheduled run held it (saved reason %s)', async why => {
+    const { h, replay } = await heldByScheduledRun(why);
+    await runTurn({ orchestrator: replay.orchestrator, sendBatch: [answer('deny')] });
 
     expect(h.audit.length).toBeGreaterThanOrEqual(2);
     expectNoCaughtText(h);
     expect(h.audit.at(-1)?.description).toContain('Search the web through the search provider. ');
     expect(h.audit.at(-1)?.description).not.toContain('Held');
   });
+
+  // The card reads differently in this release, so the owner is asked to ask again instead of approving words they did not read.
+  it.each(savedReasons)(
+    'answered allow after a scheduled run held it is not run, and says to ask again (saved reason %s)',
+    async why => {
+      const { h, replay } = await heldByScheduledRun(why);
+      await expect(runTurn({ orchestrator: replay.orchestrator, sendBatch: [answer('allow')] })).rejects.toThrow(
+        'This no longer matches what was held, so nothing was done. Ask again in chat.',
+      );
+
+      expect(h.audit.length).toBeGreaterThanOrEqual(2);
+      expectNoCaughtText(h);
+      expect(h.audit.at(-1)).toMatchObject({ outcome: 'denied' });
+    },
+  );
 });
 
 describe('the per-reply call cap in an unattended run (owner ruling, 2026-10-19)', () => {
@@ -1202,7 +1241,7 @@ describe('the per-reply call cap in an unattended run (owner ruling, 2026-10-19)
       ...OWNER,
       mcp_server_name: 'mail',
       tool_name: 'read_note',
-      mcp_server_host: null,
+      connector_binding: null,
     });
     const { brief } = await runBrief(h);
 
@@ -1242,7 +1281,7 @@ describe('the per-reply call cap in an unattended run (owner ruling, 2026-10-19)
       ...OWNER,
       mcp_server_name: 'mail',
       tool_name: 'read_note',
-      mcp_server_host: null,
+      connector_binding: null,
     });
     const { brief } = await runBrief(h);
 
@@ -1262,7 +1301,7 @@ describe('the per-reply call cap in an unattended run (owner ruling, 2026-10-19)
       ...OWNER,
       mcp_server_name: 'mail',
       tool_name: 'read_note',
-      mcp_server_host: null,
+      connector_binding: null,
     });
     const { brief } = await runBrief(h);
 
@@ -1282,7 +1321,7 @@ describe('the per-reply call cap in an unattended run (owner ruling, 2026-10-19)
       ...OWNER,
       mcp_server_name: 'mail',
       tool_name: 'read_note',
-      mcp_server_host: null,
+      connector_binding: null,
     });
     const { brief } = await runBrief(h);
 
@@ -1303,7 +1342,7 @@ describe('the per-reply call cap in an unattended run (owner ruling, 2026-10-19)
         ...OWNER,
         mcp_server_name: 'mail',
         tool_name: 'read_note',
-        mcp_server_host: null,
+        connector_binding: null,
       });
       const { orchestrator } = h.build({ unattended });
       const turn = await runTurn({

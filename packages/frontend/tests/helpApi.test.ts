@@ -12,14 +12,32 @@ const VALID = {
       status: 'fail',
       message: 'No model is connected.',
       next_step: null,
+      settings_section: 'models',
     },
-    { id: 'mail_calendar', name: 'Email and calendar', status: 'not_set_up', message: 'Not set up.', next_step: null },
+    {
+      id: 'mail_calendar',
+      name: 'Email and calendar',
+      status: 'not_set_up',
+      message: 'Not set up.',
+      next_step: null,
+      settings_section: 'connectors',
+    },
   ],
   host_report: {
     state: 'missing',
     checked_at: null,
     message: null,
     next_step: null,
+  },
+  state: {
+    setup_steps: [
+      { id: 'model', done: true },
+      { id: 'about_you', done: false },
+    ],
+    connectors: [],
+    sandbox_ready: true,
+    app_version: '1.4.0',
+    build_ref: null,
   },
 };
 
@@ -40,6 +58,24 @@ describe('parseHelpHealthCheck', () => {
     const broken = { ...VALID, items: [{ ...VALID.items[0], status: 'maybe' }] };
 
     assert.throws(() => parseHelpHealthCheck(broken), /invalid/);
+  });
+
+  it('reads the state the guide needs', () => {
+    const check = parseHelpHealthCheck(VALID);
+
+    assert.deepEqual(check.state.setup_steps, [
+      { id: 'model', done: true },
+      { id: 'about_you', done: false },
+    ]);
+    assert.equal(check.state.app_version, '1.4.0');
+  });
+
+  it('refuses a response without the state or with a mistyped state field', () => {
+    const { state: _omitted, ...withoutState } = VALID;
+    assert.throws(() => parseHelpHealthCheck(withoutState), /invalid/);
+    assert.throws(() => parseHelpHealthCheck({ ...VALID, state: { ...VALID.state, sandbox_ready: 'yes' } }), /invalid/);
+    const badConnector = { ...VALID.state, connectors: [{ name: 'linear', connected: true }] };
+    assert.throws(() => parseHelpHealthCheck({ ...VALID, state: badConnector }), /invalid/);
   });
 
   it('refuses a response without the model flag', () => {

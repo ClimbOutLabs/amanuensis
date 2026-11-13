@@ -57,6 +57,7 @@ function makeLogger() {
 
 function summarizeContext(): SummarizeTurnContext {
   const store: IModelProviderStore = {
+    managedElsewhere: false,
     listProviders: jest.fn(),
     getProvider: jest.fn(),
     getProviderForUpdate: jest.fn(),
@@ -127,6 +128,7 @@ describe('the turn after a turn that saved nothing, with summaries on', () => {
 
   function drainFirstTurn(): Promise<boolean> {
     return submitRetainWithVerification({
+      session: { is_incognito: false },
       ...TURN,
       client,
       userText: 'thanks',

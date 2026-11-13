@@ -28,11 +28,20 @@ import type { CancellationReason, TerminalTurnState } from '../schemas/turn';
 
 /**
  * Caller-supplied fields for creating a session; the store owns timestamps and tip state.
- * `agent` is a discriminated reference | inline binding.
+ * `agent` is a discriminated reference | inline binding. A private chat (`is_incognito`) carries
+ * its first deletion time; any other chat carries null.
  */
 export type CreateSessionInput<TSessionCustom extends object = Record<string, never>> = Pick<
   SessionRecord<TSessionCustom>,
-  'tenant_id' | 'session_id' | 'agent' | 'created_by_subject' | 'external_id' | 'metadata' | 'source'
+  | 'tenant_id'
+  | 'session_id'
+  | 'agent'
+  | 'created_by_subject'
+  | 'external_id'
+  | 'metadata'
+  | 'source'
+  | 'is_incognito'
+  | 'private_expires_at'
 > & {
   custom: TSessionCustom | null;
 };
@@ -50,6 +59,24 @@ export type UpdateSessionInput<TSessionCustom extends object = Record<string, ne
   title: SessionRecord<TSessionCustom>['title'] | undefined;
   metadata: SessionRecord<TSessionCustom>['metadata'] | undefined;
 };
+
+/** One metadata key to set on an existing session, merged atomically by the store. */
+export interface MergeSessionMetadataInput {
+  tenant_id: string;
+  session_id: string;
+  key: string;
+  value: string;
+}
+
+/** Input for {@link ISessionStore.replaceSessionTitleIfCurrent}. */
+export interface ReplaceSessionTitleIfCurrentInput {
+  tenant_id: string;
+  session_id: string;
+  /** The title the caller expects the session to still carry. */
+  current_title: string;
+  /** The title stored when the stored title still equals `current_title`. */
+  title: string;
+}
 
 /** Archived timestamps and metrics for a session that data import has just replayed. */
 export interface StampImportedSessionInput {
@@ -80,6 +107,24 @@ export interface GetSessionByExternalIdInput {
 }
 
 export interface DeleteSessionInput {
+  tenant_id: string;
+  session_id: string;
+}
+
+export interface SetPrivateExpiryInput {
+  tenant_id: string;
+  session_id: string;
+  private_expires_at: Date;
+}
+
+export interface ListExpiredPrivateSessionsInput {
+  /** Private chats whose deletion time is at or before this instant are returned. */
+  now: Date;
+  limit: number;
+}
+
+/** A private chat past its deletion time, named across tenants for the sweep that deletes it. */
+export interface ExpiredPrivateSession {
   tenant_id: string;
   session_id: string;
 }
@@ -212,6 +257,8 @@ export interface ListSessionsInput {
    * Requires `source_type`.
    */
   source_id: string | undefined;
+  /** When false, private chats (`is_incognito`) are left out. */
+  include_private: boolean;
 }
 
 /** Turn row fields without assembled snapshot (create input / listTurns). */
@@ -524,6 +571,9 @@ export interface ISessionStore<
    * `session_id` is globally unique across tenants.
    * Persists caller-supplied `created_by_subject` (immutable after create).
    * Sets `last_activity_timestamp_ms` (= now) on create.
+   * `is_incognito` is fixed here for the session's life. A private chat must carry a
+   * `private_expires_at` and any other chat must carry null, or the create rejects with
+   * `SessionStoreInvariantError` and writes nothing.
    */
   createSession(input: CreateSessionInput<TSessionCustom>): Promise<void>;
 
@@ -540,6 +590,19 @@ export interface ISessionStore<
 
   /** Permanently removes a session and all related data; missing sessions are a no-op. */
   deleteSession(input: DeleteSessionInput): Promise<void>;
+
+  /**
+   * Moves a private chat's deletion time. A chat that is not private rejects with
+   * `SessionStoreInvariantError`; a missing one with `SessionNotFoundError`. Not session activity:
+   * `updated_at` and `last_activity_timestamp_ms` are left alone.
+   */
+  setPrivateExpiry(input: SetPrivateExpiryInput): Promise<void>;
+
+  /**
+   * Private chats in every tenant whose deletion time is at or before `now`, soonest first,
+   * at most `limit`. Read path: nothing is changed.
+   */
+  listExpiredPrivateSessions(input: ListExpiredPrivateSessionsInput): Promise<ExpiredPrivateSession[]>;
 
   /**
    * Replaces one turn's rows in the past-chat search index with `documents`. The index is
@@ -623,6 +686,25 @@ export interface ISessionStore<
    */
   updateSession(input: UpdateSessionInput<TSessionCustom>): Promise<void>;
 
+  /**
+   * Sets one metadata key atomically, leaving every other key as it is: the merge
+   * happens inside the store's update, never as a caller read-modify-write, so a
+   * concurrent session update cannot be clobbered or silently lose keys.
+   * Throws `SessionNotFoundError` when the session is absent.
+   * Bumps `last_activity_timestamp_ms` (= now) in the same update, like `updateSession`.
+   */
+  mergeSessionMetadata(input: MergeSessionMetadataInput): Promise<void>;
+
+  /**
+   * Atomically replaces the session title only when the stored title still equals
+   * `current_title`; returns whether the replacement happened. A title that no longer
+   * matches (a rename landed first, or the session is gone) is left untouched and the
+   * call resolves `false` rather than throwing for a missing session. Bumps
+   * `updated_at`; does **not** bump `last_activity_timestamp_ms`, because the caller is
+   * background work, not chat activity.
+   */
+  replaceSessionTitleIfCurrent(input: ReplaceSessionTitleIfCurrentInput): Promise<boolean>;
+
   /** Creates an owner-scoped folder. The caller supplies its globally unique id. */
   createSessionFolder(input: CreateSessionFolderInput): Promise<SessionFolderRecord>;
 
@@ -652,7 +734,8 @@ export interface ISessionStore<
    * `agent_id` filters ref-bound sessions. `created_by_or_agent_ids` matches
    * rows created by its subject OR bound to one of its agent ids; optional
    * `source_type` / `source_id` filter by JSON `source` (expression-indexed,
-   * no scalar columns). Does **not** bump `last_activity_timestamp_ms` (read path).
+   * no scalar columns). Private chats are returned only with `include_private`.
+   * Does **not** bump `last_activity_timestamp_ms` (read path).
    */
   listSessions(
     input: ListSessionsInput,

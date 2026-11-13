@@ -10,7 +10,7 @@ import type { ISentinelAuditStore } from '../../src/db/sentinelAuditStore';
 
 export interface SentinelAuditStoreContractEnv {
   store: ISentinelAuditStore;
-  sessions: Pick<ISessionStore, 'createSession' | 'deleteSession' | 'getSession'>;
+  sessions: Pick<ISessionStore, 'createSession' | 'deleteSession' | 'getSession' | 'updateSession'>;
 }
 
 function entry(overrides: Partial<AuditRecordInput>): AuditRecordInput {
@@ -45,6 +45,8 @@ async function createChat(env: SentinelAuditStoreContractEnv, sessionId: string)
     metadata: {},
     agent: { type: 'inline', spec: makeAgentSpec() },
     custom: null,
+    is_incognito: false,
+    private_expires_at: null,
   });
 }
 
@@ -102,6 +104,13 @@ export function runSentinelAuditStoreContractSuite(getEnv: () => SentinelAuditSt
     const env = getEnv();
     await createChat(env, 'kept');
     await createChat(env, 'gone');
+    await env.sessions.updateSession({
+      tenant_id: 't1',
+      session_id: 'kept',
+      agent: { type: 'inline', spec: makeAgentSpec() },
+      title: 'Kept plan',
+      metadata: undefined,
+    });
     await recordInOrder(env.store, [
       entry({ conversation_id: 'gone', tool_name: 'send_email', outcome: 'approved', tier: 3 }),
       entry({ conversation_id: 'kept', tool_name: 'write_file', outcome: 'ran', tier: 2 }),
@@ -112,12 +121,42 @@ export function runSentinelAuditStoreContractSuite(getEnv: () => SentinelAuditSt
     const page = await env.store.listForUser({ ...forUser, limit: 10 });
 
     expect(page.next_page_token).toBeUndefined();
-    expect(page.entries.map(row => [row.tool_name, row.conversation_id, row.chat_exists])).toEqual([
-      ['search', 'never-stored', false],
-      ['write_file', 'kept', true],
-      ['send_email', 'gone', false],
+    expect(page.entries.map(row => [row.tool_name, row.conversation_id, row.chat_exists, row.session_title])).toEqual([
+      ['search', 'never-stored', false, null],
+      ['write_file', 'kept', true, 'Kept plan'],
+      ['send_email', 'gone', false, null],
     ]);
     expect(page.entries[2]).toMatchObject({ outcome: 'approved', tier: 3, description: 'Read a file' });
+  });
+
+  it('listForUser shows a chat title only to the chat’s own owner', async () => {
+    const env = getEnv();
+    await env.sessions.createSession({
+      tenant_id: 't1',
+      session_id: 'their-chat',
+      created_by_subject: { subject_id: 'u2', subject_type: 'user', subject_display_name: 'u2' },
+      external_id: null,
+      source: null,
+      metadata: {},
+      agent: { type: 'inline', spec: makeAgentSpec() },
+      custom: null,
+      is_incognito: false,
+      private_expires_at: null,
+    });
+    await env.sessions.updateSession({
+      tenant_id: 't1',
+      session_id: 'their-chat',
+      agent: { type: 'inline', spec: makeAgentSpec() },
+      title: 'Private plan of u2',
+      metadata: undefined,
+    });
+    await env.store.record(entry({ conversation_id: 'their-chat', tool_name: 'write_file', tier: 2 }));
+
+    const page = await env.store.listForUser({ ...forUser, limit: 10 });
+
+    expect(page.entries.map(row => [row.conversation_id, row.chat_exists, row.session_title])).toEqual([
+      ['their-chat', true, null],
+    ]);
   });
 
   it('listForUser never returns another user’s or another tenant’s entries', async () => {
@@ -154,6 +193,55 @@ export function runSentinelAuditStoreContractSuite(getEnv: () => SentinelAuditSt
 
     expect(pages).toBe(3);
     expect(seen).toEqual(['e', 'd', 'c', 'b', 'a']);
+  });
+
+  it('listForUser filters by a from and to time', async () => {
+    const { store } = getEnv();
+    await recordInOrder(store, [entry({ tool_name: 'tool_0' }), entry({ tool_name: 'tool_1' })]);
+    const past = new Date(Date.now() - 60_000).toISOString();
+    const future = new Date(Date.now() + 60_000).toISOString();
+
+    const inRange = await store.listForUser({ ...forUser, from: past, to: future, limit: 10 });
+    expect(inRange.entries.map(row => row.tool_name)).toEqual(['tool_1', 'tool_0']);
+
+    const afterAll = await store.listForUser({ ...forUser, from: future, limit: 10 });
+    expect(afterAll.entries).toEqual([]);
+
+    const beforeAll = await store.listForUser({ ...forUser, to: past, limit: 10 });
+    expect(beforeAll.entries).toEqual([]);
+  });
+
+  it('listForUser places an imported row saved with an offset at its real instant', async () => {
+    const { store } = getEnv();
+    const imported = (tool_name: string, created_at: string) => ({
+      id: tool_name,
+      conversation_id: 's1',
+      tier: 1,
+      tool_name,
+      description: 'Read a file',
+      outcome: 'logged' as const,
+      auto_deny_reason: null,
+      created_at,
+    });
+    await store.importRecords({
+      tenant_id: 't1',
+      created_by: 'u1',
+      records: [
+        imported('before', '2026-10-01T03:29:59.999Z'),
+        imported('with_offset', '2026-10-01T09:00:00+05:30'),
+        imported('after', '2026-10-01T03:30:00.001Z'),
+      ],
+    });
+
+    const exact = await store.listForUser({
+      ...forUser,
+      from: '2026-10-01T03:30:00.000Z',
+      to: '2026-10-01T03:30:00.001Z',
+      limit: 10,
+    });
+    expect(exact.entries.map(row => [row.tool_name, row.created_at])).toEqual([
+      ['with_offset', '2026-10-01T03:30:00.000Z'],
+    ]);
   });
 
   it('listForUser filters by outcome', async () => {

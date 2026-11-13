@@ -5,12 +5,16 @@ import { AMAN_GUIDE_NAME } from '@truefoundry/trueforge-core/core/personas/guide
  */
 export type HelpHealthStatus = 'pass' | 'warn' | 'fail' | 'not_set_up';
 
+/** The Settings section where a line's next step is done, so the step can open it. */
+export type HelpSettingsSection = 'models' | 'connectors' | 'sandbox';
+
 export interface HelpHealthItem {
   id: string;
   name: string;
   status: HelpHealthStatus;
   message: string;
   next_step: string | null;
+  settings_section: HelpSettingsSection | null;
 }
 
 export type HelpHostReportState = 'ok' | 'missing' | 'invalid' | 'stale';
@@ -22,11 +26,32 @@ export interface HelpHostReport {
   next_step: string | null;
 }
 
+export interface HelpSetupStep {
+  id: 'model' | 'about_you';
+  done: boolean;
+}
+
+export interface HelpConnectorState {
+  name: string;
+  connected: boolean;
+  last_error: string | null;
+}
+
+/** What the guide reads to say the one thing to do next. Field names match the server's, so the guide can name them. */
+export interface HelpState {
+  setup_steps: HelpSetupStep[];
+  connectors: HelpConnectorState[];
+  sandbox_ready: boolean;
+  app_version: string;
+  build_ref: string | null;
+}
+
 export interface HelpHealthCheck {
   checked_at: string;
   model_ready: boolean;
   items: HelpHealthItem[];
   host_report: HelpHostReport;
+  state: HelpState;
 }
 
 /** The guide's name. Naming her in a message is what invokes her. */
@@ -74,12 +99,41 @@ export function youWereOnLine({ screen, lastError }: { screen: string; lastError
   return `You were on: ${screen}. Last error: ${error}.`;
 }
 
+/** The help check's state as `field: value` lines, under the field names the guide's instructions read. */
+export function helpStateLines(state: HelpState): string[] {
+  const steps = state.setup_steps.map(step => `${step.id} ${step.done ? 'done' : 'not done'}`).join(', ');
+  const connectors =
+    state.connectors.length === 0
+      ? 'none set up'
+      : state.connectors
+          .map(connector =>
+            connector.connected
+              ? `${connector.name} connected`
+              : `${connector.name} not connected, last_error: ${connector.last_error ?? NO_LAST_ERROR}`,
+          )
+          .join('; ');
+  const build = state.build_ref === null ? '' : ` (build ${state.build_ref})`;
+  return [
+    `- setup_steps: ${steps}`,
+    `- connectors: ${connectors}`,
+    `- sandbox_ready: ${state.sandbox_ready ? 'yes' : 'no'}`,
+    `- app_version: ${state.app_version}${build}`,
+  ];
+}
+
 /**
  * The hidden message that makes Iris speak first. It carries only the check results, the screen
  * and the last error text. It never carries chat, mail, calendar or file content.
  */
 export function buildIrisHelpMessage({ check, screen, lastError }: IrisHelpMessageInput): string {
-  const lines = check.items.map(item => `- ${item.name}: ${statusWord(item.status)}. ${item.message}`);
+  // Each line carries the check's own next step, so Iris and the list above her give the same advice.
+  const lines = check.items.map(item =>
+    [
+      `- ${item.name}: ${statusWord(item.status)}.`,
+      item.message,
+      ...(item.next_step === null ? [] : [item.next_step]),
+    ].join(' '),
+  );
   const report = check.host_report;
   if (report.checked_at !== null && report.message !== null) {
     lines.push(`- Last full check at ${report.checked_at}: ${report.message}.`);
@@ -88,6 +142,8 @@ export function buildIrisHelpMessage({ check, screen, lastError }: IrisHelpMessa
     `${AMAN_GUIDE_NAME}, I am stuck and need help. Start by asking me: Where are you stuck? Then wait for my answer.`,
     'Health check results:',
     ...lines,
+    'State:',
+    ...helpStateLines(check.state),
     youWereOnLine({ screen, lastError }),
   ].join('\n');
 }

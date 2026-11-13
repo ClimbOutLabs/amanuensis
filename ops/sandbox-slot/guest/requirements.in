@@ -9,3 +9,7 @@ Pillow
 pytest
 ruff
 mypy
+requests
+pyyaml
+httpx
+beautifulsoup4

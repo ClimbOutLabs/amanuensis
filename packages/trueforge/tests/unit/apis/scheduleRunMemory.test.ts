@@ -75,6 +75,7 @@ const ZARA: Persona = {
 /** Minimal fake; resolving a summarization context never dereferences the store. */
 function fakeModelProviderStore(): IModelProviderStore {
   return {
+    managedElsewhere: false,
     listProviders: jest.fn(),
     getProvider: jest.fn(),
     getProviderForUpdate: jest.fn(),
@@ -139,10 +140,12 @@ describe('scheduled run memory wiring', () => {
     app.route(
       '/',
       createSchedulesRouter({
+        chatDeletionStore: { listDeletedChatModelUsage: () => Promise.resolve([]) },
         mcpCatalog: McpCatalog.loadShipped(),
         scheduleStore,
         briefItemStore: new BriefItemCompletionStore(db),
         deliveryService: deliveryDeps(db).deliveryService,
+        reminderReach: deliveryDeps(db).reminderReach,
         sessions: new Sessions<SessionCustom, TurnCustom>({ sessionStore }),
         agentStore,
         personaStore: {

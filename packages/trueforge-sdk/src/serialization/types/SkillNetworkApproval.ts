@@ -8,18 +8,24 @@ export const SkillNetworkApproval: core.serialization.ObjectSchema<
     serializers.SkillNetworkApproval.Raw,
     TrueForge.SkillNetworkApproval
 > = core.serialization.object({
+    allowedHosts: core.serialization.property("allowed_hosts", core.serialization.list(core.serialization.string())),
     approvedHosts: core.serialization.property(
         "approved_hosts",
         core.serialization.list(core.serialization.string()).nullable(),
     ),
     declaredHosts: core.serialization.property("declared_hosts", core.serialization.list(core.serialization.string())),
+    deniedHosts: core.serialization.property("denied_hosts", core.serialization.list(core.serialization.string())),
     sendCapable: core.serialization.property("send_capable", core.serialization.boolean()),
+    sessionHosts: core.serialization.property("session_hosts", core.serialization.list(core.serialization.string())),
 });
 
 export declare namespace SkillNetworkApproval {
     export interface Raw {
+        allowed_hosts: string[];
         approved_hosts?: string[] | null;
         declared_hosts: string[];
+        denied_hosts: string[];
         send_capable: boolean;
+        session_hosts: string[];
     }
 }

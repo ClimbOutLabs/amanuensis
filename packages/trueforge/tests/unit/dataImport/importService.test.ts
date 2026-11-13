@@ -5,7 +5,11 @@ import { join } from 'node:path';
 import v8 from 'node:v8';
 
 import { sql, type Transaction } from 'kysely';
-import { makeCreateTurnInput, makeModelMessageEvent } from '../../../../trueforge-core/tests/agent-session/testHelpers';
+import {
+  makeAgentSpec,
+  makeCreateTurnInput,
+  makeModelMessageEvent,
+} from '../../../../trueforge-core/tests/agent-session/testHelpers';
 
 import { AgentSpecSchema, InMemorySessionStore, MAIN_THREAD_ID } from '@truefoundry/trueforge-core/agent-session';
 import { defaultSearchConnector } from '../../../src/catalog/defaultSearchConnector';
@@ -24,12 +28,14 @@ import type { KnowledgeEmbedder } from '../../../src/dataImport/knowledgeImport'
 import { EXPIRED_APPROVAL_NOTICE } from '../../../src/dataImport/sessionRestore';
 import { DeliveryStore } from '../../../src/db/deliveryStore';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
+import { ReachSettingsStore } from '../../../src/db/reachSettingsStore';
 import { SentinelAuditStore } from '../../../src/db/sentinelAuditStore';
 import type { SessionCustom, TurnCustom } from '../../../src/db/sessionCustom';
 import { SqliteAgentStore } from '../../../src/db/sqlite/agent-store/SqliteAgentStore';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqliteGlobalSettingsStore } from '../../../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
 import { SqliteMcpServerStore } from '../../../src/db/sqlite/mcp-server-store/SqliteMcpServerStore';
+import { SqliteModelProviderStore } from '../../../src/db/sqlite/model-provider-store/SqliteModelProviderStore';
 import { SqlitePersonaStore } from '../../../src/db/sqlite/persona-store/SqlitePersonaStore';
 import { SqlitePersonalizationStore } from '../../../src/db/sqlite/personalization-store/SqlitePersonalizationStore';
 import { SqliteScheduleStore } from '../../../src/db/sqlite/schedule-store/SqliteScheduleStore';
@@ -38,6 +44,7 @@ import { SqliteSessionStore } from '../../../src/db/sqlite/session-store/SqliteS
 import { SqliteSpaceStore } from '../../../src/db/sqlite/space-store/SqliteSpaceStore';
 import { SqliteTurnArtifactStore } from '../../../src/db/sqlite/turn-artifact-store/SqliteTurnArtifactStore';
 import type { Database } from '../../../src/db/sqlite/types';
+import { TextContactStore } from '../../../src/db/textContactStore';
 import type { WithTransaction } from '../../../src/db/transaction';
 import { personaKnowledgeLocation } from '../../../src/personaKnowledge/knowledgePaths';
 import { openPersonaKnowledgeRepository } from '../../../src/personaKnowledge/sqliteKnowledgeRepository';
@@ -97,8 +104,11 @@ async function makeInstance(label: string): Promise<Instance> {
     sentinelSettingsStore: new SqliteSentinelSettingsStore(db),
     auditStore: new SentinelAuditStore(db),
     deliveryStore: new DeliveryStore(db),
+    reachSettingsStore: new ReachSettingsStore(db),
+    textContactStore: new TextContactStore(db),
     turnArtifactStore: new SqliteTurnArtifactStore(db),
     mcpServerStore: new SqliteMcpServerStore(db),
+    modelProviderStore: new SqliteModelProviderStore(db),
   };
   const embeddedTexts: string[] = [];
   return {
@@ -134,7 +144,10 @@ function importDeps(instance: Instance, memoryTarget?: MemoryImportTarget): Data
     turnArtifactStore: instance.stores.turnArtifactStore,
     auditStore: instance.stores.auditStore,
     deliveryStore: instance.stores.deliveryStore,
+    reachSettingsStore: instance.stores.reachSettingsStore,
+    textContactStore: instance.stores.textContactStore,
     mcpServerStore: instance.stores.mcpServerStore,
+    modelProviderStore: instance.stores.modelProviderStore,
     agentStore: instance.stores.agentStore,
     mcpCatalog: McpCatalog.loadShipped(),
     withTransaction: callback => instance.db.transaction().execute(callback),
@@ -224,13 +237,14 @@ describe('runDataImport', () => {
           '  2 schedules (they will be off)',
           '',
           'Good to know:',
+          '  • This export did not include your name, so Aman does not know it yet. Aman will ask in your first chat, or you can set it in Settings under Personalization.',
           '  • Connectors (dcr-connector, header-connector, plain-connector) come without an agent. Attach them on the Agents page.',
           '  • Chats keep their dates and totals. Personas, spaces, folders and schedules show the time of the import.',
-          '  • Approvals given for one chat only do not carry over.',
-          '  • 3 past permission decisions came along.',
+          "  • 'Approve for this chat' choices do not carry over.",
+          '  • Your permission history came along, with 3 past choices in it.',
           '  • 1 item from your feed came along.',
-          '  • Not brought over: model keys, connector sign-ins, your own skills.',
-          '    Add your model again and sign in to your connectors.',
+          '  • Not brought over: connector sign-ins and your own skills.',
+          '    Sign in to your connectors again.',
           '  • Permissions start fresh, so each tool will ask again.',
         ].join('\n'),
       );
@@ -249,6 +263,7 @@ describe('runDataImport', () => {
         source_id: undefined,
         folder_id: undefined,
         no_folder: false,
+        include_private: false,
       });
       expect(sessions.data.map(session => session.session_id).sort()).toEqual([
         SEED_IDS.sessionMain,
@@ -483,7 +498,7 @@ describe('runDataImport', () => {
         (caught: unknown) => caught,
       );
       expect(error).toBeInstanceOf(DataImportError);
-      expect(error instanceof Error && error.message).toContain('missing its sessions/0001.json section');
+      expect(error instanceof Error && error.message).toContain('missing the part that holds your chats');
     } finally {
       await source.close();
       await target.close();
@@ -502,6 +517,28 @@ describe('runDataImport', () => {
       );
       expect(error).toBeInstanceOf(DataImportError);
       expect(error).toMatchObject({ status: 400 });
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('names the rejected part and why, in plain words, never its file name or a machine code', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-rejected');
+    try {
+      const broken = await repack(archive, entries => {
+        entries.set('personas.json', Buffer.from('[42]'));
+      });
+      const error: unknown = await runDataImport(importDeps(target), importRequest(broken)).catch(
+        (caught: unknown) => caught,
+      );
+      expect(error).toBeInstanceOf(DataImportError);
+      const message = error instanceof Error ? error.message : '';
+      expect(message).toContain('The part of this export that holds your personas could not be read');
+      expect(message).toContain('Export again from the Aman it came from, then import the new file.');
+      expect(message).not.toContain('personas.json');
+      expect(message).not.toContain('invalid_type');
     } finally {
       await source.close();
       await target.close();
@@ -604,6 +641,282 @@ describe('runDataImport', () => {
       });
       expect(artifacts).toHaveLength(1);
       expect(artifacts[0]).toMatchObject({ path: 'notes.txt', status: 'skipped_missing' });
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+});
+
+describe('model providers and the name that come over', () => {
+  const testProviderEntry = {
+    name: 'test-provider',
+    manifest: {
+      type: 'custom',
+      name: 'test-provider',
+      base_url: 'https://models.example.com/v1',
+      models: [{ model_id: 'test-model-v1', name: 'test-model', properties: { context_length: 64000 } }],
+    },
+  };
+  const openAiEntry = {
+    name: 'openai',
+    manifest: {
+      type: 'openai',
+      base_url: 'https://api.openai.com/v1',
+      models: [{ model_id: 'gpt-test', name: 'gpt-test', properties: {} }],
+    },
+  };
+
+  function withProviders(archive: Buffer, providers: unknown): Promise<Buffer> {
+    return repack(archive, entries => {
+      entries.set('model_providers.json', Buffer.from(JSON.stringify(providers)));
+    });
+  }
+
+  it('restores provider setups without keys, and the summary names the keys to add', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-providers');
+    try {
+      const withBoth = await withProviders(archive, [testProviderEntry, openAiEntry]);
+      const result = await runDataImport(importDeps(target), importRequest(withBoth));
+
+      const providers = await target.stores.modelProviderStore.listProviders({ tenant_id: TENANT });
+      expect(providers.map(provider => provider.name)).toEqual(['openai', 'test-provider']);
+      const testProvider = providers.find(provider => provider.name === 'test-provider');
+      expect(testProvider?.manifest).toEqual(testProviderEntry.manifest);
+      const openAi = providers.find(provider => provider.name === 'openai');
+      expect(openAi?.manifest).toEqual(openAiEntry.manifest);
+
+      // The seed personas point at test-provider/test-model, which is here now.
+      const personas = await target.stores.personaStore.listPersonas({ tenant_id: TENANT, created_by: 'bob' });
+      expect(personas.map(persona => persona.model_name)).toEqual([
+        'test-provider/test-model',
+        'test-provider/test-model',
+      ]);
+
+      expect(result.summary).toContain('  2 model providers');
+      expect(result.summary).toContain('Your model settings came over, but their keys never travel in an export.');
+      expect(result.summary).toContain(
+        'Add the key for test-provider in Settings under Models, so its models can answer.',
+      );
+      expect(result.summary).toContain('Add the key for openai in Settings under Models, so its models can answer.');
+      expect(result.summary).not.toContain('was set to a model that is not on this Aman');
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('moves a persona whose model did not come over to a model that is here', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-persona-switch');
+    try {
+      const withOpenAi = await withProviders(archive, [openAiEntry]);
+      const result = await runDataImport(importDeps(target), importRequest(withOpenAi));
+
+      const personas = await target.stores.personaStore.listPersonas({ tenant_id: TENANT, created_by: 'bob' });
+      expect(personas.map(persona => persona.model_name)).toEqual(['openai/gpt-test', 'openai/gpt-test']);
+      expect(result.summary).toContain(
+        'Researcher was set to a model that is not on this Aman, so it now uses openai/gpt-test.',
+      );
+      expect(result.summary).toContain(
+        'Chef was set to a model that is not on this Aman, so it now uses openai/gpt-test.',
+      );
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('refuses an export whose provider section carries a key', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-provider-key');
+    try {
+      const withKey = await withProviders(archive, [
+        { ...openAiEntry, manifest: { ...openAiEntry.manifest, auth: { api_key: 'FAKE-KEY-smuggled-in-an-export' } } },
+      ]);
+      const error: unknown = await runDataImport(importDeps(target), importRequest(withKey)).catch(
+        (caught: unknown) => caught,
+      );
+      expect(error).toBeInstanceOf(DataImportError);
+      expect(error instanceof Error && error.message).toContain('your model setup');
+      expect(await target.stores.modelProviderStore.listProviders({ tenant_id: TENANT })).toEqual([]);
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it.each([
+    ['userinfo', 'https://user:FAKE-KEY-hidden-in-userinfo@api.openai.com/v1'],
+    ['a query', 'https://api.openai.com/v1?api_key=FAKE-KEY-hidden-in-a-query'],
+    ['a fragment', 'https://api.openai.com/v1#FAKE-KEY-hidden-in-a-fragment'],
+  ])('refuses a provider address that hides a key in its %s, and stores nothing', async (_label, baseUrl) => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-provider-address');
+    try {
+      const entry = { ...openAiEntry, manifest: { ...openAiEntry.manifest, base_url: baseUrl } };
+      const withAddress = await withProviders(archive, [entry]);
+      const error: unknown = await runDataImport(importDeps(target), importRequest(withAddress)).catch(
+        (caught: unknown) => caught,
+      );
+      expect(error).toBeInstanceOf(DataImportError);
+      expect(await target.stores.modelProviderStore.listProviders({ tenant_id: TENANT })).toEqual([]);
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('refuses an export with a key written beside a provider setup', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-provider-beside-key');
+    try {
+      const withBesideKey = await withProviders(archive, [{ ...openAiEntry, api_key: 'FAKE-KEY-beside-the-manifest' }]);
+      const error: unknown = await runDataImport(importDeps(target), importRequest(withBesideKey)).catch(
+        (caught: unknown) => caught,
+      );
+      expect(error).toBeInstanceOf(DataImportError);
+      expect(await target.stores.modelProviderStore.listProviders({ tenant_id: TENANT })).toEqual([]);
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('keeps a keyed provider at its own address when an import names another host', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-provider-repoint');
+    try {
+      await target.stores.modelProviderStore.upsertProvider({
+        tenant_id: TENANT,
+        name: 'tokenfactory',
+        manifest: {
+          type: 'tokenfactory',
+          base_url: 'https://tokenfactory.example.com/v1',
+          auth: { api_key: 'FAKE-KEY-already-on-this-aman' },
+          models: [{ model_id: 'extra-v1', name: 'extra-model', properties: {} }],
+        },
+      });
+      const withOtherHost = await withProviders(archive, [
+        {
+          name: 'tokenfactory',
+          manifest: {
+            type: 'tokenfactory',
+            base_url: 'https://evil.example.com/v1',
+            models: [{ model_id: 'main-v1', name: 'main-model', properties: {} }],
+          },
+        },
+      ]);
+      const result = await runDataImport(importDeps(target), importRequest(withOtherHost));
+
+      const providers = await target.stores.modelProviderStore.listProviders({ tenant_id: TENANT });
+      expect(providers).toHaveLength(1);
+      expect(providers[0]?.manifest.base_url).toBe('https://tokenfactory.example.com/v1');
+      expect(providers[0]?.manifest.auth?.api_key).toBe('FAKE-KEY-already-on-this-aman');
+      expect(providers[0]?.manifest.models.map(model => model.name)).toEqual(['main-model', 'extra-model']);
+      expect(result.summary).not.toContain('Add the key for tokenfactory');
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('imports an older export with no providers section and says so in the summary', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-older-export');
+    try {
+      const older = await repack(archive, entries => {
+        entries.delete('model_providers.json');
+      });
+      const result = await runDataImport(importDeps(target), importRequest(older));
+      expect(result.summary).toContain(
+        'Model settings are not in this export, because it was made by an older Aman. Add your model in Settings under Models.',
+      );
+      // No model is here to point at, so the personas keep the names they had.
+      const personas = await target.stores.personaStore.listPersonas({ tenant_id: TENANT, created_by: 'bob' });
+      expect(personas.map(persona => persona.model_name)).toEqual([
+        'test-provider/test-model',
+        'test-provider/test-model',
+      ]);
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('keeps the key and extra models of a provider already on this Aman', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-provider-merge');
+    try {
+      await target.stores.modelProviderStore.upsertProvider({
+        tenant_id: TENANT,
+        name: 'tokenfactory',
+        manifest: {
+          type: 'tokenfactory',
+          base_url: 'https://tokenfactory.example.com/v1',
+          auth: { api_key: 'FAKE-KEY-already-on-this-aman' },
+          models: [{ model_id: 'extra-v1', name: 'extra-model', properties: {} }],
+        },
+      });
+      const withTokenFactory = await withProviders(archive, [
+        {
+          name: 'tokenfactory',
+          manifest: {
+            type: 'tokenfactory',
+            base_url: 'https://tokenfactory.example.com/v1',
+            models: [{ model_id: 'main-v1', name: 'main-model', properties: {} }],
+          },
+        },
+      ]);
+      const result = await runDataImport(importDeps(target), importRequest(withTokenFactory));
+
+      const providers = await target.stores.modelProviderStore.listProviders({ tenant_id: TENANT });
+      expect(providers).toHaveLength(1);
+      expect(providers[0]?.manifest.auth?.api_key).toBe('FAKE-KEY-already-on-this-aman');
+      expect(providers[0]?.manifest.models.map(model => model.name)).toEqual(['main-model', 'extra-model']);
+      expect(result.summary).toContain('Your model settings came over, but their keys never travel in an export.');
+      expect(result.summary).not.toContain('Add the key for tokenfactory');
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('brings the name and preferred name over, and the summary says who Aman will call', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-name');
+    try {
+      const named = await repack(archive, entries => {
+        const profile = recordAt(parseJson(entries.get('personalization.json'), 'personalization.json'), 'profile');
+        profile['user_name'] = 'Test Person';
+        profile['address_as'] = 'Tester';
+        entries.set('personalization.json', Buffer.from(JSON.stringify(profile)));
+      });
+      const result = await runDataImport(importDeps(target), importRequest(named));
+
+      const profile = await target.stores.personalizationStore.getProfile({ tenant_id: TENANT, created_by: 'bob' });
+      expect(profile?.user_name).toBe('Test Person');
+      expect(profile?.address_as).toBe('Tester');
+      expect(result.summary).toContain('Aman will call you: Tester.');
+      expect(result.summary).not.toContain('did not include your name');
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('a dry run reports the providers it would restore and writes nothing', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-providers-dry');
+    try {
+      const withOne = await withProviders(archive, [testProviderEntry]);
+      const result = await runDataImport(importDeps(target), { ...importRequest(withOne), dryRun: true });
+      expect(result.summary).toContain('  1 model provider');
+      expect(result.summary).toContain(
+        'Add the key for test-provider in Settings under Models, so its models can answer.',
+      );
+      expect(await target.stores.modelProviderStore.listProviders({ tenant_id: TENANT })).toEqual([]);
     } finally {
       await source.close();
       await target.close();
@@ -736,6 +1049,8 @@ describe('export and import round trip', () => {
         metadata: {},
         external_id: null,
         source: null,
+        is_incognito: false,
+        private_expires_at: null,
       });
       await source.stores.sessionStore.createTurn(
         makeCreateTurnInput({
@@ -796,6 +1111,7 @@ async function chatsOf(instance: Instance, userId: string) {
     source_id: undefined,
     folder_id: undefined,
     no_folder: false,
+    include_private: false,
   });
   return page.data;
 }
@@ -955,6 +1271,7 @@ describe('runDataImport keeps what the archive recorded', () => {
         source_id: undefined,
         folder_id: undefined,
         no_folder: false,
+        include_private: false,
       });
       expect(newestFirst.data.map(session => session.session_id)).toEqual([
         SEED_IDS.sessionRunning,
@@ -1402,9 +1719,16 @@ describe('runDataImport refuses an instance that is not fresh', () => {
         owner_subject_id: 'bob',
         owner_name: 'Sam',
       });
-      await runDataImport({ ...importDeps(target), ownerName: 'Sam' }, importRequest(archive));
+      const deps = { ...importDeps(target), ownerName: 'Sam' };
+      const dryRun = await runDataImport(deps, { ...importRequest(archive), dryRun: true });
+      const result = await runDataImport(deps, importRequest(archive));
       const profile = await target.stores.personalizationStore.getProfile({ tenant_id: TENANT, created_by: 'bob' });
       expect(profile).toMatchObject({ assistant_name: 'Aman', user_name: 'Sam', address_as: 'Sam' });
+      // The summary names what the saved profile holds, before and after the import.
+      for (const summary of [dryRun.summary, result.summary]) {
+        expect(summary).toContain('Aman will call you: Sam.');
+        expect(summary).not.toContain('did not include your name');
+      }
     } finally {
       await source.close();
       await target.close();
@@ -1470,6 +1794,8 @@ describe('runDataImport refuses an instance that is not fresh', () => {
         metadata: {},
         external_id: null,
         source: null,
+        is_incognito: false,
+        private_expires_at: null,
       });
       const error = await importError(target, archive);
       expect(error).toMatchObject({ status: 409 });
@@ -1610,6 +1936,7 @@ describe('runDataImport failure handling', () => {
         source_id: undefined,
         folder_id: undefined,
         no_folder: false,
+        include_private: false,
       });
       expect(sessions.data).toHaveLength(0);
       expect(
@@ -1667,6 +1994,7 @@ describe('runDataImport failure handling', () => {
         source_id: undefined,
         folder_id: undefined,
         no_folder: false,
+        include_private: false,
       });
       expect(sessions.data).toHaveLength(0);
       expect(await target.stores.agentStore.getAgent({ tenant_id: TENANT, name: SEED_IDS.agentName })).toBeUndefined();
@@ -1694,6 +2022,8 @@ describe('runDataImport failure handling', () => {
         metadata: {},
         external_id: null,
         source: null,
+        is_incognito: false,
+        private_expires_at: null,
       });
       await sql`CREATE TRIGGER import_fail_space_update BEFORE UPDATE ON space BEGIN SELECT RAISE(ABORT, 'injected failure'); END`.execute(
         target.db,
@@ -1809,6 +2139,8 @@ describe('runDataImport failure handling', () => {
         metadata: {},
         external_id: null,
         source: null,
+        is_incognito: false,
+        private_expires_at: null,
       });
       const error = await importError(target, archive);
       expect(error).toMatchObject({ status: 409 });
@@ -2212,6 +2544,8 @@ describe('runDataImport at scale', () => {
           metadata: {},
           external_id: null,
           source: null,
+          is_incognito: false,
+          private_expires_at: null,
         });
         await inMemory.createTurn(
           makeCreateTurnInput({
@@ -2915,7 +3249,7 @@ describe('runDataImport keeps permission history and persona choices', () => {
           .reverse()
           .map(activation => [activation.id, activation.persona_id, activation.source]),
       );
-      expect(result.summary).toContain('3 past permission decisions came along.');
+      expect(result.summary).toContain('Your permission history came along, with 3 past choices in it.');
     } finally {
       await source.close();
       await target.close();
@@ -2939,7 +3273,7 @@ describe('runDataImport keeps permission history and persona choices', () => {
       expect(
         await target.stores.auditStore.listOwned({ tenant_id: TENANT, created_by: 'bob', limit: 10, offset: 0 }),
       ).toEqual([]);
-      expect(result.summary).not.toContain('past permission decisions');
+      expect(result.summary).not.toContain('permission history came along');
     } finally {
       await source.close();
       await target.close();
@@ -2986,6 +3320,168 @@ describe('runDataImport keeps permission history and persona choices', () => {
       const feed = await target.stores.deliveryStore.list({ tenant_id: TENANT, created_by: 'bob', limit: 10 });
       expect(feed.deliveries.map(item => item.text)).toEqual(['Call the dentist']);
       expect(result.summary).toContain('1 item from your feed came along.');
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('carries Reach me settings, and brings texts and calls in switched off', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-reach');
+    try {
+      const entries = new Map(readZipEntries(archive).map(entry => [entry.name, entry.data]));
+      const rows = listAt(parseJson(entries.get('reach.json'), 'reach.json'), 'reach.json');
+      expect(rows).toHaveLength(1);
+      expect(recordAt(recordAt(rows[0], 'row')['channels'], 'channels')['calls']).toBe(true);
+
+      await runDataImport(importDeps(target), importRequest(archive));
+      const imported = await target.stores.reachSettingsStore.get({ tenant_id: TENANT, created_by: 'bob' });
+      expect(imported).toMatchObject({
+        channels: { texts: false, calls: false },
+        call_kinds: ['travel'],
+        max_nudges_per_day: 3,
+        timezone: 'Europe/Paris',
+      });
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('carries the number and the choice of words, and brings the number in unconfirmed with texts off', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-texts');
+    try {
+      const entries = new Map(readZipEntries(archive).map(entry => [entry.name, entry.data]));
+      const rows = listAt(parseJson(entries.get('texts.json'), 'texts.json'), 'texts.json');
+      expect(rows).toEqual([{ phone: '+15550111', mode: 'full', words: [] }]);
+      expect(entries.get('texts.json')?.toString('utf8')).not.toMatch(/code|confirmed|pending|0122|a{20}/);
+
+      await runDataImport(importDeps(target), importRequest(archive));
+      await expect(target.stores.textContactStore.get({ tenant_id: TENANT, created_by: 'bob' })).resolves.toEqual({
+        phone: '+15550111',
+        mode: 'full',
+        confirmed_at: null,
+        opted_out_at: null,
+        pending_phone: null,
+        code_hash: null,
+        code_salt: null,
+        code_key_id: null,
+        code_expires_at: null,
+        code_attempts: 0,
+      });
+      const reach = await target.stores.reachSettingsStore.get({ tenant_id: TENANT, created_by: 'bob' });
+      expect(reach?.channels.texts).toBe(false);
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('imports the words a person let Aman text, and an export from before those words has none', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-text-words');
+    const older = await makeInstance('target-text-words-older');
+    const owner = { tenant_id: TENANT, created_by: 'bob' };
+    try {
+      const withWords = await repack(archive, entries => {
+        entries.set(
+          'texts.json',
+          Buffer.from(JSON.stringify([{ phone: '+15550111', mode: 'full', words: ['patel', 'lopez'] }])),
+        );
+      });
+      await runDataImport(importDeps(target), importRequest(withWords));
+      await expect(target.stores.textContactStore.listWords(owner)).resolves.toEqual(['lopez', 'patel']);
+      // The format before the words existed: a number and a choice, and nothing else.
+      const before = await repack(archive, entries => {
+        entries.set('texts.json', Buffer.from(JSON.stringify([{ phone: '+15550111', mode: 'full' }])));
+      });
+      await runDataImport(importDeps(older), importRequest(before));
+      await expect(older.stores.textContactStore.listWords(owner)).resolves.toEqual([]);
+      // A word the person could not add by hand is left out, so the list never shows a word that does nothing.
+      const rules = await repack(archive, entries => {
+        entries.set(
+          'texts.json',
+          Buffer.from(
+            JSON.stringify([{ phone: '+15550111', mode: 'full', words: ['patel', 'com', 'five', 'dot', 'dad'] }]),
+          ),
+        );
+      });
+      const strict = await makeInstance('target-text-words-rules');
+      try {
+        const result = await runDataImport(importDeps(strict), importRequest(rules));
+        await expect(strict.stores.textContactStore.listWords(owner)).resolves.toEqual(['dad', 'patel']);
+        expect(JSON.stringify(result)).toMatch(/3 text words/);
+      } finally {
+        await strict.close();
+      }
+    } finally {
+      await source.close();
+      await target.close();
+      await older.close();
+    }
+  });
+
+  it('still imports an export made before texts existed, with no number', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-no-texts');
+    try {
+      const older = await repack(archive, entries => {
+        entries.delete('texts.json');
+      });
+      const result = await runDataImport(importDeps(target), importRequest(older));
+      expect(result.chats).toBe(3);
+      await expect(
+        target.stores.textContactStore.get({ tenant_id: TENANT, created_by: 'bob' }),
+      ).resolves.toBeUndefined();
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('brings the background checks in switched off, from an export made before the switch and from one with it on', async () => {
+    const { source, archive } = await seededArchive();
+    try {
+      const withSwitch = (noticing_on: boolean | undefined) =>
+        repack(archive, entries => {
+          const rows = listAt(parseJson(entries.get('reach.json'), 'reach.json'), 'reach.json').map(row => {
+            const { noticing_on: _dropped, ...rest } = recordAt(row, 'row');
+            return noticing_on === undefined ? rest : { ...rest, noticing_on };
+          });
+          entries.set('reach.json', Buffer.from(JSON.stringify(rows), 'utf8'));
+        });
+      for (const [name, value] of [
+        ['target-reach-before-switch', undefined],
+        ['target-reach-switch-on', true],
+      ] as const) {
+        const target = await makeInstance(name);
+        try {
+          await runDataImport(importDeps(target), importRequest(await withSwitch(value)));
+          const imported = await target.stores.reachSettingsStore.get({ tenant_id: TENANT, created_by: 'bob' });
+          expect(imported).toMatchObject({ noticing_on: false, max_nudges_per_day: 3 });
+        } finally {
+          await target.close();
+        }
+      }
+    } finally {
+      await source.close();
+    }
+  });
+
+  it('still imports an export made before Reach me settings existed, leaving the person on the quiet defaults', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-no-reach');
+    try {
+      const older = await repack(archive, entries => {
+        entries.delete('reach.json');
+      });
+      const result = await runDataImport(importDeps(target), importRequest(older));
+      expect(result.chats).toBe(3);
+      await expect(
+        target.stores.reachSettingsStore.get({ tenant_id: TENANT, created_by: 'bob' }),
+      ).resolves.toBeUndefined();
     } finally {
       await source.close();
       await target.close();
@@ -3560,6 +4056,7 @@ describe('runDataImport never restores a live approval', () => {
         source_id: undefined,
         folder_id: undefined,
         no_folder: false,
+        include_private: false,
       });
       expect(sessions.data).toHaveLength(3);
       for (const session of sessions.data) {
@@ -3605,6 +4102,8 @@ async function seedLongChat(
     metadata: {},
     external_id: null,
     source: null,
+    is_incognito: false,
+    private_expires_at: null,
   });
   let previousTurnId: string | undefined;
   for (let index = 0; index < turns; index += 1) {
@@ -3879,6 +4378,7 @@ describe('runDataImport dry run on a long chat', () => {
         source_id: undefined,
         folder_id: undefined,
         no_folder: false,
+        include_private: false,
       });
       expect(sessions.data).toEqual([]);
     } finally {
@@ -3914,6 +4414,8 @@ async function seedEditedFirstMessageChat(instance: Instance): Promise<void> {
     metadata: {},
     external_id: null,
     source: null,
+    is_incognito: false,
+    private_expires_at: null,
   });
   const turns = [
     { turnId: 'edited-turn-1', previousTurnId: undefined, question: 'Plan a walk', answer: 'Sure.' },
@@ -4472,6 +4974,7 @@ describe('runDataImport tells the person everything it left out', () => {
         source_id: undefined,
         folder_id: undefined,
         no_folder: false,
+        include_private: false,
       });
       expect(sessions.data).toEqual([]);
 
@@ -4513,10 +5016,11 @@ describe('runDataImport tells the person everything it left out', () => {
           '  Sourdough starter troubleshooting...      1 chat detail',
           '',
           'Good to know:',
+          '  • This export did not include your name, so Aman does not know it yet. Aman will ask in your first chat, or you can set it in Settings under Personalization.',
           '  • Chats keep their dates and totals. Personas, spaces, folders and schedules show the time of the import.',
-          '  • Approvals given for one chat only do not carry over.',
-          '  • Not brought over: model keys, connector sign-ins, your own skills.',
-          '    Add your model again and sign in to your connectors.',
+          "  • 'Approve for this chat' choices do not carry over.",
+          '  • Not brought over: connector sign-ins and your own skills.',
+          '    Sign in to your connectors again.',
           '  • Permissions start fresh, so each tool will ask again.',
         ].join('\n'),
       );
@@ -4873,6 +5377,108 @@ describe('runDataImport keeps the source label of saved findings', () => {
         note_source: 'email',
         note_date: '2026-10-20',
       });
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+});
+
+describe('runDataImport and private chats', () => {
+  function sessionRecordsOf(entries: Map<string, Buffer>): JsonRecord[] {
+    const records = recordsAt(parseJson(entries.get('sessions/0001.json'), 'part'), 'part');
+    return records.filter(record => record['kind'] === 'session').map(record => recordAt(record['session'], 'session'));
+  }
+
+  it('imports an export made before private chats as ordinary chats', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-before-private-chats');
+    try {
+      const older = await repack(archive, entries => {
+        const records = recordsAt(parseJson(entries.get('sessions/0001.json'), 'part'), 'part');
+        for (const record of records) {
+          if (record['kind'] === 'session') {
+            const session = recordAt(record['session'], 'session');
+            delete session['is_incognito'];
+            delete session['private_expires_at'];
+          }
+        }
+        entries.set('sessions/0001.json', Buffer.from(JSON.stringify(records)));
+      });
+      expect(
+        sessionRecordsOf(new Map(readZipEntries(older).map(entry => [entry.name, entry.data]))),
+      ).not.toContainEqual(expect.objectContaining({ is_incognito: expect.anything() }));
+
+      const result = await runDataImport(importDeps(target), importRequest(older));
+
+      expect(result.chats).toBeGreaterThan(0);
+      const session = await target.stores.sessionStore.getSession({
+        tenant_id: TENANT,
+        session_id: SEED_IDS.sessionMain,
+      });
+      expect(session).toMatchObject({ is_incognito: false, private_expires_at: null });
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('leaves a private chat out of the export', async () => {
+    const source = await makeInstance('source-private-chat');
+    try {
+      await seedRichInstance({
+        stores: source.stores,
+        tenantId: TENANT,
+        userId: 'alice',
+        memoryDir: source.memoryDir,
+        knowledgeDir: source.knowledgeDir,
+      });
+      await source.stores.sessionStore.createSession({
+        tenant_id: TENANT,
+        session_id: 'private-chat',
+        created_by_subject: { subject_id: 'alice', subject_type: 'user', subject_display_name: 'alice' },
+        agent: { type: 'inline', spec: makeAgentSpec() },
+        custom: null,
+        metadata: {},
+        external_id: null,
+        source: null,
+        is_incognito: true,
+        private_expires_at: new Date(Date.now() + 60_000),
+      });
+
+      const archive = await exportArchive(source);
+
+      const ids = sessionRecordsOf(new Map(readZipEntries(archive).map(entry => [entry.name, entry.data]))).map(
+        session => session['session_id'],
+      );
+      expect(ids).toContain(SEED_IDS.sessionMain);
+      expect(ids).not.toContain('private-chat');
+    } finally {
+      await source.close();
+    }
+  });
+
+  it('never brings back a chat an archive marks private', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-private-in-archive');
+    try {
+      const marked = await repack(archive, entries => {
+        const records = recordsAt(parseJson(entries.get('sessions/0001.json'), 'part'), 'part');
+        for (const record of records) {
+          const session = record['kind'] === 'session' ? recordAt(record['session'], 'session') : undefined;
+          if (session?.['session_id'] === SEED_IDS.sessionMain) {
+            session['is_incognito'] = true;
+            session['private_expires_at'] = new Date(Date.now() + 60_000).toISOString();
+          }
+        }
+        entries.set('sessions/0001.json', Buffer.from(JSON.stringify(records)));
+      });
+
+      await runDataImport(importDeps(target), importRequest(marked));
+
+      expect(
+        await target.stores.sessionStore.getSession({ tenant_id: TENANT, session_id: SEED_IDS.sessionMain }),
+      ).toBeUndefined();
     } finally {
       await source.close();
       await target.close();

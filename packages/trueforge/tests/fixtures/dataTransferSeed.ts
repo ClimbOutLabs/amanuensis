@@ -22,18 +22,22 @@ import type { IAgentStore } from '../../src/db/agentStore';
 import type { IDeliveryStore } from '../../src/db/deliveryStore';
 import type { IGlobalSettingsStore } from '../../src/db/globalSettingsStore';
 import type { IMcpServerStore } from '../../src/db/mcpServerStore';
+import type { IModelProviderStore } from '../../src/db/modelProviderStore';
 import type { IPersonaStore } from '../../src/db/personaStore';
 import type { IPersonalizationStore } from '../../src/db/personalizationStore';
+import type { IReachSettingsStore } from '../../src/db/reachSettingsStore';
 import type { IScheduleStore } from '../../src/db/scheduleStore';
 import type { ISentinelAuditStore } from '../../src/db/sentinelAuditStore';
 import type { ISentinelSettingsStore } from '../../src/db/sentinelSettingsStore';
 import type { SessionCustom, TurnCustom } from '../../src/db/sessionCustom';
 import type { ISpaceStore } from '../../src/db/spaceStore';
+import type { ITextContactStore } from '../../src/db/textContactStore';
 import type { ITurnArtifactStore } from '../../src/db/turnArtifactStore';
 import { personaKnowledgeLocation } from '../../src/personaKnowledge/knowledgePaths';
 import { openPersonaKnowledgeRepository } from '../../src/personaKnowledge/sqliteKnowledgeRepository';
 import { EMBEDDING_DIMENSIONS } from '../../src/runtime/memory/embeddingModel';
 import { McpServerManifestSchema } from '../../src/schemas/mcpServer';
+import { defaultReachSettings } from '../../src/schemas/reach';
 import { ScheduleManifestSchema } from '../../src/schemas/schedule';
 
 export const SEED_IDS = {
@@ -162,8 +166,11 @@ export interface DataTransferSeedStores<TTransaction> {
   sentinelSettingsStore: ISentinelSettingsStore<TTransaction>;
   auditStore: ISentinelAuditStore;
   deliveryStore: IDeliveryStore;
+  reachSettingsStore: IReachSettingsStore;
+  textContactStore: ITextContactStore;
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
   mcpServerStore: IMcpServerStore<TTransaction>;
+  modelProviderStore: IModelProviderStore<TTransaction>;
 }
 
 export interface SeedRichInstanceInput<TTransaction> {
@@ -263,6 +270,8 @@ export async function seedRichInstance<TTransaction>(input: SeedRichInstanceInpu
     metadata: {},
     external_id: null,
     source: null,
+    is_incognito: false,
+    private_expires_at: null,
   });
   await stores.sessionStore.setSessionFolder({
     tenant_id: tenantId,
@@ -394,6 +403,8 @@ export async function seedRichInstance<TTransaction>(input: SeedRichInstanceInpu
     metadata: {},
     external_id: null,
     source: { type: 'schedule', id: SEED_IDS.scheduleDaily, run_id: 'run-1' },
+    is_incognito: false,
+    private_expires_at: null,
   });
   await stores.sessionStore.createTurn(
     makeCreateTurnInput({
@@ -429,6 +440,8 @@ export async function seedRichInstance<TTransaction>(input: SeedRichInstanceInpu
     metadata: {},
     external_id: null,
     source: null,
+    is_incognito: false,
+    private_expires_at: null,
   });
   await stores.sessionStore.createTurn(
     makeCreateTurnInput({
@@ -505,6 +518,36 @@ export async function seedRichInstance<TTransaction>(input: SeedRichInstanceInpu
     text: 'Call the dentist',
     reason: 'You asked to be reminded on Monday.',
     link: null,
+  });
+  await stores.reachSettingsStore.put({
+    tenant_id: tenantId,
+    created_by: userId,
+    settings: {
+      ...defaultReachSettings('Europe/Paris'),
+      channels: { texts: true, calls: true },
+      call_kinds: ['travel'],
+      max_nudges_per_day: 3,
+    },
+  });
+
+  // A confirmed number with a code to a new number still pending: none of the code or the new number is exported.
+  const seededCode = {
+    hash: 'a'.repeat(64),
+    salt: 'b'.repeat(32),
+    key_id: 'c'.repeat(8),
+    expires_at: '2026-11-05T09:10:00.000Z',
+  };
+  const owner = { tenant_id: tenantId, created_by: userId };
+  const at = new Date('2026-11-05T09:00:00.000Z');
+  await stores.textContactStore.startCode({ ...owner, phone: '+15550111', as: 'number', code: seededCode, now: at });
+  await stores.textContactStore.confirmCode({ ...owner, code_hash: seededCode.hash, now: at });
+  await stores.textContactStore.setMode({ ...owner, mode: 'full', now: at });
+  await stores.textContactStore.startCode({
+    ...owner,
+    phone: '+15550122',
+    as: 'new_number',
+    code: seededCode,
+    now: at,
   });
 
   const knowledgeDbPath = personaKnowledgeLocation({

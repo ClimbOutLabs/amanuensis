@@ -120,6 +120,8 @@ function applyPragmas(database: Database.Database): void {
   database.pragma('foreign_keys = ON');
   database.pragma('temp_store = MEMORY');
   database.pragma('cache_size = -10240');
+  // A deleted chat's words are overwritten on disk, not left in free pages a file reader could recover.
+  database.pragma('secure_delete = ON');
 }
 
 /**
@@ -145,6 +147,8 @@ const JSON_RESULT_COLUMNS = new Set([
   'event',
   'manifest',
   'network_approval',
+  'network_allowed_hosts',
+  'network_denied_hosts',
   'metadata',
   'build_metadata',
   'oauth_server',

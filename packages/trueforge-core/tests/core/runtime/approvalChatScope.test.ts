@@ -6,6 +6,7 @@ import type {
   RawAssistantMessageWithUsage,
 } from '../../../src/core/llm/LLMTypes';
 import { getEmptyUsage } from '../../../src/core/llm/LLMTypes';
+import type { Tier3Card } from '../../../src/core/permissions/tier';
 import { AgentThread } from '../../../src/core/runtime/AgentThread';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { makeMockIMCPServer, makeSilentLogger } from '../harnessMocks';
@@ -70,11 +71,46 @@ async function canChatAllow(
   throw new Error('expected a tool.approval_required event');
 }
 
+/** A card that names where the action goes, and nothing else. */
+function cardTo(destination: string | null): Tier3Card {
+  return {
+    plain_what: 'Post this note?',
+    copy: null,
+    plain_why: null,
+    cannot_be_undone: null,
+    why_asked_again: null,
+    destination,
+    recipient: null,
+    amount: null,
+    parsed_command: null,
+    outbound_text: null,
+    destination_host: null,
+    outbound_truncated: false,
+  };
+}
+
 describe('the approval event says whether chat scope is offered', () => {
-  it('offers it for a plain read and for saving a draft, and withholds it for a steered call', async () => {
+  it('offers it for a plain read and for an action whose card names where it goes, and withholds it for a steered call', async () => {
     expect(await canChatAllow('unrecognized_tool')).toBe(true);
-    expect(await canChatAllow('gmail_draft')).toBe(true);
+    expect(await canChatAllow('connector_outbound', { tier3_card: cardTo('Team notes') })).toBe(true);
     expect(await canChatAllow('content_steered')).toBe(false);
+  });
+
+  it.each(['connector_outbound', 'destructive_action', 'mcp_destructive_hint', 'mcp_open_world_hint'])(
+    'withholds it for a %s action whose card names no target',
+    async reason => {
+      expect(await canChatAllow(reason, { tier3_card: cardTo(null) })).toBe(false);
+      expect(await canChatAllow(reason)).toBe(false);
+    },
+  );
+
+  it.each(['schedule_write', 'persona_write', 'skill_install'])('withholds it for a %s card', async reason => {
+    expect(await canChatAllow(reason, { tier3_card: cardTo(null) })).toBe(false);
+  });
+
+  it('withholds it from a mail draft, whoever the draft is addressed to', async () => {
+    expect(await canChatAllow('gmail_draft', { tier3_card: cardTo('dana@example.org') })).toBe(false);
+    expect(await canChatAllow('gmail_draft')).toBe(false);
   });
 
   it('withholds it from every send and every change that invites or emails guests', async () => {

@@ -23,6 +23,7 @@ import {
 import { cn } from '../atoms/lib/cn.js';
 import { useIsMobile } from '../atoms/lib/useIsMobile.js';
 import { useLightDismiss } from '../atoms/lib/useLightDismiss.js';
+import { LightDarkToggleButton } from '../atoms/LightDarkToggleButton.js';
 import { NamedAgentHeaderLabel } from '../atoms/NamedAgentHeaderLabel.js';
 import { PageHeader } from '../atoms/PageHeader.js';
 import { DropdownMenu } from '../atoms/primitives/DropdownMenu.js';
@@ -32,6 +33,8 @@ import { AgentConfigDrawerContainer } from '../containers/AgentConfigDrawerConta
 import { Thread } from '../containers/Thread.js';
 import { ThreadListContainer } from '../containers/ThreadListContainer.js';
 import { useOpenMostRecentChat } from '../containers/useOpenMostRecentChat.js';
+import { useOptionalDeliveries } from '../deliveries/DeliveriesContext.js';
+import { DeliveryBell } from '../deliveries/DeliveryBell.js';
 import { HelpNewChatBridge } from '../help/HelpStuckButton.js';
 import { Icon } from '../icons/Icon.js';
 import { shellIsCreateAgent, useOptionalShellMode, type ShellMode } from '../server/ShellModeContext.js';
@@ -43,6 +46,9 @@ import { railEntryFor, type RailEntry } from './railEntry.js';
 const TruefoundrySettingsBuilder = lazy(() => import('../containers/SettingsBuilder/index.js'));
 const SchedulesPage = lazy(() =>
   import('../atoms/schedules/SchedulesPage.js').then(m => ({ default: m.SchedulesPage })),
+);
+const RemindersPage = lazy(() =>
+  import('../atoms/reminders/RemindersPage.js').then(m => ({ default: m.RemindersPage })),
 );
 const SpacesView = lazy(() => import('../containers/SpacesView.js'));
 
@@ -60,7 +66,7 @@ function isRecentHistoryVisible({ overlayOpen, mode }: { overlayOpen: boolean; m
 const CHAT_LIST_INSIDE_SELECTOR = '[data-chat-list-trigger], [role="menu"], [role="dialog"], [role="alertdialog"]';
 
 /**
- * Nav buttons only (Chats, Spaces and Schedules). Returned as plain siblings, not wrapped in their own
+ * Nav buttons only (Chats, Spaces, Schedules and Reminders). Returned as plain siblings, not wrapped in their own
  * `<nav>`, so the caller lays them out in one scrolling flex column with the footer actions.
  * New chat lives at the top of the chat list; Build agent, Agents, Sessions and Settings live under More.
  */
@@ -74,6 +80,7 @@ function SidebarNavItems({
   onChats: () => void;
 }): ReactNode {
   const SchedulesButton = useSlot('SchedulesButton');
+  const RemindersButton = useSlot('RemindersButton');
   const SpacesButton = useSlot('SpacesButton');
   const chatsSelected = selected === 'chats';
 
@@ -101,6 +108,7 @@ function SidebarNavItems({
       </button>
       <SpacesButton compact selected={selected === 'spaces'} />
       <SchedulesButton compact selected={selected === 'schedules'} />
+      <RemindersButton compact selected={selected === 'reminders'} />
     </>
   );
 }
@@ -148,6 +156,14 @@ function SidebarRail({
     >
       <div className="flex h-14 w-full shrink-0 items-center justify-center text-text-primary">
         <BrandLogo variant={chrome.collapsedVariant} className={brandLogoClassName} />
+      </div>
+      {/* The bell sits under the brand, outside the scrolling nav, so its panel is not clipped by the
+          nav's scroll area. Using it is not a navigation: like Chats, its clicks must not dismiss
+          the mobile drawer, since the panel shows inside it. The one exception is opening an item,
+          which does navigate; the bell reports that through onNavigate so the drawer closes over
+          the chat it opened instead of staying in front of it. */}
+      <div className="flex w-full shrink-0 items-center justify-center pb-1" onClick={event => event.stopPropagation()}>
+        <DeliveryBell onNavigate={onNavigate} />
       </div>
       {/* One scrolling flex column: on a short viewport it scrolls (min-h-0 + overflow-y-auto) instead
           of the footer painting over the nav. The footer sits at the bottom when there is room. */}
@@ -230,14 +246,19 @@ export function SidebarLayout({ className }: { className?: string }) {
   const libraryOpen = shell?.libraryOpen === true;
   const sessionsOpen = shell?.sessionsOpen === true;
   const schedulesOpen = shell?.schedulesOpen === true;
+  const remindersOpen = shell?.remindersOpen === true;
   const spacesOpen = shell?.spacesOpen === true;
-  const overlayOpen = settingsOpen || libraryOpen || sessionsOpen || schedulesOpen || spacesOpen;
+  const overlayOpen = settingsOpen || libraryOpen || sessionsOpen || schedulesOpen || remindersOpen || spacesOpen;
   const showAgentConfig =
     shell != null && shellIsCreateAgent(shell.mode) && !overlayOpen && (!isMobile || shell.agentConfigOpen);
   const recentHistoryAvailable = isRecentHistoryVisible({ overlayOpen, mode: shell?.mode });
   const historyCollapsed = shell?.historyCollapsed === true;
   const showRecentHistory = recentHistoryAvailable && !historyCollapsed;
   const railEntry = railEntryFor(shell);
+  // On a phone the rail is inside the drawer, so the bell's badge is out of sight until the drawer
+  // opens; the Navigation button carries the same unread count so it can be seen at a glance.
+  const deliveries = useOptionalDeliveries();
+  const unreadCount = deliveries?.unreadCount ?? 0;
   const openMostRecentChat = useOpenMostRecentChat();
   const chatListRef = useRef<HTMLElement>(null);
   // Opened from the rail, the docked chat list behaves like a menu: it closes on a press outside,
@@ -261,6 +282,7 @@ export function SidebarLayout({ className }: { className?: string }) {
     shell.setLibraryOpen(false);
     shell.setSessionsOpen(false);
     shell.setSchedulesOpen(false);
+    shell.setRemindersOpen(false);
     shell.closeSpaces();
     shell.setHistoryCollapsed(false);
     setChatListFromRail(true);
@@ -348,12 +370,25 @@ export function SidebarLayout({ className }: { className?: string }) {
                 <button
                   ref={menuBtnRef}
                   type="button"
-                  aria-label="Navigation"
+                  aria-label={
+                    unreadCount > 0
+                      ? `Navigation, ${String(unreadCount)} unread ${unreadCount === 1 ? 'notification' : 'notifications'}`
+                      : 'Navigation'
+                  }
                   aria-expanded={mobileNavOpen}
-                  className={auiButtonClass({ variant: 'ghost', size: 'icon' })}
+                  className={cn(auiButtonClass({ variant: 'ghost', size: 'icon' }), 'relative')}
                   onClick={() => setMobileNavOpen(true)}
                 >
                   <Icon name="bars" />
+                  {unreadCount > 0 ? (
+                    <span
+                      data-role="navigation-unread-count"
+                      aria-hidden
+                      className="bg-gold text-text-primary absolute -top-0.5 -right-0.5 min-w-4 rounded-full px-1 text-center text-[0.625rem] leading-4 font-semibold"
+                    >
+                      {unreadCount > 99 ? '99+' : unreadCount}
+                    </span>
+                  ) : null}
                 </button>
               </div>
             ) : null
@@ -362,6 +397,7 @@ export function SidebarLayout({ className }: { className?: string }) {
           end={
             !overlayOpen ? (
               <>
+                <LightDarkToggleButton />
                 <AgentDetailsToggleButton />
                 <SaveAgentButton />
               </>
@@ -422,6 +458,22 @@ export function SidebarLayout({ className }: { className?: string }) {
                 }
               >
                 <SchedulesPage />
+              </Suspense>
+            ) : remindersOpen ? (
+              <Suspense
+                fallback={
+                  <div
+                    className="flex h-full items-center justify-center"
+                    role="status"
+                    aria-live="polite"
+                    aria-busy="true"
+                  >
+                    <Spinner size={28} className="text-text-primary" />
+                    <span className="sr-only">Loading</span>
+                  </div>
+                }
+              >
+                <RemindersPage />
               </Suspense>
             ) : spacesOpen ? (
               <Suspense

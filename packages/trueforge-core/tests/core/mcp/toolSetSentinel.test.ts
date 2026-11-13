@@ -26,6 +26,8 @@ jest.mock('../../../src/core/mcp/remoteMcpClient', () => {
 const mockConnect = jest.mocked(connectRemoteMcp);
 const noopLogger = createLogger({ silent: true });
 const SERVER_NAME = 'notes';
+/** What the test connector's grants bind to, as the host would set it from the connector record. */
+const GRANT_BINDING = 'binding-of-the-notes-connector';
 
 function makeToolSet(params: {
   tools: ToolSchema[];
@@ -47,6 +49,7 @@ function makeToolSet(params: {
     name: params.serverName ?? SERVER_NAME,
     id: params.serverName ?? SERVER_NAME,
     url: 'https://mcp.example.com/mcp',
+    grantBinding: GRANT_BINDING,
     headers: {},
     logger: noopLogger,
     tracing: NOOP_AGENT_TRACING,
@@ -103,7 +106,7 @@ function servicesWithGrants(toolNames: string[]): SentinelServices {
       created_by: 'u1',
       mcp_server_name: SERVER_NAME,
       tool_name,
-      mcp_server_host: 'mcp.example.com',
+      connector_binding: GRANT_BINDING,
     });
   }
   return services;
@@ -190,14 +193,22 @@ describe('ToolSet Sentinel classification of connector tools', () => {
     expect(remediation?.message).not.toMatch(/card/i);
   });
 
-  it('refuses a standing grant when the server hints escalate the tier, but lets the chat answer once', async () => {
-    const info = await makeToolSet({ tools: [destructiveRead], services: servicesWithGrants([]) }).toolCallInfo({
+  it('refuses a standing grant when the server hints escalate the tier, and offers the chat answer only for a named place', async () => {
+    const toolSet = makeToolSet({ tools: [destructiveRead], services: servicesWithGrants([]) });
+    const unnamed = await toolSet.toolCallInfo({ name: 'archive_note', arguments: {} });
+    expect(unnamed.tier).toBe(3);
+    // The connector's own address is on the card, but it is the same for every call, so it names no place.
+    expect(unnamed.tier3_card?.destination_host).not.toBeNull();
+    expect(allowsChatApproval(unnamed)).toBe(false);
+    expect(allowsToolGrant(unnamed)).toBe(false);
+
+    const named = await toolSet.toolCallInfo({
       name: 'archive_note',
-      arguments: {},
+      arguments: { url: 'https://notes.example.com/team' },
     });
-    expect(info.tier).toBe(3);
-    expect(allowsChatApproval(info)).toBe(true);
-    expect(allowsToolGrant(info)).toBe(false);
+    expect(named.tier).toBe(3);
+    expect(allowsChatApproval(named)).toBe(true);
+    expect(allowsToolGrant(named)).toBe(false);
   });
 
   it('runs a tool the user always allows at Tier 1, without approval, and audits the run exactly once', async () => {
@@ -668,13 +679,13 @@ describe("the operator's own Calendar sidecar, under a standing grant the person
         created_by: 'u1',
         mcp_server_name: 'Calendar',
         tool_name,
-        mcp_server_host: 'mcp.example.com',
+        connector_binding: GRANT_BINDING,
       });
     }
     return services;
   }
 
-  it('runs a granted calendar write with no card under the default gate', async () => {
+  it('asks for a calendar write under the default gate, also when it was granted for every chat', async () => {
     const calendar = makeToolSet({
       tools: [createEvent],
       services: calendarServices(['create_event']),
@@ -685,17 +696,19 @@ describe("the operator's own Calendar sidecar, under a standing grant the person
       name: 'create_event',
       arguments: { summary: 'Lunch', start: '2026-10-22T12:00', end: '2026-10-22T13:00' },
     });
-    expect(info).toMatchObject({ tier: 1, tier_reason: 'mcp_tool_grant', is_approval_required: false });
+    expect(info).toMatchObject({ tier: 3, tier_reason: 'caldav_calendar_change', is_approval_required: true });
   });
 
-  it('still asks for a destructive calendar call, granted or not', async () => {
+  it('refuses a destructive calendar call whose event cannot be read, granted or not', async () => {
     const calendar = makeToolSet({
       tools: [deleteEvent],
       services: calendarServices(['delete_event']),
       firstParty: true,
       serverName: 'Calendar',
     });
+    // The fake calendar answers get_event with no event, so the delete cannot be described:
+    // it is refused outright rather than carded, and no grant is consulted first.
     const info = await calendar.toolCallInfo({ name: 'delete_event', arguments: { id: 'evt-1' } });
-    expect(info).toMatchObject({ tier: 3, is_approval_required: true });
+    expect(info).toMatchObject({ tier: 3, is_approval_required: false });
   });
 });

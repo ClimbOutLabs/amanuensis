@@ -1,6 +1,8 @@
 import dedent from 'dedent';
 import { createHash } from 'node:crypto';
 import type { ChatCompletionMessageParam } from 'openai/resources/chat';
+import { DEFAULT_ON_SOURCE_CONNECTOR_NAMES } from '../connectors/chatConnectorChoice';
+import { connectorUnavailableLine } from '../connectors/connectorAvailability';
 import { MAIL_DRAFT_TOOL_NAME } from '../email/mailConnector/toolContract';
 import type { ApprovalDecision } from '../events/schema';
 import {
@@ -20,7 +22,8 @@ import type {
   ToolInfo,
 } from '../llm/LLMTypes';
 import { UNKNOWN_TOOL_NAME } from '../llm/LLMTypes';
-import { estimateTokensForString } from '../llm/usage';
+import { toOpenAIChatMessage } from '../llm/toOpenAIChatMessage';
+import { estimateTokensForString, PICTURE_TOKEN_ESTIMATE } from '../llm/usage';
 import type { PendingHostNoteKind } from '../mcp/executeToolCalls';
 import type {
   AgentThreadRuntimeSendInput,
@@ -87,7 +90,7 @@ Show a picture in a reply only when the person asked for one or the picture is t
  * per-tool special case.
  */
 export const NO_TASK_NO_TOOLS_PROMPT = dedent`
-When the user's message names no concrete task, such as a greeting, an announcement of intent ("ready to...", "let's..."), or small talk, reply in text and ask what they want done. In that case, do not call any tool, open or use a sandbox, or guess which tool they might mean. The one exception: if the message answers a question you just asked, take the answer and continue the task, using tools as the task needs.
+When the user's message names no concrete task, such as a greeting, an announcement of intent ("ready to...", "let's..."), or small talk, reply in text and ask what they want done, without calling any tool, opening or using a sandbox, or guessing which tool they mean. Exception: if it answers a question you just asked, continue the task with the tools it needs.
 `;
 
 /**
@@ -121,6 +124,37 @@ ${connector} is connected only in Settings, under Connectors, ${connector}, with
 }
 
 export const EMAIL_PASSWORD_PROMPT = connectorPasswordPrompt({ connector: 'Email', owner: 'email' });
+
+/**
+ * Mail and calendar come only from their connectors. With one off, a model asked for an appointment hunts for a
+ * stand-in such as a helper or a schedule, so it gets one plain line per missing source instead. Undefined when
+ * every source is attached, or when the host does not report what is set up.
+ */
+export function createSourceOffPrompt({
+  attachedConnectorNames,
+  setUpConnectorNames,
+}: {
+  attachedConnectorNames: readonly string[];
+  setUpConnectorNames: readonly string[] | undefined;
+}): string | undefined {
+  if (setUpConnectorNames === undefined) {
+    return undefined;
+  }
+  const lines = DEFAULT_ON_SOURCE_CONNECTOR_NAMES.filter(name => !attachedConnectorNames.includes(name)).map(name =>
+    connectorUnavailableLine({
+      connector: name,
+      availability: setUpConnectorNames.includes(name) ? 'turned-off' : 'not-set-up',
+    }),
+  );
+  if (lines.length === 0) {
+    return undefined;
+  }
+  return dedent`
+Email and calendar are available only through the connectors below, and these are not attached to this chat.
+${lines.join('\n')}
+When a request needs one of them, say so in one plain line with the next step above, then stop. Never offer a schedule, a helper, a search, or another tool in its place, and do not look for the connector under another name.
+`;
+}
 
 /**
  * A demo instance refuses to send from the Email account but lets a draft be saved. The model is told so, or it answers "send it"
@@ -436,12 +470,35 @@ export function hasSentHostNoteThisTurn(
   return false;
 }
 
+/** Opens the host's note on a picture the host itself attached, such as a browser screenshot. */
+const HOST_PICTURE_NOTE_START = `${SYSTEM_TAG_START}[host-picture] `;
+
+/**
+ * A picture the host shows the model, with the host's note on it: a user-role message the person
+ * did not write, so it never takes the place of the person's message.
+ */
+export function hostPictureMessage(input: { note: string; imageUrl: string }): ChatCompletionMessageParam {
+  return {
+    role: 'user',
+    content: [
+      { type: 'text', text: internalSystemTag(`[host-picture] ${input.note}`) },
+      { type: 'image_url', image_url: { url: input.imageUrl } },
+    ],
+  };
+}
+
 function isHostWrittenUserContent(content: ChatCompletionMessageParam['content']): boolean {
   if (typeof content === 'string') {
     return isHostWrappedText(content);
   }
   if (!Array.isArray(content) || content.length === 0) {
     return false;
+  }
+  // A picture the host attached comes with its note first. A person's own picture never does: an
+  // upload is announced by other host text, so a message of the person's keeps counting as theirs.
+  const [first, ...rest] = content;
+  if (first?.type === 'text' && first.text.startsWith(HOST_PICTURE_NOTE_START)) {
+    return rest.every(part => part.type === 'image_url' || (part.type === 'text' && isHostWrappedText(part.text)));
   }
   return content.every(part => part.type === 'text' && isHostWrappedText(part.text));
 }
@@ -459,6 +516,38 @@ export function personMessageIndex(messages: readonly ChatCompletionMessageParam
     }
   }
   return -1;
+}
+
+/**
+ * The context as the model is sent it: thinking stays only on replies after the person's latest
+ * message, where a tool-using reply needs it to continue. Earlier thinking is never needed again
+ * and providers drop or ignore it, so sending it would only fill the context window.
+ */
+export function withoutEarlierThinking(context: readonly ContextMessage[]): ContextMessage[] {
+  let personIndex = -1;
+  for (let i = context.length - 1; i >= 0; i -= 1) {
+    const message = context[i];
+    if (
+      message !== undefined &&
+      isLLMContextMessage(message) &&
+      message.role === 'user' &&
+      !isHostWrittenUserContent(toOpenAIChatMessage(message).content)
+    ) {
+      personIndex = i;
+      break;
+    }
+  }
+  return context.map((message, index) => {
+    if (index >= personIndex || !isLLMContextMessage(message) || message.role !== 'assistant') {
+      return message;
+    }
+    if (message.thinking_blocks === undefined) {
+      return message;
+    }
+    const { thinking_blocks: _earlierThinking, ...rest } = message;
+    void _earlierThinking;
+    return rest;
+  });
 }
 
 export function internalSystemMessage(m: string): LLMUserMessage {
@@ -704,6 +793,40 @@ export function getThreadId(): string {
   return crypto.randomUUID();
 }
 
+/** A message's content as far as sizing reads it: text, or parts that may carry text or a picture. */
+type SizedContent = string | readonly { type?: string; text?: string }[] | null | undefined;
+
+/** How many pictures a message's content holds. */
+export function pictureCount(content: SizedContent): number {
+  if (typeof content === 'string' || content == null) {
+    return 0;
+  }
+  return content.filter(part => part.type === 'image_url').length;
+}
+
+/** Tokens of one message's content: its text, and a fixed amount for each picture when they are counted. */
+export function estimateTokensForChatMessageContent({
+  content,
+  countPictures,
+}: {
+  content: SizedContent;
+  countPictures: boolean;
+}): number {
+  if (typeof content === 'string') {
+    return estimateTokensForString(content);
+  }
+  if (content == null) {
+    return 0;
+  }
+  let total = countPictures ? pictureCount(content) * PICTURE_TOKEN_ESTIMATE : 0;
+  for (const part of content) {
+    if (typeof part.text === 'string') {
+      total += estimateTokensForString(part.text);
+    }
+  }
+  return total;
+}
+
 export function estimateTokensForContextMessages(messages: ContextMessage[]): CurrentContextUsage {
   let tokenCount = 0;
 
@@ -729,6 +852,16 @@ export function estimateTokensForContextMessages(messages: ContextMessage[]): Cu
 
     if ('tool_call_id' in b && b.tool_call_id) {
       tokenCount += estimateTokensForString(b.tool_call_id);
+    }
+
+    // Earlier thinking is sent back with every request, so it takes room in the model's context
+    // like any other text; leaving it out lets compaction keep a tail far larger than it measured.
+    if ('thinking_blocks' in b && b.thinking_blocks) {
+      for (const block of b.thinking_blocks) {
+        if (block.type === 'thinking') {
+          tokenCount += estimateTokensForString(block.thinking);
+        }
+      }
     }
   }
 

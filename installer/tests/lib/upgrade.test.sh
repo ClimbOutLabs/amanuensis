@@ -6,6 +6,28 @@ set -euo pipefail
 
 app_tag() { sed -n 's/.*"app_image": "\([^"]*\)".*/\1/p' "$1"; }
 compose_image() { sed -n 's/^[[:space:]]*image:[[:space:]]*//p' "$AMAN_HOME/instances/$1/compose.yaml" | head -n 1; }
+env_value() { sed -n "s/^$2=//p" "$AMAN_HOME/instances/$1/.env" | head -n 1; }
+reg_value() { sed -n "s/^$2=//p" "$AMAN_HOME/state/instances/$1.conf" | head -n 1; }
+compose() { cat "$AMAN_HOME/instances/main/compose.yaml"; }
+
+# This computer has a home network address and a name on it, so an instance can open on the network.
+lan() {
+  fixture_network 192.168.1.20
+  fixture_hostname host
+}
+
+HTTPS_ORIGINS="http://127.0.0.1:8791,http://localhost:8791,https://192.168.1.20:8443,https://host:8443,https://host.local:8443"
+PLAIN_ORIGINS="http://127.0.0.1:8791,http://localhost:8791,http://192.168.1.20:8791,http://host:8791,http://host.local:8791"
+
+# The record and the settings of the installed instance rewritten the way an install from before
+# https left them: opened on the network, with plain http everywhere and no https port.
+record_plain_http() {
+  sed -i 's/^tls=.*/tls=off/' "$AMAN_HOME/state/instances/main.conf"
+  sed -i 's/^tls_port=.*/tls_port=/' "$AMAN_HOME/state/instances/main.conf"
+  sed -i "s|^origins=.*|origins=$PLAIN_ORIGINS|" "$AMAN_HOME/state/instances/main.conf"
+  sed -i "s|^ALLOWED_ORIGINS=.*|ALLOWED_ORIGINS=$PLAIN_ORIGINS|" "$AMAN_HOME/instances/main/.env"
+  sed -i "/192.168.1.20:8443:8443/d" "$AMAN_HOME/instances/main/compose.yaml"
+}
 
 test_noop_when_current() {
   t_begin "upgrade with nothing new says so and rebuilds nothing"
@@ -17,6 +39,84 @@ test_noop_when_current() {
   assert_rc 0
   assert_contains "$OUT" "Already up to date"
   assert_eq "$(log_count "docker build")" "$builds"
+  sandbox_drop
+}
+
+test_upgrade_check_names_the_move_to_https_and_changes_nothing() {
+  t_begin "upgrade --check names the move to https an older plain http instance needs, and changes nothing"
+  sandbox_new
+  lan
+  install_machine
+  record_plain_http
+  run_install upgrade --check
+  assert_rc 0
+  assert_flat_contains "$OUT" "Instance main would move to https"
+  assert_eq "$(reg_value main tls)" off "the check leaves the record on plain http"
+  assert_eq "$(env_value main ALLOWED_ORIGINS)" "$PLAIN_ORIGINS" "and the settings keep the plain addresses"
+  sandbox_drop
+}
+
+test_upgrade_moves_a_plain_http_instance_to_https() {
+  t_begin "an upgrade with nothing new to install still moves an older plain http instance to https"
+  sandbox_new
+  lan
+  install_machine
+  record_plain_http
+  local secret
+  secret=$(env_value main OIDC_CLIENT_SECRET)
+  : >"$STUB_LOG"
+  run_install upgrade
+  assert_rc 0
+  assert_flat_contains "$OUT" "Moving instance main to https"
+  assert_eq "$(reg_value main tls)" local
+  assert_eq "$(reg_value main tls_port)" 8443
+  assert_eq "$(env_value main ALLOWED_ORIGINS)" "$HTTPS_ORIGINS"
+  assert_contains "$(compose)" "- '192.168.1.20:8443:8443'" "the moved instance is served over https"
+  assert_eq "$(env_value main OIDC_CLIENT_SECRET)" "$secret" "secrets stay as they were"
+  assert_log_has "--force-recreate"
+  run_install upgrade
+  assert_rc 0
+  assert_contains "$OUT" "Already up to date"
+  assert_eq "$(reg_value main tls)" local "https is kept"
+  sandbox_drop
+}
+
+test_a_full_upgrade_moves_a_plain_http_instance_to_https() {
+  t_begin "an upgrade to a new version moves an older plain http instance to https on the way"
+  sandbox_new
+  lan
+  install_machine
+  record_plain_http
+  repo_commit_change "app change"
+  run_install upgrade
+  assert_rc 0
+  assert_eq "$(reg_value main tls)" local
+  assert_eq "$(reg_value main tls_port)" 8443
+  assert_eq "$(env_value main ALLOWED_ORIGINS)" "$HTTPS_ORIGINS"
+  assert_contains "$(compose)" "- '192.168.1.20:8443:8443'" "the moved instance is served over https"
+  sandbox_drop
+}
+
+test_upgrade_building_missing_parts_moves_a_plain_http_instance_to_https() {
+  t_begin "an upgrade that builds missing parts also moves an older plain http instance to https"
+  sandbox_new
+  lan
+  install_machine
+  record_plain_http
+  # One part of the installed version is missing, so the upgrade builds it again instead of
+  # finding everything in place.
+  grep -v -Fx "$(app_tag "$AMAN_HOME/release/release.json")" "$STUB_STATE/images" >"$STUB_STATE/images.new"
+  mv "$STUB_STATE/images.new" "$STUB_STATE/images"
+  : >"$STUB_LOG"
+  run_install upgrade
+  assert_rc 0
+  assert_flat_contains "$OUT" "Building the missing parts again"
+  assert_flat_contains "$OUT" "Moving instance main to https"
+  assert_eq "$(reg_value main tls)" local
+  assert_eq "$(reg_value main tls_port)" 8443
+  assert_eq "$(env_value main ALLOWED_ORIGINS)" "$HTTPS_ORIGINS"
+  assert_contains "$(compose)" "- '192.168.1.20:8443:8443'" "the moved instance is served over https"
+  assert_log_has "--force-recreate"
   sandbox_drop
 }
 
@@ -393,8 +493,8 @@ test_install_rerun_updates_instead_of_reusing_old_images() {
   assert_rc 0
   new=$(app_tag "$AMAN_HOME/release/release.json")
   if [ "$new" != "$old" ]; then t_pass; else t_fail "the old release was reused"; fi
-  assert_not_contains "$OUT$ERR" "The Aman app is already built"
-  assert_not_contains "$OUT$ERR" "The speech-to-text service is already built"
+  assert_not_contains "$OUT$ERR" "The Aman app is already on this computer"
+  assert_not_contains "$OUT$ERR" "The speech-to-text service is already on this computer"
   assert_eq "$(compose_image main)" "$new" "the instance runs the new image"
   assert_eq "$(find "$AMAN_HOME/backups" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')" 1 "the instance had data, so it was backed up"
   assert_eq "$(app_tag "$AMAN_HOME/release/previous.release.json")" "$old" "the old release is kept for the rollback"
@@ -798,6 +898,10 @@ test_upgrade_from_a_release_without_the_voice_adds_it() {
 
 
 test_noop_when_current
+test_upgrade_check_names_the_move_to_https_and_changes_nothing
+test_upgrade_moves_a_plain_http_instance_to_https
+test_a_full_upgrade_moves_a_plain_http_instance_to_https
+test_upgrade_building_missing_parts_moves_a_plain_http_instance_to_https
 test_upgrade_reports_a_newer_version_when_the_checkout_is_behind_origin
 test_upgrade_stays_up_to_date_when_the_checkout_matches_origin
 test_upgrade_uses_the_checkout_when_it_is_ahead_of_origin

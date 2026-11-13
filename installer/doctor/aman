@@ -8,6 +8,7 @@
 #   aman doctor sandbox [--fix [--yes]] [--instance NAME] [--disk-gb N] [--no-hard-disk-limit]
 #   aman doctor docker|disk|backup|checkout|tls [--fix [--yes]]
 #   aman backup [NAME]
+#   aman restore [NAME] [TIME | --latest]
 #   aman upgrade [--check] [--force]
 #   aman import FILE [--instance NAME] [--display-name NAME] [--dry-run]
 #   aman migrate --from-compose FOLDER [--user ID]
@@ -85,8 +86,11 @@ usage() {
 Usage: aman doctor [--json] [--verbose] [--only ID] [--instance NAME] [--deep] [--local]
        aman doctor instance|network [--fix [--yes]] [--instance NAME]
        aman doctor sandbox [--fix [--yes]] [--instance NAME] [--disk-gb N] [--no-hard-disk-limit]
+         [--add go,rust,java] [--remove go,rust,java] [--add-python PACKAGES] [--remove-python PACKAGES]
+         --add and --add-python put toolchains or your own Python packages in the sandbox and rebuild it
        aman doctor docker|disk|backup|checkout|tls [--fix [--yes]]
        aman backup [NAME]
+       aman restore [NAME] [TIME | --latest]
        aman upgrade [--check] [--force]
        aman password [--instance NAME] [--password-stdin]
          sets a new owner password; run it on the computer where Aman is installed
@@ -797,7 +801,7 @@ check_instance_config() {
   dir="${AMAN_HOME}/instances/${name}"
   if [ ! -f "${dir}/.env" ]; then
     record "$name" config fail "The instance settings file is missing." \
-      "Restore this instance from a backup in ${AMAN_HOME}/backups."
+      "Put it back from a backup with: aman restore ${name}"
     return
   fi
   # dex.env holds the login password hash; both files hold secrets.
@@ -1365,6 +1369,13 @@ doctor_sandbox() {
       --yes) yes=1 ;;
       --verbose) UI_VERBOSE=1 ;;
       --no-hard-disk-limit) passthru+=(--no-hard-disk-limit) ;;
+      --add | --remove | --add-python | --remove-python)
+        # Each changes what is in the sandbox, so it rebuilds it the way --fix does.
+        [ $# -ge 2 ] || die_usage "$1 needs a comma-separated list."
+        passthru+=("$1" "$2")
+        fix=1
+        shift
+        ;;
       --disk-gb)
         [ $# -ge 2 ] || die_usage "--disk-gb needs a number."
         passthru+=(--disk-gb "$2")
@@ -1698,7 +1709,7 @@ doctor_machine_repair() { # kind
   exit 0
 }
 
-# aman backup [NAME], aman upgrade [...] and aman migrate [...]: the installer the sandbox tools were set up from, run for the person.
+# aman backup [NAME], aman restore [...], aman upgrade [...] and aman migrate [...]: the installer the sandbox tools were set up from, run for the person.
 run_installer() { # command args...
   local installer failure
   if ! installer=$(checkout_installer); then
@@ -1877,7 +1888,7 @@ esac
 
 case "${1:-}" in
   doctor) shift ;;
-  backup | upgrade | migrate) run_installer "$@" ;;
+  backup | restore | upgrade | migrate) run_installer "$@" ;;
   import)
     shift
     run_import "$@"

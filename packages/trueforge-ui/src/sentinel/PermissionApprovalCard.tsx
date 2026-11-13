@@ -9,20 +9,25 @@ import { useAssistantDisplayName } from '../components/PersonalizationContext.js
 import { useRewardLedger } from '../hooks/useRewardLedger.js';
 import { Icon } from '../icons/Icon.js';
 import { AlwaysAllowToolControl } from './AlwaysAllowToolControl.js';
-import { APPROVAL_CHOICES, isNewRecipientCard } from './approvalChoices.js';
+import { alwaysAllowConfirm, APPROVAL_CHOICES, isNewRecipientCard } from './approvalChoices.js';
 import {
-  approvalQuestion,
   approvalSentLine,
   approvalStub,
   approvalTime,
   approveVerb,
+  cardConsequence,
+  cardHeadline,
+  cardReason,
   declineVerb,
+  safeVerb,
 } from './approvalCopy.js';
 import { CalendarEventDetails } from './CalendarEventDetails.js';
 import { ChangeRequestBox } from './ChangeRequestBox.js';
 import { PersonaDetails } from './PersonaDetails.js';
-import { ScheduleDetails } from './ScheduleDetails.js';
+import { sameScheduleTools, ScheduleDetails, scheduleToolsRequest } from './ScheduleDetails.js';
+import { SkillDetails } from './SkillDetails.js';
 import { WAITING_FOR_YOU_LABEL, type SentinelApprovalCard } from './types.js';
+import { WhyIAmAsking } from './WhyIAmAsking.js';
 
 /** Characters shown before a long value is folded behind "Show all". */
 const FOLD_PREVIEW_CHARS = 500;
@@ -46,10 +51,12 @@ export type PermissionApprovalCardProps = {
   /** Only passed when the server declared a chat-scoped allow for this call. */
   onApproveForChat?: (() => void) | undefined;
   /**
-   * Records a standing "Always allow this tool" grant and approves this call. Only passed when the
+   * Records a standing "Always allow everywhere" grant and approves this call. Only passed when the
    * server says the owner may always allow this tool; the card asks for confirmation first.
    */
   onApproveAlways?: (() => void) | undefined;
+  /** Set when that answer lets maps run without asking, instead of allowing one tool. */
+  alwaysAllowCovers?: 'maps' | undefined;
   onDeny: () => void;
   /** Only passed for a card with editable content. Gets the text the person typed. */
   onChangeRequest?: ((text: string) => void) | undefined;
@@ -174,6 +181,7 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
   onApprove,
   onApproveForChat,
   onApproveAlways,
+  alwaysAllowCovers,
   onDeny,
   onChangeRequest,
   onApproveAll,
@@ -194,13 +202,35 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
     card.parsed_command !== null ||
     card.destination_host !== null;
 
-  const { calendar_event: calendarEvent, schedule, persona } = card;
+  const { calendar_event: calendarEvent, schedule, persona, skill } = card;
+  const cardTools = schedule?.tools;
+  const [pickedTools, setPickedTools] = useState(cardTools);
+  // Approving saves what the card shows, so other choices must come back on a new card first.
+  const toolsChanged =
+    cardTools !== undefined && pickedTools !== undefined && !sameScheduleTools(pickedTools, cardTools);
   // A new-recipient send never offers a standing grant or a chat-wide allow: approving it adds addresses.
   const newRecipients = isNewRecipientCard(card);
   const stub = approvalStub(card);
+  const hasCopy = card.copy !== null && card.copy !== undefined;
+  const consequence = cardConsequence(card);
+  // On a card with copy, everything that explains the ask sits behind "Why I'm asking": the tier
+  // reason, the agent's own why, and a repeat-ask note when there is one.
+  const whyLines = [
+    cardReason(card),
+    card.plain_why,
+    card.why_asked_again === null ? null : `You have seen this before: ${card.why_asked_again}`,
+  ].filter((line): line is string => line !== null);
+  // The server marks a card safe-first when the action is irreversible or reaches other people.
+  const safeFirst = card.safe_choice === true;
   const plumbingText = card.outbound_plumbing_text ?? null;
   const outboundShown =
     card.outbound_text === null ? null : visibleOutboundText(card.outbound_text, plumbingText) || null;
+  // The card-level Details holds only the request, the search service fields, and the Always allow
+  // control. A card with none of the three shows no Details at all, so it never opens empty.
+  const hasCardDetails =
+    (!outboundOpen && outboundShown !== null) ||
+    plumbingText !== null ||
+    (onApproveAlways !== undefined && !newRecipients);
 
   // The stub tears only for an approval the ledger allows; otherwise it simply goes.
   const markSent = (send: () => void) => () => {
@@ -236,7 +266,7 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
             <FoldedText
-              text={approvalQuestion(card)}
+              text={cardHeadline(card)}
               as="h3"
               previewChars={TITLE_PREVIEW_CHARS}
               className="aui-approval-card__title min-w-0 break-words text-text-primary"
@@ -252,17 +282,22 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
             </span>
           )}
         </div>
-        {card.plain_why !== null && <p className="text-text-secondary">Why: {card.plain_why}</p>}
-
-        {card.cannot_be_undone !== null && (
+        {consequence !== null && (
           <p className="flex items-start gap-2 text-text-secondary">
             <Icon name="info" className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
-            <span>{card.cannot_be_undone}</span>
+            <span>{consequence}</span>
           </p>
         )}
 
-        {card.why_asked_again !== null && (
-          <p className="text-text-secondary">You have seen this before: {card.why_asked_again}</p>
+        {hasCopy ? (
+          <WhyIAmAsking lines={whyLines} />
+        ) : (
+          <>
+            {card.plain_why !== null && <p className="text-text-secondary">Why: {card.plain_why}</p>}
+            {card.why_asked_again !== null && (
+              <p className="text-text-secondary">You have seen this before: {card.why_asked_again}</p>
+            )}
+          </>
         )}
 
         {hasDetails && (
@@ -277,9 +312,27 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
 
         {calendarEvent !== null && <CalendarEventDetails event={calendarEvent} />}
 
-        {schedule !== null && <ScheduleDetails schedule={schedule} />}
+        {schedule !== null && (
+          <ScheduleDetails
+            schedule={schedule}
+            picker={
+              pickedTools === undefined || onChangeRequest === undefined
+                ? undefined
+                : {
+                    picked: pickedTools,
+                    onPick: setPickedTools,
+                    onUpdate: () => {
+                      onChangeRequest(scheduleToolsRequest(pickedTools));
+                    },
+                    disabled: disabled || sentAt !== null,
+                  }
+            }
+          />
+        )}
 
         {persona !== null && <PersonaDetails persona={persona} />}
+
+        {skill !== null && <SkillDetails skill={skill} />}
 
         {outboundOpen && outboundShown !== null && (
           <OutboundBlock text={outboundShown} truncated={card.outbound_truncated} />
@@ -287,19 +340,32 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
 
         <div
           className={cn(
-            'flex flex-wrap gap-2 transition-opacity duration-150 motion-reduce:transition-none',
+            'aui-approval-card__choices flex flex-wrap gap-2 transition-opacity duration-150 motion-reduce:transition-none',
             sentAt !== null && 'pointer-events-none opacity-0',
           )}
           aria-hidden={sentAt !== null}
         >
+          {safeFirst && (
+            <Button
+              variant="primary"
+              size="small"
+              data-approval-primary
+              title={APPROVAL_CHOICES.deny.hint}
+              onClick={onDeny}
+              disabled={disabled || sentAt !== null}
+              className="flex-1"
+            >
+              {safeVerb(card)}
+            </Button>
+          )}
           <Button
-            variant="primary"
+            variant={safeFirst ? 'secondary' : 'primary'}
             size="small"
-            data-approval-primary
+            {...(safeFirst ? {} : { 'data-approval-primary': true })}
             title={APPROVAL_CHOICES.approve.hint}
             onClick={markSent(onApprove)}
-            disabled={disabled || sentAt !== null}
-            className="flex-1"
+            disabled={disabled || sentAt !== null || toolsChanged}
+            className={cn('flex-1', safeFirst && card.destructive === true && 'text-failure-bg')}
           >
             {approveVerb(card)}
           </Button>
@@ -319,16 +385,18 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
               {APPROVAL_CHOICES.changeIt.label}
             </Button>
           )}
-          <Button
-            variant="ghost"
-            size="small"
-            title={APPROVAL_CHOICES.deny.hint}
-            onClick={onDeny}
-            disabled={disabled || sentAt !== null}
-            className="flex-1 text-gold-ink"
-          >
-            {declineVerb(card)}
-          </Button>
+          {!safeFirst && (
+            <Button
+              variant="ghost"
+              size="small"
+              title={APPROVAL_CHOICES.deny.hint}
+              onClick={onDeny}
+              disabled={disabled || sentAt !== null}
+              className="flex-1 text-gold-ink"
+            >
+              {declineVerb(card)}
+            </Button>
+          )}
         </div>
         {/* The server offers a chat-wide grant only where it is safe, so the card shows it, never folds it away. */}
         {onApproveForChat !== undefined && !newRecipients && (
@@ -362,23 +430,28 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
           </Button>
         )}
 
-        <details>
-          <summary className="cursor-pointer text-text-secondary underline">Details</summary>
-          <div className="mt-2 space-y-3">
-            {!outboundOpen && outboundShown !== null && (
-              <OutboundBlock text={outboundShown} truncated={card.outbound_truncated} />
-            )}
-            {plumbingText !== null && <PlumbingDetails text={plumbingText} />}
-            {onApproveAlways !== undefined && !newRecipients && (
-              <AlwaysAllowToolControl
-                size="small"
-                disabled={disabled || sentAt !== null}
-                description={`${assistant} will run this kind of action on this connector without asking, in every chat.`}
-                onConfirm={markSent(onApproveAlways)}
-              />
-            )}
-          </div>
-        </details>
+        {hasCardDetails && (
+          <details>
+            <summary className="cursor-pointer text-text-secondary underline">Details</summary>
+            <div className="mt-2 space-y-3">
+              {!outboundOpen && outboundShown !== null && (
+                <OutboundBlock text={outboundShown} truncated={card.outbound_truncated} />
+              )}
+              {plumbingText !== null && <PlumbingDetails text={plumbingText} />}
+              {onApproveAlways !== undefined && !newRecipients && (
+                <AlwaysAllowToolControl
+                  size="small"
+                  disabled={disabled || sentAt !== null}
+                  confirm={alwaysAllowConfirm({
+                    covers: alwaysAllowCovers,
+                    toolSay: `${assistant} will run this kind of action on this connector without asking, in every chat.`,
+                  })}
+                  onConfirm={markSent(onApproveAlways)}
+                />
+              )}
+            </div>
+          </details>
+        )}
       </div>
       {sentAt === null && <div className="aui-ticket__stub">{stubContent}</div>}
       <StubTear play={tearing} onDone={() => setTearing(false)} className="aui-ticket__stub">

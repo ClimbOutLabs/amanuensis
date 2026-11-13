@@ -130,7 +130,8 @@ export function stampSentinelDecision(input: {
   | 'silent_search_query'
   | 'audit_description'
   | 'effect'
-  | 'grant_host'
+  | 'grant_binding'
+  | 'grant_tool_name'
   | 'secret_path_read'
   | 'mail_send'
 > {
@@ -145,7 +146,8 @@ export function stampSentinelDecision(input: {
     shell_binding: decision.shell_binding,
     // A connector read is inspection per call: its arguments decide it, not the tool's annotations.
     ...(decision.inspection ? { effect: 'inspect' as const } : {}),
-    ...(decision.grant_host === null ? {} : { grant_host: decision.grant_host }),
+    ...(decision.grant_binding === null ? {} : { grant_binding: decision.grant_binding }),
+    ...(decision.grant_tool_name === null ? {} : { grant_tool_name: decision.grant_tool_name }),
     ...(decision.secret_path_read ? { secret_path_read: true as const } : {}),
     ...(decision.mail_send ? { mail_send: true as const } : {}),
     ...(decision.silent_search_query === null ? {} : { silent_search_query: decision.silent_search_query }),
@@ -179,12 +181,16 @@ function autoDenyMessage(decision: TierDecision): string {
       return `Auto-denied: ${decision.reason_detail ?? 'the send cannot be shown in full.'}`;
     case 'unattended_run':
       return `Auto-denied: ${decision.reason_detail ?? 'a scheduled run cannot do this'}`;
+    case 'incognito_chat':
+      return `Not done: ${decision.reason_detail ?? 'an incognito chat cannot make or change anything lasting.'}`;
     case 'outbound_guard':
       return `Auto-denied: ${decision.reason_detail ?? 'the outbound guard held this call back'} Continue without it.`;
     case 'lookup_limit':
       return `Not run: ${decision.reason_detail ?? 'this reply already looked up a lot.'} Answer from what you already found.`;
     case 'steered_by_content':
       return `Skipped: ${decision.reason_detail ?? 'something read, not the person, asked for it.'} Continue without it.`;
+    case 'home_assistant_refused':
+      return `Not run: ${decision.reason_detail ?? 'Aman does not control locks, alarms or garage doors.'} Continue without it.`;
     case 'private_detail':
       return `Skipped: ${decision.reason_detail ?? 'it would have shared something private.'} Continue without it.`;
     default:
@@ -543,6 +549,10 @@ export class ToolSet implements IToolSet {
     return { server_id: this.id, destination_host: this.source.serverHost ?? null };
   }
 
+  resolveGrantBinding(): string | undefined {
+    return this.source.grantBinding;
+  }
+
   async toolCallInfo(
     params: CallToolRequest['params'],
     resolveUnderlyingTool?: boolean,
@@ -572,7 +582,8 @@ export class ToolSet implements IToolSet {
 
   /**
    * The event a CalDAV change names, read once before it is classified so the card can say what it
-   * changes. Null when that read fails, and the card then says the title could not be read.
+   * changes. Null when that read fails, and the change is then refused instead of carded, because a
+   * card cannot name an event it could not read.
    */
   private async caldavEventFor(params: CallToolRequest['params']): Promise<CaldavEventReview | null | undefined> {
     if (!this.firstParty || this.name !== CALDAV_SERVER_NAME) {
@@ -664,6 +675,7 @@ export class ToolSet implements IToolSet {
         mcp_server_name: info.mcp_server_name,
         mcp_server_id: info.mcp_server_id,
         mcp_server_host: this.source.serverHost,
+        mcp_grant_binding: this.source.grantBinding,
         mcp_first_party: this.firstParty,
         mcp_search_provider: this.searchProvider,
         mcp_search_tool: this.searchTools.has(params.name),

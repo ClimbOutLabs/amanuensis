@@ -42,18 +42,23 @@ import {
 import { CurrentContextUsageSchema } from '@truefoundry/trueforge-core/core/runtime/contextUsage';
 import { z } from 'zod';
 
+import { addressCarriesStrippedParts } from '../dataExport/secretScrub';
 import { parseTurnCustom } from '../db/sessionCustom';
+import { customWordProblem } from '../runtime/texts/knownWords';
 import { NameSchema } from '../schemas/common';
 import { DeliverySchema } from '../schemas/deliveries';
 import { SessionEventWithPassthroughSchema } from '../schemas/events';
 import { McpServerManifestSchema } from '../schemas/mcpServer';
+import { ModelProviderManifestSchema, modelProviderName } from '../schemas/modelProvider';
 import { PersonaActivationSchema, PersonaSchema, validatePersonaContentNames } from '../schemas/persona';
 import { PersonaKnowledgeDocumentSchema } from '../schemas/personaKnowledge';
 import { PersonalizationProfileSchema, validatePersonalizationContent } from '../schemas/personalization';
+import { ReachSettingsSchema } from '../schemas/reach';
 import { ScheduleManifestSchema, ScheduleStatusSchema } from '../schemas/schedule';
 import { SentinelAuditRecordSchema } from '../schemas/sentinelAudit';
 import { SentinelUserSettingsSchema } from '../schemas/sentinelSettings';
 import { SpaceContentSchema } from '../schemas/space';
+import { TextContactExportSchema } from '../schemas/textMessages';
 import {
   forwardIssues,
   internal,
@@ -91,6 +96,7 @@ export const LEFT_OUT = {
   checklistDetail: 'checklist detail',
   permissionSetting: 'permission setting',
   deliveryAttempt: 'delivery attempt',
+  textWord: 'text word',
 } as const;
 
 export const LEFT_OUT_PLURALS: Readonly<Record<string, string>> = {
@@ -103,6 +109,7 @@ export const LEFT_OUT_PLURALS: Readonly<Record<string, string>> = {
   [LEFT_OUT.checklistDetail]: 'checklist details',
   [LEFT_OUT.permissionSetting]: 'permission settings',
   [LEFT_OUT.deliveryAttempt]: 'delivery attempts',
+  [LEFT_OUT.textWord]: 'text words',
 };
 
 /** Host-owned turn data; one this version does not store is left out. */
@@ -408,6 +415,9 @@ export const ImportSessionRecordSchema = z.object({
   created_at: ArchivedInstantSchema,
   updated_at: ArchivedInstantSchema,
   last_activity_timestamp_ms: internal(z.number(), { label: LEFT_OUT.chatDetail }),
+  // Exports made before private chats lack both fields; such a chat was an ordinary one.
+  is_incognito: z.boolean().default(false),
+  private_expires_at: ArchivedInstantSchema.nullable().default(null),
 });
 export type ImportSessionRecord = z.infer<typeof ImportSessionRecordSchema>;
 
@@ -563,6 +573,51 @@ export const ImportConnectorRecordSchema = z.object({
 export type ImportConnectorRecord = z.infer<typeof ImportConnectorRecordSchema>;
 export const ImportConnectorsFileSchema = z.array(ImportConnectorRecordSchema);
 
+/** The one next step each refusal of a provider setup in an export carries. */
+const EXPORT_AGAIN_NEXT_STEP = 'Export again from this Aman, then import the new file.';
+
+/**
+ * A provider setup from an export: the manifest a provider is restored from.
+ * An export never carries a key, so one written into the file means the file
+ * is not an export this Aman made, and the section is refused whole. A key
+ * can also hide in the address itself (in its user name or password, its
+ * query or its fragment); an export strips those parts before writing, so
+ * an address still carrying them is refused the same way.
+ */
+const ImportModelProviderManifestSchema = ModelProviderManifestSchema.superRefine((manifest, ctx) => {
+  if (manifest.auth !== undefined) {
+    ctx.addIssue({
+      code: 'custom',
+      message: `A model provider in an export never carries a key. ${EXPORT_AGAIN_NEXT_STEP}`,
+    });
+  }
+  if (addressCarriesStrippedParts(manifest.base_url)) {
+    ctx.addIssue({
+      code: 'custom',
+      message: `A model provider address in an export never carries a user name, a password, a query or a fragment. ${EXPORT_AGAIN_NEXT_STEP}`,
+      path: ['base_url'],
+    });
+  }
+});
+
+export const ImportModelProviderRecordSchema = z
+  .object({
+    name: NameSchema,
+    manifest: ImportModelProviderManifestSchema,
+  })
+  .strict()
+  .superRefine((record, ctx) => {
+    if (modelProviderName(record.manifest) !== record.name) {
+      ctx.addIssue({
+        code: 'custom',
+        message: `A model provider entry is named differently from its own setup. ${EXPORT_AGAIN_NEXT_STEP}`,
+        path: ['name'],
+      });
+    }
+  });
+export type ImportModelProviderRecord = z.infer<typeof ImportModelProviderRecordSchema>;
+export const ImportModelProvidersFileSchema = z.array(ImportModelProviderRecordSchema);
+
 /** Permission settings as an export wrote them. Exports from before a switch lack its field, so it reads as the default. */
 const ImportPermissionSettingsSchema = z.object({
   ...SentinelUserSettingsSchema.shape,
@@ -594,3 +649,20 @@ export const ImportAuditFileSchema = z.array(ImportAuditRecordSchema);
 /** The feed an export carries. Push devices belong to a device, so they are never in an export. */
 export const ImportDeliveriesFileSchema = z.array(DeliverySchema);
 export type ImportDelivery = z.infer<typeof DeliverySchema>;
+
+/** The person's Reach me settings, as a list of none or one. The text and call switches are always off on import. */
+export const ImportReachFileSchema = z.array(ReachSettingsSchema);
+/** The person's number for texts and their choice of words, as a list of none or one. It always comes in unconfirmed. */
+export const ImportTextsFileSchema = z.array(
+  TextContactExportSchema.transform(contact => ({
+    ...contact,
+    // A word the person could not add by hand is left out, and the import report says how many.
+    words: contact.words.filter(word => {
+      if (customWordProblem(word) === undefined) {
+        return true;
+      }
+      noteLeftOut({ label: LEFT_OUT.textWord });
+      return false;
+    }),
+  })),
+);

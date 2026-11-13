@@ -525,6 +525,7 @@ async function removeEarlierSeeds<TTransaction>({
       source_id: undefined,
       folder_id: undefined,
       no_folder: false,
+      include_private: false,
     });
     if (sessions.length === 0) {
       return removed;

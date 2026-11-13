@@ -33,7 +33,7 @@ Paths below are relative to the home.
 | `release/release.json`                 | The record of what is installed. Written by `release.sh` on install and upgrade.                                     |
 | `release/previous.release.json`        | The release record from before the last upgrade, kept so an upgrade can roll back.                                   |
 | `instances/<name>/compose.yaml`        | The instance's Compose file, rendered by `instance.sh`.                                                              |
-| `instances/<name>/.env`                | The instance's settings for the app. Holds secrets (the model key among them). Mode 600.                             |
+| `instances/<name>/.env`                | The instance's settings for the app. Holds secrets (the model key and any Twilio auth token). Mode 600.              |
 | `instances/<name>/dex.env`             | The instance's settings for the sign-in service. Holds the password hash. Mode 600.                                  |
 | `machine/compose.yaml`, `machine/.env` | The shared speech service's Compose file and settings, rendered by `instance.sh`.                                    |
 | `tls/ca/`                              | The local certificate authority: `root.crt` and `root.key`. The key is mode 600. Written by `tls.sh` with `pki.mjs`. |
@@ -43,6 +43,35 @@ Paths below are relative to the home.
 | `bin/aman`                             | The doctor shim, copied in by the installer on install and upgrade. Mode 755.                                        |
 | `bin/aman-sandbox.mjs`                 | The sandbox setup copy the doctor runs.                                                                              |
 | `runtime/`                             | What the installer downloads to run itself, including `runtime/node/` (the pinned Node).                             |
+
+Texts through Twilio are set up by the owner in the `.env`, below the managed block:
+`REACH_SMS_PROVIDER=twilio`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`,
+`TWILIO_FROM_NUMBER` and `TWILIO_WEBHOOK_PUBLIC_URL`, with `TWILIO_WEBHOOK_PORT`
+if they want a port of their own. The installer reads these lines the way
+Compose does (`export`, quotes, a trailing comment and case on the provider line
+do not matter), through the one `.env` reader in `lib/shared.sh`. When
+`REACH_SMS_PROVIDER=twilio` is in the `.env`, `instance_render` also publishes
+one port in the instance's compose file, on `127.0.0.1` only, for
+Tailscale Funnel or a web server on the same computer to carry on to Twilio,
+and records it as `sms_port` in the instance's registry file. With no port set,
+the instance keeps the port it has, else gets 9201 (outside the ranges app,
+sign-in and https ports are picked from) or the next free port, and the
+installer writes it as `TWILIO_WEBHOOK_PORT` in the managed block so the app
+listens on it and it stays the same. In a `.env` with no managed block the pick
+cannot be written, so it is published onto the port the app listens on there
+(`TWILIO_WEBHOOK_PORT`, else 9201). A port another instance already publishes
+stays with that instance. A port the owner set that another instance's app,
+sign-in, https or Twilio port uses, or that Aman uses inside the instance, is
+not published: the installer names the line to change. The registry also keeps
+`sms_settings`, a short digest of the `.env` lines that set up texts, the
+`REACH_SMS_*` and `TWILIO_*` lines (never the lines themselves). A plain re-run of the installer redraws and restarts the
+instance when the port or that digest differs from the recorded one, so turning
+texts on or off, or changing the port, the auth token or any other texts line,
+needs no upgrade. New instances never pick a recorded `sms_port`. The listener
+behind it serves only Twilio's routes, for texts and for phone calls (including
+the call's `wss://` media stream on the same port). The app port is never opened
+for it, and a `.env` without the provider line opens nothing. See
+`docs/text-messages.md` and `docs/phone-calls.md`.
 
 The `release.json` in a checkout's `installer/` folder is a different file:
 it is the pins manifest the installer ships (image digests, among them the
@@ -61,7 +90,9 @@ The keys an install writes at creation are:
 `tf_cap`, `demo`, `created`.
 
 Later steps add keys with the same rule (for example `healthy` is set to `1`
-once an instance answers). Instance names use lowercase letters, digits and
+once an instance answers, `sms_port` holds the Twilio port the compose
+file publishes, empty when none, and `sms_settings` the digest of its texts
+lines, empty when none). Instance names use lowercase letters, digits and
 hyphens.
 
 ## The release record
@@ -89,6 +120,28 @@ before the new one is written. Readers treat the record as readable only
 when at least the app, speech-to-text and sign-in images are named. A record
 from before the read-aloud voice has no `tts_image`; the next upgrade adds it.
 
+### Source ids and published images
+
+Each `<source id>` names what an image is built from: the first 12
+characters of the git tree of `ops/aman-stt`, `ops/aman-tts`,
+`ops/calendar-sidecar` or `ops/browser-sidecar`, and for the app a hash of
+`Dockerfile.dev`, `.dockerignore` and every path `Dockerfile.dev` copies.
+Local changes add `-d<hash>`. `pnpm images:ids` prints them. An id from
+before November 2026 named the app by its commit, so the first upgrade after
+that reads as an update and puts the app image in place again.
+
+The pins manifest `installer/release.json` can carry a
+`published_<image>` entry for each Aman image:
+`ghcr.io/climboutlabs/<name>:<source id>@sha256:<index digest>`, written
+by the Images workflow (see `RELEASING.md`). When an entry's source id
+equals the checkout's, the installer pulls that exact digest and tags it
+with the local name instead of building. Otherwise, with
+`--build-from-source`, or when the download fails, it builds as before.
+The app is also built when `Dockerfile.dev` has a step the id cannot
+follow: a JSON-form, continued or heredoc `COPY`, an `ADD` of a local file,
+or a mount of the checkout.
+The sandbox slot image is always built on the computer.
+
 ## Backups
 
 Each backup is one folder under `backups/`, named with the UTC time it was
@@ -97,7 +150,28 @@ added when it carries a label, and `-1`, `-2` and so on when the name is
 already taken. Inside: one folder per instance that was backed up, a copy of
 `release/release.json`, a copy of the authority's `root.crt` under `tls/`
 (never its key), and `SHA256SUMS` with the hash of every file. Unlabelled
-backups are pruned to the newest seven.
+backups are pruned to the newest seven. The database copy in each backup
+holds no incognito chats: `aman backup` deletes them from its copy before the
+copy is checked, so an incognito chat open at backup time is not kept.
+`install.sh restore` reads these folders: it accepts a backup only when every
+part its instance needs is there, `SHA256SUMS` matches, neither
+`release.json`'s `schema` nor the instance's `manifest.json` version is newer
+than this installer's, and `aman backup-check` in the installed app image finds
+no database migration that image does not ship. The copy it saves first carries
+the label `before-restore`. After writing the backup's `.env` it sets the keys
+the registry owns again from the registry (`PUBLIC_BASE_URL`,
+`ALLOWED_ORIGINS`, `AUTH_COOKIE_SUFFIX`, `OIDC_ISSUER_URL`,
+`LOGIN_UPSTREAM_URL`, `OIDC_CLIENT_ID`) and drops `TRUSTED_PROXY_ADDRESSES`,
+so `.env` and `dex.yaml` always name the same client. The owner goes the
+other way: the registry's `owner_email` and `owner_name` are taken from the
+backup, and `OIDC_ADMIN_ROLE_VALUE`, `OIDC_ALLOWED_EMAILS` and `OWNER_NAME`
+are written from them. A restore with no answer on its input exits 1.
+On Windows the backups are kept on the PC itself, in
+`%LOCALAPPDATA%\Amanuensis\backups`, not in the `aman_home` volume. The
+TypeScript installer's `aman backup` and `aman restore` run the shell's
+`backup` and `restore` in the setup container with that folder mounted at
+`/root/.amanuensis/backups`, so the shell reads and writes it as its own
+`backups/`.
 
 ## The lock
 

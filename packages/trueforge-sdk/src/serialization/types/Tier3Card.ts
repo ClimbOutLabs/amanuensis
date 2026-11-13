@@ -3,18 +3,23 @@
 import type * as TrueForge from "../../api/index.js";
 import * as core from "../../core/index.js";
 import type * as serializers from "../index.js";
+import { ApprovalCardCopy } from "./ApprovalCardCopy.js";
 import { Tier3CalendarEvent } from "./Tier3CalendarEvent.js";
+import { Tier3CardSkillNetwork } from "./Tier3CardSkillNetwork.js";
 import { Tier3Email } from "./Tier3Email.js";
 import { Tier3Persona } from "./Tier3Persona.js";
 import { Tier3Schedule } from "./Tier3Schedule.js";
+import { Tier3Skill } from "./Tier3Skill.js";
 
 export const Tier3Card: core.serialization.ObjectSchema<serializers.Tier3Card.Raw, TrueForge.Tier3Card> =
     core.serialization.object({
         amount: core.serialization.string().nullable(),
         calendarEvent: core.serialization.property("calendar_event", Tier3CalendarEvent.optionalNullable()),
         cannotBeUndone: core.serialization.property("cannot_be_undone", core.serialization.string().nullable()),
+        copy: ApprovalCardCopy.nullable(),
         destination: core.serialization.string().nullable(),
         destinationHost: core.serialization.property("destination_host", core.serialization.string().nullable()),
+        destructive: core.serialization.boolean().optional(),
         email: Tier3Email.optionalNullable(),
         mailDraft: core.serialization.property("mail_draft", core.serialization.boolean().optional()),
         mailNewRecipients: core.serialization.property(
@@ -32,7 +37,10 @@ export const Tier3Card: core.serialization.ObjectSchema<serializers.Tier3Card.Ra
         plainWhat: core.serialization.property("plain_what", core.serialization.string()),
         plainWhy: core.serialization.property("plain_why", core.serialization.string().nullable()),
         recipient: core.serialization.string().nullable(),
+        safeChoice: core.serialization.property("safe_choice", core.serialization.boolean().optional()),
         schedule: Tier3Schedule.optionalNullable(),
+        skill: Tier3Skill.optionalNullable(),
+        skillNetwork: core.serialization.property("skill_network", Tier3CardSkillNetwork.optionalNullable()),
         whyAskedAgain: core.serialization.property("why_asked_again", core.serialization.string().nullable()),
     });
 
@@ -41,8 +49,10 @@ export declare namespace Tier3Card {
         amount?: string | null;
         calendar_event?: (Tier3CalendarEvent.Raw | null | undefined) | null;
         cannot_be_undone?: string | null;
+        copy?: ApprovalCardCopy.Raw | null;
         destination?: string | null;
         destination_host?: string | null;
+        destructive?: boolean | null;
         email?: (Tier3Email.Raw | null | undefined) | null;
         mail_draft?: boolean | null;
         mail_new_recipients?: (string[] | null | undefined) | null;
@@ -54,7 +64,10 @@ export declare namespace Tier3Card {
         plain_what: string;
         plain_why?: string | null;
         recipient?: string | null;
+        safe_choice?: boolean | null;
         schedule?: (Tier3Schedule.Raw | null | undefined) | null;
+        skill?: (Tier3Skill.Raw | null | undefined) | null;
+        skill_network?: (Tier3CardSkillNetwork.Raw | null | undefined) | null;
         why_asked_again?: string | null;
     }
 }

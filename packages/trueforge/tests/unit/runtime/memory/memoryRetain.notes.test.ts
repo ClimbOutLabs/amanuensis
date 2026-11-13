@@ -58,6 +58,7 @@ jest.mock('../../../../src/runtime/memory/memoryNotesSummarize', () => {
 });
 
 const unusedStore: IModelProviderStore = {
+  managedElsewhere: false,
   listProviders: jest.fn(),
   getProvider: jest.fn(),
   getProviderForUpdate: jest.fn(),
@@ -97,6 +98,7 @@ describe('turn memory with findings and reply notes', () => {
     assistantName?: string;
   }): Promise<void> {
     await submitRetain({
+      session: { is_incognito: false },
       client,
       sessionId: 'chat-1',
       turnId: turn.id,
@@ -157,6 +159,7 @@ describe('turn memory with findings and reply notes', () => {
     });
     const retain = jest.spyOn(client, 'retain');
     await submitRetain({
+      session: { is_incognito: false },
       client,
       sessionId: 'chat-1',
       turnId: 't2b',
@@ -283,6 +286,7 @@ describe('turn memory with findings and reply notes', () => {
     });
     for (const id of ['p1', 'p2', 'p3']) {
       await submitRetain({
+        session: { is_incognito: false },
         client: persona,
         sessionId: 'chat-2',
         turnId: id,

@@ -16,15 +16,41 @@ describe('toolWords', () => {
     expect(toolDoneWords('web_search')).toBe('Searched the web');
   });
 
+  it('reads Drive tools and their reasons in plain words', () => {
+    expect(toolDoingWords('list_files')).toBe('Checking your Google Drive files');
+    expect(toolDoneWords('read_drive_file')).toBe('Read your Google Drive files');
+    expect(toolDoneWords('google_drive_read')).toBe('Read your Google Drive files');
+    expect(toolDoingWords('create_doc')).toBe('Changing your Google Drive files');
+    expect(toolDoneWords('append_rows')).toBe('Changed your Google Drive files');
+    expect(toolDoneWords('google_drive_write')).toBe('Changed your Google Drive files');
+  });
+
   it('reads a Google setup check as checking the connection', () => {
     expect(toolDoingWords('google_setup_status')).toBe('Checking your Google connection');
     expect(toolDoneWords('google_setup_status')).toBe('Checked your Google connection');
     expect(toolDoneWords('google_setup_read')).toBe('Checked your Google connection');
   });
 
+  it('reads the notes folder tools in plain words', () => {
+    expect(toolDoingWords('search_notes')).toBe('Searching your notes');
+    expect(toolDoneWords('search_notes')).toBe('Searched your notes');
+    expect(toolDoingWords('read_note')).toBe('Reading a note');
+    expect(toolDoneWords('read_note')).toBe('Read note');
+    expect(toolDoingWords('append_to_inbox')).toBe('Adding to your notes inbox');
+    expect(toolDoneWords('append_to_inbox')).toBe('Added to your notes inbox');
+    expect(toolDoingWords('create_note')).toBe('Making a note');
+    expect(toolDoneWords('create_note')).toBe('Made a note');
+    expect(toolDoneWords('notes_read')).toBe('Searched your notes');
+    expect(toolDoneWords('notes_write')).toBe('Added to your notes inbox');
+  });
+
   it('reads the feed’s activity rows in plain words', () => {
     expect(toolDoneWords('delivery.created')).toBe('Sent you a notice');
     expect(toolDoneWords('delivery.web_push')).toBe('Sent a notice to your device');
+    expect(toolDoneWords('delivery.sms')).toBe('Sent you a text');
+    expect(toolDoneWords('delivery.call')).toBe('Called you');
+    expect(toolDoneWords('delivery.sms_stop')).toBe('Turned texts off after a STOP');
+    expect(toolDoneWords('delivery.sms_new_number_stopped')).toBe('Dropped a new number after a STOP');
   });
 
   it('never shows a raw tool name for a tool it does not know', () => {

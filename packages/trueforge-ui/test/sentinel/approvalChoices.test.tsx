@@ -3,7 +3,7 @@ import { render, screen } from '@testing-library/react';
 import { holdSay, searchHoldCardText } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
 import { describe, expect, it, vi } from 'vitest';
 
-import { APPROVAL_CHOICES, EMAIL_CHOICES, offersChangeIt } from '@/sentinel/approvalChoices.js';
+import { APPROVAL_CHOICES, EMAIL_CHOICES, SKILL_NETWORK_CHOICES, offersChangeIt } from '@/sentinel/approvalChoices.js';
 import { HeldActionCard } from '@/sentinel/HeldActionCard.js';
 import { PermissionApprovalCard } from '@/sentinel/PermissionApprovalCard.js';
 import { SentinelApiProvider } from '@/sentinel/SentinelApiContext.js';
@@ -26,12 +26,13 @@ const card: SentinelApprovalCard = {
   calendar_event: null,
   schedule: null,
   persona: null,
+  skill: null,
 };
 
 const buttonNames = () => screen.getAllByRole('button').map(button => button.textContent);
 
 describe('approval choices', () => {
-  it('shows the safe verb, the quiet no, and Always allow this here in plain view, and never Always deny', () => {
+  it('shows the safe verb, the quiet no, and Always allow in this chat in plain view, and never Always deny', () => {
     render(
       <PermissionApprovalCard
         approvalId="approval-1"
@@ -42,18 +43,18 @@ describe('approval choices', () => {
         onDeny={vi.fn()}
       />,
     );
-    expect(buttonNames()).toEqual(['Allow', 'Not now', 'Always allow this here']);
+    expect(buttonNames()).toEqual(['Allow', 'Not now', 'Always allow in this chat']);
     // A choice the server offers is never folded into the closed Details block.
-    expect(screen.getByRole('button', { name: 'Always allow this here' }).closest('details')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Always allow in this chat' }).closest('details')).toBeNull();
     expect(screen.getByRole('button', { name: 'Allow' })).toHaveAttribute('title', 'Allow this one call only.');
-    expect(screen.getByRole('button', { name: 'Always allow this here' })).toHaveAttribute(
+    expect(screen.getByRole('button', { name: 'Always allow in this chat' })).toHaveAttribute(
       'title',
       "Don't ask again for this kind of action in this chat.",
     );
     expect(screen.queryByText(/Always deny/i)).not.toBeInTheDocument();
   });
 
-  it('shows Approve, Always allow this tool, Deny in that order on a held action, and never Always deny', () => {
+  it('shows Approve, Always allow everywhere, Deny in that order on a held action, and never Always deny', () => {
     render(
       <HeldActionCard
         card={card}
@@ -64,8 +65,8 @@ describe('approval choices', () => {
         onDeny={vi.fn()}
       />,
     );
-    expect(buttonNames()).toEqual(['Approve', 'Always allow this tool', 'Deny']);
-    expect(screen.getByRole('button', { name: 'Always allow this tool' })).toHaveAttribute(
+    expect(buttonNames()).toEqual(['Approve', 'Always allow everywhere', 'Deny']);
+    expect(screen.getByRole('button', { name: 'Always allow everywhere' })).toHaveAttribute(
       'title',
       'Run this tool on this connector without asking, in every chat, until you remove it in settings.',
     );
@@ -98,7 +99,7 @@ describe('approval choices', () => {
       </SentinelApiProvider>,
     );
     const terms = (await screen.findAllByRole('term')).map(term => term.textContent);
-    expect(terms).toEqual(['Approve', 'Always allow this here', 'Always allow', 'Deny']);
+    expect(terms).toEqual(['Approve', 'Always allow in this chat', 'Always allow everywhere', 'Deny']);
     expect(screen.queryByText(/Always deny/i)).not.toBeInTheDocument();
   });
 });
@@ -110,6 +111,32 @@ describe('grant hint wording', () => {
     for (const hint of [APPROVAL_CHOICES.changeIt.hint, EMAIL_CHOICES.edit.hint]) {
       expect(hint).not.toMatch(/\bagent\b/i);
     }
+  });
+
+  it('does not promise a skill network command runs again when it needs an approval of its own', () => {
+    expect(SKILL_NETWORK_CHOICES.approve.hint).toBe(
+      'Allow these sites for this chat only. The command runs again with them, unless it needs an approval of its own.',
+    );
+  });
+
+  it('shows that hint as the Allow once title on a skill network card', () => {
+    render(
+      <HeldActionCard
+        card={{
+          ...card,
+          skill_network: { skill_name: 'Example', hosts: ['example.org'], reason: 'first_use', code_pin: null },
+        }}
+        status={{ kind: 'waiting' }}
+        alwaysAllowOffered={false}
+        onApprove={vi.fn()}
+        onAlwaysAllow={vi.fn()}
+        onDeny={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole('button', { name: 'Allow once' })).toHaveAttribute(
+      'title',
+      'Allow these sites for this chat only. The command runs again with them, unless it needs an approval of its own.',
+    );
   });
 
   it('shows the persona hint as the Change it title on a held card', () => {

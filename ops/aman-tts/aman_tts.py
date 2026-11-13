@@ -7,11 +7,19 @@ loads.
 
 HTTP contract:
   GET  /healthz   -> {"status": "ok", "model_loaded": bool, "model_error": str | None,
-                      "voices": [str], "default_voice": str}
-  POST /v1/speak  -> audio/wav (24 kHz mono 16-bit PCM)
+                      "voices": [str], "default_voice": str, "exact": true}
+  POST /v1/speak  -> audio/wav (24 kHz mono 16-bit PCM) by default
 
-The speak body is JSON `{"text": str, "voice": str | null}`. Text over the
-character cap is refused with 413. Text stays in memory; only character counts,
+The speak body is JSON `{"text": str, "voice": str | null, "format": str | null,
+"stream": bool | null, "exact": bool | null}`. `format` is `wav` (default), `pcm16` (24 kHz raw 16-bit
+little-endian) or `mulaw8k` (8 kHz G.711 mu-law, for phone lines). With `stream`
+true (`pcm16` or `mulaw8k` only) the audio is sent sentence by sentence, so the
+first bytes arrive after the first sentence is made. Text over the
+character cap is refused with 413. With `exact` true the whole text is first checked, with
+the same code that speaks it: if the voice would say anything other than what is written
+(numbers read another way, links, list marks, letters outside plain English) the request
+is refused with 400 and `x-aman-reason: would_change_text` before any sound; otherwise
+that same text is spoken. Text stays in memory; only character counts,
 durations and error codes are logged, never the text or the audio.
 """
 
@@ -28,24 +36,39 @@ import wave
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 import threading
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable, Iterator
 from typing import Protocol
 
 import numpy as np
 from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi.responses import StreamingResponse
+from starlette.background import BackgroundTask
 
-from phonemes import Lexicon, split_chunks, to_phonemes
+from audio_formats import FORMATS, STREAMABLE, WAV, Encoder, encode_wav
+from phonemes import Lexicon, reads_as_written, split_chunks, split_sentences, to_phonemes
 from pins import MODEL_ASSET, MODEL_FILE, VOICE_IDS, VOICES_FILE
 
 LOGGER = logging.getLogger("aman_tts")
 
 SAMPLE_RATE = 24000
-WAV_CONTENT_TYPE = "audio/wav"
 # Pause placed between model chunks, which always end at a sentence or word break.
 CHUNK_GAP_SECONDS = 0.15
 # How often a request being read checks that its caller is still there.
 DISCONNECT_POLL_SECONDS = 0.1
 VOCAB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "kokoro_vocab.json")
+
+
+REASON_HEADER = "x-aman-reason"
+# Set on an exact speak that passed the check, so a caller can tell a service that checked from one that
+# does not know `exact` and would speak anything.
+EXACT_HEADER = "x-aman-exact"
+
+
+def _nothing_to_say() -> HTTPException:
+    """A 400 that callers can tell from a real fault by its header rather than by its wording."""
+    return HTTPException(
+        status_code=400, detail="text has nothing to say aloud", headers={REASON_HEADER: "nothing_to_say"}
+    )
 
 
 def _env_int(name: str, default: int) -> int:
@@ -115,6 +138,13 @@ class Synthesizer(Protocol):
         """
         ...
 
+    def speak_sentences(self, text: str, voice: str, cancelled: Callable[[], bool]) -> Iterator[np.ndarray]:
+        """Yield 24 kHz mono float32 audio one sentence at a time, each as soon as it is made.
+
+        Raises like `speak`, on the first `next()` for the sound cap.
+        """
+        ...
+
 
 class KokoroSynthesizer:
     """Kokoro ONNX backend. onnxruntime is imported lazily so tests can inject a fake."""
@@ -141,14 +171,15 @@ class KokoroSynthesizer:
     def _tokens(self, phonemes: str) -> list[int]:
         return [self._vocab[ch] for ch in phonemes if ch in self._vocab]
 
-    def speak(self, text: str, voice: str, cancelled: Callable[[], bool]) -> np.ndarray:
+    def _pieces(self, text: str, voice: str, cancelled: Callable[[], bool], *, per_sentence: bool) -> Iterator[np.ndarray]:
         styles = self._styles[voice]
         phonemes = to_phonemes(text, self._lexicon)
         if len(phonemes) > self._max_phonemes:
             raise TextTooLong(f"{len(phonemes)} sounds is over the {self._max_phonemes} cap")
         gap = np.zeros(int(SAMPLE_RATE * CHUNK_GAP_SECONDS), dtype=np.float32)
-        parts: list[np.ndarray] = []
-        for chunk in split_chunks(phonemes):
+        pieces = split_sentences(phonemes) if per_sentence else split_chunks(phonemes)
+        started = False
+        for chunk in pieces:
             if cancelled():
                 raise SpeechCancelled()
             tokens = self._tokens(chunk)
@@ -164,21 +195,16 @@ class KokoroSynthesizer:
                     "speed": np.array([1.0], dtype=np.float32),
                 },
             )[0]
-            if parts:
-                parts.append(gap)
-            parts.append(np.asarray(audio, dtype=np.float32).ravel())
+            speech = np.asarray(audio, dtype=np.float32).ravel()
+            yield np.concatenate([gap, speech]) if started else speech
+            started = True
+
+    def speak(self, text: str, voice: str, cancelled: Callable[[], bool]) -> np.ndarray:
+        parts = list(self._pieces(text, voice, cancelled, per_sentence=False))
         return np.concatenate(parts) if parts else np.zeros(0, dtype=np.float32)
 
-
-def encode_wav(audio: np.ndarray) -> bytes:
-    pcm = (np.clip(audio, -1.0, 1.0) * 32767.0).astype("<i2")
-    buf = io.BytesIO()
-    with wave.open(buf, "wb") as wav:
-        wav.setnchannels(1)
-        wav.setsampwidth(2)
-        wav.setframerate(SAMPLE_RATE)
-        wav.writeframes(pcm.tobytes())
-    return buf.getvalue()
+    def speak_sentences(self, text: str, voice: str, cancelled: Callable[[], bool]) -> Iterator[np.ndarray]:
+        return self._pieces(text, voice, cancelled, per_sentence=True)
 
 
 @dataclass
@@ -191,7 +217,25 @@ class ServiceState:
     queued: int = 0
 
 
-def _parse_speak_body(body: bytes) -> tuple[str, str | None]:
+@dataclass(frozen=True)
+class SpeakRequest:
+    text: str
+    voice: str | None
+    format: str
+    stream: bool
+    exact: bool
+
+
+def _would_read_as_written(text: str) -> bool:
+    # A judge that fails is a refusal; the error is not logged because it may quote the card text.
+    try:
+        return reads_as_written(text)
+    except Exception:
+        LOGGER.warning("speak check failed: refusing the text")
+        return False
+
+
+def _parse_speak_body(body: bytes) -> SpeakRequest:
     try:
         payload = json.loads(body)
     except (ValueError, UnicodeDecodeError) as exc:
@@ -200,11 +244,22 @@ def _parse_speak_body(body: bytes) -> tuple[str, str | None]:
         raise HTTPException(status_code=400, detail="Body must be a JSON object")
     text = payload.get("text")
     voice = payload.get("voice")
+    fmt = payload.get("format")
+    stream = payload.get("stream")
+    exact = payload.get("exact")
     if not isinstance(text, str):
         raise HTTPException(status_code=400, detail="text must be a string")
     if voice is not None and not isinstance(voice, str):
         raise HTTPException(status_code=400, detail="voice must be a string")
-    return text, voice
+    if fmt is not None and fmt not in FORMATS:
+        raise HTTPException(status_code=400, detail=f"format must be one of {', '.join(FORMATS)}")
+    if stream is not None and not isinstance(stream, bool):
+        raise HTTPException(status_code=400, detail="stream must be true or false")
+    if exact is not None and not isinstance(exact, bool):
+        raise HTTPException(status_code=400, detail="exact must be true or false")
+    if stream and fmt not in STREAMABLE:
+        raise HTTPException(status_code=400, detail=f"stream needs format {' or '.join(STREAMABLE)}")
+    return SpeakRequest(text=text, voice=voice, format=fmt or WAV.name, stream=bool(stream), exact=bool(exact))
 
 
 def create_app(
@@ -241,32 +296,51 @@ def create_app(
             "model_error": state.model_error,
             "voices": list(synthesizer.voices) if synthesizer else [],
             "default_voice": settings.default_voice,
+            # Callers that must speak a text only as written check this before relying on `exact`.
+            "exact": True,
         }
 
     @app.post("/v1/speak")
     async def speak(request: Request) -> Response:
         started = time.monotonic()
-        synthesizer = state.synthesizer
-        if synthesizer is None:
-            LOGGER.warning("speak rejected: model not warm")
-            raise HTTPException(status_code=503, detail="Model is not warm yet")
         content_type = (request.headers.get("content-type") or "").split(";")[0].strip().lower()
         if content_type != "application/json":
             raise HTTPException(status_code=400, detail="Content-Type must be application/json")
         body = await _read_bounded_body(request, settings.max_body_bytes)
-        text, voice = _parse_speak_body(body)
+        speak_request = _parse_speak_body(body)
+        text = speak_request.text
         if len(text) > settings.max_text_chars:
             raise HTTPException(status_code=413, detail=f"Text exceeds {settings.max_text_chars} characters")
         if text.strip() == "":
             raise HTTPException(status_code=400, detail="text is empty")
-        voice_id = voice or settings.default_voice
+        # The same whole text is judged here and then spoken below, so what was checked is what is heard.
+        if speak_request.exact and not _would_read_as_written(text):
+            LOGGER.info("speak refused: would change text, chars=%d", len(text))
+            raise HTTPException(
+                status_code=400,
+                detail="the voice would not say this text as it is written",
+                headers={REASON_HEADER: "would_change_text"},
+            )
+        synthesizer = state.synthesizer
+        if synthesizer is None:
+            LOGGER.warning("speak rejected: model not warm")
+            raise HTTPException(status_code=503, detail="Model is not warm yet")
+        voice_id = speak_request.voice or settings.default_voice
         if voice_id not in synthesizer.voices:
             raise HTTPException(status_code=400, detail=f"Unknown voice; choose one of {', '.join(synthesizer.voices)}")
 
         if state.queued > settings.max_waiting:
             LOGGER.info("speak rejected: busy")
             raise HTTPException(status_code=429, detail="Busy reading other text", headers={"Retry-After": "2"})
+        fmt = FORMATS[speak_request.format]
+        headers = {"x-voice": voice_id, "x-model": synthesizer.model_label, "x-sample-rate": str(fmt.sample_rate)}
+        if speak_request.exact:
+            headers[EXACT_HEADER] = "checked"
         state.queued += 1
+        if speak_request.stream:
+            return await _stream_speech(
+                request, state, synthesizer, SpeechJob(text, voice_id, Encoder(fmt), headers, started)
+            )
         try:
             if await _wait_for_slot(request, state.in_flight):
                 try:
@@ -281,22 +355,128 @@ def create_app(
             LOGGER.info("speak cancelled: caller went away")
             return Response(status_code=499)
         if audio.size == 0:
-            raise HTTPException(status_code=400, detail="text has nothing to say aloud")
+            raise _nothing_to_say()
 
         LOGGER.info(
-            "speak ok: chars=%d audio_s=%.1f duration_ms=%d voice=%s",
+            "speak ok: chars=%d audio_s=%.1f duration_ms=%d voice=%s format=%s",
             len(text),
             audio.size / SAMPLE_RATE,
             int((time.monotonic() - started) * 1000),
             voice_id,
+            fmt.name,
         )
-        return Response(
-            content=encode_wav(audio),
-            media_type=WAV_CONTENT_TYPE,
-            headers={"x-voice": voice_id, "x-model": synthesizer.model_label},
-        )
+        if fmt is WAV:
+            content = encode_wav(audio)
+        else:
+            content = Encoder(fmt).feed(audio)
+        return Response(content=content, media_type=fmt.content_type, headers=headers)
 
     return app
+
+
+@dataclass(frozen=True)
+class SpeechJob:
+    text: str
+    voice_id: str
+    encoder: Encoder
+    headers: dict[str, str]
+    started: float
+
+
+async def _stream_speech(request: Request, state: ServiceState, synthesizer: Synthesizer, job: SpeechJob) -> Response:
+    """Sends audio sentence by sentence; the caller already counted itself in `state.queued`.
+
+    The first sentence is awaited here, so a text that cannot be read still gets a proper error status.
+    The synthesis slot is handed back only when the worker thread has really stopped, whatever
+    happens to the response.
+    """
+    loop = asyncio.get_running_loop()
+    pieces: asyncio.Queue[np.ndarray | Exception | None] = asyncio.Queue()
+    cancel = threading.Event()
+
+    def push(item: np.ndarray | Exception | None) -> None:
+        try:
+            loop.call_soon_threadsafe(pieces.put_nowait, item)
+        except RuntimeError:
+            # The server is shutting down; nobody is left to hear this.
+            cancel.set()
+
+    def produce() -> None:
+        try:
+            for piece in synthesizer.speak_sentences(job.text, job.voice_id, cancel.is_set):
+                if cancel.is_set():
+                    return
+                push(piece)
+            push(None)
+        except Exception as exc:
+            push(exc)
+
+    def finish() -> None:
+        cancel.set()
+        state.in_flight.release()
+        state.queued -= 1
+
+    async def watch_for_hang_up() -> None:
+        while not cancel.is_set():
+            if await request.is_disconnected():
+                cancel.set()
+                return
+            await asyncio.sleep(DISCONNECT_POLL_SECONDS)
+
+    try:
+        acquired = await _wait_for_slot(request, state.in_flight)
+    except BaseException:
+        state.queued -= 1
+        raise
+    if not acquired:
+        state.queued -= 1
+        LOGGER.info("speak cancelled: caller went away")
+        return Response(status_code=499)
+    worker = loop.run_in_executor(None, produce)
+    worker.add_done_callback(lambda _: finish())
+    watcher = asyncio.create_task(watch_for_hang_up())
+    try:
+        first = await pieces.get()
+    except BaseException:
+        cancel.set()
+        raise
+    finally:
+        watcher.cancel()
+    if isinstance(first, TextTooLong):
+        raise HTTPException(status_code=413, detail="Text is too long to read at once") from first
+    if isinstance(first, Exception):
+        LOGGER.error("speak failed", exc_info=first)
+        raise HTTPException(status_code=500, detail="Speech synthesis failed") from first
+    if first is None:
+        raise _nothing_to_say()
+
+    async def body() -> AsyncIterator[bytes]:
+        sent = 0
+        try:
+            item: np.ndarray | Exception | None = first
+            while isinstance(item, np.ndarray):
+                data = job.encoder.feed(item)
+                sent += len(data)
+                yield data
+                item = await pieces.get()
+            if isinstance(item, Exception):
+                # The status line is already sent; breaking the connection is how the caller learns the audio is cut short.
+                LOGGER.error("speak failed mid-stream", exc_info=item)
+                raise RuntimeError("speech stopped part way") from item
+            LOGGER.info(
+                "speak ok: streamed bytes=%d duration_ms=%d voice=%s format=%s",
+                sent,
+                int((time.monotonic() - job.started) * 1000),
+                job.voice_id,
+                job.encoder.format.name,
+            )
+        finally:
+            cancel.set()
+
+    # Also runs when the body is never started, so a caller who left early does not keep the slot busy.
+    return StreamingResponse(
+        body(), media_type=job.encoder.format.content_type, headers=job.headers, background=BackgroundTask(cancel.set)
+    )
 
 
 async def _wait_for_slot(request: Request, slot: asyncio.Semaphore) -> bool:

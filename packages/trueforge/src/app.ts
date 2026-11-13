@@ -1,5 +1,4 @@
 /** The API: resource routers, the OpenAPI document and Swagger UI, all under /api/v1. */
-import { swaggerUI } from '@hono/swagger-ui';
 import { OpenAPIHono, z } from '@hono/zod-openapi';
 import type { ISessionStore, Sessions, TurnStreamingEvent } from '@truefoundry/trueforge-core/agent-session';
 import {
@@ -20,6 +19,7 @@ import { createAgentsRouter } from './apis/agents';
 import { createAuditLogRouter } from './apis/auditLog';
 import { createAuthRouter } from './apis/auth';
 import { createBriefItemsRouter } from './apis/briefItems';
+import { createBrowserLiveRouter } from './apis/browserLive';
 import { createBugReportRouter } from './apis/bugReport';
 import { createAppBugReportRouter } from './apis/bugReportApp';
 import { CALENDAR_SETTINGS_BASE_PATH, createCalendarAccountRouter } from './apis/calendarAccount';
@@ -39,10 +39,15 @@ import { createMcpOAuthRouter } from './apis/mcpOAuth';
 import { createMcpServersRouter } from './apis/mcpServers';
 import { createMemoryVaultRouter } from './apis/memoryVault';
 import { createModelsRouter } from './apis/models';
+import { createNotesFolderRouter, NOTES_FOLDER_SETTINGS_BASE_PATH } from './apis/notesFolder';
+import { createNoticingRouter } from './apis/noticing';
 import { createPermissionsRouter } from './apis/permissions';
 import { createPersonaKnowledgeRouter } from './apis/personaKnowledge';
 import { createPersonalizationRouter } from './apis/personalization';
 import { createPersonasRouter, createSessionPersonasRouter } from './apis/personas';
+import { createChatPrivacyRouter, createPrivateChatSweepRouter } from './apis/privateChats';
+import { createReachRouter } from './apis/reach';
+import { createRemindersRouter } from './apis/reminders';
 import { createRepositoriesRouter, createSessionRepositoryRouter } from './apis/repositories';
 import { createScheduleExecutionRouter, createSchedulesRouter } from './apis/schedules';
 import { createSentinelSettingsRouter } from './apis/sentinelSettings';
@@ -54,6 +59,7 @@ import { createAvailableSkillsRouter, type ResolveSkillStore } from './apis/skil
 import { createSpaceFolderAssignmentsRouter, createSpaceFoldersRouter } from './apis/spaceFolders';
 import { createSpacePicturesRouter } from './apis/spacePictures';
 import { createSpacesRouter } from './apis/spaces';
+import { createTextNumberRouter } from './apis/textNumber';
 import { createTurnsRouter } from './apis/turns';
 import { createVoiceRouter } from './apis/voice';
 import type { Authenticator } from './auth/authenticator';
@@ -85,16 +91,21 @@ import configuration, {
 } from './config';
 import type { AgentRecord, IAgentStore } from './db/agentStore';
 import type { IBriefItemCompletionStore } from './db/briefItemCompletionStore';
+import type { IChatDeletionStore } from './db/chatDeletionStore';
 import type { ICompletedTurnEventStore } from './db/completedTurnEvents';
 import type { IDeliveryStore } from './db/deliveryStore';
 import type { IGlobalSettingsStore } from './db/globalSettingsStore';
 import type { IGoogleConnectionStore } from './db/googleConnectionStore';
+import type { ILocalUserStore } from './db/localUserStore';
 import type { IMcpServerWithAuthStore } from './db/mcpServerStore';
 import type { IMcpToolGrantStore } from './db/mcpToolGrantStore';
 import type { IModelProviderStore } from './db/modelProviderStore';
+import type { INoticingStore } from './db/noticingStore';
 import type { IPersonalizationStore } from './db/personalizationStore';
 import type { IPersonaStore } from './db/personaStore';
+import type { PersonOwner } from './db/personOwner';
 import type { IPushSubscriptionStore } from './db/pushSubscriptionStore';
+import type { IReachSettingsStore } from './db/reachSettingsStore';
 import type { IRepositoryStore } from './db/repositoryStore';
 import type { ISandboxProviderStore } from './db/sandboxProviderStore';
 import type { IScheduleStore } from './db/scheduleStore';
@@ -104,9 +115,11 @@ import type { SessionCustom, TurnCustom } from './db/sessionCustom';
 import type { ISessionMetricsStore } from './db/sessionMetricsStore';
 import type { ISkillStore } from './db/skillStore';
 import type { ISpaceStore } from './db/spaceStore';
+import type { ITextContactStore } from './db/textContactStore';
 import type { WithTransaction } from './db/transaction';
 import type { ITurnArtifactStore } from './db/turnArtifactStore';
 import type { SchedulerProbe } from './help/healthCheck';
+import { mountApiDocs } from './http/apiDocs';
 import { mountCatalogLogos } from './http/catalogLogos';
 import { createClientCertificateMiddleware } from './http/tls';
 import type { IOAuthTokenStore } from './mcp/auth/types';
@@ -123,11 +136,17 @@ import type { ChatSearchIndexer } from './runtime/chatSearchIndexing';
 import { resolveDefaultChatModel } from './runtime/defaultChatModel';
 import type { DeliveryService } from './runtime/delivery/deliveryService';
 import type { EventSubscriptionRegistry } from './runtime/event-subscription';
+import { createVaultClient } from './runtime/memory/vaultClient';
+import type { NoticingService } from './runtime/noticing/noticingService';
+import type { ChannelViewer } from './runtime/noticing/reachChannels';
+import type { ReminderReach } from './runtime/noticing/reminderReach';
 import { resolveSandboxProvider } from './runtime/sessionResources';
 import { createSpacePictureService } from './runtime/spacePictures/spacePictureService';
+import type { TextNumberService } from './runtime/texts/textNumber';
 import { TokenFactoryDailyCapError, type TokenFactoryBudget } from './runtime/tokenFactoryBudget';
 import { envManagedModelProviderNames } from './runtime/tokenFactoryProvider';
 import type { TurnDrainRegistry } from './runtime/turnDrains';
+import type { ReachAvailability } from './schemas/reach';
 import { InvalidCronError } from './schemas/schedule';
 import { TENANT_ID } from './tenancy';
 import { zodErrorResponse, zodValidationHook } from './zodErrorResponse';
@@ -309,9 +328,24 @@ export interface ServerDeps<TTransaction> {
   pushSubscriptionStore: IPushSubscriptionStore;
   /** The one door into the feed; due reminders go through it. */
   deliveryService: DeliveryService;
+  reachSettingsStore: IReachSettingsStore;
+  noticingStore: Pick<INoticingStore, 'getCheckpoint'>;
+  /** Runs the watcher passes the controller asks for. */
+  noticingService: NoticingService;
+  /** Settles how loud a due reminder is. */
+  reminderReach: ReminderReach;
+  /** Which phone channels this server can use. */
+  reachChannels: (input?: { viewer: ChannelViewer }) => ReachAvailability;
+  /** Whether this person runs Aman, so a problem with the server's setup is worded for them. */
+  isInstanceOwner: (owner: PersonOwner) => boolean;
+  /** The person's number for texts and its confirming. */
+  textNumbers: TextNumberService;
+  textContactStore: ITextContactStore;
   /** The public key a browser needs to turn push on; undefined while push is off. */
   webPushPublicKey: string | undefined;
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
+  /** Deletes a chat and everything it owns in one go; keeps its token counts. */
+  chatDeletionStore: IChatDeletionStore;
   /** Not tenant-scoped: the persisted live tool-output screen override is global. */
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
   /** Whether the in-process schedule loop is running; the help check reads it. */
@@ -335,6 +369,8 @@ export interface ServerDeps<TTransaction> {
   logger: Logger;
   /** Background OIDC discovery; undefined when browser login is disabled. */
   oidcDiscovery: OidcDiscoveryHandle | undefined;
+  /** The local user store, present only in local sign-in mode. */
+  localUserStore: ILocalUserStore | undefined;
   /** Startup-selected authenticator; middleware is built from this once per app. */
   authenticator: Authenticator;
   /** Startup-selected agent authorization policy. */
@@ -497,6 +533,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     scheduleStore: deps.scheduleStore,
     briefItemStore: deps.briefItemStore,
     deliveryService: deps.deliveryService,
+    reminderReach: deps.reminderReach,
     sessions: deps.sessions,
     agentStore: deps.agentStore,
     personaStore: deps.personaStore,
@@ -519,6 +556,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     sandboxProviderResolver: deps.sandboxProviderResolver,
     globalSettingsStore: deps.globalSettingsStore,
     tokenFactoryBudget: deps.tokenFactoryBudget,
+    chatDeletionStore: deps.chatDeletionStore,
     chatSearchIndexer: deps.chatSearchIndexer,
     audit: deps.sentinelAuditStore,
   };
@@ -597,6 +635,14 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       oidcDiscovery: deps.oidcDiscovery,
       logger: deps.logger,
       authMiddleware,
+      ...(deps.localUserStore === undefined
+        ? {}
+        : {
+            localSignIn: {
+              localUserStore: deps.localUserStore,
+              globalSettingsStore: deps.globalSettingsStore,
+            },
+          }),
     }),
   );
   app.route(
@@ -624,6 +670,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         tokenStore: deps.tokenStore,
         globalSettingsStore: deps.globalSettingsStore,
         googleConnectionStore: deps.googleConnectionStore,
+        personalizationStore: deps.personalizationStore,
         hostReportPath: configuration.HOST_REPORT_PATH,
         schedulerStatus: deps.schedulerStatus,
         logger: deps.logger,
@@ -714,6 +761,25 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     withAuth(createScheduleExecutionRouter(scheduleTurnDeps), scheduleExecutionAuthMiddleware),
   );
   app.route(
+    '/api/internal/noticing',
+    withAuth(createNoticingRouter({ noticing: deps.noticingService }), scheduleExecutionAuthMiddleware),
+  );
+  app.route(
+    '/api/internal/private-chats',
+    withAuth(
+      createPrivateChatSweepRouter({
+        sessions: deps.sessions,
+        sessionStore: deps.sessionStore,
+        chatDeletionStore: deps.chatDeletionStore,
+        activeTurns: deps.activeTurns,
+        turnDrains: deps.turnDrains,
+        redis: deps.redis,
+        logger: deps.logger,
+      }),
+      scheduleExecutionAuthMiddleware,
+    ),
+  );
+  app.route(
     '/api/v1/schedules',
     withAuth(
       createSchedulesRouter({
@@ -749,9 +815,12 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         sentinelSettingsStore: deps.sentinelSettingsStore,
         sentinelAuditStore: deps.sentinelAuditStore,
         deliveryStore: deps.deliveryStore,
+        reachSettingsStore: deps.reachSettingsStore,
+        textContactStore: deps.textContactStore,
         turnArtifactStore: deps.turnArtifactStore,
         tokenStore: deps.tokenStore,
         resolveMcpServerStore: deps.resolveMcpServerStore,
+        resolveModelProviderStore: deps.resolveModelProviderStore,
         resolveAgentStore: deps.resolveAgentStore,
         authorizer: deps.authorizer,
         outboundSecrets: deps.outboundSecrets,
@@ -773,10 +842,13 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       globalSettingsStore: deps.globalSettingsStore,
       sentinelAuditStore: deps.sentinelAuditStore,
       deliveryStore: deps.deliveryStore,
+      reachSettingsStore: deps.reachSettingsStore,
+      textContactStore: deps.textContactStore,
       turnArtifactStore: deps.turnArtifactStore,
       chatSearchIndexer: deps.chatSearchIndexer,
       tokenStore: deps.tokenStore,
       resolveMcpServerStore: deps.resolveMcpServerStore,
+      resolveModelProviderStore: deps.resolveModelProviderStore,
       resolveAgentStore: deps.resolveAgentStore,
       mcpCatalog: deps.mcpCatalog,
       withTransaction: deps.withTransaction,
@@ -882,6 +954,54 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     withAuth(createDeliveriesRouter({ deliveryStore: deps.deliveryStore, resolveRequestContext }), authMiddleware),
   );
   app.route(
+    '/api/v1/user/reach',
+    withAuth(
+      createReachRouter({
+        reachStore: deps.reachSettingsStore,
+        textContacts: deps.textContactStore,
+        noticingStore: deps.noticingStore,
+        deliveryService: deps.deliveryService,
+        channels: deps.reachChannels,
+        isInstanceOwner: deps.isInstanceOwner,
+        memories: async ({ tenant_id }) => {
+          const outcome = await createVaultClient({ logger: deps.logger, tenantId: tenant_id })?.listEntries({
+            namespace: '',
+            timeoutMs: 10_000,
+          });
+          return outcome?.ok === true ? outcome.entries.map(entry => entry.text) : [];
+        },
+        resolveRequestContext,
+        logger: deps.logger,
+      }),
+      authMiddleware,
+    ),
+  );
+  app.route(
+    '/api/v1/user/reach/texts',
+    withAuth(
+      createTextNumberRouter({
+        textNumbers: deps.textNumbers,
+        available: () => deps.reachChannels().texts.available,
+        resolveRequestContext,
+      }),
+      authMiddleware,
+    ),
+  );
+  app.route(
+    '/api/v1/user/reminders',
+    withAuth(
+      createRemindersRouter({
+        scheduleStore: deps.scheduleStore,
+        sessionStore: deps.sessionStore,
+        agentStore: deps.agentStore,
+        personaStore: deps.personaStore,
+        personalizationStore: deps.personalizationStore,
+        resolveRequestContext,
+      }),
+      authMiddleware,
+    ),
+  );
+  app.route(
     '/api/v1/user/push',
     withAuth(
       createPushRouter({
@@ -973,6 +1093,21 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       createUiSessionAuthMiddleware(deps.authenticator),
     ),
   );
+  // Same guard as the accounts: the notes folder belongs to the whole instance. It holds no
+  // secret; the path and the inbox file name are all that is saved.
+  app.route(
+    NOTES_FOLDER_SETTINGS_BASE_PATH,
+    withAuth(
+      withAdminAuth(
+        createNotesFolderRouter({
+          logger: deps.logger,
+          settingsStore: deps.globalSettingsStore,
+        }),
+        adminAuthMiddleware,
+      ),
+      createUiSessionAuthMiddleware(deps.authenticator),
+    ),
+  );
   // Same-origin tile proxy for embedded maps. Browser session only: bearer
   // credentials (agents, sandboxes, API clients) are refused.
   app.route(
@@ -993,6 +1128,18 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       createChatImagesRouter({
         sessions: deps.sessions,
         chatImages: deps.chatImages,
+        resolveRequestContext,
+        logger: deps.logger,
+      }),
+      createUiSessionAuthMiddleware(deps.authenticator),
+    ),
+  );
+  // Live view of Aman's browser, browser session only: the signed-in person watches and drives the
+  // tabs of their own browser profile, and no agent or API token can see or steer it for them.
+  app.route(
+    '/api/browser/live',
+    withAuth(
+      createBrowserLiveRouter({
         resolveRequestContext,
         logger: deps.logger,
       }),
@@ -1115,8 +1262,10 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         sessions: deps.sessions,
         mcpCatalog: deps.mcpCatalog,
         sessionStore: deps.sessionStore,
+        chatDeletionStore: deps.chatDeletionStore,
         sentinelAuditStore: deps.sentinelAuditStore,
         activeTurns: deps.activeTurns,
+        turnDrains: deps.turnDrains,
         resolveModelProviderStore: deps.resolveModelProviderStore,
         resolveMcpServerStore: deps.resolveMcpServerStore,
         resolveSkillStore: deps.resolveSkillStore,
@@ -1165,6 +1314,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       createVoiceRouter({
         logger: deps.logger,
         resolveRequestContext,
+        app,
       }),
       authMiddleware,
     ),
@@ -1185,6 +1335,19 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       createSessionPersonasRouter({
         personaStore: deps.personaStore,
         sessionStore: deps.sessionStore,
+        resolveRequestContext,
+      }),
+      authMiddleware,
+    ),
+  );
+  app.route(
+    '/api/v1/sessions',
+    withAuth(
+      createChatPrivacyRouter({
+        sessionStore: deps.sessionStore,
+        personaStore: deps.personaStore,
+        resolveAgentStore: deps.resolveAgentStore,
+        resolveModelProviderStore: deps.resolveModelProviderStore,
         resolveRequestContext,
       }),
       authMiddleware,
@@ -1230,6 +1393,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     withAuth(
       createTurnsRouter({
         mcpCatalog: deps.mcpCatalog,
+        skillCatalog: deps.skillCatalog,
         sessions: deps.sessions,
         sessionStore: deps.sessionStore,
         activeTurns: deps.activeTurns,
@@ -1249,6 +1413,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         sentinelSettingsStore: deps.sentinelSettingsStore,
         chatSearchIndexer: deps.chatSearchIndexer,
         tokenFactoryBudget: deps.tokenFactoryBudget,
+        chatDeletionStore: deps.chatDeletionStore,
         eventSubscriptions: deps.eventSubscriptions,
         resolveSandboxProviderStore: deps.resolveSandboxProviderStore,
         sandboxProviderResolver: deps.sandboxProviderResolver,
@@ -1266,8 +1431,8 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
   const uiBasePath = getPublicUiBasePath();
   const openApiSpecPath = `${uiBasePath}api/v1/openapi.json`;
   const openApiServerUrl = uiBasePath === '/' ? undefined : uiBasePath.replace(/\/$/, '');
-  app.get('/api/v1/docs', swaggerUI({ url: openApiSpecPath }));
-  app.get('/api/v1/openapi.json', c =>
+  mountApiDocs(app, { uiBasePath, openApiSpecPath, authMiddleware });
+  app.get('/api/v1/openapi.json', authMiddleware, c =>
     c.json(
       buildOpenApiDocument(app, {
         authEnabled,

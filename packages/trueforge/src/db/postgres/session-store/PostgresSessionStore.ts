@@ -31,6 +31,7 @@ import type {
   CreateTurnInput,
   DeleteSessionFolderInput,
   DeleteSessionInput,
+  ExpiredPrivateSession,
   FreezeAndGetTurnInput,
   GetCommandExecutionInput,
   GetOwnedIdsInput,
@@ -42,12 +43,14 @@ import type {
   ISessionStore,
   IndexChatMessagesInput,
   ListApprovalDismissalsInput,
+  ListExpiredPrivateSessionsInput,
   ListImplementationPlanGrantsInput,
   ListSessionEventsInput,
   ListSessionFoldersInput,
   ListSessionsInput,
   ListTurnEventsInput,
   ListTurnsInput,
+  MergeSessionMetadataInput,
   OverwriteThreadContextInput,
   PatchMCPServersInput,
   PatchSandboxInfoInput,
@@ -57,10 +60,12 @@ import type {
   RecoverRunningCommandExecutionsInput,
   RemoveThreadsInput,
   RenewCommandExecutionLeaseInput,
+  ReplaceSessionTitleIfCurrentInput,
   ReplaceTaskChecklistInput,
   RevokeImplementationPlanGrantInput,
   RevokeImplementationPlanGrantResult,
   SearchChatHistoryInput,
+  SetPrivateExpiryInput,
   SetSessionFolderInput,
   StampImportedSessionInput,
   TurnRecordWithoutSnapshot,
@@ -125,7 +130,11 @@ import {
   getOwnedIds as getOwnedIdsQuery,
   getSessionByExternalId as getSessionByExternalIdQuery,
   getSession as getSessionQuery,
+  listExpiredPrivateSessions as listExpiredPrivateSessionsQuery,
   listSessions as listSessionsQuery,
+  mergeSessionMetadata as mergeSessionMetadataQuery,
+  replaceSessionTitleIfCurrent as replaceSessionTitleIfCurrentQuery,
+  setPrivateExpiry as setPrivateExpiryQuery,
   stampImportedSession as stampImportedSessionQuery,
   updateSession as updateSessionQuery,
 } from './queries/sessions';
@@ -201,6 +210,14 @@ export class PostgresSessionStore implements ISessionStore<SessionCustom, TurnCu
     return deleteSessionQuery(this.db, input);
   }
 
+  setPrivateExpiry(input: SetPrivateExpiryInput): Promise<void> {
+    return setPrivateExpiryQuery(this.db, input);
+  }
+
+  listExpiredPrivateSessions(input: ListExpiredPrivateSessionsInput): Promise<ExpiredPrivateSession[]> {
+    return listExpiredPrivateSessionsQuery(this.db, input);
+  }
+
   listImplementationPlanGrants(input: ListImplementationPlanGrantsInput): Promise<ImplementationPlanGrant[]> {
     return listImplementationPlanGrantsQuery(this.db, input);
   }
@@ -247,6 +264,14 @@ export class PostgresSessionStore implements ISessionStore<SessionCustom, TurnCu
 
   updateSession(input: UpdateSessionInput<SessionCustom>): Promise<void> {
     return updateSessionQuery(this.db, input);
+  }
+
+  mergeSessionMetadata(input: MergeSessionMetadataInput): Promise<void> {
+    return mergeSessionMetadataQuery(this.db, input);
+  }
+
+  replaceSessionTitleIfCurrent(input: ReplaceSessionTitleIfCurrentInput): Promise<boolean> {
+    return replaceSessionTitleIfCurrentQuery(this.db, input);
   }
 
   createSessionFolder(input: CreateSessionFolderInput): Promise<SessionFolderRecord> {
@@ -535,6 +560,8 @@ export class PostgresSessionStore implements ISessionStore<SessionCustom, TurnCu
           custom: session.custom !== null ? json(session.custom) : null,
           metadata: json(metadata),
           external_id: null,
+          is_incognito: false,
+          private_expires_at: null,
           metrics: json({ total_duration_ms: 0, total_turns: turns.length }),
           last_activity_timestamp_ms: session.last_activity_timestamp_ms,
           created_at: new Date(session.created_at),

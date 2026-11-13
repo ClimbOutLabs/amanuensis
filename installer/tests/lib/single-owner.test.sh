@@ -36,6 +36,35 @@ make_legacy_users() {
   rm -f "$tmp"
 }
 
+# One more Dex entry in dex.yaml, with an email of its own and its password hash written in the file: nothing in
+# the registry, the allowed emails or dex.env mentions it.
+plant_dex_entry() {
+  local dir=$AMAN_HOME/instances/main tmp=$SB/plant
+  awk '
+    { print }
+    /^    userID: .owner.$/ {
+      print "  - email: '"'"'planted@demo.invalid'"'"'"
+      print "    hash: '"'"'$2a$10$plantedhash'"'"'"
+      print "    username: '"'"'planted'"'"'"
+      print "    userID: '"'"'planted'"'"'"
+    }' "$dir/dex.yaml" >"$tmp" && cat "$tmp" >"$dir/dex.yaml"
+  rm -f "$tmp"
+}
+
+# One more Dex entry under the owner's own email, with a password of its own written in the file.
+plant_dex_owner_copy() {
+  local dir=$AMAN_HOME/instances/main tmp=$SB/plant
+  OWNER_EMAIL=$OWNER awk '
+    { print }
+    /^    userID: .owner.$/ {
+      print "  - email: '"'"'" ENVIRON["OWNER_EMAIL"] "'"'"'"
+      print "    hash: '"'"'$2a$10$plantedhash'"'"'"
+      print "    username: '"'"'owner'"'"'"
+      print "    userID: '"'"'owner-copy'"'"'"
+    }' "$dir/dex.yaml" >"$tmp" && cat "$tmp" >"$dir/dex.yaml"
+  rm -f "$tmp"
+}
+
 assert_single_owner() {
   assert_eq "$(env_value main OIDC_ALLOWED_EMAILS)" "$OWNER" "the owner is the only allowed email"
   assert_eq "$(grep -c '^OIDC_ALLOWED_EMAILS=' "$AMAN_HOME/instances/main/.env")" 1 "one allowlist line"
@@ -253,6 +282,75 @@ test_owner_settings_and_other_instances_are_left_alone() {
   sandbox_drop
 }
 
+test_an_extra_dex_entry_alone_is_removed() {
+  t_begin "a sign-in entry that exists only in dex.yaml is planned and removed by refresh"
+  sandbox_new
+  install_machine
+  plant_dex_entry
+  run_install --dry-run
+  assert_rc 0
+  assert_flat_contains "$OUT" "Remove planted@demo.invalid from instance main"
+  assert_contains "$(dex_yaml)" "planted@demo.invalid" "a dry run changes nothing"
+  run_install instance refresh main
+  assert_rc 0
+  assert_eq "$(removal_lines)" 1
+  assert_eq "$(printf '%s\n' "$OUT" | grep '^Removed ')" "Removed planted@demo.invalid from instance main."
+  assert_single_owner
+  sandbox_drop
+}
+
+test_a_second_password_under_the_owners_email_is_removed() {
+  t_begin "a second Dex entry under the owner's own email, with a password of its own, is removed and the owner's entry stays"
+  sandbox_new
+  install_machine
+  plant_dex_owner_copy
+  run_install --dry-run
+  assert_rc 0
+  assert_flat_contains "$OUT" "Remove owner-copy from instance main"
+  assert_contains "$(dex_yaml)" "owner-copy" "a dry run changes nothing"
+  run_install instance refresh main
+  assert_rc 0
+  assert_eq "$(printf '%s\n' "$OUT" | grep '^Removed ')" "Removed owner-copy from instance main."
+  assert_single_owner
+  assert_contains "$(dex_yaml)" "hashFromEnv: DEX_USER_PASSWORD_HASH"
+  sandbox_drop
+}
+
+test_leftover_hashes_in_the_shapes_compose_reads_are_removed() {
+  t_begin "a leftover password hash indented, exported, spaced around the = or in mixed case is counted and removed"
+  sandbox_new
+  install_machine
+  local dir=$AMAN_HOME/instances/main line hash="'\$2a\$10\$shapehash'"
+  for line in "  DEX_USER_PASSWORD_HASH_GHOST=$hash" "export DEX_USER_PASSWORD_HASH_GHOST=$hash" \
+    "DEX_USER_PASSWORD_HASH_GHOST = $hash" "Dex_User_Password_Hash_GHOST=$hash"; do
+    printf '%s\n' "$line" >>"$dir/dex.env"
+    run_install --dry-run
+    assert_rc 0
+    assert_flat_contains "$OUT" "Remove ghost from instance main"
+    assert_contains "$(dex_env)" "shapehash" "a dry run changes nothing"
+    run_install instance refresh main
+    assert_rc 0
+    assert_eq "$(printf '%s\n' "$OUT" | grep '^Removed ')" "Removed ghost from instance main."
+    assert_not_contains "$(dex_env)" "shapehash"
+    assert_single_owner
+  done
+  sandbox_drop
+}
+
+test_a_clean_instance_keeps_its_dex_yaml_bytes() {
+  t_begin "refreshing an instance where only the owner can sign in removes nothing and leaves dex.yaml byte for byte"
+  sandbox_new
+  install_machine
+  local before=$SB/dex-before
+  cp "$AMAN_HOME/instances/main/dex.yaml" "$before"
+  run_install instance refresh main
+  assert_rc 0
+  assert_eq "$(removal_lines)" 0
+  if cmp -s "$before" "$AMAN_HOME/instances/main/dex.yaml"; then t_pass; else t_fail "dex.yaml changed"; fi
+  assert_single_owner
+  sandbox_drop
+}
+
 test_user_commands_and_options_are_gone
 test_a_new_instance_has_one_user
 test_install_rerun_removes_extra_users
@@ -264,4 +362,8 @@ test_refresh_removes_extra_users
 test_leftover_hashes_without_emails
 test_a_hand_edited_allowlist_is_cut_back_to_the_owner
 test_owner_settings_and_other_instances_are_left_alone
+test_an_extra_dex_entry_alone_is_removed
+test_a_second_password_under_the_owners_email_is_removed
+test_leftover_hashes_in_the_shapes_compose_reads_are_removed
+test_a_clean_instance_keeps_its_dex_yaml_bytes
 tests_finish

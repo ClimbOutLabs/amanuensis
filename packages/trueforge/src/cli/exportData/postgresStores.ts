@@ -18,7 +18,9 @@ import { PostgresSpaceStore } from '../../db/postgres/space-store/PostgresSpaceS
 import { PostgresOAuthTokenStore } from '../../db/postgres/token-store/PostgresOAuthTokenStore';
 import { PostgresTurnArtifactStore } from '../../db/postgres/turn-artifact-store/PostgresTurnArtifactStore';
 import type { Database as PostgresDatabase } from '../../db/postgres/types';
+import { ReachSettingsStore } from '../../db/reachSettingsStore';
 import { SentinelAuditStore } from '../../db/sentinelAuditStore';
+import { TextContactStore } from '../../db/textContactStore';
 import type { ExportStores } from './stores';
 
 export async function openPostgresStores(options: {
@@ -26,6 +28,7 @@ export async function openPostgresStores(options: {
   poolMax: number;
   statementTimeoutMs: number;
   idleInTransactionSessionTimeoutMs: number;
+  connectionTimeoutMs: number;
   migrate: boolean;
 }): Promise<ExportStores<Transaction<PostgresDatabase>>> {
   const db = createDb({
@@ -33,6 +36,11 @@ export async function openPostgresStores(options: {
     poolMax: options.poolMax,
     statementTimeoutMs: options.statementTimeoutMs,
     idleInTransactionSessionTimeoutMs: options.idleInTransactionSessionTimeoutMs,
+    connectionTimeoutMs: options.connectionTimeoutMs,
+    // A command-line run reports to the terminal; the failing query surfaces the error itself.
+    onIdleClientError: error => {
+      console.error(`A Postgres connection broke while idle: ${error.message}`);
+    },
   });
   try {
     if (options.migrate) {
@@ -59,6 +67,8 @@ export async function openPostgresStores(options: {
     googleConnectionStore: new PostgresGoogleConnectionStore(db),
     auditStore: new SentinelAuditStore(db),
     deliveryStore: new DeliveryStore(db),
+    reachSettingsStore: new ReachSettingsStore(db),
+    textContactStore: new TextContactStore(db),
     close: () => db.destroy(),
   };
 }

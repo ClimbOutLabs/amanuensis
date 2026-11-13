@@ -63,6 +63,7 @@ async function* answerStream(
 
 function summarizeContext() {
   const modelProviderStore: IModelProviderStore = {
+    managedElsewhere: false,
     listProviders: jest.fn(),
     getProvider: jest.fn(),
     getProviderForUpdate: jest.fn(),
@@ -218,6 +219,7 @@ async function chatWithTwoTurns() {
         return Promise.resolve();
       },
       memory: {
+        session: { is_incognito: false },
         client: memoryClient,
         userText: input.text,
         attachedFiles: false,
