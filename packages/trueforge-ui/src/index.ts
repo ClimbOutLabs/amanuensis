@@ -495,6 +495,7 @@ export {
   readSessionIsCreateAgent,
   sessionIsCreateAgent,
 } from './atoms/lib/sessionCreateAgent.js';
+export { LightDarkToggleButton } from './atoms/LightDarkToggleButton.js';
 export { SelectAgentEmptyState } from './atoms/SelectAgentEmptyState.js';
 export { ShellActionsActionSlot } from './atoms/ShellActionsActionSlot.js';
 export type { ShellActionsActionSlotProps } from './atoms/ShellActionsActionSlot.js';
