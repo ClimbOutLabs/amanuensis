@@ -88,14 +88,17 @@ describe('MemoryHelpersCard', () => {
     expect(screen.getByRole('radio', { name: /^Off/ })).toBeChecked();
     expect(screen.getByRole('radio', { name: /^Only note what it would do/ })).not.toBeChecked();
     expect(screen.getByRole('radio', { name: /^On(?!ly)/ })).not.toBeChecked();
-    expect(screen.getByText(/does not sort anything onto pages/)).toBeInTheDocument();
-    expect(screen.getByText(/writes that down\. It changes no pages/)).toBeInTheDocument();
-    expect(screen.getByText(/can only ever be added as not confirmed/)).toBeInTheDocument();
+    expect(screen.getByText(/Nothing is filed for you/)).toBeInTheDocument();
+    expect(screen.getByText(/A trial run\..*changes no pages/)).toBeInTheDocument();
+    expect(screen.getByText(/added as not confirmed until you confirm it/)).toBeInTheDocument();
     expect(screen.getByRole('switch', { name: 'Tidy pages once a day' })).not.toBeChecked();
+    expect(screen.getByText(/moves facts that are over, such as a trip that has ended/)).toBeInTheDocument();
     expect(
-      screen.getByText(/moves lines that have ended to Earlier, sorts notes that were missed/),
+      screen.getByText(/files any saved notes that were not filed yet, if sorting above is on/),
     ).toBeInTheDocument();
-    expect(screen.getAllByText(/uses the model while you are not chatting/)).toHaveLength(2);
+    expect(screen.getByText(/points out two facts that cannot both be true/)).toBeInTheDocument();
+    expect(screen.getByText('It never deletes anything.')).toBeInTheDocument();
+    expect(screen.getByText(/Both are off until you turn them on/)).toBeInTheDocument();
   });
 
   it('saves the chosen sorting mode', async () => {

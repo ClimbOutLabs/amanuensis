@@ -15,17 +15,17 @@ function sortChoices(assistant: string): { mode: PageSortMode; label: string; ex
     {
       mode: 'off',
       label: 'Off',
-      explain: `${assistant} does not sort anything onto pages. What it saves stays in the daily notes.`,
+      explain: `Nothing is filed for you. Saved notes stay on the Memories tab, and a page changes only when you ask.`,
     },
     {
       mode: 'report',
       label: 'Only note what it would do',
-      explain: `${assistant} works out where each saved note would go and writes that down. It changes no pages.`,
+      explain: `A trial run. ${assistant} writes down which page each note would go on, and changes no pages.`,
     },
     {
       mode: 'on',
       label: 'On',
-      explain: `${assistant} puts each saved note on the right page. What ${assistant} read can only ever be added as not confirmed.`,
+      explain: `${assistant} files each saved note on the right page. Anything it read elsewhere, such as in an email, is added as not confirmed until you confirm it.`,
     },
   ];
 }
@@ -41,7 +41,9 @@ function PageSortingControl() {
   return (
     <fieldset className="min-w-0" disabled={disabled}>
       <legend className="text-sm font-medium text-text-primary">Sort what Aman saves onto pages</legend>
-      <p className="mt-0.5 text-xs text-text-secondary">This uses the model while you are not chatting.</p>
+      <p className="mt-0.5 text-xs text-text-secondary">
+        After a chat, {assistant} can file what it saved onto the page it belongs to, such as your sister&apos;s page.
+      </p>
       <div className="mt-2 flex flex-col gap-2">
         {choices.map(choice => (
           <label key={choice.mode} className="flex items-start gap-2 text-sm text-text-primary">
@@ -118,13 +120,13 @@ function NightlyControl() {
           <label htmlFor="memory-nightly-toggle" className="text-sm font-medium text-text-primary">
             Tidy pages once a day
           </label>
-          <p className="mt-0.5 text-xs text-text-secondary">
-            Once a day, {assistant} moves lines that have ended to Earlier, sorts notes that were missed, and lists
-            lines that disagree. This uses the model while you are not chatting.
-          </p>
-          <p className="mt-0.5 text-xs text-text-secondary">
-            Sorting missed notes follows the sorting choice above. With sorting off, {assistant} only moves ended lines.
-          </p>
+          <p className="mt-0.5 text-xs text-text-secondary">Once a day, {assistant} goes through your pages and:</p>
+          <ul className="mt-1 list-disc pl-4 text-xs text-text-secondary">
+            <li>moves facts that are over, such as a trip that has ended, to the Earlier part of the page</li>
+            <li>files any saved notes that were not filed yet, if sorting above is on</li>
+            <li>points out two facts that cannot both be true, so you can fix one</li>
+          </ul>
+          <p className="mt-1 text-xs text-text-secondary">It never deletes anything.</p>
           {setting.error === null ? null : (
             <p className="mt-1.5 text-xs text-danger" role="alert">
               {setting.error}
@@ -204,7 +206,10 @@ export function MemoryHelpersCard() {
       <h4 id="memory-helpers-heading" className="text-sm font-medium text-text-primary">
         Sorting and tidying
       </h4>
-      <p className="mt-1 text-sm text-text-secondary">Both of these start off. Switch them on when you want them.</p>
+      <p className="mt-1 text-sm text-text-secondary">
+        Two optional helpers that keep your pages in order. Both are off until you turn them on. They work in the
+        background and use your model.
+      </p>
       <div className="mt-4 border-t border-border pt-4">
         <PageSortingControl />
       </div>
