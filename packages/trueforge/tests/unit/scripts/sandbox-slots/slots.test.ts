@@ -1162,10 +1162,10 @@ describe('the script that moves the chats of the extra slots', () => {
 });
 
 describe('your own Python packages', () => {
-  test('the saved list reaches the image build and every later compose call, and is reported', async () => {
+  test('the saved list is updated before the image build and reported', async () => {
     const asked: { add: string[]; remove: string[] }[] = [];
     const checks: string[] = [];
-    const { result, calls } = await run(() => undefined, false, {
+    const { result } = await run(() => undefined, false, {
       pythonPackagesPort: {
         update: input => {
           asked.push(input);
