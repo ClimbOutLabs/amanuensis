@@ -141,6 +141,21 @@ export type SentinelApprovalSchedule = {
 };
 
 /**
+ * The words an approval card is made of, produced by the server by one owner per action kind.
+ * The UI renders the three parts and never builds sentences of its own. Absent on cards saved
+ * before copy existed; those build their headline from their own fields, or show the generic
+ * headline when they have none, never their stored plain_what.
+ */
+export type SentinelApprovalCopy = {
+  /** What will happen, in one sentence, in words the person recognises. */
+  headline: string;
+  /** What follows from approving, in one line, or null when nothing needs saying. */
+  consequence: string | null;
+  /** Why the tier asks, in plain words, shown behind "Why I'm asking", or null. */
+  reason: string | null;
+};
+
+/**
  * Server-rendered approval card for Tier 2 and Tier 3 actions. Mirrors the backend `Tier3Card` schema:
  * destination/recipient/amount come from the server-side extractor registry over
  * canonical params, never agent text. Shell cards carry the server-parsed command.
@@ -149,6 +164,12 @@ export type SentinelApprovalSchedule = {
 export type SentinelApprovalCard = {
   /** One plain-language sentence describing what will happen. No jargon. Always present. */
   plain_what: string;
+  /** The headline, consequence and reason the card renders, or null on cards saved before copy existed. */
+  copy?: SentinelApprovalCopy | null | undefined;
+  /** True when the safe choice is the primary button: the action is irreversible or reaches other people. */
+  safe_choice?: boolean | undefined;
+  /** True when the action destroys or sends something for good, so its button wears the destructive ink. */
+  destructive?: boolean | undefined;
   /** One sentence on why the agent wants this, from agent intent when available. */
   plain_why: string | null;
   /** What cannot be undone, or null when fully reversible. */
@@ -185,6 +206,21 @@ export type SentinelApprovalCard = {
   mail_new_recipients?: string[] | null;
   /** True when a card carrying mail_new_recipients approves saving a draft rather than sending. */
   mail_draft?: boolean | undefined;
+  /** The network question when the card asks about a skill's sites, or null. */
+  skill_network?: SentinelApprovalSkillNetwork | null;
+};
+
+const APPROVAL_SKILL_NETWORK_REASONS = ['first_use', 'undeclared_host'] as const;
+
+export type SentinelApprovalSkillNetworkReason = (typeof APPROVAL_SKILL_NETWORK_REASONS)[number];
+
+/** The network question a skill network card asks: the skill, the sites, and why it is asked. */
+export type SentinelApprovalSkillNetwork = {
+  skill_name: string;
+  hosts: string[];
+  reason: SentinelApprovalSkillNetworkReason;
+  /** The code version the approval is pinned to, or null when no pin is in force. */
+  code_pin: string | null;
 };
 
 /** The whole persona a chat call adds, in plain words. */
@@ -334,6 +370,8 @@ export type SentinelAuditEntry = {
 export type SentinelUserAuditEntry = SentinelAuditEntry & {
   /** False once the chat the entry came from has been deleted. */
   chat_exists: boolean;
+  /** Title of the chat the entry came from; null when deleted or not yet titled. */
+  session_title: string | null;
 };
 
 /** One page of the owner's audit log; `nextPageToken` is absent on the last page. */
@@ -703,12 +741,40 @@ function parseSchedule(value: unknown): SentinelApprovalSchedule | null {
   return { action, name, when, time_zone, task, runs_as, next_runs, ...(tools === undefined ? {} : { tools }) };
 }
 
+/** The card's copy, read from the wire shape or its camel twin; undefined when the card predates copy. */
+function parseApprovalCopy(value: unknown): SentinelApprovalCopy | undefined {
+  if (!isRecord(value)) return undefined;
+  const headline = optionalString(value, 'headline');
+  if (headline === undefined) return undefined;
+  return {
+    headline,
+    consequence: cardString(value, { snake: 'consequence', camel: 'consequence' }),
+    reason: cardString(value, { snake: 'reason', camel: 'reason' }),
+  };
+}
+
+/** A card missing any field is not shown as a network question, so a partial one is never approved as if whole. */
+function parseSkillNetwork(value: unknown): SentinelApprovalSkillNetwork | null {
+  if (!isRecord(value)) return null;
+  const skill_name = optionalString(value, 'skill_name') ?? optionalString(value, 'skillName');
+  const hosts = stringList(value.hosts);
+  const reason = APPROVAL_SKILL_NETWORK_REASONS.find(candidate => candidate === value.reason);
+  const code_pin = value.code_pin === null ? null : optionalString(value, 'code_pin');
+  if (skill_name === undefined || hosts === undefined || reason === undefined || code_pin === undefined) {
+    return null;
+  }
+  return { skill_name, hosts, reason, code_pin };
+}
+
 function parseApprovalCard(value: unknown): SentinelApprovalCard | undefined {
   if (!isRecord(value)) return undefined;
   const plain_what = optionalString(value, 'plain_what') ?? optionalString(value, 'plainWhat');
   if (plain_what === undefined) return undefined;
   return readSavedHoldReason({
     plain_what,
+    copy: parseApprovalCopy(value.copy),
+    safe_choice: cardFlag(value, { snake: 'safe_choice', camel: 'safeChoice' }),
+    destructive: cardFlag(value, { snake: 'destructive', camel: 'destructive' }),
     plain_why: cardString(value, { snake: 'plain_why', camel: 'plainWhy' }),
     cannot_be_undone: cardString(value, { snake: 'cannot_be_undone', camel: 'cannotBeUndone' }),
     why_asked_again: cardString(value, { snake: 'why_asked_again', camel: 'whyAskedAgain' }),
@@ -727,6 +793,7 @@ function parseApprovalCard(value: unknown): SentinelApprovalCard | undefined {
     skill: parseSkill(value.skill),
     mail_new_recipients: parseNewRecipients(value.mail_new_recipients ?? value.mailNewRecipients),
     mail_draft: cardFlag(value, { snake: 'mail_draft', camel: 'mailDraft' }),
+    skill_network: parseSkillNetwork(value.skill_network ?? value.skillNetwork),
   });
 }
 
@@ -947,7 +1014,8 @@ export function parseUserAuditPage(body: unknown): SentinelUserAuditPage {
   for (const item of body.data) {
     const entry = parseAuditEntry(item);
     if (entry === undefined || !isRecord(item) || typeof item.chat_exists !== 'boolean') continue;
-    entries.push({ ...entry, chat_exists: item.chat_exists });
+    const session_title = typeof item.session_title === 'string' ? item.session_title : null;
+    entries.push({ ...entry, chat_exists: item.chat_exists, session_title });
   }
   const pagination = isRecord(body.pagination) ? body.pagination : undefined;
   const nextPageToken = pagination === undefined ? undefined : optionalString(pagination, 'next_page_token');

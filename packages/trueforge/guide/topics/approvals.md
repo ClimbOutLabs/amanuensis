@@ -10,13 +10,23 @@ How to get there: Approval cards show up in the chat, right where Aman is workin
 
 === "Computer"
 
-    ![An approval card in a chat, with Allow, Change it and Not now](../../../../docs/screenshots/app/approvals-card-desktop.png)
+    ![A card asking to delete a schedule, with the safe choice, Keep it, first and Allow after it](../../../../docs/screenshots/app/approvals-card-desktop.png)
 
 === "Phone"
 
-    ![An approval card in a chat, with Allow, Change it and Not now](../../../../docs/screenshots/app/approvals-card-phone.png)
+    ![A card asking to delete a schedule, with the safe choice, Keep it, first and Allow after it](../../../../docs/screenshots/app/approvals-card-phone.png)
 
 Reading is free. Aman doesn't ask before it reads your mail, searches the web or opens a page. It asks before it sends, saves, deletes or changes something.
+
+## Read a card
+
+The first line says what will happen, in words you would use. An event is named by its title and time. A mail is named by who it goes to.
+
+When something follows from saying yes, a second line says what it is. Guests get a cancellation. A file is replaced. Money leaves your account.
+
+The (i) on the card opens **Why I'm asking**. It says why this one needs your answer.
+
+If Aman cannot say what an action does, it shows no card. It refuses, says why, and tells you the one thing to do next.
 
 ## Answer a card
 
@@ -26,6 +36,8 @@ Reading is free. Aman doesn't ask before it reads your mail, searches the web or
 4. Or click **Not now**. Aman doesn't do it.
 
 A card stays on the screen until you answer it. If you don't want what it asks, click **Not now** and the card closes.
+
+On a card where the action cannot be undone, or where it reaches other people, the safe choice comes first and is the main button. On a delete it says **Keep it**. On a mail send it says **Don't send**. The button that does the thing comes after it.
 
 ## Stop the same question coming back
 
@@ -53,17 +65,17 @@ From then on, Aman asks before it uses that tool again.
 
 ## Mail cards
 
-A mail card shows who the mail goes to and its full text.
+A mail card shows who the mail goes to and its full text. The safe choice, **Don't send**, comes first as the main button.
 
 - Click **Allow** to send it.
 - Click **Save as draft** to keep it in your drafts without sending.
 - Click **Edit** to ask Aman to change it first.
 - Click **Not now** to stop it.
 
-If the mail goes to an address that isn't on your Email list, the buttons change:
+If the mail goes to an address that isn't on your Email list, the buttons change. The safe choice still comes first:
 
-- **Add and send** puts those addresses on your list, then sends.
 - **Don't send** stops it, and nothing is added to your list.
+- **Add and send** puts those addresses on your list, then sends.
 
 When the card saves a draft instead, they read **Add and save draft** and **Don't save**.
 

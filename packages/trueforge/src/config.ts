@@ -50,6 +50,7 @@ import { parseModelPrices, type ModelPrices } from './runtime/modelPricing';
 import { DEFAULT_TOKEN_FACTORY_MODEL } from './runtime/tokenFactoryDefaults';
 import { MAX_CODE_MODE_SOCKET_PARENT_BYTES } from './sandbox/local/core/CodeModeUdsTransport';
 import { isGoModuleHostName } from './sandbox/mirrors/goMirrorPath';
+import { E164_PATTERN } from './schemas/textMessages';
 
 const DEFAULT_PORT = 8790;
 /** Loopback default; container images set HOST=0.0.0.0 so probes and Service traffic reach the process. */
@@ -446,6 +447,102 @@ export function parseWebPushSettings(raw: {
     );
   }
   return { publicKey, privateKey, subject };
+}
+
+/** Twilio, as the one text-message provider. Texts stay off unless `REACH_SMS_PROVIDER` is `twilio` and every value is set. */
+export interface TwilioSettings {
+  accountSid: string;
+  authToken: string;
+  /** The number texts come from, in international form such as +15550100. */
+  fromNumber: string;
+  /** The port of the listener that answers Twilio, apart from the main app. */
+  webhookPort: number;
+  /** The public address Twilio reaches that listener at, without a trailing slash. Request signatures are checked against it. */
+  webhookPublicUrl: string;
+  /** Texts the whole server sends in a day, codes apart, so many accounts together cannot run up the bill. */
+  maxTextsPerDay: number;
+}
+
+export const DEFAULT_MAX_TEXTS_PER_DAY = 500;
+
+/** Outside the ranges the installer picks app, sign-in and https ports from, so no instance lands on it. */
+export const DEFAULT_TWILIO_WEBHOOK_PORT = 9201;
+
+function isPlainHttpsAddress(url: URL | undefined): url is URL {
+  return (
+    url?.protocol === 'https:' && url.username === '' && url.password === '' && url.search === '' && url.hash === ''
+  );
+}
+
+/**
+ * Parses `REACH_SMS_PROVIDER` (default `none`) and the Twilio settings. With no provider, texts are off and the
+ * Twilio values are ignored. With `twilio`, a missing or malformed value fails the boot with the one thing to do next.
+ */
+export function parseTwilioSettings(raw: {
+  provider: string | undefined;
+  accountSid: string | undefined;
+  authToken: string | undefined;
+  fromNumber: string | undefined;
+  webhookPort: string | undefined;
+  webhookPublicUrl: string | undefined;
+  maxTextsPerDay: string | undefined;
+  mainPort: number;
+}): TwilioSettings | undefined {
+  const provider = blankToUndefined(raw.provider)?.toLowerCase() ?? 'none';
+  if (provider === 'none') {
+    return undefined;
+  }
+  if (provider !== 'twilio') {
+    throw new Error('Set REACH_SMS_PROVIDER to none or twilio.');
+  }
+  const accountSid = blankToUndefined(raw.accountSid);
+  const authToken = blankToUndefined(raw.authToken);
+  const fromNumber = blankToUndefined(raw.fromNumber);
+  if (accountSid === undefined || !/^AC[0-9a-fA-F]{32}$/.test(accountSid)) {
+    throw new Error(
+      'TWILIO_ACCOUNT_SID must be your Twilio account id, which starts with AC. Copy it from the Twilio console.',
+    );
+  }
+  if (authToken === undefined) {
+    throw new Error('TWILIO_AUTH_TOKEN is not set. Copy the auth token from the Twilio console.');
+  }
+  if (fromNumber === undefined || !E164_PATTERN.test(fromNumber)) {
+    throw new Error('TWILIO_FROM_NUMBER must be your Twilio number with the country code, such as +15550100.');
+  }
+  const portText = blankToUndefined(raw.webhookPort);
+  const webhookPort = portText === undefined ? DEFAULT_TWILIO_WEBHOOK_PORT : Number(portText);
+  if (!Number.isInteger(webhookPort) || webhookPort < 1 || webhookPort > 65535 || webhookPort === raw.mainPort) {
+    throw new Error(
+      'TWILIO_WEBHOOK_PORT must be a whole number from 1 to 65535 that is not the main app port. Pick another port.',
+    );
+  }
+  const publicUrl = blankToUndefined(raw.webhookPublicUrl);
+  let parsed: URL | undefined;
+  try {
+    parsed = publicUrl === undefined ? undefined : new URL(publicUrl);
+  } catch {
+    parsed = undefined;
+  }
+  if (!isPlainHttpsAddress(parsed)) {
+    throw new Error(
+      'TWILIO_WEBHOOK_PUBLIC_URL must be the https address Twilio reaches, such as https://aman.example.com. Set it to that address.',
+    );
+  }
+  const capText = blankToUndefined(raw.maxTextsPerDay);
+  const maxTextsPerDay = capText === undefined ? DEFAULT_MAX_TEXTS_PER_DAY : Number(capText);
+  if (!Number.isInteger(maxTextsPerDay) || maxTextsPerDay < 1) {
+    throw new Error(
+      'REACH_SMS_MAX_TEXTS_PER_DAY must be a whole number of 1 or more. Set it to the most texts this server may send in a day.',
+    );
+  }
+  return {
+    accountSid,
+    authToken,
+    fromNumber,
+    webhookPort,
+    webhookPublicUrl: parsed.href.replace(/\/+$/, ''),
+    maxTextsPerDay,
+  };
 }
 
 /**
@@ -1505,6 +1602,13 @@ export interface SharedServerConfiguration {
    * are unset. Env: `WEB_PUSH_PUBLIC_KEY`, `WEB_PUSH_PRIVATE_KEY`, `WEB_PUSH_SUBJECT` (defaults to the project page).
    */
   WEB_PUSH: WebPushSettings | undefined;
+  /**
+   * Text messages through Twilio. Undefined (the default) means texts are off. Env: `REACH_SMS_PROVIDER` (`none` or
+   * `twilio`), `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER`, and for the separate Twilio listener
+   * `TWILIO_WEBHOOK_PORT` (default 9201) and `TWILIO_WEBHOOK_PUBLIC_URL`. `REACH_SMS_MAX_TEXTS_PER_DAY` (default 500)
+   * caps the texts the whole server sends in a day.
+   */
+  TWILIO: TwilioSettings | undefined;
   /**
    * Turns on Aman's own browser. Off by default: with it off, the browser_* tools do not exist, whatever
    * BROWSER_URL and BROWSER_SECRET are set to. Env: `BROWSER_ENABLED`. Default false.
@@ -2580,6 +2684,16 @@ const shared: SharedServerConfiguration = {
     privateKey: getEnv('WEB_PUSH_PRIVATE_KEY'),
     subject: getEnv('WEB_PUSH_SUBJECT'),
   }),
+  TWILIO: parseTwilioSettings({
+    provider: getEnv('REACH_SMS_PROVIDER'),
+    accountSid: getEnv('TWILIO_ACCOUNT_SID'),
+    authToken: getEnv('TWILIO_AUTH_TOKEN'),
+    fromNumber: getEnv('TWILIO_FROM_NUMBER'),
+    webhookPort: getEnv('TWILIO_WEBHOOK_PORT'),
+    webhookPublicUrl: getEnv('TWILIO_WEBHOOK_PUBLIC_URL'),
+    maxTextsPerDay: getEnv('REACH_SMS_MAX_TEXTS_PER_DAY'),
+    mainPort: port,
+  }),
   MAIL_POLICY_FILE: parseOptionalPath(getEnv('MAIL_POLICY_FILE')),
   MAIL_POLICY_STATUS_FILE: parseOptionalPath(getEnv('MAIL_POLICY_STATUS_FILE')),
   CALENDAR_CONNECTOR_URL: calendarConnectorUrl,
@@ -3134,6 +3248,7 @@ export const SECRET_SETTING_NAMES = [
   'POSTGRES_PASSWORD',
   'WEB_PUSH_PRIVATE_KEY',
   'SPEECH_SECRET',
+  'TWILIO_AUTH_TOKEN',
 ] as const;
 
 /** Connection URL settings: secret as a whole, and for the password inside. */
@@ -3166,7 +3281,7 @@ export type ConfiguredSecretSettings = Pick<
   SharedServerConfiguration,
   'TRUEFORGE_API_KEY' | 'NEBIUS_API_KEY' | 'MEMORY_SCREEN_AUTH_TOKEN' | 'OIDC' | 'SPEECH_SECRET'
 > &
-  Partial<Pick<SharedServerConfiguration, 'WEB_PUSH'>> &
+  Partial<Pick<SharedServerConfiguration, 'WEB_PUSH' | 'TWILIO'>> &
   (
     | { STANDALONE: true }
     | ({ STANDALONE: false } & Pick<
@@ -3189,6 +3304,7 @@ export function getConfiguredSecretValues(config: ConfiguredSecretSettings = con
     OIDC_CLIENT_SECRET: config.OIDC?.OIDC_CLIENT_SECRET,
     WEB_PUSH_PRIVATE_KEY: config.WEB_PUSH?.privateKey,
     SPEECH_SECRET: config.SPEECH_SECRET,
+    TWILIO_AUTH_TOKEN: config.TWILIO?.authToken,
     ...(config.STANDALONE
       ? {}
       : {

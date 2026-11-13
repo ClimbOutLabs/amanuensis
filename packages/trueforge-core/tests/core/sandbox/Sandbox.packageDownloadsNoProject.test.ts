@@ -356,6 +356,14 @@ describe('the first download always asks, even when sandbox work runs without as
     expect(firstInfo.tier3_card?.plain_what).toBe(
       'Aman wants to download packages from the public package sites (npm) in your chats that are not working on a project. This also covers your scheduled runs.',
     );
+    // An install always asks, so the download wording takes over the command card: the headline is the
+    // download sentence and the command card's own warning stays as the consequence.
+    expect(firstInfo.tier3_card?.copy).toEqual({
+      headline:
+        'Aman wants to download packages from the public package sites (npm) in your chats that are not working on a project. This also covers your scheduled runs.',
+      consequence: 'Commands can change or delete files.',
+      reason: null,
+    });
 
     const held = await sandbox.callTool(npmCall);
     if (!('approvalRequired' in held)) {

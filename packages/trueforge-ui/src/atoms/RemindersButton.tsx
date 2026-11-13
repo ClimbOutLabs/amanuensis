@@ -49,7 +49,7 @@ export function RemindersButton({ className, compact = false, selected }: Remind
         })}
         onClick={() => shell.setRemindersOpen(!open)}
       >
-        <Icon name="bell" size={compact ? 14 : undefined} />
+        <Icon name="alarm-clock" size={compact ? 14 : undefined} />
         {compact ? (
           <span className="text-center">Reminders</span>
         ) : (

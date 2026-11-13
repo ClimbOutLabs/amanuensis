@@ -76,8 +76,10 @@ text that was checked is the text that is heard. The check needs no model.
 ### `GET /healthz`
 
 Returns `{"status": "ok", "model_loaded": true, "model_error": null,
-"voices": ["af_heart", "af_bella", "af_nicole", "af_sarah", "af_alloy", "af_aoede", "af_kore", "af_nova", "af_sky", "am_michael", "am_fenrir", "am_puck"], "default_voice": "af_heart"}`.
-The agent backend probes it, and the Docker health check asserts `model_loaded`.
+"voices": ["af_heart", "af_bella", "af_nicole", "af_sarah", "af_alloy", "af_aoede", "af_kore", "af_nova", "af_sky", "am_michael", "am_fenrir", "am_puck"], "default_voice": "af_heart",
+"exact": true}`.
+The agent backend probes it, and the Docker health check asserts `model_loaded`. `exact` says this service
+checks `exact` speech; an older one leaves it out, so phone calls are not offered with it.
 
 Like `aman-stt`, calls to `/v1/speak` must carry the shared secret from
 `SPEECH_SECRET` in the `x-speech-secret` header, the service does not start

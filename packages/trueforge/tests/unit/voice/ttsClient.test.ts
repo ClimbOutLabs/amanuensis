@@ -1,7 +1,7 @@
 import configuration from '../../../src/config';
 import { SpeechRateLimiter } from '../../../src/voice/speechRateLimit';
 import { UncheckedSpeechError, WouldChangeTextError } from '../../../src/voice/transport';
-import { SidecarSpeechSynthesizer, WholeSamples } from '../../../src/voice/ttsClient';
+import { probeTtsHealth, readTtsHealth, SidecarSpeechSynthesizer, WholeSamples } from '../../../src/voice/ttsClient';
 
 function streamOf(...pieces: Uint8Array[]): Response {
   return new Response(
@@ -220,5 +220,77 @@ describe('SidecarSpeechSynthesizer with exact', () => {
       new SidecarSpeechSynthesizer().stream({ text: 'Hi.', format: 'pcm16', signal: never, exact: true }),
     );
     expect(pieces.length).toBe(1);
+  });
+});
+
+describe('a voice service that is busy', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+    jest.useRealTimers();
+  });
+
+  const busy = () => new Response('busy', { status: 429, headers: { 'retry-after': '1' } });
+
+  it('is asked again after the time it says, within the budget, and then speaks', async () => {
+    const fetchSpy = jest
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(busy())
+      .mockResolvedValueOnce(streamOf(Uint8Array.of(1, 2)));
+    const started = Date.now();
+    const pieces = await collect(
+      new SidecarSpeechSynthesizer().stream({ text: 'Hello there.', format: 'mulaw8k', signal: never }),
+    );
+    expect(pieces).toHaveLength(1);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(Date.now() - started).toBeGreaterThanOrEqual(900);
+  });
+
+  it('stops listening for an abort once the wait is over', async () => {
+    const added = jest.spyOn(EventTarget.prototype, 'addEventListener');
+    const removed = jest.spyOn(EventTarget.prototype, 'removeEventListener');
+    jest
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(busy())
+      .mockResolvedValueOnce(streamOf(Uint8Array.of(1, 2)));
+    await collect(new SidecarSpeechSynthesizer().stream({ text: 'Hello there.', format: 'mulaw8k', signal: never }));
+    const waits = added.mock.calls.filter(([type, listener]) => type === 'abort' && typeof listener === 'function');
+    const handlers = waits.map(([, listener]) => listener);
+    const gone = removed.mock.calls.filter(([type]) => type === 'abort').map(([, listener]) => listener);
+    expect(handlers.some(handler => gone.includes(handler))).toBe(true);
+  });
+
+  it('gives up when it says to wait longer than the budget allows', async () => {
+    const fetchSpy = jest
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response('busy', { status: 429, headers: { 'retry-after': '60' } }));
+    await expect(
+      collect(new SidecarSpeechSynthesizer().stream({ text: 'Hello there.', format: 'mulaw8k', signal: never })),
+    ).rejects.toThrow('429');
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('the voice service health check', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  const answering = (body: unknown) =>
+    jest.spyOn(globalThis, 'fetch').mockImplementation(() => Promise.resolve(Response.json(body)));
+
+  it('is healthy once the model is loaded', async () => {
+    answering({ status: 'ok', model_loaded: true });
+    await expect(probeTtsHealth()).resolves.toBe(true);
+  });
+
+  it('tells down, too old to check exact speech, and ready apart', async () => {
+    answering({ status: 'ok', model_loaded: false });
+    await expect(readTtsHealth()).resolves.toBe('down');
+    jest.restoreAllMocks();
+    answering({ status: 'ok', model_loaded: true });
+    await expect(readTtsHealth()).resolves.toBe('no_exact');
+    jest.restoreAllMocks();
+    answering({ status: 'ok', model_loaded: true, exact: true });
+    await expect(readTtsHealth()).resolves.toBe('ready');
   });
 });

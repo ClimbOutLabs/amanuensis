@@ -26,6 +26,8 @@ const CASES = [
     results: ['Quick health check'],
     // The "You were on" line is for Iris, so it only shows inside the "What Iris was told" disclosure.
     told: 'You were on: Chat.',
+    // A next step done in Settings opens that section when pressed.
+    step: 'Open Settings, Connectors and connect your email and your calendar there.',
   },
   {
     name: 'health check fails',
@@ -127,6 +129,16 @@ test("Help, I'm stuck opens the help chat in every case, never a blank page", { 
           }),
           fullPage: true,
         });
+        if ('step' in testCase) {
+          await results.getByRole('button', { name: testCase.step }).click();
+          await page
+            .getByRole('heading', { name: 'Connectors', exact: true })
+            .waitFor({ state: 'visible', timeout: RENDER_TIMEOUT_MS });
+          await page.screenshot({
+            path: await featureShotPath({ surface: 'screen:help-chat', step: 'step-opens-settings' }),
+            fullPage: true,
+          });
+        }
       } finally {
         await page.close();
       }

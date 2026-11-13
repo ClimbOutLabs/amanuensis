@@ -23,7 +23,7 @@ import {
   type VoiceTranscription,
 } from '../schemas/voice';
 import { VOICE_SOCKET_PROTOCOL, VOICE_STREAM_PATH } from '../voice/browserTransport';
-import { SpeechRateLimiter, speechLimiter as sharedSpeechLimiter } from '../voice/speechRateLimit';
+import { SpeechRateLimiter, speechLimiter as sharedSpeechLimiter, speechPersonKey } from '../voice/speechRateLimit';
 import { speechSecretHeaders } from '../voice/speechSecret';
 import { isVoiceAvailable, probeSttHealth } from '../voice/sttAvailability';
 import { forwardToSidecar } from '../voice/sttClient';
@@ -246,7 +246,7 @@ export function createVoiceRouter(deps: VoiceRouterDeps) {
       });
     }
     const { tenant_id, subject } = deps.resolveRequestContext(c);
-    const permit = speechLimiter.acquire(`${tenant_id}:${subject.id}`);
+    const permit = speechLimiter.acquire(speechPersonKey({ tenantId: tenant_id, personId: subject.id }));
     if (!permit.allowed) {
       deps.logger.info('voice speak rejected', { reason: 'rate_limited' });
       c.header('Retry-After', String(permit.retryAfterSeconds));
@@ -345,7 +345,7 @@ export function createVoiceRouter(deps: VoiceRouterDeps) {
     const request = c.req.valid('json');
     const { tenant_id, subject } = deps.resolveRequestContext(c);
     // Counted per ask, not per open line: each ask costs a request to the chat and a model check.
-    const permit = connectLimiter.acquire(`${tenant_id}:${subject.id}`);
+    const permit = connectLimiter.acquire(speechPersonKey({ tenantId: tenant_id, personId: subject.id }));
     if (!permit.allowed) {
       c.header('Retry-After', String(permit.retryAfterSeconds));
       return errorJson(c, {

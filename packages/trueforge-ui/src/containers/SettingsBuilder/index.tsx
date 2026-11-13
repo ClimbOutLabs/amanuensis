@@ -172,7 +172,7 @@ const TruefoundrySettingsBuilder = () => {
       // Not gated on a capability: memory is configured by pointing at a bank, so the section has
       // to be reachable while none is configured. It reads as off until one is.
       { id: 'memory', label: 'Memory', icon: 'box-archive' },
-      { id: 'themes', label: 'Themes', icon: 'palette' },
+      { id: 'themes', label: 'Appearance', icon: 'palette' },
     ];
     if (hasSkills) {
       baseSections.push({ id: 'skills', label: 'Skills', icon: 'lightbulb' });
