@@ -42,6 +42,7 @@ async function canChatAllow(
     effect: 'inspect',
     tier: 3,
     tier_reason: tierReason,
+    standing_grant_barred: false,
     ...extra,
   });
   const modelClient: ILLM = { create: jest.fn(() => toolCallStream()), createNonStream: jest.fn() };
