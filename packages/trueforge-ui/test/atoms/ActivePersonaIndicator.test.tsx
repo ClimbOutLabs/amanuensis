@@ -164,19 +164,6 @@ describe('ActivePersonaIndicator', () => {
     expect(words).not.toMatch(/\bagents?\b|specialist/i);
   });
 
-  it('moves keyboard focus to the current choice when the menu opens, and back on Escape', async () => {
-    renderIndicator({ getSessionPersona: async () => ZARA });
-    expect(await screen.findByTestId('active-persona')).toHaveTextContent('Zara');
-    const control = screen.getByTitle('Choose a persona');
-
-    fireEvent.click(control);
-    await waitFor(() => expect(screen.getByRole('menuitem', { name: 'Zara' })).toHaveFocus());
-
-    fireEvent.keyDown(document, { key: 'Escape' });
-    expect(screen.queryByRole('menu', { name: 'Who answers this chat' })).not.toBeInTheDocument();
-    expect(control).toHaveFocus();
-  });
-
   it('opens its menu fully inside the screen, even from a button near the bottom left', async () => {
     renderIndicator({ getSessionPersona: async () => null });
     const control = await screen.findByTitle('Choose a persona');

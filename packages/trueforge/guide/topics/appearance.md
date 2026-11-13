@@ -4,37 +4,44 @@ title: Appearance
 covers: settings:themes
 ---
 
-Make Aman easier on your eyes. Switch between light and dark in one click, or pick a color theme that suits you.
+Make Aman easier on your eyes. Switch between light and dark in two clicks, or pick a color theme that suits you.
 
-How to get there: Click **More** in the left bar, then **Settings**, then **Appearance**.
+How to get there: Click **More** in the left bar, then **Settings**, then **Themes**.
 
 === "Computer"
 
-    ![The Appearance page in Settings, with Color mode and the four themes](../../../../docs/screenshots/app/appearance-themes-desktop.png)
+    ![The Themes page in Settings, with Color mode and the four themes](../../../../docs/screenshots/app/appearance-themes-desktop.png)
 
 === "Phone"
 
-    ![The Appearance page in Settings, with Color mode and the four themes](../../../../docs/screenshots/app/appearance-themes-phone.png)
+    ![The Themes page in Settings, with Color mode and the four themes](../../../../docs/screenshots/app/appearance-themes-phone.png)
 
 ## Switch between light and dark
 
-On a computer, click the button at the top right of a chat, next to **Agent details**. In light mode it shows a moon: click it to switch to dark. In dark mode it shows a sun: click it to switch back to light.
+1. Click **More** at the bottom of the left bar.
+2. Under **Appearance**, click **Light**, **Dark** or **Match my computer**.
 
-The button is not shown on a phone, so the chat actions keep their room. On a phone, switch on the Appearance page instead.
+A check shows the one you use now. **Match my computer** follows your computer's own light or dark setting.
 
-![The light and dark button at the top of a chat, next to Agent details](../../../../docs/screenshots/app/appearance-light-dark-button-desktop.png)
+=== "Computer"
+
+    ![The More menu with Light, Dark and Match my computer under Appearance](../../../../docs/screenshots/app/appearance-more-menu-desktop.png)
+
+=== "Phone"
+
+    ![The More menu with Light, Dark and Match my computer under Appearance](../../../../docs/screenshots/app/appearance-more-menu-phone.png)
 
 ## Choose a color theme
 
-1. Click **More** in the left bar, then **Settings**, then **Appearance**.
+1. Click **More** in the left bar, then **Settings**, then **Themes**. The page is called **Appearance**.
 2. Under **Theme**, click **Paper**, **Forest**, **Midnight** or **High contrast**. The theme you use now is marked **Active**.
-3. Under **Color mode**, click **Light**, **Dark** or **System**. **System** follows your computer's own light or dark setting.
+3. Under **Color mode**, click **Light**, **Dark** or **System**. **System** follows your computer, like **Match my computer** does.
 
 Light and dark work with every theme. **High contrast** gives the clearest text.
 
 ## Make the words in your chats bigger or smaller
 
-1. Click **More** in the left bar, then **Settings**, then **Appearance**.
+1. Click **More** in the left bar, then **Settings**, then **Themes**.
 2. Under **Chat text size**, click **Smaller**, **Default**, **Larger** or **Largest**.
 
 Only your chats and the message box change size. The rest of the app stays as it was. Your choice stays until you change it.

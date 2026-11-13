@@ -364,10 +364,7 @@ describe('SidebarLayout More menu', () => {
 
     // Report a bug renders only when the bug-report feature is wired, as it does on main.
     expect(names).toEqual(expect.arrayContaining(['Start new agent', 'Settings']));
-    // Light and dark is not in this menu: it has its own button on the chat header.
-    expect(within(menu).queryByRole('group', { name: 'Appearance' })).toBeNull();
-    expect(names).not.toContain('Light');
-    expect(names).not.toContain('Dark');
+    expect(within(menu).getByRole('group', { name: 'Appearance' })).toBeInTheDocument();
     for (const railItem of ['Chats', 'New chat', 'Spaces']) {
       expect(names).not.toContain(railItem);
     }
@@ -453,8 +450,8 @@ describe('SidebarLayout notifications bell', () => {
   it('shows the bell once, in the rail under the brand and not in a header, and opens its panel from there', async () => {
     renderSidebarLayoutWithBell();
 
-    const bell = await screen.findByRole('button', { name: 'For you, 1 unread' });
-    expect(screen.getAllByRole('button', { name: /For you/ })).toHaveLength(1);
+    const bell = await screen.findByRole('button', { name: 'Notifications, 1 unread' });
+    expect(screen.getAllByRole('button', { name: /Notifications/ })).toHaveLength(1);
 
     const nav = screen.getByRole('navigation', { name: 'Sidebar' });
     const rail = nav.closest('aside');
@@ -467,14 +464,14 @@ describe('SidebarLayout notifications bell', () => {
     expect(bell.compareDocumentPosition(chats) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
     fireEvent.click(bell);
-    const panel = await screen.findByRole('dialog', { name: 'For you' });
+    const panel = await screen.findByRole('dialog', { name: 'Notifications' });
     expect(panel).toHaveClass('left-0');
     expect(panel).not.toHaveClass('right-0');
     expect(within(panel).getByRole('button', { name: /Call the dentist/ })).toBeInTheDocument();
     expect(within(panel).getByRole('button', { name: 'Mark all seen' })).toBeInTheDocument();
 
     fireEvent.keyDown(window, { key: 'Escape' });
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'For you' })).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Notifications' })).not.toBeInTheDocument());
   });
 
   it('shows the unread count on the Navigation button, so a phone sees it before opening the drawer', async () => {
@@ -491,8 +488,8 @@ describe('SidebarLayout notifications bell', () => {
     fireEvent.click(await screen.findByRole('button', { name: /Navigation/ }));
     const drawer = await screen.findByRole('dialog', { name: 'Navigation' });
 
-    fireEvent.click(within(drawer).getByRole('button', { name: 'For you, 1 unread' }));
-    const panel = await within(drawer).findByRole('dialog', { name: 'For you' });
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Notifications, 1 unread' }));
+    const panel = await within(drawer).findByRole('dialog', { name: 'Notifications' });
     expect(screen.getByRole('dialog', { name: 'Navigation' })).toBeInTheDocument();
 
     // Marking everything seen is not a navigation either: the drawer stays open.
@@ -507,11 +504,11 @@ describe('SidebarLayout notifications bell', () => {
     fireEvent.click(await screen.findByRole('button', { name: /Navigation/ }));
     const drawer = await screen.findByRole('dialog', { name: 'Navigation' });
 
-    fireEvent.click(within(drawer).getByRole('button', { name: 'For you, 1 unread' }));
-    const panel = await within(drawer).findByRole('dialog', { name: 'For you' });
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Notifications, 1 unread' }));
+    const panel = await within(drawer).findByRole('dialog', { name: 'Notifications' });
     fireEvent.click(within(panel).getByRole('button', { name: /Call the dentist/ }));
 
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Navigation' })).not.toBeInTheDocument());
-    expect(screen.queryByRole('dialog', { name: 'For you' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Notifications' })).not.toBeInTheDocument();
   });
 });

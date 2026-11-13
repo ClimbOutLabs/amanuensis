@@ -7,8 +7,9 @@ export interface HelpState {
     appVersion: string;
     /** The build this server runs, or null when the build was not stamped. */
     buildRef: string | null;
-    /** Each connector set up here, the Google login among them, whether it answered, and why not. */
+    /** Each connector, whether it answered, and why not. */
     connectors: TrueForge.HelpConnectorState[];
+    googleLogin: TrueForge.HelpGoogleLoginState;
     /** Whether the sandbox that reads files and runs code is ready. */
     sandboxReady: boolean;
     /** The first-run setup steps and whether each is done. */

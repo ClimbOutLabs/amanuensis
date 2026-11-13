@@ -23,7 +23,6 @@ import {
 import { cn } from '../atoms/lib/cn.js';
 import { useIsMobile } from '../atoms/lib/useIsMobile.js';
 import { useLightDismiss } from '../atoms/lib/useLightDismiss.js';
-import { LightDarkToggleButton } from '../atoms/LightDarkToggleButton.js';
 import { NamedAgentHeaderLabel } from '../atoms/NamedAgentHeaderLabel.js';
 import { PageHeader } from '../atoms/PageHeader.js';
 import { DropdownMenu } from '../atoms/primitives/DropdownMenu.js';
@@ -397,7 +396,6 @@ export function SidebarLayout({ className }: { className?: string }) {
           end={
             !overlayOpen ? (
               <>
-                <LightDarkToggleButton />
                 <AgentDetailsToggleButton />
                 <SaveAgentButton />
               </>

@@ -44,11 +44,7 @@ export function fitMenuToScreen({
   };
 }
 
-/**
- * Fixed-position style that keeps an open menu on screen and beside its button. It re-measures every
- * frame while open, because the page can move the button without a scroll or resize (the composer
- * shifts as rows around it appear), and a menu placed from a stale measurement floats away from it.
- */
+/** Fixed-position style that keeps an open menu on screen, kept current as the page scrolls or resizes. */
 export function useFitOnScreen({
   open,
   anchorRef,
@@ -66,27 +62,24 @@ export function useFitOnScreen({
       setStyle(null);
       return;
     }
-    let frame = 0;
-    let last = '';
     const update = () => {
       const anchor = anchorRef.current?.getBoundingClientRect();
-      if (anchor !== undefined) {
-        const placement = fitMenuToScreen({
-          anchor,
-          viewport: { width: window.innerWidth, height: window.innerHeight },
-          width,
-          height,
-        });
-        const key = JSON.stringify(placement);
-        if (key !== last) {
-          last = key;
-          setStyle({ position: 'fixed', ...placement, overflowY: 'auto' });
-        }
-      }
-      frame = window.requestAnimationFrame(update);
+      if (anchor === undefined) return;
+      const placement = fitMenuToScreen({
+        anchor,
+        viewport: { width: window.innerWidth, height: window.innerHeight },
+        width,
+        height,
+      });
+      setStyle({ position: 'fixed', ...placement, overflowY: 'auto' });
     };
     update();
-    return () => window.cancelAnimationFrame(frame);
+    window.addEventListener('resize', update);
+    window.addEventListener('scroll', update, true);
+    return () => {
+      window.removeEventListener('resize', update);
+      window.removeEventListener('scroll', update, true);
+    };
   }, [open, anchorRef, width, height]);
   return style;
 }

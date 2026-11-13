@@ -1,4 +1,3 @@
-import type { AgentCapability } from '../../../src/core/capabilities/AgentCapability';
 import {
   currentDateTime,
   GET_CURRENT_DATETIME_TOOL_NAME,
@@ -57,13 +56,11 @@ function threadFor({
   sandbox,
   withheldTools,
   guideSearchToolSet,
-  capabilities = [],
 }: {
   readOnly: boolean;
   sandbox?: Sandbox | undefined;
   withheldTools?: readonly string[] | undefined;
   guideSearchToolSet?: IToolSet | undefined;
-  capabilities?: readonly AgentCapability[];
 }) {
   const modelClient = {
     create: jest.fn().mockImplementation(() => textReplyStream('ok')),
@@ -91,7 +88,7 @@ function threadFor({
     currentContextUsage: undefined,
     preComputedCompletion: undefined,
     sandbox,
-    capabilities: [currentDateTime({ tracing: NOOP_AGENT_TRACING }), ...capabilities],
+    capabilities: [currentDateTime({ tracing: NOOP_AGENT_TRACING })],
     capabilityState: undefined,
     toolCallMemo: undefined,
     turnToolCallLedger: undefined,
@@ -171,38 +168,5 @@ describe('AgentThread read-only definitions', () => {
     expect(requests).toContain(`"name":"${SANDBOX_EXEC_TOOL_NAME}"`);
     expect(requests).toContain(`"name":"${SANDBOX_RUN_CODE_TOOL_NAME}"`);
     expect(requests).toContain(GET_CURRENT_DATETIME_TOOL_NAME);
-  });
-
-  describe('capability instructions', () => {
-    const TOOL_GUIDANCE = 'Call the setup tool to lead the person through the steps.';
-    const CONTEXT = 'The person prefers short answers.';
-    const capabilities: AgentCapability[] = [
-      {
-        systemToolSets: [guideSearchToolSet()],
-        instructionBuilders: [builder => builder.addSection('setup-guidance', TOOL_GUIDANCE)],
-      },
-      {
-        systemToolSets: [guideSearchToolSet()],
-        bundle: 'web',
-        instructionBuilders: [builder => builder.addSection('bundled-guidance', `Bundled: ${TOOL_GUIDANCE}`)],
-      },
-      { instructionBuilders: [builder => builder.addSection('person-context', CONTEXT)] },
-    ];
-
-    it('sends a read-only definition no instructions from a capability whose tools it does not get', async () => {
-      const { modelClient, orchestrator } = threadFor({ readOnly: true, capabilities });
-      await runTurn({ orchestrator, sendBatch: [{ type: EventType.USER_MESSAGE, content: 'hello' }] });
-      const requests = JSON.stringify(llmCreateInputs(modelClient));
-      expect(requests).not.toContain(TOOL_GUIDANCE);
-      expect(requests).toContain(CONTEXT);
-    });
-
-    it('sends those instructions to a definition that is not read-only, so the check above is not vacuous', async () => {
-      const { modelClient, orchestrator } = threadFor({ readOnly: false, capabilities });
-      await runTurn({ orchestrator, sendBatch: [{ type: EventType.USER_MESSAGE, content: 'hello' }] });
-      const requests = JSON.stringify(llmCreateInputs(modelClient));
-      expect(requests).toContain(TOOL_GUIDANCE);
-      expect(requests).toContain(CONTEXT);
-    });
   });
 });

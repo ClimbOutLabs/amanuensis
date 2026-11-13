@@ -1,8 +1,7 @@
 'use client';
 
 import { useTrueFoundryAgentSpec, useTrueFoundryUpdateAgentSpec } from '@truefoundry/assistant-ui-runtime';
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 
 import { connectorOffKey } from '@truefoundry/trueforge-core/core/connectors/chatConnectorChoice';
 import { useOptionalWorkOnRepoPanel, useWorkOnRepoAvailable } from '../../containers/workOnRepoPanel.js';
@@ -24,7 +23,6 @@ import { isDefaultOnConnector } from './defaultOnConnectors.js';
 import { DraftCapabilitiesPanel } from './DraftCapabilitiesPanel.js';
 import { useDraftCatalog } from './DraftCatalogProvider.js';
 import type { DraftComposerAction } from './DraftComposerActionsMenu.js';
-import { themePortalRoot } from './DraftModelMenuPortal.js';
 import { DraftToolPicker, draftMountsFromSpec, type DraftMount } from './DraftToolPicker.js';
 import { skillFamilyId } from './SkillVersionSelector.js';
 type AttachTab = 'connectors' | 'skills' | 'capabilities';
@@ -47,10 +45,7 @@ export type DraftCompositeSelectorProps = {
 
 /** The Add-ons picker's size before it is fitted to the screen, in CSS pixels. */
 const PICKER_WIDTH = 448;
-const PICKER_HEIGHT = 416;
-/** Keeps a short list from shrinking the picker, so switching tabs does not make it jump. */
-const PICKER_MIN_HEIGHT = '20rem';
-const COMPOSER_SELECTOR = '[data-slot="aui_composer-root"]';
+const PICKER_HEIGHT = 352;
 
 export function DraftCompositeSelector({ disabled, isRunning, onAttach }: DraftCompositeSelectorProps) {
   const DraftComposerActionsMenu = useSlot('DraftComposerActionsMenu');
@@ -71,18 +66,12 @@ export function DraftCompositeSelector({ disabled, isRunning, onAttach }: DraftC
   localSkillsRef.current = localSkills;
 
   const containerRef = useRef<HTMLDivElement>(null);
-  const pickerRef = useRef<HTMLDivElement>(null);
   const menuId = useId();
   const isMobile = useIsMobile();
   const compactLayout = useCompactLayout();
-  // The picker sits against the whole composer box, so it never covers what the person is typing.
-  const composerRef = useRef<HTMLElement | null>(null);
-  useLayoutEffect(() => {
-    composerRef.current = containerRef.current?.closest<HTMLElement>(COMPOSER_SELECTOR) ?? containerRef.current;
-  });
   const pickerStyle = useFitOnScreen({
     open: open && !isMobile && !compactLayout,
-    anchorRef: composerRef,
+    anchorRef: containerRef,
     width: PICKER_WIDTH,
     height: PICKER_HEIGHT,
   });
@@ -152,16 +141,12 @@ export function DraftCompositeSelector({ disabled, isRunning, onAttach }: DraftC
     // Flush on pointer or keyboard focus leaving the picker so Save Agent (and
     // other outside actions) see the latest local connector/skill toggles.
     const handler = (e: Event) => {
-      const target = e.target;
-      if (!(target instanceof Node)) return;
-      if (containerRef.current?.contains(target) || pickerRef.current?.contains(target)) return;
-      setOpenAndFlush(false);
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpenAndFlush(false);
+      }
     };
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
-      setOpenAndFlush(false);
-      // The picker is rendered away from its button, so hand focus back to Add.
-      containerRef.current?.querySelector<HTMLButtonElement>('button')?.focus();
+      if (e.key === 'Escape') setOpenAndFlush(false);
     };
     document.addEventListener('mousedown', handler);
     document.addEventListener('focusin', handler);
@@ -174,14 +159,6 @@ export function DraftCompositeSelector({ disabled, isRunning, onAttach }: DraftC
   }, [open, setOpenAndFlush]);
 
   useEffect(() => () => clearFlushTimer(), [clearFlushTimer]);
-
-  // The picker is rendered at the end of the page, away from Add, so Tab would never reach it.
-  // Move focus to its open tab once it is placed.
-  const pickerPlaced = pickerStyle !== null;
-  useEffect(() => {
-    if (!open || !pickerPlaced) return;
-    pickerRef.current?.querySelector<HTMLButtonElement>('button[aria-pressed="true"]')?.focus();
-  }, [open, pickerPlaced]);
 
   const toggleConnector = (connector: ConnectorState) => {
     const selected = selectedMcp.some(mount => mount.id === connector.id);
@@ -274,7 +251,6 @@ export function DraftCompositeSelector({ disabled, isRunning, onAttach }: DraftC
                 'text-text-secondary flex flex-1 items-center justify-center gap-1.5 px-2 py-2.5 text-xs font-medium',
                 active && 'text-primary-button-bg border-b-2 border-primary-button-bg',
               )}
-              aria-pressed={active}
               onClick={() => setTab(t.id)}
             >
               <Icon name={t.icon} className="size-3.5" />
@@ -351,30 +327,20 @@ export function DraftCompositeSelector({ disabled, isRunning, onAttach }: DraftC
             {content}
           </BottomSheet>
         ) : (
-          // Portaled to the theme root: the chat area is a size container, which would otherwise
-          // trap this fixed picker inside it and push it away from the composer.
-          createPortal(
-            <div
-              ref={pickerRef}
-              id={menuId}
-              role="dialog"
-              aria-label="Add to composer"
-              // Fitted to the screen: it opens on the side with more room and scrolls inside.
-              style={
-                pickerStyle === null
-                  ? { visibility: 'hidden' }
-                  : {
-                      ...pickerStyle,
-                      minHeight: `min(${PICKER_MIN_HEIGHT}, ${String(pickerStyle.maxHeight)}px)`,
-                      overflowY: 'hidden',
-                    }
-              }
-              className="aui-popup-enter bg-card-bg text-text-primary z-50 flex flex-col overflow-hidden rounded-lg border border-border shadow-lg"
-            >
-              {content}
-            </div>,
-            themePortalRoot(containerRef.current),
-          )
+          <div
+            id={menuId}
+            role="dialog"
+            aria-label="Add to composer"
+            // Fitted to the screen: it opens on the side with more room and scrolls inside.
+            style={
+              pickerStyle === null
+                ? { visibility: 'hidden' }
+                : { ...pickerStyle, height: pickerStyle.maxHeight, overflowY: 'hidden' }
+            }
+            className="aui-popup-enter bg-card-bg text-text-primary z-50 flex flex-col overflow-hidden rounded-lg border border-border shadow-lg"
+          >
+            {content}
+          </div>
         )
       ) : null}
     </div>

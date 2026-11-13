@@ -13,21 +13,13 @@ describe("HelpClient", () => {
             data: {
                 checked_at: "checked_at",
                 host_report: { checked_at: "checked_at", message: "message", next_step: "next_step", state: "ok" },
-                items: [
-                    {
-                        id: "id",
-                        message: "message",
-                        name: "name",
-                        next_step: null,
-                        settings_section: null,
-                        status: "pass",
-                    },
-                ],
+                items: [{ id: "id", message: "message", name: "name", next_step: null, status: "pass" }],
                 model_ready: true,
                 state: {
                     app_version: "app_version",
                     build_ref: "build_ref",
                     connectors: [{ connected: true, last_error: null, name: "name" }],
+                    google_login: "answered",
                     sandbox_ready: true,
                     setup_steps: [{ done: true, id: "model" }],
                 },
@@ -58,7 +50,6 @@ describe("HelpClient", () => {
                         message: "message",
                         name: "name",
                         nextStep: null,
-                        settingsSection: null,
                         status: "pass",
                     },
                 ],
@@ -73,6 +64,7 @@ describe("HelpClient", () => {
                             name: "name",
                         },
                     ],
+                    googleLogin: "answered",
                     sandboxReady: true,
                     setupSteps: [
                         {

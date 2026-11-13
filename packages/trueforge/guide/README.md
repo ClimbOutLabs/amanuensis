@@ -49,7 +49,8 @@ Every web address a page names must be on `scripts/external-hosts.allowlist.json
 When the button opens, the app calls `GET /api/v1/help/health-check` and hands Iris its result in a hidden first message. Its `state` holds what she needs to say the one thing to do next:
 
 - `setup_steps`: whether a model is chosen (`model`) and your name is saved (`about_you`).
-- `connectors`: each connector set up here, whether it answered, and its `last_error` in plain words. The built-in Google login is listed as the Google connector, and only once a login exists.
+- `connectors`: each connector, whether it answered, and its `last_error` in plain words.
+- `google_login`: whether the built-in Google login answered.
 - `sandbox_ready`: whether the sandbox can read files and run code.
 - `app_version` and `build_ref`: the version this server runs.
 

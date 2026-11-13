@@ -9,7 +9,7 @@ const SETTINGS_SECTION_NAMES: Record<SettingsSection, string> = {
   skills: 'Skills',
   sandbox: 'Sandbox',
   personalization: 'Personalization',
-  themes: 'Appearance',
+  themes: 'Themes',
   permissions: 'Permissions',
   audit: 'Audit',
   'reach-me': 'Reach me',

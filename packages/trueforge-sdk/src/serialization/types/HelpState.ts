@@ -4,6 +4,7 @@ import type * as TrueForge from "../../api/index.js";
 import * as core from "../../core/index.js";
 import type * as serializers from "../index.js";
 import { HelpConnectorState } from "./HelpConnectorState.js";
+import { HelpGoogleLoginState } from "./HelpGoogleLoginState.js";
 import { HelpSetupStep } from "./HelpSetupStep.js";
 
 export const HelpState: core.serialization.ObjectSchema<serializers.HelpState.Raw, TrueForge.HelpState> =
@@ -11,6 +12,7 @@ export const HelpState: core.serialization.ObjectSchema<serializers.HelpState.Ra
         appVersion: core.serialization.property("app_version", core.serialization.string()),
         buildRef: core.serialization.property("build_ref", core.serialization.string().nullable()),
         connectors: core.serialization.list(HelpConnectorState),
+        googleLogin: core.serialization.property("google_login", HelpGoogleLoginState),
         sandboxReady: core.serialization.property("sandbox_ready", core.serialization.boolean()),
         setupSteps: core.serialization.property("setup_steps", core.serialization.list(HelpSetupStep)),
     });
@@ -20,6 +22,7 @@ export declare namespace HelpState {
         app_version: string;
         build_ref?: string | null;
         connectors: HelpConnectorState.Raw[];
+        google_login: HelpGoogleLoginState.Raw;
         sandbox_ready: boolean;
         setup_steps: HelpSetupStep.Raw[];
     }

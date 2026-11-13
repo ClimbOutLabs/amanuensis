@@ -2,6 +2,7 @@
 import { act, render, renderHook, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { ShellActions } from '@/atoms/ShellActions.js';
 import { WelcomeScreen } from '@/atoms/WelcomeScreen.js';
 import { BrandLogo } from '@/theme/brand.js';
 import { ThemeProvider, useBrand, useTheme } from '@/theme/ThemeProvider.js';
@@ -395,10 +396,12 @@ describe('ThemeProvider', () => {
     render(
       <ThemeProvider theme={{ defaultMode: 'light' }}>
         <ModeProbe />
+        <ShellActions />
       </ThemeProvider>,
     );
 
     expect(screen.getByTestId('mode')).toHaveTextContent('light');
+    expect(screen.getByRole('button', { name: 'Appearance' })).toBeInTheDocument();
   });
 
   it('lets a stored preference win over defaultMode', () => {

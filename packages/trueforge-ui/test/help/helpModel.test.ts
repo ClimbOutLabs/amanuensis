@@ -13,21 +13,13 @@ const CHECK: HelpHealthCheck = {
   checked_at: '2026-10-21T09:00:00Z',
   model_ready: true,
   items: [
-    {
-      id: 'model',
-      name: 'Your model',
-      status: 'pass',
-      message: 'The model answered.',
-      next_step: null,
-      settings_section: 'models',
-    },
+    { id: 'model', name: 'Your model', status: 'pass', message: 'The model answered.', next_step: null },
     {
       id: 'connectors',
       name: 'Connectors',
       status: 'fail',
       message: 'These connectors did not answer: notion.',
       next_step: 'Open Settings, Connectors and check each one.',
-      settings_section: 'connectors',
     },
   ],
   host_report: { state: 'ok', checked_at: '2026-10-20T08:30:00Z', message: null, next_step: null },
@@ -37,6 +29,7 @@ const CHECK: HelpHealthCheck = {
       { id: 'about_you', done: false },
     ],
     connectors: [],
+    google_login: 'not_set_up',
     sandbox_ready: true,
     app_version: '1.4.0',
     build_ref: null,
@@ -54,9 +47,7 @@ describe('buildIrisHelpMessage', () => {
     expect(message.startsWith('Iris, ')).toBe(true);
     expect(message).toContain('Where are you stuck?');
     expect(message).toContain('- Your model: ok. The model answered.');
-    expect(message).toContain(
-      '- Connectors: failed. These connectors did not answer: notion. Open Settings, Connectors and check each one.',
-    );
+    expect(message).toContain('- Connectors: failed. These connectors did not answer: notion.');
     expect(message).toContain('You were on: Settings, Connectors.');
     expect(message).toContain('Last error: Request failed (500): The connector did not answer.');
   });
@@ -71,6 +62,7 @@ describe('buildIrisHelpMessage', () => {
             { name: 'linear', connected: true, last_error: null },
             { name: 'notion', connected: false, last_error: 'It did not answer.' },
           ],
+          google_login: 'needs_reconnect',
           sandbox_ready: false,
           build_ref: 'abc1234',
         },
@@ -81,6 +73,7 @@ describe('buildIrisHelpMessage', () => {
 
     expect(message).toContain('State:\n- setup_steps: model done, about_you not done');
     expect(message).toContain('- connectors: linear connected; notion not connected, last_error: It did not answer.');
+    expect(message).toContain('- google_login: needs_reconnect');
     expect(message).toContain('- sandbox_ready: no');
     expect(message).toContain('- app_version: 1.4.0 (build abc1234)');
   });
@@ -144,23 +137,9 @@ describe('buildIrisHelpMessage', () => {
 describe('sortHelpItems', () => {
   it('keeps the model first even when another line is failing', () => {
     const items: HelpHealthItem[] = [
-      {
-        id: 'connectors',
-        name: 'Connectors',
-        status: 'fail',
-        message: 'x',
-        next_step: null,
-        settings_section: 'connectors',
-      },
-      {
-        id: 'model',
-        name: 'Your model',
-        status: 'fail',
-        message: 'No model is connected.',
-        next_step: null,
-        settings_section: 'models',
-      },
-      { id: 'sandbox', name: 'Sandbox', status: 'warn', message: 'y', next_step: null, settings_section: 'sandbox' },
+      { id: 'connectors', name: 'Connectors', status: 'fail', message: 'x', next_step: null },
+      { id: 'model', name: 'Your model', status: 'fail', message: 'No model is connected.', next_step: null },
+      { id: 'sandbox', name: 'Sandbox', status: 'warn', message: 'y', next_step: null },
     ];
 
     expect(sortHelpItems(items).map(item => item.id)).toEqual(['model', 'connectors', 'sandbox']);

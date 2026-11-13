@@ -20,7 +20,6 @@ How to get there: Click **Help, I'm stuck** at the top of the screen. It shows o
 
 1. Click **Help, I'm stuck** at the top of the screen.
 2. A new chat opens. The guide checks Aman for a few seconds and tells you what it found.
-   When a problem is fixed in Settings, click its next step to go straight to the right Settings page.
 3. Click the choice that fits: **Setting up a model**, **Connecting email or calendar**, **An approval card**, **Something went wrong** or **Something else**.
 4. Or type your question in the box, then click **Send message**.
 

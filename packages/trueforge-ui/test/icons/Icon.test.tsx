@@ -43,10 +43,10 @@ describe('Icon', () => {
     expect(icon).toHaveAttribute('height', '2rem');
   });
 
-  it('renders the palette icon used by the Appearance settings section', () => {
-    const { container } = render(<Icon name="palette" aria-label="Appearance" />);
+  it('renders the palette icon used by the Themes settings section', () => {
+    const { container } = render(<Icon name="palette" aria-label="Themes" />);
 
-    const icon = screen.getByRole('img', { name: 'Appearance' });
+    const icon = screen.getByRole('img', { name: 'Themes' });
     expect(icon).toHaveClass('lucide-palette');
     expect(container.querySelector('svg')).toBe(icon);
   });

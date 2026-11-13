@@ -21,17 +21,11 @@ jobs:
       contents: read
       pull-requests: read
 
-  obsidian-notes:
-    name: Obsidian notes
-    uses: ./.github/workflows/obsidian-notes.yml
-    permissions:
-      contents: read
-
   # One issue tracks a failing nightly run: opened on the first failure, added to while it keeps
   # failing, closed on the next pass. Runs started by hand on another branch report nothing.
   report:
     name: Report
-    needs: [suites, obsidian-notes]
+    needs: suites
     if: always() && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -52,5 +46,5 @@ jobs:
       - name: Open, update or close the nightly issue
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          NIGHTLY_RESULT: ${{ contains(needs.*.result, 'failure') && 'failure' || contains(needs.*.result, 'cancelled') && 'cancelled' || 'success' }}
+          NIGHTLY_RESULT: ${{ needs.suites.result }}
         run: npm run nightly:report

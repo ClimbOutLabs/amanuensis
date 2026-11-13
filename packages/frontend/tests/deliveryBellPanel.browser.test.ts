@@ -23,7 +23,7 @@ const VIEWPORTS = [
 
 /** Where the open panel lies against the window, so a failure names the side it ran off. */
 async function panelOffScreen(page: Page): Promise<string[]> {
-  const panel = page.getByRole('dialog', { name: 'For you' });
+  const panel = page.getByRole('dialog', { name: 'Notifications' });
   await panel.waitFor({ state: 'visible', timeout: FIRST_LOAD_TIMEOUT_MS });
   const box = await panel.boundingBox();
   if (box === null) return ['the panel has no box on the screen'];

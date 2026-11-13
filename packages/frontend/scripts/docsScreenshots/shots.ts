@@ -39,8 +39,6 @@ export interface Shot {
    * keep the whole window.
    */
   crop?: readonly string[];
-  /** Only the computer size, for a screen a phone does not show. */
-  computerOnly?: boolean;
 }
 
 const SETTINGS_PANEL = ['[role="tabpanel"]'];
@@ -90,14 +88,12 @@ export const SHOTS: readonly Shot[] = [
     steps: [settingsTab('Skills'), enableSkill('algorithmic-art')],
     crop: SETTINGS_PANEL,
   },
-  { name: 'appearance-themes', world: 'full', steps: [settingsTab('Appearance')], crop: SETTINGS_PANEL },
+  { name: 'appearance-themes', world: 'full', steps: [settingsTab('Themes')], crop: SETTINGS_PANEL },
   {
-    name: 'appearance-light-dark-button',
+    name: 'appearance-more-menu',
     world: 'full',
-    steps: [openChat('dinner')],
-    crop: ['header:has(button[aria-label="Switch to dark"])'],
-    // A phone does not show the button.
-    computerOnly: true,
+    steps: [open('/'), openMoreMenu],
+    crop: ['button[aria-label="More"]', '[role="menu"]'],
   },
   { name: 'connect-mail-calendar-connectors', world: 'full', steps: [settingsTab('Connectors')], crop: SETTINGS_PANEL },
   {

@@ -20,20 +20,11 @@ import { simpleCardCopy } from './cardCopy';
 import type { Tier3Card, Tier3SkillNetwork } from './tier';
 
 /**
- * A site name as a person reads it. Names are stored and matched in their coded form. When the
- * decoded name differs, both are shown, because a decoded name can mix alphabets to pass for a
- * familiar site while the coded form cannot.
+ * A site name as a person reads it. Names are stored and matched in their coded form, so an
+ * international name shows decoded on the card while the question itself keeps the coded form.
  */
 function displaySiteName(host: string): string {
-  const decoded = domainToUnicode(host);
-  return decoded === '' || decoded === host.toLowerCase() ? host : `${decoded} (${host})`;
-}
-
-/** Points the reader at the coded name when a card shows one, so a look-alike name is caught. */
-function codedNameNote(hosts: readonly string[]): string {
-  return hosts.some(host => displaySiteName(host) !== host)
-    ? ' The name in brackets is how the site is really written. Check it, because letters from another alphabet can make a site look like a familiar one.'
-    : '';
+  return domainToUnicode(host);
 }
 
 /** The three answers a network card takes. */
@@ -76,7 +67,7 @@ export function buildSkillNetworkCard(input: {
     return {
       plain_what,
       copy: simpleCardCopy({ headline: plain_what, undo: null, reason: null }),
-      plain_why: `This skill names these sites as the ones it needs. It cannot reach any of them until you say yes.${codedNameNote(input.hosts)}`,
+      plain_why: 'This skill names these sites as the ones it needs. It cannot reach any of them until you say yes.',
       cannot_be_undone: null,
       why_asked_again: null,
       destination: sites,
@@ -93,7 +84,7 @@ export function buildSkillNetworkCard(input: {
   return {
     plain_what,
     copy: simpleCardCopy({ headline: plain_what, undo: null, reason: null }),
-    plain_why: `A command in this chat tried to reach ${sites}, which is not one of the sites approved for the skills in this chat, and the connection was refused. Aman cannot tell which skill, if any, made the attempt.${codedNameNote(input.hosts)}`,
+    plain_why: `A command in this chat tried to reach ${sites}, which is not one of the sites approved for the skills in this chat, and the connection was refused. Aman cannot tell which skill, if any, made the attempt.`,
     cannot_be_undone: null,
     why_asked_again: null,
     destination: sites,

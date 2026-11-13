@@ -2,12 +2,12 @@ import { AMAN_GUIDE_NAME } from '@truefoundry/trueforge-core/core/personas/guide
 import type {
   HelpApi,
   HelpConnectorState,
+  HelpGoogleLoginState,
   HelpHealthCheck,
   HelpHealthItem,
   HelpHealthStatus,
   HelpHostReport,
   HelpHostReportState,
-  HelpSettingsSection,
   HelpSetupStep,
   HelpState,
   Persona,
@@ -16,8 +16,8 @@ import type {
 const HEALTH_CHECK_URL = '/api/v1/help/health-check';
 const HEALTH_STATUSES: readonly HelpHealthStatus[] = ['pass', 'warn', 'fail', 'not_set_up'];
 const HOST_REPORT_STATES: readonly HelpHostReportState[] = ['ok', 'missing', 'invalid', 'stale'];
-const SETTINGS_SECTIONS: readonly HelpSettingsSection[] = ['models', 'connectors', 'sandbox'];
 const SETUP_STEP_IDS: readonly HelpSetupStep['id'][] = ['model', 'about_you'];
+const GOOGLE_LOGIN_STATES: readonly HelpGoogleLoginState[] = ['answered', 'needs_reconnect', 'no_answer', 'not_set_up'];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -40,8 +40,7 @@ function parseItem(value: unknown): HelpHealthItem | null {
     typeof value.name !== 'string' ||
     !isOneOf(value.status, HEALTH_STATUSES) ||
     typeof value.message !== 'string' ||
-    !isNullableString(value.next_step) ||
-    !(value.settings_section === null || isOneOf(value.settings_section, SETTINGS_SECTIONS))
+    !isNullableString(value.next_step)
   ) {
     return null;
   }
@@ -51,7 +50,6 @@ function parseItem(value: unknown): HelpHealthItem | null {
     status: value.status,
     message: value.message,
     next_step: value.next_step,
-    settings_section: value.settings_section,
   };
 }
 
@@ -99,6 +97,7 @@ function parseState(value: unknown): HelpState | null {
     !isRecord(value) ||
     !Array.isArray(value.setup_steps) ||
     !Array.isArray(value.connectors) ||
+    !isOneOf(value.google_login, GOOGLE_LOGIN_STATES) ||
     typeof value.sandbox_ready !== 'boolean' ||
     typeof value.app_version !== 'string' ||
     !isNullableString(value.build_ref)
@@ -113,6 +112,7 @@ function parseState(value: unknown): HelpState | null {
   return {
     setup_steps: setupSteps.filter((step): step is HelpSetupStep => step !== null),
     connectors: connectors.filter((connector): connector is HelpConnectorState => connector !== null),
+    google_login: value.google_login,
     sandbox_ready: value.sandbox_ready,
     app_version: value.app_version,
     build_ref: value.build_ref,

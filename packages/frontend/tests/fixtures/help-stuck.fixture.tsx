@@ -16,16 +16,7 @@ const iris = params.get('iris') ?? 'joined';
 const HEALTH_BODY = {
   checked_at: '2026-10-21T09:00:00Z',
   model_ready: health === 'ready',
-  items: [
-    {
-      id: 'mail_calendar',
-      name: 'Email and calendar',
-      status: 'not_set_up',
-      message: 'Email and calendar are not set up yet.',
-      next_step: 'Open Settings, Connectors and connect your email and your calendar there.',
-      settings_section: 'connectors',
-    },
-  ],
+  items: [],
   host_report: { state: 'ok', checked_at: '2026-10-21T08:55:00Z', message: null, next_step: null },
   state: {
     setup_steps: [
@@ -33,6 +24,7 @@ const HEALTH_BODY = {
       { id: 'about_you', done: false },
     ],
     connectors: [],
+    google_login: 'not_set_up',
     sandbox_ready: true,
     app_version: '1.4.0',
     build_ref: null,

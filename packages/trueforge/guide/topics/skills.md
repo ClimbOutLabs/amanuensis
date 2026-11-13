@@ -28,7 +28,7 @@ How to get there: Click **More** in the left bar, then **Settings**, then **Skil
 ## Use a skill in a chat
 
 1. In the chat, click **Add files and tools** beside the message box.
-2. Click **Add-ons**, then the **Skills** tab. The list opens just above the message box. If you have many skills, type in **Search skills** to find one.
+2. Click **Add-ons**, then the **Skills** tab.
 3. Select the skill.
 
 When a skill is on for a chat, Aman reads its instructions when the job comes up.
@@ -81,8 +81,6 @@ The first time a skill that names sites runs in a chat, a card asks if it may re
 - **Deny** turns them down. Aman does not ask about them again for that skill.
 
 If a skill tries a site it did not name, the connection is stopped and a card asks about that one site.
-
-Some site names use letters from other alphabets. The card then shows the name in brackets as it is really written, for example `pаypal.com (xn--pypal-4ve.com)`. Check that name before you answer, because such letters can make a site look like a familiar one.
 
 To change an answer later, open Settings, then Skills. A skill that names sites shows them there. Click **Remove network access** to take back an Always allow. Next to a site you allowed or turned down one by one, click **Clear** to take back that answer.
 

@@ -107,7 +107,6 @@ const expectedRuntimeExports: Array<keyof typeof sdk> = [
   'HistoryLoader',
   'HistoryLoaderContainer',
   'IS_CREATE_AGENT_METADATA_KEY',
-  'LightDarkToggleButton',
   'Icon',
   'ImplementationPlanGrantControls',
   'ImplementationPlanGrantProvider',

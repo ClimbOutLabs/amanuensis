@@ -4,7 +4,6 @@ import type * as TrueForge from "../../api/index.js";
 import * as core from "../../core/index.js";
 import type * as serializers from "../index.js";
 import { HelpHealthStatus } from "./HelpHealthStatus.js";
-import { HelpSettingsSection } from "./HelpSettingsSection.js";
 
 export const HelpHealthItem: core.serialization.ObjectSchema<serializers.HelpHealthItem.Raw, TrueForge.HelpHealthItem> =
     core.serialization.object({
@@ -12,7 +11,6 @@ export const HelpHealthItem: core.serialization.ObjectSchema<serializers.HelpHea
         message: core.serialization.string(),
         name: core.serialization.string(),
         nextStep: core.serialization.property("next_step", core.serialization.string().nullable()),
-        settingsSection: core.serialization.property("settings_section", HelpSettingsSection.nullable()),
         status: HelpHealthStatus,
     });
 
@@ -22,7 +20,6 @@ export declare namespace HelpHealthItem {
         message: string;
         name: string;
         next_step?: string | null;
-        settings_section?: HelpSettingsSection.Raw | null;
         status: HelpHealthStatus.Raw;
     }
 }
