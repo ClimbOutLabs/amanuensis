@@ -47,21 +47,55 @@ describe('buildSkillNetworkCard', () => {
     });
   });
 
-  it('shows an international name decoded on the card and keeps the coded form in the question', () => {
+  it('shows an international name decoded with its coded form beside it, and asks about the coded form', () => {
     const card = buildSkillNetworkCard({
       skill_name: 'ten-x',
       hosts: ['xn--mnchen-3ya.de'],
       reason: 'first_use',
     });
-    expect(card.plain_what).toBe('Let the ten-x skill reach münchen.de?');
-    expect(card.destination).toBe('münchen.de');
-    expect(card.destination_host).toBe('münchen.de');
+    expect(card.plain_what).toBe('Let the ten-x skill reach münchen.de (xn--mnchen-3ya.de)?');
+    expect(card.destination).toBe('münchen.de (xn--mnchen-3ya.de)');
+    expect(card.destination_host).toBe('münchen.de (xn--mnchen-3ya.de)');
+    expect(card.plain_why).toContain('The name in brackets is how the site is really written.');
     expect(card.skill_network).toEqual({
       skill_name: 'ten-x',
       hosts: ['xn--mnchen-3ya.de'],
       reason: 'first_use',
       code_pin: null,
     });
+  });
+
+  it('never shows a mixed-alphabet look-alike name without its coded form', () => {
+    // xn--pypal-4ve.com decodes to "pаypal.com" with a Cyrillic а: on its own it reads as a
+    // familiar site, so every place the card names it also carries the coded form.
+    const card = buildSkillNetworkCard({
+      skill_name: 'ten-x',
+      hosts: ['xn--pypal-4ve.com'],
+      reason: 'undeclared_host',
+    });
+    const shown = 'p\u0430ypal.com (xn--pypal-4ve.com)';
+    expect(card.plain_what).toBe(`Allow a connection to ${shown} in this chat?`);
+    expect(card.copy?.headline).toBe(card.plain_what);
+    expect(card.destination).toBe(shown);
+    expect(card.destination_host).toBe(shown);
+    expect(card.plain_why).toContain(`tried to reach ${shown},`);
+    expect(card.plain_why).toContain('The name in brackets is how the site is really written.');
+    expect(card.skill_network?.hosts).toEqual(['xn--pypal-4ve.com']);
+  });
+
+  it('shows a plain site name once, with no coded form and no note about it', () => {
+    const card = buildSkillNetworkCard({
+      skill_name: 'ten-x',
+      hosts: ['paypal.com', 'api.paypal.com'],
+      reason: 'first_use',
+    });
+    expect(card.plain_what).toBe('Let the ten-x skill reach paypal.com, api.paypal.com?');
+    expect(card.destination).toBe('paypal.com, api.paypal.com');
+    expect(card.plain_why).not.toContain('(');
+    expect(card.plain_why).not.toContain('brackets');
+    const single = buildSkillNetworkCard({ skill_name: 'ten-x', hosts: ['paypal.com'], reason: 'undeclared_host' });
+    expect(single.plain_what).toBe('Allow a connection to paypal.com in this chat?');
+    expect(single.destination_host).toBe('paypal.com');
   });
 });
 
