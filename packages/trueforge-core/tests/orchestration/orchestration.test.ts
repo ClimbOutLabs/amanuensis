@@ -32,6 +32,7 @@ const EXPECTED_LLM_INPUT = [
     stream: true,
     messages: [
       { role: 'system', content: expect.stringContaining(INSTRUCTION) },
+      { role: 'user', content: expect.stringContaining('The person sent their next message on') },
       { role: 'system', content: expect.stringContaining('<reply-context>') },
       { role: 'user', content: 'hello' },
     ],

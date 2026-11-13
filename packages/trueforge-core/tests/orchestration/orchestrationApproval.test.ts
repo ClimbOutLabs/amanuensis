@@ -107,6 +107,7 @@ const EXPECTED_TURN_1_LLM_INPUT = [
     tools: WRITE_NOTE_TOOLS,
     messages: [
       { role: 'system', content: expect.stringContaining(INSTRUCTION) },
+      { role: 'user', content: expect.stringContaining('The person sent their next message on') },
       { role: 'system', content: expect.stringContaining('<reply-context>') },
       { role: 'user', content: 'hello' },
     ],
@@ -146,6 +147,7 @@ describe('orchestration: pause then resume on tool approval', () => {
       tools: WRITE_NOTE_TOOLS,
       messages: [
         { role: 'system', content: expect.stringContaining(INSTRUCTION) },
+        { role: 'user', content: expect.stringContaining('The person sent their next message on') },
         { role: 'system', content: expect.stringContaining('<reply-context>') },
         { role: 'user', content: 'hello' },
         {
@@ -230,6 +232,7 @@ describe('orchestration: pause then resume on tool approval', () => {
     const EXPECTED_TURN_2_INPUT = {
       messages: [
         { role: 'system', content: expect.stringContaining(INSTRUCTION) },
+        { role: 'user', content: expect.stringContaining('The person sent their next message on') },
         { role: 'system', content: expect.stringContaining('<reply-context>') },
         { role: 'user', content: 'hello' },
         {
