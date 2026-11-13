@@ -722,7 +722,8 @@ words, fused with meaning behind the peak test. The token budget decides how muc
   longest ago are dropped first.
 - **Read content has no age limit.** A finding from a mail, a page or a document is recalled however old
   it is, like everything else. Each recalled item carries its day, and the instructions say a finding may
-  be out of date and must be checked against its source before acting on it.
+  be out of date and must be checked against its source before acting on it. The instructions also say
+  that when two memories disagree the one with the later date is current, for every kind of memory.
 - **Copies.** When the same text was saved on several days, recall shows its best-ranked copy once.
 - **Cost.** On a test vault of 1,000 daily files and 20,000 entries, a recall after the first one takes
   100 to 200 ms on one core. The first recall after a start reads every file and takes about half a

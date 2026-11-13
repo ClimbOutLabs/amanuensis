@@ -2585,4 +2585,40 @@ describe('recall of saved findings and assistant reply notes', () => {
     expect(rendered).toContain('may be out of date');
     expect(rendered).toContain('check them against the source before acting on them');
   });
+
+  it('shows two findings that disagree with their days, and tells the model the later one is current', async () => {
+    const block = await recalledBlock([
+      emailNote({
+        id: '1',
+        date: '2024-10-03',
+        text: 'From an email, found Oct 3: The CPA said not to file taxes early.',
+      }),
+      emailNote({
+        id: '2',
+        date: '2026-11-12',
+        text: 'From an email, found Nov 12: The CPA said to file taxes early.',
+      }),
+    ]);
+    expect(block).toContain(
+      '[2024-10-03, found earlier by the assistant] From an email, found Oct 3: The CPA said not',
+    );
+    expect(block).toContain(
+      '[2026-11-12, found earlier by the assistant] From an email, found Nov 12: The CPA said to',
+    );
+
+    const capability = memoryCapability({
+      client: makeClient({}),
+      config: DEFAULT_CONFIG,
+      logger: makeLogger(),
+      sessionId: 's1',
+      previousTurnId: null,
+    });
+    const builder = InstructionBuilder.createSystemPrompt('identity');
+    for (const add of capability.instructionBuilders ?? []) {
+      add(builder);
+    }
+    expect(builder.build()).toContain(
+      'When two memories disagree, the one with the later date is current; mention the older only as what was said before.',
+    );
+  });
 });
