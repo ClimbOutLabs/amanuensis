@@ -23,7 +23,7 @@ import type {
 } from '../llm/LLMTypes';
 import { UNKNOWN_TOOL_NAME } from '../llm/LLMTypes';
 import { toOpenAIChatMessage } from '../llm/toOpenAIChatMessage';
-import { estimateTokensForString } from '../llm/usage';
+import { estimateTokensForString, PICTURE_TOKEN_ESTIMATE } from '../llm/usage';
 import type { PendingHostNoteKind } from '../mcp/executeToolCalls';
 import type {
   AgentThreadRuntimeSendInput,
@@ -791,6 +791,40 @@ export function assistantMessageContentToStringForSubAgent(
 
 export function getThreadId(): string {
   return crypto.randomUUID();
+}
+
+/** A message's content as far as sizing reads it: text, or parts that may carry text or a picture. */
+type SizedContent = string | readonly { type?: string; text?: string }[] | null | undefined;
+
+/** How many pictures a message's content holds. */
+export function pictureCount(content: SizedContent): number {
+  if (typeof content === 'string' || content == null) {
+    return 0;
+  }
+  return content.filter(part => part.type === 'image_url').length;
+}
+
+/** Tokens of one message's content: its text, and a fixed amount for each picture when they are counted. */
+export function estimateTokensForChatMessageContent({
+  content,
+  countPictures,
+}: {
+  content: SizedContent;
+  countPictures: boolean;
+}): number {
+  if (typeof content === 'string') {
+    return estimateTokensForString(content);
+  }
+  if (content == null) {
+    return 0;
+  }
+  let total = countPictures ? pictureCount(content) * PICTURE_TOKEN_ESTIMATE : 0;
+  for (const part of content) {
+    if (typeof part.text === 'string') {
+      total += estimateTokensForString(part.text);
+    }
+  }
+  return total;
 }
 
 export function estimateTokensForContextMessages(messages: ContextMessage[]): CurrentContextUsage {
