@@ -88,7 +88,6 @@ function count(amount: number, { one, many }: { one: string; many: string }): st
   return `${String(amount)} ${amount === 1 ? one : many}`;
 }
 
-/** One plain sentence on what a tidy-up asked for now did. */
 /** A plain sentence part for a cause the server names; a cause this page does not know reads as a general failure. */
 function unsortedReasonCopy({ cause, assistant }: { cause: string; assistant: string }): string {
   const known: Record<string, string> = {
@@ -106,6 +105,7 @@ function unsortedReasonCopy({ cause, assistant }: { cause: string; assistant: st
   return known[cause] ?? 'something went wrong';
 }
 
+/** One plain sentence on what a tidy-up asked for now did. */
 function tidyResultCopy({ run, assistant }: { run: MemoryTidyRun; assistant: string }): string {
   if (run.status === 'busy') {
     return 'A tidy-up is already running. Try again in a few minutes.';
