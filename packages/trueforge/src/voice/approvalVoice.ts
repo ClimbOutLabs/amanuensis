@@ -60,6 +60,9 @@ type FieldRule = 'context' | 'empty' | 'shape';
  */
 export const CARD_FIELD_RULES: Record<keyof Tier3Card, FieldRule> = {
   plain_what: 'context',
+  copy: 'context',
+  safe_choice: 'context',
+  destructive: 'context',
   plain_why: 'context',
   cannot_be_undone: 'context',
   why_asked_again: 'context',

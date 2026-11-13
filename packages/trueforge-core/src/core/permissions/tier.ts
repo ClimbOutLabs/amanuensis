@@ -102,6 +102,7 @@ export type Tier2ActionKind = (typeof TIER2_ACTION_KINDS)[number];
 /** Machine-readable reasons a Tier 3 action is auto-denied: without a card, or after its card went unanswered. */
 export const AUTO_DENY_REASONS = [
   APPROVAL_EXPIRED_REASON_CODE,
+  'cannot_describe',
   'destination_unverifiable',
   'incognito_chat',
   'incomplete_send_card',
@@ -272,6 +273,26 @@ export const Tier3SkillSchema = z
   .openapi('Tier3Skill');
 
 /**
+ * The words an approval card is made of, produced in trueforge-core by one owner per action kind
+ * (see cardCopy.ts). The UI renders these three parts and never builds sentences of its own: one
+ * headline, one consequence line when it matters, and the tier reason behind "Why I'm asking".
+ * None of the three ever carries an internal id: things are named the way the person names them.
+ */
+export const ApprovalCardCopySchema = z
+  .object({
+    headline: z.string().describe('What will happen, in one sentence, in words the person recognises.'),
+    consequence: z
+      .string()
+      .nullable()
+      .describe('What follows from approving, in one line, or null when nothing needs saying.'),
+    reason: z.string().nullable().describe('Why the tier asks, in plain words, or null when it needs no reason.'),
+  })
+  .describe('The headline, consequence and reason an approval card shows.')
+  .openapi('ApprovalCardCopy');
+
+export type ApprovalCardCopy = z.infer<typeof ApprovalCardCopySchema>;
+
+/**
  * Server-rendered approval card for Tier 3 actions and for Tier 2 actions that ask. Destination/recipient/amount come from
  * the server-side extractor registry over canonical params, never agent text.
  * Shell cards carry the server-parsed command instead of a destination.
@@ -279,6 +300,17 @@ export const Tier3SkillSchema = z
 export const Tier3CardSchema = z
   .object({
     plain_what: z.string().describe('One plain-language sentence describing what will happen. No jargon.'),
+    copy: ApprovalCardCopySchema.nullable().describe(
+      'The headline, consequence and reason the card renders. Every builder fills it from its copy owner; null only where a later choke point fills it, never on a finished card.',
+    ),
+    safe_choice: z
+      .boolean()
+      .optional()
+      .describe('True when the safe choice is the primary button: the action is irreversible or reaches other people.'),
+    destructive: z
+      .boolean()
+      .optional()
+      .describe('True when the action destroys or sends something for good, so its button wears the destructive ink.'),
     plain_why: z
       .string()
       .nullable()
@@ -323,6 +355,7 @@ export const Tier3CardSchema = z
   .openapi('Tier3Card');
 
 export type Tier3Card = z.infer<typeof Tier3CardSchema>;
+export type Tier3Email = z.infer<typeof Tier3EmailSchema>;
 export type Tier3Schedule = z.infer<typeof Tier3ScheduleSchema>;
 export type Tier3ScheduleTools = z.infer<typeof Tier3ScheduleToolsSchema>;
 export type Tier3Persona = z.infer<typeof Tier3PersonaSchema>;

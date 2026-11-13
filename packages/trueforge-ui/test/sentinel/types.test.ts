@@ -81,6 +81,44 @@ describe('extractSentinelFromEvent', () => {
     expect(other?.card.mail_new_recipients).toBeNull();
   });
 
+  it('reads the card copy and the safe choice marks, and drops a copy missing its headline', () => {
+    const [withCopy, badCopy, plain] = extractSentinelFromEvent({
+      type: 'tool.approval_required',
+      tool_calls: [
+        {
+          tool_call_id: 'call-copy',
+          tier: 3,
+          tier3_card: {
+            plain_what: 'Delete something.',
+            copy: {
+              headline: 'Delete "Dentist", Fri 7 Nov, 3:00 PM?',
+              consequence: "This removes the event from the calendar. It can't be restored from here.",
+              reason: null,
+            },
+            safe_choice: true,
+            destructive: true,
+          },
+        },
+        {
+          tool_call_id: 'call-bad-copy',
+          tier: 3,
+          tier3_card: { plain_what: 'Delete something else.', copy: { consequence: 'No headline here.' } },
+        },
+        { tool_call_id: 'call-plain', tier: 3, tier3_card: { plain_what: 'Read.' } },
+      ],
+    });
+    expect(withCopy?.card.copy).toEqual({
+      headline: 'Delete "Dentist", Fri 7 Nov, 3:00 PM?',
+      consequence: "This removes the event from the calendar. It can't be restored from here.",
+      reason: null,
+    });
+    expect(withCopy?.card.safe_choice).toBe(true);
+    expect(withCopy?.card.destructive).toBe(true);
+    expect(badCopy?.card.copy).toBeUndefined();
+    expect(plain?.card.safe_choice).toBe(false);
+    expect(plain?.card.destructive).toBe(false);
+  });
+
   it('reads the draft mark on a new-recipient card, and no mark on a send card', () => {
     const [draft, send] = extractSentinelFromEvent({
       type: 'tool.approval_required',
@@ -215,6 +253,7 @@ describe('extractSentinelFromEvent', () => {
             tier: 3,
             tier3_card: {
               plain_what: 'Run code in the sandbox',
+              copy: { headline: 'Run code in the sandbox', consequence: 'Runs once.', reason: null },
               plain_why: null,
               cannot_be_undone: 'Runs once.',
               destination: null,
@@ -256,6 +295,7 @@ describe('extractSentinelFromEvent', () => {
             tier: 3,
             tier3_card: {
               plain_what: 'Change a saved draft in your Gmail.',
+              copy: { headline: 'Change this draft?', consequence: null, reason: null },
               plain_why: null,
               cannot_be_undone: null,
               destination: null,
@@ -399,6 +439,7 @@ describe('extractSentinelFromEvent', () => {
             tier: 3,
             tier3_card: {
               plain_what: 'Change "Team sync" in your Google Calendar.',
+              copy: { headline: 'Change "Team sync" in your Google Calendar?', consequence: null, reason: null },
               plain_why: null,
               cannot_be_undone: null,
               destination: null,
@@ -670,6 +711,7 @@ describe('held actions', () => {
             ...heldRef,
             tier3_card: {
               plain_what: 'Send a note to Ana.',
+              copy: { headline: 'Send a note to Ana.', consequence: null, reason: null },
               plain_why: null,
               cannot_be_undone: null,
               why_asked_again: null,

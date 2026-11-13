@@ -8,6 +8,7 @@
   },
   "scripts": {
     "build": "pnpm guide:build && pnpm --filter @truefoundry/trueforge-core build && pnpm --filter @truefoundry/trueforge-sdk build && pnpm --filter @truefoundry/trueforge-ui build && pnpm --filter frontend build && pnpm --filter @truefoundry/trueforge build && pnpm --filter amanuensis build",
+    "images:ids": "bash installer/image-ids.sh",
     "build:aman-installer": "pnpm --filter @truefoundry/aman-installer build",
     "build:setup-image": "docker build -t aman-setup:local installer/setup-image",
     "build:dev-image": "docker build -f Dockerfile.dev --build-arg BUILD_REF=\"$(git rev-parse HEAD)\" -t aman:dev .",
