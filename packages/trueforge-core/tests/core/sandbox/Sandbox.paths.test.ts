@@ -28,6 +28,7 @@ import {
   serializeImplementationPlanGrant,
 } from '../../../src/core/mcp/implementationPlanGrant';
 import { deniedToolCallText } from '../../../src/core/mcp/ToolSet';
+import type { SkillNetworkCardRequest } from '../../../src/core/permissions/skillNetworkCards';
 import { AgentThread } from '../../../src/core/runtime/AgentThread';
 import type { CodeModeTransport } from '../../../src/core/sandbox/codeMode/CodeModeTransport';
 import type { SandboxInvocationPurpose } from '../../../src/core/sandbox/commandClassification';
@@ -271,6 +272,7 @@ function makeSandbox(
     onRepositorySources?: RepositoryCommandSourceObserver;
     ocrLanguages?: string;
     skillMounter?: SkillMounter;
+    drainSkillNetworkCards?: () => Promise<readonly SkillNetworkCardRequest[]>;
   } = {},
 ): Sandbox {
   return new Sandbox({
@@ -286,6 +288,7 @@ function makeSandbox(
       (options.boundRepository === undefined ? undefined : new TestDurableWorkspaceCoordinator()),
     workspaceLeaseOwnerId: options.boundRepository === undefined ? undefined : 'test-replica',
     skillMounter: options.skillMounter,
+    drainSkillNetworkCards: options.drainSkillNetworkCards,
     blockDestructiveToolsInCodeMode: true,
     mcpRequestTimeoutMs: 60_000,
     mcpConnectTimeoutMs: 5_000,
@@ -4358,6 +4361,7 @@ describe('Sandbox skills without a network', () => {
       root: string;
       execCalls: SandboxExecParams[];
     }) => Promise<void>,
+    drainSkillNetworkCards?: () => Promise<readonly SkillNetworkCardRequest[]>,
   ): Promise<void> {
     const root = mkdtempSync(join(tmpdir(), 'sandbox-skills-'));
     const script = 'import os, sys\nprint(os.getcwd())\nprint(sys.argv[1:])\n';
@@ -4369,7 +4373,10 @@ describe('Sandbox skills without a network', () => {
       const execCalls: SandboxExecParams[] = [];
       const provider = slotLikeProvider({ root, skillsDir, execCalls });
       const alpha = registrySkill({ name: 'alpha', presignedUrl: archives.urlFor('/alpha.tar') });
-      const sandbox = makeSandbox(provider, { skillMounter: new SkillMounter({ skills: [alpha] }) });
+      const sandbox = makeSandbox(provider, {
+        skillMounter: new SkillMounter({ skills: [alpha] }),
+        ...(drainSkillNetworkCards === undefined ? {} : { drainSkillNetworkCards }),
+      });
       await sandbox.callTool(execTrue, { status: 'allow', scope: 'once' });
       await run({ sandbox, skillsDir, root, execCalls });
     } finally {
@@ -4409,6 +4416,27 @@ describe('Sandbox skills without a network', () => {
       expect(existsSync(join(skillsDir, 'alpha', 'pwned'))).toBe(false);
       expect(existsSync(join(root, 'pwned'))).toBe(false);
     });
+  });
+
+  it("raises the skill network cards a script's refused sites leave, the same way a shell command does", async () => {
+    const card: SkillNetworkCardRequest = {
+      skill_name: 'alpha',
+      hosts: ['news.example.com'],
+      reason: 'undeclared_host',
+    };
+    let owed: SkillNetworkCardRequest[] = [];
+    await withAlphaScript(
+      async ({ sandbox }) => {
+        owed = [card];
+        const response = await runFetch(sandbox);
+        expect(isCallToolResponseResult(response) && response.skillNetworkCards).toEqual([card]);
+      },
+      () => {
+        const cards = owed;
+        owed = [];
+        return Promise.resolve(cards);
+      },
+    );
   });
 
   it('refuses a script path that leaves the skill folder before anything runs', async () => {

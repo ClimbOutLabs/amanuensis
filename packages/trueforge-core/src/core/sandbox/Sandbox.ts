@@ -6106,6 +6106,8 @@ export class Sandbox extends LocalToolMCP {
         ? {}
         : { skillNetworkToken: skillNetworkGrant.token, skillNetworkHosts: skillNetworkGrant.hosts }),
     });
+    // Sites the script was refused become cards the same way they do after a shell command.
+    await this.collectSkillNetworkCards();
     const skillUsedEvents = detectSkillUsedEvents({
       command: run.command,
       cwd: run.skill_folder,
