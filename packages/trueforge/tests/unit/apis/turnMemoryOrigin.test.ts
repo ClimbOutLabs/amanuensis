@@ -89,7 +89,7 @@ function streamedToolRound({
       tool_calls: [{ index: 0, id, type: 'function', function: { name: name.slice(0, half), arguments: '' } }],
     },
     { ...delta, tool_calls: [{ index: 0, function: { name: name.slice(half), arguments: args } }] },
-    { ...delta, tool_calls: [{ index: 0, ...(call === undefined ? {} : { tool_info: call.tool_info }) }] },
+    { ...delta, tool_calls: [{ index: 0, id, ...(call === undefined ? {} : { tool_info: call.tool_info }) }] },
     response,
   ];
 }
@@ -321,6 +321,139 @@ describe('drainTurnEvents memory origin', () => {
     it('marks a turn whose wrapped call reaches a tool that shares a page tool name', async () => {
       const args = JSON.stringify({ mcp_server: 'Notes', tool_name: 'remember_fact', input: {} });
       const earlier = streamedToolRound({ id: 'c1', name: 'call_tool', args });
+      expect(await retainedOrigin({ attachedFiles: false, earlier })).toBe('tool_ingested');
+    });
+
+    /** One reply with several calls, each streamed whole with the host's first record, then the host's closing records. */
+    function streamedReply({
+      calls,
+      closing,
+    }: {
+      calls: { id: string; name: string; connector?: string }[];
+      /** The closing records as the host sends them: the place each goes to, and the call it names when it names one. */
+      closing: { index: number; id?: string; of: number }[];
+    }): TurnStreamingEvent[] {
+      const rounds = calls.map(call => toolRound(call));
+      const infoOf = (position: number) => {
+        const [whole] = rounds[position] ?? [];
+        const info = whole?.type === EventType.MODEL_MESSAGE ? whole.tool_calls?.[0]?.tool_info : undefined;
+        if (info === undefined) {
+          throw new Error(`no call at ${String(position)}`);
+        }
+        return info;
+      };
+      const delta = { type: EventType.MODEL_MESSAGE_DELTA, id: 'evt_reply', thread_id: 'main' } as const;
+      return [
+        { type: EventType.MODEL_MESSAGE, id: 'evt_reply', thread_id: 'main', created_at: NOW },
+        ...calls.map((call, index) => ({
+          ...delta,
+          tool_calls: [
+            {
+              index,
+              id: call.id,
+              type: 'function' as const,
+              function: { name: call.name, arguments: '{}' },
+              tool_info: infoOf(index),
+            },
+          ],
+        })),
+        {
+          ...delta,
+          tool_calls: closing.map(record => ({
+            index: record.index,
+            ...(record.id === undefined ? {} : { id: record.id }),
+            tool_info: infoOf(record.of),
+          })),
+        },
+        ...rounds.flatMap(round => round.slice(1)),
+      ];
+    }
+
+    const MIXED_CALLS = [
+      { id: 'a', name: 'list_pages' },
+      { id: 'b', name: 'list_pages' },
+      { id: 'c', name: 'remember_fact', connector: 'notes' },
+      { id: 'd', name: 'remember_fact' },
+    ];
+
+    it('marks a turn with a connector call after a merged duplicate, when the closing records name their calls', async () => {
+      const earlier = streamedReply({
+        calls: MIXED_CALLS,
+        closing: [
+          { index: 0, id: 'a', of: 0 },
+          { index: 2, id: 'c', of: 2 },
+          { index: 3, id: 'd', of: 3 },
+        ],
+      });
+      expect(await retainedOrigin({ attachedFiles: false, earlier })).toBe('tool_ingested');
+    });
+
+    it('marks that turn too when the closing records name no call and so sit one place off', async () => {
+      const earlier = streamedReply({
+        calls: MIXED_CALLS,
+        closing: [
+          { index: 0, of: 0 },
+          { index: 1, of: 2 },
+          { index: 2, of: 3 },
+        ],
+      });
+      expect(await retainedOrigin({ attachedFiles: false, earlier })).toBe('tool_ingested');
+    });
+
+    it('does not take a record that names another call than the one at its place', async () => {
+      const earlier = streamedReply({
+        calls: [
+          { id: 'c', name: 'remember_fact', connector: 'notes' },
+          { id: 'd', name: 'remember_fact' },
+        ],
+        closing: [{ index: 0, id: 'd', of: 1 }],
+      });
+      expect(await retainedOrigin({ attachedFiles: false, earlier })).toBe('tool_ingested');
+    });
+
+    it('marks a turn when two calls carry the same id, since a result could answer either', async () => {
+      const earlier = streamedReply({
+        calls: [
+          { id: 'x', name: 'remember_fact', connector: 'notes' },
+          { id: 'x', name: 'remember_fact' },
+        ],
+        closing: [],
+      });
+      expect(await retainedOrigin({ attachedFiles: false, earlier })).toBe('tool_ingested');
+    });
+
+    it('does not mark a turn of host page calls with a merged duplicate among them', async () => {
+      const earlier = streamedReply({
+        calls: [MIXED_CALLS[0], MIXED_CALLS[1], MIXED_CALLS[3]].flatMap(call => (call === undefined ? [] : [call])),
+        closing: [
+          { index: 0, id: 'a', of: 0 },
+          { index: 2, id: 'd', of: 2 },
+        ],
+      });
+      expect(await retainedOrigin({ attachedFiles: false, earlier })).toBe('user_stated');
+    });
+
+    it('drops a host record when more of the tool name arrives after it', async () => {
+      const [whole] = toolRound({ id: 'c1', name: 'remember_fact' });
+      const info = whole?.type === EventType.MODEL_MESSAGE ? whole.tool_calls?.[0]?.tool_info : undefined;
+      const delta = { type: EventType.MODEL_MESSAGE_DELTA, id: 'evt_reply', thread_id: 'main' } as const;
+      const earlier: TurnStreamingEvent[] = [
+        { type: EventType.MODEL_MESSAGE, id: 'evt_reply', thread_id: 'main', created_at: NOW },
+        {
+          ...delta,
+          tool_calls: [
+            {
+              index: 0,
+              id: 'c1',
+              type: 'function',
+              function: { name: 'record_finding', arguments: '{}' },
+              ...(info === undefined ? {} : { tool_info: info }),
+            },
+          ],
+        },
+        { ...delta, tool_calls: [{ index: 0, function: { name: '_2' } }] },
+        ...toolRound({ id: 'c1', name: 'record_finding_2' }).slice(1),
+      ];
       expect(await retainedOrigin({ attachedFiles: false, earlier })).toBe('tool_ingested');
     });
 

@@ -719,6 +719,41 @@ describe('duplicates, floods and dependent reads', () => {
     expect(events.at(-1)).toMatchObject({ type: InternalEventType.AGENT_DONE, status: 'done' });
   });
 
+  it('names each kept call, at the place it was streamed, when it publishes what the host knows about the calls', async () => {
+    const toolSet = makeToolSet();
+    let round = 0;
+    const create = jest.fn((_request: LLMCreateParamsStreaming) => {
+      round += 1;
+      if (round > 1) {
+        return finalAnswerStream();
+      }
+      return replyStream({
+        calls: [
+          { id: 'get-a', name: 'get_event', args: { event_id: 'evt-1' } },
+          { id: 'get-b', name: 'get_event', args: { event_id: 'evt-1' } },
+          { id: 'create-1', name: 'create_event', args: VALID_CREATE_ARGS },
+        ],
+      });
+    });
+    const events = await drain(makeThread({ toolSet, create }));
+    // The delta that carries only what the host knows: no name or arguments, one entry per kept call.
+    const published = events.flatMap(event => {
+      if (!isRecord(event) || event['type'] !== EventType.MODEL_MESSAGE_DELTA || !Array.isArray(event['tool_calls'])) {
+        return [];
+      }
+      const entries: unknown[] = event['tool_calls'];
+      return entries.every(entry => isRecord(entry) && entry['function'] === undefined)
+        ? [entries.map(entry => (isRecord(entry) ? { index: entry['index'], id: entry['id'] } : entry))]
+        : [];
+    });
+    expect(published).toEqual([
+      [
+        { index: 0, id: 'get-a' },
+        { index: 2, id: 'create-1' },
+      ],
+    ]);
+  });
+
   it('does not run a read of an event the same reply is only just creating', async () => {
     const toolSet = makeToolSet();
     let round = 0;

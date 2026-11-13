@@ -4510,15 +4510,19 @@ export class AgentThread {
     // metadata-only delta after assembly so a live client reaches the same
     // authoritative state as a client that reloads the persisted event. Do not
     // repeat function arguments here: delta folders append those fragments.
-    if (agentAssistantMessage.tool_calls?.length) {
+    // Each entry goes to the place its call was streamed at and names the call, because merged
+    // duplicates and replaced ids leave the kept calls at other positions than the stream's.
+    const streamedAt = new Map((uniqueToolCalls ?? []).map((call, index) => [call.id, index]));
+    const callMetadata = (agentAssistantMessage.tool_calls ?? []).flatMap(toolCall => {
+      const index = streamedAt.get(toolCall.id);
+      return index === undefined ? [] : [{ index, id: toolCall.id, tool_info: toolCall.tool_info }];
+    });
+    if (callMetadata.length > 0) {
       yield {
         type: EventType.MODEL_MESSAGE_DELTA,
         id: modelMessageEventId,
         thread_id: this.threadId,
-        tool_calls: agentAssistantMessage.tool_calls.map((toolCall, index) => ({
-          index,
-          tool_info: toolCall.tool_info,
-        })),
+        tool_calls: callMetadata,
       } satisfies ModelMessageDeltaEvent;
     }
 

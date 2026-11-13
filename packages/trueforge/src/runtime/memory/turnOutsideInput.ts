@@ -29,11 +29,12 @@ function callKey({ threadId, callId }: { threadId: string; callId: string }): st
 
 /**
  * The tool calls of a turn, by the thread and id a result names. A stored turn holds each call whole. A live
- * turn sends a call in pieces and never as one finished message, so the pieces are put together here: the name
- * and arguments as they arrive, and the host's own record of the tool, which comes last and replaces any earlier one.
+ * turn sends a call in pieces and never as one finished message, so the pieces are put together here. The
+ * host's record of the tool counts only from a piece that names the call by its id, and only while no part of
+ * the name came after it, so a record can never land on another call. An id two calls claim names neither.
  */
 function createTurnToolCalls() {
-  const whole = new Map<string, StreamedToolCall>();
+  const whole = new Map<string, StreamedToolCall | undefined>();
   const pieces = new Map<string, { id?: string; name: string; arguments: string; tool_info?: unknown }>();
   return {
     observe(event: TurnStreamingEvent): void {
@@ -52,23 +53,38 @@ function createTurnToolCalls() {
         pieces.set(slot, call);
         if (call.id === undefined && piece.id !== undefined) {
           call.id = piece.id;
+          const key = callKey({ threadId: event.thread_id, callId: piece.id });
+          // A second call under an id already seen: a result with that id could belong to either.
+          whole.set(key, whole.has(key) ? undefined : toWholeCall({ ...call, id: piece.id }));
         }
-        call.name += piece.function?.name ?? '';
+        const name = piece.function?.name ?? '';
+        call.name += name;
         call.arguments += piece.function?.arguments ?? '';
-        call.tool_info = piece.tool_info ?? call.tool_info;
+        if (piece.tool_info !== undefined && piece.id !== undefined && piece.id === call.id) {
+          call.tool_info = piece.tool_info;
+        } else if (name !== '' || piece.tool_info !== undefined) {
+          delete call.tool_info;
+        }
         if (call.id !== undefined) {
-          whole.set(callKey({ threadId: event.thread_id, callId: call.id }), {
-            id: call.id,
-            type: 'function',
-            function: { name: call.name, arguments: call.arguments },
-            ...(call.tool_info === undefined ? {} : { tool_info: call.tool_info }),
-          });
+          const key = callKey({ threadId: event.thread_id, callId: call.id });
+          if (whole.get(key) !== undefined) {
+            whole.set(key, toWholeCall({ ...call, id: call.id }));
+          }
         }
       }
     },
     get(key: { threadId: string; callId: string }): StreamedToolCall | undefined {
       return whole.get(callKey(key));
     },
+  };
+}
+
+function toWholeCall(call: { id: string; name: string; arguments: string; tool_info?: unknown }): StreamedToolCall {
+  return {
+    id: call.id,
+    type: 'function',
+    function: { name: call.name, arguments: call.arguments },
+    ...(call.tool_info === undefined ? {} : { tool_info: call.tool_info }),
   };
 }
 
