@@ -165,7 +165,7 @@ describe('recall exclusions for facts shown shortened', () => {
     const block = await recallBlockServing('chat-neighbour', [FACT, other]);
     expect(block).toContain(other);
     // The pulled fact's own line is gone; the other fact's line only shares its opening words.
-    expect(block?.split('\n')).not.toContain(`[2026-08-14] ${FACT}`);
+    expect(block?.split('\n').some(line => line.endsWith(`] ${FACT}`))).toBe(false);
   });
 
   it('does not trust a shortening cut too short to name the fact', async () => {

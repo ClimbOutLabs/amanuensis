@@ -93,6 +93,8 @@ const READ_LABEL = 'from something read for the person';
 const FINDING_LABEL = 'found earlier by the assistant';
 const REPLY_LABEL = "the assistant's earlier reply";
 const ITEM_LINE = /^\[([^\]]+)\] (.*)$/;
+/** How long ago the day was, which newer records carry between the day and the label. */
+const AGE_PART = /^(today|yesterday|\d+ (day|week|month|year)s? ago)$/;
 
 /** One item line of a recall block, or undefined for the block's other lines (People, curated, stats). */
 function parseBlockLine(line: string): RailRecallFact | undefined {
@@ -105,12 +107,12 @@ function parseBlockLine(line: string): RailRecallFact | undefined {
   if (text === '' || head.startsWith('mental model') || head === 'profile' || head === 'reflection') {
     return undefined;
   }
-  const comma = head.indexOf(', ');
-  const date = comma === -1 ? head : head.slice(0, comma);
+  const [date = '', ...rest] = head.split(', ');
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date) && date !== 'undated') {
     return undefined;
   }
-  const label = comma === -1 ? undefined : head.slice(comma + 2);
+  // The row shows the day itself, so the age is read past; older records have no age and no label for the person.
+  const label = (AGE_PART.test(rest[0] ?? '') ? rest.slice(1) : rest).join(', ');
   const when = date === 'undated' ? '' : ` on ${date}`;
   if (label === READ_LABEL) {
     return { text, date, source: 'read', needsCheck: true, origin: `From something read for you${when}` };

@@ -722,8 +722,15 @@ words, fused with meaning behind the peak test. The token budget decides how muc
   longest ago are dropped first.
 - **Read content has no age limit.** A finding from a mail, a page or a document is recalled however old
   it is, like everything else. Each recalled item carries its day, and the instructions say a finding may
-  be out of date and must be checked against its source before acting on it. The instructions also say
-  that when two memories disagree the one with the later date is current, for every kind of memory.
+  be out of date and must be checked against its source before acting on it.
+- **Notes are journal entries.** Every recalled line reads `[day, age, who it came from] text`, for example
+  `[2024-11-02, 2 years ago, said by the person] ...`. The host computes the age from the person's calendar
+  day (`memoryAge`), so nothing rests on the model subtracting dates, and the person's own words carry a
+  label like every other source, so no line reads as a bare present fact. An undated line, or one dated
+  after today, carries no age. The instructions define the lines once, for every kind of note: an entry
+  says what was so that day and may or may not still be so. They name no kinds of facts. They also say
+  that when two entries disagree the later one is current. Pages, not notes, state what holds now. The
+  right rail reads the same lines and skips the age.
 - **Copies.** When the same text was saved on several days, recall shows its best-ranked copy once.
 - **Cost.** On a test vault of 1,000 daily files and 20,000 entries, a recall after the first one takes
   100 to 200 ms on one core. The first recall after a start reads every file and takes about half a

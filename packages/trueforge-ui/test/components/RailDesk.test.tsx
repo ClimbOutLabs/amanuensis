@@ -68,6 +68,32 @@ describe('parseRecallFacts', () => {
     expect(facts[3]).toMatchObject({ source: 'assistant', needsCheck: false });
   });
 
+  it('reads lines that also say how long ago the day was, with the same text and source', () => {
+    const turn = turnContext(
+      't1',
+      blockOf([
+        '[2024-11-02, 2 years ago, said by the person] The gate code is 4417',
+        '[2026-11-12, yesterday, from something read for the person] The ferry leaves at 9',
+        '[2026-10-01, 6 weeks ago, found earlier by the assistant] The office is on 5th',
+        "[2026-11-13, today, the assistant's earlier reply] The train was booked",
+        '[undated, said by the person] The spare key is under the mat',
+      ]),
+    );
+    const facts = parseRecallFacts([turn]);
+    expect(facts.map(fact => fact.text)).toEqual([
+      'The gate code is 4417',
+      'The ferry leaves at 9',
+      'The office is on 5th',
+      'The train was booked',
+      'The spare key is under the mat',
+    ]);
+    expect(facts[0]).toMatchObject({ source: 'person', needsCheck: false, origin: 'You said this on 2024-11-02' });
+    expect(facts[1]).toMatchObject({ source: 'read', needsCheck: true, date: '2026-11-12' });
+    expect(facts[2]).toMatchObject({ source: 'finding', needsCheck: true });
+    expect(facts[3]).toMatchObject({ source: 'assistant', needsCheck: false });
+    expect(facts[4]).toMatchObject({ source: 'person', origin: 'You said this' });
+  });
+
   it('caps the list at six', () => {
     const lines = Array.from({ length: 8 }, (_, index) => `[2026-08-14] Fact number ${String(index)}`);
     expect(parseRecallFacts([turnContext('t1', blockOf(lines))])).toHaveLength(6);

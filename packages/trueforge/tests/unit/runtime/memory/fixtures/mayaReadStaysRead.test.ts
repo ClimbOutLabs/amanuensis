@@ -94,7 +94,7 @@ describe("what Aman read stays read when Maya's memory recalls it", () => {
       sorted: false,
     });
     const line = block.split('\n').find(candidate => candidate.includes(MAIL_LINK));
-    expect(line).toMatch(/^\[\d{4}-\d{2}-\d{2}, found earlier by the assistant\] From an email/);
+    expect(line).toMatch(/^\[\d{4}-\d{2}-\d{2}, 4 weeks ago, found earlier by the assistant\] From an email/);
     expect(isPersonVouchedUrl({ provenance, url: MAIL_LINK })).toBe(false);
     expect(steeredLinks({ provenance, values: [`${MAIL_LINK}?email=${MAYA_ADDRESS}`] })).toHaveLength(1);
   }, 60_000);

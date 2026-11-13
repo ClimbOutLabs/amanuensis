@@ -222,12 +222,12 @@ describe('recalled block', () => {
         timeoutMs: 5000,
       });
       const results = await recallItems({ client, query: 'follow-up reminder', currentSessionId: 'chat-now' });
-      const { block } = formatMemoryBlock({ results, budgetTokens: 600 });
+      const { block } = formatMemoryBlock({ today: '2026-11-13', results, budgetTokens: 600 });
       const lines = block.split('\n');
       expect(lines).toContain(
-        '[2026-10-20, from something read for the person] The dentist is Dr Rivera, per a follow-up reminder email.',
+        '[2026-10-20, 3 weeks ago, from something read for the person] The dentist is Dr Rivera, per a follow-up reminder email.',
       );
-      expect(lines).toContain('[2026-09-19] The vet follow-up reminder is booked.');
+      expect(lines).toContain('[2026-09-19, 7 weeks ago, said by the person] The vet follow-up reminder is booked.');
       expect(block).not.toContain('discussed again');
       expect(block).not.toContain('## ');
       expect(block).not.toContain('Source: read content');

@@ -185,6 +185,7 @@ describe('turn memory with findings and reply notes', () => {
     const content = retain.mock.calls[0]?.[0].items[0]?.content ?? '';
     expect(content.endsWith('<!-- note: email 2026-10-29 -->')).toBe(true);
     const block = formatMemoryBlock({
+      today: '2026-11-13',
       results: [{ id: 'h1', occurred_start: '2026-10-29', text: content }],
       budgetTokens: 2000,
     }).block;
@@ -219,7 +220,7 @@ describe('turn memory with findings and reply notes', () => {
     }
     expect(recalled.results).toHaveLength(1);
     expect(recalled.results[0]?.metadata?.['note_source']).toBeUndefined();
-    const block = formatMemoryBlock({ results: recalled.results, budgetTokens: 2000 }).block;
+    const block = formatMemoryBlock({ today: '2026-11-13', results: recalled.results, budgetTokens: 2000 }).block;
     expect(block).toContain('It ended with this line.');
     expect(block).not.toContain('found earlier by the assistant');
   });
@@ -377,7 +378,7 @@ describe('turn memory with findings and reply notes', () => {
       throw new Error('expected recall');
     }
     expect(recalled.results[0]?.metadata).toMatchObject({ note_source: 'email', note_date: '2026-10-29' });
-    const block = formatMemoryBlock({ results: recalled.results, budgetTokens: 2000 }).block;
+    const block = formatMemoryBlock({ today: '2026-11-13', results: recalled.results, budgetTokens: 2000 }).block;
     expect(block).toContain('found earlier by the assistant');
     expect(block).toContain('From an email, found Oct 29: Priya asked for the signed form by 2026-11-03.');
   });

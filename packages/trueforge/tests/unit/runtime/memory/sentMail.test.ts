@@ -325,7 +325,7 @@ describe('a sent message in memory', () => {
     });
     // The page text hides the note line and the chat id; only the origin is read from its closing line.
     expect(entryMetadata(withoutHiddenMarkers(item.text))).toEqual({ [MEMORY_ORIGIN_METADATA_KEY]: 'tool_ingested' });
-    const block = formatMemoryBlock({ results: [item], budgetTokens: 2_000 }).block;
+    const block = formatMemoryBlock({ today: '2026-11-13', results: [item], budgetTokens: 2_000 }).block;
     expect(block).toContain(', a message the person sent] From a message you sent, Oct 31: To wendy@example.com');
   });
 
