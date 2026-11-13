@@ -333,7 +333,7 @@ describe('TruefoundrySettingsBuilder', () => {
       { tab: 'Roles and Personas', content: 'Model role settings content' },
       { tab: 'Connectors', content: 'Connector settings content' },
       { tab: 'Memory', content: 'Memory settings content' },
-      { tab: 'Themes', content: 'Theme settings content' },
+      { tab: 'Appearance', content: 'Theme settings content' },
       { tab: 'Skills', content: 'Skill settings content' },
       { tab: 'Sandbox', content: 'Sandbox settings content' },
       { tab: 'Personalization', content: 'Personalization settings content' },

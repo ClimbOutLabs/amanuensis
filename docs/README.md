@@ -75,6 +75,8 @@ These are the same pages Aman's **Help, I'm stuck** answers from.
 
 - [Phone and other devices](../packages/trueforge/guide/topics/phone.md): Use Aman from your phone or another computer.
 - [Reach me](../packages/trueforge/guide/topics/reach-me.md): Choose how Aman gets your attention.
+- [Text messages](../packages/trueforge/guide/topics/text-messages.md): Get a text when something needs you.
+- [Phone calls](../packages/trueforge/guide/topics/phone-calls.md): Let Aman phone you about urgent things.
 
 **Stay in control**
 
@@ -107,6 +109,7 @@ These are the same pages Aman's **Help, I'm stuck** answers from.
 - [Privacy in detail](privacy.md): Every place your data can go.
 - [How schedules hold actions](schedules.md): The full rules for scheduled runs.
 - [How memory works](memory.md): Where memory is stored and how it is used.
+- [How Aman reaches you](reach-me.md): What Aman watches for and how loudly it tells you.
 
 **Settings for experts**
 
@@ -116,6 +119,8 @@ These are the same pages Aman's **Help, I'm stuck** answers from.
 - [A model for each job](model-roles.mdx): Which model answers you, and which does background work.
 - [Personalization details](personalization.mdx): How Aman learns your profile.
 - [Voice setup](voice-input.mdx): Speech services and voice settings.
+- [Text message setup](text-messages.md): Connect Twilio so Aman can text people.
+- [Phone call setup](phone-calls.md): Let Aman call people through Twilio.
 - [Sandbox setup](sandbox.mdx): Where Aman runs code, and its limits.
 - [Browser setup](browser.md): How Aman's browser is set up.
 - [Skills setup](skills.mdx): Add skill packs from git.

@@ -28,7 +28,7 @@ On a computer you can use keys instead. Hold ++ctrl+shift+space++ while you talk
 
 To pick other keys, or turn them off:
 
-1. Click **More** in the left bar, then **Settings**, then **Themes**.
+1. Click **More** in the left bar, then **Settings**, then **Appearance**.
 2. Under **Talking to Aman**, pick from **Hold-to-talk keys**.
 
 The choice is saved in this browser only.
@@ -102,7 +102,7 @@ To hear any other reply, click **Read aloud** under it. Click **Stop reading alo
 
 To change this:
 
-1. Click **More** in the left bar, then **Settings**, then **Themes**.
+1. Click **More** in the left bar, then **Settings**, then **Appearance**.
 2. Under **Voice replies**, turn **Speak replies when I use my voice** on or off.
 3. In **Voice**, pick one of twelve voices. Heart is the default. Aman plays a short sample when you pick one.
 
@@ -110,11 +110,11 @@ To change this:
 
 === "Computer"
 
-    ![The Talking to Aman and Voice replies settings on the Themes page](../../../../docs/screenshots/app/appearance-themes-desktop.png)
+    ![The Talking to Aman and Voice replies settings on the Appearance page](../../../../docs/screenshots/app/appearance-themes-desktop.png)
 
 === "Phone"
 
-    ![The Talking to Aman and Voice replies settings on the Themes page](../../../../docs/screenshots/app/appearance-themes-phone.png)
+    ![The Talking to Aman and Voice replies settings on the Appearance page](../../../../docs/screenshots/app/appearance-themes-phone.png)
 
 ## Good to know
 

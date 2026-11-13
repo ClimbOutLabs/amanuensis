@@ -5,6 +5,7 @@ import * as core from "../../core/index.js";
 import type * as serializers from "../index.js";
 import { ApprovalCardCopy } from "./ApprovalCardCopy.js";
 import { Tier3CalendarEvent } from "./Tier3CalendarEvent.js";
+import { Tier3CardSkillNetwork } from "./Tier3CardSkillNetwork.js";
 import { Tier3Email } from "./Tier3Email.js";
 import { Tier3Persona } from "./Tier3Persona.js";
 import { Tier3Schedule } from "./Tier3Schedule.js";
@@ -39,6 +40,7 @@ export const Tier3Card: core.serialization.ObjectSchema<serializers.Tier3Card.Ra
         safeChoice: core.serialization.property("safe_choice", core.serialization.boolean().optional()),
         schedule: Tier3Schedule.optionalNullable(),
         skill: Tier3Skill.optionalNullable(),
+        skillNetwork: core.serialization.property("skill_network", Tier3CardSkillNetwork.optionalNullable()),
         whyAskedAgain: core.serialization.property("why_asked_again", core.serialization.string().nullable()),
     });
 
@@ -65,6 +67,7 @@ export declare namespace Tier3Card {
         safe_choice?: boolean | null;
         schedule?: (Tier3Schedule.Raw | null | undefined) | null;
         skill?: (Tier3Skill.Raw | null | undefined) | null;
+        skill_network?: (Tier3CardSkillNetwork.Raw | null | undefined) | null;
         why_asked_again?: string | null;
     }
 }

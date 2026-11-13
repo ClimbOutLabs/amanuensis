@@ -44,6 +44,7 @@ import { SqliteSessionStore } from '../../../src/db/sqlite/session-store/SqliteS
 import { SqliteSpaceStore } from '../../../src/db/sqlite/space-store/SqliteSpaceStore';
 import { SqliteTurnArtifactStore } from '../../../src/db/sqlite/turn-artifact-store/SqliteTurnArtifactStore';
 import type { Database } from '../../../src/db/sqlite/types';
+import { TextContactStore } from '../../../src/db/textContactStore';
 import type { WithTransaction } from '../../../src/db/transaction';
 import { personaKnowledgeLocation } from '../../../src/personaKnowledge/knowledgePaths';
 import { openPersonaKnowledgeRepository } from '../../../src/personaKnowledge/sqliteKnowledgeRepository';
@@ -104,6 +105,7 @@ async function makeInstance(label: string): Promise<Instance> {
     auditStore: new SentinelAuditStore(db),
     deliveryStore: new DeliveryStore(db),
     reachSettingsStore: new ReachSettingsStore(db),
+    textContactStore: new TextContactStore(db),
     turnArtifactStore: new SqliteTurnArtifactStore(db),
     mcpServerStore: new SqliteMcpServerStore(db),
     modelProviderStore: new SqliteModelProviderStore(db),
@@ -143,6 +145,7 @@ function importDeps(instance: Instance, memoryTarget?: MemoryImportTarget): Data
     auditStore: instance.stores.auditStore,
     deliveryStore: instance.stores.deliveryStore,
     reachSettingsStore: instance.stores.reachSettingsStore,
+    textContactStore: instance.stores.textContactStore,
     mcpServerStore: instance.stores.mcpServerStore,
     modelProviderStore: instance.stores.modelProviderStore,
     agentStore: instance.stores.agentStore,
@@ -3340,6 +3343,98 @@ describe('runDataImport keeps permission history and persona choices', () => {
         max_nudges_per_day: 3,
         timezone: 'Europe/Paris',
       });
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('carries the number and the choice of words, and brings the number in unconfirmed with texts off', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-texts');
+    try {
+      const entries = new Map(readZipEntries(archive).map(entry => [entry.name, entry.data]));
+      const rows = listAt(parseJson(entries.get('texts.json'), 'texts.json'), 'texts.json');
+      expect(rows).toEqual([{ phone: '+15550111', mode: 'full', words: [] }]);
+      expect(entries.get('texts.json')?.toString('utf8')).not.toMatch(/code|confirmed|pending|0122|a{20}/);
+
+      await runDataImport(importDeps(target), importRequest(archive));
+      await expect(target.stores.textContactStore.get({ tenant_id: TENANT, created_by: 'bob' })).resolves.toEqual({
+        phone: '+15550111',
+        mode: 'full',
+        confirmed_at: null,
+        opted_out_at: null,
+        pending_phone: null,
+        code_hash: null,
+        code_salt: null,
+        code_key_id: null,
+        code_expires_at: null,
+        code_attempts: 0,
+      });
+      const reach = await target.stores.reachSettingsStore.get({ tenant_id: TENANT, created_by: 'bob' });
+      expect(reach?.channels.texts).toBe(false);
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('imports the words a person let Aman text, and an export from before those words has none', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-text-words');
+    const older = await makeInstance('target-text-words-older');
+    const owner = { tenant_id: TENANT, created_by: 'bob' };
+    try {
+      const withWords = await repack(archive, entries => {
+        entries.set(
+          'texts.json',
+          Buffer.from(JSON.stringify([{ phone: '+15550111', mode: 'full', words: ['patel', 'lopez'] }])),
+        );
+      });
+      await runDataImport(importDeps(target), importRequest(withWords));
+      await expect(target.stores.textContactStore.listWords(owner)).resolves.toEqual(['lopez', 'patel']);
+      // The format before the words existed: a number and a choice, and nothing else.
+      const before = await repack(archive, entries => {
+        entries.set('texts.json', Buffer.from(JSON.stringify([{ phone: '+15550111', mode: 'full' }])));
+      });
+      await runDataImport(importDeps(older), importRequest(before));
+      await expect(older.stores.textContactStore.listWords(owner)).resolves.toEqual([]);
+      // A word the person could not add by hand is left out, so the list never shows a word that does nothing.
+      const rules = await repack(archive, entries => {
+        entries.set(
+          'texts.json',
+          Buffer.from(
+            JSON.stringify([{ phone: '+15550111', mode: 'full', words: ['patel', 'com', 'five', 'dot', 'dad'] }]),
+          ),
+        );
+      });
+      const strict = await makeInstance('target-text-words-rules');
+      try {
+        const result = await runDataImport(importDeps(strict), importRequest(rules));
+        await expect(strict.stores.textContactStore.listWords(owner)).resolves.toEqual(['dad', 'patel']);
+        expect(JSON.stringify(result)).toMatch(/3 text words/);
+      } finally {
+        await strict.close();
+      }
+    } finally {
+      await source.close();
+      await target.close();
+      await older.close();
+    }
+  });
+
+  it('still imports an export made before texts existed, with no number', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-no-texts');
+    try {
+      const older = await repack(archive, entries => {
+        entries.delete('texts.json');
+      });
+      const result = await runDataImport(importDeps(target), importRequest(older));
+      expect(result.chats).toBe(3);
+      await expect(
+        target.stores.textContactStore.get({ tenant_id: TENANT, created_by: 'bob' }),
+      ).resolves.toBeUndefined();
     } finally {
       await source.close();
       await target.close();

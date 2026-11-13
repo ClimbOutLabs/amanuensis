@@ -206,6 +206,21 @@ export type SentinelApprovalCard = {
   mail_new_recipients?: string[] | null;
   /** True when a card carrying mail_new_recipients approves saving a draft rather than sending. */
   mail_draft?: boolean | undefined;
+  /** The network question when the card asks about a skill's sites, or null. */
+  skill_network?: SentinelApprovalSkillNetwork | null;
+};
+
+const APPROVAL_SKILL_NETWORK_REASONS = ['first_use', 'undeclared_host'] as const;
+
+export type SentinelApprovalSkillNetworkReason = (typeof APPROVAL_SKILL_NETWORK_REASONS)[number];
+
+/** The network question a skill network card asks: the skill, the sites, and why it is asked. */
+export type SentinelApprovalSkillNetwork = {
+  skill_name: string;
+  hosts: string[];
+  reason: SentinelApprovalSkillNetworkReason;
+  /** The code version the approval is pinned to, or null when no pin is in force. */
+  code_pin: string | null;
 };
 
 /** The whole persona a chat call adds, in plain words. */
@@ -736,6 +751,19 @@ function parseApprovalCopy(value: unknown): SentinelApprovalCopy | undefined {
   };
 }
 
+/** A card missing any field is not shown as a network question, so a partial one is never approved as if whole. */
+function parseSkillNetwork(value: unknown): SentinelApprovalSkillNetwork | null {
+  if (!isRecord(value)) return null;
+  const skill_name = optionalString(value, 'skill_name') ?? optionalString(value, 'skillName');
+  const hosts = stringList(value.hosts);
+  const reason = APPROVAL_SKILL_NETWORK_REASONS.find(candidate => candidate === value.reason);
+  const code_pin = value.code_pin === null ? null : optionalString(value, 'code_pin');
+  if (skill_name === undefined || hosts === undefined || reason === undefined || code_pin === undefined) {
+    return null;
+  }
+  return { skill_name, hosts, reason, code_pin };
+}
+
 function parseApprovalCard(value: unknown): SentinelApprovalCard | undefined {
   if (!isRecord(value)) return undefined;
   const plain_what = optionalString(value, 'plain_what') ?? optionalString(value, 'plainWhat');
@@ -763,6 +791,7 @@ function parseApprovalCard(value: unknown): SentinelApprovalCard | undefined {
     skill: parseSkill(value.skill),
     mail_new_recipients: parseNewRecipients(value.mail_new_recipients ?? value.mailNewRecipients),
     mail_draft: cardFlag(value, { snake: 'mail_draft', camel: 'mailDraft' }),
+    skill_network: parseSkillNetwork(value.skill_network ?? value.skillNetwork),
   });
 }
 

@@ -140,6 +140,18 @@ describe('the Reminders button in the left panel', () => {
     expect(shell?.setRemindersOpen).toHaveBeenCalledWith(true);
   });
 
+  it('shows an alarm clock, so the bell in the left panel means notifications only', () => {
+    render(
+      <ReminderListProvider api={api}>
+        <RemindersButton />
+      </ReminderListProvider>,
+    );
+
+    const icon = screen.getByRole('button', { name: 'Reminders' }).querySelector('svg');
+    expect(icon?.getAttribute('class')).toContain('alarm-clock');
+    expect(icon?.getAttribute('class')).not.toContain('bell');
+  });
+
   it('is not shown where there is no reminders list to open', () => {
     render(<RemindersButton />);
 
