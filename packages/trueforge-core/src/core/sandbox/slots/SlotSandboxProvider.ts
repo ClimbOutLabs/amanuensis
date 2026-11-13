@@ -127,10 +127,6 @@ function describeAgentError(error: SlotCallError): string {
 }
 
 /**
- * Shell and file tools on sandbox slots. A sandbox is a workspace tree pinned to one slot; every command
- * runs in a fresh gVisor guest that mounts that tree at /workspace. Background processes end with the call.
- */
-/**
  * A host-built git command pins its home, PATH and prompts. A guest already has a fixed, empty home and
  * PATH, reads no per-user or system git settings and has no terminal, and its agent refuses those names.
  * Only the exact pins are left out; any other value for those names still reaches the agent and is refused.
@@ -139,6 +135,10 @@ function withoutGuestPinnedEnv(env: Readonly<Record<string, string>>): Record<st
   return Object.fromEntries(Object.entries(env).filter(([name, value]) => GIT_PROCESS_PINS[name] !== value));
 }
 
+/**
+ * Shell and file tools on sandbox slots. A sandbox is a workspace tree pinned to one slot; every command
+ * runs in a fresh gVisor guest that mounts that tree at /workspace. Background processes end with the call.
+ */
 export class SlotSandboxProvider implements SandboxProvider {
   readonly type = 'slots';
   /** The slots are offline, so sandbox code cannot reach connectors through a bridge. */
