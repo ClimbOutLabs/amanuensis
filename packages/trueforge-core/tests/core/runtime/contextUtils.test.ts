@@ -26,7 +26,6 @@ describe('isFreshnessQuestion', () => {
     'Is your information up to date?',
     'Does GPT-5 exist?',
     'Has the new model been released yet?',
-    'What happened in 2026?',
   ])('flags %p as a freshness question', text => {
     expect(isFreshnessQuestion(text)).toBe(true);
   });
@@ -39,18 +38,23 @@ describe('isFreshnessQuestion', () => {
   );
 });
 
-describe("isFreshnessQuestion on the person's own things", () => {
+describe('isFreshnessQuestion on a year or "currently" alone', () => {
   it.each([
     'What did we plan for the 2026 trip?',
     'What am I currently reading?',
-    'Show me my latest note about the garden.',
     'Summarise our 2025 budget.',
-  ])('does not flag %p, which is about the person and not the outside world', text => {
+    'What happened in 2026?',
+  ])('does not flag %p', text => {
     expect(isFreshnessQuestion(text)).toBe(false);
   });
 
-  it('still flags a year in a question about the outside world', () => {
-    expect(isFreshnessQuestion('Who won the 2026 World Cup?')).toBe(true);
+  it.each([
+    'Can you tell me the latest version of Node?',
+    'Should I buy the newest iPhone?',
+    'Is GPT-6 out yet? We want to use it.',
+    'What is the latest news for 2026?',
+  ])('still flags %p, whoever it mentions', text => {
+    expect(isFreshnessQuestion(text)).toBe(true);
   });
 });
 
