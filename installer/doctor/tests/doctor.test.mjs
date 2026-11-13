@@ -706,12 +706,29 @@ describe('instance settings file', () => {
     const OWNER = 'owner@x.invalid';
     const fixCommand = 'Run aman doctor instance --fix';
 
-    function setUp({ allowed, envText, hashes = [], registered = true, records = '' }) {
+    const dexYamlWith = entries =>
+      [
+        'issuer: https://login.x.invalid/dex',
+        'enablePasswordDB: true',
+        'staticPasswords:',
+        `  - email: '${OWNER}'`,
+        '    hashFromEnv: DEX_USER_PASSWORD_HASH',
+        "    username: 'Owner'",
+        "    userID: 'owner'",
+        ...entries,
+        'staticClients: []',
+        '',
+      ].join('\n');
+
+    function setUp({ allowed, envText, hashes = [], registered = true, records = '', dex = '' }) {
       world?.dispose();
       make();
       const file = path.join(world.instanceDir('main'), 'dex.env');
       writeFileSync(file, ["DEX_USER_PASSWORD_HASH='SENTINEL-owner-hash'", ...hashes, ''].join('\n'));
       chmodSync(file, 0o600);
+      if (dex) {
+        writeFileSync(path.join(world.instanceDir('main'), 'dex.yaml'), dex);
+      }
       world.writeEnv('main', 0o600, envText ?? (allowed === undefined ? '' : `OIDC_ALLOWED_EMAILS=${allowed}\n`));
       if (registered) {
         const dir = path.join(world.home, 'state', 'instances');
@@ -765,6 +782,59 @@ describe('instance settings file', () => {
       const check = setUp({ allowed: OWNER, hashes: ["DEX_USER_PASSWORD_HASH_JUDGE1='SENTINEL-judge1-hash'"] });
       assert.equal(check.state, 'warn');
       assert.equal(check.detail, 'More than the owner can sign in: judge1.');
+      assert.equal(check.fix, fixCommand);
+      assert.doesNotMatch(world.json().stdout, /SENTINEL/);
+    });
+
+    for (const [what, line] of [
+      ['an indented line', "  DEX_USER_PASSWORD_HASH_GHOST='SENTINEL-ghost-hash'"],
+      ['an export word', "export DEX_USER_PASSWORD_HASH_GHOST='SENTINEL-ghost-hash'"],
+      ['blanks around the equals sign', "DEX_USER_PASSWORD_HASH_GHOST = 'SENTINEL-ghost-hash'"],
+      ['mixed case in the variable name', "Dex_User_Password_Hash_GHOST='SENTINEL-ghost-hash'"],
+    ]) {
+      it(`reads a left-over password hash line Compose also reads: ${what}`, () => {
+        const check = setUp({ allowed: OWNER, hashes: [line] });
+        assert.equal(check.state, 'warn');
+        assert.equal(check.detail, 'More than the owner can sign in: ghost.');
+        assert.equal(check.fix, fixCommand);
+        assert.doesNotMatch(world.json().stdout, /SENTINEL/);
+      });
+    }
+
+    it("is quiet when dex.yaml holds the owner's entry alone", () => {
+      const check = setUp({ allowed: OWNER, dex: dexYamlWith([]) });
+      assert.equal(check.state, 'ok');
+      assert.equal(check.detail, 'The settings files exist and are private to you.');
+    });
+
+    it('warns about a sign-in entry that exists only in dex.yaml', () => {
+      const check = setUp({
+        allowed: OWNER,
+        dex: dexYamlWith([
+          "  - email: 'judge@x.invalid'",
+          "    hash: 'SENTINEL-planted-hash'",
+          "    username: 'judge'",
+          "    userID: 'judge'",
+        ]),
+      });
+      assert.equal(check.state, 'warn');
+      assert.equal(check.detail, 'More than the owner can sign in: judge@x.invalid.');
+      assert.equal(check.fix, fixCommand);
+      assert.doesNotMatch(world.json().stdout, /SENTINEL/);
+    });
+
+    it("warns about a second entry under the owner's own email with a password of its own", () => {
+      const check = setUp({
+        allowed: OWNER,
+        dex: dexYamlWith([
+          `  - email: '${OWNER}'`,
+          "    hash: 'SENTINEL-planted-hash'",
+          "    username: 'owner'",
+          "    userID: 'owner-copy'",
+        ]),
+      });
+      assert.equal(check.state, 'warn');
+      assert.equal(check.detail, 'More than the owner can sign in: owner-copy.');
       assert.equal(check.fix, fixCommand);
       assert.doesNotMatch(world.json().stdout, /SENTINEL/);
     });

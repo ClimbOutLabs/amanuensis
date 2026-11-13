@@ -28,6 +28,7 @@ vi.mock('@truefoundry/assistant-ui-runtime', async importOriginal => {
 function card(plain_what: string): SentinelApprovalCard {
   return {
     plain_what,
+    copy: { headline: plain_what, consequence: null, reason: null },
     plain_why: null,
     cannot_be_undone: null,
     why_asked_again: null,
@@ -147,7 +148,7 @@ afterEach(() => {
 describe('ToolCallContainer Sentinel approvals', () => {
   it('renders the plain-language card for a Tier 2 approval', () => {
     renderPending([{ id: 'a', tier: 2 }]);
-    expect(screen.getByText('Do a')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Do a' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Allow' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Not now' })).toBeInTheDocument();
   });
@@ -212,7 +213,7 @@ describe('ToolCallContainer Sentinel approvals', () => {
       { id: 'b', tier: 2 },
       { id: 'danger', tier: 3 },
     ]);
-    const tier3Card = screen.getByText('Do danger').closest('article');
+    const tier3Card = screen.getByRole('heading', { name: 'Do danger' }).closest('article');
     expect(tier3Card).not.toBeNull();
     if (tier3Card instanceof HTMLElement) {
       expect(within(tier3Card).queryByRole('button', { name: /Approve all/ })).not.toBeInTheDocument();
@@ -491,6 +492,11 @@ describe('ToolCallContainer sandbox approval', () => {
         args: { command },
         card: {
           plain_what: 'Run this command?',
+          copy: {
+            headline: 'Run this command?',
+            consequence: 'Commands can change or delete files.',
+            reason: null,
+          },
           plain_why: null,
           cannot_be_undone: 'Commands can change or delete files.',
           why_asked_again: null,

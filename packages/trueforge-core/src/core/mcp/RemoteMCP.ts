@@ -72,6 +72,7 @@ export class RemoteMCP implements ToolSource {
 
   private readonly url: string;
   readonly serverHost: string | undefined;
+  readonly grantBinding: string | undefined;
   private readonly headers: RemoteMcpHeaders;
   private readonly signal: AbortSignal;
   private readonly logger: Logger;
@@ -113,12 +114,15 @@ export class RemoteMCP implements ToolSource {
     signal: AbortSignal;
     /** Answer a redirect with an error instead of following it; see `connectRemoteMcp`. */
     refuseRedirects?: boolean | undefined;
+    /** What an "Always allow" grant on this connector binds to, from the host's record of it; see `ToolGrantKey`. */
+    grantBinding?: string | undefined;
   }) {
     this.name = params.name;
     this.id = params.id;
     this.description = params.description;
     this.url = params.url;
     this.serverHost = hostFromUrl(params.url) ?? undefined;
+    this.grantBinding = params.grantBinding;
     this.headers = params.headers;
     this.signal = params.signal;
     this.sessionId = params.sessionId;

@@ -90,13 +90,51 @@ describe('VoiceReplySettings', () => {
 
     const picker = screen.getByLabelText('Voice');
     expect(picker).toHaveValue('af_heart');
-    expect(screen.getAllByRole('option', { name: /, a (woman|man)/ })).toHaveLength(6);
+    expect(screen.getAllByRole('option', { name: /, a (woman|man)/ })).toHaveLength(12);
     expect(screen.getByLabelText('Backup voice')).toBeInTheDocument();
 
     fireEvent.change(picker, { target: { value: 'am_fenrir' } });
 
     expect(window.localStorage.getItem(SERVER_VOICE_STORAGE_KEY)).toBe('am_fenrir');
     expect(speak).toHaveBeenCalledWith(expect.objectContaining({ voice: 'am_fenrir' }));
+  });
+
+  it('offers the added voices by name and stores a pick of one, with a sample in that voice', () => {
+    const speak = vi.fn<ServerVoiceApi['speak']>(() => new Promise<Blob>(() => {}));
+    render(
+      <SpokenReplyProvider serverVoice={{ speak }}>
+        <VoiceReplySettings />
+      </SpokenReplyProvider>,
+    );
+
+    for (const label of [
+      'Alloy, a woman',
+      'Aoede, a woman',
+      'Kore, a woman',
+      'Nova, a woman',
+      'Sky, a woman',
+      'Puck, a man',
+    ]) {
+      expect(screen.getByRole('option', { name: label })).toBeInTheDocument();
+    }
+
+    const picker = screen.getByLabelText('Voice');
+    fireEvent.change(picker, { target: { value: 'af_nova' } });
+
+    expect(window.localStorage.getItem(SERVER_VOICE_STORAGE_KEY)).toBe('af_nova');
+    expect(speak).toHaveBeenCalledWith(expect.objectContaining({ voice: 'af_nova' }));
+  });
+
+  it('keeps a pick stored before the new voices were added', () => {
+    window.localStorage.setItem(SERVER_VOICE_STORAGE_KEY, 'af_sarah');
+    const speak = vi.fn<ServerVoiceApi['speak']>(() => new Promise<Blob>(() => {}));
+    render(
+      <SpokenReplyProvider serverVoice={{ speak }}>
+        <VoiceReplySettings />
+      </SpokenReplyProvider>,
+    );
+
+    expect(screen.getByLabelText('Voice')).toHaveValue('af_sarah');
   });
 
   it('shows only the browser voices when no computer voice is wired', () => {

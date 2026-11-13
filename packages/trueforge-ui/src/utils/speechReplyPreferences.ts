@@ -68,8 +68,14 @@ export const SERVER_VOICES = [
   { id: 'af_bella', label: 'Bella, a woman' },
   { id: 'af_nicole', label: 'Nicole, a woman' },
   { id: 'af_sarah', label: 'Sarah, a woman' },
+  { id: 'af_alloy', label: 'Alloy, a woman' },
+  { id: 'af_aoede', label: 'Aoede, a woman' },
+  { id: 'af_kore', label: 'Kore, a woman' },
+  { id: 'af_nova', label: 'Nova, a woman' },
+  { id: 'af_sky', label: 'Sky, a woman' },
   { id: 'am_michael', label: 'Michael, a man' },
   { id: 'am_fenrir', label: 'Fenrir, a man' },
+  { id: 'am_puck', label: 'Puck, a man' },
 ] as const;
 
 export type ServerVoiceId = (typeof SERVER_VOICES)[number]['id'];
