@@ -101,7 +101,7 @@ describe('the bell', () => {
       item({ id: 'none', text: 'Your backup finished', link: null }),
     ]);
     renderDevice(api);
-    fireEvent.click(await screen.findByRole('button', { name: /Notifications/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /For you/ }));
 
     const linkLine = async (text: RegExp) =>
       (await screen.findByRole('button', { name: text })).querySelector('[data-role="delivery-link"]')?.textContent;
