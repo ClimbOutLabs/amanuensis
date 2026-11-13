@@ -109,6 +109,75 @@ describe('upgradeArchivedTurnState', () => {
   });
 });
 
+/** A calendar event as cards written before the guest line was carried hold it: a flag, not the line. */
+const OLDER_EVENT = {
+  action: 'create',
+  calendar: 'me@example.com',
+  title: 'Dentist',
+  when: 'Fri Nov 6, 2:30 to 3:00 pm',
+  time_zone: 'UTC',
+  duration: '30 minutes',
+  location: '',
+  description: '',
+  attendees: ['lin@example.com'],
+  guests_emailed: true,
+  one_of_repeating: false,
+  before: null,
+};
+
+const EVENT_CARD = { ...CARD, email: null, calendar_event: OLDER_EVENT };
+const EVENT_APPROVAL = { ...APPROVAL, tool_calls: [{ ...CALL, tier3_card: EVENT_CARD }] };
+
+describe('stored calendar events and the guest line', () => {
+  it('rebuilds the line from the flag on a stored event, in plain words', () => {
+    const item = upgradeStoredSessionEventItem(storedAs<SessionEventItem>({ turn_id: 'turn-1', event: EVENT_APPROVAL }));
+    expect(item.event).toMatchObject({
+      tool_calls: [{ tier3_card: { calendar_event: { guests_line: 'The guests will be emailed about this.' } } }],
+    });
+  });
+
+  it('rebuilds the line from the flag on an archived event and drops the flag', () => {
+    const upgraded = upgradeArchivedApprovalEvent(EVENT_APPROVAL);
+    expect(upgraded).toMatchObject({
+      tool_calls: [{ tier3_card: { calendar_event: { guests_line: 'The guests will be emailed about this.' } } }],
+    });
+    const event = JSON.stringify(upgraded);
+    expect(event).not.toContain('guests_emailed');
+  });
+
+  it('says the guests will not be emailed when the flag said so', () => {
+    const approval = {
+      ...EVENT_APPROVAL,
+      tool_calls: [
+        { ...CALL, tier3_card: { ...EVENT_CARD, calendar_event: { ...OLDER_EVENT, guests_emailed: false } } },
+      ],
+    };
+    const item = upgradeStoredSessionEventItem(storedAs<SessionEventItem>({ turn_id: 'turn-1', event: approval }));
+    expect(item.event).toMatchObject({
+      tool_calls: [{ tier3_card: { calendar_event: { guests_line: 'The guests will not be emailed about this.' } } }],
+    });
+  });
+
+  it('keeps a guest line a newer card already carries', () => {
+    const approval = {
+      ...EVENT_APPROVAL,
+      tool_calls: [
+        {
+          ...CALL,
+          tier3_card: {
+            ...EVENT_CARD,
+            calendar_event: { ...OLDER_EVENT, guests_line: 'Moonmail will email every guest about this.' },
+          },
+        },
+      ],
+    };
+    const item = upgradeStoredSessionEventItem(storedAs<SessionEventItem>({ turn_id: 'turn-1', event: approval }));
+    expect(item.event).toMatchObject({
+      tool_calls: [{ tier3_card: { calendar_event: { guests_line: 'Moonmail will email every guest about this.' } } }],
+    });
+  });
+});
+
 describe('upgradeStoredSessionEventItem and upgradeStoredTurnState', () => {
   it('reads a stored approval with bare address strings in the typed shape the server returns', () => {
     const item = upgradeStoredSessionEventItem(storedAs<SessionEventItem>({ turn_id: 'turn-1', event: APPROVAL }));

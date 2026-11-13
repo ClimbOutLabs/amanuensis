@@ -13,6 +13,7 @@ const DRAFT: ReviewableDraft = {
   inReplyTo: '',
   references: '',
   fromName: '',
+  fromAddress: 'ada@example.com',
   nameLeftOff: false,
   replyTo: null,
 };
@@ -30,6 +31,7 @@ describe('hashDraft', () => {
     ['inReplyTo', { inReplyTo: '<x@mail.example.com>' }],
     ['references', { references: '<x@mail.example.com>' }],
     ['the name it is sent under', { fromName: 'Ada Lovelace' }],
+    ['the address it is sent from', { fromAddress: 'other@example.com' }],
   ];
 
   it('is stable for the same draft', () => {

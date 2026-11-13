@@ -83,6 +83,11 @@ export interface CalendarWriteReview {
   attendees: string[];
   /** True when Google will email the guests about this write. */
   guests_emailed: boolean;
+  /**
+   * What the approval card tells the person about the guests being emailed, as a finished sentence in
+   * this service's own words. Empty when the event has no guests.
+   */
+  guests_line: string;
   /** A change to one date of a repeating event. */
   one_of_repeating: boolean;
   before: { title: string; when: string; short_when: string; duration: string; location: string } | null;
@@ -92,6 +97,16 @@ export interface CalendarWriteReview {
 
 export type ResolvedEventWrite =
   { ok: true; request: EventWriteRequest; review: CalendarWriteReview } | { ok: false; error: string };
+
+/** The card's sentence about the guests being emailed, in this service's words; empty with no guests. */
+function guestEmailLine(input: { attendees: readonly string[]; guests_emailed: boolean }): string {
+  if (input.attendees.length === 0) {
+    return '';
+  }
+  return input.guests_emailed
+    ? 'Google will email every guest about this.'
+    : 'Google will not email the guests about this.';
+}
 
 /** Hash of everything a write sends, and of the event version a change was shown against. */
 export function hashEventWrite(request: EventWriteRequest): string {
@@ -326,6 +341,7 @@ export function resolveCreate(input: { call: CreateEventInput; zone: string; acc
       description,
       attendees,
       guests_emailed: sendUpdates === 'all',
+      guests_line: guestEmailLine({ attendees, guests_emailed: sendUpdates === 'all' }),
       one_of_repeating: false,
       before: null,
       incomplete_reason: null,
@@ -470,6 +486,7 @@ export function resolveUpdate(input: {
       description,
       attendees: guests,
       guests_emailed: guestsEmailed,
+      guests_line: guestEmailLine({ attendees: guests, guests_emailed: guestsEmailed }),
       one_of_repeating: existing.recurringEventId !== undefined,
       incomplete_reason:
         guestsEmailed && hidden

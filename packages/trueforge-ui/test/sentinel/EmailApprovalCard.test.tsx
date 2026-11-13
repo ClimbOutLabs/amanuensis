@@ -10,6 +10,7 @@ const bare = (address: string) => ({ name: '', address });
 function email(overrides: Partial<SentinelApprovalEmail> = {}): SentinelApprovalEmail {
   return {
     action: 'send',
+    sent_from: { address: 'ada@gmail.com', service: 'Gmail' },
     to: [bare('grace@example.com')],
     cc: [],
     bcc: [],
@@ -116,13 +117,41 @@ describe('EmailApprovalCard title and verb', () => {
     expect(screen.getByRole('button', { name: 'Allow' })).toBeInTheDocument();
   });
 
-  it('shows the Gmail label, one waiting line, and no all-caps', () => {
+  it('shows the Gmail label the card carries, one waiting line, and no all-caps', () => {
     const { container } = render(
       <EmailApprovalCard approvalId="approval-1" card={cardWith()} onApprove={vi.fn()} onDeny={vi.fn()} />,
     );
     expect(screen.getByText('Gmail')).toBeInTheDocument();
     expect(screen.getAllByText('Waiting for you')).toHaveLength(1);
     expect(container.querySelector('.uppercase')).toBeNull();
+  });
+});
+
+describe('what account the mail is sent from', () => {
+  it('shows the account address the card carries', () => {
+    renderEmail();
+    expect(screen.getByText('From')).toBeInTheDocument();
+    expect(screen.getByText('ada@gmail.com')).toBeInTheDocument();
+  });
+
+  it('renders a service that exists nowhere in the product under its own name, with no Gmail wording', () => {
+    const { container } = render(
+      <EmailApprovalCard
+        approvalId="approval-1"
+        card={cardWith({ sent_from: { address: 'ada@moonmail.example', service: 'Moonmail' } })}
+        onApprove={vi.fn()}
+        onDeny={vi.fn()}
+      />,
+    );
+    expect(screen.getByText('Moonmail')).toBeInTheDocument();
+    expect(screen.getByText('ada@moonmail.example')).toBeInTheDocument();
+    expect(container.textContent).not.toContain('Gmail');
+  });
+
+  it('shows no service label and no From row on a card stored before the account was recorded', () => {
+    renderEmail({ sent_from: null });
+    expect(screen.queryByText('From')).toBeNull();
+    expect(screen.queryByText('Gmail')).toBeNull();
   });
 });
 

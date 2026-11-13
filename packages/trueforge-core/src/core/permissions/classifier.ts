@@ -2429,6 +2429,9 @@ function gmailWriteCard(input: { action: SentinelAction; agent_intent: string | 
     (content.nameLeftOff || replaces?.nameLeftOff === true ? NAME_LEFT_OFF_LINE : '');
   const email: Tier3Email = {
     action: kind,
+    // This producer is the Gmail tool set, so the account is named in its own words: the checked
+    // address the draft sends from, and the service's own name for the card to render.
+    sent_from: { address: escapeDisplayText(content.fromAddress), service: 'Gmail' },
     to: content.to.map(escapedMailbox),
     cc: content.cc.map(escapedMailbox),
     bcc: content.bcc.map(escapedMailbox),
@@ -2697,7 +2700,7 @@ function calendarWriteCard(input: {
       location: show(review.location),
       description: escapeDisplayText(review.description, { keepNewlines: true }),
       attendees: review.attendees.map(show),
-      guests_emailed: review.guests_emailed,
+      guests_line: show(review.guests_line),
       one_of_repeating: review.one_of_repeating,
       already_created: review.action === 'create' && review.already_created,
       span_days: review.span_days,

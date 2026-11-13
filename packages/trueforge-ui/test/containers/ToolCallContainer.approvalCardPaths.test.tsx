@@ -65,6 +65,7 @@ function draftCard(): SentinelApprovalCard {
     outbound_truncated: false,
     email: {
       action: 'save',
+      sent_from: { address: 'ada@example.test', service: 'Gmail' },
       to: [{ name: 'Robin Example', address: 'robin@example.test' }],
       cc: [],
       bcc: [],

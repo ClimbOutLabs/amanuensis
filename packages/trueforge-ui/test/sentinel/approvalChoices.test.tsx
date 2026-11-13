@@ -135,6 +135,7 @@ describe('grant hint wording', () => {
 describe('offersChangeIt', () => {
   const mail = {
     action: 'send' as const,
+    sent_from: { address: 'ada@gmail.com', service: 'Gmail' },
     to: [],
     cc: [],
     bcc: [],
@@ -154,7 +155,7 @@ describe('offersChangeIt', () => {
     location: '',
     description: '',
     attendees: [],
-    guests_emailed: false,
+    guests_line: '',
     one_of_repeating: false,
     before: null,
   };

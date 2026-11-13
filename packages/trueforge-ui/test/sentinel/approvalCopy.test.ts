@@ -41,6 +41,7 @@ const bare = (address: string) => ({ name: '', address });
 
 const reply: SentinelApprovalCard['email'] = {
   action: 'send',
+  sent_from: { address: 'ada@gmail.com', service: 'Gmail' },
   to: [{ name: 'Rui', address: 'rui@example.com' }],
   cc: [],
   bcc: [],
@@ -108,7 +109,7 @@ describe('approval copy', () => {
         location: '',
         description: '',
         attendees: [],
-        guests_emailed: false,
+        guests_line: '',
         one_of_repeating: false,
         before: null,
       },

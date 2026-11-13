@@ -67,6 +67,7 @@ describe('calendarCardCopy', () => {
 describe('emailCardCopy', () => {
   const base: Tier3Email = {
     action: 'send',
+    sent_from: { address: 'ada@example.test', service: 'Example Mail' },
     to: [{ name: 'Grace Hopper', address: 'grace@example.test' }],
     cc: [],
     bcc: [],
@@ -289,6 +290,7 @@ describe('no card copy carries an internal id', () => {
         inReplyTo: '',
         references: '',
         fromName: '',
+        fromAddress: 'ada@example.test',
         nameLeftOff: false,
         replyTo: null,
       },

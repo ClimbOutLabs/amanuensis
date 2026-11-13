@@ -122,6 +122,7 @@ type Schedule = NonNullable<Tier3Card['schedule']>;
  */
 export const EMAIL_FIELD_RULES: Record<keyof Email, NestedRule> = {
   action: 'checked',
+  sent_from: 'spoken',
   to: 'spoken',
   cc: 'spoken',
   bcc: 'empty',
@@ -143,7 +144,9 @@ export const EVENT_FIELD_RULES: Record<keyof CalendarEvent, NestedRule> = {
   location: 'spoken',
   description: 'spoken',
   attendees: 'empty',
-  guests_emailed: 'empty',
+  // A string field, so it follows the other string fields here: a guest event is already kept on the
+  // screen by the attendees rule, and a guest-free event carries no line.
+  guests_line: 'spoken',
   one_of_repeating: 'empty',
   before: 'empty',
   already_created: 'spoken',
@@ -228,14 +231,19 @@ function readableBody(card: Tier3Card): string[] | undefined {
     if (
       !fieldsAreListed({ shape: email, rules: EMAIL_FIELD_RULES }) ||
       ![...email.to, ...email.cc].every(mailbox => fieldsAreListed({ shape: mailbox, rules: MAILBOX_FIELD_RULES })) ||
+      // A card stored before the sending account was recorded cannot be read back in full, so it stays on screen.
+      email.sent_from === null ||
       email.from_name === undefined ||
       email.name_left_off === undefined ||
       (email.action !== 'send' && email.action !== 'save') ||
       email.to.length === 0 ||
       email.body.length > MAX_SPOKEN_BODY_CHARS ||
-      ![email.subject, email.from_name ?? '', ...[...email.to, ...email.cc].map(mailbox => mailbox.name)].every(
-        staysOnItsLine,
-      )
+      ![
+        email.subject,
+        email.sent_from.service,
+        email.from_name ?? '',
+        ...[...email.to, ...email.cc].map(mailbox => mailbox.name),
+      ].every(staysOnItsLine)
     ) {
       return undefined;
     }
@@ -248,6 +256,7 @@ function readableBody(card: Tier3Card): string[] | undefined {
       email.action === 'send'
         ? `I'll send this ${email.reply_in_thread === null ? 'email' : 'reply'} to ${addresses}${copies}.`
         : `I'll save a draft of this email to ${addresses}${copies}. It will not be sent.`,
+      `The sending account is ${spokenAddress(email.sent_from.address)}, on ${email.sent_from.service}.`,
       ...(email.reply_to === null ? [] : [`Replies will go to ${spokenAddress(email.reply_to)}.`]),
       ...(email.name_left_off ? ['The name was left off an address because it looked like an address.'] : []),
       ...email.to.map(mailbox => mailboxLine({ lead: 'To', mailbox })),

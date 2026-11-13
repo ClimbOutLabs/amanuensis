@@ -60,6 +60,7 @@ const DRAFT: ReviewableDraft = {
   inReplyTo: '',
   references: '',
   fromName: '',
+  fromAddress: 'ada@demo.example',
   nameLeftOff: false,
   replyTo: null,
 };

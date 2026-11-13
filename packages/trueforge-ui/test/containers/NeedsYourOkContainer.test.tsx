@@ -62,6 +62,7 @@ function card(overrides: Partial<SentinelApprovalCard> = {}): SentinelApprovalCa
 
 const MAIL: NonNullable<SentinelApprovalCard['email']> = {
   action: 'send',
+  sent_from: { address: 'ada@example.com', service: 'Gmail' },
   to: [{ name: 'Ana', address: 'ana@example.com' }],
   cc: [],
   bcc: [],

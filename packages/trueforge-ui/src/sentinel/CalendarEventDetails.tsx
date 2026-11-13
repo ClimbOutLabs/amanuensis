@@ -15,7 +15,8 @@ function Line({ label, value }: { label: string; value: string }) {
 
 /**
  * The whole event a calendar write saves, in plain words: every row comes from the server, and the guests are
- * always listed with whether Google emails them, because adding a guest sends mail.
+ * always listed with the line the producing review supplied about whether they are emailed, because adding a
+ * guest can send mail.
  */
 export const CalendarEventDetails: FC<{ event: SentinelApprovalCalendarEvent }> = ({ event }) => {
   const { before } = event;
@@ -48,11 +49,9 @@ export const CalendarEventDetails: FC<{ event: SentinelApprovalCalendarEvent }> 
         )}
         {event.one_of_repeating && <Line label="Repeats" value="Only this one event of the series changes" />}
         <Line label="Guests" value={event.attendees.length === 0 ? 'None' : event.attendees.join(', ')} />
-        {event.attendees.length > 0 && (
+        {event.guests_line !== '' && (
           <p className="font-medium text-text-primary" data-role="calendar-guests-emailed">
-            {event.guests_emailed
-              ? 'Google will email every guest about this.'
-              : 'Google will not email the guests about this.'}
+            {event.guests_line}
           </p>
         )}
       </div>
