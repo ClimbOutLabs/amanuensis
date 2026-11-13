@@ -20,9 +20,12 @@ import {
 import {
   INERT_GET_PAGE_TOOL,
   INERT_SEARCH_MESSAGES_TOOL,
+  INERT_SEARCH_NOTES_TOOL,
   INERT_SERVER_NAME,
   INERT_WEB_SEARCH_TOOL,
   INERT_WRITE_TOOL,
+  startInertMcpServer,
+  type InertMcpServer,
 } from '../../fixtures/inertMcpServer';
 import {
   RUN_DIRECTIVE_PREFIX,
@@ -870,6 +873,33 @@ describe('a connector read the person always allows', () => {
     },
     TURN_TIMEOUT_MS,
   );
+
+  it(
+    'asks again once the connector points at another address',
+    async () => {
+      expect((await readPage({ page_id: PAGE_ID })).cards).toEqual([]);
+
+      const saved = await server.request('/api/v1/settings/mcp-servers', {
+        ...jsonInit({
+          manifest: {
+            type: 'remote',
+            name: INERT_SERVER_NAME,
+            url: `${server.mcp.url}?workspace=second`,
+            description: 'Inert connector used by approval-flow tests.',
+          },
+        }),
+        method: 'PUT',
+      });
+      expect(saved.status).toBe(200);
+
+      const before = server.mcp.getPageInvocations();
+      const [card, ...others] = (await readPage({ page_id: PAGE_ID })).cards;
+      expect(others).toEqual([]);
+      expect(card?.can_always_allow).toBe(true);
+      expect(server.mcp.getPageInvocations()).toBe(before);
+    },
+    TURN_TIMEOUT_MS,
+  );
 });
 
 describe('reminders and schedules in a chat', () => {
@@ -1163,6 +1193,72 @@ describe('a connector tool named like a search tool', () => {
         }),
       );
       expect(card.tier3_card?.plain_what).not.toContain('Aman read');
+    },
+    TURN_TIMEOUT_MS,
+  );
+});
+
+describe('a notes connector the person adds by its address', () => {
+  let server: ApprovalTestServer;
+  let notes: InertMcpServer;
+  const NOTES = 'notes';
+  const NOTES_SPEC = {
+    ...AGENT_SPEC,
+    mcp_servers: [
+      { name: NOTES, preload: true, require_approval_for_tools: ['@write', '@destructive', '@unclassified'] },
+    ],
+  };
+
+  /** Searches the notes in a new chat and returns the chat with the cards that came up. */
+  async function searchNotes(query: string) {
+    const chatId = await createChat(server, NOTES_SPEC);
+    server.model.next({ toolArguments: { query } });
+    return { chatId, cards: cards(await runTurn({ server, chatId, input: ask(INERT_SEARCH_NOTES_TOOL) })) };
+  }
+
+  beforeAll(async () => {
+    server = await startApprovalTestServer();
+    // Stands in for a notes app's connector running on the same computer, outside Aman.
+    notes = await startInertMcpServer({ notes: true });
+    const added = await server.request(
+      '/api/v1/settings/mcp-servers',
+      jsonInit({ manifest: { type: 'remote', name: NOTES, url: notes.url, description: 'My notes folder.' } }),
+    );
+    expect(added.status).toBe(201);
+  }, TURN_TIMEOUT_MS);
+
+  afterAll(async () => {
+    await server.close();
+    await notes.close();
+  });
+
+  it(
+    'lists the tools the connector offers once it is added',
+    async () => {
+      const response = await server.request(`/api/v1/mcp-servers/${NOTES}/tools`);
+      expect(response.status).toBe(200);
+      expect(await response.text()).toContain(INERT_SEARCH_NOTES_TOOL);
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
+    'asks before the first search of the notes, and "Always allow everywhere" lets later searches run in any chat',
+    async () => {
+      const first = await searchNotes('tomatoes');
+      const [card, ...others] = first.cards;
+      expect(others).toEqual([]);
+      expect(card).toMatchObject({ can_always_allow: true });
+      if (card === undefined) {
+        throw new Error('the first search of the notes did not ask');
+      }
+      expect(notes.searchNotesInvocations()).toBe(0);
+
+      await runTurn({ server, chatId: first.chatId, input: answer({ card, scope: 'always' }) });
+      expect(notes.searchNotesInvocations()).toBe(1);
+
+      expect((await searchNotes('beans')).cards).toEqual([]);
+      expect(notes.searchNotesInvocations()).toBe(2);
     },
     TURN_TIMEOUT_MS,
   );

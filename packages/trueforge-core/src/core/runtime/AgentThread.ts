@@ -2064,9 +2064,11 @@ export class AgentThread {
     this.postToolCallContextProcessor = capabilities.flatMap(c => c.postToolCallProcessors ?? []);
     this.toolResponseProcessors = capabilities.flatMap(c => c.toolResponseProcessors ?? []);
     this.untrustedTextScreens = capabilities.flatMap(c => c.untrustedTextScreens ?? []);
-    this.instructionBuilders = capabilities.flatMap(c =>
-      (c.instructionBuilders ?? []).map(build => ({ bundle: c.bundle, build })),
-    );
+    // A capability's instructions say how to use its tools. A read-only definition gets none of those tools,
+    // so it gets none of their instructions either; context with no tools behind it still goes out.
+    this.instructionBuilders = capabilities
+      .filter(c => !this.definition.readOnly || (c.systemToolSets ?? []).length === 0)
+      .flatMap(c => (c.instructionBuilders ?? []).map(build => ({ bundle: c.bundle, build })));
     const capabilityPreSend = capabilities.flatMap(c => c.preSendProcessors ?? []);
     // OpenToolCallCloser is fixed core before contributed preSend processors.
     this.preSendContextProcessors = [
@@ -2173,6 +2175,11 @@ export class AgentThread {
     }
   }
 
+  /** Whether this thread is given the named connector's tools. A read-only thread is given none. */
+  private holdsConnector(name: string): boolean {
+    return !this.definition.readOnly && (this.definition.toolSets ?? []).some(toolSet => toolSet.name === name);
+  }
+
   private buildInstruction(userInstruction?: string): string {
     const identity = this.parent ? SUB_AGENT_IDENTITY : rootAgentIdentity(this.definition.identity ?? {});
     const builder = InstructionBuilder.createSystemPrompt(identity);
@@ -2218,7 +2225,8 @@ export class AgentThread {
     capabilities.addSection('plain-speech', PLAIN_SPEECH_PROMPT);
     if (this.definition.setUpConnectorNames?.includes(MAIL_CONNECTOR_NAME)) {
       capabilities.addSection('email-passwords', EMAIL_PASSWORD_PROMPT);
-      if (this.sentinel?.services.demoSendAllowlist != null) {
+      // The demo note tells the model to save a draft with the Email tools, so it goes only where those tools do.
+      if (this.sentinel?.services.demoSendAllowlist != null && this.holdsConnector(MAIL_CONNECTOR_NAME)) {
         capabilities.addSection('demo-email', DEMO_EMAIL_PROMPT);
       }
     }
