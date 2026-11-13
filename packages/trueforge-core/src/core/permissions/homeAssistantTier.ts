@@ -15,6 +15,7 @@ import {
   isHomeAssistantRefusedTarget,
   type HomeAssistantTarget,
 } from '../homeassistant/toolContract';
+import { simpleCardCopy } from './cardCopy';
 import type { SentinelAction } from './classifier';
 import { escapeDisplayText } from './displayText';
 import { renderOutboundArguments, SEND_VALUE_MAX_CHARS } from './extractorRegistry';
@@ -172,8 +173,10 @@ function cardFor({
   if (outbound.truncated) {
     return null;
   }
+  const plain_what = plainWhatFor({ tool_name, params, target });
   return {
-    plain_what: plainWhatFor({ tool_name, params, target }),
+    plain_what,
+    copy: simpleCardCopy({ headline: plain_what, undo: null, reason: null }),
     plain_why: null,
     cannot_be_undone: null,
     why_asked_again: null,

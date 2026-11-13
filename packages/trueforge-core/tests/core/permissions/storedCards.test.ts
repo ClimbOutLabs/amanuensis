@@ -36,6 +36,7 @@ const ARCHIVED_UPGRADED_EMAIL = { ...UPGRADED_EMAIL, reply_to: null };
 
 const CARD = {
   plain_what: 'Change',
+  copy: null,
   plain_why: null,
   cannot_be_undone: null,
   why_asked_again: null,
@@ -77,6 +78,13 @@ describe('upgradeArchivedApprovalEvent', () => {
     const named = { ...ARCHIVED_UPGRADED_EMAIL, to: [{ name: 'Grace Lee', address: 'grace@example.com' }] };
     const event = { ...APPROVAL, tool_calls: [{ ...CALL, tier3_card: { ...CARD, email: named } }] };
     expect(upgradeArchivedApprovalEvent(event)).toEqual(event);
+  });
+
+  it('fills the copy with null on a card written before cards carried their wording', () => {
+    const olderCard: Record<string, unknown> = { ...CARD };
+    delete olderCard['copy'];
+    const event = { ...APPROVAL, tool_calls: [{ ...CALL, tier3_card: olderCard }] };
+    expect(upgradeArchivedApprovalEvent(event)).toMatchObject({ tool_calls: [{ tier3_card: { copy: null } }] });
   });
 
   it('passes through events that are not approvals', () => {

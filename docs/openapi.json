@@ -394,6 +394,38 @@
         ],
         "type": "object"
       },
+      "ApprovalCardCopy": {
+        "description": "The headline, consequence and reason the card renders. Every builder fills it from its copy owner; null only where a later choke point fills it, never on a finished card.",
+        "properties": {
+          "consequence": {
+            "description": "What follows from approving, in one line, or null when nothing needs saying.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "headline": {
+            "description": "What will happen, in one sentence, in words the person recognises.",
+            "type": "string"
+          },
+          "reason": {
+            "description": "Why the tier asks, in plain words, or null when it needs no reason.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "headline",
+          "consequence",
+          "reason"
+        ],
+        "type": [
+          "object",
+          "null"
+        ]
+      },
       "ApprovalDecision": {
         "discriminator": {
           "mapping": {
@@ -4546,16 +4578,6 @@
         ],
         "type": "object"
       },
-      "HelpGoogleLoginState": {
-        "description": "The built-in Google login: answered, needs connecting again, did not answer, or not set up.",
-        "enum": [
-          "answered",
-          "needs_reconnect",
-          "no_answer",
-          "not_set_up"
-        ],
-        "type": "string"
-      },
       "HelpHealthCheck": {
         "properties": {
           "checked_at": {
@@ -4610,6 +4632,9 @@
               "null"
             ]
           },
+          "settings_section": {
+            "$ref": "#/components/schemas/HelpSettingsSection"
+          },
           "status": {
             "$ref": "#/components/schemas/HelpHealthStatus"
           }
@@ -4619,7 +4644,8 @@
           "name",
           "status",
           "message",
-          "next_step"
+          "next_step",
+          "settings_section"
         ],
         "type": "object"
       },
@@ -4678,6 +4704,19 @@
         ],
         "type": "string"
       },
+      "HelpSettingsSection": {
+        "description": "The Settings section where the next step is done.",
+        "enum": [
+          "models",
+          "connectors",
+          "sandbox",
+          null
+        ],
+        "type": [
+          "string",
+          "null"
+        ]
+      },
       "HelpSetupStep": {
         "properties": {
           "done": {
@@ -4713,14 +4752,11 @@
             ]
           },
           "connectors": {
-            "description": "Each connector, whether it answered, and why not.",
+            "description": "Each connector set up here, the Google login among them, whether it answered, and why not.",
             "items": {
               "$ref": "#/components/schemas/HelpConnectorState"
             },
             "type": "array"
-          },
-          "google_login": {
-            "$ref": "#/components/schemas/HelpGoogleLoginState"
           },
           "sandbox_ready": {
             "description": "Whether the sandbox that reads files and runs code is ready.",
@@ -4737,7 +4773,6 @@
         "required": [
           "setup_steps",
           "connectors",
-          "google_login",
           "sandbox_ready",
           "app_version",
           "build_ref"
@@ -12778,6 +12813,9 @@
               "null"
             ]
           },
+          "copy": {
+            "$ref": "#/components/schemas/ApprovalCardCopy"
+          },
           "destination": {
             "description": "Verifiable destination (URL, service name), or null.",
             "type": [
@@ -12791,6 +12829,10 @@
               "string",
               "null"
             ]
+          },
+          "destructive": {
+            "description": "True when the action destroys or sends something for good, so its button wears the destructive ink.",
+            "type": "boolean"
           },
           "email": {
             "$ref": "#/components/schemas/Tier3Email"
@@ -12855,6 +12897,10 @@
               "null"
             ]
           },
+          "safe_choice": {
+            "description": "True when the safe choice is the primary button: the action is irreversible or reaches other people.",
+            "type": "boolean"
+          },
           "schedule": {
             "$ref": "#/components/schemas/Tier3Schedule"
           },
@@ -12871,6 +12917,7 @@
         },
         "required": [
           "plain_what",
+          "copy",
           "plain_why",
           "cannot_be_undone",
           "why_asked_again",
