@@ -241,6 +241,25 @@ function asComparableText(parts: Record<string, unknown>): string {
 }
 
 /**
+ * The held card's copy with the new-recipient notice lifted out of its consequence, where the
+ * notice led it. The notice is the held sentence's own lead: the part before the sentence the
+ * fresh card still shows.
+ */
+function heldCopyWithoutNotice(input: { held: Tier3Card; fresh: Tier3Card }): Tier3Card['copy'] {
+  const { held, fresh } = input;
+  const copy = held.copy ?? null;
+  if (copy?.consequence == null) {
+    return copy;
+  }
+  const notice = held.plain_what.slice(0, held.plain_what.length - fresh.plain_what.length - 1);
+  if (notice === '' || !copy.consequence.startsWith(notice)) {
+    return copy;
+  }
+  const rest = copy.consequence.slice(notice.length).trim();
+  return { ...copy, consequence: rest === '' ? null : rest };
+}
+
+/**
  * Whether a card reads today as it read when the call was held. One difference is expected: approving a mail to
  * new addresses puts them on the Email list, so a later try no longer carries the new-recipient notice. The
  * sentence after that notice, and every other part, must still be what the owner read.
@@ -257,7 +276,7 @@ function readsAsHeld(input: { held: Tier3Card; fresh: Tier3Card }): boolean {
   }
   const withoutNotice = { plain_what: fresh.plain_what, mail_new_recipients: null, mail_draft: null };
   return (
-    asComparableText({ ...partsRead(held), ...withoutNotice }) ===
+    asComparableText({ ...partsRead(held), ...withoutNotice, copy: heldCopyWithoutNotice({ held, fresh }) }) ===
     asComparableText({ ...partsRead(fresh), ...withoutNotice })
   );
 }

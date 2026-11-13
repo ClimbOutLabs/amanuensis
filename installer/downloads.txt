@@ -11,6 +11,11 @@ tts-deps|60|Python packages fetched while building the voice that reads replies 
 tts-voice|124|Kokoro voice model and English word lists, downloaded once while the voice is built|github.com release-assets.githubusercontent.com files.pythonhosted.org
 vad-model|2|Voice mode's speech detection model, fetched and checked while the Aman app image is built|raw.githubusercontent.com
 dex|36|Sign-in service (pinned by digest)|ghcr.io
+app-image|600|The Aman app, published by a release (pinned by digest; only when this copy matches a release)|ghcr.io
+stt-image|250|Speech-to-text service, published by a release (pinned by digest)|ghcr.io
+tts-image|250|Voice that reads replies aloud, published by a release (pinned by digest)|ghcr.io
+calendar-image|60|Calendar connector, published by a release (pinned by digest)|ghcr.io
+browser-image|1100|Aman's browser and its gateway, published by a release (pinned by digest)|ghcr.io
 browser-base|1000|Playwright base image with Chromium, for Aman's own browser (pinned by digest)|mcr.microsoft.com
 browser-deps|10|Packages fetched while building Aman's browser|registry.npmjs.org
 browser-gateway-base|80|Node base image for the browser's gateway (pinned by digest)|registry-1.docker.io

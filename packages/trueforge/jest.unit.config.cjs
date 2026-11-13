@@ -48,5 +48,6 @@ module.exports = {
   // pattern is exact.
   testMatch: ['**/tests/unit/**/*.test.ts'],
   // SRT contract suites need a real host sandbox; run via `pnpm test:local-sandbox:contract`.
-  testPathIgnorePatterns: ['contract\\.test\\.ts$'],
+  // Suites that need a real outside app running have their own config and script.
+  testPathIgnorePatterns: ['contract\\.test\\.ts$', 'live\\.test\\.ts$'],
 };
