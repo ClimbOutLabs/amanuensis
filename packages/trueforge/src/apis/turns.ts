@@ -105,6 +105,7 @@ import {
   type ChatTitleDrainMember,
 } from '../runtime/chatTitle';
 import { StreamGoneError, type EventSubscription, type EventSubscriptionRegistry } from '../runtime/event-subscription';
+import { effectiveGitCommitIdentity, readStoredGitCommitIdentity } from '../runtime/gitCommitIdentitySettings';
 import { buildInternalSourceToolPolicy, type InternalSourceState } from '../runtime/internalSourceGuard';
 import { stampLatestAnswer, type LatestAnswerSessionStore } from '../runtime/latestAnswer';
 import { mailAccountDirectory } from '../runtime/mailConnector';
@@ -703,11 +704,19 @@ function createTurnResolver(deps: {
           spec,
           store: mcpServerStore,
         });
+        const gitCommitIdentity = effectiveGitCommitIdentity({
+          stored:
+            deps.globalSettingsStore === undefined
+              ? { name: null, email: null }
+              : await readStoredGitCommitIdentity({ globalSettingsStore: deps.globalSettingsStore, logger }),
+          personName: personalizationProfile?.user_name,
+        });
         return buildTurnSandbox({
           provider,
           logger,
           gitSkills,
           githubGitToken,
+          gitCommitIdentity,
           githubConnectorAttached: isGithubConnectorAttached(spec),
           webConnectorAttached: isWebConnectorAttached(spec),
           fileDownloadEnabled: spec.config.sandbox.file_downloads,

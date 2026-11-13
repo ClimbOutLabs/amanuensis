@@ -233,6 +233,7 @@
   "Add-ons": "packages/trueforge-ui/src/atoms/draft/DraftCompositeSelector.tsx",
   "Package downloads": "packages/trueforge-ui/src/containers/SettingsBuilder/SandboxSettings.tsx",
   "Chats without a project": "packages/trueforge-ui/src/containers/SettingsBuilder/SandboxSettings.tsx",
+  "Name on Git commits": "packages/trueforge-ui/src/containers/SettingsBuilder/SandboxSettings.tsx",
   "Email provider": "packages/trueforge-ui/src/containers/SettingsBuilder/EmailSetupPanel.tsx",
   "How to get an app password": "packages/trueforge-ui/src/containers/SettingsBuilder/EmailSetupPanel.tsx",
   "Other": "packages/trueforge-ui/src/atoms/draft/DraftModelCatalogPanel.tsx",

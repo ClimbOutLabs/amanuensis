@@ -9,6 +9,7 @@ import {
   SandboxPathIsDirectoryError,
 } from '../SandboxErrors';
 import type { CodeModeTransport } from '../codeMode/CodeModeTransport';
+import { hasEnvBeyondCommitIdentity } from '../gitCommitIdentity';
 import { GIT_PROCESS_PINS } from '../hostAuthenticatedGit';
 import { PACKAGE_UNAVAILABLE_RULE, PYTHON_PROJECT_ENVIRONMENT_RULE } from '../packageMirrors';
 import {
@@ -354,7 +355,7 @@ export class SlotSandboxProvider implements SandboxProvider {
   private bridgedGit(params: SandboxExecParams): Promise<ExecResult> | undefined {
     const bridge = this.gitBridge;
     const plan = bridge?.plan(params.command);
-    if (bridge === undefined || plan === undefined || Object.keys(params.env ?? {}).length > 0) {
+    if (bridge === undefined || plan === undefined || hasEnvBeyondCommitIdentity(params.env)) {
       return undefined;
     }
     return bridge.run({
