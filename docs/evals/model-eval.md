@@ -32,19 +32,21 @@ The run turns red when a model's pass rate falls more than 10 points below its l
 
 ### Add the model key once
 
-The weekly run needs a Token Factory key, saved as a repository secret. Only someone who can change the repository's settings can add it.
+The weekly run needs a Token Factory key. It is kept in a GitHub environment called `model-evals` that only `main` can use, and the workflow never runs for pull requests, so code in a pull request can never read the key. Only someone who can change the repository's settings can set this up.
 
-1. Open the repository on GitHub, then **Settings**, then **Secrets and variables**, then **Actions**.
-2. Choose **New repository secret**.
-3. Name it `MODEL_EVAL_NEBIUS_API_KEY`, paste the key as the value, and save.
-
-Or, with the GitHub command line tool, run this and paste the key when it asks:
+With the GitHub command line tool, run these three commands. The last one asks for the key, so it never shows on screen or in your shell history:
 
 ```sh
-gh secret set MODEL_EVAL_NEBIUS_API_KEY --repo ClimbOutLabs/amanuensis
+gh api -X PUT repos/ClimbOutLabs/amanuensis/environments/model-evals --input - <<< '{"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true}}'
+gh api -X POST repos/ClimbOutLabs/amanuensis/environments/model-evals/deployment-branch-policies -f name=main -f type=branch
+gh secret set MODEL_EVAL_NEBIUS_API_KEY --env model-evals --repo ClimbOutLabs/amanuensis
 ```
 
+Or on GitHub: open the repository, then **Settings**, then **Environments**, then **New environment**. Name it `model-evals`. Under **Deployment branches and tags**, choose **Selected branches and tags** and add `main`. Then, under **Environment secrets**, add `MODEL_EVAL_NEBIUS_API_KEY` with the key as its value.
+
 A key with a spending limit is a good choice. One weekly run of the two default models should cost a few dollars. The run page shows the real cost.
+
+Every file the run keeps is checked for the key before it is saved. If the key is ever found, the files are deleted and the run fails.
 
 ### Run it now, with other models
 

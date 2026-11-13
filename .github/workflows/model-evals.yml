@@ -3,6 +3,9 @@ name: Model evals
 # Runs real models against a throwaway eval-mode Aman: everyday tasks, safety traps and memory
 # questions, graded by rule checks and a judge model. Each run adds to a score history kept as a
 # run artifact, and the run fails when a model scores clearly worse than its last run.
+#
+# The model key lives only in the `model-evals` environment, which runs on main alone. This workflow
+# never runs for pull requests, so code from a pull request can never see the key.
 on:
   schedule:
     # Mondays 10:41 UTC, off the hour, when scheduled runs start late.
@@ -40,6 +43,7 @@ jobs:
     name: Compare models
     runs-on: ubuntu-latest
     timeout-minutes: 300
+    environment: model-evals
     permissions:
       contents: read
       actions: read
@@ -55,13 +59,13 @@ jobs:
           fi
 
       - name: Check out repository code
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
 
       - name: Setup Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: '.nvmrc'
           cache: 'pnpm'
@@ -99,6 +103,25 @@ jobs:
             --history "$RUNNER_TEMP/history/history.json" \
             --out "$RUNNER_TEMP/results"
 
+      # Nothing the run keeps may hold the key. If it ever does, the files are deleted and the run fails.
+      - name: Check that no output holds the model key
+        if: always()
+        env:
+          NEBIUS_API_KEY: ${{ secrets.MODEL_EVAL_NEBIUS_API_KEY }}
+        run: |
+          if [ -z "$NEBIUS_API_KEY" ]; then exit 0; fi
+          found=0
+          for dir in "$RUNNER_TEMP/results" "$RUNNER_TEMP/history"; do
+            if [ -d "$dir" ] && grep -rqF -- "$NEBIUS_API_KEY" "$dir"; then
+              rm -rf "$dir"
+              found=1
+            fi
+          done
+          if [ "$found" = 1 ]; then
+            echo '::error::An output file held the model key, so the results were deleted and not kept. Do not rerun until the cause is fixed.'
+            exit 1
+          fi
+
       - name: Show the scores on the run page
         if: always()
         run: |
@@ -108,7 +131,7 @@ jobs:
 
       - name: Keep the results
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: model-eval-results
           path: ${{ runner.temp }}/results/
@@ -117,7 +140,7 @@ jobs:
 
       - name: Keep the score history
         if: always() && github.ref == 'refs/heads/main'
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: model-eval-history
           path: ${{ runner.temp }}/history/history.json

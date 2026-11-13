@@ -23,6 +23,7 @@ A model eval that runs real models on a fixed set of cases, grades every reply b
 - **Memory is put back.** Before each model the eval saves its made-up facts; after that model it removes every memory added since it started, so each model starts from the same memory and memories from before the run are left alone.
 - **Cost from the server.** For Token Factory models the cost comes from the instance's own priced counters, so it matches what Settings shows and includes Aman's background work. Other models are priced from an optional file, or shown as not known.
 - **Eval mode only.** Both commands refuse an instance that is not in eval mode, where mail and calendar are invented, nothing is sent, and only safe approvals go through.
+- **The key stays on main.** The workflow runs only on its schedule or by hand, never for a pull request. The key is a secret of a GitHub environment that only `main` may use, every action is pinned to a commit, the job has read-only permissions, and the run fails and deletes its files if the key appears in anything it keeps.
 - **History as an artifact.** Scores are not committed, so the run needs no write access to the repository.
 
 ## Privacy
