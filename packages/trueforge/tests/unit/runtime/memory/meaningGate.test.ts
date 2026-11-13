@@ -160,6 +160,18 @@ describe('the meaning gate', () => {
       expect(gate.notes).toEqual([]);
     });
 
+    it('shows a note of a reply that wrote to the pages itself, whoever wrote it, as a note not sorted yet', async () => {
+      const { vaultDir, ids, model } = await vaultWith([
+        ownNote({ topic: 2, age: 1 }),
+        { day: daysAgo(2), text: 'Mail says topic2 too.', source: 'email' },
+      ]);
+      await markHandled({ vaultDir, ids, outcome: 'chat' });
+
+      const gate = judged(await gateFor({ vaultDir, model, message: ask }));
+
+      expect(gate.notes.map(note => note.id).sort()).toEqual([...ids].sort());
+    });
+
     it("shows a note the sorter put on no page when it is the person's own words", async () => {
       const { vaultDir, ids, model } = await vaultWith([ownNote({ topic: 2, age: 1 })]);
       await markHandled({ vaultDir, ids, outcome: 'none' });

@@ -270,6 +270,47 @@ describe('sorting after a save', () => {
     expect(model.sortCalls).toBe(1);
   });
 
+  it('keeps the note of a reply that wrote to the pages itself, and never sends it to the sorter', async () => {
+    const { client, vaultDir } = await openClient();
+    const model = fakeModel({ sortAnswer: newFactAnswer });
+
+    await submitRetain({
+      client,
+      session: { is_incognito: false },
+      ...TURN,
+      userText: SHELLFISH,
+      assistantText: 'Noted.',
+      chatWrotePages: true,
+      logger,
+      summarize: summarizeContext(model),
+    });
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    expect(model.sortCalls).toBe(0);
+    expect(await readFile(path.join(vaultDir, 'memory', '2026-11-06.md'), 'utf8')).toContain(SHELLFISH);
+    expect([...(await readHandledNotes(vaultDir)).values()]).toEqual(['chat']);
+    await expect(readFile(path.join(vaultDir, 'people', 'wendy.md'), 'utf8')).rejects.toThrow();
+  });
+
+  it('records that note as filed by the chat with sorting off too, so turning sorting on later does not sort it', async () => {
+    sortingMode = 'off';
+    const { client, vaultDir } = await openClient();
+    const model = fakeModel({ sortAnswer: newFactAnswer });
+
+    await submitRetain({
+      client,
+      session: { is_incognito: false },
+      ...TURN,
+      userText: SHELLFISH,
+      assistantText: 'Noted.',
+      chatWrotePages: true,
+      logger,
+      summarize: summarizeContext(model),
+    });
+
+    expect([...(await readHandledNotes(vaultDir)).values()]).toEqual(['chat']);
+  });
+
   it('sorts nothing from a private chat, which saves nothing', async () => {
     const { client } = await openClient();
     const model = fakeModel({ sortAnswer: newFactAnswer });

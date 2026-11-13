@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { readHandledNotes } from '../../../../src/runtime/memory/handledNotes';
+import { appendHandledNote, readHandledNotes } from '../../../../src/runtime/memory/handledNotes';
 import { appendVaultTombstone } from '../../../../src/runtime/memory/markdownMemoryFiles';
 import { markReviewedNotesFromYou } from '../../../../src/runtime/memory/memorySourceLines';
 import { MISSED_NOTES_PER_RUN, sortMissedNotes } from '../../../../src/runtime/memory/missedNotes';
@@ -76,6 +76,100 @@ describe('notes the sorter missed', () => {
     expect(result).toEqual({ asked: 1, sorted: 1, reasons: [] });
     expect(await readPage(base.vaultDir, 'matter', 'wendy')).toContain('- Wendy has a new job.');
     expect([...(await readHandledNotes(base.vaultDir))]).toEqual([[noteId('2026-11-09', 0), 'page']]);
+  });
+
+  // The two pages a person reported: the chat wrote the line, the note of the same message said it with the year.
+  it.each([
+    {
+      slug: 'garage-clean-out',
+      title: 'Garage clean-out',
+      line: 'Wants the garage clean-out done before spring.',
+      note: 'Garage clean-out to be done before spring 2027.',
+      sharper: 'Wants the garage clean-out done before spring 2027.',
+    },
+    {
+      slug: 'my-car',
+      title: 'My car',
+      line: 'Grey 2019 Subaru Outback; oil change due in January.',
+      note: 'Car is a grey 2019 Outback.\nOil change due in January 2027.',
+      sharper: 'Grey 2019 Subaru Outback; oil change due in January 2027.',
+    },
+  ])(
+    'never sorts the note of a message the chat already filed onto $slug',
+    async ({ slug, title, line, note, sharper }) => {
+      const base = await makeBase();
+      const before = pageWith({
+        title,
+        now: [`- ${line} <!-- fact: id=f_01 src=you_said since=2026-11-09 -->`],
+      });
+      await writePage(base.vaultDir, 'matter', slug, before);
+      await writeDay({ vaultDir: base.vaultDir, day: '2026-11-09', notes: [note] });
+      await appendHandledNote({ vaultDir: base.vaultDir, noteId: noteId('2026-11-09', 0), outcome: 'chat' });
+      // What the sorter answered when it did get this note.
+      const model = modelAnswering(() => ({
+        decisions: [
+          {
+            decision: 'changed',
+            about: slug,
+            statement_id: 'f_01',
+            new_text: sharper,
+            until_old: '2026-11-11',
+            since_new: '2026-11-11',
+            reason: 'More exact.',
+          },
+        ],
+      }));
+
+      const result = await run({ base, mode: 'on', model });
+
+      expect(result).toEqual({ asked: 0, sorted: 0, reasons: [] });
+      expect(model.prompts).toHaveLength(0);
+      expect(await readPage(base.vaultDir, 'matter', slug)).toBe(before);
+    },
+  );
+
+  it('still sorts a note from a later message that changes the same line', async () => {
+    const base = await makeBase();
+    await writePage(
+      base.vaultDir,
+      'matter',
+      'garage-clean-out',
+      pageWith({
+        title: 'Garage clean-out',
+        now: ['- Wants the garage clean-out done before spring. <!-- fact: id=f_01 src=you_said since=2026-11-09 -->'],
+      }),
+    );
+    await writeDay({
+      vaultDir: base.vaultDir,
+      day: '2026-11-09',
+      notes: ['Garage clean-out to be done before spring 2027.'],
+    });
+    await appendHandledNote({ vaultDir: base.vaultDir, noteId: noteId('2026-11-09', 0), outcome: 'chat' });
+    await writeDay({
+      vaultDir: base.vaultDir,
+      day: '2026-11-10',
+      notes: ['Garage clean-out is now wanted before summer.'],
+    });
+    const model = modelAnswering(() => ({
+      decisions: [
+        {
+          decision: 'changed',
+          about: 'garage-clean-out',
+          statement_id: 'f_01',
+          new_text: 'Wants the garage clean-out done before summer.',
+          until_old: '2026-11-10',
+          since_new: '2026-11-10',
+          reason: 'The person changed it.',
+        },
+      ],
+    }));
+
+    const result = await run({ base, mode: 'on', model });
+
+    expect(result).toEqual({ asked: 1, sorted: 1, reasons: [] });
+    const page = await readPage(base.vaultDir, 'matter', 'garage-clean-out');
+    expect(page).toContain('- Wants the garage clean-out done before summer.');
+    expect(page).toContain('- Wants the garage clean-out done before spring.');
   });
 
   it('does not ask again about a note it already handled', async () => {

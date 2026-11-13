@@ -1237,6 +1237,8 @@ export interface DrainTurnEventsInput {
          * Left out, the chat counts as having read something.
          */
         chatHasReadContent?: (() => boolean) | undefined;
+        /** Whether the reply changed a memory page with the page tools, asked when the turn is done. */
+        chatWrotePages?: (() => boolean) | undefined;
         /** The person's IANA time zone, so a summary writes dates as the day they lived. */
         timeZone?: string | undefined;
         /**
@@ -1564,6 +1566,7 @@ async function runTurnFollowUp(params: {
         timeZone: memory.timeZone,
         origin: ingestedToolOutput ? 'tool_ingested' : 'user_stated',
         chatReadNothing: !ingestedToolOutput && memory.chatHasReadContent?.() === false,
+        chatWrotePages: memory.chatWrotePages?.() === true,
         logger,
         toolResults,
         summarize: memory.summarize,
@@ -2050,6 +2053,7 @@ async function beginAcceptedTurnExecution(
               userText: extractUserMessageText(input ?? []),
               attachedFiles: inputAttachesFiles(input ?? []),
               chatHasReadContent: () => chatSawOutsideText(resolver.webSearchTurn),
+              chatWrotePages: () => resolver.chatWrotePages,
               timeZone: deps.clientTimezone,
               summarize: memorySummarize,
             },
@@ -3233,6 +3237,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
             userText: extractUserMessageText(body.input),
             attachedFiles: inputAttachesFiles(body.input ?? []),
             chatHasReadContent: () => chatSawOutsideText(resolver.webSearchTurn),
+            chatWrotePages: () => resolver.chatWrotePages,
             timeZone: body.client_timezone,
             // Resolved once on the create-turn path above; absent means verbatim.
             summarize: memorySummarize,

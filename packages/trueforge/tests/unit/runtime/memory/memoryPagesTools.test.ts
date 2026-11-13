@@ -39,7 +39,10 @@ afterEach(async () => {
   await rm(baseDir, { recursive: true, force: true });
 });
 
-function build(vaultDir: string, extra: { watch?: TurnReadWatch; keepsNothing?: boolean; said?: string } = {}) {
+function build(
+  vaultDir: string,
+  extra: { watch?: TurnReadWatch; keepsNothing?: boolean; said?: string; onPageWritten?: () => void } = {},
+) {
   const audit: AuditRecordInput[] = [];
   let n = 0;
   const watch = extra.watch ?? new TurnReadWatch();
@@ -70,6 +73,7 @@ function build(vaultDir: string, extra: { watch?: TurnReadWatch; keepsNothing?: 
       n += 1;
       return `f_n${String(n)}`;
     },
+    onPageWritten: extra.onPageWritten,
   });
   return { tools, audit };
 }
@@ -742,5 +746,43 @@ describe('which vault a name is looked up in', () => {
     expect(await pageText(personaDir, 'person', 'wendy')).toContain('Likes tulips.');
     expect(await pageText(sharedDir, 'person', 'wendy')).toBe(WENDY);
     await expect(stat(path.join(sharedDir, VAULT_HISTORY_DIR))).rejects.toThrow();
+  });
+});
+
+describe('telling the turn that the chat wrote to the pages', () => {
+  async function vaultWithWendy(): Promise<string> {
+    const vaultDir = new MarkdownMemoryClient({ baseDir, namespace: 'default' }).pagesWriteDir();
+    await writePageFile({ vaultDir, kind: 'person', slug: 'wendy', content: WENDY });
+    return vaultDir;
+  }
+
+  it('tells it once for each change that was kept: a remembered, a changed and a forgotten fact', async () => {
+    const vaultDir = await vaultWithWendy();
+    let told = 0;
+    const { tools } = build(vaultDir, { onPageWritten: () => (told += 1) });
+
+    await call(tools, 'remember_fact', { about: 'Wendy', text: 'Wendy likes tulips.' });
+    expect(told).toBe(1);
+    await call(tools, 'update_fact', {
+      about: 'Wendy',
+      old_text: 'Wendy likes tulips.',
+      new_text: 'Wendy works at Beta.',
+    });
+    expect(told).toBe(2);
+    await call(tools, 'forget_fact', { about: 'Wendy', text: 'Wendy works at Beta.' });
+    expect(told).toBe(3);
+  });
+
+  it('does not tell it when nothing was changed', async () => {
+    const vaultDir = await vaultWithWendy();
+    let told = 0;
+    const { tools } = build(vaultDir, { onPageWritten: () => (told += 1) });
+
+    await call(tools, 'remember_fact', { about: 'Wendy', text: 'Wendy likes tulips.' });
+    await call(tools, 'remember_fact', { about: 'Wendy', text: 'Wendy likes tulips.' });
+    await call(tools, 'remember_fact', { about: 'Nobody Known', text: 'Fine.' });
+    await call(tools, 'update_fact', { about: 'Wendy', old_text: 'Not on the page.', new_text: 'New.' });
+
+    expect(told).toBe(1);
   });
 });

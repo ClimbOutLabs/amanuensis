@@ -59,7 +59,7 @@ export interface SortNote {
  */
 export type SortResult =
   | { status: 'off' }
-  | { status: 'sorted'; written: boolean; outcome: HandledOutcome; decisions: SortDecision[] }
+  | { status: 'sorted'; written: boolean; outcome: Exclude<HandledOutcome, 'chat'>; decisions: SortDecision[] }
   | { status: 'refused'; reason: string; cause: SortStopCause }
   | { status: 'failed'; reason: string; cause: SortStopCause };
 
@@ -346,7 +346,9 @@ export async function sortNote({
     return stop({ status: 'refused', reason: ruled.reason, cause: 'reply_broke_rule' });
   }
   const decisions = ruled.planned.map(({ decision }) => decision);
-  const outcome: HandledOutcome = decisions.some(decision => decision.decision !== 'ignore') ? 'page' : 'none';
+  const outcome: Exclude<HandledOutcome, 'chat'> = decisions.some(decision => decision.decision !== 'ignore')
+    ? 'page'
+    : 'none';
 
   if (mode === 'report') {
     await report({ mode, vaultDir, logger, line: { ...line, outcome: 'sorted', decisions } });

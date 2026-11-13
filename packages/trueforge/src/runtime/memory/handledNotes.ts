@@ -1,6 +1,6 @@
 /**
- * The list of daily-log notes the sorter has handled, and what it did with each: put its facts on a page, or
- * put nothing on any page. It is one file in the vault folder with `note id`, a tab and the outcome on each
+ * The list of daily-log notes that need no sorting any more, and why: the sorter put a note's facts on a page, the
+ * sorter put nothing on any page, or the chat wrote to the pages itself in the reply the note was saved from. It is one file in the vault folder with `note id`, a tab and the outcome on each
  * line, only ever added to, so a missing file means nothing has been handled yet.
  */
 import { appendFile, readFile } from 'node:fs/promises';
@@ -10,8 +10,12 @@ import { z } from 'zod';
 const HANDLED_NOTES_FILE = '.handled-notes';
 const NOTE_ID_PATTERN = /^md:[^:\s]+:\d{4}-\d{2}-\d{2}\.md#\d+$/;
 
-/** What the sorter did with a note: `page` put its facts on a page, `none` put nothing on any page. */
-export const HandledOutcomeSchema = z.enum(['page', 'none']);
+/**
+ * Why a note needs no sorting: `page`, the sorter put its facts on a page; `none`, the sorter put nothing on any
+ * page; `chat`, the reply it was saved from wrote to the pages with the page tools, so the message already has
+ * its one writer and the sorter never sees the note.
+ */
+export const HandledOutcomeSchema = z.enum(['page', 'none', 'chat']);
 export type HandledOutcome = z.infer<typeof HandledOutcomeSchema>;
 
 /**
@@ -36,7 +40,7 @@ export async function readHandledNotes(vaultDir: string): Promise<Map<string, Ha
   return handled;
 }
 
-/** Records what the sorter did with one note. Something that is not a note id is not written. The leading line break keeps a write cut short earlier from joining this line to a torn one. */
+/** Records why one note needs no sorting. Something that is not a note id is not written. The leading line break keeps a write cut short earlier from joining this line to a torn one. */
 export async function appendHandledNote({
   vaultDir,
   noteId,

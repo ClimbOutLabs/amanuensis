@@ -30,6 +30,13 @@ describe('the list of handled notes', () => {
     expect(await readFile(path.join(dir, '.handled-notes'), 'utf8')).toContain(`${FIRST}\tpage`);
   });
 
+  it('keeps a note the chat filed itself apart from the notes the sorter handled', async () => {
+    const dir = await vault();
+    await appendHandledNote({ vaultDir: dir, noteId: FIRST, outcome: 'chat' });
+
+    expect(await readHandledNotes(dir)).toEqual(new Map([[FIRST, 'chat']]));
+  });
+
   it('lets a later line for the same note win', async () => {
     const dir = await vault();
     await appendHandledNote({ vaultDir: dir, noteId: FIRST, outcome: 'none' });

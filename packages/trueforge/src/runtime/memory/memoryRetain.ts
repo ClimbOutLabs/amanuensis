@@ -7,7 +7,7 @@
  * resubmission for a vanished operation) is a no-op on the memory provider's side.
  */
 import type { SessionRecord } from '@truefoundry/trueforge-core/agent-session';
-import type { ILLM } from '@truefoundry/trueforge-core/core';
+import { extractErrorLogFields, type ILLM } from '@truefoundry/trueforge-core/core';
 import type { Logger } from 'winston';
 import configuration from '../../config';
 import type { IGlobalSettingsStore } from '../../db/globalSettingsStore';
@@ -17,6 +17,7 @@ import type { TurnModelUsage } from '../modelUsage';
 import { sessionKeepsNothing } from '../privateChat';
 import type { TokenFactoryBudget } from '../tokenFactoryBudget';
 import { withoutAbilityNotes } from './assistantAbilityNotes';
+import { appendHandledNote } from './handledNotes';
 import { localDay } from './localDay';
 import { normalizedEntryBody, SESSION_ID_METADATA_KEY } from './markdownMemoryFiles';
 import type { MemoryClient, RetainItem, WrittenEntry } from './memoryClient';
@@ -198,6 +199,11 @@ export interface SubmitRetainParams {
    * Left out, the chat counts as having read something.
    */
   chatReadNothing?: boolean | undefined;
+  /**
+   * True when the reply changed a memory page with the page tools. The message then has its one writer, so the
+   * notes saved from it are kept but never sorted onto pages a second time, in other words.
+   */
+  chatWrotePages?: boolean | undefined;
   logger: Logger;
   outcomeLog?: RetainOutcomeLog | undefined;
   /** What the turn's tools returned, so concrete findings can be saved as labeled notes. */
@@ -546,6 +552,35 @@ async function withoutStoredCopies({
 }
 
 /**
+ * Records that the notes a save has just written need no sorting, because the reply wrote to the pages itself.
+ * Never throws: a note that could not be recorded is sorted later like any other.
+ */
+async function markFiledByChat({
+  client,
+  written,
+  logger,
+}: {
+  client: MemoryClient;
+  written: readonly WrittenEntry[] | undefined;
+  logger: Logger;
+}): Promise<void> {
+  const vaultDir = client.pagesWriteDir?.();
+  if (vaultDir === undefined) {
+    return;
+  }
+  try {
+    for (const entry of written ?? []) {
+      await appendHandledNote({ vaultDir, noteId: entry.id, outcome: 'chat' });
+    }
+  } catch (error) {
+    logger.warn(
+      'Notes of a reply that wrote to the pages could not be recorded as filed.',
+      extractErrorLogFields(error),
+    );
+  }
+}
+
+/**
  * Starts sorting the notes a save has just written, without waiting for it: the reply and the save never depend
  * on it. The work is bounded by the summarizer's limit on calls at once.
  */
@@ -629,13 +664,17 @@ async function attemptRetainSubmission(
       });
       return 'failed';
     }
-    startPageSorting({
-      client: params.client,
-      written: outcome.written,
-      summarize: params.summarize,
-      timeZone: params.timeZone,
-      logger: params.logger,
-    });
+    if (params.chatWrotePages === true) {
+      await markFiledByChat({ client: params.client, written: outcome.written, logger: params.logger });
+    } else {
+      startPageSorting({
+        client: params.client,
+        written: outcome.written,
+        summarize: params.summarize,
+        timeZone: params.timeZone,
+        logger: params.logger,
+      });
+    }
     return 'submitted';
   } catch (error) {
     params.logger.warn('Memory retain submission threw unexpectedly', {

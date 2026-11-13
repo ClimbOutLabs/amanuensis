@@ -162,6 +162,12 @@ export class MemoryTurnResourceResolver extends PersonaTurnResourceResolver {
   readonly #memory: MemoryTurnContext;
   readonly #toolOutputScreen: ToolOutputScreenConfig;
   readonly #personName: string | undefined;
+  #chatWrotePages = false;
+
+  /** True once a page tool has changed a page in this turn: the chat filed the message itself. */
+  get chatWrotePages(): boolean {
+    return this.#chatWrotePages;
+  }
 
   constructor(
     deps: ConstructorParameters<typeof PersonaTurnResourceResolver>[0],
@@ -255,6 +261,9 @@ export class MemoryTurnResourceResolver extends PersonaTurnResourceResolver {
       maxPageTokens: this.#memory.config.pages.maxTokens,
       watch,
       personName: this.#personName,
+      onPageWritten: () => {
+        this.#chatWrotePages = true;
+      },
     });
     return { capability, watch };
   }

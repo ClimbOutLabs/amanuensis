@@ -71,9 +71,12 @@ function isPersonsOwn(text: string): boolean {
   return entryMetadata(text)[MEMORY_ORIGIN_METADATA_KEY] === USER_STATED_ORIGIN;
 }
 
-/** Not sorted yet; or sorted onto no page and the person's own words. A note whose facts are on a page is spoken for by its statements. */
+/**
+ * Not sorted; or sorted onto no page and the person's own words. A note the sorter put on a page is spoken for by
+ * its statements. A note the chat filed itself was never sorted, so it stays as a note that was not sorted yet.
+ */
 function isEligible({ outcome, text }: { outcome: HandledOutcome | undefined; text: string }): boolean {
-  return outcome === undefined || (outcome === 'none' && isPersonsOwn(text));
+  return outcome === undefined || outcome === 'chat' || (outcome === 'none' && isPersonsOwn(text));
 }
 
 async function eligibleNotes({

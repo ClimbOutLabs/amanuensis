@@ -43,12 +43,18 @@ function otherBackend(): MemoryClient {
   return new QuietMemoryClient();
 }
 
-async function resolveWith(input: {
+interface ResolveInput {
   client: MemoryClient | undefined;
   recallEnabled?: boolean;
   subAgent?: boolean;
   keepsNothing?: boolean;
-}) {
+}
+
+async function resolveWith(input: ResolveInput) {
+  return (await resolverWith(input)).capabilities;
+}
+
+async function resolverWith(input: ResolveInput) {
   const resolver = new MemoryTurnResourceResolver(
     {
       llm: () =>
@@ -92,7 +98,7 @@ async function resolveWith(input: {
     signal: new AbortController().signal,
     tracing: resolver.createTracing(),
   });
-  return resolved.extraCapabilities ?? [];
+  return { resolver, capabilities: resolved.extraCapabilities ?? [] };
 }
 
 function pageToolNames(capabilities: readonly AgentCapability[]): string[] {
@@ -145,5 +151,39 @@ describe('memory page tools are offered only where they can be used', () => {
 
   it('offers none when there is no memory client', async () => {
     expect(pageToolNames(await resolveWith({ client: undefined }))).toEqual([]);
+  });
+});
+
+describe('knowing whether the chat wrote to the pages in this turn', () => {
+  it('says no until a page tool has changed a page, and yes from then on', async () => {
+    const { resolver, capabilities } = await resolverWith({ client: markdownClient() });
+    const said = 'Please remember that the garage clean-out should be done before spring.';
+    for (const capability of capabilities) {
+      for (const processor of capability.preLLMProcessors ?? []) {
+        const events = processor.processPreLLM({
+          threadId: 'main',
+          currentContextUsage: { prompt_tokens: 0, completion_tokens: 0 },
+          context: [{ role: 'user', content: said }],
+        });
+        for await (const _event of events) {
+          // Only the look at the context matters here.
+        }
+      }
+    }
+    const tools = capabilities
+      .flatMap(capability => capability.systemToolSets ?? [])
+      .find(set => set.name === 'memory_pages');
+    expect(resolver.chatWrotePages).toBe(false);
+
+    await tools?.callTool({
+      name: 'remember_fact',
+      arguments: {
+        about: 'Garage clean-out',
+        kind: 'matter',
+        text: 'The garage clean-out should be done before spring.',
+      },
+    });
+
+    expect(resolver.chatWrotePages).toBe(true);
   });
 });

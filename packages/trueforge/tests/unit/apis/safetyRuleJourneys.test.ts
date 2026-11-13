@@ -580,6 +580,17 @@ describe('a page Aman opens in its browser', () => {
       return undefined;
     }
 
+    /** How many saved notes are recorded as filed by the chat itself. */
+    async function notesFiledByChat(): Promise<number> {
+      const files = await readdir(configuration.MEMORY_MARKDOWN_DIR, { recursive: true });
+      let filed = 0;
+      for (const file of files.filter(name => name.endsWith('.handled-notes'))) {
+        const text = await readFile(join(configuration.MEMORY_MARKDOWN_DIR, file), 'utf8');
+        filed += text.split('\n').filter(line => line.endsWith('\tchat')).length;
+      }
+      return filed;
+    }
+
     it(
       'says nothing was read before it when no turn of the chat read anything from outside',
       async () => {
@@ -696,6 +707,33 @@ describe('a page Aman opens in its browser', () => {
           input: [{ type: 'user.message', content: `${RUN_DIRECTIVE_PREFIX}remember_fact ${typed}` }],
         });
         expect(await closingLineOfNoteWith(typed)).toBe('> From you');
+      },
+      TURN_TIMEOUT_MS,
+    );
+
+    it(
+      'records the note of a message the chat filed on a page itself as filed, so it is never sorted onto pages again',
+      async () => {
+        const filedBefore = await notesFiledByChat();
+        const chatId = await createChat(server);
+        server.model.next({
+          toolArguments: {
+            about: 'Garage clean-out',
+            text: 'Wants the garage clean-out done before spring.',
+            kind: 'matter',
+          },
+        });
+        const typed = 'Wants the garage clean-out done before spring.';
+        await runTurn({
+          server,
+          chatId,
+          input: [{ type: 'user.message', content: `${RUN_DIRECTIVE_PREFIX}remember_fact ${typed}` }],
+        });
+        expect(await closingLineOfNoteWith(typed)).toBe('> From you');
+        for (let attempt = 0; attempt < 50 && (await notesFiledByChat()) === filedBefore; attempt += 1) {
+          await delay(100);
+        }
+        expect(await notesFiledByChat()).toBe(filedBefore + 1);
       },
       TURN_TIMEOUT_MS,
     );

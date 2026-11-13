@@ -331,6 +331,8 @@ export interface MemoryPagesToolSetOptions {
   personName: string | undefined;
   /** Makes fact ids; tests supply their own. */
   newId?: (() => string) | undefined;
+  /** Told each time a tool has changed a page and the change was kept, so the turn knows the chat filed this message itself. */
+  onPageWritten?: (() => void) | undefined;
 }
 
 /** The memory page tools for one chat turn. */
@@ -606,7 +608,7 @@ export class MemoryPagesToolSet extends LocalToolMCP {
     const { vaultDir, runner, logger, timeZone, now } = this.#options;
     const today = localDay({ instant: now(), timeZone }).date;
     const covers = usablePageAbout(pageAbout);
-    return commitPageChange({
+    const outcome: Outcome = await commitPageChange({
       options: { vaultDir, runner, today, logger, newId: this.#options.newId },
       message,
       change: async ({ newId }) => {
@@ -628,6 +630,10 @@ export class MemoryPagesToolSet extends LocalToolMCP {
         });
       },
     });
+    if (outcome.saved) {
+      this.#options.onPageWritten?.();
+    }
+    return outcome;
   }
 
   /** Why a page may not be made under a name the person did not type; undefined when it may. */
