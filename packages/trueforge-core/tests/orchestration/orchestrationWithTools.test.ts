@@ -101,7 +101,7 @@ const EXPECTED_ROOT_LLM_INPUT = [
   {
     messages: [
       { role: 'system', content: expect.stringContaining(INSTRUCTION) },
-      { role: 'user', content: expect.stringContaining('The person sent their next message on') },
+      { role: 'user', content: expect.stringContaining('messages from here on were sent on') },
       { role: 'system', content: expect.stringContaining('<reply-context>') },
       { role: 'user', content: 'hello' },
     ],
@@ -109,7 +109,7 @@ const EXPECTED_ROOT_LLM_INPUT = [
   {
     messages: [
       { role: 'system', content: expect.stringContaining(INSTRUCTION) },
-      { role: 'user', content: expect.stringContaining('The person sent their next message on') },
+      { role: 'user', content: expect.stringContaining('messages from here on were sent on') },
       { role: 'system', content: expect.stringContaining('<reply-context>') },
       { role: 'user', content: 'hello' },
       {

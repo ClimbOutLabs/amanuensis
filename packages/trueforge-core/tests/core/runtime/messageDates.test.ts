@@ -76,12 +76,25 @@ describe('the date each message was sent', () => {
     const later = await replyOn({ day: '2026-11-13', context: first.context, message: 'How was the weather there?' });
 
     const sent = texts(later.messages);
-    const earlierNote = sent.findIndex(text => text.includes('sent their next message on 2026-11-03 (Tuesday, UTC)'));
-    const laterNote = sent.findIndex(text => text.includes('sent their next message on 2026-11-13 (Friday, UTC)'));
+    const earlierNote = sent.findIndex(text =>
+      text.includes('messages from here on were sent on 2026-11-03 (Tuesday, UTC)'),
+    );
+    const laterNote = sent.findIndex(text =>
+      text.includes('messages from here on were sent on 2026-11-13 (Friday, UTC)'),
+    );
     expect(earlierNote).toBeGreaterThan(-1);
     expect(sent[earlierNote + 1]).toBe('I fly to Lisbon tomorrow.');
     expect(laterNote).toBeGreaterThan(earlierNote);
     expect(sent[sent.length - 1]).toBe('How was the weather there?');
+  });
+
+  it('gives the date once for messages sent on the same day', async () => {
+    const first = await replyOn({ day: '2026-11-03', context: undefined, message: 'I fly to Lisbon tomorrow.' });
+    const sameDay = await replyOn({ day: '2026-11-03', context: first.context, message: 'Which terminal?' });
+
+    const sent = texts(sameDay.messages);
+    expect(sent.filter(text => text.includes('messages from here on were sent on'))).toHaveLength(1);
+    expect(sent[sent.indexOf('I fly to Lisbon tomorrow.') - 1]).toContain('2026-11-03 (Tuesday, UTC)');
   });
 
   it('saves the send time on the message itself and adds no note to the saved chat', async () => {
@@ -104,8 +117,8 @@ describe('the date each message was sent', () => {
     });
 
     const sent = texts(later.messages);
-    expect(sent.filter(text => text.includes('sent their next message on'))).toHaveLength(1);
-    expect(sent[sent.indexOf('An older message.') - 1]).not.toContain('sent their next message on');
+    expect(sent.filter(text => text.includes('messages from here on were sent on'))).toHaveLength(1);
+    expect(sent[sent.indexOf('An older message.') - 1]).not.toContain('messages from here on were sent on');
   });
 
   it('keeps the earlier part of the request the same on the later reply', async () => {

@@ -3063,6 +3063,7 @@ export class AgentThread {
     const countPictures = this.definition.modelSupportsVision === true;
     for (const message of withoutEarlierThinking(this.context)) {
       total += estimateTokensForContextMessages([message]).prompt_tokens;
+      // Counted for every dated message, though one is sent per day: a little over, never under.
       if (isLLMContextMessage(message)) {
         total += estimateTokensForString(this.sentDateNote(message) ?? '');
       }
@@ -3093,13 +3094,19 @@ export class AgentThread {
 
   /** The saved chat as it is sent: no `tool_info`, no approval rows, no thinking from earlier replies. */
   private contextAsChatMessages(): ChatCompletionMessageParam[] {
+    let shownNote: string | undefined;
     return withoutEarlierThinking(this.context)
       .filter(message => !isLegacyIncompleteReasoningMessage(message))
       .filter(isLLMContextMessage)
       .flatMap(msg => {
         const message = withoutHostNotices(toOpenAIChatMessage(msg));
         const note = this.sentDateNote(msg);
-        return note === undefined ? [message] : [toOpenAIChatMessage(internalSystemMessage(note)), message];
+        // Only where the day changes: a note on every message of one day would say nothing new.
+        if (note === undefined || note === shownNote) {
+          return [message];
+        }
+        shownNote = note;
+        return [toOpenAIChatMessage(internalSystemMessage(note)), message];
       });
   }
 
@@ -3114,7 +3121,7 @@ export class AgentThread {
     const sentAt = new Date(message.sent_at);
     return Number.isNaN(sentAt.getTime())
       ? undefined
-      : `The person sent their next message on ${this.dateText(sentAt)}`;
+      : `The person's messages from here on were sent on ${this.dateText(sentAt)}`;
   }
 
   /**
