@@ -159,6 +159,10 @@ describe("a skill's own scripts run with exec", () => {
     expect(verdictWithSkills(command)).toBe('allow');
   });
 
+  it('allows a skill script by its full path even after a cd it cannot follow', () => {
+    expect(verdictWithSkills('cd - && python3 /workspace/.aman/skills/ai-news/scripts/fetch.py')).toBe('allow');
+  });
+
   it('allows a relative script when the call itself starts in the skill folder', () => {
     expect(verdictWithSkills('python3 scripts/fetch.py', '/workspace/.aman/skills/ai-news')).toBe('allow');
   });
@@ -178,6 +182,20 @@ describe("a skill's own scripts run with exec", () => {
     ['python3 -c "print(1)" /workspace/.aman/skills/ai-news/scripts/fetch.py', 'inline code beside a skill script'],
     ["python3 - <<'EOF'\nprint(1)\nEOF", 'heredoc input'],
     ['python3 /workspace/.aman/skills/ai-news/scripts/fetch.py; python3 /workspace/x.py', 'a second script outside'],
+    ['cd /workspace/.aman/skills/ai-news && cd - && python3 x.py', 'cd - back to where it started'],
+    ['cd /workspace/.aman/skills/ai-news; cd ~; python3 x.py', 'cd ~'],
+    ['cd /workspace/.aman/skills/ai-news && cd && python3 x.py', 'a bare cd'],
+    ['cd /workspace/.aman/skills/ai-news && pushd /tmp && python3 x.py', 'pushd'],
+    ['cd /workspace/.aman/skills/ai-news && popd && python3 x.py', 'popd'],
+    ['V=../../..; cd /workspace/.aman/skills/ai-news/$V && python3 x.py', 'an expanded cd operand'],
+    ['cd /workspace/.aman/skills/ai-news/$(echo ../../..) && python3 x.py', 'a substituted cd operand'],
+    ['cd /workspace/.aman/skills/ai-news/`echo ..` && python3 x.py', 'a backtick cd operand'],
+    ['cd /workspace/.aman/skills/ai-news/* && python3 x.py', 'a glob cd operand'],
+    ['cd /workspace/.aman/skills/ai-news & python3 x.py', 'a cd sent to the background'],
+    ['cd /workspace/.aman/skills/ai-news | python3 x.py', 'a cd in a pipe'],
+    ['cd /workspace/.aman/skills/ai-news || python3 x.py', 'a script that runs only when the cd fails'],
+    ['true || cd /workspace/.aman/skills/ai-news && python3 x.py', 'a cd that may be skipped'],
+    ['(cd /workspace/.aman/skills/ai-news) && python3 x.py', 'a cd in a subshell'],
   ])('still rejects %s (%s)', command => {
     expect(verdictWithSkills(command)).toBe('reject');
   });

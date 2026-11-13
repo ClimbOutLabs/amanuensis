@@ -118,6 +118,8 @@ function basenameOf(path: string): string {
 
 interface Token {
   text: string;
+  /** For a boundary: the operator that made it (`&&`, `;`, `|`, `&`, `||`, a newline or a parenthesis). */
+  separator?: string;
 }
 
 interface TokenizeResult {
@@ -148,9 +150,9 @@ function tokenize(command: string): TokenizeResult {
       hasToken = false;
     }
   };
-  const pushBoundary = (): void => {
+  const pushBoundary = (separator: string): void => {
     pushToken();
-    tokens.push({ text: SEGMENT_BOUNDARY });
+    tokens.push({ text: SEGMENT_BOUNDARY, separator });
   };
 
   while (i < n) {
@@ -182,19 +184,20 @@ function tokenize(command: string): TokenizeResult {
       i += 2;
     } else if (ch === ' ' || ch === '\t' || ch === '\r' || ch === '\n') {
       if (ch === '\n') {
-        pushBoundary();
+        pushBoundary('\n');
       } else {
         pushToken();
       }
       i += 1;
     } else if (ch === ';' || ch === '&' || ch === '|') {
       // &&, ||, ;; collapse to one boundary; a lone & or | is a boundary too.
+      const start = i;
       while (i < n && (command[i] === ';' || command[i] === '&' || command[i] === '|')) {
         i += 1;
       }
-      pushBoundary();
+      pushBoundary(command.slice(start, i));
     } else if (ch === '(' || ch === ')') {
-      pushBoundary();
+      pushBoundary(ch);
       i += 1;
     } else if (ch === '<' && command[i + 1] === '<') {
       hasHeredoc = true;
@@ -226,25 +229,40 @@ function tokenize(command: string): TokenizeResult {
   return { tokens, hasHeredoc };
 }
 
-/** Split tokens into pipeline segments at boundary markers. */
-function splitSegments(tokens: Token[]): string[][] {
-  const segments: string[][] = [];
+interface Segment {
+  argv: string[];
+  /** The operators just before and just after the segment; undefined at the start or the end of the command. */
+  before: string | undefined;
+  after: string | undefined;
+}
+
+/** Split tokens into pipeline segments at boundary markers, keeping the operators around each one. */
+function splitSegments(tokens: Token[]): Segment[] {
+  const segments: Segment[] = [];
   let current: string[] = [];
+  let before: string | undefined;
   for (const token of tokens) {
     if (token.text === SEGMENT_BOUNDARY) {
       if (current.length > 0) {
-        segments.push(current);
+        segments.push({ argv: current, before, after: token.separator });
         current = [];
       }
+      before = token.separator;
     } else {
       current.push(token.text);
     }
   }
   if (current.length > 0) {
-    segments.push(current);
+    segments.push({ argv: current, before, after: undefined });
   }
   return segments;
 }
+
+/** Operators after which the next command runs in the directory a `cd` left, whether or not that `cd` succeeded. */
+const SEQUENCING = new Set(['&&', ';', '\n']);
+
+/** A `cd` operand the guard can follow: a plain literal path, with nothing the shell would expand. */
+const LITERAL_DIR = /^[A-Za-z0-9._/@+=,:][A-Za-z0-9._/@+=,:-]*$/;
 
 /**
  * If the segment is a `sh -c '…'` / `bash -lc '…'` / `env …` wrapper, return
@@ -322,7 +340,12 @@ function shebangInterpreter(shebang: string): string | undefined {
 
 /** Whether `p`, read from `cwd`, names a file inside the skills directory. */
 function isSkillFile(input: { p: string; cwd: string; skills: ExecGuardSkills | undefined }): boolean {
-  if (input.skills === undefined || !input.cwd.startsWith('/') || input.p.includes('\0')) {
+  // A relative path needs a known directory; an unknown one never counts as the skills folder.
+  if (
+    input.skills === undefined ||
+    input.p.includes('\0') ||
+    (!input.p.startsWith('/') && !input.cwd.startsWith('/'))
+  ) {
     return false;
   }
   const root = posix.resolve(input.skills.skills_dir);
@@ -470,12 +493,22 @@ export function classifyExecCommand(input: {
 }): ExecGuardVerdict {
   const { tokens, hasHeredoc } = tokenize(input.command);
   const segments = splitSegments(tokens);
-  // A plain `cd <dir>` moves where later segments read relative paths from, as it does in the shell.
+  // A plain `cd <dir>`, run in sequence, moves where later segments read relative paths from, as it does in the
+  // shell. Any other directory change (`cd -`, `cd ~`, an expanded operand, pushd or popd, or a cd that runs in the
+  // background, in a pipe, in a subshell or only when something else fails) leaves the directory unknown, and an
+  // unknown directory never counts as the skills folder.
   let cwd = input.skills?.cwd ?? '';
-  for (const argv of segments) {
+  for (const { argv, before, after } of segments) {
     const [head, dir, ...extra] = argv;
-    if (head === 'cd' && dir !== undefined && extra.length === 0 && cwd.startsWith('/')) {
-      cwd = posix.resolve(cwd, dir);
+    if (head === 'cd' || head === 'pushd' || head === 'popd') {
+      const followable =
+        head === 'cd' &&
+        dir !== undefined &&
+        extra.length === 0 &&
+        LITERAL_DIR.test(dir) &&
+        (before === undefined || SEQUENCING.has(before)) &&
+        (after === undefined || SEQUENCING.has(after));
+      cwd = followable && cwd.startsWith('/') ? posix.resolve(cwd, dir) : '';
       continue;
     }
     const verdict = classifySegment({ argv, hasHeredoc, host: input.host, skills: input.skills, cwd });
