@@ -247,6 +247,7 @@ import {
   UNTRUSTED_TOOL_OUTPUT_PROMPT,
   WEB_IMAGES_PROMPT,
   withHostUniqueToolCallIds,
+  withoutEarlierThinking,
 } from './contextUtils';
 import { CALL_TOOL_NAME, DeferredTool, tryParseCallToolWrapper, tryUnwrapCallToolInput } from './DeferredTool';
 import { applyHostToolCallPolicy, type HostToolCallPolicy, type HostToolCallPolicyLogger } from './HostToolCallPolicy';
@@ -3030,7 +3031,7 @@ export class AgentThread {
         }
       }
     }
-    for (const message of this.context) {
+    for (const message of withoutEarlierThinking(this.context)) {
       total += estimateTokensForContextMessages([message]).prompt_tokens;
       if (total > limit) {
         return total;
@@ -3069,7 +3070,7 @@ export class AgentThread {
 
     // NOTE: all this code-golf is to remove `tool_info` before sending the message to Gateway
     // ApprovalDecisionMessage rows are persisted in context but must not be sent to the LLM.
-    const contextMessages = this.context
+    const contextMessages = withoutEarlierThinking(this.context)
       .filter(message => !isLegacyIncompleteReasoningMessage(message))
       .filter(isLLMContextMessage)
       .map(msg => withoutHostNotices(toOpenAIChatMessage(msg)));
@@ -3865,7 +3866,9 @@ export class AgentThread {
     let result: IteratorResult<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage>;
     // The request's size in tokens, estimated from the context it is built from; the silence
     // report names it, so an oversized request is visible in the one line that reports the ending.
-    const requestTokenEstimate = Math.round(estimateTokensForContextMessages(this.context).prompt_tokens);
+    const requestTokenEstimate = Math.round(
+      estimateTokensForContextMessages(withoutEarlierThinking(this.context)).prompt_tokens,
+    );
     // A step that goes silent is retried once before the turn ends: the finished tool results
     // behind it stay in the history the retry sends, and a partial tool call never runs because
     // calls only execute from a completed step. Only a second silence ends the step.

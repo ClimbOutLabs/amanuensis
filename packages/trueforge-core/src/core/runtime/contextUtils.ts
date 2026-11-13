@@ -22,6 +22,7 @@ import type {
   ToolInfo,
 } from '../llm/LLMTypes';
 import { UNKNOWN_TOOL_NAME } from '../llm/LLMTypes';
+import { toOpenAIChatMessage } from '../llm/toOpenAIChatMessage';
 import { estimateTokensForString } from '../llm/usage';
 import type { PendingHostNoteKind } from '../mcp/executeToolCalls';
 import type {
@@ -515,6 +516,38 @@ export function personMessageIndex(messages: readonly ChatCompletionMessageParam
     }
   }
   return -1;
+}
+
+/**
+ * The context as the model is sent it: thinking stays only on replies after the person's latest
+ * message, where a tool-using reply needs it to continue. Earlier thinking is never needed again
+ * and providers drop or ignore it, so sending it would only fill the context window.
+ */
+export function withoutEarlierThinking(context: readonly ContextMessage[]): ContextMessage[] {
+  let personIndex = -1;
+  for (let i = context.length - 1; i >= 0; i -= 1) {
+    const message = context[i];
+    if (
+      message !== undefined &&
+      isLLMContextMessage(message) &&
+      message.role === 'user' &&
+      !isHostWrittenUserContent(toOpenAIChatMessage(message).content)
+    ) {
+      personIndex = i;
+      break;
+    }
+  }
+  return context.map((message, index) => {
+    if (index >= personIndex || !isLLMContextMessage(message) || message.role !== 'assistant') {
+      return message;
+    }
+    if (message.thinking_blocks === undefined) {
+      return message;
+    }
+    const { thinking_blocks: _earlierThinking, ...rest } = message;
+    void _earlierThinking;
+    return rest;
+  });
 }
 
 export function internalSystemMessage(m: string): LLMUserMessage {

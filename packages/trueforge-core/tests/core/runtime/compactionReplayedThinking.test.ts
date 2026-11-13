@@ -49,10 +49,64 @@ async function* answerStream(): AsyncGenerator<ExtendedChatCompletionChunk, RawA
   return { output: { role: 'assistant', content: 'answer' }, usage: getEmptyUsage(), finish_reason: 'stop' };
 }
 
+/** Runs one turn against a provider that counts what is sent and refuses anything over its window. */
+async function runTurn(context: ContextMessage[]): Promise<{
+  requests: LLMCreateParamsStreaming[];
+  done: InternalThreadDoneEvent | undefined;
+}> {
+  const requests: LLMCreateParamsStreaming[] = [];
+  const create = jest.fn((body: LLMCreateParamsStreaming) => {
+    requests.push(body);
+    return fitsWindow(body) ? answerStream() : overLimitStream();
+  });
+  const modelClient: ILLM = {
+    create,
+    createNonStream: jest.fn().mockResolvedValue({
+      output: { role: 'assistant', content: CONVERSATION_COMPACTION_TEMPLATE },
+      usage: getEmptyUsage(),
+      finish_reason: 'stop',
+    }),
+  };
+  const definition = {
+    modelClient,
+    modelId: undefined,
+    configuredModels: undefined,
+    instruction: 'test',
+    toolSets: [],
+    modelProperties: { contextLength: CONTEXT_LENGTH },
+    modelParams: { max_tokens: MAX_OUTPUT_TOKENS },
+  };
+  const thread = new AgentThread({
+    threadId: 'main',
+    title: 'Main',
+    toolCallMemo: undefined,
+    turnToolCallLedger: undefined,
+    taskState: undefined,
+    isRequestContinuation: undefined,
+    tracing: NOOP_AGENT_TRACING,
+    logger: makeSilentLogger(),
+    definition,
+    context,
+    currentContextUsage: { prompt_tokens: 99_073, completion_tokens: 0 },
+    capabilities: [contextCompaction({ logger: undefined, definition })],
+  });
+  let done: InternalThreadDoneEvent | undefined;
+  for await (const event of thread.execute({ signal: new AbortController().signal })) {
+    if (event.type === InternalEventType.AGENT_DONE) {
+      done = event;
+    }
+  }
+  return { requests, done };
+}
+
+function fitsWindow(body: LLMCreateParamsStreaming): boolean {
+  return sentChars(body) / CHARS_PER_TOKEN + MAX_OUTPUT_TOKENS < CONTEXT_LENGTH;
+}
+
 describe('compaction with a thinking model', () => {
-  it('shortens a long chat whose size is mostly earlier thinking, so the turn still answers', async () => {
-    // A long chat with a thinking model: each reply is short, but the thinking behind it, which
-    // is sent back with every request, is fifteen times longer.
+  it('stops sending earlier thinking, so a long chat that was mostly thinking still answers', async () => {
+    // A long chat with a thinking model: each reply is short, but the thinking behind it is
+    // fifteen times longer.
     const context: ContextMessage[] = [];
     for (let index = 0; index < 40; index++) {
       context.push({ role: 'user', content: `Question ${String(index)}. ${'q'.repeat(400)}` });
@@ -64,60 +118,50 @@ describe('compaction with a thinking model', () => {
     }
     context.push({ role: 'user', content: 'The latest question.' });
 
-    // The provider counts what is actually sent and refuses anything over its window.
-    const requests: LLMCreateParamsStreaming[] = [];
-    const create = jest.fn((body: LLMCreateParamsStreaming) => {
-      requests.push(body);
-      return sentChars(body) / CHARS_PER_TOKEN + MAX_OUTPUT_TOKENS > CONTEXT_LENGTH
-        ? overLimitStream()
-        : answerStream();
-    });
-    const modelClient: ILLM = {
-      create,
-      createNonStream: jest.fn().mockResolvedValue({
-        output: { role: 'assistant', content: CONVERSATION_COMPACTION_TEMPLATE },
-        usage: getEmptyUsage(),
-        finish_reason: 'stop',
-      }),
-    };
-    const definition = {
-      modelClient,
-      modelId: undefined,
-      configuredModels: undefined,
-      instruction: 'test',
-      toolSets: [],
-      modelProperties: { contextLength: CONTEXT_LENGTH },
-      modelParams: { max_tokens: MAX_OUTPUT_TOKENS },
-    };
-    const thread = new AgentThread({
-      threadId: 'main',
-      title: 'Main',
-      toolCallMemo: undefined,
-      turnToolCallLedger: undefined,
-      taskState: undefined,
-      isRequestContinuation: undefined,
-      tracing: NOOP_AGENT_TRACING,
-      logger: makeSilentLogger(),
-      definition,
-      context,
-      currentContextUsage: { prompt_tokens: 99_073, completion_tokens: 0 },
-      capabilities: [contextCompaction({ logger: undefined, definition })],
-    });
-
-    let done: InternalThreadDoneEvent | undefined;
-    for await (const event of thread.execute({ signal: new AbortController().signal })) {
-      if (event.type === InternalEventType.AGENT_DONE) {
-        done = event;
-      }
-    }
+    const { requests, done } = await runTurn(context);
 
     expect(done?.status).toBe('done');
-    // Compaction ran before the first request, and that request already fits.
     expect(requests).toHaveLength(1);
     const [request] = requests;
     if (request === undefined) {
       throw new Error('Expected one model request');
     }
-    expect(sentChars(request) / CHARS_PER_TOKEN + MAX_OUTPUT_TOKENS).toBeLessThan(CONTEXT_LENGTH);
+    expect(fitsWindow(request)).toBe(true);
+    expect(request.messages.some(message => Reflect.get(message, 'thinking_blocks') !== undefined)).toBe(false);
+  });
+
+  it("keeps the current reply's thinking and counts it before sending", async () => {
+    // A tool-using reply in progress: its thinking must go back with the tool result, and it is
+    // larger than the window on its own.
+    const context: ContextMessage[] = [
+      { role: 'user', content: 'Look this up.' },
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [
+          {
+            id: 'call-1',
+            type: 'function',
+            function: { name: 'lookup', arguments: '{}' },
+            tool_info: {
+              type: 'mcp',
+              mcp_server_id: 'lookup',
+              mcp_server_name: 'lookup',
+              original_tool_name: 'lookup',
+              is_approval_required: false,
+              is_client_side: false,
+            },
+          },
+        ],
+        thinking_blocks: [{ type: 'thinking', thinking: 't'.repeat(500_000) }],
+      },
+      { role: 'tool', tool_call_id: 'call-1', content: 'Found it.' },
+    ];
+
+    const { requests, done } = await runTurn(context);
+
+    // The size check sees the thinking, so no request the provider would refuse is sent.
+    expect(requests.every(fitsWindow)).toBe(true);
+    expect(done?.status).toBe('error');
   });
 });
