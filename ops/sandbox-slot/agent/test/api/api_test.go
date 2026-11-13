@@ -344,7 +344,7 @@ func TestExecGivesTheShellAHomeItCanWrite(t *testing.T) {
 	}
 	s := e.runner.spec
 	for name, want := range map[string]string{
-		"HOME":             "/tmp/home",
+		"HOME":             "/tmp",
 		"npm_config_cache": "/workspace/.aman/npm-cache",
 		"PIP_NO_CACHE_DIR": "1",
 	} {

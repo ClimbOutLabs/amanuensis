@@ -44,7 +44,7 @@ const (
 // cache lives in the chat's workspace.
 const (
 	runCodeHome    = "/scratch"
-	execHome       = "/tmp/home"
+	execHome       = "/tmp"
 	execNpmCache   = tree.GuestRoot + "/" + npmCacheDir
 	npmCacheDir    = ".aman/npm-cache"
 	npmCacheIgnore = npmCacheDir + "/.gitignore"
