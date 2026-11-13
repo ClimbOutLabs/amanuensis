@@ -50,6 +50,7 @@ const CONTENT: ReviewableDraft = {
   inReplyTo: '',
   references: '',
   fromName: '',
+  fromAddress: 'ada@gmail.com',
   nameLeftOff: false,
   replyTo: null,
 };
@@ -87,6 +88,7 @@ describe('Gmail write classification', () => {
       expect(decision.card?.plain_what).toContain('It is not sent.');
       expect(decision.card?.email).toMatchObject({
         action: name === 'draft_email' ? 'save' : 'change',
+        sent_from: { address: 'ada@gmail.com', service: 'Gmail' },
         to: [{ name: '', address: 'grace@example.com' }],
         cc: [{ name: '', address: 'lin@example.com' }],
         subject: 'Lease',

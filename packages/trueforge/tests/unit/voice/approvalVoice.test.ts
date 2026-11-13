@@ -39,6 +39,28 @@ describe('what is read back for a voice approval', () => {
     expect(said).toContain('Thursday at three works for me. Bring the form, $40 in cash & 2 photos.');
   });
 
+  it('reads back the sending account a card carries, for a service that exists nowhere in the product', () => {
+    const base = sendReplyCard();
+    const email = base.email;
+    if (email === null || email === undefined) {
+      throw new Error('expected the fixture to carry a mail');
+    }
+    const result = plan({ ...base, email: { ...email, sent_from: { address: 'ada@moonmail.example', service: 'Moonmail' } } });
+    if (result.kind !== 'ask') {
+      throw new Error('expected a read-back');
+    }
+    expect(result.body).toContain('The sending account is ada at moonmail dot example, on Moonmail.');
+  });
+
+  it('leaves a card stored before the sending account was recorded for the screen', () => {
+    const base = sendReplyCard();
+    const email = base.email;
+    if (email === null || email === undefined) {
+      throw new Error('expected the fixture to carry a mail');
+    }
+    expect(plan({ ...base, email: { ...email, sent_from: null } })).toEqual({ kind: 'typed_only' });
+  });
+
   it('says a calendar event with its description', () => {
     const result = plan(dentistCard);
     if (result.kind !== 'ask') {
@@ -338,6 +360,7 @@ describe('the wording around the card fields', () => {
   /** Every line the engine writes starts with one of these; person-supplied text never starts a line. */
   const OWN_LINES = [
     "I'll ",
+    'The sending account is ',
     'Replies will go to',
     'The name was left off',
     'To ',
@@ -562,7 +585,7 @@ describe('a calendar card as the calendar writes it, through the voice service c
         location: review.location,
         description: review.description,
         attendees: review.attendees,
-        guests_emailed: review.guests_emailed,
+        guests_line: review.guests_line,
         one_of_repeating: review.one_of_repeating,
         already_created: review.already_created,
         span_days: review.span_days,

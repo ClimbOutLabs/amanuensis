@@ -55,6 +55,11 @@ export type SentinelApprovalMailbox = Tier3Mailbox;
 /** The whole message of a mail card, so what is approved is everything that is sent. */
 export type SentinelApprovalEmail = {
   action: SentinelApprovalEmailAction;
+  /**
+   * The account the message is sent from: its address and the name of its service, as that service
+   * names itself. Null on a card stored before the account was recorded.
+   */
+  sent_from: { address: string; service: string } | null;
   to: SentinelApprovalMailbox[];
   cc: SentinelApprovalMailbox[];
   bcc: SentinelApprovalMailbox[];
@@ -91,8 +96,11 @@ export type SentinelApprovalCalendarEvent = {
   /** Empty when the write sets none. */
   description: string;
   attendees: string[];
-  /** True when Google emails the guests about this. */
-  guests_emailed: boolean;
+  /**
+   * What the card tells the person about the guests being emailed, in the finished words of the
+   * service that sends the email. Empty when the event has no guests.
+   */
+  guests_line: string;
   /** True when a change touches one date of a repeating event. */
   one_of_repeating: boolean;
   /** True when the same event was created in this chat a few minutes ago; absent on an older card. */
@@ -544,8 +552,19 @@ function parseEmail(value: unknown): SentinelApprovalEmail | null {
       ? null
       : (optionalString(value, 'from_name') ?? optionalString(value, 'fromName'));
   const nameLeftOff = optionalBoolean(value, 'name_left_off') ?? optionalBoolean(value, 'nameLeftOff');
+  // A card from before the sending account was recorded has none, and reads as not known. One that
+  // carries the account in a shape this reader cannot read is not shown at all.
+  const rawSentFrom = value.sent_from ?? value.sentFrom;
+  let sentFrom: SentinelApprovalEmail['sent_from'] = null;
+  if (rawSentFrom !== undefined && rawSentFrom !== null) {
+    const address = isRecord(rawSentFrom) ? optionalString(rawSentFrom, 'address') : undefined;
+    const service = isRecord(rawSentFrom) ? optionalString(rawSentFrom, 'service') : undefined;
+    if (address === undefined || service === undefined) return null;
+    sentFrom = { address, service };
+  }
   return {
     action,
+    sent_from: sentFrom,
     to,
     cc,
     bcc,
@@ -587,7 +606,17 @@ function parseCalendarEvent(value: unknown): SentinelApprovalCalendarEvent | nul
   const location = optionalString(value, 'location');
   const description = optionalString(value, 'description');
   const attendees = stringList(value.attendees);
-  const guests_emailed = optionalBoolean(value, 'guests_emailed') ?? optionalBoolean(value, 'guestsEmailed');
+  // A card from before the guest line was carried holds only the flag it was rendered from, so the line
+  // is rebuilt from that flag in plain words. A card with no guests never carried a line.
+  const rawGuestsLine = optionalString(value, 'guests_line') ?? optionalString(value, 'guestsLine');
+  const legacyGuestsEmailed = optionalBoolean(value, 'guests_emailed') ?? optionalBoolean(value, 'guestsEmailed');
+  const guests_line =
+    rawGuestsLine ??
+    (attendees === undefined || attendees.length === 0 || legacyGuestsEmailed === undefined
+      ? undefined
+      : legacyGuestsEmailed
+        ? 'The guests will be emailed about this.'
+        : 'The guests will not be emailed about this.');
   const one_of_repeating = optionalBoolean(value, 'one_of_repeating') ?? optionalBoolean(value, 'oneOfRepeating');
   const alreadyCreated = optionalBoolean(value, 'already_created') ?? optionalBoolean(value, 'alreadyCreated');
   const rawSpanDays = value.span_days ?? value.spanDays;
@@ -607,7 +636,7 @@ function parseCalendarEvent(value: unknown): SentinelApprovalCalendarEvent | nul
     location === undefined ||
     description === undefined ||
     attendees === undefined ||
-    guests_emailed === undefined ||
+    guests_line === undefined ||
     one_of_repeating === undefined
   ) {
     return null;
@@ -622,7 +651,7 @@ function parseCalendarEvent(value: unknown): SentinelApprovalCalendarEvent | nul
     location,
     description,
     attendees,
-    guests_emailed,
+    guests_line,
     one_of_repeating,
     ...(alreadyCreated === undefined ? {} : { already_created: alreadyCreated }),
     ...(spanDays === undefined ? {} : { span_days: spanDays }),

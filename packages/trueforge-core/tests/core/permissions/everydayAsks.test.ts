@@ -158,6 +158,7 @@ function draft(overrides: Partial<ReviewableDraft>): ReviewableDraft {
     inReplyTo: '',
     references: '',
     fromName: '',
+    fromAddress: 'sam.rivers@example.com',
     nameLeftOff: false,
     replyTo: null,
     ...overrides,
@@ -190,6 +191,8 @@ function calendarCreate(attendees: string[]): SentinelAction {
     description: '',
     attendees,
     guests_emailed: true,
+    guests_line:
+      attendees.length === 0 ? '' : 'Google will email every guest about this.',
     one_of_repeating: false,
     before: null,
     incomplete_reason: null,

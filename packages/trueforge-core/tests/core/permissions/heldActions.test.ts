@@ -363,13 +363,14 @@ describe('checkHeldReplay', () => {
     location: '',
     description: '',
     attendees: ['ana@example.com'],
-    guests_emailed: true,
+    guests_line: 'Google will email every guest about this.',
     one_of_repeating: false,
     before: { title: 'Dentist', when: 'Fri 13 Nov, 09:00', duration: '30 minutes', location: '' },
   };
 
   const EMAIL: NonNullable<Tier3Card['email']> = {
     action: 'send',
+    sent_from: { address: 'ada@example.com', service: 'Gmail' },
     to: [{ name: 'Ana', address: 'ana@example.com' }],
     cc: [],
     bcc: [],

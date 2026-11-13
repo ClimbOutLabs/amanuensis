@@ -140,7 +140,9 @@ export const EmailApprovalCard: FC<EmailApprovalCardProps> = ({
       <header className="flex items-center gap-2 px-4 py-3">
         <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-gold-ink" />
         <h3 className="aui-approval-card__title min-w-0 flex-1 text-text-primary">{cardHeadline(card)}</h3>
-        <span className="shrink-0 text-text-secondary">Gmail</span>
+        {email.sent_from !== null && email.sent_from !== undefined && (
+          <span className="shrink-0 text-text-secondary">{email.sent_from.service}</span>
+        )}
         {sentAt === null && <span className="shrink-0 text-text-secondary">{WAITING_FOR_YOU_LABEL}</span>}
       </header>
 
@@ -153,6 +155,12 @@ export const EmailApprovalCard: FC<EmailApprovalCardProps> = ({
               <dd className="break-words text-text-primary">{email.reply_in_thread.subject}</dd>
               <dt className="text-text-secondary">Reply in the thread, from</dt>
               <dd className="break-words text-text-primary">{email.reply_in_thread.from}</dd>
+            </>
+          )}
+          {email.sent_from !== null && email.sent_from !== undefined && (
+            <>
+              <dt className="text-text-secondary">From</dt>
+              <dd className="break-words text-text-primary">{email.sent_from.address}</dd>
             </>
           )}
           <dt className="text-text-secondary">To</dt>

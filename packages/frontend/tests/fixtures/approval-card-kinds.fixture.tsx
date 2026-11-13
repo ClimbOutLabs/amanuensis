@@ -50,6 +50,7 @@ const emailCard: SentinelApprovalCard = {
   plain_what: `Send ${TOKEN}`,
   email: {
     action: 'send',
+    sent_from: { address: 'ada@example.test', service: 'Gmail' },
     to: [{ name: 'Robin Ellis', address: 'robin@example.test' }],
     cc: [],
     bcc: [],

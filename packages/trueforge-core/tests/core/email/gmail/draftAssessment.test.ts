@@ -46,6 +46,7 @@ describe('assessDraft', () => {
         inReplyTo: '<a@mail.example.com>',
         references: '<a@mail.example.com>',
         fromName: 'Ada Lovelace',
+        fromAddress: 'ada@example.com',
         nameLeftOff: false,
         replyTo: null,
       },

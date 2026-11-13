@@ -209,7 +209,7 @@ describe('HeldActionCard', () => {
           location: '',
           description: '',
           attendees: ['lin@example.com'],
-          guests_emailed: false,
+          guests_line: 'Google will not email the guests about this.',
           one_of_repeating: false,
           before: null,
         },

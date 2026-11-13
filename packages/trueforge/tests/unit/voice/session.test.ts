@@ -307,6 +307,7 @@ describe('approval by voice', () => {
       'I have a draft.',
       [
         "I'll send this reply to 1 address.",
+        'The sending account is me at example dot com, on Gmail.',
         'To victor at example dot com, named Victor',
         'The subject is: Re: Thursday',
         'It says: Thursday at three works for me. See you then.',
@@ -568,6 +569,7 @@ describe('approval by voice', () => {
     expect(t.tts.asked).toEqual([
       [
         "I'll send this reply to 1 address.",
+        'The sending account is me at example dot com, on Gmail.',
         'To victor at example dot com, named Victor',
         'The subject is: Re: Thursday',
         'It says: Thursday at three works for me. See you then.',

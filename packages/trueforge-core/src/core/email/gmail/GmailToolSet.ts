@@ -485,6 +485,8 @@ export class GmailToolSet extends LocalToolMCP {
       inReplyTo: replyHeaders(reply).inReplyTo,
       references: replyHeaders(reply).references,
       fromName: '',
+      // A draft written here is saved on the connected account, so that account is the address sent from.
+      fromAddress: this.#options.account,
       // The recipients are bare addresses (the model's are validated in toolContract, and a filled reply
       // recipient is the sender address read from the message), so no name is left off today. This check
       // stays as a defence in case that contract ever admits display names.

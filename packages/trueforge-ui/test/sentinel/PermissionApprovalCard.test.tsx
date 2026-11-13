@@ -313,7 +313,7 @@ describe('PermissionApprovalCard for a calendar event', () => {
     location: 'Room 4',
     description: 'Bring the plan.',
     attendees: ['lin@example.com', 'sam@example.com'],
-    guests_emailed: true,
+    guests_line: 'Google will email every guest about this.',
     one_of_repeating: true,
     before: {
       title: 'Team sync',
@@ -345,7 +345,7 @@ describe('PermissionApprovalCard for a calendar event', () => {
 
   it('says plainly when there are no guests, and for a new event shows what will be saved', () => {
     renderCard({
-      calendar_event: { ...event, action: 'create', attendees: [], guests_emailed: false, before: null },
+      calendar_event: { ...event, action: 'create', attendees: [], guests_line: '', before: null },
     });
     expect(screen.getByRole('button', { name: 'Allow' })).toBeInTheDocument();
     expect(screen.getByText('Exactly what will be saved')).toBeInTheDocument();

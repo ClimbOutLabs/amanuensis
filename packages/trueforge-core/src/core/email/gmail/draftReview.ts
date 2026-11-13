@@ -19,6 +19,8 @@ export interface ReviewableDraft {
   references: string;
   /** The display name the message is sent under, which recipients see; empty when there is none. */
   fromName: string;
+  /** The address of the account the message is sent from, checked against the account before it is carried. */
+  fromAddress: string;
   /** Whether a recipient's name was left off because it looked like an address, so the card says so. */
   nameLeftOff: boolean;
   /** The address replies go to when it is not the sending account; null when replies go to the sender. */

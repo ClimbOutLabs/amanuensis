@@ -117,11 +117,24 @@ export const AUTO_DENY_REASONS = [
 ] as const;
 export type AutoDenyReason = (typeof AUTO_DENY_REASONS)[number];
 
+/** The account a message is sent from, as the producing tier reads it from the account that will send. */
+export const Tier3EmailSentFromSchema = z
+  .object({
+    address: z.string().describe('The address of the account the message is sent from.'),
+    service: z
+      .string()
+      .describe('The name of the service the sending account belongs to, as that service names itself.'),
+  })
+  .describe('The account a message is sent from: its address and the name of its service.')
+  .openapi('Tier3EmailSentFrom');
+
 export const Tier3EmailSchema = z
   .object({
     action: z
       .enum(['send', 'save', 'change'])
       .describe('What happens to the message: sent, saved as a draft, or a saved draft changed.'),
+    // Cards stored before this field existed read as null: the account they were sent from was never recorded.
+    sent_from: Tier3EmailSentFromSchema.nullable().default(null),
     to: z.array(Tier3MailboxSchema).describe('Recipients.'),
     cc: z.array(Tier3MailboxSchema).describe('Copied recipients.'),
     bcc: z.array(Tier3MailboxSchema).describe('Hidden copy recipients.'),
@@ -174,7 +187,7 @@ const Tier3CalendarEventBeforeSchema = z
 export const Tier3CalendarEventSchema = z
   .object({
     action: z.enum(['create', 'change']).describe('Whether a new event is added or an existing one changed.'),
-    calendar: z.string().describe('The Google account whose main calendar is written.'),
+    calendar: z.string().describe('The account whose main calendar is written, as its own service names it.'),
     title: z.string().describe('Event title.'),
     when: z.string().describe('Local date and time in plain words.'),
     time_zone: z.string().describe('IANA time zone the times are in.'),
@@ -182,7 +195,13 @@ export const Tier3CalendarEventSchema = z
     location: z.string().describe('Place; empty when none.'),
     description: z.string().describe('Description the write sets; empty when none.'),
     attendees: z.array(z.string()).describe('Every guest on the event.'),
-    guests_emailed: z.boolean().describe('True when Google emails the guests about this.'),
+    // Cards stored before this line was carried read as no line: they held only a flag for it.
+    guests_line: z
+      .string()
+      .default('')
+      .describe(
+        'What the card tells the person about the guests being emailed, in the finished words of the review that built the card. Empty when the event has no guests.',
+      ),
     one_of_repeating: z.boolean().describe('True when this changes one date of a repeating event.'),
     before: Tier3CalendarEventBeforeSchema.nullable(),
     // Absent on cards stored before these fields existed: a reader must treat absent as not known.
@@ -350,6 +369,7 @@ export const Tier3CardSchema = z
 
 export type Tier3Card = z.infer<typeof Tier3CardSchema>;
 export type Tier3Email = z.infer<typeof Tier3EmailSchema>;
+export type Tier3EmailSentFrom = z.infer<typeof Tier3EmailSentFromSchema>;
 export type Tier3Schedule = z.infer<typeof Tier3ScheduleSchema>;
 export type Tier3ScheduleTools = z.infer<typeof Tier3ScheduleToolsSchema>;
 export type Tier3Persona = z.infer<typeof Tier3PersonaSchema>;

@@ -59,6 +59,7 @@ describe('approval card content', () => {
           plain_what: 'Send Lease from your Gmail to grace@example.com?',
           email: {
             action: 'send',
+            sent_from: { address: 'ada@gmail.com', service: 'Gmail' },
             to: [{ name: 'Grace', address: 'grace@example.com' }],
             cc: [],
             bcc: [],
@@ -92,6 +93,7 @@ describe('approval card content', () => {
           plain_what: 'Save a draft Lease in your Gmail to grace@example.com? It is not sent.',
           email: {
             action: 'save',
+            sent_from: { address: 'ada@gmail.com', service: 'Gmail' },
             to: [{ name: '', address: 'grace@example.com' }],
             cc: [],
             bcc: [],
@@ -125,7 +127,7 @@ describe('approval card content', () => {
           location: 'Cafe',
           description: '',
           attendees: ['ana@example.com'],
-          guests_emailed: true,
+          guests_line: 'Google will email every guest about this.',
           one_of_repeating: false,
           before: null,
         },
