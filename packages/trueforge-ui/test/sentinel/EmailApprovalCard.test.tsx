@@ -251,7 +251,7 @@ describe('EmailApprovalCard actions', () => {
     const { onApprove } = renderEmail();
     fireEvent.click(screen.getByRole('button', { name: 'Allow' }));
     expect(onApprove).toHaveBeenCalledTimes(1);
-    expect(screen.getByText('Sending…').closest('[data-role="approval-status"]')).not.toBeNull();
+    expect(screen.getByRole('status')).toHaveTextContent('Sending…');
     expect(screen.queryByText(/^Sent/)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Allow' })).not.toBeInTheDocument();
   });
