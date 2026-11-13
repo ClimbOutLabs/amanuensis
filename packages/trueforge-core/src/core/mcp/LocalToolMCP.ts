@@ -78,7 +78,7 @@ export function defineTool<T extends z.ZodType>(config: {
 }): ToolDefinition {
   // Advertise the *input* shape: fields with `.default()` are optional to callers
   // (Zod 4's default `io: "output"` would mark them required after defaults apply).
-  const jsonSchema = config.schema.toJSONSchema({ io: 'input' }) as ToolInputSchema;
+  const jsonSchema = withoutSafeIntegerBounds(config.schema.toJSONSchema({ io: 'input' })) as ToolInputSchema;
   return {
     name: config.name,
     description: config.description,
@@ -197,4 +197,26 @@ export abstract class LocalToolMCP implements IToolSet {
     }
     return tool.execute(params.arguments, approvalDecision, context);
   }
+}
+
+/**
+ * Zod writes the largest safe integer as the bound of every whole-number field. It tells the model
+ * nothing and is sent on every request, so it is left out; the handler still checks the input.
+ */
+function withoutSafeIntegerBounds(schema: unknown): unknown {
+  if (Array.isArray(schema)) {
+    return schema.map(withoutSafeIntegerBounds);
+  }
+  if (typeof schema !== 'object' || schema === null) {
+    return schema;
+  }
+  return Object.fromEntries(
+    Object.entries(schema)
+      .filter(
+        ([key, value]) =>
+          !(key === 'maximum' && value === Number.MAX_SAFE_INTEGER) &&
+          !(key === 'minimum' && value === Number.MIN_SAFE_INTEGER),
+      )
+      .map(([key, value]) => [key, withoutSafeIntegerBounds(value)]),
+  );
 }
