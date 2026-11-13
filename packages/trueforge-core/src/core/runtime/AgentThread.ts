@@ -2997,11 +2997,11 @@ export class AgentThread {
    * is assembled. Mirrors the message assembly in transformToLLMRequest without
    * building the full request body.
    *
-   * Context messages are estimated text-only (see contextMessageTextTokens):
-   * toOpenAIChatMessage preserves image_url / input_audio / file parts with
-   * their full base64 payloads, which the length/4 heuristic would inflate
-   * wildly (a 1MB image reads as ~340k tokens) while the provider does not
-   * bill those bytes as text tokens.
+   * Context messages are estimated with estimateTokensForContextMessages, the
+   * same count compaction sizes its kept tail with: text, tool calls and replayed
+   * thinking, but not image_url / input_audio / file payloads, whose base64 bytes
+   * the length/4 heuristic would inflate wildly (a 1MB image reads as ~340k
+   * tokens) while the provider does not bill them as text tokens.
    *
    * Bails out early once the running total already exceeds `limit`: this runs on
    * every turn, and precision past the guard threshold buys nothing. Pass
@@ -3031,7 +3031,7 @@ export class AgentThread {
       }
     }
     for (const message of this.context) {
-      total += contextMessageTextTokens(message);
+      total += estimateTokensForContextMessages([message]).prompt_tokens;
       if (total > limit) {
         return total;
       }
@@ -6243,11 +6243,6 @@ function contextMessageTextLength(message: ContextMessage): number {
     return total;
   }
   return 0;
-}
-
-/** Token estimate for one context message counting text only; see contextMessageTextLength. */
-function contextMessageTextTokens(message: ContextMessage): number {
-  return contextMessageTextLength(message) / 4;
 }
 
 function estimateRawContextTextLength(context: readonly ContextMessage[]): number {

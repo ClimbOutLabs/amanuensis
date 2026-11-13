@@ -786,6 +786,16 @@ export function estimateTokensForContextMessages(messages: ContextMessage[]): Cu
     if ('tool_call_id' in b && b.tool_call_id) {
       tokenCount += estimateTokensForString(b.tool_call_id);
     }
+
+    // Earlier thinking is sent back with every request, so it takes room in the model's context
+    // like any other text; leaving it out lets compaction keep a tail far larger than it measured.
+    if ('thinking_blocks' in b && b.thinking_blocks) {
+      for (const block of b.thinking_blocks) {
+        if (block.type === 'thinking') {
+          tokenCount += estimateTokensForString(block.thinking);
+        }
+      }
+    }
   }
 
   return {

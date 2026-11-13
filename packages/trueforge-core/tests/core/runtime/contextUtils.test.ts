@@ -1,6 +1,7 @@
 import type { ChatCompletionMessageParam } from 'openai/resources/chat';
 import type { ContextMessage } from '../../../src/core/runtime/AgentThread.types';
 import {
+  estimateTokensForContextMessages,
   hasCalledRetrievalTool,
   hasRetrievalTool,
   hostPictureMessage,
@@ -267,5 +268,25 @@ describe('personMessageIndex', () => {
 
   it('is -1 when only the host wrote user messages', () => {
     expect(personMessageIndex([{ role: 'user', content: internalSystemTag('note') }])).toBe(-1);
+  });
+});
+
+describe('estimateTokensForContextMessages', () => {
+  it('counts the thinking that is sent back with every request', () => {
+    const withThinking: ContextMessage = {
+      role: 'assistant',
+      content: 'a'.repeat(400),
+      thinking_blocks: [{ type: 'thinking', thinking: 't'.repeat(8_000) }],
+    };
+    expect(estimateTokensForContextMessages([withThinking]).prompt_tokens).toBe(2_100);
+  });
+
+  it('does not count redacted thinking, which is never sent back as text', () => {
+    const redacted: ContextMessage = {
+      role: 'assistant',
+      content: 'a'.repeat(400),
+      thinking_blocks: [{ type: 'redacted_thinking', data: 'x'.repeat(8_000) }],
+    };
+    expect(estimateTokensForContextMessages([redacted]).prompt_tokens).toBe(100);
   });
 });
