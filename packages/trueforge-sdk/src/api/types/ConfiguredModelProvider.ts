@@ -5,6 +5,7 @@ import type * as TrueForge from "../index.js";
 export interface ConfiguredModelProvider {
     /** True when the server derives this provider from its environment; it is read-only here. */
     envManaged?: boolean;
+    lastCheck?: TrueForge.ModelProviderCheck;
     manifest: TrueForge.ModelProviderManifest;
     name: TrueForge.ResourceName;
 }

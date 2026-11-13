@@ -6,10 +6,17 @@ import { useSlot } from '../../theme/SlotsProvider.js';
 export type AgentRuntimeEditorContentProps = {
   spec: AgentSpec;
   sandboxAvailable: boolean;
+  /** The picked model's size limit in tokens; null when a model is picked but its limit is unknown. */
+  modelContextLength?: number | null;
   onChange: (spec: AgentSpec) => void;
 };
 
-export function AgentRuntimeEditorContent({ spec, sandboxAvailable, onChange }: AgentRuntimeEditorContentProps) {
+export function AgentRuntimeEditorContent({
+  spec,
+  sandboxAvailable,
+  modelContextLength,
+  onChange,
+}: AgentRuntimeEditorContentProps) {
   const AgentRuntimeConfigFields = useSlot('AgentRuntimeConfigFields');
 
   return (
@@ -19,6 +26,7 @@ export function AgentRuntimeEditorContent({ spec, sandboxAvailable, onChange }: 
         sandboxAvailable={sandboxAvailable}
         hasSkills={(spec.skills?.length ?? 0) > 0}
         layout="detailed"
+        modelContextLength={modelContextLength}
         onChange={config => onChange({ ...spec, config })}
       />
     </div>

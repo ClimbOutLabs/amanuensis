@@ -292,7 +292,7 @@ describe('installer/templates/instance/compose.yaml.tpl calendar connector', () 
       })
       .loose()
       .parse(load('docker-compose.yml'));
-    expect(dev.services.loopback.networks).toEqual(['default', 'calendar', 'browser-control', 'voice']);
+    expect(dev.services.loopback.networks).toEqual(['default', 'calendar', 'mail', 'browser-control', 'voice']);
     expect(dev.services['calendar-caldav'].environment.CALENDAR_ACCOUNT_SECRET).toBe(
       dev.services.server.environment.CALENDAR_ACCOUNT_SECRET,
     );
