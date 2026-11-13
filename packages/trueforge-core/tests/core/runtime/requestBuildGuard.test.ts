@@ -331,4 +331,20 @@ describe('token-based pre-flight guard', () => {
       'The chat is too long for this model. Start a new chat or use a different model.',
     );
   });
+
+  it('does not count a saved message twice when it comes back as a copy', async () => {
+    // About 2,000 tokens: under the 4,096-token model once, over it if counted twice.
+    const returnsCopies: AgentCapability = {
+      preLLMEphemeralProcessors: [{ processPreLLMEphemeral: messages => messages.map(message => ({ ...message })) }],
+    };
+    const { thread, create } = makeThread({
+      context: [{ role: 'user', content: 'x'.repeat(8_000) }],
+      modelProperties: { contextLength: 4096 },
+      capabilities: [returnsCopies],
+    });
+    const events = await drainEvents(thread, new AbortController().signal);
+
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(doneEvent(events)?.status).toBe('done');
+  });
 });

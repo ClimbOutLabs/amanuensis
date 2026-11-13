@@ -5,7 +5,7 @@ import { EventType, newEventId } from '../../events/schema';
 import type { ILLM, LLMCreateParams } from '../../llm/ILLM';
 import { getEmptyUsage, type CompletionUsage, type FinishReason, type RawAssistantMessage } from '../../llm/LLMTypes';
 import { resolveMaxOutputTokens } from '../../llm/maxOutputTokens';
-import { estimateTokensForString } from '../../llm/usage';
+import { estimateTokensForString, PICTURE_TOKEN_ESTIMATE } from '../../llm/usage';
 import type { AgentDefinition, ModelParams } from '../../runtime/AgentDefinition';
 import { InternalEventType, type ContextMessage } from '../../runtime/AgentThread.types';
 import {
@@ -13,6 +13,7 @@ import {
   internalSystemMessage,
   isInternalSystemMessage,
   isLLMContextMessage,
+  pictureCount,
   userAuthoredText,
   withoutEarlierThinking,
 } from '../../runtime/contextUtils';
@@ -705,10 +706,16 @@ function touchedPathsFromSuccessfulToolResults(context: ContextMessage[]): strin
   return [...paths].sort();
 }
 
-function splitContextForCompaction(
-  context: readonly ContextMessage[],
-  tailTokenBudget: number,
-): { older: ContextMessage[]; tail: ContextMessage[] } {
+function splitContextForCompaction({
+  context,
+  tailTokenBudget,
+  countPictures,
+}: {
+  context: readonly ContextMessage[];
+  tailTokenBudget: number;
+  /** Size each picture as the request size check does, so the kept tail still fits afterwards. */
+  countPictures: boolean;
+}): { older: ContextMessage[]; tail: ContextMessage[] } {
   if (context.length === 0) {
     return { older: [], tail: [] };
   }
@@ -724,7 +731,9 @@ function splitContextForCompaction(
     if (message === undefined) {
       break;
     }
-    const messageTokens = estimateTokensForContextMessages([message]).prompt_tokens;
+    const pictureTokens =
+      countPictures && isLLMContextMessage(message) ? pictureCount(message.content) * PICTURE_TOKEN_ESTIMATE : 0;
+    const messageTokens = estimateTokensForContextMessages([message]).prompt_tokens + pictureTokens;
     if (tailTokens + messageTokens > realTailBudget) {
       tailStartIndex = i + 1;
       break;
@@ -1195,6 +1204,7 @@ export class ContextCompaction implements PreLLMAgentContextProcessor {
   private modelParams: ModelParams | undefined;
   private compactionThresholdTokens: number;
   private readonly modelContextLength: number | undefined;
+  private readonly modelSupportsVision: boolean;
   private readonly summarizerContextLength: number | undefined;
   private readonly checklist: TaskChecklistAccess | undefined;
   private readonly checklistState: TaskChecklistRequestState | undefined;
@@ -1209,6 +1219,8 @@ export class ContextCompaction implements PreLLMAgentContextProcessor {
     compactionThresholdTokens: number;
     /** The thread model's context length; sizes the retained tail. */
     modelContextLength?: number | undefined;
+    /** Whether the thread's model reads pictures; the kept tail then counts each one. */
+    modelSupportsVision?: boolean | undefined;
     /** The summarizing model's context length; bounds its request. Unknown falls back to the larger of the threshold and the default. */
     summarizerContextLength?: number | undefined;
     checklist?: TaskChecklistAccess | undefined;
@@ -1220,6 +1232,7 @@ export class ContextCompaction implements PreLLMAgentContextProcessor {
     this.modelParams = input.modelParams;
     this.compactionThresholdTokens = input.compactionThresholdTokens;
     this.modelContextLength = input.modelContextLength;
+    this.modelSupportsVision = input.modelSupportsVision === true;
     this.summarizerContextLength = input.summarizerContextLength;
     this.checklist = input.checklist;
     this.checklistState = input.checklistState;
@@ -1469,7 +1482,11 @@ export class ContextCompaction implements PreLLMAgentContextProcessor {
     // Measured and kept as it is sent: thinking before the person's latest message is never sent
     // again, so it neither counts toward the kept tail nor survives in the shortened context.
     const sentContext = withoutEarlierThinking(execution.context);
-    const { older: olderContext, tail: recentTail } = splitContextForCompaction(sentContext, tailTokenBudget);
+    const { older: olderContext, tail: recentTail } = splitContextForCompaction({
+      context: sentContext,
+      tailTokenBudget,
+      countPictures: this.modelSupportsVision,
+    });
 
     let systemContent: string;
     let repository: BoundRepositoryContext | undefined;
@@ -1718,6 +1735,7 @@ export function contextCompaction(options: {
     modelParams: options.compactionModel?.modelParams ?? options.definition.modelParams,
     compactionThresholdTokens: threshold,
     modelContextLength: options.definition.modelProperties?.contextLength,
+    modelSupportsVision: options.definition.modelSupportsVision,
     summarizerContextLength: (options.compactionModel ?? options.definition).modelProperties?.contextLength,
     checklist: options.checklist,
     checklistState: options.checklistState,

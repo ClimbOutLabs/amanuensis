@@ -3085,14 +3085,15 @@ export class AgentThread {
     for (const processor of this.preEphemeralLLMContextProcessors) {
       messages = processor.processPreLLMEphemeral(messages, { modelSupportsVision }) ?? messages;
     }
-    const savedMessages = new Set(saved);
-    let total = 0;
-    for (const message of messages) {
-      if (!savedMessages.has(message)) {
-        total += estimateTokensForChatMessageContent({ content: message.content, countPictures: modelSupportsVision });
-      }
-    }
-    return total;
+    // The difference in size, not the new objects: a processor may hand back a saved message as
+    // a copy, and that copy must not count twice.
+    const size = (list: readonly ChatCompletionMessageParam[]): number =>
+      list.reduce(
+        (total, message) =>
+          total + estimateTokensForChatMessageContent({ content: message.content, countPictures: modelSupportsVision }),
+        0,
+      );
+    return Math.max(0, size(messages) - size(saved));
   }
 
   private transformToLLMRequest(tools: ChatCompletionTool[]): LLMCreateParamsStreaming {
