@@ -7895,8 +7895,20 @@
             "type": "string"
           },
           "unsorted_reasons": {
-            "description": "Why notes were left unsorted in this run, each different reason once. Empty when none were.",
+            "description": "Why notes were left unsorted in this run, each different cause once. Empty when none were.",
             "items": {
+              "enum": [
+                "model_slow",
+                "model_error",
+                "reply_empty",
+                "reply_cut_short",
+                "reply_too_long",
+                "reply_wrong_form",
+                "reply_broke_rule",
+                "note_empty",
+                "pages_unreadable",
+                "write_failed"
+              ],
               "type": "string"
             },
             "type": "array"

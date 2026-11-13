@@ -14,7 +14,7 @@ import type { SummarizeTurnContext } from './memoryRetain';
 import { sortMissedNotes } from './missedNotes';
 import { claimNightlyDay } from './nightlyState';
 import { listDisagreements, summaryModelForDisagreements } from './pageDisagreements';
-import type { PageSortMode } from './pageSortMode';
+import type { PageSortMode, SortStopCause } from './pageSortMode';
 import { summaryModelForSorting } from './pageSortRun';
 import { VaultBusyError } from './vaultLock';
 
@@ -52,8 +52,8 @@ export interface NightlyCounts {
   pairsListed: number;
   /** Vaults where sorting was not off but no model could be found, so the steps that ask one were skipped. */
   vaultsWithoutModel: number;
-  /** Why notes were left unsorted, each different reason once. It may quote the model, so it is not logged here. */
-  unsortedReasons: string[];
+  /** Why notes were left unsorted, each different cause once. */
+  unsortedReasons: SortStopCause[];
 }
 
 export type NightlyOutcome =
@@ -180,12 +180,7 @@ export async function runNightlyForVault({
     counts.pagesAsked = found?.asked ?? 0;
     counts.pairsListed = found?.listed ?? 0;
   }
-  const { unsortedReasons, ...numbers } = counts;
-  logger.info('Nightly memory tidy finished for a vault.', {
-    personaId: vault.persona?.id,
-    ...numbers,
-    unsortedReasons: unsortedReasons.length,
-  });
+  logger.info('Nightly memory tidy finished for a vault.', { personaId: vault.persona?.id, ...counts });
   return { status: 'ran', counts };
 }
 

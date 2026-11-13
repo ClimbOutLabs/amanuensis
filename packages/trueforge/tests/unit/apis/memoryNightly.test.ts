@@ -173,7 +173,7 @@ describe('memoryNightly router', () => {
         pagesAsked: 5,
         pairsListed: 1,
         vaultsWithoutModel: 0,
-        unsortedReasons: ['the reply was too long'],
+        unsortedReasons: ['reply_too_long'],
       },
       sorting: 'on',
     });
@@ -188,7 +188,7 @@ describe('memoryNightly router', () => {
         pairs_listed: 1,
         sorting: 'on',
         model_missing: false,
-        unsorted_reasons: ['the reply was too long'],
+        unsorted_reasons: ['reply_too_long'],
       },
     });
   });

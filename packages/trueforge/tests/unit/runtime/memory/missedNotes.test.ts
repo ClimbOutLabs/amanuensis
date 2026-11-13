@@ -197,15 +197,14 @@ describe('notes the sorter missed', () => {
     expect(model.prompts).toHaveLength(5);
   });
 
-  it('says why notes were left unsorted, each different reason once', async () => {
+  it('says why notes were left unsorted, each different cause once', async () => {
     const base = await setUp();
     await writeDay({ vaultDir: base.vaultDir, day: '2026-11-09', notes: ['Hard note.', 'Another hard note.'] });
 
     const result = await run({ base, mode: 'on', model: modelAnswering(() => 'not json') });
 
     expect(result).toMatchObject({ asked: 2, sorted: 0 });
-    expect(result.reasons).toHaveLength(1);
-    expect(result.reasons[0]).toContain('the reply was not in the expected shape');
+    expect(result.reasons).toEqual(['reply_wrong_form']);
   });
 });
 

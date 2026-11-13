@@ -189,10 +189,10 @@ describe('MemoryHelpersCard', () => {
     const status = renderCardAndTidy({
       ...QUIET_RUN,
       notesAsked: 4,
-      unsortedReasons: ['the reply was too long', 'the model did not answer'],
+      unsortedReasons: ['model_slow', 'reply_wrong_form', 'a cause from a newer server'],
     });
     expect(await status).toHaveTextContent(
-      'Nothing changed. Aman looked at 4 saved notes but could not file any. Your notes stay on the Memories tab. What Aman recorded: the reply was too long; the model did not answer. Try again, or choose another model in Settings.',
+      "Nothing changed. Aman looked at 4 saved notes but could not file any. Your notes stay on the Memories tab. The reason: the model took too long to answer, the model's answer was not in the form Aman asked for, and something went wrong. Try again, or choose another model in Settings.",
     );
   });
 

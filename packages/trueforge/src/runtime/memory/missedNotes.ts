@@ -9,7 +9,7 @@ import type { PageListing } from './memoryPages';
 import type { PageChangeOptions } from './memoryPageWriter';
 import { changeNightlyState, readNightlyState } from './nightlyState';
 import { sortNote, type SortModel } from './pageSorter';
-import type { PageSortMode } from './pageSortMode';
+import type { PageSortMode, SortStopCause } from './pageSortMode';
 import { readReportedNoteIds } from './pageSortReport';
 import { noteOf } from './pageSortRun';
 
@@ -29,13 +29,9 @@ export interface MissedNotesResult {
   asked: number;
   /** Notes whose reply was understood, written or only reported. */
   sorted: number;
-  /** Why notes were left unsorted in this run: each different reason once, the first few only. */
-  reasons: string[];
+  /** Why notes were left unsorted in this run, each different cause once. */
+  reasons: SortStopCause[];
 }
-
-/** How many different reasons a run keeps, and how long one may be. */
-const REASONS_KEPT = 3;
-const REASON_MAX_CHARACTERS = 200;
 
 function firstDayInWindow(today: string): string {
   return new Date(Date.parse(`${today}T00:00:00Z`) - MISSED_NOTES_WINDOW_DAYS * DAY_MS).toISOString().slice(0, 10);
@@ -113,9 +109,8 @@ export async function sortMissedNotes({
     }
     failed.add(entry.id);
     if (outcome.status === 'refused' || outcome.status === 'failed') {
-      const reason = outcome.reason.slice(0, REASON_MAX_CHARACTERS);
-      if (result.reasons.length < REASONS_KEPT && !result.reasons.includes(reason)) {
-        result.reasons.push(reason);
+      if (!result.reasons.includes(outcome.cause)) {
+        result.reasons.push(outcome.cause);
       }
     }
     failuresInARow += 1;

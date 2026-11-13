@@ -35,7 +35,7 @@ export interface MemoryTidyRun {
   sorting: PageSortMode;
   /** True when sorting was not off and no model was found to ask. */
   modelMissing: boolean;
-  /** Why notes were left unsorted, as the server recorded it; each different reason once. */
+  /** Why notes were left unsorted: the server's name for each cause, such as `model_slow`, each once. */
   unsortedReasons: string[];
 }
 

@@ -5,6 +5,7 @@ import * as core from "../../core/index.js";
 import type * as serializers from "../index.js";
 import { MemoryTidyRunSorting } from "./MemoryTidyRunSorting.js";
 import { MemoryTidyRunStatus } from "./MemoryTidyRunStatus.js";
+import { MemoryTidyRunUnsortedReasonsItem } from "./MemoryTidyRunUnsortedReasonsItem.js";
 
 export const MemoryTidyRun: core.serialization.ObjectSchema<serializers.MemoryTidyRun.Raw, TrueForge.MemoryTidyRun> =
     core.serialization.object({
@@ -17,7 +18,7 @@ export const MemoryTidyRun: core.serialization.ObjectSchema<serializers.MemoryTi
         status: MemoryTidyRunStatus,
         unsortedReasons: core.serialization.property(
             "unsorted_reasons",
-            core.serialization.list(core.serialization.string()),
+            core.serialization.list(MemoryTidyRunUnsortedReasonsItem),
         ),
     });
 
@@ -30,6 +31,6 @@ export declare namespace MemoryTidyRun {
         pairs_listed: number;
         sorting: MemoryTidyRunSorting.Raw;
         status: MemoryTidyRunStatus.Raw;
-        unsorted_reasons: string[];
+        unsorted_reasons: MemoryTidyRunUnsortedReasonsItem.Raw[];
     }
 }

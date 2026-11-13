@@ -52,13 +52,14 @@ export function summaryModelFor({
   return async messages => {
     const answer = await askSummaryModel({ messages, modelFqn, resolveLlm, isReadable, maxOutputTokens, logger });
     if (answer.status === 'failed') {
-      return {
-        ok: false,
-        reason: answer.fallback === 'model_timeout' ? 'the model took too long to answer' : answer.reason,
-      };
+      return answer.fallback === 'model_timeout'
+        ? { ok: false, reason: answer.reason, cause: 'model_slow' }
+        : { ok: false, reason: answer.reason };
     }
     if (answer.reply === '') {
-      return { ok: false, reason: answer.cutShort ? 'the reply was cut short' : 'the reply was empty' };
+      return answer.cutShort
+        ? { ok: false, reason: 'the reply was cut short', cause: 'reply_cut_short' }
+        : { ok: false, reason: 'the reply was empty', cause: 'reply_empty' };
     }
     return { ok: true, reply: answer.reply };
   };

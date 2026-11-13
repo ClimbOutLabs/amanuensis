@@ -609,7 +609,7 @@ describe('when something goes wrong', () => {
       model: () => Promise.resolve({ ok: false, reason: 'the model did not answer' }),
     });
 
-    expect(result).toEqual({ status: 'failed', reason: 'the model did not answer' });
+    expect(result).toEqual({ status: 'failed', reason: 'the model did not answer', cause: 'model_error' });
     expect(await read(vaultDir, 'person', 'wendy')).toBe(wendy);
     expect(await readHandledNotes(vaultDir)).toEqual(new Map());
   });

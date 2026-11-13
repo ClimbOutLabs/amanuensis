@@ -89,12 +89,31 @@ function count(amount: number, { one, many }: { one: string; many: string }): st
 }
 
 /** One plain sentence on what a tidy-up asked for now did. */
+/** A plain sentence part for a cause the server names; a cause this page does not know reads as a general failure. */
+function unsortedReasonCopy({ cause, assistant }: { cause: string; assistant: string }): string {
+  const known: Record<string, string> = {
+    model_slow: 'the model took too long to answer',
+    model_error: 'the model returned an error',
+    reply_empty: 'the model gave no answer',
+    reply_cut_short: "the model's answer was cut short",
+    reply_too_long: "the model's answer was too long",
+    reply_wrong_form: `the model's answer was not in the form ${assistant} asked for`,
+    reply_broke_rule: "the model's answer asked for a change that is not allowed",
+    note_empty: 'the note was empty',
+    pages_unreadable: 'a page could not be read',
+    write_failed: 'a page could not be saved',
+  };
+  return known[cause] ?? 'something went wrong';
+}
+
 function tidyResultCopy({ run, assistant }: { run: MemoryTidyRun; assistant: string }): string {
   if (run.status === 'busy') {
     return 'A tidy-up is already running. Try again in a few minutes.';
   }
   const unread = run.notesAsked - run.notesSorted;
-  const why = run.unsortedReasons.length > 0 ? ` What ${assistant} recorded: ${run.unsortedReasons.join('; ')}.` : '';
+  const reasons = [...new Set(run.unsortedReasons.map(cause => unsortedReasonCopy({ cause, assistant })))];
+  const why =
+    reasons.length > 0 ? ` The reason: ${new Intl.ListFormat('en', { type: 'conjunction' }).format(reasons)}.` : '';
   const unreadNote =
     unread > 0
       ? ` It could not file ${count(unread, { one: 'other note', many: 'other notes' })}. Those stay on the Memories tab.${why}`

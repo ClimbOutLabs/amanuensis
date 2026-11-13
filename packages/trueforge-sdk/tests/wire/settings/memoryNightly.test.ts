@@ -170,7 +170,7 @@ describe("MemoryNightlyClient", () => {
                 pairs_listed: 1,
                 sorting: "off",
                 status: "ran",
-                unsorted_reasons: ["unsorted_reasons"],
+                unsorted_reasons: ["model_slow"],
             },
         };
 
@@ -192,7 +192,7 @@ describe("MemoryNightlyClient", () => {
                 pairsListed: 1,
                 sorting: "off",
                 status: "ran",
-                unsortedReasons: ["unsorted_reasons"],
+                unsortedReasons: ["model_slow"],
             },
         });
     });

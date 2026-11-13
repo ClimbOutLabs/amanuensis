@@ -369,6 +369,7 @@ export * from "./MemorySummarize.js";
 export * from "./MemoryTidyRun.js";
 export * from "./MemoryTidyRunSorting.js";
 export * from "./MemoryTidyRunStatus.js";
+export * from "./MemoryTidyRunUnsortedReasonsItem.js";
 export * from "./MemoryVaultEntry.js";
 export * from "./MemoryVaultExport.js";
 export * from "./MemoryVaultImportEntry.js";

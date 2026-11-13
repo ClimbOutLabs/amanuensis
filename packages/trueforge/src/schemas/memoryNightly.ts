@@ -1,6 +1,6 @@
 import { z } from '@hono/zod-openapi';
 
-import { PageSortModeSchema } from '../runtime/memory/pageSortMode';
+import { PageSortModeSchema, SortStopCauseSchema } from '../runtime/memory/pageSortMode';
 
 export const MemoryNightlySchema = z
   .object({
@@ -57,8 +57,8 @@ export const MemoryTidyRunSchema = z
       .boolean()
       .describe('True when sorting was not off but no model was found, so the steps that ask a model were skipped.'),
     unsorted_reasons: z
-      .array(z.string())
-      .describe('Why notes were left unsorted in this run, each different reason once. Empty when none were.'),
+      .array(SortStopCauseSchema)
+      .describe('Why notes were left unsorted in this run, each different cause once. Empty when none were.'),
   })
   .openapi('MemoryTidyRun');
 

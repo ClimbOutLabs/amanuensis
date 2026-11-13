@@ -22,7 +22,7 @@ import {
 } from './memoryPages';
 import { extractReplyJson } from './memorySummarize';
 import { SortReplySchema, type SortDecision } from './pageSortDecisions';
-import type { PageSortMode } from './pageSortMode';
+import type { PageSortMode, SortStopCause } from './pageSortMode';
 import { noteOriginOf, statementSourceOf, type NoteOrigin } from './pageSortOrigin';
 import { buildSortPrompt, type ShownStatement } from './pageSortPrompt';
 import { appendSortReport, type SortReportLine } from './pageSortReport';
@@ -33,7 +33,9 @@ import { currentFactsSaying, sameText, sectionAfterChange, statementWith, unique
 const SORT_MAX_REPLY_CHARACTERS = 8000;
 
 /** The answer from the model call, or why there is none. */
-export type SortModelAnswer = { ok: true; reply: string } | { ok: false; reason: string };
+export type SortModelAnswer =
+  | { ok: true; reply: string }
+  | { ok: false; reason: string; cause?: Extract<SortStopCause, 'model_slow' | 'reply_empty' | 'reply_cut_short'> };
 
 /** Asks the model one question. Never throws. */
 export type SortModel = (messages: { role: 'system' | 'user'; content: string }[]) => Promise<SortModelAnswer>;
@@ -58,8 +60,8 @@ export interface SortNote {
 export type SortResult =
   | { status: 'off' }
   | { status: 'sorted'; written: boolean; outcome: HandledOutcome; decisions: SortDecision[] }
-  | { status: 'refused'; reason: string }
-  | { status: 'failed'; reason: string };
+  | { status: 'refused'; reason: string; cause: SortStopCause }
+  | { status: 'failed'; reason: string; cause: SortStopCause };
 
 /** A page changed after the model saw it, so the decision no longer fits. */
 class StalePageError extends Error {
@@ -304,27 +306,32 @@ export async function sortNote({
   };
 
   if (note.text.trim() === '') {
-    return stop({ status: 'failed', reason: 'the note is empty' });
+    return stop({ status: 'failed', reason: 'the note is empty', cause: 'note_empty' });
   }
   const origin = noteOriginOf(note.metadata);
   let prompt: Awaited<ReturnType<typeof buildSortPrompt>>;
   try {
     prompt = await buildSortPrompt({ vaultDir, note, origin, similarPages });
   } catch (error) {
-    return stop({ status: 'failed', reason: `the pages could not be read: ${reasonOf(error)}` });
+    return stop({
+      status: 'failed',
+      reason: `the pages could not be read: ${reasonOf(error)}`,
+      cause: 'pages_unreadable',
+    });
   }
   const answer = await askModel(prompt.messages);
   if (!answer.ok) {
-    return stop({ status: 'failed', reason: answer.reason });
+    return stop({ status: 'failed', reason: answer.reason, cause: answer.cause ?? 'model_error' });
   }
   if (answer.reply.length > SORT_MAX_REPLY_CHARACTERS) {
-    return stop({ status: 'refused', reason: 'the reply was too long' });
+    return stop({ status: 'refused', reason: 'the reply was too long', cause: 'reply_too_long' });
   }
   const parsed = SortReplySchema.safeParse(extractReplyJson(answer.reply));
   if (!parsed.success) {
     const issue = parsed.error.issues[0];
     return stop({
       status: 'refused',
+      cause: 'reply_wrong_form',
       reason: `the reply was not in the expected shape${issue === undefined ? '' : ` (${issue.path.join('.')}: ${issue.message})`}`,
     });
   }
@@ -336,7 +343,7 @@ export async function sortNote({
     known: prompt.known,
   });
   if (!ruled.ok) {
-    return stop({ status: 'refused', reason: ruled.reason });
+    return stop({ status: 'refused', reason: ruled.reason, cause: 'reply_broke_rule' });
   }
   const decisions = ruled.planned.map(({ decision }) => decision);
   const outcome: HandledOutcome = decisions.some(decision => decision.decision !== 'ignore') ? 'page' : 'none';
@@ -356,7 +363,7 @@ export async function sortNote({
     await appendHandledNote({ vaultDir, noteId: note.id, outcome });
   } catch (error) {
     logger.warn('A saved note could not be sorted onto pages.', { noteId: note.id, ...extractErrorLogFields(error) });
-    return { status: 'failed', reason: reasonOf(error) };
+    return { status: 'failed', reason: reasonOf(error), cause: 'write_failed' };
   }
   return { status: 'sorted', written: true, outcome, decisions };
 }

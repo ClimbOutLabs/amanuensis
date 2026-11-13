@@ -92,7 +92,7 @@ describe('the model the sorter asks', () => {
     expect(await ask?.(MESSAGES)).toEqual({ ok: false, reason: 'no such model' });
   });
 
-  it('says in plain words when the model took too long, after one more try', async () => {
+  it('says the model was slow when it took too long, after one more try', async () => {
     const { llm } = llmReturning([]);
     let tries = 0;
     const slow = {
@@ -103,13 +103,17 @@ describe('the model the sorter asks', () => {
       },
     };
     const ask = summaryModelForSorting({ summarize: context({ resolveLlm: () => Promise.resolve(slow) }), logger });
-    expect(await ask?.(MESSAGES)).toEqual({ ok: false, reason: 'the model took too long to answer' });
+    expect(await ask?.(MESSAGES)).toEqual({
+      ok: false,
+      reason: 'The operation was aborted due to timeout',
+      cause: 'model_slow',
+    });
     expect(tries).toBe(2);
   });
 
   it('says why when the reply is empty', async () => {
     const { llm } = llmReturning([{ content: '  ', finish: 'stop' }]);
     const ask = summaryModelForSorting({ summarize: context({ resolveLlm: () => Promise.resolve(llm) }), logger });
-    expect(await ask?.(MESSAGES)).toEqual({ ok: false, reason: 'the reply was empty' });
+    expect(await ask?.(MESSAGES)).toEqual({ ok: false, reason: 'the reply was empty', cause: 'reply_empty' });
   });
 });
