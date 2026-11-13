@@ -95,6 +95,9 @@ const TOOL_WORDS: ReadonlyMap<string, ToolWords> = new Map([
     'run_registered_command',
   ]),
   ...words({ doing: 'Running code', done: 'Ran code', thing: 'Some code' }, ['run_code']),
+  ...words({ doing: "Running a skill's script", done: "Ran a skill's script", thing: "A skill's script" }, [
+    'run_skill_script',
+  ]),
   ...words({ doing: 'Reading', done: 'Read files', thing: 'Some files' }, ['read_file', 'read', 'open_file', 'cat']),
   ...words({ doing: 'Editing files', done: 'Changed files', thing: 'A file change' }, [
     'write_file',

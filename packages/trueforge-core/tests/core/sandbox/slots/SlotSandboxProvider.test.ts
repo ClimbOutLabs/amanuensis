@@ -126,6 +126,21 @@ describe('SlotSandboxProvider', () => {
     });
   });
 
+  test('an argv call reaches the agent as that argv, with no shell in front', async () => {
+    const { provider, agents: started } = await providerFor([healthy]);
+    const sandboxId = `s1-${'d'.repeat(32)}`;
+    await provider.exec({
+      sandboxId,
+      command: "'python3' 'scripts/run.py' '$(id)'",
+      argv: ['python3', 'scripts/run.py', '$(id)'],
+      cwd: '/workspace/.aman/skills/alpha',
+    });
+    expect(started[0]?.requests[0]?.body).toMatchObject({
+      argv: ['python3', 'scripts/run.py', '$(id)'],
+      cwd: '/workspace/.aman/skills/alpha',
+    });
+  });
+
   test('exec carries the skill network token to the agent only when one was granted', async () => {
     const { provider, agents: started } = await providerFor([healthy]);
     const sandboxId = `s1-${'d'.repeat(32)}`;

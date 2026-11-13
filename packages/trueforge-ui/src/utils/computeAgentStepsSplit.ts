@@ -5,6 +5,7 @@ export type AgentStepPart = {
   type: PartState['type'];
   text?: string;
   toolName?: string;
+  toolCallId?: string;
 };
 
 /** A contiguous run of parts folded into agent internals; `end` is exclusive. */
@@ -66,13 +67,19 @@ function collectRuns({ parts, folded }: { parts: readonly AgentStepPart[]; folde
  * whitespace-only text fold; every part with visible text stays in the main flow as it streams,
  * so text never moves between folded and unfolded once it has content.
  */
-export function computeAgentStepsSplit(parts: readonly AgentStepPart[]): AgentStepsSplitResult {
+export function computeAgentStepsSplit(
+  parts: readonly AgentStepPart[],
+  options?: {
+    /** Parts that stay in the main flow whatever their kind, like a send receipt the person came for. */
+    keepVisible?: (part: AgentStepPart) => boolean;
+  },
+): AgentStepsSplitResult {
   let trailingStart = parts.length;
   while (trailingStart > 0 && parts[trailingStart - 1]?.type === 'text') trailingStart--;
   const hasFinal = parts.slice(trailingStart).some(part => (part.text ?? '').trim() !== '');
 
   const folded = parts.map(part => {
-    if (isMapsCall(part)) return false;
+    if (isMapsCall(part) || options?.keepVisible?.(part) === true) return false;
     return part.type !== 'text' || (part.text ?? '').trim() === '';
   });
 

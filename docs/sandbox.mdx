@@ -225,6 +225,15 @@ The shell tool runs repository and workspace commands. It does not run inline co
 through `run_code`. Building and testing a Python project is the exception: `python3 -m pytest`,
 `python3 -m pip`, `python3 -m venv` and `python3 -m unittest` run in the shell.
 
+A script that ships with a skill turned on in the chat runs through its own action, not the shell.
+Aman names the skill, the script's path inside the skill's folder and the script's arguments. The
+server checks that the skill is on in this chat and the script is a Python or JavaScript file in
+its folder. In the sandbox it then checks that the script, followed through any links, is still
+inside that folder. It starts `python3` or `node` from that folder with the script and each argument
+passed as they are, with no shell in between. A skill's script runs without asking while the sandbox
+can't reach the internet. It asks when the sandbox can reach the internet, or when Aman edited a file
+in that skill's folder with its file tools earlier in the chat.
+
 A reply can do as much work inside the sandbox workspace as the task needs: writing and editing
 files, running code, builds and tests. Two limits still apply to every reply:
 

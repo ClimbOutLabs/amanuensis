@@ -166,6 +166,7 @@ describe('offersChangeIt', () => {
     bcc: [],
     subject: 'Lunch',
     body: 'Lunch at noon?',
+    check_code: null,
     replaces: null,
     reply_in_thread: null,
     reply_to: null,

@@ -108,8 +108,8 @@ A reminder is for something that should happen at a set time. In any chat, ask w
 - If Aman is still answering in that chat, the line waits until the answer ends.
 - No model is called to deliver a reminder, so it costs nothing.
 - A reminder whose chat was deleted still shows in the bell.
-- Reminders don't show on the Schedules page. To see them all, click Reminders in the left panel. It lists what is coming up and what has already reminded you, with the persona that set each one. Each row shows the day, how far off it is, and whether it repeats or is paused. Click a reminder that says **Open chat** to go to the chat you set it in; a reminder set outside a chat, or whose chat was deleted, says **No chat to open**. To change or cancel one, ask in a chat, such as "What reminders do I have?"
-- Before Aman cancels one, a card shows the reminder and waits for your OK. A canceled reminder is gone for good.
+- Reminders don't show on the Schedules page. To see them all, click Reminders in the left panel. It lists what is coming up and what has already reminded you, with the persona that set each one. Each row shows the day, how far off it is, and whether it repeats or is paused. Click a reminder that says **Open chat** to go to the chat you set it in; a reminder set outside a chat, or whose chat was deleted, says **No chat to open**. To delete one, click the bin on its row and confirm. To change one, or to cancel one by asking, use a chat, such as "What reminders do I have?"
+- Before Aman cancels one, a card shows the reminder and waits for your OK. A canceled or deleted reminder is gone for good.
 
 ## Related
 
