@@ -47,6 +47,7 @@ import {
   SANDBOX_MCP_SERVER_ID,
   SANDBOX_REPLACE_TEXT_TOOL_NAME,
   SANDBOX_RUN_REGISTERED_COMMAND_TOOL_NAME,
+  SANDBOX_RUN_SKILL_SCRIPT_TOOL_NAME,
   SANDBOX_SUBMIT_IMPLEMENTATION_PLAN_TOOL_NAME,
   SANDBOX_WRITE_FILE_TOOL_NAME,
   sandboxCommandApprovalIdentity,
@@ -4334,6 +4335,59 @@ describe('Sandbox skills without a network', () => {
       expect(builder.build()).not.toContain('unavailable');
     } finally {
       await archives.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("runs a skill's own script from its folder with a command the host builds", async () => {
+    const root = mkdtempSync(join(tmpdir(), 'sandbox-skills-'));
+    const archives = await serveArchives(new Map([['/alpha.tar', skillArchive({ root, name: 'alpha' })]]));
+    try {
+      const skillsDir = join(root, 'skills');
+      const execCalls: SandboxExecParams[] = [];
+      const provider = slotLikeProvider({ root, skillsDir, execCalls });
+      const alpha = registrySkill({ name: 'alpha', presignedUrl: archives.urlFor('/alpha.tar') });
+      const sandbox = makeSandbox(provider, { skillMounter: new SkillMounter({ skills: [alpha] }) });
+      expect((await sandbox.listTools()).result.tools.map(tool => tool.name)).toContain(
+        SANDBOX_RUN_SKILL_SCRIPT_TOOL_NAME,
+      );
+
+      await sandbox.callTool(
+        {
+          name: SANDBOX_RUN_SKILL_SCRIPT_TOOL_NAME,
+          arguments: { intent: 'Get news', skill: 'alpha', script: 'scripts/fetch.py', args: ['--q', '$(id)'] },
+        },
+        { status: 'allow', scope: 'once' },
+      );
+
+      const scriptRun = execCalls.find(call => call.command.includes('scripts/fetch.py'));
+      expect(scriptRun?.command).toBe("python3 'scripts/fetch.py' '--q' '$(id)'");
+      expect(scriptRun?.cwd).toBe(join(skillsDir, 'alpha'));
+
+      const refused = await sandbox.callTool(
+        {
+          name: SANDBOX_RUN_SKILL_SCRIPT_TOOL_NAME,
+          arguments: { intent: 'Escape', skill: 'alpha', script: '../beta/x.py' },
+        },
+        { status: 'allow', scope: 'once' },
+      );
+      expect(isCallToolResponseResult(refused) && refused.result.isError).toBe(true);
+      expect(execCalls.some(call => call.command.includes('beta'))).toBe(false);
+    } finally {
+      await archives.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('offers no skill script action when no skill is turned on', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'sandbox-skills-'));
+    try {
+      const provider = slotLikeProvider({ root, skillsDir: join(root, 'skills'), execCalls: [] });
+      const sandbox = makeSandbox(provider);
+      expect((await sandbox.listTools()).result.tools.map(tool => tool.name)).not.toContain(
+        SANDBOX_RUN_SKILL_SCRIPT_TOOL_NAME,
+      );
+    } finally {
       rmSync(root, { recursive: true, force: true });
     }
   });

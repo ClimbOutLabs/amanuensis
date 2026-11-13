@@ -383,6 +383,7 @@ export type {
 export { TFYSandboxProvider } from './sandbox/provider/TFYSandboxProvider';
 export {
   SANDBOX_RUN_REGISTERED_COMMAND_TOOL_NAME,
+  SANDBOX_RUN_SKILL_SCRIPT_TOOL_NAME,
   SANDBOX_WRITE_FILE_TOOL_NAME,
   SKILL_DOWNLOAD_TIMEOUT_SECONDS,
   Sandbox,

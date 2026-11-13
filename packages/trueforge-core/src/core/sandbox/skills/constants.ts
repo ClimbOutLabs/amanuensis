@@ -26,7 +26,7 @@ export const SKILLS_PREAMBLE = [
   '5.a. If the `SKILL.md content` is inlined, the Agent must not read `path/SKILL.md`.',
   '5.b. Otherwise the Agent must read `path/SKILL.md` first.',
   '6. The Agent must avoid listing the `path` unless there are references in `SKILL.md` and there is reason to do so given the current conversation.',
-  "7. To run a script that ships with a skill, use exec with python3 or node and the script's path under `path`, for example `python3 <path>/scripts/<script>.py`. Never copy it into run_code: run_code cannot see the skill's other files. `uv` is not installed: where a skill says `uv run`, use python3.",
+  "7. To run a script that ships with a skill, use run_skill_script with the skill's name, the script's path inside `path` (for example `scripts/<script>.py`) and its arguments. Not exec or run_code. Where a skill says `uv run` or `python3 <script>`, use run_skill_script.",
   '8. If a skill script fails because a package or a website it needs is missing, tell the user that in plain words and stop. Do not rewrite the script or try another tool for the same job.',
 ].join('\n');
 

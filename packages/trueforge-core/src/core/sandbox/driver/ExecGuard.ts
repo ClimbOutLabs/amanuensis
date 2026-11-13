@@ -1,5 +1,3 @@
-import { posix } from 'node:path';
-
 /**
  * Harness-level guard for the exec tool path (§2.10, D5/B1).
  *
@@ -28,16 +26,6 @@ export interface ExecGuardHost {
 }
 
 export type ExecGuardVerdict = { verdict: 'allow' } | { verdict: 'reject'; reason: string };
-
-/**
- * Where this chat's skills are copied, and the directory the command starts in. A skill ships its own
- * scripts, which the person added on purpose; run_code cannot see the skill's folder, so exec is where
- * those scripts run. Paths are judged by name, the way the sandbox's own containment judges them.
- */
-export interface ExecGuardSkills {
-  skills_dir: string;
-  cwd: string;
-}
 
 const DATA_INTERPRETERS = new Set(['python', 'python3', 'node', 'nodejs', 'ruby', 'perl']);
 
@@ -118,8 +106,6 @@ function basenameOf(path: string): string {
 
 interface Token {
   text: string;
-  /** For a boundary: the operator that made it (`&&`, `;`, `|`, `&`, `||`, a newline or a parenthesis). */
-  separator?: string;
 }
 
 interface TokenizeResult {
@@ -150,9 +136,9 @@ function tokenize(command: string): TokenizeResult {
       hasToken = false;
     }
   };
-  const pushBoundary = (separator: string): void => {
+  const pushBoundary = (): void => {
     pushToken();
-    tokens.push({ text: SEGMENT_BOUNDARY, separator });
+    tokens.push({ text: SEGMENT_BOUNDARY });
   };
 
   while (i < n) {
@@ -184,20 +170,19 @@ function tokenize(command: string): TokenizeResult {
       i += 2;
     } else if (ch === ' ' || ch === '\t' || ch === '\r' || ch === '\n') {
       if (ch === '\n') {
-        pushBoundary('\n');
+        pushBoundary();
       } else {
         pushToken();
       }
       i += 1;
     } else if (ch === ';' || ch === '&' || ch === '|') {
       // &&, ||, ;; collapse to one boundary; a lone & or | is a boundary too.
-      const start = i;
       while (i < n && (command[i] === ';' || command[i] === '&' || command[i] === '|')) {
         i += 1;
       }
-      pushBoundary(command.slice(start, i));
+      pushBoundary();
     } else if (ch === '(' || ch === ')') {
-      pushBoundary(ch);
+      pushBoundary();
       i += 1;
     } else if (ch === '<' && command[i + 1] === '<') {
       hasHeredoc = true;
@@ -229,40 +214,25 @@ function tokenize(command: string): TokenizeResult {
   return { tokens, hasHeredoc };
 }
 
-interface Segment {
-  argv: string[];
-  /** The operators just before and just after the segment; undefined at the start or the end of the command. */
-  before: string | undefined;
-  after: string | undefined;
-}
-
-/** Split tokens into pipeline segments at boundary markers, keeping the operators around each one. */
-function splitSegments(tokens: Token[]): Segment[] {
-  const segments: Segment[] = [];
+/** Split tokens into pipeline segments at boundary markers. */
+function splitSegments(tokens: Token[]): string[][] {
+  const segments: string[][] = [];
   let current: string[] = [];
-  let before: string | undefined;
   for (const token of tokens) {
     if (token.text === SEGMENT_BOUNDARY) {
       if (current.length > 0) {
-        segments.push({ argv: current, before, after: token.separator });
+        segments.push(current);
         current = [];
       }
-      before = token.separator;
     } else {
       current.push(token.text);
     }
   }
   if (current.length > 0) {
-    segments.push({ argv: current, before, after: undefined });
+    segments.push(current);
   }
   return segments;
 }
-
-/** Operators after which the next command runs in the directory a `cd` left, whether or not that `cd` succeeded. */
-const SEQUENCING = new Set(['&&', ';', '\n']);
-
-/** A `cd` operand the guard can follow: a plain literal path, with nothing the shell would expand. */
-const LITERAL_DIR = /^[A-Za-z0-9._/@+=,:][A-Za-z0-9._/@+=,:-]*$/;
 
 /**
  * If the segment is a `sh -c '…'` / `bash -lc '…'` / `env …` wrapper, return
@@ -338,28 +308,7 @@ function shebangInterpreter(shebang: string): string | undefined {
   return first;
 }
 
-/** Whether `p`, read from `cwd`, names a file inside the skills directory. */
-function isSkillFile(input: { p: string; cwd: string; skills: ExecGuardSkills | undefined }): boolean {
-  // A relative path needs a known directory; an unknown one never counts as the skills folder.
-  if (
-    input.skills === undefined ||
-    input.p.includes('\0') ||
-    (!input.p.startsWith('/') && !input.cwd.startsWith('/'))
-  ) {
-    return false;
-  }
-  const root = posix.resolve(input.skills.skills_dir);
-  const target = posix.resolve(input.cwd, input.p);
-  return target.startsWith(`${root}/`);
-}
-
-function classifySegment(input: {
-  argv: string[];
-  hasHeredoc: boolean;
-  host: ExecGuardHost;
-  skills: ExecGuardSkills | undefined;
-  cwd: string;
-}): ExecGuardVerdict {
+function classifySegment(input: { argv: string[]; hasHeredoc: boolean; host: ExecGuardHost }): ExecGuardVerdict {
   // Leading `VAR=value` assignments (`FOO=1 python3 -c …`) are shell env
   // prefixes, not the command — strip them before classification.
   let argv = input.argv;
@@ -388,11 +337,7 @@ function classifySegment(input: {
   // multi-segment payloads (sh -c 'git status; python3 -c "…"') are caught.
   const inner = unwrapSegmentCommand(argv);
   if (inner !== undefined) {
-    return classifyExecCommand({
-      command: inner,
-      host: input.host,
-      skills: input.skills === undefined ? undefined : { ...input.skills, cwd: input.cwd },
-    });
+    return classifyExecCommand({ command: inner, host: input.host });
   }
   if (argv.length === 0) {
     return { verdict: 'allow' };
@@ -452,11 +397,7 @@ function classifySegment(input: {
         reason: `exec must not pipe code into ${base} via stdin: use the run_code tool instead`,
       };
     }
-    const script = operands.find(op => !op.startsWith('-'));
-    if (script !== undefined) {
-      if (isSkillFile({ p: script, cwd: input.cwd, skills: input.skills })) {
-        return { verdict: 'allow' };
-      }
+    if (operands.some(op => !op.startsWith('-'))) {
       return {
         verdict: 'reject',
         reason: `exec must not run ${base} on a script file: use the run_code tool instead`,
@@ -467,7 +408,7 @@ function classifySegment(input: {
   }
 
   // Not a data interpreter by name: check the shebang of directly-executed scripts.
-  if (invoked.includes('/') && !isSkillFile({ p: invoked, cwd: input.cwd, skills: input.skills })) {
+  if (invoked.includes('/')) {
     const shebang = input.host.readShebang(invoked);
     if (shebang !== undefined) {
       const interpreter = shebangInterpreter(shebang);
@@ -486,32 +427,11 @@ function classifySegment(input: {
  * Classify a full exec command. Rejects when ANY pipeline segment is an
  * interpreter invocation. Resolution results should be cached by the host.
  */
-export function classifyExecCommand(input: {
-  command: string;
-  host: ExecGuardHost;
-  skills?: ExecGuardSkills | undefined;
-}): ExecGuardVerdict {
+export function classifyExecCommand(input: { command: string; host: ExecGuardHost }): ExecGuardVerdict {
   const { tokens, hasHeredoc } = tokenize(input.command);
   const segments = splitSegments(tokens);
-  // A plain `cd <dir>`, run in sequence, moves where later segments read relative paths from, as it does in the
-  // shell. Any other directory change (`cd -`, `cd ~`, an expanded operand, pushd or popd, or a cd that runs in the
-  // background, in a pipe, in a subshell or only when something else fails) leaves the directory unknown, and an
-  // unknown directory never counts as the skills folder.
-  let cwd = input.skills?.cwd ?? '';
-  for (const { argv, before, after } of segments) {
-    const [head, dir, ...extra] = argv;
-    if (head === 'cd' || head === 'pushd' || head === 'popd') {
-      const followable =
-        head === 'cd' &&
-        dir !== undefined &&
-        extra.length === 0 &&
-        LITERAL_DIR.test(dir) &&
-        (before === undefined || SEQUENCING.has(before)) &&
-        (after === undefined || SEQUENCING.has(after));
-      cwd = followable && cwd.startsWith('/') ? posix.resolve(cwd, dir) : '';
-      continue;
-    }
-    const verdict = classifySegment({ argv, hasHeredoc, host: input.host, skills: input.skills, cwd });
+  for (const argv of segments) {
+    const verdict = classifySegment({ argv, hasHeredoc, host: input.host });
     if (verdict.verdict === 'reject') {
       return verdict;
     }
@@ -528,7 +448,7 @@ export function interpreterInvocationRefusal(reason: string): string {
     `Invalid exec input: ${reason}. ` +
     `exec is for repository and workspace commands (git, build, test, file inspection) — ` +
     `it must not run python/node code. Use the run_code tool instead. ` +
-    `python3 -m pytest, -m pip, -m venv and -m unittest are allowed, and so is running a script that ships with a skill in this chat, by its path in the skill's folder. ` +
+    `python3 -m pytest, -m pip, -m venv and -m unittest are allowed. ` +
     `Do not work around this by renaming the interpreter or wrapping the invocation.`
   );
 }

@@ -21,6 +21,7 @@ import {
   SANDBOX_EXEC_TOOL_NAME,
   SANDBOX_REPLACE_TEXT_TOOL_NAME,
   SANDBOX_RUN_REGISTERED_COMMAND_TOOL_NAME,
+  SANDBOX_RUN_SKILL_SCRIPT_TOOL_NAME,
   SANDBOX_SUBMIT_IMPLEMENTATION_PLAN_TOOL_NAME,
   SANDBOX_WRITE_FILE_TOOL_NAME,
   type BoundRepository,
@@ -204,12 +205,13 @@ const SANDBOX_TOOL_NAMES: ReadonlySet<string> = new Set([
   SANDBOX_REPLACE_TEXT_TOOL_NAME,
   SANDBOX_WRITE_FILE_TOOL_NAME,
   SANDBOX_RUN_REGISTERED_COMMAND_TOOL_NAME,
+  SANDBOX_RUN_SKILL_SCRIPT_TOOL_NAME,
   SANDBOX_SUBMIT_IMPLEMENTATION_PLAN_TOOL_NAME,
 ]);
 
 /**
  * True when `context` contains at least one assistant tool call naming a sandbox tool
- * (exec, apply_patch, replace_text, write_file, run_registered_command, or
+ * (exec, apply_patch, replace_text, write_file, run_registered_command, run_skill_script, or
  * submit_implementation_plan). A sandbox being attached to the thread is not by itself evidence
  * of engineering work: Amanuensis attaches a sandbox to ordinary assistant chats too, so mode
  * selection looks for actual use, not attachment. See CompactionSessionMode.
