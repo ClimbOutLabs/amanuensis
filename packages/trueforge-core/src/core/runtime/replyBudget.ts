@@ -95,8 +95,8 @@ export function replyStepBudgetFor({
  * Steps to hand back after one tool batch: one when a space write or a sandbox file edit in it landed
  * cleanly, or a sandbox shell command in it ran to its end. A build done in parts (a space, or a project
  * written file by file and then built and tested in the sandbox) is then not cut off by its own progress.
- * A failing test run counts, since reading the failure is how the next fix is found; a command that was
- * refused or never started does not. Refused or failed writes, and writes that saved nothing new, earn
+ * A failing test run counts, since reading the failure is how the next fix is found; it comes back as a
+ * finished command with its exit code. A command the host refused or could not run does not count. Refused or failed writes, and writes that saved nothing new, earn
  * nothing, and the total per thread never passes MAX_PROGRESS_STEP_REFUNDS.
  */
 export function progressRefundFor({
@@ -122,10 +122,7 @@ export function progressRefundFor({
       !result.failure &&
       !result.savedNothing,
   );
-  const commandRan = results.some(
-    result =>
-      result.sandboxCommand && (result.disposition === 'executed_ok' || result.disposition === 'executed_nonzero'),
-  );
+  const commandRan = results.some(result => result.sandboxCommand && result.disposition === 'executed_ok');
   return (landedWrite || commandRan) && refundsSoFar < MAX_PROGRESS_STEP_REFUNDS ? 1 : 0;
 }
 

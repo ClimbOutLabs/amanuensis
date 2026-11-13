@@ -241,12 +241,22 @@ describe('progressRefundFor', () => {
     expect(progressRefundFor({ results: [{ ...landed, toolName: 'write_file' }], refundsSoFar: 0 })).toBe(0);
   });
 
-  it('refunds one step when a sandbox command ran to its end, whatever it answered', () => {
+  it('refunds one step when a sandbox command ran to its end', () => {
+    // A failing test run also arrives like this, with its exit code in the result.
     const command = { ...landed, toolName: 'exec', sandboxCommand: true };
     expect(progressRefundFor({ results: [command], refundsSoFar: 0 })).toBe(1);
-    // A failing test run is how the next fix is found.
-    const failedTests = { ...command, disposition: 'executed_nonzero', failure: true } as const;
-    expect(progressRefundFor({ results: [failedTests], refundsSoFar: 0 })).toBe(1);
+  });
+
+  it('refunds nothing for a sandbox command the host refused or could not run', () => {
+    // The interpreter guard and the other refusals answer as an error result.
+    const refused = {
+      ...landed,
+      toolName: 'exec',
+      sandboxCommand: true,
+      disposition: 'executed_nonzero',
+      failure: true,
+    } as const;
+    expect(progressRefundFor({ results: [refused], refundsSoFar: 0 })).toBe(0);
   });
 
   it('refunds nothing for a sandbox command that was refused, blocked or never started', () => {
