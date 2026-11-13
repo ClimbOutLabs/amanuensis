@@ -272,7 +272,6 @@ describe('memory vault', () => {
         const recall = await client.recall({
           query: 'meetings',
           maxTokens: 1000,
-          queryTimestamp: new Date().toISOString(),
           timeoutMs: TIMEOUT_MS,
         });
         expect(recall.ok).toBe(true);

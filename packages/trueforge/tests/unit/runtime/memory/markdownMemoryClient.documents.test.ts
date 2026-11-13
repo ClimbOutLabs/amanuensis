@@ -28,7 +28,6 @@ async function recalledTexts(client: MarkdownMemoryClient): Promise<string[]> {
   const outcome = await client.recall({
     query: 'profile tea coffee',
     maxTokens: 4000,
-    queryTimestamp: '2026-10-28T13:00:00.000Z',
     timeoutMs: 1000,
   });
   if (!outcome.ok) {

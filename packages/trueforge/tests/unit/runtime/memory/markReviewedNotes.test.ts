@@ -72,7 +72,6 @@ describe('marking reviewed notes as from the person', () => {
     const outcome = await client.recall({
       query: 'tea send Friday Lisbon page',
       maxTokens: 5_000,
-      queryTimestamp: '2026-10-03T10:00:00.000Z',
       timeoutMs: 5_000,
     });
     if (!outcome.ok) throw new Error('recall failed');
@@ -290,7 +289,6 @@ describe('a reviewed note after the Memories page edits or deletes it', () => {
     const outcome = await client.recall({
       query,
       maxTokens: 5_000,
-      queryTimestamp: '2026-10-03T10:00:00.000Z',
       timeoutMs: 5_000,
     });
     if (!outcome.ok) throw new Error('recall failed');
@@ -382,7 +380,6 @@ describe('an erased note', () => {
     const recall = await client.recall({
       query: 'erased tea Friday',
       maxTokens: 5_000,
-      queryTimestamp: '2026-10-03T10:00:00.000Z',
       timeoutMs: 5_000,
     });
     expect(recall.ok && recall.results.map(item => item.id).sort()).toEqual([id(0), id(2)]);

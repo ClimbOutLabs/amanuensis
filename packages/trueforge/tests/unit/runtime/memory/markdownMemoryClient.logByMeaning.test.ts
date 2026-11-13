@@ -45,7 +45,6 @@ async function recallTexts({ client, query }: { client: MarkdownMemoryClient; qu
   const outcome = await client.recall({
     query,
     maxTokens: 4000,
-    queryTimestamp: new Date().toISOString(),
     timeoutMs: TIMEOUT_MS,
   });
   if (!outcome.ok) {

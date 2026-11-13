@@ -22,7 +22,6 @@ async function recallItems({
   const outcome = await client.recall({
     query,
     maxTokens: 4000,
-    queryTimestamp: '2026-10-26T10:00:00.000Z',
     timeoutMs: 5000,
     currentSessionId,
   });
@@ -99,7 +98,6 @@ describe('MarkdownMemoryClient recall scope', () => {
       const outcome = await client.recall({
         query: 'follow-up reminder',
         maxTokens: 120,
-        queryTimestamp: '2026-10-26T10:00:00.000Z',
         timeoutMs: 5000,
         currentSessionId: 'chat-now',
       });

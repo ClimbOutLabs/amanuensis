@@ -76,7 +76,6 @@ describe('MarkdownMemoryClient', () => {
         const outcome = await other.recall({
           query: 'tenant a secret',
           maxTokens: 2048,
-          queryTimestamp: '2026-09-19T13:00:00.000Z',
           timeoutMs: 5000,
         });
         expect(outcome.ok).toBe(true);
@@ -153,7 +152,6 @@ describe('MarkdownMemoryClient', () => {
         const outcome = await client.recall({
           query: 'tea',
           maxTokens: 2048,
-          queryTimestamp: '2026-09-19T13:00:00.000Z',
           timeoutMs: 5000,
         });
         expect(outcome.ok).toBe(true);
@@ -191,7 +189,6 @@ describe('MarkdownMemoryClient', () => {
         const outcome = await client.recall({
           query: 'PIN dentist Rivera',
           maxTokens: 2048,
-          queryTimestamp: '2026-09-19T13:00:00.000Z',
           timeoutMs: 5000,
         });
         expect(outcome.ok).toBe(true);
@@ -224,7 +221,6 @@ describe('MarkdownMemoryClient', () => {
         const outcome = await client.recall({
           query: 'dog Rex',
           maxTokens: 2048,
-          queryTimestamp: '2026-09-20T13:00:00.000Z',
           timeoutMs: 5000,
         });
         expect(outcome.ok).toBe(true);
@@ -293,7 +289,6 @@ describe('MarkdownMemoryClient', () => {
         const outcome = await client.recall({
           query: 'wire landlord account',
           maxTokens: 2048,
-          queryTimestamp: '2026-09-19T13:00:00.000Z',
           timeoutMs: 5000,
         });
         expect(outcome.ok).toBe(true);
@@ -328,7 +323,6 @@ describe('MarkdownMemoryClient', () => {
         const outcome = await client.recall({
           query: 'dentist Friday',
           maxTokens: 2048,
-          queryTimestamp: '2026-09-19T13:00:00.000Z',
           timeoutMs: 5000,
         });
         expect(outcome.ok).toBe(true);
@@ -365,7 +359,6 @@ describe('MarkdownMemoryClient', () => {
         const outcome = await client.recall({
           query: 'Madrid hotel September',
           maxTokens: 2048,
-          queryTimestamp: '2026-09-19T13:00:00.000Z',
           timeoutMs: 5000,
         });
         expect(outcome.ok).toBe(true);
@@ -384,7 +377,6 @@ describe('MarkdownMemoryClient', () => {
         const outcome = await client.recall({
           query: 'anything',
           maxTokens: 2048,
-          queryTimestamp: '2026-09-19T13:00:00.000Z',
           timeoutMs: 5000,
         });
         expect(outcome).toEqual({ ok: true, results: [] });

@@ -2550,16 +2550,20 @@ describe('recall of saved findings and assistant reply notes', () => {
       '[2026-10-28, found earlier by the assistant] From the web, found Oct 28: The lease signing',
     );
     expect(block).not.toContain('<!-- note');
-    expect(block).not.toContain('Old news');
+    expect(block).toContain('[2026-10-01, found earlier by the assistant] From the web, found Oct 1: Old news');
   });
 
-  it('skips notes older than 14 days and keeps notes at the limit and things the person said', async () => {
+  it('recalls a note of something read however old it is, with the day it was found', async () => {
     const block = await recalledBlock([
-      emailNote({ id: '1', date: '2026-10-14', text: 'From an email, found Oct 14: Old news about the lease.' }),
+      emailNote({
+        id: '1',
+        date: '2025-10-14',
+        text: 'From an email, found Oct 14: The accountant said to file form 8829.',
+      }),
       emailNote({ id: '2', date: '2026-10-15', text: 'From an email, found Oct 15: Lease signing is on 2026-11-01.' }),
       { id: '3', occurred_start: '2026-08-01', text: 'The dentist is Dr Rivera.', metadata: { origin: 'user_stated' } },
     ]);
-    expect(block).not.toContain('Old news about the lease');
+    expect(block).toContain('[2025-10-14, found earlier by the assistant] From an email, found Oct 14: The accountant');
     expect(block).toContain('Lease signing is on 2026-11-01');
     expect(block).toContain('[2026-08-01] The dentist is Dr Rivera.');
   });

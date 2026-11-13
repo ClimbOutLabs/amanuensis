@@ -78,7 +78,6 @@ async function recall(
   const outcome = await client.recall({
     query,
     maxTokens,
-    queryTimestamp: '2026-09-27T10:00:00.000Z',
     timeoutMs: TIMEOUT_MS,
     currentSessionId,
   });

@@ -60,7 +60,6 @@ import type {
 } from './memoryEvents';
 import {
   ASSISTANT_RESPONSE_SOURCE,
-  isNoteTooOld,
   isReplyThatReadNothing,
   noteProvenance,
   SENT_MAIL_SOURCE,
@@ -1353,14 +1352,11 @@ export class MemoryProcessor implements PreLLMProcessor, PreLLMEphemeralAgentCon
       // it, instead of injecting the full recalled set unconditionally: scored items below
       // recallMinScore are dropped outright, and unscored items are capped by rank.
       const gated = applyRelevanceGate({
-        // Read content older than the freshness limit stays stored but is not recalled; the
-        // assistant's own replies are always recalled.
         items: recall.outcome.results.filter(
           item =>
             !item.text.trim().startsWith(LEARNED_PROFILE_CLEARED_CONTENT) &&
             // The profile is in the prompt already; this covers copies saved before memory stopped keeping one.
-            !isLearnedProfileCopy(item.metadata) &&
-            !isNoteTooOld({ metadata: item.metadata, text: item.text, now: new Date() }),
+            !isLearnedProfileCopy(item.metadata),
         ),
         minScore: this.config.recallMinScore,
         maxItems: this.config.recallMaxItems,
@@ -1511,7 +1507,6 @@ export class MemoryProcessor implements PreLLMProcessor, PreLLMEphemeralAgentCon
       this.client.recall({
         query,
         maxTokens,
-        queryTimestamp: new Date().toISOString(),
         timeoutMs: this.config.recallTimeoutMs,
         currentSessionId: this.sessionId,
         gate: await gate,

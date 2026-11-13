@@ -1,10 +1,8 @@
 import {
-  isNoteTooOld,
   noteLabel,
   noteProvenance,
   noteRetainContent,
   parseMarker,
-  READ_CONTENT_NOTE_MAX_AGE_DAYS,
   withoutNoteTrailer,
 } from '../../../../src/runtime/memory/memoryNotes';
 
@@ -69,58 +67,5 @@ describe('note markers in the stored text', () => {
     });
     expect(noteProvenance({ metadata: { note_source: 'made_up' }, text: 'Plain' })).toBeUndefined();
     expect(noteProvenance({ metadata: undefined, text: 'The dentist is Dr Rivera.' })).toBeUndefined();
-  });
-});
-
-describe('isNoteTooOld', () => {
-  const now = new Date('2026-10-29T12:00:00.000Z');
-  const note = (date: string) => ({ note_source: 'email', note_date: date });
-
-  it('keeps the read-content limit in one named constant of 14 days', () => {
-    expect(READ_CONTENT_NOTE_MAX_AGE_DAYS).toBe(14);
-  });
-
-  it("ages read content out after 14 days but keeps the assistant's own replies at any age", () => {
-    expect(isNoteTooOld({ metadata: note('2026-10-15'), text: '', now })).toBe(false);
-    expect(isNoteTooOld({ metadata: note('2026-10-14'), text: '', now })).toBe(true);
-    expect(
-      isNoteTooOld({ metadata: { note_source: 'assistant_response', note_date: '2026-09-29' }, text: '', now }),
-    ).toBe(false);
-    const oldReply = noteRetainContent({
-      text: 'Take the earlier train.',
-      source: 'assistant_response',
-      date: '2026-09-29',
-    });
-    expect(isNoteTooOld({ metadata: undefined, text: oldReply, now })).toBe(false);
-  });
-
-  it('is false for a recent note, a note at the limit, and an item that is not a note', () => {
-    expect(isNoteTooOld({ metadata: note('2026-10-29'), text: '', now })).toBe(false);
-    expect(isNoteTooOld({ metadata: note('2026-10-15'), text: '', now })).toBe(false);
-    expect(isNoteTooOld({ metadata: { origin: 'user_stated' }, text: '', now })).toBe(false);
-    expect(isNoteTooOld({ metadata: undefined, text: 'Plain', now })).toBe(false);
-  });
-
-  it('is true past the limit, and when the date cannot be read', () => {
-    expect(isNoteTooOld({ metadata: note('2026-10-14'), text: '', now })).toBe(true);
-    expect(isNoteTooOld({ metadata: note('not a date'), text: '', now })).toBe(true);
-    expect(isNoteTooOld({ metadata: { note_source: 'email' }, text: '', now })).toBe(true);
-  });
-
-  it('reads the day from the text marker when no metadata came back', () => {
-    const old = noteRetainContent({ text: 'Old', source: 'web', date: '2026-10-01' });
-    const fresh = noteRetainContent({ text: 'Fresh', source: 'web', date: '2026-10-28' });
-    expect(isNoteTooOld({ metadata: undefined, text: old, now })).toBe(true);
-    expect(isNoteTooOld({ metadata: undefined, text: fresh, now })).toBe(false);
-  });
-
-  it('treats a day in the future as today, so it expires like any other', () => {
-    expect(isNoteTooOld({ metadata: note('2027-06-01'), text: '', now })).toBe(false);
-    expect(isNoteTooOld({ metadata: note('2027-06-01'), text: '', now: new Date('2026-11-13T00:00:00.000Z') })).toBe(
-      false,
-    );
-    expect(isNoteTooOld({ metadata: note('2026-10-29'), text: '', now: new Date('2026-11-13T00:00:00.000Z') })).toBe(
-      true,
-    );
   });
 });

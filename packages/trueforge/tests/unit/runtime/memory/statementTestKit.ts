@@ -263,7 +263,6 @@ export async function gateFor({
       },
     ],
     currentSessionId,
-    now: new Date(),
   });
 }
 

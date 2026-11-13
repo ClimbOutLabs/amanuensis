@@ -59,7 +59,6 @@ describe('MarkdownMemoryClient recall reach', () => {
     const outcome = await client.recall({
       query,
       maxTokens,
-      queryTimestamp: new Date(NOW).toISOString(),
       timeoutMs: 5000,
     });
     if (!outcome.ok) {
@@ -112,7 +111,6 @@ describe('MarkdownMemoryClient recall reach', () => {
     const outcome = await client.recall({
       query: 'what is Wendy allergic to?',
       maxTokens: 600,
-      queryTimestamp: new Date(NOW).toISOString(),
       timeoutMs: 5000,
     });
 
@@ -126,22 +124,20 @@ describe('MarkdownMemoryClient recall reach', () => {
     }
   });
 
-  it('does not spend the recall budget on read content that is past its freshness limit', async () => {
-    await retain([emailFinding({ text: 'The plumber Rossi quoted 400 for the boiler repair in an email.', age: 40 })]);
-    await retain([personFact({ text: 'The plumber for the boiler is Rossi.', age: 35 })]);
-
-    // Room for one of the two entries only.
-    const texts = await recallTexts({ query: 'plumber Rossi boiler repair email quoted', maxTokens: 12 });
-
-    expect(texts).toEqual(['The plumber for the boiler is Rossi.']);
-  });
-
-  it('still recalls read content inside its freshness limit', async () => {
+  it('recalls read content however old it is, with the day it was found', async () => {
+    await retain([emailFinding({ text: 'The accountant said to file form 8829 for the home office.', age: 400 })]);
     await retain([emailFinding({ text: 'The plumber Rossi quoted 400 for the boiler repair.', age: 3 })]);
 
-    const texts = await recallTexts({ query: 'plumber Rossi boiler quote', maxTokens: 600 });
+    const outcome = await client.recall({ query: 'accountant form home office', maxTokens: 600, timeoutMs: 5000 });
 
-    expect(texts).toEqual([expect.stringContaining('quoted 400')]);
+    expect(outcome.ok).toBe(true);
+    if (outcome.ok) {
+      const found = outcome.results.find(item => item.text.includes('form 8829'));
+      expect(found?.occurred_start).toBe(daysAgo(400));
+    }
+    expect(await recallTexts({ query: 'plumber Rossi boiler quote', maxTokens: 600 })).toEqual([
+      expect.stringContaining('quoted 400'),
+    ]);
   });
 
   it('sees a hand edit to an old day file on the next recall', async () => {

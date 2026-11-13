@@ -230,7 +230,6 @@ export class MarkdownMemoryClient implements MemoryClient {
   async recall(params: {
     query: string;
     maxTokens: number;
-    queryTimestamp: string;
     timeoutMs: number;
     currentSessionId?: string | undefined;
     gate?: MeaningGate | undefined;
@@ -283,15 +282,12 @@ export class MarkdownMemoryClient implements MemoryClient {
       }
 
       // Each vault ranks on its own corpus and index; the lists then interleave.
-      const asked = new Date(params.queryTimestamp);
-      const now = Number.isNaN(asked.getTime()) ? new Date() : asked;
       const gate =
         params.gate ??
         (await computeMeaningGate({
           message: params.query,
           vaults: vaults.map(({ namespace, scan }) => this.gateVault({ namespace, scan })),
           currentSessionId: params.currentSessionId,
-          now,
         }));
       const rankedLists = await Promise.all(
         vaults.map(({ namespace, scan }) =>
@@ -301,7 +297,6 @@ export class MarkdownMemoryClient implements MemoryClient {
             query: params.query,
             timeoutMs: params.timeoutMs,
             currentSessionId: params.currentSessionId,
-            now,
             gate,
           }),
         ),
@@ -337,8 +332,7 @@ export class MarkdownMemoryClient implements MemoryClient {
    * One vault's entries best-first. When the meaning gate judged the message, only the notes it chose are
    * shown, best standing first. Otherwise: keyword overlap, fused with the vault's own meaning index when
    * ready. Either way notes naming a person the query asks about move to the front, and the chat being
-   * answered is left out, as is read content past its freshness limit: left in, it would use up the budget
-   * and then be dropped.
+   * answered is left out.
    */
   private async rankVault(input: {
     namespace: string;
@@ -346,7 +340,6 @@ export class MarkdownMemoryClient implements MemoryClient {
     query: string;
     timeoutMs: number;
     currentSessionId: string | undefined;
-    now: Date;
     gate: MeaningGate;
   }): Promise<RankedMemory[]> {
     const { gate } = input;
@@ -361,7 +354,6 @@ export class MarkdownMemoryClient implements MemoryClient {
     const excludeIds = recallExcludedIds({
       entries: input.scan.entries,
       sessionId: input.currentSessionId,
-      now: input.now,
     });
     const entries = input.scan.entries.filter(entry => !excludeIds.has(entry.id));
     const words = queryWords(input.query);
@@ -629,7 +621,6 @@ export class MarkdownMemoryClient implements MemoryClient {
         message: params.message,
         vaults: vaults.map(vault => this.gateVault(vault)),
         currentSessionId: params.currentSessionId,
-        now: new Date(),
       });
     } catch {
       return { state: 'unavailable' };

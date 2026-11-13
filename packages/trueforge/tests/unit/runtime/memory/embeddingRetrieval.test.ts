@@ -819,7 +819,6 @@ describe('EmbeddingSubsystem', () => {
       const outcome = await client.recall({
         query: 'accommodation in Spain',
         maxTokens: 4000,
-        queryTimestamp: '2026-09-20T10:00:00.000Z',
         timeoutMs: 5000,
         currentSessionId: 'chat-now',
       });
@@ -856,7 +855,6 @@ describe('EmbeddingSubsystem', () => {
       const outcome = await client.recall({
         query: 'accommodation in Spain',
         maxTokens: 4000,
-        queryTimestamp: '2026-09-21T10:00:00.000Z',
         timeoutMs: 5000,
       });
       expect(outcome.ok).toBe(true);
@@ -885,7 +883,6 @@ describe('EmbeddingSubsystem', () => {
       const outcome = await client.recall({
         query: 'accommodation in Spain',
         maxTokens: 4000,
-        queryTimestamp: '2026-09-20T10:00:00.000Z',
         timeoutMs: 5000,
       });
       expect(outcome.ok).toBe(true);

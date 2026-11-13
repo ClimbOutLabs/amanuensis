@@ -212,7 +212,6 @@ describe('turn memory with findings and reply notes', () => {
     const recalled = await client.recall({
       query: 'page ended line',
       maxTokens: 1000,
-      queryTimestamp: '2026-10-30T09:00:00.000Z',
       timeoutMs: 5000,
     });
     if (!recalled.ok) {
@@ -372,7 +371,6 @@ describe('turn memory with findings and reply notes', () => {
     const recalled = await client.recall({
       query: 'signed form Priya',
       maxTokens: 1000,
-      queryTimestamp: '2026-10-30T09:00:00.000Z',
       timeoutMs: 5000,
     });
     if (!recalled.ok) {

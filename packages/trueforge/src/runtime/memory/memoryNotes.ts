@@ -51,14 +51,6 @@ export interface NoteProvenance {
   date: string;
 }
 
-/**
- * Read content (findings from emails, web pages, documents) older than this stays stored but is not recalled,
- * because it goes out of date; the assistant's own replies never age out, so "what did you advise me" stays recallable.
- */
-export const READ_CONTENT_NOTE_MAX_AGE_DAYS = 14;
-
-const MILLISECONDS_PER_DAY = 86_400_000;
-
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const;
 
 const NOTE_DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
@@ -158,33 +150,6 @@ export function noteLabel({
 /** The note's text as saved: its label, then the fact. */
 export function labeledNoteText({ label, text }: { label: string; text: string }): string {
   return `${label}: ${text}`;
-}
-
-/**
- * Whether a recalled item is a note more than the limit's whole days old, counted in UTC days. A day in the
- * future counts as today, so a wrong clock never keeps a note forever. A note whose date cannot be read
- * counts as too old, because its age cannot be checked. Items that are not notes are never too old.
- */
-export function isNoteTooOld({
-  metadata,
-  text,
-  now,
-}: {
-  metadata: Readonly<Record<string, string>> | undefined;
-  text: string;
-  now: Date;
-}): boolean {
-  const provenance = noteProvenance({ metadata, text });
-  if (provenance === undefined || provenance.source === ASSISTANT_RESPONSE_SOURCE) {
-    return false;
-  }
-  const found = NOTE_DATE_PATTERN.test(provenance.date) ? Date.parse(`${provenance.date}T00:00:00Z`) : Number.NaN;
-  if (Number.isNaN(found)) {
-    return true;
-  }
-  const today = Math.floor(now.getTime() / MILLISECONDS_PER_DAY);
-  const foundDay = Math.min(Math.floor(found / MILLISECONDS_PER_DAY), today);
-  return today - foundDay > READ_CONTENT_NOTE_MAX_AGE_DAYS;
 }
 
 /**

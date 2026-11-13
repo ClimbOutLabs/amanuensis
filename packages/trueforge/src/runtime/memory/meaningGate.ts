@@ -83,15 +83,13 @@ async function eligibleNotes({
   vault,
   index,
   currentSessionId,
-  now,
 }: {
   vault: GateVault;
   index: NoteIndex;
   currentSessionId: string | undefined;
-  now: Date;
 }): Promise<string[]> {
   const handled = await readHandledNotes(vault.dir);
-  const excluded = recallExcludedIds({ entries: vault.scan.entries, sessionId: currentSessionId, now });
+  const excluded = recallExcludedIds({ entries: vault.scan.entries, sessionId: currentSessionId });
   const indexed = new Set(index.numbersFor(vault.scan.entries.map(entry => entry.id)).map(({ id }) => id));
   return vault.scan.entries
     .filter(
@@ -107,12 +105,10 @@ async function judge({
   message,
   vaults,
   currentSessionId,
-  now,
 }: {
   message: string;
   vaults: readonly GateVault[];
   currentSessionId?: string | undefined;
-  now: Date;
 }): Promise<MeaningGate> {
   const statementIndexes: StatementIndex[] = [];
   const noteVaults: NoteVault[] = [];
@@ -134,7 +130,7 @@ async function judge({
       noteVaults.push({
         vault,
         index,
-        eligible: await eligibleNotes({ vault, index, currentSessionId, now }),
+        eligible: await eligibleNotes({ vault, index, currentSessionId }),
       });
       model ??= embeddings.embeddingModel;
     }
@@ -194,7 +190,6 @@ export async function computeMeaningGate(input: {
   message: string;
   vaults: readonly GateVault[];
   currentSessionId?: string | undefined;
-  now: Date;
 }): Promise<MeaningGate> {
   try {
     return await withTimeout(judge(input), GATE_TIMEOUT_MS, 'memory meaning search');

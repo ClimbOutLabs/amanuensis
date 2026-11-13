@@ -54,7 +54,6 @@ describe('MarkdownMemoryClient recall ranks notes naming the person asked about 
       const outcome = await client.recall({
         query: MESSAGE,
         maxTokens: 600,
-        queryTimestamp: '2026-10-28T13:00:00.000Z',
         timeoutMs: 5000,
       });
       if (!outcome.ok) {

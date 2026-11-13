@@ -78,7 +78,6 @@ export interface MemoryClient {
   recall(params: {
     query: string;
     maxTokens: number;
-    queryTimestamp: string;
     timeoutMs: number;
     /** The chat being answered: notes retained from it are never returned (its history is already in the conversation). */
     currentSessionId?: string | undefined;

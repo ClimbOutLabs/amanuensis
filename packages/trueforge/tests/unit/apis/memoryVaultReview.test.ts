@@ -121,7 +121,6 @@ describe('the review of older notes', () => {
     const recalled = await client.recall({
       query: 'tea',
       maxTokens: 2_000,
-      queryTimestamp: '2026-10-03T10:00:00.000Z',
       timeoutMs: 5_000,
     });
     expect(recalled.ok && recalled.results.map(item => item.metadata?.['origin'])).toEqual(['user_stated']);

@@ -48,7 +48,7 @@ Recall is limited in size, so a large memory can't crowd out the conversation. E
 
 Aman looks through every saved note, from the whole log and not only the last two weeks, and compares what each note means with what you wrote. It shows a note only when your message is clearly about it. A message that only shares a word with a note, such as "remember", shows nothing. Aman shows at most four notes for one message, or six when no page holds any fact yet. A note that Aman has already sorted onto a page is left out of this search, because the page already holds it and keeps track of what has changed. Your own words that Aman found no page for stay in the search. When very little is saved, fewer than five notes and facts together, Aman cannot tell what is clearly about something, so it finds notes by shared words as well. It does the same while the memory model is not ready.
 
-Aman looks through everything it has saved, however long ago. One kind of note is different. Notes that Aman took from something it read for you, such as an email or a web page, are brought up for 14 days. After that they stay in your files, but Aman no longer brings them up on its own.
+Aman looks through everything it has saved, however long ago. That includes notes it took from something it read for you, such as an email or a web page, so advice in a mail from a year ago can still be found. Aman sees the day each note was found. It is told that such a note may be out of date and that it must check the source before it acts on one.
 
 ## Pages about people and matters
 

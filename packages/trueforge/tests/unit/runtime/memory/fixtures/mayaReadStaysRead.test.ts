@@ -66,7 +66,7 @@ describe("what Aman read stays read when Maya's memory recalls it", () => {
         assistant: 'Aman',
         destinations: steered.map(({ value, kind, origin }) => ({ who: value, kind, source: origin.source })),
       }),
-    ).toBe(`This goes to ${MAIL_ADDRESS}, whose address Aman read earlier and saved to memory.`);
+    ).toBe(`This goes to ${MAIL_ADDRESS}, whose address was in an email Aman read.`);
   }, 60_000);
 
   it('leaves a link Maya typed herself hers to use after recall', async () => {
@@ -88,11 +88,14 @@ describe("what Aman read stays read when Maya's memory recalls it", () => {
     expect(watch.reason).toBe('memory_holds_outside_text');
   }, 60_000);
 
-  it('does not show the mail from day 10 out of the daily log on day 40: read notes are recalled only while fresh', async () => {
-    const { block } = await recall({
+  it('shows the mail from day 10 out of the daily log on day 40, dated and as something found, never as hers', async () => {
+    const { block, provenance } = await recall({
       message: "Dr Okafor's practice asked to confirm the booking. Which link do I use?",
       sorted: false,
     });
-    expect(block).not.toContain(MAIL_LINK);
+    const line = block.split('\n').find(candidate => candidate.includes(MAIL_LINK));
+    expect(line).toMatch(/^\[\d{4}-\d{2}-\d{2}, found earlier by the assistant\] From an email/);
+    expect(isPersonVouchedUrl({ provenance, url: MAIL_LINK })).toBe(false);
+    expect(steeredLinks({ provenance, values: [`${MAIL_LINK}?email=${MAYA_ADDRESS}`] })).toHaveLength(1);
   }, 60_000);
 });

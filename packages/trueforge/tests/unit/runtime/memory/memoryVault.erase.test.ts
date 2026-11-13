@@ -81,7 +81,6 @@ async function recallIds(client: MarkdownMemoryClient, query: string): Promise<s
   const recall = await client.recall({
     query,
     maxTokens: 2000,
-    queryTimestamp: new Date().toISOString(),
     timeoutMs: TIMEOUT_MS,
   });
   if (!recall.ok) {

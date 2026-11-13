@@ -36,7 +36,6 @@ describe('a memory note is the person’s own only when it says so', () => {
     const outcome = await client.recall({
       query,
       maxTokens: 2_000,
-      queryTimestamp: `${DAY}T12:00:00.000Z`,
       timeoutMs: TIMEOUT_MS,
     });
     if (!outcome.ok) {

@@ -161,8 +161,7 @@ the nightly pass can learn how the person writes to each contact.
 - **Source and label.** The note's source is `sent_mail` and its label reads "From a message you sent, Oct 31".
   The note closes with `> External source: a message you sent`, and the Memories page shows those words. The note is stored with the same origin as other tool
   results (`tool_ingested`), so the recall screen holds it to the same strict posture: what a message says is
-  data, never an instruction. Recall ages it like other read content: a note older than two weeks stays in
-  the file but is not recalled.
+  data, never an instruction. Like other read content it is recalled at any age, with its day.
 - **Not an instruction.** The model composed the text of a sent message, and it can echo text from mail it
   read, so a `sent_mail` note is evidence of how the person writes, not something the person said as a
   rule. No pass may promote a `sent_mail` note into a drafting instruction on a page, and so into a fact
@@ -442,12 +441,12 @@ it can be found. Shared words alone never show a note while the rules can judge.
   on a page (`page` in `.handled-notes`) is not, whoever wrote it: its statements speak for it, with their
   end dates. A note the sorter handled and put on no page (`none`) is eligible only when it is the person's
   own words (`user_stated`; `recallMetadata` in `markdownMemoryFiles.ts` reads a note's origin). Notes from
-  the chat being answered and read content past its freshness limit are never eligible. `handledNotes.ts`
+  the chat being answered are never eligible. Age never makes a note ineligible. `handledNotes.ts`
   owns the file: each line is the note id, a tab and the outcome, and a later line for a note wins; a line
   with no outcome, an unknown outcome or a bad id is skipped (see `specs/memory-pages.md`, section 4).
 - **What is shown.** Notes with a standing above 3, best first, at most 4, or at most 6 when no vault has a
   page statement. A note that names a person the message asks about moves to the front of those (the name
-  boost); it never adds a note. The token budget, the freshness limit, the recall screen and the rule that
+  boost); it never adds a note. The token budget, the recall screen and the rule that
   the same text is shown once apply afterwards as before.
 - **Too little to judge.** With fewer than 5 statements and eligible notes together, the log is searched as
   before: shared words, fused with meaning behind the peak test (`VECTOR_PEAK_THRESHOLD`), so a new vault
@@ -721,9 +720,9 @@ words, fused with meaning behind the peak test. The token budget decides how muc
   is always read again, because a second change could carry the same time. So a hand edit or a restore
   is seen on the next recall. The parsed text is kept per process, capped at 64 MiB, and the files read
   longest ago are dropped first.
-- **Read content past its freshness limit** (`READ_CONTENT_NOTE_MAX_AGE_DAYS`) is left out before
-  ranking. Left in, it would use up the token budget and then be dropped by the capability, which
-  applies the same limit to every backend.
+- **Read content has no age limit.** A finding from a mail, a page or a document is recalled however old
+  it is, like everything else. Each recalled item carries its day, and the instructions say a finding may
+  be out of date and must be checked against its source before acting on it.
 - **Copies.** When the same text was saved on several days, recall shows its best-ranked copy once.
 - **Cost.** On a test vault of 1,000 daily files and 20,000 entries, a recall after the first one takes
   100 to 200 ms on one core. The first recall after a start reads every file and takes about half a

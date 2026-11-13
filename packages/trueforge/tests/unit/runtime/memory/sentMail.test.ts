@@ -308,7 +308,6 @@ describe('a sent message in memory', () => {
     const recalled = await client.recall({
       query: 'Wendy Saturday',
       maxTokens: 2_000,
-      queryTimestamp: '2026-10-31T13:00:00.000Z',
       timeoutMs: 1_000,
     });
     if (!recalled.ok) {
@@ -368,7 +367,6 @@ describe('a sent message in memory', () => {
       const recalled = await client.recall({
         query: 'Dinner Sam',
         maxTokens: 2_000,
-        queryTimestamp: '2026-10-31T13:00:00.000Z',
         timeoutMs: 1_000,
       });
       if (!recalled.ok) {

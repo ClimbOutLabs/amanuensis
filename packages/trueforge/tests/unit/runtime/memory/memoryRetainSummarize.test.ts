@@ -463,7 +463,6 @@ describe('markdown round trip (synthetic end-to-end)', () => {
       const recallOutcome = await markdownClient(dir).recall({
         query: 'What is my houseplant named?',
         maxTokens: 2000,
-        queryTimestamp: '2026-09-21T12:01:00.000Z',
         timeoutMs: 5000,
       });
       if (!recallOutcome.ok) {
