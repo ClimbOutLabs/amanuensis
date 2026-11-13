@@ -75,7 +75,8 @@ export const testReachChannelRoute = createRoute({
   path: '/test',
   tags: [OpenApiTag.DELIVERIES],
   summary: 'Try a channel',
-  description: 'Sends the signed-in person a test item on one channel. A channel that is not set up answers 409.',
+  description:
+    'Sends the signed-in person a test item on one channel. A channel that is not set up answers 409. Test texts and test calls are limited, and a test past the limit answers 429.',
   'x-fern-sdk-group-name': ['reach'],
   'x-fern-sdk-method-name': 'test_channel',
   request: { body: { content: { 'application/json': { schema: TestReachChannelRequestSchema } }, required: true } },
@@ -85,7 +86,16 @@ export const testReachChannelRoute = createRoute({
     401: unauthorizedResponse,
     409: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },
-      description: 'That channel is not set up yet.',
+      description: 'That channel is not set up yet, or the number is not confirmed.',
+    },
+    429: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description:
+        'Too many test texts or test calls for now, or a day’s limit on texts is reached. The message says how long to wait.',
+    },
+    502: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'The test text could not be sent, or the test call could not be started.',
     },
   },
 });

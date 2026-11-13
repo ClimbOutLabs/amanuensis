@@ -11,7 +11,10 @@ describe("ReachClient", () => {
 
         const rawResponseBody = {
             data: {
-                availability: { calls: { available: true, note: "note" }, texts: { available: true, note: "note" } },
+                availability: {
+                    calls: { available: true, note: "note", problem: null },
+                    texts: { available: true, note: "note", problem: null },
+                },
                 calendar_problem: { kind: "google_sign_in", since: "since" },
                 mail_problem: { kind: "too_slow", since: "since" },
                 mail_source: "google",
@@ -49,10 +52,12 @@ describe("ReachClient", () => {
                     calls: {
                         available: true,
                         note: "note",
+                        problem: null,
                     },
                     texts: {
                         available: true,
                         note: "note",
+                        problem: null,
                     },
                 },
                 calendarProblem: {
@@ -136,7 +141,10 @@ describe("ReachClient", () => {
         };
         const rawResponseBody = {
             data: {
-                availability: { calls: { available: true, note: "note" }, texts: { available: true, note: "note" } },
+                availability: {
+                    calls: { available: true, note: "note", problem: null },
+                    texts: { available: true, note: "note", problem: null },
+                },
                 calendar_problem: { kind: "google_sign_in", since: "since" },
                 mail_problem: { kind: "too_slow", since: "since" },
                 mail_source: "google",
@@ -208,10 +216,12 @@ describe("ReachClient", () => {
                     calls: {
                         available: true,
                         note: "note",
+                        problem: null,
                     },
                     texts: {
                         available: true,
                         note: "note",
+                        problem: null,
                     },
                 },
                 calendarProblem: {
@@ -534,5 +544,49 @@ describe("ReachClient", () => {
                 channel: "in_app",
             });
         }).rejects.toThrow(TrueForgeTypes.ConflictError);
+    });
+
+    test("test_channel (5)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { channel: "in_app" };
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .post("/api/v1/user/reach/test")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(429)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.reach.testChannel({
+                channel: "in_app",
+            });
+        }).rejects.toThrow(TrueForgeTypes.TooManyRequestsError);
+    });
+
+    test("test_channel (6)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { channel: "in_app" };
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .post("/api/v1/user/reach/test")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(502)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.reach.testChannel({
+                channel: "in_app",
+            });
+        }).rejects.toThrow(TrueForgeTypes.BadGatewayError);
     });
 });

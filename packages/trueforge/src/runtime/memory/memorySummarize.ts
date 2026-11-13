@@ -485,7 +485,7 @@ export function lightReasoningRequestFields(properties: ModelProperties): Record
 /** Models, by name, whose provider refused the reasoning fields; they are not sent again for the life of the process. */
 const modelsRefusingReasoningFields = new Set<string>();
 
-/** A 400 whose message names a reasoning field: the provider refused the hint, not the summary request. */
+/** A 400 whose message names a reasoning field: the provider refused the hint, not the request itself. */
 function refusedReasoningFields(error: unknown): boolean {
   return (
     error instanceof Error &&
@@ -497,9 +497,9 @@ function refusedReasoningFields(error: unknown): boolean {
 /**
  * The model with extra request fields on every non-streaming call. A provider that refuses them
  * gets the same call once without them, and that model skips them from then on, so a model that
- * cannot take the hint still summarizes.
+ * cannot take the hint still answers.
  */
-function withRequestFields({
+export function withRequestFields({
   llm,
   fields,
   modelKey,
@@ -526,7 +526,7 @@ function withRequestFields({
           throw error;
         }
         modelsRefusingReasoningFields.add(modelKey);
-        logger.debug('Memory summarization model refused the reasoning fields; retrying without them');
+        logger.debug('The model refused the reasoning fields; retrying without them');
         return llm.createNonStream(body);
       }
     },

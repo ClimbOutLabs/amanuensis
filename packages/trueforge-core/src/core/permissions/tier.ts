@@ -192,6 +192,29 @@ export const Tier3PersonaSchema = z
   .describe('The persona a chat call adds, shown in full.')
   .openapi('Tier3Persona');
 
+/** Why a skill network card is asked: the skill's first use, or a site it reached for without declaring. */
+export const Tier3SkillNetworkReasonSchema = z
+  .enum(['first_use', 'undeclared_host'])
+  .describe('Why the card is asked: the skill\u2019s first use, or a site it did not declare.')
+  .openapi('Tier3SkillNetworkReason');
+
+/**
+ * The network question a skill network card asks, shown in full: the skill, the sites, and why.
+ * `code_pin` names the exact code the approval covers once code pinning lands; until then null.
+ */
+export const Tier3SkillNetworkSchema = z
+  .object({
+    skill_name: z.string().describe('Name of the skill asking for network access.'),
+    hosts: z.array(z.string()).describe('The sites the skill asks to reach.'),
+    reason: Tier3SkillNetworkReasonSchema,
+    code_pin: z
+      .string()
+      .nullable()
+      .describe('The code version the approval is pinned to, or null when no pin is in force.'),
+  })
+  .describe('The skill network access a card asks about, shown in full.')
+  .openapi('Tier3SkillNetwork');
+
 /** A skill that a chat call adds, as the host read it from where it comes from. */
 export const Tier3SkillSchema = z
   .object({
@@ -287,11 +310,15 @@ export const Tier3CardSchema = z
       .boolean()
       .optional()
       .describe('True when a card carrying mail_new_recipients approves saving a draft rather than sending.'),
+    skill_network: Tier3SkillNetworkSchema.nullable()
+      .optional()
+      .describe('For a skill network card: the skill, the sites it asks for, and why. Otherwise null.'),
   })
   .openapi('Tier3Card');
 
 export type Tier3Card = z.infer<typeof Tier3CardSchema>;
 export type Tier3Email = z.infer<typeof Tier3EmailSchema>;
+export type Tier3SkillNetwork = z.infer<typeof Tier3SkillNetworkSchema>;
 export type Tier3Schedule = z.infer<typeof Tier3ScheduleSchema>;
 export type Tier3ScheduleTools = z.infer<typeof Tier3ScheduleToolsSchema>;
 export type Tier3Persona = z.infer<typeof Tier3PersonaSchema>;

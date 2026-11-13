@@ -49,6 +49,8 @@ export const INERT_READ_TOOL = 'inert_read';
 export const INERT_GET_PAGE_TOOL = 'inert_get_page';
 /** Opt-in (`messageSearch: true`): a search whose name alone says it only looks things up. */
 export const INERT_SEARCH_MESSAGES_TOOL = 'search_messages';
+/** Opt-in (`notes: true`): a search over a folder of notes, as a notes connector offers. */
+export const INERT_SEARCH_NOTES_TOOL = 'search_notes';
 export const INERT_WRITE_TOOL = 'inert_write';
 export const INERT_UNANNOTATED_TOOL = 'inert_unannotated';
 export const INERT_ASK_MEMORY_TOOL = 'ask_memory';
@@ -151,6 +153,7 @@ export interface InertMcpServer {
   readInvocations: () => number;
   getPageInvocations: () => number;
   searchMessagesInvocations: () => number;
+  searchNotesInvocations: () => number;
   unannotatedInvocations: () => number;
   askMemoryInvocations: () => number;
   searchMemoryInvocations: () => number;
@@ -205,6 +208,7 @@ interface Counters {
   read: number;
   getPage: number;
   searchMessages: number;
+  searchNotes: number;
   write: number;
   unannotated: number;
   askMemory: number;
@@ -284,6 +288,7 @@ function buildMcpServer({
   calendar,
   pageById,
   messageSearch,
+  notes,
 }: {
   counters: Counters;
   gates: WriteGate[];
@@ -295,6 +300,7 @@ function buildMcpServer({
   calendar: boolean;
   pageById: boolean;
   messageSearch: boolean;
+  notes: boolean;
 }): McpServer {
   const server = new McpServer({ name: 'inert-connector', version: '0.0.0' });
 
@@ -352,6 +358,21 @@ function buildMcpServer({
       ({ query }) => {
         counters.searchMessages += 1;
         return textResult(`no messages match ${query}`);
+      },
+    );
+  }
+
+  if (notes) {
+    server.registerTool(
+      INERT_SEARCH_NOTES_TOOL,
+      {
+        description: 'Searches the notes in this folder. Read-only and non-open-world.',
+        inputSchema: { query: z.string() },
+        annotations: { readOnlyHint: true, openWorldHint: false },
+      },
+      ({ query }) => {
+        counters.searchNotes += 1;
+        return textResult(`Garden plan.md mentions ${query}`);
       },
     );
   }
@@ -575,6 +596,8 @@ export async function startInertMcpServer(options?: {
   pageById?: boolean;
   /** Adds `search_messages`, a search known as a lookup by its name. */
   messageSearch?: boolean;
+  /** Adds `search_notes`, a search over a folder of notes. */
+  notes?: boolean;
 }): Promise<InertMcpServer> {
   const webSearch = options?.webSearch === true;
   const searchProvider = options?.searchProvider === true;
@@ -588,6 +611,7 @@ export async function startInertMcpServer(options?: {
     read: 0,
     getPage: 0,
     searchMessages: 0,
+    searchNotes: 0,
     write: 0,
     unannotated: 0,
     askMemory: 0,
@@ -672,6 +696,7 @@ export async function startInertMcpServer(options?: {
       calendar,
       pageById: options?.pageById === true,
       messageSearch: options?.messageSearch === true,
+      notes: options?.notes === true,
     }).connect(asTransport(transport));
     await transport.handleRequest(req, res, body);
   }
@@ -741,6 +766,7 @@ export async function startInertMcpServer(options?: {
     readInvocations: () => counters.read,
     getPageInvocations: () => counters.getPage,
     searchMessagesInvocations: () => counters.searchMessages,
+    searchNotesInvocations: () => counters.searchNotes,
     unannotatedInvocations: () => counters.unannotated,
     askMemoryInvocations: () => counters.askMemory,
     searchMemoryInvocations: () => counters.searchMemory,
