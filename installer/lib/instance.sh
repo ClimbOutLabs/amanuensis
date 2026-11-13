@@ -1014,12 +1014,18 @@ print_instance_summary() {
 # How a device comes to trust this computer: one short link over plain http, the same link as a code for a phone, and the
 # step an iPhone needs after installing.
 print_trust_lines() { # name
-  local link
+  local link fp
   link=$(tls_trust_link "$1")
+  ui_heading "Let each device trust this computer"
   ui_line "On each device, the browser will first warn that the page is not private. Do not click past the warning."
   ui_line "Instead, open this page once on that device and follow its steps: $link"
   ui_line "On an iPhone: open it in Safari, install the profile, then turn it on in Settings, General, About, Certificate Trust Settings."
-  ui_line "Your device will show a long code called a fingerprint. It must be $(tls_fingerprint). If it differs, stop."
+  fp=$(tls_fingerprint)
+  ui_line "Your device will show a long code called a fingerprint. It must be this one:"
+  # Two lines of 16 pairs, so the code fits a narrow terminal and is easy to compare half by half.
+  ui_line "$(_ui_s 1 "${fp:0:48}")"
+  if [ -n "${fp:48}" ]; then ui_line "$(_ui_s 1 "${fp:48}")"; fi
+  ui_line "If it differs, stop."
   if [ "$TLS_AUTHORITY_REPLACED" = 1 ]; then
     ui_line "This computer's root certificate was made again, so each device must trust it again."
   fi
@@ -1051,6 +1057,7 @@ print_backups_row() {
 
 # The last lines of a finished run: how to reach the aman command from this terminal, and how to update later.
 print_closing_lines() {
+  ui_gap
   case ":$PATH:" in
     *":$AMAN_HOME/bin:"*) ;;
     *) ui_line "Open a new terminal window to use the aman command." ;;

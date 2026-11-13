@@ -35,7 +35,7 @@ The rest of this page, up to the Windows section, is for Mac, Linux and WSL.
 aman doctor
 ```
 
-It checks this computer and every instance, then prints one **Next:** line for each problem, with the command that fixes it. It changes nothing. An instance is one person's own copy of Aman.
+It checks this computer and every instance, then prints one **Next:** line for each problem, with the command that fixes it. The box at the end lists every problem again. It changes nothing. An instance is one person's own copy of Aman.
 
 | Command                       | What it does                                                                       |
 | ----------------------------- | ---------------------------------------------------------------------------------- |
@@ -236,3 +236,13 @@ The [Windows guide](install-windows.md) walks through Aman Setup.
 ## When a command fails
 
 Every command says what went wrong and the one thing to do next. If that doesn't help, see [Troubleshooting](troubleshooting.md).
+
+## Colors and plain text
+
+In a terminal, the installer, `aman upgrade` and `aman doctor` use color, numbered steps and boxes. The colors come from your terminal's own theme, so they work on light and dark backgrounds. To turn color off, set `NO_COLOR=1`:
+
+```bash
+NO_COLOR=1 aman doctor
+```
+
+When the output goes to a file or another program, it is plain text with no color. Without a UTF-8 language setting, the lines and boxes use plain ASCII characters.

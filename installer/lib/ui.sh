@@ -17,7 +17,12 @@ UI_STEP_T0=0
 UI_STATUS_WIDTH=11
 UI_MAX_TRIES=5
 UI_FRAMES=("|" "/" "-" "\\")
-S_OK=+ S_WARN=! S_FAIL=x S_PROMPT=">" S_SKIP=- S_RULE=- S_ELL=...
+UI_ASKING=0
+UI_IN_PROMPT=0
+UI_LAST_BLANK=1
+UI_SUMMARY_CODE=1
+S_OK=+ S_WARN=! S_FAIL=x S_PROMPT=">" S_SKIP=- S_RULE=- S_ELL=... S_ARROW="->"
+S_TL=+ S_TR=+ S_BL=+ S_BR=+ S_H=- S_V="|" S_BAR_ON="#" S_BAR_OFF=-
 
 # Decides symbols, color and width once. Color needs a terminal and no NO_COLOR; CLICOLOR_FORCE=1 is for tests.
 ui_init() {
@@ -57,10 +62,12 @@ ui_init() {
     if [ "$UI_WIDTH" -lt 40 ]; then UI_WIDTH=40; fi
   fi
   if [ "$UI_UTF8" = 1 ]; then
-    S_OK=✓ S_WARN=! S_FAIL=✗ S_PROMPT=› S_SKIP=· S_RULE=─ S_ELL=…
+    S_OK=✓ S_WARN=! S_FAIL=✗ S_PROMPT=› S_SKIP=· S_RULE=─ S_ELL=… S_ARROW=→
+    S_TL=╭ S_TR=╮ S_BL=╰ S_BR=╯ S_H=─ S_V=│ S_BAR_ON=━ S_BAR_OFF=─
     UI_FRAMES=(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧)
   else
-    S_OK=+ S_WARN=! S_FAIL=x S_PROMPT=">" S_SKIP=- S_RULE=- S_ELL=...
+    S_OK=+ S_WARN=! S_FAIL=x S_PROMPT=">" S_SKIP=- S_RULE=- S_ELL=... S_ARROW="->"
+    S_TL=+ S_TR=+ S_BL=+ S_BR=+ S_H=- S_V="|" S_BAR_ON="#" S_BAR_OFF=-
     UI_FRAMES=("|" "/" "-" "\\")
   fi
 }
@@ -78,7 +85,94 @@ _ui_s() {
   fi
 }
 
-_ui_out() { printf '%s\n' "$1" >&"$UI_FD"; }
+# Any line that is not part of a question ends the question block, so the next question gets its separator again.
+_ui_out() {
+  if [ "$UI_IN_PROMPT" != 1 ]; then UI_ASKING=0; fi
+  if [ -z "$1" ]; then UI_LAST_BLANK=1; else UI_LAST_BLANK=0; fi
+  printf '%s\n' "$1" >&"$UI_FD"
+}
+
+# One blank line between blocks, never two.
+_ui_gap() {
+  if [ "$UI_LAST_BLANK" != 1 ]; then _ui_out ""; fi
+}
+
+# Columns a line takes on screen: SGR codes take none and a UTF-8 character takes one, whatever the locale says.
+_ui_width() {
+  local s=$1 LC_ALL=C csi=$'\033[' head rest
+  while [[ $s == *"$csi"* ]]; do
+    head=${s%%"$csi"*}
+    rest=${s#*"$csi"}
+    s=$head${rest#*m}
+  done
+  s=${s//[$'\x80'-$'\xbf']/}
+  printf '%s' "${#s}"
+}
+
+# N copies of a string.
+_ui_repeat() { # string n
+  local out='' i=0
+  while [ "$i" -lt "$2" ]; do
+    out=$out$1
+    i=$((i + 1))
+  done
+  printf '%s' "$out"
+}
+
+# LEFT, then RIGHT pushed to the right edge; RIGHT is dropped when the two do not fit on one line.
+_ui_spread() { # left right
+  local gap
+  gap=$((UI_WIDTH - $(_ui_width "$1") - $(_ui_width "$2")))
+  if [ -z "$2" ] || [ "$gap" -lt 2 ]; then
+    printf '%s' "$1"
+  else
+    printf '%s%*s%s' "$1" "$gap" '' "$2"
+  fi
+}
+
+# A label that stands out: inverted colors on a terminal, brackets everywhere else.
+_ui_badge() { # code text
+  if _ui_color_on; then
+    _ui_s "7;$1" " $2 "
+  else
+    printf '[ %s ]' "$2"
+  fi
+}
+
+_ui_color_on() {
+  if [ "$UI_FD" = 2 ]; then [ "$UI_COLOR_2" = 1 ]; else [ "$UI_COLOR_1" = 1 ]; fi
+}
+
+# A box around short lines of text, as wide as the screen. CODE colors the frame; the lines keep their own styles.
+_ui_box() { # code line...
+  local code=$1 line pad inner=$((UI_WIDTH - 4))
+  shift
+  _ui_out "$(_ui_s "$code" "$S_TL$(_ui_repeat "$S_H" $((UI_WIDTH - 2)))$S_TR")"
+  for line in "$@"; do
+    pad=$((inner - $(_ui_width "$line")))
+    if [ "$pad" -lt 0 ]; then pad=0; fi
+    _ui_out "$(_ui_s "$code" "$S_V") $line$(printf '%*s' "$pad" '') $(_ui_s "$code" "$S_V")"
+  done
+  _ui_out "$(_ui_s "$code" "$S_BL$(_ui_repeat "$S_H" $((UI_WIDTH - 2)))$S_BR")"
+}
+
+# Words wrapped to WIDTH columns, one line per output line.
+_ui_wrap() { # width text
+  local cur='' word oldf=$-
+  set -f
+  for word in $2; do
+    if [ -z "$cur" ]; then
+      cur=$word
+    elif [ $((${#cur} + 1 + ${#word})) -le "$1" ]; then
+      cur="$cur $word"
+    else
+      printf '%s\n' "$cur"
+      cur=$word
+    fi
+  done
+  case "$oldf" in *f*) ;; *) set +f ;; esac
+  printf '%s\n' "$cur"
+}
 
 # Prints one wrapped block. LEAD is the already styled start of the first line (LW visible columns); later lines are
 # indented by LW. CODE styles the text of every line; TAIL (already styled) ends the last line. Words are never split,
@@ -143,20 +237,55 @@ _ui_elapsed_since() {
 
 # ---- lines ----------------------------------------------------------------------------------------
 
-ui_title() { _ui_out "$(_ui_s 1 "$1")"; }
-
-ui_phase() { # text [n total]
-  local line
-  _ui_out ""
-  line=$(_ui_s 1 "$1")
-  if [ -n "${2:-}" ]; then line="$line $(_ui_s 2 "($2 of $3)")"; fi
-  _ui_out "$line"
+# The banner at the top of a run: the name in bold color, then what the run does, in a box.
+ui_title() { # text [name]
+  local name=${2:-AMAN} line first=1
+  while IFS= read -r line; do
+    if [ "$first" = 1 ]; then
+      set -- "$(_ui_s "1;36" "$name")  $line"
+      first=0
+    else
+      set -- "$@" "$(printf '%*s' $((${#name} + 2)) '')$line"
+    fi
+  done < <(_ui_wrap $((UI_WIDTH - 6 - ${#name})) "$1")
+  _ui_box 36 "$@"
 }
 
+# A step of a run: "1 of 6" as a badge, the step in bold, and how far the run has come as a bar on the right.
+ui_phase() { # text [n total]
+  local line bar='' off
+  _ui_gap
+  if [ -z "${2:-}" ]; then
+    _ui_out "$(_ui_badge 36 "$1")"
+    return 0
+  fi
+  line="$(_ui_badge 36 "$2 of $3")  $(_ui_s 1 "$1")"
+  # With color the part still to come is the same thick line, dimmed; without color it has to be a different character.
+  off=$S_BAR_OFF
+  if _ui_color_on; then off=$S_BAR_ON; fi
+  bar="$(_ui_s 32 "$(_ui_repeat "$S_BAR_ON" $((2 * $2)))")$(_ui_s 2 "$(_ui_repeat "$off" $((2 * ($3 - $2))))")"
+  _ui_out "$(_ui_spread "$line" "$bar")"
+}
+
+# A part of a report: its name as a badge and, on the right, a short count of what was found.
+ui_section() { # text [counts]
+  _ui_gap
+  _ui_out "$(_ui_spread "$(_ui_badge 36 "$1")" "${2:-}")"
+}
+
+# The elapsed time sits at the right edge when the line has room, so the times of a step line up.
 ui_ok() { # text [elapsed]
-  local tail=
-  if [ -n "${2:-}" ]; then tail="  $(_ui_s 2 "$2")"; fi
-  _ui_marked 32 "$S_OK" "$1" "$tail"
+  local plain
+  if [ -n "${2:-}" ]; then
+    plain="  $S_OK $1"
+    if [ $(($(_ui_width "$plain") + 2 + ${#2})) -le "$UI_WIDTH" ]; then
+      _ui_out "$(_ui_spread "  $(_ui_s 32 "$S_OK") $1" "$(_ui_s 2 "$2")")"
+      return 0
+    fi
+    _ui_marked 32 "$S_OK" "$1" "  $(_ui_s 2 "$2")"
+    return 0
+  fi
+  _ui_marked 32 "$S_OK" "$1"
 }
 
 # Warnings are remembered so the closing block can repeat them.
@@ -164,6 +293,12 @@ ui_warn() { # text [next] [details]
   UI_WARNS="$UI_WARNS$1"$'\n'
   _ui_marked 33 "$S_WARN" "$1"
   _ui_follow "${2:-}" "${3:-}"
+}
+
+# A warning shown a second time, in a closing list, so it is not remembered again.
+ui_warn_again() { # text [next]
+  _ui_marked 33 "$S_WARN" "$1"
+  _ui_follow "${2:-}" ""
 }
 
 ui_fail() { # text [next] [details]
@@ -187,11 +322,14 @@ ui_skip() { _ui_block "  $S_SKIP " 4 "$1" 2; }
 
 ui_hint() { _ui_block "  " 2 "$1" 2; }
 
+# A command to copy, on a line of its own and never wrapped, so it pastes whole however narrow the terminal is.
+ui_command() { _ui_out "    $(_ui_s 1 "$1")"; }
+
 # Plain indented text, for lists under a heading.
 ui_line() { _ui_block "  " 2 "$1"; }
 
 ui_heading() { # blank line, then a bold word
-  _ui_out ""
+  _ui_gap
   _ui_out "$(_ui_s 1 "$1")"
 }
 
@@ -232,6 +370,9 @@ ui_rule() {
 
 ui_newline() { _ui_out ""; }
 
+# A blank line unless the last line was already blank.
+ui_gap() { _ui_gap; }
+
 # Plan rows: marker, status word and text; the color is on the marker and the word only.
 _ui_status() { # color marker word text
   local pad
@@ -246,36 +387,65 @@ ui_admin() { _ui_status 33 "$S_WARN" "needs admin" "$1"; }
 # Dim detail lines under a plan row, in the text column.
 ui_detail() { _ui_block "$(printf '%*s' $((UI_STATUS_WIDTH + 6)) '')" $((UI_STATUS_WIDTH + 6)) "$1" 2; }
 
-# A framed closing block: rule, the verdict, then whatever the caller prints, then ui_summary_end.
+# The closing block: the verdict in a box colored by how the run went, then whatever the caller prints, then
+# ui_summary_end. Only the verdict is boxed, so the addresses and commands under it copy cleanly.
 ui_summary() { # ok|warn|fail verdict
-  local code=1
+  local code=1 marker=$S_OK line first=1
   case "$1" in
-    ok) code="1;32" ;;
-    warn) code="1;33" ;;
-    fail) code="1;31" ;;
+    ok) code=32 ;;
+    warn)
+      code=33
+      marker=$S_WARN
+      ;;
+    fail)
+      code=31
+      marker=$S_FAIL
+      ;;
   esac
-  _ui_out ""
-  ui_rule
-  _ui_block "" 0 "$2" "$code"
+  UI_SUMMARY_CODE=$code
+  while IFS= read -r line; do
+    if [ "$first" = 1 ]; then
+      set -- "$(_ui_s "1;$code" "$marker $line")"
+      first=0
+    else
+      set -- "$@" "  $(_ui_s "1;$code" "$line")"
+    fi
+  done < <(_ui_wrap $((UI_WIDTH - 6)) "$2")
+  _ui_gap
+  _ui_box "$code" "$@"
   _ui_out ""
 }
 
+# The warnings of the run again, then a closing rule in the verdict's color with the total time at its end.
 ui_summary_end() { # [total elapsed]
-  local w
+  local w end
   if [ -n "$UI_WARNS" ]; then
-    ui_heading "Warnings"
+    _ui_gap
+    _ui_out "$(_ui_s "1;33" "Warnings")"
     while IFS= read -r w; do
       if [ -n "$w" ]; then _ui_marked 33 "$S_WARN" "$w"; fi
     done <<<"$UI_WARNS"
   fi
-  if [ -n "${1:-}" ]; then
-    _ui_out ""
-    _ui_out "$(_ui_s 2 "Done in $1")"
+  _ui_gap
+  if [ -z "${1:-}" ]; then
+    _ui_out "$(_ui_s "$UI_SUMMARY_CODE" "$(_ui_repeat "$S_RULE" "$UI_WIDTH")")"
+    return 0
   fi
-  ui_rule
+  end=" Done in $1 "
+  _ui_out "$(_ui_s "$UI_SUMMARY_CODE" "$(_ui_repeat "$S_RULE" $((UI_WIDTH - ${#end} - 2)))")$(_ui_s 2 "$end")$(_ui_s "$UI_SUMMARY_CODE" "$S_RULE$S_RULE")"
 }
 
 # ---- prompts (stderr) -----------------------------------------------------------------------------
+
+# A separator line before a question, so the moment the run waits for a person stands out. Questions in a row share
+# one; any other line in between ends the group, and the next question gets its own separator.
+ui_ask_begin() {
+  local UI_FD=2 label="Your answer is needed"
+  if [ "$UI_ASKING" = 1 ]; then return 0; fi
+  _ui_gap
+  _ui_out "$(_ui_s "1;36" "$S_PROMPT $label") $(_ui_s 2 "$(_ui_repeat "$S_RULE" $((UI_WIDTH - ${#label} - 3)))")"
+  UI_ASKING=1
+}
 
 # "  > Label [default] " without a newline. A label ending in a colon keeps the colon after the default.
 ui_prompt_head() { # label [default]
@@ -291,7 +461,8 @@ ui_prompt_head() { # label [default]
 
 # ui_prompt VAR label default [hint]: one line from stdin; Enter keeps the default. Returns 1 at the end of the input.
 ui_prompt() {
-  local __var=$1 __answer='' __rc=0 UI_FD=2
+  local __var=$1 __answer='' __rc=0 UI_FD=2 UI_IN_PROMPT=1
+  ui_ask_begin
   if [ -n "${4:-}" ]; then ui_hint "$4"; fi
   ui_prompt_head "$2" "${3:-}"
   IFS= read -r __answer || __rc=1
@@ -304,7 +475,8 @@ ui_prompt() {
 # Yes or no with the default capitalised. Returns 0 on yes. A root or delete question passes n; --yes takes the
 # default and says so. The end of the input counts as no.
 ui_confirm() { # question y|n
-  local def=${2:-n} hint answer='' tries=0 UI_FD=2
+  local def=${2:-n} hint answer='' tries=0 UI_FD=2 UI_IN_PROMPT=1
+  ui_ask_begin
   if [ "$def" = y ]; then hint="Y/n"; else hint="y/N"; fi
   if [ "$UI_ASSUME_YES" = 1 ]; then
     ui_prompt_head "$1 [$hint]"
@@ -335,7 +507,8 @@ ui_confirm() { # question y|n
 
 # Reads a secret without echo into VAR. Returns 1 at the end of the input. Every label ends in "(not shown):".
 ui_password() { # VAR label
-  local __value='' __rc=0 UI_FD=2 __label=$2
+  local __value='' __rc=0 UI_FD=2 __label=$2 UI_IN_PROMPT=1
+  ui_ask_begin
   __label="${__label%:} (not shown):"
   ui_prompt_head "$__label"
   IFS= read -rs __value || __rc=1
