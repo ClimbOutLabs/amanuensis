@@ -76,6 +76,8 @@ A change to your own calendar that reaches no guests also offers **Always allow 
 
 **Always allow everywhere** covers every chat. It's never offered for sends, deletes, installs, outside services or a calendar change. A maps card is the one exception: its **Always allow everywhere** turns on the **Maps** switch, described under Maps below. The connector tools you always allow are listed in that connector's page under **Settings**, **Connectors**, where **Revoke** turns each one off.
 
+An **Always allow everywhere** choice holds for the connector as it was set up when you chose it. If you change its address, or the way it signs in, every such choice on it ends, and each tool asks again. Changing its description, or a key being refreshed, keeps them.
+
 ### Maps
 
 A map sends the places it looks up to the map service that Aman is set up to use. Nothing else gets them.
@@ -160,6 +162,17 @@ Pages, emails from other people, files and tool results are things Aman reads. T
 In a scheduled run, a held call is skipped, and the run tells you in one line. A held connector read waits for you in the run's **Needs your OK** list.
 
 You can let file writes run without a card, and let work in the sandbox run without one as described above. No setting covers a send, a delete or a package install.
+
+## Skills and the network
+
+A skill can name the sites it needs to reach. Naming a site grants nothing on its own, and a skill can only ever reach named sites it has been allowed.
+
+- The first time a skill with named sites runs in a chat, a card asks whether the skill may reach the sites it names. **Allow once** covers this chat only. **Always allow** remembers the sites for that skill in every chat. **Deny** remembers the refusal. You can change any of these later in Settings, then Skills.
+- Turning down one named site does not switch off the others. The sites you approved still work, and the turned-down site stays out. Clearing its refusal in Settings grants nothing by itself, because your approval never named that site. A card asks about the list again first.
+- If a command tries to reach a site no skill named, the connection is refused and a card asks about that one site. The card names no skill, because a refused connection cannot show which skill, if any, made the attempt. Its Always choice names the skill the answer is kept under.
+- Connections to bare addresses are always refused, and no card can allow them. That covers addresses on your own machine, such as 127.0.0.1, addresses on your home network, and the address a cloud machine keeps its own settings behind.
+- No card ever waits inside a connection. The connection is refused first, and the question is asked in the chat.
+- Approving a card runs the held command again, unless the command needs an approval of its own. Then that approval is asked for on its own card, and only your answer about the sites is kept.
 
 ## Scheduled runs hold actions for you
 
