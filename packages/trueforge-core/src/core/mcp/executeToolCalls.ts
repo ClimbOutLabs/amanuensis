@@ -1725,13 +1725,30 @@ export async function executeToolCalls({
           });
         }
       }
+      let wireArguments: Record<string, unknown> | undefined;
+      try {
+        wireArguments = parseToolArguments(toolCall.function.arguments);
+      } catch {
+        wireArguments = undefined;
+      }
+      // The tool set may say in the chat why the action did not happen (a send's receipt reads "Not sent").
+      const refusedEvents =
+        wireArguments === undefined
+          ? []
+          : (toolInfo.toolSet.refusedAtDispatchEvents?.({
+              params: { name: toolInfo.originalToolName, arguments: wireArguments },
+              tool_call_id: toolCall.id,
+            }) ?? []);
       return {
         toolCall,
         toolInfo,
-        response: toolResultResponse({
-          text: JSON.stringify({ error: sentinelVerificationError }),
-          isError: true,
-        }),
+        response: {
+          ...toolResultResponse({
+            text: JSON.stringify({ error: sentinelVerificationError }),
+            isError: true,
+          }),
+          ...(refusedEvents.length > 0 ? { events: refusedEvents } : {}),
+        },
         failure: true,
         completedAt: new Date().toISOString(),
         memoized: false,
@@ -2014,6 +2031,7 @@ export async function executeToolCalls({
           {
             admission_provenance: admission,
             dispatch_id: dispatchId,
+            tool_call_id: toolCall.id,
             // the turn's abort signal reaches tools that do bounded
             // multi-phase work (run_code provisioning observes it).
             signal,

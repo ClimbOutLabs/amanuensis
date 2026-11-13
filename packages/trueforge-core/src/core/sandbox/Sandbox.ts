@@ -176,6 +176,12 @@ import { matchReplaceText } from './replaceTextDiagnostics';
 import type { ISkillMounter } from './skills/ISkillMounter';
 import { detectSkillUsedEvents } from './skills/skillEvents';
 import {
+  skillScriptRealPathOperands,
+  skillScriptRun,
+  skillScriptStaysInFolder,
+  type SkillScriptRun,
+} from './skills/skillScript';
+import {
   extractStructuredEditPaths,
   repositoryRelativeStructuredEditPath,
   repositoryRootsMatch,
@@ -390,6 +396,7 @@ export const SANDBOX_APPLY_PATCH_TOOL_NAME = 'apply_patch';
 export const SANDBOX_REPLACE_TEXT_TOOL_NAME = 'replace_text';
 export const SANDBOX_WRITE_FILE_TOOL_NAME = 'write_file';
 export const SANDBOX_RUN_REGISTERED_COMMAND_TOOL_NAME = 'run_registered_command';
+export const SANDBOX_RUN_SKILL_SCRIPT_TOOL_NAME = 'run_skill_script';
 export const SANDBOX_SUBMIT_IMPLEMENTATION_PLAN_TOOL_NAME = 'submit_implementation_plan';
 
 /**
@@ -1049,6 +1056,13 @@ export const sandboxRunRegisteredCommandSchema = z.object({
 
 const REGISTERED_COMMAND_OUTPUT_TAIL_LINES = 100;
 
+export const sandboxRunSkillScriptSchema = z.object({
+  intent: z.string().describe('Why you are running this script (user-facing).'),
+  skill: z.string().min(1).describe('Name of a skill turned on in this chat.'),
+  script: z.string().min(1).describe("The script's path inside the skill's folder, such as scripts/run.py."),
+  args: z.array(z.string().max(4096)).max(64).optional().describe('Arguments passed to the script, one per item.'),
+});
+
 const sandboxImplementationPlanSchema = ImplementationPlanSchema;
 
 // Every multi-line text field below (`content`, `patch`, `old_text`, `new_text`) is paired with a
@@ -1570,6 +1584,9 @@ export function createSandboxWriteFileDescription({ fileDownload }: { fileDownlo
 export const SANDBOX_RUN_REGISTERED_COMMAND_DESCRIPTION =
   'Run one host-confirmed repository build, test, or verification command by its stable command ID. The host owns the exact command, repository cwd, purpose, and timeout. Do not restate the shell command.';
 
+export const SANDBOX_RUN_SKILL_SCRIPT_DESCRIPTION =
+  "Run a Python or JavaScript script that ships with a skill turned on in this chat, from that skill's folder. Name the skill, the script's path inside it, and its arguments.";
+
 export const SANDBOX_SUBMIT_IMPLEMENTATION_PLAN_DESCRIPTION =
   'Submit a typed implementation plan before editing a bound repository. This tool never edits or executes.';
 
@@ -1581,6 +1598,7 @@ export const SANDBOX_MCP_SERVER_ID = 'sandbox';
 type SandboxExecInput = z.infer<typeof sandboxExecSchema>;
 type SandboxExecOutputInput = z.infer<typeof sandboxExecSchema>['output'];
 type SandboxRunRegisteredCommandInput = z.infer<typeof sandboxRunRegisteredCommandSchema>;
+type SandboxRunSkillScriptInput = z.infer<typeof sandboxRunSkillScriptSchema>;
 type SandboxImplementationPlanInput = z.infer<typeof sandboxImplementationPlanSchema>;
 type SandboxRuntimeExecInput = SandboxExecInput & { timeoutSeconds?: number | undefined };
 type SandboxApplyPatchInput = z.infer<typeof sandboxApplyPatchSchema>;
@@ -1963,7 +1981,7 @@ function sandboxExecPreflightFailure(input: {
     (input.purpose === 'inspect' || input.purpose === 'edit' || input.purpose === 'execute') &&
     sandboxCommandUsesUnstructuredOperation(input.command)
   ) {
-    return "Unstructured shell redirection, heredocs, tee, and inline Python evaluation are not allowed for inspect, edit, or execute-purpose exec calls. Use read_file for inspection, write_file for a new file, apply_patch/replace_text for an edit, or run_code for Python or Node code. To trim long output, use the exec tool's output.head_lines, output.tail_lines or output.grep fields instead of a shell pipe.";
+    return "Unstructured shell redirection, heredocs, tee, and inline Python evaluation are not allowed for inspect, edit, or execute-purpose exec calls. Inspect a file with a plain exec command such as cat, head or sed -n, use write_file for a new file, apply_patch/replace_text for an edit, or run_code for Python or Node code. To trim long output, use the exec tool's output.head_lines, output.tail_lines or output.grep fields instead of a shell pipe.";
   }
   // Verification has to stay observable: redirection, substitution, and
   // backgrounding hide what the check actually ran, so a green result would
@@ -2280,6 +2298,12 @@ export class Sandbox extends LocalToolMCP {
       handler: (input, approvalDecision, context) => this.handleRunRegisteredCommand(input, approvalDecision, context),
     }),
     defineTool({
+      name: SANDBOX_RUN_SKILL_SCRIPT_TOOL_NAME,
+      description: SANDBOX_RUN_SKILL_SCRIPT_DESCRIPTION,
+      schema: sandboxRunSkillScriptSchema,
+      handler: (input, approvalDecision, context) => this.handleRunSkillScript(input, approvalDecision, context),
+    }),
+    defineTool({
       name: SANDBOX_SUBMIT_IMPLEMENTATION_PLAN_TOOL_NAME,
       description: SANDBOX_SUBMIT_IMPLEMENTATION_PLAN_DESCRIPTION,
       schema: sandboxImplementationPlanSchema,
@@ -2334,6 +2358,15 @@ export class Sandbox extends LocalToolMCP {
   } {
     const requestedCwd = typeof params.arguments?.['cwd'] === 'string' ? params.arguments['cwd'] : undefined;
     const cwd = requestedCwd ?? this.boundRepository?.workspace_cwd ?? this.provider.getWorkspaceDir();
+    if (params.name === SANDBOX_RUN_SKILL_SCRIPT_TOOL_NAME) {
+      // The folder is worked out here, never taken from the call, so classification judges the real script.
+      const run = this.skillScriptRunFor(params.arguments);
+      return {
+        requestedCwd: undefined,
+        cwd: run?.status === 'ok' ? run.skill_folder : undefined,
+        effectiveArguments: { ...params.arguments, skill_folder: run?.status === 'ok' ? run.skill_folder : null },
+      };
+    }
     const structuredEditToolName = structuredEditToolNameFor(params.name);
     if (structuredEditToolName === undefined || params.arguments === undefined) {
       return { requestedCwd, cwd, effectiveArguments: params.arguments };
@@ -2368,11 +2401,13 @@ export class Sandbox extends LocalToolMCP {
         ? (invocationPolicy?.effect ?? 'execute')
         : params.name === SANDBOX_RUN_REGISTERED_COMMAND_TOOL_NAME
           ? 'verify'
-          : params.name === SANDBOX_APPLY_PATCH_TOOL_NAME ||
-              params.name === SANDBOX_REPLACE_TEXT_TOOL_NAME ||
-              params.name === SANDBOX_WRITE_FILE_TOOL_NAME
-            ? 'edit'
-            : undefined;
+          : params.name === SANDBOX_RUN_SKILL_SCRIPT_TOOL_NAME
+            ? 'execute'
+            : params.name === SANDBOX_APPLY_PATCH_TOOL_NAME ||
+                params.name === SANDBOX_REPLACE_TEXT_TOOL_NAME ||
+                params.name === SANDBOX_WRITE_FILE_TOOL_NAME
+              ? 'edit'
+              : undefined;
     // Syntax-only risk signal for the approval prompt (open_world_hint). Never
     // consulted for admission: a network-tool command is already gated by its
     // ordinary effect (only 'inspect' auto-admits), so this only adds
@@ -2422,6 +2457,8 @@ export class Sandbox extends LocalToolMCP {
     );
     const invalidRegisteredCommand =
       params.name === SANDBOX_RUN_REGISTERED_COMMAND_TOOL_NAME && registeredCommand === undefined;
+    const invalidSkillScript =
+      params.name === SANDBOX_RUN_SKILL_SCRIPT_TOOL_NAME && this.skillScriptRunFor(params.arguments)?.status !== 'ok';
     const planInput =
       params.name === SANDBOX_SUBMIT_IMPLEMENTATION_PLAN_TOOL_NAME
         ? sandboxImplementationPlanSchema.safeParse(params.arguments)
@@ -2631,6 +2668,7 @@ export class Sandbox extends LocalToolMCP {
       invalidWriteFilePath ||
       writeFileScopeFailure ||
       invalidRegisteredCommand ||
+      invalidSkillScript ||
       invalidImplementationPlan ||
       structuredEditPreconditionFailure !== undefined;
     // Legacy approval when Sentinel is not configured: the pre-Sentinel
@@ -3052,6 +3090,21 @@ export class Sandbox extends LocalToolMCP {
     return this.existingSandboxId === undefined ? '' : rawSandboxId(this.existingSandboxId);
   }
 
+  /** The checked command for a run_skill_script call; undefined when its arguments do not parse. */
+  private skillScriptRunFor(argumentsValue: Record<string, unknown> | undefined): SkillScriptRun | undefined {
+    const parsed = sandboxRunSkillScriptSchema.safeParse(argumentsValue);
+    if (!parsed.success) {
+      return undefined;
+    }
+    return skillScriptRun({
+      skillsDir: this.provider.getSkillsDir(this.promptSandboxId()),
+      skillNames: this.skillMounter?.skillNames() ?? [],
+      skill: parsed.data.skill,
+      script: parsed.data.script,
+      args: parsed.data.args ?? [],
+    });
+  }
+
   private buildMcpServersEnvelope(): Record<string, SandboxMcpServerConfig> {
     const out: Record<string, SandboxMcpServerConfig> = {};
     for (const server of this.codeExecToolSets) {
@@ -3068,14 +3121,14 @@ export class Sandbox extends LocalToolMCP {
   }
 
   protected getTools() {
-    const base =
-      this.boundRepository === undefined
-        ? this.tools.filter(
-            tool =>
-              tool.name !== SANDBOX_RUN_REGISTERED_COMMAND_TOOL_NAME &&
-              tool.name !== SANDBOX_SUBMIT_IMPLEMENTATION_PLAN_TOOL_NAME,
-          )
-        : this.tools;
+    const skillsMounted = (this.skillMounter?.skillNames() ?? []).length > 0;
+    const base = this.tools.filter(
+      tool =>
+        (this.boundRepository !== undefined ||
+          (tool.name !== SANDBOX_RUN_REGISTERED_COMMAND_TOOL_NAME &&
+            tool.name !== SANDBOX_SUBMIT_IMPLEMENTATION_PLAN_TOOL_NAME)) &&
+        (skillsMounted || tool.name !== SANDBOX_RUN_SKILL_SCRIPT_TOOL_NAME),
+    );
     // run_code's /ingress list is per-turn: re-render its description on every
     // tool-list read so newly staged attachments are advertised.
     return base.map(tool => {
@@ -3119,7 +3172,7 @@ export class Sandbox extends LocalToolMCP {
       return true;
     }
     const networked = this.hasNetwork() || this.skillNetworkHostsForChat.length > 0;
-    if (name === SANDBOX_RUN_REGISTERED_COMMAND_TOOL_NAME) {
+    if (name === SANDBOX_RUN_REGISTERED_COMMAND_TOOL_NAME || name === SANDBOX_RUN_SKILL_SCRIPT_TOOL_NAME) {
       return !networked;
     }
     if (name !== SANDBOX_EXEC_TOOL_NAME) {
@@ -5781,7 +5834,7 @@ export class Sandbox extends LocalToolMCP {
       command: resolvedInput.command,
       purpose: resolvedInput.purpose,
       cwd: resolvedInput.cwd,
-      env: resolvedInput.env,
+      env: input.env,
       output: resolvedInput.output,
       webConnectorAttached: this.webConnectorAttached,
       webConnectorToolHint: this.webConnectorToolHint,
@@ -5985,6 +6038,94 @@ export class Sandbox extends LocalToolMCP {
       context,
       { kind: 'command', command_id: input.command_id },
     );
+  }
+
+  /**
+   * Runs a script that ships with a skill turned on in this chat. The host picks the program and passes the
+   * script and its arguments as separate arguments with no shell, and the shell tool's own limits on starting
+   * Python or Node stay as they are.
+   */
+  private async handleRunSkillScript(
+    input: SandboxRunSkillScriptInput,
+    approvalDecision?: ApprovalDecision,
+    context?: ToolInvocationContext,
+  ): Promise<CallToolResponse> {
+    const run = this.skillScriptRunFor(input);
+    if (run === undefined || run.status === 'invalid') {
+      const message = run?.message ?? 'Name the skill and the script inside it.';
+      return toolResultResponse({ text: JSON.stringify({ error: message }), isError: true });
+    }
+    if (approvalDecision === undefined) {
+      const tool_info = await this.toolCallInfo({ name: SANDBOX_RUN_SKILL_SCRIPT_TOOL_NAME, arguments: input });
+      if (tool_info.pre_dispatch_failure !== undefined) {
+        return hostRefusalResponse(tool_info.pre_dispatch_failure.message);
+      }
+      if (tool_info.is_approval_required) {
+        return { approvalRequired: { tool_info } };
+      }
+    }
+    let sandboxInfo: SandboxInfo;
+    let sandboxCreated: SandboxInfo | undefined;
+    try {
+      ({ sandboxInfo, sandboxCreated } = await this.ensureReadySandbox());
+    } catch (e) {
+      this.logger.error('Sandbox initialization failed', extractErrorLogFields(e));
+      return hostRefusalResponse(SANDBOX_START_FAILED_MESSAGE);
+    }
+    const rawId = this.providerSandboxId(sandboxInfo.sandbox_id);
+    const skillsDir = this.provider.getSkillsDir(rawId);
+    // Checked where it runs, through any links, since the server cannot see the sandbox's files.
+    const located = await this.hostExec({
+      sandboxId: rawId,
+      // A host-built check on the trusted PATH, so a program planted in the workspace cannot answer for realpath.
+      command: ['realpath', '-e', '--', ...skillScriptRealPathOperands({ skillsDir, run })].map(shellEscape).join(' '),
+      signal: context?.signal,
+    });
+    if (
+      !located.success ||
+      located.response.exitCode !== 0 ||
+      !skillScriptStaysInFolder({ skillsDir, skill: input.skill, resolved: located.response.result })
+    ) {
+      return hostRefusalResponse(
+        `The script ${input.script} is not a file inside the ${input.skill} skill's folder, so it did not run. Check the script's path in the skill's instructions.`,
+      );
+    }
+    const skillNetworkGrant = await this.resolveSkillNetworkGrant();
+    const execInput: SandboxRuntimeExecInput = {
+      intent: input.intent,
+      purpose: 'execute',
+      command: run.command,
+      cwd: run.skill_folder,
+    };
+    const result = await this.provider.exec({
+      sandboxId: rawId,
+      command: run.command,
+      argv: run.argv,
+      cwd: run.skill_folder,
+      signal: context?.signal,
+      ...(skillNetworkGrant === undefined
+        ? {}
+        : { skillNetworkToken: skillNetworkGrant.token, skillNetworkHosts: skillNetworkGrant.hosts }),
+    });
+    // Sites the script was refused become cards the same way they do after a shell command.
+    await this.collectSkillNetworkCards();
+    const skillUsedEvents = detectSkillUsedEvents({
+      command: run.command,
+      cwd: run.skill_folder,
+      skillsDir,
+      skillNames: this.skillMounter?.skillNames() ?? [],
+    });
+    return {
+      result: {
+        content: [{ type: 'text', text: this.execResultText(await this.decorateExecResult(result, rawId, execInput)) }],
+        isError: !isExecResultOk(result),
+      },
+      wasInitialized: undefined,
+      sandboxCreated: Boolean(sandboxCreated),
+      sandboxInfo,
+      verificationReceiptCandidate: undefined,
+      events: skillUsedEvents.length > 0 ? skillUsedEvents : undefined,
+    };
   }
 
   /**

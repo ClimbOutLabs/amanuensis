@@ -375,6 +375,7 @@ describe('checkHeldReplay', () => {
     bcc: [],
     subject: 'Lunch on Friday',
     body: 'Are you free at one?',
+    check_code: null,
     replaces: null,
     reply_in_thread: null,
     reply_to: null,

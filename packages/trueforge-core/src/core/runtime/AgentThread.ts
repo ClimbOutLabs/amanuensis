@@ -1165,6 +1165,9 @@ function validateApprovalMessage({
   if (
     message.approval.status === 'allow' &&
     message.approval.scope === 'always' &&
+    // "Always allow for this skill" on a skill network card is recorded against the skill, not
+    // as a grant on the held call, so it does not need the call itself to take a standing grant.
+    held?.tool_info.skill_network == null &&
     !(toolGrantsAvailable && allowsToolGrant(pending.tool_info))
   ) {
     throw new InvalidAgentSendInputError(

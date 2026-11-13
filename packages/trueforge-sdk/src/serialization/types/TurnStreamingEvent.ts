@@ -16,6 +16,7 @@ import { ModelWaitingPersistedEvent } from "./ModelWaitingPersistedEvent.js";
 import { ProfileLearnedPersistedEvent } from "./ProfileLearnedPersistedEvent.js";
 import { ProvisioningPersistedEvent } from "./ProvisioningPersistedEvent.js";
 import { SandboxCreatedEvent } from "./SandboxCreatedEvent.js";
+import { SendReceiptPersistedEvent } from "./SendReceiptPersistedEvent.js";
 import { SkillUsedPersistedEvent } from "./SkillUsedPersistedEvent.js";
 import { ThreadCreatedEvent } from "./ThreadCreatedEvent.js";
 import { ThreadDoneEvent } from "./ThreadDoneEvent.js";
@@ -33,6 +34,7 @@ export const TurnStreamingEvent: core.serialization.Schema<
 > = core.serialization.undiscriminatedUnion([
     ContextCompactionEvent,
     ContextCompactionStartedEvent,
+    SendReceiptPersistedEvent,
     MemoryRecallPersistedEvent,
     ModelUsagePersistedEvent,
     ModelWaitingPersistedEvent,
@@ -60,6 +62,7 @@ export declare namespace TurnStreamingEvent {
     export type Raw =
         | ContextCompactionEvent.Raw
         | ContextCompactionStartedEvent.Raw
+        | SendReceiptPersistedEvent.Raw
         | MemoryRecallPersistedEvent.Raw
         | ModelUsagePersistedEvent.Raw
         | ModelWaitingPersistedEvent.Raw

@@ -96,7 +96,7 @@ Aman always shows a card first. Aman itself reads the skill on GitHub, so the na
 
 What you approve is what is added. The skill is saved at the exact version on the card, so a later change to the repository isn't picked up. If the repository changes between the card and your answer, nothing is added and Aman asks again.
 
-Adding a skill gives it nothing else. Its scripts run in the sandbox under the same rules as any other code. A skill that wants to reach sites still needs your OK in Settings, under Skills. From a chat, Aman can only add a skill. It can't change or remove one.
+Adding a skill gives it nothing else. Its scripts run only in the sandbox. **Commands in the sandbox** below says when they ask first. A skill that wants to reach sites still needs your OK in Settings, under Skills. From a chat, Aman can only add a skill. It can't change or remove one.
 
 An incognito chat can't add a skill. A scheduled run can't add one either, because the tool isn't there.
 
@@ -104,11 +104,13 @@ An incognito chat can't add a skill. A scheduled run can't add one either, becau
 
 The sandbox is the sealed-off space on your computer where Aman runs code.
 
-In the sandbox, a command that only reads inside the workspace runs without asking. That's still true when several reads are joined, as in `cd repo && git status`. Reads are listing files, reading a file or part of one, searching files, and looking at git history.
+In the sandbox, a command that only reads inside the workspace runs without asking. That's still true when several reads are joined, as in `cd repo && git status`. Reads are listing files, reading a file or part of one, searching files, and looking at git history. A file named by its full path counts the same as one named from the workspace, so Aman reading an installed skill's instructions doesn't ask. A full path outside the workspace still asks.
 
 Every other command asks first, unless the **Sandbox** switch covers it. Answering **Always allow in this chat** on a command covers running that same command again in this chat, and nothing else.
 
 Installing a package asks first on every sandbox. The **Sandbox** switch never covers it.
+
+A script that ships with a skill you installed runs without asking, with or without the switch, while the sandbox has no internet. It asks where the sandbox can reach the internet, including a chat that uses a skill you let reach its own sites. It also asks when Aman edited a file in that skill's folder with its file tools earlier in the chat. A script that is a link to a file outside the skill's folder doesn't run.
 
 ??? note "What the Sandbox switch covers"
 
