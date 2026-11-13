@@ -77,6 +77,13 @@ function PageSortingControl() {
 
 const HOURS = Array.from({ length: 24 }, (_, hour) => hour);
 
+/** The waits offered; a value stored another way is added to the list so it still shows. */
+const MODEL_WAIT_MINUTES = [1, 3, 5, 10, 20, 30, 60];
+
+function minutesLabel(minutes: number): string {
+  return minutes === 1 ? '1 minute' : `${String(minutes)} minutes`;
+}
+
 /** An hour of the day as a clock time: 0 is midnight, 12 is noon. */
 function hourLabel(hour: number): string {
   if (hour === 0) return '12:00 AM (midnight)';
@@ -152,6 +159,7 @@ function NightlyControl() {
   const setting = useMemoryNightlySetting();
   const toaster = useToasterOptional();
   const disabled = setting.saving || setting.enabled === null;
+  const modelWait = setting.modelWaitMinutes ?? 10;
 
   return (
     <div className="flex flex-col gap-3">
@@ -236,6 +244,36 @@ function NightlyControl() {
           {setting.tidyError}
         </p>
       )}
+      <div className="flex flex-col gap-1">
+        <label htmlFor="memory-helper-model-wait" className="text-xs font-medium text-text-secondary">
+          Wait for the model up to
+        </label>
+        <select
+          id="memory-helper-model-wait"
+          className="w-fit rounded-md border border-border bg-primary-bg px-2 py-1.5 text-sm text-text-primary"
+          value={modelWait}
+          disabled={disabled}
+          onChange={event => {
+            const next = Number(event.target.value);
+            void setting.setModelWaitMinutes(next).then(saved => {
+              if (saved)
+                toaster?.showSuccess({ title: `${assistant} waits up to ${minutesLabel(next)} for the model` });
+            });
+          }}
+        >
+          {[...new Set([...MODEL_WAIT_MINUTES, modelWait])]
+            .sort((a, b) => a - b)
+            .map(minutes => (
+              <option key={minutes} value={minutes}>
+                {minutesLabel(minutes)}
+              </option>
+            ))}
+        </select>
+        <p className="text-xs text-text-secondary">
+          This is for each note {assistant} sorts or tidies. Choose longer when your model is slow. {assistant} stops
+          sooner when the model goes silent.
+        </p>
+      </div>
     </div>
   );
 }

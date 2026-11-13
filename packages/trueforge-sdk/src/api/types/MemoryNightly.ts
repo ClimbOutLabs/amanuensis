@@ -7,6 +7,8 @@ export interface MemoryNightly {
     enabled: boolean;
     /** The hour of the server's day the tidy-up starts at. `0` is midnight, the default. */
     hour: number;
+    /** How many minutes one sorting or tidying question may wait for the model. `10` is the default. */
+    modelWaitMinutes: number;
     /** Whether a persisted override is currently stored. */
     overridden: boolean;
 }

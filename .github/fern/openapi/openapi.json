@@ -7108,6 +7108,12 @@
             "minimum": 0,
             "type": "integer"
           },
+          "model_wait_minutes": {
+            "description": "How many minutes one sorting or tidying question may wait for the model. `10` is the default.",
+            "maximum": 60,
+            "minimum": 1,
+            "type": "integer"
+          },
           "overridden": {
             "description": "Whether a persisted override is currently stored.",
             "type": "boolean"
@@ -7117,7 +7123,8 @@
           "enabled",
           "overridden",
           "default_enabled",
-          "hour"
+          "hour",
+          "model_wait_minutes"
         ],
         "type": "object"
       },
@@ -15607,6 +15614,12 @@
             "description": "The hour of the server's day the tidy-up starts at, `0` to `23`. Left out, it stays as it is.",
             "maximum": 23,
             "minimum": 0,
+            "type": "integer"
+          },
+          "model_wait_minutes": {
+            "description": "Minutes one sorting or tidying question may wait for the model, `1` to `60`. Left out, it stays as it is.",
+            "maximum": 60,
+            "minimum": 1,
             "type": "integer"
           }
         },

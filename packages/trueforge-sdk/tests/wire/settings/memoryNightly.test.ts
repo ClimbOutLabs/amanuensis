@@ -9,7 +9,9 @@ describe("MemoryNightlyClient", () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
 
-        const rawResponseBody = { data: { default_enabled: true, enabled: true, hour: 1, overridden: true } };
+        const rawResponseBody = {
+            data: { default_enabled: true, enabled: true, hour: 1, model_wait_minutes: 1, overridden: true },
+        };
 
         server
             .mockEndpoint()
@@ -25,6 +27,7 @@ describe("MemoryNightlyClient", () => {
                 defaultEnabled: true,
                 enabled: true,
                 hour: 1,
+                modelWaitMinutes: 1,
                 overridden: true,
             },
         });
@@ -72,7 +75,9 @@ describe("MemoryNightlyClient", () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
         const rawRequestBody = { enabled: true, hour: 0 };
-        const rawResponseBody = { data: { default_enabled: true, enabled: true, hour: 1, overridden: true } };
+        const rawResponseBody = {
+            data: { default_enabled: true, enabled: true, hour: 1, model_wait_minutes: 1, overridden: true },
+        };
 
         server
             .mockEndpoint()
@@ -92,6 +97,7 @@ describe("MemoryNightlyClient", () => {
                 defaultEnabled: true,
                 enabled: true,
                 hour: 1,
+                modelWaitMinutes: 1,
                 overridden: true,
             },
         });

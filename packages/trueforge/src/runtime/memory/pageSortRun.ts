@@ -5,6 +5,7 @@
 import { execFileRunner, extractErrorLogFields, withTimeout } from '@truefoundry/trueforge-core/core';
 import type { Logger } from 'winston';
 
+import { readMemoryHelperWaitMinutes } from '../memoryHelperWaitSettings';
 import { localDay } from './localDay';
 import { entryMetadata, entryRecallText } from './markdownMemoryFiles';
 import type { MemoryClient, WrittenEntry } from './memoryClient';
@@ -19,19 +20,16 @@ import { sortNote, type SortModel, type SortNote } from './pageSorter';
 /** Cap on generated tokens: up to eight decisions with a reason each. */
 const SORT_MAX_OUTPUT_TOKENS = 1600;
 
-/**
- * The longest one try at a helper job's question may take. Nobody waits on these questions, so a slow model that is
- * still answering is left to finish: the model client already gives up on one that has stopped sending anything.
- * This only bounds a model that keeps sending without ever finishing.
- */
-const HELPER_JOB_TIMEOUT_MS = 600_000;
-
 /** The longest the search by meaning may hold up one note. */
 const SIMILAR_PAGES_TIMEOUT_MS = 10_000;
 
 const NOTE_DAY_PATTERN = /:(\d{4}-\d{2}-\d{2})\.md#\d+$/;
 
-/** The model a helper job asks: the summarizer's client, limits and light-reasoning request, with a longer time budget. */
+/**
+ * The model a helper job asks: the summarizer's client, limits and light-reasoning request. Nobody waits on these
+ * questions, so one try may take as long as the person chose in Settings; the model client still gives up sooner
+ * on a model that has stopped sending anything.
+ */
 export function summaryModelFor({
   summarize,
   logger,
@@ -48,9 +46,13 @@ export function summaryModelFor({
   if (modelFqn === undefined || modelFqn.trim() === '') {
     return undefined;
   }
-  const resolveLlm =
-    summarize.resolveLlm ?? summaryLlmResolver({ ...summarize, logger, timeoutMs: HELPER_JOB_TIMEOUT_MS });
   return async messages => {
+    const waitMinutes = await readMemoryHelperWaitMinutes({
+      globalSettingsStore: summarize.globalSettingsStore,
+      logger,
+    });
+    const resolveLlm =
+      summarize.resolveLlm ?? summaryLlmResolver({ ...summarize, logger, timeoutMs: waitMinutes * 60_000 });
     const askedAt = Date.now();
     const answer = await askSummaryModel({ messages, modelFqn, resolveLlm, isReadable, maxOutputTokens, logger });
     // How long the model takes says whether a helper job suits it; the question and the answer are not logged.

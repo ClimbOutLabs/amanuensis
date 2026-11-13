@@ -15,6 +15,12 @@ export const MemoryNightlySchema = z
       .min(0)
       .max(23)
       .describe("The hour of the server's day the tidy-up starts at. `0` is midnight, the default."),
+    model_wait_minutes: z
+      .number()
+      .int()
+      .min(1)
+      .max(60)
+      .describe('How many minutes one sorting or tidying question may wait for the model. `10` is the default.'),
   })
   .openapi('MemoryNightly');
 
@@ -34,6 +40,15 @@ export const UpdateMemoryNightlyRequestSchema = z
       .max(23)
       .optional()
       .describe("The hour of the server's day the tidy-up starts at, `0` to `23`. Left out, it stays as it is."),
+    model_wait_minutes: z
+      .number()
+      .int()
+      .min(1)
+      .max(60)
+      .optional()
+      .describe(
+        'Minutes one sorting or tidying question may wait for the model, `1` to `60`. Left out, it stays as it is.',
+      ),
   })
   .openapi('UpdateMemoryNightlyRequest', { example: { enabled: true, hour: 0 } });
 

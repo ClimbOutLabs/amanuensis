@@ -132,6 +132,9 @@ export interface MemoryNightlyState {
   /** Resolves true when saved, false when the save failed (the error is then in `error`). */
   setEnabled(enabled: boolean): Promise<boolean>;
   setHour(hour: number): Promise<boolean>;
+  /** Minutes one sorting or tidying question may wait for the model; `null` until the server has answered. */
+  modelWaitMinutes: number | null;
+  setModelWaitMinutes(minutes: number): Promise<boolean>;
   /** True while a tidy-up is running, also one started before this page was opened. */
   tidying: boolean;
   /** What the last tidy-up did, if it finished within the hour; `null` otherwise and while one runs. */
@@ -144,7 +147,7 @@ export interface MemoryNightlyState {
 /** How often a page waiting on a running tidy-up asks whether it has finished. */
 const TIDY_STATE_ASK_MS = 5000;
 
-type NightlyChange = { enabled?: boolean; hour?: number };
+type NightlyChange = { enabled?: boolean; hour?: number; modelWaitMinutes?: number };
 
 export function useMemoryNightlySetting(): MemoryNightlyState {
   const server = useOptionalServer();
@@ -159,7 +162,7 @@ export function useMemoryNightlySetting(): MemoryNightlyState {
   const state = useStoredSetting<MemoryNightlySetting, NightlyChange>({
     load,
     save,
-    valueOf: stored => ({ enabled: stored.enabled, hour: stored.hour }),
+    valueOf: stored => ({ enabled: stored.enabled, hour: stored.hour, modelWaitMinutes: stored.modelWaitMinutes }),
   });
   const [tidying, setTidying] = useState(false);
   const [tidied, setTidied] = useState<MemoryTidyRun | null>(null);
@@ -216,6 +219,8 @@ export function useMemoryNightlySetting(): MemoryNightlyState {
     error: state.error,
     setEnabled: enabled => change({ enabled }),
     setHour: hour => change({ hour }),
+    modelWaitMinutes: state.value?.modelWaitMinutes ?? state.stored?.modelWaitMinutes ?? null,
+    setModelWaitMinutes: modelWaitMinutes => change({ modelWaitMinutes }),
     tidying,
     tidied,
     tidyError,

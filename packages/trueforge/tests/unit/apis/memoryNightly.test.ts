@@ -89,7 +89,7 @@ describe('memoryNightly router', () => {
     const response = await router.request('/');
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
-      data: { enabled: false, overridden: false, default_enabled: false, hour: 0 },
+      data: { enabled: false, overridden: false, default_enabled: false, hour: 0, model_wait_minutes: 10 },
     });
   });
 
@@ -99,20 +99,20 @@ describe('memoryNightly router', () => {
     const putTrue = await router.request('/', putInit(true));
     expect(putTrue.status).toBe(200);
     expect(await putTrue.json()).toEqual({
-      data: { enabled: true, overridden: true, default_enabled: false, hour: 0 },
+      data: { enabled: true, overridden: true, default_enabled: false, hour: 0, model_wait_minutes: 10 },
     });
     expect((await globalSettingsStore.getSetting({ key: KEY }))?.value).toBe('true');
 
     const putFalse = await router.request('/', putInit(false));
     expect(putFalse.status).toBe(200);
     expect(await putFalse.json()).toEqual({
-      data: { enabled: false, overridden: true, default_enabled: false, hour: 0 },
+      data: { enabled: false, overridden: true, default_enabled: false, hour: 0, model_wait_minutes: 10 },
     });
     expect((await globalSettingsStore.getSetting({ key: KEY }))?.value).toBe('false');
 
     const get = await router.request('/');
     expect(await get.json()).toEqual({
-      data: { enabled: false, overridden: true, default_enabled: false, hour: 0 },
+      data: { enabled: false, overridden: true, default_enabled: false, hour: 0, model_wait_minutes: 10 },
     });
   });
 
@@ -123,7 +123,7 @@ describe('memoryNightly router', () => {
     const cleared = await router.request('/', putInit(null));
     expect(cleared.status).toBe(200);
     expect(await cleared.json()).toEqual({
-      data: { enabled: false, overridden: false, default_enabled: false, hour: 0 },
+      data: { enabled: false, overridden: false, default_enabled: false, hour: 0, model_wait_minutes: 10 },
     });
     expect(await globalSettingsStore.getSetting({ key: KEY })).toBeUndefined();
   });
@@ -139,14 +139,38 @@ describe('memoryNightly router', () => {
     });
     expect(put.status).toBe(200);
     expect(await put.json()).toEqual({
-      data: { enabled: true, overridden: true, default_enabled: false, hour: 21 },
+      data: { enabled: true, overridden: true, default_enabled: false, hour: 21, model_wait_minutes: 10 },
     });
     expect((await globalSettingsStore.getSetting({ key: 'memory_nightly_job_hour' }))?.value).toBe('21');
 
     const off = await router.request('/', putInit(false));
     expect(await off.json()).toEqual({
-      data: { enabled: false, overridden: true, default_enabled: false, hour: 21 },
+      data: { enabled: false, overridden: true, default_enabled: false, hour: 21, model_wait_minutes: 10 },
     });
+  });
+
+  it('PUT model_wait_minutes saves how long a helper question may wait and leaves the rest as it is', async () => {
+    const { router, globalSettingsStore } = await createRouter();
+    const put = await router.request('/', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model_wait_minutes: 30 }),
+    });
+    expect(await put.json()).toEqual({
+      data: { enabled: false, overridden: false, default_enabled: false, hour: 0, model_wait_minutes: 30 },
+    });
+    expect((await globalSettingsStore.getSetting({ key: 'memory_helper_model_wait_minutes' }))?.value).toBe('30');
+    expect(await (await router.request('/')).json()).toMatchObject({ data: { model_wait_minutes: 30 } });
+  });
+
+  it.each([0, 61, 2.5, '5'])('PUT with model_wait_minutes %p is rejected', async minutes => {
+    const { router } = await createRouter();
+    const response = await router.request('/', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model_wait_minutes: minutes }),
+    });
+    expect(response.status).toBe(400);
   });
 
   it.each([24, -1, 1.5, '3'])('PUT with hour %p is rejected', async hour => {
@@ -163,7 +187,7 @@ describe('memoryNightly router', () => {
     const { router, globalSettingsStore } = await createRouter();
     await globalSettingsStore.setSetting({ key: 'memory_nightly_job_hour', value: '99' });
     expect(await (await router.request('/')).json()).toEqual({
-      data: { enabled: false, overridden: false, default_enabled: false, hour: 0 },
+      data: { enabled: false, overridden: false, default_enabled: false, hour: 0, model_wait_minutes: 10 },
     });
   });
 
@@ -287,14 +311,14 @@ describe('memoryNightly router', () => {
     const putFalse = await router.request('/', putInit(false));
     expect(putFalse.status).toBe(200);
     expect(await putFalse.json()).toEqual({
-      data: { enabled: false, overridden: true, default_enabled: true, hour: 0 },
+      data: { enabled: false, overridden: true, default_enabled: true, hour: 0, model_wait_minutes: 10 },
     });
 
     // Clearing the override reports the env default as the effective state.
     const cleared = await router.request('/', putInit(null));
     expect(cleared.status).toBe(200);
     expect(await cleared.json()).toEqual({
-      data: { enabled: true, overridden: false, default_enabled: true, hour: 0 },
+      data: { enabled: true, overridden: false, default_enabled: true, hour: 0, model_wait_minutes: 10 },
     });
   });
 });

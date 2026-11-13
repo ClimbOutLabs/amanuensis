@@ -133,6 +133,7 @@
   "Start the daily tidy-up at": "packages/trueforge-ui/src/containers/SettingsBuilder/MemoryHelpersCard.tsx",
   "Tidy now": "packages/trueforge-ui/src/containers/SettingsBuilder/MemoryHelpersCard.tsx",
   "Tidy pages once a day": "packages/trueforge-ui/src/containers/SettingsBuilder/MemoryHelpersCard.tsx",
+  "Wait for the model up to": "packages/trueforge-ui/src/containers/SettingsBuilder/MemoryHelpersCard.tsx",
   "Take over": "packages/frontend/src/BrowserLivePage.tsx",
   "Hand back": "packages/frontend/src/BrowserLivePage.tsx",
   "Done": "packages/frontend/src/BrowserLivePage.tsx",

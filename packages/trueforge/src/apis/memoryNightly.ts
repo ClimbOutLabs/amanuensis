@@ -11,6 +11,12 @@ import {
 } from '../routes/memoryNightlyRoutes';
 import type { NightlyMemoryJob, TidyState } from '../runtime/memory/nightlyService';
 import {
+  DEFAULT_MEMORY_HELPER_WAIT_MINUTES,
+  MEMORY_HELPER_WAIT_SETTING_KEY,
+  parseHelperWaitMinutes,
+  readMemoryHelperWaitMinutes,
+} from '../runtime/memoryHelperWaitSettings';
+import {
   DEFAULT_MEMORY_NIGHTLY_HOUR,
   MEMORY_NIGHTLY_HOUR_SETTING_KEY,
   MEMORY_NIGHTLY_SETTING_KEY,
@@ -41,12 +47,19 @@ function toMemoryTidyRun(state: TidyState): MemoryTidyRun {
   };
 }
 
-function toMemoryNightly(setting: MemoryNightlySetting): MemoryNightly {
+function toMemoryNightly({
+  setting,
+  modelWaitMinutes,
+}: {
+  setting: MemoryNightlySetting;
+  modelWaitMinutes: number;
+}): MemoryNightly {
   return {
     enabled: setting.enabled,
     overridden: setting.overridden,
     default_enabled: setting.defaultEnabled,
     hour: setting.hour,
+    model_wait_minutes: modelWaitMinutes,
   };
 }
 
@@ -59,7 +72,11 @@ export function createMemoryNightlyRouter<TTransaction>(deps: MemoryNightlyRoute
       globalSettingsStore: deps.globalSettingsStore,
       logger: deps.logger,
     });
-    return c.json({ data: toMemoryNightly(setting) }, 200);
+    const modelWaitMinutes = await readMemoryHelperWaitMinutes({
+      globalSettingsStore: deps.globalSettingsStore,
+      logger: deps.logger,
+    });
+    return c.json({ data: toMemoryNightly({ setting, modelWaitMinutes }) }, 200);
   };
 
   const putHandler: RouteHandler<typeof putMemoryNightlyRoute> = async c => {
@@ -74,6 +91,12 @@ export function createMemoryNightlyRouter<TTransaction>(deps: MemoryNightlyRoute
     }
     if (body.hour !== undefined) {
       await deps.globalSettingsStore.setSetting({ key: MEMORY_NIGHTLY_HOUR_SETTING_KEY, value: String(body.hour) });
+    }
+    if (body.model_wait_minutes !== undefined) {
+      await deps.globalSettingsStore.setSetting({
+        key: MEMORY_HELPER_WAIT_SETTING_KEY,
+        value: String(body.model_wait_minutes),
+      });
     }
     // Confirm from what was just written, not a re-read: a failed read would fall back to the env default
     // and contradict the change the person just made. Only a field the request left out is read.
@@ -95,16 +118,23 @@ export function createMemoryNightlyRouter<TTransaction>(deps: MemoryNightlyRoute
             : null
         : body.enabled;
     const storedHour = body.hour === undefined ? await left(MEMORY_NIGHTLY_HOUR_SETTING_KEY) : undefined;
+    const storedWait = body.model_wait_minutes === undefined ? await left(MEMORY_HELPER_WAIT_SETTING_KEY) : undefined;
     return c.json(
       {
         data: toMemoryNightly({
-          enabled: override ?? defaultEnabled,
-          overridden: override !== null,
-          defaultEnabled,
-          hour:
-            body.hour ??
-            (storedHour === undefined ? undefined : parseNightlyHour(storedHour)) ??
-            DEFAULT_MEMORY_NIGHTLY_HOUR,
+          setting: {
+            enabled: override ?? defaultEnabled,
+            overridden: override !== null,
+            defaultEnabled,
+            hour:
+              body.hour ??
+              (storedHour === undefined ? undefined : parseNightlyHour(storedHour)) ??
+              DEFAULT_MEMORY_NIGHTLY_HOUR,
+          },
+          modelWaitMinutes:
+            body.model_wait_minutes ??
+            (storedWait === undefined ? undefined : parseHelperWaitMinutes(storedWait)) ??
+            DEFAULT_MEMORY_HELPER_WAIT_MINUTES,
         }),
       },
       200,

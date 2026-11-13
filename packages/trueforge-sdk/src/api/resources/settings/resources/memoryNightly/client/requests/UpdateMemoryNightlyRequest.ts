@@ -12,4 +12,6 @@ export interface UpdateMemoryNightlyRequest {
     enabled?: boolean | null;
     /** The hour of the server's day the tidy-up starts at, `0` to `23`. Left out, it stays as it is. */
     hour?: number;
+    /** Minutes one sorting or tidying question may wait for the model, `1` to `60`. Left out, it stays as it is. */
+    modelWaitMinutes?: number;
 }

@@ -10,11 +10,13 @@ export const UpdateMemoryNightlyRequest: core.serialization.Schema<
 > = core.serialization.object({
     enabled: core.serialization.boolean().optionalNullable(),
     hour: core.serialization.number().optional(),
+    modelWaitMinutes: core.serialization.property("model_wait_minutes", core.serialization.number().optional()),
 });
 
 export declare namespace UpdateMemoryNightlyRequest {
     export interface Raw {
         enabled?: (boolean | null | undefined) | null;
         hour?: number | null;
+        model_wait_minutes?: number | null;
     }
 }

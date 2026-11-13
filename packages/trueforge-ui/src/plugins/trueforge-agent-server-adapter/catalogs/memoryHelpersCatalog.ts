@@ -20,6 +20,8 @@ export interface MemoryNightlySetting {
   defaultEnabled: boolean;
   /** The hour of the server's day the tidy-up starts at, 0 to 23. */
   hour: number;
+  /** How many minutes one sorting or tidying question may wait for the model, 1 to 60. */
+  modelWaitMinutes: number;
 }
 
 /** What a tidy-up did. `busy` means one is running; `idle`, only from a read, means none ran lately. */
@@ -47,7 +49,11 @@ export interface MemoryPageSortingCatalog {
 export interface MemoryNightlyCatalog {
   getMemoryNightly(): Promise<MemoryNightlySetting>;
   /** Saves the fields given; a field left out stays as it is. */
-  setMemoryNightly(change: { enabled?: boolean; hour?: number }): Promise<MemoryNightlySetting>;
+  setMemoryNightly(change: {
+    enabled?: boolean;
+    hour?: number;
+    modelWaitMinutes?: number;
+  }): Promise<MemoryNightlySetting>;
   tidyMemoryNow(): Promise<MemoryTidyRun>;
   /** Where a tidy-up stands, without starting one: running, finished a short while ago, or neither. */
   getMemoryTidyState(): Promise<MemoryTidyRun>;
@@ -69,6 +75,7 @@ const NightlyResponseSchema = z.object({
     overridden: z.boolean(),
     default_enabled: z.boolean(),
     hour: z.number().int().min(0).max(23),
+    model_wait_minutes: z.number().int().min(1).max(60),
   }),
 });
 
@@ -138,8 +145,8 @@ export function createMemoryNightlyCatalog(options: CreateTrueForgeClientOptions
     if (!parsed.success) {
       throw new Error('The server sent back something unexpected. Reload the page and try again.');
     }
-    const { enabled, overridden, default_enabled, hour } = parsed.data.data;
-    return { enabled, overridden, defaultEnabled: default_enabled, hour };
+    const { enabled, overridden, default_enabled, hour, model_wait_minutes } = parsed.data.data;
+    return { enabled, overridden, defaultEnabled: default_enabled, hour, modelWaitMinutes: model_wait_minutes };
   };
   const parseRun = (response: unknown): MemoryTidyRun => {
     const parsed = TidyRunResponseSchema.safeParse(response);
@@ -160,7 +167,8 @@ export function createMemoryNightlyCatalog(options: CreateTrueForgeClientOptions
   };
   return {
     getMemoryNightly: async () => parse(await request('GET')),
-    setMemoryNightly: async change => parse(await request('PUT', change)),
+    setMemoryNightly: async ({ enabled, hour, modelWaitMinutes }) =>
+      parse(await request('PUT', { enabled, hour, model_wait_minutes: modelWaitMinutes })),
     tidyMemoryNow: async () => parseRun(await request('POST', undefined, '/run')),
     getMemoryTidyState: async () => parseRun(await request('GET', undefined, '/run')),
   };

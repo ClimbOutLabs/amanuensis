@@ -41,6 +41,8 @@ function renderCard({
   const enabledWrites: boolean[] = [];
   const hourWrites: number[] = [];
   let hour = 0;
+  const waitWrites: number[] = [];
+  let modelWaitMinutes = 10;
   const sorting = (next: Mode) => ({
     mode: next,
     overridden: true,
@@ -52,6 +54,7 @@ function renderCard({
     overridden: true,
     defaultEnabled: false,
     hour,
+    modelWaitMinutes,
   });
   const ports = withPorts
     ? {
@@ -65,7 +68,11 @@ function renderCard({
         },
         memoryNightly: {
           getMemoryNightly: async () => nightly(),
-          setMemoryNightly: async (change: { enabled?: boolean; hour?: number }) => {
+          setMemoryNightly: async (change: { enabled?: boolean; hour?: number; modelWaitMinutes?: number }) => {
+            if (change.modelWaitMinutes !== undefined) {
+              waitWrites.push(change.modelWaitMinutes);
+              modelWaitMinutes = change.modelWaitMinutes;
+            }
             if (change.enabled !== undefined) {
               enabledWrites.push(change.enabled);
               nightlyEnabled = change.enabled;
@@ -87,7 +94,7 @@ function renderCard({
       <MemoryHelpersCard />
     </ServerProvider>,
   );
-  return { modeWrites, enabledWrites, hourWrites };
+  return { modeWrites, enabledWrites, hourWrites, waitWrites };
 }
 
 async function renderCardAndTidy(tidy: NonNullable<Parameters<typeof renderCard>[0]>['tidy']) {
@@ -149,6 +156,25 @@ describe('MemoryHelpersCard', () => {
     await waitFor(() => {
       expect(toggle).toBeChecked();
     });
+  });
+
+  it('waits ten minutes for the model until another wait is chosen', async () => {
+    const { waitWrites, hourWrites } = renderCard();
+    const picker = await screen.findByLabelText('Wait for the model up to');
+    await waitFor(() => {
+      expect(picker).toBeEnabled();
+    });
+    expect(picker).toHaveValue('10');
+
+    fireEvent.change(picker, { target: { value: '30' } });
+
+    await waitFor(() => {
+      expect(waitWrites).toEqual([30]);
+    });
+    await waitFor(() => {
+      expect(picker).toHaveValue('30');
+    });
+    expect(hourWrites).toEqual([]);
   });
 
   it('starts at midnight and saves another hour', async () => {
