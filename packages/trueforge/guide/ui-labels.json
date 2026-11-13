@@ -309,7 +309,7 @@
   "Notices on this device": "packages/trueforge-ui/src/deliveries/ReachMeSettings.tsx",
   "Mark all seen": "packages/trueforge-ui/src/deliveries/DeliveryBell.tsx",
   "Turn off on this device": "packages/trueforge-ui/src/deliveries/ReachMeSettings.tsx",
-  "Notifications": "packages/trueforge-ui/src/deliveries/DeliveryBell.tsx",
+  "For you": "packages/trueforge-ui/src/deliveries/DeliveryBell.tsx",
   "Turn on notices": "packages/trueforge-ui/src/reminders/ReminderNotificationPrompt.tsx",
   "Run test": "packages/trueforge-ui/src/atoms/schedules/TestScheduleScreen.tsx",
   "Search skills": "packages/trueforge-ui/src/containers/SettingsBuilder/SkillSettings.tsx",
