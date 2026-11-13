@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState, type ComponentType } from 'react';
 
 import { openDeliveryLink } from '../../deliveries/openDelivery.js';
+import { Icon } from '../../icons/Icon.js';
 import { groupReminders, reminderDetailLine, reminderWhenLine } from '../../reminders/groupReminders.js';
 import { useReminderList } from '../../reminders/ReminderListContext.js';
 import type { ReminderItem } from '../../reminders/types.js';
@@ -13,30 +14,32 @@ import { PageHeader } from '../PageHeader.js';
 import { Button } from '../primitives/Button.js';
 import { Skeleton } from '../primitives/Skeleton.js';
 
-const ROW_CLASS = 'flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left';
+const ROW_CLASS = 'flex w-full flex-col gap-1 px-4 py-3 text-left sm:flex-row sm:items-center sm:gap-4';
 
 function ReminderRow({ item, onOpenChat }: { item: ReminderItem; onOpenChat: (sessionId: string) => void }) {
-  const past = item.state === 'reminded' || item.state === 'missed';
   const sessionId = item.sessionId;
   const content = (
     <>
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-sm font-medium text-text-primary">{item.what}</span>
-        <span className="block truncate text-sm text-text-secondary">{reminderWhenLine(item)}</span>
-        <span className="block truncate text-xs text-text-secondary">{reminderDetailLine(item)}</span>
+        <span className="block text-sm font-medium break-words text-text-primary">{item.what}</span>
+        <span className="mt-0.5 block text-sm break-words text-text-secondary">{reminderWhenLine(item)}</span>
+        <span className="mt-0.5 block text-xs break-words text-text-secondary">{reminderDetailLine(item)}</span>
       </span>
       {sessionId !== null ? (
-        <span className="shrink-0 text-xs text-text-secondary">
-          {past ? 'See it in its chat' : 'Will appear in its chat'}
+        <span className="flex shrink-0 items-center gap-0.5 text-sm font-medium text-link">
+          Open chat
+          <Icon name="chevron-right" className="size-4 shrink-0" />
         </span>
-      ) : null}
+      ) : (
+        <span className="shrink-0 text-xs text-text-secondary">No chat to open</span>
+      )}
     </>
   );
   if (sessionId === null) {
-    return <li className={ROW_CLASS}>{content}</li>;
+    return <li className={cn(ROW_CLASS, 'border-b border-border last:border-b-0')}>{content}</li>;
   }
   return (
-    <li>
+    <li className="border-b border-border last:border-b-0">
       <button
         type="button"
         className={cn(ROW_CLASS, 'hover:bg-secondary-button-hover')}
@@ -61,12 +64,12 @@ function ReminderGroup({
   onOpenChat: (sessionId: string) => void;
 }) {
   return (
-    <section aria-label={title} className="flex flex-col gap-1">
-      <h2 className="px-3 text-sm font-semibold text-text-primary">{title}</h2>
+    <section aria-label={title} className="flex flex-col gap-2">
+      <h2 className="px-1 text-sm font-semibold text-text-primary">{title}</h2>
       {items.length === 0 ? (
-        <p className="px-3 py-2 text-sm text-text-secondary">{emptyText}</p>
+        <p className="px-1 py-2 text-sm text-text-secondary">{emptyText}</p>
       ) : (
-        <ul className="flex flex-col">
+        <ul className="flex flex-col overflow-hidden rounded-xl border border-border bg-paper">
           {items.map(item => (
             <ReminderRow key={item.id} item={item} onOpenChat={onOpenChat} />
           ))}

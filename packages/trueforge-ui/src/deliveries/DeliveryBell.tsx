@@ -8,7 +8,7 @@ import { Icon } from '../icons/Icon.js';
 import { useOptionalShellMode } from '../server/ShellModeContext.js';
 import { useOptionalDeliveries } from './DeliveriesContext.js';
 import { openDeliveryLink } from './openDelivery.js';
-import type { DeliveryItem } from './types.js';
+import type { DeliveryItem, DeliveryLink } from './types.js';
 
 const KIND_WORDS: Record<string, string> = {
   reminder: 'Reminder',
@@ -35,26 +35,43 @@ function whenWords(iso: string): string {
       });
 }
 
+/** What the link line of an item says, by where it leads. */
+function linkWords(link: DeliveryLink): string {
+  switch (link.type) {
+    case 'chat':
+      return 'Open chat';
+    case 'approval':
+      return 'Open chat to answer';
+    case 'space':
+      return 'Open space';
+  }
+}
+
 function DeliveryRow({ item, onOpen }: { item: DeliveryItem; onOpen: (item: DeliveryItem) => void }) {
   const unread = item.seenAt === null;
   return (
-    <li>
+    <li className="border-border border-b last:border-b-0">
       <button
         type="button"
         data-role="delivery-item"
         data-unread={unread ? 'true' : 'false'}
         onClick={() => onOpen(item)}
-        className="hover:bg-ghost-button-hover w-full rounded-lg px-3 py-2 text-left"
+        className="hover:bg-ghost-button-hover flex w-full flex-col gap-1 px-4 py-3 text-left"
       >
-        <span className="flex items-center gap-2 text-xs">
-          {unread ? <span aria-hidden className="bg-gold size-2 shrink-0 rounded-full" /> : null}
-          <span className="text-text-primary font-semibold">{kindWords(item.kind)}</span>
-          <span className="text-text-secondary">{whenWords(item.createdAt)}</span>
+        <span className="flex items-baseline gap-2 text-xs">
+          {unread ? <span aria-hidden className="bg-gold size-2 shrink-0 self-center rounded-full" /> : null}
+          <span className="text-text-secondary font-semibold">{kindWords(item.kind)}</span>
+          <span className="text-text-secondary ml-auto shrink-0">{whenWords(item.createdAt)}</span>
           {unread ? <span className="sr-only">Unread</span> : null}
         </span>
-        <span className="text-text-primary mt-1 block text-sm break-words">{item.text}</span>
-        <span className="text-text-secondary mt-1 block text-xs break-words">Why you got this: {item.reason}</span>
-        {item.link === null ? null : <span className="text-text-secondary mt-1 block text-xs underline">Open</span>}
+        <span className={cn('text-text-primary block text-sm break-words', unread && 'font-medium')}>{item.text}</span>
+        <span className="text-text-secondary block text-xs break-words">Why you got this: {item.reason}</span>
+        {item.link === null ? null : (
+          <span data-role="delivery-link" className="text-link mt-1 flex items-center gap-0.5 text-xs font-medium">
+            {linkWords(item.link)}
+            <Icon name="chevron-right" className="size-3.5 shrink-0" />
+          </span>
+        )}
       </button>
     </li>
   );
@@ -126,9 +143,9 @@ export function DeliveryBell({ onNavigate }: { onNavigate?: () => void }) {
         <div
           role="dialog"
           aria-label="Notifications"
-          className="border-border bg-paper absolute top-full left-0 z-50 mt-2 flex max-h-[28rem] w-[22rem] max-w-[calc(100vw-2rem)] flex-col rounded-xl border shadow-xl"
+          className="border-border bg-paper absolute top-full left-0 z-50 mt-2 flex max-h-[28rem] w-[22rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl border shadow-xl"
         >
-          <div className="border-border flex items-center justify-between border-b px-3 py-2">
+          <div className="border-border flex items-center justify-between border-b px-4 py-2.5">
             <h2 className="text-text-primary text-sm font-semibold">Notifications</h2>
             {unreadCount > 0 ? (
               <button
@@ -145,7 +162,7 @@ export function DeliveryBell({ onNavigate }: { onNavigate?: () => void }) {
               Nothing yet. Reminders and notes show up here.
             </p>
           ) : (
-            <ul className="min-h-0 flex-1 overflow-y-auto p-1">
+            <ul className="min-h-0 flex-1 overflow-y-auto">
               {items.map(item => (
                 <DeliveryRow key={item.id} item={item} onOpen={onOpen} />
               ))}

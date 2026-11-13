@@ -1,4 +1,5 @@
 import {
+  AlarmClock,
   Archive,
   ArrowDown,
   ArrowLeft,
@@ -154,6 +155,7 @@ const defaults: Record<string, IconEntry> = {
   'box-archive': Archive,
   'clock-rotate-left': History,
   bell: Bell,
+  'alarm-clock': AlarmClock,
   'circle-exclamation': CircleAlert,
   info: Info,
   'triangle-exclamation': TriangleAlert,
