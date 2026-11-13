@@ -14,6 +14,7 @@ import {
   isInternalSystemMessage,
   isLLMContextMessage,
   userAuthoredText,
+  withoutEarlierThinking,
 } from '../../runtime/contextUtils';
 import {
   boundRepositoryContextFromBinding,
@@ -1465,13 +1466,16 @@ export class ContextCompaction implements PreLLMAgentContextProcessor {
     const activeRequestChars = Math.max(tailTokenBudget, 100) * CHARS_PER_TOKEN;
     // A last message larger than the tail budget leaves the tail empty: it is then summarized from
     // the transcript (cut there if oversized) and the summary's last_request carries it forward.
-    const { older: olderContext, tail: recentTail } = splitContextForCompaction(execution.context, tailTokenBudget);
+    // Measured and kept as it is sent: thinking before the person's latest message is never sent
+    // again, so it neither counts toward the kept tail nor survives in the shortened context.
+    const sentContext = withoutEarlierThinking(execution.context);
+    const { older: olderContext, tail: recentTail } = splitContextForCompaction(sentContext, tailTokenBudget);
 
     let systemContent: string;
     let repository: BoundRepositoryContext | undefined;
     let commands: BoundRepository['commands'] | undefined;
     const entries = transcriptEntries(olderContext);
-    const userText = userAuthoredText(execution.context);
+    const userText = userAuthoredText(sentContext);
     if (mode === 'coding') {
       // Fetch the durable checklist for the host-supplied state; the checklist is only needed
       // in coding mode where it is included in the handoff message.
@@ -1506,7 +1510,7 @@ export class ContextCompaction implements PreLLMAgentContextProcessor {
       this.logger?.warn(`Compaction request cannot fit the model context (mode: ${mode}); falling back to truncation`);
       yield* this.truncationFallback({
         mode,
-        context: execution.context,
+        context: sentContext,
         recentTail,
         activeRequestChars,
         contextTokens,
@@ -1517,7 +1521,7 @@ export class ContextCompaction implements PreLLMAgentContextProcessor {
     }
     const requiredSections = mode === 'coding' ? REQUIRED_SUMMARY_SECTIONS : CONVERSATION_REQUIRED_SUMMARY_SECTIONS;
     // A partial summary replaces the whole context, so it must not drop an earlier summary's content.
-    const earlierSummary = latestCompactionSummaryMessage(execution.context);
+    const earlierSummary = latestCompactionSummaryMessage(sentContext);
     const earlierSummaryAtRisk = earlierSummary !== undefined && !recentTail.includes(earlierSummary);
     const essentialSections = earlierSummaryAtRisk ? requiredSections : ESSENTIAL_SUMMARY_SECTIONS[mode];
     // What the summarizer saw that nobody at the host wrote; a reply repeating it is not a summary.
@@ -1573,7 +1577,7 @@ export class ContextCompaction implements PreLLMAgentContextProcessor {
       );
       yield* this.truncationFallback({
         mode,
-        context: execution.context,
+        context: sentContext,
         recentTail,
         activeRequestChars,
         contextTokens,
@@ -1633,7 +1637,7 @@ export class ContextCompaction implements PreLLMAgentContextProcessor {
       );
       yield* this.truncationFallback({
         mode,
-        context: execution.context,
+        context: sentContext,
         recentTail,
         activeRequestChars,
         contextTokens,
@@ -1653,7 +1657,7 @@ export class ContextCompaction implements PreLLMAgentContextProcessor {
     // truncation fallback does; a complete one carries it in last_request / user_request.
     const activeRequest = missingSections.some(name => REQUEST_SECTIONS.includes(name))
       ? activeRequestMessages({
-          context: execution.context,
+          context: sentContext,
           tail: new Set(recentTail),
           maxChars: activeRequestChars,
         })
