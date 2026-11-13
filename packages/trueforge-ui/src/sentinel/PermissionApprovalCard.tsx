@@ -32,6 +32,13 @@ import { WhyIAmAsking } from './WhyIAmAsking.js';
 /** Characters shown before a long value is folded behind "Show all". */
 const FOLD_PREVIEW_CHARS = 500;
 
+/**
+ * Characters of the card's question shown before it folds. A held search can put a long query in the question,
+ * and at full length it pushed the buttons off a phone screen. The whole text is one click away, and the query
+ * is also listed in full under Details.
+ */
+const TITLE_PREVIEW_CHARS = 160;
+
 export type PermissionApprovalCardProps = {
   /** Id of the approval this card answers; the composer banner finds the card by it. */
   approvalId: string;
@@ -69,11 +76,21 @@ export type PermissionApprovalCardProps = {
 };
 
 /** Text folded after a preview, cut on code points so a surrogate pair is never split. */
-function FoldedText({ text, as: Tag, className }: { text: string; as: 'pre' | 'span'; className: string }) {
+function FoldedText({
+  text,
+  as: Tag,
+  className,
+  previewChars = FOLD_PREVIEW_CHARS,
+}: {
+  text: string;
+  as: 'pre' | 'span' | 'h3';
+  className: string;
+  previewChars?: number;
+}) {
   const [expanded, setExpanded] = useState(false);
   const points = Array.from(text);
-  const isLong = points.length > FOLD_PREVIEW_CHARS;
-  const shown = isLong && !expanded ? `${points.slice(0, FOLD_PREVIEW_CHARS).join('')}...` : text;
+  const isLong = points.length > previewChars;
+  const shown = isLong && !expanded ? `${points.slice(0, previewChars).join('')}...` : text;
   return (
     <>
       <Tag className={className}>{shown}</Tag>
@@ -86,7 +103,7 @@ function FoldedText({ text, as: Tag, className }: { text: string; as: 'pre' | 's
           aria-expanded={expanded}
           className="mt-1 block font-medium text-text-secondary underline hover:text-text-primary"
         >
-          {expanded ? 'Show less' : `Show all (${String(points.length - FOLD_PREVIEW_CHARS)} more characters)`}
+          {expanded ? 'Show less' : `Show all (${String(points.length - previewChars)} more characters)`}
         </button>
       )}
     </>
@@ -247,7 +264,14 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
     >
       <div className="min-w-0 space-y-3 p-4">
         <div className="flex flex-wrap items-start justify-between gap-2">
-          <h3 className="aui-approval-card__title min-w-0 text-text-primary">{cardHeadline(card)}</h3>
+          <div className="min-w-0 flex-1">
+            <FoldedText
+              text={cardHeadline(card)}
+              as="h3"
+              previewChars={TITLE_PREVIEW_CHARS}
+              className="aui-approval-card__title min-w-0 break-words text-text-primary"
+            />
+          </div>
           {sentAt === null ? (
             <span className="aui-ticket__label shrink-0 rounded-full border border-gold-line px-2 py-0.5 text-gold-ink">
               {WAITING_FOR_YOU_LABEL}
