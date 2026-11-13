@@ -72,6 +72,7 @@ RUN pip install --no-cache-dir --break-system-packages --no-deps --require-hashe
 # These are only the image copies on /usr/local/bin: a project's own pinned tools, in its node_modules/.bin
 # or its Python environment, are what its test commands resolve first, and nothing here changes that.
 RUN pytest --version \
+ && python3 -c "import requests, yaml, httpx, bs4" \
  && ruff --version \
  && mypy --version \
  && vitest --version \
