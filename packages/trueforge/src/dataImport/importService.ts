@@ -43,6 +43,7 @@ import type { IModelProviderStore } from '../db/modelProviderStore';
 import type { IReachSettingsStore } from '../db/reachSettingsStore';
 import type { ISentinelAuditStore } from '../db/sentinelAuditStore';
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
+import type { ITextContactStore } from '../db/textContactStore';
 import type { WithTransaction } from '../db/transaction';
 import type { ITurnArtifactStore } from '../db/turnArtifactStore';
 import { isReservedConnectorName } from '../mcp/firstParty';
@@ -79,6 +80,7 @@ import { DEFAULT_CHAT_MODEL_SETTING_KEY } from '../runtime/tokenFactoryProvider'
 import { TOOL_OUTPUT_SCREEN_ENABLED_SETTING_KEY } from '../runtime/toolOutputScreenSettings';
 import type { ImportDataResult } from '../schemas/dataImport';
 import type { ReachSettings } from '../schemas/reach';
+import { TEXT_WORDS_MAX, type TextContactExport } from '../schemas/textMessages';
 import { newId } from '../utils/id';
 import { detachConnectors, normalizeImportedConnectors, withoutKeptConnector } from './connectorImport';
 import { upgradeArchivedConnectors } from './connectorUpgrade';
@@ -120,6 +122,7 @@ import {
   ImportSessionPartRecordSchema,
   ImportSettingsFileSchema,
   ImportSpacesFileSchema,
+  ImportTextsFileSchema,
   isToolType,
   LEFT_OUT_PLURALS,
   UnknownToolTypeError,
@@ -164,8 +167,9 @@ export interface DataImportDeps<TTransaction> extends PreflightDeps<TTransaction
   auditStore: Pick<ISentinelAuditStore, 'importRecords'>;
   /** The feed comes along with the same commit. Push devices never do. */
   deliveryStore: Pick<IDeliveryStore, 'importDeliveries'>;
-  /** Reach me settings come along with the same commit, with texts and calls switched off. */
+  /** Reach me settings and the number for texts come along with the same commit: texts and calls off, the number unconfirmed. */
   reachSettingsStore: Pick<IReachSettingsStore, 'importSettings'>;
+  textContactStore: Pick<ITextContactStore, 'importContact' | 'importWords'>;
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
   withTransaction: WithTransaction<TTransaction>;
   personaKnowledgeDir: string;
@@ -554,6 +558,7 @@ interface ArchiveContents {
   audit: ImportAuditRecord[];
   deliveries: ImportDelivery[];
   reach: ReachSettings[];
+  texts: TextContactExport[];
   files: ReadonlyMap<string, Buffer>;
   sourceTenantId: string;
   /** Internal details from an older version that were repaired or left out, filled in as sections are read. */
@@ -812,6 +817,8 @@ function loadArchive(input: {
       : [],
     // Absent from exports made before Reach me settings existed.
     reach: files.has('reach.json') ? section('reach.json', ImportReachFileSchema, startReachSwitchesAsNew) : [],
+    // Absent from exports made before texts existed.
+    texts: files.has('texts.json') ? section('texts.json', ImportTextsFileSchema) : [],
     files: manifest.schema_version < MEMORY_SOURCE_LINES_SCHEMA_VERSION ? memoryFilesWithSourceLines(files) : files,
     sourceTenantId: manifest.tenant_id,
     leftOutReport: leftOut,
@@ -1588,6 +1595,7 @@ async function importArchive<TTransaction>(
     audit,
     deliveries,
     reach,
+    texts,
   } = contents;
   const modelProviders = contents.modelProviders;
   // Each person's guide is installed from the bundled pack, so the archived copy is never written again.
@@ -1919,6 +1927,11 @@ async function importArchive<TTransaction>(
       await deps.deliveryStore.importDeliveries({ tenant_id: tenantId, created_by: subjectId, deliveries }, tx);
       for (const settings of reach) {
         await deps.reachSettingsStore.importSettings({ tenant_id: tenantId, created_by: subjectId, settings }, tx);
+      }
+      for (const contact of texts) {
+        const owner = { tenant_id: tenantId, created_by: subjectId };
+        await deps.textContactStore.importContact({ ...owner, contact }, tx);
+        await deps.textContactStore.importWords({ ...owner, words: contact.words, max: TEXT_WORDS_MAX }, tx);
       }
 
       if (personalization !== null && profileNames !== null) {

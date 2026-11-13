@@ -55,6 +55,18 @@ For a short overview, see [Your privacy](../packages/trueforge/guide/topics/priv
     - It also sees this computer's internet address.
     - It sees the project's public page as the sender's contact.
 
+??? note "To Twilio and the phone company, only if you set up texts and switch them on"
+
+    Twilio and the phone company get your phone number and each text.
+
+    - In Private mode, the default, a text holds only the assistant's name and the kind of thing, such as "a reminder is due". It has no names, amounts or message content.
+    - In Full mode, a reminder's text holds the reminder, but only when every word is one Aman knows.
+    - Anything your assistant noticed gets the Private words, never the model's own words.
+    - The confirmation code is texted once, to prove the number is yours.
+    - Aman never writes the number, the text or Twilio's auth token to its logs.
+
+    See [Text messages](/text-messages).
+
 ??? note "To a connector's service"
 
     Whatever a connector call sends, such as an email you approved. Calls that send or change something show a card first. See [Safety rules in detail](safety.md).

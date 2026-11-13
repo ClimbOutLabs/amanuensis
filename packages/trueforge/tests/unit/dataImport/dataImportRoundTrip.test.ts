@@ -47,6 +47,7 @@ import { SqliteSessionStore } from '../../../src/db/sqlite/session-store/SqliteS
 import { SqliteSpaceStore } from '../../../src/db/sqlite/space-store/SqliteSpaceStore';
 import { SqliteTurnArtifactStore } from '../../../src/db/sqlite/turn-artifact-store/SqliteTurnArtifactStore';
 import type { Database as SqliteDatabase } from '../../../src/db/sqlite/types';
+import { TextContactStore } from '../../../src/db/textContactStore';
 import type { WithTransaction } from '../../../src/db/transaction';
 import { PERSISTED_ARTIFACT_MIME } from '../../../src/runtime/artifacts/persistTurnArtifacts';
 import { EMBEDDING_DIMENSIONS } from '../../../src/runtime/memory/embeddingModel';
@@ -86,6 +87,7 @@ async function makeSqliteInstance(label: string): Promise<Instance<SqliteTx>> {
     auditStore: new SentinelAuditStore(db),
     deliveryStore: new DeliveryStore(db),
     reachSettingsStore: new ReachSettingsStore(db),
+    textContactStore: new TextContactStore(db),
     turnArtifactStore: new SqliteTurnArtifactStore(db),
     mcpServerStore: new SqliteMcpServerStore(db),
     modelProviderStore: new SqliteModelProviderStore(db),
@@ -122,6 +124,7 @@ async function makePostgresInstance(label: string): Promise<Instance<PgTx> | und
     auditStore: new SentinelAuditStore(db),
     deliveryStore: new DeliveryStore(db),
     reachSettingsStore: new ReachSettingsStore(db),
+    textContactStore: new TextContactStore(db),
     turnArtifactStore: new PostgresTurnArtifactStore(db),
     mcpServerStore: new PostgresMcpServerStore(db),
     modelProviderStore: new PostgresModelProviderStore(db),
@@ -154,6 +157,7 @@ async function importArchive<Tx>(instance: Instance<Tx>, archive: Buffer, userId
     auditStore: instance.stores.auditStore,
     deliveryStore: instance.stores.deliveryStore,
     reachSettingsStore: instance.stores.reachSettingsStore,
+    textContactStore: instance.stores.textContactStore,
     turnArtifactStore: instance.stores.turnArtifactStore,
     mcpServerStore: instance.stores.mcpServerStore,
     modelProviderStore: instance.stores.modelProviderStore,

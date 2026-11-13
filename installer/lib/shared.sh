@@ -42,6 +42,11 @@ env_key_values() { # env file, key
     }' "$1"
 }
 
+# The value Compose reads for KEY: that of its last line.
+env_get() { # env file, key
+  env_key_values "$1" "$2" | tail -n 1
+}
+
 # The user name behind one line of an env file that sets a sign-in user's password hash, DEX_USER_PASSWORD_HASH_<NAME>,
 # read in every shape Compose reads: blanks before the key, an export word, blanks around the = or :, and any case in
 # the variable name. The name comes back lowercased, with - for _. Empty when the line sets no user's hash; the owner's

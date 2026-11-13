@@ -603,6 +603,7 @@ describe('Data export route', () => {
       'audit.json',
       'deliveries.json',
       'reach.json',
+      'texts.json',
     ]);
     for (const section of manifest.sections) {
       expect(names).toContain(section);

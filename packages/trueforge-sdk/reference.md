@@ -7324,7 +7324,7 @@ await client.reach.listSuggestions();
 <dl>
 <dd>
 
-Sends the signed-in person a test item on one channel. A channel that is not set up answers 409.
+Sends the signed-in person a test item on one channel. A channel that is not set up answers 409. Test texts are limited to a few an hour.
 </dd>
 </dl>
 </dd>
@@ -10216,6 +10216,440 @@ await client.personalization.briefItems.undo("item_key");
 <dd>
 
 **requestOptions:** `BriefItemsClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+## Reach Texts
+<details><summary><code>client.reach.texts.<a href="/src/api/resources/reach/resources/texts/client/Client.ts">get</a>() -> TrueForge.GetTextStatusResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Reads the signed-in person’s number for texts and whether it is confirmed.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.reach.texts.get();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**requestOptions:** `TextsClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.reach.texts.<a href="/src/api/resources/reach/resources/texts/client/Client.ts">update</a>({ ...params }) -> TrueForge.GetTextStatusResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Chooses Private (only the kind of thing) or Full (a reminder’s own words).
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.reach.texts.update({
+    mode: "private"
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.reach.UpdateTextModeRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `TextsClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.reach.texts.<a href="/src/api/resources/reach/resources/texts/client/Client.ts">delete</a>() -> TrueForge.DeleteTextNumberResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Forgets the number and switches texts off.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.reach.texts.delete();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**requestOptions:** `TextsClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.reach.texts.<a href="/src/api/resources/reach/resources/texts/client/Client.ts">sendCode</a>({ ...params }) -> TrueForge.GetTextStatusResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Texts a one-time code to a number. Nothing else is sent to a number until it is confirmed.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.reach.texts.sendCode({
+    phone: "phone"
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.reach.SendTextCodeRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `TextsClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.reach.texts.<a href="/src/api/resources/reach/resources/texts/client/Client.ts">confirm</a>({ ...params }) -> TrueForge.GetTextStatusResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Checks the one-time code. A right code confirms the number. Too many wrong tries void the code.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.reach.texts.confirm({
+    code: "code"
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.reach.ConfirmTextCodeRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `TextsClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.reach.texts.<a href="/src/api/resources/reach/resources/texts/client/Client.ts">addWord</a>({ ...params }) -> TrueForge.GetTextStatusResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Lets a Full text carry a name or word that is not a common word. Letters only. A web ending or a number word is refused.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.reach.texts.addWord({
+    word: "word"
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.reach.AddTextWordRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `TextsClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.reach.texts.<a href="/src/api/resources/reach/resources/texts/client/Client.ts">removeWord</a>(word) -> TrueForge.GetTextStatusResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Takes a word off the person’s list. A word that is not on it changes nothing.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.reach.texts.removeWord("word");
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**word:** `string` — The word to remove.
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `TextsClient.RequestOptions`
 
 </dd>
 </dl>

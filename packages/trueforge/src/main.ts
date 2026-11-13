@@ -106,6 +106,7 @@ import type { IModelProviderStore } from './db/modelProviderStore';
 import { NoticingStore, type INoticingStore } from './db/noticingStore';
 import type { IPersonalizationStore } from './db/personalizationStore';
 import type { IPersonaStore } from './db/personaStore';
+import type { PersonOwner } from './db/personOwner';
 import type { PostgresAgentStore } from './db/postgres/agent-store/PostgresAgentStore';
 import type { Database as PostgresDatabase } from './db/postgres/types';
 import { PushSubscriptionStore, type IPushSubscriptionStore } from './db/pushSubscriptionStore';
@@ -120,6 +121,7 @@ import type { ISessionMetricsStore } from './db/sessionMetricsStore';
 import type { ISkillStore } from './db/skillStore';
 import type { ISpaceStore } from './db/spaceStore';
 import type { Database as SqliteDatabase } from './db/sqlite/types';
+import { TextContactStore, type ITextContactStore } from './db/textContactStore';
 import type { ITokenFactoryUsageStore } from './db/tokenFactoryUsageStore';
 import type { WithTransaction } from './db/transaction';
 import type { ITurnArtifactStore } from './db/turnArtifactStore';
@@ -153,13 +155,21 @@ import { createGoogleNoticingSources, googleCalendarTimezoneFor } from './runtim
 import { createNoticingJudgeResolver } from './runtime/noticing/judgeFactory';
 import { createNoticingService } from './runtime/noticing/noticingService';
 import { personTimezoneFor } from './runtime/noticing/personTimezone';
-import { NO_PHONE_CHANNELS } from './runtime/noticing/reachChannels';
+import { reachChannelsFor, type ChannelViewer } from './runtime/noticing/reachChannels';
 import { createReminderReach } from './runtime/noticing/reminderReach';
 import { createSidecarNoticingSources } from './runtime/noticing/sidecarSources';
 import { createOutboundSecretSource } from './runtime/outboundSecrets';
 import { seedOwnerNameAtBoot } from './runtime/ownerName';
 import { createSentinelServices } from './runtime/sentinelServices';
 import { getSharedRunCodeService } from './runtime/sessionResources';
+import {
+  createTwilioSmsProvider,
+  pointNumberWithRetry,
+  reportPointing,
+  type PointNumberFailure,
+} from './runtime/texts/smsProvider';
+import { createSmsSender } from './runtime/texts/smsSender';
+import { createTextNumberService } from './runtime/texts/textNumber';
 import { createTokenFactoryBudget } from './runtime/tokenFactoryBudget';
 import { ensureEnvManagedTokenFactoryProvider, seedEnvManagedDefaultChatModel } from './runtime/tokenFactoryProvider';
 import { TurnDrainRegistry } from './runtime/turnDrains';
@@ -179,6 +189,8 @@ import { TrueFoundryModelProviderStore } from './truefoundry/TrueFoundryModelPro
 import { TrueFoundrySandboxProviderStore } from './truefoundry/TrueFoundrySandboxProviderStore';
 import { TrueFoundryServiceFoundryServerClient } from './truefoundry/TrueFoundryServiceFoundryServerClient';
 import { TrueFoundrySkillStore } from './truefoundry/TrueFoundrySkillStore';
+import { INBOUND_SMS_PATH, inboundSmsRoute } from './twilioWebhook/inboundSms';
+import { twilioListenerFor } from './twilioWebhook/listener';
 import { ensureWritableDataDir } from './utils/dataDir';
 import { startSttAvailabilityWatcher } from './voice/sttAvailability';
 import { attachVoiceSocket } from './voice/voiceSocket';
@@ -230,6 +242,7 @@ interface ServerPersistence<TTransaction> {
   briefItemStore: IBriefItemCompletionStore;
   deliveryStore: IDeliveryStore;
   reachSettingsStore: IReachSettingsStore;
+  textContactStore: ITextContactStore;
   noticingStore: INoticingStore;
   pushSubscriptionStore: IPushSubscriptionStore;
   approvalTokenStore: ApprovalTokenStore;
@@ -475,6 +488,7 @@ async function createStandalonePersistence(options: {
     briefItemStore: new BriefItemCompletionStore(db),
     deliveryStore: new DeliveryStore(db),
     reachSettingsStore: new ReachSettingsStore(db),
+    textContactStore: new TextContactStore(db),
     noticingStore: new NoticingStore(db),
     pushSubscriptionStore: new PushSubscriptionStore(db),
     approvalTokenStore: new SqliteApprovalTokenStore(db),
@@ -664,6 +678,7 @@ async function createDistributedPersistence(options: {
     briefItemStore: new BriefItemCompletionStore(db),
     deliveryStore: new DeliveryStore(db),
     reachSettingsStore: new ReachSettingsStore(db),
+    textContactStore: new TextContactStore(db),
     noticingStore: new NoticingStore(db),
     pushSubscriptionStore: new PushSubscriptionStore(db),
     approvalTokenStore: new PostgresApprovalTokenStore(db),
@@ -711,6 +726,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     briefItemStore,
     deliveryStore,
     reachSettingsStore,
+    textContactStore,
     noticingStore,
     pushSubscriptionStore,
     approvalTokenStore,
@@ -838,9 +854,44 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     tokens: tokenStore,
     googleConnections: googleConnectionStore,
   });
+  const smsProvider =
+    configuration.TWILIO === undefined ? undefined : createTwilioSmsProvider({ settings: configuration.TWILIO });
+  const textNumbers = createTextNumberService({
+    store: textContactStore,
+    reachSettings: reachSettingsStore,
+    personalization: personalizationStore,
+    provider: smsProvider,
+    audit: sentinelAuditStore,
+    logger,
+    // Codes are keyed by a secret that is not in the database. With no Twilio details no code is ever sent.
+    codeKey: configuration.TWILIO?.authToken,
+  });
+  // Number counts are keyed by the same secret as codes, so the count table never holds a number.
+  const textLimits =
+    configuration.TWILIO === undefined
+      ? undefined
+      : { number_key: configuration.TWILIO.authToken, max_texts_per_day: configuration.TWILIO.maxTextsPerDay };
+  // Set when the Twilio number could not be pointed at this server at boot, so Settings can say what to do.
+  const twilioNumber: { problem: PointNumberFailure | undefined } = { problem: undefined };
+  const reachChannels = (input?: { viewer: ChannelViewer }) =>
+    reachChannelsFor({
+      twilio: configuration.TWILIO,
+      numberProblem: twilioNumber.problem,
+      viewer: input?.viewer ?? 'person',
+    });
   const deliveryService = createDeliveryService({
     store: deliveryStore,
-    senders: [createWebPushSender({ subscriptions: pushSubscriptionStore, settings: configuration.WEB_PUSH })],
+    senders: [
+      createWebPushSender({ subscriptions: pushSubscriptionStore, settings: configuration.WEB_PUSH }),
+      createSmsSender({
+        contacts: textContactStore,
+        reachSettings: reachSettingsStore,
+        personalization: personalizationStore,
+        provider: smsProvider,
+        limits: textLimits,
+        textNumbers,
+      }),
+    ],
     audit: sentinelAuditStore,
     logger,
   });
@@ -873,7 +924,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
       logger,
     }),
     budget: tokenFactoryBudget,
-    channels: () => NO_PHONE_CHANNELS,
+    channels: reachChannels,
     logger,
     assistantNameFor: async owner => await assistantNameFor({ personalizationStore, owner }),
     timezoneFor: personTimezoneFor({
@@ -1040,10 +1091,14 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
       reachSettings: reachSettingsStore,
       store: noticingStore,
       history: deliveryStore,
-      channels: () => NO_PHONE_CHANNELS,
+      channels: reachChannels,
       logger,
     }),
-    reachChannels: () => NO_PHONE_CHANNELS,
+    reachChannels,
+    isInstanceOwner: (owner: PersonOwner) =>
+      owner.tenant_id === noticingInstanceOwner?.tenant_id && owner.created_by === noticingInstanceOwner.created_by,
+    textNumbers,
+    textContactStore,
     webPushPublicKey: configuration.WEB_PUSH?.publicKey,
     sessions,
     chatImages,
@@ -1100,6 +1155,12 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     sentinelAuditStore,
     chatSearchIndexer,
     packageMirrorAllowanceHolds,
+    smsProvider,
+    twilioNumber,
+    twilioWebhookRoutes:
+      configuration.TWILIO === undefined
+        ? []
+        : [inboundSmsRoute({ settings: configuration.TWILIO, textNumbers, logger })],
   };
 }
 
@@ -1185,6 +1246,9 @@ try {
     sentinelAuditStore,
     chatSearchIndexer,
     packageMirrorAllowanceHolds,
+    twilioWebhookRoutes,
+    smsProvider,
+    twilioNumber,
   } = configuration.STANDALONE
     ? await createServerRuntime(
         await createStandalonePersistence({ sqlitePath: configuration.SQLITE_PATH, logger }),
@@ -1410,6 +1474,33 @@ try {
     process.exit(1);
   });
 
+  // The Twilio listener has its own port and serves only Twilio's routes. It is off unless texts are set up, and a
+  // port it cannot open stops the server, because Twilio sends STOP replies to it. A number that could not be pointed
+  // here does not stop texts; Reach me says STOP replies do not reach Aman yet.
+  const twilioServer = await twilioListenerFor({
+    twilio: configuration.TWILIO,
+    hostname: configuration.HOST,
+    routes: twilioWebhookRoutes,
+    logger,
+  }).catch((error: unknown) => {
+    console.error(error instanceof Error ? error.message : error);
+    process.exit(1);
+  });
+  if (smsProvider !== undefined && configuration.TWILIO !== undefined) {
+    // So nobody has to set it in the Twilio console. Only this number's incoming-text address changes, only to the
+    // configured one, and a failure leaves texts working as before.
+    const smsUrl = `${configuration.TWILIO.webhookPublicUrl}${INBOUND_SMS_PATH}`;
+    const onResult = reportPointing({
+      logger,
+      setProblem: problem => {
+        twilioNumber.problem = problem;
+      },
+    });
+    // The waits are unref'd, so trying again never keeps the server from stopping.
+    const wait = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms).unref());
+    void pointNumberWithRetry({ provider: smsProvider, smsUrl, onResult, wait });
+  }
+
   // Graceful drain is the safe default for built and direct execution.
   // Development watch mode opts out so tsx can restart without waiting for a drain.
   if (configuration.NODE_ENV !== 'development') {
@@ -1436,6 +1527,7 @@ try {
       // Stop the control loops before draining; anything they already started drains
       // with every other turn below.
       await controller?.stop();
+      twilioServer?.close();
 
       // Sets the registry's shutdown reason immediately so late track() (in-flight create-turn still
       // inside session.createTurn) aborts as Abandoned; then drains the registry. await

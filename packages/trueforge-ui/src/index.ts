@@ -767,9 +767,13 @@ export type {
   NoticingKind,
   PushDevice,
   ReachApi,
+  ReachChannelState,
   ReachSender,
   ReachSettings,
   ReachView,
+  TextMode,
+  TextStatus,
+  TextsApi,
 } from './deliveries/types.js';
 export { groupReminders, reminderDetailLine, reminderWhenLine } from './reminders/groupReminders.js';
 export { ReminderListProvider, useOptionalReminderList, useReminderList } from './reminders/ReminderListContext.js';
