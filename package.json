@@ -120,6 +120,7 @@
     "test:default-compose": "node --test tests/default-compose.test.mjs",
     "test:pre-push": "node --test tests/pre-push-selection.test.mjs tests/private-data-scan.test.mjs tests/require-smoke-env.test.mjs tests/compose-smoke.test.mjs tests/slots-live.test.mjs",
     "test:slots-live": "node scripts/slots-live.mjs",
+    "test:sandbox-coding-live": "node scripts/slots-live.mjs --suite coding",
     "test:installer-doctor": "node --test installer/doctor/tests/doctor.test.mjs installer/tests/qr.test.mjs installer/tests/pki.test.mjs",
     "test:calendar-sidecar": "npm --prefix ops/calendar-sidecar ci --ignore-scripts && npm --prefix ops/calendar-sidecar test",
     "test:browser-sidecar": "docker build -q -t trueforge-browser-sidecar-test ops/browser-sidecar && docker run --rm --init -e BROWSER_TESTS_REQUIRED=1 --security-opt seccomp=ops/browser-sidecar/seccomp_profile.json --cap-drop ALL --security-opt no-new-privileges:true -v \"$PWD/ops/browser-sidecar/test:/app/test:ro\" trueforge-browser-sidecar-test xvfb-run --auto-servernum node --test --test-concurrency=1 \"test/*.test.mjs\"",
