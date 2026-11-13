@@ -17,7 +17,8 @@ import {
 import { canText, type TextNumberService } from './textNumber';
 import { allowedExtraWords, textBody, TEXTS_NOT_SET_UP, type FullWithheld } from './textWords';
 
-function maskedTarget(phone: string): string {
+/** How a number is named in Activity: by its last four digits only. */
+export function maskedTarget(phone: string): string {
   return `number ending ${phone.slice(-4)}`;
 }
 

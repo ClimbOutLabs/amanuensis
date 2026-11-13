@@ -115,6 +115,7 @@
   "Reach me": "packages/trueforge-ui/src/help/helpScreen.ts",
   "Open Reach me": "packages/trueforge-ui/src/deliveries/WatchMailNote.tsx",
   "Try it": "packages/trueforge-ui/src/deliveries/ReachPreferences.tsx",
+  "Phone calls": "packages/trueforge-ui/src/deliveries/ReachPreferences.tsx",
   "Call me for reminders I mark urgent": "packages/trueforge-ui/src/deliveries/ReachPreferences.tsx",
   "Send code": "packages/trueforge-ui/src/deliveries/TextsSettings.tsx",
   "Confirm": "packages/trueforge-ui/src/deliveries/TextsSettings.tsx",

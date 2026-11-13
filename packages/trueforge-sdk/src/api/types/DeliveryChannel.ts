@@ -4,5 +4,6 @@ export const DeliveryChannel = {
     InApp: "in_app",
     WebPush: "web_push",
     Sms: "sms",
+    Call: "call",
 } as const;
 export type DeliveryChannel = (typeof DeliveryChannel)[keyof typeof DeliveryChannel];

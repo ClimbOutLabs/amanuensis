@@ -84,7 +84,7 @@ import {
   type StreamDeadlineDetails,
 } from '../llm/streamDeadline';
 import { toOpenAIChatMessage } from '../llm/toOpenAIChatMessage';
-import { estimateTokensForString } from '../llm/usage';
+import { estimateTokensForString, PICTURE_TOKEN_ESTIMATE } from '../llm/usage';
 import {
   isContextLengthError,
   isRetryableProviderError,
@@ -211,6 +211,7 @@ import {
   EMAIL_PASSWORD_PROMPT,
   EMPTY_ANSWER_NUDGE_MESSAGE,
   emptyInspectionNudgeMessage,
+  estimateTokensForChatMessageContent,
   estimateTokensForContextMessages,
   failedBatchNudgeMessage,
   findHeldToolCalls,
@@ -236,6 +237,7 @@ import {
   NO_TASK_NO_TOOLS_PROMPT,
   noProgressNudgeMessage,
   personMessageIndex,
+  pictureCount,
   PLAIN_SPEECH_PROMPT,
   policyBlockedNudgeMessage,
   remapToolCallIdSet,
@@ -247,6 +249,7 @@ import {
   UNTRUSTED_TOOL_OUTPUT_PROMPT,
   WEB_IMAGES_PROMPT,
   withHostUniqueToolCallIds,
+  withoutEarlierThinking,
 } from './contextUtils';
 import { CALL_TOOL_NAME, DeferredTool, tryParseCallToolWrapper, tryUnwrapCallToolInput } from './DeferredTool';
 import { applyHostToolCallPolicy, type HostToolCallPolicy, type HostToolCallPolicyLogger } from './HostToolCallPolicy';
@@ -2043,6 +2046,17 @@ export class AgentThread {
             this.addBundleGuidance(builder, bundle);
             return builder.build();
           },
+          // A saved tool result is a JSON envelope, so the text sits in it as a JSON string.
+          inChat: text => {
+            const saved = JSON.stringify(text);
+            return this.context.some(
+              message =>
+                isLLMContextMessage(message) &&
+                message.role === 'tool' &&
+                typeof message.content === 'string' &&
+                message.content.includes(saved),
+            );
+          },
         });
     const capabilities = [
       ...(this.toolBundles === undefined ? [] : [this.toolBundles.capability()]),
@@ -2997,11 +3011,12 @@ export class AgentThread {
    * is assembled. Mirrors the message assembly in transformToLLMRequest without
    * building the full request body.
    *
-   * Context messages are estimated text-only (see contextMessageTextTokens):
-   * toOpenAIChatMessage preserves image_url / input_audio / file parts with
-   * their full base64 payloads, which the length/4 heuristic would inflate
-   * wildly (a 1MB image reads as ~340k tokens) while the provider does not
-   * bill those bytes as text tokens.
+   * Context messages are estimated with estimateTokensForContextMessages, the
+   * same count compaction sizes its kept tail with: text, tool calls and replayed
+   * thinking. The base64 bytes of a picture are never counted as text (a 1MB image
+   * would read as ~340k tokens); each picture counts as a fixed amount instead,
+   * because the model does take it into its context. What is added for this one
+   * request (recalled memories, screenshots) is counted too.
    *
    * Bails out early once the running total already exceeds `limit`: this runs on
    * every turn, and precision past the guard threshold buys nothing. Pass
@@ -3030,11 +3045,20 @@ export class AgentThread {
         }
       }
     }
-    for (const message of this.context) {
-      total += contextMessageTextTokens(message);
+    // A model that cannot read pictures is sent a line of text in place of each one.
+    const countPictures = this.definition.modelSupportsVision === true;
+    for (const message of withoutEarlierThinking(this.context)) {
+      total += estimateTokensForContextMessages([message]).prompt_tokens;
+      if (countPictures && isLLMContextMessage(message)) {
+        total += pictureCount(message.content) * PICTURE_TOKEN_ESTIMATE;
+      }
       if (total > limit) {
         return total;
       }
+    }
+    total += this.estimateEphemeralTokens();
+    if (total > limit) {
+      return total;
     }
     const taskStateBlock = renderTaskStateBlock({
       state: this.taskState,
@@ -3048,6 +3072,39 @@ export class AgentThread {
     }
     total += estimateTokensForString(JSON.stringify(tools));
     return total;
+  }
+
+  /** The saved chat as it is sent: no `tool_info`, no approval rows, no thinking from earlier replies. */
+  private contextAsChatMessages(): ChatCompletionMessageParam[] {
+    return withoutEarlierThinking(this.context)
+      .filter(message => !isLegacyIncompleteReasoningMessage(message))
+      .filter(isLLMContextMessage)
+      .map(msg => withoutHostNotices(toOpenAIChatMessage(msg)));
+  }
+
+  /**
+   * Tokens of what is added to this one request and never saved: recalled memories, the latest
+   * screenshots. They are sent like any other message, so the size check has to count them.
+   */
+  private estimateEphemeralTokens(): number {
+    if (this.preEphemeralLLMContextProcessors.length === 0) {
+      return 0;
+    }
+    const saved = this.contextAsChatMessages();
+    const modelSupportsVision = this.definition.modelSupportsVision === true;
+    let messages = saved;
+    for (const processor of this.preEphemeralLLMContextProcessors) {
+      messages = processor.processPreLLMEphemeral(messages, { modelSupportsVision }) ?? messages;
+    }
+    // The difference in size, not the new objects: a processor may hand back a saved message as
+    // a copy, and that copy must not count twice.
+    const size = (list: readonly ChatCompletionMessageParam[]): number =>
+      list.reduce(
+        (total, message) =>
+          total + estimateTokensForChatMessageContent({ content: message.content, countPictures: modelSupportsVision }),
+        0,
+      );
+    return Math.max(0, size(messages) - size(saved));
   }
 
   private transformToLLMRequest(tools: ChatCompletionTool[]): LLMCreateParamsStreaming {
@@ -3067,14 +3124,7 @@ export class AgentThread {
       }
     }
 
-    // NOTE: all this code-golf is to remove `tool_info` before sending the message to Gateway
-    // ApprovalDecisionMessage rows are persisted in context but must not be sent to the LLM.
-    const contextMessages = this.context
-      .filter(message => !isLegacyIncompleteReasoningMessage(message))
-      .filter(isLLMContextMessage)
-      .map(msg => withoutHostNotices(toOpenAIChatMessage(msg)));
-
-    messages.push(...contextMessages);
+    messages.push(...this.contextAsChatMessages());
 
     // Order is the cache order: static instruction, history, then this reply's fixed block
     // and the ephemeral recall block, both just before the current message. The history and
@@ -3865,7 +3915,9 @@ export class AgentThread {
     let result: IteratorResult<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage>;
     // The request's size in tokens, estimated from the context it is built from; the silence
     // report names it, so an oversized request is visible in the one line that reports the ending.
-    const requestTokenEstimate = Math.round(estimateTokensForContextMessages(this.context).prompt_tokens);
+    const requestTokenEstimate = Math.round(
+      estimateTokensForContextMessages(withoutEarlierThinking(this.context)).prompt_tokens,
+    );
     // A step that goes silent is retried once before the turn ends: the finished tool results
     // behind it stay in the history the retry sends, and a partial tool call never runs because
     // calls only execute from a completed step. Only a second silence ends the step.
@@ -6247,11 +6299,6 @@ function contextMessageTextLength(message: ContextMessage): number {
     return total;
   }
   return 0;
-}
-
-/** Token estimate for one context message counting text only; see contextMessageTextLength. */
-function contextMessageTextTokens(message: ContextMessage): number {
-  return contextMessageTextLength(message) / 4;
 }
 
 function estimateRawContextTextLength(context: readonly ContextMessage[]): number {

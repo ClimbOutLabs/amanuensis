@@ -39,7 +39,7 @@ The first time you turn it on, Aman starts from that moment, so old mail doesn't
 
 - A note is quiet. It waits under the bell. Most things are notes.
 - A nudge is a notice on the devices where you turned notices on.
-- A call is a phone call. Calls are not set up yet.
+- A call is a phone call, once the owner sets up Twilio, the voice parts are running and you switch calls on. Until then it comes as a nudge.
 
 A model suggests how loudly to tell you, and your settings decide. The model's words show only under the bell, never in a notice or a text on your phone. In Full mode, a text carries only a reminder's own words. Words in a message, such as "urgent", can never make it louder than a note. Aman sends at most 5 nudges a day unless you change that. Reminders you set never count toward that limit.
 
@@ -66,7 +66,7 @@ To stop notices on a device, open the same page on that device and click **Turn 
 
 1. Click **More** in the left bar, then **Settings**, then **Reach me**.
 2. Click **Try it** next to a way to reach you.
-3. A test item shows under the bell. For notices, Aman also says how many devices it reached.
+3. A test item shows under the bell. For notices, Aman also says how many devices it reached. For texts, your phone gets a test text. For calls, your phone rings.
 
 ## Read what Aman sent
 

@@ -52,7 +52,7 @@ export function plainText(text: string): string {
  * What a Private text says: only the kind of thing. It never carries a name, an amount or any content, because a
  * text can show on a locked screen and travels through the phone company.
  */
-function privatePhrase(kind: DeliveryKind): string {
+export function privatePhrase(kind: DeliveryKind): string {
   switch (kind) {
     case 'reminder':
       return 'a reminder is due';

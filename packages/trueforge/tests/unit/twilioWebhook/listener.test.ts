@@ -1,12 +1,14 @@
-import { createServer } from 'node:net';
+import { connect, createServer } from 'node:net';
 import { Writable } from 'node:stream';
 
 import winston from 'winston';
+import WebSocket from 'ws';
 
 import {
   EMPTY_TWIML,
   startTwilioWebhookListener,
   twilioListenerFor,
+  type TwilioSocketRoute,
   type TwilioWebhookRoute,
 } from '../../../src/twilioWebhook/listener';
 import { twilioSignature } from '../../../src/twilioWebhook/signature';
@@ -174,6 +176,94 @@ describe('the Twilio listener', () => {
       expect(JSON.stringify(errors)).not.toContain('5550111');
     } finally {
       await failing.close();
+    }
+  });
+});
+
+describe('a socket route that fails', () => {
+  it('refuses the socket when looking up the id throws at once, opens nothing and keeps serving', async () => {
+    const open = jest.fn();
+    const sockets: TwilioSocketRoute[] = [
+      {
+        path: '/twilio/stream',
+        idShape: /^[a-z]{4}$/,
+        admits: () => {
+          throw new Error('lookup failed');
+        },
+        open,
+      },
+    ];
+    const handle = jest.fn().mockResolvedValue({ status: 200, body: EMPTY_TWIML });
+    const server = await startTwilioWebhookListener({
+      settings,
+      hostname: '127.0.0.1',
+      routes: [{ method: 'POST', path: '/twilio/test', handle }],
+      sockets,
+      logger,
+    });
+    const port = await listeningPort(server);
+    try {
+      const path = '/twilio/stream/abcd';
+      const socket = new WebSocket(`ws://127.0.0.1:${String(port)}${path}`, {
+        headers: {
+          'x-twilio-signature': twilioSignature({
+            authToken: settings.authToken,
+            url: `${settings.webhookPublicUrl}${path}`,
+            params: new URLSearchParams(),
+          }),
+        },
+      });
+      const refused = await new Promise<number | undefined>(resolve => {
+        socket.on('unexpected-response', (_request, response) => {
+          resolve(response.statusCode);
+        });
+        socket.on('open', () => {
+          resolve(undefined);
+        });
+        socket.on('error', () => undefined);
+      });
+      expect(refused).toBe(404);
+      expect(open).not.toHaveBeenCalled();
+      const reply = await fetch(`http://127.0.0.1:${String(port)}/twilio/test`, {
+        method: 'POST',
+        ...signed({ path: '/twilio/test', fields: { A: 'b' } }),
+      });
+      expect(reply.status).toBe(200);
+    } finally {
+      await closeServer(server);
+    }
+  });
+});
+
+describe('an upgrade whose address cannot be read', () => {
+  it('is answered with 404 and the listener keeps serving', async () => {
+    const server = await startTwilioWebhookListener({
+      settings,
+      hostname: '127.0.0.1',
+      routes: [],
+      sockets: [
+        { path: '/twilio/stream', idShape: /^[a-z]{4}$/, admits: () => Promise.resolve(true), open: jest.fn() },
+      ],
+      logger,
+    });
+    const port = await listeningPort(server);
+    try {
+      const socket = connect({ host: '127.0.0.1', port });
+      const reply = await new Promise<string>(resolve => {
+        let seen = '';
+        socket.on('data', chunk => {
+          seen += chunk.toString('utf8');
+        });
+        socket.on('close', () => {
+          resolve(seen);
+        });
+        socket.on('error', () => undefined);
+        socket.write('GET http://[::1 HTTP/1.1\r\nHost: x\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n');
+      });
+      expect(reply).toMatch(/^HTTP\/1\.1 (404|400)/);
+      expect((await fetch(`http://127.0.0.1:${String(port)}/twilio/none`, { method: 'POST' })).status).toBe(404);
+    } finally {
+      await closeServer(server);
     }
   });
 });

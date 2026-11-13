@@ -1,7 +1,15 @@
 import { z } from 'zod';
 
 import type { TwilioSettings } from '../../config';
-import { fetchPublicUrl, type ResolveAddresses } from '../publicFetch';
+import type { ResolveAddresses } from '../publicFetch';
+import {
+  postTwilioForm,
+  publicTwilioFetch,
+  twilioAccount,
+  twilioErrorCode,
+  twilioRefusal,
+  type TwilioFetch,
+} from '../twilio/rest';
 
 /** Why a text was not sent. The words for the person are written by whoever shows it. */
 export type SmsFailure = 'opted_out' | 'invalid_number' | 'not_accepted' | 'unreachable';
@@ -114,55 +122,9 @@ function hostOf(url: string | null | undefined): string | null {
   }
 }
 
-const SEND_TIMEOUT_MS = 15_000;
-
 /** What Twilio answers with when it will not send; only the error code is read, never its message, which can hold the number. */
 const OPTED_OUT_CODES = new Set([21610]);
 const INVALID_NUMBER_CODES = new Set([21211, 21214, 21217, 21408, 21614, 21612]);
-
-interface TwilioReply {
-  status: number;
-  text: () => Promise<string>;
-}
-
-/** One call to Twilio's REST API. */
-export type TwilioFetch = (input: {
-  method: 'GET' | 'POST';
-  url: string;
-  headers: Record<string, string>;
-  body?: Uint8Array<ArrayBuffer>;
-}) => Promise<TwilioReply>;
-
-function publicTwilioFetch(resolveAddresses: ResolveAddresses | undefined): TwilioFetch {
-  return async ({ method, url, headers, body }) => {
-    const result = await fetchPublicUrl(url, {
-      fetchImpl: undefined,
-      resolveAddresses,
-      timeoutMs: SEND_TIMEOUT_MS,
-      maxRedirects: 0,
-      method,
-      headers,
-      ...(body === undefined ? {} : { body }),
-      allowHop: undefined,
-      describe: () => 'Twilio could not be reached.',
-    });
-    const text = await result.response.text().catch(() => '');
-    await result.release();
-    return { status: result.response.status, text: () => Promise.resolve(text) };
-  };
-}
-
-function errorCode(text: string): number | undefined {
-  try {
-    const parsed: unknown = JSON.parse(text);
-    if (typeof parsed === 'object' && parsed !== null && 'code' in parsed && typeof parsed.code === 'number') {
-      return parsed.code;
-    }
-  } catch {
-    // An answer that is not JSON has no code to read.
-  }
-  return undefined;
-}
 
 /** One of the account's numbers as Twilio lists it. Only these fields are read, and the id must look like one. */
 const TwilioNumberSchema = z.object({
@@ -208,13 +170,7 @@ export function createTwilioSmsProvider({
   resolveAddresses?: ResolveAddresses;
   fetchTwilio?: TwilioFetch;
 }): SmsProvider & NumberPointer {
-  const account = `https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(settings.accountSid)}`;
-  const authorization = `Basic ${Buffer.from(`${settings.accountSid}:${settings.authToken}`).toString('base64')}`;
-  const headers = { Authorization: authorization, Accept: 'application/json' };
-  const formHeaders = { ...headers, 'Content-Type': 'application/x-www-form-urlencoded' };
-  const refused = (status: number): PointNumberResult => ({
-    result: status === 401 || status === 403 ? 'not_accepted' : 'unreachable',
-  });
+  const { url: account, headers } = twilioAccount(settings);
   return {
     // So nobody has to set it by hand in the Twilio console. A number already pointed there, or not in the account,
     // is left alone.
@@ -226,7 +182,7 @@ export function createTwilioSmsProvider({
           headers,
         });
         if (lookup.status !== 200) {
-          return refused(lookup.status);
+          return { result: twilioRefusal(lookup.status) };
         }
         const entry = numberEntry({ text: await lookup.text(), fromNumber: settings.fromNumber });
         if (entry === undefined) {
@@ -235,15 +191,15 @@ export function createTwilioSmsProvider({
         if (entry.sms_url === smsUrl && entry.sms_method === 'POST') {
           return { result: 'already_set' };
         }
-        const update = await fetchTwilio({
-          method: 'POST',
-          url: `${account}/IncomingPhoneNumbers/${entry.sid}.json`,
-          headers: formHeaders,
-          body: new TextEncoder().encode(new URLSearchParams({ SmsUrl: smsUrl, SmsMethod: 'POST' }).toString()),
+        const update = await postTwilioForm({
+          fetchTwilio,
+          settings,
+          resource: `IncomingPhoneNumbers/${entry.sid}.json`,
+          form: new URLSearchParams({ SmsUrl: smsUrl, SmsMethod: 'POST' }),
         });
         return update.status >= 200 && update.status < 300
           ? { result: 'updated', replaced_host: entry.sms_url === smsUrl ? null : hostOf(entry.sms_url) }
-          : refused(update.status);
+          : { result: twilioRefusal(update.status) };
       } catch {
         return { result: 'unreachable' };
       }
@@ -252,16 +208,11 @@ export function createTwilioSmsProvider({
     async send({ to, body }) {
       const form = new URLSearchParams({ To: to, From: settings.fromNumber, Body: body });
       try {
-        const reply = await fetchTwilio({
-          method: 'POST',
-          url: `${account}/Messages.json`,
-          headers: formHeaders,
-          body: new TextEncoder().encode(form.toString()),
-        });
+        const reply = await postTwilioForm({ fetchTwilio, settings, resource: 'Messages.json', form });
         if (reply.status >= 200 && reply.status < 300) {
           return { outcome: 'sent' };
         }
-        const code = errorCode(await reply.text());
+        const code = twilioErrorCode(await reply.text());
         if (code !== undefined && OPTED_OUT_CODES.has(code)) {
           return { outcome: 'failed', failure: 'opted_out' };
         }
@@ -270,7 +221,7 @@ export function createTwilioSmsProvider({
         }
         return {
           outcome: 'failed',
-          failure: reply.status === 401 || reply.status === 403 ? 'not_accepted' : 'unreachable',
+          failure: twilioRefusal(reply.status),
         };
       } catch {
         return { outcome: 'failed', failure: 'unreachable' };
