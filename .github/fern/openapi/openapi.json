@@ -2024,6 +2024,9 @@
             "description": "True when the server derives this provider from its environment; it is read-only here.",
             "type": "boolean"
           },
+          "last_check": {
+            "$ref": "#/components/schemas/ModelProviderCheck"
+          },
           "manifest": {
             "$ref": "#/components/schemas/ModelProviderManifest"
           },
@@ -8126,6 +8129,40 @@
           "api_key"
         ],
         "type": "object"
+      },
+      "ModelProviderCheck": {
+        "additionalProperties": false,
+        "description": "Outcome of the connection check run when this provider was last saved. Absent when no check has run.",
+        "properties": {
+          "checked_at": {
+            "description": "ISO-8601 UTC instant the check ran.",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ModelProviderCheckKind"
+          },
+          "message": {
+            "description": "The outcome in plain words, including the one step to take when something went wrong.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "message",
+          "checked_at"
+        ],
+        "type": "object"
+      },
+      "ModelProviderCheckKind": {
+        "enum": [
+          "answered",
+          "key_refused",
+          "unreachable",
+          "timed_out",
+          "server_error"
+        ],
+        "type": "string"
       },
       "ModelProviderManifest": {
         "discriminator": {
