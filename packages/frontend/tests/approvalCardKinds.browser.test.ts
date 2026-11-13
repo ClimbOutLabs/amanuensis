@@ -37,37 +37,33 @@ async function checkKinds(page: Page, width: number): Promise<void> {
   const bodyText = await page.evaluate(() => document.body.innerText);
   assert.ok(!bodyText.includes(TOKEN), 'an internal id reached the page');
 
-  // Safe-first kinds: the safe choice leads as the primary button; the action follows, not primary.
-  const safeFirst: { testId: string; safe: string; action: string }[] = [
-    { testId: 'kind-calendar', safe: 'Keep it', action: 'Allow' },
-    { testId: 'kind-email', safe: "Don't send", action: 'Allow' },
-    { testId: 'kind-payment', safe: 'Keep it', action: 'Allow' },
+  // Allow leads on every kind, safe-first ones too; a safe-first card keeps its safe words on the last choice.
+  const kinds: { testId: string; no: string }[] = [
+    { testId: 'kind-calendar', no: 'Keep it' },
+    { testId: 'kind-email', no: "Don't send" },
+    { testId: 'kind-payment', no: 'Keep it' },
+    { testId: 'kind-file', no: 'Not now' },
+    { testId: 'kind-sandbox', no: 'Not now' },
   ];
-  for (const { testId, safe, action } of safeFirst) {
+  for (const { testId, no } of kinds) {
     const card = page.getByTestId(testId);
     const order = await buttonOrder(card);
-    assert.equal(order[0], safe, `${testId} does not lead with the safe choice: ${order.join(', ')}`);
-    assert.equal(order[1], action, `${testId} does not put the action second: ${order.join(', ')}`);
-    const safeButton = card.getByRole('button', { name: safe, exact: true });
-    assert.equal(
-      await safeButton.getAttribute('data-approval-primary'),
-      'true',
-      `${testId} safe choice is not primary`,
-    );
-    const actionButton = card.getByRole('button', { name: action, exact: true });
-    assert.equal(await actionButton.getAttribute('data-approval-primary'), null, `${testId} action is still primary`);
-    const actionClass = await actionButton.getAttribute('class');
-    assert.ok(
-      actionClass !== null && actionClass.includes('text-failure-bg'),
-      `${testId} action is not in the destructive ink`,
-    );
+    assert.equal(order[0], 'Allow', `${testId} does not lead with Allow: ${order.join(', ')}`);
+    assert.equal(order.at(-1), no, `${testId} does not end with ${no}: ${order.join(', ')}`);
   }
 
-  // Reversible kinds keep the action primary.
-  for (const testId of ['kind-file', 'kind-sandbox']) {
-    const card = page.getByTestId(testId);
-    const allow = card.getByRole('button', { name: 'Allow', exact: true });
-    assert.equal(await allow.getAttribute('data-approval-primary'), 'true', `${testId} lost its primary action`);
+  // No choice is filled or inked: every button in every row has the same outlined look.
+  const looks = await page.evaluate(() =>
+    Array.from(document.querySelectorAll<HTMLElement>('.aui-approval-card__actions button')).map(button => {
+      const style = getComputedStyle(button);
+      return { label: button.innerText.trim(), background: style.backgroundColor, color: style.color };
+    }),
+  );
+  const first = looks[0];
+  assert.ok(first !== undefined, 'no approval buttons rendered');
+  for (const look of looks) {
+    assert.equal(look.background, first.background, `"${look.label}" is filled differently from "${first.label}"`);
+    assert.equal(look.color, first.color, `"${look.label}" has a different ink from "${first.label}"`);
   }
 
   // The reason shows on its own line under the question, with nothing to open.
@@ -76,7 +72,7 @@ async function checkKinds(page: Page, width: number): Promise<void> {
   assert.equal(await calendar.getByText(reason).isVisible(), true, 'the reason line does not show under the question');
 }
 
-test('every approval card kind fits a phone and a desktop, safe choice first', { timeout: 240_000 }, async () => {
+test('every approval card kind fits a phone and a desktop, Allow first', { timeout: 240_000 }, async () => {
   const frontendRoot = fileURLToPath(new URL('../', import.meta.url));
   const viteCache = privateViteCache('approval-card-kinds');
   const server = await createServer({

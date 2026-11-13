@@ -144,7 +144,7 @@ describe('PermissionApprovalCard', () => {
     expect(document.querySelectorAll('p > svg')).toHaveLength(0);
   });
 
-  it('puts the safe choice first as the primary button on a destructive card, with the reason under the question', () => {
+  it('puts Allow first and the safe choice last, all alike, on a destructive card, with the reason under the question', () => {
     const { onApprove, onDeny } = renderCard({
       copy: {
         headline: 'Delete "Dentist", Fri 7 Nov, 3:00 PM?',
@@ -163,10 +163,14 @@ describe('PermissionApprovalCard', () => {
     const buttons = screen
       .getAllByRole('button')
       .filter(button => ['Keep it', 'Allow'].includes(button.textContent ?? ''));
-    expect(buttons.map(button => button.textContent)).toEqual(['Keep it', 'Allow']);
-    expect(buttons[0]?.hasAttribute('data-approval-primary')).toBe(true);
-    expect(buttons[1]?.hasAttribute('data-approval-primary')).toBe(false);
-    expect(buttons[1]?.className).toMatch(/text-failure-bg/);
+    expect(buttons.map(button => button.textContent)).toEqual(['Allow', 'Keep it']);
+    for (const button of buttons) {
+      expect(button.className).toMatch(/bg-secondary-button-bg/);
+      expect(button.className).not.toMatch(/bg-primary-button-bg|text-failure-bg/);
+    }
+    // Keyboard focus still lands on the safe choice, so Enter after jumping to the card does not delete.
+    expect(buttons[0]?.hasAttribute('data-approval-primary')).toBe(false);
+    expect(buttons[1]?.hasAttribute('data-approval-primary')).toBe(true);
     expect(screen.queryByRole('button', { name: 'Not now' })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Keep it' }));
@@ -198,7 +202,7 @@ describe('PermissionApprovalCard', () => {
     ).toBeInTheDocument();
   });
 
-  it('keeps the action primary and the safe choice quiet on a reversible card', () => {
+  it('puts Allow first and fills no choice on a reversible card', () => {
     renderCard({
       copy: {
         headline: 'Write the summary into notes.md?',
@@ -208,7 +212,11 @@ describe('PermissionApprovalCard', () => {
     });
     const allow = screen.getByRole('button', { name: 'Allow' });
     expect(allow.hasAttribute('data-approval-primary')).toBe(true);
-    expect(screen.getByRole('button', { name: 'Not now' })).toBeInTheDocument();
+    const labels = screen.getAllByRole('button').map(button => button.textContent);
+    expect(labels.indexOf('Allow')).toBe(0);
+    expect(labels.indexOf('Not now')).toBeGreaterThan(0);
+    expect(allow.className).toMatch(/bg-secondary-button-bg/);
+    expect(allow.className).not.toMatch(/bg-primary-button-bg/);
     expect(screen.getByText('This kind of write always asks.')).toBeInTheDocument();
   });
 

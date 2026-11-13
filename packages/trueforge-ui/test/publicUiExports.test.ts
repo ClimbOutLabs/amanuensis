@@ -206,6 +206,7 @@ const expectedRuntimeExports: Array<keyof typeof sdk> = [
   'railMenuRowClassName',
   'menuTriggerFor',
   'EmailApprovalCard',
+  'HeldActionCard',
   'Toast',
   'ToastStack',
   'ToolCallCard',

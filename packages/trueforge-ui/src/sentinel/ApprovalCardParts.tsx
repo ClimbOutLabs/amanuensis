@@ -139,18 +139,17 @@ export function ApprovalActions({ children, end }: { children: ReactNode; end?: 
   );
 }
 
-/** One choice in the row. Only the main yes is filled; every other choice is the same outlined button. */
-export const ApprovalButton = forwardRef<
-  HTMLButtonElement,
-  Omit<ComponentProps<typeof Button>, 'variant' | 'size'> & { main?: boolean }
->(function ApprovalButton({ main = false, className, ...props }, ref) {
-  return (
-    <Button
-      ref={ref}
-      variant={main ? 'primary' : 'secondary'}
-      size="large"
-      className={cn('aui-approval-card__choice', className)}
-      {...props}
-    />
-  );
-});
+/** One choice in the row. Every choice is the same outlined button, so none is pressed on the person. */
+export const ApprovalButton = forwardRef<HTMLButtonElement, Omit<ComponentProps<typeof Button>, 'variant' | 'size'>>(
+  function ApprovalButton({ className, ...props }, ref) {
+    return (
+      <Button
+        ref={ref}
+        variant="secondary"
+        size="large"
+        className={cn('aui-approval-card__choice', className)}
+        {...props}
+      />
+    );
+  },
+);

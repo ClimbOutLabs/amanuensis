@@ -403,6 +403,8 @@ export { useRuntimeConnectivity } from './hooks/useRuntimeConnectivity.js';
 export type { RuntimeConnectivity, UseRuntimeConnectivityOptions } from './hooks/useRuntimeConnectivity.js';
 export { EmailApprovalCard } from './sentinel/EmailApprovalCard.js';
 export type { EmailApprovalCardProps } from './sentinel/EmailApprovalCard.js';
+export { HeldActionCard } from './sentinel/HeldActionCard.js';
+export type { HeldActionCardProps, HeldActionStatus } from './sentinel/HeldActionCard.js';
 export { OfflineIndicator } from './sentinel/OfflineIndicator.js';
 export { PermissionApprovalCard } from './sentinel/PermissionApprovalCard.js';
 export type { PermissionApprovalCardProps } from './sentinel/PermissionApprovalCard.js';

@@ -106,6 +106,27 @@ describe('HeldActionCard', () => {
     expect(screen.queryByRole('button', { name: 'Always allow everywhere' })).not.toBeInTheDocument();
   });
 
+  it('puts Approve first and Keep it last on a safe-first destructive card, with no filled button', () => {
+    const { onApprove, onDeny } = renderCard(
+      { alwaysAllowOffered: true, onChangeRequest: vi.fn() },
+      { safe_choice: true, destructive: true },
+    );
+    const buttons = screen.getAllByRole('button');
+    expect(buttons.map(button => button.textContent)).toEqual([
+      'Approve',
+      'Always allow everywhere',
+      'Change it',
+      'Keep it',
+    ]);
+    for (const button of buttons) {
+      expect(button.className).toMatch(/bg-secondary-button-bg/);
+      expect(button.className).not.toMatch(/bg-primary-button-bg|text-failure-bg/);
+    }
+    fireEvent.click(screen.getByRole('button', { name: 'Keep it' }));
+    expect(onDeny).toHaveBeenCalledTimes(1);
+    expect(onApprove).not.toHaveBeenCalled();
+  });
+
   it('offers Always allow everywhere only when the server said it may', () => {
     renderCard({ alwaysAllowOffered: false });
     expect(screen.queryByRole('button', { name: 'Always allow everywhere' })).not.toBeInTheDocument();

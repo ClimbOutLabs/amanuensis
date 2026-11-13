@@ -254,6 +254,31 @@ describe('EmailApprovalCard actions', () => {
     expect(screen.queryByRole('button', { name: 'Allow' })).not.toBeInTheDocument();
   });
 
+  it("puts Allow first and Don't send last on a safe-first send, all alike, and each sends its own answer", () => {
+    const onApprove = vi.fn();
+    const onDeny = vi.fn();
+    render(
+      <EmailApprovalCard
+        approvalId="approval-1"
+        card={{ ...cardWith(), safe_choice: true, destructive: true }}
+        onApprove={onApprove}
+        onDeny={onDeny}
+        onChangeRequest={vi.fn()}
+        onSaveDraft={vi.fn()}
+      />,
+    );
+    const buttons = screen.getAllByRole('button').filter(button => button.closest('section') === null);
+    expect(buttons.map(button => button.textContent)).toEqual(['Allow', 'Edit', 'Save as draft', "Don't send"]);
+    for (const button of buttons) {
+      expect(button.className).toMatch(/bg-secondary-button-bg/);
+      expect(button.className).not.toMatch(/bg-primary-button-bg|text-failure-bg/);
+    }
+    expect(screen.getByRole('button', { name: "Don't send" }).hasAttribute('data-approval-primary')).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: "Don't send" }));
+    expect(onDeny).toHaveBeenCalledTimes(1);
+    expect(onApprove).not.toHaveBeenCalled();
+  });
+
   it('calls onDeny from Not now', () => {
     const { onDeny } = renderEmail();
     fireEvent.click(screen.getByRole('button', { name: 'Not now' }));
@@ -327,6 +352,22 @@ describe('EmailApprovalCard for a new recipient', () => {
     const labels = screen.getAllByRole('button').map(button => button.textContent);
     expect(labels).toEqual(['Add and send', 'Edit', 'Save as draft', "Don't send"]);
     expect(screen.getByText('grace@example.com, lin@example.com')).toBeInTheDocument();
+  });
+
+  it("keeps Add and send first and Don't send last on a safe-first card, with no filled button", () => {
+    render(
+      <EmailApprovalCard
+        approvalId="approval-1"
+        card={{ ...card, safe_choice: true, destructive: true }}
+        onApprove={vi.fn()}
+        onDeny={vi.fn()}
+      />,
+    );
+    const buttons = screen.getAllByRole('button');
+    expect(buttons.map(button => button.textContent)).toEqual(['Add and send', "Don't send"]);
+    for (const button of buttons) {
+      expect(button.className).not.toMatch(/bg-primary-button-bg|text-failure-bg/);
+    }
   });
 
   it('says in the server sentence that approving adds the address and sends', () => {

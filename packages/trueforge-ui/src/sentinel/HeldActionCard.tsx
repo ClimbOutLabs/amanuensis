@@ -2,7 +2,6 @@
 
 import { useRef, useState, type FC, type ReactNode } from 'react';
 
-import { cn } from '../atoms/lib/cn.js';
 import { useAssistantDisplayName } from '../components/PersonalizationContext.js';
 import { Icon } from '../icons/Icon.js';
 import { AlwaysAllowToolControl } from './AlwaysAllowToolControl.js';
@@ -126,10 +125,10 @@ export const HeldActionCard: FC<HeldActionCardProps> = ({
     : newRecipients
       ? NEW_RECIPIENT_CHOICES.cancel
       : APPROVAL_CHOICES.deny;
-  // The server marks a card safe-first when the action is irreversible or reaches other people:
-  // the safe choice is then the primary button and the action follows it.
-  const safeFirst = card.safe_choice === true;
-  const safeLabel = newRecipients || newRecipientDraft ? denyChoice.label : safeVerb(card);
+  // Allow always leads the row and no choice is filled. On a card the server marks safe-first (irreversible,
+  // or reaching other people) the no at the end keeps its safe words, such as "Keep it".
+  const denyLabel =
+    card.safe_choice === true && !newRecipients && !newRecipientDraft ? safeVerb(card) : denyChoice.label;
   const consequence = cardConsequence(card);
 
   return (
@@ -185,18 +184,7 @@ export const HeldActionCard: FC<HeldActionCardProps> = ({
         )}
 
         <ApprovalActions>
-          {safeFirst && (
-            <ApprovalButton main title={denyChoice.hint} onClick={onDeny} disabled={disabled}>
-              {safeLabel}
-            </ApprovalButton>
-          )}
-          <ApprovalButton
-            main={!safeFirst}
-            title={approveChoice.hint}
-            onClick={onApprove}
-            disabled={disabled}
-            className={cn(safeFirst && card.destructive === true && 'text-failure-bg')}
-          >
+          <ApprovalButton title={approveChoice.hint} onClick={onApprove} disabled={disabled}>
             {approveChoice.label}
           </ApprovalButton>
           {alwaysAllowOffered && !newRecipients && (
@@ -224,11 +212,9 @@ export const HeldActionCard: FC<HeldActionCardProps> = ({
               {APPROVAL_CHOICES.changeIt.label}
             </ApprovalButton>
           )}
-          {!safeFirst && (
-            <ApprovalButton title={denyChoice.hint} onClick={onDeny} disabled={disabled}>
-              {denyChoice.label}
-            </ApprovalButton>
-          )}
+          <ApprovalButton title={denyChoice.hint} onClick={onDeny} disabled={disabled}>
+            {denyLabel}
+          </ApprovalButton>
         </ApprovalActions>
         {changing && onChangeRequest !== undefined && (
           <ChangeRequestBox

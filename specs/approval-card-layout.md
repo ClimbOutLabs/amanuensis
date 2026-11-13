@@ -14,7 +14,7 @@ One card layout, built from shared parts, for every approval card:
 2. **The question.** One short question, such as "Open a page on example.org?".
 3. **The reason.** One quiet sentence on why Aman is checking first, such as "Searches are set to ask, so Aman is checking with you first." It comes from the card's own wording (`copy.reason`), separate from the question, and is always visible. It replaces the old "Why I'm asking" button.
 4. **Facts, once.** Label and value rows in one box: Address or Where, To, Amount, Command. A fact the question already names is left out of the rows.
-5. **Choices in one row.** The main choice is filled; every other choice is the same outlined button. The order follows the card wording's safe-first rule: on a card where saying yes is risky (for example sending mail, or cancelling a reminder), the safe choice comes first and the yes is not the filled button. Otherwise the order is: yes, Always allow this here, Approve all, Change it, no.
+5. **Choices in one row.** Every choice is the same outlined button; none is filled, and the yes has no red ink. Each choice has one fixed place, the same on every card: yes (Allow, or Approve on a held action), Always allow in this chat, Always allow everywhere (held actions only; chat cards keep it in Details), Approve all, Change it (Edit on a mail card), Save as draft (mail only), then the no. A card leaves out the choices it does not offer, but never reorders the rest. On a card the server marks safe-first (`safe_choice`, for example sending mail, an event with guests, or a delete), the no stays last but uses safe words such as "Keep it" or "Don't send", and it is where keyboard focus lands when the person jumps to the card, so Enter does not send.
 6. **Details, only when it adds something.** The raw request and the standing grant fold behind Details. Details is hidden when the raw request only repeats a fact already shown.
 
 Mail keeps its own body block and sticky action bar, but uses the same status line, question, reason and fact rows.
@@ -24,6 +24,7 @@ Mail keeps its own body block and sticky action bar, but uses the same status li
 - **No string parsing.** The card wording (`copy`: headline, reason, consequence) already carries the question and the reason separately. The layout only places them; it never splits a sentence back out of the question.
 - **The reason stays in audit text.** The audit log still records the question and the reason together, so nothing is lost from the record.
 - **Quieter than the chat.** Only the question uses the chat body size, in semibold. The reason, the consequence, the facts and the buttons are one step smaller, and the status line is the smallest step. Order comes from weight and colour, not big size jumps, so a card never looks louder than the chat around it. A mail body stays at body size because it is what is being approved. Phone buttons stay at least 2.75rem tall.
+- **No pressed button.** One fixed order with Allow first is easier to learn than an order that flips on risky cards, and with no filled or red button the card does not steer the answer. The risk shows in the question, the consequence line and the safe words on the no.
 - **Phone first.** On a narrow screen the fact rows stack and the buttons share the row and wrap their labels instead of overflowing.
 - **One tick.** The old tear-off animation is gone. A small gold tick plays once on approval, under the same rules that limited the old animation.
 
@@ -40,7 +41,7 @@ No new data is collected, stored or sent. The reason sentence was already shown 
 ## Testing
 
 - Core tests check the browser question, the link-source sentence said once, and that the audit text keeps the reason.
-- UI tests check the layout order, that each fact shows once, the button order including safe-first, when Details appears, and the answered line.
+- UI tests check the layout order, that each fact shows once, that Allow comes first on every card including safe-first ones, that no choice is filled, that every card kind keeps each choice in its fixed place, when Details appears, and the answered line.
 - Browser tests check the cards at phone width with tall enough buttons, that only the question and a mail body are at body size, and that no line is below the smallest type step.
 - All test data is synthetic.
 

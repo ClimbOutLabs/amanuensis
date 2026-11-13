@@ -82,7 +82,7 @@ export function approvalQuestion(card: SentinelApprovalCard): string {
   return GENERIC_CARD_HEADLINE;
 }
 
-/** The verb on the primary button: Allow for every card, except a new-recipient card, which says it adds its addresses. */
+/** The verb on the first button: Allow for every card, except a new-recipient card, which says it adds its addresses. */
 export function approveVerb(card: SentinelApprovalCard): string {
   // Approving a new-recipient card adds its addresses to the send list, so it says so, in send or draft words.
   if (isNewRecipientDraftCard(card)) return NEW_RECIPIENT_DRAFT_CHOICES.approve.label;
@@ -98,8 +98,8 @@ export function declineVerb(card: SentinelApprovalCard): string {
 }
 
 /**
- * The words on the safe choice, which is the primary button whenever the server marks the card
- * safe-first: Keep it for a destructive action, Don't send or Don't save for mail, Not now otherwise.
+ * The words on the no choice, last in the row, whenever the server marks the card safe-first:
+ * Keep it for a destructive action, Don't send or Don't save for mail, Not now otherwise.
  * A new-recipient card keeps its own cancel words, which say what will not happen.
  */
 export function safeVerb(card: SentinelApprovalCard): string {

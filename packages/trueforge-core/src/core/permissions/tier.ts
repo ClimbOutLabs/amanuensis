@@ -300,11 +300,13 @@ export const Tier3CardSchema = z
     safe_choice: z
       .boolean()
       .optional()
-      .describe('True when the safe choice is the primary button: the action is irreversible or reaches other people.'),
+      .describe(
+        "True when the action is irreversible or reaches other people, so the no choice uses safe words such as Keep it or Don't send.",
+      ),
     destructive: z
       .boolean()
       .optional()
-      .describe('True when the action destroys or sends something for good, so its button wears the destructive ink.'),
+      .describe('True when the action destroys or sends something for good, so the no choice says Keep it.'),
     plain_why: z
       .string()
       .nullable()

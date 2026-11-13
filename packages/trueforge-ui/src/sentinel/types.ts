@@ -166,9 +166,9 @@ export type SentinelApprovalCard = {
   plain_what: string;
   /** The headline, consequence and reason the card renders, or null on cards saved before copy existed. */
   copy?: SentinelApprovalCopy | null | undefined;
-  /** True when the safe choice is the primary button: the action is irreversible or reaches other people. */
+  /** True when the action is irreversible or reaches other people: the no choice then uses safe words and takes keyboard focus. */
   safe_choice?: boolean | undefined;
-  /** True when the action destroys or sends something for good, so its button wears the destructive ink. */
+  /** True when the action destroys or sends something for good, so the no choice says Keep it. */
   destructive?: boolean | undefined;
   /** One sentence on why the agent wants this, from agent intent when available. */
   plain_why: string | null;

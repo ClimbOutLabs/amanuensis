@@ -102,6 +102,29 @@ test(
             };
           });
 
+          // Allow leads the row and no choice is filled or inked: every button has the same outlined look.
+          const choices = await page
+            .locator(`[data-card="${kind}"] .aui-approval-card__actions button`)
+            .evaluateAll(buttons =>
+              buttons.map(button => {
+                const style = getComputedStyle(button);
+                return {
+                  label: (button.textContent ?? '').trim(),
+                  background: style.backgroundColor,
+                  color: style.color,
+                };
+              }),
+            );
+          assert.equal(choices[0]?.label, 'Allow', `${kind} (${theme}): Allow is the first choice`);
+          for (const choice of choices) {
+            assert.equal(
+              choice.background,
+              choices[0]?.background,
+              `${kind} (${theme}): "${choice.label}" is not filled`,
+            );
+            assert.equal(choice.color, choices[0]?.color, `${kind} (${theme}): "${choice.label}" has the same ink`);
+          }
+
           assert.equal(`${card.title.size}px`, chat.size, `${kind} (${theme}): title is the chat's body size`);
           assert.equal(card.title.weight, '600', `${kind} (${theme}): title is semibold`);
           assert.equal(card.title.family, chat.family, `${kind} (${theme}): title uses the body font`);

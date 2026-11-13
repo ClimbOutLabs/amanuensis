@@ -37,7 +37,7 @@ If Aman cannot say what an action does, it shows no card. It refuses, says why, 
 
 A card stays on the screen until you answer it. If you don't want what it asks, click **Not now** and the card closes.
 
-On a card where the action cannot be undone, or where it reaches other people, the safe choice comes first and is the main button. On a delete it says **Keep it**. On a mail send it says **Don't send**. The button that does the thing comes after it.
+**Allow** is always the first button, and all the buttons look the same. Each button keeps the same place on every card. On a card where the action cannot be undone, or where it reaches other people, the last button uses safe words instead of **Not now**. On a delete it says **Keep it**. On a mail send it says **Don't send**.
 
 ## Stop the same question coming back
 
@@ -65,17 +65,17 @@ From then on, Aman asks before it uses that tool again.
 
 ## Mail cards
 
-A mail card shows who the mail goes to and its full text. The safe choice, **Don't send**, comes first as the main button.
+A mail card shows who the mail goes to and its full text.
 
 - Click **Allow** to send it.
-- Click **Save as draft** to keep it in your drafts without sending.
 - Click **Edit** to ask Aman to change it first.
-- Click **Not now** to stop it.
+- Click **Save as draft** to keep it in your drafts without sending.
+- Click **Don't send** to stop it.
 
-If the mail goes to an address that isn't on your Email list, the buttons change. The safe choice still comes first:
+If the mail goes to an address that isn't on your Email list, the buttons change:
 
-- **Don't send** stops it, and nothing is added to your list.
 - **Add and send** puts those addresses on your list, then sends.
+- **Don't send** stops it, and nothing is added to your list.
 
 When the card saves a draft instead, they read **Add and save draft** and **Don't save**.
 

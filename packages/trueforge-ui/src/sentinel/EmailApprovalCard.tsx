@@ -154,8 +154,8 @@ export const EmailApprovalCard: FC<EmailApprovalCardProps> = ({
     ...(email.reply_to === null ? [] : [{ label: 'Replies go to', value: email.reply_to }]),
     { label: 'Subject', value: email.subject === '' ? 'No subject' : email.subject },
   ];
-  // A send reaches other people and cannot be unsent, so the server marks its card safe-first:
-  // the safe choice is the main button and the send follows it in the destructive ink.
+  // A send reaches other people and cannot be unsent, so the server marks its card safe-first: the no then
+  // says "Don't send" and takes keyboard focus. Allow still leads the row and no choice is filled.
   const safeFirst = card.safe_choice === true;
   const consequence = cardConsequence(card);
 
@@ -214,24 +214,11 @@ export const EmailApprovalCard: FC<EmailApprovalCardProps> = ({
       {/* The negative margins match the card padding, so the bar spans the card edge to edge. */}
       <div className="sticky bottom-0 -mx-4 -mb-3.5 rounded-b-[0.625rem] bg-card-bg px-4 pb-3.5 pt-1">
         <ApprovalActions>
-          {safeFirst && (
-            <ApprovalButton
-              main
-              data-approval-primary
-              title={APPROVAL_CHOICES.deny.hint}
-              onClick={onDeny}
-              disabled={disabled}
-            >
-              {safeVerb(card)}
-            </ApprovalButton>
-          )}
           <ApprovalButton
-            main={!safeFirst}
             {...(safeFirst ? {} : { 'data-approval-primary': true })}
             title={APPROVAL_CHOICES.approve.hint}
             onClick={sendNow}
             disabled={disabled}
-            className={cn(safeFirst && card.destructive === true && 'text-failure-bg')}
           >
             {approveVerb(card)}
           </ApprovalButton>
@@ -252,11 +239,14 @@ export const EmailApprovalCard: FC<EmailApprovalCardProps> = ({
               {EMAIL_CHOICES.saveDraft.label}
             </ApprovalButton>
           )}
-          {!safeFirst && (
-            <ApprovalButton title={APPROVAL_CHOICES.deny.hint} onClick={onDeny} disabled={disabled}>
-              {declineVerb(card)}
-            </ApprovalButton>
-          )}
+          <ApprovalButton
+            {...(safeFirst ? { 'data-approval-primary': true } : {})}
+            title={APPROVAL_CHOICES.deny.hint}
+            onClick={onDeny}
+            disabled={disabled}
+          >
+            {safeFirst ? safeVerb(card) : declineVerb(card)}
+          </ApprovalButton>
         </ApprovalActions>
       </div>
     </ApprovalCardShell>

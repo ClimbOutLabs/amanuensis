@@ -2,7 +2,6 @@
 
 import { useRef, useState, type FC } from 'react';
 
-import { cn } from '../atoms/lib/cn.js';
 import { GoldTick } from '../atoms/Reward.js';
 import { useAssistantDisplayName } from '../components/PersonalizationContext.js';
 import { useRewardLedger } from '../hooks/useRewardLedger.js';
@@ -155,8 +154,8 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
   const alwaysOffered = onApproveAlways !== undefined && !newRecipients;
   const hasDetails = (!outboundOpen && outboundShown !== null) || plumbingText !== null || alwaysOffered;
   const consequence = cardConsequence(card);
-  // The server marks a card safe-first when the action is irreversible or reaches other people: the safe
-  // choice then leads the row as the main button, and Allow follows it.
+  // Allow always leads the row and no choice is filled. On a card the server marks safe-first (irreversible,
+  // or reaching other people) the no keeps its safe words and stays the keyboard focus target.
   const safeFirst = card.safe_choice === true;
 
   // The tick plays only for an approval the ledger allows; otherwise the card simply says it is done.
@@ -241,24 +240,11 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
       )}
 
       <ApprovalActions>
-        {safeFirst && (
-          <ApprovalButton
-            main
-            data-approval-primary
-            title={APPROVAL_CHOICES.deny.hint}
-            onClick={onDeny}
-            disabled={busy}
-          >
-            {safeVerb(card)}
-          </ApprovalButton>
-        )}
         <ApprovalButton
-          main={!safeFirst}
           {...(safeFirst ? {} : { 'data-approval-primary': true })}
           title={APPROVAL_CHOICES.approve.hint}
           onClick={markSent(onApprove)}
           disabled={busy || toolsChanged}
-          className={cn(safeFirst && card.destructive === true && 'text-failure-bg')}
         >
           {approveVerb(card)}
         </ApprovalButton>
@@ -290,11 +276,14 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
             {APPROVAL_CHOICES.changeIt.label}
           </ApprovalButton>
         )}
-        {!safeFirst && (
-          <ApprovalButton title={APPROVAL_CHOICES.deny.hint} onClick={onDeny} disabled={busy}>
-            {declineVerb(card)}
-          </ApprovalButton>
-        )}
+        <ApprovalButton
+          {...(safeFirst ? { 'data-approval-primary': true } : {})}
+          title={APPROVAL_CHOICES.deny.hint}
+          onClick={onDeny}
+          disabled={busy}
+        >
+          {safeFirst ? safeVerb(card) : declineVerb(card)}
+        </ApprovalButton>
       </ApprovalActions>
 
       {changing && onChangeRequest !== undefined && (

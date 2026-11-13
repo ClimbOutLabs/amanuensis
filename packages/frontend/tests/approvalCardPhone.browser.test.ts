@@ -68,6 +68,18 @@ test('both approval cards fit a 390 px phone with every choice in reach', { time
         // 2.75rem: the smallest comfortable tap target, kept even though the card's text is small.
         assert.ok(Math.round(box.height) >= 44, `${name} is ${String(box.height)} px tall, too short to tap`);
       }
+      // Allow comes first, and every choice has the same outlined look, so none is pushed.
+      const looks = await card.locator('.aui-approval-card__actions button').evaluateAll(buttons =>
+        buttons.map(button => {
+          const style = getComputedStyle(button);
+          return { label: (button.textContent ?? '').trim(), background: style.backgroundColor, color: style.color };
+        }),
+      );
+      assert.equal(looks[0]?.label, 'Allow', `the first choice is ${String(looks[0]?.label)}, not Allow`);
+      for (const look of looks) {
+        assert.equal(look.background, looks[0]?.background, `"${look.label}" is filled differently from Allow`);
+        assert.equal(look.color, looks[0]?.color, `"${look.label}" has a different ink from Allow`);
+      }
     }
 
     // The generic ticket shows who a draft goes to without opening Details.
