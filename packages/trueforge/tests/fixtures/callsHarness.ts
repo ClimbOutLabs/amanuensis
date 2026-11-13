@@ -52,6 +52,7 @@ export async function callsHarness({
   tts = new FakeTts(),
   speaking,
   redeemGate,
+  startSilence,
 }: {
   chat?: CallChat;
   assistantName?: string;
@@ -65,6 +66,8 @@ export async function callsHarness({
   speaking?: (owner: { tenant_id: string; created_by: string }) => SpeechSynthesizer;
   /** Holds each media key's redeem until it settles, so a test can drop the line meanwhile. */
   redeemGate?: { reached: () => void; open: Promise<void> };
+  /** Replaces the wait for an answer, so a test decides when it runs out instead of racing a clock. */
+  startSilence?: (fire: () => void, ms: number) => () => void;
 } = {}) {
   const db = createSqliteDb(':memory:');
   await migrateSqliteToLatest(db);
@@ -157,6 +160,7 @@ export async function callsHarness({
     listening,
     logger,
     ...(limits === undefined ? {} : { limits }),
+    ...(startSilence === undefined ? {} : { startSilence }),
     now: () => clock.now,
   });
   const deliveries = createDeliveryService({
