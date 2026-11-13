@@ -63,6 +63,37 @@ function toolRound({
   ];
 }
 
+/** The same round as a live turn sends it: an empty message, the call in pieces, then the host's record of the tool. */
+function streamedToolRound({
+  id,
+  name,
+  args = '{}',
+  connector,
+}: {
+  id: string;
+  name: string;
+  args?: string;
+  connector?: string;
+}): TurnStreamingEvent[] {
+  const [whole, response] = toolRound({ id, name, args, ...(connector === undefined ? {} : { connector }) });
+  if (whole?.type !== EventType.MODEL_MESSAGE || response === undefined) {
+    throw new Error('toolRound did not return a call and its result');
+  }
+  const [call] = whole.tool_calls ?? [];
+  const half = Math.ceil(name.length / 2);
+  const delta = { type: EventType.MODEL_MESSAGE_DELTA, id: whole.id, thread_id: 'main' } as const;
+  return [
+    { type: EventType.MODEL_MESSAGE, id: whole.id, thread_id: 'main', created_at: NOW },
+    {
+      ...delta,
+      tool_calls: [{ index: 0, id, type: 'function', function: { name: name.slice(0, half), arguments: '' } }],
+    },
+    { ...delta, tool_calls: [{ index: 0, function: { name: name.slice(half), arguments: args } }] },
+    { ...delta, tool_calls: [{ index: 0, ...(call === undefined ? {} : { tool_info: call.tool_info }) }] },
+    response,
+  ];
+}
+
 async function* doneStream({
   earlier,
   reply,
@@ -269,6 +300,36 @@ describe('drainTurnEvents memory origin', () => {
     const args = JSON.stringify({ mcp_server: 'notes', tool_name: 'record_finding', input: {} });
     const earlier = toolRound({ id: 'c1', name: 'call_tool', args, connector: 'notes' });
     expect(await retainedOrigin({ attachedFiles: false, earlier })).toBe('tool_ingested');
+  });
+
+  describe('a live turn, which sends each call in pieces', () => {
+    it.each(['remember_fact', 'list_pages', 'record_finding'])(
+      'does not mark a turn that only used the host tool %s',
+      async name => {
+        const earlier = streamedToolRound({ id: 'c1', name });
+        expect(await retainedOrigin({ attachedFiles: false, earlier })).toBe('user_stated');
+      },
+    );
+
+    it('marks a turn that used a connector tool, also one named like a page tool', async () => {
+      for (const name of ['search_pages', 'remember_fact']) {
+        const earlier = streamedToolRound({ id: 'c1', name, connector: 'notes' });
+        expect(await retainedOrigin({ attachedFiles: false, earlier })).toBe('tool_ingested');
+      }
+    });
+
+    it('marks a turn whose wrapped call reaches a tool that shares a page tool name', async () => {
+      const args = JSON.stringify({ mcp_server: 'Notes', tool_name: 'remember_fact', input: {} });
+      const earlier = streamedToolRound({ id: 'c1', name: 'call_tool', args });
+      expect(await retainedOrigin({ attachedFiles: false, earlier })).toBe('tool_ingested');
+    });
+
+    it('marks a turn whose result names a call from another thread', async () => {
+      const earlier = streamedToolRound({ id: 'c1', name: 'remember_fact' }).map(event =>
+        event.type === EventType.TOOL_RESPONSE_V2 ? { ...event, thread_id: 'helper' } : event,
+      );
+      expect(await retainedOrigin({ attachedFiles: false, earlier })).toBe('tool_ingested');
+    });
   });
 
   it('marks a turn whose tool response has no matching call', async () => {

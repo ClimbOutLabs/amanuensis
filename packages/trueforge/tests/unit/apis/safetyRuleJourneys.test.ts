@@ -656,6 +656,25 @@ describe('a page Aman opens in its browser', () => {
       },
       TURN_TIMEOUT_MS,
     );
+
+    // Last, so the note and page it leaves are not recalled into the chats above.
+    it(
+      'leaves the note of the person’s message as their own when the turn only saved their typed words on a page',
+      async () => {
+        const chatId = await createChat(server);
+        server.model.next({
+          toolArguments: { about: 'Tom', text: 'Borrowed the ladder last week and still has it.', kind: 'person' },
+        });
+        const typed = 'My neighbour Tom borrowed the ladder last week and still has it.';
+        await runTurn({
+          server,
+          chatId,
+          input: [{ type: 'user.message', content: `${RUN_DIRECTIVE_PREFIX}remember_fact ${typed}` }],
+        });
+        expect(await closingLineOfNoteWith(typed)).toBe('> From you');
+      },
+      TURN_TIMEOUT_MS,
+    );
   });
 
   it(

@@ -47,7 +47,6 @@ import {
   withTimeout,
   type BoundRepository,
   type HeldRefusalReason,
-  type ToolResultSource,
 } from '@truefoundry/trueforge-core/core';
 import { readTurnedOffConnectorKeys } from '@truefoundry/trueforge-core/core/connectors/chatConnectorChoice';
 import type { RawToolCall } from '@truefoundry/trueforge-core/core/llm/LLMTypes';
@@ -1394,10 +1393,8 @@ async function runTurnEventDrain(params: {
   // (spaces, task state, schedules) leave a turn unmarked. Text extracted from an attached file is just as untrusted, so a turn that
   // attached one starts out tainted. A turn with neither is the user's own voice: `user_stated`.
   const outsideInput = createOutsideInputTracker({ attachedFiles: memory?.attachedFiles === true });
-  const callSources = new Map<string, ToolResultSource>();
   const toolResults: TurnToolResult[] = [];
   // A send is read from its call and saved as soon as its result says it went through, whichever turn ran it.
-  const callsByKey = new Map<string, RawToolCall>(approvedCalls);
   const sentMailWrites: Promise<void>[] = [];
   let followUp: Promise<void> | undefined;
   try {
@@ -1405,14 +1402,12 @@ async function runTurnEventDrain(params: {
       if (MODEL_WORK_EVENT_TYPES.has(event.type)) {
         startBound?.markStarted();
       }
-      if (event.type === EventType.MODEL_MESSAGE) {
-        for (const call of event.tool_calls ?? []) {
-          callSources.set(call.id, callResultSource(call));
-          callsByKey.set(toolCallKey({ threadId: event.thread_id, callId: call.id }), call);
-        }
-      }
+      // Fed first, so a result below finds the call it answers.
+      const readOutside = outsideInput.observe(event);
       if (memory !== undefined && event.type === EventType.TOOL_RESPONSE_V2 && event.disposition === 'executed_ok') {
-        const call = callsByKey.get(toolCallKey({ threadId: event.thread_id, callId: event.tool_call_id }));
+        const call =
+          outsideInput.callOf(event) ??
+          approvedCalls?.get(toolCallKey({ threadId: event.thread_id, callId: event.tool_call_id }));
         const mail = call === undefined || !sentMailWentThrough(event.content) ? undefined : sentMailFromCall(call);
         if (mail !== undefined && sentMailWrites.length < TURN_TOOL_RESULTS_KEPT) {
           sentMailWrites.push(
@@ -1432,17 +1427,14 @@ async function runTurnEventDrain(params: {
           );
         }
       }
-      if (
-        outsideInput.observe(event) &&
-        (event.type === EventType.TOOL_RESPONSE || event.type === EventType.TOOL_RESPONSE_V2)
-      ) {
+      if (readOutside && (event.type === EventType.TOOL_RESPONSE || event.type === EventType.TOOL_RESPONSE_V2)) {
         // Kept for the note pass; a result that did not run cleanly holds no finding.
         if (
           (event.type === EventType.TOOL_RESPONSE || event.disposition === 'executed_ok') &&
           toolResults.length < TURN_TOOL_RESULTS_KEPT
         ) {
           toolResults.push({
-            source: callSources.get(event.tool_call_id) ?? 'other',
+            source: callResultSource(outsideInput.callOf(event)),
             text: event.content.slice(0, TURN_TOOL_RESULT_CHARACTERS_KEPT),
           });
         }
