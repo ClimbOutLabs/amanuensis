@@ -55,8 +55,8 @@ A model can only read so much of a chat at once. When a chat gets long, Aman sum
 
 1. In the **Agent Config** panel, click the edit button on **Run settings**.
 2. Find **When to summarize long chats**.
-3. Pick **Automatic (recommended)** to let Aman decide from the model's size limit. An agent summarizes when a chat fills about 60% of that limit. If the limit isn't known, Aman uses a safe default.
-4. Or pick **At a set size** and type the chat size to summarize at. It starts at about 60% of the model's limit.
+3. Pick **Automatic (recommended)** to let Aman decide from the model's size limit. If that limit isn't known, Aman uses a safe default.
+4. Or pick **At a set size** and type the chat size to summarize at. It starts near the size Automatic would use for that model.
 5. Close the panel, then click **Save Agent**.
 
 ## Good to know

@@ -319,15 +319,14 @@ Runtime behavior. Every field has a default, so `config` can be omitted entirely
 
 #### `config.context_management`
 
-Compaction is enabled by default. When its `trigger` is omitted, a saved agent compacts at 60% of the configured
-model's context length, and an everyday chat at 80%. Both use 50,000 input tokens when that context length is
-unavailable.
+Compaction is enabled by default. When its `trigger` is omitted, it runs at 80% of the configured model's context
+length, or at 50,000 input tokens when that context length is unavailable.
 
 | Field                               | Default                     | Set via | Description                                         |
 | ----------------------------------- | --------------------------- | ------- | --------------------------------------------------- |
 | `compaction.enabled`                | `true`                      | API     | Summarize older history as context grows.           |
 | `compaction.trigger.type`           | `input_tokens`              | API     | Trigger using the estimated request input size.     |
-| `compaction.trigger.value`          | 60% of model context length | API     | Explicit input-token threshold when configured.     |
+| `compaction.trigger.value`          | 80% of model context length | API     | Explicit input-token threshold when configured.     |
 | `large_tool_response.enabled`       | `true`                      | API     | Offload oversized tool responses to a sandbox file. |
 
 ### `response_format`

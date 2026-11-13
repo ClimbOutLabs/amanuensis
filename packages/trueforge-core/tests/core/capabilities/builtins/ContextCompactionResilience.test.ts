@@ -531,7 +531,6 @@ describe('threshold floor with a large output reserve', () => {
         configuredThresholdTokens: undefined,
         modelContextLength: 32_000,
         modelParams: { max_tokens: 31_000 },
-        contextRatio: undefined,
       }),
     ).toBe(4_000);
   });
@@ -542,7 +541,6 @@ describe('threshold floor with a large output reserve', () => {
         configuredThresholdTokens: undefined,
         modelContextLength: 4_096,
         modelParams: { max_tokens: 3_900 },
-        contextRatio: undefined,
       }),
     ).toBe(3_276);
   });

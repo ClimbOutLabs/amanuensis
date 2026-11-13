@@ -1,8 +1,8 @@
 'use client';
 
 import {
+  DEFAULT_CONTEXT_COMPACTION_RATIO,
   DEFAULT_CONTEXT_COMPACTION_THRESHOLD_TOKENS,
-  SAVED_AGENT_CONTEXT_COMPACTION_RATIO,
 } from '@truefoundry/trueforge-core/core/capabilities/builtins/tokenBudgetConstants';
 
 import type { AgentInputTokensCompactionTrigger, TrueForgeAgentRuntimeConfig } from '../../server/types.js';
@@ -91,12 +91,12 @@ function applyBudgetedTools(value: TrueForgeAgentRuntimeConfig, budgetedTools: s
   };
 }
 
-/** A set size starts at a saved agent's 60% of the model's limit, in whole thousands. Automatic can go lower when the agent caps its reply length. */
+/** A set size starts at 80% of the model's limit, in whole thousands. Automatic can go lower when the agent caps its reply length. */
 function startingCompactionSize(modelContextLength: number | null | undefined): number {
   if (modelContextLength === null || modelContextLength === undefined) {
     return DEFAULT_CONTEXT_COMPACTION_THRESHOLD_TOKENS;
   }
-  const size = Math.floor((modelContextLength * SAVED_AGENT_CONTEXT_COMPACTION_RATIO) / 1000) * 1000;
+  const size = Math.floor((modelContextLength * DEFAULT_CONTEXT_COMPACTION_RATIO) / 1000) * 1000;
   return size > 0 ? size : DEFAULT_CONTEXT_COMPACTION_THRESHOLD_TOKENS;
 }
 

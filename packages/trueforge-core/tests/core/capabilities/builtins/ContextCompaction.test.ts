@@ -14,10 +14,7 @@ import {
 } from '../../../../src/core/capabilities/builtins/ContextCompaction';
 import { repositoryBindingContext } from '../../../../src/core/capabilities/builtins/RepositoryBindingContext';
 import type { TaskChecklistAccess } from '../../../../src/core/capabilities/builtins/TaskChecklist';
-import {
-  DEFAULT_CONTEXT_COMPACTION_THRESHOLD_TOKENS,
-  SAVED_AGENT_CONTEXT_COMPACTION_RATIO,
-} from '../../../../src/core/capabilities/builtins/tokenBudgetConstants';
+import { DEFAULT_CONTEXT_COMPACTION_THRESHOLD_TOKENS } from '../../../../src/core/capabilities/builtins/tokenBudgetConstants';
 import { createToolResponseV2, newEventId, type ToolResultDisposition } from '../../../../src/core/events/schema';
 import type { InternalEnrichedToolCall, InternalToolCallInfo } from '../../../../src/core/llm/LLMTypes';
 import {
@@ -2030,20 +2027,8 @@ describe('resolveCompactionThresholdTokens', () => {
         configuredThresholdTokens: 80_000,
         modelContextLength: 200_000,
         modelParams: { max_tokens: 150_000 },
-        contextRatio: undefined,
       }),
     ).toBe(80_000);
-  });
-
-  it("uses a saved agent's lower share when one is given", () => {
-    expect(
-      resolveCompactionThresholdTokens({
-        configuredThresholdTokens: undefined,
-        modelContextLength: 128_000,
-        modelParams: undefined,
-        contextRatio: SAVED_AGENT_CONTEXT_COMPACTION_RATIO,
-      }),
-    ).toBe(76_800);
   });
 
   it('defaults to 80% of the model context length', () => {
@@ -2052,7 +2037,6 @@ describe('resolveCompactionThresholdTokens', () => {
         configuredThresholdTokens: undefined,
         modelContextLength: 128_001,
         modelParams: undefined,
-        contextRatio: undefined,
       }),
     ).toBe(102_400);
   });
@@ -2066,7 +2050,6 @@ describe('resolveCompactionThresholdTokens', () => {
         configuredThresholdTokens: undefined,
         modelContextLength: 128_000,
         modelParams,
-        contextRatio: undefined,
       }),
     ).toBe(94_720);
   });
@@ -2077,7 +2060,6 @@ describe('resolveCompactionThresholdTokens', () => {
         configuredThresholdTokens: undefined,
         modelContextLength: 128_000,
         modelParams: { max_completion_tokens: 32_768, max_tokens: 64_000 },
-        contextRatio: undefined,
       }),
     ).toBe(94_720);
   });
@@ -2088,7 +2070,6 @@ describe('resolveCompactionThresholdTokens', () => {
         configuredThresholdTokens: undefined,
         modelContextLength: 128_000,
         modelParams: { max_tokens: 16_000 },
-        contextRatio: undefined,
       }),
     ).toBe(102_400);
   });
@@ -2103,7 +2084,6 @@ describe('resolveCompactionThresholdTokens', () => {
         configuredThresholdTokens: undefined,
         modelContextLength: 128_000,
         modelParams,
-        contextRatio: undefined,
       }),
     ).toBe(102_400);
   });
@@ -2114,7 +2094,6 @@ describe('resolveCompactionThresholdTokens', () => {
         configuredThresholdTokens: undefined,
         modelContextLength: undefined,
         modelParams: { max_tokens: 32_768 },
-        contextRatio: undefined,
       }),
     ).toBe(DEFAULT_CONTEXT_COMPACTION_THRESHOLD_TOKENS);
   });
