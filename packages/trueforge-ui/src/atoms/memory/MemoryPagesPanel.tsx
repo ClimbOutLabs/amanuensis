@@ -5,6 +5,7 @@ import type { ReactNode } from 'react';
 import { auiButtonClass } from '@/atoms/lib/buttonClasses.js';
 import { cn } from '@/atoms/lib/cn.js';
 import { Spinner } from '@/atoms/primitives/Spinner.js';
+import { Icon } from '@/icons/Icon.js';
 import type { MemoryPageSummary } from '@/plugins/trueforge-agent-server-adapter/catalogs/memoryPagesCatalog.js';
 import { useAssistantDisplayName } from '../../components/PersonalizationContext.js';
 import { dayCopy, MemoryPageView, PageActions } from './MemoryPageView.js';
@@ -158,9 +159,10 @@ export function MemoryPagesPanel() {
           <button
             type="button"
             onClick={state.closePage}
-            className={auiButtonClass({ variant: 'ghost', size: 'small' })}
+            className={cn(auiButtonClass({ variant: 'secondary', size: 'small' }), 'gap-1.5')}
           >
-            All pages
+            <Icon name="arrow-left" />
+            Back to all pages
           </button>
         </div>
         {state.page === null ? (

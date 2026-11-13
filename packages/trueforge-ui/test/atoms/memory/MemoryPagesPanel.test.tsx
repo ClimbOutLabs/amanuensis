@@ -307,7 +307,7 @@ describe('MemoryPagesPanel', () => {
     await openWendy();
     expect(screen.getAllByText('Plays tennis on Fridays.')).toHaveLength(1);
     expect(screen.queryByRole('region', { name: 'Summary' })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'All pages' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Back to all pages' }));
     fireEvent.click(await screen.findByRole('button', { name: /^The Madrid move/ }));
     expect(await screen.findByRole('region', { name: 'Summary' })).toHaveTextContent('Moving in spring.');
     expect(screen.getByText(/^Last updated .*2026/)).toBeInTheDocument();
@@ -332,7 +332,7 @@ describe('MemoryPagesPanel', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: 'Edit page: Wendy' }));
     expect(await screen.findByRole('textbox', { name: 'Edit page text' })).toHaveValue(WENDY.markdown);
-    fireEvent.click(screen.getByRole('button', { name: 'All pages' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Back to all pages' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Delete page: The Madrid move' }));
     expect(await screen.findByText('Page deleted.')).toBeInTheDocument();
     act(() => vi.advanceTimersByTime(FORGET_UNDO_MS + 100));
