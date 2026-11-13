@@ -232,6 +232,25 @@ func changedAt(info fs.FileInfo) time.Time {
 	return info.ModTime()
 }
 
+// Mark is the tree's own "now", read from a file made in it. File change times come from the kernel's
+// coarse clock, which runs a few milliseconds behind time.Now, so a mark taken from time.Now would
+// count the first files a command writes as older than the command.
+func Mark(root string) time.Time {
+	// Wider than the clock gap, for a tree too full to hold even an empty file.
+	fallback := time.Now().Add(-time.Second)
+	f, err := os.CreateTemp(root, ".aman-mark-")
+	if err != nil {
+		return fallback
+	}
+	info, err := f.Stat()
+	_ = f.Close()
+	_ = os.Remove(f.Name())
+	if err != nil {
+		return fallback
+	}
+	return changedAt(info)
+}
+
 func insideGitDir(rel string) bool {
 	for _, part := range strings.Split(rel, string(filepath.Separator)) {
 		if part == ".git" {

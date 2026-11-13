@@ -204,10 +204,11 @@ func (s *Server) exec(w http.ResponseWriter, r *http.Request) {
 	limit := int64(req.DiskMB) << 20
 	spec.MaxFileBytes = limit
 	spec.MaxProcesses = guestMaxProcesses
-	// Taken before anything runs, so everything this call writes counts as new when the tree is trimmed.
 	started := time.Now()
+	// Taken before anything runs, so everything this call writes counts as new when the tree is trimmed.
+	mark := lease.Mark(root)
 	// A tree left over its limit by an earlier overshoot is trimmed before anything new runs in it.
-	notices := reclaimNotice(lease.Reclaim(root, limit, started), req.DiskMB, nil)
+	notices := reclaimNotice(lease.Reclaim(root, limit, mark), req.DiskMB, nil)
 	watch, err := newDiskWatch(s.VolumeDir, s.MinFreeBytes, limit, root)
 	if err != nil {
 		writeStorageError(w, err)
@@ -227,7 +228,7 @@ func (s *Server) exec(w http.ResponseWriter, r *http.Request) {
 	endGrant()
 	// Whatever a fast writer got in before the kill is removed, so the overshoot never stays. Only what
 	// this call wrote goes: files from before it, a project's history above all, are left alone.
-	notices = reclaimNotice(lease.Reclaim(root, limit, started), req.DiskMB, notices)
+	notices = reclaimNotice(lease.Reclaim(root, limit, mark), req.DiskMB, notices)
 	writeJSON(w, http.StatusOK, execResponse{
 		ExitCode:      res.ExitCode,
 		Output:        string(res.Stdout),

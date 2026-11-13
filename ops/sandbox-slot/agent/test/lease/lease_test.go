@@ -134,7 +134,7 @@ func exists(path string) bool {
 
 func TestReclaimRemovesTheLargestFilesUntilWithinTheLimit(t *testing.T) {
 	dir := t.TempDir()
-	since := time.Now()
+	since := lease.Mark(dir)
 	for name, size := range map[string]int{"big": 400_000, "mid": 200_000, "small": 20_000} {
 		writeSized(t, filepath.Join(dir, name), size)
 	}
@@ -167,7 +167,7 @@ func TestReclaimKeepsWhatWasThereBeforeTheCommand(t *testing.T) {
 	writeSized(t, pack, 600_000)
 	writeSized(t, source, 500_000)
 	time.Sleep(20 * time.Millisecond)
-	since := time.Now()
+	since := lease.Mark(dir)
 	for _, name := range []string{"out1.o", "out2.o", "out3.o"} {
 		writeSized(t, filepath.Join(dir, "repo", "build", name), 300_000)
 	}
@@ -191,7 +191,7 @@ func TestReclaimIsNotFooledByAnOldModificationTime(t *testing.T) {
 	kept := filepath.Join(dir, "kept")
 	writeSized(t, kept, 400_000)
 	time.Sleep(20 * time.Millisecond)
-	since := time.Now()
+	since := lease.Mark(dir)
 	unpacked := filepath.Join(dir, "unpacked")
 	writeSized(t, unpacked, 300_000)
 	old := time.Now().Add(-48 * time.Hour)
@@ -204,10 +204,27 @@ func TestReclaimIsNotFooledByAnOldModificationTime(t *testing.T) {
 	}
 }
 
+// A file written straight after the mark, with no wait, is still the command's own.
+func TestReclaimCountsAFileWrittenRightAfterTheMarkAsNew(t *testing.T) {
+	for round := 0; round < 50; round++ {
+		dir := t.TempDir()
+		since := lease.Mark(dir)
+		writeSized(t, filepath.Join(dir, "first.bin"), 300_000)
+		got := lease.Reclaim(dir, 100_000, since)
+		if got.Files != 1 || got.Older {
+			t.Fatalf("round %d: the file was counted as older than the command: %+v", round, got)
+		}
+		entries, err := os.ReadDir(dir)
+		if err != nil || len(entries) != 0 {
+			t.Fatalf("round %d: the mark left something behind: %v %v", round, entries, err)
+		}
+	}
+}
+
 // Among the files a command wrote, git's own go last: a clone that overshoots loses its checkout first.
 func TestReclaimGivesUpGitFilesLast(t *testing.T) {
 	dir := t.TempDir()
-	since := time.Now()
+	since := lease.Mark(dir)
 	pack := filepath.Join(dir, ".git", "objects", "pack", "new.pack")
 	writeSized(t, pack, 600_000)
 	writeSized(t, filepath.Join(dir, "a.bin"), 300_000)
@@ -224,7 +241,7 @@ func TestReclaimTouchesOlderFilesOnlyWhenNothingNewIsLeft(t *testing.T) {
 	writeSized(t, filepath.Join(dir, ".git", "pack"), 400_000)
 	writeSized(t, filepath.Join(dir, "old.bin"), 400_000)
 	time.Sleep(20 * time.Millisecond)
-	got := lease.Reclaim(dir, 500_000, time.Now())
+	got := lease.Reclaim(dir, 500_000, lease.Mark(dir))
 	if !got.Older || exists(filepath.Join(dir, "old.bin")) || !exists(filepath.Join(dir, ".git", "pack")) {
 		t.Fatalf("an older plain file should go before git's, and be reported as older: %+v", got)
 	}
