@@ -10792,6 +10792,61 @@ await client.settings.memoryNightly.createOrUpdate({
 </dl>
 </details>
 
+<details><summary><code>client.settings.memoryNightly.<a href="/src/api/resources/settings/resources/memoryNightly/client/Client.ts">getRun</a>() -> TrueForge.RunMemoryNightlyResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Tells whether a tidy-up is running now (`busy`), what one that finished in the last hour did (`ran`), or that there is neither (`idle`). It starts nothing.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.memoryNightly.getRun();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**requestOptions:** `MemoryNightlyClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
 <details><summary><code>client.settings.memoryNightly.<a href="/src/api/resources/settings/resources/memoryNightly/client/Client.ts">run</a>() -> TrueForge.RunMemoryNightlyResponse</code></summary>
 <dl>
 <dd>

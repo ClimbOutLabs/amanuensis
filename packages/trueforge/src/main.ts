@@ -996,7 +996,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     logger,
   });
   const app = createServerApp({
-    tidyMemoryNow: nightlyMemoryJob.tidyNow,
+    memoryTidy: nightlyMemoryJob,
     chatSearchIndexer,
     modelCatalog,
     mcpCatalog,

@@ -157,6 +157,84 @@ describe("MemoryNightlyClient", () => {
         }).rejects.toThrow(TrueForgeTypes.ForbiddenError);
     });
 
+    test("get_run (1)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = {
+            data: {
+                model_missing: true,
+                moved_to_earlier: 1,
+                notes_asked: 1,
+                notes_sorted: 1,
+                pairs_listed: 1,
+                sorting: "off",
+                status: "ran",
+                unsorted_reasons: ["model_slow"],
+            },
+        };
+
+        server
+            .mockEndpoint()
+            .get("/api/v1/settings/memory-nightly/run")
+            .respondWith()
+            .statusCode(200)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        const response = await client.settings.memoryNightly.getRun();
+        expect(response).toEqual({
+            data: {
+                modelMissing: true,
+                movedToEarlier: 1,
+                notesAsked: 1,
+                notesSorted: 1,
+                pairsListed: 1,
+                sorting: "off",
+                status: "ran",
+                unsortedReasons: ["model_slow"],
+            },
+        });
+    });
+
+    test("get_run (2)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .get("/api/v1/settings/memory-nightly/run")
+            .respondWith()
+            .statusCode(401)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.settings.memoryNightly.getRun();
+        }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+    });
+
+    test("get_run (3)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .get("/api/v1/settings/memory-nightly/run")
+            .respondWith()
+            .statusCode(403)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.settings.memoryNightly.getRun();
+        }).rejects.toThrow(TrueForgeTypes.ForbiddenError);
+    });
+
     test("run (1)", async () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });

@@ -16,7 +16,7 @@ import type { IModelProviderStore } from '../db/modelProviderStore';
 import type { ISandboxProviderStore } from '../db/sandboxProviderStore';
 import type { WithTransaction } from '../db/transaction';
 import type { IOAuthTokenStore } from '../mcp/auth/types';
-import type { TidyNowResult } from '../runtime/memory/nightlyService';
+import type { NightlyMemoryJob } from '../runtime/memory/nightlyService';
 import { getSharedRunCodeService } from '../runtime/sessionResources';
 import type { TokenFactoryBudget } from '../runtime/tokenFactoryBudget';
 import { sandboxDisabledByInstaller } from '../sandbox/slotBackend';
@@ -44,8 +44,8 @@ export interface SettingsRouterDeps<TTransaction> {
   resolveSandboxProviderStore: (c: Context) => ISandboxProviderStore<TTransaction>;
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
   tokenFactoryBudget: TokenFactoryBudget;
-  /** Runs the memory tidy-up now and answers when it has finished. */
-  tidyMemoryNow: () => Promise<TidyNowResult>;
+  /** Runs the memory tidy-up now, and tells where one stands. */
+  memoryTidy: NightlyMemoryJob;
   /** Model providers the environment owns (see `envManagedModelProviderNames`). */
   envManagedModelProviderNames: ReadonlySet<string>;
   withTransaction: WithTransaction<TTransaction>;
@@ -141,7 +141,7 @@ export function createSettingsRouter<TTransaction>(deps: SettingsRouterDeps<TTra
     '/memory-nightly',
     createMemoryNightlyRouter({
       globalSettingsStore: deps.globalSettingsStore,
-      tidyNow: deps.tidyMemoryNow,
+      memoryTidy: deps.memoryTidy,
       logger: deps.logger,
     }),
   );

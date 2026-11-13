@@ -40,8 +40,10 @@ export const UpdateMemoryNightlyRequestSchema = z
 export const MemoryTidyRunSchema = z
   .object({
     status: z
-      .enum(['ran', 'busy'])
-      .describe('`ran`: the tidy-up finished. `busy`: one was already running, so nothing was started.'),
+      .enum(['ran', 'busy', 'idle'])
+      .describe(
+        '`ran`: the tidy-up finished. `busy`: one is running, so nothing was started. `idle`: none is running and none finished lately; only a read answers this.',
+      ),
     moved_to_earlier: z.number().int().nonnegative().describe('Lines that had ended and were moved to Earlier.'),
     notes_asked: z.number().int().nonnegative().describe('Missed notes the model was asked about.'),
     notes_sorted: z

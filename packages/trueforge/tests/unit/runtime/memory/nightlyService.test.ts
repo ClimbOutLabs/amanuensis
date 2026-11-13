@@ -153,7 +153,19 @@ describe('the nightly timer', () => {
     await jest.advanceTimersByTimeAsync(0);
 
     expect(await job.tidyNow()).toEqual({ status: 'busy' });
+    expect(job.tidyState()).toEqual({ status: 'busy' });
     finish?.();
     expect((await first).status).toBe('ran');
+  });
+
+  it('tells a page that comes back what the last tidy-up did, for an hour', async () => {
+    const job = start(inMemoryGlobalSettingsStore());
+    expect(job.tidyState()).toEqual({ status: 'idle' });
+
+    const ran = await job.tidyNow();
+
+    expect(job.tidyState()).toEqual(ran);
+    jest.setSystemTime(Date.now() + 61 * 60 * 1000);
+    expect(job.tidyState()).toEqual({ status: 'idle' });
   });
 });

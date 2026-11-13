@@ -7,8 +7,8 @@ import type * as serializers from "../index.js";
 export const MemoryTidyRunStatus: core.serialization.Schema<
     serializers.MemoryTidyRunStatus.Raw,
     TrueForge.MemoryTidyRunStatus
-> = core.serialization.enum_(["ran", "busy"]);
+> = core.serialization.enum_(["ran", "busy", "idle"]);
 
 export declare namespace MemoryTidyRunStatus {
-    export type Raw = "ran" | "busy";
+    export type Raw = "ran" | "busy" | "idle";
 }

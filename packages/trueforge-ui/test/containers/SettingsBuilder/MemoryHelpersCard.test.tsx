@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { MemoryHelpersCard } from '@/containers/SettingsBuilder/MemoryHelpersCard.js';
 import type { MemoryTidyRun } from '@/plugins/trueforge-agent-server-adapter/catalogs/memoryHelpersCatalog.js';
@@ -27,7 +27,10 @@ function renderCard({
   withPorts = true,
   failSave = false,
   tidy = { ...QUIET_RUN, movedToEarlier: 2, notesAsked: 1, notesSorted: 1 },
+  tidyState = () => ({ ...QUIET_RUN, status: 'idle' }),
 }: {
+  /** What the server says about a tidy-up when the page asks. */
+  tidyState?: () => MemoryTidyRun;
   tidy?: MemoryTidyRun;
   mode?: Mode;
   enabled?: boolean;
@@ -74,6 +77,7 @@ function renderCard({
             return nightly();
           },
           tidyMemoryNow: async () => tidy,
+          getMemoryTidyState: async () => tidyState(),
         },
       }
     : {};
@@ -214,6 +218,28 @@ describe('MemoryHelpersCard', () => {
     expect(await renderCardAndTidy(QUIET_RUN)).toHaveTextContent(
       'Done. Nothing needed tidying. Every saved note was already looked at.',
     );
+  });
+
+  it('picks a running tidy-up back up when the page is opened again, and shows what it did', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      let state: MemoryTidyRun = { ...QUIET_RUN, status: 'busy' };
+      renderCard({ tidyState: () => state });
+
+      expect(await screen.findByRole('button', { name: 'Tidying…' })).toBeDisabled();
+      state = { ...QUIET_RUN, movedToEarlier: 1 };
+      await vi.advanceTimersByTimeAsync(5000);
+
+      expect(await screen.findByRole('status')).toHaveTextContent('Done. Aman moved 1 ended line to Earlier.');
+      expect(screen.getByRole('button', { name: 'Tidy now' })).toBeEnabled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('shows what a tidy-up that finished while the page was closed did', async () => {
+    renderCard({ tidyState: () => ({ ...QUIET_RUN, movedToEarlier: 3 }) });
+    expect(await screen.findByRole('status')).toHaveTextContent('Done. Aman moved 3 ended lines to Earlier.');
   });
 
   it('says to try again when a tidy-up is already running', async () => {

@@ -48,9 +48,17 @@ async function personaVaults(personaStore: PersonaLister): Promise<NightlyVault[
 /** What a tidy-up the person asked for did, or `busy` when one was already running. */
 export type TidyNowResult = { status: 'ran'; counts: NightlyCounts; sorting: PageSortMode } | { status: 'busy' };
 
+/** Where a tidy-up the person asked for stands: running (`busy`), finished a short while ago, or neither (`idle`). */
+export type TidyState = TidyNowResult | { status: 'idle' };
+
+/** How long the result of a finished tidy-up is still told to a page that asks. */
+const LAST_TIDY_KEPT_MS = 60 * 60 * 1000;
+
 export interface NightlyMemoryJob {
   /** Tidies every vault now, whatever the hour and whether or not the daily tidy-up is switched on. */
   tidyNow: () => Promise<TidyNowResult>;
+  /** Lets a page that was closed during a tidy-up find out that one is running, or what the last one did. */
+  tidyState: () => TidyState;
 }
 
 /**
@@ -112,6 +120,7 @@ export function startNightlyMemoryJob({
   };
 
   let running = false;
+  let lastTidy: { result: TidyNowResult; finishedAt: number } | undefined;
   const look = (): void => {
     if (running) {
       return;
@@ -147,10 +156,20 @@ export function startNightlyMemoryJob({
           deps: { ...deps, mode: sorting.mode, hour: nightly.hour },
           onRequest: true,
         });
-        return { status: 'ran', counts, sorting: sorting.mode };
+        const result: TidyNowResult = { status: 'ran', counts, sorting: sorting.mode };
+        lastTidy = { result, finishedAt: deps.now().getTime() };
+        return result;
       } finally {
         running = false;
       }
+    },
+    tidyState: () => {
+      if (running) {
+        return { status: 'busy' };
+      }
+      return lastTidy !== undefined && deps.now().getTime() - lastTidy.finishedAt < LAST_TIDY_KEPT_MS
+        ? lastTidy.result
+        : { status: 'idle' };
     },
   };
 }

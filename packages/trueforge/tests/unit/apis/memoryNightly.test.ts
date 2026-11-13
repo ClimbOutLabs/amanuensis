@@ -16,7 +16,7 @@ import type {
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqliteGlobalSettingsStore } from '../../../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
-import type { TidyNowResult } from '../../../src/runtime/memory/nightlyService';
+import type { TidyNowResult, TidyState } from '../../../src/runtime/memory/nightlyService';
 
 const silentLogger = createLogger({ silent: true });
 
@@ -56,8 +56,13 @@ async function createRouter() {
   await migrateSqliteToLatest(db);
   const globalSettingsStore = new SqliteGlobalSettingsStore(db);
   const tidyNow = jest.fn<Promise<TidyNowResult>, []>();
-  const router = createMemoryNightlyRouter({ globalSettingsStore, tidyNow, logger: silentLogger });
-  return { router, globalSettingsStore, tidyNow };
+  const tidyState = jest.fn<TidyState, []>(() => ({ status: 'idle' }));
+  const router = createMemoryNightlyRouter({
+    globalSettingsStore,
+    memoryTidy: { tidyNow, tidyState },
+    logger: silentLogger,
+  });
+  return { router, globalSettingsStore, tidyNow, tidyState };
 }
 
 function putInit(enabled: boolean | null): RequestInit {
@@ -230,6 +235,33 @@ describe('memoryNightly router', () => {
     expect(await response.json()).toMatchObject({ data: { status: 'ran', sorting: 'on', model_missing: true } });
   });
 
+  it('GET /run tells where a tidy-up stands and starts nothing', async () => {
+    const { router, tidyNow, tidyState } = await createRouter();
+
+    expect(await (await router.request('/run')).json()).toMatchObject({ data: { status: 'idle' } });
+
+    tidyState.mockReturnValue({ status: 'busy' });
+    expect(await (await router.request('/run')).json()).toMatchObject({ data: { status: 'busy' } });
+
+    tidyState.mockReturnValue({
+      status: 'ran',
+      counts: {
+        movedToEarlier: 1,
+        notesAsked: 2,
+        notesSorted: 1,
+        pagesAsked: 0,
+        pairsListed: 0,
+        vaultsWithoutModel: 0,
+        unsortedReasons: ['model_slow'],
+      },
+      sorting: 'on',
+    });
+    expect(await (await router.request('/run')).json()).toMatchObject({
+      data: { status: 'ran', moved_to_earlier: 1, notes_asked: 2, notes_sorted: 1, unsorted_reasons: ['model_slow'] },
+    });
+    expect(tidyNow).not.toHaveBeenCalled();
+  });
+
   it('PUT with a non-boolean enabled is rejected', async () => {
     const { router } = await createRouter();
     const response = await router.request('/', {
@@ -246,7 +278,7 @@ describe('memoryNightly router', () => {
     await migrateSqliteToLatest(db);
     const router = createMemoryNightlyRouter({
       globalSettingsStore: new ReadFailingGlobalSettingsStore(new SqliteGlobalSettingsStore(db)),
-      tidyNow: () => Promise.resolve({ status: 'busy' }),
+      memoryTidy: { tidyNow: () => Promise.resolve({ status: 'busy' }), tidyState: () => ({ status: 'idle' }) },
       logger: silentLogger,
     });
 

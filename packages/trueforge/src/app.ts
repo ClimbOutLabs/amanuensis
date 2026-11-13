@@ -136,7 +136,7 @@ import { resolveDefaultChatModel } from './runtime/defaultChatModel';
 import type { DeliveryService } from './runtime/delivery/deliveryService';
 import type { EventSubscriptionRegistry } from './runtime/event-subscription';
 import { createMemoryClient } from './runtime/memory/createMemoryClient';
-import type { TidyNowResult } from './runtime/memory/nightlyService';
+import type { NightlyMemoryJob } from './runtime/memory/nightlyService';
 import { createVaultClient } from './runtime/memory/vaultClient';
 import type { NoticingService } from './runtime/noticing/noticingService';
 import type { ReminderReach } from './runtime/noticing/reminderReach';
@@ -346,8 +346,8 @@ export interface ServerDeps<TTransaction> {
   schedulerStatus: () => SchedulerProbe;
   /** Per-instance daily Token Factory token cap, enforced when a turn starts on Token Factory. */
   tokenFactoryBudget: TokenFactoryBudget;
-  /** Runs the memory tidy-up now and answers when it has finished. */
-  tidyMemoryNow: () => Promise<TidyNowResult>;
+  /** Runs the memory tidy-up now, and tells where one stands. */
+  memoryTidy: NightlyMemoryJob;
   /** Post-completion passthrough appends ride the same store (see db/completedTurnEvents.ts). */
   sessionStore: ISessionStore<SessionCustom, TurnCustom> & ICompletedTurnEventStore;
   sessions: Sessions<SessionCustom, TurnCustom>;
@@ -883,7 +883,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         resolveSandboxProviderStore: deps.resolveSandboxProviderStore,
         globalSettingsStore: deps.globalSettingsStore,
         tokenFactoryBudget: deps.tokenFactoryBudget,
-        tidyMemoryNow: deps.tidyMemoryNow,
+        memoryTidy: deps.memoryTidy,
         envManagedModelProviderNames: envManagedProviders,
         withTransaction: deps.withTransaction,
         logger: deps.logger,

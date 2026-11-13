@@ -29,7 +29,8 @@ function isNightlyCatalog(port: unknown): port is MemoryNightlyCatalog {
     port !== null &&
     typeof Reflect.get(port, 'getMemoryNightly') === 'function' &&
     typeof Reflect.get(port, 'setMemoryNightly') === 'function' &&
-    typeof Reflect.get(port, 'tidyMemoryNow') === 'function'
+    typeof Reflect.get(port, 'tidyMemoryNow') === 'function' &&
+    typeof Reflect.get(port, 'getMemoryTidyState') === 'function'
   );
 }
 
@@ -131,14 +132,17 @@ export interface MemoryNightlyState {
   /** Resolves true when saved, false when the save failed (the error is then in `error`). */
   setEnabled(enabled: boolean): Promise<boolean>;
   setHour(hour: number): Promise<boolean>;
-  /** True while a tidy-up asked for here is running. */
+  /** True while a tidy-up is running, also one started before this page was opened. */
   tidying: boolean;
-  /** What the last tidy-up asked for here did; `null` before the first one and while one runs. */
+  /** What the last tidy-up did, if it finished within the hour; `null` otherwise and while one runs. */
   tidied: MemoryTidyRun | null;
   tidyError: string | null;
   /** Resolves with what the tidy-up did, or `null` when it could not run (the reason is then in `tidyError`). */
   tidyNow(): Promise<MemoryTidyRun | null>;
 }
+
+/** How often a page waiting on a running tidy-up asks whether it has finished. */
+const TIDY_STATE_ASK_MS = 5000;
 
 type NightlyChange = { enabled?: boolean; hour?: number };
 
@@ -160,6 +164,33 @@ export function useMemoryNightlySetting(): MemoryNightlyState {
   const [tidying, setTidying] = useState(false);
   const [tidied, setTidied] = useState<MemoryTidyRun | null>(null);
   const [tidyError, setTidyError] = useState<string | null>(null);
+  // A tidy-up goes on after the page is left, so a page that opens asks where one stands and waits for it.
+  useEffect(() => {
+    if (catalog === null) return undefined;
+    let left = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const ask = async (): Promise<void> => {
+      let state: MemoryTidyRun;
+      try {
+        state = await catalog.getMemoryTidyState();
+      } catch {
+        return;
+      }
+      if (left) return;
+      if (state.status === 'busy') {
+        setTidying(true);
+        timer = setTimeout(() => void ask(), TIDY_STATE_ASK_MS);
+        return;
+      }
+      setTidying(false);
+      if (state.status === 'ran') setTidied(state);
+    };
+    void ask();
+    return () => {
+      left = true;
+      clearTimeout(timer);
+    };
+  }, [catalog]);
   const tidyNow = useCallback(async () => {
     if (catalog === null) return null;
     setTidying(true);

@@ -116,4 +116,26 @@ describe('createMemoryNightlyCatalog', () => {
       unsortedReasons: ['reply_too_long'],
     });
   });
+
+  it('asks where a tidy-up stands with a GET, which starts nothing', async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      expect(String(input)).toBe('/api/v1/settings/memory-nightly/run');
+      expect(init?.method).toBe('GET');
+      return okJson({
+        data: {
+          status: 'idle',
+          moved_to_earlier: 0,
+          notes_asked: 0,
+          notes_sorted: 0,
+          pairs_listed: 0,
+          sorting: 'off',
+          model_missing: false,
+          unsorted_reasons: [],
+        },
+      });
+    });
+    await expect(createMemoryNightlyCatalog({ fetch: fetchImpl }).getMemoryTidyState()).resolves.toMatchObject({
+      status: 'idle',
+    });
+  });
 });

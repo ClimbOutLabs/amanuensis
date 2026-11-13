@@ -92,3 +92,28 @@ export const runMemoryNightlyRoute = createRoute({
     },
   },
 });
+
+export const getMemoryNightlyRunRoute = createRoute({
+  method: 'get',
+  path: '/run',
+  tags: [OpenApiTag.CAPABILITIES],
+  summary: 'See where a tidy-up stands',
+  description:
+    'Tells whether a tidy-up is running now (`busy`), what one that finished in the last hour did (`ran`), or that there is neither (`idle`). It starts nothing.',
+  'x-fern-sdk-group-name': ['settings', 'memoryNightly'],
+  'x-fern-sdk-method-name': 'get_run',
+  responses: {
+    200: {
+      content: { 'application/json': { schema: RunMemoryNightlyResponseSchema } },
+      description: 'Where a tidy-up stands.',
+    },
+    401: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'Authentication required.',
+    },
+    403: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'Admin access required.',
+    },
+  },
+});

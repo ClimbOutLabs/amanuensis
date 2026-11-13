@@ -3,8 +3,13 @@ import type { Logger } from 'winston';
 
 import configuration from '../config';
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
-import { getMemoryNightlyRoute, putMemoryNightlyRoute, runMemoryNightlyRoute } from '../routes/memoryNightlyRoutes';
-import type { TidyNowResult } from '../runtime/memory/nightlyService';
+import {
+  getMemoryNightlyRoute,
+  getMemoryNightlyRunRoute,
+  putMemoryNightlyRoute,
+  runMemoryNightlyRoute,
+} from '../routes/memoryNightlyRoutes';
+import type { NightlyMemoryJob, TidyState } from '../runtime/memory/nightlyService';
 import {
   DEFAULT_MEMORY_NIGHTLY_HOUR,
   MEMORY_NIGHTLY_HOUR_SETTING_KEY,
@@ -13,13 +18,27 @@ import {
   readMemoryNightlySetting,
   type MemoryNightlySetting,
 } from '../runtime/memoryNightlySettings';
-import type { MemoryNightly } from '../schemas/memoryNightly';
+import type { MemoryNightly, MemoryTidyRun } from '../schemas/memoryNightly';
 
 export interface MemoryNightlyRouterDeps<TTransaction> {
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
-  /** Runs the tidy-up now and answers when it has finished. */
-  tidyNow: () => Promise<TidyNowResult>;
+  /** Runs the tidy-up now, and tells where a tidy-up stands. */
+  memoryTidy: NightlyMemoryJob;
   logger: Logger;
+}
+
+function toMemoryTidyRun(state: TidyState): MemoryTidyRun {
+  const counts = state.status === 'ran' ? state.counts : undefined;
+  return {
+    status: state.status,
+    moved_to_earlier: counts?.movedToEarlier ?? 0,
+    notes_asked: counts?.notesAsked ?? 0,
+    notes_sorted: counts?.notesSorted ?? 0,
+    pairs_listed: counts?.pairsListed ?? 0,
+    sorting: state.status === 'ran' ? state.sorting : 'off',
+    model_missing: (counts?.vaultsWithoutModel ?? 0) > 0,
+    unsorted_reasons: counts?.unsortedReasons ?? [],
+  };
 }
 
 function toMemoryNightly(setting: MemoryNightlySetting): MemoryNightly {
@@ -92,28 +111,15 @@ export function createMemoryNightlyRouter<TTransaction>(deps: MemoryNightlyRoute
     );
   };
 
-  const runHandler: RouteHandler<typeof runMemoryNightlyRoute> = async c => {
-    const result = await deps.tidyNow();
-    const counts = result.status === 'ran' ? result.counts : undefined;
-    return c.json(
-      {
-        data: {
-          status: result.status,
-          moved_to_earlier: counts?.movedToEarlier ?? 0,
-          notes_asked: counts?.notesAsked ?? 0,
-          notes_sorted: counts?.notesSorted ?? 0,
-          pairs_listed: counts?.pairsListed ?? 0,
-          sorting: result.status === 'ran' ? result.sorting : 'off',
-          model_missing: (counts?.vaultsWithoutModel ?? 0) > 0,
-          unsorted_reasons: counts?.unsortedReasons ?? [],
-        },
-      },
-      200,
-    );
-  };
+  const runHandler: RouteHandler<typeof runMemoryNightlyRoute> = async c =>
+    c.json({ data: toMemoryTidyRun(await deps.memoryTidy.tidyNow()) }, 200);
+
+  const getRunHandler: RouteHandler<typeof getMemoryNightlyRunRoute> = c =>
+    c.json({ data: toMemoryTidyRun(deps.memoryTidy.tidyState()) }, 200);
 
   router.openapi(getMemoryNightlyRoute, getHandler);
   router.openapi(putMemoryNightlyRoute, putHandler);
   router.openapi(runMemoryNightlyRoute, runHandler);
+  router.openapi(getMemoryNightlyRunRoute, getRunHandler);
   return router;
 }

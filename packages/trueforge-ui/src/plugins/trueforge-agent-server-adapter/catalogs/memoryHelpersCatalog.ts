@@ -22,9 +22,9 @@ export interface MemoryNightlySetting {
   hour: number;
 }
 
-/** What a tidy-up asked for now did; `busy` means one was already running and nothing was started. */
+/** What a tidy-up did. `busy` means one is running; `idle`, only from a read, means none ran lately. */
 export interface MemoryTidyRun {
-  status: 'ran' | 'busy';
+  status: 'ran' | 'busy' | 'idle';
   movedToEarlier: number;
   /** Saved notes the model was asked about. */
   notesAsked: number;
@@ -49,6 +49,8 @@ export interface MemoryNightlyCatalog {
   /** Saves the fields given; a field left out stays as it is. */
   setMemoryNightly(change: { enabled?: boolean; hour?: number }): Promise<MemoryNightlySetting>;
   tidyMemoryNow(): Promise<MemoryTidyRun>;
+  /** Where a tidy-up stands, without starting one: running, finished a short while ago, or neither. */
+  getMemoryTidyState(): Promise<MemoryTidyRun>;
 }
 
 const PageSortModeSchema = z.enum(['off', 'report', 'on']);
@@ -72,7 +74,7 @@ const NightlyResponseSchema = z.object({
 
 const TidyRunResponseSchema = z.object({
   data: z.object({
-    status: z.enum(['ran', 'busy']),
+    status: z.enum(['ran', 'busy', 'idle']),
     moved_to_earlier: z.number(),
     notes_asked: z.number(),
     notes_sorted: z.number(),
@@ -139,26 +141,28 @@ export function createMemoryNightlyCatalog(options: CreateTrueForgeClientOptions
     const { enabled, overridden, default_enabled, hour } = parsed.data.data;
     return { enabled, overridden, defaultEnabled: default_enabled, hour };
   };
+  const parseRun = (response: unknown): MemoryTidyRun => {
+    const parsed = TidyRunResponseSchema.safeParse(response);
+    if (!parsed.success) {
+      throw new Error('The server sent back something unexpected. Reload the page and try again.');
+    }
+    const run = parsed.data.data;
+    return {
+      status: run.status,
+      movedToEarlier: run.moved_to_earlier,
+      notesAsked: run.notes_asked,
+      notesSorted: run.notes_sorted,
+      pairsListed: run.pairs_listed,
+      sorting: run.sorting,
+      modelMissing: run.model_missing,
+      unsortedReasons: run.unsorted_reasons,
+    };
+  };
   return {
     getMemoryNightly: async () => parse(await request('GET')),
     setMemoryNightly: async change => parse(await request('PUT', change)),
-    tidyMemoryNow: async () => {
-      const parsed = TidyRunResponseSchema.safeParse(await request('POST', undefined, '/run'));
-      if (!parsed.success) {
-        throw new Error('The server sent back something unexpected. Reload the page and try again.');
-      }
-      const run = parsed.data.data;
-      return {
-        status: run.status,
-        movedToEarlier: run.moved_to_earlier,
-        notesAsked: run.notes_asked,
-        notesSorted: run.notes_sorted,
-        pairsListed: run.pairs_listed,
-        sorting: run.sorting,
-        modelMissing: run.model_missing,
-        unsortedReasons: run.unsorted_reasons,
-      };
-    },
+    tidyMemoryNow: async () => parseRun(await request('POST', undefined, '/run')),
+    getMemoryTidyState: async () => parseRun(await request('GET', undefined, '/run')),
   };
 }
 
