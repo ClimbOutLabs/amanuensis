@@ -89,6 +89,28 @@ describe('the bell', () => {
     expect(screen.getByTestId('unread-chats').textContent).toBe('');
   });
 
+  it('ends each item with a link line that says where it leads, and none when it leads nowhere', async () => {
+    const { api } = fakeServer([
+      item({ id: 'chat', text: 'Call the dentist' }),
+      item({
+        id: 'approval',
+        text: 'A message is waiting for your OK',
+        link: { type: 'approval', sessionId: 'mail-chat', approvalId: 'approval-1' },
+      }),
+      item({ id: 'space', text: 'Your trip page changed', link: { type: 'space', spaceId: 'trip' } }),
+      item({ id: 'none', text: 'Your backup finished', link: null }),
+    ]);
+    renderDevice(api);
+    fireEvent.click(await screen.findByRole('button', { name: /Notifications/ }));
+
+    const linkLine = async (text: RegExp) =>
+      (await screen.findByRole('button', { name: text })).querySelector('[data-role="delivery-link"]')?.textContent;
+    expect(await linkLine(/Call the dentist/)).toBe('Open chat');
+    expect(await linkLine(/waiting for your OK/)).toBe('Open chat to answer');
+    expect(await linkLine(/trip page changed/)).toBe('Open space');
+    expect(await linkLine(/backup finished/)).toBeUndefined();
+  });
+
   it('shows seen on one device as seen on the other', async () => {
     const { api } = fakeServer([item({ id: 'a' })]);
     const phone = renderDevice(api);
