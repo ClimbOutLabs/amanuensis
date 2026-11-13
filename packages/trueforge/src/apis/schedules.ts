@@ -300,6 +300,8 @@ export async function startScheduleRunOnRequest<TTransaction>(params: {
     input: prepared.input,
     previous_turn_id: prepared.previous_turn_id,
     userRef: prepared.userRef,
+    // The run names its own chat for the schedule, so the task text never becomes its title.
+    session_title: prepared.session_title,
     // Nobody watches a scheduled run, so it holds what would ask instead of stopping at a card.
     unattended: true,
     withheldTools: scheduleWithheldTools({ name: item.schedule.name, task: item.schedule.manifest.task }),
