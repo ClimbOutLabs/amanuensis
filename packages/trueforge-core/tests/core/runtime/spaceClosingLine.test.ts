@@ -170,7 +170,7 @@ describe('the closing line after space writes', () => {
         },
       ],
     });
-    const history = writeHistory({ user: 'Make a space for my 2027 trip plan.', ids: ['c1'], name: 'Trip plan' });
+    const history = writeHistory({ user: 'Make a space for the latest trip plan.', ids: ['c1'], name: 'Trip plan' });
     const { finals } = await runReply({ replies: ['Done.', 'Done, from memory.'], history, toolSets: [searchTools] });
     expect(finals.filter(content => content.includes('I saved'))).toHaveLength(1);
     expect(finals).toHaveLength(2);
