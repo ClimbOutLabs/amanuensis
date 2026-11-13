@@ -14,6 +14,7 @@ export const Tier3Email: core.serialization.ObjectSchema<serializers.Tier3Email.
         bcc: core.serialization.list(Tier3Mailbox),
         body: core.serialization.string(),
         cc: core.serialization.list(Tier3Mailbox),
+        checkCode: core.serialization.property("check_code", core.serialization.string().optionalNullable()),
         fromName: core.serialization.property("from_name", core.serialization.string().optionalNullable()),
         nameLeftOff: core.serialization.property("name_left_off", core.serialization.boolean().optional()),
         replaces: Tier3EmailReplaces.nullable(),
@@ -29,6 +30,7 @@ export declare namespace Tier3Email {
         bcc: Tier3Mailbox.Raw[];
         body: string;
         cc: Tier3Mailbox.Raw[];
+        check_code?: (string | null | undefined) | null;
         from_name?: (string | null | undefined) | null;
         name_left_off?: boolean | null;
         replaces?: Tier3EmailReplaces.Raw | null;

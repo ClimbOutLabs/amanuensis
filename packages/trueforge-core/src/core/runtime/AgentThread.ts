@@ -1165,6 +1165,9 @@ function validateApprovalMessage({
   if (
     message.approval.status === 'allow' &&
     message.approval.scope === 'always' &&
+    // "Always allow for this skill" on a skill network card is recorded against the skill, not
+    // as a grant on the held call, so it does not need the call itself to take a standing grant.
+    held?.tool_info.skill_network == null &&
     !(toolGrantsAvailable && allowsToolGrant(pending.tool_info))
   ) {
     throw new InvalidAgentSendInputError(
@@ -1674,6 +1677,18 @@ function isSandboxFileEditCall({
     mapped !== undefined &&
     isSandboxFileEditTool({ serverName: mapped.toolSet.name, toolName: mapped.originalToolName })
   );
+}
+
+/** Whether the call goes to the sandbox's own shell tool, looked up by the tool it maps to. */
+function isSandboxCommandCall({
+  call,
+  toolMapping,
+}: {
+  call: Pick<InternalEnrichedToolCall, 'function'>;
+  toolMapping: Map<string, MappedMCPTool>;
+}): boolean {
+  const mapped = toolMapping.get(call.function.name);
+  return mapped?.toolSet.name === SANDBOX_MCP_SERVER_ID && mapped.originalToolName === SANDBOX_EXEC_TOOL_NAME;
 }
 
 /** Whether a call reached its tool, whatever it answered. Refused, blocked and unsent calls did not. */
@@ -5701,8 +5716,8 @@ export class AgentThread {
         this.noteUnfinished(unfinished);
       }
     }
-    // A step that landed a space write or a sandbox file edit is progress, not spent budget; a build in
-    // parts needs many such steps.
+    // A step that landed a space write or a sandbox file edit, or ran a sandbox command, is progress, not
+    // spent budget; a build in parts needs many such steps.
     const refundsSoFar = replyTurn.progressRefundsByThread.get(this.threadId) ?? 0;
     const refund = progressRefundFor({
       refundsSoFar,
@@ -5718,6 +5733,7 @@ export class AgentThread {
                 failure: result.failure,
                 savedNothing: spaceWriteSavedNothing(result.message.content),
                 sandboxFileEdit: isSandboxFileEditCall({ call, toolMapping }),
+                sandboxCommand: isSandboxCommandCall({ call, toolMapping }),
               },
             ];
       }),

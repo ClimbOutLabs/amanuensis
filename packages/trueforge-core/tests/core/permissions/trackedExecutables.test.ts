@@ -139,37 +139,55 @@ describe('writeTargetTouchesGitControl', () => {
 });
 
 describe('isNewWriteTarget', () => {
-  test('a path that does not exist yet is new', () => {
+  const onHost = (p: string, cwd: string): Promise<boolean> =>
+    isNewWriteTarget({ p, cwd, resolution: undefined, path_missing: undefined });
+
+  test('a path that does not exist yet is new', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'new-target-'));
     try {
-      expect(isNewWriteTarget({ p: 'fresh.py', cwd: dir })).toBe(true);
-      expect(isNewWriteTarget({ p: 'sub/fresh.py', cwd: dir })).toBe(true);
+      expect(await onHost('fresh.py', dir)).toBe(true);
+      expect(await onHost('sub/fresh.py', dir)).toBe(true);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  test('an existing file is not new', () => {
+  test('an existing file is not new', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'new-target-'));
     try {
       writeFileSync(join(dir, 'README.md'), 'text');
-      expect(isNewWriteTarget({ p: 'README.md', cwd: dir })).toBe(false);
+      expect(await onHost('README.md', dir)).toBe(false);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  test('a dangling symlink is not new', () => {
+  test('a dangling symlink is not new', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'new-target-'));
     try {
       symlinkSync(join(dir, 'missing.txt'), join(dir, 'link.txt'));
-      expect(isNewWriteTarget({ p: 'link.txt', cwd: dir })).toBe(false);
+      expect(await onHost('link.txt', dir)).toBe(false);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  test('a remote sandbox path is never new, because the server cannot see it', () => {
-    expect(isNewWriteTarget({ p: 'fresh.py', cwd: '/workspace', resolution: 'remote' })).toBe(false);
+  test('a remote sandbox path is not new when the sandbox cannot be asked', async () => {
+    expect(
+      await isNewWriteTarget({ p: 'fresh.py', cwd: '/workspace', resolution: 'remote', path_missing: undefined }),
+    ).toBe(false);
+  });
+
+  test('a remote sandbox path is new only when the sandbox says nothing is there', async () => {
+    const asked: string[] = [];
+    const path_missing = (path: string): Promise<boolean> => {
+      asked.push(path);
+      return Promise.resolve(path === '/workspace/sub/fresh.py');
+    };
+    const remote = (p: string): Promise<boolean> =>
+      isNewWriteTarget({ p, cwd: '/workspace', resolution: 'remote', path_missing });
+    expect(await remote('sub/./fresh.py')).toBe(true);
+    expect(await remote('README.md')).toBe(false);
+    expect(asked).toEqual(['/workspace/sub/fresh.py', '/workspace/README.md']);
   });
 });

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { DeliveriesProvider } from '@/deliveries/DeliveriesContext.js';
@@ -9,6 +9,8 @@ import { fakeServer, SERVER_KEY } from '../deliveries/fakeDeliveriesApi.js';
 import { removePushBrowser, stubPushBrowser } from '../deliveries/fakePushBrowser.js';
 
 afterEach(() => {
+  cleanup();
+  window.localStorage.clear();
   vi.unstubAllGlobals();
   removePushBrowser();
 });
@@ -23,12 +25,12 @@ async function settle() {
 function renderPrompt({ savedEndpoints }: { savedEndpoints: string[] }) {
   const server = fakeServer([]);
   for (const endpoint of savedEndpoints) server.state.pushEndpoints.add(endpoint);
-  render(
+  const { unmount } = render(
     <DeliveriesProvider api={server.api}>
       <ReminderNotificationPrompt />
     </DeliveriesProvider>,
   );
-  return server;
+  return { ...server, unmount };
 }
 
 describe('ReminderNotificationPrompt', () => {
@@ -42,6 +44,19 @@ describe('ReminderNotificationPrompt', () => {
     stubPushBrowser({ existingKey: SERVER_KEY });
     const { api } = renderPrompt({ savedEndpoints: ['https://push.example.test/device-1'] });
     await waitFor(() => expect(api.pushDeviceSaved).toHaveBeenCalled());
+    await settle();
+    expect(screen.queryByRole('button', { name: 'Turn on notices' })).toBeNull();
+  });
+
+  it('keeps the offer away after Not now, on a reload too', async () => {
+    stubPushBrowser({ existingKey: SERVER_KEY });
+    const first = renderPrompt({ savedEndpoints: [] });
+    fireEvent.click(await screen.findByRole('button', { name: 'Not now' }));
+    expect(screen.queryByRole('button', { name: 'Turn on notices' })).toBeNull();
+    first.unmount();
+
+    const second = renderPrompt({ savedEndpoints: [] });
+    await waitFor(() => expect(second.api.pushDeviceSaved).toHaveBeenCalled());
     await settle();
     expect(screen.queryByRole('button', { name: 'Turn on notices' })).toBeNull();
   });
