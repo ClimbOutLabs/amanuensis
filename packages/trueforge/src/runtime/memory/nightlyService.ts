@@ -124,52 +124,72 @@ export function startNightlyMemoryJob({
 
   let running = false;
   let lastTidy: { result: TidyResult; finishedAt: number } | undefined;
+  // True when a page asked for a tidy-up while the daily one ran: that page waits on it, so its outcome is kept.
+  let awaited = false;
+  const startTidy = (): void => {
+    running = true;
+    void (async (): Promise<TidyResult> => {
+      const nightly = await readMemoryNightlySetting({ globalSettingsStore, logger });
+      const sorting = await readMemoryPageSortingSetting({ globalSettingsStore, logger });
+      const counts = await runNightlyJob({
+        deps: { ...deps, mode: sorting.mode, hour: nightly.hour },
+        onRequest: true,
+      });
+      return { status: 'ran', counts, sorting: sorting.mode };
+    })()
+      .catch((error: unknown): TidyResult => {
+        logger.warn('A tidy-up asked for now stopped on an error.', extractErrorLogFields(error));
+        return { status: 'failed' };
+      })
+      .then(result => {
+        lastTidy = { result, finishedAt: deps.now().getTime() };
+        awaited = false;
+        running = false;
+      });
+  };
   const look = (): void => {
     if (running) {
       return;
     }
     running = true;
-    void (async () => {
+    void (async (): Promise<TidyResult | undefined> => {
       const nightly = await readMemoryNightlySetting({ globalSettingsStore, logger });
       if (!nightly.enabled || !inQuietHours({ now: deps.now(), hour: nightly.hour })) {
-        return;
+        return undefined;
       }
       const sorting = await readMemoryPageSortingSetting({ globalSettingsStore, logger });
-      await runNightlyJob({ deps: { ...deps, mode: sorting.mode, hour: nightly.hour } });
+      const counts = await runNightlyJob({ deps: { ...deps, mode: sorting.mode, hour: nightly.hour } });
+      return { status: 'ran', counts, sorting: sorting.mode };
     })()
-      .catch((error: unknown) => {
-        logger.warn('The nightly memory job could not start.', extractErrorLogFields(error));
+      .catch((error: unknown): TidyResult => {
+        logger.warn('The nightly memory job stopped on an error.', extractErrorLogFields(error));
+        return { status: 'failed' };
       })
-      .finally(() => {
+      .then(result => {
+        const wanted = awaited;
+        awaited = false;
         running = false;
+        if (!wanted) {
+          return;
+        }
+        if (result === undefined) {
+          // The look had nothing to do, so the tidy-up the page asked for meanwhile still has to run.
+          startTidy();
+          return;
+        }
+        lastTidy = { result, finishedAt: deps.now().getTime() };
       });
   };
   setInterval(look, LOOK_INTERVAL_MS).unref();
 
   return {
     tidyNow: () => {
+      lastTidy = undefined;
       if (running) {
+        awaited = true;
         return;
       }
-      running = true;
-      lastTidy = undefined;
-      void (async (): Promise<TidyResult> => {
-        const nightly = await readMemoryNightlySetting({ globalSettingsStore, logger });
-        const sorting = await readMemoryPageSortingSetting({ globalSettingsStore, logger });
-        const counts = await runNightlyJob({
-          deps: { ...deps, mode: sorting.mode, hour: nightly.hour },
-          onRequest: true,
-        });
-        return { status: 'ran', counts, sorting: sorting.mode };
-      })()
-        .catch((error: unknown): TidyResult => {
-          logger.warn('A tidy-up asked for now stopped on an error.', extractErrorLogFields(error));
-          return { status: 'failed' };
-        })
-        .then(result => {
-          lastTidy = { result, finishedAt: deps.now().getTime() };
-          running = false;
-        });
+      startTidy();
     },
     tidyState: () => {
       if (running) {

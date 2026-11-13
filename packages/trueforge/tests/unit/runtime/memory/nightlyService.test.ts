@@ -159,6 +159,83 @@ describe('the nightly timer', () => {
     expect(job.tidyState()).toMatchObject({ status: 'ran' });
   });
 
+  it('gives a page that asked during the daily tidy-up the outcome of that run', async () => {
+    let finish: (() => void) | undefined;
+    const settings = inMemoryGlobalSettingsStore();
+    await settings.setSetting({ key: MEMORY_NIGHTLY_SETTING_KEY, value: 'true' });
+    const job = start(settings);
+    job.tidyNow();
+    await jest.advanceTimersByTimeAsync(0);
+    const earlier = job.tidyState();
+    expect(earlier).toMatchObject({ status: 'ran' });
+
+    run.mockImplementationOnce(
+      () =>
+        new Promise(resolve => {
+          finish = () => resolve({ ...QUIET_COUNTS, pairsListed: 4 });
+        }),
+    );
+    await jest.advanceTimersByTimeAsync(LOOK);
+    expect(job.tidyState()).toEqual({ status: 'busy' });
+
+    job.tidyNow();
+    await jest.advanceTimersByTimeAsync(0);
+    expect(run).toHaveBeenCalledTimes(2);
+    finish?.();
+    await jest.advanceTimersByTimeAsync(0);
+
+    expect(job.tidyState()).toEqual({
+      status: 'ran',
+      counts: { ...QUIET_COUNTS, pairsListed: 4 },
+      sorting: 'off',
+    });
+  });
+
+  it('still tidies when asked while a daily look with nothing to do was reading its settings', async () => {
+    const stored = inMemoryGlobalSettingsStore();
+    let release: (() => void) | undefined;
+    let hold = false;
+    const settings: typeof stored = {
+      ...stored,
+      getSetting: async query => {
+        if (hold) {
+          hold = false;
+          await new Promise<void>(resolve => {
+            release = resolve;
+          });
+        }
+        return stored.getSetting(query);
+      },
+    };
+    const job = start(settings);
+    hold = true;
+    await jest.advanceTimersByTimeAsync(LOOK);
+    expect(job.tidyState()).toEqual({ status: 'busy' });
+
+    job.tidyNow();
+    release?.();
+    await jest.advanceTimersByTimeAsync(0);
+
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(run.mock.calls[0]?.[0]).toMatchObject({ onRequest: true });
+    expect(job.tidyState()).toMatchObject({ status: 'ran' });
+  });
+
+  it('keeps what a tidy-up asked for did when a later daily look runs unasked', async () => {
+    const settings = inMemoryGlobalSettingsStore();
+    await settings.setSetting({ key: MEMORY_NIGHTLY_SETTING_KEY, value: 'true' });
+    const job = start(settings);
+    job.tidyNow();
+    await jest.advanceTimersByTimeAsync(0);
+    const asked = job.tidyState();
+
+    run.mockResolvedValueOnce(QUIET_COUNTS);
+    await jest.advanceTimersByTimeAsync(LOOK);
+
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(job.tidyState()).toEqual(asked);
+  });
+
   it('says a tidy-up failed when it stopped on an error, and can start again', async () => {
     run.mockRejectedValueOnce(new Error('disk full'));
     const job = start(inMemoryGlobalSettingsStore());
