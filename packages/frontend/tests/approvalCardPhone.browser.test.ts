@@ -65,6 +65,8 @@ test('both approval cards fit a 390 px phone with every choice in reach', { time
         const box = await choice.boundingBox();
         assert.ok(box !== null, `${name} has no box`);
         assert.ok(box.x >= 0 && box.x + box.width <= PHONE.width, `${name} runs off the screen`);
+        // 2.75rem: the smallest comfortable tap target, kept even though the card's text is small.
+        assert.ok(Math.round(box.height) >= 44, `${name} is ${String(box.height)} px tall, too short to tap`);
       }
     }
 

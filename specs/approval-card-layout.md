@@ -23,7 +23,7 @@ Mail keeps its own body block and sticky action bar, but uses the same status li
 
 - **No string parsing.** The card wording (`copy`: headline, reason, consequence) already carries the question and the reason separately. The layout only places them; it never splits a sentence back out of the question.
 - **The reason stays in audit text.** The audit log still records the question and the reason together, so nothing is lost from the record.
-- **Text at body size.** Every line on the card uses the chat body size, so a card is never harder to read than the chat around it.
+- **Quieter than the chat.** Only the question uses the chat body size, in semibold. The reason, the consequence, the facts and the buttons are one step smaller, and the status line is the smallest step. Order comes from weight and colour, not big size jumps, so a card never looks louder than the chat around it. A mail body stays at body size because it is what is being approved. Phone buttons stay at least 2.75rem tall.
 - **Phone first.** On a narrow screen the fact rows stack and the buttons share the row and wrap their labels instead of overflowing.
 - **One tick.** The old tear-off animation is gone. A small gold tick plays once on approval, under the same rules that limited the old animation.
 
@@ -41,7 +41,7 @@ No new data is collected, stored or sent. The reason sentence was already shown 
 
 - Core tests check the browser question, the link-source sentence said once, and that the audit text keeps the reason.
 - UI tests check the layout order, that each fact shows once, the button order including safe-first, when Details appears, and the answered line.
-- Browser tests check the cards at phone width and that all card text is at body size.
+- Browser tests check the cards at phone width with tall enough buttons, that only the question and a mail body are at body size, and that no line is below the smallest type step.
 - All test data is synthetic.
 
 ## Out of scope

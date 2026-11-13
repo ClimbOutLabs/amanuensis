@@ -140,7 +140,7 @@ export const HeldActionCard: FC<HeldActionCardProps> = ({
         status={canAnswer ? { kind: 'waiting' } : { kind: 'answered', ...answeredStatus(status) }}
       >
         {card.why_asked_again !== null && (
-          <p className="text-sm text-text-secondary" data-role="held-action-why-held">
+          <p className="text-text-secondary" data-role="held-action-why-held">
             {card.why_asked_again}
           </p>
         )}
@@ -153,9 +153,9 @@ export const HeldActionCard: FC<HeldActionCardProps> = ({
 
         {card.outbound_text !== null && !outboundRepeatsFacts(card, card.outbound_text) && (
           <div className="rounded border border-border bg-primary-bg px-3 py-2">
-            <p className="mb-1 text-sm font-medium text-text-secondary">Full request</p>
+            <p className="mb-1 font-medium text-text-secondary">Full request</p>
             {card.outbound_truncated && (
-              <p className="mb-1 text-sm font-medium text-text-primary" data-role="held-action-truncated">
+              <p className="mb-1 font-medium text-text-primary" data-role="held-action-truncated">
                 Part of this is not shown in full. Check it before you approve.
               </p>
             )}
@@ -166,20 +166,20 @@ export const HeldActionCard: FC<HeldActionCardProps> = ({
         )}
 
         {consequence !== null && (
-          <p className="flex items-start gap-2 text-sm text-text-secondary">
+          <p className="flex items-start gap-2 text-text-secondary">
             <Icon name="info" className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
             <span>{consequence}</span>
           </p>
         )}
 
         {card.plain_why !== null && (
-          <p className="text-sm text-text-secondary" data-role="held-action-reason">
+          <p className="text-text-secondary" data-role="held-action-reason">
             {assistant} says: {card.plain_why}
           </p>
         )}
 
         {status.kind === 'failed' && (
-          <p role="alert" className="text-sm text-failure-bg">
+          <p role="alert" className="text-failure-bg">
             {status.message}
           </p>
         )}

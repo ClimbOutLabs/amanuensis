@@ -78,7 +78,8 @@ function EmailBody({ body }: { body: string }) {
   const long = clipped || isLongEmailBody(body);
   const collapsed = long && !expanded;
   return (
-    <div className="px-4 py-3">
+    // The message is what is being approved, so it reads at the chat's body size while the rest of the card is smaller.
+    <div className="px-4 py-3 text-base">
       <div ref={bodyRef} className={cn('space-y-3 text-text-primary', collapsed && COLLAPSED_HEIGHT_CLASS)}>
         {splitEmailBody(body).map((segment, index) =>
           segment.kind === 'code' ? (
@@ -210,7 +211,8 @@ export const EmailApprovalCard: FC<EmailApprovalCardProps> = ({
         />
       )}
 
-      <div className="sticky bottom-0 -mx-[1.125rem] -mb-4 rounded-b-[0.625rem] bg-card-bg px-[1.125rem] pb-4 pt-1">
+      {/* The negative margins match the card padding, so the bar spans the card edge to edge. */}
+      <div className="sticky bottom-0 -mx-4 -mb-3.5 rounded-b-[0.625rem] bg-card-bg px-4 pb-3.5 pt-1">
         <ApprovalActions>
           {safeFirst && (
             <ApprovalButton

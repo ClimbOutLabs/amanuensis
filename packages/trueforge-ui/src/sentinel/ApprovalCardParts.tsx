@@ -76,13 +76,16 @@ export function ApprovalCardShell({
     >
       <div className="flex flex-col gap-1">
         {answered ? (
-          <p className="flex min-w-0 items-center gap-1.5 text-text-secondary" data-role="approval-status">
+          <p
+            className="aui-approval-card__status flex min-w-0 items-center gap-1.5 text-text-secondary"
+            data-role="approval-status"
+          >
             {status.tick}
             <span className="min-w-0">{status.text}</span>
           </p>
         ) : (
-          <p className="flex items-center gap-1.5 text-gold-ink" data-role="approval-status">
-            <span aria-hidden="true" className="size-[0.4375rem] shrink-0 rounded-full bg-gold-ink" />
+          <p className="aui-approval-card__status flex items-center gap-1.5 text-gold-ink" data-role="approval-status">
+            <span aria-hidden="true" className="size-[0.375rem] shrink-0 rounded-full bg-gold-ink" />
             {WAITING_FOR_YOU_LABEL}
           </p>
         )}
@@ -117,10 +120,7 @@ export function ApprovalFacts({ facts }: { facts: readonly ApprovalFact[] }) {
             <FoldedText
               text={fact.value}
               as="span"
-              className={cn(
-                'text-text-primary',
-                fact.mono === true ? 'break-all font-mono text-[0.8125rem]' : 'break-words',
-              )}
+              className={cn('text-text-primary', fact.mono === true ? 'break-all font-mono' : 'break-words')}
             />
           </dd>
         </div>
