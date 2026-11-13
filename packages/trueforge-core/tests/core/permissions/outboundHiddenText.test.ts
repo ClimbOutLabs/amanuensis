@@ -298,7 +298,9 @@ describe('long keys', () => {
   });
 
   test('a call that sends nothing is carded and marked cut, not refused', async () => {
-    const { decision, refused } = await denial('frobnicate', { [keyOf(201)]: 'x' });
+    // The mailbox anchors the call in the connector's own store, so the carried-payload refusal
+    // does not claim it and the long key is still shown cut on its card.
+    const { decision, refused } = await denial('frobnicate', { mailbox: 'Depot', [keyOf(201)]: 'x' });
     expect(refused).toBe(false);
     expect(decision.card?.outbound_truncated).toBe(true);
   });

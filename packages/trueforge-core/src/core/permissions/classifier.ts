@@ -3924,6 +3924,20 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     });
   }
 
+  // The carried-payload refusal, last: a call no mechanism above claims, which is not a known
+  // read and not declared read-only and closed-world, yet carries words or an id and shows no
+  // destination the card can verify, is refused rather than carded. Every more specific outcome
+  // (a family card, a hint escalation, a name-ranked class, the calendar card, a silent read)
+  // has already been decided above, so what reaches here is exactly the unclaimed remainder that
+  // would otherwise get the unrecognized-tool card below.
+  if (extraction.payload_unverifiable) {
+    return autoDenyDecision({
+      reason: 'destination_unverifiable',
+      reason_detail: 'A connector call that carries words or an id and shows no verifiable destination is never carded.',
+      sensitive_read: false,
+    });
+  }
+
   // Fail closed: anything unrecognized is Tier 3 with a card.
   const card = connectorApprovalCard({ action, extraction, agent_intent: ctx.agent_intent });
   const recognized = extraction.connector_what !== null;

@@ -137,9 +137,130 @@ describe('an invented send tool with no listed name', () => {
     expect(decision).toMatchObject({ tier: 3, auto_deny: 'offline_mode' });
   });
 
-  it('carries nothing out when it only looks something up, so it is carded, not denied', async () => {
+  it('is auto-denied when it carries words under a text key and no destination', async () => {
     const decision = await classifyTier(
       connectorCall({ tool_name: 'transmit_letter', params: { text: 'a long lookup string' } }),
+      makeCtx(),
+    );
+    expect(decision).toMatchObject({ tier: 3, auto_deny: 'destination_unverifiable', card: null });
+  });
+});
+
+describe('a call that carries words or an id but shows no destination', () => {
+  // The calls the gate named, refused before the registry was deleted and carded after it:
+  // each carries words or an id, none shows a destination a card could verify, and none is a
+  // known connector read or declared read-only and closed-world. No name here is matched
+  // anywhere. What refuses them is what they carry.
+  it('refuses a text message that names no number to send to', async () => {
+    const decision = await classifyTier(
+      connectorCall({ tool_name: 'send_sms', params: { text: 'Running late, see you at seven.' } }),
+      makeCtx(),
+    );
+    expect(decision).toMatchObject({ tier: 3, auto_deny: 'destination_unverifiable', card: null });
+  });
+
+  it('refuses a post whose words sit under a status key', async () => {
+    const decision = await classifyTier(
+      connectorCall({ tool_name: 'post_tweet', params: { status: 'Hello from the release party.' } }),
+      makeCtx(),
+    );
+    expect(decision).toMatchObject({ tier: 3, auto_deny: 'destination_unverifiable', card: null });
+  });
+
+  it('refuses a share that names only the file it would share', async () => {
+    const decision = await classifyTier(
+      connectorCall({ tool_name: 'share_file', params: { file_id: 'file_9f27' } }),
+      makeCtx(),
+    );
+    expect(decision).toMatchObject({ tier: 3, auto_deny: 'destination_unverifiable', card: null });
+  });
+
+  it('refuses a payment that names only the invoice it would pay', async () => {
+    const decision = await classifyTier(
+      connectorCall({ tool_name: 'make_payment', params: { invoice_id: 'inv_4021' } }),
+      makeCtx(),
+    );
+    expect(decision).toMatchObject({ tier: 3, auto_deny: 'destination_unverifiable', card: null });
+  });
+
+  it('refuses a webhook call whose payload is a json string', async () => {
+    const decision = await classifyTier(
+      connectorCall({ tool_name: 'trigger_webhook', params: { json: '{"event":"deploy","ok":true}' } }),
+      makeCtx(),
+    );
+    expect(decision).toMatchObject({ tier: 3, auto_deny: 'destination_unverifiable', card: null });
+  });
+
+  it('refuses a webhook call whose payload is an object with words and numbers inside', async () => {
+    const decision = await classifyTier(
+      connectorCall({ tool_name: 'trigger_webhook', params: { json: { event: 'deploy', attempt: 2 } } }),
+      makeCtx(),
+    );
+    expect(decision).toMatchObject({ tier: 3, auto_deny: 'destination_unverifiable', card: null });
+  });
+
+  it('refuses a call whose only argument is an id under a key nothing special-cases', async () => {
+    const decision = await classifyTier(
+      connectorCall({ tool_name: 'relay_parcel', params: { parcel_ref: 'p_881' } }),
+      makeCtx(),
+    );
+    expect(decision).toMatchObject({ tier: 3, auto_deny: 'destination_unverifiable', card: null });
+  });
+
+  it('refuses a call whose words are nested inside an object argument', async () => {
+    const decision = await classifyTier(
+      connectorCall({ tool_name: 'dispatch_note', params: { envelope: { note: 'Leave it at the door.' } } }),
+      makeCtx(),
+    );
+    expect(decision).toMatchObject({ tier: 3, auto_deny: 'destination_unverifiable', card: null });
+  });
+
+  it('cards the same text message when it names the number it goes to', async () => {
+    const decision = await classifyTier(
+      connectorCall({
+        tool_name: 'send_sms',
+        params: { phone_number: '+15551234567', text: 'Running late, see you at seven.' },
+      }),
+      makeCtx(),
+    );
+    expect(decision).toMatchObject({ tier: 3, auto_deny: null });
+    expect(decision.approval_token_id).not.toBeNull();
+    expect(decision.card?.recipient).toBe('+15551234567');
+  });
+
+  it('does not refuse a known connector read that carries words', async () => {
+    const decision = await classifyTier(
+      connectorCall({ tool_name: 'search_messages', params: { query: 'invoice from April' } }),
+      makeCtx(),
+    );
+    expect(decision.auto_deny).toBeNull();
+  });
+
+  it('does not refuse a declared read-only closed-world call that carries words and an id', async () => {
+    const decision = await classifyTier(
+      connectorCall({
+        tool_name: 'export_file',
+        params: { file_id: 'file_9f27', text: 'quarterly export' },
+        hints: { read_only_hint: true, open_world_hint: false },
+      }),
+      makeCtx(),
+    );
+    expect(decision.auto_deny).toBeNull();
+    expect(decision.approval_token_id).not.toBeNull();
+  });
+
+  it('cards a call that names only a mailbox, the connector own store', async () => {
+    const decision = await classifyTier(
+      connectorCall({ tool_name: 'stash_parcel', params: { mailbox: 'Depot' } }),
+      makeCtx(),
+    );
+    expect(decision).toMatchObject({ tier: 3, auto_deny: null });
+    expect(decision.approval_token_id).not.toBeNull();
+  });
+
+  it('cards a call that carries only a flag, which is neither words nor an id', async () => {
+    const decision = await classifyTier(
+      connectorCall({ tool_name: 'poke_service', params: { dry_run: true } }),
       makeCtx(),
     );
     expect(decision).toMatchObject({ tier: 3, auto_deny: null });
@@ -216,6 +337,34 @@ describe('the real send tools named in the finding keep their decisions', () => 
     );
     expect(decision).toMatchObject({ tier: 3, auto_deny: null });
     expect(decision.card?.destination).toBe('https://hooks.example.com/x');
+  });
+
+  it('cards a reply that carries only its content, since the thread it answers is its destination', async () => {
+    const decision = await classifyTier(
+      connectorCall({ tool_name: 'reply_to_thread', params: { message_id: 'm1', body: 'Thanks, that works.' } }),
+      makeCtx(),
+    );
+    expect(decision).toMatchObject({ tier: 3, auto_deny: null });
+    expect(decision.approval_token_id).not.toBeNull();
+  });
+
+  it('refuses a bare forward, whose delivered content is the stored message the card cannot show', async () => {
+    // A mail forward naming no recipient is refused by the more specific incomplete-send
+    // refusal. Either way it is refused, never carded.
+    const decision = await classifyTier(
+      connectorCall({ tool_name: 'forward_email', params: { message_id: 'm1' } }),
+      makeCtx(),
+    );
+    expect(decision).toMatchObject({ tier: 3, auto_deny: 'incomplete_send_card', card: null });
+  });
+
+  it('cards a call on the mail connector that names only a mailbox, the connector own store', async () => {
+    const decision = await classifyTier(
+      connectorCall({ tool_name: 'purge_emails', params: { mailbox: 'Trash' } }),
+      makeCtx(),
+    );
+    expect(decision).toMatchObject({ tier: 3, auto_deny: null });
+    expect(decision.approval_token_id).not.toBeNull();
   });
 
   it('extraction without a connector still reports an unverifiable carried send', () => {

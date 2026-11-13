@@ -98,7 +98,11 @@ describe('connector send cards', () => {
   });
 
   test('still cuts a long value on a call that sends nothing', async () => {
-    const decision = await classify(mailCall('lookup_note', { text: 'a'.repeat(OUTBOUND_VALUE_MAX_CHARS + 5) }));
+    // The mailbox anchors the call in the connector's own store, so the carried-payload refusal
+    // does not claim it and the card still shows the long value cut.
+    const decision = await classify(
+      mailCall('lookup_note', { mailbox: 'Notes', text: 'a'.repeat(OUTBOUND_VALUE_MAX_CHARS + 5) }),
+    );
     expect(decision.auto_deny).toBeNull();
     expect(decision.card?.outbound_truncated).toBe(true);
   });
