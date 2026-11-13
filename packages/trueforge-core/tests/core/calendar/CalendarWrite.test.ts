@@ -150,8 +150,15 @@ describe('the approval card', () => {
       before: null,
     });
     expect(info.tier3_card?.plain_what).toBe(
-      'Add "Dentist" to your Google Calendar on Mon Oct 19, 9:00 to 10:00 am (America/New_York)? Google emails lin@example.com and sam@example.com about it. This change sends an invitation to other people, so Aman always asks.',
+      'Add "Dentist" to your Google Calendar on Mon Oct 19, 9:00 to 10:00 am (America/New_York)? Google emails lin@example.com and sam@example.com about it.',
     );
+    expect(info.tier3_card?.copy).toEqual({
+      headline: 'Add "Dentist" to your Google Calendar on Mon Oct 19, 9:00 to 10:00 am (America/New_York)?',
+      consequence:
+        "Google emails lin@example.com and sam@example.com about it. Google emails the guests right away. That email can't be unsent.",
+      reason: 'This change sends an invitation to other people, so Aman always asks.',
+    });
+    expect(info.tier3_card?.safe_choice).toBe(true);
     expect(info.tier3_card?.cannot_be_undone).toContain("can't be unsent");
   });
 
@@ -738,7 +745,7 @@ describe('card date wording and duplicate creates', () => {
     expect(outcome.disposition).toBe('executed_ok');
 
     const again = await cardFor(built, { name: 'create_event', arguments: CHECKUP });
-    expect(again.tier3_card?.plain_what).toContain('You already have this event. Add another?');
+    expect(again.tier3_card?.copy?.consequence).toContain('You already have this event.');
     // It still asks as a normal card: approving it is the owner's choice, not a refusal.
     expect(again.tier).toBe(3);
     expect(again.is_approval_required).toBe(true);

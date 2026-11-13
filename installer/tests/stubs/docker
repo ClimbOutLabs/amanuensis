@@ -119,6 +119,11 @@ case "$cmd" in
     echo "$1" >>"$S/images"
     exit 0
     ;;
+  tag)
+    grep -Fxq "$1" "$S/images" || { echo "Error response from daemon: No such image: $1" >&2; exit 1; }
+    echo "$2" >>"$S/images"
+    exit 0
+    ;;
   logs)
     printf '%s\n' "${STUB_UP_FAIL_LOG:-}"
     exit 0

@@ -17,7 +17,7 @@ One instance serves one person. If two people in the same household need it, the
 - On Linux, Docker Engine 28 or newer: older versions let other devices on your network reach ports meant for this computer only, so the installer and `aman doctor` stop and say so.
 - Docker needs at least 6 GB of memory for the first build. The installer blocks below 6 GB and warns between 6 and 8 GB; 8 GB or more is recommended.
 - Your own model: the address of a model server you already run, for example `http://host.docker.internal:11434/v1`. The address and any API key are entered in the app afterwards, not in the installer. That address names your computer from inside the container, not the container itself, so the app can use it as it stands, with nothing to name first (see [Setup Models](/models#adding-a-custom-provider)). The installer never scans your machine for models.
-- A git checkout of this repository. The installer runs from the checkout and builds the images from source.
+- A git checkout of this repository. The installer runs from the checkout. When the checkout is a release whose images were published, it downloads Aman's images for your kind of processor, each checked against the digest pinned in the release. Otherwise, or with `--build-from-source`, it builds them from source.
 
 ## Windows
 
@@ -56,7 +56,7 @@ The installer works in phases and shows you a printed plan before changing anyth
 1. **Preflight (read-only).** Checks the OS, architecture, Docker, Compose v2 or newer, and free disk. On supported Linux without a working Engine, it offers to install Docker for you.
 2. **Plan and confirmation.** Prints each step as done, to do, or needs admin, then asks to continue. `--yes` skips the prompt; `--dry-run` prints the plan and stops without changing anything.
 3. **Downloads.** Fetches third-party base images by pinned digest and the model weight files listed in the printed plan.
-4. **Images.** Downloads the pinned Node.js runtime for the sandbox setup, builds the app and helper images locally from the checked-out source, then the sandbox slot image (its build log goes to `~/.amanuensis/state/sandbox.log`; the terminal shows one progress line).
+4. **Images.** Downloads the pinned Node.js runtime for the sandbox setup. Downloads the app and helper images a release published for this source (pinned by digest), or builds them locally from the checked-out source, then builds the sandbox slot image (its build log goes to `~/.amanuensis/state/sandbox.log`; the terminal shows one progress line).
 5. **Machine services.** Starts the shared speech-to-text service.
 6. **First instance.** Prompts for the instance details, starts the two sandbox slots (asking before the `sudo` steps on Linux: installing the AppArmor profile in `/etc/apparmor.d` and loading it, creating the slot disks, and enabling Docker at boot if it is not), then starts your stack connected to them.
 7. **Doctor and summary.** Runs the health checks, then proves the sandbox: every slot's safety checks and a real call from the app to the slots. Prints your URLs, versions, backup location, and next steps.
@@ -97,6 +97,7 @@ The printed plan lists every first-run download with its approximate size, inclu
 - `--sandbox-root`: let the installer run the printed root steps for the sandbox (AppArmor profile, slot disks) without asking. `--yes` alone never uses sudo.
 - `--no-sandbox`: install without the gVisor sandbox. Run code stays off.
 - `--use-host-node`: run the sandbox setup on this computer's Node.js 22.14 or newer instead of downloading a pinned copy.
+- `--build-from-source`: build every Aman image on this computer, even when the release published it.
 - `--print-root-steps`: print the root steps for installing Docker and stop.
 - `--print-network`: print every host the installer may contact and stop.
 - `--print-proxy-requirements`: print what a reverse proxy in front of an instance must do and stop.
@@ -260,7 +261,7 @@ installer/install.sh upgrade --check   # compare the installed version with the 
 installer/install.sh upgrade           # back up, rebuild, restart, health-check
 ```
 
-Upgrade refuses to start unless doctor shows no failures, unless you pass `--force`. It backs up every instance first, rebuilds the images, restarts each stack, and checks health. If the upgrade fails after the restart begins, it restores the backup and the previous images, then tells you what it did.
+Upgrade refuses to start unless doctor shows no failures, unless you pass `--force`. It backs up every instance first, downloads or rebuilds the images, restarts each stack, and checks health. If the upgrade fails after the restart begins, it restores the backup and the previous images, then tells you what it did.
 
 ### Exporting one person's data
 
