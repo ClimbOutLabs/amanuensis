@@ -4913,26 +4913,19 @@ export class Sandbox extends LocalToolMCP {
     const requiresDurableCoordination = guarded && this.boundRepository !== undefined;
     if (!requiresDurableCoordination) {
       const workspaceRoot = await this.resolveWorkspaceRoot(sandboxId, input.cwd);
+      // A folder that is not a Git repository has no lock to take, but the command still gets the
+      // chat's download and skill site grants: those belong to the chat, not to a repository.
       const run = (): Promise<ExecResult> =>
-        workspaceRoot === undefined
-          ? this.sandboxPathExec({
-              sandboxId,
-              command: input.command,
-              cwd: input.cwd,
-              env,
-              ...(input.timeoutSeconds === undefined ? {} : { timeoutSeconds: input.timeoutSeconds }),
-              ...(approvedGitRemotes === undefined ? {} : { approvedGitRemotes }),
-            })
-          : this.execWorkspaceExclusive({
-              hostAuthored: false,
-              sandboxId,
-              workspaceRoot,
-              command: input.command,
-              cwd: input.cwd,
-              env,
-              timeoutSeconds: input.timeoutSeconds,
-              approvedGitRemotes,
-            });
+        this.execWorkspaceExclusive({
+          hostAuthored: false,
+          sandboxId,
+          workspaceRoot,
+          command: input.command,
+          cwd: input.cwd,
+          env,
+          timeoutSeconds: input.timeoutSeconds,
+          approvedGitRemotes,
+        });
       // Workspace-root discovery above (unbound path) is complete; the target
       // command is about to reach the provider. A SandboxNotAvailableError from
       // this point on means the target may have run, so replay must stop being
