@@ -22,6 +22,7 @@ Some things go out, and only when needed:
 
 - To your model: Each chat goes to the model you chose, with what Aman knows about you and anything it read for you. A local model keeps all of this on your computer.
 - To the web search service: The search words, and the pages Aman opens from the results.
+- To Twilio and the phone company, only if you set up texts or calls: Your phone number, each text, and the sound of each call. The voice and the transcript of a call are made on your computer.
 - To the map service: The places and routes Aman looks up. With the **Maps** switch off, only after you approve the card.
 - To the model a new chat starts on, when Aman notices something new for you, such as a calendar clash: a short description of that one thing, so the model can suggest how loudly to tell you. Nothing is sent when nothing is new. See [Reach me](reach-me.md).
 - To your browser's push service, only for devices where you turned notices on: an item number and a short title such as "Reminder", never the text.

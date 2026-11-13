@@ -171,6 +171,7 @@ async function main(): Promise<void> {
   });
   let browser: Browser | undefined;
   const problems: string[] = [];
+  let taken = 0;
   try {
     await vite.listen();
     const origin = `http://127.0.0.1:${String(port)}`;
@@ -192,6 +193,7 @@ async function main(): Promise<void> {
       for (const shot of inWorld) {
         // Both sizes of one shot are taken together, so a step that changes the world changes it for both.
         for (const size of SIZES) {
+          if (shot.computerOnly === true && size.phone) continue;
           const context = await newContext({ browser, origin, owner, size });
           const page = await context.newPage();
           const failures: string[] = [];
@@ -201,6 +203,7 @@ async function main(): Promise<void> {
               failures.push(`${String(response.status())} from ${response.url()}`);
             }
           });
+          taken += 1;
           try {
             const path = await takeShot({ shot, size, context: { page, origin, phone: size.phone, api, owner } });
             console.log(`saved ${path}`);
@@ -223,7 +226,7 @@ async function main(): Promise<void> {
     await rm(dataDir, { recursive: true, force: true });
   }
   const seconds = Math.round((Date.now() - started) / 1000);
-  console.log(`Took ${String(shots.length * SIZES.length)} screenshots in ${String(seconds)} seconds.`);
+  console.log(`Took ${String(taken)} screenshots in ${String(seconds)} seconds.`);
   if (problems.length > 0) {
     console.error(`Some screens need a look. Pictures of them are in ${failedDir}.\n- ${problems.join('\n- ')}`);
     process.exitCode = 1;

@@ -38,6 +38,8 @@ How to get there: Click **More** in the left bar, then **Build agent**.
 
 To run it on a schedule, point at its row and click **Schedule**. See [Schedules](schedules.md).
 
+When you make a schedule by asking in a chat, Aman saves an agent for it, named after the schedule. It shows up here, and you can change its tools, instructions or model. Deleting the schedule leaves the agent in place.
+
 ## Change, copy or delete an agent
 
 Open **Agents**, then click the menu at the end of the agent's row:

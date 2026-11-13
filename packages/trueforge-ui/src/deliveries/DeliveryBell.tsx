@@ -2,13 +2,19 @@
 
 import { useEffect, useRef } from 'react';
 
-import { auiButtonClass } from '../atoms/lib/buttonClasses.js';
+import {
+  auiButtonClass,
+  railSelectedClassName,
+  sidebarButtonRadiusClassName,
+  sidebarRailButtonClassName,
+} from '../atoms/lib/buttonClasses.js';
 import { cn } from '../atoms/lib/cn.js';
 import { Icon } from '../icons/Icon.js';
+import { reminderRelativeWords } from '../reminders/groupReminders.js';
 import { useOptionalShellMode } from '../server/ShellModeContext.js';
 import { useOptionalDeliveries } from './DeliveriesContext.js';
 import { openDeliveryLink } from './openDelivery.js';
-import type { DeliveryItem } from './types.js';
+import type { DeliveryItem, DeliveryLink } from './types.js';
 
 const KIND_WORDS: Record<string, string> = {
   reminder: 'Reminder',
@@ -22,39 +28,81 @@ function kindWords(kind: string): string {
   return KIND_WORDS[kind] ?? 'New';
 }
 
-function whenWords(iso: string): string {
-  const date = new Date(iso);
-  return Number.isNaN(date.getTime())
-    ? ''
-    : date.toLocaleString(undefined, {
-        weekday: 'short',
-        month: 'short',
-        day: 'numeric',
-        hour: 'numeric',
-        minute: '2-digit',
-      });
+const KIND_ICONS: Record<string, string> = {
+  reminder: 'alarm-clock',
+  note: 'info',
+  nudge: 'lightbulb',
+  approval_waiting: 'circle-exclamation',
+};
+
+/** How long ago an item came, at a glance, counted in the time zone of this device. */
+function whenWords({ iso, now }: { iso: string; now: Date }): string {
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  return reminderRelativeWords({ iso, timezone, now });
 }
 
-function DeliveryRow({ item, onOpen }: { item: DeliveryItem; onOpen: (item: DeliveryItem) => void }) {
+/** What the link line of an item says, by where it leads. */
+function linkWords(link: DeliveryLink): string {
+  switch (link.type) {
+    case 'chat':
+      return 'Open chat';
+    case 'approval':
+      return 'Open chat to answer';
+    case 'space':
+      return 'Open space';
+  }
+}
+
+function DeliveryRow({ item, now, onOpen }: { item: DeliveryItem; now: Date; onOpen: (item: DeliveryItem) => void }) {
   const unread = item.seenAt === null;
+  const when = whenWords({ iso: item.createdAt, now });
   return (
-    <li>
+    <li className="border-border border-b last:border-b-0">
       <button
         type="button"
         data-role="delivery-item"
         data-unread={unread ? 'true' : 'false'}
         onClick={() => onOpen(item)}
-        className="hover:bg-ghost-button-hover w-full rounded-lg px-3 py-2 text-left"
+        className="hover:bg-ghost-button-hover flex w-full items-start gap-3 px-4 py-3 text-left"
       >
-        <span className="flex items-center gap-2 text-xs">
-          {unread ? <span aria-hidden className="bg-gold size-2 shrink-0 rounded-full" /> : null}
-          <span className="text-text-primary font-semibold">{kindWords(item.kind)}</span>
-          <span className="text-text-secondary">{whenWords(item.createdAt)}</span>
-          {unread ? <span className="sr-only">Unread</span> : null}
+        <span
+          aria-hidden
+          className="bg-secondary-bg text-text-secondary relative mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-lg"
+        >
+          <Icon name={KIND_ICONS[item.kind] ?? 'bell'} className="size-4" />
+          {unread ? (
+            <span className="bg-gold border-paper absolute -top-1 -right-1 size-2.5 rounded-full border" />
+          ) : null}
         </span>
-        <span className="text-text-primary mt-1 block text-sm break-words">{item.text}</span>
-        <span className="text-text-secondary mt-1 block text-xs break-words">Why you got this: {item.reason}</span>
-        {item.link === null ? null : <span className="text-text-secondary mt-1 block text-xs underline">Open</span>}
+        <span className="min-w-0 flex-1">
+          <span className="flex items-center gap-2 text-xs">
+            <span className="text-text-secondary font-semibold tracking-wide uppercase">{kindWords(item.kind)}</span>
+            {unread ? <span className="sr-only">Unread</span> : null}
+            {when === '' ? null : (
+              <span className="bg-secondary-bg text-text-secondary ml-auto shrink-0 rounded-full px-2 py-0.5 font-medium">
+                {when}
+              </span>
+            )}
+          </span>
+          <span
+            className={cn(
+              'text-text-primary mt-1 block text-[0.9375rem] leading-snug break-words',
+              unread ? 'font-semibold' : 'font-medium',
+            )}
+          >
+            {item.text}
+          </span>
+          <span className="text-text-secondary mt-1 block text-xs break-words opacity-80">{item.reason}</span>
+          {item.link === null ? null : (
+            <span
+              data-role="delivery-link"
+              className="text-text-secondary mt-1.5 flex items-center gap-0.5 text-xs font-medium"
+            >
+              {linkWords(item.link)}
+              <Icon name="chevron-right" className="size-3.5 shrink-0" />
+            </span>
+          )}
+        </span>
       </button>
     </li>
   );
@@ -92,6 +140,8 @@ export function DeliveryBell({ onNavigate }: { onNavigate?: () => void }) {
   if (deliveries === null) return null;
   const { unreadCount, items, hasMore, loadMore, markSeen, markAllSeen } = deliveries;
 
+  const now = new Date();
+
   const onOpen = (item: DeliveryItem) => {
     void markSeen([item.id]);
     if (item.link !== null && shell !== null) {
@@ -106,17 +156,26 @@ export function DeliveryBell({ onNavigate }: { onNavigate?: () => void }) {
       <button
         type="button"
         data-role="delivery-bell"
-        aria-label={unreadCount > 0 ? `Notifications, ${String(unreadCount)} unread` : 'Notifications'}
+        aria-label={unreadCount > 0 ? `For you, ${String(unreadCount)} unread` : 'For you'}
         aria-expanded={open}
-        className={cn(auiButtonClass({ variant: 'ghost', size: 'icon' }), 'relative')}
+        className={auiButtonClass({
+          variant: 'ghost',
+          className: cn(
+            sidebarButtonRadiusClassName,
+            sidebarRailButtonClassName,
+            'relative',
+            open && railSelectedClassName,
+          ),
+        })}
         onClick={() => deliveries.setPanelOpen(!open)}
       >
-        <Icon name="bell" />
+        <Icon name="bell" size={14} />
+        <span className="text-center">For you</span>
         {unreadCount > 0 ? (
           <span
             data-role="delivery-unread-count"
             aria-hidden
-            className="bg-gold text-text-primary absolute -top-0.5 -right-0.5 min-w-4 rounded-full px-1 text-center text-[0.625rem] leading-4 font-semibold"
+            className="bg-gold text-text-primary absolute top-0.5 right-2.5 min-w-4 rounded-full px-1 text-center text-[0.625rem] leading-4 font-semibold"
           >
             {unreadCount > 99 ? '99+' : unreadCount}
           </span>
@@ -125,11 +184,11 @@ export function DeliveryBell({ onNavigate }: { onNavigate?: () => void }) {
       {open ? (
         <div
           role="dialog"
-          aria-label="Notifications"
-          className="border-border bg-paper absolute top-full left-0 z-50 mt-2 flex max-h-[28rem] w-[22rem] max-w-[calc(100vw-2rem)] flex-col rounded-xl border shadow-xl"
+          aria-label="For you"
+          className="border-border bg-paper absolute top-full left-0 z-50 mt-2 flex max-h-[28rem] w-[22rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl border shadow-xl"
         >
-          <div className="border-border flex items-center justify-between border-b px-3 py-2">
-            <h2 className="text-text-primary text-sm font-semibold">Notifications</h2>
+          <div className="border-border flex items-center justify-between border-b px-4 py-2.5">
+            <h2 className="text-text-primary text-sm font-semibold">For you</h2>
             {unreadCount > 0 ? (
               <button
                 type="button"
@@ -141,13 +200,22 @@ export function DeliveryBell({ onNavigate }: { onNavigate?: () => void }) {
             ) : null}
           </div>
           {items.length === 0 ? (
-            <p className="text-text-secondary px-3 py-6 text-center text-sm">
-              Nothing yet. Reminders and notes show up here.
-            </p>
+            <div className="flex flex-col items-center gap-2 px-6 py-8 text-center">
+              <span
+                aria-hidden
+                className="bg-secondary-bg text-text-secondary flex size-10 items-center justify-center rounded-full"
+              >
+                <Icon name="bell" className="size-4" />
+              </span>
+              <p className="text-text-primary text-sm font-semibold">Nothing for you yet</p>
+              <p className="text-text-secondary text-xs">
+                Reminders that come due and things waiting for your OK show up here.
+              </p>
+            </div>
           ) : (
-            <ul className="min-h-0 flex-1 overflow-y-auto p-1">
+            <ul className="min-h-0 flex-1 overflow-y-auto">
               {items.map(item => (
-                <DeliveryRow key={item.id} item={item} onOpen={onOpen} />
+                <DeliveryRow key={item.id} item={item} now={now} onOpen={onOpen} />
               ))}
               {hasMore ? (
                 <li className="p-2 text-center">

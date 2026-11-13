@@ -14,6 +14,14 @@ How to get there: Click **More** in the left bar, then **Settings**, then **Role
 
 ## Make a persona
 
+=== "Computer"
+
+    ![The Personas tab, with three personas and the Add persona button](../../../../docs/screenshots/app/personas-list-desktop.png)
+
+=== "Phone"
+
+    ![The Personas tab, with three personas and the Add persona button](../../../../docs/screenshots/app/personas-list-phone.png)
+
 1. Click the **Personas** tab.
 2. Click **Add persona**.
 3. In **Name**, type the name you will call it by, such as Zara.

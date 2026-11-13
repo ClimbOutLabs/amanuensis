@@ -13,7 +13,13 @@ import {
   ImplementationPlanGrantScopeSchema,
 } from '../mcp/implementationPlanGrant';
 import { ShellApprovalBindingSchema } from '../permissions/approvalTokens';
-import { TIER2_ACTION_KINDS, Tier3CardSchema, TierSchema, TrackedExecutionBindingSchema } from '../permissions/tier';
+import {
+  TIER2_ACTION_KINDS,
+  Tier3CardSchema,
+  Tier3SkillNetworkSchema,
+  TierSchema,
+  TrackedExecutionBindingSchema,
+} from '../permissions/tier';
 import { GitRemotePreconditionSchema } from '../sandbox/gitRemoteObservation';
 import { StructuredEditPreconditionSchema } from '../sandbox/structuredEditPrecondition';
 import {
@@ -227,12 +233,12 @@ export const InternalToolCallInfoSchema = z.object({
     .string()
     .optional()
     .describe('Text of a web search the host ran without asking, shown as a chip. Never model-authored.'),
-  grant_host: z
+  grant_binding: z
     .string()
     .nullable()
     .optional()
     .describe(
-      'Connector host a standing grant for this call binds to, set on a grant-eligible ask. Never model-authored.',
+      'Connector setup a standing grant for this call binds to, set on a grant-eligible ask. Never model-authored.',
     ),
   grant_tool_name: z
     .string()
@@ -249,6 +255,11 @@ export const InternalToolCallInfoSchema = z.object({
     .optional()
     .describe(
       'Set when an unattended run held this call for the owner instead of asking; duplicate marks a repeat of a call already held in the same batch. Never model-authored.',
+    ),
+  skill_network: Tier3SkillNetworkSchema.nullable()
+    .optional()
+    .describe(
+      'Set on a held call that carries a skill network card: the skill, the sites it asks for, and why. The answer is recorded against the skill, and approving re-runs the command. Never model-authored.',
     ),
   search_provider_call: z
     .literal(true)

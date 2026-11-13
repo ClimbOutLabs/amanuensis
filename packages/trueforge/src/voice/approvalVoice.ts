@@ -60,6 +60,9 @@ type FieldRule = 'context' | 'empty' | 'shape';
  */
 export const CARD_FIELD_RULES: Record<keyof Tier3Card, FieldRule> = {
   plain_what: 'context',
+  copy: 'context',
+  safe_choice: 'context',
+  destructive: 'context',
   plain_why: 'context',
   cannot_be_undone: 'context',
   why_asked_again: 'context',
@@ -78,6 +81,7 @@ export const CARD_FIELD_RULES: Record<keyof Tier3Card, FieldRule> = {
   skill: 'empty',
   mail_new_recipients: 'empty',
   mail_draft: 'context',
+  skill_network: 'empty',
 };
 
 function isEmpty(value: unknown): boolean {
@@ -154,6 +158,7 @@ export const SCHEDULE_FIELD_RULES: Record<keyof Schedule, NestedRule> = {
   task: 'spoken',
   runs_as: 'spoken',
   next_runs: 'empty',
+  tools: 'empty',
 };
 
 /** The fields of one recipient: the name it is shown with and the address mail goes to. */

@@ -7,7 +7,8 @@
     "node": ">=22.14.0"
   },
   "scripts": {
-    "build": "pnpm guide:build && pnpm --filter @truefoundry/trueforge-core build && pnpm --filter @truefoundry/trueforge-sdk build && pnpm --filter @truefoundry/trueforge-ui build && pnpm --filter frontend build && pnpm --filter @truefoundry/trueforge build && pnpm --filter amanuensis build",
+    "build": "pnpm guide:build && pnpm --filter @truefoundry/trueforge-core build && pnpm --filter frontend build && pnpm --filter amanuensis build",
+    "images:ids": "bash installer/image-ids.sh",
     "build:aman-installer": "pnpm --filter @truefoundry/aman-installer build",
     "build:setup-image": "docker build -t aman-setup:local installer/setup-image",
     "build:dev-image": "docker build -f Dockerfile.dev --build-arg BUILD_REF=\"$(git rev-parse HEAD)\" -t aman:dev .",
@@ -65,6 +66,7 @@
     "eval:tokens": "node scripts/eval-tokens.mjs",
     "eval:spaces": "node scripts/eval-spaces.mjs",
     "smoke:down": "node scripts/require-smoke-env.mjs && node scripts/compose-smoke.mjs down",
+    "smoke:logs": "node scripts/require-smoke-env.mjs && node scripts/compose-smoke.mjs logs",
     "smoke:npx:amanuensis": "pnpm build && node scripts/npx-smoke-amanuensis.mjs",
     "smoke:npx": "pnpm build && node scripts/npx-smoke.mjs",
     "smoke": "node scripts/require-smoke-env.mjs && node scripts/compose-smoke.mjs up --build --wait && node -e \"Promise.all([fetch('http://127.0.0.1:8791/healthz'), fetch('http://127.0.0.1:8791/')]).then(async ([health, ui]) => { if (!health.ok) throw new Error('healthz returned ' + health.status); const html = await ui.text(); if (!ui.ok || !html.includes('id=\\\"root\\\"')) throw new Error('UI did not return its app shell'); console.log('healthz and UI OK'); })\"",
@@ -103,6 +105,8 @@
     "test:external-hosts": "node scripts/check-external-hosts.mjs",
     "test:external-hosts-scanner": "node --test tests/external-hosts-scan.test.mjs",
     "nightly:report": "node scripts/nightly-report.mjs",
+    "nightly:obsidian-notes:start": "node scripts/obsidian-notes/start-obsidian.mjs",
+    "nightly:obsidian-notes": "pnpm --filter @truefoundry/trueforge test:obsidian-notes",
     "nightly:coverage": "node scripts/check-nightly-coverage.mjs",
     "nightly:gallery": "node scripts/build-nightly-gallery.mjs",
     "test:nightly-coverage": "node --test tests/nightly-coverage.test.mjs",
@@ -113,6 +117,7 @@
     "test:test-mailbox": "node --test tests/assistant-mailbox-fixtures.test.mjs tests/import-demo-mailbox.test.mjs tests/send-test-mailbox.test.mjs tests/demo-deploy-guide.test.mjs",
     "test:eval-tokens": "node --test tests/eval-tokens-set.test.mjs tests/eval-tokens-run.test.mjs",
     "test:eval-spaces": "node --test tests/eval-spaces-set.test.mjs tests/eval-spaces-run.test.mjs",
+    "test:default-compose": "node --test tests/default-compose.test.mjs",
     "test:pre-push": "node --test tests/pre-push-selection.test.mjs tests/private-data-scan.test.mjs tests/require-smoke-env.test.mjs tests/compose-smoke.test.mjs tests/slots-live.test.mjs",
     "test:slots-live": "node scripts/slots-live.mjs",
     "test:installer-doctor": "node --test installer/doctor/tests/doctor.test.mjs installer/tests/qr.test.mjs installer/tests/pki.test.mjs",
@@ -129,7 +134,7 @@
     "test:trueforge-ui": "pnpm --filter @truefoundry/trueforge-ui test",
     "test": "pnpm test:aman-guide && pnpm test:help-coverage && pnpm test:trueforge-core &&pnpm test:trueforge-sdk && pnpm test:trueforge-ui && pnpm test:trueforge && pnpm test:frontend",
     "verify": "pnpm run test:private-data && pnpm run test:conflict-markers && pnpm run test:external-hosts && pnpm run format:check && pnpm run typecheck && pnpm run lint:ci && pnpm run build && pnpm run test",
-    "typecheck": "pnpm --filter @truefoundry/trueforge-sdk build && pnpm --filter @truefoundry/trueforge-ui build && pnpm --filter @truefoundry/trueforge-ui --filter @truefoundry/trueforge --filter frontend --parallel typecheck:only && pnpm --filter @truefoundry/trueforge-core --filter amanuensis --parallel typecheck",
+    "typecheck": "pnpm --filter @truefoundry/trueforge-ui build && pnpm --filter @truefoundry/trueforge-ui --filter @truefoundry/trueforge --filter frontend --parallel typecheck:only && pnpm --filter @truefoundry/trueforge-core --filter amanuensis --parallel typecheck",
     "version": "node scripts/version.mjs"
   },
   "devDependencies": {

@@ -545,6 +545,7 @@ export {
   searchResultUrls,
 } from './permissions/provenance';
 export type { ChatProvenance, ReadSource, SearchResultUrls } from './permissions/provenance';
+export type { SkillNetworkCardRequest } from './permissions/skillNetworkCards';
 export {
   AUTO_DENY_REASONS,
   TIER2_ACTION_KINDS,
@@ -563,6 +564,7 @@ export type {
   Tier3Card,
   Tier3Persona,
   Tier3Schedule,
+  Tier3ScheduleTools,
   Tier3Skill,
   TierDecision,
   TrackedExecutionBinding,
