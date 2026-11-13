@@ -36,7 +36,8 @@ export interface ReadMemoryNightlySettingDeps {
 
 /**
  * The nightly-job setting, read each time the timer looks at the clock so a change in Settings applies
- * without a restart. A failed read falls back to the env default.
+ * without a restart. The env default counts only when nothing is stored: a read that fails or a stored value
+ * that cannot be understood reads as off, so a person who switched the tidy off never gets it back by accident.
  */
 export async function readMemoryNightlySetting(deps: ReadMemoryNightlySettingDeps): Promise<MemoryNightlySetting> {
   const defaultEnabled = configuration.MEMORY_NIGHTLY_JOB;
@@ -52,18 +53,15 @@ export async function readMemoryNightlySetting(deps: ReadMemoryNightlySettingDep
     const storedHour = await deps.globalSettingsStore.getSetting({ key: MEMORY_NIGHTLY_HOUR_SETTING_KEY });
     unset.hour = (storedHour === undefined ? undefined : parseNightlyHour(storedHour.value)) ?? unset.hour;
   } catch (error) {
-    deps.logger.warn(
-      'Global setting read failed; using the env default for the nightly job',
-      extractErrorLogFields(error),
-    );
-    return unset;
+    deps.logger.warn('Global setting read failed; the nightly job stays off for now', extractErrorLogFields(error));
+    return { ...unset, enabled: false };
   }
   if (record === undefined) {
     return unset;
   }
   if (record.value !== 'true' && record.value !== 'false') {
-    deps.logger.warn('Ignoring malformed nightly-job override; using the env default', { value: record.value });
-    return unset;
+    deps.logger.warn('Stored nightly-job choice cannot be read; the nightly job stays off', { value: record.value });
+    return { ...unset, enabled: false };
   }
   const override = record.value === 'true';
   return {

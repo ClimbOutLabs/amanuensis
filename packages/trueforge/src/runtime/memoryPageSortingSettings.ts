@@ -24,7 +24,8 @@ export interface ReadMemoryPageSortingSettingDeps {
 
 /**
  * The page-sorting setting, read each time the sorter is about to work so a change in Settings applies
- * without a restart. A failed read falls back to the env default.
+ * without a restart. The env default counts only when nothing is stored: a read that fails or a stored value
+ * that cannot be understood reads as `off`, so a person who switched sorting off never gets it back by accident.
  */
 export async function readMemoryPageSortingSetting(
   deps: ReadMemoryPageSortingSettingDeps,
@@ -39,19 +40,16 @@ export async function readMemoryPageSortingSetting(
   try {
     record = await deps.globalSettingsStore.getSetting({ key: MEMORY_PAGE_SORTING_SETTING_KEY });
   } catch (error) {
-    deps.logger.warn(
-      'Global setting read failed; using the env default for page sorting',
-      extractErrorLogFields(error),
-    );
-    return unset;
+    deps.logger.warn('Global setting read failed; page sorting stays off for now', extractErrorLogFields(error));
+    return { ...unset, mode: 'off' };
   }
   if (record === undefined) {
     return unset;
   }
   const parsed = PageSortModeSchema.safeParse(record.value);
   if (!parsed.success) {
-    deps.logger.warn('Ignoring malformed page-sorting override; using the env default', { value: record.value });
-    return unset;
+    deps.logger.warn('Stored page-sorting choice cannot be read; page sorting stays off', { value: record.value });
+    return { ...unset, mode: 'off' };
   }
   return {
     mode: parsed.data,

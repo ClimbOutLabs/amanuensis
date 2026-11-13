@@ -46,16 +46,24 @@ describe('readMemoryPageSortingSetting', () => {
     expect((await readMemoryPageSortingSetting({ globalSettingsStore: store, logger })).mode).toBe('off');
   });
 
-  it('ignores a malformed stored value', async () => {
+  it('follows an env default of on when nothing is stored', async () => {
+    configuration.MEMORY_PAGE_SORTING = 'on';
+    const setting = await readMemoryPageSortingSetting({ globalSettingsStore: inMemoryGlobalSettingsStore(), logger });
+    expect(setting).toEqual({ mode: 'on', overridden: false, defaultMode: 'on' });
+  });
+
+  it('stays off for a stored value it cannot understand, even when the default is on', async () => {
+    configuration.MEMORY_PAGE_SORTING = 'on';
     const store = inMemoryGlobalSettingsStore({ [MEMORY_PAGE_SORTING_SETTING_KEY]: 'maybe' });
     const setting = await readMemoryPageSortingSetting({ globalSettingsStore: store, logger });
     expect(setting.overridden).toBe(false);
     expect(setting.mode).toBe('off');
   });
 
-  it('falls back to the env default when the store cannot be read', async () => {
+  it('stays off when a stored off cannot be read, even when the default is on', async () => {
+    configuration.MEMORY_PAGE_SORTING = 'on';
     const failing: IGlobalSettingsStore = {
-      ...inMemoryGlobalSettingsStore(),
+      ...inMemoryGlobalSettingsStore({ [MEMORY_PAGE_SORTING_SETTING_KEY]: 'off' }),
       getSetting: () => Promise.reject(new Error('db down')),
     };
     const setting = await readMemoryPageSortingSetting({ globalSettingsStore: failing, logger });
