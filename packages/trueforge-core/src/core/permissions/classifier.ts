@@ -1182,6 +1182,56 @@ function runCodeCardText(params: Record<string, unknown>, ctx: ClassifyContext):
   return scriptFileText({ file: identity, resolution: ctx.path_resolution });
 }
 
+/**
+ * A script that ships with a skill the person turned on runs without a card while the sandbox cannot reach a
+ * network. It still asks when the sandbox can reach one, and when Aman changed a file in that skill's folder
+ * in this chat, since the script is then no longer only the skill's own.
+ */
+async function classifySkillScript(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
+  const skill = stringParam(action.canonical_params, 'skill') ?? '';
+  const script = stringParam(action.canonical_params, 'script') ?? '';
+  const folder = stringParam(action.canonical_params, 'skill_folder');
+  const args = action.canonical_params['args'];
+  const argText = Array.isArray(args) ? args.filter(arg => typeof arg === 'string').join(' ') : '';
+  const shown = argText === '' ? script : `${script} ${argText}`;
+  const folderIdentity =
+    folder === null ? null : canonicalFileIdentity({ p: folder, cwd: folder, resolution: ctx.path_resolution });
+  const changedByAman =
+    folderIdentity === null ||
+    ctx.services.tracked_store.tracksWithin({ scope: workspaceScope(ctx), folder_identity: folderIdentity });
+  if (ctx.sandbox_network === 'none' && !changedByAman) {
+    return tier1Decision({
+      reason: SANDBOX_COMMAND_REASON,
+      reason_detail: `Ran a script from the ${escapeDisplayText(skill)} skill in the sandbox: ${escapeDisplayText(shown)}`,
+      sensitive_read: false,
+    });
+  }
+  const plainWhat = `Run a script from the ${skill} skill?`;
+  const askReason = changedByAman
+    ? "Aman changed a file in this skill's folder in this chat."
+    : 'The sandbox can reach the internet.';
+  return tier3Decision({
+    card: {
+      plain_what: plainWhat,
+      copy: sandboxCardCopy({ headline: plainWhat, undo: "Once this runs, it can't be undone.", reason: askReason }),
+      plain_why: plainWhy(ctx.agent_intent),
+      cannot_be_undone: "Once this runs, it can't be undone.",
+      why_asked_again: null,
+      destination: null,
+      recipient: null,
+      amount: null,
+      parsed_command: shown,
+      outbound_text: null,
+      destination_host: null,
+      outbound_truncated: false,
+    },
+    reason: 'arbitrary_code_execution',
+    reason_detail: askReason,
+    sensitive_read: false,
+    approval_token_id: await mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params }),
+  });
+}
+
 async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
   const { services } = ctx;
   const command = stringParam(action.canonical_params, 'command') ?? '';
@@ -4236,6 +4286,9 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
       (name === 'run_workflow' && isRunnerWorkflow(action.canonical_params['workflow']))
     ) {
       return classifyRunnerTool(action, ctx);
+    }
+    if (name === 'run_skill_script') {
+      return await classifySkillScript(action, ctx);
     }
     if (name === 'run_code' && (await sandboxWorkRunsSilently(ctx))) {
       const silentRun = await runCodePlacement({ params: action.canonical_params, ctx });
