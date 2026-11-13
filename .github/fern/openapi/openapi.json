@@ -7893,6 +7893,13 @@
               "busy"
             ],
             "type": "string"
+          },
+          "unsorted_reasons": {
+            "description": "Why notes were left unsorted in this run, each different reason once. Empty when none were.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           }
         },
         "required": [
@@ -7902,7 +7909,8 @@
           "notes_sorted",
           "pairs_listed",
           "sorting",
-          "model_missing"
+          "model_missing",
+          "unsorted_reasons"
         ],
         "type": "object"
       },

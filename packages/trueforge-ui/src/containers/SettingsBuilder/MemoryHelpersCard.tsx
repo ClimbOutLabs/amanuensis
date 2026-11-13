@@ -94,9 +94,10 @@ function tidyResultCopy({ run, assistant }: { run: MemoryTidyRun; assistant: str
     return 'A tidy-up is already running. Try again in a few minutes.';
   }
   const unread = run.notesAsked - run.notesSorted;
+  const why = run.unsortedReasons.length > 0 ? ` What ${assistant} recorded: ${run.unsortedReasons.join('; ')}.` : '';
   const unreadNote =
     unread > 0
-      ? ` It could not file ${count(unread, { one: 'other note', many: 'other notes' })}, because the model's answer could not be read. Those stay on the Memories tab.`
+      ? ` It could not file ${count(unread, { one: 'other note', many: 'other notes' })}. Those stay on the Memories tab.${why}`
       : '';
   const done = [
     ...(run.movedToEarlier > 0
@@ -120,7 +121,7 @@ function tidyResultCopy({ run, assistant }: { run: MemoryTidyRun; assistant: str
     return `Nothing changed. ${assistant} found no model to work with, so it only looked for facts that are over, and found none. Choose a model in Settings, then try again.`;
   }
   if (unread > 0) {
-    return `Nothing changed. ${assistant} looked at ${count(unread, { one: 'saved note', many: 'saved notes' })} but could not file ${unread === 1 ? 'it' : 'any'}, because the model's answer could not be read. Try again, or choose another model in Settings.`;
+    return `Nothing changed. ${assistant} looked at ${count(unread, { one: 'saved note', many: 'saved notes' })} but could not file ${unread === 1 ? 'it' : 'any'}. Your notes stay on the Memories tab.${why} Try again, or choose another model in Settings.`;
   }
   return run.sorting === 'off'
     ? `Done. Nothing changed. Sorting is off, so ${assistant} only looked for facts that are over, and found none.`

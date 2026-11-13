@@ -42,6 +42,7 @@ describe('the nightly timer', () => {
       pagesAsked: 0,
       pairsListed: 0,
       vaultsWithoutModel: 0,
+      unsortedReasons: [],
     });
   });
 
@@ -123,6 +124,7 @@ describe('the nightly timer', () => {
         pagesAsked: 0,
         pairsListed: 0,
         vaultsWithoutModel: 0,
+        unsortedReasons: [],
       },
       sorting: 'off',
     });
@@ -142,6 +144,7 @@ describe('the nightly timer', () => {
               pagesAsked: 0,
               pairsListed: 0,
               vaultsWithoutModel: 0,
+              unsortedReasons: [],
             });
         }),
     );

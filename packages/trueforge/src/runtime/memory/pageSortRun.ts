@@ -19,12 +19,18 @@ import { sortNote, type SortModel, type SortNote } from './pageSorter';
 /** Cap on generated tokens: up to eight decisions with a reason each. */
 const SORT_MAX_OUTPUT_TOKENS = 1600;
 
+/**
+ * The longest one try at a helper job's question may take. These questions show whole pages and ask for a longer
+ * answer than a turn summary, and nobody waits on them, so a slow model gets more time than a summary does.
+ */
+const HELPER_JOB_TIMEOUT_MS = 180_000;
+
 /** The longest the search by meaning may hold up one note. */
 const SIMILAR_PAGES_TIMEOUT_MS = 10_000;
 
 const NOTE_DAY_PATTERN = /:(\d{4}-\d{2}-\d{2})\.md#\d+$/;
 
-/** The model a helper job asks: the summarizer's client, limits, time budget and light-reasoning request. */
+/** The model a helper job asks: the summarizer's client, limits and light-reasoning request, with a longer time budget. */
 export function summaryModelFor({
   summarize,
   logger,
@@ -41,11 +47,15 @@ export function summaryModelFor({
   if (modelFqn === undefined || modelFqn.trim() === '') {
     return undefined;
   }
-  const resolveLlm = summarize.resolveLlm ?? summaryLlmResolver({ ...summarize, logger });
+  const resolveLlm =
+    summarize.resolveLlm ?? summaryLlmResolver({ ...summarize, logger, timeoutMs: HELPER_JOB_TIMEOUT_MS });
   return async messages => {
     const answer = await askSummaryModel({ messages, modelFqn, resolveLlm, isReadable, maxOutputTokens, logger });
     if (answer.status === 'failed') {
-      return { ok: false, reason: answer.reason };
+      return {
+        ok: false,
+        reason: answer.fallback === 'model_timeout' ? 'the model took too long to answer' : answer.reason,
+      };
     }
     if (answer.reply === '') {
       return { ok: false, reason: answer.cutShort ? 'the reply was cut short' : 'the reply was empty' };

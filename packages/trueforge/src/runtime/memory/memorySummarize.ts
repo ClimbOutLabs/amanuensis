@@ -727,8 +727,10 @@ export function summaryLlmResolver(params: {
   tokenFactoryBudget: TokenFactoryBudget;
   modelUsage: TurnModelUsage;
   logger: Logger;
+  /** The longest one client may take; left out, the summary time limit. */
+  timeoutMs?: number | undefined;
 }): (modelFqn: string) => Promise<ILLM> {
-  const { tenantId, modelProviderStore, logger } = params;
+  const { tenantId, modelProviderStore, logger, timeoutMs = SUMMARIZE_TIMEOUT_MS } = params;
   return async (name: string): Promise<ILLM> => {
     const { providerConfig, streamTimeout, modelProperties } = await getModelDetails({
       tenant_id: tenantId,
@@ -739,7 +741,7 @@ export function summaryLlmResolver(params: {
       llm: new VercelAILLM({
         providerConfig,
         logger,
-        signal: AbortSignal.timeout(SUMMARIZE_TIMEOUT_MS),
+        signal: AbortSignal.timeout(timeoutMs),
         streamTimeout,
       }),
       identity: modelIdentity({ name, providerConfig }),

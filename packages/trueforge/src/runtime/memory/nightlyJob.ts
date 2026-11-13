@@ -52,6 +52,8 @@ export interface NightlyCounts {
   pairsListed: number;
   /** Vaults where sorting was not off but no model could be found, so the steps that ask one were skipped. */
   vaultsWithoutModel: number;
+  /** Why notes were left unsorted, each different reason once. It may quote the model, so it is not logged here. */
+  unsortedReasons: string[];
 }
 
 export type NightlyOutcome =
@@ -135,6 +137,7 @@ export async function runNightlyForVault({
     pagesAsked: 0,
     pairsListed: 0,
     vaultsWithoutModel: 0,
+    unsortedReasons: [],
   };
   counts.movedToEarlier =
     (await attempt({ step: 'ended statements', logger, work: () => moveEndedStatements({ options }) })) ?? 0;
@@ -166,6 +169,7 @@ export async function runNightlyForVault({
     });
     counts.notesAsked = missed?.asked ?? 0;
     counts.notesSorted = missed?.sorted ?? 0;
+    counts.unsortedReasons = missed?.reasons ?? [];
   }
   if (disagreementModel !== undefined) {
     const found = await attempt({
@@ -176,7 +180,12 @@ export async function runNightlyForVault({
     counts.pagesAsked = found?.asked ?? 0;
     counts.pairsListed = found?.listed ?? 0;
   }
-  logger.info('Nightly memory tidy finished for a vault.', { personaId: vault.persona?.id, ...counts });
+  const { unsortedReasons, ...numbers } = counts;
+  logger.info('Nightly memory tidy finished for a vault.', {
+    personaId: vault.persona?.id,
+    ...numbers,
+    unsortedReasons: unsortedReasons.length,
+  });
   return { status: 'ran', counts };
 }
 
@@ -198,6 +207,7 @@ export async function runNightlyJob({
     pagesAsked: 0,
     pairsListed: 0,
     vaultsWithoutModel: 0,
+    unsortedReasons: [],
   };
   for (const vault of await deps.vaults()) {
     if (!onRequest && !inQuietHours({ now: deps.now(), hour: deps.hour })) {
@@ -212,6 +222,7 @@ export async function runNightlyJob({
         total.pagesAsked += outcome.counts.pagesAsked;
         total.pairsListed += outcome.counts.pairsListed;
         total.vaultsWithoutModel += outcome.counts.vaultsWithoutModel;
+        total.unsortedReasons = [...new Set([...total.unsortedReasons, ...outcome.counts.unsortedReasons])];
       }
     } catch (error) {
       deps.logger.warn('The nightly memory tidy failed for a vault.', {

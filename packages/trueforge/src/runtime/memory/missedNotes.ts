@@ -29,7 +29,13 @@ export interface MissedNotesResult {
   asked: number;
   /** Notes whose reply was understood, written or only reported. */
   sorted: number;
+  /** Why notes were left unsorted in this run: each different reason once, the first few only. */
+  reasons: string[];
 }
+
+/** How many different reasons a run keeps, and how long one may be. */
+const REASONS_KEPT = 3;
+const REASON_MAX_CHARACTERS = 200;
 
 function firstDayInWindow(today: string): string {
   return new Date(Date.parse(`${today}T00:00:00Z`) - MISSED_NOTES_WINDOW_DAYS * DAY_MS).toISOString().slice(0, 10);
@@ -59,7 +65,7 @@ export async function sortMissedNotes({
   /** Whether a note that fails in this run moves one night closer to being left alone. */
   countFailedNight: boolean;
 }): Promise<MissedNotesResult> {
-  const result: MissedNotesResult = { asked: 0, sorted: 0 };
+  const result: MissedNotesResult = { asked: 0, sorted: 0, reasons: [] };
   if (mode === 'off') {
     return result;
   }
@@ -106,6 +112,12 @@ export async function sortMissedNotes({
       continue;
     }
     failed.add(entry.id);
+    if (outcome.status === 'refused' || outcome.status === 'failed') {
+      const reason = outcome.reason.slice(0, REASON_MAX_CHARACTERS);
+      if (result.reasons.length < REASONS_KEPT && !result.reasons.includes(reason)) {
+        result.reasons.push(reason);
+      }
+    }
     failuresInARow += 1;
     if (failuresInARow >= MAX_FAILURES_IN_A_ROW) {
       break;

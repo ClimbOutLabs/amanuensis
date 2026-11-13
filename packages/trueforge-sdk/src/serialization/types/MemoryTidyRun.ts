@@ -15,6 +15,10 @@ export const MemoryTidyRun: core.serialization.ObjectSchema<serializers.MemoryTi
         pairsListed: core.serialization.property("pairs_listed", core.serialization.number()),
         sorting: MemoryTidyRunSorting,
         status: MemoryTidyRunStatus,
+        unsortedReasons: core.serialization.property(
+            "unsorted_reasons",
+            core.serialization.list(core.serialization.string()),
+        ),
     });
 
 export declare namespace MemoryTidyRun {
@@ -26,5 +30,6 @@ export declare namespace MemoryTidyRun {
         pairs_listed: number;
         sorting: MemoryTidyRunSorting.Raw;
         status: MemoryTidyRunStatus.Raw;
+        unsorted_reasons: string[];
     }
 }

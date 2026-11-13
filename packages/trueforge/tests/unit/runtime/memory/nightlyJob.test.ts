@@ -102,6 +102,7 @@ describe('the nightly job', () => {
         pagesAsked: 1,
         pairsListed: 1,
         vaultsWithoutModel: 0,
+        unsortedReasons: [],
       },
     });
     expect(history(vaultDir)).toContain('Aman moved 1 ended line to Earlier');

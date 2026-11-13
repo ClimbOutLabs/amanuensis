@@ -35,6 +35,8 @@ export interface MemoryTidyRun {
   sorting: PageSortMode;
   /** True when sorting was not off and no model was found to ask. */
   modelMissing: boolean;
+  /** Why notes were left unsorted, as the server recorded it; each different reason once. */
+  unsortedReasons: string[];
 }
 
 export interface MemoryPageSortingCatalog {
@@ -77,6 +79,7 @@ const TidyRunResponseSchema = z.object({
     pairs_listed: z.number(),
     sorting: z.enum(['off', 'report', 'on']),
     model_missing: z.boolean(),
+    unsorted_reasons: z.array(z.string()),
   }),
 });
 
@@ -153,6 +156,7 @@ export function createMemoryNightlyCatalog(options: CreateTrueForgeClientOptions
         pairsListed: run.pairs_listed,
         sorting: run.sorting,
         modelMissing: run.model_missing,
+        unsortedReasons: run.unsorted_reasons,
       };
     },
   };

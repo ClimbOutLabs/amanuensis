@@ -17,6 +17,7 @@ const QUIET_RUN: MemoryTidyRun = {
   pairsListed: 0,
   sorting: 'on',
   modelMissing: false,
+  unsortedReasons: [],
 };
 
 /** The trueforge adapter's two ports, backed by memory so a save reads back as the server would answer. */
@@ -181,15 +182,17 @@ describe('MemoryHelpersCard', () => {
 
   it('says which notes it could not file beside what it did', async () => {
     const status = renderCardAndTidy({ ...QUIET_RUN, notesAsked: 3, notesSorted: 1 });
-    expect(await status).toHaveTextContent(
-      "It could not file 2 other notes, because the model's answer could not be read. Those stay on the Memories tab.",
-    );
+    expect(await status).toHaveTextContent('It could not file 2 other notes. Those stay on the Memories tab.');
   });
 
-  it('says why when the model could not be understood and nothing changed', async () => {
-    const status = renderCardAndTidy({ ...QUIET_RUN, notesAsked: 4 });
+  it('says why when notes could not be filed and nothing changed', async () => {
+    const status = renderCardAndTidy({
+      ...QUIET_RUN,
+      notesAsked: 4,
+      unsortedReasons: ['the reply was too long', 'the model did not answer'],
+    });
     expect(await status).toHaveTextContent(
-      "Nothing changed. Aman looked at 4 saved notes but could not file any, because the model's answer could not be read. Try again, or choose another model in Settings.",
+      'Nothing changed. Aman looked at 4 saved notes but could not file any. Your notes stay on the Memories tab. What Aman recorded: the reply was too long; the model did not answer. Try again, or choose another model in Settings.',
     );
   });
 

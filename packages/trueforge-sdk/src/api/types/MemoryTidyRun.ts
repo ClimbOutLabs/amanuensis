@@ -17,4 +17,6 @@ export interface MemoryTidyRun {
     sorting: TrueForge.MemoryTidyRunSorting;
     /** `ran`: the tidy-up finished. `busy`: one was already running, so nothing was started. */
     status: TrueForge.MemoryTidyRunStatus;
+    /** Why notes were left unsorted in this run, each different reason once. Empty when none were. */
+    unsortedReasons: string[];
 }

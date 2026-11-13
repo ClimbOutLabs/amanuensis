@@ -101,6 +101,7 @@ describe('createMemoryNightlyCatalog', () => {
           pairs_listed: 0,
           sorting: 'on',
           model_missing: false,
+          unsorted_reasons: ['the reply was too long'],
         },
       });
     });
@@ -112,6 +113,7 @@ describe('createMemoryNightlyCatalog', () => {
       pairsListed: 0,
       sorting: 'on',
       modelMissing: false,
+      unsortedReasons: ['the reply was too long'],
     });
   });
 });

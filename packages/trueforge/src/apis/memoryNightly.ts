@@ -105,6 +105,7 @@ export function createMemoryNightlyRouter<TTransaction>(deps: MemoryNightlyRoute
           pairs_listed: counts?.pairsListed ?? 0,
           sorting: result.status === 'ran' ? result.sorting : 'off',
           model_missing: (counts?.vaultsWithoutModel ?? 0) > 0,
+          unsorted_reasons: counts?.unsortedReasons ?? [],
         },
       },
       200,
