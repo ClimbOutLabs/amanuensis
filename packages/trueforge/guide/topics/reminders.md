@@ -50,7 +50,7 @@ Say so when you ask, such as "Remind me at 5 pm to call the pharmacy, it's urgen
 
 ## See or cancel reminders
 
-1. Click **Reminders** in the left panel. It lists what is coming up and what has already reminded you, with the persona that set each one. Click a reminder that says **Open chat** to go to the chat you set it in. A reminder says **No chat to open** when its chat was deleted, or when it was set before Aman kept track of the chat. Or, in any chat, ask "What reminders do I have?"
+1. Click **Reminders** in the left panel. It lists what is coming up and what has already reminded you, with the persona that set each one. Each reminder shows its day, how far off it is, such as "In 3 weeks", and whether it repeats or is paused. Click a reminder that says **Open chat** to go to the chat you set it in. A reminder says **No chat to open** when its chat was deleted, or when it was set before Aman kept track of the chat. Or, in any chat, ask "What reminders do I have?"
 2. To cancel one, ask, such as "Cancel the pharmacy reminder".
 3. A card shows the reminder. Click **Allow** to cancel it, or **Not now** to keep it.
 
