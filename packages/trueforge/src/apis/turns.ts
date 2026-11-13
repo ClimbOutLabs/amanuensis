@@ -106,6 +106,7 @@ import {
 } from '../runtime/chatTitle';
 import { StreamGoneError, type EventSubscription, type EventSubscriptionRegistry } from '../runtime/event-subscription';
 import { buildInternalSourceToolPolicy, type InternalSourceState } from '../runtime/internalSourceGuard';
+import { stampLatestAnswer, type LatestAnswerSessionStore } from '../runtime/latestAnswer';
 import { mailAccountDirectory } from '../runtime/mailConnector';
 import { createMemoryClient } from '../runtime/memory/createMemoryClient';
 import type { MemoryClient } from '../runtime/memory/memoryClient';
@@ -143,6 +144,7 @@ import {
 import { synchronizeRepositoryCommandProposals } from '../runtime/repositoryCommandProposals';
 import { validateSandboxFilePath } from '../runtime/sandboxFilePath';
 import type { ScheduleStoreAccess, ScheduleTurnContext } from '../runtime/scheduleCapability';
+import { scheduleAgentChoices } from '../runtime/scheduleTools';
 import {
   applyTokenFactoryRouting,
   buildGatewayMetadata,
@@ -177,7 +179,7 @@ import {
 import type { DeletedChatUsageReader } from '../runtime/usageSummaryCapability';
 import { packageMirrorTokens } from '../sandbox/mirrors/packageMirrorTokens';
 import { checkSnapshotStatus } from '../sandbox/providerUtils';
-import { resolveSkillNetworkGrant } from '../sandbox/skillnet/skillNetworkGrant';
+import { drainSkillNetworkCards, resolveSkillNetworkGrant } from '../sandbox/skillnet/skillNetworkGrant';
 import { skillNetworkTokens } from '../sandbox/skillnet/skillNetworkTokens';
 import type { MemoryProviderSettings } from '../schemas/mcpServer';
 import { canReadSession } from './agentAccess';
@@ -645,6 +647,7 @@ function createTurnResolver(deps: {
             metadataHeaders,
           }),
           first_party: connection.first_party,
+          grant_binding: connection.grant_binding,
           search_provider:
             connection.search_provider === undefined
               ? undefined
@@ -791,6 +794,22 @@ function createTurnResolver(deps: {
               registry: skillNetworkTokens,
               tenant_id,
               created_by: userRef,
+              session_id: sessionId,
+              skillNames: (spec.skills ?? []).map(skill => skill.name),
+            });
+          },
+          drainSkillNetworkCards: async () => {
+            const currentSession = await sessionStore.getSession({
+              tenant_id,
+              session_id: sessionId,
+            });
+            if (currentSession?.created_by_subject.subject_id !== userRef) {
+              return [];
+            }
+            return drainSkillNetworkCards({
+              store: skillStore,
+              registry: skillNetworkTokens,
+              tenant_id,
               session_id: sessionId,
               skillNames: (spec.skills ?? []).map(skill => skill.name),
             });
@@ -1309,6 +1328,16 @@ export interface DrainTurnEventsInput {
       }
     | undefined;
   /**
+   * Present on every turn: where the finished turn's answer time is stamped, so the chat
+   * list can mark a chat whose latest answer the person has not opened yet.
+   */
+  answerMark?:
+    | {
+        sessionStore: LatestAnswerSessionStore;
+        tenantId: string;
+      }
+    | undefined;
+  /**
    * Present only on a chat's first turn, when that turn set the chat's working title
    * from the person's first message. The follow-up starts the subject-title step
    * detached; nothing in the drain waits for it.
@@ -1503,6 +1532,7 @@ async function runTurnFollowUp(params: {
     profileLearning,
     modelUsage,
     chatSearch,
+    answerMark,
     chatTitle,
   } = input;
   try {
@@ -1520,6 +1550,19 @@ async function runTurnFollowUp(params: {
       }
     } finally {
       markArtifactsCaptured();
+    }
+    if (answerMark !== undefined && state.output !== null) {
+      // The answer is in the chat now. Stamp when it landed so the chat list can show the
+      // unseen-answer dot until the person opens the chat. A turn that ended paused with no
+      // final message added no answer, so it earns no stamp. The stamp swallows its own
+      // failures, so this cannot fail the follow-up.
+      await stampLatestAnswer({
+        sessionStore: answerMark.sessionStore,
+        tenantId: answerMark.tenantId,
+        sessionId,
+        answeredAt: state.completed_at,
+        logger,
+      });
     }
     // Before the model calls below, so the answer's usage is visible before that slower work.
     const flushUsage = async () => {
@@ -1762,6 +1805,7 @@ export interface TurnEventDrainInput {
   modelUsage: ModelUsageDrainMember;
   memory?: DrainTurnEventsInput['memory'];
   chatSearch?: DrainTurnEventsInput['chatSearch'];
+  answerMark?: DrainTurnEventsInput['answerMark'];
   chatTitle?: DrainTurnEventsInput['chatTitle'];
   privateChat?: DrainTurnEventsInput['privateChat'];
 }
@@ -1780,6 +1824,13 @@ export async function beginTurnExecution(params: {
   unattended?: boolean | undefined;
   /** Built-in tool names this turn does not offer. */
   withheldTools?: readonly string[] | undefined;
+  /**
+   * A title the caller has already chosen for this session (a schedule run names its chat
+   * for the schedule). Set on the first turn instead of the working title derived from the
+   * first user message, and the subject-title follow-up does not run for it: the follow-up
+   * only ever replaces a derived working title.
+   */
+  session_title?: string | undefined;
 }): Promise<{ turn: TurnHandle<TurnCustom>; drainInput: TurnEventDrainInput }> {
   const clocks = startTurnClocks({ sessionId: params.session.session_id, logger: params.deps.logger });
   try {
@@ -1916,8 +1967,11 @@ async function beginAcceptedTurnExecution(
       });
 
       // First turn only: derive the working title from the first user message. The
-      // store never overwrites an existing title.
-      const title = session.record.last_turn_id ? undefined : deriveSessionTitle(input);
+      // store never overwrites an existing title. A caller that names the session
+      // itself (a schedule run) sets that title instead, and the turn then reports no
+      // derived title, so the subject-title follow-up below leaves the name alone.
+      const derivedTitle = session.record.last_turn_id ? undefined : deriveSessionTitle(input);
+      const title = params.session_title ?? derivedTitle;
 
       const turn = await session.createTurn({
         turn_id: turnId,
@@ -1934,7 +1988,12 @@ async function beginAcceptedTurnExecution(
         unattended: params.unattended,
         withheld_tools: params.withheldTools,
       });
-      return { turn, resolver, memorySummarize, derivedTitle: title };
+      return {
+        turn,
+        resolver,
+        memorySummarize,
+        derivedTitle: params.session_title === undefined ? derivedTitle : undefined,
+      };
     },
     discard: ({ turn, resolver }) =>
       abandonTurnThatCouldNotStart({ session, turn, resolver, abortController, logger: deps.logger }),
@@ -2001,6 +2060,7 @@ async function beginAcceptedTurnExecution(
       logger: deps.logger,
       turnDrains: deps.turnDrains,
       modelUsage: { ledger: modelUsage, eventStore: deps.sessionStore },
+      answerMark: { sessionStore: deps.sessionStore, tenantId: tenant_id },
       privateChat: privateChatDrainMember({ session, sessionStore: deps.sessionStore }),
       chatSearch:
         deps.chatSearchIndexer === undefined
@@ -2038,6 +2098,8 @@ export async function startTurnInProcess(params: {
   deps: BeginTurnExecutionDeps;
   unattended?: boolean | undefined;
   withheldTools?: readonly string[] | undefined;
+  /** A title the caller has already chosen for this session; see beginTurnExecution. */
+  session_title?: string | undefined;
 }): Promise<TurnHandle<TurnCustom>> {
   const { turn, drainInput } = await beginTurnExecution(params);
 
@@ -2866,8 +2928,15 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
                 owner: scheduleOwner,
                 runner: chatRunner,
                 persona: persona?.kind === 'persona' ? persona.persona : undefined,
-                assistantName: profile?.assistant_name ?? null,
                 agentStore,
+                scheduleAgentChoices: scheduleAgentChoices({
+                  tenant_id: requestContext.tenant_id,
+                  modelProviderStore,
+                  mcpServerStore,
+                  skillStore,
+                  sandboxProviderStore,
+                  searchProviderPresetNames: deps.mcpCatalog.searchProviderPresetNames(),
+                }),
               }),
               runsAs: scheduleRunsAs({
                 tenant_id: requestContext.tenant_id,
@@ -3208,6 +3277,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
           logger: deps.logger,
           turnDrains: deps.turnDrains,
           modelUsage: { ledger: modelUsage, eventStore: deps.sessionStore },
+          answerMark: { sessionStore: deps.sessionStore, tenantId: requestContext.tenant_id },
           chatTitle,
           privateChat: privateChatDrainMember({ session, sessionStore: deps.sessionStore }),
           memory:

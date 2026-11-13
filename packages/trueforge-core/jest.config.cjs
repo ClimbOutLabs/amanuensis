@@ -28,6 +28,8 @@ module.exports = {
   // pnpm stores packages under node_modules/.pnpm/, and the AI SDK + its transitive
   // dependencies all ship as ESM — transform every .js file in node_modules.
   transformIgnorePatterns: [],
+  // A fixed place for compiled files, so CI can keep them between runs. Jest checks each file's content, so an old entry is never used for a changed file.
+  cacheDirectory: '<rootDir>/node_modules/.cache/jest',
   moduleNameMapper: {
     '^(\\.{1,2}/.*)\\.js$': '$1',
   },

@@ -129,6 +129,26 @@ const TOOL_WORDS: ReadonlyMap<string, ToolWords> = new Map([
     },
     ['delivery.web_push'],
   ),
+  ...words({ doing: 'Sending you a text', done: 'Sent you a text', thing: 'A text for you' }, ['delivery.sms']),
+  ...words({ doing: 'Calling you', done: 'Called you', thing: 'A phone call to you' }, ['delivery.call']),
+  ...words({ doing: 'Turning texts off', done: 'Turned texts off after a STOP', thing: 'A STOP reply' }, [
+    'delivery.sms_stop',
+  ]),
+  ...words(
+    {
+      doing: 'Dropping a new number',
+      done: 'Dropped a new number after a STOP',
+      thing: 'A STOP from a new number',
+    },
+    ['delivery.sms_new_number_stopped'],
+  ),
+  ...words(
+    { doing: 'Confirming your number', done: 'Confirmed your number for texts', thing: 'Your number for texts' },
+    ['delivery.sms_confirmed'],
+  ),
+  ...words({ doing: 'Removing your number', done: 'Removed your number for texts', thing: 'Your number for texts' }, [
+    'delivery.sms_removed',
+  ]),
   ...words({ doing: 'Checking your reminders', done: 'Checked your reminders', thing: 'Your reminders' }, [
     'list_reminders',
   ]),

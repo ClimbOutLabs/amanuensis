@@ -81,7 +81,7 @@ async function scenario(harness: MailAgentHarness, { delay_ms = 0 }: { delay_ms?
   const deliveryStore = new DeliveryStore(db);
   const deliveries = createDeliveryService({
     store: deliveryStore,
-    senders: [{ send: () => Promise.resolve([]) }],
+    senders: [{ channel: 'web_push', send: () => Promise.resolve([]) }],
     audit: { record: () => Promise.resolve() },
     logger: winston.createLogger({ silent: true }),
   });
@@ -131,8 +131,8 @@ async function scenario(harness: MailAgentHarness, { delay_ms = 0 }: { delay_ms?
       judgeFor: () => Promise.resolve(() => Promise.resolve({ level: 'note', reason: 'It can wait.', message: 'Ok.' })),
       budget: { isExhausted: () => Promise.resolve(false) },
       channels: () => ({
-        texts: { available: false, note: 'Texts are not set up yet.' },
-        calls: { available: false, note: 'Phone calls are not set up yet.' },
+        texts: { available: false, note: 'Texts are not set up yet.', problem: null },
+        calls: { available: false, note: 'Phone calls are not set up yet.', problem: null },
       }),
       logger: winston.createLogger({ silent: true }),
       now: () => clock.now,

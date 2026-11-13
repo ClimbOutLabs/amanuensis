@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DraftCatalogProvider } from '@/atoms/draft/DraftCatalogProvider.js';
@@ -231,7 +231,7 @@ describe('DraftCompositeSelector', () => {
       const picker = await screen.findByRole('dialog', { name: 'Add to composer' });
       expect(picker.style.position).toBe('fixed');
       const top = Number.parseFloat(picker.style.top);
-      const height = Number.parseFloat(picker.style.height);
+      const height = Number.parseFloat(picker.style.maxHeight);
       expect(top).toBeGreaterThan(380);
       expect(top + height).toBeLessThanOrEqual(900 - 8);
       expect(Number.parseFloat(picker.style.left) + Number.parseFloat(picker.style.width)).toBeLessThanOrEqual(
@@ -240,6 +240,44 @@ describe('DraftCompositeSelector', () => {
     } finally {
       rect.mockRestore();
     }
+  });
+
+  it('keeps the add-ons picker beside the composer when the composer moves without a scroll', async () => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1440 });
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 900 });
+    let anchorTop = 800;
+    const rect = vi
+      .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+      .mockImplementation(() => new DOMRect(400, anchorTop, 32, 32));
+    try {
+      renderSelector();
+      openAddOns();
+
+      const picker = await screen.findByRole('dialog', { name: 'Add to composer' });
+      // Rendered outside the composer, so the chat area cannot trap or clip it.
+      expect(screen.getByRole('button', { name: 'Add' }).parentElement?.contains(picker)).toBe(false);
+      expect(Number.parseFloat(picker.style.bottom)).toBe(900 - 800 + 4);
+
+      anchorTop = 760;
+      await waitFor(() => expect(Number.parseFloat(picker.style.bottom)).toBe(900 - 760 + 4));
+    } finally {
+      rect.mockRestore();
+    }
+  });
+
+  it('moves keyboard focus into the add-ons picker, and back to Add on Escape', async () => {
+    renderSelector();
+    openAddOns();
+
+    const picker = await screen.findByRole('dialog', { name: 'Add to composer' });
+    await waitFor(() =>
+      expect(picker).toContainElement(document.activeElement instanceof HTMLElement ? document.activeElement : null),
+    );
+    expect(document.activeElement).toHaveAttribute('aria-pressed', 'true');
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('dialog', { name: 'Add to composer' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add' })).toHaveFocus();
   });
 
   it('shows Add with its words on the plus button, never a bare icon', () => {
