@@ -1,5 +1,5 @@
 import type { AgentSpec, SessionHandle } from '@truefoundry/trueforge-core/agent-session';
-import type { SentinelHostContext } from '@truefoundry/trueforge-core/core';
+import type { SentinelHostContext, SkillNetworkCardRequest } from '@truefoundry/trueforge-core/core';
 import {
   DisabledDriver,
   DockerDriver,
@@ -729,6 +729,7 @@ export function buildTurnSandbox(input: {
   loadBoundRepository?: (() => Promise<BoundRepository | undefined>) | undefined;
   loadPackageMirrorToken?: (() => Promise<string | undefined>) | undefined;
   loadSkillNetworkGrant?: (() => Promise<{ token: string; hosts: readonly string[] } | undefined>) | undefined;
+  drainSkillNetworkCards?: (() => Promise<readonly SkillNetworkCardRequest[]>) | undefined;
   loadPackageDownloadsAllowed?: (() => Promise<boolean>) | undefined;
   allowPackageDownloads?: (() => Promise<void>) | undefined;
   onRepositorySources?: RepositoryCommandSourceObserver | undefined;
@@ -768,6 +769,7 @@ export function buildTurnSandbox(input: {
     loadBoundRepository: input.loadBoundRepository,
     loadPackageMirrorToken: input.loadPackageMirrorToken,
     loadSkillNetworkGrant: input.loadSkillNetworkGrant,
+    drainSkillNetworkCards: input.drainSkillNetworkCards,
     loadPackageDownloadsAllowed: input.loadPackageDownloadsAllowed,
     allowPackageDownloads: input.allowPackageDownloads,
     onRepositorySources: input.onRepositorySources,

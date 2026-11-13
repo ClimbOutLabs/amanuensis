@@ -13,7 +13,13 @@ import {
   ImplementationPlanGrantScopeSchema,
 } from '../mcp/implementationPlanGrant';
 import { ShellApprovalBindingSchema } from '../permissions/approvalTokens';
-import { TIER2_ACTION_KINDS, Tier3CardSchema, TierSchema, TrackedExecutionBindingSchema } from '../permissions/tier';
+import {
+  TIER2_ACTION_KINDS,
+  Tier3CardSchema,
+  Tier3SkillNetworkSchema,
+  TierSchema,
+  TrackedExecutionBindingSchema,
+} from '../permissions/tier';
 import { GitRemotePreconditionSchema } from '../sandbox/gitRemoteObservation';
 import { StructuredEditPreconditionSchema } from '../sandbox/structuredEditPrecondition';
 import {
@@ -249,6 +255,11 @@ export const InternalToolCallInfoSchema = z.object({
     .optional()
     .describe(
       'Set when an unattended run held this call for the owner instead of asking; duplicate marks a repeat of a call already held in the same batch. Never model-authored.',
+    ),
+  skill_network: Tier3SkillNetworkSchema.nullable()
+    .optional()
+    .describe(
+      'Set on a held call that carries a skill network card: the skill, the sites it asks for, and why. The answer is recorded against the skill, and approving re-runs the command. Never model-authored.',
     ),
   search_provider_call: z
     .literal(true)

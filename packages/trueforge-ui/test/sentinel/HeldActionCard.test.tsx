@@ -147,6 +147,43 @@ describe('HeldActionCard', () => {
     expect(onAlwaysAllow).toHaveBeenCalledTimes(1);
   });
 
+  it('names the skill the answer is filed under in the Always choice on a refused-site card', () => {
+    const { onAlwaysAllow } = renderCard(
+      { alwaysAllowOffered: true },
+      {
+        plain_what: 'Allow a connection to api.example.com in this chat?',
+        plain_why:
+          'A command in this chat tried to reach api.example.com, which is not one of the sites approved for the skills in this chat, and the connection was refused. Aman cannot tell which skill, if any, made the attempt.',
+        skill_network: {
+          skill_name: 'Trail Weather',
+          hosts: ['api.example.com'],
+          reason: 'undeclared_host',
+          code_pin: null,
+        },
+      },
+    );
+    expect(screen.queryByRole('button', { name: 'Always allow for this skill' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Always allow for the Trail Weather skill' }));
+
+    expect(screen.getByRole('heading', { name: 'Always allow for the Trail Weather skill?' })).toBeInTheDocument();
+    expect(
+      screen.getByText('Aman will let Trail Weather reach api.example.com without asking, in every chat.'),
+    ).toBeInTheDocument();
+    expect(onAlwaysAllow).not.toHaveBeenCalled();
+  });
+
+  it('keeps the plain Always allow wording on a first-use card, whose question names the skill', () => {
+    renderCard(
+      { alwaysAllowOffered: true },
+      {
+        plain_what: 'Let the Trail Weather skill reach api.example.com?',
+        skill_network: { skill_name: 'Trail Weather', hosts: ['api.example.com'], reason: 'first_use', code_pin: null },
+      },
+    );
+    expect(screen.getByRole('button', { name: 'Always allow for this skill' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Always allow for the Trail Weather skill' })).not.toBeInTheDocument();
+  });
+
   it.each([
     [{ kind: 'approved' as const, outcome: 'done' as const }, 'Approved and done.'],
     [

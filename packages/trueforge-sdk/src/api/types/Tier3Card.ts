@@ -39,6 +39,8 @@ export interface Tier3Card {
     safeChoice?: boolean;
     schedule?: TrueForge.Tier3Schedule | null;
     skill?: TrueForge.Tier3Skill | null;
+    /** For a skill network card: the skill, the sites it asks for, and why. Otherwise null. */
+    skillNetwork?: TrueForge.Tier3CardSkillNetwork | null;
     /** Actual cause of re-escalation, or null on first ask. */
     whyAskedAgain: string | null;
 }

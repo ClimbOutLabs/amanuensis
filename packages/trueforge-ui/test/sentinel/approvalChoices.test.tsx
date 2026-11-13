@@ -3,7 +3,7 @@ import { render, screen } from '@testing-library/react';
 import { holdSay, searchHoldCardText } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
 import { describe, expect, it, vi } from 'vitest';
 
-import { APPROVAL_CHOICES, EMAIL_CHOICES, offersChangeIt } from '@/sentinel/approvalChoices.js';
+import { APPROVAL_CHOICES, EMAIL_CHOICES, SKILL_NETWORK_CHOICES, offersChangeIt } from '@/sentinel/approvalChoices.js';
 import { HeldActionCard } from '@/sentinel/HeldActionCard.js';
 import { PermissionApprovalCard } from '@/sentinel/PermissionApprovalCard.js';
 import { SentinelApiProvider } from '@/sentinel/SentinelApiContext.js';
@@ -113,6 +113,32 @@ describe('grant hint wording', () => {
     }
   });
 
+  it('does not promise a skill network command runs again when it needs an approval of its own', () => {
+    expect(SKILL_NETWORK_CHOICES.approve.hint).toBe(
+      'Allow these sites for this chat only. The command runs again with them, unless it needs an approval of its own.',
+    );
+  });
+
+  it('shows that hint as the Allow once title on a skill network card', () => {
+    render(
+      <HeldActionCard
+        card={{
+          ...card,
+          skill_network: { skill_name: 'Example', hosts: ['example.org'], reason: 'first_use', code_pin: null },
+        }}
+        status={{ kind: 'waiting' }}
+        alwaysAllowOffered={false}
+        onApprove={vi.fn()}
+        onAlwaysAllow={vi.fn()}
+        onDeny={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole('button', { name: 'Allow once' })).toHaveAttribute(
+      'title',
+      'Allow these sites for this chat only. The command runs again with them, unless it needs an approval of its own.',
+    );
+  });
+
   it('shows the persona hint as the Change it title on a held card', () => {
     render(
       <HeldActionCard
@@ -140,6 +166,7 @@ describe('offersChangeIt', () => {
     bcc: [],
     subject: 'Lunch',
     body: 'Lunch at noon?',
+    check_code: null,
     replaces: null,
     reply_in_thread: null,
     reply_to: null,

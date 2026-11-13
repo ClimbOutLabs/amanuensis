@@ -180,7 +180,7 @@ import {
 import type { DeletedChatUsageReader } from '../runtime/usageSummaryCapability';
 import { packageMirrorTokens } from '../sandbox/mirrors/packageMirrorTokens';
 import { checkSnapshotStatus } from '../sandbox/providerUtils';
-import { resolveSkillNetworkGrant } from '../sandbox/skillnet/skillNetworkGrant';
+import { drainSkillNetworkCards, resolveSkillNetworkGrant } from '../sandbox/skillnet/skillNetworkGrant';
 import { skillNetworkTokens } from '../sandbox/skillnet/skillNetworkTokens';
 import { canReadSession } from './agentAccess';
 import { approvedToolCalls, toolCallKey } from './approvedToolCalls';
@@ -794,6 +794,22 @@ function createTurnResolver(deps: {
               registry: skillNetworkTokens,
               tenant_id,
               created_by: userRef,
+              session_id: sessionId,
+              skillNames: (spec.skills ?? []).map(skill => skill.name),
+            });
+          },
+          drainSkillNetworkCards: async () => {
+            const currentSession = await sessionStore.getSession({
+              tenant_id,
+              session_id: sessionId,
+            });
+            if (currentSession?.created_by_subject.subject_id !== userRef) {
+              return [];
+            }
+            return drainSkillNetworkCards({
+              store: skillStore,
+              registry: skillNetworkTokens,
+              tenant_id,
               session_id: sessionId,
               skillNames: (spec.skills ?? []).map(skill => skill.name),
             });
@@ -1818,6 +1834,13 @@ export async function beginTurnExecution(params: {
   unattended?: boolean | undefined;
   /** Built-in tool names this turn does not offer. */
   withheldTools?: readonly string[] | undefined;
+  /**
+   * A title the caller has already chosen for this session (a schedule run names its chat
+   * for the schedule). Set on the first turn instead of the working title derived from the
+   * first user message, and the subject-title follow-up does not run for it: the follow-up
+   * only ever replaces a derived working title.
+   */
+  session_title?: string | undefined;
 }): Promise<{ turn: TurnHandle<TurnCustom>; drainInput: TurnEventDrainInput }> {
   const clocks = startTurnClocks({ sessionId: params.session.session_id, logger: params.deps.logger });
   try {
@@ -1949,8 +1972,11 @@ async function beginAcceptedTurnExecution(
       });
 
       // First turn only: derive the working title from the first user message. The
-      // store never overwrites an existing title.
-      const title = session.record.last_turn_id ? undefined : deriveSessionTitle(input);
+      // store never overwrites an existing title. A caller that names the session
+      // itself (a schedule run) sets that title instead, and the turn then reports no
+      // derived title, so the subject-title follow-up below leaves the name alone.
+      const derivedTitle = session.record.last_turn_id ? undefined : deriveSessionTitle(input);
+      const title = params.session_title ?? derivedTitle;
 
       const turn = await session.createTurn({
         turn_id: turnId,
@@ -1967,7 +1993,12 @@ async function beginAcceptedTurnExecution(
         unattended: params.unattended,
         withheld_tools: params.withheldTools,
       });
-      return { turn, resolver, memorySummarize, derivedTitle: title };
+      return {
+        turn,
+        resolver,
+        memorySummarize,
+        derivedTitle: params.session_title === undefined ? derivedTitle : undefined,
+      };
     },
     discard: ({ turn, resolver }) =>
       abandonTurnThatCouldNotStart({ session, turn, resolver, abortController, logger: deps.logger }),
@@ -2075,6 +2106,8 @@ export async function startTurnInProcess(params: {
   deps: BeginTurnExecutionDeps;
   unattended?: boolean | undefined;
   withheldTools?: readonly string[] | undefined;
+  /** A title the caller has already chosen for this session; see beginTurnExecution. */
+  session_title?: string | undefined;
 }): Promise<TurnHandle<TurnCustom>> {
   const { turn, drainInput } = await beginTurnExecution(params);
 
