@@ -49,6 +49,16 @@ Open **Agents**, then click the menu at the end of the agent's row:
 - **Manage Schedules** shows the schedules that use it.
 - **Delete** removes it. Aman asks first.
 
+## Choose when an agent summarizes a long chat
+
+A model can only read so much of a chat at once. When a chat gets long, Aman summarizes its oldest part so the model can keep going.
+
+1. In the **Agent Config** panel, click the edit button on **Run settings**.
+2. Find **When to summarize long chats**.
+3. Pick **Automatic (recommended)** to let Aman decide from the model's size limit. If that limit isn't known, Aman uses a safe default.
+4. Or pick **At a set size** and type the chat size to summarize at. It starts near the size Automatic would use for that model.
+5. Close the panel, then click **Save Agent**.
+
 ## Good to know
 
 - An agent follows the same approval rules as Aman. Sending, deleting and installing still wait for your OK.

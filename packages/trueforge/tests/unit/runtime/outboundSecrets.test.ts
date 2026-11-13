@@ -45,6 +45,7 @@ function mcpRecord(id: string, manifest: McpServerRecord['manifest']): McpServer
 const providerRecord: ModelProviderRecord = {
   tenant_id: 't1',
   name: 'custom-llm',
+  last_check: null,
   created_at: '2026-10-01T00:00:00.000Z',
   updated_at: '2026-10-01T00:00:00.000Z',
   manifest: {

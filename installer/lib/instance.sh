@@ -227,7 +227,10 @@ instance_render() {
   # The email connector is part of the compose file only once its image is known. Its wrapper script is copied beside the
   # compose file, because the compose file mounts it from this folder.
   local email_on=0
-  [ -n "${REL_MAIL_EMAIL_IMAGE:-}" ] && email_on=1
+  if [ -n "${REL_MAIL_EMAIL_IMAGE:-}" ]; then
+    email_on=1
+    env_secret_backfill "$name" MAIL_EMAIL_ACCOUNT_SECRET
+  fi
   ensure_private_dir "$dir"
   if [ "$email_on" = 1 ]; then
     write_if_changed "$dir/mail-email-entrypoint.sh" 644 <"$REPO_ROOT/ops/compose/mail-email/entrypoint.sh" || true

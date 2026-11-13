@@ -146,6 +146,7 @@ const JSON_RESULT_COLUMNS = new Set([
   'thread_checkpoint',
   'event',
   'manifest',
+  'last_check',
   'network_approval',
   'network_allowed_hosts',
   'network_denied_hosts',
