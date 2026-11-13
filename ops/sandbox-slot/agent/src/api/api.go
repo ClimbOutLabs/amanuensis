@@ -48,6 +48,8 @@ const (
 	execNpmCache   = tree.GuestRoot + "/" + npmCacheDir
 	npmCacheDir    = ".aman/npm-cache"
 	npmCacheIgnore = npmCacheDir + "/.gitignore"
+	// The folder name the sandbox instructions give for a project's Python environment.
+	projectEnvDir = ".venv"
 )
 
 // Termination causes reported for a run.

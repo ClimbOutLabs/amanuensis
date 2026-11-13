@@ -226,6 +226,7 @@ func (s *Server) exec(w http.ResponseWriter, r *http.Request) {
 		Guard:         watch.guard,
 		GuardInterval: guardIntervalMS * time.Millisecond,
 	})
+	hideProjectEnvironment(root, spec.Cwd)
 	endSkillNetworkGrant()
 	endGrant()
 	// Whatever a fast writer got in before the kill is removed, largest files first, so the overshoot never stays.
@@ -238,6 +239,18 @@ func (s *Server) exec(w http.ResponseWriter, r *http.Request) {
 		Notices:       notices,
 		DurationMS:    time.Since(started).Milliseconds(),
 	})
+}
+
+// hideProjectEnvironment keeps a Python environment made in the command's folder out of `git status`, as
+// newer Python versions do themselves. Best effort: the environment works without it.
+func hideProjectEnvironment(root, cwd string) {
+	env := path.Join(cwd, projectEnvDir)
+	if _, err := tree.Read(root, env+"/pyvenv.cfg"); err != nil {
+		return
+	}
+	if _, err := tree.Read(root, env+"/.gitignore"); errors.Is(err, os.ErrNotExist) {
+		_ = tree.Write(root, env+"/.gitignore", []byte("*\n"), 0o644)
+	}
 }
 
 // reclaimNotice appends the sentence about deleted files, if any, to the call's notices; never nil.

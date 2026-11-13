@@ -982,3 +982,61 @@ func TestSessionsServesTheCachedWalkUntilItAges(t *testing.T) {
 		t.Fatalf("aged listing did not walk again: first %+v, third %+v", first.Sessions, third.Sessions)
 	}
 }
+
+// Python 3.12 does not hide a new environment from git by itself, so `git status` listed thousands of files.
+func TestExecHidesANewPythonEnvironmentFromGit(t *testing.T) {
+	e := newEnv(t, true)
+	sub := filepath.Join(e.srv.TreeDir, sessionID, "sub")
+	e.runner.play = func(guest.Spec) {
+		if err := os.MkdirAll(filepath.Join(sub, ".venv"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(sub, ".venv", "pyvenv.cfg"), []byte("home = /usr/bin\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if rec := e.do("POST", "/v1/exec", execBody(nil)); rec.Code != 200 {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	ignore, err := os.ReadFile(filepath.Join(sub, ".venv", ".gitignore"))
+	if err != nil || string(ignore) != "*\n" {
+		t.Fatalf("the environment must be hidden from git: %q %v", ignore, err)
+	}
+}
+
+func TestExecLeavesAFolderThatIsNotAnEnvironmentAlone(t *testing.T) {
+	e := newEnv(t, true)
+	sub := filepath.Join(e.srv.TreeDir, sessionID, "sub")
+	e.runner.play = func(guest.Spec) {
+		if err := os.MkdirAll(filepath.Join(sub, ".venv"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if rec := e.do("POST", "/v1/exec", execBody(nil)); rec.Code != 200 {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(sub, ".venv", ".gitignore")); !os.IsNotExist(err) {
+		t.Fatalf("a folder without pyvenv.cfg must not get an ignore file: %v", err)
+	}
+}
+
+func TestExecKeepsAnIgnoreFileTheEnvironmentAlreadyHas(t *testing.T) {
+	e := newEnv(t, true)
+	env := filepath.Join(e.srv.TreeDir, sessionID, "sub", ".venv")
+	e.runner.play = func(guest.Spec) {
+		if err := os.MkdirAll(env, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		for name, content := range map[string]string{"pyvenv.cfg": "home = /usr/bin\n", ".gitignore": "lib/\n"} {
+			if err := os.WriteFile(filepath.Join(env, name), []byte(content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if rec := e.do("POST", "/v1/exec", execBody(nil)); rec.Code != 200 {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	if kept, _ := os.ReadFile(filepath.Join(env, ".gitignore")); string(kept) != "lib/\n" {
+		t.Fatalf("an existing ignore file must stay as it is: %q", kept)
+	}
+}
