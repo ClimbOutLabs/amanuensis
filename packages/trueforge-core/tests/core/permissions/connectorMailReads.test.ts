@@ -128,9 +128,11 @@ describe('connector mail sends keep their decisions', () => {
       tier: 3,
       auto_deny: 'destination_unverifiable',
     });
+    // A reply that names no recipient is refused by the rule that names the missing recipient, not
+    // by the unverifiable-destination rule: the card could show everything except who receives it.
     expect(
       await classifyTier(mailCall('reply-to-message', { message_id: 'm1', body: 'Thanks' }), makeCtx()),
-    ).toMatchObject({ tier: 3, auto_deny: 'destination_unverifiable' });
+    ).toMatchObject({ tier: 3, auto_deny: 'incomplete_send_card' });
     expect(await classifyTier(mailCall('create-draft', { subject: 'Hi', body: 'Hello' }), makeCtx())).toMatchObject({
       tier: 3,
       auto_deny: null,
@@ -145,12 +147,13 @@ describe('connector mail sends keep their decisions', () => {
       auto_deny: null,
       reason: 'external_service',
     });
+    // A reply is a connector family send, so it keeps the family reason; both reasons bar a durable grant.
     expect(
       await classifyTier(
         mailCall('reply-to-message', { message_id: 'm1', to: 'x@outside.example', body: 'Thanks' }),
         makeCtx(),
       ),
-    ).toMatchObject({ tier: 3, auto_deny: null, reason: 'external_service' });
+    ).toMatchObject({ tier: 3, auto_deny: null, reason: 'connector_send' });
     expect(await classifyTier(mailCall('create-draft', to), makeCtx())).toMatchObject({
       tier: 3,
       auto_deny: null,
@@ -177,8 +180,10 @@ describe('connector mail sends keep their decisions', () => {
   });
 
   it('a read-named call with a reply-to-everyone flag is still refused', async () => {
+    // Refused as a reply to everyone, whose recipients the card cannot show, rather than for an
+    // unverifiable destination: the hidden-send refusal names the actual problem.
     expect(await classifyTier(mailCall('search-messages', { query: 'x', reply_all: true }), makeCtx())).toMatchObject({
-      auto_deny: 'destination_unverifiable',
+      auto_deny: 'incomplete_send_card',
     });
   });
 

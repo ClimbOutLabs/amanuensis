@@ -745,7 +745,7 @@ describe('connector card does not change the tier', () => {
   });
 
   test('extraction still reports external-service actions without a destination as unverifiable', () => {
-    const result = extractCardFields({ tool_name: 'send_message', canonical_params: { text: 'hi' }, tool_type: 'mcp' });
+    const result = extractCardFields({ tool_name: 'send_message', canonical_params: { body: 'hi' }, tool_type: 'mcp' });
     expect(result.external_service).toBe(true);
     expect(result.destination_unverifiable).toBe(true);
   });

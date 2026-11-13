@@ -268,8 +268,8 @@ describe('hidden sends: one rule for every spelling', () => {
     }
   });
 
-  test('a send_message with only a draft id stays denied for its missing destination', async () => {
-    expect((await classify(mailCall('send_message', { draftId: 'd1' }))).auto_deny).toBe('destination_unverifiable');
+  test('a send_message with only a draft id is refused as a saved draft the card cannot show', async () => {
+    expect((await classify(mailCall('send_message', { draftId: 'd1' }))).auto_deny).toBe('incomplete_send_card');
   });
 
   test.each<[string, Record<string, unknown>]>([

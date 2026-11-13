@@ -347,9 +347,11 @@ describe('an unattended run', () => {
     expect(brief.result.required_actions).toEqual([]);
     expect(brief.result.root_agent_error).toBeUndefined();
     // The run's last message names what it held, so the owner knows to look at the list.
+    // send_note carries a recipient and a body, so its card names the external action and who it
+    // reaches: a call is now classed by what it carries, not by fragments in its name.
     expect(brief.result.output).toMatchObject({
       content: expect.stringContaining(
-        "All done.\n\nI need your OK for one thing: Allow this new tool from mail? Approve it on your Needs your OK list and I'll add it here.",
+        "All done.\n\nI need your OK for one thing: Perform an external action affecting ana@example.com? Approve it on your Needs your OK list and I'll add it here.",
       ),
     });
     expect(brief.events.map(event => event.type)).not.toContain(EventType.TOOL_EXECUTION_STARTED);

@@ -1813,12 +1813,13 @@ function sendCardCopy(input: {
   return input.notice === null ? base : { ...base, consequence: joinLine([input.notice, base.consequence]) };
 }
 
-function externalServiceWhat(input: {
+/** The external-service sentence for a tool whose name names the kind of send, or null when it does not. */
+function externalServiceWhatSpecific(input: {
   tool_name: string;
   destination: string | null;
   recipient: string | null;
   amount: string | null;
-}): string {
+}): string | null {
   const name = input.tool_name.toLowerCase();
   const where = input.recipient ?? input.destination ?? 'an external destination';
   if (name.includes('email') || name.includes('mail')) {
@@ -1851,7 +1852,33 @@ function externalServiceWhat(input: {
   ) {
     return `Spend ${input.amount ?? 'money'}${input.destination === null ? '' : ` via ${input.destination}`}?`;
   }
-  return `Perform an external action affecting ${where}?`;
+  return null;
+}
+
+function externalServiceWhat(input: {
+  tool_name: string;
+  destination: string | null;
+  recipient: string | null;
+  amount: string | null;
+}): string {
+  const where = input.recipient ?? input.destination ?? 'an external destination';
+  return externalServiceWhatSpecific(input) ?? `Perform an external action affecting ${where}?`;
+}
+
+/**
+ * The sentence for a call classified as an external-service send: the external-service sentence
+ * when the tool's name names the kind of send, else the connector family's own sentence for the
+ * call when a family described one, else the general external-action sentence.
+ */
+function namedSendWhat(input: { action: SentinelAction; extraction: ExtractionResult }): string {
+  const { fields } = input.extraction;
+  const parts = {
+    tool_name: input.action.tool_name,
+    destination: fields.destination,
+    recipient: fields.recipient,
+    amount: fields.amount,
+  };
+  return externalServiceWhatSpecific(parts) ?? input.extraction.connector_what ?? externalServiceWhat(parts);
 }
 
 const DESTRUCTIVE_FRAGMENTS = ['delete', 'remove', 'uninstall', 'drop', 'destroy', 'erase'];
@@ -3477,13 +3504,16 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
   // Offline: network-required tools are filtered from the list; a stale call
   // that slips through is auto-denied here.
   const offline = await services.isOffline({ tenant_id: ctx.tenant_id, created_by: ctx.created_by });
+  // The tool declares itself read-only and closed-world: it says it does not reach outside its own service.
+  const declaredReadOnlyClosedWorld =
+    action.mcp_hints.read_only_hint === true && action.mcp_hints.open_world_hint === false;
   const extraction = extractCardFields({
     tool_name: action.tool_name,
     canonical_params: await cardArguments(action, ctx),
     tool_type: action.tool_type,
     server_host: action.mcp_server_host,
     server_name: action.mcp_server_name,
-    read_only_closed_world: action.mcp_hints.read_only_hint === true && action.mcp_hints.open_world_hint === false,
+    read_only_closed_world: declaredReadOnlyClosedWorld,
     host_mail_draft: isHostMailDraft(action),
   });
   // A card for the host's own Email sidecar never shows the sidecar's endpoint as a destination: the recipient is.
@@ -3505,8 +3535,23 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
   ) {
     return incognitoRefusal();
   }
-  // A read is not a send by name, so it is not carded as an external-service send; its annotations still decide.
-  const namedSend = extraction.external_service && !extraction.connector_read;
+  // Name-ranked Tier 3 classes, judged on the name alone: destructive, install.
+  const isDestructive = DESTRUCTIVE_FRAGMENTS.some(fragment => name.includes(fragment));
+  const isInstall = INSTALL_FRAGMENTS.some(fragment => name.includes(fragment));
+  // A read is not a send by what it carries, so it is not carded as an external-service send; its annotations still decide.
+  // A connector calendar change keeps its own card below, so it is never reworded as a send either, and a call a
+  // connector family claims as its own send keeps that family's reason: the external-service class is for the rest.
+  // A tool declared read-only and closed-world whose name ranks it destructive or install keeps that rank: its
+  // declaration says it does not reach out, so what its arguments carry does not promote it into a send.
+  const namedSend =
+    extraction.external_service &&
+    !extraction.connector_read &&
+    !extraction.family_send &&
+    !isCalendarChangeToolName(action.tool_name) &&
+    !(declaredReadOnlyClosedWorld && (isDestructive || isInstall));
+  // The same carried send, for wording only: a hint-escalated family send still gets the send sentence.
+  const carriedSend =
+    extraction.external_service && !extraction.connector_read && !isCalendarChangeToolName(action.tool_name);
   // A connector read is private data, so a search in the same chat asks afterwards.
   const readsPrivateData = extraction.connector_read || containsSecretPath(action.canonical_params);
   // Any argument with a path shape is a private read whatever its name, so it never gets a grant.
@@ -3687,13 +3732,8 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
   if (destructiveHint || (openWorldHint && !readOnlyHint)) {
     const { fields } = extraction;
     // The external-service sentence wins: it is the more specific warning about where this goes.
-    const plain_what = namedSend
-      ? externalServiceWhat({
-          tool_name: action.tool_name,
-          destination: fields.destination,
-          recipient: fields.recipient,
-          amount: fields.amount,
-        })
+    const plain_what = carriedSend
+      ? namedSendWhat({ action, extraction })
       : destructiveHint || extraction.connector_what === null
         ? destructiveHint
           ? 'Run this action, even though it might change or delete something for good?'
@@ -3745,18 +3785,11 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     });
   }
 
-  // Name-based Tier 3 classes: external-service (non-fallback), destructive, install.
-  const isDestructive = DESTRUCTIVE_FRAGMENTS.some(fragment => name.includes(fragment));
-  const isInstall = INSTALL_FRAGMENTS.some(fragment => name.includes(fragment));
+  // Name-based Tier 3 classes: external-service (non-fallback), destructive, install (computed above).
   if (namedSend || isDestructive || isInstall) {
     const { fields } = extraction;
     const what = namedSend
-      ? externalServiceWhat({
-          tool_name: action.tool_name,
-          destination: fields.destination,
-          recipient: fields.recipient,
-          amount: fields.amount,
-        })
+      ? namedSendWhat({ action, extraction })
       : isInstall
         ? 'Install software or dependencies?'
         : `Delete or remove ${fields.destination ?? fields.recipient ?? 'data'}?`;
@@ -4035,6 +4068,15 @@ function connectorApprovalCard(input: {
   const hostCalendarRead = isHostCalendarRead(action);
   const plain_what =
     spaceToolLine(action) ??
+    // A send the tool's name names gets that sentence even on the family card, as it did on the send card.
+    (extraction.sends
+      ? externalServiceWhatSpecific({
+          tool_name: action.tool_name,
+          destination: fields.destination,
+          recipient: fields.recipient,
+          amount: fields.amount,
+        })
+      : null) ??
     extraction.connector_what ??
     (hostCalendarRead
       ? 'Allow looking at your calendar?'
