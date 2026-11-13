@@ -363,8 +363,8 @@ One more setting decides whether saved notes are sorted onto pages at all:
 
 | Setting               | Default | Meaning                                                                                        |
 | --------------------- | ------- | ---------------------------------------------------------------------------------------------- |
-| `MEMORY_PAGE_SORTING` | `off`   | `off` does nothing. `report` only records what sorting would do. `on` writes pages. See below. |
-| `MEMORY_NIGHTLY_JOB`  | `false` | Once a day per vault, tidies pages from the hour set in Settings. See "The nightly job".       |
+| `MEMORY_PAGE_SORTING` | `on`    | `off` does nothing. `report` only records what sorting would do. `on` writes pages. See below. |
+| `MEMORY_NIGHTLY_JOB`  | `true`  | Once a day per vault, tidies pages from the hour set in Settings. See "The nightly job".       |
 
 Both are only the starting choice. Settings, then Memory, stores an override in the global settings store
 (`memory_page_sorting_mode`, `memory_nightly_job_enabled`) that wins over the environment value, and clearing it
@@ -622,7 +622,7 @@ limit. It uses the summarizer's model, so with no model set nothing is sorted. A
 it sorts nothing. A message the person sent is sorted the same way once its note is saved. Each persona's notes
 are sorted into that persona's own pages.
 
-**Three modes, one setting.** `MEMORY_PAGE_SORTING` is `off`, `report` or `on`, and defaults to `off`. The sorter reads the stored setting after each
+**Three modes, one setting.** `MEMORY_PAGE_SORTING` is `off`, `report` or `on`, and defaults to `on`. The sorter reads the stored setting after each
 save (the turn's summary context carries the settings store), so a change in Settings counts from the next save.
 `off` calls no model. `report` calls the model and checks the answer exactly as `on` does, but writes no page
 and no line in `.handled-notes`. It adds one JSON line to `.sorter-report.jsonl` in the vault folder: the note
@@ -667,7 +667,7 @@ adds nothing, so the note stays unsorted and recall keeps showing it from the lo
 ## The nightly job
 
 `nightlyService.ts` starts a timer with the server (Markdown backend) that looks at the server's clock every ten
-minutes. Each look first reads the stored tidy-up setting (`MEMORY_NIGHTLY_JOB` is only its default, off), the stored
+minutes. Each look first reads the stored tidy-up setting (`MEMORY_NIGHTLY_JOB` is only its default, on), the stored
 hour (`memory_nightly_job_hour`, 0 to 23, midnight when unset) and the stored sorting setting, so a change in Settings
 counts without a restart. From that hour and for up to three hours, never past the end of the day (server time),
 `runNightlyJob` goes through the

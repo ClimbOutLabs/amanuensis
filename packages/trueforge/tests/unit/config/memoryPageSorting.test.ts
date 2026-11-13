@@ -20,12 +20,12 @@ describe('MEMORY_PAGE_SORTING', () => {
     return (await import('../../../src/config')).default.MEMORY_PAGE_SORTING;
   }
 
-  it('defaults to off', async () => {
-    expect(await load(undefined)).toBe('off');
+  it('defaults to on', async () => {
+    expect(await load(undefined)).toBe('on');
   });
 
-  it('turns on with the environment value', async () => {
+  it('follows the environment value', async () => {
     expect(await load('report')).toBe('report');
-    expect(await load('on')).toBe('on');
+    expect(await load('off')).toBe('off');
   });
 });

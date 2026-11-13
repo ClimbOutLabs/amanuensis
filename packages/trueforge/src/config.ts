@@ -2056,7 +2056,7 @@ export interface SharedServerConfiguration {
    * `report` asks the model and only records what it would have done in the vault's `.sorter-report.jsonl`,
    * `on` writes the pages.
    * Settings can store an override that wins over this default, so a change needs no restart.
-   * Env: `MEMORY_PAGE_SORTING`. Default `off`.
+   * Env: `MEMORY_PAGE_SORTING`. Default `on`.
    */
   MEMORY_PAGE_SORTING: PageSortMode;
   /**
@@ -2064,7 +2064,7 @@ export interface SharedServerConfiguration {
    * lines to Earlier, sorts notes the sorter missed (as `MEMORY_PAGE_SORTING` allows) and lists lines that
    * disagree. It never edits a line's words.
    * Settings can store an override that wins over this default, so a change needs no restart.
-   * Env: `MEMORY_NIGHTLY_JOB`. Default `false`.
+   * Env: `MEMORY_NIGHTLY_JOB`. Default `true`.
    */
   MEMORY_NIGHTLY_JOB: boolean;
   /**
@@ -2888,12 +2888,12 @@ const shared: SharedServerConfiguration = {
   MEMORY_PAGE_SORTING: parsePageSortMode({
     envKey: 'MEMORY_PAGE_SORTING',
     raw: getEnv('MEMORY_PAGE_SORTING'),
-    defaultValue: 'off',
+    defaultValue: 'on',
   }),
   MEMORY_NIGHTLY_JOB: parseBoolean({
     envKey: 'MEMORY_NIGHTLY_JOB',
     raw: getEnv('MEMORY_NIGHTLY_JOB'),
-    defaultValue: false,
+    defaultValue: true,
   }),
   NEBIUS_API_KEY: getEnv('NEBIUS_API_KEY'),
   SEARCH_PROVIDER: parseSearchProviderChoice({ envKey: 'SEARCH_PROVIDER', raw: getEnv('SEARCH_PROVIDER') }),

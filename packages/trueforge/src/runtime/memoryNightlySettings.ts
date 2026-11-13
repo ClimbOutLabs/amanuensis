@@ -36,7 +36,7 @@ export interface ReadMemoryNightlySettingDeps {
 
 /**
  * The nightly-job setting, read each time the timer looks at the clock so a change in Settings applies
- * without a restart. A failed read falls back to the env default rather than switching the job on.
+ * without a restart. A failed read falls back to the env default.
  */
 export async function readMemoryNightlySetting(deps: ReadMemoryNightlySettingDeps): Promise<MemoryNightlySetting> {
   const defaultEnabled = configuration.MEMORY_NIGHTLY_JOB;

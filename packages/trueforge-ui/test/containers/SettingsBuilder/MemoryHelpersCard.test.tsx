@@ -125,7 +125,7 @@ describe('MemoryHelpersCard', () => {
     expect(screen.getByText(/files any saved notes that were not filed yet/)).toBeInTheDocument();
     expect(screen.getByText(/points out two facts that cannot both be true/)).toBeInTheDocument();
     expect(screen.getByText('It never deletes anything.')).toBeInTheDocument();
-    expect(screen.getByText(/Both are off until you turn them on/)).toBeInTheDocument();
+    expect(screen.getByText(/Both are on unless you turn them off/)).toBeInTheDocument();
   });
 
   it('saves the chosen sorting mode', async () => {

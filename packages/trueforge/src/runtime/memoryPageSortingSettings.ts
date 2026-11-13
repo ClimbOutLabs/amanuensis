@@ -24,7 +24,7 @@ export interface ReadMemoryPageSortingSettingDeps {
 
 /**
  * The page-sorting setting, read each time the sorter is about to work so a change in Settings applies
- * without a restart. A failed read falls back to the env default rather than switching the model on.
+ * without a restart. A failed read falls back to the env default.
  */
 export async function readMemoryPageSortingSetting(
   deps: ReadMemoryPageSortingSettingDeps,

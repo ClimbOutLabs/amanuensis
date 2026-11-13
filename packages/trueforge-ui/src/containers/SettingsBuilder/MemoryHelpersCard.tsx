@@ -275,7 +275,7 @@ function NightlyControl() {
   );
 }
 
-/** Settings > Memory: the two helpers that work on pages while nobody is chatting. Both start off. */
+/** Settings > Memory: the two helpers that work on pages while nobody is chatting. Both start on. */
 export function MemoryHelpersCard() {
   const sorting = useMemoryPageSortingSetting();
   const nightly = useMemoryNightlySetting();
@@ -287,8 +287,8 @@ export function MemoryHelpersCard() {
         Sorting and tidying
       </h4>
       <p className="mt-1 text-sm text-text-secondary">
-        Two optional helpers that keep your pages in order. Both are off until you turn them on. They work in the
-        background and use your model.
+        Two helpers that keep your pages in order. Both are on unless you turn them off. They work in the background
+        and use your model.
       </p>
       <div className="mt-4 border-t border-border pt-4">
         <PageSortingControl />
