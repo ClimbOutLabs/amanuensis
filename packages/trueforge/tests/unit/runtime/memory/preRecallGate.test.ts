@@ -140,6 +140,22 @@ describe('classifyPreRecallGate', () => {
     ).toBe('trivial_acknowledgement');
   });
 
+  it("recalls on an acknowledgement that answers the assistant's question", () => {
+    const asked: ContextMessage[] = [
+      userMessage('My sister has a birthday soon.'),
+      { role: 'assistant', content: 'Shall I draft a note to her?' },
+    ];
+    expect(classifyPreRecallGate([...asked, userMessage('ok')])).toBeUndefined();
+    expect(classifyPreRecallGate([...asked, userMessage('hi')])).toBe('trivial_greeting');
+    expect(
+      classifyPreRecallGate([
+        userMessage('What is the capital of Spain?'),
+        { role: 'assistant', content: 'Madrid.' },
+        userMessage('thanks'),
+      ]),
+    ).toBe('trivial_acknowledgement');
+  });
+
   it('recalls when there is no user message', () => {
     expect(classifyPreRecallGate([])).toBeUndefined();
     expect(classifyPreRecallGate([{ role: 'assistant', content: 'hello' }])).toBeUndefined();

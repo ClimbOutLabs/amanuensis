@@ -1074,8 +1074,8 @@ const TRIVIAL_GREETING_PATTERN =
 const TRIVIAL_ACKNOWLEDGEMENT_PATTERN =
   /^(thanks?|thank\s?you|thx|ok|okay|k|got\s?it|understood|cool|nice|great|awesome|perfect)[!.,\s]*$/;
 
-/** Newest non-internal user message text, or undefined when the turn carries none. */
-function lastUserText(context: readonly ContextMessage[]): string | undefined {
+/** Newest non-internal user message and where it sits, or undefined when the turn carries none. */
+function lastUserMessage(context: readonly ContextMessage[]): { text: string; index: number } | undefined {
   for (let i = context.length - 1; i >= 0; i -= 1) {
     const message = context[i];
     if (!message || !hasRole(message) || message.role !== 'user') {
@@ -1085,24 +1085,44 @@ function lastUserText(context: readonly ContextMessage[]): string | undefined {
     if (!trimmed) {
       continue;
     }
-    return trimmed;
+    return { text: trimmed, index: i };
   }
   return undefined;
+}
+
+/**
+ * Whether the assistant's last reply before `index` asked something. A bare "ok" after a question
+ * is a go-ahead for real work, so it is not trivial.
+ */
+function answersAssistantQuestion({ context, index }: { context: readonly ContextMessage[]; index: number }): boolean {
+  for (let i = index - 1; i >= 0; i -= 1) {
+    const message = context[i];
+    if (!message || !hasRole(message) || message.role !== 'assistant') {
+      continue;
+    }
+    const text = formatAssistantContent(message.content).trim();
+    if (!text) {
+      continue;
+    }
+    return text.includes('?');
+  }
+  return false;
 }
 
 /**
  * Conservative pre-recall gate: returns a skip reason only for high-confidence trivial turns —
  * short greetings and bare acknowledgements that cannot need long-term memory. Everything else
  * returns undefined so the turn recalls normally: questions, history references, longer messages,
- * and anything the patterns do not recognize. Deterministic and local; a model call here would
+ * an acknowledgement that answers the assistant's question, and anything the patterns do not
+ * recognize. Deterministic and local; a model call here would
  * cost the latency the gate exists to save.
  */
 export function classifyPreRecallGate(context: readonly ContextMessage[]): PreRecallGateSkipReason | undefined {
-  const text = lastUserText(context);
-  if (text === undefined) {
+  const newest = lastUserMessage(context);
+  if (newest === undefined) {
     return undefined;
   }
-  const normalized = text.toLowerCase();
+  const normalized = newest.text.toLowerCase();
   if (normalized.length > PRE_RECALL_GATE_MAX_CHARS) {
     return undefined;
   }
@@ -1116,7 +1136,7 @@ export function classifyPreRecallGate(context: readonly ContextMessage[]): PreRe
     return 'trivial_greeting';
   }
   if (TRIVIAL_ACKNOWLEDGEMENT_PATTERN.test(normalized)) {
-    return 'trivial_acknowledgement';
+    return answersAssistantQuestion({ context, index: newest.index }) ? undefined : 'trivial_acknowledgement';
   }
   return undefined;
 }

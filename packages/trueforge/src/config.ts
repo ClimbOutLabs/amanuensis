@@ -2113,8 +2113,9 @@ export interface SharedServerConfiguration {
   SCREEN_CLASSIFY_CACHE_MAX_ENTRIES: number;
   /**
    * Whether the pre-recall gate may skip the memory provider reads on high-confidence trivial
-   * turns (short greetings, bare acknowledgements). Off by default; a bank can override it in
-   * Settings > Memory. Env: `MEMORY_PRERECALL_GATE_ENABLED`. Default false.
+   * turns (short greetings, bare acknowledgements). On by default, so "hi" or "thanks" does not
+   * add recalled memories to the request; a bank can override it in Settings > Memory.
+   * Env: `MEMORY_PRERECALL_GATE_ENABLED`. Default true.
    */
   MEMORY_PRERECALL_GATE_ENABLED: boolean;
   /**
@@ -3013,7 +3014,7 @@ const shared: SharedServerConfiguration = {
   MEMORY_PRERECALL_GATE_ENABLED: parseBoolean({
     envKey: 'MEMORY_PRERECALL_GATE_ENABLED',
     raw: getEnv('MEMORY_PRERECALL_GATE_ENABLED'),
-    defaultValue: false,
+    defaultValue: true,
   }),
   MEMORY_CURATED_ENABLED: parseBoolean({
     envKey: 'MEMORY_CURATED_ENABLED',
