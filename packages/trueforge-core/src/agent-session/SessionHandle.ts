@@ -3,6 +3,10 @@
  */
 import type { Logger } from 'winston';
 import { stripLegacyHostContextMessages } from '../core/capabilities/builtins/RepositoryBindingContext';
+import {
+  DEFAULT_CONTEXT_COMPACTION_RATIO,
+  SAVED_AGENT_CONTEXT_COMPACTION_RATIO,
+} from '../core/capabilities/builtins/tokenBudgetConstants';
 import type { ActionRequiredEvent, ApprovalDecision, UserToolApprovalMessage } from '../core/events/schema';
 import { newEventId } from '../core/events/schema';
 import type { RegisteredCommandExecution } from '../core/llm/LLMTypes';
@@ -1083,6 +1087,13 @@ export class SessionHandle<
     return map;
   }
 
+  /** A saved agent summarizes earlier than an everyday chat, which runs an inline spec. */
+  private compactionContextRatio(): number {
+    return this.session.agent.type === 'reference'
+      ? SAVED_AGENT_CONTEXT_COMPACTION_RATIO
+      : DEFAULT_CONTEXT_COMPACTION_RATIO;
+  }
+
   private buildThread(input: {
     threadId: string;
     previousThreadSnapshot?: AgentThreadSnapshot | undefined;
@@ -1114,6 +1125,7 @@ export class SessionHandle<
       logger: input.logger,
       compactionContext: input.resolver.compactionContext,
       compactionThresholdTokensDefault: input.resolver.compactionThresholdTokensDefault,
+      compactionContextRatio: this.compactionContextRatio(),
       boundRepository: input.resolver.boundRepository,
       withheldTools: input.withheldTools,
       extraCapabilities,
@@ -1225,6 +1237,7 @@ export class SessionHandle<
         logger: input.logger,
         compactionContext: input.resolver.compactionContext,
         compactionThresholdTokensDefault: input.resolver.compactionThresholdTokensDefault,
+        compactionContextRatio: this.compactionContextRatio(),
         boundRepository: input.resolver.boundRepository,
         extraCapabilities,
       });

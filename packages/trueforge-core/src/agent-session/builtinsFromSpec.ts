@@ -45,6 +45,8 @@ export interface BuiltinsFromSpecInput {
    * the threshold to contextCompaction, which derives it from the model's context length.
    */
   compactionThresholdTokensDefault?: number | undefined;
+  /** Share of the model's context length that Automatic summarizes at; undefined uses the everyday-chat share. */
+  compactionContextRatio?: number | undefined;
   boundRepository?: BoundRepository | undefined;
   /** Built-in tool names this run does not offer. */
   withheldTools?: readonly string[] | undefined;
@@ -62,6 +64,7 @@ export function builtinsFromSpec(input: BuiltinsFromSpecInput): AgentCapability[
     logger,
     compactionContext,
     compactionThresholdTokensDefault,
+    compactionContextRatio,
     boundRepository,
     withheldTools,
   } = input;
@@ -97,6 +100,7 @@ export function builtinsFromSpec(input: BuiltinsFromSpecInput): AgentCapability[
         // host's instance-wide value, which itself falls through to the context-length ratio.
         compactionThresholdTokens:
           config.context_management.compaction.trigger?.value ?? compactionThresholdTokensDefault,
+        compactionContextRatio,
         checklist: compactionContext,
         checklistState,
         boundRepository,

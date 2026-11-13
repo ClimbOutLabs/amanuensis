@@ -598,10 +598,10 @@ describe('AgentConfigEditors', () => {
       fireEvent.change(screen.getByRole('combobox', { name: 'When to summarize long chats' }), {
         target: { value: 'set_size' },
       });
-      // 80% of the 128,000-token limit, in whole thousands.
+      // 60% of the 128,000-token limit, in whole thousands.
       expect(onChange.mock.lastCall?.[0].config.contextManagement.compaction).toEqual({
         enabled: true,
-        trigger: { type: 'input_tokens', value: 102_000 },
+        trigger: { type: 'input_tokens', value: 76_000 },
       });
     });
 

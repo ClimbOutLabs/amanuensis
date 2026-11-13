@@ -4,6 +4,7 @@ import {
   COMPACTION_TOUCHED_PATHS_STATE_KEY,
   CONVERSATION_REQUIRED_SUMMARY_SECTIONS,
 } from '../../src/core/capabilities/builtins/ContextCompaction';
+import { SAVED_AGENT_CONTEXT_COMPACTION_RATIO } from '../../src/core/capabilities/builtins/tokenBudgetConstants';
 import { EventType } from '../../src/core/events/schema';
 import type { ContextMessage } from '../../src/core/runtime/AgentThread.types';
 import { NOOP_AGENT_TRACING } from '../../src/core/tracing/NoopAgentTracing';
@@ -21,6 +22,7 @@ async function compacts(input: {
   hostDefault: number | undefined;
   contextTokens: number;
   specTrigger?: number;
+  contextRatio?: number;
 }): Promise<boolean> {
   const spec = AgentSpecSchema.parse({
     model: { name: 'provider/model' },
@@ -53,6 +55,7 @@ async function compacts(input: {
     tracing: NOOP_AGENT_TRACING,
     logger: makeSilentLogger(),
     compactionThresholdTokensDefault: input.hostDefault,
+    compactionContextRatio: input.contextRatio,
   });
   const processor = capabilities.find(capability => capability.state?.key === COMPACTION_TOUCHED_PATHS_STATE_KEY)
     ?.preLLMProcessors?.[0];
@@ -91,6 +94,17 @@ describe('compaction threshold wiring', () => {
   it('keeps the fixed 50k threshold when the model context length is unknown', async () => {
     expect(await compacts({ contextLength: undefined, hostDefault: undefined, contextTokens: 40_000 })).toBe(false);
     expect(await compacts({ contextLength: undefined, hostDefault: undefined, contextTokens: 55_000 })).toBe(true);
+  });
+
+  it('compacts a saved agent at 60% of the model context length', async () => {
+    const saved = {
+      contextLength: 100_000,
+      hostDefault: undefined,
+      contextRatio: SAVED_AGENT_CONTEXT_COMPACTION_RATIO,
+    };
+    expect(await compacts({ ...saved, contextTokens: 55_000 })).toBe(false);
+    expect(await compacts({ ...saved, contextTokens: 65_000 })).toBe(true);
+    expect(await compacts({ contextLength: 100_000, hostDefault: undefined, contextTokens: 65_000 })).toBe(false);
   });
 
   it('lets an explicit host value override the ratio on both a large and a small model', async () => {

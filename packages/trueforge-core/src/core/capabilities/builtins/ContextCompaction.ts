@@ -122,12 +122,16 @@ export function resolveCompactionThresholdTokens(input: {
   configuredThresholdTokens: number | undefined;
   modelContextLength: number | undefined;
   modelParams: AgentDefinition['modelParams'];
+  /** Share of the context length to summarize at; everyday chats use the default. */
+  contextRatio: number | undefined;
 }): number {
   if (input.configuredThresholdTokens !== undefined) {
     return input.configuredThresholdTokens;
   }
   if (input.modelContextLength !== undefined) {
-    const ratioThreshold = Math.floor(input.modelContextLength * DEFAULT_CONTEXT_COMPACTION_RATIO);
+    const ratioThreshold = Math.floor(
+      input.modelContextLength * (input.contextRatio ?? DEFAULT_CONTEXT_COMPACTION_RATIO),
+    );
     const maxOutputTokens = resolveMaxOutputTokens(input.modelParams);
     if (maxOutputTokens !== undefined) {
       const inputBudget = Math.floor(input.modelContextLength - maxOutputTokens - TOKEN_BUDGET_SAFETY_MARGIN);
@@ -1722,6 +1726,7 @@ export function contextCompaction(options: {
    */
   compactionModel?: CompactionModel | undefined;
   compactionThresholdTokens?: number | undefined;
+  compactionContextRatio?: number | undefined;
   checklist?: TaskChecklistAccess | undefined;
   checklistState?: TaskChecklistRequestState | undefined;
   boundRepository?: BoundRepository | undefined;
@@ -1731,6 +1736,7 @@ export function contextCompaction(options: {
     configuredThresholdTokens: options.compactionThresholdTokens,
     modelContextLength: options.definition.modelProperties?.contextLength,
     modelParams: options.definition.modelParams,
+    contextRatio: options.compactionContextRatio,
   });
   const processor = new ContextCompaction({
     modelClient: options.compactionModel?.modelClient ?? options.definition.modelClient,

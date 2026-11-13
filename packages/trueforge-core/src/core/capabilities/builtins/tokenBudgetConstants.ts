@@ -13,3 +13,6 @@ export const DEFAULT_CONTEXT_COMPACTION_THRESHOLD_TOKENS = 50 * 1000;
 
 /** Share of the model's context length a chat may fill before it is summarized. */
 export const DEFAULT_CONTEXT_COMPACTION_RATIO = 0.8;
+
+/** The same share for a saved agent: lower, so a long unattended run keeps more room for its own work. */
+export const SAVED_AGENT_CONTEXT_COMPACTION_RATIO = 0.6;
