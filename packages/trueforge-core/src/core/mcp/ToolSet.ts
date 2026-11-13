@@ -582,7 +582,8 @@ export class ToolSet implements IToolSet {
 
   /**
    * The event a CalDAV change names, read once before it is classified so the card can say what it
-   * changes. Null when that read fails, and the card then says the title could not be read.
+   * changes. Null when that read fails, and the change is then refused instead of carded, because a
+   * card cannot name an event it could not read.
    */
   private async caldavEventFor(params: CallToolRequest['params']): Promise<CaldavEventReview | null | undefined> {
     if (!this.firstParty || this.name !== CALDAV_SERVER_NAME) {

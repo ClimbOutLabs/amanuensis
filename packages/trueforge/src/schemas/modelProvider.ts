@@ -132,7 +132,10 @@ export type ModelProviderStreamTimeout = z.infer<typeof ModelProviderStreamTimeo
 
 const ModelProviderManifestBaseSchema = z
   .object({
-    auth: ModelProviderAuthSchema,
+    // A stored manifest may carry no key: an imported provider setup waits
+    // for its key, and a local endpoint may need none. The settings API
+    // still requires a key when a provider that needs one is first set up.
+    auth: ModelProviderAuthSchema.optional(),
     models: z.array(ConfiguredModelSchema).min(1).describe('Models exposed by this provider (at least one).'),
     stream_timeout: ModelProviderStreamTimeoutSchema.optional(),
   })
@@ -143,7 +146,22 @@ const ModelProviderManifestBaseSchema = z
  * one of each because the `(tenant_id, name)` primary key replaces the row rather than adding a
  * sibling. `base_url` defaults to the adapter's endpoint and stays overridable.
  */
-function wellKnownProviderSchema<Type extends Exclude<ModelProviderType, 'custom' | 'truefoundry'>>({
+export type WellKnownModelProviderType = Exclude<ModelProviderType, 'custom' | 'truefoundry'>;
+
+/** The API address each well-known provider uses unless the person overrides it. */
+export const WELL_KNOWN_PROVIDER_BASE_URLS: Readonly<Record<WellKnownModelProviderType, string>> = {
+  openai: 'https://api.openai.com/v1',
+  anthropic: 'https://api.anthropic.com/v1',
+  'google-gemini': 'https://generativelanguage.googleapis.com/v1beta',
+  fireworks: 'https://api.fireworks.ai/inference/v1',
+  zai: 'https://api.z.ai/api/paas/v4',
+  moonshot: 'https://api.moonshot.ai/v1',
+  together: 'https://api.together.xyz/v1',
+  alibaba: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
+  tokenfactory: TOKEN_FACTORY_DEFAULT_BASE_URL,
+};
+
+function wellKnownProviderSchema<Type extends WellKnownModelProviderType>({
   type,
   base_url,
 }: {
@@ -158,47 +176,47 @@ function wellKnownProviderSchema<Type extends Exclude<ModelProviderType, 'custom
 
 const OpenAiModelProviderSchema = wellKnownProviderSchema({
   type: 'openai',
-  base_url: 'https://api.openai.com/v1',
+  base_url: WELL_KNOWN_PROVIDER_BASE_URLS.openai,
 }).openapi('OpenAIModelProvider');
 
 const AnthropicModelProviderSchema = wellKnownProviderSchema({
   type: 'anthropic',
-  base_url: 'https://api.anthropic.com/v1',
+  base_url: WELL_KNOWN_PROVIDER_BASE_URLS.anthropic,
 }).openapi('AnthropicModelProvider');
 
 const GoogleGeminiModelProviderSchema = wellKnownProviderSchema({
   type: 'google-gemini',
-  base_url: 'https://generativelanguage.googleapis.com/v1beta',
+  base_url: WELL_KNOWN_PROVIDER_BASE_URLS['google-gemini'],
 }).openapi('GoogleGeminiModelProvider');
 
 const FireworksModelProviderSchema = wellKnownProviderSchema({
   type: 'fireworks',
-  base_url: 'https://api.fireworks.ai/inference/v1',
+  base_url: WELL_KNOWN_PROVIDER_BASE_URLS.fireworks,
 }).openapi('FireworksModelProvider');
 
 const ZaiModelProviderSchema = wellKnownProviderSchema({
   type: 'zai',
-  base_url: 'https://api.z.ai/api/paas/v4',
+  base_url: WELL_KNOWN_PROVIDER_BASE_URLS.zai,
 }).openapi('ZaiModelProvider');
 
 const MoonshotModelProviderSchema = wellKnownProviderSchema({
   type: 'moonshot',
-  base_url: 'https://api.moonshot.ai/v1',
+  base_url: WELL_KNOWN_PROVIDER_BASE_URLS.moonshot,
 }).openapi('MoonshotModelProvider');
 
 const TogetherAIModelProviderSchema = wellKnownProviderSchema({
   type: 'together',
-  base_url: 'https://api.together.xyz/v1',
+  base_url: WELL_KNOWN_PROVIDER_BASE_URLS.together,
 }).openapi('TogetherAIModelProvider');
 
 const AlibabaModelProviderSchema = wellKnownProviderSchema({
   type: 'alibaba',
-  base_url: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
+  base_url: WELL_KNOWN_PROVIDER_BASE_URLS.alibaba,
 }).openapi('AlibabaModelProvider');
 
 const TokenFactoryModelProviderSchema = wellKnownProviderSchema({
   type: 'tokenfactory',
-  base_url: TOKEN_FACTORY_DEFAULT_BASE_URL,
+  base_url: WELL_KNOWN_PROVIDER_BASE_URLS.tokenfactory,
 }).openapi('TokenFactoryModelProvider');
 
 /**
@@ -209,7 +227,6 @@ const TokenFactoryModelProviderSchema = wellKnownProviderSchema({
 const TrueFoundryModelProviderSchema = ModelProviderManifestBaseSchema.extend({
   type: z.literal('truefoundry'),
   base_url: z.url().describe('Base URL of the TrueFoundry AI gateway the models are invoked against.'),
-  auth: ModelProviderAuthSchema.optional(),
 })
   .strict()
   .openapi('TrueFoundryModelProvider');
@@ -219,7 +236,6 @@ const CustomModelProviderSchema = ModelProviderManifestBaseSchema.extend({
   type: z.literal('custom'),
   name: NameSchema,
   base_url: z.url().describe("Base URL of the provider's API."),
-  auth: ModelProviderAuthSchema.optional(),
 })
   .strict()
   .openapi('CustomModelProvider');

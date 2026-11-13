@@ -193,6 +193,27 @@ describe('"Always allow in this chat" is offered only when the card names who or
   );
 
   it(
+    'a schedule made in a chat gets its own agent, named after it, only once the card is approved',
+    async () => {
+      const agentNames = async () =>
+        z
+          .object({ data: z.array(z.object({ name: z.string() }).loose()) })
+          .parse(JSON.parse(await savedNames({ server, path: '/api/v1/agents' })))
+          .data.map(agent => agent.name);
+      const chatId = await createChat(server);
+      const before = await agentNames();
+      const card = onlyCard(await runTurn({ server, chatId, input: ask('create_schedule') }));
+      expect(await agentNames()).toEqual(before);
+
+      await runTurn({ server, chatId, input: answer({ card, scope: 'once' }) });
+      const added = (await agentNames()).filter(name => !before.includes(name));
+      expect(added).toHaveLength(1);
+      expect(added[0]).toContain(SCRIPTED_SCHEDULE.name);
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
     'creating a persona takes no chat-wide answer',
     async () => {
       const chatId = await createChat(server);
@@ -344,6 +365,20 @@ describe('a page Aman opens in its browser', () => {
   let server: ApprovalTestServer;
   let browser: Server;
   const opened: string[] = [];
+  const clicked: string[] = [];
+  /** What the stand-in browser says each element on its page is, by ref. */
+  const ELEMENTS: Record<
+    string,
+    { accessible_name: string; role: string; is_form_submit: boolean; link_url: string | null }
+  > = {
+    order: { accessible_name: 'Place order', role: 'button', is_form_submit: true, link_url: null },
+    hours: {
+      accessible_name: 'Opening hours',
+      role: 'link',
+      is_form_submit: false,
+      link_url: 'https://shop.example/hours',
+    },
+  };
   const original = {
     BROWSER_ENABLED: configuration.BROWSER_ENABLED,
     BROWSER_URL: configuration.BROWSER_URL,
@@ -357,14 +392,24 @@ describe('a page Aman opens in its browser', () => {
       req.on('data', (chunk: Buffer) => chunks.push(chunk));
       req.on('end', () => {
         const body = z
-          .object({ url: z.string().optional() })
+          .object({ url: z.string().optional(), ref: z.string().optional() })
           .loose()
           .parse(JSON.parse(Buffer.concat(chunks).toString('utf8')));
         if (req.url === '/open' && body.url !== undefined) {
           opened.push(body.url);
         }
+        if (req.url === '/click' && body.ref !== undefined) {
+          clicked.push(body.ref);
+        }
+        const element = req.url === '/element-info' && body.ref !== undefined ? ELEMENTS[body.ref] : undefined;
         res.writeHead(200, { 'content-type': 'application/json' });
-        res.end(JSON.stringify({ status: 'ok', text: '# Account' }));
+        res.end(
+          JSON.stringify(
+            element === undefined
+              ? { status: 'ok', text: '# Account' }
+              : { status: 'ok', site: 'shop.example', form_values: {}, ...element },
+          ),
+        );
       });
     });
     await new Promise<void>(resolve => {
@@ -392,7 +437,14 @@ describe('a page Aman opens in its browser', () => {
 
   beforeEach(() => {
     opened.length = 0;
+    clicked.length = 0;
   });
+
+  /** Asks for one element on the open page to be clicked. */
+  async function click({ chatId, ref }: { chatId: string; ref: string }) {
+    server.model.next({ toolArguments: { ref } });
+    return runTurn({ server, chatId, input: ask('browser_click') });
+  }
 
   /** Asks for one page to be opened, without the address being in the person's own message. */
   async function open({ chatId, url }: { chatId: string; url: string }) {
@@ -457,6 +509,31 @@ describe('a page Aman opens in its browser', () => {
       const card = onlyCard(await runTurn({ server, chatId, input: askToOpen }));
       expect(card.tier3_card?.destination).toBe('https://sam@site.example/account');
       expect(opened).toHaveLength(2);
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
+    'asks before clicking a button that sends a form, and clicks it only once approved',
+    async () => {
+      const chatId = await createChat(server);
+      const card = onlyCard(await click({ chatId, ref: 'order' }));
+      expect(card.tier3_card?.plain_what).toBe('Click "Place order" on shop.example?');
+      expect(card).toMatchObject({ can_chat_allow: false, can_always_allow: false });
+      expect(clicked).toEqual([]);
+
+      await runTurn({ server, chatId, input: answer({ card, scope: 'once' }) });
+      expect(clicked).toEqual(['order']);
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
+    'follows a plain link to another page without a card',
+    async () => {
+      const chatId = await createChat(server);
+      expect(cards(await click({ chatId, ref: 'hours' }))).toEqual([]);
+      expect(clicked).toEqual(['hours']);
     },
     TURN_TIMEOUT_MS,
   );
