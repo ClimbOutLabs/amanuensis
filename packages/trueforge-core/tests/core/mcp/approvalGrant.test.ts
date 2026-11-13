@@ -1,6 +1,7 @@
 import type { Logger } from 'winston';
 import { RemoteMCP, ToolSet } from '../../../src/core';
 import type { ApprovalDecision } from '../../../src/core/events/schema';
+import { InternalToolCallInfoSchema } from '../../../src/core/llm/LLMTypes';
 import type { InternalEnrichedToolCall, InternalToolCallInfo } from '../../../src/core/llm/LLMTypes';
 import {
   allowsChatApproval,
@@ -254,13 +255,13 @@ describe('chat grant key', () => {
     expect(new Set([keyA, keyB, keyC]).size).toBe(3);
   });
 
-  it('bars durable scope when the tier has no reason, and keeps it for a plain read that names a recipient', () => {
+  it('bars durable scope when the tier has no reason, and when a reason is present without the flag', () => {
     const info: InternalToolCallInfo = { ...toolInfo('notes', 'list_events'), effect: 'inspect', tier: 3 };
     expect(allowsChatApproval(info)).toBe(false);
     expect(allowsToolGrant(info)).toBe(false);
     const read = { ...info, tier_reason: 'unrecognized_tool' };
-    expect(allowsChatApproval(read)).toBe(true);
-    expect(allowsToolGrant(read)).toBe(true);
+    expect(allowsChatApproval(read)).toBe(false);
+    expect(allowsToolGrant(read)).toBe(false);
   });
 
   it('changes the key when only the host or only the recipient changes', () => {
@@ -308,6 +309,49 @@ describe('chat grant key', () => {
       expect(effective.has('call')).toBe(false);
       expect(allowsChatApproval(info)).toBe(false);
     }
+  });
+});
+
+describe('a card saved before the grant policy was stamped on it', () => {
+  // The stored tool info exactly as a build from before the policy properties wrote it: a tier
+  // and a reason, and no standing_grant_barred key at all. It is read back through the schema
+  // stored tool calls are read with, so the shape under test is the persisted one, not a
+  // hand-built stand-in.
+  const savedJson = `{
+    "type": "mcp",
+    "mcp_server_id": "notes",
+    "mcp_server_name": "notes",
+    "original_tool_name": "list_events",
+    "is_approval_required": true,
+    "effect": "inspect",
+    "tier": 3,
+    "tier_reason": "unrecognized_tool"
+  }`;
+
+  it('reads back with a tier reason and no standing_grant_barred flag', () => {
+    const info = InternalToolCallInfoSchema.parse(JSON.parse(savedJson));
+    expect(info.tier_reason).toBe('unrecognized_tool');
+    expect(info.standing_grant_barred).toBeUndefined();
+  });
+
+  it('is refused a chat grant and a standing grant, and a stored chat grant admits nothing for it', () => {
+    const info = InternalToolCallInfoSchema.parse(JSON.parse(savedJson));
+    expect(allowsChatApproval(info)).toBe(false);
+    expect(allowsToolGrant(info)).toBe(false);
+    const admissions = effectiveToolAdmissions({
+      calls: [toolCall('saved', info)],
+      decisions: new Map(),
+      chatApprovalGrants: new Set([approvalGrantKey(info)]),
+      implementationPlanGrants: new Set(),
+    });
+    expect(admissions.get('saved')).toEqual({ decision: undefined, admission_provenance: { source: 'automatic' } });
+  });
+
+  it('trusts the flag on the same stored card once a current build has stamped it', () => {
+    const info = InternalToolCallInfoSchema.parse({ ...JSON.parse(savedJson), standing_grant_barred: false });
+    expect(info.standing_grant_barred).toBe(false);
+    expect(allowsChatApproval(info)).toBe(true);
+    expect(allowsToolGrant(info)).toBe(true);
   });
 });
 
@@ -924,6 +968,7 @@ describe('Drive writes to the person own files can take a durable grant', () => 
       is_approval_required: true,
       tier: 3,
       tier_reason: 'google_drive_write',
+      standing_grant_barred: false,
       own_drive_write: true,
     };
     expect(allowsChatApproval(info)).toBe(true);

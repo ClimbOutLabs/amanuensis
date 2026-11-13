@@ -124,7 +124,12 @@ function tierBarsDurableGrant(info: InternalToolCallInfo): boolean {
   if (info.standing_grant_barred !== undefined) {
     return info.standing_grant_barred;
   }
-  return info.tier_reason === undefined && info.tier === 3;
+  // A card saved before the flag existed carries a tier reason and no flag. It was never stamped
+  // with the grant policy, so it fails closed rather than falling through to a grant.
+  if (info.tier_reason !== undefined) {
+    return true;
+  }
+  return info.tier === 3;
 }
 
 /**
