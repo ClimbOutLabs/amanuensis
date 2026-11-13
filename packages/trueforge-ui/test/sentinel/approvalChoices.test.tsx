@@ -119,7 +119,7 @@ describe('grant hint wording', () => {
     );
   });
 
-  it('shows that hint as the Allow once title on a skill network card', () => {
+  it('shows that hint as the Allow title on a skill network card', () => {
     render(
       <HeldActionCard
         card={{
@@ -133,7 +133,7 @@ describe('grant hint wording', () => {
         onDeny={vi.fn()}
       />,
     );
-    expect(screen.getByRole('button', { name: 'Allow once' })).toHaveAttribute(
+    expect(screen.getByRole('button', { name: 'Allow' })).toHaveAttribute(
       'title',
       'Allow these sites for this chat only. The command runs again with them, unless it needs an approval of its own.',
     );

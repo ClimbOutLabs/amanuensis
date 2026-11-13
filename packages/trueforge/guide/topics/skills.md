@@ -76,7 +76,7 @@ Some skills need to reach certain websites. After you enable one, Aman lists the
 
 The first time a skill that names sites runs in a chat, a card asks if it may reach those sites. Nothing is reached until you answer.
 
-- **Allow once** lets the skill reach those sites in this chat only.
+- **Allow** lets the skill reach those sites in this chat only.
 - **Always allow for this skill** lets it reach them in every chat.
 - **Deny** turns them down. Aman does not ask about them again for that skill.
 
