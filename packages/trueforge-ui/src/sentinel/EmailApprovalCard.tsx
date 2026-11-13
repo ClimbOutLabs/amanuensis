@@ -30,8 +30,23 @@ export type EmailApprovalCardProps = {
   onSaveDraft?: (() => void) | undefined;
 };
 
-function mailboxListText(mailboxes: readonly SentinelApprovalMailbox[]): string {
+export function mailboxListText(mailboxes: readonly SentinelApprovalMailbox[]): string {
   return mailboxes.map(mailbox => mailboxText(mailbox, { escape: text => text })).join(', ');
+}
+
+/**
+ * The short code a send card shows and its receipt repeats, so a person can see the message that went is the one
+ * they approved. It sits in the card's field list.
+ */
+export function CheckCodeRow({ code }: { code: string }) {
+  return (
+    <>
+      <dt className="text-text-secondary">Check code</dt>
+      <dd data-role="check-code" className="font-mono font-semibold text-text-primary">
+        {code}
+      </dd>
+    </>
+  );
 }
 
 /** Lines of a message shown before it folds: nine lines at 1.5rem each. */
@@ -41,7 +56,7 @@ const COLLAPSED_HEIGHT_CLASS = 'max-h-[13.5rem] overflow-hidden';
  * The message as the recipient sees it. Line breaks are kept, fenced code reads in mono, and a long
  * message folds to about nine lines. The word count is the whole message, not the visible part.
  */
-function EmailBody({ body }: { body: string }) {
+export function EmailBody({ body }: { body: string }) {
   const [expanded, setExpanded] = useState(false);
   const [clipped, setClipped] = useState(false);
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -116,13 +131,15 @@ export const EmailApprovalCard: FC<EmailApprovalCardProps> = ({
   onSaveDraft,
 }) => {
   const [changing, setChanging] = useState(false);
-  const [sentAt, setSentAt] = useState<string | null>(null);
+  // When the person answered. A send says "Sending" until the server's receipt replaces this card, because
+  // only the send gate knows whether the message went out.
+  const [answeredAt, setAnsweredAt] = useState<string | null>(null);
   const email: SentinelApprovalEmail | null = card.email;
   if (email === null) return null;
 
   const sending = email.action === 'send';
   const sendNow = () => {
-    setSentAt(approvalTime(new Date()));
+    setAnsweredAt(approvalTime(new Date()));
     onApprove();
   };
   // A send reaches other people and cannot be unsent, so the server marks its card safe-first:
@@ -141,7 +158,7 @@ export const EmailApprovalCard: FC<EmailApprovalCardProps> = ({
         <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-gold-ink" />
         <h3 className="aui-approval-card__title min-w-0 flex-1 text-text-primary">{cardHeadline(card)}</h3>
         <span className="shrink-0 text-text-secondary">Gmail</span>
-        {sentAt === null && <span className="shrink-0 text-text-secondary">{WAITING_FOR_YOU_LABEL}</span>}
+        {answeredAt === null && <span className="shrink-0 text-text-secondary">{WAITING_FOR_YOU_LABEL}</span>}
       </header>
 
       <div className="border-t border-border px-4 py-3">
@@ -177,6 +194,7 @@ export const EmailApprovalCard: FC<EmailApprovalCardProps> = ({
           )}
           <dt className="text-text-secondary">Subject</dt>
           <dd className="break-words text-text-primary">{email.subject === '' ? 'No subject' : email.subject}</dd>
+          {email.check_code !== null && <CheckCodeRow code={email.check_code} />}
         </dl>
         {email.name_left_off === true && (
           <p className="mt-2 text-text-primary">The name was left off an address because it looked like an address.</p>
@@ -218,7 +236,7 @@ export const EmailApprovalCard: FC<EmailApprovalCardProps> = ({
       )}
 
       <div className="aui-approval-card__choices sticky bottom-0 flex flex-wrap items-center gap-2 border-t border-border bg-card-bg px-4 py-3">
-        {sentAt === null ? (
+        {answeredAt === null ? (
           <>
             {safeFirst && (
               <Button
@@ -287,8 +305,8 @@ export const EmailApprovalCard: FC<EmailApprovalCardProps> = ({
             )}
           </>
         ) : (
-          <p className="text-text-secondary">
-            {sending ? 'Sent' : 'Saved'} · {sentAt}
+          <p role="status" className="text-text-secondary">
+            {sending ? 'Sending…' : `Saved · ${answeredAt}`}
           </p>
         )}
       </div>

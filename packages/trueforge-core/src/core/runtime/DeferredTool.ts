@@ -4,6 +4,7 @@ import type { Logger } from 'winston';
 import { z } from 'zod';
 import { type ConnectorAvailability, connectorUnavailableLine } from '../connectors/connectorAvailability';
 import { isMailConnectorGuess, MAIL_CONNECTOR_NAME } from '../email/mailConnector/toolContract';
+import type { RegisteredPassthroughEvent } from '../events/PassthroughEvents';
 import type { ApprovalDecision } from '../events/schema';
 import { InstructionBuilder } from '../InstructionBuilder';
 import type { InternalToolCallInfo } from '../llm/LLMTypes';
@@ -255,6 +256,27 @@ export class DeferredTool extends LocalToolMCP {
     }
     const server = this.resolveServer(parsed.data.mcp_server);
     return server?.liveMintParams?.({ name: parsed.data.tool_name, arguments: parsed.data.input });
+  }
+
+  /** What the wrapped connector reports for a `call_tool` call stopped at dispatch, as for a direct call to it. */
+  refusedAtDispatchEvents(input: {
+    params: CallToolRequest['params'];
+    tool_call_id: string;
+  }): readonly RegisteredPassthroughEvent[] {
+    if (input.params.name !== CALL_TOOL_NAME) {
+      return [];
+    }
+    const parsed = callToolSchema.safeParse(input.params.arguments);
+    if (!parsed.success || ALIASABLE_META_TOOL_NAMES.has(parsed.data.tool_name)) {
+      return [];
+    }
+    const server = this.resolveServer(parsed.data.mcp_server);
+    return (
+      server?.refusedAtDispatchEvents?.({
+        params: { name: parsed.data.tool_name, arguments: parsed.data.input },
+        tool_call_id: input.tool_call_id,
+      }) ?? []
+    );
   }
 
   /** What an "Always allow" grant for the tool a `call_tool` wrapper names binds to, as its own tool set reports it. */

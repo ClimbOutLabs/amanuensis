@@ -254,6 +254,7 @@ describe('model provider export and import round trip', () => {
         getProviderForUpdate: () => trueFoundryManaged(),
         createProvider: () => trueFoundryManaged(),
         upsertProvider: () => trueFoundryManaged(),
+        recordProviderCheck: () => trueFoundryManaged(),
         deleteProvider: () => trueFoundryManaged(),
         listModels: (input, tx) => sqlite.listModels(input, tx),
       };

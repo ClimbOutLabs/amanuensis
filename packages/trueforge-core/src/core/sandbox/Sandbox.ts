@@ -133,6 +133,7 @@ import {
   packageDownloadCardWhatWithoutProject,
   packageDownloadSitesText,
   packageDownloadsOffNote,
+  PYTHON_PROJECT_ENVIRONMENT_RULE,
 } from './packageMirrors';
 import {
   ensureExecSuccess,
@@ -1533,7 +1534,7 @@ function runCodeEnvironmentSentences({
   if (offline) {
     // The package gateway is separate from the sandbox network, so an offline sandbox can still download.
     const packages = packageDownloads
-      ? `Packages can be downloaded for this chat: if one is missing, install it from ${packageDownloadSitesText()}, then run again.`
+      ? `Packages can be downloaded for this chat from ${packageDownloadSitesText()}, into the workspace only. run_code runs only the code it is given, in an empty folder, and cannot see the workspace or what is installed there, so code that needs a downloaded package runs through the project's own tests. ${PYTHON_PROJECT_ENVIRONMENT_RULE}`
       : `Packages cannot be downloaded here, so if one is missing, ${PACKAGE_UNAVAILABLE_RULE}`;
     return `Preinstalled: Python with pandas, numpy, matplotlib, openpyxl, pdfplumber, pypdf, Pillow, python-docx, reportlab, requests, pyyaml, httpx and beautifulsoup4; Node with tsx and typescript. This sandbox has no internet access. Never use it to fetch web content. ${packages}`;
   }

@@ -1,3 +1,4 @@
+import type { ApiServiceDeclaration } from '@truefoundry/trueforge-core/core/connectors/apiServices';
 import {
   SkillManifestSchema,
   effectiveSkillNetworkHosts,
@@ -151,5 +152,35 @@ describe('skillNetworkHostsCanSend', () => {
   it('is false for read-shaped sites like the ten-x example', () => {
     expect(skillNetworkHostsCanSend(TEN_X_HOSTS)).toBe(false);
     expect(skillNetworkHostsCanSend([])).toBe(false);
+  });
+
+  /**
+   * Invented services that exist nowhere else in the codebase. The warning has to follow the
+   * service's own declaration, so a service Aman has never heard of is judged by what it
+   * declares, never by its name appearing on a list.
+   */
+  const INVENTED_SEND_SERVICE: ApiServiceDeclaration = {
+    service: 'Parchment Post',
+    hosts: ['api.parchment-post.example'],
+    can_send: true,
+  };
+  const INVENTED_READ_SERVICE: ApiServiceDeclaration = {
+    service: 'Ledger Look',
+    hosts: ['api.ledger-look.example'],
+    can_send: false,
+  };
+
+  it('is true for an invented service that declares it can send', () => {
+    expect(skillNetworkHostsCanSend(['api.parchment-post.example'], [INVENTED_SEND_SERVICE])).toBe(true);
+  });
+
+  it('is false for an invented service that declares it cannot send', () => {
+    expect(skillNetworkHostsCanSend(['api.ledger-look.example'], [INVENTED_READ_SERVICE])).toBe(false);
+  });
+
+  it('is false for a site no service declares', () => {
+    expect(skillNetworkHostsCanSend(['undeclared.example'], [INVENTED_SEND_SERVICE, INVENTED_READ_SERVICE])).toBe(
+      false,
+    );
   });
 });

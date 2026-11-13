@@ -326,6 +326,8 @@ describe('recordSkillNetworkAnswer', () => {
     });
     const grant = await resolveSkillNetworkGrant({ store, registry, ...CALL, skillNames: ['ten-x'] });
     expect(grant?.hosts).toEqual(['api.github.com', 'github.com']);
+    const nextCommand = await resolveSkillNetworkGrant({ store, registry, ...CALL, skillNames: ['ten-x'] });
+    expect(nextCommand?.hosts).toEqual(['api.github.com', 'github.com']);
     await expect(
       resolveSkillNetworkGrant({ store, registry, ...CALL, session_id: 'another-chat', skillNames: ['ten-x'] }),
     ).resolves.toBeUndefined();
