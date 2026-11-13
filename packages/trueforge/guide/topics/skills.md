@@ -31,7 +31,11 @@ How to get there: Click **More** in the left bar, then **Settings**, then **Skil
 2. Click **Add-ons**, then the **Skills** tab. The list opens just above the message box. If you have many skills, type in **Search skills** to find one.
 3. Select the skill.
 
-When a skill is on for a chat, Aman reads its instructions when the job comes up.
+When a skill is on for a chat, Aman reads its instructions when the job comes up. Reading them doesn't ask you.
+
+Some skills come with their own scripts. Aman runs them in the sandbox, from the skill's folder. A skill's own script runs without asking, because you installed the skill. It asks first when the sandbox can reach the internet, or when Aman edited one of the skill's files in that chat.
+
+A skill script that needs a website or an extra package can't get it on its own. When that happens, Aman tells you instead of trying workarounds.
 
 ## Add your own skill from GitHub
 

@@ -21,6 +21,7 @@ import {
   ensureExecSuccess,
   executeVerifiedWorkspaceCommit,
   shellEscape,
+  withArgvAsCommandLine,
   withTrustedPath,
   workspaceTerminationCommand,
   type ExecResult,
@@ -121,7 +122,7 @@ export class TFYSandboxProvider implements SandboxProvider {
    */
   async exec(params: SandboxExecParams): Promise<ExecResult> {
     throwIfSignalAborted(params.signal);
-    const lockedParams = commandWithWorkspaceLock(params);
+    const lockedParams = commandWithWorkspaceLock(withArgvAsCommandLine(params));
     validateSandboxOwnedByTenant({ sandboxId: lockedParams.sandboxId, tenantName: this.tenantName });
     const { root, inheritedPath } = await this.sandboxLayout({
       sandboxId: lockedParams.sandboxId,

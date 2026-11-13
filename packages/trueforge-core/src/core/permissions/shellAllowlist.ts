@@ -220,9 +220,14 @@ export function hashArgv(argv: readonly string[]): string {
   return createHash('sha256').update(JSON.stringify(argv)).digest('hex');
 }
 
+/**
+ * Whether a token is plain enough to be a path operand of a read. A full path (`/workspace/notes.md`) passes here
+ * like a relative one: this check only reads the spelling. Whether the path lands inside the workspace is decided
+ * by the classifier, which resolves every operand against the workspace root before a read runs without a card.
+ */
 function isWorkspaceRelativeOperand(token: string): boolean {
   // Glob and brace characters are expanded by a shell; the executor passes argv literally, so they ask instead.
-  if (token === '' || token.startsWith('/') || token.startsWith('~') || /[*?[\]{}]/u.test(token)) {
+  if (token === '' || token === '/' || token.startsWith('~') || /[*?[\]{}]/u.test(token)) {
     return false;
   }
   const segments = token.split('/');

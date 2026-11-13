@@ -201,7 +201,7 @@ export class SlotSandboxProvider implements SandboxProvider {
     const cwd = params.cwd === undefined ? WORKSPACE_DIR : posix.resolve(WORKSPACE_DIR, params.cwd);
     const request = {
       session_id: target.sessionId,
-      argv: ['bash', '-c', params.command],
+      argv: params.argv === undefined ? ['bash', '-c', params.command] : [...params.argv],
       cwd,
       env: params.env ?? {},
       timeout_ms: Math.max(SLOT_MIN_AGENT_TIMEOUT_MS, timeoutMs - SLOT_AGENT_TIMEOUT_MARGIN_MS),
