@@ -83,8 +83,8 @@ describe('buildHelpHealthCheck state', () => {
         { name: 'notion', connected: false, last_error: 'It needs you to sign in to it again.' },
         { name: 'Email', connected: false, last_error: 'It did not answer.' },
         { name: 'Calendar', connected: false, last_error: 'Its saved settings could not be read.' },
+        { name: 'Google', connected: false, last_error: 'It needs you to sign in to it again.' },
       ],
-      google_login: 'needs_reconnect',
       sandbox_ready: false,
       app_version: '1.4.0',
       build_ref: null,
@@ -112,6 +112,7 @@ describe('buildHelpHealthCheck', () => {
       status: 'fail',
       message: 'No model is connected.',
       next_step: null,
+      settings_section: 'models',
     });
     expect(check.model_ready).toBe(false);
   });
@@ -159,6 +160,7 @@ describe('buildHelpHealthCheck', () => {
       status: 'fail',
       message: 'These connectors did not answer: notion.',
       next_step: 'Open Settings, Connectors and check each one.',
+      settings_section: 'connectors',
     });
   });
 
@@ -176,6 +178,7 @@ describe('buildHelpHealthCheck', () => {
       status: 'warn',
       message: 'The sandbox is not ready.',
       next_step: 'Check Settings, Sandbox.',
+      settings_section: 'sandbox',
     });
   });
 
@@ -189,6 +192,13 @@ describe('buildHelpHealthCheck', () => {
       status: 'not_set_up',
       message: 'Email and calendar are not set up yet.',
     });
+  });
+
+  it('sends a person with no mail or calendar to the Connectors page, not to one card', () => {
+    const next = item(build(), 'mail_calendar')?.next_step ?? '';
+
+    expect(next).toContain('Settings, Connectors');
+    expect(next).not.toContain('Google');
   });
 
   it('reports mail and calendar OK when a configured mail or calendar connector answers', () => {
@@ -213,8 +223,37 @@ describe('buildHelpHealthCheck', () => {
   it('asks for a new sign-in when the Google login needs connecting again', () => {
     expect(item(build({ google: 'needs_reconnect' }), 'mail_calendar')).toMatchObject({
       status: 'fail',
-      message: 'Google needs to be connected again.',
+      message: 'Your Google login needs you to sign in again.',
     });
+  });
+
+  it('lists the Google login among the connectors the guide reads, and only once a login exists', () => {
+    expect(JSON.stringify(build().state)).not.toContain('Google');
+    expect(build({ google: 'answered' }).state.connectors).toContainEqual({
+      name: 'Google',
+      connected: true,
+      last_error: null,
+    });
+    expect(build({ google: 'no_answer' }).state.connectors).toContainEqual({
+      name: 'Google',
+      connected: false,
+      last_error: 'It did not answer.',
+    });
+  });
+
+  it('names the Settings section for every line whose next step is done there', () => {
+    const check = build({ model: { kind: 'no_answer' }, sandboxReady: false, scheduler: 'stopped' });
+
+    expect(item(check, 'mail_calendar')?.settings_section).toBe('connectors');
+    expect(item(check, 'schedules')?.settings_section).toBeNull();
+    expect(item(check, 'host_ports')?.settings_section).toBeNull();
+  });
+
+  it('points a person whose mail or calendar did not answer at their own cards, not at Google', () => {
+    const next = item(build({ google: 'no_answer' }), 'mail_calendar')?.next_step ?? '';
+
+    expect(next).toContain('Settings, Connectors');
+    expect(next).not.toContain('Google');
   });
 
   it('shows the model test answering as OK in the first item', () => {
