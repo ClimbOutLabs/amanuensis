@@ -187,13 +187,17 @@ For current or external facts, require adequate source contents supplied by the 
  * cannot reliably reason about relative to its own (self-unknowable) training
  * cutoff. Deliberately narrow: false negatives leave the model to its own
  * judgment (unchanged behavior); false positives cost one extra model step.
+ * A message about the person's own things ("my 2026 budget", "what am I
+ * currently reading") is not about the outside world, so it never counts.
  */
 const FRESHNESS_QUESTION_PATTERN =
   /\b(latest|newest|most recent|up[- ]to[- ]date|right now|as of (today|now)|currently)\b|\b(does|is|are|has|have)\b[^.?!\n]{0,60}\b(exist|exists|existed|been released|released yet|come out|out yet|available yet)\b|\b20\d{2}\b/i;
 
+const OWN_THINGS_PATTERN = /\b(i|i'm|i've|me|my|mine|we|we're|we've|us|our|ours)\b/i;
+
 /** See {@link FRESHNESS_QUESTION_PATTERN}. */
 export function isFreshnessQuestion(text: string): boolean {
-  return FRESHNESS_QUESTION_PATTERN.test(text);
+  return FRESHNESS_QUESTION_PATTERN.test(text) && !OWN_THINGS_PATTERN.test(text);
 }
 
 /** A tool counts as retrieval-capable when its name names one of these capabilities. */

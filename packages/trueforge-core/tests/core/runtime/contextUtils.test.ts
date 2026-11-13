@@ -39,6 +39,21 @@ describe('isFreshnessQuestion', () => {
   );
 });
 
+describe("isFreshnessQuestion on the person's own things", () => {
+  it.each([
+    'What did we plan for the 2026 trip?',
+    'What am I currently reading?',
+    'Show me my latest note about the garden.',
+    'Summarise our 2025 budget.',
+  ])('does not flag %p, which is about the person and not the outside world', text => {
+    expect(isFreshnessQuestion(text)).toBe(false);
+  });
+
+  it('still flags a year in a question about the outside world', () => {
+    expect(isFreshnessQuestion('Who won the 2026 World Cup?')).toBe(true);
+  });
+});
+
 describe('isRetrievalToolName / hasRetrievalTool', () => {
   it.each(['web_search', 'search_docs', 'fetch_url', 'browse_page', 'lookup_ticket'])(
     'treats %p as retrieval-capable',

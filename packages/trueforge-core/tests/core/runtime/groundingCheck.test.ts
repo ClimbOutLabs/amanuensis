@@ -156,4 +156,21 @@ describe('grounding check on a final answer to a freshness question', () => {
 
     expect(create).toHaveBeenCalledTimes(1);
   });
+
+  it("asks the model once when a year is about the person's own plans", async () => {
+    const toolSet = makeSearchToolSet();
+    const create = jest.fn(() => finalStream('You planned a week in Lisbon.'));
+    const modelClient: ILLM = { create, createNonStream: jest.fn() };
+    const thread = makeThread({
+      modelClient,
+      toolSets: [toolSet],
+      userText: 'What did we plan for the 2026 trip?',
+    });
+
+    for await (const _event of thread.execute({ signal: new AbortController().signal })) {
+      // drain
+    }
+
+    expect(create).toHaveBeenCalledTimes(1);
+  });
 });
