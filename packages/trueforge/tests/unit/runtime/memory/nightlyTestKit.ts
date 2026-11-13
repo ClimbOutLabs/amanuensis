@@ -155,6 +155,7 @@ export function fakeSummarize(answer: (prompt: string) => unknown): SummarizeTur
     upsertProvider: jest.fn(),
     listModels: jest.fn(),
     deleteProvider: jest.fn(),
+    recordProviderCheck: jest.fn(),
     managedElsewhere: false,
   };
   const llm: ILLM = {

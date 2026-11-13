@@ -65,6 +65,7 @@ describe('the nightly timer', () => {
           Promise.resolve(listed.map(name => ({ name, model_id: name, provider: { name: 'test' }, properties: {} }))),
         ),
         deleteProvider: jest.fn(),
+        recordProviderCheck: jest.fn(),
         managedElsewhere: false,
       },
       globalSettingsStore: settings,

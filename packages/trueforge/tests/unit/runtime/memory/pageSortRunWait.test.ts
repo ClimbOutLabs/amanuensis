@@ -40,6 +40,7 @@ const modelProviderStore: IModelProviderStore = {
   upsertProvider: jest.fn(),
   listModels: jest.fn(),
   deleteProvider: jest.fn(),
+  recordProviderCheck: jest.fn(),
   managedElsewhere: false,
 };
 
