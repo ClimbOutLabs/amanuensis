@@ -102,12 +102,12 @@ export class SlotsReporter {
     }
   }
 
-  /** Shows the question for the disk step before it is asked. */
+  /** Shows what the disk step's question is about, under the separator that says an answer is needed. */
   explain(question: string): void {
     this.step?.stop();
     this.step = undefined;
     this.stageHadOutput = true;
-    this.options.ui.line(question);
+    this.options.ui.askLine(question);
   }
 
   /** Prints the closing block (or the failure) and says whether the run succeeded. */
