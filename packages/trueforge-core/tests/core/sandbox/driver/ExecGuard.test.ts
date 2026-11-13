@@ -7,7 +7,6 @@ import {
 function makeHost(overrides?: Partial<ExecGuardHost>): ExecGuardHost {
   return {
     resolveExecutable: () => undefined,
-    readShebang: () => undefined,
     ...overrides,
   };
 }
@@ -25,8 +24,6 @@ describe('classifyExecCommand', () => {
       ["node -e'console.log(1)'", '-e glued to its argument'],
       ['python3 - <<EOF\nprint(1)\nEOF', 'heredoc stdin'],
       ["python3 - <<'EOF'\nprint(1)\nEOF", 'quoted heredoc'],
-      ['python3 script.py', 'script file operand'],
-      ['python script.py --flag', 'script file with flags'],
       ['python3 -m', '-m without a module name'],
       ["python3 -m 'not a module'", '-m with something that is not a module name'],
       ['python3 -m pdb x.py', '-m pdb runs a script'],
@@ -68,22 +65,23 @@ describe('classifyExecCommand', () => {
       ['echo $(python3 -c "x")', 'command substitution whose inner command runs code'],
       ['echo hi | python3 -', 'stdin pipe'],
       ['python3', 'bare interpreter'],
-      ['node server.js', 'node script file'],
-      ['./analyze.py', 'direct script with python shebang'],
       ['sh -c \'python3 -c "x"\'', 'sh -c wrapper'],
       ['bash -lc "python3 --version; node -e 1"', 'bash -lc wrapper, second segment'],
       ['env FOO=1 python3 -c x', 'env wrapper'],
-      ['FOO=1 BAR=2 python3 script.py', 'env-prefix assignments'],
       ['FOO=1 sh -c "python3 -c x"', 'env prefix before sh wrapper'],
       ['git status; python3 -c "x"', 'second pipeline segment'],
       ['git status && node -e "x"', '&& segment'],
+      ['python3 main.py; python3 -c "x"', 'inline code after a script run'],
+      ['python3 main.py <<EOF\nx\nEOF', 'a script run fed by a heredoc'],
+      ['python3 - main.py', 'code from stdin with a file name after it'],
+      ['python3 -W ignore -c "x"', 'inline code after an option that takes a value'],
+      ['python3 -X dev -c "x"', 'inline code after -X and its value'],
+      ['node -r ./hook.js -e "x"', 'inline code after a preloaded module'],
+      ['node --require ./hook.js --eval "x"', 'inline code after --require and its value'],
     ];
     for (const [command, label] of cases) {
       it(`rejects: ${label}`, () => {
-        const host = makeHost({
-          readShebang: path => (path === './analyze.py' ? '#!/usr/bin/env python3' : undefined),
-        });
-        expect(verdictOf(command, host)).toBe('reject');
+        expect(verdictOf(command)).toBe('reject');
       });
     }
   });
@@ -118,6 +116,16 @@ describe('classifyExecCommand', () => {
       ['python3 -m venv --system-site-packages .venv', '-m venv with the system site-packages'],
       ['.venv/bin/python -m pip install mcp ytmusicapi', "the project environment's pip"],
       ['.venv/bin/python -m pytest -q', "the project environment's pytest"],
+      // A program that is a file in the workspace is run like any other project command.
+      ['python3 main.py', 'a python script file'],
+      ['python script.py --flag', 'a script file with its own flags'],
+      ['python3 -u src/app.py -c config.toml', "a -c after the script is the script's own argument"],
+      ['.venv/bin/python manage.py migrate', "the project environment's python"],
+      ['node server.js', 'a node script file'],
+      ['node --enable-source-maps dist/index.js', 'node options before the script'],
+      ['FOO=1 BAR=2 python3 script.py', 'env-prefix assignments before a script run'],
+      ['./analyze.py', 'a script run by its path'],
+      ['cd app && node index.js', 'a script run after cd'],
     ];
     for (const [command, label] of cases) {
       it(`allows: ${label}`, () => {
@@ -130,14 +138,6 @@ describe('classifyExecCommand', () => {
     const host = makeHost({ resolveExecutable: name => (name === 'py' ? '/usr/bin/python3' : undefined) });
     expect(verdictOf('py -c "x"', host)).toBe('reject');
     expect(verdictOf('py --version', host)).toBe('allow');
-  });
-
-  it('checks shebangs of directly-executed scripts', () => {
-    const host = makeHost({
-      readShebang: path => (path === '/repo/tool.py' ? '#!/usr/bin/env python3 -u' : '#!/bin/bash'),
-    });
-    expect(verdictOf('/repo/tool.py', host)).toBe('reject');
-    expect(verdictOf('/repo/deploy.sh', host)).toBe('allow');
   });
 
   it('does not reject versioned interpreter names used with flags only', () => {

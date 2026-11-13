@@ -1,28 +1,22 @@
 /**
- * Harness-level guard for the exec tool path (§2.10, D5/B1).
+ * Harness-level guard for the exec tool path.
  *
- * exec's contract narrows to repository/workspace operations (git, build,
- * test, file inspection). Interpreter invocations — the classic
- * model-heroics drift (`python3 - <<'EOF'`, `write_file` + `exec("python3
- * analysis.py")`) — are rejected with an invalid_input-style error pointing
- * at `run_code`.
+ * exec is for repository and workspace commands: git, build, test, file inspection, and running a
+ * program that is a file in the workspace (`python3 main.py`, `node server.js`). Code that is not a
+ * file (`python3 -c`, a heredoc, code piped in, a bare interpreter) is rejected with an error
+ * pointing at `run_code`, which is where one-off code belongs.
  *
- * Classification is by RESOLVED EXECUTABLE + OPERAND SHAPE, not just
- * syntactic forms: argv[0] is resolved through PATH, `sh -c`/`bash -c`/`env`
- * wrappers are unwrapped, and scripts executed by path get their shebang
- * checked. Host access (PATH lookup, shebang reads) is injected so the pure
- * classifier is unit-testable.
+ * Classification is by RESOLVED EXECUTABLE + OPERAND SHAPE, not just syntactic forms: argv[0] is
+ * resolved through PATH and `sh -c`/`bash -c`/`env` wrappers are unwrapped. PATH lookup is injected
+ * so the pure classifier is unit-testable.
  *
- * This guard prevents accidental/heroic drift, not a malicious model: exec is
- * a trusted-operator tool (explicit threat model in §2.10); prompt-injection
- * via repo content is handled by the existing tool-output screening policy.
+ * This guard prevents accidental drift, not a malicious model: whether a command needs approval is
+ * decided by the permission rules, which see every script run.
  */
 
 export interface ExecGuardHost {
   /** Resolve a bare command name through PATH; undefined when not found. */
   resolveExecutable: (name: string) => string | undefined;
-  /** First `#!` line of a file, without the `#!`; undefined when absent/unreadable. */
-  readShebang: (path: string) => string | undefined;
 }
 
 export type ExecGuardVerdict = { verdict: 'allow' } | { verdict: 'reject'; reason: string };
@@ -97,6 +91,31 @@ function pythonModuleInvocation(operands: readonly string[]): { optionCount: num
     return { optionCount, valid: moduleName !== undefined && PYTHON_BUILD_AND_TEST_MODULES.has(moduleName) };
   }
   return undefined;
+}
+
+/** Interpreter options that take no value of their own, so the word after them is the script. */
+const PYTHON_PLAIN_OPTIONS: ReadonlySet<string> = new Set(['-u', '-B', '-E', '-I', '-O', '-OO', '-s', '-S', '-q']);
+const NODE_PLAIN_OPTIONS: ReadonlySet<string> = new Set([
+  '--enable-source-maps',
+  '--experimental-strip-types',
+  '--no-warnings',
+  '--trace-warnings',
+]);
+
+/**
+ * The operands that belong to the interpreter and not to the script it runs: the options before the
+ * script file. What follows the script is the script's own, so a `-c` there is not inline code. This
+ * is only trusted when every option before the script is known to take no value; with any other
+ * option the script cannot be told from that option's value, so every operand is checked.
+ */
+function interpreterOwnOperands(input: { base: string; operands: readonly string[] }): readonly string[] {
+  const plain = input.base.startsWith('python') ? PYTHON_PLAIN_OPTIONS : NODE_PLAIN_OPTIONS;
+  const script = input.operands.findIndex(op => !op.startsWith('-'));
+  if (script === -1) {
+    return input.operands;
+  }
+  const options = input.operands.slice(0, script);
+  return options.every(op => plain.has(op)) ? options : input.operands;
 }
 
 function basenameOf(path: string): string {
@@ -288,26 +307,6 @@ function unwrapSegmentCommand(argv: string[]): string | undefined {
   return undefined;
 }
 
-function shebangInterpreter(shebang: string): string | undefined {
-  // "#!/usr/bin/env python3 -u" → "python3"; "#!/bin/sh" → "sh".
-  const parts = shebang
-    .trim()
-    .split(/\s+/)
-    .filter(part => part !== '');
-  const first = parts[0];
-  if (first === undefined) {
-    return undefined;
-  }
-  if (basenameOf(first) === 'env' && parts.length > 1) {
-    const second = parts[1];
-    if (second === undefined) {
-      return undefined;
-    }
-    return second.startsWith('-') && parts.length > 2 ? parts[2] : second;
-  }
-  return first;
-}
-
 function classifySegment(input: { argv: string[]; hasHeredoc: boolean; host: ExecGuardHost }): ExecGuardVerdict {
   // Leading `VAR=value` assignments (`FOO=1 python3 -c …`) are shell env
   // prefixes, not the command — strip them before classification.
@@ -354,7 +353,7 @@ function classifySegment(input: { argv: string[]; hasHeredoc: boolean; host: Exe
     if (operands.length === 0) {
       return {
         verdict: 'reject',
-        reason: `exec must not run ${base}: use the run_code tool for python/node code instead`,
+        reason: `exec must not start ${base} with no script file: name the file to run, or use the run_code tool for code that is not a file`,
       };
     }
     // Code flags match ANYWHERE in short clusters (`-uc`, `-pe`, `-lne`
@@ -364,7 +363,10 @@ function classifySegment(input: { argv: string[]; hasHeredoc: boolean; host: Exe
     const codeFlag = codeFlagPattern(base);
     const isNode = base === 'node' || base === 'nodejs';
     const pythonModule = base.startsWith('python') ? pythonModuleInvocation(operands) : undefined;
-    const optionOperands = pythonModule === undefined ? operands : operands.slice(0, pythonModule.optionCount);
+    const optionOperands =
+      pythonModule === undefined
+        ? interpreterOwnOperands({ base, operands })
+        : operands.slice(0, pythonModule.optionCount);
     const runsCode = optionOperands.some(
       op => codeFlag?.test(op) === true || (isNode && /^--(eval|print)(=|$)/.test(op)),
     );
@@ -397,28 +399,9 @@ function classifySegment(input: { argv: string[]; hasHeredoc: boolean; host: Exe
         reason: `exec must not pipe code into ${base} via stdin: use the run_code tool instead`,
       };
     }
-    if (operands.some(op => !op.startsWith('-'))) {
-      return {
-        verdict: 'reject',
-        reason: `exec must not run ${base} on a script file: use the run_code tool instead`,
-      };
-    }
-    // Flags only (e.g. python3 --version, node --help): not code execution.
+    // A script file, or flags only (python3 --version, node --help): a program in the workspace is
+    // run like any other project command, and the permission rules decide whether it needs a card.
     return { verdict: 'allow' };
-  }
-
-  // Not a data interpreter by name: check the shebang of directly-executed scripts.
-  if (invoked.includes('/')) {
-    const shebang = input.host.readShebang(invoked);
-    if (shebang !== undefined) {
-      const interpreter = shebangInterpreter(shebang);
-      if (interpreter !== undefined && isDataInterpreterBasename(basenameOf(interpreter))) {
-        return {
-          verdict: 'reject',
-          reason: `exec must not execute scripts with a ${basenameOf(interpreter)} shebang: use the run_code tool instead`,
-        };
-      }
-    }
   }
   return { verdict: 'allow' };
 }
@@ -446,8 +429,8 @@ export function classifyExecCommand(input: { command: string; host: ExecGuardHos
 export function interpreterInvocationRefusal(reason: string): string {
   return (
     `Invalid exec input: ${reason}. ` +
-    `exec is for repository and workspace commands (git, build, test, file inspection) — ` +
-    `it must not run python/node code. Use the run_code tool instead. ` +
+    `exec runs repository and workspace commands (git, build, test, file inspection) and programs that are files in the workspace, ` +
+    `such as python3 main.py or node server.js. Code that is not a file goes to the run_code tool. ` +
     `python3 -m pytest, -m pip, -m venv and -m unittest are allowed. ` +
     `Do not work around this by renaming the interpreter or wrapping the invocation.`
   );
