@@ -116,7 +116,10 @@ describe('reminder lines', () => {
 
 describe('the day tile', () => {
   it('shows the day in the reminder time zone, not the day in UTC', () => {
-    expect(reminderDayTile('2026-11-05T03:00:00.000Z', 'America/Los_Angeles')).toEqual({ month: 'Nov', day: '4' });
+    expect(reminderDayTile({ iso: '2026-11-05T03:00:00.000Z', timezone: 'America/Los_Angeles' })).toEqual({
+      month: 'Nov',
+      day: '4',
+    });
   });
 
   it('is about the next time for an upcoming reminder and the last time for a past one', () => {

@@ -26,7 +26,7 @@ const PILL_CLASS = 'inline-flex shrink-0 items-center rounded-full px-2 py-0.5 t
 
 /** The square at the start of a row: the day it is about, or a mark for a reminder with no day queued. */
 function DayTile({ item, moment }: { item: ReminderItem; moment: string | null }) {
-  const tile = moment === null ? null : reminderDayTile(moment, item.timezone);
+  const tile = moment === null ? null : reminderDayTile({ iso: moment, timezone: item.timezone });
   return (
     <span
       aria-hidden

@@ -112,7 +112,13 @@ export function reminderMoment(item: ReminderItem): string | null {
 }
 
 /** The month and day a row's tile shows, read in the reminder's own time zone. Null for a time that cannot be read. */
-export function reminderDayTile(iso: string, timezone: string): { month: string; day: string } | null {
+export function reminderDayTile({
+  iso,
+  timezone,
+}: {
+  iso: string;
+  timezone: string;
+}): { month: string; day: string } | null {
   const parts = formatIn({ iso, timezone, options: { month: 'short', day: 'numeric' } });
   const month = partOf(parts, 'month');
   const day = partOf(parts, 'day');
@@ -120,7 +126,7 @@ export function reminderDayTile(iso: string, timezone: string): { month: string;
 }
 
 /** Days since a fixed day for the calendar date an instant falls on in a time zone. */
-function calendarDay(iso: string, timezone: string): number {
+function calendarDay({ iso, timezone }: { iso: string; timezone: string }): number {
   const parts = formatIn({ iso, timezone, options: { year: 'numeric', month: 'numeric', day: 'numeric' } });
   const utc = Date.UTC(Number(partOf(parts, 'year')), Number(partOf(parts, 'month')) - 1, Number(partOf(parts, 'day')));
   return Math.round(utc / 86_400_000);
@@ -150,7 +156,7 @@ export function reminderRelativeWords({ iso, timezone, now }: { iso: string; tim
   } else if (size < DAY_MS) {
     words = relative.format(sign * Math.round(size / HOUR_MS), 'hour');
   } else {
-    const days = calendarDay(iso, timezone) - calendarDay(now.toISOString(), timezone);
+    const days = calendarDay({ iso, timezone }) - calendarDay({ iso: now.toISOString(), timezone });
     const count = Math.abs(days);
     if (count < 14) {
       words = relative.format(days, 'day');
