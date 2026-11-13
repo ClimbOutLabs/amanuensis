@@ -180,7 +180,11 @@ func (s *Server) exec(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, ErrInternal, "the session tree could not be prepared")
 		return
 	}
-	env := guestEnv(req.PackageMirrorToken)
+	env := append(guestEnv(req.PackageMirrorToken, execHome), "npm_config_cache="+execNpmCache)
+	// Keeps the cache out of a project that sits at the top of the workspace. Best effort: npm works without it.
+	if _, err := tree.Read(root, tree.GuestRoot+"/"+npmCacheIgnore); errors.Is(err, os.ErrNotExist) {
+		_ = tree.Write(root, tree.GuestRoot+"/"+npmCacheIgnore, []byte("*\n"), 0o644)
+	}
 	for name, value := range req.Env {
 		env = append(env, name+"="+value)
 	}

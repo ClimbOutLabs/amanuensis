@@ -9,7 +9,8 @@ import {
   SandboxPathIsDirectoryError,
 } from '../SandboxErrors';
 import type { CodeModeTransport } from '../codeMode/CodeModeTransport';
-import { PACKAGE_UNAVAILABLE_RULE } from '../packageMirrors';
+import { GIT_PROCESS_PINS } from '../hostAuthenticatedGit';
+import { PACKAGE_UNAVAILABLE_RULE, PYTHON_PROJECT_ENVIRONMENT_RULE } from '../packageMirrors';
 import {
   executeVerifiedWorkspaceCommit,
   type ExecResult,
@@ -126,6 +127,15 @@ function describeAgentError(error: SlotCallError): string {
 }
 
 /**
+ * A host-built git command pins its home, PATH and prompts. A guest already has a fixed, empty home and
+ * PATH, reads no per-user or system git settings and has no terminal, and its agent refuses those names.
+ * Only the exact pins are left out; any other value for those names still reaches the agent and is refused.
+ */
+function withoutGuestPinnedEnv(env: Readonly<Record<string, string>>): Record<string, string> {
+  return Object.fromEntries(Object.entries(env).filter(([name, value]) => GIT_PROCESS_PINS[name] !== value));
+}
+
+/**
  * Shell and file tools on sandbox slots. A sandbox is a workspace tree pinned to one slot; every command
  * runs in a fresh gVisor guest that mounts that tree at /workspace. Background processes end with the call.
  */
@@ -203,7 +213,7 @@ export class SlotSandboxProvider implements SandboxProvider {
       session_id: target.sessionId,
       argv: params.argv === undefined ? ['bash', '-c', params.command] : [...params.argv],
       cwd,
-      env: params.env ?? {},
+      env: withoutGuestPinnedEnv(params.env ?? {}),
       timeout_ms: Math.max(SLOT_MIN_AGENT_TIMEOUT_MS, timeoutMs - SLOT_AGENT_TIMEOUT_MARGIN_MS),
       disk_mb: this.treeDiskMb,
       ...(params.packageMirrorToken === undefined ? {} : { package_mirror_token: params.packageMirrorToken }),
@@ -304,8 +314,10 @@ export class SlotSandboxProvider implements SandboxProvider {
       'SANDBOX RULES:',
       '- Every command starts in a fresh, offline sandbox. Files under /workspace persist between commands; processes do not, so a background process ends when its command returns.',
       '- Python 3, Node.js with TypeScript, bash, git and gcc/g++/make are installed.',
-      '- No general network from code or the shell, by design. The one exception is package downloads: when the person has allowed downloads for the repo this chat is working on, pip, npm, Go and Cargo can fetch packages from the public package sites. Packages that come from a git address cannot be fetched. When downloads are not allowed for the repo, packages cannot be downloaded; ' +
+      '- No general network from code or the shell, by design. The one exception is package downloads: when the person has allowed downloads for this chat (per repository, or one switch for chats without a project), pip, npm, Go and Cargo can fetch packages from the public package sites. Packages that come from a git address cannot be fetched. When downloads are not allowed, packages cannot be downloaded; ' +
         PACKAGE_UNAVAILABLE_RULE,
+      `- ${PYTHON_PROJECT_ENVIRONMENT_RULE}`,
+      "- run_code runs only the code it is given, in an empty folder: it cannot see /workspace or anything installed there. Check a project's files with exec and its code with its tests, not with run_code.",
     ].join('\n');
   }
 
@@ -534,7 +546,9 @@ export class SlotSandboxProvider implements SandboxProvider {
         return {
           success: false,
           error: withTail(
-            `The command timed out after ${String(Math.round(input.timeoutMs / 1000))}s and was stopped.`,
+            `The command timed out after ${String(Math.round(input.timeoutMs / 1000))}s and was stopped.${
+              input.timeoutMs < MAX_TIMEOUT_MS ? ' If it needs longer, run it again with a larger timeout_seconds.' : ''
+            }`,
           ),
         };
       case 'oom':
