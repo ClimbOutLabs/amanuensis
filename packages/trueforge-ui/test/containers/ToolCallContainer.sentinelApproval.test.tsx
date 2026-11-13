@@ -331,6 +331,22 @@ describe('ToolCallContainer Sentinel approvals', () => {
       renderPending([{ id: 'a', tier: 3, options: declaredChat }]);
       expect(screen.getByRole('button', { name: 'Always allow in this chat' })).toBeInTheDocument();
     });
+
+    // Each button in the row sends its own answer, whatever order the row shows them in.
+    it.each([
+      { button: 'Allow', approved: true, optionId: 'allow-once' },
+      { button: 'Always allow in this chat', approved: true, optionId: 'allow-chat' },
+      { button: 'Not now', approved: false, optionId: 'deny' },
+    ])('$button sends approved=$approved with option $optionId', ({ button, approved, optionId }) => {
+      const { onRespondToToolApproval } = renderPending([
+        { id: 'a', tier: 3, options: declaredChat, chatAllowOffered: true, alwaysAllowOffered: true },
+      ]);
+      fireEvent.click(screen.getByRole('button', { name: button }));
+      const sent = [...onRespondToToolApproval.mock.calls, ...respondToApproval.mock.calls].map(
+        ([response]) => response,
+      );
+      expect(sent).toEqual([expect.objectContaining({ approvalId: 'a', approved, optionId })]);
+    });
   });
 });
 
