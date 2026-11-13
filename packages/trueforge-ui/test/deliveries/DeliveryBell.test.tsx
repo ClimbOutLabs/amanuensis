@@ -40,7 +40,7 @@ describe('the bell', () => {
     ]);
     renderDevice(api);
 
-    expect(await screen.findByRole('button', { name: 'Notifications, 2 unread' })).toBeTruthy();
+    expect(await screen.findByRole('button', { name: 'For you, 2 unread' })).toBeTruthy();
     expect(screen.getByTestId('unread-chats').textContent).toBe('reminders-chat');
     expect(window.localStorage.length).toBe(0);
   });
@@ -64,7 +64,7 @@ describe('the bell', () => {
       await vi.advanceTimersByTimeAsync(POLL_MS);
     });
     expect(api.unreadCount).toHaveBeenCalledTimes(2);
-    expect(screen.getByRole('button', { name: 'Notifications, 1 unread' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'For you, 1 unread' })).toBeTruthy();
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(POLL_MS);
@@ -76,16 +76,16 @@ describe('the bell', () => {
   it('lists time, text, reason and a link, and marks an item seen on the server when it is opened', async () => {
     const { api, state } = fakeServer([item({ id: 'a', text: 'Call the dentist' })]);
     renderDevice(api);
-    fireEvent.click(await screen.findByRole('button', { name: /Notifications/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /For you/ }));
 
     const row = await screen.findByRole('button', { name: /Call the dentist/ });
-    expect(row.textContent).toContain('Why you got this: You asked to be reminded on Monday.');
+    expect(row.textContent).toContain('You asked to be reminded on Monday.');
     expect(within(row).getByText('Open chat')).toBeTruthy();
 
     fireEvent.click(row);
     await waitFor(() => expect(api.markSeen).toHaveBeenCalledWith(['a']));
     expect(state.items[0]?.seenAt).not.toBeNull();
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Notifications' })).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'For you' })).toBeTruthy());
     expect(screen.getByTestId('unread-chats').textContent).toBe('');
   });
 
@@ -97,14 +97,14 @@ describe('the bell', () => {
         <DeliveryBell />
       </DeliveriesProvider>,
     );
-    await within(laptop.container).findByRole('button', { name: 'Notifications, 1 unread' });
+    await within(laptop.container).findByRole('button', { name: 'For you, 1 unread' });
 
-    fireEvent.click(await within(phone.container).findByRole('button', { name: /Notifications/ }));
+    fireEvent.click(await within(phone.container).findByRole('button', { name: /For you/ }));
     fireEvent.click(await within(phone.container).findByRole('button', { name: /Mark all seen/ }));
     await waitFor(() => expect(api.markAllSeen).toHaveBeenCalled());
 
     // The laptop's next check reads the shared server state.
-    await waitFor(() => expect(within(laptop.container).getByRole('button', { name: 'Notifications' })).toBeTruthy(), {
+    await waitFor(() => expect(within(laptop.container).getByRole('button', { name: 'For you' })).toBeTruthy(), {
       timeout: 3_000,
     });
   });
@@ -113,19 +113,19 @@ describe('the bell', () => {
     const { api, state } = fakeServer([item({ id: 'a' })]);
     vi.mocked(api.unreadCount).mockResolvedValueOnce(150);
     renderDevice(api);
-    fireEvent.click(await screen.findByRole('button', { name: 'Notifications, 150 unread' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'For you, 150 unread' }));
     fireEvent.click(await screen.findByRole('button', { name: /Mark all seen/ }));
 
     await waitFor(() => expect(api.markAllSeen).toHaveBeenCalledTimes(1));
     expect(api.markSeen).not.toHaveBeenCalled();
     expect(state.items.every(row => row.seenAt !== null)).toBe(true);
-    expect(await screen.findByRole('button', { name: 'Notifications' })).toBeTruthy();
+    expect(await screen.findByRole('button', { name: 'For you' })).toBeTruthy();
   });
 
   it('shows the latest items each time the panel opens, even when the count did not change', async () => {
     const { api, state } = fakeServer([item({ id: 'a', text: 'First thing' })]);
     renderDevice(api);
-    const bell = await screen.findByRole('button', { name: 'Notifications, 1 unread' });
+    const bell = await screen.findByRole('button', { name: 'For you, 1 unread' });
 
     // One item was seen elsewhere and another arrived, so the count is still 1.
     state.items = [item({ id: 'b', text: 'Second thing' }), { ...item({ id: 'a', text: 'First thing' }), seenAt: 'x' }];
@@ -137,7 +137,7 @@ describe('the bell', () => {
   it('says what an empty feed means', async () => {
     const { api } = fakeServer([]);
     renderDevice(api);
-    fireEvent.click(await screen.findByRole('button', { name: 'Notifications' }));
-    expect(await screen.findByText('Nothing yet. Reminders and notes show up here.')).toBeTruthy();
+    fireEvent.click(await screen.findByRole('button', { name: 'For you' }));
+    expect(await screen.findByText('Nothing for you yet')).toBeTruthy();
   });
 });

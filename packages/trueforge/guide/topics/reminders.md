@@ -26,7 +26,7 @@ A reminder can also repeat every day, every weekday, or on the days you choose, 
 
 ## Use the bell
 
-1. Click the bell at the top of the left panel. On a phone, tap the menu button first. The **Notifications** panel opens.
+1. Click the bell at the top of the left panel. It is labelled **For you**. On a phone, tap the menu button first. The **For you** panel opens.
 2. Each item says what it is, when it came, and why you got it.
 3. An item that came from a chat ends with **Open chat**. Click the item to go to that chat.
 4. Click **Mark all seen** to clear the count.
