@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"aman/slotagent/src/lease"
 )
@@ -116,28 +117,119 @@ func TestUsageCountsAllocatedBlocksNotFileSize(t *testing.T) {
 	}
 }
 
+func writeSized(t *testing.T, path string, size int) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, make([]byte, size), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func exists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
 func TestReclaimRemovesTheLargestFilesUntilWithinTheLimit(t *testing.T) {
 	dir := t.TempDir()
+	since := time.Now()
 	for name, size := range map[string]int{"big": 400_000, "mid": 200_000, "small": 20_000} {
-		if err := os.WriteFile(filepath.Join(dir, name), make([]byte, size), 0o644); err != nil {
-			t.Fatal(err)
-		}
+		writeSized(t, filepath.Join(dir, name), size)
 	}
-	got := lease.Reclaim(dir, 250_000)
-	if got.Files != 1 || got.Bytes < 400_000 || len(got.Paths) != 1 || got.Paths[0] != "big" {
+	got := lease.Reclaim(dir, 250_000, since)
+	if got.Files != 1 || got.Bytes < 400_000 || len(got.Paths) != 1 || got.Paths[0] != "big" || got.Older {
 		t.Fatalf("removed %+v", got)
 	}
-	if notice := got.Notice(2048); !strings.Contains(notice, "2048 MB limit") || !strings.Contains(notice, "big") {
-		t.Fatalf("the notice must name the limit and the file: %q", notice)
+	notice := got.Notice(2048)
+	for _, want := range []string{"2048 MB limit", "big", "that this command wrote", "run the command again"} {
+		if !strings.Contains(notice, want) {
+			t.Fatalf("the notice must say %q: %q", want, notice)
+		}
 	}
-	if _, err := os.Stat(filepath.Join(dir, "big")); !os.IsNotExist(err) {
+	if exists(filepath.Join(dir, "big")) {
 		t.Fatal("the largest file should go first")
 	}
-	if _, err := os.Stat(filepath.Join(dir, "small")); err != nil {
+	if !exists(filepath.Join(dir, "small")) {
 		t.Fatal("small files within the limit must stay")
 	}
-	if got := lease.Reclaim(dir, 1<<30); got.Files != 0 || got.Notice(1) != "" {
+	if got := lease.Reclaim(dir, 1<<30, since); got.Files != 0 || got.Notice(1) != "" {
 		t.Fatal("nothing to reclaim under the limit")
+	}
+}
+
+// A project's history is one large file. A build that overshoots must lose its own output, not that.
+func TestReclaimKeepsWhatWasThereBeforeTheCommand(t *testing.T) {
+	dir := t.TempDir()
+	pack := filepath.Join(dir, "repo", ".git", "objects", "pack", "history.pack")
+	source := filepath.Join(dir, "repo", "data.bin")
+	writeSized(t, pack, 600_000)
+	writeSized(t, source, 500_000)
+	time.Sleep(20 * time.Millisecond)
+	since := time.Now()
+	for _, name := range []string{"out1.o", "out2.o", "out3.o"} {
+		writeSized(t, filepath.Join(dir, "repo", "build", name), 300_000)
+	}
+	got := lease.Reclaim(dir, 1_500_000, since)
+	if !exists(pack) || !exists(source) {
+		t.Fatalf("files from before the command were deleted: %+v", got)
+	}
+	if got.Files == 0 || got.Older {
+		t.Fatalf("only the command's own files should go: %+v", got)
+	}
+	for _, p := range got.Paths {
+		if !strings.HasPrefix(p, filepath.Join("repo", "build")) {
+			t.Fatalf("removed %q, which the command did not write", p)
+		}
+	}
+}
+
+// An unpacked archive carries old modification times; it still counts as written by the command.
+func TestReclaimIsNotFooledByAnOldModificationTime(t *testing.T) {
+	dir := t.TempDir()
+	kept := filepath.Join(dir, "kept")
+	writeSized(t, kept, 400_000)
+	time.Sleep(20 * time.Millisecond)
+	since := time.Now()
+	unpacked := filepath.Join(dir, "unpacked")
+	writeSized(t, unpacked, 300_000)
+	old := time.Now().Add(-48 * time.Hour)
+	if err := os.Chtimes(unpacked, old, old); err != nil {
+		t.Fatal(err)
+	}
+	got := lease.Reclaim(dir, 500_000, since)
+	if !exists(kept) || exists(unpacked) || got.Older {
+		t.Fatalf("the file the command wrote should go, whatever its date: %+v", got)
+	}
+}
+
+// Among the files a command wrote, git's own go last: a clone that overshoots loses its checkout first.
+func TestReclaimGivesUpGitFilesLast(t *testing.T) {
+	dir := t.TempDir()
+	since := time.Now()
+	pack := filepath.Join(dir, ".git", "objects", "pack", "new.pack")
+	writeSized(t, pack, 600_000)
+	writeSized(t, filepath.Join(dir, "a.bin"), 300_000)
+	writeSized(t, filepath.Join(dir, "b.bin"), 300_000)
+	got := lease.Reclaim(dir, 700_000, since)
+	if !exists(pack) || got.Files != 2 {
+		t.Fatalf("the plain files should go before git's: %+v", got)
+	}
+}
+
+// Only a tree that was already over its limit before the command loses older files, and it says so.
+func TestReclaimTouchesOlderFilesOnlyWhenNothingNewIsLeft(t *testing.T) {
+	dir := t.TempDir()
+	writeSized(t, filepath.Join(dir, ".git", "pack"), 400_000)
+	writeSized(t, filepath.Join(dir, "old.bin"), 400_000)
+	time.Sleep(20 * time.Millisecond)
+	got := lease.Reclaim(dir, 500_000, time.Now())
+	if !got.Older || exists(filepath.Join(dir, "old.bin")) || !exists(filepath.Join(dir, ".git", "pack")) {
+		t.Fatalf("an older plain file should go before git's, and be reported as older: %+v", got)
+	}
+	if notice := got.Notice(1); !strings.Contains(notice, "in the workspace was deleted") {
+		t.Fatalf("the notice must not blame the command: %q", notice)
 	}
 }
 
