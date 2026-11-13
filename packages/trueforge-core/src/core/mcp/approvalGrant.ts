@@ -2,12 +2,6 @@ import type { ApprovalDecision } from '../events/schema';
 import type { InternalEnrichedToolCall, InternalToolCallInfo } from '../llm/LLMTypes';
 import { MAPS_ASK_REASON } from '../permissions/mapsToolNames';
 import {
-  CHAT_GRANTABLE_CONSEQUENCE_REASONS,
-  GRANT_BARRED_TIER_REASONS,
-  OWN_CALENDAR_CHANGE_REASONS,
-  OWN_DRIVE_WRITE_REASONS,
-} from '../permissions/tier';
-import {
   SANDBOX_APPLY_PATCH_TOOL_NAME,
   SANDBOX_MCP_SERVER_ID,
   SANDBOX_REPLACE_TEXT_TOOL_NAME,
@@ -98,7 +92,7 @@ export function allowsChatApproval(info: InternalToolCallInfo): boolean {
   if (isOwnDriveWrite(info)) {
     return true;
   }
-  if (info.tier_reason !== undefined && CHAT_GRANTABLE_CONSEQUENCE_REASONS.has(info.tier_reason)) {
+  if (info.chat_grantable_consequence === true) {
     return cardNamesTarget(info);
   }
   return !tierBarsDurableGrant(info) && (info.effect === 'inspect' || info.effect === 'verify');
@@ -117,20 +111,20 @@ function cardNamesTarget(info: InternalToolCallInfo): boolean {
 
 /** A change to the person's own calendar with no guests; a guest change never qualifies, whatever its effect. */
 function isOwnCalendarChange(info: InternalToolCallInfo): boolean {
-  return info.tier_reason !== undefined && OWN_CALENDAR_CHANGE_REASONS.has(info.tier_reason);
+  return info.own_calendar_change === true;
 }
 
 /** A Drive write to the person's own files; it sends nothing to anyone, so it qualifies like an own-calendar change. */
 function isOwnDriveWrite(info: InternalToolCallInfo): boolean {
-  return info.tier_reason !== undefined && OWN_DRIVE_WRITE_REASONS.has(info.tier_reason);
+  return info.own_drive_write === true;
 }
 
 /** A send, destructive, install or hint-escalated call is never covered by an argument-blind grant. */
 function tierBarsDurableGrant(info: InternalToolCallInfo): boolean {
-  if (info.tier_reason === undefined) {
-    return info.tier === 3;
+  if (info.standing_grant_barred !== undefined) {
+    return info.standing_grant_barred;
   }
-  return GRANT_BARRED_TIER_REASONS.has(info.tier_reason);
+  return info.tier_reason === undefined && info.tier === 3;
 }
 
 /**

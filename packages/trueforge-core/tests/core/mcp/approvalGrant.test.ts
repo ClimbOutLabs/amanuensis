@@ -20,7 +20,7 @@ import type { ToolSelectorConfig } from '../../../src/core/mcp/ToolSelectorPolic
 import { stampSentinelDecision } from '../../../src/core/mcp/ToolSet';
 import { createSentinelHostContext, defaultSentinelServices } from '../../../src/core/permissions';
 import { MAPS_ASK_REASON, MAPS_HOLD_REASON } from '../../../src/core/permissions/mapsToolNames';
-import { tier1Decision } from '../../../src/core/permissions/tier';
+import { tier1Decision, tier3Decision, type Tier3Card } from '../../../src/core/permissions/tier';
 import { sandboxCommandApprovalIdentity } from '../../../src/core/sandbox/Sandbox';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 
@@ -297,6 +297,7 @@ describe('chat grant key', () => {
         effect: 'inspect',
         tier: 3,
         tier_reason,
+        standing_grant_barred: true,
       };
       const effective = effectiveApprovalDecisions({
         calls: [toolCall('call', info)],
@@ -329,6 +330,12 @@ describe('a chat grant is tied to the target the card names', () => {
     ...toolInfo('tracker', 'archive_item'),
     tier: 3,
     tier_reason: reason,
+    standing_grant_barred: reason !== 'connector_outbound',
+    chat_grantable_consequence:
+      reason === 'connector_outbound' ||
+      reason === 'destructive_action' ||
+      reason === 'mcp_destructive_hint' ||
+      reason === 'mcp_open_world_hint',
   });
 
   it.each([
@@ -816,6 +823,62 @@ describe('secret-path detection covers every argument of an unannotated connecto
   });
 });
 
+describe('grant policy carried by a classifier decision for a provider named nowhere else', () => {
+  const card: Tier3Card = {
+    plain_what: 'Do this?',
+    copy: null,
+    plain_why: null,
+    cannot_be_undone: null,
+    why_asked_again: null,
+    destination: null,
+    recipient: null,
+    amount: null,
+    parsed_command: null,
+    outbound_text: null,
+    destination_host: null,
+    outbound_truncated: false,
+  };
+
+  it('refuses a standing grant when the invented mail provider decision bars one', () => {
+    const decision = tier3Decision({
+      card,
+      reason: 'northbeam_send',
+      reason_detail: 'Sending through Northbeam Mail always asks.',
+      sensitive_read: false,
+      standing_grant_barred: true,
+    });
+    const info = { ...toolInfo('northbeam-mail', 'send_message'), ...stampSentinelDecision({ decision }) };
+    expect(info.standing_grant_barred).toBe(true);
+    expect(allowsToolGrant(info)).toBe(false);
+    expect(allowsChatApproval(info)).toBe(false);
+  });
+
+  it('gives an invented calendar provider the own-change treatment its decision carries', () => {
+    const decision = tier3Decision({
+      card,
+      reason: 'northbeam_calendar_change',
+      reason_detail: "A change on the person's own Northbeam calendar asks.",
+      sensitive_read: false,
+      own_calendar_change: true,
+    });
+    const info = { ...toolInfo('northbeam-calendar', 'create_event'), ...stampSentinelDecision({ decision }) };
+    expect(info.own_calendar_change).toBe(true);
+    expect(allowsChatApproval(info)).toBe(true);
+    expect(allowsToolGrant(info)).toBe(false);
+  });
+
+  it('does not infer either treatment from the invented provider reason alone', () => {
+    const info: InternalToolCallInfo = {
+      ...toolInfo('northbeam-calendar', 'create_event'),
+      tier: 3,
+      tier_reason: 'northbeam_calendar_change',
+      effect: 'edit',
+    };
+    expect(allowsChatApproval(info)).toBe(false);
+    expect(allowsToolGrant(info)).toBe(false);
+  });
+});
+
 describe('calendar changes that reach guests never get a durable grant', () => {
   it.each(['calendar_write_guests', 'caldav_calendar_guests', 'caldav_invitation_reply', 'connector_calendar_write'])(
     'refuses chat and always scope for %s, even when the server calls the tool a read',
@@ -829,6 +892,7 @@ describe('calendar changes that reach guests never get a durable grant', () => {
         effect: 'inspect',
         tier: 3,
         tier_reason,
+        standing_grant_barred: true,
       };
       expect(allowsChatApproval(info)).toBe(false);
       expect(allowsToolGrant(info)).toBe(false);
@@ -860,6 +924,7 @@ describe('Drive writes to the person own files can take a durable grant', () => 
       is_approval_required: true,
       tier: 3,
       tier_reason: 'google_drive_write',
+      own_drive_write: true,
     };
     expect(allowsChatApproval(info)).toBe(true);
     expect(allowsToolGrant(info)).toBe(true);
@@ -881,7 +946,7 @@ describe('Drive writes to the person own files can take a durable grant', () => 
 
 describe('lasting answers on a maps card', () => {
   function mapsInfo(overrides: Partial<InternalToolCallInfo>): InternalToolCallInfo {
-    return {
+    const info: InternalToolCallInfo = {
       type: 'truefoundry-system',
       mcp_server_id: 'maps',
       mcp_server_name: 'maps',
@@ -891,6 +956,7 @@ describe('lasting answers on a maps card', () => {
       tier_reason: MAPS_ASK_REASON,
       ...overrides,
     };
+    return { ...info, standing_grant_barred: info.tier_reason === MAPS_HOLD_REASON };
   }
 
   it('offers both for a map that asks only because maps are set to ask', () => {

@@ -103,6 +103,8 @@ export async function classifyCaldavTool({
     reason: reach.reason,
     reason_detail: reach.reason_detail,
     sensitive_read: true,
+    standing_grant_barred: reach.standing_grant_barred,
+    own_calendar_change: reach.own_calendar_change,
     approval_token_id: await mintToken(),
   });
 }
@@ -146,12 +148,16 @@ function reachFor({ tool, assistant }: { tool: CaldavToolName; assistant: string
   reason_detail: string;
   /** The tier reason the card shows behind "Why I'm asking", or null when the ask needs no reason. */
   reason_text: string | null;
+  standing_grant_barred: boolean;
+  own_calendar_change: boolean;
 } {
   if (tool === 'respond_to_event') {
     return {
       reason: 'caldav_invitation_reply',
       reason_detail: 'Calendar change that reaches guests always asks.',
       reason_text: `This reply goes to the event organizer, so ${assistant} always asks.`,
+      standing_grant_barred: true,
+      own_calendar_change: false,
     };
   }
   if (tool === 'create_event') {
@@ -159,6 +165,8 @@ function reachFor({ tool, assistant }: { tool: CaldavToolName; assistant: string
       reason: 'caldav_calendar_change',
       reason_detail: 'Calendar change on your own calendar asks.',
       reason_text: null,
+      standing_grant_barred: false,
+      own_calendar_change: true,
     };
   }
   const verb = tool === 'delete_event' ? 'deleting' : 'changing';
@@ -166,6 +174,8 @@ function reachFor({ tool, assistant }: { tool: CaldavToolName; assistant: string
     reason: 'caldav_calendar_guests',
     reason_detail: 'Change to an existing calendar event always asks.',
     reason_text: `${assistant} always asks before ${verb} an event in this calendar, because it cannot check who else is on it.`,
+    standing_grant_barred: true,
+    own_calendar_change: false,
   };
 }
 

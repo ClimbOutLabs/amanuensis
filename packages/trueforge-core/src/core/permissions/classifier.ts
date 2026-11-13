@@ -2292,6 +2292,10 @@ function steeringChecked(input: {
     ...decision,
     reason: CONTENT_STEERED_REASON,
     reason_detail: say,
+    standing_grant_barred: true,
+    chat_grantable_consequence: false,
+    own_calendar_change: false,
+    own_drive_write: false,
     card: {
       ...card,
       plain_what: withHoldSay(card.plain_what, say),
@@ -2628,6 +2632,7 @@ async function classifyGmailTool(action: SentinelAction, ctx: ClassifyContext): 
     reason: isSend ? 'gmail_send' : 'gmail_draft',
     reason_detail: isSend ? 'Sending email always asks.' : 'Saving a draft always asks.',
     sensitive_read: false,
+    standing_grant_barred: true,
     approval_token_id: await mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params }),
   });
 }
@@ -2837,6 +2842,8 @@ async function classifyCalendarTool(action: SentinelAction, ctx: ClassifyContext
         ? 'A calendar change that reaches guests always asks.'
         : 'Adding or changing an event on your own calendar asks.',
       sensitive_read: false,
+      standing_grant_barred: reachesGuests,
+      own_calendar_change: !reachesGuests,
       approval_token_id: await mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params }),
     });
   }
@@ -2944,6 +2951,7 @@ async function classifyDriveTool(action: SentinelAction, ctx: ClassifyContext): 
       reason: CONTENT_STEERED_REASON,
       reason_detail: say,
       sensitive_read: false,
+      standing_grant_barred: true,
       approval_token_id: await mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params }),
     });
   }
@@ -2959,6 +2967,7 @@ async function classifyDriveTool(action: SentinelAction, ctx: ClassifyContext): 
     reason: 'google_drive_write',
     reason_detail: 'Creating a Doc or adding rows to a Sheet always asks.',
     sensitive_read: false,
+    own_drive_write: true,
     approval_token_id: await mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params }),
   });
 }
@@ -3076,6 +3085,7 @@ async function classifyPersonaTool(action: SentinelAction, ctx: ClassifyContext)
     reason: 'persona_write',
     reason_detail: 'Adding a persona always asks.',
     sensitive_read: false,
+    standing_grant_barred: true,
     approval_token_id: await mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params }),
   });
 }
@@ -3135,6 +3145,7 @@ async function classifySkillTool(action: SentinelAction, ctx: ClassifyContext): 
     reason: 'skill_install',
     reason_detail: 'Adding a skill always asks.',
     sensitive_read: false,
+    standing_grant_barred: true,
     approval_token_id: await mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params }),
   });
 }
@@ -3202,6 +3213,7 @@ async function classifyScheduleTool(action: SentinelAction, ctx: ClassifyContext
       reason: 'schedule_write',
       reason_detail: 'Creating or deleting a schedule always asks.',
       sensitive_read: false,
+      standing_grant_barred: true,
       approval_token_id: await mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params }),
     });
   }
@@ -3218,6 +3230,7 @@ async function classifyScheduleTool(action: SentinelAction, ctx: ClassifyContext
       reason: SCHEDULE_STATUS_REASON,
       reason_detail: 'Pausing or resuming a schedule always asks.',
       sensitive_read: false,
+      standing_grant_barred: true,
       approval_token_id: await mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params }),
     });
   }
@@ -3291,6 +3304,7 @@ async function classifyReminderTool(action: SentinelAction, ctx: ClassifyContext
         reason: REMINDER_CANCEL_REASON,
         reason_detail: 'Cancelling a reminder always asks.',
         sensitive_read: false,
+        standing_grant_barred: true,
         approval_token_id: await mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params }),
       });
     }
@@ -3619,6 +3633,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
         ...(draft ? { mail_draft: true } : {}),
       },
       mail_send: !draft,
+      standing_grant_barred: true,
       reason: MAIL_NEW_RECIPIENT_REASON,
       reason_detail: draft
         ? 'A mail draft to an address that is not on the Email list.'
@@ -3668,6 +3683,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
         outbound_truncated: fields.outbound_truncated,
       },
       mail_send: true,
+      standing_grant_barred: true,
       reason: MAIL_SEND_REASON,
       reason_detail: 'A mail send through the Email sidecar always asks.',
       sensitive_read: readsPrivateData,
@@ -3735,6 +3751,8 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
       reason: extraction.sends ? 'connector_send' : destructiveHint ? 'mcp_destructive_hint' : 'mcp_open_world_hint',
       reason_detail: 'MCP annotations flagged the tool; hints escalate only.',
       sensitive_read: readsPrivateData,
+      standing_grant_barred: true,
+      chat_grantable_consequence: !extraction.sends,
       escalated: true,
       approval_token_id: await mintPlainToken({
         ctx,
@@ -3788,6 +3806,8 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
       reason: namedSend ? 'external_service' : isInstall ? 'install_action' : 'destructive_action',
       reason_detail: 'Name-based Tier 3 class.',
       sensitive_read: containsSecretPath(action.canonical_params),
+      standing_grant_barred: true,
+      chat_grantable_consequence: !namedSend && !isInstall,
       approval_token_id: await mintPlainToken({
         ctx,
         tool_name: action.tool_name,
@@ -3820,6 +3840,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
       reason: 'connector_calendar_write',
       reason_detail: 'A calendar change from a connector always asks.',
       sensitive_read: readsPrivateData,
+      standing_grant_barred: true,
       secret_path_read: containsSecretPath(action.canonical_params) || pathLike,
       approval_token_id: await mintPlainToken({
         ctx,
@@ -3901,6 +3922,8 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
       ? 'Connector call that sends data out; always asks.'
       : 'Fail-closed: unrecognized tools require approval.',
     sensitive_read: readsPrivateData,
+    standing_grant_barred: extraction.sends,
+    chat_grantable_consequence: !extraction.sends && recognized,
     inspection: grantableRead,
     grant_binding: action.mcp_grant_binding ?? null,
     secret_path_read: containsSecretPath(action.canonical_params) || pathLike,
@@ -3977,6 +4000,7 @@ async function guardUnaskedConnectorRead(input: {
     reason: CONNECTOR_READ_GUARD_REASON,
     reason_detail: say,
     sensitive_read: input.sensitive_read,
+    standing_grant_barred: true,
     approval_token_id: await mintPlainToken({
       ctx,
       tool_name: action.tool_name,
@@ -4129,6 +4153,7 @@ async function classifyNotesFolderToolCall(action: SentinelAction, ctx: Classify
     reason: CONTENT_STEERED_REASON,
     reason_detail: say,
     sensitive_read: false,
+    standing_grant_barred: true,
     approval_token_id: await mintPlainToken({
       ctx,
       tool_name: action.tool_name,
@@ -4333,6 +4358,7 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
         reason: verdict.ok ? MAPS_ASK_REASON : MAPS_HOLD_REASON,
         reason_detail: mapsReason,
         sensitive_read: false,
+        standing_grant_barred: !verdict.ok,
         approval_token_id: await mintPlainToken({
           ctx,
           tool_name: action.tool_name,
