@@ -482,7 +482,7 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
     const stored = await store.getCheckpoint({ ...owner, watcher: 'mail' });
     return stored?.source === undefined || stored.source === kind
       ? stored
-      : { ...stored, stuck: undefined, cursor: undefined, source: kind };
+      : { ...stored, stuck: undefined, cursor: undefined, source: kind, sender_confirmation: undefined };
   }
 
   /** The name to put in a note; a lookup that fails never stops mail from being read. */
@@ -609,6 +609,7 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
       stuck: findings.stuck,
       cursor: findings.cursor,
       source: kind,
+      sender_confirmation: mail.reportsSenderConfirmation,
     });
     if (findings.stopped_by !== undefined) {
       throw findings.stopped_by.error;
@@ -669,6 +670,7 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
       stuck: checkpoint?.stuck,
       cursor: checkpoint?.cursor,
       source,
+      sender_confirmation: checkpoint?.sender_confirmation,
     });
   }
 
@@ -708,6 +710,7 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
       stuck: undefined,
       cursor: undefined,
       source: undefined,
+      sender_confirmation: undefined,
     });
   }
 

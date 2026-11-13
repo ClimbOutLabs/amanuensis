@@ -74,6 +74,8 @@ export type ReachView = {
   calendarProblem: { since: string; kind: 'google_sign_in' | 'other' } | null;
   /** Where mail is read from, or null until it has been checked once. */
   mailSource: 'google' | 'email_connector' | null;
+  /** Whether the mail source read from reports sender confirmation, or null when that is not known yet. */
+  mailSenderConfirmation: boolean | null;
 };
 
 export type ReachSuggestion = { address: string; memory: string };

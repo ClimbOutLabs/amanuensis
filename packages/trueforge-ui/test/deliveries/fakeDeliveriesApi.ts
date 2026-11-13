@@ -85,6 +85,7 @@ export function fakeServer(initial: DeliveryItem[]) {
       mailProblem: null,
       calendarProblem: null,
       mailSource: null,
+      mailSenderConfirmation: null,
     },
     suggestions: [],
     texts: NO_NUMBER,

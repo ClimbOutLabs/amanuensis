@@ -282,6 +282,32 @@ export function runNoticingStoreContractSuite(getStore: () => INoticingStore): v
     await expect(store.getCheckpoint({ ...BOB, watcher: 'mail' })).resolves.toBeUndefined();
   });
 
+  it('keeps whether the mail source reports sender confirmation with its checkpoint', async () => {
+    const store = getStore();
+    const base = {
+      checked_at: new Date('2026-11-05T10:00:00.000Z'),
+      failure: undefined,
+      stuck: undefined,
+      cursor: undefined,
+      source: 'email_connector' as const,
+    };
+    await store.setCheckpoint({ ...ALICE, watcher: 'mail', ...base, sender_confirmation: false });
+    await expect(store.getCheckpoint({ ...ALICE, watcher: 'mail' })).resolves.toEqual({
+      ...base,
+      sender_confirmation: false,
+    });
+    await store.setCheckpoint({ ...ALICE, watcher: 'mail', ...base, sender_confirmation: true });
+    await expect(store.getCheckpoint({ ...ALICE, watcher: 'mail' })).resolves.toEqual({
+      ...base,
+      sender_confirmation: true,
+    });
+    await store.setCheckpoint({ ...ALICE, watcher: 'mail', ...base, sender_confirmation: undefined });
+    await expect(store.getCheckpoint({ ...ALICE, watcher: 'mail' })).resolves.toEqual({
+      ...base,
+      sender_confirmation: undefined,
+    });
+  });
+
   it('lists everyone with a checkpoint for a watcher', async () => {
     const store = getStore();
     const clear = { failure: undefined, stuck: undefined, cursor: undefined, source: undefined };

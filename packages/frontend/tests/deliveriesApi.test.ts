@@ -192,6 +192,11 @@ test('reads Reach me settings into the app shape, dropping what it does not know
     Response.json({ data: { ...WIRE_REACH.data, mail_source: 'google' } }),
   );
   assert.equal((await watched.reach.get()).mailSource, 'google');
+  assert.equal(view.mailSenderConfirmation, null);
+  const confirming = createDeliveriesApi(async () =>
+    Response.json({ data: { ...WIRE_REACH.data, mail_sender_confirmation: false } }),
+  );
+  assert.equal((await confirming.reach.get()).mailSenderConfirmation, false);
 });
 
 test('reads a problem with texts the server reports, and refuses a channel that leaves it out', async () => {

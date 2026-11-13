@@ -190,6 +190,7 @@ async function setup({
         : Promise.resolve(texts[message.id] ?? message.snippet),
     laterInThread: jest.fn(() => Promise.resolve(later)),
     trustedAuthenticationServers: ['mx.example.net'],
+    reportsSenderConfirmation: true,
   };
   const calendarSource: CalendarSource = { listEvents: jest.fn(() => Promise.resolve(events)) };
   const sources: NoticingSources = {
@@ -263,6 +264,23 @@ function waitingFor({
 }): WaitingApproval {
   return { owner, session_id: `s-${approval_id}`, approval_id, waiting_since: new Date(since) };
 }
+
+describe('what a mail pass records about its source', () => {
+  it('records sender confirmation as the source states it, for a source no provider list names', async () => {
+    const built = await setup({ messages: [] });
+    // The harness source is invented: its receiving server is mx.example.net, which no provider list names, and
+    // it states that it reports sender confirmation.
+    await built.service.run({ watcher: 'mail' });
+    expect((await built.store.getCheckpoint({ ...OWNER, watcher: 'mail' }))?.sender_confirmation).toBe(true);
+    built.sources.mail = {
+      status: 'ready',
+      kind: 'email_connector',
+      source: { ...built.mailSource, trustedAuthenticationServers: [], reportsSenderConfirmation: false },
+    };
+    await built.service.run({ watcher: 'mail' });
+    expect((await built.store.getCheckpoint({ ...OWNER, watcher: 'mail' }))?.sender_confirmation).toBe(false);
+  });
+});
 
 describe('the switch for the background checks', () => {
   const minutes = (count: number) => new Date(NOW.getTime() + count * 60_000);
@@ -1653,6 +1671,7 @@ describe('mail from a mailbox that numbers its messages', () => {
           : Promise.resolve(message.snippet),
       laterInThread: () => Promise.resolve([]),
       trustedAuthenticationServers: [],
+      reportsSenderConfirmation: false,
     };
     built.sources.mail = { status: 'ready', source, kind: 'email_connector' };
     const recorded: NoticingEvent[] = [];
@@ -2211,6 +2230,7 @@ describe('mail trouble follows how far behind the checkpoint is', () => {
           readText: message => mailSource.readText(message),
           laterInThread: ref => mailSource.laterInThread(ref),
           trustedAuthenticationServers: [],
+          reportsSenderConfirmation: false,
         };
         const told = (message: MailMessage): boolean =>
           recorded.some(

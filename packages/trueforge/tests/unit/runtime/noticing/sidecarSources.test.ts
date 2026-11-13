@@ -179,6 +179,7 @@ describe('sidecar mail source (IMAP)', () => {
     // The connector's tools take the UID alone.
     expect(calls.at(-1)?.[1]).toMatchObject({ email_ids: ['7'], mark_as_read: false });
     expect(source.trustedAuthenticationServers).toEqual([]);
+    expect(source.reportsSenderConfirmation).toBe(false);
   });
 
   it('sends no cursor on the first look, and the start time to list from', async () => {

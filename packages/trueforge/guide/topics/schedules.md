@@ -72,7 +72,7 @@ A space is the one exception. A run can make and change any space without asking
 ## Good to know
 
 - A scheduled run sends no notice. Its results wait in its chat until you open it.
-- A scheduled run can read your Gmail, but it never drafts or sends Gmail mail.
+- A scheduled run can read your mail, but it never drafts or sends mail.
 - An incognito chat can't make, pause or delete a schedule. Ask in a normal chat.
 - Reminders don't show on the Schedules page. See [Reminders](reminders.md).
 - The full rules for what a run may do are on [How schedules hold actions](../../../../docs/schedules.md).
