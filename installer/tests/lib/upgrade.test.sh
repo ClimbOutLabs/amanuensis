@@ -556,8 +556,22 @@ test_upgrade_still_needs_force_for_an_instance_with_data() {
   STUB_DOCTOR_EXIT=1
   run_install upgrade
   assert_rc 1
-  assert_flat_contains "$ERR" "Instance main worked before but has a problem now, so the upgrade did not start: The main app is not running."
-  assert_flat_contains "$ERR" "upgrade --force"
+  assert_flat_contains "$ERR" "Instance main worked before but has a problem now, so the upgrade did not start: The main app is not running. Run aman doctor instance --fix, then run the upgrade again."
+  assert_no_path "$AMAN_HOME/backups"
+  sandbox_drop
+}
+
+test_upgrade_gate_names_the_fix_of_the_failing_check() {
+  t_begin "the upgrade gate names the fix of the first failing check, not a fixed instance repair"
+  sandbox_new
+  install_machine
+  repo_commit_change "needs the sandbox"
+  STUB_DOCTOR_JSON='{"machine":[{"id":"sandbox","state":"fail","detail":"Docker could not start a sandbox slot: AppArmor enabling failed: profile \"aman-sandbox-slot\" not found","fix":"Run aman doctor sandbox --fix"}],"instances":{"main":[{"id":"run_code","state":"fail","detail":"Code cannot run yet.","fix":"Run aman doctor sandbox --fix"}]}}'
+  STUB_DOCTOR_EXIT=1
+  run_install upgrade
+  assert_rc 1
+  assert_flat_contains "$ERR" "so the upgrade did not start: Docker could not start a sandbox slot: AppArmor enabling failed: profile \"aman-sandbox-slot\" not found. Code cannot run yet. Run aman doctor sandbox --fix, then run the upgrade again."
+  assert_not_contains "$ERR" "doctor instance --fix"
   assert_no_path "$AMAN_HOME/backups"
   sandbox_drop
 }

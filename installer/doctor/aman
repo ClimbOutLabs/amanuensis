@@ -635,11 +635,11 @@ check_backup() {
 
 # The sandbox slots, whichever instance they serve: the slot setup starts them, not an instance, so they are
 # reported even before the first instance exists. A slot that is not running and healthy fails, and the failing
-# line of its own log says which of its checks failed. No slot containers, no row: the sandbox may be off, or
+# line of its own log says which of its checks failed; a slot that never ran has Docker's reason instead. No slot containers, no row: the sandbox may be off, or
 # never installed. Read-only: this never starts or repairs a slot, that is `aman doctor sandbox --fix`.
 check_sandbox() {
   [ "$DOCKER_OK" = 1 ] || return 0
-  local lines id cname state status service total=0 bad="" log failed_line="" shown_line="" failed_rest="" failed_check=""
+  local lines id cname state status service total=0 bad="" log failed_line="" shown_line="" failed_rest="" failed_check="" start_error=""
   lines=$(bounded "$PROBE_SECONDS" docker ps -a --format '{{.ID}}|{{.Names}}|{{.State}}|{{.Status}}|{{.Label "com.docker.compose.service"}}' 2>/dev/null)
   while IFS='|' read -r id cname state status service; do
     case "$service" in
@@ -685,6 +685,13 @@ check_sandbox() {
         ;;
     esac
     record machine sandbox fail "A sandbox slot failed: ${shown_line}" "Run aman doctor sandbox --fix"
+    return
+  fi
+  # A slot Docker refused to start (its safety profile not loaded, a disk not mounted) never ran, so its log is
+  # empty; Docker keeps the reason on the container itself.
+  start_error=$(bounded "$PROBE_SECONDS" docker inspect --format '{{.State.Error}}' "$bad" 2>/dev/null | head -n 1)
+  if [ -n "$start_error" ]; then
+    record machine sandbox fail "Docker could not start a sandbox slot: ${start_error}" "Run aman doctor sandbox --fix"
   else
     record machine sandbox fail "One of the sandbox slots is not running properly, and its log does not say which check failed." "Run aman doctor sandbox --fix"
   fi

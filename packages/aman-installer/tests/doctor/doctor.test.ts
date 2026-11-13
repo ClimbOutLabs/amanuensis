@@ -905,6 +905,24 @@ test('sandbox: a stopped slot whose log names no check fails plainly', async () 
   });
 });
 
+test("sandbox: a slot Docker refused to start fails with Docker's reason", async () => {
+  const psLine = commandLine('docker', ['ps', '-a', '--format', PS_FORMAT]);
+  const stopped = 'slot0001|proj-slots-sandbox-1|exited|Exited (128) 2 hours ago|sandbox-1';
+  const answers = withAnswer(readyAnswers(), psLine, okResult(`${stopped}\n`));
+  answers.set(commandLine('docker', ['logs', '--tail', '50', 'slot0001']), okResult(''));
+  answers.set(
+    commandLine('docker', ['inspect', '--format', '{{.State.Error}}', 'slot0001']),
+    okResult('AppArmor enabling failed: profile "aman-sandbox-slot" not found\n'),
+  );
+  const world = await makeWorld({ answers });
+  assert.deepEqual(recordById((await runJson(world)).doc.machine, 'sandbox'), {
+    id: 'sandbox',
+    state: 'fail',
+    detail: 'Docker could not start a sandbox slot: AppArmor enabling failed: profile "aman-sandbox-slot" not found',
+    fix: 'Run aman doctor sandbox --fix',
+  });
+});
+
 test('checkout: a writable folder above the checkout fails as a parent problem', async () => {
   const world = await makeWorld();
   const parent = await mkdtemp(join(tmpdir(), 'aman-doctor-parent-'));
