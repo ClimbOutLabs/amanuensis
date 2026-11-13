@@ -57,6 +57,7 @@ import {
   vaultWriteNamespace,
 } from '../runtime/memory/markdownMemoryFiles';
 import { listPageFiles, pageFolder, parsePageFilePath } from '../runtime/memory/memoryPages';
+import { MEMORY_HELPER_MODEL_SETTING_KEY } from '../runtime/memoryHelperModelSettings';
 import { MEMORY_HELPER_WAIT_SETTING_KEY } from '../runtime/memoryHelperWaitSettings';
 import { MEMORY_NIGHTLY_HOUR_SETTING_KEY, MEMORY_NIGHTLY_SETTING_KEY } from '../runtime/memoryNightlySettings';
 import { MEMORY_PAGE_SORTING_SETTING_KEY } from '../runtime/memoryPageSortingSettings';
@@ -92,6 +93,7 @@ const PERSONA_ACTIVATION_LIMIT = 100_000;
 export const EXPORTED_GLOBAL_SETTING_KEYS = [
   DEFAULT_CHAT_MODEL_SETTING_KEY,
   MEMORY_RECALL_ENABLED_SETTING_KEY,
+  MEMORY_HELPER_MODEL_SETTING_KEY,
   MEMORY_HELPER_WAIT_SETTING_KEY,
   MEMORY_NIGHTLY_HOUR_SETTING_KEY,
   MEMORY_NIGHTLY_SETTING_KEY,

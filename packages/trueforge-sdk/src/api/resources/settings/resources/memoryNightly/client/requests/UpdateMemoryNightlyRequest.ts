@@ -10,6 +10,8 @@
 export interface UpdateMemoryNightlyRequest {
     /** Persisted override: `true` or `false`. `null` clears the override back to the env default. Left out, it stays as it is. */
     enabled?: boolean | null;
+    /** The model for background work after a chat. `null` goes back to each chat using its own model. Left out, it stays as it is. */
+    helperModel?: string | null;
     /** The hour of the server's day the tidy-up starts at, `0` to `23`. Left out, it stays as it is. */
     hour?: number;
     /** Minutes one sorting or tidying question may wait for the model, `1` to `20`. Left out, it stays as it is. */

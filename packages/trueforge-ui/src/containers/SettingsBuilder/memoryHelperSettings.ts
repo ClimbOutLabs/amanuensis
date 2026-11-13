@@ -135,6 +135,10 @@ export interface MemoryNightlyState {
   /** Minutes one sorting or tidying question may wait for the model; `null` until the server has answered. */
   modelWaitMinutes: number | null;
   setModelWaitMinutes(minutes: number): Promise<boolean>;
+  /** The model chosen for background work after a chat; `null` while each chat uses its own model, and until the server has answered. */
+  helperModel: string | null;
+  /** `null` goes back to each chat using its own model. */
+  setHelperModel(model: string | null): Promise<boolean>;
   /** True while a tidy-up is running, also one started before this page was opened. */
   tidying: boolean;
   /** What the last tidy-up did, if it finished within the hour; `null` otherwise and while one runs. */
@@ -147,7 +151,7 @@ export interface MemoryNightlyState {
 /** How often a page waiting on a running tidy-up asks whether it has finished. */
 const TIDY_STATE_ASK_MS = 5000;
 
-type NightlyChange = { enabled?: boolean; hour?: number; modelWaitMinutes?: number };
+type NightlyChange = { enabled?: boolean; hour?: number; modelWaitMinutes?: number; helperModel?: string | null };
 
 export function useMemoryNightlySetting(): MemoryNightlyState {
   const server = useOptionalServer();
@@ -162,7 +166,12 @@ export function useMemoryNightlySetting(): MemoryNightlyState {
   const state = useStoredSetting<MemoryNightlySetting, NightlyChange>({
     load,
     save,
-    valueOf: stored => ({ enabled: stored.enabled, hour: stored.hour, modelWaitMinutes: stored.modelWaitMinutes }),
+    valueOf: stored => ({
+      enabled: stored.enabled,
+      hour: stored.hour,
+      modelWaitMinutes: stored.modelWaitMinutes,
+      helperModel: stored.helperModel,
+    }),
   });
   const [tidying, setTidying] = useState(false);
   const [tidied, setTidied] = useState<MemoryTidyRun | null>(null);
@@ -248,6 +257,9 @@ export function useMemoryNightlySetting(): MemoryNightlyState {
     setHour: hour => change({ hour }),
     modelWaitMinutes: state.value?.modelWaitMinutes ?? state.stored?.modelWaitMinutes ?? null,
     setModelWaitMinutes: modelWaitMinutes => change({ modelWaitMinutes }),
+    // A change being saved may be a `null`, so only a field the change left out falls back to what is stored.
+    helperModel: state.value?.helperModel === undefined ? (state.stored?.helperModel ?? null) : state.value.helperModel,
+    setHelperModel: helperModel => change({ helperModel }),
     tidying,
     tidied,
     tidyError,

@@ -10,16 +10,24 @@
  * small semaphore so overlapping turn drains cannot stampede the model.
  */
 import type { SessionAgent } from '@truefoundry/trueforge-core/agent-session';
-import { ModelOutputRepetitionError, VercelAILLM, type ILLM } from '@truefoundry/trueforge-core/core';
+import {
+  extractErrorLogFields,
+  ModelOutputRepetitionError,
+  VercelAILLM,
+  type ILLM,
+} from '@truefoundry/trueforge-core/core';
 import type { Logger } from 'winston';
 import { z } from 'zod';
 import type { AgentRecord, IAgentStore } from '../../db/agentStore';
+import type { IGlobalSettingsStore } from '../../db/globalSettingsStore';
 import type { IModelProviderStore } from '../../db/modelProviderStore';
 import type { ModelProperties, ReasoningEffort } from '../../schemas/modelProvider';
+import { readMemoryHelperModel } from '../memoryHelperModelSettings';
 import { modelIdentity, type TurnModelUsage } from '../modelUsage';
 import { getModelDetails } from '../sessionResources';
 import { meterHelperLlm, type TokenFactoryBudget } from '../tokenFactoryBudget';
 import { localDay } from './localDay';
+import { noteReadBefore, questionFingerprint, wasReadBefore } from './readBefore';
 import { FACT_STOPWORDS } from './stopWords';
 
 /**
@@ -889,6 +897,24 @@ export async function askSummaryModel({
   });
 }
 
+/** Whether the question was read before. A store that cannot be read says no, so the model is asked. */
+async function readBeforeOrNot({
+  vaultDir,
+  fingerprint,
+  logger,
+}: {
+  vaultDir: string;
+  fingerprint: string;
+  logger: Logger;
+}): Promise<boolean> {
+  try {
+    return await wasReadBefore({ vaultDir, fingerprint });
+  } catch (error) {
+    logger.debug('Could not check whether these words were read before', extractErrorLogFields(error));
+    return false;
+  }
+}
+
 /**
  * Pulls the durable facts out of one turn's exchange via the LLM.
  *
@@ -921,10 +947,15 @@ export async function summarizeTurnContent(params: {
    * says which kept facts belong in the profile. Absent, the call asks for facts only.
    */
   profileLines?: readonly string[] | undefined;
+  /**
+   * The vault folder, where Aman remembers which questions held nothing worth keeping. With it, the same words
+   * in the same situation are read once; left out, every turn is asked about.
+   */
+  vaultDir?: string | undefined;
   /** Test seam; production leaves it unset and resolves a VercelAILLM over the configured provider. */
   resolveLlm?: ((modelFqn: string) => Promise<ILLM>) | undefined;
 }): Promise<SummarizeTurnResult> {
-  const { summarizationModelFqn, logger } = params;
+  const { summarizationModelFqn, logger, vaultDir } = params;
   // A long turn keeps its start and its end, and the model is told that the middle is missing.
   const boundedUser = boundedText(params.userText);
   const userText = boundedUser.text;
@@ -936,15 +967,24 @@ export async function summarizeTurnContent(params: {
   if (summarizationModelFqn === undefined || summarizationModelFqn.trim() === '') {
     return { status: 'skipped', reason: 'no-model-configured' };
   }
-  const messages = buildSummarizationMessages({
+  const question = {
     userText,
     assistantQuestion,
-    turnDate: params.turnDate,
     timeZone: params.timeZone,
     textLeftOut,
     personName: params.personName,
     profileLines: params.profileLines,
+  };
+  const messages = buildSummarizationMessages({ ...question, turnDate: params.turnDate });
+  // The day only shapes how a kept fact is written, so the question is told apart without it.
+  const fingerprint = questionFingerprint({
+    modelFqn: summarizationModelFqn,
+    messages: buildSummarizationMessages({ ...question, turnDate: '' }),
   });
+  if (vaultDir !== undefined && (await readBeforeOrNot({ vaultDir, fingerprint, logger }))) {
+    logger.debug('These words were read before and held nothing worth keeping; the model is not asked again');
+    return { status: 'nothing_to_keep' };
+  }
   const answer = await askSummaryModel({
     messages,
     modelFqn: summarizationModelFqn,
@@ -970,6 +1010,11 @@ export async function summarizeTurnContent(params: {
     return { status: 'failed', reason: 'summary-unreadable', fallback: 'summary_unreadable' };
   }
   if (parsed.kind === 'nothing') {
+    if (vaultDir !== undefined) {
+      await noteReadBefore({ vaultDir, fingerprint }).catch((error: unknown) => {
+        logger.debug('Could not record that these words held nothing worth keeping', extractErrorLogFields(error));
+      });
+    }
     return { status: 'nothing_to_keep' };
   }
   const facts = keepFactsFromPerson({
@@ -995,36 +1040,39 @@ export async function summarizeTurnContent(params: {
 }
 
 /**
- * Resolves the model FQN for memory summarization.
+ * The model for the background work after a chat: what to remember, the notes, sorting and the chat's title.
  *
- * Precedence: explicitly-set `summarization` role → persona override → main model. An unset role
- * tracks the main model.
- * For stored agents, the agent record is fetched once and reused for both the role
- * check and the main-model fallback (single DB read).
+ * Precedence: the agent's own `summarization` role, then the helper model chosen in Settings, then the persona's
+ * model, then the chat's main model. For stored agents the record is read once for both the role and the main model.
  */
 export async function resolveSummarizationModelFqn(params: {
   tenantId: string;
   personaModelName: string | undefined;
   sessionAgent: SessionAgent;
   agentStore: IAgentStore;
+  globalSettingsStore: IGlobalSettingsStore;
+  modelProviderStore: Pick<IModelProviderStore, 'listModels'>;
+  logger: Logger;
 }): Promise<string | undefined> {
   let summarizationModelName: string | undefined;
   let storedRecord: AgentRecord | null | undefined;
   if (params.sessionAgent.type === 'inline') {
     summarizationModelName = params.sessionAgent.spec.auxiliary_models?.summarization?.name;
   } else {
-    // Single DB read: fetch once, reuse for both the role check and the main-model fallback.
     storedRecord =
       (await params.agentStore.getAgent({ tenant_id: params.tenantId, id: params.sessionAgent.id })) ?? null;
     summarizationModelName = storedRecord?.manifest.auxiliary_models?.summarization?.name;
   }
-  // An explicitly-set summarization role wins over the persona override.
   if (summarizationModelName !== undefined && summarizationModelName.trim() !== '') {
     return summarizationModelName;
   }
-  // Fall back to the main model. For stored agents, reuse the already-fetched record
-  // so the store is read once.
   return (
+    (await readMemoryHelperModel({
+      tenantId: params.tenantId,
+      globalSettingsStore: params.globalSettingsStore,
+      modelProviderStore: params.modelProviderStore,
+      logger: params.logger,
+    })) ??
     params.personaModelName ??
     (params.sessionAgent.type === 'inline' ? params.sessionAgent.spec.model.name : storedRecord?.manifest.model.name)
   );

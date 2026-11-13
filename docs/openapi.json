@@ -7147,6 +7147,13 @@
             "description": "The stored setting: the persisted override when set, else the `MEMORY_NIGHTLY_JOB` env default.",
             "type": "boolean"
           },
+          "helper_model": {
+            "description": "The model chosen for background work after a chat. `null` means each chat uses its own model.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "hour": {
             "description": "The hour of the server's day the tidy-up starts at. `0` is midnight, the default.",
             "maximum": 23,
@@ -7169,7 +7176,8 @@
           "overridden",
           "default_enabled",
           "hour",
-          "model_wait_minutes"
+          "model_wait_minutes",
+          "helper_model"
         ],
         "type": "object"
       },
@@ -15739,6 +15747,15 @@
             "description": "Persisted override: `true` or `false`. `null` clears the override back to the env default. Left out, it stays as it is.",
             "type": [
               "boolean",
+              "null"
+            ]
+          },
+          "helper_model": {
+            "description": "The model for background work after a chat. `null` goes back to each chat using its own model. Left out, it stays as it is.",
+            "maxLength": 300,
+            "minLength": 1,
+            "type": [
+              "string",
               "null"
             ]
           },

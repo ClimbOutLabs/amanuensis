@@ -173,6 +173,9 @@ export async function resolveTurnSummarizeContext(
       personaModelName,
       sessionAgent,
       agentStore,
+      globalSettingsStore,
+      modelProviderStore,
+      logger,
     });
     if (summarizationModelFqn === undefined || summarizationModelFqn.trim() === '') {
       logger.debug(

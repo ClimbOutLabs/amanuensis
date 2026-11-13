@@ -356,6 +356,7 @@ async function decidePersonFacts(params: SubmitRetainParams): Promise<TurnMemory
       modelUsage: summarize.modelUsage,
       logger: params.logger,
       profileLines: params.profileLearning?.knownLines,
+      vaultDir: params.client.pagesWriteDir?.(),
       resolveLlm: summarize.resolveLlm,
     });
     params.profileLearning?.onAnswered(result.status === 'summarized' ? (result.profileLines ?? []) : []);

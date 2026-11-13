@@ -405,6 +405,7 @@ async function askForProfileLines(
     modelUsage: factCall.modelUsage,
     logger: params.logger,
     profileLines: knownLines,
+    vaultDir: params.memoryClient?.pagesWriteDir?.(),
     resolveLlm: factCall.resolveLlm,
   });
   return result.status === 'summarized' ? (result.profileLines ?? []) : [];

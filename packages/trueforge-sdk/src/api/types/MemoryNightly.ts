@@ -5,6 +5,8 @@ export interface MemoryNightly {
     defaultEnabled: boolean;
     /** The stored setting: the persisted override when set, else the `MEMORY_NIGHTLY_JOB` env default. */
     enabled: boolean;
+    /** The model chosen for background work after a chat. `null` means each chat uses its own model. */
+    helperModel: string | null;
     /** The hour of the server's day the tidy-up starts at. `0` is midnight, the default. */
     hour: number;
     /** How many minutes one sorting or tidying question may wait for the model. `10` is the default. */

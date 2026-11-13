@@ -70,6 +70,7 @@ import {
 } from '../runtime/memory/markdownMemoryFiles';
 import { isInPageFolder, pageFolder, parsePageFilePath } from '../runtime/memory/memoryPages';
 import { ensureMemorySourceLines } from '../runtime/memory/memorySourceLines';
+import { MEMORY_HELPER_MODEL_SETTING_KEY } from '../runtime/memoryHelperModelSettings';
 import { MEMORY_HELPER_WAIT_SETTING_KEY } from '../runtime/memoryHelperWaitSettings';
 import { MEMORY_NIGHTLY_HOUR_SETTING_KEY, MEMORY_NIGHTLY_SETTING_KEY } from '../runtime/memoryNightlySettings';
 import { MEMORY_PAGE_SORTING_SETTING_KEY } from '../runtime/memoryPageSortingSettings';
@@ -255,6 +256,7 @@ function leftOutName(name: string): string {
 const IMPORTABLE_GLOBAL_SETTING_KEYS: ReadonlySet<string> = new Set<string>([
   DEFAULT_CHAT_MODEL_SETTING_KEY,
   MEMORY_RECALL_ENABLED_SETTING_KEY,
+  MEMORY_HELPER_MODEL_SETTING_KEY,
   MEMORY_HELPER_WAIT_SETTING_KEY,
   MEMORY_NIGHTLY_HOUR_SETTING_KEY,
   MEMORY_NIGHTLY_SETTING_KEY,

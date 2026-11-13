@@ -12,6 +12,7 @@ import type { IModelProviderStore } from '../../db/modelProviderStore';
 import type { IPersonaStore } from '../../db/personaStore';
 import { TENANT_ID } from '../../tenancy';
 import { resolveDefaultChatModel } from '../defaultChatModel';
+import { readMemoryHelperModel } from '../memoryHelperModelSettings';
 import { readMemoryNightlySetting } from '../memoryNightlySettings';
 import { readMemoryPageSortingSetting } from '../memoryPageSortingSettings';
 import { readMemorySummarizeSetting } from '../memorySummarizeSettings';
@@ -91,6 +92,7 @@ export function startNightlyMemoryJob({
         return undefined;
       }
       const summarizationModelFqn =
+        (await readMemoryHelperModel({ tenantId: TENANT_ID, globalSettingsStore, modelProviderStore, logger })) ??
         vault.persona?.modelName ??
         (await resolveDefaultChatModel({ tenantId: TENANT_ID, modelProviderStore, globalSettingsStore, logger }));
       return {

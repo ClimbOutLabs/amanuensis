@@ -9,6 +9,7 @@ export const UpdateMemoryNightlyRequest: core.serialization.Schema<
     TrueForge.settings.UpdateMemoryNightlyRequest
 > = core.serialization.object({
     enabled: core.serialization.boolean().optionalNullable(),
+    helperModel: core.serialization.property("helper_model", core.serialization.string().optionalNullable()),
     hour: core.serialization.number().optional(),
     modelWaitMinutes: core.serialization.property("model_wait_minutes", core.serialization.number().optional()),
 });
@@ -16,6 +17,7 @@ export const UpdateMemoryNightlyRequest: core.serialization.Schema<
 export declare namespace UpdateMemoryNightlyRequest {
     export interface Raw {
         enabled?: (boolean | null | undefined) | null;
+        helper_model?: (string | null | undefined) | null;
         hour?: number | null;
         model_wait_minutes?: number | null;
     }

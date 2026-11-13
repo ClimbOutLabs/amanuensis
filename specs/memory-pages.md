@@ -90,6 +90,12 @@ A Pages tab sits beside Memories and Sharing in Settings, then Memory, and on th
 
 Incognito chats are not involved: this is Settings.
 
+### Background model calls
+
+- One helper model does all background work after a chat: the facts call, the notes, sorting, tidying and the chat title. Precedence: an agent's own `auxiliary_models.summarization`, then the helper model chosen in Settings (global setting `memory_helper_model`, used only while the model list still holds it), then the persona's model, then the chat's model. The daily tidy-up follows the same setting.
+- The facts call is not repeated for a question the model already answered with "nothing to keep". The vault keeps a fingerprint of such questions (model plus prompt, without the day) in `.memory-state/read-before.json`, at most 2000. An answer that kept facts is asked again, because it depends on the day. Known cost: a wrong "nothing to keep" sticks for the exact same words until the model or prompt changes.
+- A model whose reply was once cut off with no answer is asked with the larger answer room from the start, for the life of the process.
+
 ## Scope
 
 - Summary line and role words.

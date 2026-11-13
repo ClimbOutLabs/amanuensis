@@ -8,6 +8,7 @@ export const MemoryNightly: core.serialization.ObjectSchema<serializers.MemoryNi
     core.serialization.object({
         defaultEnabled: core.serialization.property("default_enabled", core.serialization.boolean()),
         enabled: core.serialization.boolean(),
+        helperModel: core.serialization.property("helper_model", core.serialization.string().nullable()),
         hour: core.serialization.number(),
         modelWaitMinutes: core.serialization.property("model_wait_minutes", core.serialization.number()),
         overridden: core.serialization.boolean(),
@@ -17,6 +18,7 @@ export declare namespace MemoryNightly {
     export interface Raw {
         default_enabled: boolean;
         enabled: boolean;
+        helper_model?: string | null;
         hour: number;
         model_wait_minutes: number;
         overridden: boolean;

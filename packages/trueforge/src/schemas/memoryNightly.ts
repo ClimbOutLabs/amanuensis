@@ -1,6 +1,7 @@
 import { z } from '@hono/zod-openapi';
 
 import { PageSortModeSchema, SortStopCauseSchema } from '../runtime/memory/pageSortMode';
+import { MAX_HELPER_MODEL_NAME_CHARS } from '../runtime/memoryHelperModelSettings';
 import { MAX_MEMORY_HELPER_WAIT_MINUTES } from '../runtime/memoryHelperWaitSettings';
 
 export const MemoryNightlySchema = z
@@ -22,6 +23,10 @@ export const MemoryNightlySchema = z
       .min(1)
       .max(MAX_MEMORY_HELPER_WAIT_MINUTES)
       .describe('How many minutes one sorting or tidying question may wait for the model. `10` is the default.'),
+    helper_model: z
+      .string()
+      .nullable()
+      .describe('The model chosen for background work after a chat. `null` means each chat uses its own model.'),
   })
   .openapi('MemoryNightly');
 
@@ -49,6 +54,16 @@ export const UpdateMemoryNightlyRequestSchema = z
       .optional()
       .describe(
         'Minutes one sorting or tidying question may wait for the model, `1` to `20`. Left out, it stays as it is.',
+      ),
+    helper_model: z
+      .string()
+      .trim()
+      .min(1)
+      .max(MAX_HELPER_MODEL_NAME_CHARS)
+      .nullable()
+      .optional()
+      .describe(
+        'The model for background work after a chat. `null` goes back to each chat using its own model. Left out, it stays as it is.',
       ),
   })
   .openapi('UpdateMemoryNightlyRequest', { example: { enabled: true, hour: 0 } });

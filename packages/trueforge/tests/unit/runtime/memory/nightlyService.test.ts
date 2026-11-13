@@ -52,7 +52,7 @@ describe('the nightly timer', () => {
     configuration.MEMORY_PAGE_SORTING = originalSorting;
   });
 
-  function start(settings: ReturnType<typeof inMemoryGlobalSettingsStore>) {
+  function start(settings: ReturnType<typeof inMemoryGlobalSettingsStore>, listed: string[] = []) {
     return startNightlyMemoryJob({
       personaStore,
       modelProviderStore: {
@@ -61,7 +61,9 @@ describe('the nightly timer', () => {
         getProviderForUpdate: jest.fn(),
         createProvider: jest.fn(),
         upsertProvider: jest.fn(),
-        listModels: jest.fn(),
+        listModels: jest.fn(() =>
+          Promise.resolve(listed.map(name => ({ name, model_id: name, provider: { name: 'test' }, properties: {} }))),
+        ),
         deleteProvider: jest.fn(),
         managedElsewhere: false,
       },
@@ -96,6 +98,22 @@ describe('the nightly timer', () => {
     await settings.setSetting({ key: MEMORY_NIGHTLY_SETTING_KEY, value: 'false' });
     await jest.advanceTimersByTimeAsync(LOOK);
     expect(run).toHaveBeenCalledTimes(2);
+  });
+
+  it('asks the helper model chosen in Settings, and the chat model when that one is gone', async () => {
+    const settings = inMemoryGlobalSettingsStore();
+    await settings.setSetting({ key: MEMORY_NIGHTLY_SETTING_KEY, value: 'true' });
+    await settings.setSetting({ key: 'memory_summarize_enabled', value: 'true' });
+    await settings.setSetting({ key: 'memory_helper_model', value: 'local/small' });
+    start(settings, ['openai/main', 'local/small']);
+    await jest.advanceTimersByTimeAsync(LOOK);
+    const summarizeFor = run.mock.calls[0]?.[0].deps.summarizeFor;
+    const vault = { namespace: 'default' };
+
+    expect((await summarizeFor?.(vault))?.summarizationModelFqn).toBe('local/small');
+
+    await settings.setSetting({ key: 'memory_helper_model', value: 'local/gone' });
+    expect((await summarizeFor?.(vault))?.summarizationModelFqn).toBe('openai/main');
   });
 
   it('waits for the hour the person chose', async () => {

@@ -61,7 +61,16 @@ describe('createMemoryPageSortingCatalog', () => {
 });
 
 describe('createMemoryNightlyCatalog', () => {
-  const wire = { data: { enabled: true, overridden: true, default_enabled: false, hour: 21, model_wait_minutes: 10 } };
+  const wire = {
+    data: {
+      enabled: true,
+      overridden: true,
+      default_enabled: false,
+      hour: 21,
+      model_wait_minutes: 10,
+      helper_model: 'local/small',
+    },
+  };
 
   it('GETs and PUTs the nightly setting', async () => {
     const seen: Array<{ url: string; method?: string; body?: string }> = [];
@@ -80,15 +89,20 @@ describe('createMemoryNightlyCatalog', () => {
       defaultEnabled: false,
       hour: 21,
       modelWaitMinutes: 10,
+      helperModel: 'local/small',
     });
     await catalog.setMemoryNightly({ enabled: false });
     await catalog.setMemoryNightly({ hour: 6 });
     await catalog.setMemoryNightly({ modelWaitMinutes: 20 });
+    await catalog.setMemoryNightly({ helperModel: 'local/other' });
+    await catalog.setMemoryNightly({ helperModel: null });
     expect(seen).toEqual([
       { url: '/api/v1/settings/memory-nightly', method: 'GET', body: undefined },
       { url: '/api/v1/settings/memory-nightly', method: 'PUT', body: JSON.stringify({ enabled: false }) },
       { url: '/api/v1/settings/memory-nightly', method: 'PUT', body: JSON.stringify({ hour: 6 }) },
       { url: '/api/v1/settings/memory-nightly', method: 'PUT', body: JSON.stringify({ model_wait_minutes: 20 }) },
+      { url: '/api/v1/settings/memory-nightly', method: 'PUT', body: JSON.stringify({ helper_model: 'local/other' }) },
+      { url: '/api/v1/settings/memory-nightly', method: 'PUT', body: JSON.stringify({ helper_model: null }) },
     ]);
   });
 

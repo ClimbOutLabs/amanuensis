@@ -20,7 +20,7 @@ With **Turn summaries** on, Aman keeps only lasting facts: facts about you, plan
 
 Each fact is a short note that starts with what it is about, such as "Sister Lexie is allergic to shellfish", without your name in front. Aman uses your name only where a note would be unclear without it. Notes saved before this change keep their wording.
 
-With **Turn summaries** off, Aman saves each turn word for word, as two notes. Your words are one note. Aman's reply is a second note, marked `> External source: assistant reply`, so what Aman said is never saved as something you said. The summaries use the **Summarization model** from [A model for each job](model-roles.mdx), and each one costs an extra model call.
+With **Turn summaries** off, Aman saves each turn word for word, as two notes. Your words are one note. Aman's reply is a second note, marked `> External source: assistant reply`, so what Aman said is never saved as something you said. The summaries use the **Helper model** from [A model for each job](model-roles.mdx), and each one costs an extra model call.
 
 ### What Aman learns about you
 
@@ -65,6 +65,15 @@ Aman can sort each note it saves onto your pages: a new fact goes on the right p
 ### A small tidy once a day
 
 This is off until you turn it on. Open **Settings**, **Memory**, **Settings** and switch on **Tidy pages once a day**. The change counts from the next time Aman looks at the clock, with no restart. Once a day Aman then tidies your pages, and it uses the model while you are not chatting. It starts at midnight unless you pick another hour under **Start the daily tidy-up at**. The hour is the time on the computer Aman runs on. Aman starts within three hours of that hour and before the day ends. To tidy straight away, choose **Tidy now**. It works at any hour, also while the daily tidy is switched off, and when it has finished it tells you what it did. When nothing changed, it says why: sorting is off, no model was found, the model took too long to answer, or its answers could not be read. The tidy-up waits for a slow model as long as it is still answering, up to ten minutes for each try, and tries twice. To change the ten minutes, pick another time under **Wait for the model up to**, from 1 minute to 20 minutes. The same wait counts when Aman sorts a note after a chat. You can leave the page while it works. When you come back within the hour, the page shows that it is still tidying, or what it did. Choosing **Tidy now** many times never makes Aman give up on a note. It does three things. It moves a line to Earlier when the end day you or Aman gave it has passed. It sorts notes from the last 14 days that were missed, as far as your sorting choice allows. With sorting off, it skips this and the next step. It looks for two lines on a page that cannot both be true, and lists them for you. On the page you see "These lines disagree" with both lines and a reason. Edit the page to fix the line that is wrong, or choose **Not a problem** and Aman will not list that pair again. Aman never changes the words of a line, never removes a line, and never decides which of two lines is right. It does the same for each persona's pages. To turn the tidy off, switch **Tidy pages once a day** off. A server can set the starting choice with `MEMORY_NIGHTLY_JOB` (`true` or `false`, default `false`). What you choose in Settings wins over it. It needs the same model as your memory notes, so it does nothing in those steps when no model is set up. Nothing is tidied because of an incognito chat.
+
+### The model that does the background work
+
+After each chat Aman does some work in the background. It picks out what to remember, files it on your pages, tidies the pages and names the chat. All of this uses one model, the helper model. Unless you choose one, it is the main chat model. To choose one, open **Settings**, **Roles and Personas**, and pick a model under **Helper model**. A smaller, faster model works well here. The choice counts from the next chat, with no restart. Choose **Default** to go back to the main chat model.
+
+Aman keeps this work small in two ways.
+
+- It reads each thing once. When the model found nothing worth keeping in a message, Aman remembers that. If the very same message comes again, Aman does not ask the model about it again. So if the model once missed something in a message, sending the exact same words again will not save it. Say it in other words, or ask Aman to remember it. A new model reads everything fresh.
+- It does not ask twice. Some models think before they answer and run out of room. Aman then asks once more with more room. After that it gives that model the larger room from the start, until Aman restarts.
 
 ## Where each memory came from
 
