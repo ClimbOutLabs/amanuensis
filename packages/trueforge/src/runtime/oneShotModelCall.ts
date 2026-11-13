@@ -2,7 +2,9 @@ import { VercelAILLM, type LLMCreateParams } from '@truefoundry/trueforge-core/c
 import type { Logger } from 'winston';
 
 import type { IModelProviderStore } from '../db/modelProviderStore';
+import type { ModelProperties } from '../schemas/modelProvider';
 import type { ModelUsageRole } from '../schemas/modelUsageEvents';
+import { lightReasoningRequestFields } from './memory/memorySummarize';
 import { modelIdentity, type TurnModelUsage } from './modelUsage';
 import { getModelDetails } from './sessionResources';
 import { meterHelperLlm, type TokenFactoryBudget } from './tokenFactoryBudget';
@@ -14,9 +16,35 @@ function answerText(content: string | { type: string; text?: string; refusal?: s
   return content === null ? '' : content.map(part => part.text ?? part.refusal ?? '').join('');
 }
 
+/** Room for a model that thinks before it answers, so a short cap is not spent on thinking alone. */
+const THINKING_ROOM_TOKENS = 1_024;
+
+/**
+ * The output cap and reasoning fields for a short helper call. Thinking is turned off when the
+ * model says it can be. Otherwise the model is asked for the least thinking it lists and the cap
+ * gets room for it; `maxTokens` stays the size of the answer that is wanted.
+ */
+export function shortCallRequestFields({
+  modelProperties,
+  maxTokens,
+}: {
+  modelProperties: ModelProperties;
+  maxTokens: number;
+}): { max_completion_tokens: number; reasoning: Record<string, string | boolean> } {
+  const reasoning = lightReasoningRequestFields(modelProperties);
+  if (reasoning['enable_thinking'] === false) {
+    return { max_completion_tokens: maxTokens, reasoning };
+  }
+  const withRoom = maxTokens + THINKING_ROOM_TOKENS;
+  return {
+    max_completion_tokens: Math.min(withRoom, modelProperties.max_output_tokens ?? withRoom),
+    reasoning,
+  };
+}
+
 /**
  * One short helper call with no tools and no streaming, metered under `role`, that resolves to the answer's text.
- * Thinking is turned off only when the model says it can be. Throws when the model cannot be reached or answer in
+ * Throws when the model cannot be reached or answer in
  * time, so each caller chooses its own fallback.
  */
 export async function askModelOnce({
@@ -50,10 +78,14 @@ export async function askModelOnce({
     name: modelName,
     store: modelProviderStore,
   });
-  const request: LLMCreateParams = { messages, max_completion_tokens: maxTokens, temperature: 0, top_p: 1 };
-  if (modelProperties.reasoning_efforts?.includes('none') === true) {
-    Object.assign(request, { enable_thinking: false, reasoning_effort: 'none' });
-  }
+  const fields = shortCallRequestFields({ modelProperties, maxTokens });
+  const request: LLMCreateParams = {
+    messages,
+    max_completion_tokens: fields.max_completion_tokens,
+    temperature: 0,
+    top_p: 1,
+  };
+  Object.assign(request, fields.reasoning);
   const llm = meterHelperLlm({
     llm: new VercelAILLM({
       providerConfig,

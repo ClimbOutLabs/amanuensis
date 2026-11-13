@@ -9,6 +9,7 @@ import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import type { EventSubscription } from './event-subscription';
 import { resolveSummarizationModelFqn } from './memory/memorySummarize';
 import { flushModelUsage, modelIdentity, type ModelUsageDrainMember, type TurnModelUsage } from './modelUsage';
+import { shortCallRequestFields } from './oneShotModelCall';
 import { getModelDetails } from './sessionResources';
 import { meterHelperLlm, type TokenFactoryBudget } from './tokenFactoryBudget';
 
@@ -216,17 +217,14 @@ export async function generateChatSubjectTitle(params: {
     name: params.modelName,
     store: params.modelProviderStore,
   });
+  const fields = shortCallRequestFields({ modelProperties, maxTokens: CHAT_TITLE_MAX_TOKENS });
   const request: LLMCreateParams = {
     messages: buildChatTitleMessages({ userText: params.userText, assistantText: params.assistantText }),
-    max_completion_tokens: CHAT_TITLE_MAX_TOKENS,
+    max_completion_tokens: fields.max_completion_tokens,
     temperature: 0,
     top_p: 1,
   };
-  // Same provider-extension discipline as the knowledge relevance check:
-  // extensions only when the configured model explicitly advertises `none`.
-  if (modelProperties.reasoning_efforts?.includes('none') === true) {
-    Object.assign(request, { enable_thinking: false, reasoning_effort: 'none' });
-  }
+  Object.assign(request, fields.reasoning);
   const llm = meterHelperLlm({
     llm: new VercelAILLM({
       providerConfig,
