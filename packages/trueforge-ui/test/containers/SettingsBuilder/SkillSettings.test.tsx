@@ -65,16 +65,71 @@ function createFakeHost(
       ? {}
       : {
           getSkillNetworkApproval: async ({ id }: { id: string }) =>
-            approvals.get(id) ?? { declaredHosts: [], approvedHosts: null, sendCapable: false },
+            approvals.get(id) ?? {
+              declaredHosts: [],
+              approvedHosts: null,
+              allowedHosts: [],
+              deniedHosts: [],
+              sessionHosts: [],
+              sendCapable: false,
+            },
           approveSkillNetwork: async ({ id, hosts }: { id: string; hosts: string[] }) => {
             approvalCalls.push({ method: 'approve', id, hosts });
+            const current = approvals.get(id);
             const next: SkillNetworkApprovalState = {
               declaredHosts: hosts,
               approvedHosts: hosts,
-              sendCapable: approvals.get(id)?.sendCapable ?? false,
+              allowedHosts: current?.allowedHosts ?? [],
+              deniedHosts: current?.deniedHosts ?? [],
+              sessionHosts: current?.sessionHosts ?? [],
+              sendCapable: current?.sendCapable ?? false,
             };
             approvals.set(id, next);
             return next;
+          },
+          allowSkillNetworkHost: async ({ id, host }: { id: string; host: string }) => {
+            approvalCalls.push({ method: 'allow-host', id, hosts: [host] });
+            const current = approvals.get(id);
+            if (current === undefined) throw new Error('no such skill');
+            const next: SkillNetworkApprovalState = {
+              ...current,
+              allowedHosts: [...new Set([...current.allowedHosts, host])].sort(),
+              deniedHosts: current.deniedHosts.filter(candidate => candidate !== host),
+            };
+            approvals.set(id, next);
+            return next;
+          },
+          denySkillNetworkHost: async ({ id, host }: { id: string; host: string }) => {
+            approvalCalls.push({ method: 'deny-host', id, hosts: [host] });
+            const current = approvals.get(id);
+            if (current === undefined) throw new Error('no such skill');
+            const next: SkillNetworkApprovalState = {
+              ...current,
+              deniedHosts: [...new Set([...current.deniedHosts, host])].sort(),
+              allowedHosts: current.allowedHosts.filter(candidate => candidate !== host),
+            };
+            approvals.set(id, next);
+            return next;
+          },
+          clearSkillNetworkAllowedHost: async ({ id, host }: { id: string; host: string }) => {
+            approvalCalls.push({ method: 'clear-allowed-host', id, hosts: [host] });
+            const current = approvals.get(id);
+            if (current !== undefined) {
+              approvals.set(id, {
+                ...current,
+                allowedHosts: current.allowedHosts.filter(candidate => candidate !== host),
+              });
+            }
+          },
+          clearSkillNetworkDeniedHost: async ({ id, host }: { id: string; host: string }) => {
+            approvalCalls.push({ method: 'clear-denied-host', id, hosts: [host] });
+            const current = approvals.get(id);
+            if (current !== undefined) {
+              approvals.set(id, {
+                ...current,
+                deniedHosts: current.deniedHosts.filter(candidate => candidate !== host),
+              });
+            }
           },
           revokeSkillNetwork: async ({ id }: { id: string }) => {
             approvalCalls.push({ method: 'revoke', id });
@@ -334,6 +389,9 @@ describe('SkillSettings network approval', () => {
   const tenXApproval: SkillNetworkApprovalState = {
     declaredHosts: ['github.com', 'api.github.com'],
     approvedHosts: null,
+    allowedHosts: [],
+    deniedHosts: [],
+    sessionHosts: [],
     sendCapable: false,
   };
 
@@ -387,11 +445,65 @@ describe('SkillSettings network approval', () => {
     expect(host.approvalCalls).toEqual([{ method: 'revoke', id: 'ten-x' }]);
   });
 
+  it('shows the per-site decisions and clears them one by one', async () => {
+    const host = createFakeHost([tenX], {
+      networkApprovals: {
+        'ten-x': {
+          ...tenXApproval,
+          approvedHosts: ['github.com', 'api.github.com'],
+          allowedHosts: ['uploads.github.com'],
+          deniedHosts: ['trackers.example.com'],
+          sessionHosts: ['once.example.com'],
+        },
+      },
+    });
+    const { wrapper: Wrapper } = host;
+
+    render(
+      <Wrapper>
+        <SkillSettings />
+      </Wrapper>,
+    );
+
+    expect(await screen.findByText('Also allowed, one by one:')).toBeTruthy();
+    expect(screen.getByText('uploads.github.com')).toBeTruthy();
+    expect(screen.getByText('Turned down, so no card asks about them:')).toBeTruthy();
+    expect(screen.getByText('trackers.example.com')).toBeTruthy();
+    expect(screen.getByText('Allowed once in a chat that is still open:')).toBeTruthy();
+    expect(screen.getByText('once.example.com')).toBeTruthy();
+
+    const clearButtons = screen.getAllByRole('button', { name: 'Clear' });
+    expect(clearButtons).toHaveLength(2);
+    const [firstClear] = clearButtons;
+    if (firstClear === undefined) throw new Error('Expected a Clear button for the allowed site');
+    fireEvent.click(firstClear);
+    await waitFor(() => {
+      expect(screen.queryByText('uploads.github.com')).toBeNull();
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
+    await waitFor(() => {
+      expect(screen.queryByText('trackers.example.com')).toBeNull();
+    });
+    expect(host.approvalCalls).toEqual([
+      { method: 'clear-allowed-host', id: 'ten-x', hosts: ['uploads.github.com'] },
+      { method: 'clear-denied-host', id: 'ten-x', hosts: ['trackers.example.com'] },
+    ]);
+    // The session-only site has no clear button: it ends with its chat.
+    expect(screen.getByText('once.example.com')).toBeTruthy();
+  });
+
   it('names the sending when a declared site can send email', async () => {
     const google: DefinedSkill = { id: 'google', name: 'google', description: 'Reads mail and calendar.' };
     const host = createFakeHost([google], {
       networkApprovals: {
-        google: { declaredHosts: ['gmail.googleapis.com'], approvedHosts: null, sendCapable: true },
+        google: {
+          declaredHosts: ['gmail.googleapis.com'],
+          approvedHosts: null,
+          allowedHosts: [],
+          deniedHosts: [],
+          sessionHosts: [],
+          sendCapable: true,
+        },
       },
     });
     const { wrapper: Wrapper } = host;
@@ -411,7 +523,16 @@ describe('SkillSettings network approval', () => {
 
   it('a skill that declares no sites shows no panel', async () => {
     const host = createFakeHost([tenX], {
-      networkApprovals: { 'ten-x': { declaredHosts: [], approvedHosts: null, sendCapable: false } },
+      networkApprovals: {
+        'ten-x': {
+          declaredHosts: [],
+          approvedHosts: null,
+          allowedHosts: [],
+          deniedHosts: [],
+          sessionHosts: [],
+          sendCapable: false,
+        },
+      },
     });
     const { wrapper: Wrapper } = host;
 

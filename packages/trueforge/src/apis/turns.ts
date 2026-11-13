@@ -179,7 +179,7 @@ import {
 import type { DeletedChatUsageReader } from '../runtime/usageSummaryCapability';
 import { packageMirrorTokens } from '../sandbox/mirrors/packageMirrorTokens';
 import { checkSnapshotStatus } from '../sandbox/providerUtils';
-import { resolveSkillNetworkGrant } from '../sandbox/skillnet/skillNetworkGrant';
+import { drainSkillNetworkCards, resolveSkillNetworkGrant } from '../sandbox/skillnet/skillNetworkGrant';
 import { skillNetworkTokens } from '../sandbox/skillnet/skillNetworkTokens';
 import type { MemoryProviderSettings } from '../schemas/mcpServer';
 import { canReadSession } from './agentAccess';
@@ -794,6 +794,22 @@ function createTurnResolver(deps: {
               registry: skillNetworkTokens,
               tenant_id,
               created_by: userRef,
+              session_id: sessionId,
+              skillNames: (spec.skills ?? []).map(skill => skill.name),
+            });
+          },
+          drainSkillNetworkCards: async () => {
+            const currentSession = await sessionStore.getSession({
+              tenant_id,
+              session_id: sessionId,
+            });
+            if (currentSession?.created_by_subject.subject_id !== userRef) {
+              return [];
+            }
+            return drainSkillNetworkCards({
+              store: skillStore,
+              registry: skillNetworkTokens,
+              tenant_id,
               session_id: sessionId,
               skillNames: (spec.skills ?? []).map(skill => skill.name),
             });

@@ -340,5 +340,8 @@
   "Smaller": "packages/trueforge-ui/src/utils/chatFontSizePreference.ts",
   "Default": "packages/trueforge-ui/src/utils/chatFontSizePreference.ts",
   "Larger": "packages/trueforge-ui/src/utils/chatFontSizePreference.ts",
-  "Largest": "packages/trueforge-ui/src/utils/chatFontSizePreference.ts"
+  "Largest": "packages/trueforge-ui/src/utils/chatFontSizePreference.ts",
+  "Allow once": "packages/trueforge-ui/src/sentinel/approvalChoices.ts",
+  "Always allow for this skill": "packages/trueforge-ui/src/sentinel/approvalChoices.ts",
+  "Clear": "packages/trueforge-ui/src/containers/SettingsBuilder/SkillSettings.tsx"
 }

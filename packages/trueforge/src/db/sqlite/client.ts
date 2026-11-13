@@ -147,6 +147,8 @@ const JSON_RESULT_COLUMNS = new Set([
   'event',
   'manifest',
   'network_approval',
+  'network_allowed_hosts',
+  'network_denied_hosts',
   'metadata',
   'build_metadata',
   'oauth_server',
