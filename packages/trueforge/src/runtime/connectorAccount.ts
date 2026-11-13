@@ -46,7 +46,7 @@ export interface ConnectorAccountState<TAccount> {
 export interface ConnectorAccountClientDeps {
   /** The account agent's base address from configuration; undefined means the card is not offered. */
   accountUrl: string | undefined;
-  /** What the agent needs before it answers, when it needs one; the Email agent needs none. */
+  /** The account secret the agent needs before it answers; undefined when none is set, and the agent then stays closed. */
   secret?: string | undefined;
   /** Replaceable so tests never reach a real sidecar. */
   fetchImpl: typeof fetch | undefined;

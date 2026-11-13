@@ -49,6 +49,8 @@ export interface TrackedExecutableStore {
   untrack(input: { scope: TrackedExecutableScope; file_identity: string }): void;
   /** True when the file identity is in the tracked set for the scope. */
   isTracked(input: { scope: TrackedExecutableScope; file_identity: string }): boolean;
+  /** True when any tracked file for the scope lies inside the folder, by identity. */
+  tracksWithin(input: { scope: TrackedExecutableScope; folder_identity: string }): boolean;
   /**
    * Record an approved (content_hash, argv_hash) pair as a payload-bearing
    * grant keyed by (conversation_id, file_identity). Byte-identical
@@ -82,6 +84,16 @@ export class InMemoryTrackedExecutableStore implements TrackedExecutableStore {
 
   isTracked(input: { scope: TrackedExecutableScope; file_identity: string }): boolean {
     return this.entries.get(scopeKey(input.scope))?.has(input.file_identity) ?? false;
+  }
+
+  tracksWithin(input: { scope: TrackedExecutableScope; folder_identity: string }): boolean {
+    const prefix = `${input.folder_identity.replace(/\/+$/u, '')}/`;
+    for (const identity of this.entries.get(scopeKey(input.scope)) ?? []) {
+      if (identity.startsWith(prefix)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   recordGrant(input: TrackApprovalGrantInput): void {

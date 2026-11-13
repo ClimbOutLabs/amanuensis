@@ -4,6 +4,10 @@ const synthetic = {
   TRUEFORGE_API_KEY: 'synthetic-service-key-0001',
   NEBIUS_API_KEY: 'synthetic-nebius-key-0002',
   MEMORY_SCREEN_AUTH_TOKEN: 'synthetic-screen-token-0003',
+  MAIL_EMAIL_ACCOUNT_SECRET: undefined,
+  CALENDAR_ACCOUNT_SECRET: undefined,
+  BROWSER_SECRET: undefined,
+  TAVILY_API_KEY: undefined,
   SPEECH_SECRET: undefined,
 };
 
@@ -17,6 +21,27 @@ describe('getConfiguredSecretValues', () => {
         SPEECH_SECRET: 'synthetic-speech-secret-0012',
       }),
     ).toContain('synthetic-speech-secret-0012');
+  });
+
+  it('lists the connector account secrets, the browser secret and the search key', () => {
+    expect(
+      getConfiguredSecretValues({
+        STANDALONE: true,
+        ...synthetic,
+        OIDC: undefined,
+        MAIL_EMAIL_ACCOUNT_SECRET: 'synthetic-mail-secret-0008',
+        CALENDAR_ACCOUNT_SECRET: 'synthetic-calendar-secret-0009',
+        BROWSER_SECRET: 'synthetic-browser-secret-0010',
+        TAVILY_API_KEY: 'synthetic-search-key-0011',
+      }),
+    ).toEqual(
+      expect.arrayContaining([
+        'synthetic-mail-secret-0008',
+        'synthetic-calendar-secret-0009',
+        'synthetic-browser-secret-0010',
+        'synthetic-search-key-0011',
+      ]),
+    );
   });
 
   it('lists the credentials a standalone process holds and skips unset or empty ones', () => {

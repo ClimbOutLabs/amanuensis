@@ -43,7 +43,7 @@ A reminder whose chat was deleted still shows under the bell. It has no **Open c
 
 ## Turn on notices
 
-After you set your first reminder, Aman offers to show notices on this device. Click **Turn on notices**, then allow them when your browser asks. Click **Not now** to skip. Aman offers again with your next reminder.
+After you set your first reminder, Aman offers to show notices on this device. Click **Turn on notices**, then allow them when your browser asks. Click **Not now** to skip. Aman does not offer again on this device.
 
 To change it later:
 
@@ -56,7 +56,7 @@ Each device has its own setting. If the page says notices are not set up on this
 
 Say so when you ask, such as "Remind me at 5 pm to call the pharmacy, it's urgent". An urgent reminder can call you once phone calls are set up and you tick **Call me for reminders I mark urgent** in **Reach me**.
 
-## See or cancel reminders
+## See, delete or cancel reminders
 
 === "Computer"
 
@@ -67,10 +67,10 @@ Say so when you ask, such as "Remind me at 5 pm to call the pharmacy, it's urgen
     ![The Reminders page, with a reminder coming up in 7 days and an Open chat link](../../../../docs/screenshots/app/reminders-page-phone.png)
 
 1. Click **Reminders** in the left panel. It lists what is coming up and what has already reminded you, with the persona that set each one. Each reminder shows its day, how far off it is, such as "In 3 weeks", and whether it repeats or is paused. Click a reminder that says **Open chat** to go to the chat you set it in. A reminder says **No chat to open** when its chat was deleted, or when it was set before Aman kept track of the chat. Or, in any chat, ask "What reminders do I have?"
-2. To cancel one, ask, such as "Cancel the pharmacy reminder".
-3. A card shows the reminder. Click **Allow** to cancel it, or **Not now** to keep it.
+2. To delete one on that page, click the bin at the end of its row. A box asks you to confirm. Click **Delete** to remove it, or **Cancel** to keep it.
+3. Or ask in a chat, such as "Cancel the pharmacy reminder". A card shows the reminder. Click **Allow** to cancel it, or **Not now** to keep it.
 
-A canceled reminder is gone for good.
+A deleted or canceled reminder is gone for good. A repeating one will not remind you again.
 
 ## Good to know
 

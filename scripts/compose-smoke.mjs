@@ -1,4 +1,4 @@
-// Runs `docker compose` for the smoke stack with random calendar, browser and speech secrets, so the checked-in
+// Runs `docker compose` for the smoke stack with random account, browser and speech secrets, so the checked-in
 // compose file needs no fixed default. A value already in the environment is kept, so a stack started by hand can
 // be stopped the same way.
 import { spawn } from 'node:child_process';
@@ -6,7 +6,12 @@ import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 /** The shared secrets the compose file requires and has no default for. */
-export const SMOKE_SECRETS = ['CALENDAR_ACCOUNT_SECRET', 'BROWSER_SECRET', 'SPEECH_SECRET'];
+export const SMOKE_SECRETS = [
+  'CALENDAR_ACCOUNT_SECRET',
+  'MAIL_EMAIL_ACCOUNT_SECRET',
+  'BROWSER_SECRET',
+  'SPEECH_SECRET',
+];
 
 /** The environment for a compose call: the caller's own, plus a random value for each secret that is not set. */
 export function smokeComposeEnv({ env, secret = () => randomBytes(32).toString('hex') }) {

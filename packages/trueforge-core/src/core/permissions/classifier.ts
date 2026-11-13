@@ -19,7 +19,7 @@ import type { CalendarWriteReview } from '../calendar/eventWrite';
 import { CALENDAR_SERVER_ID, isCalendarReadToolName, isCalendarWriteToolName } from '../calendar/toolContract';
 import { DRIVE_SERVER_ID, isDriveReadToolName, isDriveWriteToolName } from '../drive/toolContract';
 import type { DriveWriteReview } from '../drive/writeReview';
-import type { ReviewableDraft } from '../email/gmail/draftReview';
+import { checkCodeOf, hashDraft, type ReviewableDraft } from '../email/gmail/draftReview';
 import type { AnsweredMessage } from '../email/gmail/replyThread';
 import {
   GMAIL_SERVER_ID,
@@ -1180,6 +1180,56 @@ function runCodeCardText(params: Record<string, unknown>, ctx: ClassifyContext):
     return null;
   }
   return scriptFileText({ file: identity, resolution: ctx.path_resolution });
+}
+
+/**
+ * A script that ships with a skill the person turned on runs without a card while the sandbox cannot reach a
+ * network. It still asks when the sandbox can reach one, and when Aman changed a file in that skill's folder
+ * in this chat, since the script is then no longer only the skill's own.
+ */
+async function classifySkillScript(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
+  const skill = stringParam(action.canonical_params, 'skill') ?? '';
+  const script = stringParam(action.canonical_params, 'script') ?? '';
+  const folder = stringParam(action.canonical_params, 'skill_folder');
+  const args = action.canonical_params['args'];
+  const argText = Array.isArray(args) ? args.filter(arg => typeof arg === 'string').join(' ') : '';
+  const shown = argText === '' ? script : `${script} ${argText}`;
+  const folderIdentity =
+    folder === null ? null : canonicalFileIdentity({ p: folder, cwd: folder, resolution: ctx.path_resolution });
+  const changedByAman =
+    folderIdentity === null ||
+    ctx.services.tracked_store.tracksWithin({ scope: workspaceScope(ctx), folder_identity: folderIdentity });
+  if (ctx.sandbox_network === 'none' && !changedByAman) {
+    return tier1Decision({
+      reason: SANDBOX_COMMAND_REASON,
+      reason_detail: `Ran a script from the ${escapeDisplayText(skill)} skill in the sandbox: ${escapeDisplayText(shown)}`,
+      sensitive_read: false,
+    });
+  }
+  const plainWhat = `Run a script from the ${skill} skill?`;
+  const askReason = changedByAman
+    ? "Aman changed a file in this skill's folder in this chat."
+    : 'The sandbox can reach the internet.';
+  return tier3Decision({
+    card: {
+      plain_what: plainWhat,
+      copy: sandboxCardCopy({ headline: plainWhat, undo: "Once this runs, it can't be undone.", reason: askReason }),
+      plain_why: plainWhy(ctx.agent_intent),
+      cannot_be_undone: "Once this runs, it can't be undone.",
+      why_asked_again: null,
+      destination: null,
+      recipient: null,
+      amount: null,
+      parsed_command: shown,
+      outbound_text: null,
+      destination_host: null,
+      outbound_truncated: false,
+    },
+    reason: 'arbitrary_code_execution',
+    reason_detail: askReason,
+    sensitive_read: false,
+    approval_token_id: await mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params }),
+  });
 }
 
 async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
@@ -2372,6 +2422,18 @@ function escapedMailbox(mailbox: Tier3Mailbox): Tier3Mailbox {
   return { name: escapeDisplayText(mailbox.name), address: escapeDisplayText(mailbox.address) };
 }
 
+/** The message as a card shows it. The send receipt shows this same text, so both read it from here. */
+export function messageForDisplay(content: ReviewableDraft) {
+  return {
+    to: content.to.map(escapedMailbox),
+    cc: content.cc.map(escapedMailbox),
+    bcc: content.bcc.map(escapedMailbox),
+    subject: escapeDisplayText(content.subject),
+    body: escapeDisplayText(content.body, { keepNewlines: true }),
+    reply_to: content.replyTo === null ? null : escapeDisplayText(content.replyTo),
+  };
+}
+
 function cardText(text: string): string {
   const chars = Array.from(escapeDisplayText(text));
   return chars.length > GMAIL_CARD_SUBJECT_MAX_CHARS
@@ -2429,14 +2491,10 @@ function gmailWriteCard(input: { action: SentinelAction; agent_intent: string | 
     (content.nameLeftOff || replaces?.nameLeftOff === true ? NAME_LEFT_OFF_LINE : '');
   const email: Tier3Email = {
     action: kind,
-    to: content.to.map(escapedMailbox),
-    cc: content.cc.map(escapedMailbox),
-    bcc: content.bcc.map(escapedMailbox),
-    subject: escapeDisplayText(content.subject),
-    body: escapeDisplayText(content.body, { keepNewlines: true }),
-    reply_to: content.replyTo === null ? null : escapeDisplayText(content.replyTo),
+    ...messageForDisplay(content),
     from_name: content.fromName === '' ? null : escapeDisplayText(content.fromName),
     name_left_off: content.nameLeftOff || replaces?.nameLeftOff === true,
+    check_code: kind === 'send' ? checkCodeOf(hashDraft(content)) : null,
     replaces:
       replaces === undefined
         ? null
@@ -4236,6 +4294,9 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
       (name === 'run_workflow' && isRunnerWorkflow(action.canonical_params['workflow']))
     ) {
       return classifyRunnerTool(action, ctx);
+    }
+    if (name === 'run_skill_script') {
+      return await classifySkillScript(action, ctx);
     }
     if (name === 'run_code' && (await sandboxWorkRunsSilently(ctx))) {
       const silentRun = await runCodePlacement({ params: action.canonical_params, ctx });
