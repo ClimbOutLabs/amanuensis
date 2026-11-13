@@ -32,8 +32,8 @@ const SCHEDULE_SCAN_LIMIT = 200;
 
 /**
  * The reminders due today or overdue, and how many schedules are on. A reminder is due when
- * its pending run falls at or before the end of the person's local day, so one that fired
- * earlier and one still to come tonight both show.
+ * its pending run falls at or before the end of the person's local day. Once it goes off it
+ * has no pending run, so it leaves this list and the bell carries it instead.
  */
 async function readDueAndCarrying(
   deps: TodayRouterDeps,

@@ -347,5 +347,9 @@
   "Run settings": "packages/trueforge-ui/src/atoms/draft/AgentConfigPanel.tsx",
   "When to summarize long chats": "packages/trueforge-ui/src/atoms/draft/AgentRuntimeConfigFields.tsx",
   "Automatic (recommended)": "packages/trueforge-ui/src/atoms/draft/AgentRuntimeConfigFields.tsx",
-  "At a set size": "packages/trueforge-ui/src/atoms/draft/AgentRuntimeConfigFields.tsx"
+  "At a set size": "packages/trueforge-ui/src/atoms/draft/AgentRuntimeConfigFields.tsx",
+  "Today": "packages/trueforge-ui/src/components/RailDesk.tsx",
+  "Due": "packages/trueforge-ui/src/components/RailDesk.tsx",
+  "Using": "packages/trueforge-ui/src/components/RailDesk.tsx",
+  "Forget everywhere": "packages/trueforge-ui/src/components/RailDesk.tsx"
 }

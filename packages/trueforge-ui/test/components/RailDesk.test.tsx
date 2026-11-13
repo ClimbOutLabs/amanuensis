@@ -165,6 +165,12 @@ describe('the rail desk on Home', () => {
     expect(screen.getByText(/^Tomorrow, /)).toBeInTheDocument();
   });
 
+  it('writes the free time in the same small type as the rows around it', async () => {
+    render(<AmanRuntimeRail status="ready" deskApi={deskApi(TODAY)} />);
+    const free = await screen.findByText(/^Free /);
+    expect(free).toHaveClass('aman-runtime-rail__desk-note');
+  });
+
   it('says when more actions are waiting than the list shows', async () => {
     render(<AmanRuntimeRail status="ready" deskApi={deskApi({ ...TODAY, needs_ok_more: true })} />);
     expect(await screen.findByText('More are waiting in your chats.')).toBeInTheDocument();

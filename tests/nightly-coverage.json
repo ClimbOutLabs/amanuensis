@@ -490,7 +490,8 @@
       "tests": [
         "packages/frontend/tests/homeAndMenu.browser.test.ts",
         "packages/frontend/tests/homeColumn.browser.test.ts",
-        "packages/frontend/tests/homeCards.browser.test.ts"
+        "packages/frontend/tests/homeCards.browser.test.ts",
+        "packages/frontend/tests/homeRailPhone.browser.test.ts"
       ]
     },
     "screen:memory-sharing": {

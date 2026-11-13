@@ -240,7 +240,7 @@ export const RailHomeDesk: FC<{
       {today.calendar !== null && (
         <DeskSection title="Today">
           {today.calendar.length === 0 ? (
-            <p className="aman-runtime-rail__row-text">Nothing on the calendar.</p>
+            <p className="aman-runtime-rail__desk-note">Nothing on the calendar.</p>
           ) : (
             <ul className="aman-runtime-rail__desk-list">
               {today.calendar.map(event => {
@@ -278,7 +278,7 @@ export const RailHomeDesk: FC<{
             </ul>
           )}
           {today.free_after !== null && (
-            <p className="aman-runtime-rail__row-text">
+            <p className="aman-runtime-rail__desk-note">
               {freeNow ? 'Free for the rest of the day.' : `Free after ${formatClock(today.free_after, timeZone)}.`}
             </p>
           )}
@@ -346,7 +346,7 @@ export const RailHomeDesk: FC<{
               </li>
             ))}
           </ul>
-          {today.needs_ok_more && <p className="aman-runtime-rail__row-text">More are waiting in your chats.</p>}
+          {today.needs_ok_more && <p className="aman-runtime-rail__desk-note">More are waiting in your chats.</p>}
         </DeskSection>
       )}
     </>
