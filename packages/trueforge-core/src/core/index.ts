@@ -454,6 +454,7 @@ export type { HostToolCallPolicy, HostToolCallPolicyBlock, HostToolCallPolicyCal
 export {
   callResultSource,
   callReturnsOutsideContent,
+  contextCalledMemoryPagesWriter,
   contextHasOutsideToolResult,
   personTypedText,
   turnReadOutsideText,

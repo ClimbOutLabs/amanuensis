@@ -2459,6 +2459,13 @@ describe('extractPreviousExchange origin', () => {
     expect(extractPreviousExchange(exchangeWithTool('record_finding'))?.origin).toBe('user_stated');
   });
 
+  it('says the chat wrote to the pages when a page tool that changes a page was called', () => {
+    expect(extractPreviousExchange(exchangeWithTool('remember_fact'))?.chatWrotePages).toBe(true);
+    expect(extractPreviousExchange(exchangeWithTool('update_fact'))?.chatWrotePages).toBe(true);
+    expect(extractPreviousExchange(exchangeWithTool('read_page'))?.chatWrotePages).toBe(false);
+    expect(extractPreviousExchange(exchangeWithTool('record_finding'))?.chatWrotePages).toBe(false);
+  });
+
   it('marks the exchange as read content when a connector tool named like a task tool ran', () => {
     expect(extractPreviousExchange(exchangeWithTool('record_finding', 'notes'))?.origin).toBe('tool_ingested');
     expect(extractPreviousExchange(exchangeWithTool('replace_task_checklist', 'notes'))?.origin).toBe('tool_ingested');

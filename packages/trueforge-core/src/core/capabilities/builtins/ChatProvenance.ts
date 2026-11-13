@@ -6,7 +6,7 @@ import {
   type RawToolCall,
 } from '../../llm/LLMTypes';
 import { parseToolCallArguments } from '../../mcp/toolArgumentCheck';
-import { isMemoryPagesToolName } from '../../memory/pagesToolContract';
+import { isMemoryPagesToolName, isMemoryPagesWriteToolName } from '../../memory/pagesToolContract';
 import { collectOutboundStrings } from '../../permissions/outboundGuard';
 import type { ReadSource } from '../../permissions/provenance';
 import { recordPersonText, recordReplyText, recordUntrustedText } from '../../permissions/provenance';
@@ -117,6 +117,19 @@ export function contextHasOutsideToolResult(messages: readonly ContextMessage[])
     }
     return message.role === 'tool' && (outside.get(message.tool_call_id) ?? true);
   });
+}
+
+/**
+ * Whether the assistant called a tool named like one of the memory page tools that change a page. Whether the
+ * call worked cannot be read back from the chat, so any such call counts.
+ */
+export function contextCalledMemoryPagesWriter(messages: readonly ContextMessage[]): boolean {
+  return messages.some(
+    message =>
+      isLLMContextMessage(message) &&
+      message.role === 'assistant' &&
+      (message.tool_calls ?? []).some(call => isMemoryPagesWriteToolName(calledTool(call).tool_name)),
+  );
 }
 
 /** Whether a user message carries anything but typed words: a file, an image, or text extracted from a file. */

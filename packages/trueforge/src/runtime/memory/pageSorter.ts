@@ -148,7 +148,7 @@ async function applyPlanned({
     pages.set(`${entry.kind}/${entry.slug}`, entry);
   };
 
-  for (const { decision, kind, target } of planned) {
+  for (const { decision, kind, target, guessed } of planned) {
     switch (decision.decision) {
       case 'ignore':
         break;
@@ -225,7 +225,7 @@ async function applyPlanned({
                   fact: statementWith({
                     text: decision.text,
                     id: uniqueFactId({ page: held.page, newId }),
-                    src,
+                    src: guessed ? 'inferred' : src,
                     seen: decision.seen,
                   }),
                 }),
@@ -338,9 +338,11 @@ export async function sortNote({
   const ruled = ruleDecisions({
     decisions: parsed.data.decisions,
     origin,
+    noteText: note.text,
     day: note.day,
     shown: prompt.shown,
     known: prompt.known,
+    words: prompt.words,
   });
   if (!ruled.ok) {
     return stop({ status: 'refused', reason: ruled.reason, cause: 'reply_broke_rule' });

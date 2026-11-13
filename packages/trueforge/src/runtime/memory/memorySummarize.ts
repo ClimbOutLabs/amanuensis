@@ -556,6 +556,31 @@ export function isPersonsOwnStatement({
   return matched > 0 && unsaid <= OWN_STATEMENT_MAX_UNSAID_WORDS;
 }
 
+/**
+ * Whether a statement holds a content word that is found in text the person did not write and nowhere in their
+ * own words. Such a word can only have come from what was read, so the statement is not theirs however much of
+ * the rest is. A word of theirs must match exactly; a read word also matches by its start, so a changed ending
+ * does not hide it.
+ */
+export function holdsWordOnlyRead({
+  text,
+  ownText,
+  readText,
+}: {
+  text: string;
+  ownText: string;
+  readText: string;
+}): boolean {
+  const own = new Set(wordsOf(foldText(ownText)).map(stem));
+  const read = wordsOf(foldText(readText)).map(stem);
+  const isContent = (word: string): boolean =>
+    !FACT_STOPWORDS.has(word) && (word.length >= 3 || SINGLE_CHARACTER_WORD.test(word) || /^\d+$/.test(word));
+  return wordsOf(foldText(text))
+    .map(stem)
+    .filter(isContent)
+    .some(word => !own.has(word) && read.some(candidate => sameWord({ a: word, b: candidate })));
+}
+
 /** Drops a plural "s" so "wants" meets "want". */
 function stem(word: string): string {
   return word.length > 3 && word.endsWith('s') ? word.slice(0, -1) : word;

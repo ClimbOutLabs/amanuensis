@@ -6,7 +6,7 @@
 import { loadAliasIndex, matchAliases } from './aliasIndex';
 import { hashEntryText } from './embeddingStore';
 import type { FactSource } from './memoryNotes';
-import { singleLine } from './memoryPageLoader';
+import { pageNameIsOwn, singleLine } from './memoryPageLoader';
 import {
   listMemoryPages,
   pageSummary,
@@ -52,6 +52,25 @@ export interface SortPrompt {
   known: PageListing[];
   /** What the prompt left out, in plain words; empty when nothing was cut. */
   cut: string[];
+  /** Every page name and statement the prompt showed, split by whose words it is. The note itself is not in it. */
+  words: ShownWords;
+}
+
+/**
+ * What the model was shown besides the note. `own` is the person's: their confirmed statements, and the name and
+ * summary of a page whose name counts as theirs. `read` is everything else, which was read or guessed.
+ */
+export interface ShownWords {
+  own: string[];
+  read: string[];
+}
+
+/** Sources whose words are the person's own. */
+export const OWN_STATEMENT_SOURCES: ReadonlySet<ShownStatement['src']> = new Set(['you_said', 'you_edited', 'typed']);
+
+/** Whether a shown statement is the person's own confirmed words. A line under Unconfirmed never is. */
+function isOwnStatement(statement: ShownStatement): boolean {
+  return OWN_STATEMENT_SOURCES.has(statement.src) && statement.section !== 'Unconfirmed';
 }
 
 const SOURCE_WORDS: Readonly<Record<ShownStatement['src'], string>> = {
@@ -215,6 +234,11 @@ export async function buildSortPrompt({
   if (boundedNote.cut) {
     cut.push('the middle of the note');
   }
+  const words: ShownWords = { own: [], read: [] };
+  // A page's slug and name are the person's only when the page holds a line of theirs; a model chose the others.
+  const namesShown = ({ listing, page }: { listing: PageListing; page: MemoryPage }) => {
+    (pageNameIsOwn(page) ? words.own : words.read).push(listing.slug.replaceAll('-', ' '), page.frontMatter.title);
+  };
   const shown: ShownPage[] = [];
   const blocks: string[] = [];
   let used = 0;
@@ -237,6 +261,10 @@ export async function buildSortPrompt({
     used += block.length;
     shown.push(entry);
     blocks.push(block);
+    namesShown({ listing, page });
+    for (const statement of entry.statements) {
+      (isOwnStatement(statement) ? words.own : words.read).push(statement.text);
+    }
   }
   if (leftOut.length > 0) {
     cut.push(`the pages ${leftOut.join(', ')}`);
@@ -255,6 +283,9 @@ export async function buildSortPrompt({
     }
     listChars += line.length;
     listed.push(line);
+    namesShown({ listing, page });
+    // The summary a list line shows is only ever a line of the person's own.
+    words.own.push(pageSummary(page) ?? '');
   }
   const unlisted = pages.size - listed.length;
   if (unlisted > 0) {
@@ -282,5 +313,6 @@ export async function buildSortPrompt({
     shown,
     known,
     cut,
+    words,
   };
 }

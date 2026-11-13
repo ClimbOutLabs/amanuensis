@@ -24,6 +24,7 @@ import type {
   ReadSource,
 } from '@truefoundry/trueforge-core/core';
 import {
+  contextCalledMemoryPagesWriter,
   contextHasOutsideToolResult,
   HOST_SUMMARY_PREFACE,
   InternalEventType,
@@ -430,7 +431,7 @@ function detectCompactionMarker(context: readonly ContextMessage[]): string | un
  */
 export function extractPreviousExchange(
   context: readonly ContextMessage[],
-): { userText: string; assistantText: string; origin: AmanMemoryOrigin } | undefined {
+): { userText: string; assistantText: string; origin: AmanMemoryOrigin; chatWrotePages: boolean } | undefined {
   let lastUserIndex = -1;
   for (let i = context.length - 1; i >= 0; i -= 1) {
     const message = context[i];
@@ -482,7 +483,13 @@ export function extractPreviousExchange(
       message =>
         hasRole(message) && message.role === 'user' && textParts(message.content).some(isUntrustedDocumentText),
     );
-  return { userText, assistantText, origin: readUntrusted ? 'tool_ingested' : USER_STATED_ORIGIN };
+  return {
+    userText,
+    assistantText,
+    origin: readUntrusted ? 'tool_ingested' : USER_STATED_ORIGIN,
+    // The chat may have put this message on the pages itself, so its note must not be sorted onto them again.
+    chatWrotePages: contextCalledMemoryPagesWriter(between),
+  };
 }
 
 function estimateTokens(text: string): number {
@@ -1816,6 +1823,7 @@ export class MemoryProcessor implements PreLLMProcessor, PreLLMEphemeralAgentCon
       assistantText: exchange.assistantText,
       completedAt: new Date().toISOString(),
       origin: exchange.origin,
+      chatWrotePages: exchange.chatWrotePages,
       logger: this.logger,
     });
     this.pending = capPending([

@@ -1009,7 +1009,7 @@ export const MAYA_STORY: readonly StoryLine[] = [
   said({
     at: [41, 1],
     text: "Maya paid Sam Rossi's invoice of 640.",
-    then: [fresh({ page: 'samRossi', text: 'His invoice of 640 for the pipe work is paid.' })],
+    then: [fresh({ page: 'samRossi', text: 'His invoice of 640 is paid.' })],
   }),
   sent({
     at: [41, 2],

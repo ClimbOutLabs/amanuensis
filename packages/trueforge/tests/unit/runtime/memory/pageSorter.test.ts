@@ -535,6 +535,170 @@ describe('a reply that cannot be trusted', () => {
   });
 });
 
+const CAR = `---
+kind: matter
+title: My car
+aliases: [car]
+status: active
+---
+# My car
+
+## Now
+- The car needs new tires. <!-- fact: id=f_c1 src=you_said since=2026-11-01 -->
+
+## Unconfirmed
+- The car is a Subaru Outback. <!-- fact: id=f_c2 src=read_content seen=2026-11-02 -->
+`;
+
+describe('words that were only read never reach a line marked as the person’s', () => {
+  async function carVault(): Promise<string> {
+    const vaultDir = await makeVault();
+    await writePageFile({ vaultDir, kind: 'matter', slug: 'my-car', content: CAR });
+    return vaultDir;
+  }
+
+  const changedTo = (newText: string) =>
+    modelReplying({
+      decisions: [
+        {
+          decision: 'changed',
+          about: 'my-car',
+          statement_id: 'f_c1',
+          new_text: newText,
+          until_old: DAY,
+          since_new: DAY,
+          reason,
+        },
+      ],
+    });
+
+  it('leaves the person’s line alone and keeps a change that borrows a read word as Aman’s guess', async () => {
+    const vaultDir = await carVault();
+    const result = await sortWith({
+      vaultDir,
+      model: changedTo('The Subaru needs new tires before winter.'),
+      noteToSort: note({ text: 'The car needs new tires before winter.' }),
+    });
+
+    expect(result).toMatchObject({ status: 'sorted', decisions: [{ decision: 'unconfirmed' }] });
+    const page = await read(vaultDir, 'matter', 'my-car');
+    expect(page).toContain('- The car needs new tires. <!-- fact: id=f_c1 src=you_said since=2026-11-01 -->');
+    expect(page).toContain(
+      `- The Subaru needs new tires before winter. <!-- fact: id=f_s1 src=inferred seen=${DAY} -->`,
+    );
+    expect(page).not.toMatch(/Subaru[^\n]*src=you_(said|edited)/);
+    expect(page.indexOf('## Unconfirmed')).toBeLessThan(page.indexOf('The Subaru needs'));
+  });
+
+  it('still changes the line when the new wording holds only the person’s words', async () => {
+    const vaultDir = await carVault();
+    await sortWith({
+      vaultDir,
+      model: changedTo('The car needs new tires before winter.'),
+      noteToSort: note({ text: 'The car needs new tires before winter.' }),
+    });
+
+    const page = await read(vaultDir, 'matter', 'my-car');
+    expect(page).toContain(`- The car needs new tires before winter. <!-- fact: id=f_s1 src=you_said since=${DAY} -->`);
+    expect(page).toContain(
+      `- The car needs new tires. <!-- fact: id=f_c1 src=you_said since=2026-11-01 until=${DAY} -->`,
+    );
+  });
+
+  it('keeps a word that the person’s own note also holds', async () => {
+    const vaultDir = await carVault();
+    await sortWith({
+      vaultDir,
+      model: changedTo('The Subaru needs new tires.'),
+      noteToSort: note({ text: 'My car, the Subaru, needs new tires.' }),
+    });
+
+    expect(await read(vaultDir, 'matter', 'my-car')).toContain(
+      `- The Subaru needs new tires. <!-- fact: id=f_s1 src=you_said since=${DAY} -->`,
+    );
+  });
+
+  it('writes a new line that borrows a read word as an unconfirmed guess, also with a changed ending', async () => {
+    const vaultDir = await carVault();
+    const result = await sortWith({
+      vaultDir,
+      model: modelReplying({
+        decisions: [
+          {
+            decision: 'new',
+            about: 'my-car',
+            page_kind: 'matter',
+            section: 'Now',
+            text: 'The Subarus get a service in spring.',
+            reason,
+          },
+        ],
+      }),
+      noteToSort: note({ text: 'The car gets a service in spring.' }),
+    });
+
+    expect(result).toMatchObject({ status: 'sorted', decisions: [{ decision: 'unconfirmed' }] });
+    expect(await read(vaultDir, 'matter', 'my-car')).toContain(
+      `- The Subarus get a service in spring. <!-- fact: id=f_s1 src=inferred seen=${DAY} -->`,
+    );
+  });
+
+  it('does not let a read word name a new page', async () => {
+    const vaultDir = await carVault();
+    await sortWith({
+      vaultDir,
+      model: modelReplying({
+        decisions: [
+          {
+            decision: 'new',
+            about: 'garage',
+            page_kind: 'matter',
+            title: 'Subaru garage',
+            section: 'Now',
+            text: 'The garage is on Mill Road.',
+            reason,
+          },
+        ],
+      }),
+      noteToSort: note({ text: 'The car goes to the garage, and the garage is on Mill Road.' }),
+    });
+
+    const page = await read(vaultDir, 'matter', 'garage');
+    expect(page).toContain('title: Garage\n');
+    expect(page).not.toContain('Subaru');
+    expect(page).toContain(`- The garage is on Mill Road. <!-- fact: id=f_s1 src=you_said since=${DAY} -->`);
+  });
+
+  it('counts the name of a page with no line of the person’s as read', async () => {
+    const vaultDir = await makeVault();
+    await writePageFile({
+      vaultDir,
+      kind: 'person',
+      slug: 'zorblax',
+      content: `---\nkind: person\ntitle: Zorblax\naliases: []\nhousehold: false\n---\n# Zorblax\n\n## Unconfirmed\n- Sells vacuum cleaners. <!-- fact: id=f_z1 src=read_content seen=2026-11-02 -->\n`,
+    });
+    await sortWith({
+      vaultDir,
+      model: modelReplying({
+        decisions: [
+          {
+            decision: 'new',
+            about: 'wendy',
+            page_kind: 'person',
+            section: 'Now',
+            text: 'Wendy works at Brightline with Zorblax.',
+            reason,
+          },
+        ],
+      }),
+    });
+
+    expect(await read(vaultDir, 'person', 'wendy')).toContain(
+      `- Wendy works at Brightline with Zorblax. <!-- fact: id=f_s1 src=inferred seen=${DAY} -->`,
+    );
+  });
+});
+
 describe('the modes', () => {
   it('writes no page and no handled line in report mode, and one report line without the note’s text', async () => {
     const vaultDir = await makeVault();

@@ -15,12 +15,18 @@ export const READ_PAGE_TOOL_NAME = 'read_page';
 
 const MEMORY_PAGES_READ_TOOL_NAMES: readonly string[] = [LIST_PAGES_TOOL_NAME, READ_PAGE_TOOL_NAME];
 
-const MEMORY_PAGES_TOOL_NAMES: readonly string[] = [
+const MEMORY_PAGES_WRITE_TOOL_NAMES: readonly string[] = [
   REMEMBER_FACT_TOOL_NAME,
   UPDATE_FACT_TOOL_NAME,
   FORGET_FACT_TOOL_NAME,
-  ...MEMORY_PAGES_READ_TOOL_NAMES,
 ];
+
+const MEMORY_PAGES_TOOL_NAMES: readonly string[] = [...MEMORY_PAGES_WRITE_TOOL_NAMES, ...MEMORY_PAGES_READ_TOOL_NAMES];
+
+/** Whether a name is one of the host's three memory page tools that change a page. */
+export function isMemoryPagesWriteToolName(tool_name: string): boolean {
+  return MEMORY_PAGES_WRITE_TOOL_NAMES.includes(tool_name);
+}
 
 /** Whether a name is one of the host's memory page tools. */
 export function isMemoryPagesToolName(tool_name: string): boolean {
