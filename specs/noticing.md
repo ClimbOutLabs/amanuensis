@@ -2,7 +2,7 @@
 
 **Status:** implemented
 
-**Scope note:** This spec covers what the assistant watches for (mail from people the person marked always important, calendar clashes and travel, bills and deadlines, approvals that wait), how it decides how loudly to say so, and the Reach me settings page. It builds on the delivery feed in [Reaching You](notifications-delivery.md). Text messages and phone calls are separate work: this spec only leaves the place for them.
+**Scope note:** This spec covers what the assistant watches for (mail from people the person marked always important, calendar clashes and travel, bills and deadlines, approvals that wait), how it decides how loudly to say so, and the Reach me settings page. It builds on the delivery feed in [Reaching You](notifications-delivery.md). Text messages are covered in [Text Messages](text-messages.md). Phone calls are separate work: this spec leaves the place for them.
 
 ## Problem
 
@@ -15,7 +15,7 @@ Watchers look for a few kinds of event. Each new event is judged once by the mod
 ## Levels
 
 - **Note**: a quiet item in the bell. No push. This is where most things end up.
-- **Nudge**: a delivery with a push notice to the person's devices.
+- **Nudge**: a delivery with a push notice to the person's devices, and a text when the person has texts on and a confirmed number.
 - **Call**: a phone call. Until phone calls are set up, a call that survives every rule is delivered as a nudge, and the reason says so. The level rules for calls stay in code and are tested, so a phone channel only has to report itself available.
 
 ## Watchers
@@ -81,7 +81,7 @@ Reminders follow the same channels. A reminder is never quieter than a nudge. A 
   - Turned off mid-way: the next pass for that person does nothing.
   - First turned on: with no checkpoint the first mail check looks back only the usual 10 minutes from the moment of that pass, with the date bound as now, so old mail never floods in.
   - Turned on again after a gap: the checkpoint is where it was. Within a day the next pass reads on from it, so mail that came in while off is read then. After more than a day the usual one-day limit applies: older mail is not read, and the one fixed note about mail left unread is raised once.
-- Channels: in the app (always on), push for each device, texts and phone calls. Texts and calls show "not set up yet" and cannot be switched on until they exist.
+- Channels: in the app (always on), push for each device, texts and phone calls. Texts have their own number and code flow when the server has a text provider (see [Text Messages](text-messages.md)); until then, and for calls, they show "not set up" with the one thing to do, and cannot be switched on.
 - Always-important senders, with suggestions found in memories. Nothing is added until the person accepts it.
 - Time zone, daily nudge limit, travel lead time and approval wait.
 - Settings that only matter for calls (which kinds may call, quiet hours, hours between calls, call me for urgent reminders) are hidden until a phone channel is set up, with one line saying they appear then. Saved values are kept.
@@ -92,8 +92,8 @@ Reminders follow the same channels. A reminder is never quieter than a nudge. A 
 - Notes appear in the bell as quiet items. They never push.
 - Every note and nudge is written to Activity with its reason.
 - The assistant's name in any text comes from the person's own choice, never a fixed name.
-- The channel list, levels and rules live in one place, so a phone channel plugs in by reporting itself available and acting on a `call` decision, with no change to the watchers.
-- Settings, events, claims, leases and checkpoints are stored in SQLite and Postgres behind one store interface, and Reach me settings are in data export and import. An import brings texts and calls in switched off.
+- The channel list, levels and rules live in one place, so a phone channel plugs in by reporting itself available and acting on a `call` decision, with no change to the watchers. Texts did exactly that: `reachChannelsFor` reports them available when Twilio is set up, and a text sender joins the delivery layer.
+- Settings, events, claims, leases and checkpoints are stored in SQLite and Postgres behind one store interface, and Reach me settings are in data export and import. An import brings texts and calls in switched off, and the number for texts in unconfirmed.
 - The controller runs the passes by calling an internal route on the server with the service key, so the server alone holds mail, calendar and model access.
 
 ## Scope
@@ -134,5 +134,5 @@ All tests use synthetic data, never a person's real data.
 
 ## Out of Scope
 
-- Text messages and phone calls
+- Phone calls
 - A summary of notes in the morning brief. Notes stay in the bell.

@@ -10,11 +10,13 @@ export const ReachChannelAvailability: core.serialization.ObjectSchema<
 > = core.serialization.object({
     available: core.serialization.boolean(),
     note: core.serialization.string(),
+    problem: core.serialization.string().nullable(),
 });
 
 export declare namespace ReachChannelAvailability {
     export interface Raw {
         available: boolean;
         note: string;
+        problem?: string | null;
     }
 }

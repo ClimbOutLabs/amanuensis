@@ -365,12 +365,12 @@ export type { WorkOnRepoControlsProps } from './containers/WorkOnRepoControls.js
 export { HELP_BUTTON_LABEL, IRIS_HELP_CHOICES } from './help/helpModel.js';
 export type {
   HelpConnectorState,
-  HelpGoogleLoginState,
   HelpHealthCheck,
   HelpHealthItem,
   HelpHealthStatus,
   HelpHostReport,
   HelpHostReportState,
+  HelpSettingsSection,
   HelpSetupStep,
   HelpState,
 } from './help/helpModel.js';
@@ -497,6 +497,7 @@ export {
   readSessionIsCreateAgent,
   sessionIsCreateAgent,
 } from './atoms/lib/sessionCreateAgent.js';
+export { LightDarkToggleButton } from './atoms/LightDarkToggleButton.js';
 export { SelectAgentEmptyState } from './atoms/SelectAgentEmptyState.js';
 export { ShellActionsActionSlot } from './atoms/ShellActionsActionSlot.js';
 export type { ShellActionsActionSlotProps } from './atoms/ShellActionsActionSlot.js';
@@ -768,9 +769,13 @@ export type {
   NoticingKind,
   PushDevice,
   ReachApi,
+  ReachChannelState,
   ReachSender,
   ReachSettings,
   ReachView,
+  TextMode,
+  TextStatus,
+  TextsApi,
 } from './deliveries/types.js';
 export { groupReminders, reminderDetailLine, reminderWhenLine } from './reminders/groupReminders.js';
 export { ReminderListProvider, useOptionalReminderList, useReminderList } from './reminders/ReminderListContext.js';

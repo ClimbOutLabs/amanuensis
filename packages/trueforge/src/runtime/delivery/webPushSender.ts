@@ -171,6 +171,7 @@ export function createWebPushSender({
   }
 
   return {
+    channel: 'web_push',
     async send({ delivery, tenant_id, created_by }) {
       if (delivery.level === 'note') {
         return [];

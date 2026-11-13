@@ -111,6 +111,12 @@ On a computer, a panel on the right shows how Aman is doing.
 
 Click the arrow at the top of the panel to fold it away, and again to bring it back. On a phone, or in a narrow window, the panel is a strip at the bottom with only Aman's name.
 
+## See which chats have new answers
+
+In the list of chats, a dot and a bold title mark a chat with an answer you haven't opened yet. Open the chat and the mark goes away.
+
+Each browser keeps its own marks, so reading a chat on your phone doesn't clear its mark on your laptop.
+
 ## Good to know
 
 - Your chats are kept on your computer. See [Your privacy](privacy.md).

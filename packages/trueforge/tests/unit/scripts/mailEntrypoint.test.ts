@@ -152,7 +152,8 @@ describe('mail-email entrypoint wrapper', () => {
 
   it('restarts the server with the saved account when the account file changes', async () => {
     startWrapper();
-    await eventually(async () => (await readOrEmpty(status)) !== '');
+    // The server records what it was started with once it runs, which can be after the status is written.
+    await eventually(async () => (await readOrEmpty(envLog)).includes('addr:'));
     expect(await readOrEmpty(envLog)).toContain('addr:unset');
     await writeFile(
       accountFile,
@@ -202,7 +203,8 @@ describe('mail-email entrypoint wrapper', () => {
     await writeFile(firstList, LIST_V1);
     await rename(firstList, policy);
     await eventually(async () => (await readOrEmpty(status)) === allowedRecipientsFileHash(LIST_V1));
-    expect(await startCount()).toBeGreaterThanOrEqual(1);
+    // The status is written as soon as the server is launched, which can be before it has run at all.
+    await eventually(async () => (await startCount()) >= 1);
     // Stop through the wrapper's own signal path, so the stand-in server stops with it and
     // no child is left holding this test's output pipe open.
     const exited = new Promise(resolve => child.once('exit', resolve));
@@ -273,13 +275,16 @@ describe('mail-email entrypoint bounded stop', () => {
     await rm(dir, { recursive: true, force: true });
   });
 
-  /** Writes the stand-in server. A stubborn one ignores the stop signal; only a forced stop ends it. */
+  /**
+   * Writes the stand-in server. A stubborn one ignores the stop signal; only a forced stop ends it.
+   * It records its pid only once it ignores the signal, so a recorded pid means it is ready to be stopped.
+   */
   async function writeStub(stubborn: boolean): Promise<void> {
     const bin = join(dir, 'bin');
     await mkdir(bin);
     const holder = await writePortHolder(bin);
     const body = stubborn
-      ? `#!/bin/sh\necho start >> "${starts}"\necho $$ >> "${pidsFile}"\nexec python3 "${holder}" ignore-stop\n`
+      ? `#!/bin/sh\necho start >> "${starts}"\ntrap '' TERM\necho $$ >> "${pidsFile}"\nexec python3 "${holder}" ignore-stop\n`
       : `#!/bin/sh\necho start >> "${starts}"\necho $$ >> "${pidsFile}"\nexec python3 "${holder}"\n`;
     await writeFile(join(bin, 'mcp-email-server'), body);
     await chmod(join(bin, 'mcp-email-server'), 0o755);
@@ -360,13 +365,18 @@ describe('mail-email entrypoint bounded stop', () => {
     await changeList();
     await eventually(async () => (await readOrEmpty(status)) === allowedRecipientsFileHash(LIST_V2), 25_000);
 
-    expect(await startCount()).toBeGreaterThanOrEqual(2);
+    // The status is written as soon as the server is launched, which can be before it has run at all.
+    await eventually(async () => (await startCount()) >= 2);
     expect(isAlive(firstPid)).toBe(false);
+    // The output reaches this test after the status file can, and the start is its last line: once it is
+    // here, every line before it is too.
+    await eventually(async () =>
+      output.includes(`mail server started (send list ${allowedRecipientsFileHash(LIST_V2)}`),
+    );
     // The stop, the forcing, and the start are all in the log, with the hashes that caused them.
     expect(output).toContain('the send list changed');
     expect(output).toContain(allowedRecipientsFileHash(LIST_V1));
     expect(output).toContain('did not stop within 2 seconds; forcing it down');
-    expect(output).toContain(`mail server started (send list ${allowedRecipientsFileHash(LIST_V2)}`);
   }, 40_000);
 
   it('restarts a server that stops on the signal promptly, without forcing it down', async () => {
@@ -378,7 +388,13 @@ describe('mail-email entrypoint bounded stop', () => {
     // Well inside the 30 second grace: a stop that waited out the grace would miss this.
     await eventually(async () => (await readOrEmpty(status)) === allowedRecipientsFileHash(LIST_V2), 15_000);
 
-    expect(await startCount()).toBeGreaterThanOrEqual(2);
+    // The status is written as soon as the server is launched, which can be before it has run at all.
+    await eventually(async () => (await startCount()) >= 2);
+    // The output reaches this test after the status file can, and the start is its last line: once it is
+    // here, every line before it is too.
+    await eventually(async () =>
+      output.includes(`mail server started (send list ${allowedRecipientsFileHash(LIST_V2)}`),
+    );
     expect(output).toContain('the send list changed');
     expect(output).not.toContain('forcing it down');
   }, 30_000);
@@ -393,7 +409,8 @@ describe('mail-email entrypoint bounded stop', () => {
     await changeList();
     await eventually(async () => (await readOrEmpty(status)) === allowedRecipientsFileHash(LIST_V2), 25_000);
 
-    expect(await startCount()).toBeGreaterThanOrEqual(2);
+    // The status is written as soon as the server is launched, which can be before it has run at all.
+    await eventually(async () => (await startCount()) >= 2);
     // An orphaned worker is reaped a moment after it dies, so give that a little time.
     for (const pid of firstPids) {
       await eventually(async () => !isAlive(pid), 3_000);
@@ -410,7 +427,8 @@ describe('mail-email entrypoint bounded stop', () => {
     await changeList();
     await eventually(async () => (await readOrEmpty(status)) === allowedRecipientsFileHash(LIST_V2), 25_000);
 
-    expect(await startCount()).toBeGreaterThanOrEqual(2);
+    // The status is written as soon as the server is launched, which can be before it has run at all.
+    await eventually(async () => (await startCount()) >= 2);
     // An orphaned worker is reaped a moment after it dies, so give that a little time.
     for (const pid of firstPids) {
       await eventually(async () => !isAlive(pid), 3_000);

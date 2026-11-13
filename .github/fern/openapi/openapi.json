@@ -23,6 +23,20 @@
           }
         ]
       },
+      "AddTextWordRequest": {
+        "properties": {
+          "word": {
+            "description": "A name or word Aman may text, in letters only. A web ending or a number word is refused.",
+            "maxLength": 60,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "word"
+        ],
+        "type": "object"
+      },
       "Agent": {
         "additionalProperties": false,
         "properties": {
@@ -2064,6 +2078,20 @@
         ],
         "type": "object"
       },
+      "ConfirmTextCodeRequest": {
+        "properties": {
+          "code": {
+            "description": "The code that was texted.",
+            "maxLength": 12,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "type": "object"
+      },
       "ConfirmVerifyCommandProposalRequest": {
         "additionalProperties": false,
         "properties": {
@@ -2798,6 +2826,10 @@
         "properties": {},
         "type": "object"
       },
+      "DeleteTextNumberResponse": {
+        "properties": {},
+        "type": "object"
+      },
       "DeleteVerifyCommandProposalResponse": {
         "properties": {},
         "type": "object"
@@ -2903,7 +2935,8 @@
       "DeliveryChannel": {
         "enum": [
           "in_app",
-          "web_push"
+          "web_push",
+          "sms"
         ],
         "type": "string"
       },
@@ -4046,6 +4079,17 @@
         ],
         "type": "object"
       },
+      "GetTextStatusResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/TextStatus"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "GetTokenFactoryUsageResponse": {
         "properties": {
           "data": {
@@ -4533,16 +4577,6 @@
         ],
         "type": "object"
       },
-      "HelpGoogleLoginState": {
-        "description": "The built-in Google login: answered, needs connecting again, did not answer, or not set up.",
-        "enum": [
-          "answered",
-          "needs_reconnect",
-          "no_answer",
-          "not_set_up"
-        ],
-        "type": "string"
-      },
       "HelpHealthCheck": {
         "properties": {
           "checked_at": {
@@ -4597,6 +4631,9 @@
               "null"
             ]
           },
+          "settings_section": {
+            "$ref": "#/components/schemas/HelpSettingsSection"
+          },
           "status": {
             "$ref": "#/components/schemas/HelpHealthStatus"
           }
@@ -4606,7 +4643,8 @@
           "name",
           "status",
           "message",
-          "next_step"
+          "next_step",
+          "settings_section"
         ],
         "type": "object"
       },
@@ -4665,6 +4703,19 @@
         ],
         "type": "string"
       },
+      "HelpSettingsSection": {
+        "description": "The Settings section where the next step is done.",
+        "enum": [
+          "models",
+          "connectors",
+          "sandbox",
+          null
+        ],
+        "type": [
+          "string",
+          "null"
+        ]
+      },
       "HelpSetupStep": {
         "properties": {
           "done": {
@@ -4700,14 +4751,11 @@
             ]
           },
           "connectors": {
-            "description": "Each connector, whether it answered, and why not.",
+            "description": "Each connector set up here, the Google login among them, whether it answered, and why not.",
             "items": {
               "$ref": "#/components/schemas/HelpConnectorState"
             },
             "type": "array"
-          },
-          "google_login": {
-            "$ref": "#/components/schemas/HelpGoogleLoginState"
           },
           "sandbox_ready": {
             "description": "Whether the sandbox that reads files and runs code is ready.",
@@ -4724,7 +4772,6 @@
         "required": [
           "setup_steps",
           "connectors",
-          "google_login",
           "sandbox_ready",
           "app_version",
           "build_ref"
@@ -9378,11 +9425,19 @@
           "note": {
             "description": "A plain-words line about the channel, shown beside its switch.",
             "type": "string"
+          },
+          "problem": {
+            "description": "Set when the channel works but has a problem to fix, in plain words with what to do. Null otherwise.",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
           "available",
-          "note"
+          "note",
+          "problem"
         ],
         "type": "object"
       },
@@ -10871,6 +10926,20 @@
         },
         "required": [
           "data"
+        ],
+        "type": "object"
+      },
+      "SendTextCodeRequest": {
+        "properties": {
+          "phone": {
+            "description": "The number to send a code to, with the country code, such as +15550100.",
+            "maxLength": 40,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "phone"
         ],
         "type": "object"
       },
@@ -12403,6 +12472,69 @@
         "required": [
           "type",
           "text"
+        ],
+        "type": "object"
+      },
+      "TextMode": {
+        "description": "Private texts say only the kind of thing. Full texts carry a reminder’s own words.",
+        "enum": [
+          "private",
+          "full"
+        ],
+        "type": "string"
+      },
+      "TextStatus": {
+        "properties": {
+          "code_pending": {
+            "description": "Whether a code was sent and can still be entered.",
+            "type": "boolean"
+          },
+          "confirmed": {
+            "description": "Whether the person proved the number with a code. Nothing is sent before then.",
+            "type": "boolean"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/TextMode"
+          },
+          "opted_out": {
+            "description": "Whether the person replied STOP. They confirm the number again to use texts.",
+            "type": "boolean"
+          },
+          "pending_phone": {
+            "description": "A new number waiting for its code. Texts keep going to the confirmed number until then.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "phone": {
+            "description": "The number the person entered, or null before one is entered.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "private_preview": {
+            "description": "What a Private text says, word for word, for a reminder.",
+            "type": "string"
+          },
+          "words": {
+            "description": "The words the person lets Aman text besides the common words, such as a name.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "phone",
+          "confirmed",
+          "mode",
+          "opted_out",
+          "pending_phone",
+          "code_pending",
+          "private_preview",
+          "words"
         ],
         "type": "object"
       },
@@ -15524,6 +15656,17 @@
         },
         "required": [
           "data"
+        ],
+        "type": "object"
+      },
+      "UpdateTextModeRequest": {
+        "properties": {
+          "mode": {
+            "$ref": "#/components/schemas/TextMode"
+          }
+        },
+        "required": [
+          "mode"
         ],
         "type": "object"
       },
@@ -27641,7 +27784,7 @@
     },
     "/api/v1/user/reach/test": {
       "post": {
-        "description": "Sends the signed-in person a test item on one channel. A channel that is not set up answers 409.",
+        "description": "Sends the signed-in person a test item on one channel. A channel that is not set up answers 409. Test texts are limited to a few an hour.",
         "requestBody": {
           "content": {
             "application/json": {
@@ -27692,6 +27835,26 @@
               }
             },
             "description": "That channel is not set up yet."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Too many test texts this hour, or a day’s limit on texts is reached. The message says how long to wait."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The test text could not be sent."
           }
         },
         "summary": "Try a channel",
@@ -27702,6 +27865,398 @@
           "reach"
         ],
         "x-fern-sdk-method-name": "test_channel"
+      }
+    },
+    "/api/v1/user/reach/texts": {
+      "delete": {
+        "description": "Forgets the number and switches texts off.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteTextNumberResponse"
+                }
+              }
+            },
+            "description": "The number is gone."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          }
+        },
+        "summary": "Remove the number",
+        "tags": [
+          "Deliveries"
+        ],
+        "x-fern-sdk-group-name": [
+          "reach",
+          "texts"
+        ],
+        "x-fern-sdk-method-name": "delete"
+      },
+      "get": {
+        "description": "Reads the signed-in person’s number for texts and whether it is confirmed.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetTextStatusResponse"
+                }
+              }
+            },
+            "description": "The status."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          }
+        },
+        "summary": "Get text number status",
+        "tags": [
+          "Deliveries"
+        ],
+        "x-fern-sdk-group-name": [
+          "reach",
+          "texts"
+        ],
+        "x-fern-sdk-method-name": "get"
+      },
+      "put": {
+        "description": "Chooses Private (only the kind of thing) or Full (a reminder’s own words).",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateTextModeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetTextStatusResponse"
+                }
+              }
+            },
+            "description": "The saved choice."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Texts are not set up on this server, or there is no number yet."
+          }
+        },
+        "summary": "Choose what texts say",
+        "tags": [
+          "Deliveries"
+        ],
+        "x-fern-sdk-group-name": [
+          "reach",
+          "texts"
+        ],
+        "x-fern-sdk-method-name": "update"
+      }
+    },
+    "/api/v1/user/reach/texts/code": {
+      "post": {
+        "description": "Texts a one-time code to a number. Nothing else is sent to a number until it is confirmed.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SendTextCodeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetTextStatusResponse"
+                }
+              }
+            },
+            "description": "The code was sent."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Texts are not set up on this server, or there is no number yet."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Too many codes were sent. Try again later."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The code could not be sent."
+          }
+        },
+        "summary": "Send a confirmation code",
+        "tags": [
+          "Deliveries"
+        ],
+        "x-fern-sdk-group-name": [
+          "reach",
+          "texts"
+        ],
+        "x-fern-sdk-method-name": "send_code"
+      }
+    },
+    "/api/v1/user/reach/texts/confirm": {
+      "post": {
+        "description": "Checks the one-time code. A right code confirms the number. Too many wrong tries void the code.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmTextCodeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetTextStatusResponse"
+                }
+              }
+            },
+            "description": "The number is confirmed."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          }
+        },
+        "summary": "Confirm a number",
+        "tags": [
+          "Deliveries"
+        ],
+        "x-fern-sdk-group-name": [
+          "reach",
+          "texts"
+        ],
+        "x-fern-sdk-method-name": "confirm"
+      }
+    },
+    "/api/v1/user/reach/texts/words": {
+      "post": {
+        "description": "Lets a Full text carry a name or word that is not a common word. Letters only. A web ending or a number word is refused.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddTextWordRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetTextStatusResponse"
+                }
+              }
+            },
+            "description": "The word is added."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The person has as many words as are allowed."
+          }
+        },
+        "summary": "Add a word Aman may text",
+        "tags": [
+          "Deliveries"
+        ],
+        "x-fern-sdk-group-name": [
+          "reach",
+          "texts"
+        ],
+        "x-fern-sdk-method-name": "add_word"
+      }
+    },
+    "/api/v1/user/reach/texts/words/{word}": {
+      "delete": {
+        "description": "Takes a word off the person’s list. A word that is not on it changes nothing.",
+        "parameters": [
+          {
+            "description": "The word to remove.",
+            "in": "path",
+            "name": "word",
+            "required": true,
+            "schema": {
+              "description": "The word to remove.",
+              "maxLength": 60,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetTextStatusResponse"
+                }
+              }
+            },
+            "description": "The status without the word."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          }
+        },
+        "summary": "Remove a word Aman may text",
+        "tags": [
+          "Deliveries"
+        ],
+        "x-fern-sdk-group-name": [
+          "reach",
+          "texts"
+        ],
+        "x-fern-sdk-method-name": "remove_word"
       }
     },
     "/api/v1/user/reminders": {

@@ -403,6 +403,10 @@
       "set": "spaces",
       "tests": []
     },
+    "route:text": {
+      "set": "reach",
+      "tests": []
+    },
     "route:tokenFactoryUsage": {
       "set": "models",
       "tests": []
@@ -807,6 +811,7 @@
     "route:skill",
     "route:space",
     "route:spaceFolder",
+    "route:text",
     "route:tokenFactoryUsage",
     "route:toolOutputScreen",
     "route:voice",

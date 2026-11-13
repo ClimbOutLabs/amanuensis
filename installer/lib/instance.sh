@@ -185,6 +185,23 @@ instance_render() {
       done < <(network_bind_addresses "$origins")
     fi
   fi
+  # Texts through Twilio get a listener of their own beside the app. Its port is published on 127.0.0.1 only, for
+  # Tailscale Funnel or a web server on this computer to carry on to Twilio. The app port is never opened for it.
+  local sms_port sms_env sms_listen
+  sms_port=$(sms_webhook_port "$name" quiet)
+  sms_env="$(instance_dir "$name")/.env"
+  # A port picked for the person is written down, so it stays the same whatever other instances do later.
+  if [ -n "$sms_port" ] && [ "$(sms_port_wanted "$name")" = auto ] && grep -q '^# >>> managed by the installer' "$sms_env"; then
+    env_managed_set "$sms_env" TWILIO_WEBHOOK_PORT "$sms_port"
+  fi
+  # Published onto the port the app listens on, which differs from the pick only when the pick could not be written.
+  sms_listen=$(env_get "$sms_env" TWILIO_WEBHOOK_PORT)
+  sms_listen=${sms_listen:-$TWILIO_DEFAULT_PORT}
+  reg_set "$name" sms_port "$sms_port"
+  reg_set "$name" sms_settings "$(sms_settings_digest "$name")"
+  if [ -n "$sms_port" ]; then
+    app_ports="${app_ports:+$app_ports$'\n'}      - '127.0.0.1:$sms_port:$sms_listen'"
+  fi
   # Only the app reaches the sign-in service when it passes the sign-in pages through; a browser that goes to the
   # published sign-in port directly needs the service on every address of the namespace.
   if [ -n "$origins" ] || [ "$(gateway_flag "$origins" "$public_url")" = 1 ]; then login_bind=127.0.0.1; fi
@@ -241,6 +258,89 @@ instance_render() {
     "ISSUER=$login_url/dex" "LOGIN_BIND=$login_bind" "LOGIN_PORT=$login_port" "DEX_TELEMETRY_PORT=$DEX_TELEMETRY_PORT" \
     "OWNER_EMAIL=$email" "OWNER_NAME=$(reg_get "$name" owner_name)" "CLIENT_ID=$client_id" "REDIRECT_URIS=$redirects" |
     write_if_changed "$dir/dex.yaml" 644 || true
+}
+
+# The app's own default port for the Twilio listener. It sits outside the ranges app, sign-in and https ports are
+# picked from, so a new instance never lands on it.
+TWILIO_DEFAULT_PORT=9201
+
+# The Twilio port the instance's settings file asks for when it turns texts on, `auto` when it turns them on and sets
+# no port, otherwise nothing. A value that is not a port gives nothing, and the app then says so when it starts.
+sms_port_wanted() { # name
+  local env port provider
+  env="$(instance_dir "$1")/.env"
+  [ -f "$env" ] || return 0
+  provider=$(env_get "$env" REACH_SMS_PROVIDER | tr '[:upper:]' '[:lower:]')
+  [ "$provider" = twilio ] || return 0
+  port=$(env_get "$env" TWILIO_WEBHOOK_PORT)
+  if [ -z "$port" ]; then
+    printf auto
+    return 0
+  fi
+  case $port in
+    *[!0-9]*) return 0 ;;
+  esac
+  if [ "${#port}" -le 5 ] && [ "$port" -ge 1 ] && [ "$port" -le 65535 ]; then printf '%s' "$port"; fi
+}
+
+# The ports the instance's Twilio listener must not use: every instance's app, sign-in and https ports, the ones Aman
+# uses inside the instance, the Twilio port each other instance already publishes, and the one each instance earlier
+# by name asks for. A port already published stays with the instance that has it.
+sms_ports_taken() { # name
+  local name=$1 other taken
+  taken="$(reg_all app_port) $(reg_all login_port) $(reg_all tls_port) $TLS_HTTP_IN $TLS_HTTPS_IN"
+  for other in $(reg_names); do
+    [ "$other" = "$name" ] || taken="$taken $(reg_get "$other" sms_port)"
+  done
+  for other in $(reg_names); do
+    [ "$other" = "$name" ] && break
+    taken="$taken $(sms_webhook_port "$other" quiet)"
+  done
+  printf '%s' "$taken"
+}
+
+# The Twilio port to publish for the instance, or nothing. With no port set, the instance keeps the one it has, else
+# gets the default or the next free port. A port the person set that is taken is not published, and the installer
+# says which line to change, unless asked to be quiet.
+sms_webhook_port() { # name [quiet]
+  local name=$1 quiet=${2:-} port taken own env
+  port=$(sms_port_wanted "$name")
+  [ -n "$port" ] || return 0
+  taken=$(sms_ports_taken "$name")
+  if [ "$port" = auto ]; then
+    own=$(reg_get "$name" sms_port)
+    if [ -n "$own" ] && ! port_reserved "$own" "$taken"; then
+      printf '%s' "$own"
+    else
+      pick_port "$TWILIO_DEFAULT_PORT" "$taken" | tr -d '\n' || true
+    fi
+    return 0
+  fi
+  if port_reserved "$port" "$taken"; then
+    [ -n "$quiet" ] && return 0
+    env="$(instance_dir "$name")/.env"
+    warn "Texts in $name cannot use TWILIO_WEBHOOK_PORT $port, because another instance or Aman itself already uses it. Set TWILIO_WEBHOOK_PORT to another port in $env, for example $(pick_port $((port + 1)) "$taken" || echo 9301), then run the installer again."
+    return 0
+  fi
+  printf '%s' "$port"
+}
+
+# A short digest of the settings file's lines that set up texts, or nothing when it has none, so a plain run of the
+# installer restarts the app after any of them changes, such as a new auth token. The lines themselves are never kept.
+sms_settings_digest() { # name
+  local env lines
+  env="$(instance_dir "$1")/.env"
+  [ -f "$env" ] || return 0
+  lines=$(LC_ALL=C grep -E "$(env_key_line_re '(REACH_SMS_[A-Z0-9_]+|TWILIO_[A-Z0-9_]+)')" "$env" || true)
+  [ -n "$lines" ] || return 0
+  printf '%s\n' "$lines" | sha256_stdin | cut -c1-16
+}
+
+# True when the texts settings in the settings file are not the ones the instance was last started with: the Twilio
+# port to publish, or any line that sets up texts.
+sms_settings_changed() { # name
+  [ "$(reg_get "$1" sms_port)" != "$(sms_webhook_port "$1" quiet)" ] ||
+    [ "$(reg_get "$1" sms_settings)" != "$(sms_settings_digest "$1")" ]
 }
 
 # What Aman calls a person who has not said: the start of their email, cut to the longest name allowed.
@@ -596,7 +696,7 @@ instance_derive() {
   local reserved_app reserved_login all_reserved
   reserved_app=$(reg_all app_port)
   reserved_login=$(reg_all login_port)
-  all_reserved="$reserved_app $reserved_login $(reg_all tls_port)"
+  all_reserved="$reserved_app $reserved_login $(reg_all tls_port) $(reg_all sms_port)"
   if [ -n "${OPT_PORT:-}" ]; then
     check_port_usable "$OPT_PORT" "$all_reserved" "--port"
     I_PORT=$OPT_PORT

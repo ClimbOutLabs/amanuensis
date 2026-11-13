@@ -2,7 +2,7 @@
 
 **Status:** approved
 
-**Scope note:** This spec covers the delivery feed, reminders moved onto it, the in-app bell, Web Push, Activity records and data import. Text messages and phone calls are later work and use the same feed. Quiet hours, the call rules and per-kind notice settings are covered by [Noticing](noticing.md).
+**Scope note:** This spec covers the delivery feed, reminders moved onto it, the in-app bell, Web Push, Activity records and data import. Phone calls are later work and use the same feed. Text messages are covered in [Text Messages](text-messages.md). Quiet hours, the call rules and per-kind notice settings are covered by [Noticing](noticing.md).
 
 ## Problem
 
@@ -16,7 +16,7 @@ One server-side feed of things Aman wants a person to see, called deliveries. Ea
 
 **Server owns seen state.** Seen on one device is seen on every device. Every read and write is scoped to the tenant and the person who owns the delivery.
 
-**Kinds and channels grow without migrations.** Kind, level and channel are plain text columns. The API validates kind with a discriminated union, so later parts add kinds and channels in code only.
+**Kinds and channels grow without migrations.** Kind, level and channel are plain text columns. The API validates kind with a discriminated union, so later parts add kinds and channels in code only. A channel sender names its channel (`web_push`, `sms`), so a failure is recorded under the right one. A Try it test names its channel as `test`, so the service tries just that sender and tells it the delivery is a test.
 
 **Push carries no content.** The push payload is the delivery id and a short title such as "Reminder". It never holds the reminder text, the reason or the assistant's name. The page fetches details after the person opens it.
 
@@ -53,7 +53,7 @@ One server-side feed of things Aman wants a person to see, called deliveries. Ea
 - Push payloads hold only an id and a generic title, so the push service never sees reminder text
 - The push service (Google, Apple or Mozilla, by browser) sees this computer's address and the project page as contact, and nothing about the person
 - Push subscriptions are not exported, since they are tied to one browser
-- Nothing in this spec texts or calls anyone
+- Nothing in this spec texts or calls anyone. Texts, if the person sets them up, are in [Text Messages](text-messages.md)
 
 ## Testing
 
@@ -78,6 +78,6 @@ All tests use synthetic data, never a person's real data.
 
 ## Out of Scope
 
-- Text messages and phone calls
+- Phone calls
 - Pruning old deliveries
 - Quiet hours and per-kind notice settings (see [Noticing](noticing.md))

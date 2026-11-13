@@ -52,6 +52,7 @@ export async function openImportDataSession(): Promise<ImportDataSession> {
     { SentinelAuditStore },
     { DeliveryStore },
     { ReachSettingsStore },
+    { TextContactStore },
     { McpCatalog },
   ] = await Promise.all([
     import('../../config'),
@@ -64,6 +65,7 @@ export async function openImportDataSession(): Promise<ImportDataSession> {
     import('../../db/sentinelAuditStore'),
     import('../../db/deliveryStore'),
     import('../../db/reachSettingsStore'),
+    import('../../db/textContactStore'),
     import('../../catalog/McpCatalog'),
   ]);
   if (!configuration.STANDALONE) {
@@ -140,6 +142,7 @@ export async function openImportDataSession(): Promise<ImportDataSession> {
           auditStore: audit,
           deliveryStore: new DeliveryStore(db),
           reachSettingsStore: new ReachSettingsStore(db),
+          textContactStore: new TextContactStore(db),
           turnArtifactStore: new SqliteTurnArtifactStore(db),
           mcpServerStore: new SqliteMcpServerStore(db),
           modelProviderStore: new SqliteModelProviderStore(db),

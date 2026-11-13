@@ -46,12 +46,12 @@ const whenOnByDefault = NOTICING_ON_BY_DEFAULT ? it : it.skip;
 const NOW = new Date('2026-11-05T15:00:00.000Z');
 const PASS = 'mx.example.net; dkim=pass header.d=example.com; dmarc=pass header.from=example.com';
 const PHONE_READY: ReachAvailability = {
-  texts: { available: false, note: 'Texts are not set up yet.' },
-  calls: { available: true, note: 'Calls are on.' },
+  texts: { available: false, note: 'Texts are not set up yet.', problem: null },
+  calls: { available: true, note: 'Calls are on.', problem: null },
 };
 const NO_PHONE: ReachAvailability = {
-  texts: { available: false, note: 'Texts are not set up yet.' },
-  calls: { available: false, note: 'Phone calls are not set up yet.' },
+  texts: { available: false, note: 'Texts are not set up yet.', problem: null },
+  calls: { available: false, note: 'Phone calls are not set up yet.', problem: null },
 };
 
 function mail(overrides: Partial<MailMessage> = {}): MailMessage {
@@ -148,6 +148,7 @@ async function setup({
     store: deliveryStore,
     senders: [
       {
+        channel: 'web_push',
         send: ({ delivery }) => {
           if (delivery.level !== 'note') {
             pushed.push(delivery);
@@ -841,6 +842,25 @@ describe('what the model can and cannot do', () => {
     const levels = (await feed()).map(item => item.level).sort();
     expect(levels).toEqual(['note', 'nudge']);
     expect(pushed).toHaveLength(1);
+  });
+
+  it('makes a note only at the note level, so a texted nudge is never a note', async () => {
+    // A note at the nudge level is what the Reach me test makes, and a texted nudge must stay a nudge.
+    const { service, feed } = await setup({
+      settings: { max_nudges_per_day: 1 },
+      events: [
+        ...clash,
+        event({ id: 'c', title: 'Gym', start: '2026-11-05T18:00:00.000Z', end: '2026-11-05T19:00:00.000Z' }),
+        event({ id: 'd', title: 'Class', start: '2026-11-05T18:30:00.000Z', end: '2026-11-05T19:30:00.000Z' }),
+      ],
+      verdict: { level: 'nudge', reason: 'Today matters.', message: 'Two things overlap.' },
+    });
+    await service.run({ watcher: 'calendar' });
+    const items = await feed();
+    expect(items.map(item => [item.kind, item.level]).sort()).toEqual([
+      ['note', 'note'],
+      ['nudge', 'nudge'],
+    ]);
   });
 
   it('puts every note and nudge in Activity with its reason, and never pushes a note', async () => {

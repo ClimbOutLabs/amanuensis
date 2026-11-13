@@ -47,6 +47,9 @@ describe('toolWords', () => {
   it('reads the feed’s activity rows in plain words', () => {
     expect(toolDoneWords('delivery.created')).toBe('Sent you a notice');
     expect(toolDoneWords('delivery.web_push')).toBe('Sent a notice to your device');
+    expect(toolDoneWords('delivery.sms')).toBe('Sent you a text');
+    expect(toolDoneWords('delivery.sms_stop')).toBe('Turned texts off after a STOP');
+    expect(toolDoneWords('delivery.sms_new_number_stopped')).toBe('Dropped a new number after a STOP');
   });
 
   it('never shows a raw tool name for a tool it does not know', () => {
