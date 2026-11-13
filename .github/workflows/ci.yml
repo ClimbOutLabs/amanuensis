@@ -461,6 +461,15 @@ jobs:
         working-directory: packages/${{ matrix.package }}
         run: pnpm exec playwright-core install --with-deps chromium
 
+      # These suites compile every dependency they load, which takes longer than the tests themselves on a cold run.
+      - name: Cache compiled test files
+        if: matrix.package == 'trueforge' || matrix.package == 'trueforge-core'
+        uses: actions/cache@v6.1.0
+        with:
+          path: packages/${{ matrix.package }}/node_modules/.cache/jest
+          key: jest-${{ matrix.package }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: jest-${{ matrix.package }}-${{ runner.os }}-${{ runner.arch }}-
+
       - name: Test
         env:
           AMAN_SCREENSHOT_DIR: ${{ runner.temp }}/screenshots/${{ needs.detect-changes.outputs.screenshot_folder }}
