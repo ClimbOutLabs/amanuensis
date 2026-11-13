@@ -191,8 +191,12 @@ export class MailAccountDirectory {
   }
 }
 
-/** Reads the sidecar's account names. Throws when the list cannot be read or names no account. */
-export async function readMailAccountNames(source: Pick<ToolSource, 'callTool'>): Promise<readonly string[]> {
+/**
+ * Reads the account snapshot the sidecar settles: the connected account names. The sidecar names no
+ * default and no persona limit, so both stay unset here; the host layers its own routing on top.
+ * Throws when the list cannot be read or names no account.
+ */
+export async function readMailAccountSnapshot(source: Pick<ToolSource, 'callTool'>): Promise<MailAccountSnapshot> {
   const response = await source.callTool({ name: MAIL_ACCOUNT_LIST_TOOL_NAME, arguments: {} });
   if (!isCallToolResponseResult(response) || response.result.isError === true) {
     throw new Error('The Email sidecar did not return its account list.');
@@ -201,7 +205,7 @@ export async function readMailAccountNames(source: Pick<ToolSource, 'callTool'>)
   if (names.length === 0) {
     throw new Error('The Email sidecar listed no account.');
   }
-  return names;
+  return { names, default_name: null, allowed: null };
 }
 
 /**

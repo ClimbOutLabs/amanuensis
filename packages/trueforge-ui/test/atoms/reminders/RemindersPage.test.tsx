@@ -99,6 +99,8 @@ describe('the Reminders page', () => {
     expect(shell?.setRemindersOpen).toHaveBeenCalledWith(false);
     expect(shell?.openHistorySession).toHaveBeenCalledWith({ sessionId: 'chat-7', isMutable: false });
     expect(screen.queryByRole('button', { name: /Water the plants/ })).toBeNull();
+    expect(screen.getAllByText('Open chat')).toHaveLength(1);
+    expect(screen.getByText('No chat to open')).toBeTruthy();
   });
 
   it('says there are no reminders yet when none were set', async () => {

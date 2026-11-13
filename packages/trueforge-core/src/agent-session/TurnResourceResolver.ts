@@ -5,7 +5,8 @@ import type { TaskChecklistAccess } from '../core/capabilities/builtins/TaskChec
 import {
   MailAccountDirectory,
   MailConnectorSource,
-  readMailAccountNames,
+  readMailAccountSnapshot,
+  type MailAccountSnapshot,
 } from '../core/email/mailConnector/MailConnectorSource';
 import { MAIL_CONNECTOR_NAME } from '../core/email/mailConnector/toolContract';
 import type { ILLM } from '../core/llm/ILLM';
@@ -257,25 +258,24 @@ export class TurnResourceResolver<
        * Omit when the host cannot say; calls then use the first connected account and no limit.
        */
       mailRouting?:
-        (() => Promise<{ default_name: string | null; allowed: readonly string[] | null } | undefined>) | undefined;
+        (() => Promise<Pick<MailAccountSnapshot, 'default_name' | 'allowed'> | undefined>) | undefined;
       /**
        * The connected Email accounts and the default among them, for the prompt's account list.
        * Called at most once per resolver instance. Omit when the host cannot say; the prompt then
        * names no accounts.
        */
       mailAccountFacts?:
-        (() => Promise<{ names: readonly string[]; default_name: string | null } | undefined>) | undefined;
+        (() => Promise<Pick<MailAccountSnapshot, 'names' | 'default_name'> | undefined>) | undefined;
     },
   ) {
     this.#mailAccounts = deps.mailAccounts ?? new MailAccountDirectory();
   }
 
   readonly #mailAccounts: MailAccountDirectory;
-  #mailRoutingPromise?:
-    Promise<{ default_name: string | null; allowed: readonly string[] | null } | undefined> | undefined;
+  #mailRoutingPromise?: Promise<Pick<MailAccountSnapshot, 'default_name' | 'allowed'> | undefined> | undefined;
 
   /** Single-flight; a failed read leaves the routing unknown rather than failing the turn. */
-  #resolveMailRouting(): Promise<{ default_name: string | null; allowed: readonly string[] | null } | undefined> {
+  #resolveMailRouting(): Promise<Pick<MailAccountSnapshot, 'default_name' | 'allowed'> | undefined> {
     const read = this.deps.mailRouting;
     if (read === undefined) {
       return Promise.resolve(undefined);
@@ -286,10 +286,10 @@ export class TurnResourceResolver<
     });
     return this.#mailRoutingPromise;
   }
-  #mailAccountFactsPromise?: Promise<{ names: readonly string[]; default_name: string | null } | undefined> | undefined;
+  #mailAccountFactsPromise?: Promise<Pick<MailAccountSnapshot, 'names' | 'default_name'> | undefined> | undefined;
 
   /** Single-flight; a failed read leaves the accounts unnamed rather than failing the turn. */
-  #resolveMailAccountFacts(): Promise<{ names: readonly string[]; default_name: string | null } | undefined> {
+  #resolveMailAccountFacts(): Promise<Pick<MailAccountSnapshot, 'names' | 'default_name'> | undefined> {
     const read = this.deps.mailAccountFacts;
     if (read === undefined) {
       return Promise.resolve(undefined);
@@ -559,11 +559,7 @@ export class TurnResourceResolver<
                   chat_id: session_id,
                   connector_url: url,
                   fresh,
-                  read: async () => ({
-                    names: await readMailAccountNames(remote),
-                    default_name: null,
-                    allowed: null,
-                  }),
+                  read: async () => readMailAccountSnapshot(remote),
                 });
                 const routing = await this.#resolveMailRouting();
                 return {
