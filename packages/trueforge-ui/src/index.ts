@@ -365,12 +365,12 @@ export type { WorkOnRepoControlsProps } from './containers/WorkOnRepoControls.js
 export { HELP_BUTTON_LABEL, IRIS_HELP_CHOICES } from './help/helpModel.js';
 export type {
   HelpConnectorState,
-  HelpGoogleLoginState,
   HelpHealthCheck,
   HelpHealthItem,
   HelpHealthStatus,
   HelpHostReport,
   HelpHostReportState,
+  HelpSettingsSection,
   HelpSetupStep,
   HelpState,
 } from './help/helpModel.js';
