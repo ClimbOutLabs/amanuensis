@@ -71,9 +71,12 @@ describe('PermissionApprovalCard for a held search with a long query', () => {
   const longQuery = Array.from({ length: 30 }, (_, index) => `word${String(index)}`)
     .join(' ')
     .repeat(2);
+  // The server leads a search card with its whole question, query included, as the headline.
+  const longWhat = searchHoldCardText({ summary: longQuery, say: holdSay('Aman').search_setting, page: false });
   const longCard: SentinelApprovalCard = {
     ...SEARCH_CARD,
-    plain_what: searchHoldCardText({ summary: longQuery, say: holdSay('Aman').search_setting, page: false }),
+    plain_what: longWhat,
+    copy: { headline: longWhat, consequence: null, reason: null },
     outbound_text: `query: "${longQuery}"`,
     outbound_plumbing_text: null,
   };
@@ -103,7 +106,15 @@ describe('PermissionApprovalCard for a held search with a long query', () => {
   });
 
   it('keeps a short question whole, with nothing to unfold', () => {
-    renderSearch();
+    render(
+      <PermissionApprovalCard
+        approvalId="approval-short-search"
+        card={{ ...SEARCH_CARD, copy: { headline: SEARCH_CARD.plain_what, consequence: null, reason: null } }}
+        othersWaiting={0}
+        onApprove={vi.fn()}
+        onDeny={vi.fn()}
+      />,
+    );
     expect(screen.getByRole('heading', { level: 3 }).textContent).toBe(SEARCH_CARD.plain_what);
     expect(screen.queryByRole('button', { name: /^Show all/ })).toBeNull();
   });
