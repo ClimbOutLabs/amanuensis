@@ -258,15 +258,13 @@ export class TurnResourceResolver<
        * persona may use (null when the persona is not limited). Read at most once per resolver.
        * Omit when the host cannot say; calls then use the first connected account and no limit.
        */
-      mailRouting?:
-        (() => Promise<Pick<MailAccountSnapshot, 'default_name' | 'allowed'> | undefined>) | undefined;
+      mailRouting?: (() => Promise<Pick<MailAccountSnapshot, 'default_name' | 'allowed'> | undefined>) | undefined;
       /**
        * The connected Email accounts and the default among them, for the prompt's account list.
        * Called at most once per resolver instance. Omit when the host cannot say; the prompt then
        * names no accounts.
        */
-      mailAccountFacts?:
-        (() => Promise<Pick<MailAccountSnapshot, 'names' | 'default_name'> | undefined>) | undefined;
+      mailAccountFacts?: (() => Promise<Pick<MailAccountSnapshot, 'names' | 'default_name'> | undefined>) | undefined;
       /**
        * How Calendar calls are routed for this turn: the default account, and the accounts this
        * turn's persona may use (null when the persona is not limited). Read at most once per
