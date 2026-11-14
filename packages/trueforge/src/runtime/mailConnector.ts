@@ -5,7 +5,7 @@ import type { Logger } from 'winston';
 
 import type { IMcpServerStore } from '../db/mcpServerStore';
 import { ensureAllowedRecipientsFile } from './mailAllowedRecipients';
-import { runFirstFillInBackground } from './mailFirstFill';
+import { runAccountListFillInBackground } from './mailFirstFill';
 
 /** Each chat's Email account names, kept per connector address in this process and shared by its turns. */
 export const mailAccountDirectory = new MailAccountDirectory();
@@ -40,8 +40,10 @@ export async function registerMailConnector({
 }
 
 /**
- * Boot step for the send list: creates an empty list the first time, so the sidecar can start, and fills it
- * from Sent in the background. Never keeps the server from starting.
+ * Boot step for the send lists: creates an empty list the first time, so the sidecar can start, and in
+ * the background fills the list of any account that has none yet from that account's Sent. Runs again
+ * whenever an account is saved, so a newly connected account gets its own fill. Never keeps the
+ * server from starting.
  */
 export async function prepareMailPolicyAtBoot({
   url,
@@ -56,10 +58,8 @@ export async function prepareMailPolicyAtBoot({
     return;
   }
   try {
-    const created = await ensureAllowedRecipientsFile({ path: policyPath });
-    if (created) {
-      runFirstFillInBackground({ url, path: policyPath, logger });
-    }
+    await ensureAllowedRecipientsFile({ path: policyPath });
+    runAccountListFillInBackground({ url, policyPath, logger });
   } catch (error) {
     logger.warn('Email send list could not be prepared', extractErrorLogFields(error));
   }

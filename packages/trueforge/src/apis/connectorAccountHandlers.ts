@@ -18,6 +18,7 @@ interface ErrorBody {
 /** What a handler answers with; each router returns only the statuses its routes declare. */
 export type ReadAnswer<TStatus> = { status: 200; body: { data: TStatus } } | { status: 502; body: ErrorBody };
 export type SaveAnswer<TStatus> = { status: 201; body: { data: TStatus } } | { status: 400 | 502; body: ErrorBody };
+export type ChangeAnswer<TStatus> = { status: 200; body: { data: TStatus } } | { status: 400 | 502; body: ErrorBody };
 
 export interface ConnectorAccountHandlerKind<TAccount, TRequest, TStatus> {
   /** False when the instance has no connector of this kind to configure, so no card is shown. */
@@ -27,7 +28,10 @@ export interface ConnectorAccountHandlerKind<TAccount, TRequest, TStatus> {
   /** Reads the agent's state; a caller that is already late asks for a shorter wait. */
   readState(options: { timeoutMs?: number | undefined }): Promise<ConnectorAccountState<TAccount>>;
   save(request: TRequest): Promise<ConnectorAccountState<TAccount>>;
-  remove(): Promise<ConnectorAccountState<TAccount>>;
+  /** Removes one account by its key, or every account when no key is given. */
+  remove(key: string | undefined): Promise<ConnectorAccountState<TAccount>>;
+  /** Makes one saved account the default. */
+  setDefault(key: string): Promise<ConnectorAccountState<TAccount>>;
   /** Brings the connector's registration in line with the agent's answer; never throws. */
   sync(state: ConnectorAccountState<TAccount>): Promise<void>;
 }
@@ -87,9 +91,9 @@ export function createConnectorAccountHandlers<TAccount, TRequest, TStatus>(
       }
     },
 
-    async remove(): Promise<ReadAnswer<TStatus>> {
+    async remove(key: string | undefined): Promise<ReadAnswer<TStatus>> {
       try {
-        const state = await kind.remove();
+        const state = await kind.remove(key);
         await kind.sync(state);
         return { status: 200, body: { data: kind.statusBody(state) } };
       } catch (caught) {
@@ -97,6 +101,20 @@ export function createConnectorAccountHandlers<TAccount, TRequest, TStatus>(
           await reconcileAfterUnreachable(caught);
           // A removal can only fail one way: the connector could not be reached.
           return { status: 502, body: errorBody(caught) };
+        }
+        throw caught;
+      }
+    },
+
+    async setDefault(key: string): Promise<ChangeAnswer<TStatus>> {
+      try {
+        const state = await kind.setDefault(key);
+        await kind.sync(state);
+        return { status: 200, body: { data: kind.statusBody(state) } };
+      } catch (caught) {
+        if (caught instanceof ConnectorAccountError) {
+          await reconcileAfterUnreachable(caught);
+          return { status: caught.failure === 'connector_unreachable' ? 502 : 400, body: errorBody(caught) };
         }
         throw caught;
       }

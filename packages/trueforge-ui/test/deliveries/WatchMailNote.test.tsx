@@ -56,12 +56,30 @@ const emailPort: EmailSetupPort = {
     state: 'connected',
     address: 'person@example.com',
     providerKey: 'gmail',
+    accounts: [
+      {
+        address: 'person@example.com',
+        providerKey: 'gmail',
+        state: 'connected',
+        isDefault: true,
+        imapHost: 'imap.gmail.com',
+        imapPort: 993,
+        imapMode: 'ssl',
+        smtpHost: 'smtp.gmail.com',
+        smtpPort: 465,
+        smtpMode: 'ssl',
+      },
+    ],
+    defaultAddress: 'person@example.com',
     providers: [],
   }),
   saveEmailAccount: async () => {
     throw new Error('not used');
   },
   removeEmailAccount: async () => {
+    throw new Error('not used');
+  },
+  setDefaultEmailAccount: async () => {
     throw new Error('not used');
   },
 };

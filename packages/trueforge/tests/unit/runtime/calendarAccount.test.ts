@@ -70,6 +70,21 @@ const connectedReply = (signIn = 'ok') =>
       username: 'u',
       email: 'u@example.invalid',
       sign_in: signIn,
+      accounts: [
+        { url: 'https://nas.example.invalid/dav/', username: 'u', email: 'u@example.invalid', sign_in: signIn },
+      ],
+      default: 'u@example.invalid',
+    }),
+  );
+/** The flat answer an agent that has not learned the list answer yet gives for one saved account. */
+const flatConnectedReply = (signIn = 'ok') =>
+  new Response(
+    JSON.stringify({
+      connected: true,
+      url: 'https://nas.example.invalid/dav/',
+      username: 'u',
+      email: 'u@example.invalid',
+      sign_in: signIn,
     }),
   );
 const emptyReply = () => new Response(JSON.stringify({ connected: false }));
@@ -104,12 +119,47 @@ describe('the Calendar connector follows the saved account', () => {
     expect(rows.get('Calendar')?.first_party).toBe(true);
   });
 
+  it('reads an agent that still answers with one flat account as a list of one', async () => {
+    const state = await getCalendarAccountState({
+      accountUrl: ACCOUNT_URL,
+      secret: SECRET,
+      logger,
+      fetchImpl: replyingWith([flatConnectedReply()]),
+    });
+    expect(state).toEqual({
+      connected: true,
+      sign_in: 'ok',
+      account: { url: 'https://nas.example.invalid/dav/', username: 'u', email: 'u@example.invalid' },
+      accounts: [
+        {
+          account: { url: 'https://nas.example.invalid/dav/', username: 'u', email: 'u@example.invalid' },
+          sign_in: 'ok',
+        },
+      ],
+      default_key: 'u@example.invalid',
+    });
+  });
+
+  it('registers the connector at boot from an agent that still answers with one flat account', async () => {
+    const { rows, store } = makeStore();
+    await registerCalendarConnectorFromSavedAccountInBackground({
+      ...bootDeps(replyingWith([flatConnectedReply()])),
+      mcpServerStore: store,
+    });
+    expect(rows.get('Calendar')?.manifest).toMatchObject({ type: 'remote', url: MCP_URL });
+    expect(rows.get('Calendar')?.first_party).toBe(true);
+  });
+
   it('leaves the connector unregistered when no account is saved, and drops a stale registration', async () => {
     const { rows, store } = makeStore();
     const state: CalendarAccountState = {
       connected: true,
       sign_in: 'ok',
       account: { url: 'https://a.example.invalid/', username: 'u', email: 'u@example.invalid' },
+      accounts: [
+        { account: { url: 'https://a.example.invalid/', username: 'u', email: 'u@example.invalid' }, sign_in: 'ok' },
+      ],
+      default_key: 'u@example.invalid',
     };
     await syncCalendarConnectorWithAccount({ state, mcpUrl: MCP_URL, mcpServerStore: store, tenant_id: 't1', logger });
     expect(rows.size).toBe(1);
@@ -207,6 +257,15 @@ describe('saving a calendar account', () => {
           username: 'person@gmail.com',
           email: 'person@gmail.com',
           sign_in: 'ok',
+          accounts: [
+            {
+              url: 'https://calendar.google.com/calendar/dav/person%40gmail.com/',
+              username: 'person@gmail.com',
+              email: 'person@gmail.com',
+              sign_in: 'ok',
+            },
+          ],
+          default: 'person@gmail.com',
         }),
       );
     });

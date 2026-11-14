@@ -1,12 +1,20 @@
 import { extractErrorLogFields, RemoteMCP } from '@truefoundry/trueforge-core/core';
-import { emailsOfResult } from '@truefoundry/trueforge-core/core/email/mailConnector/mailToolResults';
+import {
+  accountNamesOfResult,
+  emailsOfResult,
+} from '@truefoundry/trueforge-core/core/email/mailConnector/mailToolResults';
 import { MAIL_CONNECTOR_NAME } from '@truefoundry/trueforge-core/core/email/mailConnector/toolContract';
 import type { Logger } from 'winston';
 
-import { addAllowedRecipients, exactRecipientAddress } from './mailAllowedRecipients';
+import {
+  accountRecipientListsPath,
+  readAccountRecipientLists,
+  seedAccountListsFromSidecarList,
+  syncSidecarListFromAccountLists,
+  writeAccountRecipientLists,
+} from './mailAccountRecipients';
+import { exactRecipientAddress } from './mailAllowedRecipients';
 
-/** The account name the sidecar gives an account supplied by its environment without a name. */
-const MAIL_ACCOUNT_NAME = 'default';
 const SENT_MAILBOX = 'Sent';
 const SENT_LOOKBACK_MS = 365 * 24 * 60 * 60 * 1000;
 /** Most sent messages read on the first fill. The list can always grow later from approvals. */
@@ -37,22 +45,25 @@ export function recipientsOfEmails(emails: readonly unknown[]): string[] {
 }
 
 /**
- * The exact addresses the owner has sent mail to, read from Sent over the last twelve months, at most
- * SENT_MESSAGE_CAP messages. Each address appears once, lowercased.
+ * The exact addresses the owner has sent mail to from one account, read from its Sent over the last
+ * twelve months, at most SENT_MESSAGE_CAP messages. Each address appears once, lowercased.
  */
 export async function collectSentRecipients({
   callMailTool,
   now,
+  account_name,
 }: {
   callMailTool: CallMailTool;
   now: Date;
+  /** The account whose Sent is read; the sidecar names an account by its address. */
+  account_name: string;
 }): Promise<string[]> {
   const since = new Date(now.getTime() - SENT_LOOKBACK_MS).toISOString();
   const found = new Set<string>();
   let scanned = 0;
   for (let page = 1; scanned < SENT_MESSAGE_CAP; page += 1) {
     const result = await callMailTool('list_emails_metadata', {
-      account_name: MAIL_ACCOUNT_NAME,
+      account_name,
       mailbox: SENT_MAILBOX,
       since,
       page,
@@ -71,21 +82,47 @@ export async function collectSentRecipients({
   return [...found];
 }
 
-/** Adds the addresses the owner has sent mail to. A list that is already there stays, and nothing is removed. */
-export async function fillSendListFromSent({
-  path,
+/** The account names the sidecar reports, in its own order. */
+export async function readSidecarAccountNames(callMailTool: CallMailTool): Promise<string[]> {
+  const result = await callMailTool('list_available_accounts', {});
+  return accountNamesOfResult(result);
+}
+
+/**
+ * Fills the send list of every connected account that has none yet, from that account's own Sent.
+ * A list that is already there stays, and nothing is removed. An install moving from the one shared
+ * list is seeded first, so its history stays with the account it was approved under. When any list
+ * was filled, the sidecar's shared list is rewritten as the union of the accounts' lists. Returns
+ * how many accounts were filled.
+ */
+export async function fillAccountListsFromSent({
+  policyPath,
   callMailTool,
   now,
 }: {
-  path: string;
+  policyPath: string;
   callMailTool: CallMailTool;
   now: Date;
 }): Promise<number> {
-  const addresses = await collectSentRecipients({ callMailTool, now });
-  if (addresses.length > 0) {
-    await addAllowedRecipients({ path, addresses });
+  const listsPath = accountRecipientListsPath(policyPath);
+  const names = await readSidecarAccountNames(callMailTool);
+  await seedAccountListsFromSidecarList({ policyPath, listsPath, accounts: names });
+  const lists = await readAccountRecipientLists({ path: listsPath });
+  let filled = 0;
+  for (const name of names) {
+    const account = exactRecipientAddress(name);
+    if (account === null || lists.has(account)) {
+      continue;
+    }
+    const addresses = await collectSentRecipients({ callMailTool, now, account_name: name });
+    lists.set(account, addresses);
+    filled += 1;
   }
-  return addresses.length;
+  if (filled > 0) {
+    await writeAccountRecipientLists({ path: listsPath, lists });
+    await syncSidecarListFromAccountLists({ policyPath, listsPath });
+  }
+  return filled;
 }
 
 /** Longest one first-fill session may run before it gives up. */
@@ -117,18 +154,19 @@ const FIRST_FILL_ATTEMPTS = 6;
 const FIRST_FILL_RETRY_MS = 10_000;
 
 /**
- * Runs the first fill after the send list was created at boot. The sidecar may still be starting, so a failed
- * attempt is retried a few times. Giving up leaves the list empty: every recipient then asks with a card.
+ * Runs the first fill for any account that has no send list yet. The sidecar may still be starting, so a
+ * failed attempt is retried a few times. Giving up leaves the lists empty: every recipient then asks
+ * with a card.
  */
-export function runFirstFillInBackground({
+export function runAccountListFillInBackground({
   url,
-  path,
+  policyPath,
   logger,
   attempts = FIRST_FILL_ATTEMPTS,
   retryMs = FIRST_FILL_RETRY_MS,
 }: {
   url: string;
-  path: string;
+  policyPath: string;
   logger: Logger;
   attempts?: number;
   retryMs?: number;
@@ -136,16 +174,18 @@ export function runFirstFillInBackground({
   void (async () => {
     for (let attempt = 1; attempt <= attempts; attempt += 1) {
       try {
-        const count = await fillSendListFromSent({
-          path,
+        const filled = await fillAccountListsFromSent({
+          policyPath,
           callMailTool: mailSidecarTools({ url, logger }),
           now: new Date(),
         });
-        logger.info('Email send list filled from Sent', { recipients: count });
+        if (filled > 0) {
+          logger.info('Email send lists filled from Sent', { accounts: filled });
+        }
         return;
       } catch (error) {
         if (attempt === attempts) {
-          logger.warn('Email send list could not be filled from Sent; each recipient will ask', {
+          logger.warn('Email send lists could not be filled from Sent; each recipient will ask', {
             ...extractErrorLogFields(error),
           });
           return;

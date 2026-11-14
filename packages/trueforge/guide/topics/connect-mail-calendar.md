@@ -39,15 +39,17 @@ If you don't see the **Email** or **Calendar** card, your install of Aman doesn'
 
 ## Connect your email with an app password
 
+You can connect several email accounts this way, for example a personal account and a work account.
+
 1. Click **More** in the left bar, then **Settings**, then **Connectors**.
-2. Find **Email** and click **Connect**.
+2. Find **Email** and click **Connect**. If an account is already connected, click **Manage**, then click the button that starts with "Add another".
 3. Pick your provider in **Email provider**.
 4. Make an app password at your provider. The panel shows a short note for your provider, with a link called **How to get an app password**. The tabs below say the same.
 5. Type your **Email address**.
 6. Paste the app password in **App password**.
 7. Click **Connect**.
 
-Aman signs in to your email once before it saves anything. If the sign-in fails, nothing is saved, and the panel says what to fix.
+Aman signs in to your email once before it saves anything. If the sign-in fails, nothing is saved, and the panel says what to fix. Saving an account you already connected replaces its saved details and keeps your other accounts.
 
 === "Gmail"
 
@@ -81,6 +83,18 @@ Aman signs in to your email once before it saves anything. If the sign-in fails,
 
     Pick **Other**. Then type your provider's **Incoming server (IMAP)**, **Incoming port**, **Outgoing server (SMTP)** and **Outgoing port**. Your provider's help pages list them. The ports start as 993 and 465, which most providers use.
 
+## More than one email account
+
+New email goes out from the default account. To choose it:
+
+1. Click **More** in the left bar, then **Settings**, then **Connectors**.
+2. Find **Email** and click **Manage**.
+3. Click **Make default** on the account you want.
+
+When an email needs your OK, its card has a **From** picker when more than one account is connected. Pick the account there, before you approve. The account cannot be changed after you approve, and an OK you gave for one account never covers another.
+
+Each account keeps its own list of addresses you have approved. Approving a new address adds it to the list of the account the email goes from, and to no other account. When you connect a new account, Aman fills its list from that account's own Sent folder, using the addresses you sent mail to from that account in the last twelve months. The helper that sends your mail enforces one combined list, made by putting every account's list together. Aman itself is stricter. It checks each send against the list of the account the email goes from, and that is the check the card shows you.
+
 ## Connect your calendar with an app password
 
 1. Click **More** in the left bar, then **Settings**, then **Connectors**.
@@ -92,6 +106,8 @@ Aman signs in to your email once before it saves anything. If the sign-in fails,
 7. Click **Connect**.
 
 Aman signs in to your calendar once before it saves anything. If the sign-in fails, nothing is saved, and the panel says what to fix.
+
+You can connect more than one calendar account. To add another, click **Manage**, click the button that starts with "Add another", and fill in the form again. The Calendar card in Settings lists every connected account. One account is the default. To make a different account the default, click **Make default** next to it. Reads span every account, and answers say which account each calendar and event belongs to. A new event lands on the account of the calendar you pick for it, and the approval card names that calendar and its account before you approve. Nothing about an event changes after you approve it.
 
 === "Google"
 
@@ -141,16 +157,18 @@ Aman can watch your mail for you. It can tell you about bills that are due soon,
 1. In the Google or Email panel, click **Open Reach me**. Or click **More** in the left bar, then **Settings**, then **Reach me**.
 2. Turn on the switch called "Let Aman watch for things".
 
+With several Email accounts connected, Aman watches the inbox of the default account.
+
 See [Reach me](reach-me.md) for what Aman watches for and how it tells you.
 
 ## Change or remove a connection
 
 === "Email or Calendar card"
 
-    - Change it: click **Manage**, then "Change account" on the Email card or "Change calendar" on the Calendar card. Type the details again and click **Connect**. Aman checks the new sign-in before it replaces the old one.
-    - Remove it: click **Manage**, then **Remove**, then "Remove account" or "Remove calendar". This deletes the saved app password for good. Click **Keep it** if you change your mind.
-    - If the card says "Sign-in stopped working": make a new app password at your provider, then click **Manage** and save it again.
-    - If the card says "Not working right now": check your internet connection, then click **Manage**. You can type the details again, click **Cancel**, or click **Remove**.
+    - Change it: click **Manage**, then click **Change** next to the account. Type the details again and click **Connect**. Aman checks the new sign-in before it replaces the old one. To close the form without saving, click **Cancel**.
+    - Remove it: click **Manage**, click **Remove** next to the account, then click "Remove account". This deletes that account's saved app password for good and keeps your other accounts. Click **Keep it** if you change your mind.
+    - If the card says "Sign-in stopped working": make a new app password at your provider, then click **Manage**, click **Change** next to the account, and save it again.
+    - If the card says "Not working right now": check your internet connection, then click **Manage**. You can click **Change** next to the account and type the details again, click **Cancel**, or click **Remove**.
 
 === "Google card"
 

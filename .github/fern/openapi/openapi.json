@@ -372,6 +372,10 @@
       },
       "ApprovalAllow": {
         "properties": {
+          "from_account": {
+            "description": "For an approved Email send or draft: the account the person picked on the card. Omitted means the account the card showed, which is the default unless the call named one.",
+            "type": "string"
+          },
           "scope": {
             "description": "Omitted or once allows only this invocation; chat grants this exact tool for the current session; always allows this read-only connector tool for the caller until revoked.",
             "enum": [
@@ -1300,28 +1304,85 @@
         ],
         "type": "object"
       },
+      "CalendarAccountEntry": {
+        "properties": {
+          "calendar_url": {
+            "description": "The calendar address of this account.",
+            "type": "string"
+          },
+          "email": {
+            "description": "The email address of this account.",
+            "type": "string"
+          },
+          "is_default": {
+            "description": "Whether this is the account new events land on.",
+            "type": "boolean"
+          },
+          "provider_key": {
+            "description": "The provider of this account, worked out from its address.",
+            "type": "string"
+          },
+          "state": {
+            "description": "Connected, not connected, connected but the saved sign-in no longer works, or saved but the server cannot be reached right now.",
+            "enum": [
+              "connected",
+              "not_connected",
+              "sign_in_stopped",
+              "not_working"
+            ],
+            "type": "string"
+          },
+          "username": {
+            "description": "The login name of this account; never the password.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "username",
+          "calendar_url",
+          "provider_key",
+          "state",
+          "is_default"
+        ],
+        "type": "object"
+      },
       "CalendarAccountStatus": {
         "properties": {
+          "accounts": {
+            "description": "Every connected account, in saved order.",
+            "items": {
+              "$ref": "#/components/schemas/CalendarAccountEntry"
+            },
+            "type": "array"
+          },
           "available": {
             "description": "Whether this instance has the Calendar connector at all; when false, no card is shown.",
             "type": "boolean"
           },
           "calendar_url": {
-            "description": "The calendar address of the connected account; null when none.",
+            "description": "The calendar address of the default account; null when none.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "default_address": {
+            "description": "The account new events land on; null when none is connected.",
             "type": [
               "string",
               "null"
             ]
           },
           "email": {
-            "description": "The email address of the connected account; null when none is connected.",
+            "description": "The email address of the default account; null when none is connected.",
             "type": [
               "string",
               "null"
             ]
           },
           "provider_key": {
-            "description": "The provider of the connected account, worked out from its address; the picker default otherwise.",
+            "description": "The provider of the default account, worked out from its address; the picker default otherwise.",
             "type": "string"
           },
           "providers": {
@@ -1342,7 +1403,7 @@
             "type": "string"
           },
           "username": {
-            "description": "The login name of the connected account; never the password.",
+            "description": "The login name of the default account; never the password.",
             "type": [
               "string",
               "null"
@@ -1356,6 +1417,8 @@
           "username",
           "calendar_url",
           "provider_key",
+          "accounts",
+          "default_address",
           "providers"
         ],
         "type": "object"
@@ -3216,10 +3279,88 @@
         },
         "type": "object"
       },
-      "EmailAccountStatus": {
+      "EmailAccountEntry": {
         "properties": {
           "address": {
-            "description": "The connected account address; null when none is connected.",
+            "description": "The account address.",
+            "type": "string"
+          },
+          "imap_host": {
+            "description": "Incoming mail server.",
+            "type": "string"
+          },
+          "imap_mode": {
+            "description": "How the server is reached: direct TLS, or plain first and upgraded with STARTTLS.",
+            "enum": [
+              "ssl",
+              "starttls"
+            ],
+            "type": "string"
+          },
+          "imap_port": {
+            "description": "Incoming mail port.",
+            "type": "integer"
+          },
+          "is_default": {
+            "description": "Whether this is the account new mail goes out from.",
+            "type": "boolean"
+          },
+          "provider_key": {
+            "description": "The provider of this account, worked out from its servers.",
+            "type": "string"
+          },
+          "smtp_host": {
+            "description": "Outgoing mail server.",
+            "type": "string"
+          },
+          "smtp_mode": {
+            "description": "How the server is reached: direct TLS, or plain first and upgraded with STARTTLS.",
+            "enum": [
+              "ssl",
+              "starttls"
+            ],
+            "type": "string"
+          },
+          "smtp_port": {
+            "description": "Outgoing mail port.",
+            "type": "integer"
+          },
+          "state": {
+            "description": "Connected, not connected, connected but the saved sign-in no longer works, or saved but the server cannot be reached right now.",
+            "enum": [
+              "connected",
+              "not_connected",
+              "sign_in_stopped",
+              "not_working"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "address",
+          "provider_key",
+          "state",
+          "is_default",
+          "imap_host",
+          "imap_port",
+          "imap_mode",
+          "smtp_host",
+          "smtp_port",
+          "smtp_mode"
+        ],
+        "type": "object"
+      },
+      "EmailAccountStatus": {
+        "properties": {
+          "accounts": {
+            "description": "Every connected account, in saved order.",
+            "items": {
+              "$ref": "#/components/schemas/EmailAccountEntry"
+            },
+            "type": "array"
+          },
+          "address": {
+            "description": "The default account address; null when none is connected.",
             "type": [
               "string",
               "null"
@@ -3229,8 +3370,15 @@
             "description": "Whether this instance has the Email connector at all; when false, no card is shown.",
             "type": "boolean"
           },
+          "default_address": {
+            "description": "The account new mail goes out from; null when none is connected.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "provider_key": {
-            "description": "The provider of the connected account, worked out from its servers; the picker default otherwise.",
+            "description": "The provider of the default account, worked out from its servers; the picker default otherwise.",
             "type": "string"
           },
           "providers": {
@@ -3256,6 +3404,8 @@
           "state",
           "address",
           "provider_key",
+          "accounts",
+          "default_address",
           "providers"
         ],
         "type": "object"
@@ -9211,6 +9361,16 @@
             "maxItems": 8,
             "type": "array"
           },
+          "calendar_accounts": {
+            "description": "Calendar accounts this persona may use, by email address. Omitted means every connected account.",
+            "items": {
+              "maxLength": 320,
+              "minLength": 3,
+              "type": "string"
+            },
+            "maxItems": 16,
+            "type": "array"
+          },
           "created_at": {
             "format": "date-time",
             "type": "string"
@@ -9236,6 +9396,16 @@
             "maxLength": 2000,
             "minLength": 1,
             "type": "string"
+          },
+          "mail_accounts": {
+            "description": "Email accounts this persona may use, by address. Omitted means every connected account.",
+            "items": {
+              "maxLength": 320,
+              "minLength": 3,
+              "type": "string"
+            },
+            "maxItems": 16,
+            "type": "array"
           },
           "model_name": {
             "description": "Fully qualified model name (`provider/model`) selected when this persona is active.",
@@ -9347,6 +9517,16 @@
             "maxItems": 8,
             "type": "array"
           },
+          "calendar_accounts": {
+            "description": "Calendar accounts this persona may use, by email address. Omitted means every connected account.",
+            "items": {
+              "maxLength": 320,
+              "minLength": 3,
+              "type": "string"
+            },
+            "maxItems": 16,
+            "type": "array"
+          },
           "display_name": {
             "description": "Name shown in the UI and typed to invoke the persona.",
             "example": "Zara",
@@ -9359,6 +9539,16 @@
             "maxLength": 2000,
             "minLength": 1,
             "type": "string"
+          },
+          "mail_accounts": {
+            "description": "Email accounts this persona may use, by address. Omitted means every connected account.",
+            "items": {
+              "maxLength": 320,
+              "minLength": 3,
+              "type": "string"
+            },
+            "maxItems": 16,
+            "type": "array"
           },
           "model_name": {
             "description": "Fully qualified model name (`provider/model`) selected when this persona is active.",
@@ -10537,6 +10727,15 @@
         ],
         "type": "object"
       },
+      "RemoveCalendarAccountRequest": {
+        "properties": {
+          "address": {
+            "description": "The one account to remove, by its email address; without it, every connected account is removed.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "RemoveCalendarAccountResponse": {
         "properties": {
           "data": {
@@ -10546,6 +10745,15 @@
         "required": [
           "data"
         ],
+        "type": "object"
+      },
+      "RemoveEmailAccountRequest": {
+        "properties": {
+          "address": {
+            "description": "The one account to remove; without it, every connected account is removed.",
+            "type": "string"
+          }
+        },
         "type": "object"
       },
       "RemoveEmailAccountResponse": {
@@ -12631,6 +12839,52 @@
         ],
         "type": "string"
       },
+      "SetDefaultCalendarAccountRequest": {
+        "properties": {
+          "address": {
+            "description": "The connected account to make the default, by its email address.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "address"
+        ],
+        "type": "object"
+      },
+      "SetDefaultCalendarAccountResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CalendarAccountStatus"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "SetDefaultEmailAccountRequest": {
+        "properties": {
+          "address": {
+            "description": "The connected account to make the default.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "address"
+        ],
+        "type": "object"
+      },
+      "SetDefaultEmailAccountResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/EmailAccountStatus"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "SetPackageDownloadsRequest": {
         "additionalProperties": false,
         "properties": {
@@ -13670,6 +13924,23 @@
           "mail_draft": {
             "description": "True when a card carrying mail_new_recipients approves saving a draft rather than sending.",
             "type": "boolean"
+          },
+          "mail_from": {
+            "description": "For a card on the Email connector: the account the message goes from. Otherwise null.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "mail_from_choices": {
+            "description": "For a card on the Email connector: every connected account the person could pick instead. Otherwise null.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
           },
           "mail_new_recipients": {
             "description": "For a mail send to addresses not yet on the Email list: those addresses, lowercased. Otherwise null.",
@@ -31553,7 +31824,17 @@
     },
     "/api/v1/user/settings/calendar": {
       "delete": {
-        "description": "Deletes the saved account and its app password from the sidecar for good.",
+        "description": "Deletes the named account and its app password from the sidecar for good, or every account when the body names none.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RemoveCalendarAccountRequest"
+              }
+            }
+          },
+          "required": false
+        },
         "responses": {
           "200": {
             "content": {
@@ -31681,9 +31962,85 @@
         "x-fern-sdk-method-name": "save_account"
       }
     },
+    "/api/v1/user/settings/calendar/default": {
+      "post": {
+        "description": "Makes the named connected account the default. Naming an account that is not connected changes nothing.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetDefaultCalendarAccountRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetDefaultCalendarAccountResponse"
+                }
+              }
+            },
+            "description": "The default account is set."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The named account is not connected."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The caller is not an admin, or the request did not come from this app, so nothing was done."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The calendar connector could not be reached."
+          }
+        },
+        "summary": "Set the default calendar account",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "calendar"
+        ],
+        "x-fern-sdk-method-name": "set_default_account"
+      }
+    },
     "/api/v1/user/settings/calendar/status": {
       "get": {
-        "description": "Returns whether a calendar account is connected, its email, login and calendar address, and the provider table for the picker. The app password is never returned.",
+        "description": "Returns whether a calendar account is connected, its accounts and the default among them, and the provider table for the picker. The app password is never returned.",
         "responses": {
           "200": {
             "content": {
@@ -31739,7 +32096,17 @@
     },
     "/api/v1/user/settings/email": {
       "delete": {
-        "description": "Deletes the saved account and its app password from the sidecar for good.",
+        "description": "Deletes the named account and its app password from the sidecar for good, or every account when the body names none.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RemoveEmailAccountRequest"
+              }
+            }
+          },
+          "required": false
+        },
         "responses": {
           "200": {
             "content": {
@@ -31867,9 +32234,85 @@
         "x-fern-sdk-method-name": "save_account"
       }
     },
+    "/api/v1/user/settings/email/default": {
+      "post": {
+        "description": "Makes the named connected account the default. Naming an account that is not connected changes nothing.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetDefaultEmailAccountRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetDefaultEmailAccountResponse"
+                }
+              }
+            },
+            "description": "The default account is set."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The named account is not connected."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The caller is not an admin, or the request did not come from this app, so nothing was done."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The email connector could not be reached."
+          }
+        },
+        "summary": "Set the default email account",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "email"
+        ],
+        "x-fern-sdk-method-name": "set_default_account"
+      }
+    },
     "/api/v1/user/settings/email/status": {
       "get": {
-        "description": "Returns whether an email account is connected, its address and provider, and the provider table for the picker. The app password is never returned.",
+        "description": "Returns whether an email account is connected, its accounts and the default among them, and the provider table for the picker. The app password is never returned.",
         "responses": {
           "200": {
             "content": {

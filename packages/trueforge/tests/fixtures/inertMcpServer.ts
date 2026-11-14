@@ -192,6 +192,8 @@ export interface InertMcpServer {
    * `undefined` restores the default empty text answer.
    */
   setCalendarEvents: (events: readonly InertCalendarEvent[] | undefined) => void;
+  /** The arguments of every calendar `list_events` call so far, in the order they arrived. */
+  calendarListCalls: () => readonly Record<string, unknown>[];
   /** Sets the result shape the next (and every subsequent) `search_memory` call answers with. */
   setSearchMemoryMode: (mode: MemoryToolMode) => void;
   /**
@@ -232,6 +234,10 @@ interface SearchResults {
 
 interface CalendarEvents {
   current: readonly InertCalendarEvent[] | undefined;
+  /** Each account's own events, answered when a `list_events` call names that account. */
+  byAccount: Readonly<Record<string, readonly InertCalendarEvent[]>> | undefined;
+  /** The arguments of every `list_events` call, in the order they arrived. */
+  listCalls: Record<string, unknown>[];
 }
 
 interface MemoryModes {
@@ -542,20 +548,30 @@ function buildMcpServer({
         name,
         {
           description: `Pretends to ${name.replace(/_/g, ' ')}. Never reaches a calendar.`,
-          inputSchema: {},
+          // `list_events` keeps every argument it is given, so a test can read which account was asked for.
+          inputSchema: name === 'list_events' ? z.looseObject({}) : {},
           // The reads declare themselves read-only and closed-world; the changes publish nothing.
           ...(CALDAV_READ_TOOL_NAMES.some(read => read === name)
             ? { annotations: { readOnlyHint: true, openWorldHint: false } }
             : {}),
         },
-        () => {
+        (args: Record<string, unknown>) => {
           // A change reads its event first: `get_event` answers with the one readable event, so a
           // change to it asks. Once a test sets events, `list_events` answers with them in the
-          // sidecar's shape. Every other tool answers with nothing.
+          // sidecar's shape, or with the named account's own events when the test gave them per
+          // account. Every other tool answers with nothing.
           if (name === 'get_event') {
             return calendarEventResult();
           }
-          const events = name === 'list_events' ? calendarEvents.current : undefined;
+          if (name !== 'list_events') {
+            return textResult('[]');
+          }
+          calendarEvents.listCalls.push({ ...args });
+          const account = typeof args['account'] === 'string' ? args['account'] : undefined;
+          const events =
+            account !== undefined && calendarEvents.byAccount !== undefined
+              ? calendarEvents.byAccount[account]
+              : calendarEvents.current;
           return events === undefined ? textResult('[]') : calendarEventsResult({ events: [...events] });
         },
       );
@@ -620,6 +636,8 @@ export async function startInertMcpServer(options?: {
   calendar?: boolean;
   /** The events the calendar tools' `list_events` starts out answering with; changeable via `setCalendarEvents`. */
   calendarEvents?: readonly InertCalendarEvent[];
+  /** Each account's own `list_events` answer, used when a call names that account in `account`. */
+  calendarEventsByAccount?: Readonly<Record<string, readonly InertCalendarEvent[]>>;
   /** Adds `inert_get_page`, a read by id. */
   pageById?: boolean;
   /** Adds `search_messages`, a search known as a lookup by its name. */
@@ -649,7 +667,11 @@ export async function startInertMcpServer(options?: {
   };
   const memoryModes: MemoryModes = { ask: 'result', search: 'result' };
   const searchResults: SearchResults = { current: undefined };
-  const calendarEvents: CalendarEvents = { current: options?.calendarEvents };
+  const calendarEvents: CalendarEvents = {
+    current: options?.calendarEvents,
+    byAccount: options?.calendarEventsByAccount,
+    listCalls: [],
+  };
   const gates: WriteGate[] = [];
   const transports = new Map<string, StreamableHTTPServerTransport>();
   let severed = false;
@@ -843,6 +865,7 @@ export async function startInertMcpServer(options?: {
     setCalendarEvents: events => {
       calendarEvents.current = events;
     },
+    calendarListCalls: () => calendarEvents.listCalls,
     setSearchMemoryMode: mode => {
       memoryModes.search = mode;
     },

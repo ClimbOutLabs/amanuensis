@@ -493,7 +493,11 @@ describe('GET /api/v1/today with a CalDAV calendar', () => {
   /** The account agent's address, answered by the fake fetch below; never really resolved. */
   const ACCOUNT_AGENT_URL = 'http://calendar-account.invalid';
 
-  function caldavDeps(): Partial<TodayRouterDeps> {
+  const ADA_ACCOUNT = { url: 'https://caldav.example.org/dav/', username: 'ada', email: 'ada@example.org' };
+
+  function caldavDeps(
+    accounts: readonly { url: string; username: string; email: string }[] = [ADA_ACCOUNT],
+  ): Partial<TodayRouterDeps> {
     const record: McpServerRecord = {
       id: 'caldav-1',
       tenant_id: TENANT,
@@ -513,9 +517,8 @@ describe('GET /api/v1/today with a CalDAV calendar', () => {
       if (url === `${ACCOUNT_AGENT_URL}/account`) {
         return jsonResponse({
           connected: true,
-          url: 'https://caldav.example.org/dav/',
-          username: 'ada',
-          email: 'ada@example.org',
+          default: 'ada@example.org',
+          accounts,
         });
       }
       throw new Error(`Unexpected address asked for: ${url}`);
@@ -591,6 +594,42 @@ describe('GET /api/v1/today with a CalDAV calendar', () => {
     const again = await readToday(router);
     expect(again.calendar).toHaveLength(3);
     expect(inert.requestsSeen()).toBe(requestsAfterFirstRead);
+  });
+
+  it('reads each CalDAV account on its own, and keeps each event with the account it came from', async () => {
+    const workAccount = { url: 'https://dav.example.com/cal/', username: 'ada.work', email: 'ada@example.com' };
+    inert = await startInertMcpServer({
+      calendar: true,
+      calendarEventsByAccount: {
+        'ada@example.org': [
+          {
+            summary: 'School run',
+            start: { value: '2026-11-06T10:00:00', tzid: 'America/Los_Angeles', all_day: false },
+            end: { value: '2026-11-06T10:30:00', tzid: 'America/Los_Angeles', all_day: false },
+          },
+        ],
+        'ada@example.com': [
+          {
+            summary: 'Team standup',
+            start: { value: '2026-11-06T11:00:00', tzid: 'America/Los_Angeles', all_day: false },
+            end: { value: '2026-11-06T11:15:00', tzid: 'America/Los_Angeles', all_day: false },
+          },
+        ],
+      },
+    });
+    const router = createTodayRouter(baseDeps(caldavDeps([ADA_ACCOUNT, workAccount])));
+
+    const today = await readToday(router);
+
+    const askedFor = inert
+      .calendarListCalls()
+      .map(call => call['account'])
+      .sort();
+    expect(askedFor).toEqual(['ada@example.com', 'ada@example.org']);
+    expect(today.calendar).toEqual([
+      expect.objectContaining({ title: 'School run', source: 'caldav', calendar_account_id: 'ada@example.org' }),
+      expect.objectContaining({ title: 'Team standup', source: 'caldav', calendar_account_id: 'ada@example.com' }),
+    ]);
   });
 
   it('reads an empty CalDAV day as an empty list, not as no calendar', async () => {

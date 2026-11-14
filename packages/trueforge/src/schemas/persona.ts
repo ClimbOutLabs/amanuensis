@@ -52,6 +52,8 @@ const PersonaModelNameSchema = z
   .max(256)
   .describe('Fully qualified model name (`provider/model`) selected when this persona is active.');
 
+const PersonaAccountListSchema = z.array(z.string().trim().min(3).max(320)).max(16).optional();
+
 const PersonaContentBaseSchema = z
   .object({
     display_name: PersonaNameSchema.describe('Name shown in the UI and typed to invoke the persona.').openapi({
@@ -65,6 +67,12 @@ const PersonaContentBaseSchema = z
       'Concise role for the persona. Added as one section of the system prompt; it cannot replace harness policy.',
     ),
     model_name: PersonaModelNameSchema,
+    mail_accounts: PersonaAccountListSchema.describe(
+      'Email accounts this persona may use, by address. Omitted means every connected account.',
+    ),
+    calendar_accounts: PersonaAccountListSchema.describe(
+      'Calendar accounts this persona may use, by email address. Omitted means every connected account.',
+    ),
   })
   .strict();
 

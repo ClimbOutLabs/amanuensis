@@ -80,7 +80,7 @@ if [ "$(id -u)" = 0 ] && command -v setpriv >/dev/null 2>&1 && command -v python
   trap 'if [ -n "${agent_tmp:-}" ]; then rm -rf "$agent_tmp"; fi; cleanup' EXIT
   agent="$REPO/ops/compose/mail-email/account_agent.py"
   agent_env() {
-    setpriv --bounding-set=-all --inh-caps=-all -- env AMAN_MAIL_ACCOUNT_FILE="$1" python3 "$agent" --print-child-env
+    setpriv --bounding-set=-all --inh-caps=-all -- env AMAN_MAIL_ACCOUNT_FILE="$1" python3 "$agent" --print-config
   }
   agent_write() {
     printf '%s\n' "$2" | setpriv --bounding-set=-all --inh-caps=-all -- env AMAN_MAIL_ACCOUNT_FILE="$1" python3 "$agent" --write-stdin
@@ -107,7 +107,7 @@ if [ "$(id -u)" = 0 ] && command -v setpriv >/dev/null 2>&1 && command -v python
   owned="$agent_tmp/owned.env"
   printf '%s\n' "$account_text" >"$owned"
   chmod 600 "$owned"
-  agent_env "$owned" | grep -q 'MCP_EMAIL_SERVER_EMAIL_ADDRESS=a@example.invalid' ||
+  agent_env "$owned" | grep -q 'account_name = "a@example.invalid"' ||
     agent_fail "the capability-free agent could not read the sidecar's own account file"
   agent_write "$owned" "$changed_text" | grep -qx 'saved' ||
     agent_fail "the capability-free agent could not save the sidecar's own account file"
@@ -118,14 +118,15 @@ if [ "$(id -u)" = 0 ] && command -v setpriv >/dev/null 2>&1 && command -v python
   agent_remove "$owned" | grep -qx 'removed' ||
     agent_fail "the capability-free agent could not remove the sidecar's own account file"
   [ ! -s "$owned" ] || agent_fail "the account file is not empty after remove"
-  agent_env "$owned" | grep -q 'unset MCP_EMAIL_SERVER_EMAIL_ADDRESS' ||
+  # With no account left, the agent prints no config at all.
+  [ -z "$(agent_env "$owned")" ] ||
     agent_fail "a removed account still reads as connected"
   # Another user's file: the old bind-mounted layout, which the volume replaces.
   foreign="$agent_tmp/foreign.env"
   printf '%s\n' "$account_text" >"$foreign"
   chmod 600 "$foreign"
   chown 1000 "$foreign"
-  agent_env "$foreign" | grep -q 'unset MCP_EMAIL_SERVER_EMAIL_ADDRESS' ||
+  [ -z "$(agent_env "$foreign")" ] ||
     agent_fail "the capability-free agent read another user's account file"
   if agent_write "$foreign" "$changed_text" >/dev/null 2>&1; then
     agent_fail "the capability-free agent wrote another user's account file"

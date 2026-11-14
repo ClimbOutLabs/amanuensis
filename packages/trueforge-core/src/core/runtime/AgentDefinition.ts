@@ -62,6 +62,18 @@ export interface AgentDefinition {
    * resolver, not here.
    */
   configuredModels: readonly ConfiguredModelSummary[] | undefined;
+  /**
+   * The Email accounts connected on this host at turn time and which of them is the default, for
+   * the prompt's host-owned facts: the model is told the accounts outright instead of having to
+   * guess an account name. Undefined when the host cannot say, or no Email connector is set up.
+   */
+  mailAccounts?: { names: readonly string[]; default_name: string | null } | undefined;
+  /**
+   * The Calendar accounts connected on this host at turn time and which of them is the default, for
+   * the prompt's host-owned facts, so the model can name the account a calendar belongs to instead
+   * of guessing. Undefined when the host cannot say, or no Calendar connector is set up.
+   */
+  calendarAccounts?: { names: readonly string[]; default_name: string | null } | undefined;
   modelProperties?:
     | {
         /** Maximum combined input/output context for the resolved model, when known. */

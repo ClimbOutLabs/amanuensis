@@ -1,11 +1,13 @@
 import type { Logger } from 'winston';
+import { CalendarConnectorSource } from '../core/calendar/caldav/CalendarConnectorSource';
 import { CALDAV_SERVER_NAME } from '../core/calendar/caldav/toolContract';
 import { chatProvenanceCapability } from '../core/capabilities/builtins/ChatProvenance';
 import type { TaskChecklistAccess } from '../core/capabilities/builtins/TaskChecklist';
 import {
   MailAccountDirectory,
   MailConnectorSource,
-  readMailAccountNames,
+  readMailAccountSnapshot,
+  type MailAccountSnapshot,
 } from '../core/email/mailConnector/MailConnectorSource';
 import { MAIL_CONNECTOR_NAME } from '../core/email/mailConnector/toolContract';
 import type { ILLM } from '../core/llm/ILLM';
@@ -251,12 +253,99 @@ export class TurnResourceResolver<
        * Keeps the Email account names per chat across turns. Omit to keep them for one turn only.
        */
       mailAccounts?: MailAccountDirectory | undefined;
+      /**
+       * How Email calls are routed for this turn: the default account, and the accounts this turn's
+       * persona may use (null when the persona is not limited). Read at most once per resolver.
+       * Omit when the host cannot say; calls then use the first connected account and no limit.
+       */
+      mailRouting?: (() => Promise<Pick<MailAccountSnapshot, 'default_name' | 'allowed'> | undefined>) | undefined;
+      /**
+       * The connected Email accounts and the default among them, for the prompt's account list.
+       * Called at most once per resolver instance. Omit when the host cannot say; the prompt then
+       * names no accounts.
+       */
+      mailAccountFacts?: (() => Promise<Pick<MailAccountSnapshot, 'names' | 'default_name'> | undefined>) | undefined;
+      /**
+       * How Calendar calls are routed for this turn: the default account, and the accounts this
+       * turn's persona may use (null when the persona is not limited). Read at most once per
+       * resolver. Omit when the host cannot say; calls then carry no persona limit.
+       */
+      calendarRouting?:
+        (() => Promise<{ default_name: string | null; allowed: readonly string[] | null } | undefined>) | undefined;
+      /**
+       * The connected Calendar accounts and the default among them, for the prompt's account list
+       * and the connector's account guard. Called at most once per resolver instance. Omit when
+       * the host cannot say; the prompt then names no accounts and calls are not scoped.
+       */
+      calendarAccountFacts?:
+        (() => Promise<{ names: readonly string[]; default_name: string | null } | undefined>) | undefined;
     },
   ) {
     this.#mailAccounts = deps.mailAccounts ?? new MailAccountDirectory();
   }
 
   readonly #mailAccounts: MailAccountDirectory;
+  #mailRoutingPromise?: Promise<Pick<MailAccountSnapshot, 'default_name' | 'allowed'> | undefined> | undefined;
+
+  /** Single-flight; a failed read leaves the routing unknown rather than failing the turn. */
+  #resolveMailRouting(): Promise<Pick<MailAccountSnapshot, 'default_name' | 'allowed'> | undefined> {
+    const read = this.deps.mailRouting;
+    if (read === undefined) {
+      return Promise.resolve(undefined);
+    }
+    this.#mailRoutingPromise ??= read().catch((error: unknown) => {
+      this.deps.logger.warn('Email account routing could not be read', extractErrorLogFields(error));
+      return undefined;
+    });
+    return this.#mailRoutingPromise;
+  }
+  #mailAccountFactsPromise?: Promise<Pick<MailAccountSnapshot, 'names' | 'default_name'> | undefined> | undefined;
+
+  /** Single-flight; a failed read leaves the accounts unnamed rather than failing the turn. */
+  #resolveMailAccountFacts(): Promise<Pick<MailAccountSnapshot, 'names' | 'default_name'> | undefined> {
+    const read = this.deps.mailAccountFacts;
+    if (read === undefined) {
+      return Promise.resolve(undefined);
+    }
+    this.#mailAccountFactsPromise ??= read().catch((error: unknown) => {
+      this.deps.logger.warn('Email accounts for the prompt could not be read', extractErrorLogFields(error));
+      return undefined;
+    });
+    return this.#mailAccountFactsPromise;
+  }
+
+  #calendarRoutingPromise?:
+    Promise<{ default_name: string | null; allowed: readonly string[] | null } | undefined> | undefined;
+
+  /** Single-flight; a failed read leaves the routing unknown rather than failing the turn. */
+  #resolveCalendarRouting(): Promise<{ default_name: string | null; allowed: readonly string[] | null } | undefined> {
+    const read = this.deps.calendarRouting;
+    if (read === undefined) {
+      return Promise.resolve(undefined);
+    }
+    this.#calendarRoutingPromise ??= read().catch((error: unknown) => {
+      this.deps.logger.warn('Calendar account routing could not be read', extractErrorLogFields(error));
+      return undefined;
+    });
+    return this.#calendarRoutingPromise;
+  }
+
+  #calendarAccountFactsPromise?:
+    Promise<{ names: readonly string[]; default_name: string | null } | undefined> | undefined;
+
+  /** Single-flight; a failed read leaves the accounts unnamed rather than failing the turn. */
+  #resolveCalendarAccountFacts(): Promise<{ names: readonly string[]; default_name: string | null } | undefined> {
+    const read = this.deps.calendarAccountFacts;
+    if (read === undefined) {
+      return Promise.resolve(undefined);
+    }
+    this.#calendarAccountFactsPromise ??= read().catch((error: unknown) => {
+      this.deps.logger.warn('Calendar accounts for the prompt could not be read', extractErrorLogFields(error));
+      return undefined;
+    });
+    return this.#calendarAccountFactsPromise;
+  }
+
   #setUpConnectorNamesPromise?: Promise<readonly string[] | undefined> | undefined;
 
   /** Single-flight; a failed read leaves the names unknown rather than failing the turn. */
@@ -505,18 +594,39 @@ export class TurnResourceResolver<
               tracing,
               signal,
             });
+            if (entry.name === CALDAV_SERVER_NAME && first_party === true) {
+              return new CalendarConnectorSource({
+                inner: remote,
+                accounts: async () => {
+                  const facts = await this.#resolveCalendarAccountFacts();
+                  const routing = await this.#resolveCalendarRouting();
+                  return {
+                    names: facts?.names ?? [],
+                    default_name: routing?.default_name ?? facts?.default_name ?? null,
+                    allowed: routing?.allowed ?? null,
+                  };
+                },
+              });
+            }
             if (entry.name !== MAIL_CONNECTOR_NAME || first_party !== true) {
               return remote;
             }
             return new MailConnectorSource({
               inner: remote,
-              accounts: ({ fresh }) =>
-                this.#mailAccounts.accounts({
+              accounts: async ({ fresh }) => {
+                const kept = await this.#mailAccounts.accounts({
                   chat_id: session_id,
                   connector_url: url,
                   fresh,
-                  read: () => readMailAccountNames(remote),
-                }),
+                  read: async () => readMailAccountSnapshot(remote),
+                });
+                const routing = await this.#resolveMailRouting();
+                return {
+                  names: kept.names,
+                  default_name: routing?.default_name ?? kept.default_name,
+                  allowed: routing?.allowed ?? kept.allowed,
+                };
+              },
               now: () => new Date(),
               timeZone: this.deps.clientTimezone,
             });
@@ -585,6 +695,8 @@ export class TurnResourceResolver<
     // shared unchanged across the root thread and every sub-agent thread;
     // see #resolveConfiguredModels.
     const configuredModels = await this.#resolveConfiguredModels();
+    const mailAccounts = await this.#resolveMailAccountFacts();
+    const calendarAccounts = await this.#resolveCalendarAccountFacts();
     const setUpConnectorNames = await this.#resolveSetUpConnectorNames();
 
     return {
@@ -602,6 +714,8 @@ export class TurnResourceResolver<
         modelSupportsVision: resolvedModel.modelSupportsVision,
         modelRequestGate: resolvedModel.modelRequestGate,
         configuredModels,
+        mailAccounts,
+        calendarAccounts,
         modelProperties: resolvedModel.modelProperties,
         clientTimezone: this.deps.clientTimezone,
         spokenReply: this.deps.spokenReply,

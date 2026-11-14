@@ -3,11 +3,15 @@
 import type * as TrueForge from "../index.js";
 
 export interface EmailAccountStatus {
-    /** The connected account address; null when none is connected. */
+    /** Every connected account, in saved order. */
+    accounts: TrueForge.EmailAccountEntry[];
+    /** The default account address; null when none is connected. */
     address: string | null;
     /** Whether this instance has the Email connector at all; when false, no card is shown. */
     available: boolean;
-    /** The provider of the connected account, worked out from its servers; the picker default otherwise. */
+    /** The account new mail goes out from; null when none is connected. */
+    defaultAddress: string | null;
+    /** The provider of the default account, worked out from its servers; the picker default otherwise. */
     providerKey: string;
     /** The provider picker table, in display order. */
     providers: TrueForge.EmailProvider[];

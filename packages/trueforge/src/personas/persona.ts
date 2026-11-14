@@ -39,6 +39,10 @@ export interface PersonaContent {
   instructions: string;
   /** Fully qualified `provider/model`, resolved through the existing model contract. */
   model_name: string;
+  /** Email accounts this persona may use, by address; absent means every connected account. */
+  mail_accounts?: string[] | undefined;
+  /** Calendar accounts this persona may use, by email address; absent means every connected account. */
+  calendar_accounts?: string[] | undefined;
 }
 
 export interface Persona extends PersonaContent {

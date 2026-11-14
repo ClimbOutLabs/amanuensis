@@ -73,7 +73,7 @@ test_entrypoint_records_the_list_once_the_server_answers() {
 import sys
 import time
 
-if "--print-child-env" in sys.argv:
+if "--print-config" in sys.argv:
     print("")
 else:
     time.sleep(3600)
@@ -142,7 +142,7 @@ test_entrypoint_probes_the_port_the_server_is_given() {
 import sys
 import time
 
-if "--print-child-env" in sys.argv:
+if "--print-config" in sys.argv:
     print("")
 else:
     time.sleep(3600)
@@ -194,7 +194,7 @@ test_entrypoint_records_a_server_that_answers_after_the_wait() {
 import sys
 import time
 
-if "--print-child-env" in sys.argv:
+if "--print-config" in sys.argv:
     print("")
 else:
     time.sleep(3600)
