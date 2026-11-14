@@ -69,6 +69,8 @@ services:
       NODE_ENV: production
       # Tells the server it was set up by the installer and under what name, so Settings can say how to turn the sandbox on.
       INSTALLER_INSTANCE: '@@NAME@@'
+      # This computer's key for saved logins. The app only reads it, and waits, locked, while it is missing.
+      SECRETS_KEY_FILE: /run/aman-key/master.key
 @@IF_SANDBOX@@      # Run code, shell and files go to the gVisor sandbox slots (project @@NAME@@-slots), never to Docker.
 @@IF_SANDBOX@@      SANDBOX_BACKEND: slots
 @@IF_SANDBOX@@      SANDBOX_SLOTS: '2'
@@ -85,6 +87,7 @@ services:
 @@IF_BROWSER@@      BROWSER_URL: http://browser-relay:8792
     volumes:
       - data:/data
+      - machine-key:/run/aman-key:ro
 @@IF_SANDBOX@@      # Read-only views of each slot's control socket. No Docker socket, no workspace volume.
 @@IF_SANDBOX@@      - slot_ctl_1:/run/aman-slots/1:ro
 @@IF_SANDBOX@@      - slot_ctl_2:/run/aman-slots/2:ro
@@ -114,6 +117,26 @@ services:
     # Above the app's graceful shutdown window so a kill does not cut off turn drain.
     stop_grace_period: 35s
     restart: unless-stopped
+
+  # Runs only when the installer asks, never on a normal start. It ties this instance's data to this computer's
+  # key, makes the key the first time, and is the only service that may write it. It has no network.
+  secrets-setup:
+    image: @@APP_IMAGE@@
+    pull_policy: never
+    profiles:
+      - setup
+    network_mode: none
+    entrypoint:
+      - aman
+      - secrets
+    volumes:
+      - data:/data
+      - machine-key:/run/aman-key
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: 'no'
 
 @@IF_LOCAL_MODEL@@  # The local model bridge: carries the app's model requests to a model server on this computer, at the ports its owner
 @@IF_LOCAL_MODEL@@  # named with aman local-model. This host side dials the model and listens only on socket files in a volume it shares
@@ -390,6 +413,10 @@ volumes:
     name: aman_@@NAME@@_data
     labels:
       com.amanuensis.instance: @@NAME@@
+  # This computer's key for saved logins, shared by every instance. The installer makes it; Compose never does.
+  machine-key:
+    name: aman_key
+    external: true
   dex:
     name: aman_@@NAME@@_dex
     labels:

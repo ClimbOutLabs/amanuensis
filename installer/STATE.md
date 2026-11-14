@@ -105,8 +105,33 @@ Later steps add keys with the same rule (for example `healthy` is set to `1`
 once an instance answers, `sms_port` holds the Twilio port the compose
 file publishes, empty when none, `sms_settings` the digest of its texts
 lines, empty when none, and `local_models` holds the comma-separated ports of
-this computer that `aman local-model` named for the local model bridge). Instance names use lowercase letters, digits and
+this computer that `aman local-model` named for the local model bridge, and `secrets` is set to `1` once the
+instance's data is tied to this computer's key). Instance names use lowercase letters, digits and
 hyphens.
+
+## This computer's key
+
+Saved logins in an instance's database are encrypted with one key per
+computer. The key is the file `master.key` in the Docker volume `aman_key`,
+which the installer makes once. It is not in the home, not in any instance's
+data and not in any backup.
+
+- Every instance's app mounts `aman_key` read-only at `/run/aman-key` and
+  reads the key from there (`SECRETS_KEY_FILE`). The app never makes a key.
+  With no key, or a key that does not match its data, it starts locked and
+  serves only a page that says so.
+- Before an instance starts for the first time with this layout, the
+  installer runs the `secrets-setup` service of its Compose file once
+  (`aman secrets init --if-needed`). It makes the key when the volume is
+  empty, ties the instance's database to it, and prints that instance's
+  recovery key. The installer shows the recovery key once, never writes it
+  to a file or a log, and at a terminal asks the person to type it back.
+  Then it records `secrets=1` in the registry and does not run setup for
+  that instance again.
+- Each instance has its own recovery key. It opens that instance's data on
+  a computer that does not have the key.
+- `aman_key` is removed only when the last instance is removed with its
+  data.
 
 ## The release record
 
@@ -260,5 +285,5 @@ longer than the dead limit while the others stay out.
   home.
 - Volumes an instance owns on Docker are named after it: `aman_<name>_data`
   and `aman_<name>_dex`, its Compose project is `aman-<name>`, and the
-  shared volumes are `aman_home`, `aman_source`, `aman_stt_cache` and
-  `aman_machine`.
+  shared volumes are `aman_home`, `aman_source`, `aman_stt_cache`,
+  `aman_machine` and `aman_key`.

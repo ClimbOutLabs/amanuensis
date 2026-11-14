@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Names the disk under Docker's data only when a test says the disk is encrypted; otherwise it knows nothing.
+[ -n "${STUB_DISK_ENCRYPTED:-}" ] || exit 1
+echo /dev/mapper/stub-root

@@ -677,6 +677,7 @@ case "$cmd" in
         --project-name) proj=$2; shift 2 ;;
         --env-file) envfile=$2; shift 2 ;;
         --project-directory) shift 2 ;;
+        --profile) shift 2 ;;
         -f) file=$2; shift 2 ;;
         *) break ;;
       esac
@@ -710,7 +711,10 @@ case "$cmd" in
         case " $* " in *" dex "*) rm -f "$S/dex_stopped_$proj" ;; esac
         printf '%s\n' "$img" >"$S/up/$proj"
         awk '/^    name: / {n = $2} /com.amanuensis.instance:/ {print n, $2}' "$file" >>"$S/volumes_labels"
+        # Compose owns only the volumes it makes; an external one belongs to no project.
+        externals=$(awk '/^    name: / {n = $2} /external: true/ {print n}' "$file")
         grep -o 'name: aman_[a-z0-9_-]*' "$file" | sed 's/name: //' | while read -r v; do
+          if printf '%s\n' "$externals" | grep -Fxq "$v"; then continue; fi
           case "$v" in
             *_stt | *_speech) grep -Fxq "$v" "$S/networks" 2>/dev/null || echo "$v" >>"$S/networks" ;;
             *) grep -Fxq "$v" "$S/volumes" || echo "$v" >>"$S/volumes"; echo "$v $proj" >>"$S/volume_projects" ;;
@@ -763,6 +767,39 @@ case "$cmd" in
         exit 0
         ;;
       run)
+        # `run --rm -T secrets-setup init|check-recovery ...`: ties an instance's data to this computer's key, as the
+        # real command does. The key is $S/key; each project's data remembers the key it was set up with and its
+        # recovery key. $S/key_lost models a computer whose key is gone while the data is still there.
+        case "$*" in
+          *" secrets-setup init "*)
+            [ -n "${STUB_SECRETS_FAIL:-}" ] && { echo "The database could not be opened." >&2; exit 1; }
+            [ -f "$S/key" ] || { echo "key-$(date +%s%N)" >"$S/key"; echo "$proj" >>"$S/key_made_by"; }
+            if [ -f "$S/secrets_$proj" ]; then
+              if [ "$(sed -n 1p "$S/secrets_$proj")" = "$(cat "$S/key")" ]; then
+                printf '{"already_set_up":true}\n'
+                exit 0
+              fi
+              echo "This database was set up with a different key. Unlock it with its recovery key instead of running setup." >&2
+              exit 1
+            fi
+            n=$(($(cat "$S/secrets_count" 2>/dev/null || echo 0) + 1))
+            echo "$n" >"$S/secrets_count"
+            recovery=$(printf '%06d-222222-333333-444444-555555-666666-777777-888888' "$n")
+            printf '%s\n%s\n' "$(cat "$S/key")" "$recovery" >"$S/secrets_$proj"
+            printf '{"recovery_key":"%s"}\n' "$recovery"
+            echo "Saved secrets are set up. Write down the recovery key now: it is shown only this once." >&2
+            exit 0
+            ;;
+          *" secrets-setup check-recovery "*)
+            typed=$(cat)
+            if [ "$(printf '%s' "$typed" | tr -cd 0-9)" = "$(sed -n 2p "$S/secrets_$proj" 2>/dev/null | tr -cd 0-9)" ]; then
+              printf '{"ok":true}\n'
+              exit 0
+            fi
+            echo "That recovery key does not unlock this database." >&2
+            exit 2
+            ;;
+        esac
         # A connector's account agent, run one-off: it reads the account from stdin, empties it, or checks
         # it, in the named volume the compose project owns. The service must exist in the file, as in
         # Compose. The account text arrives on stdin only, never in the logged command. The calendar agent

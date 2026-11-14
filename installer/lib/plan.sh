@@ -677,6 +677,8 @@ install_execute() {
       case "$ADDRESS_CHANGED" in *" $name "*) recreate=recreate ;; esac
       if instance_enforce_single_owner "$name"; then recreate=recreate; fi
       if sms_settings_changed "$name"; then recreate=recreate; fi
+      # An instance from before this computer's key is tied to it now, which needs a fresh start.
+      if [ "$(reg_get "$name" secrets)" != 1 ]; then recreate=recreate; fi
       if [ "$(instance_state "$name")" != running ] || [ -n "$recreate" ] || { instance_sandbox_wanted "$name" && ! instance_sandbox_wired "$name"; } ||
         { instance_sandbox_wanted "$name" && ! sandbox_slots_use_current_image "$name"; }; then
         if [ "$name" = "$enabled" ]; then recreate=recreate; fi

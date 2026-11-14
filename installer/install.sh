@@ -53,6 +53,8 @@ DOWNLOADS_FILE=$INSTALLER_DIR/downloads.txt
 . "$INSTALLER_DIR/lib/secrets.sh"
 # shellcheck source=lib/registry.sh
 . "$INSTALLER_DIR/lib/registry.sh"
+# shellcheck source=lib/machinekey.sh
+. "$INSTALLER_DIR/lib/machinekey.sh"
 # shellcheck source=lib/release.sh
 . "$INSTALLER_DIR/lib/release.sh"
 # shellcheck source=lib/templates.sh

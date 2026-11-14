@@ -488,6 +488,8 @@ instance_state() {
 instance_up() {
   local name=$1 rc=0 recreate=() clash
   if [ "${2:-}" = recreate ]; then recreate=(--force-recreate); fi
+  # The app waits, locked, until its data is tied to this computer's key, so that comes first.
+  instance_secrets_ensure "$name" || return 1
   step_begin "start-$name" "Starting instance $name and waiting until it answers"
   # Tailscale would take the port the moment the instance stops, so a start that would stop it is not begun.
   clash=$(instance_tailscale_clash "$name")
@@ -1461,7 +1463,7 @@ instance_volumes() {
     project_objects volumes "$name-slots"
     for volume in $(D volume ls -q 2>/dev/null || true); do
       case "$volume" in
-        aman_stt_cache | aman_machine) ;;
+        aman_stt_cache | aman_machine | aman_key) ;;
         "aman_${name}_"* | "${name}_slot_"*) printf '%s\n' "$volume" ;;
       esac
     done
@@ -1478,6 +1480,8 @@ machine_volumes() {
   {
     project_objects volumes aman-machine
     if docker_volume_exists aman_stt_cache; then printf '%s\n' aman_stt_cache; fi
+    # This computer's key goes only with the last instance: without it no saved login can be opened.
+    if docker_volume_exists "$MACHINE_KEY_VOLUME"; then printf '%s\n' "$MACHINE_KEY_VOLUME"; fi
   } | sort -u
 }
 

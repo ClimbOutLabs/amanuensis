@@ -475,7 +475,7 @@ test_instances_are_isolated_and_images_stay_local() {
   assert_log_has "network connect --alias aman-tts-engine aman_main_speech aman-tts"
   assert_log_has "network connect --alias aman-tts-engine aman_second_speech aman-tts"
   assert_eq "$(sort "$SB_STATE/network_links" | tr '\n' ',')" "aman_main_speech aman-stt,aman_main_speech aman-tts,aman_second_speech aman-stt,aman_second_speech aman-tts," "the speech services are the only things joined to each"
-  assert_eq "$(grep -c 'pull_policy: never' "$AMAN_HOME/instances/main/compose.yaml")" 7 "app, holder, speech relay, calendar and email connector, the browser and its gateway are never pulled"
+  assert_eq "$(grep -c 'pull_policy: never' "$AMAN_HOME/instances/main/compose.yaml")" 8 "app, key setup, holder, speech relay, calendar and email connector, the browser and its gateway are never pulled"
   assert_contains "$machine" "pull_policy: never"
   assert_not_contains "$(sed -n '/^  dex:/,/^configs:/p' "$AMAN_HOME/instances/main/compose.yaml")" "pull_policy" "the login image is pulled by digest"
   run_install instance remove second
