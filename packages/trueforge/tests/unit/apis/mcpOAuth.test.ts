@@ -18,6 +18,32 @@ import { SqliteMcpToolGrantStore } from '../../../src/db/sqlite/mcp-tool-grant-s
 import { SqliteOAuthTokenStore } from '../../../src/db/sqlite/token-store/SqliteOAuthTokenStore';
 import { mcpOAuthCallbackUrl } from '../../../src/mcp/auth/mcpOAuthHelpers';
 
+// Name resolution is stubbed for the whole suite: the two example hosts resolve to a public
+// address, and every other name does not resolve. The authorize flow and the sign-in dials are
+// judged by the address check, so the suite's answer cannot depend on the DNS of the machine
+// running it, and no real lookup leaves the suite.
+jest.mock('node:dns/promises', () => {
+  const actual = jest.requireActual<typeof import('node:dns/promises')>('node:dns/promises');
+  return {
+    ...actual,
+    lookup: async (hostname: string, options?: { all?: boolean | undefined }) => {
+      const address =
+        hostname === 'mcp.example.com' || hostname === 'auth.example.com'
+          ? '93.184.216.34'
+          : hostname === 'blocked.example.com' || hostname === 'localhost'
+            ? '127.0.0.1'
+            : undefined;
+      if (address === undefined) {
+        const error = new Error(`getaddrinfo ENOTFOUND ${hostname}`);
+        Reflect.set(error, 'code', 'ENOTFOUND');
+        throw error;
+      }
+      const entry = { address, family: 4 };
+      return options?.all === true ? [entry] : entry;
+    },
+  };
+});
+
 const AS_ORIGIN = 'https://auth.example.com';
 const MCP_URL = 'https://mcp.example.com/sse';
 const FE_RETURN_TO = '/mcp/connected';

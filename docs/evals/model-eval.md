@@ -34,6 +34,14 @@ The run turns red when a model's pass rate falls more than 10 points below its l
 
 A model that judges its own replies may be too kind. When you have a second model's key, use it as the judge.
 
+### Coding in the sandbox
+
+The same weekly run also checks that coding work runs in the sandbox. It builds the sandbox from `main` on the runner and runs `pnpm test:sandbox-coding-live`, which needs no model. It checks Git history after a full disk, `npm install`, Python project environments, a project's own scripts, longer commands, the Sandbox switch and plain commits. This part runs beside the model eval, never sees the model key, and shows as its own line on the run page, so a sandbox failure is never mixed into the model scores.
+
+### Co-browse
+
+The weekly run also checks co-browse in a real browser, with no model and no real website. It runs `pnpm test:cobrowse`, which builds the browser image from `main` and uses made-up pages served inside the job. It checks that the live browser page loads, that paste and copy work, that the password box takes typing and never copies out, that taking over works, and that clicking the same thing again is not skipped as already done. Like the sandbox part, it never sees the model key and shows as its own line on the run page.
+
 ### What a run costs
 
 One run of Muse Spark 1.1 on all 43 cases, with Muse as the judge, should cost about 2 to 3 US dollars at Meta's list price of $1.25 per million input tokens and $4.25 per million output tokens. That is an estimate: the run page shows the cost of each run. It counts the tokens of the eval's chats, so Aman's background work, such as saving memories, can add a little more on the Meta bill.

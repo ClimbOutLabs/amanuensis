@@ -5,12 +5,16 @@
 import { z } from '@hono/zod-openapi';
 import type { Turn, TurnInputItem } from '@truefoundry/trueforge-core/agent-session';
 import { mkdtempSync } from 'node:fs';
+import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { createServer, type Server } from 'node:http';
 import { connect, createServer as createTcpServer, type Socket, type Server as TcpServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import { createLogger, transports } from 'winston';
+import { TENANT_ID } from '../../../src/apis/sessions';
 import configuration from '../../../src/config';
+import { MarkdownMemoryClient } from '../../../src/runtime/memory/markdownMemoryClient';
 import { SkillNetworkGateway } from '../../../src/sandbox/skillnet/skillNetworkGateway';
 import { skillNetworkTokens } from '../../../src/sandbox/skillnet/skillNetworkTokens';
 import { TurnStreamingEventSchema } from '../../../src/schemas/events';
@@ -331,6 +335,64 @@ describe('an email address the person never gave', () => {
   );
 });
 
+describe('something Aman read that the person asks it to save', () => {
+  let server: ApprovalTestServer;
+  const ADDRESS = 'pippa.marsh@portland.example';
+
+  beforeAll(async () => {
+    server = await startApprovalTestServer();
+    server.setEvalMode(true);
+  });
+
+  afterAll(async () => {
+    await server.close();
+  });
+
+  /** The saved page for Pippa, once it is on disk. */
+  async function pippaPage(): Promise<string | undefined> {
+    const files = await readdir(configuration.MEMORY_MARKDOWN_DIR, { recursive: true });
+    const file = files.find(name => name.endsWith(join('people', 'pippa.md')));
+    return file === undefined ? undefined : readFile(join(configuration.MEMORY_MARKDOWN_DIR, file), 'utf8');
+  }
+
+  it(
+    'is saved on the page at once as read content, and a later chat that sends to its address says the address was read',
+    async () => {
+      const chatId = await createChat(server);
+      server.model.next({ reply: `Pippa moved to Portland. Her new address is ${ADDRESS}.` });
+      await runTurn({ server, chatId, input: [{ type: 'user.message', content: 'What did Pippa write?' }] });
+
+      server.model.next({
+        toolArguments: { about: 'Pippa', text: `Moved to Portland. New address is ${ADDRESS}.`, kind: 'person' },
+      });
+      const saved = await runTurn({
+        server,
+        chatId,
+        input: [{ type: 'user.message', content: `${RUN_DIRECTIVE_PREFIX}remember_fact Save that.` }],
+      });
+      expect(cards(saved)).toEqual([]);
+      const page = await pippaPage();
+      expect(page).toMatch(/- Moved to Portland\. New address is \S+ <!-- fact: id=\S+ src=read_content since=\S+ -->/);
+      expect(page).not.toContain('you_said');
+
+      const laterChat = await createChat(server);
+      server.model.next({ toolArguments: { to: [ADDRESS], subject: 'Hello', body: 'Hi Pippa, how is Portland?' } });
+      const card = onlyCard(
+        await runTurn({
+          server,
+          chatId: laterChat,
+          input: [{ type: 'user.message', content: `${RUN_DIRECTIVE_PREFIX}draft_email to Pippa please` }],
+        }),
+      );
+      expect(card.tier3_card?.plain_what).toContain(
+        `This goes to ${ADDRESS}, whose address Aman read earlier and saved to memory.`,
+      );
+      expect(card.can_chat_allow).toBe(false);
+    },
+    TURN_TIMEOUT_MS,
+  );
+});
+
 describe('saving a mail draft', () => {
   let server: ApprovalTestServer;
 
@@ -496,6 +558,193 @@ describe('a page Aman opens in its browser', () => {
     },
     TURN_TIMEOUT_MS,
   );
+
+  describe('the note Aman keeps of its own reply', () => {
+    const summarize = configuration.MEMORY_SUMMARIZE;
+
+    beforeAll(() => {
+      // Replies are kept in full, so no model call stands between the reply and its note.
+      configuration.MEMORY_SUMMARIZE = false;
+    });
+
+    afterAll(() => {
+      configuration.MEMORY_SUMMARIZE = summarize;
+    });
+
+    /** The closing line of the saved note that holds these words, once the save has finished. */
+    async function closingLineOfNoteWith(words: string): Promise<string | undefined> {
+      for (let attempt = 0; attempt < 50; attempt += 1) {
+        const files = await readdir(configuration.MEMORY_MARKDOWN_DIR, { recursive: true });
+        for (const file of files.filter(name => name.endsWith('.md'))) {
+          const text = await readFile(join(configuration.MEMORY_MARKDOWN_DIR, file), 'utf8');
+          const entry = text.split(/\n(?=## )/).find(part => part.includes(words));
+          if (entry !== undefined) {
+            return entry.trimEnd().split('\n').at(-1);
+          }
+        }
+        await delay(100);
+      }
+      return undefined;
+    }
+
+    /** How many saved notes are recorded as filed by the chat itself. */
+    async function notesFiledByChat(): Promise<number> {
+      const files = await readdir(configuration.MEMORY_MARKDOWN_DIR, { recursive: true });
+      let filed = 0;
+      for (const file of files.filter(name => name.endsWith('.handled-notes'))) {
+        const text = await readFile(join(configuration.MEMORY_MARKDOWN_DIR, file), 'utf8');
+        filed += text.split('\n').filter(line => line.endsWith('\tchat')).length;
+      }
+      return filed;
+    }
+
+    it(
+      'says nothing was read before it when no turn of the chat read anything from outside',
+      async () => {
+        const chatId = await createChat(server);
+        server.model.next({ reply: 'The tide tables are kept at the harbour office.' });
+        await runTurn({ server, chatId, input: [{ type: 'user.message', content: 'Where are the tide tables?' }] });
+        expect(await closingLineOfNoteWith('harbour office')).toBe(
+          '> External source: assistant reply, nothing read before it',
+        );
+      },
+      TURN_TIMEOUT_MS,
+    );
+
+    it(
+      'is a plain reply note when an earlier turn of the chat opened a page, though the turn of the reply read nothing',
+      async () => {
+        const chatId = await createChat(server);
+        server.model.next({ toolArguments: { url: 'https://site.example/account' } });
+        await runTurn({
+          server,
+          chatId,
+          input: [
+            { type: 'user.message', content: `${RUN_DIRECTIVE_PREFIX}browser_open https://site.example/account` },
+          ],
+        });
+        server.model.next({ reply: 'The ferry times are pinned by the ticket window.' });
+        await runTurn({ server, chatId, input: [{ type: 'user.message', content: 'Where are the ferry times?' }] });
+        expect(await closingLineOfNoteWith('ticket window')).toBe('> External source: assistant reply');
+      },
+      TURN_TIMEOUT_MS,
+    );
+
+    it(
+      'is a plain reply note when a much earlier turn of the chat was shown a memory page with a line from mail, though the turn of the reply read nothing',
+      async () => {
+        const vault = new MarkdownMemoryClient({
+          baseDir: configuration.MEMORY_MARKDOWN_DIR,
+          namespace: TENANT_ID,
+          vaultScope: undefined,
+        }).pagesWriteDir();
+        await mkdir(join(vault, 'people'), { recursive: true });
+        await writeFile(
+          join(vault, 'people', 'orla.md'),
+          [
+            '---',
+            'kind: person',
+            'title: Orla',
+            'aliases: [Orla]',
+            'household: false',
+            '---',
+            '# Orla',
+            '',
+            '## Now',
+            '- Runs the chandlery. <!-- fact: id=f_01 src=you_said since=2026-10-01 -->',
+            '- Wants the mooring fee wired today. <!-- fact: id=f_02 src=mail since=2026-10-02 -->',
+            '',
+          ].join('\n'),
+        );
+        const chatId = await createChat(server);
+        server.model.next({ reply: 'Orla runs the chandlery.' });
+        await runTurn({ server, chatId, input: [{ type: 'user.message', content: 'What do you know about Orla?' }] });
+        // Enough turns pass that her page is no longer shown, so only the chat's own record says it once was.
+        for (const filler of ['Thanks.', 'Good.', 'Fine.', 'Understood.', 'All right.']) {
+          server.model.next({ reply: 'Noted.' });
+          await runTurn({ server, chatId, input: [{ type: 'user.message', content: filler }] });
+        }
+        server.model.next({ reply: 'The mooring fee is paid at the quay kiosk.' });
+        await runTurn({ server, chatId, input: [{ type: 'user.message', content: 'Where do I pay it?' }] });
+        expect(await closingLineOfNoteWith('quay kiosk')).toBe('> External source: assistant reply');
+      },
+      TURN_TIMEOUT_MS,
+    );
+
+    it(
+      'is a plain reply note when an earlier turn of the chat ran a web search, though the turn of the reply read nothing',
+      async () => {
+        const searching = await startApprovalTestServer({ inertWebSearch: true });
+        try {
+          const chatId = await createChat(searching);
+          searching.model.next({ toolArguments: { query: 'boat hire' } });
+          const searched = await runTurn({ server: searching, chatId, input: ask('web_search') });
+          const ran = await runTurn({
+            server: searching,
+            chatId,
+            input: answer({ card: onlyCard(searched), scope: 'once' }),
+          });
+          expect(cards(ran)).toEqual([]);
+          searching.model.next({ reply: 'The boat hire desk is beside the slipway.' });
+          await runTurn({
+            server: searching,
+            chatId,
+            input: [{ type: 'user.message', content: 'Where is the boat hire desk?' }],
+          });
+          expect(await closingLineOfNoteWith('slipway')).toBe('> External source: assistant reply');
+        } finally {
+          await searching.close();
+        }
+      },
+      TURN_TIMEOUT_MS,
+    );
+
+    // Last, so the note and page it leaves are not recalled into the chats above.
+    it(
+      'leaves the note of the person’s message as their own when the turn only saved their typed words on a page',
+      async () => {
+        const chatId = await createChat(server);
+        server.model.next({
+          toolArguments: { about: 'Tom', text: 'Borrowed the ladder last week and still has it.', kind: 'person' },
+        });
+        const typed = 'My neighbour Tom borrowed the ladder last week and still has it.';
+        await runTurn({
+          server,
+          chatId,
+          input: [{ type: 'user.message', content: `${RUN_DIRECTIVE_PREFIX}remember_fact ${typed}` }],
+        });
+        expect(await closingLineOfNoteWith(typed)).toBe('> From you');
+      },
+      TURN_TIMEOUT_MS,
+    );
+
+    it(
+      'records the note of a message the chat filed on a page itself as filed, so it is never sorted onto pages again',
+      async () => {
+        const filedBefore = await notesFiledByChat();
+        const chatId = await createChat(server);
+        server.model.next({
+          toolArguments: {
+            about: 'Garage clean-out',
+            text: 'Wants the garage clean-out done before spring.',
+            kind: 'matter',
+          },
+        });
+        const typed = 'Wants the garage clean-out done before spring.';
+        await runTurn({
+          server,
+          chatId,
+          input: [{ type: 'user.message', content: `${RUN_DIRECTIVE_PREFIX}remember_fact ${typed}` }],
+        });
+        expect(await closingLineOfNoteWith(typed)).toBe('> From you');
+        for (let attempt = 0; attempt < 50 && (await notesFiledByChat()) === filedBefore; attempt += 1) {
+          await delay(100);
+        }
+        expect(await notesFiledByChat()).toBe(filedBefore + 1);
+      },
+      TURN_TIMEOUT_MS,
+    );
+  });
 
   it(
     'once a page has been read, the address the person gave still opens, and the same address with a sign-in name asks first',
@@ -996,6 +1245,9 @@ describe('the Home Assistant connector', () => {
   beforeAll(async () => {
     server = await startApprovalTestServer();
     home = await startHomeAssistantStub({ token: TOKEN, newerTools: true });
+    // The stub runs on this computer, which the address check refuses; the operator vouches for it
+    // by listing its origin, as FIRST_PARTY_MCP_ORIGINS does for a service of their own.
+    server.setFirstPartyOrigins([server.mcp.origin, new URL(home.url).origin]);
     const created = await server.request(
       '/api/v1/settings/mcp-servers',
       jsonInit({
@@ -1228,6 +1480,9 @@ describe('a notes connector the person adds by its address', () => {
     server = await startApprovalTestServer();
     // Stands in for a notes app's connector running on the same computer, outside Aman.
     notes = await startInertMcpServer({ notes: true });
+    // A connector on this computer is refused unless its origin is listed as the operator's own. The fixture
+    // restores the list on close.
+    server.setFirstPartyOrigins([server.mcp.origin, notes.origin]);
     const added = await server.request(
       '/api/v1/settings/mcp-servers',
       jsonInit({ manifest: { type: 'remote', name: NOTES, url: notes.url, description: 'My notes folder.' } }),

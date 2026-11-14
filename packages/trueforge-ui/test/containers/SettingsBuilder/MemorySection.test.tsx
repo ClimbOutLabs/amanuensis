@@ -8,6 +8,7 @@ import { DraftCatalogProvider } from '@/atoms/draft/DraftCatalogProvider.js';
 import { MemoryVaultPage } from '@/atoms/memory/MemoryVaultPage.js';
 import { PersonalizationProvider } from '@/components/PersonalizationContext.js';
 import TruefoundrySettingsBuilder from '@/containers/SettingsBuilder/index.js';
+import type { MemoryPagesCatalog } from '@/plugins/trueforge-agent-server-adapter/catalogs/memoryPagesCatalog.js';
 import type { MemoryVaultCatalog } from '@/plugins/trueforge-agent-server-adapter/catalogs/memoryVaultCatalog.js';
 import { ServerProvider } from '@/server/ServerContext.js';
 import { ShellModeProvider, useShellMode } from '@/server/ShellModeContext.js';
@@ -42,22 +43,13 @@ vi.mock('@/containers/SettingsBuilder/MemorySettings.js', () => ({
   default: () => <div>Memory settings content</div>,
 }));
 
-/** Memory-defaults fixture per the generated SDK type; only `backend` is read here. */
+/** Memory-defaults fixture per the generated SDK type. */
 const MEMORY_DEFAULTS = {
-  backend: 'markdown',
   recallTimeoutMs: 2500,
   recallQueryWindow: 5,
   recallMaxItems: 50,
-  recallMaxEntities: 10,
   recallMinScore: 0.6,
-  curatedEnabled: true,
-  curatedMaxModels: 3,
-  curatedMaxTokens: 512,
   prerecallGateEnabled: false,
-  reflectEnabled: true,
-  reflectBudget: 'low',
-  reflectMaxTokens: 512,
-  reflectTimeoutMs: 8000,
 } satisfies TrueForgeApi.MemoryDefaultsCapability;
 
 const vaultCatalog: MemoryVaultCatalog = {
@@ -78,7 +70,27 @@ const vaultCatalog: MemoryVaultCatalog = {
   updateSharing: async sharing => sharing,
 };
 
-function createServer(options: { memorySetUp: boolean }): AgentUIServer {
+const pagesCatalog: MemoryPagesCatalog = {
+  listPages: async () => ({ pages: [], skippedFiles: [] }),
+  getPage: async () => {
+    throw new Error('not used in these tests');
+  },
+  savePage: async () => {
+    throw new Error('not used in these tests');
+  },
+  confirmLine: async () => {
+    throw new Error('not used in these tests');
+  },
+  dismissLine: async () => {
+    throw new Error('not used in these tests');
+  },
+  dismissDisagreement: async () => {
+    throw new Error('not used');
+  },
+  deletePage: async () => {},
+};
+
+function createServer(options: { memorySetUp: boolean; withPages?: boolean }): AgentUIServer {
   const response = {
     data: {
       sandbox: { enabled: true },
@@ -94,7 +106,11 @@ function createServer(options: { memorySetUp: boolean }): AgentUIServer {
     getCapabilities: async () => response,
   });
   // The vault is a companion surface the adapter attaches beside the typed server.
-  const server = { ...base, memoryVault: vaultCatalog };
+  const server = {
+    ...base,
+    memoryVault: vaultCatalog,
+    ...(options.withPages === true ? { memoryPages: pagesCatalog } : {}),
+  };
   return server;
 }
 
@@ -162,6 +178,18 @@ async function openMemorySection() {
 }
 
 describe('Settings Memory section', () => {
+  it('offers a Pages tab only when the server keeps pages', async () => {
+    const { unmount } = render(<TestShell server={createServer({ memorySetUp: true })} />);
+    await openMemorySection();
+    expect(screen.queryByRole('tab', { name: 'Pages' })).not.toBeInTheDocument();
+    unmount();
+
+    render(<TestShell server={createServer({ memorySetUp: true, withPages: true })} />);
+    await openMemorySection();
+    fireEvent.click(screen.getByRole('tab', { name: 'Pages' }));
+    expect(await screen.findByText(/A page is a short note/)).toBeInTheDocument();
+  });
+
   it('has one Memory entry in the list and no Memory vault entry', async () => {
     render(<TestShell server={createServer({ memorySetUp: true })} />);
     await openSettings();
@@ -188,16 +216,6 @@ describe('Settings Memory section', () => {
 
     expect(screen.getByRole('tab', { name: 'Memories' })).toHaveAttribute('aria-selected', 'true');
     expect(await screen.findByText('The user drinks tea in the morning.')).toBeInTheDocument();
-  });
-
-  it('opens on Settings when memory is not set up yet', async () => {
-    render(<TestShell server={createServer({ memorySetUp: false })} />);
-    await openMemorySection();
-
-    await waitFor(() => {
-      expect(screen.getByRole('tab', { name: 'Settings' })).toHaveAttribute('aria-selected', 'true');
-    });
-    expect(await screen.findByText('Memory settings content')).toBeInTheDocument();
   });
 
   it('shows the Sharing sub-tab content when picked', async () => {

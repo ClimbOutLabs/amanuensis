@@ -32,7 +32,7 @@ test('a person signs in on the built app, adds a model, chats and signs out', { 
   let app: Awaited<ReturnType<typeof startBuiltApp>> | undefined;
   let browser: Browser | undefined;
   try {
-    app = await startBuiltApp();
+    app = await startBuiltApp({ localModelEndpoints: [new URL(model.baseUrl).host] });
     browser = await chromium.launch({ executablePath: findChromiumExecutable(chromium.executablePath()) });
     const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
     page.setDefaultTimeout(STEP_TIMEOUT_MS);

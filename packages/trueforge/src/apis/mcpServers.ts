@@ -13,11 +13,10 @@ import {
 } from '@truefoundry/trueforge-core/core/homeassistant/toolContract';
 import type { Context } from 'hono';
 import { HTTPException } from 'hono/http-exception';
-import { createHash } from 'node:crypto';
 import type { Logger } from 'winston';
 import type { ResolveRequestContext } from '../auth/identity';
 import { safeReturnTo } from '../auth/safeReturnTo';
-import type { McpCatalog, SearchDeclaration } from '../catalog/McpCatalog';
+import type { McpCatalog } from '../catalog/McpCatalog';
 import configuration from '../config';
 import {
   McpServerNameConflictError,
@@ -32,7 +31,7 @@ import { createMcpOAuthClient } from '../mcp/auth/mcpDcr';
 import { mcpOAuthRedirectUris } from '../mcp/auth/mcpOAuthHelpers';
 import type { IOAuthTokenStore, OAuthClientRecord } from '../mcp/auth/types';
 import { connectorGrantBinding } from '../mcp/connectorGrantBinding';
-import { firstPartyAfterSave } from '../mcp/firstParty';
+import { isFirstPartyOrigin } from '../mcp/firstParty';
 import { checkHomeAssistant, homeAssistantUrlProblem, type HomeAssistantProbeClient } from '../mcp/homeAssistant';
 import {
   authorizeMcpServerRoute,
@@ -47,11 +46,10 @@ import {
   listMcpServersRoute,
   listMcpServerToolsRoute,
   listMcpToolGrantsRoute,
-  memoryCheckMcpServerRoute,
   putMcpServerRoute,
 } from '../routes/mcpServerRoutes';
-import { checkMemoryProviderUrl, type MemoryProviderCheckOutcome } from '../runtime/memory/memoryProbe';
-import { getMcpConnection, resolveManifestRequestHeaders } from '../runtime/sessionResources';
+import { remoteUrlProblem } from '../runtime/remoteAddress';
+import { getMcpConnection, RemoteAddressRefusedError } from '../runtime/sessionResources';
 import type {
   AvailableMcpServer,
   ConfiguredMcpServer,
@@ -60,7 +58,6 @@ import type {
   McpServerManifest,
   UpdateMcpServerRequest,
 } from '../schemas/mcpServer';
-import type { MemoryProviderCheckResult } from '../schemas/memoryProvider';
 import { MissingStoredSecretError, resolveStoredSecretValue, SECRET_REDACTION } from '../utils/secretRedaction';
 import { isSecretReference } from '../utils/secretReferences';
 
@@ -118,165 +115,25 @@ function redactMcpServerManifest(manifest: McpServerManifest): McpServerManifest
   return manifest;
 }
 
-/** Connector roles of which exactly one configured server may hold the flag. */
-type SingleHolderRole = 'memory_provider' | 'search_provider';
-
 /**
- * Only one configured server may hold each single-holder role: the host recalls from and retains to
- * exactly one memory connector, and routes the user's silent searches through exactly one search
- * connector. `excludeName` skips the row being written itself, so re-saving the server that already
- * holds the flag is not treated as a conflict with itself. Returns the first other flagged server
- * found, or undefined when there is none.
+ * Only one configured server may be the search provider: the user's silent searches go through
+ * exactly one connector. `excludeName` skips the row being written itself, so re-saving the holder
+ * is not a conflict with itself. Returns the first other holder found, or undefined.
  */
-async function findOtherRoleHolder({
+async function findOtherSearchProvider({
   mcpServerStore,
   tenant_id,
   excludeName,
-  role,
 }: {
   mcpServerStore: IMcpServerStore;
   tenant_id: string;
   excludeName: string;
-  role: SingleHolderRole;
 }): Promise<McpServerRecord | undefined> {
   const servers = await mcpServerStore.listServers({ tenant_id, names: undefined });
   return servers.find(
-    server => server.name !== excludeName && server.manifest.type === 'remote' && server.manifest[role] === true,
+    server =>
+      server.name !== excludeName && server.manifest.type === 'remote' && server.manifest.search_provider === true,
   );
-}
-
-function dcrUnauthorizedReason(name: string): string {
-  return `connector "${name}" must be saved and authorized before it can be checked`;
-}
-
-/**
- * Why a DCR manifest will have no usable token once the write lands, or undefined when the
- * stored authorization survives it. A DCR token is keyed by the row id and scoped to the MCP
- * URL, so only a re-save of an already-authorized DCR connector at an unchanged URL keeps it:
- * a brand-new connector, a switch from header auth, and a URL change all commit a row whose
- * token does not exist yet or is about to be deleted.
- */
-function dcrAuthorizationGap({
-  manifest,
-  stored,
-}: {
-  manifest: McpServerManifest;
-  stored: McpServerRecord | undefined;
-}): string | undefined {
-  if (stored === undefined || stored.manifest.auth?.type !== 'dcr') {
-    return dcrUnauthorizedReason(manifest.name);
-  }
-  if (stored.manifest.url !== manifest.url) {
-    return `changing the URL of "${manifest.name}" clears its authorization, so it must be authorized again before it can serve memory`;
-  }
-  return undefined;
-}
-
-/**
- * Runs the memory-provider connection check for the manifest a write is about to commit,
- * resolving its live request headers exactly as a turn would. A connector's `auth_status` only
- * covers its MCP endpoint, while host-enforced memory calls the Hindsight REST API behind the
- * same host, so this is the only signal that says the credential memory will use actually works.
- *
- * Credentials come from the incoming manifest, never from whatever the row happens to hold now:
- * a header-to-DCR switch must not pass on the header it replaces, and a DCR URL change must not
- * pass on the token the write then deletes. DCR is the one case that legitimately reads stored
- * state, and only where {@link dcrAuthorizationGap} says the stored token outlives the write.
- */
-async function checkMemoryProvider({
-  manifest,
-  stored,
-  mcpServerStore,
-  tokenStore,
-  tenant_id,
-  userRef,
-}: {
-  manifest: McpServerManifest;
-  stored: McpServerRecord | undefined;
-  mcpServerStore: IMcpServerStore;
-  tokenStore: IOAuthTokenStore;
-  tenant_id: string;
-  userRef: string;
-}): Promise<MemoryProviderCheckOutcome> {
-  let headers: RemoteMcpHeaders;
-  if (manifest.auth?.type === 'dcr') {
-    const gap = dcrAuthorizationGap({ manifest, stored });
-    if (gap !== undefined) {
-      return { ok: false, code: 'auth_required', reason: gap };
-    }
-    const connection = await getMcpConnection({
-      tenant_id,
-      name: manifest.name,
-      store: mcpServerStore,
-      tokenStore,
-      clientName: configuration.MCP_DCR_OAUTH_CLIENT_NAME,
-      userRef,
-    });
-    if (connection === undefined) {
-      return { ok: false, code: 'auth_required', reason: dcrUnauthorizedReason(manifest.name) };
-    }
-    headers = connection.headers;
-  } else {
-    headers = resolveManifestRequestHeaders(manifest);
-  }
-  return checkMemoryProviderUrl({
-    url: manifest.url,
-    headers,
-    // A bank tuned to a long recall deadline must not fail its own save check sooner than a turn.
-    timeoutMs: Math.max(
-      configuration.MEMORY_CHECK_TIMEOUT_MS,
-      (manifest.type === 'remote' ? manifest.memory_settings?.recall_timeout_ms : undefined) ??
-        configuration.MEMORY_RECALL_TIMEOUT_MS,
-    ),
-  });
-}
-
-/**
- * Digest of everything the memory-provider check authenticated with: the URL it dialed, the auth
- * the row will carry, and the identity of the row a DCR token hangs off. The check runs on an
- * unlocked read, so the write transaction re-derives this under its row lock and refuses to
- * commit a URL and credential pair that never passed. Hashed rather than compared raw so a header
- * secret never survives in a comparison value.
- */
-function memoryProviderProbeDigest({
-  manifest,
-  stored,
-}: {
-  manifest: McpServerManifest;
-  stored: McpServerRecord | undefined;
-}): string {
-  const probed = JSON.stringify({
-    url: manifest.url,
-    auth: manifest.auth ?? null,
-    stored_id: stored?.id ?? null,
-  });
-  return createHash('sha256').update(probed).digest('hex');
-}
-
-/**
- * The connector changed between the unlocked read the memory-provider check ran on and the write
- * transaction that locks it. Reported as the conflict the rest of this router uses, so the caller
- * retries against current state instead of saving credentials nothing verified.
- */
-class MemoryProviderCheckStaleError extends Error {
-  constructor(name: string) {
-    super(`connector "${name}" changed while its memory provider check was running; retry the save`);
-    this.name = 'MemoryProviderCheckStaleError';
-  }
-}
-
-/** Wire projection of a check outcome; the runtime shape is camelCase, the wire is snake_case. */
-function toMemoryProviderCheckResult(outcome: MemoryProviderCheckOutcome): MemoryProviderCheckResult {
-  if (outcome.ok) {
-    return { status: 'ok' };
-  }
-  return {
-    status: 'failed',
-    code: outcome.code,
-    reason: outcome.reason,
-    ...(outcome.httpStatus === undefined ? {} : { http_status: outcome.httpStatus }),
-    ...(outcome.detail === undefined ? {} : { detail: outcome.detail }),
-  };
 }
 
 /**
@@ -472,46 +329,34 @@ function withStoredDeclaredChangeTools({
   return { ...manifest, declared_change_tools: kept };
 }
 
+/**
+ * The reason a remote connector address may not be used, or undefined when it may. An origin on
+ * the operator's own list is the operator's own service and is not second-guessed; every other
+ * remote address is resolved and judged by the address check (see runtime/remoteAddress) before
+ * anything dials it or writes it. A host that does not resolve is not refused here: it connects
+ * nowhere, the connection attempt reports its own failure, and the address is judged again on
+ * the next check if the name starts resolving. The wording is the same wherever the refusal is
+ * served, so the person hears one explanation.
+ */
+async function remoteAddressRefusal({ url }: { url: string }): Promise<string | undefined> {
+  if (isFirstPartyOrigin({ url, origins: configuration.FIRST_PARTY_MCP_ORIGINS })) {
+    return undefined;
+  }
+  const problem = await remoteUrlProblem({ url });
+  switch (problem) {
+    case null:
+    case 'unresolved':
+      return undefined;
+    case 'blocked':
+      return 'That address is on this computer, so the server cannot connect to it. Enter an address on your home network or the internet instead.';
+    case 'invalid':
+      return 'That address is not one the server can connect to. Enter the full address, starting with http:// or https://, without a name and password in it.';
+  }
+}
+
 export function createSettingsMcpServersRouter<TTransaction>(
   deps: McpServersRouterDeps<TTransaction> & { mcpCatalog: McpCatalog },
 ) {
-  /**
-   * The message to reject a memory-provider write with, or undefined when the check passed.
-   * Callers run this only for a manifest that sets the flag: a connector that is not the memory
-   * provider is never dialed on save.
-   */
-  async function memoryProviderWriteRejection({
-    manifest,
-    stored,
-    mcpServerStore,
-    tenant_id,
-    userRef,
-  }: {
-    manifest: McpServerManifest;
-    stored: McpServerRecord | undefined;
-    mcpServerStore: IMcpServerStore<TTransaction>;
-    tenant_id: string;
-    userRef: string;
-  }): Promise<string | undefined> {
-    const outcome = await checkMemoryProvider({
-      manifest,
-      stored,
-      mcpServerStore,
-      tokenStore: deps.tokenStore,
-      tenant_id,
-      userRef,
-    });
-    if (outcome.ok) {
-      return undefined;
-    }
-    deps.logger.warn(`Memory provider check failed for "${manifest.name}"; rejecting write`, {
-      code: outcome.code,
-      reason: outcome.reason,
-      ...(outcome.httpStatus === undefined ? {} : { httpStatus: outcome.httpStatus }),
-    });
-    return `memory provider check failed: ${outcome.reason}`;
-  }
-
   /**
    * The search declaration for a save that designates this connector, dialing the server when
    * neither the stored record nor a shipped preset settles it. The dial reads the server's own
@@ -521,7 +366,7 @@ export function createSettingsMcpServersRouter<TTransaction>(
    * silently for it, and the declaration is captured the next time its tool list is read. The
    * one refusal is a shipped preset at the address carrying no search declaration, where the
    * catalog itself says the server is not a search provider. Runs outside the write
-   * transaction, like the memory provider check, so its network I/O never holds a lock.
+   * transaction, so its network I/O never holds a lock.
    */
   async function searchDeclarationForWrite({
     manifest,
@@ -638,26 +483,23 @@ export function createSettingsMcpServersRouter<TTransaction>(
     const requestContext = deps.resolveRequestContext(c);
     const incomingManifest = body.manifest;
 
-    if (incomingManifest.type === 'remote' && incomingManifest.memory_provider === true) {
-      const conflict = await findOtherRoleHolder({
-        mcpServerStore: deps.resolveMcpServerStore(c),
-        tenant_id: requestContext.tenant_id,
-        excludeName: incomingManifest.name,
-        role: 'memory_provider',
-      });
-      if (conflict !== undefined) {
-        return c.json({ error: { message: `memory provider already set on ${conflict.name}; disable it first` } }, 409);
-      }
-    }
     if (incomingManifest.type === 'remote' && incomingManifest.search_provider === true) {
-      const conflict = await findOtherRoleHolder({
+      const conflict = await findOtherSearchProvider({
         mcpServerStore: deps.resolveMcpServerStore(c),
         tenant_id: requestContext.tenant_id,
         excludeName: incomingManifest.name,
-        role: 'search_provider',
       });
       if (conflict !== undefined) {
         return c.json({ error: { message: `search provider already set on ${conflict.name}; disable it first` } }, 409);
+      }
+    }
+
+    // The address check comes before DCR and before the write: registration dials the address,
+    // so a refused address is neither dialed nor saved.
+    if (incomingManifest.type === 'remote') {
+      const refusal = await remoteAddressRefusal({ url: incomingManifest.url });
+      if (refusal !== undefined) {
+        return c.json({ error: { message: refusal } }, 400);
       }
     }
 
@@ -706,25 +548,6 @@ export function createSettingsMcpServersRouter<TTransaction>(
       }
     }
 
-    // After secret resolution, so the check dials with the credential the row will actually
-    // carry, and before the write, so a provider memory cannot reach is never committed.
-    let memoryProviderChecked = false;
-    if (manifest.type === 'remote' && manifest.memory_provider === true) {
-      // No stored row on create: a name clash is a 409 below, so nothing of an existing row can
-      // be inherited by this write, and a DCR manifest has no token yet to check with.
-      const rejection = await memoryProviderWriteRejection({
-        manifest,
-        stored: undefined,
-        mcpServerStore: deps.resolveMcpServerStore(c),
-        tenant_id: requestContext.tenant_id,
-        userRef: requestContext.subject.id,
-      });
-      if (rejection !== undefined) {
-        return c.json({ error: { message: rejection } }, 422);
-      }
-      memoryProviderChecked = true;
-    }
-
     // The search declaration is settled here, after secret resolution and before the write:
     // captured from the server's own tool list when it can be read now, and left empty when
     // it cannot, so the stored designation never carries tool names nobody read off the server.
@@ -750,11 +573,7 @@ export function createSettingsMcpServersRouter<TTransaction>(
             tenant_id: requestContext.tenant_id,
             name: manifest.name,
             manifest,
-            first_party: firstPartyAfterSave({
-              manifest,
-              memoryProviderChecked,
-              origins: configuration.FIRST_PARTY_MCP_ORIGINS,
-            }),
+            first_party: false,
           },
           transaction,
         );
@@ -795,81 +614,52 @@ export function createSettingsMcpServersRouter<TTransaction>(
       }
     }
 
-    if (incomingManifest.type === 'remote' && incomingManifest.memory_provider === true) {
-      const conflict = await findOtherRoleHolder({
-        mcpServerStore: deps.resolveMcpServerStore(c),
-        tenant_id: requestContext.tenant_id,
-        excludeName: incomingManifest.name,
-        role: 'memory_provider',
-      });
-      if (conflict !== undefined) {
-        return c.json({ error: { message: `memory provider already set on ${conflict.name}; disable it first` } }, 409);
-      }
-    }
     if (incomingManifest.type === 'remote' && incomingManifest.search_provider === true) {
-      const conflict = await findOtherRoleHolder({
+      const conflict = await findOtherSearchProvider({
         mcpServerStore: deps.resolveMcpServerStore(c),
         tenant_id: requestContext.tenant_id,
         excludeName: incomingManifest.name,
-        role: 'search_provider',
       });
       if (conflict !== undefined) {
         return c.json({ error: { message: `search provider already set on ${conflict.name}; disable it first` } }, 409);
       }
     }
 
+    // The address check comes before the write, so a refused address is never saved.
+    if (incomingManifest.type === 'remote') {
+      const refusal = await remoteAddressRefusal({ url: incomingManifest.url });
+      if (refusal !== undefined) {
+        return c.json({ error: { message: refusal } }, 400);
+      }
+    }
+
+    // The search declaration is captured in this unlocked pass: its dial must never run
+    // inside the write lock. The capture is keyed to the address it read, and the transaction
+    // below applies it only to a manifest still at that address.
+    let searchCapture: { url: string; declaration: SearchDeclaration | undefined } | undefined;
+    if (incomingManifest.type === 'remote' && incomingManifest.search_provider === true) {
+      const stored = await deps
+        .resolveMcpServerStore(c)
+        .getServer({ tenant_id: requestContext.tenant_id, name: incomingManifest.name });
+      const resolved = resolveMcpServerManifestForWrite({ incoming: incomingManifest, existing: stored?.manifest });
+      const captured = await searchDeclarationForWrite({
+        manifest: resolved,
+        stored,
+        mcpServerStore: deps.resolveMcpServerStore(c),
+        tenant_id: requestContext.tenant_id,
+        userRef,
+        signal: c.req.raw.signal,
+      });
+      if ('rejection' in captured) {
+        return c.json({ error: { message: captured.rejection } }, 422);
+      }
+      searchCapture = {
+        url: resolved.type === 'remote' ? resolved.url : '',
+        declaration: captured.declaration,
+      };
+    }
+
     try {
-      // Memory-provider check before the write txn, so its network I/O never runs inside a lock
-      // and a provider memory cannot reach is never committed. The unlocked read resolves the
-      // same stored secrets a redacted header keeps inside the txn below, so the check dials
-      // with the credential the row ends up carrying. Every save that leaves the flag on is
-      // checked, because a URL or credential edit is exactly what silently breaks recall.
-      let probedDigest: string | undefined;
-      if (incomingManifest.type === 'remote' && incomingManifest.memory_provider === true) {
-        const stored = await deps
-          .resolveMcpServerStore(c)
-          .getServer({ tenant_id: requestContext.tenant_id, name: incomingManifest.name });
-        const probed = resolveMcpServerManifestForWrite({ incoming: incomingManifest, existing: stored?.manifest });
-        const rejection = await memoryProviderWriteRejection({
-          manifest: probed,
-          stored,
-          mcpServerStore: deps.resolveMcpServerStore(c),
-          tenant_id: requestContext.tenant_id,
-          userRef,
-        });
-        if (rejection !== undefined) {
-          return c.json({ error: { message: rejection } }, 422);
-        }
-        probedDigest = memoryProviderProbeDigest({ manifest: probed, stored });
-      }
-
-      // The search declaration is captured in this unlocked pass too, for the same reason:
-      // its dial must never run inside the write lock, and a designation whose tools were
-      // never read is never committed. The capture is keyed to the address it read, and the
-      // transaction below applies it only to a manifest still at that address.
-      let searchCapture: { url: string; declaration: SearchDeclaration | undefined } | undefined;
-      if (incomingManifest.type === 'remote' && incomingManifest.search_provider === true) {
-        const stored = await deps
-          .resolveMcpServerStore(c)
-          .getServer({ tenant_id: requestContext.tenant_id, name: incomingManifest.name });
-        const resolved = resolveMcpServerManifestForWrite({ incoming: incomingManifest, existing: stored?.manifest });
-        const captured = await searchDeclarationForWrite({
-          manifest: resolved,
-          stored,
-          mcpServerStore: deps.resolveMcpServerStore(c),
-          tenant_id: requestContext.tenant_id,
-          userRef,
-          signal: c.req.raw.signal,
-        });
-        if ('rejection' in captured) {
-          return c.json({ error: { message: captured.rejection } }, 422);
-        }
-        searchCapture = {
-          url: resolved.type === 'remote' ? resolved.url : '',
-          declaration: captured.declaration,
-        };
-      }
-
       // Lock → resolve secrets → DCR (if needed) → upsert + saveClient in one txn.
       // Exception: MCP put may run `createMcpOAuthClient` inside the write txn that persists
       // `oauth_server`/`oauth_client` so a failed registration rolls back the server write.
@@ -891,12 +681,6 @@ export function createSettingsMcpServersRouter<TTransaction>(
           manifest: withSearchDeclaration({ manifest: resolved, declaration }),
           existing: existing?.manifest,
         });
-        // A concurrent update between the unlocked check above and this lock could otherwise
-        // commit a URL and credential pair the provider never answered for.
-        if (probedDigest !== undefined && memoryProviderProbeDigest({ manifest, stored: existing }) !== probedDigest) {
-          throw new MemoryProviderCheckStaleError(manifest.name);
-        }
-
         let dcrClientToSave: OAuthClientRecord | undefined;
         const urlChanged =
           existing !== undefined && existing.manifest.url !== manifest.url && manifest.auth?.type === 'dcr';
@@ -922,12 +706,7 @@ export function createSettingsMcpServersRouter<TTransaction>(
             tenant_id: requestContext.tenant_id,
             name: manifest.name,
             manifest,
-            // The digest check above proves this exact URL and credential passed the provider check.
-            first_party: firstPartyAfterSave({
-              manifest,
-              memoryProviderChecked: probedDigest !== undefined,
-              origins: configuration.FIRST_PARTY_MCP_ORIGINS,
-            }),
+            first_party: false,
           },
           transaction,
         );
@@ -964,10 +743,6 @@ export function createSettingsMcpServersRouter<TTransaction>(
     } catch (error) {
       if (error instanceof MissingStoredSecretError) {
         return c.json({ error: { message: 'Header secret is required' } }, 400);
-      }
-      if (error instanceof MemoryProviderCheckStaleError) {
-        deps.logger.warn(`Memory provider check went stale for "${incomingManifest.name}"; rejecting upsert`);
-        return c.json({ error: { message: error.message } }, 409);
       }
       if (error instanceof McpConnectionError) {
         deps.logger.error(
@@ -1026,6 +801,17 @@ export function createMcpServersRouter<TTransaction>(deps: McpServersRouterDeps<
       return c.json({ error: { message: 'Invalid return_to: must be a same-origin relative path' } }, 400);
     }
 
+    // The authorize flow dials the stored address for discovery, so the address check gates it
+    // like any other connection. A missing record falls through to the store, which answers
+    // with its own not-found error.
+    const record = await deps.resolveMcpServerStore(c).getServer({ tenant_id: requestContext.tenant_id, name });
+    if (record?.manifest.type === 'remote') {
+      const refusal = await remoteAddressRefusal({ url: record.manifest.url });
+      if (refusal !== undefined) {
+        return c.json({ error: { message: refusal } }, 422);
+      }
+    }
+
     try {
       // The store owns the whole authorize flow, `dcr` and `oauth_client` (fork-only; see
       // DIVERGENCE.md) alike: header/no-auth resolve to a static status, dcr/oauth_client reuse a
@@ -1069,12 +855,22 @@ export function createMcpServersRouter<TTransaction>(deps: McpServersRouterDeps<
     const requestContext = deps.resolveRequestContext(c);
     const userRef = requestContext.subject.id;
     // Same url + header resolution as turn execution (store Bearer, DCR, or static headers).
-    const connection = await getMcpConnection({
-      tenant_id: requestContext.tenant_id,
-      name,
-      store: deps.resolveMcpServerStore(c),
-      userRef,
-    });
+    // The address check inside getMcpConnection refuses a stored address that resolves inward;
+    // serve that refusal as the client's answer instead of letting it escape as a 500.
+    let connection: Awaited<ReturnType<typeof getMcpConnection>>;
+    try {
+      connection = await getMcpConnection({
+        tenant_id: requestContext.tenant_id,
+        name,
+        store: deps.resolveMcpServerStore(c),
+        userRef,
+      });
+    } catch (error) {
+      if (error instanceof RemoteAddressRefusedError) {
+        return c.json({ error: { message: error.message } }, 422);
+      }
+      throw error;
+    }
     if (connection === undefined) {
       return c.json({ error: { message: `MCP server not found: ${name}` } }, 404);
     }
@@ -1134,34 +930,6 @@ export function createMcpServersRouter<TTransaction>(deps: McpServersRouterDeps<
       }
       throw error;
     }
-  };
-
-  const memoryCheckHandler: RouteHandler<typeof memoryCheckMcpServerRoute> = async c => {
-    const { name } = c.req.valid('param');
-    const requestContext = deps.resolveRequestContext(c);
-    const userRef = requestContext.subject.id;
-    const record = await deps.resolveMcpServerStore(c).getServer({ tenant_id: requestContext.tenant_id, name });
-    if (!record) {
-      return c.json({ error: { message: `MCP server not found: ${name}` } }, 404);
-    }
-    // Read-only: the stored manifest is checked as saved, so a user who fixed their provider can
-    // re-check without toggling the flag off and on.
-    const outcome = await checkMemoryProvider({
-      manifest: record.manifest,
-      stored: record,
-      mcpServerStore: deps.resolveMcpServerStore(c),
-      tokenStore: deps.tokenStore,
-      tenant_id: requestContext.tenant_id,
-      userRef,
-    });
-    if (!outcome.ok) {
-      deps.logger.warn(`Memory provider check failed for "${name}"`, {
-        code: outcome.code,
-        reason: outcome.reason,
-        ...(outcome.httpStatus === undefined ? {} : { httpStatus: outcome.httpStatus }),
-      });
-    }
-    return c.json({ data: toMemoryProviderCheckResult(outcome) }, 200);
   };
 
   const homeAssistantCheckHandler: RouteHandler<typeof homeAssistantCheckMcpServerRoute> = async c => {
@@ -1313,10 +1081,7 @@ export function createMcpServersRouter<TTransaction>(deps: McpServersRouterDeps<
       tenant_id: requestContext.tenant_id,
       name,
     });
-    // The memory provider is host-owned and never offered to chat surfaces (see the filter in
-    // listAvailableMcpServersRoute below); treating it as not-found here keeps a direct lookup by
-    // name consistent with what the list endpoint would ever return.
-    if (!record || (record.manifest.type === 'remote' && record.manifest.memory_provider === true)) {
+    if (!record) {
       return c.json({ error: { message: `MCP server not found: ${name}` } }, 404);
     }
     return c.json(
@@ -1335,22 +1100,10 @@ export function createMcpServersRouter<TTransaction>(deps: McpServersRouterDeps<
   router.openapi(listAvailableMcpServersRoute, async c => {
     const requestContext = deps.resolveRequestContext(c);
     const userRef = requestContext.subject.id;
-    const stored = await deps.resolveMcpServerStore(c).listServers({
+    const records = await deps.resolveMcpServerStore(c).listServers({
       tenant_id: requestContext.tenant_id,
       names: undefined,
     });
-    // The memory provider is host-owned: it recalls before every model call and retains every
-    // completed turn by itself, and the turn resolver hands the model only its read tools. There
-    // is nothing left for a user to gain by attaching it to a chat, so it is not offered as a
-    // choice rather than being offered and expected to be left alone. Filtered here, in the chat
-    // projection, rather than in a picker component: this shape is what every chat-facing client
-    // reads, and it deliberately does not carry `memory_provider`, so a client could not apply
-    // this rule for itself without a second call to the settings list. The settings projection is
-    // untouched, so the connector stays fully visible where it is configured. An agent or session
-    // that already mounts it keeps working: this changes what is offered, never what is stored.
-    const records = stored.filter(
-      record => !(record.manifest.type === 'remote' && record.manifest.memory_provider === true),
-    );
     const statuses = await deps.resolveMcpServerStore(c).resolveAuthStatuses({
       records,
       userRef,
@@ -1367,7 +1120,6 @@ export function createMcpServersRouter<TTransaction>(deps: McpServersRouterDeps<
   router.openapi(listMcpToolGrantsRoute, listToolGrantsHandler);
   router.openapi(deleteMcpToolGrantRoute, deleteToolGrantHandler);
   router.openapi(authorizeMcpServerRoute, authorizeHandler);
-  router.openapi(memoryCheckMcpServerRoute, memoryCheckHandler);
   router.openapi(homeAssistantCheckMcpServerRoute, homeAssistantCheckHandler);
   router.openapi(deleteAuthorizationMcpServerRoute, deleteAuthorizationHandler);
   router.openapi(getAvailableMcpServerRoute, getAvailableHandler);

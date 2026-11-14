@@ -295,6 +295,28 @@ export const InternalToolCallInfoSchema = z.object({
     .describe(
       "Set when the call is a send through the host's own Email sidecar, so approving it checks the Email list. Never model-authored.",
     ),
+  standing_grant_barred: z
+    .boolean()
+    .optional()
+    .describe('Set from the classifier decision when this call may never take a standing grant. Never model-authored.'),
+  chat_grantable_consequence: z
+    .boolean()
+    .optional()
+    .describe(
+      'Set from the classifier decision when this consequential call may take a chat grant for a target its card names. Never model-authored.',
+    ),
+  own_calendar_change: z
+    .boolean()
+    .optional()
+    .describe(
+      "Set from the classifier decision when this call changes only the person's own calendar. Never model-authored.",
+    ),
+  own_drive_write: z
+    .boolean()
+    .optional()
+    .describe(
+      "Set from the classifier decision when this call writes only the person's own Drive files. Never model-authored.",
+    ),
   approval_binding: TrackedExecutionBindingSchema.nullable()
     .optional()
     .describe('Host-derived tracked-execution content/argv binding. Never model-authored.'),

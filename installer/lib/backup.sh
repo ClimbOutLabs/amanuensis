@@ -147,12 +147,12 @@ backup_run() {
   done
   ensure_private_dir "$dir"
   for name in $(backup_targets "$only"); do
-    say "Backing up instance $name"
     if ! backup_instance "$name" "$dir" "$image"; then
       rm -rf "$dir"
       warn "The backup of $name failed, so the unfinished backup was removed."
       return 1
     fi
+    ui_ok "Backed up instance $name"
     n=$((n + 1))
   done
   # Only the authority's certificate goes into a backup, never its private key: a backup is not encrypted, and whoever
@@ -168,13 +168,13 @@ backup_run() {
   backup_prune
   log_event "backup $dir"
   if [ -n "$label" ]; then
-    say "Saved a backup to $dir, kept until you remove it."
+    ui_ok "Saved a backup to $(ui_path "$dir"), kept until you remove it."
   else
-    say "Saved a backup to $dir."
+    ui_ok "Saved a backup to $(ui_path "$dir")."
   fi
-  say "It holds your passwords and keys, so keep it on this computer."
+  ui_hint "It holds your passwords and keys, so keep it on this computer."
   if [ -f "$dir/tls/root.crt" ]; then
-    say "After a restore, each device needs to trust this computer again."
+    ui_hint "After a restore, each device needs to trust this computer again."
   fi
 }
 

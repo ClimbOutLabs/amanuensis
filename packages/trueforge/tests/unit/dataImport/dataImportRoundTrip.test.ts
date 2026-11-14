@@ -164,7 +164,7 @@ async function importArchive<Tx>(instance: Instance<Tx>, archive: Buffer, userId
     agentStore: instance.stores.agentStore,
     mcpCatalog: McpCatalog.loadShipped(),
     withTransaction: instance.withTransaction,
-    memoryTarget: { kind: 'markdown', markdownDir: instance.memoryDir },
+    memoryMarkdownDir: instance.memoryDir,
     ownerName: '',
     personaKnowledgeDir: instance.knowledgeDir,
     knowledgeEmbedder: {

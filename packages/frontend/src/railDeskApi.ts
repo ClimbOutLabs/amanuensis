@@ -11,8 +11,8 @@ import { listDocumentIngestionTurnContext } from '@truefoundry/trueforge-ui/plug
 
 /**
  * The right rail's desk, backed by the server's stored state: `GET /api/v1/today` for Home,
- * the session's own ingestion records for its attachments, and the recall-exclusion write for
- * pulling a fact out of one chat. None of these reads goes near a model.
+ * the session's own ingestion records for its attachments, the recall-exclusion write for
+ * pulling a fact out of one chat, and the delete of a memory the chat showed. None of these goes near a model.
  */
 
 const TODAY_URL = '/api/v1/today';
@@ -90,13 +90,8 @@ function readToday(value: unknown): RailToday | undefined {
   if (!isRecord(value)) {
     return undefined;
   }
-  const { calendar, free_after, due, needs_ok, needs_ok_more, carrying, as_of } = value;
-  if (
-    !isStringOrNull(free_after) ||
-    typeof needs_ok_more !== 'boolean' ||
-    typeof carrying !== 'number' ||
-    typeof as_of !== 'string'
-  ) {
+  const { calendar, free_after, due, needs_ok, needs_ok_more, as_of } = value;
+  if (!isStringOrNull(free_after) || typeof needs_ok_more !== 'boolean' || typeof as_of !== 'string') {
     return undefined;
   }
   if (calendar !== null && !Array.isArray(calendar)) {
@@ -121,7 +116,6 @@ function readToday(value: unknown): RailToday | undefined {
     due: reminders.filter(reminder => reminder !== undefined),
     needs_ok: held.filter(item => item !== undefined),
     needs_ok_more,
-    carrying,
     as_of,
   };
 }
@@ -162,6 +156,17 @@ export function createRailDeskApi({ fetcher, client }: { fetcher: typeof fetch; 
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ fact_text: factText }),
+      });
+      if (!response.ok) {
+        const body: unknown = await response.json().catch((): null => null);
+        throw new Error(errorMessage({ body, status: response.status }));
+      }
+    },
+    async deleteShownMemory({ factText }) {
+      const response = await fetcher('/api/v1/memory/vault/delete-shown', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ shown_text: factText }),
       });
       if (!response.ok) {
         const body: unknown = await response.json().catch((): null => null);

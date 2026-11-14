@@ -91,20 +91,19 @@ The app does not ship with a model configured — a fresh checkout has no defaul
     - Under **Models**, **Model ID** — `qwen2.5:0.5b` (or whatever you pulled), matching the name exactly. **Model name** here is actually a machine slug, not a display label: lowercase letters, digits, and hyphens only, starting with a letter — `qwen2-5-0-5b` works.
     - Under **Advanced**, set **Context length** and **Max output tokens** — check the model's page on [ollama.com/library](https://ollama.com/library) for its real limits; `32000` and `4096` are safe placeholders for small models.
 
-    Click **Add provider**.
+    One setting comes first: Aman does not connect to a model on its own computer until that model's exact address is named in the server's `LOCAL_MODEL_ENDPOINTS` setting. Start the app with `LOCAL_MODEL_ENDPOINTS=localhost:11434` in its environment (or add that line to `packages/trueforge/.env`), restart it, and then click **Add provider**. See [Setup Models](/models#adding-a-custom-provider).
   </Tab>
 </Tabs>
 
 ## Confirm it works
 
-Start a **New Chat**, pick your model from the selector in the message box, and send a message. A reply streaming back confirms the app, the database, and the model connection are all working. The right-hand rail shows which model and memory bank (if any) are active for the session.
+Start a **New Chat**, pick your model from the selector in the message box, and send a message. A reply streaming back confirms the app, the database, and the model connection are all working. The right-hand rail shows which model is active for the session.
 
 ## Optional add-ons
 
 None of these are required to chat with a model. Each is one sentence plus where to read more:
 
 - **Sandbox** — lets an agent run code and use skills that need a filesystem, via [Daytona](https://www.daytona.io). Standalone mode also supports a built-in local adapter on supported macOS and Linux hosts; hosted mode needs a configured provider. See [Sandbox](/sandbox).
-- **Memory (Hindsight)** — a self-hosted, long-term memory bank the app recalls from and writes to automatically. See the [Memory runbook](/../ops/memory/RUNBOOK.md) and the README's [Memory](https://github.com/ClimbOutLabs/amanuensis#memory) section.
 - **Prompt Guard** — an optional classifier sidecar that screens recalled memories and tool output for prompt injection before they reach the model. See [Deployment Security → Prompt Guard screens](/deployment-security#prompt-guard-screens).
 - **OIDC login** — always on in standalone; in hosted mode it is required before the app is reachable by anyone but you, since without it every request is one shared admin identity. See [Setup Login](/authentication/overview).
 
@@ -147,10 +146,11 @@ None of these are required to chat with a model. Each is one sentence plus where
     cp packages/trueforge/.env.example packages/trueforge/.env
     export CALENDAR_ACCOUNT_SECRET=$(openssl rand -hex 32)
     export MAIL_EMAIL_ACCOUNT_SECRET=$(openssl rand -hex 32)
+    export SPEECH_SECRET=$(openssl rand -hex 32)
     docker compose up --build
     ```
 
-    The `export` lines make random secrets that the app shares with the calendar and email containers, so only the app can use their account ports. Compose stops with a message if one is missing. Set them again in each new terminal, and run `docker compose down` and `up` with the same values; `pnpm smoke` makes them for you.
+    The `export` lines make random secrets that the app shares with the calendar, email and speech containers, so only the app can use them. Compose stops with a message if one is missing. Set them again in each new terminal, and run `docker compose down` and `up` with the same values; `pnpm smoke` makes them for you.
 
     The first build takes a few minutes (it compiles the app from source). `docker compose up` stays in the foreground
     and streams every container's log; the stack is ready when the `server` line `Agent server listening on http://0.0.0.0:8790`
@@ -215,7 +215,7 @@ None of these are required to chat with a model. Each is one sentence plus where
     `http://localhost:5556/dex`, delete the `NODE_EXTRA_CA_CERTS` line, then run
     `docker compose --profile login up --build -d` again.
 
-    **Ollama from Compose.** The app runs inside a container here, so `localhost` means the container itself. Point the custom provider at `http://host.docker.internal:11434/v1` instead of `http://localhost:11434/v1`. Docker Desktop provides that mapping automatically; plain Docker Engine needs the `extra_hosts` entry this repo's `docker-compose.yml` already ships. Ollama itself listens on `127.0.0.1` only by default — open it to the Docker network with `OLLAMA_HOST=0.0.0.0:11434` (systemd override on Linux/WSL, or the desktop app's Settings on macOS/Windows) and restart it.
+    **Ollama from Compose.** The app runs inside a container here, so `localhost` means the container itself. Point the custom provider at `http://host.docker.internal:11434/v1` instead of `http://localhost:11434/v1`. Docker Desktop provides that mapping automatically; plain Docker Engine needs the `extra_hosts` entry this repo's `docker-compose.yml` already ships. Ollama itself listens on `127.0.0.1` only by default. Open it to the Docker network with `OLLAMA_HOST=0.0.0.0:11434` (systemd override on Linux/WSL, or the desktop app's Settings on macOS/Windows) and restart it. No `LOCAL_MODEL_ENDPOINTS` entry is needed for this address: it names your computer, not the container, so the address check lets it through as it stands. See [Setup Models](/models#adding-a-custom-provider).
 
     **Docker prerequisite gotchas** (fresh machines hit these):
     - `docker compose up --build` fails with `unknown flag: --build` — the Compose plugin isn't installed. On macOS/Windows, install [Docker Desktop](https://docs.docker.com/get-started/get-docker/) (it bundles Compose v2) and wait for it to report running.

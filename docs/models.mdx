@@ -57,6 +57,25 @@ Use a custom provider for vLLM, Ollama, a company gateway, or any other OpenAI-c
 5. Add each model you want to use, with its model ID and a name. Set its max output tokens to the model's real limit.
 6. Click **Add provider**.
 
+### A model on the same computer as Aman
+
+Aman checks a provider's base URL when you save it, and again each time the model is used. An address on the internet or on your home network works as it stands. An address of the computer Aman runs on is refused, and so is a link-local or cloud metadata address.
+
+A model you run yourself on that computer, such as Ollama, is the one exception. Whoever runs Aman names the model's exact address, host and port, in the `LOCAL_MODEL_ENDPOINTS` setting. For a local Ollama that is:
+
+```bash
+LOCAL_MODEL_ENDPOINTS=localhost:11434
+```
+
+- On an installed Aman, put it in the instance's settings file, `~/.amanuensis/instances/<name>/.env`, below the block the installer manages. Then restart the instance.
+- When you run from a checkout, put it in `packages/trueforge/.env` and restart the server. See `packages/trueforge/.env.example`.
+
+The match is exact. A different port on the same computer is a different address, and stays refused until it's named too.
+
+In the installer's Docker setup, a model on your computer is reached at `host.docker.internal`, for example `http://host.docker.internal:11434/v1`. That name points at your computer from inside the container, so it works as it stands and doesn't need to be named.
+
+If a model server answers with a redirect, the new address is checked the same way before Aman follows it.
+
 ## Assign models to jobs
 
 This page is the inventory: which providers are connected and which models exist. Which model does which job lives under **Settings, Roles and Personas**. That covers the main chat, sub-agents, compaction and named personas. See [Roles and Personas](model-roles.mdx).

@@ -21,6 +21,7 @@ import { SqliteSandboxProviderStore } from '../../../src/db/sqlite/sandbox-provi
 import { SqliteSkillStore } from '../../../src/db/sqlite/skill-store/SqliteSkillStore';
 import { SqliteOAuthTokenStore } from '../../../src/db/sqlite/token-store/SqliteOAuthTokenStore';
 import type { CheckSavedModelProvider } from '../../../src/runtime/modelProviderCheck';
+import { RequestErrorResponseSchema } from '../../../src/schemas/errors';
 import {
   ListAvailableModelsResponseSchema,
   ListModelProvidersResponseSchema,
@@ -125,6 +126,7 @@ async function createRouters(
       globalSettingsStore,
       personalizationStore: new SqlitePersonalizationStore(db),
       tokenFactoryBudget: uncappedTokenFactoryBudget,
+      memoryTidy: { tidyNow: () => undefined, tidyState: () => ({ status: 'idle' }) },
       envManagedModelProviderNames: options.envManagedNames ?? new Set(),
       // Saves in these suites carry no check outcome unless a suite wires its own checker.
       checkSavedProvider:
@@ -238,6 +240,19 @@ describe('settings model-providers and models routers', () => {
 });
 
 describe('custom providers may omit auth', () => {
+  const originalLocalModelEndpoints = configuration.LOCAL_MODEL_ENDPOINTS;
+
+  beforeEach(() => {
+    // These providers live at the Ollama address on this computer; the operator names that
+    // exact endpoint, as the local model endpoint list requires, so the saves below are
+    // judged on their auth alone.
+    configuration.LOCAL_MODEL_ENDPOINTS = ['localhost:11434'];
+  });
+
+  afterEach(() => {
+    configuration.LOCAL_MODEL_ENDPOINTS = originalLocalModelEndpoints;
+  });
+
   const model = {
     model_id: 'llama',
     name: 'llama',
@@ -761,5 +776,104 @@ describe('GET /models default chat model', () => {
     const { data } = ListAvailableModelsResponseSchema.parse(await (await modelsRouter.request('/')).json());
 
     expect(data.map(item => item.name)).toEqual(['anthropic/claude-sonnet-4-6']);
+  });
+});
+
+describe('the address check on model providers', () => {
+  function customAt(name: string, baseUrl: string) {
+    return { type: 'custom' as const, name, base_url: baseUrl, auth: { api_key: 'sk-custom' }, models: [model] };
+  }
+
+  async function errorMessage(response: Response): Promise<string> {
+    return RequestErrorResponseSchema.parse(await response.json()).error.message;
+  }
+
+  it('refuses a provider at a loopback address, naming the setting that allows a local model', async () => {
+    const { settingsRouter } = await createRouters();
+
+    const response = await settingsRouter.request(
+      '/model-providers',
+      putInit(customAt('local-refused', 'http://127.0.0.1:11434/v1')),
+    );
+
+    expect(response.status).toBe(400);
+    expect(await errorMessage(response)).toContain('LOCAL_MODEL_ENDPOINTS');
+    const list = await settingsRouter.request('/model-providers');
+    expect(await list.json()).toEqual({ data: [] });
+  });
+
+  it('refuses a provider at the cloud metadata address', async () => {
+    const { settingsRouter } = await createRouters();
+
+    const response = await settingsRouter.request(
+      '/model-providers',
+      postInit(customAt('metadata-refused', 'http://169.254.169.254/v1')),
+    );
+
+    expect(response.status).toBe(400);
+    const message = await errorMessage(response);
+    expect(message).toContain('That address is on this computer, so the server cannot use it for a model');
+    expect(message).toContain('~/.amanuensis/instances/<name>/.env');
+    expect(message).toContain('Restart the instance after changing it');
+  });
+
+  it('refuses an address carrying a name and password', async () => {
+    const { settingsRouter } = await createRouters();
+
+    const response = await settingsRouter.request(
+      '/model-providers',
+      putInit(customAt('credentialed-refused', 'https://user:secret@8.8.8.8/v1')),
+    );
+
+    expect(response.status).toBe(400);
+    expect(await errorMessage(response)).toContain('without a name and password in it');
+  });
+
+  it('saves a provider at a public address', async () => {
+    const { settingsRouter } = await createRouters();
+
+    const response = await settingsRouter.request(
+      '/model-providers',
+      putInit(customAt('public-allowed', 'https://8.8.8.8/v1')),
+    );
+
+    expect(response.status).toBe(200);
+  });
+
+  it('saves a provider at a loopback address once the operator names its exact endpoint', async () => {
+    const { settingsRouter } = await createRouters();
+    const originalEndpoints = configuration.LOCAL_MODEL_ENDPOINTS;
+    configuration.LOCAL_MODEL_ENDPOINTS = ['127.0.0.1:11434', 'localhost:11434'];
+    try {
+      const byLiteral = await settingsRouter.request(
+        '/model-providers',
+        putInit(customAt('local-allowed', 'http://127.0.0.1:11434/v1')),
+      );
+      expect(byLiteral.status).toBe(200);
+
+      const byName = await settingsRouter.request(
+        '/model-providers',
+        putInit(customAt('local-named', 'http://localhost:11434/v1')),
+      );
+      expect(byName.status).toBe(200);
+    } finally {
+      configuration.LOCAL_MODEL_ENDPOINTS = originalEndpoints;
+    }
+  });
+
+  it('a named endpoint does not cover a different port on the same host', async () => {
+    const { settingsRouter } = await createRouters();
+    const originalEndpoints = configuration.LOCAL_MODEL_ENDPOINTS;
+    configuration.LOCAL_MODEL_ENDPOINTS = ['127.0.0.1:11434'];
+    try {
+      const response = await settingsRouter.request(
+        '/model-providers',
+        putInit(customAt('local-wrong-port', 'http://127.0.0.1:9999/v1')),
+      );
+
+      expect(response.status).toBe(400);
+    } finally {
+      configuration.LOCAL_MODEL_ENDPOINTS = originalEndpoints;
+    }
   });
 });

@@ -6,8 +6,9 @@
  * nothing (see browserTier.ts in trueforge-core). A click may or may not need the person's OK,
  * decided server-side from what the live page says about the clicked element, never from model
  * text. A page the browser reads comes from the person's signed-in browser, so it is recorded like
- * their mail (see provenance.ts). The model never sees a screenshot: it goes to the chat for the
- * person.
+ * their mail (see provenance.ts). A screenshot goes to the chat for the person, and a model that
+ * can read images sees its own labelled copy (see ScreenshotViewer). A read names the pictures in
+ * view, whose content its text cannot show, so the model knows when a screenshot would help.
  *
  * The browser itself runs in a private sidecar (ops/browser-sidecar): a real, headed Chromium with
  * one persistent profile per person and one tab per chat. This capability only calls its HTTP API.
@@ -124,6 +125,13 @@ export const LiveInputReplySchema = z.discriminatedUnion('status', [
   z.object({ status: z.literal('bad_input') }),
   ClosedReplySchema,
 ]);
+/** The text the person selected in the tab, or why there is none to copy. */
+export const LiveCopyReplySchema = z.discriminatedUnion('status', [
+  z.object({ status: z.literal('ok'), text: z.string() }),
+  z.object({ status: z.literal('nothing_selected') }),
+  z.object({ status: z.literal('password') }),
+  ClosedReplySchema,
+]);
 export const LiveTakeoverReplySchema = z.discriminatedUnion('status', [
   z.object({ status: z.literal('ok'), takeover: z.boolean() }),
   z.object({ status: z.literal('bad_input') }),
@@ -134,6 +142,7 @@ export type LiveTabsReply = z.infer<typeof LiveTabsReplySchema>;
 export type LiveFrameReply = z.infer<typeof LiveFrameReplySchema>;
 export type LiveInputReply = z.infer<typeof LiveInputReplySchema>;
 export type LiveTakeoverReply = z.infer<typeof LiveTakeoverReplySchema>;
+export type LiveCopyReply = z.infer<typeof LiveCopyReplySchema>;
 
 /** What the sidecar answered to a request, or why there is no usable answer. */
 export type SidecarResult<T> = { ok: true; body: T } | { ok: false; message: string };

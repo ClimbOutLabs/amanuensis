@@ -28,7 +28,7 @@ import {
 import {
   AgentHarnessError,
   callResultSource,
-  callReturnsOutsideContent,
+  chatSawOutsideText,
   existingSandboxIdForProvider,
   extractErrorLogFields,
   HeldActionRefusedError,
@@ -47,9 +47,9 @@ import {
   withTimeout,
   type BoundRepository,
   type HeldRefusalReason,
-  type ToolResultSource,
 } from '@truefoundry/trueforge-core/core';
 import { readTurnedOffConnectorKeys } from '@truefoundry/trueforge-core/core/connectors/chatConnectorChoice';
+import type { RawToolCall } from '@truefoundry/trueforge-core/core/llm/LLMTypes';
 import { upgradeStoredTurnState } from '@truefoundry/trueforge-core/core/permissions/storedCards';
 import type { Context } from 'hono';
 import { HTTPException } from 'hono/http-exception';
@@ -113,15 +113,17 @@ import { mailAccountDirectory } from '../runtime/mailConnector';
 import { createMemoryClient } from '../runtime/memory/createMemoryClient';
 import type { MemoryClient } from '../runtime/memory/memoryClient';
 import type { TurnToolResult } from '../runtime/memory/memoryNotesSummarize';
-import { resolveMemoryProvider } from '../runtime/memory/memoryProvider';
 import {
   submitRetainWithVerification,
   type RetainOutcomeLog,
   type SummarizeTurnContext,
 } from '../runtime/memory/memoryRetain';
-import { applyMemorySettings } from '../runtime/memory/memorySettings';
+import { serverMemoryConfig, withMemoryScreenOverride } from '../runtime/memory/memorySettings';
+import { resolveSummarizationModelFqn, type ProfileLineSuggestion } from '../runtime/memory/memorySummarize';
+import { saveSentMail, sentMailFromCall, sentMailWentThrough } from '../runtime/memory/sentMail';
+import { createOutsideInputTracker, inputAttachesFiles } from '../runtime/memory/turnOutsideInput';
 import { readMemoryRecallSetting } from '../runtime/memoryRecallSettings';
-import { applyMemoryScreenOverride, readMemoryScreenSetting } from '../runtime/memoryScreenSettings';
+import { readMemoryScreenSetting } from '../runtime/memoryScreenSettings';
 import { resolveTurnSummarizeContext } from '../runtime/memorySummarizeSettings';
 import { resolveModelContextLength } from '../runtime/modelContextLength';
 import {
@@ -138,8 +140,7 @@ import type { PersonaTurnContext } from '../runtime/personaCapability';
 import type { PersonaSwitchNotice } from '../runtime/PersonaTurnResourceResolver';
 import { privateChatExpiry, sessionKeepsNothing } from '../runtime/privateChat';
 import {
-  profileLearningPassConfig,
-  resolveTurnModelFqn,
+  learnedProfileLines,
   submitProfileLearning,
   type ProfileLearningDrainMember,
 } from '../runtime/profileLearning';
@@ -157,6 +158,7 @@ import {
   isGithubConnectorAttached,
   isWebConnectorAttached,
   modelRequestGate,
+  RemoteAddressRefusedError,
   RepositoryBindingResolutionError,
   resolveBoundRepository,
   resolveGithubGitToken,
@@ -183,8 +185,8 @@ import { packageMirrorTokens } from '../sandbox/mirrors/packageMirrorTokens';
 import { checkSnapshotStatus } from '../sandbox/providerUtils';
 import { drainSkillNetworkCards, resolveSkillNetworkGrant } from '../sandbox/skillnet/skillNetworkGrant';
 import { skillNetworkTokens } from '../sandbox/skillnet/skillNetworkTokens';
-import type { MemoryProviderSettings } from '../schemas/mcpServer';
 import { canReadSession } from './agentAccess';
+import { approvedToolCalls, toolCallKey } from './approvedToolCalls';
 import { readServerSandboxAvailable } from './capabilities';
 
 export function toWireTurn<TCustom extends object>(record: TurnRecordWithoutSnapshot<TCustom>): Turn {
@@ -381,8 +383,8 @@ export type BeginTurnExecutionDeps = Pick<
   personaContext?: PersonaContext | undefined;
   boundRepository?: BoundRepository | undefined;
   memoryClient?: MemoryClient | undefined;
-  memoryProviderServerName?: string | undefined;
-  memorySettings?: MemoryProviderSettings | undefined;
+  /** The Settings switch for the recall screen, when the person set one. */
+  memoryScreenOverride?: boolean | undefined;
   previousTurnId?: string | null;
   /** From CreateTurnRequest.client_timezone, or a schedule's own time zone for its runs. */
   clientTimezone?: string | undefined;
@@ -430,10 +432,10 @@ function createTurnResolver(deps: {
   sentinelSettingsStore?: ISentinelSettingsStore | undefined;
   sessionStore: ISessionStore<SessionCustom, TurnCustom>;
   memoryClient?: MemoryClient | undefined;
+  /** The Settings switch for the recall screen, when the person set one. */
+  memoryScreenOverride?: boolean | undefined;
   /** Facts pulled out of a chat's recall, read by the recall path. Absent, nothing is excluded. */
   recallExclusionStore?: Pick<IRecallExclusionStore, 'listForSession'> | undefined;
-  memoryProviderServerName?: string | undefined;
-  memorySettings?: MemoryProviderSettings | undefined;
   /** No person watches this turn (a scheduled run): recall stays off, so a recalled earlier task cannot fingerprint-block the run's own searches. Retain and summarize still run. */
   unattended?: boolean | undefined;
   previousTurnId?: string | null;
@@ -504,9 +506,8 @@ function createTurnResolver(deps: {
     sentinelSettingsStore,
     sessionStore,
     memoryClient,
+    memoryScreenOverride,
     recallExclusionStore,
-    memoryProviderServerName,
-    memorySettings,
     previousTurnId,
     memorySummarize,
     memoryRecallEnabled,
@@ -636,14 +637,25 @@ function createTurnResolver(deps: {
         };
       },
       mcp: async name => {
-        const connection = await getMcpConnection({
-          tenant_id,
-          name,
-          store: mcpServerStore,
-          tokenStore,
-          clientName: configuration.MCP_DCR_OAUTH_CLIENT_NAME,
-          userRef,
-        });
+        let connection: Awaited<ReturnType<typeof getMcpConnection>>;
+        try {
+          connection = await getMcpConnection({
+            tenant_id,
+            name,
+            store: mcpServerStore,
+            tokenStore,
+            clientName: configuration.MCP_DCR_OAUTH_CLIENT_NAME,
+            userRef,
+          });
+        } catch (error) {
+          // An address refusal is the person's to fix, so it surfaces with its reason, the
+          // same treatment as a named server that is not configured; other connection
+          // failures keep their own handling.
+          if (error instanceof RemoteAddressRefusedError) {
+            throw new HTTPException(422, { message: error.message, cause: error });
+          }
+          throw error;
+        }
         if (connection === undefined) {
           throw new HTTPException(422, {
             message: `Unknown MCP server "${name}" - not configured`,
@@ -957,40 +969,9 @@ function createTurnResolver(deps: {
     personaContext,
     {
       client: memoryClient,
-      config: applyMemorySettings(memorySettings, {
-        recallMaxTokens: configuration.MEMORY_RECALL_MAX_TOKENS,
-        recallEntityTokens: configuration.MEMORY_RECALL_ENTITY_TOKENS,
-        recallTimeoutMs: configuration.MEMORY_RECALL_TIMEOUT_MS,
-        recallQueryWindow: configuration.MEMORY_RECALL_QUERY_WINDOW,
-        recallMinScore: configuration.MEMORY_RECALL_MIN_SCORE,
-        recallMaxItems: configuration.MEMORY_RECALL_MAX_ITEMS,
-        recallMaxEntities: configuration.MEMORY_RECALL_MAX_ENTITIES,
-        preRecallGateEnabled: configuration.MEMORY_PRERECALL_GATE_ENABLED,
-        retainTimeoutMs: configuration.MEMORY_RETAIN_TIMEOUT_MS,
-        sweepMaxPerTurn: configuration.MEMORY_SWEEP_MAX_PER_TURN,
-        screen: {
-          enabled: configuration.MEMORY_SCREEN_ENABLED,
-          url: configuration.MEMORY_SCREEN_URL,
-          authToken: configuration.MEMORY_SCREEN_AUTH_TOKEN,
-          threshold: configuration.MEMORY_SCREEN_THRESHOLD,
-          timeoutMs: configuration.MEMORY_SCREEN_TIMEOUT_MS,
-          maxConcurrency: configuration.MEMORY_SCREEN_MAX_CONCURRENCY,
-        },
-        curated: {
-          enabled: configuration.MEMORY_CURATED_ENABLED,
-          maxModels: configuration.MEMORY_CURATED_MAX_MODELS,
-          maxTokens: configuration.MEMORY_CURATED_MAX_TOKENS,
-        },
-        reflect: {
-          enabled: configuration.MEMORY_REFLECT_ENABLED,
-          budget: configuration.MEMORY_REFLECT_BUDGET,
-          maxTokens: configuration.MEMORY_REFLECT_MAX_TOKENS,
-          timeoutMs: configuration.MEMORY_REFLECT_TIMEOUT_MS,
-        },
-      }),
+      config: withMemoryScreenOverride({ base: serverMemoryConfig(), override: memoryScreenOverride }),
       sessionId,
       previousTurnId: previousTurnId ?? null,
-      providerServerName: memoryProviderServerName,
       keepsNothing: sessionKeepsNothing({ session: session.record }),
       loadRecallExclusions:
         recallExclusionStore === undefined
@@ -1096,13 +1077,6 @@ export function deriveSessionTitle(input: TurnInputItem[] | undefined): string |
     return undefined;
   }
   return title;
-}
-
-/** True when any user message in a create-turn input carries an attached file. */
-function inputAttachesFiles(input: TurnInputItem[]): boolean {
-  return input
-    .filter(isAgentInputUserMessage)
-    .some(message => typeof message.content !== 'string' && message.content.some(isFileContentPart));
 }
 
 /**
@@ -1299,7 +1273,7 @@ export interface DrainTurnEventsInput {
   logger: Logger;
   turnDrains: TurnDrainRegistry;
   onEvent?: (event: TurnStreamingEvent, sequenceNumber: number) => Promise<void>;
-  /** Present only when a memory provider resolved for this turn; the drain awaits the retain. */
+  /** Present only when the turn has memory; the drain awaits the retain. */
   memory?:
     | {
         client: MemoryClient;
@@ -1308,6 +1282,13 @@ export interface DrainTurnEventsInput {
         userText: string;
         /** The turn's input carried an attached file, whose extracted text reaches the model as data. */
         attachedFiles: boolean;
+        /**
+         * Whether the chat has read anything that is not the person's own words, asked when the turn is done.
+         * Left out, the chat counts as having read something.
+         */
+        chatHasReadContent?: (() => boolean) | undefined;
+        /** Whether the reply changed a memory page with the page tools, asked when the turn is done. */
+        chatWrotePages?: (() => boolean) | undefined;
         /** The person's IANA time zone, so a summary writes dates as the day they lived. */
         timeZone?: string | undefined;
         /**
@@ -1320,6 +1301,11 @@ export interface DrainTurnEventsInput {
         outcomeLog?: TurnOutcomeLog | undefined;
       }
     | undefined;
+  /**
+   * Calls the person allowed on a card, from the turn that paused. An approved call runs in this turn, whose
+   * stream never carries the message that asked for it, so the drain would not otherwise know what ran.
+   */
+  approvedCalls?: ReadonlyMap<string, RawToolCall> | undefined;
   /** Present on every turn: the model usage the turn recorded, persisted when it completes. */
   modelUsage?: ModelUsageDrainMember | undefined;
   /** Present only when profile learning is enabled; the drain awaits the pass. */
@@ -1435,53 +1421,72 @@ async function renewPrivateChatExpiry(input: {
 const TURN_TOOL_RESULTS_KEPT = 20;
 const TURN_TOOL_RESULT_CHARACTERS_KEPT = 30_000;
 
-/** A refused or unrun call returned no content, so it cannot have brought anything in. */
-function toolRanOrMayHave(disposition: string): boolean {
-  return disposition !== 'denied' && disposition !== 'policy_blocked' && disposition !== 'never_ran';
-}
-
 async function runTurnEventDrain(params: {
   input: DrainTurnEventsInput;
   markArtifactsCaptured: () => void;
 }): Promise<void> {
   const { input, markArtifactsCaptured } = params;
-  const { trackedStream, turnEventStream, sessionId, turnId, executionDeadline, startBound, logger, onEvent, memory } =
-    input;
+  const {
+    trackedStream,
+    turnEventStream,
+    sessionId,
+    turnId,
+    executionDeadline,
+    startBound,
+    logger,
+    onEvent,
+    memory,
+    approvedCalls,
+  } = input;
   // Provenance for the memory the retain below writes. Tool output may hold text from outside the
   // chat (a web page, mail, a connector, a shell command), and the retained assistant reply is
   // produced after seeing it, so a turn with any tool result is stamped `tool_ingested` and held to
   // the recall screen's stricter posture. Only host tools known to return nothing from outside
   // (spaces, task state, schedules) leave a turn unmarked. Text extracted from an attached file is just as untrusted, so a turn that
   // attached one starts out tainted. A turn with neither is the user's own voice: `user_stated`.
-  let ingestedToolOutput = memory?.attachedFiles === true;
-  const callReturnsOutside = new Map<string, boolean>();
-  const callSources = new Map<string, ToolResultSource>();
+  const outsideInput = createOutsideInputTracker({ attachedFiles: memory?.attachedFiles === true });
   const toolResults: TurnToolResult[] = [];
+  // A send is read from its call and saved as soon as its result says it went through, whichever turn ran it.
+  const sentMailWrites: Promise<void>[] = [];
   let followUp: Promise<void> | undefined;
   try {
     for await (const event of trackedStream) {
       if (MODEL_WORK_EVENT_TYPES.has(event.type)) {
         startBound?.markStarted();
       }
-      if (event.type === EventType.MODEL_MESSAGE) {
-        for (const call of event.tool_calls ?? []) {
-          callReturnsOutside.set(call.id, callReturnsOutsideContent(call));
-          callSources.set(call.id, callResultSource(call));
+      // Fed first, so a result below finds the call it answers.
+      const readOutside = outsideInput.observe(event);
+      if (memory !== undefined && event.type === EventType.TOOL_RESPONSE_V2 && event.disposition === 'executed_ok') {
+        const call =
+          outsideInput.callOf(event) ??
+          approvedCalls?.get(toolCallKey({ threadId: event.thread_id, callId: event.tool_call_id }));
+        const mail = call === undefined || !sentMailWentThrough(event.content) ? undefined : sentMailFromCall(call);
+        if (mail !== undefined && sentMailWrites.length < TURN_TOOL_RESULTS_KEPT) {
+          sentMailWrites.push(
+            saveSentMail({
+              client: memory.client,
+              session: memory.session,
+              sessionId,
+              turnId,
+              threadId: event.thread_id,
+              callId: event.tool_call_id,
+              mail,
+              sentAt: event.created_at,
+              timeZone: memory.timeZone,
+              summarize: memory.summarize,
+              logger,
+            }),
+          );
         }
       }
-      if (
-        (event.type === EventType.TOOL_RESPONSE ||
-          (event.type === EventType.TOOL_RESPONSE_V2 && toolRanOrMayHave(event.disposition))) &&
-        (callReturnsOutside.get(event.tool_call_id) ?? true)
-      ) {
-        ingestedToolOutput = true;
+      if (readOutside && (event.type === EventType.TOOL_RESPONSE || event.type === EventType.TOOL_RESPONSE_V2)) {
         // Kept for the note pass; a result that did not run cleanly holds no finding.
         if (
           (event.type === EventType.TOOL_RESPONSE || event.disposition === 'executed_ok') &&
           toolResults.length < TURN_TOOL_RESULTS_KEPT
         ) {
           toolResults.push({
-            source: callSources.get(event.tool_call_id) ?? 'other',
+            source: callResultSource(outsideInput.callOf(event)),
             text: event.content.slice(0, TURN_TOOL_RESULT_CHARACTERS_KEPT),
           });
         }
@@ -1500,7 +1505,7 @@ async function runTurnEventDrain(params: {
         followUp = runTurnFollowUp({
           input,
           state: event.state,
-          ingestedToolOutput,
+          ingestedToolOutput: outsideInput.ingested,
           toolResults,
           markArtifactsCaptured,
         });
@@ -1527,6 +1532,8 @@ async function runTurnEventDrain(params: {
     if (followUp === undefined) {
       markArtifactsCaptured();
     }
+    // Each write never throws; the drain waits so a shutdown does not drop a note.
+    await Promise.allSettled(sentMailWrites);
     executionDeadline.dispose();
     startBound?.dispose();
   }
@@ -1593,6 +1600,9 @@ async function runTurnFollowUp(params: {
       }
     };
     await flushUsage();
+    const assistantText = formatAssistantMessageText(state.output?.content);
+    // Set by the turn's fact call when it runs, so profile learning costs no call of its own.
+    let profileSuggestions: readonly ProfileLineSuggestion[] | undefined;
     if (memory !== undefined) {
       // Awaited so the verification pass inside can retry a failed retain once.
       const stored = await submitRetainWithVerification({
@@ -1601,13 +1611,24 @@ async function runTurnFollowUp(params: {
         sessionId,
         turnId,
         userText: memory.userText,
-        assistantText: formatAssistantMessageText(state.output?.content),
+        assistantText,
         completedAt: state.completed_at,
         timeZone: memory.timeZone,
         origin: ingestedToolOutput ? 'tool_ingested' : 'user_stated',
+        chatReadNothing: !ingestedToolOutput && memory.chatHasReadContent?.() === false,
+        chatWrotePages: memory.chatWrotePages?.() === true,
         logger,
         toolResults,
         summarize: memory.summarize,
+        profileLearning:
+          profileLearning === undefined
+            ? undefined
+            : {
+                knownLines: profileLearning.knownLines,
+                onAnswered: lines => {
+                  profileSuggestions = lines;
+                },
+              },
         outcomeLog: memory.outcomeLog,
       });
       // Only a stored turn can have gone to the persona it started with; a skipped or failed
@@ -1617,15 +1638,16 @@ async function runTurnFollowUp(params: {
       }
     }
     if (profileLearning !== undefined) {
-      // The assistant's reply is deliberately not passed here: it is not a source of facts
-      // about the user, so the learning pass only ever sees the user's own turn text.
-      // The pass writes its audit event to the turnEventStream (how an open tab sees it
-      // without reloading the turn).
+      // The reply is read only for its last question, as the fact call reads it: it is never
+      // a source of facts about the user. The audit event goes to the turnEventStream (how an
+      // open tab sees it without reloading the turn).
       await submitProfileLearning({
         ...profileLearning,
         sessionId,
         turnId,
         completedAt: state.completed_at,
+        assistantText,
+        suggestions: profileSuggestions,
         turnEventStream,
         logger,
       });
@@ -1919,10 +1941,6 @@ async function beginAcceptedTurnExecution(
         globalSettingsStore: deps.globalSettingsStore,
         logger: deps.logger,
       });
-      const effectiveMemorySettings = applyMemoryScreenOverride(
-        deps.memorySettings,
-        memoryScreenSetting.overridden ? memoryScreenSetting.enabled : undefined,
-      );
       const internalSources = await resolveTurnInternalSources({
         session,
         previousTurnId,
@@ -1973,8 +1991,7 @@ async function beginAcceptedTurnExecution(
         personaKnowledgeHits: internalSources.personaKnowledgeHits,
         internalSourceState: internalSources.internalSourceState,
         memoryClient: deps.memoryClient,
-        memoryProviderServerName: deps.memoryProviderServerName,
-        memorySettings: effectiveMemorySettings,
+        memoryScreenOverride: memoryScreenSetting.overridden ? memoryScreenSetting.enabled : undefined,
         unattended: params.unattended,
         previousTurnId: deps.previousTurnId ?? null,
         memorySummarize,
@@ -2026,7 +2043,7 @@ async function beginAcceptedTurnExecution(
   if (setup.status === 'could_not_start') {
     throw new TurnCouldNotStartError();
   }
-  const { turn, memorySummarize, derivedTitle } = setup.value;
+  const { turn, resolver, memorySummarize, derivedTitle } = setup.value;
 
   // A first turn that set a working title also carries the context for the
   // subject-title step its follow-up starts. Resolved here, after the turn exists,
@@ -2043,6 +2060,7 @@ async function beginAcceptedTurnExecution(
           personaModelName: deps.personaContext?.model_name,
           agentStore: deps.agentStore,
           modelProviderStore: deps.modelProviderStore,
+          globalSettingsStore: deps.globalSettingsStore,
           tokenFactoryBudget: deps.tokenFactoryBudget,
           sessionStore: deps.sessionStore,
           derivedTitle,
@@ -2101,6 +2119,8 @@ async function beginAcceptedTurnExecution(
               session: session.record,
               userText: extractUserMessageText(input ?? []),
               attachedFiles: inputAttachesFiles(input ?? []),
+              chatHasReadContent: () => chatSawOutsideText(resolver.webSearchTurn),
+              chatWrotePages: () => resolver.chatWrotePages,
               timeZone: deps.clientTimezone,
               summarize: memorySummarize,
             },
@@ -2721,23 +2741,6 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       library_near_miss: internalSources.libraryNearMiss,
     };
 
-    // Resolved before the turn exists, same as the model/sandbox lookups above: a missing or
-    // invalid memory provider must never fail the turn, so this degrades to `undefined` rather
-    // than throwing. Read once and shared between the resolver (recall) and the drain hook
-    // (retain) so a turn dials the provider through a single client instance. The markdown
-    // backend needs no MCP server, so the provider lookup is skipped unless hindsight is
-    // selected.
-    const memoryProvider =
-      configuration.MEMORY_BACKEND === 'hindsight'
-        ? await resolveMemoryProvider({
-            mcpServerStore,
-            tokenStore: deps.tokenStore,
-            tenantId: requestContext.tenant_id,
-            clientName: configuration.MCP_DCR_OAUTH_CLIENT_NAME,
-            userRef,
-            logger: deps.logger,
-          })
-        : undefined;
     const vaultScope =
       persona?.kind === 'persona'
         ? { personaName: persona.persona.display_name, personaId: persona.persona.id }
@@ -2749,18 +2752,9 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       previousTurnCustom?.persona?.persona_name ?? legacyParentActivation?.persona_name ?? null;
     const memoryPreviousTurnId = previousTurnPersonaName === (vaultScope?.personaName ?? null) ? previousTurnId : null;
     const memoryClient = createMemoryClient({
-      backend: configuration.MEMORY_BACKEND,
       markdownDir: configuration.MEMORY_MARKDOWN_DIR,
       namespace: requestContext.tenant_id,
       vaultScope,
-      hindsight:
-        memoryProvider === undefined
-          ? undefined
-          : {
-              apiBase: memoryProvider.apiBase,
-              bank: memoryProvider.bank,
-              headers: memoryProvider.headers,
-            },
       // Meaning-based recall: the subsystem singleton loads the model once per
       // process and degrades to keyword-only until it is ready, so a missing or
       // slow model download never fails or slows the turn.
@@ -2773,50 +2767,9 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
         : undefined,
     });
 
-    // Resolved before the turn exists, like the memory provider above: the pass itself runs
-    // after TURN_DONE (awaited by the tracked drain) and every failure inside it silently
-    // no-ops. Read off the
-    // profile already loaded for the personalization context, so learning left off (the default)
-    // costs nothing here, not even the model-FQN lookup. The pass re-reads the switch itself, so
-    // a user who turns it off mid-turn is still obeyed.
-    //
-    // This is the one part of the pass that runs on the create-turn path, so it is the one
-    // part that could fail a turn. It must not: an agent-store read that throws drops learning
-    // for this turn and nothing more.
-    let profileLearning: ProfileLearningDrainMember | undefined;
-    if (profile?.learning_enabled === true) {
-      try {
-        profileLearning = {
-          session: session.record,
-          config: profileLearningPassConfig(),
-          personalizationStore: deps.personalizationStore,
-          eventStore: deps.sessionStore,
-          modelProviderStore,
-          tokenFactoryBudget: deps.tokenFactoryBudget,
-          modelUsage,
-          memoryClient,
-          tenantId: requestContext.tenant_id,
-          createdBy: userRef,
-          userText: extractUserMessageText(body.input),
-          turnModelFqn: await resolveTurnModelFqn({
-            tenantId: requestContext.tenant_id,
-            personaModelName: persona?.kind === 'persona' ? persona.persona.model_name : undefined,
-            sessionAgent: session.record.agent,
-            agentStore,
-          }),
-        };
-      } catch (error) {
-        deps.logger.debug('Profile learning disabled for this turn: the model FQN did not resolve', {
-          sessionId,
-          ...extractErrorLogFields(error),
-        });
-        profileLearning = undefined;
-      }
-    }
-
     // One read per turn: the Settings toggle's persisted override wins when stored, otherwise
-    // the MEMORY_SUMMARIZE env default. Resolved before the turn exists, next to the profile
-    // learning lookup above, so the drain hook below can summarize without a store of its own.
+    // the MEMORY_SUMMARIZE env default. Resolved before the turn exists, so the drain hook below
+    // can summarize without a store of its own.
     const memorySummarize = await resolveTurnSummarizeContext({
       globalSettingsStore: deps.globalSettingsStore,
       logger: deps.logger,
@@ -2828,7 +2781,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       agentStore,
       personaModelName: persona?.kind === 'persona' ? persona.persona.model_name : undefined,
       sessionAgent: session.record.agent,
-      memoryClientPresent: memoryClient !== undefined,
+      memoryClientPresent: true,
       personName: profile?.user_name ?? undefined,
       profileLines: profile ? personalizationFactLines(profile) : undefined,
       assistantName:
@@ -2836,6 +2789,55 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
         profile?.assistant_name ??
         undefined,
     });
+
+    // Read off the profile already loaded for the personalization context, so learning left off
+    // (the default) costs nothing here. Learning rides the turn's fact call; the model named here
+    // is asked only when no fact call runs for the turn. The switch is read again after the turn,
+    // so a user who turns it off mid-turn is still obeyed.
+    //
+    // This runs on the create-turn path, so it must not fail a turn: an agent-store read that
+    // throws drops learning for this turn and nothing more.
+    let profileLearning: ProfileLearningDrainMember | undefined;
+    if (profile?.learning_enabled === true) {
+      try {
+        profileLearning = {
+          session: session.record,
+          personalizationStore: deps.personalizationStore,
+          eventStore: deps.sessionStore,
+          memoryClient,
+          retainTimeoutMs: configuration.MEMORY_RETAIN_TIMEOUT_MS,
+          tenantId: requestContext.tenant_id,
+          createdBy: userRef,
+          userText: extractUserMessageText(body.input),
+          knownLines: learnedProfileLines(profile.learned_profile),
+          factCall: {
+            modelProviderStore,
+            summarizationModelFqn:
+              memorySummarize === undefined
+                ? await resolveSummarizationModelFqn({
+                    tenantId: requestContext.tenant_id,
+                    personaModelName: persona?.kind === 'persona' ? persona.persona.model_name : undefined,
+                    sessionAgent: session.record.agent,
+                    agentStore,
+                    globalSettingsStore: deps.globalSettingsStore,
+                    modelProviderStore,
+                    logger: deps.logger,
+                  })
+                : memorySummarize.summarizationModelFqn,
+            tokenFactoryBudget: deps.tokenFactoryBudget,
+            modelUsage,
+            personName: profile.user_name ?? undefined,
+            timeZone: body.client_timezone,
+          },
+        };
+      } catch (error) {
+        deps.logger.debug('Profile learning disabled for this turn: the model FQN did not resolve', {
+          sessionId,
+          ...extractErrorLogFields(error),
+        });
+        profileLearning = undefined;
+      }
+    }
 
     const turnId = mintPeeredTurnId(configuration.EXECUTOR_ID);
     // One read per turn: the persisted override (or env default) applies to the whole turn.
@@ -2860,10 +2862,6 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       globalSettingsStore: deps.globalSettingsStore,
       logger: deps.logger,
     });
-    const effectiveMemorySettings = applyMemoryScreenOverride(
-      memoryProvider?.settings,
-      memoryScreenSetting.overridden ? memoryScreenSetting.enabled : undefined,
-    );
     const serverSandboxAvailable = await readServerSandboxAvailable({
       store: sandboxProviderStore,
       tenant_id: requestContext.tenant_id,
@@ -2899,8 +2897,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       sessionStore: deps.sessionStore,
       recallExclusionStore: deps.recallExclusionStore,
       memoryClient,
-      memoryProviderServerName: memoryProvider?.serverName,
-      memorySettings: effectiveMemorySettings,
+      memoryScreenOverride: memoryScreenSetting.overridden ? memoryScreenSetting.enabled : undefined,
       previousTurnId: memoryPreviousTurnId,
       memorySummarize,
       memoryRecallEnabled,
@@ -2977,6 +2974,9 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
     // First turn only: derive the working title from the first user message. The
     // store never overwrites an existing title.
     const title = session.record.last_turn_id ? undefined : deriveSessionTitle(body.input);
+
+    // Read before the turn exists and only when memory will save the send; a read failure falls back to none.
+    const approvedCalls = await approvedToolCalls({ pausedTurn: previousTurn, input: body.input, logger: deps.logger });
 
     // Turning down held actions ends the turn with no model call. Approving one runs the call,
     // and the model continues with its result.
@@ -3285,6 +3285,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
                 personaModelName: persona?.kind === 'persona' ? persona.persona.model_name : undefined,
                 agentStore,
                 modelProviderStore,
+                globalSettingsStore: deps.globalSettingsStore,
                 tokenFactoryBudget: deps.tokenFactoryBudget,
                 sessionStore: deps.sessionStore,
                 derivedTitle: title,
@@ -3304,24 +3305,24 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
           answerMark: { sessionStore: deps.sessionStore, tenantId: requestContext.tenant_id },
           chatTitle,
           privateChat: privateChatDrainMember({ session, sessionStore: deps.sessionStore }),
-          memory:
-            memoryClient === undefined
-              ? undefined
-              : {
-                  client: memoryClient,
-                  session: session.record,
-                  userText: extractUserMessageText(body.input),
-                  attachedFiles: inputAttachesFiles(body.input ?? []),
-                  timeZone: body.client_timezone,
-                  // Resolved once on the create-turn path above; absent means verbatim.
-                  summarize: memorySummarize,
-                  outcomeLog: {
-                    personaName: vaultScope?.personaName ?? 'shared',
-                    personaStore: deps.personaStore,
-                    tenantId: requestContext.tenant_id,
-                  },
-                },
+          memory: {
+            client: memoryClient,
+            session: session.record,
+            userText: extractUserMessageText(body.input),
+            attachedFiles: inputAttachesFiles(body.input ?? []),
+            chatHasReadContent: () => chatSawOutsideText(resolver.webSearchTurn),
+            chatWrotePages: () => resolver.chatWrotePages,
+            timeZone: body.client_timezone,
+            // Resolved once on the create-turn path above; absent means verbatim.
+            summarize: memorySummarize,
+            outcomeLog: {
+              personaName: vaultScope?.personaName ?? 'shared',
+              personaStore: deps.personaStore,
+              tenantId: requestContext.tenant_id,
+            },
+          },
           profileLearning,
+          approvedCalls,
           chatSearch:
             deps.chatSearchIndexer === undefined
               ? undefined

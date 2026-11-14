@@ -6,19 +6,27 @@ import { htmlImages } from '../email/gmail/htmlText';
 import { isGmailReadToolName } from '../email/gmail/toolContract';
 import { isMailReadToolName } from '../email/mailConnector/toolContract';
 import type { InternalToolCallInfo } from '../llm/LLMTypes';
+import {
+  FORGET_FACT_TOOL_NAME,
+  LIST_PAGES_TOOL_NAME,
+  READ_PAGE_TOOL_NAME,
+  REMEMBER_FACT_TOOL_NAME,
+  UPDATE_FACT_TOOL_NAME,
+} from '../memory/pagesToolContract';
 import { DEFAULT_ASSISTANT_NAME } from '../personas/assistantName';
 import { REPLACE_TASK_CHECKLIST_TOOL_NAME, TASK_STATE_TOOL_NAME } from '../runtime/taskState';
 import { TAVILY_EXTRACT_TOOL_NAME, TAVILY_SEARCH_TOOL_NAME } from '../search/TavilyClient';
 import { BROWSER_OPEN_SILENT_REASON, BROWSER_OPEN_TOOL_NAME, isBrowserToolName } from './browserToolNames';
 import {
+  type ChatProvenance,
   emptyChatProvenance,
+  hasReadContent,
   namesUrl,
+  type ReadSource,
   recordEmailText,
   recordPageImageUrls,
   recordSearchResults,
   recordUntrustedText,
-  type ChatProvenance,
-  type ReadSource,
 } from './provenance';
 
 /**
@@ -93,10 +101,19 @@ export interface WebSearchTurnState {
   sentText: string;
   /** Where the links and addresses this chat has seen came from. */
   provenance: ChatProvenance;
+  /** Whether a tool that can return text from outside the chat has answered in this chat, a plain search included. */
+  outsideToolResult: boolean;
+  /** Whether memory shown in any turn of this chat held text that is not the person's own words. */
+  recalledOutsideText: boolean;
   /** The name the person calls the assistant, for the sentences on its cards. */
   assistantName: string;
   /** Tail of the one-at-a-time chain that classifies and counts the turn's search calls. */
   admission: Promise<void>;
+}
+
+/** Whether any turn of this chat has seen text that is not the person's own: read content, a tool's answer or recalled memory. */
+export function chatSawOutsideText(state: WebSearchTurnState): boolean {
+  return hasReadContent(state.provenance) || state.outsideToolResult || state.recalledOutsideText;
 }
 
 export function createWebSearchTurnState(): WebSearchTurnState {
@@ -104,6 +121,8 @@ export function createWebSearchTurnState(): WebSearchTurnState {
     silentSearches: 0,
     sentText: '',
     provenance: emptyChatProvenance(),
+    outsideToolResult: false,
+    recalledOutsideText: false,
     assistantName: DEFAULT_ASSISTANT_NAME,
     admission: Promise.resolve(),
   };
@@ -235,6 +254,20 @@ function baseToolName(toolName: string): string {
 const HOST_ONLY_TOOL_NAMES: ReadonlySet<string> = new Set([TASK_STATE_TOOL_NAME, REPLACE_TASK_CHECKLIST_TOOL_NAME]);
 
 /**
+ * The memory page tools answer with a fixed sentence and the words the model sent, or with a page the host
+ * has already marked. The read tool tells the turn itself when what it shows holds outside text, so a call does
+ * not count as outside by its name. They are matched by their full name: a connector's tool carries its
+ * server's prefix, so it can never pass for one.
+ */
+const HOST_ONLY_FULL_TOOL_NAMES: ReadonlySet<string> = new Set([
+  REMEMBER_FACT_TOOL_NAME,
+  UPDATE_FACT_TOOL_NAME,
+  FORGET_FACT_TOOL_NAME,
+  LIST_PAGES_TOOL_NAME,
+  READ_PAGE_TOOL_NAME,
+]);
+
+/**
  * What the host itself recorded about the tool that ran a call. A connector chooses its tools' names, so a
  * name alone never earns a tool the standing of one of the assistant's own tools or of the search provider.
  */
@@ -276,7 +309,9 @@ export function hostToolStamp(
  * own host-only tools. A connector's tool with one of their names still brings in outside content.
  */
 export function toolReturnsOutsideContent(input: { tool_name: string; stamp: HostToolStamp }): boolean {
-  return !(input.stamp.host_tool && HOST_ONLY_TOOL_NAMES.has(baseToolName(input.tool_name)));
+  const hostOnly =
+    HOST_ONLY_TOOL_NAMES.has(baseToolName(input.tool_name)) || HOST_ONLY_FULL_TOOL_NAMES.has(input.tool_name);
+  return !(input.stamp.host_tool && hostOnly);
 }
 
 /**

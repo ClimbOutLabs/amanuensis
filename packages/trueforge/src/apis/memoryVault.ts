@@ -5,16 +5,15 @@
  * memory facts across tenant-scoped vault namespaces, export/import vaults as
  * JSON, and store the per-persona sharing config. The daily logs stay
  * append-only; edits and deletes are recorded as markers, never rewrites.
- * Only the markdown backend serves the vault; anything else answers 501.
  */
 import { OpenAPIHono, type RouteHandler } from '@hono/zod-openapi';
-import type { Context } from 'hono';
 import { randomUUID } from 'node:crypto';
 import type { Logger } from 'winston';
 import type { ResolveRequestContext } from '../auth/identity';
 import configuration from '../config';
 import {
   deleteMemoryVaultEntryRoute,
+  deleteShownMemoryRoute,
   exportMemoryVaultRoute,
   getMemoryVaultSharingRoute,
   getMemoryVaultSummaryStatusRoute,
@@ -29,10 +28,12 @@ import {
   sanitizeNamespace,
   vaultFilesystemNamespace,
   withHiddenContext,
+  withoutSourceLines,
   writeVaultSharing,
   type VaultSharing,
 } from '../runtime/memory/markdownMemoryFiles';
-import type { MemoryVaultEntry as VaultEntry } from '../runtime/memory/memoryClient';
+import type { RetainItem, MemoryVaultEntry as VaultEntry } from '../runtime/memory/memoryClient';
+import { IMPORTED_ORIGIN, MEMORY_ORIGIN_METADATA_KEY } from '../runtime/memory/memoryOrigin';
 import { createVaultClient } from '../runtime/memory/vaultClient';
 import type { MemoryVaultEntry } from '../schemas/memoryVault';
 
@@ -55,17 +56,6 @@ function wireEntry({ id, text, timestamp, persona }: VaultEntry): MemoryVaultEnt
 /** An exported entry carries its internal id as the closing line, the same shape the daily logs hold. */
 function exportedEntry({ id, text, timestamp, persona, context }: VaultEntry): MemoryVaultEntry {
   return { id, text: withHiddenContext({ text, context }), timestamp, persona };
-}
-
-function markdownBackendRequired(c: Context) {
-  return c.json(
-    {
-      error: {
-        message: 'The memory vault needs the markdown memory backend, which this server does not use.',
-      },
-    },
-    501,
-  );
 }
 
 /** Wire label for a vault namespace query value: blank reads as the shared vault. */
@@ -114,9 +104,6 @@ export function createMemoryVaultRouter(deps: MemoryVaultRouterDeps) {
     const { namespace } = c.req.valid('query');
     const requestContext = deps.resolveRequestContext(c);
     const client = createVaultClient({ logger: deps.logger, tenantId: requestContext.tenant_id });
-    if (client === undefined) {
-      return markdownBackendRequired(c);
-    }
     const outcome = await client.listEntries({ namespace: namespace ?? '', timeoutMs: VAULT_TIMEOUT_MS });
     if (!outcome.ok) {
       return c.json({ error: { message: outcome.reason } }, 500);
@@ -129,9 +116,6 @@ export function createMemoryVaultRouter(deps: MemoryVaultRouterDeps) {
     const body = c.req.valid('json');
     const requestContext = deps.resolveRequestContext(c);
     const client = createVaultClient({ logger: deps.logger, tenantId: requestContext.tenant_id });
-    if (client === undefined) {
-      return markdownBackendRequired(c);
-    }
     const outcome = await client.updateEntry({ entryId, text: body.text, timeoutMs: VAULT_TIMEOUT_MS });
     if (!outcome.ok) {
       if (outcome.code === 'not_found') {
@@ -146,9 +130,6 @@ export function createMemoryVaultRouter(deps: MemoryVaultRouterDeps) {
     const { entry_id: entryId } = c.req.valid('param');
     const requestContext = deps.resolveRequestContext(c);
     const client = createVaultClient({ logger: deps.logger, tenantId: requestContext.tenant_id });
-    if (client === undefined) {
-      return markdownBackendRequired(c);
-    }
     const outcome = await client.deleteEntry({ entryId, timeoutMs: VAULT_TIMEOUT_MS });
     if (!outcome.ok) {
       if (outcome.code === 'not_found') {
@@ -159,13 +140,32 @@ export function createMemoryVaultRouter(deps: MemoryVaultRouterDeps) {
     return c.json({}, 200);
   };
 
+  const deleteShownHandler: RouteHandler<typeof deleteShownMemoryRoute> = async c => {
+    const body = c.req.valid('json');
+    const requestContext = deps.resolveRequestContext(c);
+    const client = createVaultClient({ logger: deps.logger, tenantId: requestContext.tenant_id });
+    const outcome = await client.deleteEntriesShownAs({ shownText: body.shown_text, timeoutMs: VAULT_TIMEOUT_MS });
+    if (!outcome.ok) {
+      return c.json({ error: { message: outcome.reason } }, 500);
+    }
+    if (outcome.deleted === 0) {
+      return c.json(
+        {
+          error: {
+            message:
+              'Aman could not find one memory with exactly these words, so nothing was deleted. Open Settings, then Memory, and delete it there.',
+          },
+        },
+        404,
+      );
+    }
+    return c.json({ data: { deleted: outcome.deleted } }, 200);
+  };
+
   const exportHandler: RouteHandler<typeof exportMemoryVaultRoute> = async c => {
     const { namespace } = c.req.valid('query');
     const requestContext = deps.resolveRequestContext(c);
     const client = createVaultClient({ logger: deps.logger, tenantId: requestContext.tenant_id });
-    if (client === undefined) {
-      return markdownBackendRequired(c);
-    }
     const outcome = await client.listEntries({ namespace: namespace ?? '', timeoutMs: VAULT_TIMEOUT_MS });
     if (!outcome.ok) {
       return c.json({ error: { message: outcome.reason } }, 500);
@@ -185,9 +185,6 @@ export function createMemoryVaultRouter(deps: MemoryVaultRouterDeps) {
   const importHandler: RouteHandler<typeof importMemoryVaultRoute> = async c => {
     const body = c.req.valid('json');
     const requestContext = deps.resolveRequestContext(c);
-    if (configuration.MEMORY_BACKEND !== 'markdown') {
-      return markdownBackendRequired(c);
-    }
     const tenantNamespace = sanitizeNamespace(requestContext.tenant_id);
     const filesystemNamespace = vaultFilesystemNamespace(tenantNamespace, body.namespace);
     // Bound to the target vault namespace so the import lands in its daily logs.
@@ -196,7 +193,7 @@ export function createMemoryVaultRouter(deps: MemoryVaultRouterDeps) {
       namespace: filesystemNamespace,
     });
     const now = new Date().toISOString();
-    const items = body.entries.map(entry => {
+    const items = body.entries.map((entry): RetainItem => {
       let timestamp = now;
       if (entry.timestamp !== undefined) {
         const parsed = new Date(entry.timestamp);
@@ -204,7 +201,13 @@ export function createMemoryVaultRouter(deps: MemoryVaultRouterDeps) {
           timestamp = parsed.toISOString();
         }
       }
-      return { content: entry.text, timestamp, document_id: randomUUID() };
+      // An imported note is never taken as the person's own words, whatever the file says about itself.
+      return {
+        content: withoutSourceLines(entry.text),
+        timestamp,
+        document_id: randomUUID(),
+        metadata: { [MEMORY_ORIGIN_METADATA_KEY]: IMPORTED_ORIGIN },
+      };
     });
     const outcome = await importClient.retain({
       items,
@@ -219,9 +222,6 @@ export function createMemoryVaultRouter(deps: MemoryVaultRouterDeps) {
 
   const getSharingHandler: RouteHandler<typeof getMemoryVaultSharingRoute> = async c => {
     const requestContext = deps.resolveRequestContext(c);
-    if (configuration.MEMORY_BACKEND !== 'markdown') {
-      return markdownBackendRequired(c);
-    }
     const sharing = await readVaultSharing({
       baseDir: configuration.MEMORY_MARKDOWN_DIR,
       tenantNamespace: sanitizeNamespace(requestContext.tenant_id),
@@ -232,9 +232,6 @@ export function createMemoryVaultRouter(deps: MemoryVaultRouterDeps) {
   const putSharingHandler: RouteHandler<typeof putMemoryVaultSharingRoute> = async c => {
     const body = c.req.valid('json');
     const requestContext = deps.resolveRequestContext(c);
-    if (configuration.MEMORY_BACKEND !== 'markdown') {
-      return markdownBackendRequired(c);
-    }
     const normalized = normalizeSharing(body.shares);
     if ('error' in normalized) {
       return c.json({ error: { message: normalized.error } }, 400);
@@ -252,9 +249,6 @@ export function createMemoryVaultRouter(deps: MemoryVaultRouterDeps) {
     const { namespace } = c.req.valid('query');
     const requestContext = deps.resolveRequestContext(c);
     const client = createVaultClient({ logger: deps.logger, tenantId: requestContext.tenant_id });
-    if (client === undefined) {
-      return markdownBackendRequired(c);
-    }
     const summaryPending = await client.summaryPending({ namespace: namespace ?? '' });
     return c.json({ data: { summary_pending: summaryPending } }, 200);
   };
@@ -267,6 +261,7 @@ export function createMemoryVaultRouter(deps: MemoryVaultRouterDeps) {
   router.openapi(getMemoryVaultSharingRoute, getSharingHandler);
   router.openapi(putMemoryVaultSharingRoute, putSharingHandler);
   router.openapi(getMemoryVaultSummaryStatusRoute, summaryStatusHandler);
+  router.openapi(deleteShownMemoryRoute, deleteShownHandler);
   router.openapi(updateMemoryVaultEntryRoute, updateHandler);
   router.openapi(deleteMemoryVaultEntryRoute, deleteHandler);
   return router;
