@@ -7,11 +7,11 @@ import { useEffect, useRef } from 'react';
 import { useSpokenReply } from '../components/SpokenReplyContext.js';
 import { cardHeadline } from '../sentinel/approvalCopy.js';
 import { useOptionalSentinelState, type SentinelState } from '../sentinel/SentinelStateProvider.js';
-import { useSpeakVoiceReplies } from '../utils/speechReplyPreferences.js';
+import { useReadWholeMessages, useSpeakVoiceReplies } from '../utils/speechReplyPreferences.js';
 import {
+  answerReadoutText,
   approvalSpeechLine,
   finalAnswerSpeech,
-  limitSpeechWords,
   pendingApprovalCallIds,
   type SpeechContentPart,
 } from '../utils/speechText.js';
@@ -57,6 +57,7 @@ export function SpokenReplyContainer() {
   const messages = useAuiState(s => s.thread.messages);
   const threadId = useAuiState(s => s.threadListItem.id);
   const { enabled } = useSpeakVoiceReplies();
+  const { enabled: readWholeEnabled } = useReadWholeMessages();
   const spokenReply = useSpokenReply();
   const latestUser = lastMessageWithRole(messages, 'user');
   const latestUserId = latestUser?.id;
@@ -106,9 +107,9 @@ export function SpokenReplyContainer() {
     // Switching chats ends a run as seen here too; only the chat the voice turn started in is read.
     if (runThreadId.current !== threadId || !enabled || !spokenReply.canSpeak()) return;
     const sentinelLine = approvalLine(message.content, sentinel);
-    const text = sentinelLine ?? limitSpeechWords(finalAnswerSpeech(message.content));
+    const text = sentinelLine ?? answerReadoutText(finalAnswerSpeech(message.content), { readWhole: readWholeEnabled });
     void spokenReply.speak(text, { key: message.id }).catch(() => undefined);
-  }, [isRunning, messages, enabled, sentinel, threadId, spokenReply]);
+  }, [isRunning, messages, enabled, readWholeEnabled, sentinel, threadId, spokenReply]);
 
   return null;
 }

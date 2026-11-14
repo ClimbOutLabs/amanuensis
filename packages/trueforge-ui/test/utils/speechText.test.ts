@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  answerReadoutText,
   approvalSpeechLine,
   finalAnswerSpeech,
   limitSpeechWords,
@@ -57,6 +58,26 @@ describe('limitSpeechWords', () => {
     expect(limitSpeechWords(`${head} done. More words follow after that point.`)).toBe(
       `${head} done. The rest is on screen.`,
     );
+  });
+});
+
+describe('answerReadoutText', () => {
+  const words = Array.from({ length: 100 }, (_, index) => `w${String(index)}`);
+  const longAnswer = words.join(' ');
+
+  it('cuts a long answer short with the rest on screen when whole messages are off', () => {
+    expect(answerReadoutText(longAnswer, { readWhole: false })).toBe(
+      `${words.slice(0, 60).join(' ')}. The rest is on screen.`,
+    );
+  });
+
+  it('reads the whole answer when whole messages are on', () => {
+    expect(answerReadoutText(longAnswer, { readWhole: true })).toBe(longAnswer);
+  });
+
+  it('reads a short answer in full either way', () => {
+    expect(answerReadoutText('Three words here.', { readWhole: false })).toBe('Three words here.');
+    expect(answerReadoutText('Three words here.', { readWhole: true })).toBe('Three words here.');
   });
 });
 

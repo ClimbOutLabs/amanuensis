@@ -105,6 +105,7 @@ To change this:
 1. Click **More** in the left bar, then **Settings**, then **Appearance**.
 2. Under **Voice replies**, turn **Speak replies when I use my voice** on or off.
 3. In **Voice**, pick one of twelve voices. Heart is the default. Aman plays a short sample when you pick one.
+4. To hear a long reply in full, turn on **Read whole messages aloud**. When it is off, a long reply is read in part, and the rest stays on screen.
 
 **Backup voice** is your browser's own voice. It reads replies when the voice on your computer is not running. These choices are saved in this browser only.
 

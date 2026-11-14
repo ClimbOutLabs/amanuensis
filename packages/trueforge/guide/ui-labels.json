@@ -356,6 +356,7 @@
   "Speak replies when I use my voice": "packages/trueforge-ui/src/components/VoiceReplySettings.tsx",
   "Voice": "packages/trueforge-ui/src/components/VoiceReplySettings.tsx",
   "Backup voice": "packages/trueforge-ui/src/components/VoiceReplySettings.tsx",
+  "Read whole messages aloud": "packages/trueforge-ui/src/components/VoiceReplySettings.tsx",
   "Try again": "packages/frontend/src/AuthErrorScreen.tsx",
   "Search provider": "packages/trueforge-ui/src/containers/SettingsBuilder/ConnectorSettings.tsx",
   "Web search provider": "packages/trueforge-ui/src/containers/SettingsBuilder/ConnectorDetails.tsx",

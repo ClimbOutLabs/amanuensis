@@ -35,7 +35,8 @@ import {
   toolStepErrored,
   toolStepUnfinished,
 } from '../utils/recoveredSteps.js';
-import { finalAnswerSpeech, limitSpeechWords } from '../utils/speechText.js';
+import { readReadWholeMessages } from '../utils/speechReplyPreferences.js';
+import { answerReadoutText, finalAnswerSpeech } from '../utils/speechText.js';
 import { hasPendingAskUserResponse, hasPendingToolApproval } from '../utils/toolCallParsing.js';
 import { lastReminderMessageId, turnOutcomeLines } from '../utils/turnOutcomes.js';
 import { AgentStepsContainer } from './AgentStepsContainer.js';
@@ -464,9 +465,14 @@ export function AssistantMessageContainer() {
                   ? {
                       speaking: speakingKey === messageId,
                       onSpeak: () => {
-                        void spokenReply.speak(limitSpeechWords(finalAnswerSpeech(messageContent)), {
-                          key: messageId,
-                        });
+                        void spokenReply.speak(
+                          answerReadoutText(finalAnswerSpeech(messageContent), {
+                            readWhole: readReadWholeMessages(),
+                          }),
+                          {
+                            key: messageId,
+                          },
+                        );
                       },
                       onStop: spokenReply.stop,
                     }
