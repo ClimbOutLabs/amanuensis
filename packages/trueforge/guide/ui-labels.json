@@ -267,6 +267,8 @@
   "Put name in page": "packages/frontend/src/BrowserLivePage.tsx",
   "Put password in page": "packages/frontend/src/BrowserLivePage.tsx",
   "Password": "packages/frontend/src/BrowserLivePage.tsx",
+  "Upload a file": "packages/frontend/src/BrowserLivePage.tsx",
+  "Sign in with your password manager": "packages/frontend/src/BrowserLivePage.tsx",
   "Memories": "packages/trueforge-ui/src/containers/SettingsBuilder/MemorySection.tsx",
   "Sharing": "packages/trueforge-ui/src/containers/SettingsBuilder/MemorySection.tsx",
   "Search memories": "packages/trueforge-ui/src/atoms/memory/MemoryExplorerFilters.tsx",
