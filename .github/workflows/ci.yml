@@ -896,7 +896,8 @@ jobs:
         run: node scripts/check-repo-rules.mjs
 
   # No dependency install: must run fast and stay green even when pnpm install fails.
-  # Also runs the outside-hosts check and the nightly report's test, which need nothing installed either.
+  # Also runs the outside-hosts check, the nightly report's test and the local model bridge's test, which need nothing
+  # installed either.
   private-data-scan:
     name: Private data scan
     runs-on: ubuntu-latest
@@ -930,6 +931,9 @@ jobs:
 
       - name: Test the nightly report
         run: npm run test:nightly-report
+
+      - name: Test the local model bridge
+        run: npm run test:local-model-bridge
 
   # The help behind "Help, I'm stuck": its pack is regenerated from its sources, every surface has a
   # topic, and every label, path, command and link a topic names is real.

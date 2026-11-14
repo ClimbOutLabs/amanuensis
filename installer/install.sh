@@ -8,6 +8,7 @@
 #        install.sh instance refresh <name>
 #        install.sh instance email <name> [--remove]
 #        install.sh instance calendar <name> [--remove]
+#        install.sh instance local-model <name> <port> [--remove]
 #        install.sh instance password [<name>]
 #        install.sh backup [<name>]
 #        install.sh backups daily|off
@@ -64,6 +65,8 @@ DOWNLOADS_FILE=$INSTALLER_DIR/downloads.txt
 . "$INSTALLER_DIR/lib/edge.sh"
 # shellcheck source=lib/instance.sh
 . "$INSTALLER_DIR/lib/instance.sh"
+# shellcheck source=lib/localmodel.sh
+. "$INSTALLER_DIR/lib/localmodel.sh"
 # shellcheck source=lib/email.sh
 . "$INSTALLER_DIR/lib/email.sh"
 # shellcheck source=lib/demo.sh
@@ -137,6 +140,7 @@ OPT_CAL_URL=
 OPT_CAL_USER=
 OPT_CAL_PASSWORD_STDIN=0
 OPT_REMOVE=0
+OPT_LOCAL_MODEL=
 COMMAND=install
 SUBCOMMAND=
 LOCK_HELD=0
@@ -169,6 +173,9 @@ Amanuensis installer
                                   asks for the details unless the --email-* options are given
   install.sh instance calendar <name> [--remove]
                                   connect a calendar to an instance (asks for the details); --remove takes it away
+  install.sh instance local-model <name> <port> [--remove]
+                                  let an instance reach a model server on this computer at that port, through Aman's
+                                  own local link (http://aman-local-model:<port>/v1); --remove takes the port away
   install.sh instance password [<name>]
                                   set a new owner password and sign everyone out
   install.sh backup [<name>]      make a backup now
@@ -316,7 +323,9 @@ parse_args() {
             ;;
           2:instance) SUBCOMMAND=$arg ;;
           3:instance | 2:backup) OPT_NAME=$arg ;;
-          4:instance) OPT_IMPORT_FILE=$arg ;;
+          4:instance)
+            if [ "$SUBCOMMAND" = local-model ]; then OPT_LOCAL_MODEL=$arg; else OPT_IMPORT_FILE=$arg; fi
+            ;;
           2:backups) OPT_BACKUPS_ARG=$arg ;;
           2:restore | 3:restore) restore_take_arg "$arg" ;;
           *) usage_die "unexpected argument $arg" ;;
@@ -518,7 +527,8 @@ main() {
         email) cmd_instance_email ;;
         password) cmd_instance_password ;;
         calendar) cmd_instance_calendar ;;
-        *) usage_die "usage: install.sh instance add|list|remove|demo-seed|import|refresh|email|password|calendar" ;;
+        local-model) cmd_instance_local_model ;;
+        *) usage_die "usage: install.sh instance add|list|remove|demo-seed|import|refresh|email|password|calendar|local-model" ;;
       esac
       ;;
   esac

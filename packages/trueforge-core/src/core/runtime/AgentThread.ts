@@ -74,6 +74,7 @@ import {
   type ThinkingBlock,
 } from '../llm/LLMTypes';
 import { resolveMaxOutputTokens } from '../llm/maxOutputTokens';
+import { ModelUnreachableError } from '../llm/modelUnreachable';
 import { buildModelWaitingEvent } from '../llm/modelWaitingEvent';
 import { describeTurnFailure } from '../llm/plainFailureMessages';
 import { noticeAfter, REPEAT_STOP_NOTE, TOOL_MARKUP_NOTICE, UNBACKED_CLAIM_NOTES } from '../llm/replyNotices';
@@ -4065,6 +4066,9 @@ export class AgentThread {
     // behind it stay in the history the retry sends, and a partial tool call never runs because
     // calls only execute from a completed step. Only a second silence ends the step.
     let silenceRetried = false;
+    // A connection that never started is retried once with the same history, since a short network blip can cause
+    // one. A second one ends the step with words that say no reply was started, never that a reply broke off.
+    let unreachableRetried = false;
     // Retries of the forced answer after the provider said to try again later (see
     // FORCED_ANSWER_RETRY_BACKOFF_MS); never counts toward the stream-fault attempts.
     let providerRetries = 0;
@@ -4239,6 +4243,15 @@ export class AgentThread {
           if (signal?.aborted) {
             throw error;
           }
+          if (error instanceof ModelUnreachableError && !unreachableRetried) {
+            unreachableRetried = true;
+            this.logger.warn('Model connection never started; retrying the call once with the same history', {
+              ...extractErrorLogFields(error),
+              place: error.place,
+              attempt,
+            });
+            continue;
+          }
           if (!(error instanceof ModelStreamFault)) {
             // A definite "try again later" from the provider (5xx, 429) on the forced answer is
             // retried after a short wait, since this step is the only one left and failing it
@@ -4254,7 +4267,12 @@ export class AgentThread {
                 attempt,
                 step: this.metrics.iterations,
               });
-              yield this.generateErrorEvent(MODEL_SERVICE_UNAVAILABLE_MESSAGE, undefined, 'model_stream_fault');
+              // A connection that never started keeps its own words: the service did not refuse anything.
+              yield this.generateErrorEvent(
+                error instanceof ModelUnreachableError ? error.message : MODEL_SERVICE_UNAVAILABLE_MESSAGE,
+                undefined,
+                'model_stream_fault',
+              );
               return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
             }
             providerRetries++;

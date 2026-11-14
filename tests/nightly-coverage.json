@@ -118,6 +118,10 @@
       "set": "install",
       "tests": ["installer/tests/lib/look.test.sh"]
     },
+    "command:local-model": {
+      "set": "install",
+      "tests": []
+    },
     "command:migrate": {
       "set": "install",
       "tests": []
@@ -783,6 +787,7 @@
     "command:backup",
     "command:backups",
     "command:import",
+    "command:local-model",
     "command:migrate",
     "command:network",
     "command:open",

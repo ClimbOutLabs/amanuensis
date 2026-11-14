@@ -645,6 +645,11 @@ case "$cmd" in
         fi
         exit 0
         ;;
+      *"-d /run/aman-local-model"*)
+        # Whether the app image has the local model bridge's folder: an image built before it does not.
+        [ -n "${STUB_OLD_APP_IMAGE:-}" ] && exit 1
+        exit 0
+        ;;
       *host-report*)
         # The app's saved check result, written into the data volume.
         cat >"$S/host_report_$vol"

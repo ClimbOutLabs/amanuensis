@@ -16,8 +16,9 @@ import {
   listModelProvidersRoute,
   putModelProviderRoute,
 } from '../routes/modelProviderRoutes';
+import { localModelBridgePortMessage } from '../runtime/localModels';
 import type { CheckSavedModelProvider } from '../runtime/modelProviderCheck';
-import { modelUrlProblem } from '../runtime/remoteAddress';
+import { modelUrlProblem, type ResolveAddresses } from '../runtime/remoteAddress';
 import {
   modelProviderName,
   type ConfiguredModelProvider,
@@ -33,6 +34,8 @@ export interface ModelProvidersRouterDeps<TTransaction> {
   resolveRequestContext: ResolveRequestContext;
   /** Providers whose record the environment rewrites at startup; the API keeps them read-only. */
   envManagedNames: ReadonlySet<string>;
+  /** Name lookups for the checks on model addresses; tests replace it so no lookup leaves the machine. */
+  resolveHostAddresses?: ResolveAddresses;
   /** Runs the one test call for a just-saved provider; its outcome is stored on the provider. */
   checkSavedProvider: CheckSavedModelProvider;
   logger: Logger;
@@ -62,17 +65,30 @@ function envManagedConflict(name: string) {
  * does not resolve is not refused: it connects nowhere, and the address is judged again when
  * the model is used.
  */
-async function modelAddressRefusal({ baseUrl }: { baseUrl: string | undefined }): Promise<string | undefined> {
+async function modelAddressRefusal({
+  baseUrl,
+  resolveAddresses,
+}: {
+  baseUrl: string | undefined;
+  resolveAddresses: ResolveAddresses | undefined;
+}): Promise<string | undefined> {
   if (baseUrl === undefined) {
     return undefined;
   }
-  const problem = await modelUrlProblem({ url: baseUrl, endpoints: configuration.LOCAL_MODEL_ENDPOINTS });
+  const problem = await modelUrlProblem({
+    url: baseUrl,
+    endpoints: configuration.LOCAL_MODEL_ENDPOINTS,
+    deps: { resolveAddresses },
+  });
   switch (problem) {
     case null:
     case 'unresolved':
       return undefined;
     case 'blocked':
-      return "That address is on this computer, so the server cannot use it for a model. To use a model on this computer, name its exact address (host and port) in LOCAL_MODEL_ENDPOINTS. On an installed Aman, that setting is in the instance's settings file, ~/.amanuensis/instances/<name>/.env, below the block the installer manages. Restart the instance after changing it.";
+      return (
+        localModelBridgePortMessage(baseUrl) ??
+        "That address is on this computer, so the server cannot use it for a model. To use a model on this computer, name its exact address (host and port) in LOCAL_MODEL_ENDPOINTS. On an installed Aman, that setting is in the instance's settings file, ~/.amanuensis/instances/<name>/.env, below the block the installer manages. Restart the instance after changing it."
+      );
     case 'invalid':
       return 'That address is not one the server can connect to. Enter the full address, starting with http:// or https://, without a name and password in it.';
   }
@@ -183,7 +199,10 @@ export function createModelProvidersRouter<TTransaction>(deps: ModelProvidersRou
     if (deps.envManagedNames.has(name)) {
       return c.json(envManagedConflict(name), 409);
     }
-    const refusal = await modelAddressRefusal({ baseUrl: provider.base_url });
+    const refusal = await modelAddressRefusal({
+      baseUrl: provider.base_url,
+      resolveAddresses: deps.resolveHostAddresses,
+    });
     if (refusal !== undefined) {
       return c.json({ error: { message: refusal } }, 400);
     }
@@ -220,7 +239,10 @@ export function createModelProvidersRouter<TTransaction>(deps: ModelProvidersRou
     }
     // Before the transaction: the check resolves the address, and remote I/O stays out of the
     // write transaction.
-    const refusal = await modelAddressRefusal({ baseUrl: provider.base_url });
+    const refusal = await modelAddressRefusal({
+      baseUrl: provider.base_url,
+      resolveAddresses: deps.resolveHostAddresses,
+    });
     if (refusal !== undefined) {
       return c.json({ error: { message: refusal } }, 400);
     }

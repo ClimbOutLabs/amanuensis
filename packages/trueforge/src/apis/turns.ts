@@ -109,6 +109,7 @@ import { StreamGoneError, type EventSubscription, type EventSubscriptionRegistry
 import { effectiveGitCommitIdentity, readStoredGitCommitIdentity } from '../runtime/gitCommitIdentitySettings';
 import { buildInternalSourceToolPolicy, type InternalSourceState } from '../runtime/internalSourceGuard';
 import { stampLatestAnswer, type LatestAnswerSessionStore } from '../runtime/latestAnswer';
+import { placeOfModelHost } from '../runtime/localModels';
 import { mailAccountDirectory } from '../runtime/mailConnector';
 import { createMemoryClient } from '../runtime/memory/createMemoryClient';
 import type { MemoryClient } from '../runtime/memory/memoryClient';
@@ -579,6 +580,7 @@ function createTurnResolver(deps: {
             streamTimeout: resolved.streamTimeout,
             toolCallChunkMs: configuration.MODEL_STREAM_TOOL_CALL_IDLE_TIMEOUT_MS,
             toolArgumentLimits: SPACE_WRITE_TOOL_ARGUMENT_LIMITS,
+            placeOfModelHost,
           });
           return new UsageRecordingLLM({
             llm: client,

@@ -245,6 +245,10 @@ instance_render() {
   if [ "$browser_on" = 1 ]; then
     write_if_changed "$dir/browser-seccomp.json" 644 <"$REPO_ROOT/ops/browser-sidecar/seccomp_profile.json" || true
   fi
+  # The local model bridge, when the owner named a port of this computer for it.
+  local local_model_args=()
+  mapfile -t local_model_args < <(local_model_render_args "$name")
+  if [ -n "$(local_model_ports "$name")" ]; then local_model_files "$dir"; fi
   # The https folders are mounted from the home folder itself, except when the home is the state volume
   # (Windows): then the compose file mounts them from inside the volume, because a host folder the
   # daemon could read does not exist there.
@@ -257,7 +261,7 @@ instance_render() {
     "IF_EDGE=$edge_on" "LOGIN_HOST=$login_host" \
     "LOGIN_PORT=$login_port" "DEX_TELEMETRY_PORT=$DEX_TELEMETRY_PORT" "APP_PORTS=$app_ports" \
     "IF_TLS=$tls_on" "IF_TLS_HOST=$tls_host" "IF_TLS_VOLUME=$tls_volume" "CADDY_IMAGE=$(tls_image)" "TLS_USER=$(id -u):$(id -g)" "TLS_LEAF_DIR=$(tls_leaf_dir "$name")" \
-    "TLS_TRUST_DIR=$(tls_trust_dir "$name")" "TLS_HTTP_IN=$TLS_HTTP_IN" | write_if_changed "$dir/compose.yaml" 644 || true
+    "TLS_TRUST_DIR=$(tls_trust_dir "$name")" "TLS_HTTP_IN=$TLS_HTTP_IN" "${local_model_args[@]}" | write_if_changed "$dir/compose.yaml" 644 || true
   if [ "$tls_on" = 1 ]; then tls_prepare "$name" "$app_image"; fi
   if [ "$edge_on" = 1 ]; then edge_render "$name"; fi
   render_template "$TEMPLATES_DIR/instance/dex.yaml.tpl" \
@@ -542,7 +546,8 @@ container_networks_sync() { # name
   env="$(instance_dir "$name")/.env"
   [ -f "$env" ] || return 0
   ranges=""
-  for network in "aman-${name}_default" "aman-${name}_link" "aman-${name}_calendar" "aman-${name}_browser-control"; do
+  for network in "aman-${name}_default" "aman-${name}_link" "aman-${name}_calendar" "aman-${name}_browser-control" \
+    "aman-${name}_local-model"; do
     for subnet in $(D network inspect "$network" --format '{{range .IPAM.Config}}{{.Subnet}} {{end}}' 2>/dev/null || true); do
       case "$subnet" in
         */*) ranges="${ranges:+$ranges,}$subnet" ;;

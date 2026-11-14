@@ -51,6 +51,7 @@ import type { ModelProperties, ModelProviderStreamTimeout } from '../schemas/mod
 import { parseGitSkill } from '../schemas/skill';
 import { isSecretReference, resolveSecretReference } from '../utils/secretReferences';
 import { buildRunCodeHarvestSink } from './artifacts/persistRunCodeHarvests';
+import { localModelBridgePortMessage } from './localModels';
 import { modelUrlProblem, remoteUrlProblem } from './remoteAddress';
 
 /**
@@ -347,6 +348,7 @@ export async function getModelDetails({
   if (problem === 'blocked') {
     throw new HTTPException(422, {
       message:
+        localModelBridgePortMessage(baseUrl) ??
         "That address is on this computer, so the server cannot use it for a model. To use a model on this computer, name its exact address (host and port) in LOCAL_MODEL_ENDPOINTS. On an installed Aman, that setting is in the instance's settings file, ~/.amanuensis/instances/<name>/.env, below the block the installer manages. Restart the instance after changing it.",
     });
   }

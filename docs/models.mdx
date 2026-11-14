@@ -72,7 +72,11 @@ LOCAL_MODEL_ENDPOINTS=localhost:11434
 
 The match is exact. A different port on the same computer is a different address, and stays refused until it's named too.
 
-In the installer's Docker setup, a model on your computer is reached at `host.docker.internal`, for example `http://host.docker.internal:11434/v1`. That name points at your computer from inside the container, so it works as it stands and doesn't need to be named.
+In the installer's Docker setup, a model on your computer is reached at `host.docker.internal`, for example `http://host.docker.internal:11434/v1`. That name points at your computer from inside the container, so it works as it stands and doesn't need to be named. Your computer's home network or Tailscale address or name works too. Aman runs in containers with addresses of their own there, so those addresses are not refused.
+
+An installed instance also offers an optional local model bridge at `http://aman-local-model:<port>/v1`, after `aman local-model <port>` on that computer. It reaches a model server that listens only on `127.0.0.1`, and it keeps working when your computer's network changes. That command also names `aman-local-model:<port>` in `LOCAL_MODEL_ENDPOINTS` for you and starts the instance again, and `aman local-model <port> --remove` takes it out. See [A model on this computer](/install#a-model-on-this-computer).
+
+When a model call cannot connect at all (nothing listens, the address is refused or cannot be reached), Aman tries once more, since a short network blip can cause it. If it still cannot connect, the chat says Aman could not connect to the model and that no reply was started. It never says the reply broke off, which is kept for a reply that began and was cut. When the address is the local model bridge, the notice says nothing answered at that port on this computer.
 
 If a model server answers with a redirect, the new address is checked the same way before Aman follows it.
 

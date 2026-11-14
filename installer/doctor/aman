@@ -11,6 +11,7 @@
 #   aman restore [NAME] [TIME | --latest]
 #   aman upgrade [--check] [--force]
 #   aman import FILE [--instance NAME] [--display-name NAME] [--dry-run]
+#   aman local-model PORT [--instance NAME] [--remove]
 #   aman migrate --from-compose FOLDER [--user ID]
 #
 # --json never loads the terminal style and is the same document as before.
@@ -97,6 +98,8 @@ Usage: aman doctor [--json] [--verbose] [--only ID] [--instance NAME] [--deep] [
        aman import FILE [--instance NAME] [--display-name NAME] [--dry-run]
          --dry-run checks the file and imports nothing; an instance that has never started is started once first
        aman migrate --from-compose FOLDER [--user ID]
+       aman local-model PORT [--instance NAME] [--remove]
+         lets Aman reach a model server on this computer at that port; --remove takes the port away
 USAGE
 }
 
@@ -1791,6 +1794,45 @@ run_import() {
   run_installer instance import "$instance" "$file" ${rest[@]+"${rest[@]}"}
 }
 
+# aman local-model PORT: the installer's local model bridge for the one instance on this computer, or the one --instance
+# names.
+run_local_model() {
+  local port="" instance="" name count=0 rest=()
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --instance)
+        [ $# -ge 2 ] || die_usage "--instance needs a name."
+        instance=$2
+        shift
+        ;;
+      --remove) rest+=("$1") ;;
+      -*) die_usage "Unknown argument: $1" ;;
+      *)
+        [ -z "$port" ] || die_usage "Unexpected argument: $1"
+        port=$1
+        ;;
+    esac
+    shift
+  done
+  [ -n "$port" ] || die_usage "aman local-model needs the port your model server listens on. Run aman local-model PORT."
+  if [ -z "$instance" ]; then
+    while IFS= read -r name; do
+      [ -n "$name" ] || continue
+      count=$((count + 1))
+      instance=$name
+    done < <(list_instances)
+    if [ "$count" = 0 ]; then
+      printf 'This computer has no Aman instance yet. Run install.sh first.\n' >&2
+      exit 1
+    fi
+    if [ "$count" -gt 1 ]; then
+      printf 'This computer has %s instances, so Aman cannot tell which one should reach the model. Run aman local-model %s --instance NAME.\n' "$count" "$port" >&2
+      exit 2
+    fi
+  fi
+  run_installer instance local-model "$instance" "$port" ${rest[@]+"${rest[@]}"}
+}
+
 # Any aman command renews an https certificate that has 60 days or fewer left, quietly; the installer does it, so it needs
 # the installer's folder to be safe to run, and it never runs from inside the installer's own run.
 renew_tls_if_due() {
@@ -1911,7 +1953,7 @@ write_host_reports() {
 # ---------------------------------------------------------------- main
 
 case "${1:-}" in
-  doctor | backup | upgrade | import | migrate) renew_tls_if_due ;;
+  doctor | backup | upgrade | import | migrate | local-model) renew_tls_if_due ;;
 esac
 
 case "${1:-}" in
@@ -1920,6 +1962,10 @@ case "${1:-}" in
   import)
     shift
     run_import "$@"
+    ;;
+  local-model)
+    shift
+    run_local_model "$@"
     ;;
   password)
     shift

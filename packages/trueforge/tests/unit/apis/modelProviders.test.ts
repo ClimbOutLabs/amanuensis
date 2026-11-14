@@ -21,6 +21,7 @@ import { SqliteSandboxProviderStore } from '../../../src/db/sqlite/sandbox-provi
 import { SqliteSkillStore } from '../../../src/db/sqlite/skill-store/SqliteSkillStore';
 import { SqliteOAuthTokenStore } from '../../../src/db/sqlite/token-store/SqliteOAuthTokenStore';
 import type { CheckSavedModelProvider } from '../../../src/runtime/modelProviderCheck';
+import { configureRemoteAddressCheck, type ResolveAddresses } from '../../../src/runtime/remoteAddress';
 import { RequestErrorResponseSchema } from '../../../src/schemas/errors';
 import {
   ListAvailableModelsResponseSchema,
@@ -95,8 +96,17 @@ function withRedactedApiKey<T extends { auth: { api_key: string } }>(provider: T
   };
 }
 
+/** Name lookups answer from a fixed table, so no test depends on the DNS of the machine running it. */
+function fixedLookups(table: Record<string, string[]>): ResolveAddresses {
+  return hostname => Promise.resolve(table[hostname] ?? []);
+}
+
 async function createRouters(
-  options: { envManagedNames?: ReadonlySet<string>; checkSavedProvider?: CheckSavedModelProvider } = {},
+  options: {
+    envManagedNames?: ReadonlySet<string>;
+    resolveHostAddresses?: ResolveAddresses;
+    checkSavedProvider?: CheckSavedModelProvider;
+  } = {},
 ): Promise<{
   settingsRouter: ReturnType<typeof createSettingsRouter>;
   catalogRouter: ReturnType<typeof createCatalogRouter>;
@@ -128,6 +138,7 @@ async function createRouters(
       tokenFactoryBudget: uncappedTokenFactoryBudget,
       memoryTidy: { tidyNow: () => undefined, tidyState: () => ({ status: 'idle' }) },
       envManagedModelProviderNames: options.envManagedNames ?? new Set(),
+      resolveHostAddresses: options.resolveHostAddresses ?? fixedLookups({}),
       // Saves in these suites carry no check outcome unless a suite wires its own checker.
       checkSavedProvider:
         options.checkSavedProvider ??
@@ -776,6 +787,78 @@ describe('GET /models default chat model', () => {
     const { data } = ListAvailableModelsResponseSchema.parse(await (await modelsRouter.request('/')).json());
 
     expect(data.map(item => item.name)).toEqual(['anthropic/claude-sonnet-4-6']);
+  });
+});
+
+describe('a model on the same computer as an installed Aman', () => {
+  // The app runs in containers on networks of their own, so this computer's home network address, its Tailscale
+  // address and name, and host.docker.internal (Docker's gateway to this computer) are not the app's own addresses.
+  const lookups = fixedLookups({
+    'spark.example.ts.net': ['100.101.102.103'],
+    spark: ['192.168.1.20'],
+    'host.docker.internal': ['172.17.0.1'],
+  });
+  const localBody = (base_url: string) => ({ ...customBody, name: 'spark', base_url });
+
+  beforeEach(() => {
+    configureRemoteAddressCheck({ ownNetworkRanges: ['172.18.0.0/16', '172.19.0.0/16'] });
+  });
+
+  afterEach(() => {
+    configureRemoteAddressCheck({ ownNetworkRanges: [] });
+  });
+
+  it.each([
+    ['its Tailscale name', 'https://spark.example.ts.net:8443/v1'],
+    ['its Tailscale address', 'http://100.101.102.103:30031/v1'],
+    ['its home network address', 'http://192.168.1.20:30031/v1'],
+    ['a short name that resolves to it', 'http://spark:30031/v1'],
+    ['host.docker.internal', 'http://host.docker.internal:11434/v1'],
+  ])('is saved when given by %s', async (_label, baseUrl) => {
+    const { settingsRouter, modelProviderStore } = await createRouters({ resolveHostAddresses: lookups });
+
+    expect((await settingsRouter.request('/model-providers', postInit(localBody(baseUrl)))).status).toBe(201);
+    expect((await settingsRouter.request('/model-providers', putInit(localBody(baseUrl)))).status).toBe(200);
+    const saved = await modelProviderStore.listProviders({ tenant_id: STANDALONE_REQUEST_CONTEXT.tenant_id });
+    expect(saved.map(record => record.manifest.base_url)).toEqual([baseUrl]);
+  });
+});
+
+describe("the local model bridge's address on an instance network", () => {
+  // The bridge answers on a network the app's containers share, so the address check refuses it
+  // unless aman local-model has listed its endpoint.
+  const lookups = fixedLookups({ 'aman-local-model': ['172.30.5.2'] });
+  const bridgeBody = { ...customBody, name: 'bridged', base_url: 'http://aman-local-model:30031/v1' };
+  const originalEndpoints = configuration.LOCAL_MODEL_ENDPOINTS;
+
+  beforeEach(() => {
+    configureRemoteAddressCheck({ ownNetworkRanges: ['172.30.0.0/16'] });
+  });
+
+  afterEach(() => {
+    configureRemoteAddressCheck({ ownNetworkRanges: [] });
+    configuration.LOCAL_MODEL_ENDPOINTS = originalEndpoints;
+  });
+
+  it('is refused, with the command that adds its port, while its endpoint is not listed', async () => {
+    configuration.LOCAL_MODEL_ENDPOINTS = ['aman-local-model:11434'];
+    const { settingsRouter, modelProviderStore } = await createRouters({ resolveHostAddresses: lookups });
+
+    for (const init of [postInit(bridgeBody), putInit(bridgeBody)]) {
+      const response = await settingsRouter.request('/model-providers', init);
+      expect(response.status).toBe(400);
+      const body = RequestErrorResponseSchema.parse(await response.json());
+      expect(body.error.message).toContain('run aman local-model 30031');
+    }
+    expect(await modelProviderStore.listProviders({ tenant_id: STANDALONE_REQUEST_CONTEXT.tenant_id })).toEqual([]);
+  });
+
+  it('is saved once its endpoint is listed', async () => {
+    configuration.LOCAL_MODEL_ENDPOINTS = ['localhost:11434', 'aman-local-model:30031'];
+    const { settingsRouter } = await createRouters({ resolveHostAddresses: lookups });
+
+    expect((await settingsRouter.request('/model-providers', postInit(bridgeBody))).status).toBe(201);
+    expect((await settingsRouter.request('/model-providers', putInit(bridgeBody))).status).toBe(200);
   });
 });
 

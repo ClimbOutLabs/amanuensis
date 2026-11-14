@@ -16,7 +16,7 @@ One instance serves one person. If two people in the same household need it, the
 - Nothing else: no Node.js is needed. For the sandbox setup the installer downloads a pinned Node.js from nodejs.org (about 35 MB, checked against a SHA-256 pinned in the repository) into `~/.amanuensis/runtime/node`, and uses it only to run that setup. `--use-host-node` uses your own Node.js 22.14 or newer instead; `--no-sandbox` skips all of it.
 - On Linux, Docker Engine 28 or newer: older versions let other devices on your network reach ports meant for this computer only, so the installer and `aman doctor` stop and say so.
 - Docker needs at least 6 GB of memory for the first build. The installer blocks below 6 GB and warns between 6 and 8 GB; 8 GB or more is recommended.
-- Your own model: the address of a model server you already run, for example `http://host.docker.internal:11434/v1`. The address and any API key are entered in the app afterwards, not in the installer. That address names your computer from inside the container, not the container itself, so the app can use it as it stands, with nothing to name first (see [Setup Models](/models#adding-a-custom-provider)). The installer never scans your machine for models.
+- Your own model: the address of a model server you already run, for example `http://host.docker.internal:11434/v1`. The address and any API key are entered in the app afterwards, not in the installer. That address names your computer from inside the container, not the container itself, so the app can use it as it stands, with nothing to name first (see [Setup Models](/models#adding-a-custom-provider)). A model on this computer also works at the computer's home network or Tailscale address. The installer never scans your machine for models. The local model bridge is an optional other way to reach a model on this computer (see [A model on this computer](#a-model-on-this-computer)).
 - A git checkout of this repository. The installer runs from the checkout. When the checkout is a release whose images were published, it downloads Aman's images for your kind of processor, each checked against the digest pinned in the release. Otherwise, or with `--build-from-source`, it builds them from source.
 
 ## Windows
@@ -153,6 +153,24 @@ installer/install.sh instance remove <name> --purge-data
 This asks you to type the instance name to confirm (or pass it in advance with `--confirm-name`). The installer never deletes a volume otherwise.
 
 An instance served with `--tls caddy` also has a site file in `/etc/caddy/aman.d`. `instance remove` prints the root steps that delete it and reload Caddy (`sudo rm -f /etc/caddy/aman.d/<name>.caddyfile`, then `systemctl reload-or-restart caddy`) and runs them after you answer yes or pass `--tls-root`. Without consent the instance is still removed, a warning says that Caddy keeps serving its names, and the steps stay yours to run.
+
+## A model on this computer
+
+A model server on the same computer as Aman (Ollama, vLLM, llama.cpp) works at the addresses it always did: `http://host.docker.internal:<port>/v1`, or the computer's home network or Tailscale address or name. Add it in **Settings → Models** as any other model.
+
+The local model bridge is an optional other way. Use it when the model server listens only on `127.0.0.1` (Ollama's default), which a container cannot reach at any of this computer's addresses. Use it too when you want the model to keep working after a network change on this computer. For example, Tailscale 1.104 and later, on Linux, accept a connection to a Serve address only when it arrives over the tailnet or from this computer's own programs, so a container's connection to it is refused.
+
+```bash
+aman local-model 11434                     # the port the model server listens on; --instance <name> with more than one
+aman local-model 11434 --remove            # take the port away again
+installer/install.sh instance local-model <name> 11434   # the same, from the checkout
+```
+
+The command records the port and adds `aman-local-model:11434` to `LOCAL_MODEL_ENDPOINTS` in the instance's settings file, `~/.amanuensis/instances/<name>/.env`. The app refuses every address on the instance's own networks, the bridge's included, unless that exact address is in this list (see [A model on the same computer as Aman](/models#a-model-on-the-same-computer-as-aman)). The command keeps every other entry in the list as it was, and `--remove` takes out only the bridge's entry for that port. It then starts the instance again, so the app reads the new list, and prints the address to give the model in **Settings → Models**: `http://aman-local-model:11434/v1`. A bridge address whose port was never added is refused when it is saved, with the `aman local-model` command to run.
+
+Two small services in the instance carry the bridge. The host side dials the model at `127.0.0.1` and that port (under Docker Desktop, at `host.docker.internal`) and listens only on a socket file in a volume of its own. The link side answers the app at `aman-local-model` on an internal network only the app shares, and passes each connection to that socket. Nothing is published, so no other device or container reaches the model through it, and only the ports the owner named are carried.
+
+The bridge is not available in Aman Setup on Windows yet, because there the installer runs in a container of its own. Add a model on the same computer at `http://host.docker.internal:<port>/v1` there.
 
 ## Using it from other devices
 
