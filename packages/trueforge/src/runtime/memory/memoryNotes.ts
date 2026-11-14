@@ -152,6 +152,19 @@ export function labeledNoteText({ label, text }: { label: string; text: string }
   return `${label}: ${text}`;
 }
 
+/** Any label `noteLabel` writes, with the colon after it. The assistant's name in a reply label can be any short text. */
+const NOTE_LABEL_PATTERN = new RegExp(
+  `^From (?:[^\\n]{1,80}?(?:'s|’s) reply|(?:${Object.values(FINDING_SOURCE_PHRASES).join('|')})(?:, found)?),? [^:\\n]{1,20}: `,
+);
+
+/**
+ * A saved note without its label. The label says where the note came from, and a reply's label names the
+ * assistant, so a reader that is told the origin apart must not take the label for part of what was said.
+ */
+export function noteTextWithoutLabel(text: string): string {
+  return text.replace(NOTE_LABEL_PATTERN, '');
+}
+
 /**
  * Where a fact on a page came from. The model never chooses it. `you_said` and `you_edited` are the person's own words.
  */
