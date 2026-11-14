@@ -32,6 +32,15 @@ A small host job places the key in a memory-only file when the machine starts. A
 - `aman secrets check-recovery` reads a recovery key on stdin and says whether it unlocks the database, so setup can make sure it was written down correctly.
 - Setup on each platform puts the key file in a memory-only place outside the data folder and mounts it into each instance; that wiring comes with the platform step.
 
+## Sealed backups
+
+A backup holds chats, memory and settings, so the whole backup is encrypted, not only the secrets inside it.
+
+- `aman seal` turns a stream of bytes into a sealed file, and `aman unseal` opens one. Both read and write files or stdin and stdout, so a backup can be sealed without an unencrypted copy touching the disk.
+- Each sealed file has its own random data key. The header holds that key encrypted with the machine key, and the database's recovery copy, so the file opens with the machine key on the computer that made it, or with the recovery key anywhere.
+- The data is encrypted in 64 KB pieces (AES-256-GCM). Each piece is checked together with the header and its position, and the last piece is marked. A file that was changed, cut short, reordered or mixed with another file is refused.
+- `aman seal` refuses a database that is not set up, or a key that is not that database's key. `aman unseal` writes to a `.part` file and only gives it its final name when the whole file passed its checks.
+
 ## Scope
 
 Delivered in steps, each its own PR linking this spec:
@@ -42,6 +51,7 @@ Delivered in steps, each its own PR linking this spec:
 4. Platform key protection (Linux, Windows, Mac) and the startup task on Windows.
 5. Encrypting existing secrets, then cleaning old copies out of the database files.
 6. Log redaction and plain docs on what backups hold.
+7. Sealed backups, and restoring one on a new machine with the recovery key.
 
 ## Privacy
 
