@@ -424,7 +424,8 @@ describe('something Aman read that the person asks it to save', () => {
           input: [{ type: 'user.message', content: `${RUN_DIRECTIVE_PREFIX}draft_email to Omar please` }],
         }),
       );
-      expect(card.tier3_card?.plain_what).not.toContain('read earlier');
+      expect(card.tier3_card?.plain_what).toContain(ownAddress);
+      expect(card.tier3_card?.plain_what).not.toContain('whose address Aman read earlier');
     },
     TURN_TIMEOUT_MS,
   );
