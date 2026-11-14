@@ -38,6 +38,7 @@ describe('defineTool inputSchema', () => {
   it('leaves out the safe-integer bound Zod adds to whole numbers, and keeps real bounds', () => {
     const tool = defineTool({
       name: 'read_page',
+      requiresNetwork: false,
       description: 'Read a page',
       schema: z.object({
         revision: z.number().int().positive(),
