@@ -1,6 +1,5 @@
 import { classifyTier, type ClassifyContext, type SentinelAction } from '../../../src/core/permissions/classifier';
 import { defaultSentinelServices } from '../../../src/core/permissions/context';
-import { GRANT_BARRED_TIER_REASONS } from '../../../src/core/permissions/tier';
 import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
 
 function makeCtx(): ClassifyContext {
@@ -47,7 +46,7 @@ describe('Skill tool classification', () => {
     expect(decision).toMatchObject({ tier: 3, reason: 'skill_install', auto_deny: null });
     expect(decision.card?.skill).toEqual(REVIEW);
     expect(decision.card?.plain_what).toContain('Add the skill "release-notes"?');
-    expect(GRANT_BARRED_TIER_REASONS.has('skill_install')).toBe(true);
+    expect(decision.standing_grant_barred).toBe(true);
   });
 
   it('shows text from the skill as plain text, so it cannot dress the card up', async () => {

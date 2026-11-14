@@ -216,6 +216,126 @@ export function parseFirstPartyMcpOrigins(raw: string | undefined): string[] {
 }
 
 /**
+ * Parses `LOCAL_MODEL_ENDPOINTS`: comma-separated exact `host:port` endpoints of model servers
+ * running on this computer that the operator names as allowed. A model base
+ * URL normally has to resolve to an address the server may connect to (see runtime/remoteAddress),
+ * which refuses this computer's own addresses; a base URL that names one of these exact
+ * endpoints is the one exception. Unset / blank → none, so no local model endpoint is allowed
+ * until the operator names it. Each entry is normalized (host lowercased, IPv6 hosts bracketed,
+ * the port written without leading zeros) and matched exactly, port included. Anything that is
+ * not an exact host and port fails the boot: a silently dropped typo would read as "no local
+ * model is allowed", and a bare host would suggest a match wider than the one the list makes.
+ */
+export function parseLocalModelEndpoints(raw: string | undefined): string[] {
+  if (raw === undefined || raw.trim() === '') {
+    return [];
+  }
+  const endpoints = new Set<string>();
+  for (const entry of raw
+    .split(',')
+    .map(part => part.trim())
+    .filter(part => part.length > 0)) {
+    const endpoint = normalizedLocalModelEndpoint(entry);
+    if (endpoint === undefined) {
+      throw new Error(
+        `LOCAL_MODEL_ENDPOINTS entries must be exact host:port endpoints such as localhost:11434 or [::1]:11434, got: ${entry}`,
+      );
+    }
+    endpoints.add(endpoint);
+  }
+  return [...endpoints];
+}
+
+function normalizedLocalModelEndpoint(entry: string): string | undefined {
+  let host: string;
+  let rawPort: string;
+  if (entry.startsWith('[')) {
+    const close = entry.indexOf(']');
+    if (close < 0 || entry.charAt(close + 1) !== ':') {
+      return undefined;
+    }
+    const inside = entry.slice(1, close);
+    if (isIP(inside) !== 6) {
+      return undefined;
+    }
+    host = `[${inside.toLowerCase()}]`;
+    rawPort = entry.slice(close + 2);
+  } else {
+    const colon = entry.lastIndexOf(':');
+    if (colon < 1) {
+      return undefined;
+    }
+    const rawHost = entry.slice(0, colon);
+    if (!/^[a-z0-9._-]+$/i.test(rawHost) || rawHost.includes('*')) {
+      return undefined;
+    }
+    host = rawHost.toLowerCase();
+    rawPort = entry.slice(colon + 1);
+  }
+  if (!/^\d+$/.test(rawPort)) {
+    return undefined;
+  }
+  const port = Number(rawPort);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    return undefined;
+  }
+  return `${host}:${String(port)}`;
+}
+
+/**
+ * Parses `CONTAINER_NETWORK_RANGES`: comma-separated CIDR ranges of the container networks this
+ * instance sits on, which the remote address check refuses as well as this instance's own
+ * addresses (see runtime/remoteAddress). The installer writes the setting once it has started an
+ * instance and learned the ranges Docker gave its networks, so a container install refuses its
+ * neighbours (the app's own connectors among them). Unset / blank → none: an app run directly on
+ * the host names no ranges, and only its own addresses are refused, so its home network stays
+ * usable. Each entry is normalized (the address lowercased, the prefix written without leading
+ * zeros) and matched as a range. Anything that is not an exact address and prefix fails the
+ * boot, naming the entry: a silently dropped typo would read as "no range is refused".
+ */
+export function parseContainerNetworkRanges(raw: string | undefined): string[] {
+  if (raw === undefined || raw.trim() === '') {
+    return [];
+  }
+  const ranges = new Set<string>();
+  for (const entry of raw
+    .split(',')
+    .map(part => part.trim())
+    .filter(part => part.length > 0)) {
+    const range = normalizedContainerNetworkRange(entry);
+    if (range === undefined) {
+      throw new Error(
+        `CONTAINER_NETWORK_RANGES entries must be exact CIDR ranges such as 172.30.0.0/16 or fd00:1234::/64, got: ${entry}`,
+      );
+    }
+    ranges.add(range);
+  }
+  return [...ranges];
+}
+
+function normalizedContainerNetworkRange(entry: string): string | undefined {
+  const slash = entry.lastIndexOf('/');
+  if (slash < 1) {
+    return undefined;
+  }
+  const address = entry.slice(0, slash);
+  const family = isIP(address);
+  if (family === 0) {
+    return undefined;
+  }
+  const rawPrefix = entry.slice(slash + 1);
+  if (!/^\d+$/.test(rawPrefix)) {
+    return undefined;
+  }
+  const prefix = Number(rawPrefix);
+  const maxPrefix = family === 6 ? 128 : 32;
+  if (!Number.isInteger(prefix) || prefix < 0 || prefix > maxPrefix) {
+    return undefined;
+  }
+  return `${address.toLowerCase()}/${String(prefix)}`;
+}
+
+/**
  * The mail sidecar is the operator's own service, so its origin is first-party whenever it is configured.
  * Listing it by hand would be one more value to keep in step, and compose's `environment` would replace
  * the one in `.env`.
@@ -272,6 +392,26 @@ export function parseMailEmailAccountUrl(raw: string | undefined): string | unde
   const trimmed = raw.trim();
   if (normalizedOrigin(trimmed) === undefined) {
     throw new Error(`MAIL_EMAIL_ACCOUNT_URL must be an http(s) URL such as http://mail-email:9559, got: ${trimmed}`);
+  }
+  return trimmed;
+}
+
+/** The shortest account secret the mail connector accepts; a shorter one keeps its account port closed. */
+const MAIL_EMAIL_ACCOUNT_SECRET_MIN_LENGTH = 32;
+
+/**
+ * Parses `MAIL_EMAIL_ACCOUNT_SECRET`: the value the mail connector's account agent needs before it answers.
+ * Unset or blank means none. A value that is too short fails the boot, since the connector would refuse it.
+ */
+export function parseMailEmailAccountSecret(raw: string | undefined): string | undefined {
+  if (raw === undefined || raw.trim() === '') {
+    return undefined;
+  }
+  const trimmed = raw.trim();
+  if (trimmed.length < MAIL_EMAIL_ACCOUNT_SECRET_MIN_LENGTH) {
+    throw new Error(
+      `MAIL_EMAIL_ACCOUNT_SECRET must be at least ${String(MAIL_EMAIL_ACCOUNT_SECRET_MIN_LENGTH)} characters. Set a longer random value, or remove the line to leave the Email card off.`,
+    );
   }
   return trimmed;
 }
@@ -579,6 +719,61 @@ export function parseBrowserSecret(raw: string | undefined): string | undefined 
     );
   }
   return trimmed;
+}
+
+/** The shortest secret the speech sidecars accept; a shorter one keeps their ports closed. */
+const SPEECH_SECRET_MIN_LENGTH = 32;
+
+/**
+ * Parses `SPEECH_SECRET`: the value every request to the speech sidecars must carry. Unset or blank means
+ * none. A value that is too short fails the boot, since the sidecars would refuse it.
+ */
+export function parseSpeechSecret(raw: string | undefined): string | undefined {
+  if (raw === undefined || raw.trim() === '') {
+    return undefined;
+  }
+  const trimmed = raw.trim();
+  if (trimmed.length < SPEECH_SECRET_MIN_LENGTH) {
+    throw new Error(
+      `SPEECH_SECRET must be at least ${String(SPEECH_SECRET_MIN_LENGTH)} characters. Set a random value of that length, the same one the speech services use.`,
+    );
+  }
+  return trimmed;
+}
+
+/**
+ * Parses `STT_URL` and `TTS_URL`: a speech sidecar's address. Voice recordings and reply text are
+ * only ever sent to a speech service on this computer or its local network (a loopback or private
+ * address, or an internal service name such as the compose default), so an address anywhere else
+ * fails the boot instead of quietly sending voice to it.
+ */
+export function parseSpeechUrl({
+  envKey,
+  raw,
+  defaultValue,
+}: {
+  envKey: string;
+  raw: string | undefined;
+  defaultValue: string;
+}): string {
+  const value = raw === undefined || raw.trim() === '' ? defaultValue : raw.trim();
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch (error) {
+    throw new Error(`${envKey} must be a valid URL, for example ${defaultValue}.`, { cause: error });
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error(`${envKey} must be an http(s) URL, for example ${defaultValue}.`);
+  }
+  if (!isPrivateNetworkHost(parsed.hostname)) {
+    throw new Error(
+      `${envKey} points at ${parsed.hostname}, which is not this computer or its local network. ` +
+        `Voice is only sent to a speech service on this computer or its local network. ` +
+        `Change ${envKey} to the local speech service (for example ${defaultValue}), or remove the line to use the default.`,
+    );
+  }
+  return value;
 }
 
 /**
@@ -1503,6 +1698,23 @@ export interface SharedServerConfiguration {
    */
   FIRST_PARTY_MCP_ORIGINS: string[];
   /**
+   * Exact `host:port` endpoints of model servers on this computer that the
+   * operator named as allowed, as normalized strings. A model base URL that names one of these
+   * endpoints may be saved and used even though its address is one the address check otherwise
+   * refuses. Empty means no local model endpoint is allowed. Env: `LOCAL_MODEL_ENDPOINTS`
+   * (comma-separated). Default empty.
+   */
+  LOCAL_MODEL_ENDPOINTS: string[];
+  /**
+   * CIDR ranges of the container networks this instance sits on, which the remote address check
+   * refuses as well as this instance's own addresses, so a steered address cannot reach a
+   * neighbouring container. The installer writes them for a container install once it learns the
+   * ranges Docker gave the instance's networks. Empty means no ranges are named: an app run
+   * directly on the host refuses only its own addresses, and its home network stays usable.
+   * Env: `CONTAINER_NETWORK_RANGES` (comma-separated). Default empty.
+   */
+  CONTAINER_NETWORK_RANGES: string[];
+  /**
    * MCP endpoint of the mail sidecar. When set, the Email connector is registered at boot; when unset, the
    * sidecar is not configured and nothing mail-related is offered. Env: `MAIL_EMAIL_MCP_URL`. Default unset.
    */
@@ -1513,6 +1725,12 @@ export interface SharedServerConfiguration {
    * from it for registration once an account exists. Env: `MAIL_EMAIL_ACCOUNT_URL`. Default unset.
    */
   MAIL_EMAIL_ACCOUNT_URL: string | undefined;
+  /**
+   * The secret the mail connector's account agent needs before it answers. The same value is given to the
+   * connector. With an account URL but no secret the Settings Email card is left off.
+   * Env: `MAIL_EMAIL_ACCOUNT_SECRET`. Default unset.
+   */
+  MAIL_EMAIL_ACCOUNT_SECRET: string | undefined;
   /**
    * The mail sidecar's MCP endpoint this host owns, resolved once: MAIL_EMAIL_MCP_URL, else the one derived
    * from MAIL_EMAIL_ACCOUNT_URL. An Email connector at this address is first-party. Default unset.
@@ -1991,15 +2209,23 @@ export interface SharedServerConfiguration {
   /**
    * Base URL of the `aman-stt` speech-to-text sidecar (`POST {url}/v1/transcribe`).
    * The browser never calls it directly; the voice endpoints proxy through this server.
+   * The address must be on this computer or its local network; anything else fails the boot.
    * Env: `STT_URL`. Default `http://aman-stt:8001`.
    */
   STT_URL: string;
   /**
    * Base URL of the `aman-tts` text-to-speech sidecar (`POST {url}/v1/speak`).
    * The browser never calls it directly; `POST /api/v1/voice/speak` proxies through this server.
+   * The address must be on this computer or its local network; anything else fails the boot.
    * Env: `TTS_URL`. Default `http://aman-tts:8002`.
    */
   TTS_URL: string;
+  /**
+   * The shared secret every request to the speech sidecars must carry; the same value is given to
+   * the sidecars. The sidecars do not serve without one, so voice is off until it is set.
+   * Env: `SPEECH_SECRET`. Default unset.
+   */
+  SPEECH_SECRET: string | undefined;
   /**
    * Whether spoken replies and voice mode may use the `aman-tts` sidecar. Off, voice mode does not start
    * and replies are read by the browser's own voice.
@@ -2613,9 +2839,12 @@ const shared: SharedServerConfiguration = {
     }),
     mailUrl: mailSidecarMcpUrl,
   }),
+  LOCAL_MODEL_ENDPOINTS: parseLocalModelEndpoints(getEnv('LOCAL_MODEL_ENDPOINTS')),
+  CONTAINER_NETWORK_RANGES: parseContainerNetworkRanges(getEnv('CONTAINER_NETWORK_RANGES')),
   MAIL_EMAIL_MCP_URL: mailEmailMcpUrl,
   MAIL_SIDECAR_MCP_URL: mailSidecarMcpUrl,
   MAIL_EMAIL_ACCOUNT_URL: mailEmailAccountUrl,
+  MAIL_EMAIL_ACCOUNT_SECRET: parseMailEmailAccountSecret(getEnv('MAIL_EMAIL_ACCOUNT_SECRET')),
   WEB_PUSH: parseWebPushSettings({
     publicKey: getEnv('WEB_PUSH_PUBLIC_KEY'),
     privateKey: getEnv('WEB_PUSH_PRIVATE_KEY'),
@@ -2930,8 +3159,9 @@ const shared: SharedServerConfiguration = {
     defaultValue: false,
   }),
   MEMORY_SCREEN_URL: getEnv('MEMORY_SCREEN_URL', { defaultValue: '' }) ?? '',
-  STT_URL: getEnv('STT_URL', { defaultValue: 'http://aman-stt:8001' }) ?? 'http://aman-stt:8001',
-  TTS_URL: getEnv('TTS_URL', { defaultValue: 'http://aman-tts:8002' }) ?? 'http://aman-tts:8002',
+  STT_URL: parseSpeechUrl({ envKey: 'STT_URL', raw: getEnv('STT_URL'), defaultValue: 'http://aman-stt:8001' }),
+  TTS_URL: parseSpeechUrl({ envKey: 'TTS_URL', raw: getEnv('TTS_URL'), defaultValue: 'http://aman-tts:8002' }),
+  SPEECH_SECRET: parseSpeechSecret(getEnv('SPEECH_SECRET')),
   TTS_ENABLED: parseBoolean({ envKey: 'TTS_ENABLED', raw: getEnv('TTS_ENABLED'), defaultValue: true }),
   VOICE_VAD_MODEL_DIR: voiceModelDirFromEnv(process.env),
   MAPS_GEOCODER_URL: parseMapsUrl({
@@ -3183,6 +3413,11 @@ export const SECRET_SETTING_NAMES = [
   'TRUEFOUNDRY_SANDBOX_API_KEY',
   'POSTGRES_PASSWORD',
   'WEB_PUSH_PRIVATE_KEY',
+  'MAIL_EMAIL_ACCOUNT_SECRET',
+  'CALENDAR_ACCOUNT_SECRET',
+  'BROWSER_SECRET',
+  'TAVILY_API_KEY',
+  'SPEECH_SECRET',
   'TWILIO_AUTH_TOKEN',
 ] as const;
 
@@ -3214,7 +3449,15 @@ export function secretSettingValues(settings: Partial<Record<SecretSettingName, 
 /** The settings that carry secrets: what {@link getConfiguredSecretValues} reads, so a test can supply just these. */
 export type ConfiguredSecretSettings = Pick<
   SharedServerConfiguration,
-  'TRUEFORGE_API_KEY' | 'NEBIUS_API_KEY' | 'MEMORY_SCREEN_AUTH_TOKEN' | 'OIDC'
+  | 'TRUEFORGE_API_KEY'
+  | 'NEBIUS_API_KEY'
+  | 'MEMORY_SCREEN_AUTH_TOKEN'
+  | 'OIDC'
+  | 'MAIL_EMAIL_ACCOUNT_SECRET'
+  | 'CALENDAR_ACCOUNT_SECRET'
+  | 'BROWSER_SECRET'
+  | 'TAVILY_API_KEY'
+  | 'SPEECH_SECRET'
 > &
   Partial<Pick<SharedServerConfiguration, 'WEB_PUSH' | 'TWILIO'>> &
   (
@@ -3238,6 +3481,11 @@ export function getConfiguredSecretValues(config: ConfiguredSecretSettings = con
     MEMORY_SCREEN_AUTH_TOKEN: config.MEMORY_SCREEN_AUTH_TOKEN,
     OIDC_CLIENT_SECRET: config.OIDC?.OIDC_CLIENT_SECRET,
     WEB_PUSH_PRIVATE_KEY: config.WEB_PUSH?.privateKey,
+    MAIL_EMAIL_ACCOUNT_SECRET: config.MAIL_EMAIL_ACCOUNT_SECRET,
+    CALENDAR_ACCOUNT_SECRET: config.CALENDAR_ACCOUNT_SECRET,
+    BROWSER_SECRET: config.BROWSER_SECRET,
+    TAVILY_API_KEY: config.TAVILY_API_KEY,
+    SPEECH_SECRET: config.SPEECH_SECRET,
     TWILIO_AUTH_TOKEN: config.TWILIO?.authToken,
     ...(config.STANDALONE
       ? {}

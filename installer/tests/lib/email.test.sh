@@ -556,6 +556,40 @@ test_instance_commands_keep_the_connector() {
   sandbox_drop
 }
 
+test_agent_secret() {
+  t_begin "the app and the email connector share one secret through the settings file, and the connector has a network of its own"
+  sandbox_new
+  install_with_gmail
+  local env=$AMAN_HOME/instances/main/.env compose=$AMAN_HOME/instances/main/compose.yaml first
+  first=$(sed -n 's/^MAIL_EMAIL_ACCOUNT_SECRET=//p' "$env")
+  assert_eq "${#first}" 64 "a random secret of 64 characters is made"
+  assert_not_contains "$(cat "$compose")" "$first" "the compose file never holds the secret"
+  assert_contains "$(cat "$compose")" "AMAN_MAIL_ACCOUNT_SECRET: \${MAIL_EMAIL_ACCOUNT_SECRET:?missing from .env}" "the compose file points the connector at the shared secret"
+  assert_eq "$(awk '/^  mail-email:/{f=1;next} /^  [a-z]/{f=0} f && /^    networks:/{n=1;next} f && n && /^      - /{print $2} f && n && !/^      - /{n=0}' "$compose" | tr '\n' ' ')" "mail " "the connector joins only its own network"
+  assert_contains "$(awk '/^  loopback:/{f=1;next} /^  [a-z]/{f=0} f' "$compose")" "- mail" "the app's network holder joins it"
+  assert_eq "$(awk '/^  [a-z]/{svc=$1} svc != "mail-email:" && svc != "loopback:" && /^      - mail$/{print svc}' "$compose")" "" "no other service joins the mail network"
+  run_install instance email main --remove
+  assert_rc 0
+  assert_eq "$(sed -n 's/^MAIL_EMAIL_ACCOUNT_SECRET=//p' "$env")" "$first" "the same secret is still there"
+  sandbox_drop
+}
+
+test_an_older_instance_gets_a_mail_secret() {
+  t_begin "an instance whose settings file has no mail secret gets one on the next email command"
+  sandbox_new
+  install_with_gmail
+  local env=$AMAN_HOME/instances/main/.env made
+  grep -v '^MAIL_EMAIL_ACCOUNT_SECRET=' "$env" >"$env.new"
+  mv "$env.new" "$env"
+  chmod 600 "$env"
+  run_install instance email main --remove
+  assert_rc 0
+  made=$(sed -n 's/^MAIL_EMAIL_ACCOUNT_SECRET=//p' "$env")
+  assert_eq "${#made}" 64 "a secret of 64 characters is made"
+  assert_mode "$env" 600
+  sandbox_drop
+}
+
 test_instance_email_needs_the_connector_installed() {
   t_begin "instance email on a version without the email connector says to upgrade and changes nothing"
   sandbox_new
@@ -575,6 +609,8 @@ test_entrypoint_records_the_list_once_the_server_answers
 test_entrypoint_probes_the_port_the_server_is_given
 test_entrypoint_records_a_server_that_answers_after_the_wait
 test_presets_write_their_servers
+test_agent_secret
+test_an_older_instance_gets_a_mail_secret
 test_instance_commands_keep_the_connector
 test_instance_email_needs_the_connector_installed
 test_sign_in_check_against_a_local_server

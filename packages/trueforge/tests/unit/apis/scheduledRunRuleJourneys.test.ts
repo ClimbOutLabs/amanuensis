@@ -298,6 +298,8 @@ describe('scheduled runs', () => {
 
       // The connector now goes somewhere else, so the place the card named is no longer where this would go.
       const elsewhere = await startInertMcpServer({ webSearch: false });
+      // Both test connectors listen on this computer, which the address check refuses unless they are listed.
+      server.setFirstPartyOrigins([server.mcp.origin, elsewhere.origin]);
       try {
         const moved = await server.request(
           '/api/v1/settings/mcp-servers',
@@ -324,6 +326,22 @@ describe('scheduled runs', () => {
         expect(server.mcp.writeInvocations()).toBe(writesBefore);
         expect(elsewhere.writeInvocations()).toBe(0);
       } finally {
+        // Later tests run against the connector as it was.
+        await server.request(
+          '/api/v1/settings/mcp-servers',
+          jsonInit(
+            {
+              manifest: {
+                type: 'remote',
+                name: INERT_SERVER_NAME,
+                url: server.mcp.url,
+                description: 'Inert connector used by approval-flow tests.',
+              },
+            },
+            'PUT',
+          ),
+        );
+        server.setFirstPartyOrigins([server.mcp.origin]);
         await elsewhere.close();
       }
     },

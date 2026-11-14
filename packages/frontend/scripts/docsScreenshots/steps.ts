@@ -174,6 +174,29 @@ export const openMoreMenu: Step = async context => {
   await shows(page.getByRole('menu'));
 };
 
+/** Opens the For you panel from the bell in the left panel, after the menu button on a phone. */
+export const openForYou: Step = async context => {
+  if (context.phone) await press(/^Navigation/)(context);
+  await press(/^For you/)(context);
+  await shows(context.page.getByRole('dialog', { name: 'For you' }).getByText('Call the pharmacy'));
+};
+
+/** Opens the Reminders page from the left panel, after the menu button on a phone. */
+export const openReminders: Step = async context => {
+  await open('/')(context);
+  if (context.phone) await press(/^Navigation/)(context);
+  await press('Reminders')(context);
+};
+
+/** Picks a tab inside the page, such as Personas on the Roles and Personas page. */
+export function pickTab(name: string): Step {
+  return async ({ page }) => {
+    const tab = page.getByRole('tabpanel').getByRole('tab', { name, exact: true });
+    await shows(tab);
+    await tab.first().click();
+  };
+}
+
 /**
  * Opens the chat list with its Earlier group unfolded: the Chats button in the left bar, or the menu button and
  * then Chats on a phone. The Chats button also folds the list away, so it is pressed only when the list is shut.

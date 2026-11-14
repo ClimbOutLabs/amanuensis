@@ -270,6 +270,11 @@ describe('an imported chat never runs a tool without a fresh approval from the o
     configuration.PERSONA_KNOWLEDGE_DIR = join(dir, 'knowledge');
     const target = await startApprovalTestServer({ authenticator: headerAuthenticator });
     targets.push(target);
+    // The archive's connector record still points at the source instance's connector, which
+    // listens on this computer: the operator of this instance lists that origin as well, so
+    // the address check lets the connection through. The listing grants the record no trust;
+    // it stays unmarked, and its tools still ask.
+    target.setFirstPartyOrigins([target.mcp.origin, source.mcp.origin]);
     const mcp = new SqliteMcpServerStore(target.db());
     for (const server of await mcp.listServers({ tenant_id: TENANT_ID, names: undefined })) {
       await mcp.deleteServer({ tenant_id: TENANT_ID, name: server.name });

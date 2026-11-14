@@ -58,7 +58,7 @@ Aman sorts every action into one of three groups before it runs.
 
 ### What the card offers
 
-The card shows what will happen, including what will be sent, before anything leaves your computer. In a chat, the card offers **Allow** and **Not now**. A held action in a scheduled run's list offers **Approve** and **Deny**.
+The card shows what will happen, including what will be sent, before anything leaves your computer. In a chat, the card offers **Allow** and **Not now**. A held action in a scheduled run's list offers **Allow** and **Deny**.
 
 These ask every time, so their cards offer only a yes or a no:
 
@@ -96,7 +96,7 @@ Aman always shows a card first. Aman itself reads the skill on GitHub, so the na
 
 What you approve is what is added. The skill is saved at the exact version on the card, so a later change to the repository isn't picked up. If the repository changes between the card and your answer, nothing is added and Aman asks again.
 
-Adding a skill gives it nothing else. Its scripts run in the sandbox under the same rules as any other code. A skill that wants to reach sites still needs your OK in Settings, under Skills. From a chat, Aman can only add a skill. It can't change or remove one.
+Adding a skill gives it nothing else. Its scripts run only in the sandbox. **Commands in the sandbox** below says when they ask first. A skill that wants to reach sites still needs your OK in Settings, under Skills. From a chat, Aman can only add a skill. It can't change or remove one.
 
 An incognito chat can't add a skill. A scheduled run can't add one either, because the tool isn't there.
 
@@ -104,11 +104,13 @@ An incognito chat can't add a skill. A scheduled run can't add one either, becau
 
 The sandbox is the sealed-off space on your computer where Aman runs code.
 
-In the sandbox, a command that only reads inside the workspace runs without asking. That's still true when several reads are joined, as in `cd repo && git status`. Reads are listing files, reading a file or part of one, searching files, and looking at git history.
+In the sandbox, a command that only reads inside the workspace runs without asking. That's still true when several reads are joined, as in `cd repo && git status`. Reads are listing files, reading a file or part of one, searching files, and looking at git history. A file named by its full path counts the same as one named from the workspace, so Aman reading an installed skill's instructions doesn't ask. A full path outside the workspace still asks.
 
 Every other command asks first, unless the **Sandbox** switch covers it. Answering **Always allow in this chat** on a command covers running that same command again in this chat, and nothing else.
 
 Installing a package asks first on every sandbox. The **Sandbox** switch never covers it.
+
+A script that ships with a skill you installed runs without asking, with or without the switch, while the sandbox has no internet. It asks where the sandbox can reach the internet, including a chat that uses a skill you let reach its own sites. It also asks when Aman edited a file in that skill's folder with its file tools earlier in the chat. A script that is a link to a file outside the skill's folder doesn't run.
 
 ??? note "What the Sandbox switch covers"
 
@@ -163,6 +165,17 @@ In a scheduled run, a held call is skipped, and the run tells you in one line. A
 
 You can let file writes run without a card, and let work in the sandbox run without one as described above. No setting covers a send, a delete or a package install.
 
+## Skills and the network
+
+A skill can name the sites it needs to reach. Naming a site grants nothing on its own, and a skill can only ever reach named sites it has been allowed.
+
+- The first time a skill with named sites runs in a chat, a card asks whether the skill may reach the sites it names. **Allow** covers this chat only. **Always allow** remembers the sites for that skill in every chat. **Deny** remembers the refusal. You can change any of these later in Settings, then Skills.
+- Turning down one named site does not switch off the others. The sites you approved still work, and the turned-down site stays out. Clearing its refusal in Settings grants nothing by itself, because your approval never named that site. A card asks about the list again first.
+- If a command tries to reach a site no skill named, the connection is refused and a card asks about that one site. The card names no skill, because a refused connection cannot show which skill, if any, made the attempt. Its Always choice names the skill the answer is kept under.
+- Connections to bare addresses are always refused, and no card can allow them. That covers addresses on your own machine, such as 127.0.0.1, addresses on your home network, and the address a cloud machine keeps its own settings behind.
+- No card ever waits inside a connection. The connection is refused first, and the question is asked in the chat.
+- Approving a card runs the held command again, unless the command needs an approval of its own. Then that approval is asked for on its own card, and only your answer about the sites is kept.
+
 ## Scheduled runs hold actions for you
 
 A scheduled run has nobody watching it, so it never sends anything by itself. The one thing of yours it changes by itself is a space.
@@ -181,7 +194,7 @@ A scheduled run has nobody watching it, so it never sends anything by itself. Th
 
 ### The Needs your OK list
 
-When the run finishes, its chat ends with a **Needs your OK** list: "Aman held these for you. Nothing has been done yet." Each item shows what will happen, with **Approve** and **Deny**. Some read-only connector tools also offer **Always allow everywhere**.
+When the run finishes, its chat ends with a **Needs your OK** list: "Aman held these for you. Nothing has been done yet." Each item shows what will happen, with **Allow** and **Deny**. Some read-only connector tools also offer **Always allow everywhere**.
 
 - The app builds the list from what was held, not from the model's words. So the model can't hide an item or add a fake one.
 - When you approve a held action, Aman checks it again first. If anything the card showed has changed since it was held, such as the guests of an event or the text of a message, nothing is done. Aman says to ask again in chat.
