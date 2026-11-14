@@ -16,6 +16,12 @@ How to get there: Click **Chats** in the left bar. On a phone, tap the menu butt
 
     ![The chat list with folders, opened from the menu button](../../../../docs/screenshots/app/chats-list-phone.png)
 
+## How a chat looks
+
+Your messages sit on the right in a soft tinted bubble. Aman's written replies sit on the left on a paper card. A card that asks you something, such as whether to allow an action, stands on its own so it is easy to spot.
+
+To copy a reply or hear it read aloud, move the pointer over it and use the small buttons under the card.
+
 ## Start a chat
 
 1. Click **New chat** at the top of the chat list.

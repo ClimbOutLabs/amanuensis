@@ -19,7 +19,10 @@ describe('UserMessageBubble', () => {
 
     expect(root).toHaveClass('consumer-class');
     expect(content).toHaveTextContent('First line Second line');
-    expect(content).toHaveStyle({ borderRadius: 'var(--composer-radius, 1.5rem)' });
+    expect(content).toHaveStyle({
+      borderRadius: 'var(--composer-radius, 1.5rem)',
+      borderBottomRightRadius: '0.375rem',
+    });
     expect(screen.getByRole('link', { name: 'brief.pdf' })).toHaveAttribute('href', '/brief.pdf');
     expect(screen.getByRole('button', { name: 'Edit message' })).toBeInTheDocument();
   });
