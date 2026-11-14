@@ -401,10 +401,15 @@ export const ExtendedChunkDeltaSchema = ChatCompletionChunkDeltaSchema.omit({ to
   })
   .openapi('ExtendedChunkDelta');
 
-export const LLMUserMessageSchema = ChatCompletionUserMessageParamSchema.pick({
-  role: true,
-  content: true,
-}).openapi('LLMUserMessage');
+export const LLMUserMessageSchema = z
+  .object({
+    ...ChatCompletionUserMessageParamSchema.pick({ role: true, content: true }).shape,
+    sent_at: z
+      .string()
+      .optional()
+      .describe('When the person sent this message, as an ISO 8601 time. Absent on host notes and older messages.'),
+  })
+  .openapi('LLMUserMessage');
 
 export const LLMSystemMessageSchema = z
   .object({

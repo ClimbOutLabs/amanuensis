@@ -611,6 +611,35 @@ describe('runDataImport', () => {
     }
   });
 
+  it('keeps the time a message was sent, and takes a message from an older export that has none', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-sent-at');
+    try {
+      // The seeded messages are in the older shape, with no send time; one more is added in the newer shape.
+      const withSendTime = await editScheduledTurn(archive, ({ thread }) => {
+        listAt(thread['context'], 'context').push({
+          role: 'user',
+          content: 'And tomorrow?',
+          sent_at: '2026-10-16T09:00:00.000Z',
+        });
+      });
+      await runDataImport(importDeps(target), importRequest(withSendTime));
+
+      const { context } = await importedScheduledChat(target);
+      const people = context.flatMap(message => ('role' in message && message.role === 'user' ? [message] : []));
+      expect(people.at(-1)).toEqual({
+        role: 'user',
+        content: 'And tomorrow?',
+        sent_at: '2026-10-16T09:00:00.000Z',
+      });
+      expect(people.slice(0, -1).length).toBeGreaterThan(0);
+      expect(people.slice(0, -1).every(message => message.sent_at === undefined)).toBe(true);
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
   it('refuses an archive over the byte cap', async () => {
     const { source, archive } = await seededArchive();
     const target = await makeInstance('target-cap');

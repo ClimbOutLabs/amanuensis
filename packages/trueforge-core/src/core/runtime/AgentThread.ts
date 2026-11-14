@@ -196,6 +196,7 @@ import {
   type InternalCapabilityStateEvent,
   type InternalMCPAuthRequiredEvent,
   type InternalThreadDoneEvent,
+  type LLMContextMessage,
   type SubAgentCompletionMarker,
 } from './AgentThread.types';
 import {
@@ -2146,6 +2147,20 @@ export class AgentThread {
    * instruction. The date is fixed when the thread starts; a bound repository's branch and
    * head are rebuilt here when they change. Sub-agents get the date only.
    */
+  /** This reply's date with its weekday stated: models often name the wrong day for a date. */
+  private replyDateText(): string {
+    return this.dateText(this.replyDate);
+  }
+
+  private dateText(date: Date): string {
+    const dateUtc = date.toISOString().slice(0, 10);
+    const local = resolveLocalTime(date, this.definition.clientTimezone);
+    const localDateClause = local.isFallback
+      ? ''
+      : ` The user's local date is ${local.date} (${weekdayNameOf(local.date)}, ${local.zone}, UTC${local.utcOffset}).`;
+    return `${dateUtc} (${weekdayNameOf(dateUtc)}, UTC).${localDateClause}`;
+  }
+
   private buildReplyContext(): string {
     const builder = new InstructionBuilder('reply-context');
     builder.addContent(
@@ -2155,15 +2170,9 @@ export class AgentThread {
     // instead assume one from training and reason years into the past, which a
     // live session demonstrated against dated memory retrievals. Date only, no
     // time of day. The get_current_datetime tool remains for precise time.
-    const dateUtc = this.replyDate.toISOString().slice(0, 10);
-    const local = resolveLocalTime(this.replyDate, this.definition.clientTimezone);
-    const localDateClause = local.isFallback
-      ? ''
-      : ` The user's local date is ${local.date} (${weekdayNameOf(local.date)}, ${local.zone}, UTC${local.utcOffset}).`;
-    // The weekday is stated, not left to the model: models often name the wrong day for a date.
     builder.addSection(
       'current-date',
-      `Today's date is ${dateUtc} (${weekdayNameOf(dateUtc)}, UTC).${localDateClause} Reason about past and future relative to this date, not to your training data.`,
+      `Today's date is ${this.replyDateText()} Reason about past and future relative to this date, not to your training data.`,
     );
     if (!this.parent && this.definition.spokenReply === true) {
       builder.addSection(
@@ -2360,7 +2369,12 @@ export class AgentThread {
           clientSideToolResponses.push(m);
         } else if (isInputUserMessage(m)) {
           const result = await processAgentUserInput(m, this.sandbox, this.definition.modelSupportsVision ?? false);
-          contextMessages.push(result.message);
+          // Saved with the message: today's date is only in the request for this reply, so without
+          // this a later reply cannot tell how long ago an earlier message was sent. A sub-agent's
+          // message is a task from the main chat, not something the person sent.
+          contextMessages.push(
+            this.parent ? result.message : { ...result.message, sent_at: this.replyDate.toISOString() },
+          );
           if (result.sandboxCreated) {
             this.pendingSandboxCreatedEvents.push(buildSandboxCreatedEvent(result.sandboxCreated));
           }
@@ -3193,6 +3207,10 @@ export class AgentThread {
     const countPictures = this.definition.modelSupportsVision === true;
     for (const message of withoutEarlierThinking(this.context)) {
       total += estimateTokensForContextMessages([message]).prompt_tokens;
+      // Counted for every dated message, though one is sent per day: a little over, never under.
+      if (isLLMContextMessage(message)) {
+        total += estimateTokensForString(this.sentDateNote(message) ?? '');
+      }
       if (countPictures && isLLMContextMessage(message)) {
         total += pictureCount(message.content) * PICTURE_TOKEN_ESTIMATE;
       }
@@ -3220,10 +3238,34 @@ export class AgentThread {
 
   /** The saved chat as it is sent: no `tool_info`, no approval rows, no thinking from earlier replies. */
   private contextAsChatMessages(): ChatCompletionMessageParam[] {
+    let shownNote: string | undefined;
     return withoutEarlierThinking(this.context)
       .filter(message => !isLegacyIncompleteReasoningMessage(message))
       .filter(isLLMContextMessage)
-      .map(msg => withoutHostNotices(toOpenAIChatMessage(msg)));
+      .flatMap(msg => {
+        const message = withoutHostNotices(toOpenAIChatMessage(msg));
+        const note = this.sentDateNote(msg);
+        // Only where the day changes: a note on every message of one day would say nothing new.
+        if (note === undefined || note === shownNote) {
+          return [message];
+        }
+        shownNote = note;
+        return [toOpenAIChatMessage(internalSystemMessage(note)), message];
+      });
+  }
+
+  /**
+   * When the person sent a message, as a host note for the request. Written from the saved send
+   * time, so it reads the same on every later request and is never part of the saved chat.
+   */
+  private sentDateNote(message: LLMContextMessage): string | undefined {
+    if (message.role !== 'user' || message.sent_at === undefined) {
+      return undefined;
+    }
+    const sentAt = new Date(message.sent_at);
+    return Number.isNaN(sentAt.getTime())
+      ? undefined
+      : `The person's messages from here on were sent on ${this.dateText(sentAt)}`;
   }
 
   /**
