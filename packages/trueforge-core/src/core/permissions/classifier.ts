@@ -224,6 +224,7 @@ import {
 
 import type { CaldavEventReview } from '../calendar/caldav/eventReview';
 import { CALDAV_SERVER_NAME, isCaldavReadToolName } from '../calendar/caldav/toolContract';
+import { isSkillBlockedHost } from '../connectors/apiServices';
 import {
   HOME_ASSISTANT_SERVER_NAME,
   homeAssistantTarget,
@@ -240,7 +241,7 @@ import {
   simpleCardCopy,
 } from './cardCopy';
 import { classifyHomeAssistantTool } from './homeAssistantTier';
-import { SKILL_SITES_DATA_WARNING, SKILL_SITES_SEND_WARNING } from './skillSitesCopy';
+import { SKILL_SITES_DATA_WARNING, SKILL_SITES_EMAIL_BLOCKED, skillSiteLabel } from './skillSitesCopy';
 
 export interface SentinelAction {
   /** Original tool name (sandbox name or mcp server tool name). */
@@ -3205,8 +3206,8 @@ function skillWebsitesSentence(review: Tier3Skill): string {
   if (websites.length === 0) {
     return '';
   }
-  const send = review.can_send === true ? ` ${SKILL_SITES_SEND_WARNING}` : '';
-  return ` It sends requests to ${websites.map(site => escapeDisplayText(site)).join(', ')}. Adding it lets the skill reach these websites and no others. ${SKILL_SITES_DATA_WARNING}${send}`;
+  const send = review.can_send === true ? ` ${SKILL_SITES_EMAIL_BLOCKED}` : '';
+  return ` It sends requests to ${websites.map(site => skillSiteLabel({ site: escapeDisplayText(site), blocked: isSkillBlockedHost(site) })).join(', ')}. Adding it lets the skill reach these websites and no others. ${SKILL_SITES_DATA_WARNING}${send}`;
 }
 
 function skillInstallCard(input: { review: Tier3Skill; assistant: string; agent_intent: string | null }): Tier3Card {

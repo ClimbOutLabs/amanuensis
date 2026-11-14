@@ -1,9 +1,11 @@
 import type { ISessionStore } from '@truefoundry/trueforge-core/agent-session';
 import type { Tier3Card } from '@truefoundry/trueforge-core/core';
+import { isSkillBlockedHost } from '@truefoundry/trueforge-core/core/connectors/apiServices';
 import type { ActionRequiredEvent, ModelMessageEvent } from '@truefoundry/trueforge-core/core/events/schema';
 import {
   SKILL_SITES_DATA_WARNING,
-  SKILL_SITES_SEND_WARNING,
+  SKILL_SITES_EMAIL_BLOCKED,
+  skillSiteLabel,
 } from '@truefoundry/trueforge-core/core/permissions/skillSitesCopy';
 import type {
   Tier3CalendarEventSchema,
@@ -418,10 +420,12 @@ function approvalCardLines(card: Tier3Card): string[] {
     if (websites.length === 0) {
       lines.push("It doesn't send requests to any website.");
     } else {
-      lines.push(`It sends requests to these websites: ${websites.join(', ')}`);
+      lines.push(
+        `It sends requests to these websites: ${websites.map(site => skillSiteLabel({ site, blocked: isSkillBlockedHost(site) })).join(', ')}`,
+      );
       lines.push(`Adding it lets the skill reach these websites and no others. ${SKILL_SITES_DATA_WARNING}`);
       if (skill.can_send === true) {
-        lines.push(SKILL_SITES_SEND_WARNING);
+        lines.push(SKILL_SITES_EMAIL_BLOCKED);
       }
     }
     if (skill.makes_up_addresses === true) {

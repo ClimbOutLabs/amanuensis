@@ -414,7 +414,7 @@ describe('SkillSettings network approval', () => {
       ),
     ).toBeTruthy();
     // GitHub cannot send mail, so no sending line appears for it.
-    expect(screen.queryByText(/not each email it sends/)).toBeNull();
+    expect(screen.queryByText(/A skill can never send email/)).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: 'Allow' }));
 
@@ -516,7 +516,7 @@ describe('SkillSettings network approval', () => {
 
     expect(
       await screen.findByText(
-        'One of these sites can send email. You approve each run of the skill, not each email it sends.',
+        'Aman blocks the email sites on this list. A skill can never send email. Email only goes out through Aman, and you approve each one.',
       ),
     ).toBeTruthy();
   });

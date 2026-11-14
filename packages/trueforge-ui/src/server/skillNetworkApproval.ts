@@ -9,7 +9,7 @@
  */
 import {
   SKILL_SITES_DATA_WARNING,
-  SKILL_SITES_SEND_WARNING,
+  SKILL_SITES_EMAIL_BLOCKED,
 } from '@truefoundry/trueforge-core/core/permissions/skillSitesCopy';
 import { z } from 'zod';
 
@@ -101,7 +101,7 @@ export function skillNetworkApprovalLines(input: { skillName: string; state: Ski
     `While this skill is switched on for a chat, that chat’s sandbox can contact these sites and no others. ${SKILL_SITES_DATA_WARNING}`,
   ];
   if (input.state.sendCapable) {
-    lines.push(SKILL_SITES_SEND_WARNING);
+    lines.push(SKILL_SITES_EMAIL_BLOCKED);
   }
   return lines;
 }
