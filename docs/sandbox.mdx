@@ -265,7 +265,8 @@ files, running code, builds and tests. Two limits still apply to every reply:
   that does more than look at files counts too, builds and test runs included, because any of them
   could reach the internet; on an offline sandbox (sandbox slots) they do not. An action counts once
   it was tried, even if it answered with an error; one that was refused or never sent does not, and
-  reads never do.
+  reads never do. Steps in Aman's own browser don't count either. Each one stays in the tab of the
+  site Aman opened, and any click or typing that could send something asks you first, every time.
 - A step budget of 8 model steps, with one step handed back for each step that saved a file in the
   sandbox (or wrote to a space) or ran a shell command there to its end, up to 12 more. So a reply
   that edits, builds and tests can take up to 20 steps. A failing test run is handed back too; a
@@ -273,7 +274,10 @@ files, running code, builds and tests. Two limits still apply to every reply:
   changed and what is left, and you can ask it to continue.
 
 The same call made twice with nothing changed in between is skipped as a repeat, so running the
-tests again after a file edit works, and running them twice in a row does not. An action that can
+tests again after a file edit works, and running them twice in a row does not. Aman's own browser is
+the exception: a page can change on its own, so no browser step is skipped as already done. A step
+that keeps showing the same page gets a note after its second try and ends the reply after its
+fourth. An action that can
 reach past the sandbox is never repeated in one reply, whatever changed in between, and is not
 retried after an error: it may have gone through anyway, so Aman checks and tells you instead.
 
