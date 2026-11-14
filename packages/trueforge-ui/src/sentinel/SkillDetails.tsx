@@ -2,6 +2,7 @@
 
 import type { FC } from 'react';
 
+import { SKILL_SITES_DATA_WARNING, SKILL_SITES_SEND_WARNING } from '../server/skillNetworkApproval.js';
 import type { SentinelApprovalSkill } from './types.js';
 
 function Line({ label, value }: { label: string; value: string }) {
@@ -44,7 +45,10 @@ export const SkillDetails: FC<{ skill: SentinelApprovalSkill }> = ({ skill }) =>
               </li>
             ))}
           </ul>
-          <p className="text-text-primary">Adding it lets the skill reach these websites and no others.</p>
+          <p className="text-text-primary">
+            Adding it lets the skill reach these websites and no others. {SKILL_SITES_DATA_WARNING}
+          </p>
+          {skill.can_send && <p className="mt-2 font-semibold text-text-primary">{SKILL_SITES_SEND_WARNING}</p>}
         </>
       )}
       {skill.makes_up_addresses && (

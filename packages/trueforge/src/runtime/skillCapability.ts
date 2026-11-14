@@ -31,6 +31,7 @@ import {
   SkillGitPathSchema,
   SkillGitRefSchema,
   SkillManifestSchema,
+  skillNetworkHostsCanSend,
   SkillNetworkHostsSchema,
   type GitSkill,
 } from '../schemas/skill';
@@ -245,6 +246,7 @@ export class SkillToolSet extends LocalToolMCP {
           instructions,
           websites: [...(manifest.network_hosts ?? [])],
           makes_up_addresses: makesUpAddresses,
+          can_send: skillNetworkHostsCanSend(manifest.network_hosts ?? []),
         },
       },
     });
@@ -485,7 +487,11 @@ export class SkillToolSet extends LocalToolMCP {
           hosts,
         });
       } catch (error) {
-        await this.#options.store.deleteSkill({ tenant_id: this.#options.tenant_id, name: manifest.name });
+        // If taking it out fails too, the skill stays with no websites allowed, which fails safe;
+        // the first failure is still the one reported.
+        await this.#options.store
+          .deleteSkill({ tenant_id: this.#options.tenant_id, name: manifest.name })
+          .catch(() => undefined);
         throw new Error('the skill was added but its websites could not be allowed, so it was removed again', {
           cause: error,
         });

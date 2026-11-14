@@ -278,6 +278,8 @@ export type SentinelApprovalSkill = {
   websites: string[];
   /** True when the skill also builds web addresses while it runs, which could not be read ahead of time. */
   makes_up_addresses: boolean;
+  /** True when one of the websites can send email or change a calendar. */
+  can_send: boolean;
 };
 
 /** What the server says about an action a scheduled run held for its owner instead of asking. */
@@ -735,10 +737,12 @@ function parseSkill(value: unknown): SentinelApprovalSkill | null {
   // A card saved before websites were shown has neither field; its approval cannot add websites.
   const websites = value.websites ?? [];
   const makesUpAddresses = value.makes_up_addresses ?? false;
+  const canSend = value.can_send ?? false;
   if (
     !Array.isArray(websites) ||
     !websites.every((site): site is string => typeof site === 'string') ||
     typeof makesUpAddresses !== 'boolean' ||
+    typeof canSend !== 'boolean' ||
     name === undefined ||
     description === undefined ||
     source === undefined ||
@@ -748,7 +752,17 @@ function parseSkill(value: unknown): SentinelApprovalSkill | null {
   ) {
     return null;
   }
-  return { name, description, source, version, starter, instructions, websites, makes_up_addresses: makesUpAddresses };
+  return {
+    name,
+    description,
+    source,
+    version,
+    starter,
+    instructions,
+    websites,
+    makes_up_addresses: makesUpAddresses,
+    can_send: canSend,
+  };
 }
 
 /** A card missing any field is not shown as a schedule, so a partial schedule is never approved as if it were whole. */

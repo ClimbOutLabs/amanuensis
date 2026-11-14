@@ -4,6 +4,8 @@
  * The skill a chat call adds, shown in full.
  */
 export interface Tier3Skill {
+    /** True when one of the websites can send email or change a calendar. */
+    canSend?: boolean;
     /** What the skill is for, as the skill itself says. */
     description: string;
     /** The skill's own instruction file as the host read it, or null for a starter skill. */

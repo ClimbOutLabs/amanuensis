@@ -6,6 +6,7 @@ import type * as serializers from "../index.js";
 
 export const Tier3Skill: core.serialization.ObjectSchema<serializers.Tier3Skill.Raw, TrueForge.Tier3Skill> =
     core.serialization.object({
+        canSend: core.serialization.property("can_send", core.serialization.boolean().optional()),
         description: core.serialization.string(),
         instructions: core.serialization.string().nullable(),
         makesUpAddresses: core.serialization.property("makes_up_addresses", core.serialization.boolean().optional()),
@@ -18,6 +19,7 @@ export const Tier3Skill: core.serialization.ObjectSchema<serializers.Tier3Skill.
 
 export declare namespace Tier3Skill {
     export interface Raw {
+        can_send?: boolean | null;
         description: string;
         instructions?: string | null;
         makes_up_addresses?: boolean | null;

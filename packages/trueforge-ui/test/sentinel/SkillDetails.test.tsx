@@ -33,6 +33,7 @@ const RELEASE_NOTES_CARD = {
     instructions: '# Steps\n\nRead the log.',
     websites: ['api.release-feed.info'],
     makes_up_addresses: false,
+    can_send: false,
   },
 } satisfies SentinelApprovalCard;
 
@@ -75,7 +76,16 @@ describe('the skill approval card', () => {
     expect(websites).toHaveTextContent('It sends requests to these websites:');
     expect(screen.getByRole('listitem')).toHaveTextContent('api.release-feed.info');
     expect(websites).toHaveTextContent('Adding it lets the skill reach these websites and no others.');
+    expect(websites).toHaveTextContent('The skill can send any of your data to them');
+    expect(websites).not.toHaveTextContent('send email as you');
     expect(websites).not.toHaveTextContent('makes up web addresses');
+  });
+
+  it('warns when one of the websites can send email as the person', () => {
+    renderCard({ ...RELEASE_NOTES_CARD, skill: { ...RELEASE_NOTES_CARD.skill, can_send: true } });
+    expect(document.querySelector('[data-role="skill-websites"]')).toHaveTextContent(
+      'One of these sites can send email. This skill will be able to send email as you, without asking each time.',
+    );
   });
 
   it('says when the skill sends no requests, and warns about addresses it makes up while it runs', () => {
@@ -123,8 +133,8 @@ describe('the skill approval card', () => {
     expect(badWebsites?.card.skill).toBeNull();
 
     // A card saved before websites were shown has neither field, and shows none.
-    const { websites: _w, makes_up_addresses: _m, ...older } = RELEASE_NOTES_CARD.skill;
+    const { websites: _w, makes_up_addresses: _m, can_send: _c, ...older } = RELEASE_NOTES_CARD.skill;
     const [old] = extractSentinelFromEvent(event(older));
-    expect(old?.card.skill).toMatchObject({ websites: [], makes_up_addresses: false });
+    expect(old?.card.skill).toMatchObject({ websites: [], makes_up_addresses: false, can_send: false });
   });
 });

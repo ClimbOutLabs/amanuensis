@@ -243,6 +243,7 @@ export const Tier3SkillSchema = z
       .boolean()
       .optional()
       .describe('True when the skill also builds web addresses while it runs, which cannot be read ahead of time.'),
+    can_send: z.boolean().optional().describe('True when one of the websites can send email or change a calendar.'),
   })
   .describe('The skill a chat call adds, shown in full.')
   .openapi('Tier3Skill');

@@ -174,7 +174,7 @@ describe('install_skill', () => {
     const built = await setup();
     const info = await built.tools.toolCallInfo({ name: 'install_skill', arguments: RELEASE_NOTES });
     expect(info.tier3_card?.plain_what).toBe(
-      'Add the skill "release-notes"? Aman will follow its instructions when a task calls for it. It sends requests to api.release-feed.info. Adding it lets the skill reach these websites and no others.',
+      'Add the skill "release-notes"? Aman will follow its instructions when a task calls for it. It sends requests to api.release-feed.info. Adding it lets the skill reach these websites and no others. The skill can send any of your data to them, so only allow this for a skill you trust.',
     );
     expect(info.tier3_card?.skill).toEqual({
       name: 'release-notes',
@@ -185,6 +185,7 @@ describe('install_skill', () => {
       instructions: '# Steps\n\nRead the log.',
       websites: ['api.release-feed.info'],
       makes_up_addresses: false,
+      can_send: false,
     });
     expect(await built.saved()).toEqual([]);
 
@@ -212,6 +213,19 @@ describe('install_skill', () => {
     built.hub.state.scripts.set(COMMIT, 'import os, requests\nrequests.get(os.environ["FEED_URL"])\n');
     const info = await built.tools.toolCallInfo({ name: 'install_skill', arguments: RELEASE_NOTES });
     expect(info.tier3_card?.skill).toMatchObject({ websites: [], makes_up_addresses: true });
+  });
+
+  it('warns on the card when one of the websites can send email as the user', async () => {
+    const built = await setup();
+    built.hub.state.scripts.set(
+      COMMIT,
+      'requests.post("https://gmail.googleapis.com/gmail/v1/users/me/messages/send")\n',
+    );
+    const info = await built.tools.toolCallInfo({ name: 'install_skill', arguments: RELEASE_NOTES });
+    expect(info.tier3_card?.skill).toMatchObject({ websites: ['gmail.googleapis.com'], can_send: true });
+    expect(info.tier3_card?.plain_what).toContain(
+      'This skill will be able to send email as you, without asking each time.',
+    );
   });
 
   it('adds nothing when the files cannot be read to check them', async () => {
@@ -301,6 +315,7 @@ describe('install_skill', () => {
       instructions: null,
       websites: ['api.example.com'],
       makes_up_addresses: false,
+      can_send: false,
     });
     const { result } = await dispatch({ built, args, decision: { status: 'allow' } });
     expect(built.hub.state.asked).toBe(0);
