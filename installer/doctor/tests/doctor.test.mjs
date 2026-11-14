@@ -140,7 +140,11 @@ describe('document and exit codes', () => {
     assert.match(result.stdout, /Next: Run aman doctor disk --fix/);
     assert.match(result.stdout, /\n\+- \[ Checking instance main \]/);
     assert.match(result.stdout, /\| x 1 problem +\|/);
-    assert.match(result.stdout, /\| x 1 problem +\|[\s\S]* x Only 1\.0 GB is free for Docker data[\s\S]*Next: Run aman doctor disk --fix/, 'the closing block lists the problem with its next step');
+    assert.match(
+      result.stdout,
+      /\| x 1 problem +\|[\s\S]* x Only 1\.0 GB is free for Docker data[\s\S]*Next: Run aman doctor disk --fix/,
+      'the closing block lists the problem with its next step',
+    );
     assert.match(result.stdout, /Do the Next step of each, then run aman doctor again\./);
   });
 
