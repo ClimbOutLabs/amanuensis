@@ -168,9 +168,13 @@ services:
       # The Email send list. The server is its only writer; the sidecar mounts it read-only.
       - mail-policy:/data/mail-policy
       - mail-policy-status:/data/mail-policy-status:ro
+      # The key that protects saved logins, made by `secrets-setup`.
+      - secrets-key:/data/app/secrets:ro
     depends_on:
       loopback:
         condition: service_started
+      secrets-setup:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:
@@ -398,6 +402,27 @@ services:
     mem_limit: 256m
     restart: unless-stopped
 
+  # Runs once before the server: makes the key that protects saved logins if this stack has none yet.
+  # The recovery key is printed once, in this service's log (`docker compose logs secrets-setup`).
+  secrets-setup:
+    image: truefoundry-server:latest
+    pull_policy: never
+    command: ['aman', 'secrets', 'init', '--if-needed']
+    environment:
+      NODE_ENV: production
+      STANDALONE: 'false'
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+    env_file:
+      - path: packages/trueforge/.env
+        required: true
+    volumes:
+      - secrets-key:/data/app/secrets
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: 'no'
+
   # Schedule controller: runs the periodic control loops (schedule dispatch) as a separate service.
   controller:
     # Runs the image the `server` service builds. Building it here too makes Compose build
@@ -416,6 +441,9 @@ services:
     env_file:
       - path: packages/trueforge/.env
         required: true
+    volumes:
+      # The controller reads the Telegram login, so it needs the same key as the server.
+      - secrets-key:/data/app/secrets:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -474,6 +502,8 @@ networks:
   browser-egress: {}
 
 volumes:
+  # The key that protects saved logins. Losing this volume locks them until the recovery key is entered.
+  secrets-key:
   # The Email send list. Holds only addresses, never credentials.
   mail-policy:
   # Records which send list the Email sidecar loaded. Written by the sidecar, read by the server.
