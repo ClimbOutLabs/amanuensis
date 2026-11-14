@@ -258,6 +258,7 @@ export class FakeTelegramClient implements TelegramClient {
   updates: Parameters<TelegramClient['getUpdates']>[0]['offset'][] = [];
   webhookUrls: string[] = [];
   deleteWebhookCalls = 0;
+  commandMenus: { chat_id: string; commands: string[] }[] = [];
   fileBytes = new TextEncoder().encode('fake-file-bytes');
   failSend = false;
 
@@ -286,6 +287,14 @@ export class FakeTelegramClient implements TelegramClient {
       no_link_preview: input.no_link_preview,
     });
     return Promise.resolve({ message_id: this.sent.length });
+  }
+
+  setMyCommands(input: {
+    chat_id: string;
+    commands: readonly { command: string; description: string }[];
+  }): Promise<void> {
+    this.commandMenus.push({ chat_id: input.chat_id, commands: input.commands.map(entry => entry.command) });
+    return Promise.resolve();
   }
 
   answerCallbackQuery(input: { callback_query_id: string; text?: string | undefined }): Promise<void> {
