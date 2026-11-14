@@ -147,7 +147,7 @@ import { isExpiredApproval } from '../permissions/approvalExpiry';
 import type { ConnectorBinding } from '../permissions/approvalTokens';
 import { approvalTokenExpiry } from '../permissions/approvalTokens';
 import { recordHeldActionAudit, recordNotPreparedRefusals } from '../permissions/audit';
-import { movesBrowserPage } from '../permissions/browserToolNames';
+import { isAmanBrowserCall } from '../permissions/browserToolNames';
 import { isChangeRequestReason } from '../permissions/changeRequest';
 import { isHostVouchedReadReason } from '../permissions/connectorTrust';
 import {
@@ -4956,9 +4956,14 @@ export class AgentThread {
       // An outside action gets no automatic retry either: one that reported an error may still
       // have gone out, so the model is told to check first.
       const lastRun = turn.callSignatures.get(signature);
+      // Aman's browser shows a live page that changes by itself (it loads, a menu opens late, the
+      // person uses the live view), and a press may not take the first time. So a browser step is
+      // never refused as already done; one that keeps showing nothing new still ends the turn below.
+      const liveBrowserStep = isAmanBrowserCall(call.tool_info);
       const alreadySeen =
         seenInBatch.has(signature) ||
-        (lastRun !== undefined &&
+        (!liveBrowserStep &&
+          lastRun !== undefined &&
           (countsTowardCap ||
             (!retryIsDue({ lastKind: lastRun.lastKind, retried: lastRun.retried }) &&
               lastRun.writesAtLastRun >= changesSeenBy(call.tool_info, turn))));
@@ -5336,17 +5341,15 @@ export class AgentThread {
         if (toolCall !== undefined && changesState(toolCall.tool_info, { countsTowardCap })) {
           nextToolCallMemo.turn.changesThisTurn += 1;
         }
-        // The browser's page has a count of its own: a step counts only when it reaches a page not
+        // The browser's page has a count of its own: a step counts only when it shows a page not
         // seen before in this turn, so a scroll at the bottom of a page, or back and forth between
-        // two pages, moved nothing new.
+        // two pages, showed nothing new. A read counts too: the page may have changed by itself.
         if (toolCall !== undefined) {
           const page = browserPageSeen({ info: toolCall.tool_info, text: result.message.content });
           if (page !== undefined && !nextToolCallMemo.turn.browserPagesSeen.includes(page.digest)) {
             nextToolCallMemo.turn.browserPagesSeen.push(page.digest);
-            if (page.moves) {
-              nextToolCallMemo.turn.browserPageChangesThisTurn += 1;
-              changedByCallId.add(toolCall.id);
-            }
+            nextToolCallMemo.turn.browserPageChangesThisTurn += 1;
+            changedByCallId.add(toolCall.id);
           }
         }
         if (result.toolCallInfo !== undefined) {
@@ -5784,10 +5787,10 @@ export class AgentThread {
       // snapshot, but not used for the stop/nudge decisions below (see callSignatureCountsThisTurn).
       const previousRecord = nextToolCallMemo.turn.callSignatures.get(signature);
       const settled = settledByCallId.get(callId);
-      // A browser step that moved the page starts from where it left it, so its own move does not
-      // count against it: the same scroll may run again, and is no loop. One that moved nothing is.
-      // A step that keeps moving still has a higher stop of its own (IDENTICAL_MOVE_STOP_AT) and no nudge.
-      const movedPage = movesBrowserPage(call.tool_info) && changedByCallId.has(callId);
+      // A browser step that showed a new page starts from there, so its own move does not count
+      // against it: the same scroll or read may run again, and is no loop. One that showed nothing
+      // new is. A step that keeps moving still has a higher stop of its own (IDENTICAL_MOVE_STOP_AT) and no nudge.
+      const movedPage = changedByCallId.has(callId);
       nextToolCallMemo.turn.callSignatures.set(signature, {
         count: (previousRecord?.count ?? 0) + 1,
         writesAtLastRun: changesSeenBy(call.tool_info, nextToolCallMemo.turn) - (movedPage ? 1 : 0),

@@ -7,6 +7,7 @@ import type { ResolveRequestContext } from '../auth/identity';
 import {
   callBrowserSidecar,
   callBrowserSidecarForOwner,
+  LiveCopyReplySchema,
   LiveFrameReplySchema,
   LiveInputReplySchema,
   LiveTabsReplySchema,
@@ -36,6 +37,10 @@ const LiveUpInputSchema = z.object({ tab: TabIdSchema, kind: z.literal('up'), ..
 const LiveTypeInputSchema = z
   .object({ tab: TabIdSchema, kind: z.literal('type'), text: z.string().min(1).max(10000) })
   .strict();
+// Pasted text goes in as one insert, so a line break in it never presses Enter on the page.
+const LivePasteInputSchema = z
+  .object({ tab: TabIdSchema, kind: z.literal('paste'), text: z.string().min(1).max(10000) })
+  .strict();
 const LiveKeyInputSchema = z
   .object({ tab: TabIdSchema, kind: z.literal('key'), key: z.string().min(1).max(64) })
   .strict();
@@ -43,7 +48,7 @@ const LiveWheelInputSchema = z.object({ tab: TabIdSchema, kind: z.literal('wheel
 
 /**
  * One act the person does in the live view: a click, the takeover pointer acts (move, down, up),
- * typed text, one named key, or a scroll step.
+ * typed or pasted text, one named key, or a scroll step.
  */
 const LiveInputRequestSchema = z.discriminatedUnion('kind', [
   LiveClickInputSchema,
@@ -51,6 +56,7 @@ const LiveInputRequestSchema = z.discriminatedUnion('kind', [
   LiveDownInputSchema,
   LiveUpInputSchema,
   LiveTypeInputSchema,
+  LivePasteInputSchema,
   LiveKeyInputSchema,
   LiveWheelInputSchema,
 ]);
@@ -108,7 +114,7 @@ export function createBrowserLiveRouter(deps: BrowserLiveRouterDeps) {
   });
 
   // Every act below drives the person's own tab, so a form posted from another site must not reach it.
-  for (const path of ['/frame', '/input', '/upload', '/takeover']) {
+  for (const path of ['/frame', '/input', '/copy', '/upload', '/takeover']) {
     app.use(path, requireJsonOrSameOrigin());
   }
 
@@ -144,6 +150,38 @@ export function createBrowserLiveRouter(deps: BrowserLiveRouterDeps) {
       return c.json({ error: { message: 'That input was not understood. Try again.' } }, 400);
     }
     return c.json({ data: result.body }, 200);
+  });
+
+  // The selected text goes back to the person's own live view only: it is never logged or kept,
+  // since it may be anything on the page.
+  app.post('/copy', async c => {
+    const body: unknown = await c.req.json().catch(() => undefined);
+    const request = FrameRequestSchema.safeParse(body);
+    if (!request.success) {
+      return c.json({ error: { message: 'That copy request was not understood. Try again.' } }, 400);
+    }
+    const tab: BrowserTabRef = { ...profileOf(c), chat_id: request.data.tab };
+    const result = await callBrowserSidecar({ path: '/live/copy', tab, schema: LiveCopyReplySchema });
+    if (!result.ok) {
+      deps.logger.warn('browser live copy failed', { message: result.message });
+      return c.json({ error: { message: result.message } }, 502);
+    }
+    switch (result.body.status) {
+      case 'ok':
+        return c.json({ data: { text: result.body.text } }, 200);
+      case 'nothing_selected':
+        return c.json(
+          { error: { message: 'Nothing is selected in the page. Select some text in the picture first.' } },
+          409,
+        );
+      case 'password':
+        return c.json(
+          { error: { message: 'Passwords cannot be copied out of the page. Copy it from your password manager.' } },
+          409,
+        );
+      case 'closed':
+        return c.json({ error: { message: 'That tab has closed. Ask Aman to open the page again.' } }, 409);
+    }
   });
 
   app.post('/takeover', async c => {

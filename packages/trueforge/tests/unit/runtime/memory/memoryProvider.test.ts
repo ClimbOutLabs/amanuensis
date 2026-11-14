@@ -11,6 +11,26 @@ import {
   resolveMemoryProvider,
 } from '../../../../src/runtime/memory/memoryProvider';
 
+// Name resolution is stubbed for the whole suite: a name with 'unresolvable' in it does not
+// resolve, localhost resolves to loopback, and every other name resolves to a public address.
+// The address check behind the memory provider lookup judges names by what they resolve to,
+// so the suite's answer cannot depend on the DNS of the machine running it.
+jest.mock('node:dns/promises', () => {
+  const actual = jest.requireActual<typeof import('node:dns/promises')>('node:dns/promises');
+  return {
+    ...actual,
+    lookup: async (hostname: string, options?: { all?: boolean | undefined }) => {
+      if (hostname.includes('unresolvable')) {
+        const error = new Error(`getaddrinfo ENOTFOUND ${hostname}`);
+        Reflect.set(error, 'code', 'ENOTFOUND');
+        throw error;
+      }
+      const entry = { address: hostname === 'localhost' ? '127.0.0.1' : '93.184.216.34', family: 4 };
+      return options?.all === true ? [entry] : entry;
+    },
+  };
+});
+
 describe('parseMemoryProviderUrl', () => {
   it('accepts a single-bank Hindsight MCP URL with a trailing slash', () => {
     expect(parseMemoryProviderUrl('https://hindsight.example.com/mcp/aman/')).toEqual({
@@ -191,6 +211,37 @@ describe('resolveMemoryProvider', () => {
         name: 'bad-hindsight',
         url: 'https://hindsight.example.com/sse',
         description: 'Misconfigured memory provider.',
+        memory_provider: true,
+      },
+      first_party: false,
+    });
+    const warn = jest.spyOn(logger, 'warn');
+
+    const connection = await resolveMemoryProvider({
+      mcpServerStore: isolatedMcpServerStore,
+      tokenStore: isolatedTokenStore,
+      tenantId: TENANT_ID,
+      clientName: 'test-client',
+      userRef: STANDALONE_REQUEST_CONTEXT.subject.id,
+      logger,
+    });
+
+    expect(connection).toBeUndefined();
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns undefined and logs a warning when the memory provider address fails the address check', async () => {
+    // A provider at a refused address degrades to no memory for the turn, like the invalid URL
+    // above: the refusal must not fail the turn that asked for memory.
+    const { mcpServerStore: isolatedMcpServerStore, tokenStore: isolatedTokenStore } = await freshStores();
+    await isolatedMcpServerStore.upsertServer({
+      tenant_id: TENANT_ID,
+      name: 'loopback-hindsight',
+      manifest: {
+        type: 'remote',
+        name: 'loopback-hindsight',
+        url: 'http://127.0.0.1:8888/mcp/aman/',
+        description: 'Memory provider at a refused address.',
         memory_provider: true,
       },
       first_party: false,

@@ -176,6 +176,71 @@ describe('browser live routes', () => {
     ]);
   });
 
+  it('forwards pasted text as a paste, not as typing', async () => {
+    const { app, sent } = buildApp(() => ({ json: { status: 'ok' } }));
+    const response = await call(app, {
+      method: 'POST',
+      path: '/api/browser/live/input',
+      body: { tab: 'chat-1', kind: 'paste', text: 'line one\nline two' },
+    });
+    expect(response.status).toBe(200);
+    expect(sent.map(entry => entry.body)).toEqual([
+      { owner: 'default:user-a', tab: 'chat-1', kind: 'paste', text: 'line one\nline two' },
+    ]);
+  });
+
+  it('refuses an empty or too long paste, without calling the sidecar', async () => {
+    const { app, sent } = buildApp(() => ({ json: { status: 'ok' } }));
+    for (const text of ['', 'x'.repeat(10_001)]) {
+      const response = await call(app, {
+        method: 'POST',
+        path: '/api/browser/live/input',
+        body: { tab: 'chat-1', kind: 'paste', text },
+      });
+      expect(response.status).toBe(400);
+    }
+    expect(sent).toEqual([]);
+  });
+
+  it("copies the text selected in the caller's own tab", async () => {
+    const { app, sent } = buildApp(() => ({ json: { status: 'ok', text: 'ORDER-12345' } }));
+    const response = await call(app, { method: 'POST', path: '/api/browser/live/copy', body: { tab: 'chat-1' } });
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ data: { text: 'ORDER-12345' } });
+    expect(sent).toEqual([
+      {
+        url: 'http://browser-relay:8792/live/copy',
+        headers: expect.objectContaining({ 'x-browser-secret': SECRET }),
+        body: { owner: 'default:user-a', tab: 'chat-1' },
+      },
+    ]);
+  });
+
+  it('says what to do when nothing is selected, the selection is a password, or the tab closed', async () => {
+    for (const [status, message] of [
+      ['nothing_selected', 'Nothing is selected in the page. Select some text in the picture first.'],
+      ['password', 'Passwords cannot be copied out of the page. Copy it from your password manager.'],
+      ['closed', 'That tab has closed. Ask Aman to open the page again.'],
+    ] as const) {
+      const { app } = buildApp(() => ({ json: { status } }));
+      const response = await call(app, { method: 'POST', path: '/api/browser/live/copy', body: { tab: 'chat-1' } });
+      expect(response.status).toBe(409);
+      await expect(response.json()).resolves.toEqual({ error: { message } });
+      jest.restoreAllMocks();
+    }
+  });
+
+  it('refuses a copy request that names the profile, without calling the sidecar', async () => {
+    const { app, sent } = buildApp(() => ({ json: { status: 'ok', text: 'x' } }));
+    const response = await call(app, {
+      method: 'POST',
+      path: '/api/browser/live/copy',
+      body: { tab: 'chat-1', owner: 'default:someone-else' },
+    });
+    expect(response.status).toBe(400);
+    expect(sent).toEqual([]);
+  });
+
   it('forwards a pointer move, a press and a release from takeover', async () => {
     const { app, sent } = buildApp(() => ({ json: { status: 'ok' } }));
     for (const body of [
@@ -306,6 +371,7 @@ describe('browser live routes', () => {
     for (const path of [
       '/api/browser/live/input',
       '/api/browser/live/frame',
+      '/api/browser/live/copy',
       '/api/browser/live/upload',
       '/api/browser/live/takeover',
     ]) {

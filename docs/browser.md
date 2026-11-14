@@ -80,6 +80,7 @@ The live browser is the `/browser-live` page of the app. It works only for a sig
 - A click in the live browser uses a real mouse click, so the same rules keep the tab on its site. Actions on one tab run one at a time, in order.
 - Takeover hands the tab to the person. The tab never leaves the browser; only whose hand drives it changes. While it is taken over, Aman's own steps on that tab are refused, and the pointer moves in steps from where it last was, so the page sees a hand moving.
 - The live browser reports a human check when the check's own frame is on the page, or the whole page is the check.
+- Pasting into the live browser puts the text into the page as one paste, so a line break in it never presses Enter. Copying reads only the text the person selected in the page, never a password field. Neither the pasted nor the copied text is logged, kept, or shown to the model. The name and password boxes for a password manager paste the same way and are emptied once used.
 - A file uploaded from the live browser is at most 10 MB. It goes into the file picker the page opened, or else the page's first file field. The page itself sends it.
 
 ## Your data
