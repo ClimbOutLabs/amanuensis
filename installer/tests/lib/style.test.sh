@@ -228,7 +228,7 @@ test_plan_words_and_nothing_printed_twice() {
   assert_not_contains "$OUT$ERR" "[root]"
   assert_flat_contains "$OUT" "> to do Create the folder"
   local after
-  after=${OUT#*Building the app (4 of 6)}
+  after=${OUT#*"[ 4 of 6 ]  Building the app"}
   assert_not_contains "$after" "to do" "the plan is not printed again"
   assert_flat_contains "$after" "+ Built the Aman app"
   assert_flat_contains "$after" "+ Built the speech-to-text service"
@@ -274,8 +274,8 @@ test_color_is_on_markers_and_status_words_only() {
   assert_contains "$OUT" "${ESC}[32m✓${ESC}[0m Linux on"
   assert_contains "$OUT" "${ESC}[36m›${ESC}[0m ${ESC}[36mto do${ESC}[0m        Create the folder"
   assert_contains "$OUT" "${ESC}[33m!${ESC}[0m ${ESC}[33mneeds admin${ESC}[0m  Set up the sandbox on this computer"
-  assert_contains "$OUT" "${ESC}[1mThe plan${ESC}[0m ${ESC}[2m(3 of 6)${ESC}[0m"
-  assert_contains "$OUT" "${ESC}[1;32mDry run: nothing was changed.${ESC}[0m"
+  assert_contains "$OUT" "${ESC}[7;36m 3 of 6 ${ESC}[0m  ${ESC}[1mThe plan${ESC}[0m"
+  assert_contains "$OUT" "${ESC}[1;32m✓ Dry run: nothing was changed.${ESC}[0m"
   assert_not_contains "$OUT" "${ESC}[36mCreate the folder"
   sandbox_drop
 }
@@ -389,8 +389,10 @@ test_the_closing_block_and_warnings() {
   clear_input
   assert_flat_contains "$OUT" "Ready. Instance main is running."
   assert_flat_contains "$OUT" "Model not set: add one in Settings > Models"
-  assert_contains "$OUT" "------------------------------------------------------------------------"
-  assert_eq "$(printf '%s\n' "$OUT" | grep -c '^-\{72\}$')" 2 "a rule above and below"
+  assert_contains "$OUT" "| + Ready. Instance main is running."
+  assert_eq "$(printf '%s\n' "$OUT" | grep -c '^+- \[ [1-6] of 6 \]  .* -+$')" 6 "each of the six steps opens a panel with its number in the top line"
+  assert_eq "$(printf '%s\n' "$OUT$ERR" | grep -c '^| AMAN  \|^| + Ready')" 2 "the banner and the verdict each sit in a box"
+  assert_eq "$(printf '%s\n' "$OUT" | grep -c '^-\{72\}$')" 1 "a rule closes the block"
   sandbox_drop
 }
 

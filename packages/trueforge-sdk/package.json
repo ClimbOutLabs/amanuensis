@@ -275,6 +275,17 @@
             },
             "default": "./dist/cjs/api/resources/spaces/exports.js"
         },
+        "./today": {
+            "import": {
+                "types": "./dist/esm/api/resources/today/exports.d.mts",
+                "default": "./dist/esm/api/resources/today/exports.mjs"
+            },
+            "require": {
+                "types": "./dist/cjs/api/resources/today/exports.d.ts",
+                "default": "./dist/cjs/api/resources/today/exports.js"
+            },
+            "default": "./dist/cjs/api/resources/today/exports.js"
+        },
         "./deliveries": {
             "import": {
                 "types": "./dist/esm/api/resources/deliveries/exports.d.mts",
@@ -462,6 +473,17 @@
             },
             "default": "./dist/cjs/api/resources/memory/exports.js"
         },
+        "./memory/pages": {
+            "import": {
+                "types": "./dist/esm/api/resources/memory/resources/pages/exports.d.mts",
+                "default": "./dist/esm/api/resources/memory/resources/pages/exports.mjs"
+            },
+            "require": {
+                "types": "./dist/cjs/api/resources/memory/resources/pages/exports.d.ts",
+                "default": "./dist/cjs/api/resources/memory/resources/pages/exports.js"
+            },
+            "default": "./dist/cjs/api/resources/memory/resources/pages/exports.js"
+        },
         "./memory/vault": {
             "import": {
                 "types": "./dist/esm/api/resources/memory/resources/vault/exports.d.mts",
@@ -495,6 +517,28 @@
             },
             "default": "./dist/cjs/api/resources/personalization/resources/briefItems/exports.js"
         },
+        "./reach/texts": {
+            "import": {
+                "types": "./dist/esm/api/resources/reach/resources/texts/exports.d.mts",
+                "default": "./dist/esm/api/resources/reach/resources/texts/exports.mjs"
+            },
+            "require": {
+                "types": "./dist/cjs/api/resources/reach/resources/texts/exports.d.ts",
+                "default": "./dist/cjs/api/resources/reach/resources/texts/exports.js"
+            },
+            "default": "./dist/cjs/api/resources/reach/resources/texts/exports.js"
+        },
+        "./sessions/recallExclusions": {
+            "import": {
+                "types": "./dist/esm/api/resources/sessions/resources/recallExclusions/exports.d.mts",
+                "default": "./dist/esm/api/resources/sessions/resources/recallExclusions/exports.mjs"
+            },
+            "require": {
+                "types": "./dist/cjs/api/resources/sessions/resources/recallExclusions/exports.d.ts",
+                "default": "./dist/cjs/api/resources/sessions/resources/recallExclusions/exports.js"
+            },
+            "default": "./dist/cjs/api/resources/sessions/resources/recallExclusions/exports.js"
+        },
         "./settings": {
             "import": {
                 "types": "./dist/esm/api/resources/settings/exports.d.mts",
@@ -517,6 +561,17 @@
             },
             "default": "./dist/cjs/api/resources/settings/resources/firstRunGuide/exports.js"
         },
+        "./settings/gitCommitIdentity": {
+            "import": {
+                "types": "./dist/esm/api/resources/settings/resources/gitCommitIdentity/exports.d.mts",
+                "default": "./dist/esm/api/resources/settings/resources/gitCommitIdentity/exports.mjs"
+            },
+            "require": {
+                "types": "./dist/cjs/api/resources/settings/resources/gitCommitIdentity/exports.d.ts",
+                "default": "./dist/cjs/api/resources/settings/resources/gitCommitIdentity/exports.js"
+            },
+            "default": "./dist/cjs/api/resources/settings/resources/gitCommitIdentity/exports.js"
+        },
         "./settings/mcpServers": {
             "import": {
                 "types": "./dist/esm/api/resources/settings/resources/mcpServers/exports.d.mts",
@@ -527,6 +582,28 @@
                 "default": "./dist/cjs/api/resources/settings/resources/mcpServers/exports.js"
             },
             "default": "./dist/cjs/api/resources/settings/resources/mcpServers/exports.js"
+        },
+        "./settings/memoryNightly": {
+            "import": {
+                "types": "./dist/esm/api/resources/settings/resources/memoryNightly/exports.d.mts",
+                "default": "./dist/esm/api/resources/settings/resources/memoryNightly/exports.mjs"
+            },
+            "require": {
+                "types": "./dist/cjs/api/resources/settings/resources/memoryNightly/exports.d.ts",
+                "default": "./dist/cjs/api/resources/settings/resources/memoryNightly/exports.js"
+            },
+            "default": "./dist/cjs/api/resources/settings/resources/memoryNightly/exports.js"
+        },
+        "./settings/memoryPageSorting": {
+            "import": {
+                "types": "./dist/esm/api/resources/settings/resources/memoryPageSorting/exports.d.mts",
+                "default": "./dist/esm/api/resources/settings/resources/memoryPageSorting/exports.mjs"
+            },
+            "require": {
+                "types": "./dist/cjs/api/resources/settings/resources/memoryPageSorting/exports.d.ts",
+                "default": "./dist/cjs/api/resources/settings/resources/memoryPageSorting/exports.js"
+            },
+            "default": "./dist/cjs/api/resources/settings/resources/memoryPageSorting/exports.js"
         },
         "./settings/memoryRecalls": {
             "import": {

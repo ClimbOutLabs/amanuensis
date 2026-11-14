@@ -5,15 +5,43 @@
 import { resourceUrlFromServerUrl } from '@modelcontextprotocol/sdk/shared/auth-utils.js';
 import { InMemoryOAuthClientStore, InMemoryOAuthTokenStore } from '../../../../src/mcp/auth/inMemoryStores';
 import {
+  McpOAuthAddressRefusedError,
   buildMcpAuthorizationUrl,
   completeMcpAuthorization,
   createMcpOAuthClient,
+  dialMcpOAuthUrl,
   ensureMcpClientRegistered,
   isMcpAuthRequired,
   resolveMcpAuth,
 } from '../../../../src/mcp/auth/mcpDcr';
 import { DEFAULT_MCP_ACCESS_TOKEN_TTL_SECONDS, mcpOAuthCallbackUrl } from '../../../../src/mcp/auth/mcpOAuthHelpers';
 import type { OAuthClientRecord } from '../../../../src/mcp/auth/types';
+
+// Name resolution is stubbed for the whole suite: the two example hosts resolve to a public
+// address, blocked.example.com resolves to loopback, and every other name does not resolve.
+// The sign-in dials are judged by the address check, so the suite's answer cannot depend on
+// the DNS of the machine running it, and no real lookup leaves the suite.
+jest.mock('node:dns/promises', () => {
+  const actual = jest.requireActual<typeof import('node:dns/promises')>('node:dns/promises');
+  return {
+    ...actual,
+    lookup: async (hostname: string, options?: { all?: boolean | undefined }) => {
+      const address =
+        hostname === 'mcp.example.com' || hostname === 'auth.example.com'
+          ? '93.184.216.34'
+          : hostname === 'blocked.example.com' || hostname === 'localhost'
+            ? '127.0.0.1'
+            : undefined;
+      if (address === undefined) {
+        const error = new Error(`getaddrinfo ENOTFOUND ${hostname}`);
+        Reflect.set(error, 'code', 'ENOTFOUND');
+        throw error;
+      }
+      const entry = { address, family: 4 };
+      return options?.all === true ? [entry] : entry;
+    },
+  };
+});
 
 interface Stores {
   tokenStore: InMemoryOAuthTokenStore;
@@ -830,5 +858,168 @@ describe('completeMcpAuthorization', () => {
     expect(tokenBodies.length).toBeGreaterThan(0);
     const savedToken = await stores.tokenStore.getToken({ id: SERVER_ID, userRef: USER_REF });
     expect(savedToken).toBeDefined();
+  });
+});
+
+describe('the address check on sign-in dials', () => {
+  /** A transport that records every URL it was asked to dial and serves the OAuth flow. */
+  function stubRecordingFetch(options: { registrationEndpoint?: string; redirectMetadataTo?: string }): {
+    dialed: string[];
+  } {
+    const dialed: string[] = [];
+    globalThis.fetch = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+      const url = String(input);
+      dialed.push(url);
+      if (url.includes('oauth-protected-resource')) {
+        return json({ resource: SERVER_URL, authorization_servers: [AS_ORIGIN] });
+      }
+      if (url === `${AS_ORIGIN}/.well-known/oauth-authorization-server` && options.redirectMetadataTo !== undefined) {
+        return new Response(null, { status: 302, headers: { location: options.redirectMetadataTo } });
+      }
+      if (
+        url.includes('oauth-authorization-server') ||
+        url.includes('openid-configuration') ||
+        url === `${AS_ORIGIN}/as-metadata`
+      ) {
+        const metadata: Record<string, unknown> = { ...AS_METADATA };
+        if (options.registrationEndpoint !== undefined) {
+          metadata['registration_endpoint'] = options.registrationEndpoint;
+        }
+        return json(metadata);
+      }
+      if (url.endsWith('/register') && init?.method === 'POST') {
+        return json({
+          client_id: 'dyn-client-1',
+          client_secret: 'dyn-secret-1',
+          token_endpoint_auth_method: 'client_secret_post',
+          redirect_uris: [mcpOAuthCallbackUrl()],
+          grant_types: ['authorization_code', 'refresh_token'],
+          response_types: ['code'],
+        });
+      }
+      return new Response(`unexpected url: ${url}`, { status: 404 });
+    };
+    return { dialed };
+  }
+
+  it('refuses to dial a registration endpoint that resolves to a refused address', async () => {
+    const { dialed } = stubRecordingFetch({ registrationEndpoint: 'https://blocked.example.com/register' });
+
+    const attempt = createMcpOAuthClient({
+      mcpServerUrl: SERVER_URL,
+      mcpServerName: SERVER_NAME,
+      redirectUris: [mcpOAuthCallbackUrl()],
+      clientName: CLIENT_NAME,
+    });
+    await expect(attempt).rejects.toBeInstanceOf(McpOAuthAddressRefusedError);
+    await expect(attempt).rejects.toMatchObject({
+      statusCode: 422,
+      message: expect.stringContaining('may not connect to'),
+    });
+    expect(dialed.some(url => url.includes('blocked.example.com'))).toBe(false);
+  });
+
+  it('refuses a sign-in redirect to a refused address, and never dials it', async () => {
+    const { dialed } = stubRecordingFetch({
+      redirectMetadataTo: 'https://blocked.example.com/.well-known/oauth-authorization-server',
+    });
+
+    const attempt = createMcpOAuthClient({
+      mcpServerUrl: SERVER_URL,
+      mcpServerName: SERVER_NAME,
+      redirectUris: [mcpOAuthCallbackUrl()],
+      clientName: CLIENT_NAME,
+    });
+    await expect(attempt).rejects.toBeInstanceOf(McpOAuthAddressRefusedError);
+    expect(dialed.some(url => url.includes('blocked.example.com'))).toBe(false);
+  });
+
+  it('follows a sign-in redirect the check passes', async () => {
+    stubRecordingFetch({ redirectMetadataTo: `${AS_ORIGIN}/as-metadata` });
+
+    const client = await createMcpOAuthClient({
+      mcpServerUrl: SERVER_URL,
+      mcpServerName: SERVER_NAME,
+      redirectUris: [mcpOAuthCallbackUrl()],
+      clientName: CLIENT_NAME,
+    });
+    expect(client.client.clientId).toBe('dyn-client-1');
+  });
+
+  it('drops the credential headers when a sign-in redirect crosses origins, and keeps them within the origin', async () => {
+    const received: Array<{ url: string; headers: Headers }> = [];
+    const stubDial = (redirectTarget: string): void => {
+      received.length = 0;
+      globalThis.fetch = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+        const url = String(input);
+        received.push({ url, headers: new Headers(init?.headers) });
+        if (url === `${AS_ORIGIN}/token`) {
+          return new Response(null, { status: 307, headers: { location: redirectTarget } });
+        }
+        return json({ access_token: 'token-1', token_type: 'Bearer', expires_in: 3600 });
+      };
+    };
+    const sent = {
+      method: 'POST',
+      headers: {
+        Authorization: 'Basic Y2xpZW50OnNlY3JldA==',
+        Cookie: 'session=person-session',
+        'X-Api-Key': 'sign-in-key-header',
+        'Api-Key': 'sign-in-key-alt-header',
+      },
+      body: 'grant_type=refresh_token',
+    };
+
+    stubDial('https://mcp.example.com/token');
+    await dialMcpOAuthUrl(`${AS_ORIGIN}/token`, sent);
+    expect(received.map(entry => entry.url)).toEqual([`${AS_ORIGIN}/token`, 'https://mcp.example.com/token']);
+    // The first dial carries the credentials, as the caller sent them; the other origin sees none of them.
+    expect(received[0]?.headers.get('authorization')).toBe('Basic Y2xpZW50OnNlY3JldA==');
+    expect(received[1]?.headers.get('authorization')).toBeNull();
+    expect(received[1]?.headers.get('cookie')).toBeNull();
+    expect(received[1]?.headers.get('x-api-key')).toBeNull();
+    expect(received[1]?.headers.get('api-key')).toBeNull();
+
+    stubDial(`${AS_ORIGIN}/token-final`);
+    await dialMcpOAuthUrl(`${AS_ORIGIN}/token`, sent);
+    expect(received.map(entry => entry.url)).toEqual([`${AS_ORIGIN}/token`, `${AS_ORIGIN}/token-final`]);
+    expect(received[1]?.headers.get('authorization')).toBe('Basic Y2xpZW50OnNlY3JldA==');
+    expect(received[1]?.headers.get('cookie')).toBe('session=person-session');
+    expect(received[1]?.headers.get('x-api-key')).toBe('sign-in-key-header');
+    expect(received[1]?.headers.get('api-key')).toBe('sign-in-key-alt-header');
+  });
+
+  it('refuses to dial a token endpoint whose name does not resolve', async () => {
+    const stores = newStores();
+    const goneClient: OAuthClientRecord = {
+      server: {
+        authorizationEndpoint: `${AS_ORIGIN}/authorize`,
+        tokenEndpoint: 'https://gone.example.com/token',
+        codeChallengeMethodsSupported: ['S256'],
+      },
+      client: { clientId: 'cached-client', clientSecret: 'cached-secret' },
+    };
+    await stores.mcpServerStore.saveClient({ id: SERVER_ID, record: goneClient });
+    const { dialed } = stubRecordingFetch({});
+
+    const attempt = completeMcpAuthorization({
+      tokenStore: stores.tokenStore,
+      mcpServerStore: stores.mcpServerStore,
+      pending: {
+        state: 'state-1',
+        id: SERVER_ID,
+        userRef: USER_REF,
+        mcpServerUrl: SERVER_URL,
+        codeVerifier: 'verifier-1',
+        returnTo: null,
+      },
+      code: 'auth-code-1',
+    });
+    await expect(attempt).rejects.toBeInstanceOf(McpOAuthAddressRefusedError);
+    await expect(attempt).rejects.toMatchObject({
+      statusCode: 422,
+      message: expect.stringContaining('did not resolve'),
+    });
+    expect(dialed.some(url => url.includes('gone.example.com'))).toBe(false);
   });
 });

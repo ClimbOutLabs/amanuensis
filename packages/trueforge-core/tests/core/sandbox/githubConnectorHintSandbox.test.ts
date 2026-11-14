@@ -1,6 +1,6 @@
 import type { ApprovalDecision } from '../../../src/core/events/schema';
 import { isCallToolResponseResult } from '../../../src/core/mcp/IMCPServer';
-import { GITHUB_CONNECTOR_MISSING_HINT } from '../../../src/core/sandbox/githubConnectorHint';
+import { GITHUB_CONNECTOR_MISSING_HINT, OFFLINE_GIT_FORM_HINT } from '../../../src/core/sandbox/githubConnectorHint';
 import type { ExecResult, SandboxProvider } from '../../../src/core/sandbox/provider/Provider';
 import { SANDBOX_EXEC_TOOL_NAME, Sandbox } from '../../../src/core/sandbox/Sandbox';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
@@ -120,5 +120,54 @@ describe('Sandbox github connector remediation', () => {
       throw new Error('expected text content');
     }
     expect(parseRemediation(text.text)).toBeUndefined();
+  });
+
+  describe('a git network command that ran inside an offline sandbox', () => {
+    const noNetwork: ExecResult = {
+      success: true,
+      response: {
+        exitCode: 1,
+        result: "fatal: unable to access 'https://github.com/acme/widgets/': Could not resolve host: github.com",
+      },
+    };
+    const successResult: ExecResult = { success: true, response: { exitCode: 0, result: '' } };
+
+    async function remediationOf(input: { command: string; network: 'none' | undefined }): Promise<string | undefined> {
+      const provider: SandboxProvider = {
+        ...makeProvider(params => Promise.resolve(params.command.includes('git pull') ? noNetwork : successResult)),
+        ...(input.network === undefined ? {} : { network: input.network }),
+      };
+      const sandbox = new Sandbox({
+        provider,
+        blockDestructiveToolsInCodeMode: true,
+        mcpRequestTimeoutMs: 60_000,
+        mcpConnectTimeoutMs: 5_000,
+        logger: makeSilentLogger(),
+        tracing: NOOP_AGENT_TRACING,
+      });
+      const result = await sandbox.callTool(
+        {
+          name: SANDBOX_EXEC_TOOL_NAME,
+          arguments: { intent: 'update the repo', purpose: 'edit', command: input.command },
+        },
+        { status: 'allow', scope: 'once' },
+      );
+      if (!isCallToolResponseResult(result)) {
+        throw new Error('expected tool result');
+      }
+      const text = result.result.content[0];
+      if (text?.type !== 'text') {
+        throw new Error('expected text content');
+      }
+      return parseRemediation(text.text);
+    }
+
+    it('says to run the git command on its own when it was joined to another command', async () => {
+      expect(await remediationOf({ command: 'cd widgets && git pull', network: 'none' })).toBe(OFFLINE_GIT_FORM_HINT);
+    });
+
+    it('says nothing of the kind where the sandbox has a network, since the failure is then a real one', async () => {
+      expect(await remediationOf({ command: 'cd widgets && git pull', network: undefined })).toBeUndefined();
+    });
   });
 });

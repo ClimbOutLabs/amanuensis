@@ -15,13 +15,14 @@ import type { IModelProviderStore } from '../../../src/db/modelProviderStore';
 import type { ISandboxProviderStore } from '../../../src/db/sandboxProviderStore';
 import type { SessionCustom, TurnCustom } from '../../../src/db/sessionCustom';
 import { EventSubscriptionRegistry } from '../../../src/runtime/event-subscription';
-import { HindsightClient } from '../../../src/runtime/memory/hindsightClient';
 import { summarizeTurnContent, type SummarizeTurnResult } from '../../../src/runtime/memory/memorySummarize';
 import { TurnDrainRegistry } from '../../../src/runtime/turnDrains';
 import { TurnExecutionDeadline } from '../../../src/runtime/turnExecutionDeadline';
 import { discardedModelUsage } from '../../fixtures/discardedModelUsage';
 import { FakeSandboxProvider } from '../../fixtures/fakeSandboxProvider';
 import { FakeTurnArtifactStore } from '../../fixtures/fakeTurnArtifactStore';
+import { inMemoryGlobalSettingsStore } from '../../fixtures/inMemoryGlobalSettingsStore';
+import { QuietMemoryClient } from '../../fixtures/memory/quietMemoryClient';
 import { uncappedTokenFactoryBudget } from '../../fixtures/uncappedTokenFactoryBudget';
 
 jest.mock('../../../src/runtime/memory/memorySummarize', () => {
@@ -69,6 +70,7 @@ function summarizeContext() {
     getProviderForUpdate: jest.fn(),
     createProvider: jest.fn(),
     upsertProvider: jest.fn(),
+    recordProviderCheck: jest.fn(async () => undefined),
     listModels: jest.fn(),
     deleteProvider: jest.fn(),
   };
@@ -77,6 +79,7 @@ function summarizeContext() {
     modelProviderStore,
     summarizationModelFqn: 'openai/gpt-4o',
     tokenFactoryBudget: uncappedTokenFactoryBudget,
+    globalSettingsStore: inMemoryGlobalSettingsStore(),
     modelUsage: discardedModelUsage,
   };
 }
@@ -167,12 +170,7 @@ async function chatWithTwoTurns() {
     external_id: null,
   });
 
-  const memoryClient = new HindsightClient({
-    apiBase: 'https://hindsight.test.example',
-    bank: 'aman',
-    headers: {},
-    fetchImpl: () => Promise.reject(new Error('drain tests must not reach the network')),
-  });
+  const memoryClient = new QuietMemoryClient();
   const retain = jest.spyOn(memoryClient, 'retain').mockResolvedValue({ ok: true });
   jest.spyOn(memoryClient, 'getOperation').mockResolvedValue({ ok: true, status: 'completed' });
 

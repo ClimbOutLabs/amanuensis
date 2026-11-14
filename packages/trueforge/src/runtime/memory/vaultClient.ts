@@ -4,17 +4,8 @@ import configuration from '../../config';
 import { getEmbeddingSubsystem } from './embeddingRetrieval';
 import { MarkdownMemoryClient } from './markdownMemoryClient';
 
-/** The tenant's memory vault, or undefined when this server's memory backend does not keep one. */
-export function createVaultClient({
-  logger,
-  tenantId,
-}: {
-  logger: Logger;
-  tenantId: string;
-}): MarkdownMemoryClient | undefined {
-  if (configuration.MEMORY_BACKEND !== 'markdown') {
-    return undefined;
-  }
+/** The tenant's memory vault. */
+export function createVaultClient({ logger, tenantId }: { logger: Logger; tenantId: string }): MarkdownMemoryClient {
   return new MarkdownMemoryClient({
     baseDir: configuration.MEMORY_MARKDOWN_DIR,
     namespace: tenantId,

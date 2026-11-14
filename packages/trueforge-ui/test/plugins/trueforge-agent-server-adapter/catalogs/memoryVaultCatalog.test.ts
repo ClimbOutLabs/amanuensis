@@ -19,23 +19,30 @@ function fetchFor(handler: (path: string, method: string) => unknown) {
 }
 
 describe('createMemoryVaultCatalog', () => {
-  it('reads the summary status for a namespace', async () => {
+  it('reads the summary status for a namespace, and dismisses it', async () => {
     const calls: Array<{ path: string; method: string }> = [];
     const catalog = createMemoryVaultCatalog({
       fetch: fetchFor((path, method) => {
         calls.push({ path, method });
         if (path === '/api/v1/memory/vault/summary-status?namespace=persona%3AZara' && method === 'GET')
-          return { summary_pending: true };
+          return { summary_pending: true, failed_at: '2026-08-14T12:00:00.000Z' };
         if (path === '/api/v1/memory/vault/summary-status' && method === 'GET') return { summary_pending: false };
+        if (path === '/api/v1/memory/vault/summary-status?namespace=persona%3AZara' && method === 'DELETE') return {};
         throw new Error(`unexpected request ${method} ${path}`);
       }),
     });
 
-    assert.deepEqual(await catalog.getSummaryStatus('persona:Zara'), { summaryPending: true });
-    assert.deepEqual(await catalog.getSummaryStatus(), { summaryPending: false });
+    assert.deepEqual(await catalog.getSummaryStatus('persona:Zara'), {
+      summaryPending: true,
+      failedAt: '2026-08-14T12:00:00.000Z',
+    });
+    // A server from before the failed time was sent still reads.
+    assert.deepEqual(await catalog.getSummaryStatus(), { summaryPending: false, failedAt: null });
+    await catalog.dismissSummaryStatus('persona:Zara');
     assert.deepEqual(calls, [
       { path: '/api/v1/memory/vault/summary-status?namespace=persona%3AZara', method: 'GET' },
       { path: '/api/v1/memory/vault/summary-status', method: 'GET' },
+      { path: '/api/v1/memory/vault/summary-status?namespace=persona%3AZara', method: 'DELETE' },
     ]);
   });
 
@@ -98,5 +105,39 @@ describe('createMemoryVaultCatalog', () => {
       fetch: vi.fn(async () => Response.json({ data: [{ id: 1 }] })),
     });
     await assert.rejects(() => catalog.listEntries(), /unexpected memory payload/);
+  });
+  it('lists older notes to review and marks only the ids it is given', async () => {
+    const calls: Array<{ path: string; method: string; body: string }> = [];
+    const catalog = createMemoryVaultCatalog({
+      fetch: vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = new URL(input instanceof URL ? input.href : String(input), 'http://localhost');
+        calls.push({ path: url.pathname + url.search, method: init?.method ?? 'GET', body: String(init?.body ?? '') });
+        if (init?.method === 'POST') {
+          return Response.json({
+            data: { marked_count: 1, marked_ids: ['a'], refused: [{ entry_id: 'b', reason: 'Stays external.' }] },
+          });
+        }
+        return Response.json({
+          data: {
+            notes: [{ entry_id: 'a', day: '2026-10-02', text: 'Likes tea.', chat_title: null }],
+            note_count: 1,
+            next_cursor: '200',
+          },
+        });
+      }),
+    });
+
+    assert.deepEqual(await catalog.listReviewNotes?.({ namespace: 'persona:Zara', cursor: '200' }), {
+      notes: [{ entryId: 'a', day: '2026-10-02', text: 'Likes tea.', chatTitle: null }],
+      nextCursor: '200',
+    });
+    assert.deepEqual(await catalog.markReviewNotes?.({ entryIds: ['a', 'b'] }), {
+      markedIds: ['a'],
+      refused: [{ entryId: 'b', reason: 'Stays external.' }],
+    });
+    assert.deepEqual(calls, [
+      { path: '/api/v1/memory/vault/review?namespace=persona%3AZara&cursor=200', method: 'GET', body: '' },
+      { path: '/api/v1/memory/vault/review', method: 'POST', body: JSON.stringify({ entry_ids: ['a', 'b'] }) },
+    ]);
   });
 });

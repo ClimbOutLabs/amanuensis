@@ -73,7 +73,7 @@ test_a_file_without_a_managed_part_gets_the_lines() {
   run_install upgrade
   assert_rc 0
   assert_eq "$(grep -c '^WEB_PUSH_' "$env")" 2 "each line is there once"
-  assert_eq "$(grep -v '^WEB_PUSH_\|^CALENDAR_ACCOUNT_SECRET=\|^BROWSER_SECRET=' "$env")" "$(printf 'OWN_SETTING=kept\nANOTHER=also-kept')"
+  assert_eq "$(grep -v '^WEB_PUSH_\|^CALENDAR_ACCOUNT_SECRET=\|^MAIL_EMAIL_ACCOUNT_SECRET=\|^BROWSER_SECRET=\|^SPEECH_SECRET=' "$env")" "$(printf 'OWN_SETTING=kept\nANOTHER=also-kept')"
   assert_mode "$env" 600
   sandbox_drop
 }

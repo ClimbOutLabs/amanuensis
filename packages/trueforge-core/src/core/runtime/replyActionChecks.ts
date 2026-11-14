@@ -16,6 +16,7 @@ import {
   SANDBOX_REPLACE_TEXT_TOOL_NAME,
   SANDBOX_RUN_CODE_TOOL_NAME,
   SANDBOX_RUN_REGISTERED_COMMAND_TOOL_NAME,
+  SANDBOX_RUN_SKILL_SCRIPT_TOOL_NAME,
   SANDBOX_WRITE_FILE_TOOL_NAME,
 } from '../sandbox/Sandbox';
 
@@ -49,9 +50,17 @@ export const WRITE_CAP_STOP_MESSAGE = `Stopped after ${String(MAX_WRITE_CALLS_PE
  * Work its own server says stays in its workspace (staysInWorkspace) does not count, so a coding
  * task is not cut off part way. A read the host vouches for (a search, a page read, a map lookup)
  * never counts; a server's own read-only claim is not enough. A call held for the owner does not run now.
+ * A step of Aman's own browser never counts: it acts only in the tab of the site it opened, each press
+ * or typing that could send something asks first on its own card, and the repeat stop ends a loop.
  */
 export function countsTowardWriteCap(info: InternalToolCallInfo, input: { staysInWorkspace: boolean }): boolean {
-  return info.tier === 3 && info.held_for_owner === undefined && !isHostVouchedRead(info) && !input.staysInWorkspace;
+  return (
+    info.tier === 3 &&
+    info.held_for_owner === undefined &&
+    !isHostVouchedRead(info) &&
+    !isAmanBrowserCall(info) &&
+    !input.staysInWorkspace
+  );
 }
 
 /**
@@ -67,18 +76,14 @@ export function changesSeenBy(
 }
 
 /**
- * The page a successful browser call showed, as a digest of its text, and whether the call was a
- * step that moves the page. Undefined for a call that shows no page (a screenshot, any other tool).
+ * The page a successful browser call showed, as a digest of its text: a step that moves the page,
+ * or a read. Undefined for a call that shows no page (a screenshot, any other tool).
  */
-export function browserPageSeen(input: {
-  info: InternalToolCallInfo;
-  text: string;
-}): { moves: boolean; digest: string } | undefined {
-  const moves = movesBrowserPage(input.info);
-  if (!moves && !(isAmanBrowserCall(input.info) && input.info.original_tool_name === BROWSER_READ_TOOL_NAME)) {
-    return undefined;
-  }
-  return { moves, digest: createHash('sha256').update(input.text).digest('hex') };
+export function browserPageSeen(input: { info: InternalToolCallInfo; text: string }): { digest: string } | undefined {
+  const showsPage =
+    movesBrowserPage(input.info) ||
+    (isAmanBrowserCall(input.info) && input.info.original_tool_name === BROWSER_READ_TOOL_NAME);
+  return showsPage ? { digest: createHash('sha256').update(input.text).digest('hex') } : undefined;
 }
 
 /**
@@ -129,6 +134,7 @@ const SANDBOX_COMMAND_TOOLS: ReadonlySet<string> = new Set([
   SANDBOX_EXEC_TOOL_NAME,
   SANDBOX_RUN_CODE_TOOL_NAME,
   SANDBOX_RUN_REGISTERED_COMMAND_TOOL_NAME,
+  SANDBOX_RUN_SKILL_SCRIPT_TOOL_NAME,
 ]);
 
 /** Connector tools that clone or download, as opposed to ones that only search or list repositories. */

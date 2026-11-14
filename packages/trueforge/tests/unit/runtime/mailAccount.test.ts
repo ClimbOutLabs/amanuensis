@@ -23,6 +23,7 @@ import {
 
 const CANARY = 'CANARY-APP-PASSWORD-7f3d9';
 const ACCOUNT_URL = 'http://mail-email:9559';
+const SECRET = 'test-account-secret-0123456789abcdef0123';
 
 /** The list body the account agent answers with for one connected Gmail account. */
 const AGENT_CONNECTED = {
@@ -333,6 +334,7 @@ describe('keeping the connector registration in step', () => {
     const boot = (fetchImpl: typeof fetch, store: ReturnType<typeof makeFakeStore>['store']) =>
       registerMailConnectorFromSavedAccountInBackground({
         accountUrl: ACCOUNT_URL,
+        secret: SECRET,
         mcpUrl: 'http://127.0.0.1:1/mcp',
         policyPath: undefined,
         fetchImpl,
@@ -369,6 +371,41 @@ describe('keeping the connector registration in step', () => {
       await settled(() => fake.rows.size === 1);
       expect(calls).toBe(3);
       expect(fake.rows.size).toBe(1);
+    });
+
+    it('with an agent address but no secret, registers nothing and says why in one line', async () => {
+      const fake = makeFakeStore();
+      const warnLogger = createLogger({ silent: true });
+      const warn = jest.spyOn(warnLogger, 'warn');
+      const fetchImpl = jest.fn(async () => new Response(JSON.stringify(AGENT_CONNECTED), { status: 200 }));
+      registerMailConnectorFromSavedAccountInBackground({
+        accountUrl: ACCOUNT_URL,
+        secret: undefined,
+        mcpUrl: 'http://127.0.0.1:1/mcp',
+        policyPath: undefined,
+        fetchImpl,
+        mcpServerStore: fake.store,
+        tenant_id: 't1',
+        logger: warnLogger,
+        backoff: { initialDelayMs: 1, maxDelayMs: 2, attempts: 5 },
+        sleep,
+      });
+      expect(fetchImpl).not.toHaveBeenCalled();
+      expect(fake.rows.size).toBe(0);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('MAIL_EMAIL_ACCOUNT_SECRET'));
+    });
+
+    it('presents the secret to the agent when it asks at boot', async () => {
+      const fake = makeFakeStore();
+      const authorizations: (string | null)[] = [];
+      boot(async (_input: string | Request | URL, init?: RequestInit) => {
+        authorizations.push(new Headers(init?.headers).get('authorization'));
+        return new Response(JSON.stringify(AGENT_CONNECTED), { status: 200 });
+      }, fake.store);
+      await settled(() => fake.rows.size === 1);
+      expect(fake.rows.size).toBe(1);
+      expect(authorizations.length).toBeGreaterThan(0);
+      expect(authorizations.every(value => value === `Bearer ${SECRET}`)).toBe(true);
     });
   });
 });

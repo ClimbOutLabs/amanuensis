@@ -20,7 +20,7 @@ function Line({ label, value }: { label: string; value: string }) {
 export const CalendarEventDetails: FC<{ event: SentinelApprovalCalendarEvent }> = ({ event }) => {
   const { before } = event;
   return (
-    <div className="space-y-3 rounded border border-border bg-primary-bg px-3 py-2" data-role="calendar-event">
+    <div className="space-y-3 rounded-lg bg-primary-bg px-3 py-2.5" data-role="calendar-event">
       {before !== null && (
         <div>
           <p className="mb-1 font-medium text-text-secondary">Now</p>

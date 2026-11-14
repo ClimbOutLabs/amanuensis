@@ -1,4 +1,4 @@
-import type { SentinelApprovalInfo } from './types.js';
+import type { SentinelApprovalInfo, SentinelSendReceipt } from './types.js';
 
 /**
  * Push-only, in-memory fan-out for Sentinel approvals observed on the live turn SSE
@@ -25,7 +25,26 @@ export function publishSentinelEvent(info: SentinelApprovalInfo): void {
   }
 }
 
+export type SendReceiptListener = (receipt: SentinelSendReceipt) => void;
+
+const receiptListeners = new Set<SendReceiptListener>();
+
+/** Send receipts ride the same raw stream tap as approvals, for the same reason. */
+export function subscribeToSendReceipts(listener: SendReceiptListener): () => void {
+  receiptListeners.add(listener);
+  return () => {
+    receiptListeners.delete(listener);
+  };
+}
+
+export function publishSendReceipt(receipt: SentinelSendReceipt): void {
+  for (const listener of receiptListeners) {
+    listener(receipt);
+  }
+}
+
 /** Test helper: drops every subscriber so suites do not leak listeners. */
 export function clearSentinelEventSubscribers(): void {
   listeners.clear();
+  receiptListeners.clear();
 }

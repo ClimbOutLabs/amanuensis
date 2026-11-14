@@ -16,6 +16,16 @@ const EMAIL_SH = resolve(REPO_ROOT, 'installer/lib/email.sh');
 const CANARY = 'CANARY-APP-PASSWORD-7f3d9';
 const AGENT_PORT = 19773;
 const ADDRESS = 'person@example.com';
+// The account agent only answers a caller that presents the instance's shared secret, so the
+// test sets one for the agent and presents it on every call, the way the app does.
+const SECRET = 'test-account-secret-0123456789abcdef0123';
+
+/** One call to the account agent, with the shared secret presented as the app presents it. */
+async function agentFetch(init: RequestInit = {}): Promise<Response> {
+  const headers = new Headers(init.headers);
+  headers.set('authorization', `Bearer ${SECRET}`);
+  return fetch(`http://127.0.0.1:${String(AGENT_PORT)}/account`, { ...init, headers });
+}
 
 async function eventually(check: () => Promise<boolean>, timeoutMs = 15_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
@@ -103,6 +113,7 @@ describe('the installer and Settings share one account store', () => {
         ...process.env,
         AMAN_MAIL_ACCOUNT_FILE: accountFile,
         AMAN_MAIL_ACCOUNT_PORT: String(AGENT_PORT),
+        AMAN_MAIL_ACCOUNT_SECRET: SECRET,
         AMAN_MAIL_EMAIL_CHECK: EMAIL_CHECK,
         SSL_CERT_FILE: cert,
       },
@@ -110,7 +121,7 @@ describe('the installer and Settings share one account store', () => {
     });
     await eventually(async () => {
       try {
-        const response = await fetch(`http://127.0.0.1:${String(AGENT_PORT)}/account`);
+        const response = await agentFetch();
         return response.status === 200;
       } catch {
         return false;
@@ -136,7 +147,7 @@ describe('the installer and Settings share one account store', () => {
     };
     // Written exactly as the installer writes it: email_env_text into the instance file.
     writeFileSync(accountFile, installerEnvText(account), { mode: 0o600 });
-    const response = await fetch(`http://127.0.0.1:${String(AGENT_PORT)}/account`);
+    const response = await agentFetch();
     const body = JSON.parse(await response.text());
     expect(body.connected).toBe(true);
     expect(body.default).toBe(ADDRESS);
@@ -158,7 +169,7 @@ describe('the installer and Settings share one account store', () => {
       smtp_port: 587,
       smtp_mode: 'starttls',
     };
-    const response = await fetch(`http://127.0.0.1:${String(AGENT_PORT)}/account`, {
+    const response = await agentFetch({
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ provider_key: 'other', ...changed }),

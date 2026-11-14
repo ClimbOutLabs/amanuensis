@@ -18,6 +18,8 @@ const FAKE_IMAP = resolve(REPO_ROOT, 'installer/tests/fake_imap.py');
 
 const CANARY = 'CANARY-APP-PASSWORD-7f3d9';
 const WRONG = 'CANARY-WRONG-PASSWORD-9z';
+const SECRET = 'test-account-secret-0123456789abcdef0123';
+const WRONG_SECRET = 'test-account-secret-ffffffffffffffffffff';
 const AGENT_PORT = 19771;
 const ADDRESS = 'person@example.com';
 
@@ -60,17 +62,31 @@ describe('the mail account agent', () => {
     return { provider_key: 'other', ...accountWith(password) };
   }
 
-  async function agentCall(
-    method: string,
-    body?: unknown,
+  async function rawAgentCall({
+    method,
+    authorization,
+    body,
     path = '/account',
-  ): Promise<{ status: number; text: string }> {
-    const init: RequestInit = { method, headers: { 'content-type': 'application/json' } };
+  }: {
+    method: string;
+    authorization: string | undefined;
+    body?: unknown;
+    path?: string;
+  }): Promise<{ status: number; text: string }> {
+    const headers: Record<string, string> = { 'content-type': 'application/json' };
+    if (authorization !== undefined) {
+      headers['authorization'] = authorization;
+    }
+    const init: RequestInit = { method, headers };
     if (body !== undefined) {
       init.body = JSON.stringify(body);
     }
     const response = await fetch(`http://127.0.0.1:${String(AGENT_PORT)}${path}`, init);
     return { status: response.status, text: await response.text() };
+  }
+
+  async function agentCall(method: string, body?: unknown): Promise<{ status: number; text: string }> {
+    return rawAgentCall({ method, authorization: `Bearer ${SECRET}`, body });
   }
 
   beforeAll(async () => {
@@ -112,6 +128,7 @@ describe('the mail account agent', () => {
         ...process.env,
         AMAN_MAIL_ACCOUNT_FILE: accountFile,
         AMAN_MAIL_ACCOUNT_PORT: String(AGENT_PORT),
+        AMAN_MAIL_ACCOUNT_SECRET: SECRET,
         AMAN_MAIL_EMAIL_CHECK: EMAIL_CHECK,
         SSL_CERT_FILE: cert,
       },
@@ -146,6 +163,33 @@ describe('the mail account agent', () => {
     expect(body.accounts).toEqual([]);
     expect(body.default).toBeNull();
     expect(text).not.toContain(CANARY);
+  });
+
+  it('refuses a caller that presents no secret, and changes nothing for it', async () => {
+    for (const method of ['GET', 'DELETE']) {
+      const { status, text } = await rawAgentCall({ method, authorization: undefined });
+      expect(status).toBe(401);
+      expect(JSON.parse(text).error).toBe('unauthorized');
+    }
+    const { status, text } = await rawAgentCall({ method: 'POST', authorization: undefined, body: postBody(CANARY) });
+    expect(status).toBe(401);
+    expect(JSON.parse(text).error).toBe('unauthorized');
+    const after = await agentCall('GET');
+    expect(JSON.parse(after.text).connected).toBe(false);
+    expect(readFileSync(accountFile, 'utf8')).toBe('');
+  });
+
+  it('refuses a caller that presents the wrong secret', async () => {
+    const { status, text } = await rawAgentCall({ method: 'GET', authorization: `Bearer ${WRONG_SECRET}` });
+    expect(status).toBe(401);
+    expect(JSON.parse(text).error).toBe('unauthorized');
+    expect(text).not.toContain(WRONG_SECRET);
+  });
+
+  it('refuses a caller whose secret does not arrive as a bearer value', async () => {
+    const { status, text } = await rawAgentCall({ method: 'GET', authorization: SECRET });
+    expect(status).toBe(401);
+    expect(JSON.parse(text).error).toBe('unauthorized');
   });
 
   it('checks before saving: a refused sign-in saves nothing', async () => {
@@ -247,12 +291,22 @@ describe('the mail account agent', () => {
       expect(both.default).toBe(ADDRESS);
       expect(parseMailAccountsEnv(readFileSync(accountFile, 'utf8')).accounts).toHaveLength(2);
 
-      const moved = await agentCall('POST', { address: secondAddress }, '/account/default');
+      const moved = await rawAgentCall({
+        method: 'POST',
+        authorization: `Bearer ${SECRET}`,
+        body: { address: secondAddress },
+        path: '/account/default',
+      });
       expect(moved.status).toBe(200);
       expect(JSON.parse(moved.text).default).toBe(secondAddress);
       expect(parseMailAccountsEnv(readFileSync(accountFile, 'utf8')).default_address).toBe(secondAddress);
 
-      const unknown = await agentCall('POST', { address: 'nobody@example.com' }, '/account/default');
+      const unknown = await rawAgentCall({
+        method: 'POST',
+        authorization: `Bearer ${SECRET}`,
+        body: { address: 'nobody@example.com' },
+        path: '/account/default',
+      });
       expect(unknown.status).toBe(400);
       expect(JSON.parse(unknown.text).error).toBe('invalid');
 
@@ -287,9 +341,79 @@ describe('the mail account agent', () => {
     expect(without).toBe('');
   }, 30_000);
 
-  it('the agent never printed the password anywhere', () => {
+  it('the agent never printed the password or the secret anywhere', () => {
     expect(agentOutput).not.toContain(CANARY);
     expect(agentOutput).not.toContain(WRONG);
+    expect(agentOutput).not.toContain(SECRET);
+    expect(agentOutput).not.toContain(WRONG_SECRET);
+  });
+});
+
+describe('the mail account agent with no usable secret', () => {
+  let dir: string;
+  let accountFile: string;
+
+  beforeAll(() => {
+    dir = mkdtempSync(join(tmpdir(), 'mail-agent-closed-'));
+    accountFile = join(dir, '.env.mail-email');
+    writeFileSync(accountFile, '', { mode: 0o600 });
+  });
+
+  function agentEnv(secretValue: string | undefined, port: number): NodeJS.ProcessEnv {
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      AMAN_MAIL_ACCOUNT_FILE: accountFile,
+      AMAN_MAIL_ACCOUNT_PORT: String(port),
+    };
+    if (secretValue === undefined) {
+      delete env['AMAN_MAIL_ACCOUNT_SECRET'];
+    } else {
+      env['AMAN_MAIL_ACCOUNT_SECRET'] = secretValue;
+    }
+    return env;
+  }
+
+  async function startAgent(
+    secretValue: string | undefined,
+    port: number,
+  ): Promise<{ output: () => string; exited: Promise<number | null> }> {
+    const child = spawn('python3', [AGENT], { env: agentEnv(secretValue, port), stdio: ['ignore', 'pipe', 'pipe'] });
+    let output = '';
+    child.stdout?.on('data', (chunk: Buffer) => {
+      output += chunk.toString();
+    });
+    child.stderr?.on('data', (chunk: Buffer) => {
+      output += chunk.toString();
+    });
+    const exited = new Promise<number | null>(resolvePromise => {
+      child.on('exit', code => {
+        resolvePromise(code);
+      });
+    });
+    return { output: () => output, exited };
+  }
+
+  it('does not serve, and says why, when no secret is set', async () => {
+    const started = await startAgent(undefined, 19772);
+    await expect(started.exited).resolves.toBe(0);
+    expect(started.output()).toContain('no account secret is set, so its port is closed');
+    await expect(fetch('http://127.0.0.1:19772/account')).rejects.toThrow();
+  });
+
+  it('does not serve when the secret is too short to use, and never prints it', async () => {
+    const started = await startAgent('too-short', 19773);
+    await expect(started.exited).resolves.toBe(0);
+    expect(started.output()).toContain('no account secret is set, so its port is closed');
+    expect(started.output()).not.toContain('too-short');
+    await expect(fetch('http://127.0.0.1:19773/account')).rejects.toThrow();
+  });
+
+  it('the command line still works with no secret set', () => {
+    const out = execFileSync('python3', [AGENT, '--print-config'], {
+      env: agentEnv(undefined, 19774),
+      encoding: 'utf8',
+    });
+    expect(out).toBe('');
   });
 });
 
