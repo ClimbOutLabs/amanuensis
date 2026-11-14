@@ -24,18 +24,31 @@ export const CalendarProviderSchema = z
   })
   .openapi('CalendarProvider');
 
+export const CalendarAccountEntrySchema = z
+  .object({
+    email: z.string().describe('The email address of this account.'),
+    username: z.string().describe('The login name of this account; never the password.'),
+    calendar_url: z.string().describe('The calendar address of this account.'),
+    provider_key: z.string().describe('The provider of this account, worked out from its address.'),
+    state: ConnectorAccountStateSchema,
+    is_default: z.boolean().describe('Whether this is the account new events land on.'),
+  })
+  .openapi('CalendarAccountEntry');
+
 export const CalendarAccountStatusSchema = z
   .object({
     available: z
       .boolean()
       .describe('Whether this instance has the Calendar connector at all; when false, no card is shown.'),
     state: ConnectorAccountStateSchema,
-    email: z.string().nullable().describe('The email address of the connected account; null when none is connected.'),
-    username: z.string().nullable().describe('The login name of the connected account; never the password.'),
-    calendar_url: z.string().nullable().describe('The calendar address of the connected account; null when none.'),
+    email: z.string().nullable().describe('The email address of the default account; null when none is connected.'),
+    username: z.string().nullable().describe('The login name of the default account; never the password.'),
+    calendar_url: z.string().nullable().describe('The calendar address of the default account; null when none.'),
     provider_key: z
       .string()
-      .describe('The provider of the connected account, worked out from its address; the picker default otherwise.'),
+      .describe('The provider of the default account, worked out from its address; the picker default otherwise.'),
+    accounts: z.array(CalendarAccountEntrySchema).describe('Every connected account, in saved order.'),
+    default_address: z.string().nullable().describe('The account new events land on; null when none is connected.'),
     providers: z.array(CalendarProviderSchema).describe('The provider picker table, in display order.'),
   })
   .openapi('CalendarAccountStatus');
@@ -60,9 +73,30 @@ export const SaveCalendarAccountResponseSchema = z
   .object({ data: CalendarAccountStatusSchema })
   .openapi('SaveCalendarAccountResponse');
 
+export const RemoveCalendarAccountRequestSchema = z
+  .object({
+    address: z
+      .string()
+      .optional()
+      .describe('The one account to remove, by its email address; without it, every connected account is removed.'),
+  })
+  .openapi('RemoveCalendarAccountRequest');
+
 export const RemoveCalendarAccountResponseSchema = z
   .object({ data: CalendarAccountStatusSchema })
   .openapi('RemoveCalendarAccountResponse');
 
+export const SetDefaultCalendarAccountRequestSchema = z
+  .object({
+    address: z.string().describe('The connected account to make the default, by its email address.'),
+  })
+  .openapi('SetDefaultCalendarAccountRequest');
+
+export const SetDefaultCalendarAccountResponseSchema = z
+  .object({ data: CalendarAccountStatusSchema })
+  .openapi('SetDefaultCalendarAccountResponse');
+
 export type CalendarAccountStatus = z.infer<typeof CalendarAccountStatusSchema>;
 export type SaveCalendarAccountRequest = z.infer<typeof SaveCalendarAccountRequestSchema>;
+export type RemoveCalendarAccountRequest = z.infer<typeof RemoveCalendarAccountRequestSchema>;
+export type SetDefaultCalendarAccountRequest = z.infer<typeof SetDefaultCalendarAccountRequestSchema>;

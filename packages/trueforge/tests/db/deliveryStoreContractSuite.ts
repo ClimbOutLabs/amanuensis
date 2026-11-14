@@ -136,6 +136,38 @@ export function runDeliveryStoreContractSuite(getStore: () => IDeliveryStore): v
     expect((await store.get({ ...ALICE, id: b.id }))?.seen_at).toBeNull();
   });
 
+  it('lists one person’s unread deliveries of the kinds asked for, newest first', async () => {
+    const store = getStore();
+    const approval = (approval_id: string, minutesAgo: number) =>
+      store.create({
+        ...ALICE,
+        kind: 'approval_waiting',
+        level: 'nudge',
+        text: 'Send the email?',
+        reason: 'An action is waiting for your ok.',
+        link: { type: 'approval', session_id: 's1', approval_id },
+        created_at: new Date(Date.now() - minutesAgo * 60_000),
+      });
+    const older = await approval('a1', 3);
+    const seen = await approval('a2', 2);
+    await store.markSeen({ ...ALICE, ids: [seen.id] });
+    await store.create(reminder(ALICE));
+    await store.create({
+      ...BOB,
+      kind: 'approval_waiting',
+      level: 'nudge',
+      text: 'x',
+      reason: 'y',
+      link: { type: 'approval', session_id: 's2', approval_id: 'b1' },
+    });
+    const newer = await approval('a3', 1);
+
+    const unread = await store.listUnread({ ...ALICE, kinds: ['approval_waiting'], limit: 10 });
+    expect(unread.map(item => item.id)).toEqual([newer.id, older.id]);
+    await expect(store.listUnread({ ...ALICE, kinds: ['approval_waiting'], limit: 1 })).resolves.toHaveLength(1);
+    await expect(store.listUnread({ ...ALICE, kinds: [], limit: 10 })).resolves.toEqual([]);
+  });
+
   it('marks all of one person’s unread seen and leaves everyone else’s', async () => {
     const store = getStore();
     for (let index = 0; index < 120; index += 1) {

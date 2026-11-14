@@ -860,6 +860,54 @@ describe('the prompt', () => {
     expect(prompt).toContain('an email the assistant read');
   });
 
+  it('shows a reply note without its label, so the assistant’s name is not read as someone the note is about', async () => {
+    const vaultDir = await makeVault();
+    await writePageFile({
+      vaultDir,
+      kind: 'person',
+      slug: 'juno',
+      content:
+        '---\nkind: person\ntitle: Juno\naliases: [Juno]\n---\n# Juno\n\n## Unconfirmed\n- Juno is keeping the oat bars. <!-- fact: id=f_j1 src=inferred seen=2026-11-01 -->\n',
+    });
+    const model = modelReplying({ decisions: [] });
+    await sortWith({
+      vaultDir,
+      model,
+      noteToSort: note({
+        metadata: REPLY,
+        text: "From Juno's reply, Nov 6: If you keep the oat bars for the walk, they will travel well.",
+      }),
+    });
+
+    const [prompt] = model.prompts;
+    expect(prompt).toContain("Where the note came from: the assistant's own reply");
+    expect(prompt).toContain('<note>\nIf you keep the oat bars for the walk, they will travel well.\n</note>');
+    expect(prompt).not.toContain("Juno's reply");
+    // The label's name no longer picks the page of that name as one the note may belong to.
+    expect(prompt).not.toContain('<page slug="juno"');
+  });
+
+  it('shows a found note without its label, and the person’s own words as they are', async () => {
+    const vaultDir = await makeVault();
+    const model = modelReplying({ decisions: [] });
+    await sortWith({
+      vaultDir,
+      model,
+      noteToSort: note({ metadata: MAIL, text: 'From an email, found Nov 6: Nora is away until Friday.' }),
+    });
+    await sortWith({
+      vaultDir,
+      model,
+      noteToSort: note({
+        text: 'From an email, found Nov 6: that is how my notes start.',
+        id: 'md:vault:2026-11-06.md#1',
+      }),
+    });
+
+    expect(model.prompts[0]).toContain('<note>\nNora is away until Friday.\n</note>');
+    expect(model.prompts[1]).toContain('<note>\nFrom an email, found Nov 6: that is how my notes start.\n</note>');
+  });
+
   it('says what it left out when the note is too long', async () => {
     const vaultDir = await makeVault();
     const model = modelReplying({ decisions: [] });

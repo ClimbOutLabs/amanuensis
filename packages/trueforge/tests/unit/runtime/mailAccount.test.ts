@@ -13,8 +13,10 @@ import {
   getMailAccountState,
   MAIL_SIGN_IN_REFUSED_MESSAGE,
   registerMailConnectorFromSavedAccountInBackground,
+  removeMailAccount,
   resolveMailAccountSave,
   saveMailAccount,
+  setMailDefaultAccount,
   syncMailConnectorWithAccount,
   type MailAccountState,
 } from '../../../src/runtime/mailAccount';
@@ -23,10 +25,25 @@ const CANARY = 'CANARY-APP-PASSWORD-7f3d9';
 const ACCOUNT_URL = 'http://mail-email:9559';
 const SECRET = 'test-account-secret-0123456789abcdef0123';
 
-/** The flat body the account agent answers with for a connected Gmail account. */
+/** The list body the account agent answers with for one connected Gmail account. */
 const AGENT_CONNECTED = {
   connected: true,
-  sign_in: 'ok',
+  accounts: [
+    {
+      sign_in: 'ok',
+      address: 'person@gmail.com',
+      imap_host: 'imap.gmail.com',
+      imap_port: 993,
+      imap_mode: 'ssl',
+      smtp_host: 'smtp.gmail.com',
+      smtp_port: 465,
+      smtp_mode: 'ssl',
+    },
+  ],
+  default: 'person@gmail.com',
+};
+
+const PERSON_ACCOUNT: MailAccountState['account'] = {
   address: 'person@gmail.com',
   imap_host: 'imap.gmail.com',
   imap_port: 993,
@@ -39,18 +56,18 @@ const AGENT_CONNECTED = {
 const CONNECTED_STATE: MailAccountState = {
   connected: true,
   sign_in: 'ok',
-  account: {
-    address: 'person@gmail.com',
-    imap_host: 'imap.gmail.com',
-    imap_port: 993,
-    imap_mode: 'ssl',
-    smtp_host: 'smtp.gmail.com',
-    smtp_port: 465,
-    smtp_mode: 'ssl',
-  },
+  account: PERSON_ACCOUNT,
+  accounts: [{ account: PERSON_ACCOUNT, sign_in: 'ok' }],
+  default_key: 'person@gmail.com',
 };
 
-const NOT_CONNECTED_STATE: MailAccountState = { connected: false, sign_in: null, account: null };
+const NOT_CONNECTED_STATE: MailAccountState = {
+  connected: false,
+  sign_in: null,
+  account: null,
+  accounts: [],
+  default_key: null,
+};
 
 describe('resolving a save from the Settings form', () => {
   it('fills the servers from the picked provider', () => {
@@ -194,6 +211,72 @@ describe('the account agent client', () => {
       (caught: unknown) => caught,
     );
     expect(failure).toBeInstanceOf(ConnectorAccountError);
+  });
+
+  it('reads two accounts and takes the view from the named default', async () => {
+    const second = {
+      sign_in: 'refused',
+      address: 'second@example.com',
+      imap_host: 'imap.example.com',
+      imap_port: 993,
+      imap_mode: 'ssl',
+      smtp_host: 'smtp.example.com',
+      smtp_port: 465,
+      smtp_mode: 'ssl',
+    };
+    const body = {
+      connected: true,
+      accounts: [AGENT_CONNECTED.accounts[0], second],
+      default: 'second@example.com',
+    };
+    const fetchImpl = async () => new Response(JSON.stringify(body), { status: 200 });
+    const state = await getMailAccountState({ accountUrl: ACCOUNT_URL, fetchImpl, logger });
+    expect(state.accounts.map(entry => entry.account.address)).toEqual(['person@gmail.com', 'second@example.com']);
+    expect(state.default_key).toBe('second@example.com');
+    expect(state.account?.address).toBe('second@example.com');
+    expect(state.sign_in).toBe('refused');
+  });
+
+  it('removing one account names it, and removing every account names none', async () => {
+    const seen: Array<{ method: string; body: unknown }> = [];
+    const fetchImpl = async (_input: unknown, init?: RequestInit) => {
+      seen.push({
+        method: init?.method ?? '',
+        body: typeof init?.body === 'string' ? JSON.parse(init.body) : undefined,
+      });
+      return new Response(JSON.stringify({ connected: false }), { status: 200 });
+    };
+    const deps = { accountUrl: ACCOUNT_URL, fetchImpl, logger };
+    await removeMailAccount(deps, 'person@gmail.com');
+    await removeMailAccount(deps);
+    expect(seen).toEqual([
+      { method: 'DELETE', body: { address: 'person@gmail.com' } },
+      { method: 'DELETE', body: {} },
+    ]);
+  });
+
+  it('setting the default posts the address to the default route', async () => {
+    const seen: Array<{ url: string; body: unknown }> = [];
+    const fetchImpl = async (input: unknown, init?: RequestInit) => {
+      seen.push({
+        url: typeof input === 'string' ? input : '',
+        body: typeof init?.body === 'string' ? JSON.parse(init.body) : undefined,
+      });
+      return new Response(JSON.stringify(AGENT_CONNECTED), { status: 200 });
+    };
+    const state = await setMailDefaultAccount({ accountUrl: ACCOUNT_URL, fetchImpl, logger }, 'person@gmail.com');
+    expect(seen).toEqual([{ url: `${ACCOUNT_URL}/account/default`, body: { address: 'person@gmail.com' } }]);
+    expect(state.default_key).toBe('person@gmail.com');
+  });
+
+  it('setting the default to an account that is not saved is a plain refusal', async () => {
+    const refused = async () => new Response(JSON.stringify({ error: 'invalid' }), { status: 400 });
+    const failure = await setMailDefaultAccount(
+      { accountUrl: ACCOUNT_URL, fetchImpl: refused, logger },
+      'ghost@example.com',
+    ).catch((caught: unknown) => caught);
+    expect(failure).toBeInstanceOf(ConnectorAccountError);
+    expect(failure instanceof ConnectorAccountError ? failure.failure : '').toBe('invalid_request');
   });
 });
 

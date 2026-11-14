@@ -23,6 +23,7 @@ import {
 } from '@truefoundry/trueforge-core/core/skills/toolContract';
 import { z } from 'zod';
 import { SkillNameConflictError, type ISkillStore, type SkillRecord } from '../db/skillStore';
+import { forgetCachedSkillCode, resolveSkillCodePin } from '../sandbox/skillnet/skillNetworkGrant';
 import { NameSchema } from '../schemas/common';
 import {
   parseGitSkill,
@@ -460,11 +461,15 @@ export class SkillToolSet extends LocalToolMCP {
       // All or nothing: the card approved the skill and its websites together, so a skill whose
       // websites could not be allowed is taken out again rather than left half added.
       try {
+        // The manifest is pinned to the commit that was read, so the pin names that same code.
+        const code_sha = await resolveSkillCodePin({ manifest });
         await this.#options.store.setSkillNetworkApproval({
           tenant_id: this.#options.tenant_id,
           name: manifest.name,
           hosts,
+          code_sha,
         });
+        forgetCachedSkillCode({ skill_name: manifest.name });
       } catch (error) {
         // If taking it out fails too, the skill stays with no websites allowed, which fails safe;
         // the first failure is still the one reported.

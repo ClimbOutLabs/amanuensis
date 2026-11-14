@@ -55,25 +55,25 @@ describe('the skill approval card', () => {
     expect(screen.getByRole('heading', { name: 'Add the skill "release-notes"?' })).toBeInTheDocument();
   });
 
-  it('keeps where the skill comes from and its exact version in view, and its instructions under Details', () => {
+  it('keeps what the skill is for and where it comes from in view, and its exact version and instructions under Details', () => {
     renderCard(RELEASE_NOTES_CARD);
     const region = document.querySelector('[data-role="skill"]');
-    expect(region).toHaveTextContent('Name: release-notes');
-    expect(region).toHaveTextContent('For: Writes release notes from merged changes.');
-    expect(region).toHaveTextContent('From: github.com/acme/skills, folder skills/release-notes');
-    expect(region).toHaveTextContent(`Version: ${COMMIT}`);
-    expect(region).toHaveTextContent('This skill was written by someone else.');
-    expect(region).toHaveTextContent('Running code still asks you first');
+    expect(region).toHaveTextContent('Writes release notes from merged changes.');
+    expect(region).toHaveTextContent('github.com/acme/skills, folder skills/release-notes · version aaaaaaa');
+    expect(region).toHaveTextContent('Written by someone else. Add it only if you trust where it comes from.');
+    expect(region).toHaveTextContent('Running its code still asks you first.');
 
     const instructions = screen.getByRole('region', { name: 'Skill instructions' });
-    expect(instructions.closest('details')).not.toHaveAttribute('open');
+    const details = instructions.closest('details');
+    expect(details).not.toHaveAttribute('open');
+    expect(details).toHaveTextContent(`Exact version: ${COMMIT}`);
     expect(instructions).toHaveTextContent('Read the log.');
   });
 
   it('lists the websites the skill sends requests to, and says approving allows only those', () => {
     renderCard(RELEASE_NOTES_CARD);
     const websites = document.querySelector('[data-role="skill-websites"]');
-    expect(websites).toHaveTextContent('It sends requests to these websites:');
+    expect(websites).toHaveTextContent('It sends requests to these websites');
     expect(screen.getByRole('listitem')).toHaveTextContent('api.release-feed.info');
     expect(websites).toHaveTextContent('Adding it lets the skill reach these websites and no others.');
     expect(websites).toHaveTextContent('The skill can send any of your data to them');
@@ -100,12 +100,13 @@ describe('the skill approval card', () => {
     );
   });
 
-  it('says a starter skill comes with the app, and shows no empty Details', () => {
+  it('says a starter skill comes with the app, and keeps only its exact version under Details', () => {
     renderCard({ ...RELEASE_NOTES_CARD, skill: { ...RELEASE_NOTES_CARD.skill, starter: true, instructions: null } });
     expect(document.querySelector('[data-role="skill"]')).toHaveTextContent(
-      'This is one of the starter skills that come with the app.',
+      'One of the starter skills that come with the app.',
     );
-    expect(document.querySelectorAll('details')).toHaveLength(0);
+    expect(screen.queryByRole('region', { name: 'Skill instructions' })).toBeNull();
+    expect(document.querySelector('details')).toHaveTextContent(`Exact version: ${COMMIT}`);
   });
 
   it('offers only a yes or a no for this one install', () => {

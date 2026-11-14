@@ -106,7 +106,7 @@ export function PrivateChatBanner() {
   return (
     <div data-slot="aui_private-chat-banner" className={bannerClass}>
       <Icon name="lock" className="size-3.5 shrink-0" />
-      <span className="min-w-0 flex-1">{privateChatBannerLine(privacy)}</span>
+      <span className="min-w-28 flex-1">{privateChatBannerLine(privacy)}</span>
       <button
         type="button"
         className={cn(

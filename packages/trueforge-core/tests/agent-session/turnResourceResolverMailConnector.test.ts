@@ -191,7 +191,11 @@ function scriptedSidecar({
   return { calls };
 }
 
-function makeResolver(mailAccounts: MailAccountDirectory, clientTimezone?: string) {
+function makeResolver(
+  mailAccounts: MailAccountDirectory,
+  clientTimezone?: string,
+  mailRouting?: () => Promise<{ default_name: string | null; allowed: readonly string[] | null } | undefined>,
+) {
   return new TurnResourceResolver({
     clientTimezone,
     llm: () =>
@@ -206,8 +210,11 @@ function makeResolver(mailAccounts: MailAccountDirectory, clientTimezone?: strin
     mcpConnectTimeoutMs: 1_000,
     logger: makeSilentLogger(),
     mailAccounts,
+    ...(mailRouting === undefined ? {} : { mailRouting }),
   });
 }
+
+const twoAccounts = () => text([{ account_name: 'work' }, { account_name: 'home' }]);
 
 function makeSpec(): AgentSpec {
   return AgentSpecSchema.parse({
@@ -326,7 +333,7 @@ describe('Email connector account name', () => {
 
     expect(JSON.parse(said)).toEqual({
       error:
-        "There is no Email account named 'main'. The accounts are 'work', 'home'; use one of these names, or leave the name out when there is one account.",
+        "There is no Email account named 'main'. The accounts are 'work', 'home'; use one of these names, or leave the name out to use the default account.",
     });
   });
 
@@ -362,6 +369,77 @@ describe('Email connector account name', () => {
     expect(sends.map(call => call['account_name'])).toEqual(['default']);
   });
 
+  it('fills the default account into a send that leaves the name out, with several accounts', async () => {
+    const sidecar = scriptedSidecar({ accountList: twoAccounts, known: () => ['work', 'home'] });
+    const routing = () => Promise.resolve({ default_name: 'home', allowed: null });
+    const toolSet = await emailToolSet(makeResolver(new MailAccountDirectory(), undefined, routing));
+
+    const { isError } = resultText(
+      await toolSet.callTool(
+        { name: 'send_email', arguments: { recipients: ['friend@example.com'], subject: 'Hi' } },
+        APPROVED,
+      ),
+    );
+
+    expect(isError).toBe(false);
+    const sends = sidecar.calls.filter(call => call['tool'] === 'send_email');
+    expect(sends.map(call => call['account_name'])).toEqual(['home']);
+  });
+
+  it('sends from the account the person picked on the card, not the default', async () => {
+    const sidecar = scriptedSidecar({ accountList: twoAccounts, known: () => ['work', 'home'] });
+    const routing = () => Promise.resolve({ default_name: 'home', allowed: null });
+    const toolSet = await emailToolSet(makeResolver(new MailAccountDirectory(), undefined, routing));
+
+    const { isError } = resultText(
+      await toolSet.callTool(
+        { name: 'send_email', arguments: { recipients: ['friend@example.com'], subject: 'Hi' } },
+        { status: 'allow', from_account: 'work' },
+      ),
+    );
+
+    expect(isError).toBe(false);
+    const sends = sidecar.calls.filter(call => call['tool'] === 'send_email');
+    expect(sends.map(call => call['account_name'])).toEqual(['work']);
+  });
+
+  it('refuses a send naming an account outside the persona limit, and sends nothing', async () => {
+    const sidecar = scriptedSidecar({ accountList: twoAccounts, known: () => ['work', 'home'] });
+    const routing = () => Promise.resolve({ default_name: 'home', allowed: ['home'] });
+    const toolSet = await emailToolSet(makeResolver(new MailAccountDirectory(), undefined, routing));
+
+    const { text: said, isError } = resultText(
+      await toolSet.callTool(
+        {
+          name: 'send_email',
+          arguments: { account_name: 'work', recipients: ['friend@example.com'], subject: 'Hi' },
+        },
+        APPROVED,
+      ),
+    );
+
+    expect(isError).toBe(true);
+    expect(said).toContain("This persona cannot use the Email account 'work'.");
+    expect(sidecar.calls.filter(call => call['tool'] === 'send_email')).toEqual([]);
+  });
+
+  it('refuses a card pick outside the persona limit, and sends nothing', async () => {
+    const sidecar = scriptedSidecar({ accountList: twoAccounts, known: () => ['work', 'home'] });
+    const routing = () => Promise.resolve({ default_name: 'home', allowed: ['home'] });
+    const toolSet = await emailToolSet(makeResolver(new MailAccountDirectory(), undefined, routing));
+
+    const { text: said, isError } = resultText(
+      await toolSet.callTool(
+        { name: 'send_email', arguments: { recipients: ['friend@example.com'], subject: 'Hi' } },
+        { status: 'allow', from_account: 'work' },
+      ),
+    );
+
+    expect(isError).toBe(true);
+    expect(said).toContain('The account picked on the approval card cannot be used for this send');
+    expect(sidecar.calls.filter(call => call['tool'] === 'send_email')).toEqual([]);
+  });
+
   it('reads the account list again for a send, so an account added since the last read is used', async () => {
     const accounts = ['default'];
     const sidecar = scriptedSidecar({
@@ -390,7 +468,7 @@ describe('Email connector account name', () => {
 
   it('keeps each connector address apart in the same chat', async () => {
     const directory = new MailAccountDirectory();
-    const read = jest.fn(() => Promise.resolve(['default']));
+    const read = jest.fn(() => Promise.resolve({ names: ['default'], default_name: 'default', allowed: null }));
 
     await directory.accounts({ chat_id: 'chat-1', connector_url: 'https://a.example.com/mcp', fresh: false, read });
     await directory.accounts({ chat_id: 'chat-1', connector_url: 'https://b.example.com/mcp', fresh: false, read });

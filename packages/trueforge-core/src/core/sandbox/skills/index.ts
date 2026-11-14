@@ -20,5 +20,5 @@ export type {
   SkillSiteUnknown,
   SkillSiteUnknownKind,
 } from './skillSiteScan';
-export { readGitSkillFiles } from './slotSkillCopy';
+export { readGitSkillFiles, resolveGitSkillObjectId } from './slotSkillCopy';
 export type { GitSkillSource } from './slotSkillCopy';

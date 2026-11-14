@@ -9,6 +9,8 @@ import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqliteSkillStore } from '../../../src/db/sqlite/skill-store/SqliteSkillStore';
 import type { ReadSkillFiles } from '../../../src/runtime/skillWebsites';
+import { resolveSkillNetworkGrant } from '../../../src/sandbox/skillnet/skillNetworkGrant';
+import { SkillNetworkTokenRegistry } from '../../../src/sandbox/skillnet/skillNetworkTokens';
 import { ListSkillsResponseSchema } from '../../../src/schemas/skill';
 import { TRUEFOUNDRY_MANAGED_MESSAGE, trueFoundryManaged } from '../../../src/truefoundry/errors';
 
@@ -88,6 +90,7 @@ describe('skills routers', () => {
       resolveRequestContext: () => STANDALONE_REQUEST_CONTEXT,
       catalog: [],
       readFiles: readFixture,
+      resolveSkillCodeSha: async () => 'a'.repeat(40),
     });
     catalogRouter = createCatalogRouter({
       modelCatalog: ModelCatalog.load(),
@@ -182,6 +185,7 @@ describe('skills routers', () => {
       resolveTurnSkills: jest.fn(),
       setSkillNetworkApproval: jest.fn(),
       setSkillNetworkHostDecision: jest.fn(),
+      setSkillNetworkCodePin: jest.fn(),
     };
     const router = createAvailableSkillsRouter({
       resolveSkillStore: () => skillStore,
@@ -233,6 +237,7 @@ describe('skills routers', () => {
       resolveTurnSkills: jest.fn(),
       setSkillNetworkApproval: jest.fn(),
       setSkillNetworkHostDecision: jest.fn(),
+      setSkillNetworkCodePin: jest.fn(),
     };
     const router = createSkillsRouter({
       resolveSkillStore: () => managedStore,
@@ -277,6 +282,7 @@ describe('skills routers', () => {
       resolveTurnSkills: jest.fn(),
       setSkillNetworkApproval: jest.fn(),
       setSkillNetworkHostDecision: jest.fn(),
+      setSkillNetworkCodePin: jest.fn(),
     };
     const router = createSkillsRouter({
       resolveSkillStore: () => managedStore,
@@ -316,8 +322,8 @@ describe('skills routers', () => {
       name: 'deletable-skill',
       path: 'skills/deletable-skill',
     };
-    const created = await settingsRouter.request('/', putInit(wrapManifest(deleteBody)));
-    expect(created.status).toBe(200);
+    // Seeded straight into the store: adding through Settings would read its files.
+    await new SqliteSkillStore(db).upsertSkill({ tenant_id: 'default', name: deleteBody.name, manifest: deleteBody });
 
     const deleted = await settingsRouter.request('/deletable-skill', { method: 'DELETE' });
     expect(deleted.status).toBe(200);
@@ -513,6 +519,72 @@ describe('skills routers', () => {
       });
     });
 
+    it('PUT refuses the approval when the code version cannot be read, with the refusal in plain words', async () => {
+      const db = createSqliteDb(':memory:');
+      await migrateSqliteToLatest(db);
+      const failingRouter = createSkillsRouter({
+        resolveSkillStore: () => new SqliteSkillStore(db),
+        withTransaction: callback => db.transaction().execute(callback),
+        resolveRequestContext: () => STANDALONE_REQUEST_CONTEXT,
+        catalog: [],
+        readFiles: readFixture,
+        resolveSkillCodeSha: async () => {
+          throw new Error('repository unreachable');
+        },
+      });
+      // Seeded straight into the store: adding through Settings would read its files.
+      await new SqliteSkillStore(db).upsertSkill({ tenant_id: 'default', name: tenX.name, manifest: tenX });
+      const response = await failingRouter.request(
+        '/ten-x/network-approval',
+        putInit({ hosts: ['github.com', 'api.github.com'] }),
+      );
+      expect(response.status).toBe(422);
+      expect(await response.json()).toEqual({
+        error: {
+          message: "Aman could not read this skill's code version. Check the skill's address and try again.",
+        },
+      });
+      const state = await failingRouter.request('/ten-x/network-approval');
+      expect(await state.json()).toMatchObject({ data: { approved_hosts: null } });
+    });
+
+    it('PUT after the branch moved stores an approval the next check keeps, even with the old commit cached', async () => {
+      const db = createSqliteDb(':memory:');
+      await migrateSqliteToLatest(db);
+      const store = new SqliteSkillStore(db);
+      let branchAt = 'a'.repeat(40);
+      const resolveSkillCodeSha = async () => branchAt;
+      const router = createSkillsRouter({
+        resolveSkillStore: () => store,
+        withTransaction: callback => db.transaction().execute(callback),
+        resolveRequestContext: () => STANDALONE_REQUEST_CONTEXT,
+        catalog: [],
+        readFiles: readFixture,
+        resolveSkillCodeSha,
+      });
+      await new SqliteSkillStore(db).upsertSkill({ tenant_id: 'default', name: tenX.name, manifest: tenX });
+      const approve = () => router.request('/ten-x/network-approval', putInit({ hosts: tenX.network_hosts }));
+      expect((await approve()).status).toBe(200);
+      const registry = new SkillNetworkTokenRegistry();
+      const check = () =>
+        resolveSkillNetworkGrant({
+          store,
+          registry,
+          tenant_id: STANDALONE_REQUEST_CONTEXT.tenant_id,
+          created_by: STANDALONE_REQUEST_CONTEXT.subject.id,
+          session_id: 'settings-fresh-approval-cached',
+          skillNames: ['ten-x'],
+          resolveCodeSha: resolveSkillCodeSha,
+        });
+      expect((await check())?.hosts).toEqual(['api.github.com', 'github.com']);
+
+      branchAt = 'b'.repeat(40);
+      expect((await approve()).status).toBe(200);
+      expect((await check())?.hosts).toEqual(['api.github.com', 'github.com']);
+      const state = await router.request('/ten-x/network-approval');
+      expect(await state.json()).toMatchObject({ data: { approved_hosts: ['github.com', 'api.github.com'] } });
+    });
+
     it('PUT refuses a list that is not the declared list, with the next step in plain words', async () => {
       const response = await settingsRouter.request('/ten-x/network-approval', putInit({ hosts: ['github.com'] }));
       expect(response.status).toBe(422);
@@ -698,6 +770,85 @@ describe('skills routers', () => {
         method: 'DELETE',
       });
       expect(clearDenied.status).toBe(404);
+    });
+
+    it('PUT allowed-host binds the allowance to the code pin, and removing the approval leaves both standing', async () => {
+      const db = createSqliteDb(':memory:');
+      await migrateSqliteToLatest(db);
+      const store = new SqliteSkillStore(db);
+      const router = createSkillsRouter({
+        resolveSkillStore: () => store,
+        withTransaction: callback => db.transaction().execute(callback),
+        resolveRequestContext: () => STANDALONE_REQUEST_CONTEXT,
+        catalog: [],
+        readFiles: readFixture,
+        resolveSkillCodeSha: async () => 'a'.repeat(40),
+      });
+      const pinBound = { ...tenX, name: 'pin-bound' };
+      // Seeded straight into the store: adding through Settings would read its files.
+      await new SqliteSkillStore(db).upsertSkill({ tenant_id: 'default', name: pinBound.name, manifest: pinBound });
+
+      const allowed = await router.request(
+        '/pin-bound/network-approval/allowed-host',
+        putInit({ host: 'uploads.example.com' }),
+      );
+      expect(allowed.status).toBe(200);
+      const [afterAllow] = await store.listSkills({ tenant_id: 'default', names: ['pin-bound'] });
+      expect(afterAllow?.network_approval).toBeNull();
+      expect(afterAllow?.network_allowed_hosts).toEqual(['uploads.example.com']);
+      expect(afterAllow?.network_approval_code_sha).toBe('a'.repeat(40));
+
+      const approved = await router.request(
+        '/pin-bound/network-approval',
+        putInit({ hosts: ['github.com', 'api.github.com'] }),
+      );
+      expect(approved.status).toBe(200);
+      const removed = await router.request('/pin-bound/network-approval', { method: 'DELETE' });
+      expect(removed.status).toBe(200);
+      const [afterRemove] = await store.listSkills({ tenant_id: 'default', names: ['pin-bound'] });
+      expect(afterRemove?.network_approval).toBeNull();
+      expect(afterRemove?.network_allowed_hosts).toEqual(['uploads.example.com']);
+      expect(afterRemove?.network_approval_code_sha).toBe('a'.repeat(40));
+
+      const cleared = await router.request('/pin-bound/network-approval/allowed-host?host=uploads.example.com', {
+        method: 'DELETE',
+      });
+      expect(cleared.status).toBe(200);
+      const [afterClear] = await store.listSkills({ tenant_id: 'default', names: ['pin-bound'] });
+      expect(afterClear?.network_allowed_hosts).toEqual([]);
+      expect(afterClear?.network_approval_code_sha).toBeNull();
+    });
+
+    it('PUT allowed-host refuses when the code version cannot be read, storing nothing', async () => {
+      const db = createSqliteDb(':memory:');
+      await migrateSqliteToLatest(db);
+      const store = new SqliteSkillStore(db);
+      const failingRouter = createSkillsRouter({
+        resolveSkillStore: () => store,
+        withTransaction: callback => db.transaction().execute(callback),
+        resolveRequestContext: () => STANDALONE_REQUEST_CONTEXT,
+        catalog: [],
+        readFiles: readFixture,
+        resolveSkillCodeSha: async () => {
+          throw new Error('repository unreachable');
+        },
+      });
+      const pinRefused = { ...tenX, name: 'pin-refused' };
+      // Seeded straight into the store: adding through Settings would read its files.
+      await new SqliteSkillStore(db).upsertSkill({ tenant_id: 'default', name: pinRefused.name, manifest: pinRefused });
+      const response = await failingRouter.request(
+        '/pin-refused/network-approval/allowed-host',
+        putInit({ host: 'uploads.example.com' }),
+      );
+      expect(response.status).toBe(422);
+      expect(await response.json()).toEqual({
+        error: {
+          message: "Aman could not read this skill's code version. Check the skill's address and try again.",
+        },
+      });
+      const [record] = await store.listSkills({ tenant_id: 'default', names: ['pin-refused'] });
+      expect(record?.network_allowed_hosts).toEqual([]);
+      expect(record?.network_approval_code_sha).toBeNull();
     });
   });
 });

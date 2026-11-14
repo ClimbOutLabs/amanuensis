@@ -415,6 +415,63 @@ describe('Email connector classifier', () => {
     });
   });
 
+  describe('accounts', () => {
+    const WORK = 'work@example.com';
+    const HOME = 'home@example.com';
+    const DANA = 'dana@example.com';
+
+    /** Two accounts; Dana is listed for Home only. Work is the default. */
+    function ctxWithAccounts(): ClassifyContext {
+      const ctx = makeCtx();
+      return {
+        ...ctx,
+        services: {
+          ...ctx.services,
+          mail_accounts: () => Promise.resolve({ accounts: [WORK, HOME], default_account: WORK }),
+          mail_listed_addresses: ({ account }: { account: string | null }) =>
+            Promise.resolve(account === HOME ? [DANA] : []),
+        },
+      };
+    }
+
+    it('a send from the account that lists the recipient keeps the plain send card and names its account', async () => {
+      const decision = await classifyTier(
+        hostMailCall(
+          'send_email',
+          { account_name: HOME, recipients: [DANA], subject: SUBJECT, body: 'Hi' },
+          OUTBOUND_WRITE,
+        ),
+        ctxWithAccounts(),
+      );
+      expect(decision).toMatchObject({ tier: 3, auto_deny: null, reason: 'mail_send' });
+      expect(decision.card?.mail_from).toBe(HOME);
+      expect(decision.card?.mail_from_choices).toEqual([WORK, HOME]);
+    });
+
+    it('a send from the other account to the same recipient asks with the new-recipient card', async () => {
+      const decision = await classifyTier(
+        hostMailCall(
+          'send_email',
+          { account_name: WORK, recipients: [DANA], subject: SUBJECT, body: 'Hi' },
+          OUTBOUND_WRITE,
+        ),
+        ctxWithAccounts(),
+      );
+      expect(decision).toMatchObject({ tier: 3, auto_deny: null, reason: 'mail_new_recipient' });
+      expect(decision.card?.mail_new_recipients).toEqual([DANA]);
+      expect(decision.card?.mail_from).toBe(WORK);
+    });
+
+    it('a send naming no account is checked against the default account list', async () => {
+      const decision = await classifyTier(
+        hostMailCall('send_email', { recipients: [DANA], subject: SUBJECT, body: 'Hi' }, OUTBOUND_WRITE),
+        ctxWithAccounts(),
+      );
+      expect(decision).toMatchObject({ tier: 3, auto_deny: null, reason: 'mail_new_recipient' });
+      expect(decision.card?.mail_from).toBe(WORK);
+    });
+  });
+
   describe('unknown tools', () => {
     it('a tool the Email connector does not offer with a mail word in its name is never silent', async () => {
       const decision = await classifyTier(hostMailCall('purge_emails', { mailbox: 'INBOX' }, {}), makeCtx());

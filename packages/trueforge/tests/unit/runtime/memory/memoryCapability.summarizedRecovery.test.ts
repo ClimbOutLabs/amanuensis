@@ -30,6 +30,7 @@ import type { IModelProviderStore } from '../../../../src/db/modelProviderStore'
 import { MarkdownMemoryClient } from '../../../../src/runtime/memory/markdownMemoryClient';
 import { memoryCapability, type MemoryConfig } from '../../../../src/runtime/memory/memoryCapability';
 import {
+  markRetainUnderWay,
   noteUnfinishedTurnOwesNoSummary,
   submitRetainWithVerification,
   type SummarizeTurnContext,
@@ -212,6 +213,8 @@ describe('the turn after a turn that saved nothing, with summaries on', () => {
 
     await runSecondTurn(capabilityFor(client));
     expect(savedLogs(dir)).toEqual([]);
+    // A summary that is still being written is not a failed one, so the Memories page shows no warning.
+    expect(await client.summaryPendingSince({ namespace: '' })).toBeUndefined();
 
     finishSummary?.();
     await firstTurn;
@@ -220,6 +223,39 @@ describe('the turn after a turn that saved nothing, with summaries on', () => {
     expect(logs[0]).toContain('The person says thanks often.');
     expect(logs[0]).not.toContain('User:');
     expect(await client.summaryPendingSince({ namespace: '' })).toBeUndefined();
+  });
+
+  it('finds the turn recorded once its summary has ended, and still raises no warning', async () => {
+    let finishSummary: (() => void) | undefined;
+    mockSummarize.mockImplementation(
+      () =>
+        new Promise(resolve => {
+          finishSummary = () => {
+            resolve({ status: 'nothing_to_keep' });
+          };
+        }),
+    );
+    const firstTurn = drainFirstTurn();
+    await new Promise(resolve => setTimeout(resolve, 20));
+
+    await runSecondTurn(capabilityFor(client));
+    finishSummary?.();
+    await firstTurn;
+    await runSecondTurn(capabilityFor(client));
+
+    expect(await client.summaryPendingSince({ namespace: '' })).toBeUndefined();
+    expect(savedLogs(dir)).toEqual([]);
+  });
+
+  it('raises no warning for a turn whose save was announced and has not begun, and raises it once that ends with no record', async () => {
+    const ended = markRetainUnderWay(TURN);
+
+    await runSecondTurn(capabilityFor(client));
+    expect(await client.summaryPendingSince({ namespace: '' })).toBeUndefined();
+
+    ended();
+    await runSecondTurn(capabilityFor(client));
+    expect(await client.summaryPendingSince({ namespace: '' })).toEqual(expect.any(String));
   });
 
   it('still rebuilds a vanished turn as its full exchange when summaries are off', async () => {

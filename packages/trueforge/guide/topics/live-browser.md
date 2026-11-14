@@ -46,6 +46,10 @@ Some steps only you can do: signing in, typing a code sent to your phone, a pict
 
 Aman carries on from where you left the page. A sign-in you finished stays signed in.
 
+## End the session yourself
+
+To stop Aman using a page, click **End session** at the top, then click it again to confirm. The page closes in Aman's browser. Aman has to open a page again before it can go on in that chat. A sign-in you finished stays signed in.
+
 ## Sign in with your password manager
 
 Your password manager can't fill the picture of the page, because the picture has no real boxes. Use the name and password boxes under the picture instead.

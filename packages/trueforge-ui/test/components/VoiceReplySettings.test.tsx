@@ -13,6 +13,7 @@ import { VoiceInputProvider, type VoiceInputApi } from '@/components/VoiceInputC
 import { VoiceInputSettings, VoiceReplySettings } from '@/components/VoiceReplySettings.js';
 import { PUSH_TO_TALK_HOTKEY_STORAGE_KEY } from '@/utils/pushToTalkHotkey.js';
 import {
+  READ_WHOLE_MESSAGES_STORAGE_KEY,
   SERVER_VOICE_STORAGE_KEY,
   SPEAK_VOICE_REPLIES_STORAGE_KEY,
   SPEECH_VOICE_STORAGE_KEY,
@@ -45,6 +46,18 @@ describe('VoiceReplySettings', () => {
 
     expect(toggle).toHaveAttribute('aria-checked', 'false');
     expect(window.localStorage.getItem(SPEAK_VOICE_REPLIES_STORAGE_KEY)).toBe('false');
+  });
+
+  it('keeps whole-message reading off by default and stores a switch-on in this browser', () => {
+    render(<VoiceReplySettings />);
+
+    const toggle = screen.getByRole('switch', { name: 'Read whole messages aloud' });
+    expect(toggle).toHaveAttribute('aria-checked', 'false');
+
+    fireEvent.click(toggle);
+
+    expect(toggle).toHaveAttribute('aria-checked', 'true');
+    expect(window.localStorage.getItem(READ_WHOLE_MESSAGES_STORAGE_KEY)).toBe('true');
   });
 
   it('lists the browser voices and stores the one the person picks', () => {

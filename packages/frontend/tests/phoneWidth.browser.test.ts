@@ -90,6 +90,14 @@ test('at phone widths nothing on the main screens runs off the side', { timeout:
       await page.locator('main').getByText(FINAL_TEXT).first().waitFor({ timeout: FIRST_LOAD_TIMEOUT_MS });
       await check('chat');
 
+      await page.getByRole('button', { name: /^Navigation/ }).click();
+      const menu = page.getByRole('dialog', { name: 'Navigation' });
+      await menu.getByRole('button', { name: 'New chat' }).waitFor({ timeout: FIRST_LOAD_TIMEOUT_MS });
+      await check('menu');
+      // The strip beside the menu is what a person taps to close it.
+      await page.mouse.click(width - 8, 400);
+      await menu.waitFor({ state: 'detached', timeout: FIRST_LOAD_TIMEOUT_MS });
+
       await page.goto(`${origin}/settings`, { waitUntil: 'domcontentloaded' });
       const tablist = page.getByRole('tablist', { name: 'Settings sections' });
       await tablist.waitFor({ state: 'visible', timeout: FIRST_LOAD_TIMEOUT_MS });

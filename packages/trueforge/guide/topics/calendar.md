@@ -45,7 +45,7 @@ Reading your calendar runs without asking.
 
 You can ask Aman to add guests to a new event, such as "Invite dana@example.org". The card lists every guest. It also says whether Google will email them about it, so you know before anyone hears from you.
 
-With a calendar connected with an app password, Aman can also answer an invitation for you: accept, tentatively accept, or decline. The card names the organizer, who is told your answer. That reply can't be unsent.
+With a calendar connected with an app password, Aman can also answer an invitation for you: accept, tentatively accept, or decline. The card names the organizer, who is told your answer. That reply can't be unsent. If your answer couldn't reach the organizer, Aman tells you.
 
 ## Good to know
 

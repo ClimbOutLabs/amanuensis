@@ -259,11 +259,15 @@ services:
       # server never touch the OS keyring, and no account is written to the config file.
       MCP_EMAIL_SERVER_CREDENTIAL_STORAGE: plaintext
       # The send list the server owns. It is read-only here; the server is the only writer.
+      # The wrapper composes the config file the mail server reads from this list and the saved
+      # accounts, and starts the server on the composed file instead.
       MCP_EMAIL_SERVER_CONFIG_PATH: /policy/allowed_recipients.toml
       # Where the wrapper records the hash of the list it started with. The server waits on it.
       AMAN_MAIL_STATUS_FILE: /mail-status/loaded.sha256
       # The account agent: the account file it owns, its private-network port, and its own path in the image.
       AMAN_MAIL_ACCOUNT_FILE: /account/.env.mail-email
+      # The composed config the wrapper writes from the send list and the saved accounts.
+      AMAN_MAIL_CONFIG_FILE: /account/config.toml
       AMAN_MAIL_ACCOUNT_PORT: '9559'
       # Only a caller that presents this secret can read, replace or remove the account (same value as the server).
       AMAN_MAIL_ACCOUNT_SECRET: ${MAIL_EMAIL_ACCOUNT_SECRET:?set MAIL_EMAIL_ACCOUNT_SECRET to a random value of 32 or more characters, for example from openssl rand -hex 32}

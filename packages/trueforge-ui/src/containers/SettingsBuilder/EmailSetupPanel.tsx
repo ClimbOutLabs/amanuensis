@@ -1,11 +1,11 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 
 import { auiInputClass } from '@/atoms/lib/inputClasses.js';
 import { WatchMailNote } from '@/deliveries/WatchMailNote.js';
 import type { EmailAccountStatus, EmailProviderInfo, EmailSetupPort } from '@/server/emailSetup.js';
-import AccountSetupPanel from './AccountSetupPanel.js';
+import AccountSetupPanel, { type PanelAccount } from './AccountSetupPanel.js';
 
 type EmailSetupPanelProps = {
   open: boolean;
@@ -45,20 +45,96 @@ export default function EmailSetupPanel({ open, onOpenChange, port, onChanged }:
   const [imapPort, setImapPort] = useState(DEFAULT_PORTS.imapPort);
   const [smtpHost, setSmtpHost] = useState('');
   const [smtpPort, setSmtpPort] = useState(DEFAULT_PORTS.smtpPort);
+  /** The saved account the form is changing; null while the form is for a new account. */
+  const [editingAddress, setEditingAddress] = useState<string | null>(null);
+  const statusRef = useRef<EmailAccountStatus | null>(null);
+  const editingRef = useRef<string | null>(null);
 
-  // Every status, including the one after Remove, sets the whole form, so nothing stale is left behind.
-  const applyStatus = useCallback((next: EmailAccountStatus) => {
-    setProviderKey(next.providerKey);
-    setAddress(next.address ?? '');
+  const fillForm = useCallback((status: EmailAccountStatus, forAddress: string | null) => {
+    const entry =
+      forAddress === null
+        ? (status.accounts.find(account => account.isDefault) ?? status.accounts[0])
+        : status.accounts.find(account => account.address === forAddress);
+    setProviderKey(entry?.providerKey ?? status.providerKey);
+    setAddress(entry?.address ?? '');
+    setPassword('');
+    if (entry !== undefined && entry.providerKey === 'other') {
+      setImapHost(entry.imapHost);
+      setImapPort(String(entry.imapPort));
+      setSmtpHost(entry.smtpHost);
+      setSmtpPort(String(entry.smtpPort));
+    } else {
+      setImapHost('');
+      setImapPort(DEFAULT_PORTS.imapPort);
+      setSmtpHost('');
+      setSmtpPort(DEFAULT_PORTS.smtpPort);
+    }
+  }, []);
+
+  const clearForm = useCallback((status: EmailAccountStatus | null) => {
+    setProviderKey(status?.providerKey ?? 'gmail');
+    setAddress('');
     setPassword('');
     setImapHost('');
     setImapPort(DEFAULT_PORTS.imapPort);
     setSmtpHost('');
     setSmtpPort(DEFAULT_PORTS.smtpPort);
   }, []);
+
+  // Every status, including the one after Remove, sets the whole form, so nothing stale is left behind.
+  const applyStatus = useCallback(
+    (next: EmailAccountStatus) => {
+      statusRef.current = next;
+      const editing = editingRef.current;
+      if (editing !== null && !next.accounts.some(account => account.address === editing)) {
+        editingRef.current = null;
+        setEditingAddress(null);
+        fillForm(next, null);
+        return;
+      }
+      fillForm(next, editing);
+    },
+    [fillForm],
+  );
   const clearPassword = useCallback(() => setPassword(''), []);
   const loadStatus = useCallback(() => port.getEmailStatus(), [port]);
-  const removeAccount = useCallback(() => port.removeEmailAccount(), [port]);
+  const removeAccount = useCallback(async () => {
+    const status = statusRef.current;
+    const target = editingRef.current ?? status?.defaultAddress ?? null;
+    if (status === null || target === null) {
+      return port.getEmailStatus();
+    }
+    return port.removeEmailAccount(target);
+  }, [port]);
+
+  const listAccounts = useCallback(
+    (status: EmailAccountStatus): readonly PanelAccount[] =>
+      status.accounts.map(account => ({
+        key: account.address,
+        label: account.address,
+        state: account.state,
+        isDefault: account.isDefault,
+      })),
+    [],
+  );
+  const beginEdit = useCallback(
+    (key: string | null) => {
+      editingRef.current = key;
+      setEditingAddress(key);
+      if (key === null) {
+        clearForm(statusRef.current);
+      } else if (statusRef.current !== null) {
+        fillForm(statusRef.current, key);
+      }
+    },
+    [clearForm, fillForm],
+  );
+  const makeDefault = useCallback((key: string) => port.setDefaultEmailAccount(key), [port]);
+  const removeOne = useCallback((key: string) => port.removeEmailAccount(key), [port]);
+  const saveNote =
+    editingAddress !== null
+      ? 'Saving replaces the saved details for this account. The sign-in is checked before anything is saved.'
+      : 'The sign-in is checked before anything is saved. Connecting an account keeps the accounts already connected.';
 
   const isOther = providerKey === 'other';
   const saveAccount = async () => {
@@ -87,7 +163,7 @@ export default function EmailSetupPanel({ open, onOpenChange, port, onChanged }:
       onOpenChange={onOpenChange}
       onChanged={onChanged}
       title="Email"
-      description="Connect an email account with an app password, so your assistant can read your email and, with your approval, draft and send it."
+      description="Connect email accounts with app passwords, so your assistant can read your email and, with your approval, draft and send it."
       thing="account"
       connector="email connector"
       loadStatus={loadStatus}
@@ -96,6 +172,11 @@ export default function EmailSetupPanel({ open, onOpenChange, port, onChanged }:
       onOpened={clearPassword}
       onStatus={applyStatus}
       connectedAs={status => status.address}
+      listAccounts={listAccounts}
+      beginEdit={beginEdit}
+      makeDefault={makeDefault}
+      removeOne={removeOne}
+      saveNote={saveNote}
       canSubmit={address.trim() !== '' && password !== ''}
       note={<WatchMailNote onOpenReachMe={() => onOpenChange(false)} />}
       fields={status => {

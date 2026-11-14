@@ -523,6 +523,14 @@ describe('create_schedule', () => {
     expect(create?.description).toContain('not a calendar event');
   });
 
+  it('tells the model to offer a reminder nobody asked for and wait for a yes', async () => {
+    const built = await setup();
+    const { result } = await built.tools.listTools();
+    const reminder = result.tools.find(tool => tool.name === 'set_reminder');
+    expect(reminder?.description).toContain('the user asked for');
+    expect(reminder?.description).toContain('wait for a yes');
+  });
+
   it('still reports other unknown details as a fixable error', async () => {
     const built = await setup();
     const info = await built.tools.toolCallInfo({
