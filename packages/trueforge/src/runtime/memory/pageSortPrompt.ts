@@ -19,7 +19,7 @@ import {
 } from './memoryPages';
 import { boundedText, SUMMARIZE_MAX_INPUT_CHARACTERS } from './memorySummarize';
 import { SORT_MAX_DECISIONS } from './pageSortDecisions';
-import { describeNoteOrigin, type NoteOrigin } from './pageSortOrigin';
+import { describeNoteOrigin, type SortableOrigin } from './pageSortOrigin';
 
 /** Most pages shown whole. */
 export const SORT_MAX_SHOWN_PAGES = 5;
@@ -210,7 +210,7 @@ export async function buildSortPrompt({
 }: {
   vaultDir: string;
   note: { text: string; day: string };
-  origin: NoteOrigin;
+  origin: SortableOrigin;
   /** Pages whose statements are closest in meaning to a text; left out until the meaning search is ready. */
   similarPages?: ((text: string) => Promise<PageListing[]>) | undefined;
 }): Promise<SortPrompt> {

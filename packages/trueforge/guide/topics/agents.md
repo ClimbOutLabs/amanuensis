@@ -26,7 +26,7 @@ How to get there: Click **More** in the left bar, then **Build agent**.
 2. Under **What should it do?**, click **Edit Instructions** and write the job in your own words, such as "Every week, sum up my unpaid bills in a short list."
 3. To let it use your apps, click **Add a connector**. To let it run code and work with files, turn on **Sandbox**. To give it extra know-how, click **Add a skill**. Skills need the sandbox, so it stays on while the agent has skills.
 4. The model and run settings sit under **More settings**. The usual choices work for most agents. To pick another model, open **More settings** and click **Edit Model**.
-5. Try it out in the chat until it does what you want.
+5. Test it in the chat beside the panel, under **Test your agent here**. Give it a task like the job you described and see how it does. Change the setup and try again until it does what you want.
 6. Click **Save Agent**.
 7. Type a **Name** and say **What it's for**. You need both. Spaces and capitals are fine.
 8. Click **Save agent**.
@@ -61,6 +61,7 @@ A model can only read so much of a chat at once. When a chat gets long, Aman sum
 
 ## Good to know
 
+- A new agent doesn't stop to ask you questions while it works. To let it ask, open **More settings**, click the edit button on **Run settings** and turn on **Ask user questions**.
 - An agent follows the same approval rules as Aman. Sending, deleting and installing still wait for your OK.
 - For every option an agent has, see [Create an agent](../../../../docs/create-agent/overview.mdx).
 

@@ -12,7 +12,7 @@ You can talk to Aman from Telegram. You make a small bot of your own, connect it
 2. Send /newbot and follow his steps. He gives you a token.
 3. In Aman, click **More** in the left bar, click **Settings**, then click **Connectors**.
 4. Find **Telegram** and click **Connect**.
-5. Paste the token and click **Connect**. Aman checks the token with Telegram before it saves anything.
+5. Paste the token and click **Connect**. Aman checks the token with Telegram before it saves anything. To leave without connecting, press ++esc++. The Telegram window closes and you stay in Settings.
 
 ## Pair it with you
 
