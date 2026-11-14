@@ -513,9 +513,8 @@ describe('GET /api/v1/today with a CalDAV calendar', () => {
       if (url === `${ACCOUNT_AGENT_URL}/account`) {
         return jsonResponse({
           connected: true,
-          url: 'https://caldav.example.org/dav/',
-          username: 'ada',
-          email: 'ada@example.org',
+          default: 'ada@example.org',
+          accounts: [{ url: 'https://caldav.example.org/dav/', username: 'ada', email: 'ada@example.org' }],
         });
       }
       throw new Error(`Unexpected address asked for: ${url}`);

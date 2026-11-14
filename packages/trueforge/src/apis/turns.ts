@@ -714,6 +714,7 @@ function createTurnResolver(deps: {
       calendarAccountFacts: async () => {
         const state = await getCalendarAccountState({
           accountUrl: configuration.CALENDAR_ACCOUNT_URL,
+          secret: configuration.CALENDAR_ACCOUNT_SECRET,
           fetchImpl: undefined,
           logger,
         }).catch(() => undefined);
@@ -725,6 +726,7 @@ function createTurnResolver(deps: {
       calendarRouting: async () => {
         const state = await getCalendarAccountState({
           accountUrl: configuration.CALENDAR_ACCOUNT_URL,
+          secret: configuration.CALENDAR_ACCOUNT_SECRET,
           fetchImpl: undefined,
           logger,
         }).catch(() => undefined);

@@ -235,7 +235,7 @@ describe('the email settings endpoints', () => {
   it('presents the instance secret to the agent on every call, and nothing else as a credential', async () => {
     agent.script([
       { status: 200, body: NOT_CONNECTED },
-      { status: 200, body: CONNECTED },
+      { status: 200, body: connectedBody() },
       { status: 200, body: NOT_CONNECTED },
     ]);
     await call({ method: 'GET', path: '/status' });
