@@ -104,6 +104,11 @@ export interface TelegramClient {
     text: string;
     inline_buttons?: readonly (readonly TelegramInlineButton[])[] | undefined;
   }): Promise<TelegramSentMessage>;
+  /** Sets the commands the bot's menu lists in one chat, so only the paired person's chat shows them. */
+  setMyCommands(input: {
+    chat_id: string;
+    commands: readonly { command: string; description: string }[];
+  }): Promise<void>;
   /** Stops the spinner on a tapped button. A failure here is worth logging, never retrying blindly. */
   answerCallbackQuery(input: { callback_query_id: string; text?: string | undefined }): Promise<void>;
   /** Fetches a file the person sent, as bytes. Throws a TelegramApiError when it cannot be read. */
@@ -272,6 +277,14 @@ export function createTelegramClient({
       await call({
         method: 'setWebhook',
         body: { url, secret_token, max_connections: 1, allowed_updates: ['message', 'callback_query'] },
+        result: z.boolean(),
+      });
+    },
+
+    async setMyCommands({ chat_id, commands }) {
+      await call({
+        method: 'setMyCommands',
+        body: { commands, scope: { type: 'chat', chat_id: Number(chat_id) } },
         result: z.boolean(),
       });
     },

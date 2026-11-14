@@ -92,6 +92,7 @@ For a short overview, see [Your privacy](../packages/trueforge/guide/topics/priv
     - Reminder text.
     - The details of anything that needs your ok.
     - Any photos or files you send the bot.
+    - The names of your models, personas and connectors, when you use the bot's menu to pick one.
 
     Chats with a bot are not end to end encrypted, so Telegram can hold and read them. Do not send the bot anything you would not want Telegram to hold. The chats themselves still live on your computer.
 
