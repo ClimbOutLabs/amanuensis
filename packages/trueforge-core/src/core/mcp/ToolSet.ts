@@ -3,6 +3,16 @@ import type { Logger } from 'winston';
 import { caldavEventReviewFrom, type CaldavEventReview } from '../calendar/caldav/eventReview';
 import { CALDAV_SERVER_NAME } from '../calendar/caldav/toolContract';
 import { caldavResultForModel } from '../calendar/caldav/toolResults';
+import {
+  mailForwardReadArguments,
+  mailForwardReviewFrom,
+  type MailForwardReview,
+} from '../email/mailConnector/forwardReview';
+import {
+  MAIL_CONNECTOR_NAME,
+  MAIL_CONTENT_TOOL_NAME,
+  MAIL_FORWARD_TOOL_NAME,
+} from '../email/mailConnector/toolContract';
 import { McpConnectionError, ToolPolicyBlockedError, ToolPreDispatchError } from '../errors';
 import type { ApprovalDecision, ToolResultRemediation } from '../events/schema';
 import type { InternalToolCallInfo, ToolEffectHints } from '../llm/LLMTypes';
@@ -23,8 +33,8 @@ import { isHostVouchedDecision, isStandingTrustDecision } from '../permissions/c
 import { isMapsToolName } from '../permissions/mapsToolNames';
 import { appendOutboundTrace, collectOutboundStrings } from '../permissions/outboundGuard';
 import {
-  isSearchAskReason,
   countsAsSilentLookup,
+  isSearchAskReason,
   resultTexts,
   runOneAtATime,
   type SearchProviderGrant,
@@ -96,7 +106,11 @@ export const REPEATED_DENIAL_REMEDIATION: ToolResultRemediation = {
 /** Marks a denied call whose card expired, so the chat says it expired instead of "you said no". */
 export function deniedToolCallRemediation(reason: string | undefined): ToolResultRemediation | undefined {
   return isApprovalExpiredReason(reason)
-    ? { reason_code: APPROVAL_EXPIRED_REASON_CODE, message: APPROVAL_EXPIRED_RESULT, suggested_action: 'request_approval' }
+    ? {
+        reason_code: APPROVAL_EXPIRED_REASON_CODE,
+        message: APPROVAL_EXPIRED_RESULT,
+        suggested_action: 'request_approval',
+      }
     : undefined;
 }
 
@@ -617,6 +631,30 @@ export class ToolSet implements IToolSet {
     }
   }
 
+  /**
+   * The message an Email forward sends on, read once before it is classified so the card can show it.
+   * Null when that read fails; the card then lists the request as written.
+   */
+  private async mailForwardFor(params: CallToolRequest['params']): Promise<MailForwardReview | null | undefined> {
+    if (!this.firstParty || this.name !== MAIL_CONNECTOR_NAME || params.name !== MAIL_FORWARD_TOOL_NAME) {
+      return undefined;
+    }
+    const read = mailForwardReadArguments(isRecord(params.arguments) ? params.arguments : {});
+    if (read === undefined) {
+      return undefined;
+    }
+    try {
+      const response = await this.source.callTool({ name: MAIL_CONTENT_TOOL_NAME, arguments: read });
+      if (!isCallToolResponseResult(response) || response.result.isError === true) {
+        return null;
+      }
+      const [id] = Array.isArray(read['email_ids']) ? read['email_ids'] : [];
+      return typeof id === 'string' ? mailForwardReviewFrom({ id, result: response.result }) : null;
+    } catch {
+      return null;
+    }
+  }
+
   /** Shapes a CalDAV result for the model: the id to reuse, and plain notes where the calendar gives none. */
   private withCaldavResultShape({
     params,
@@ -664,6 +702,7 @@ export class ToolSet implements IToolSet {
       return { info, classification: undefined };
     }
     const caldavEvent = await this.caldavEventFor(params);
+    const mailForward = await this.mailForwardFor(params);
     const decision = await classifyHostToolCall({
       sentinel,
       repository_id: null,
@@ -682,6 +721,7 @@ export class ToolSet implements IToolSet {
         mcp_search_tool: this.searchTools.has(params.name),
         mcp_search_plumbing_fields: this.searchPlumbingFields,
         caldav_event: caldavEvent,
+        mail_forward: mailForward,
         mcp_hints: {
           read_only_hint: info.read_only_hint,
           destructive_hint: info.destructive_hint,

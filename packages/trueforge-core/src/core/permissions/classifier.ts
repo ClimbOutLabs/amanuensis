@@ -36,6 +36,7 @@ import {
   MAIL_ACCOUNT_ARGUMENT,
   MAIL_CONNECTOR_NAME,
   MAIL_CONTENT_TOOL_NAME,
+  MAIL_FORWARD_TOOL_NAME,
   MAIL_NEW_MESSAGE_TOOL_NAME,
 } from '../email/mailConnector/toolContract';
 import { GOOGLE_SETUP_SERVER_ID, GOOGLE_SETUP_STATUS_TOOL_NAME } from '../google/setupToolContract';
@@ -228,6 +229,7 @@ import {
 
 import type { CaldavEventReview } from '../calendar/caldav/eventReview';
 import { CALDAV_SERVER_NAME, isCaldavReadToolName } from '../calendar/caldav/toolContract';
+import { forwardedSubject, type MailForwardReview } from '../email/mailConnector/forwardReview';
 import {
   HOME_ASSISTANT_SERVER_NAME,
   homeAssistantTarget,
@@ -266,6 +268,8 @@ export interface SentinelAction {
   mcp_first_party?: boolean | undefined;
   /** The CalDAV event a change names, read once before classifying. Set only for the CalDAV connector. */
   caldav_event?: CaldavEventReview | null | undefined;
+  /** The message an Email forward sends on, read once before classifying. Set only for the Email connector. */
+  mail_forward?: MailForwardReview | null | undefined;
   /** The user designated this connector as their search provider. Set by the host from the connector record only. */
   mcp_search_provider?: boolean | undefined;
   /** The host's own list for the designated provider names this tool as a search tool. Never from tool metadata. */
@@ -2593,7 +2597,8 @@ async function mailCardFacts(input: { action: SentinelAction; ctx: ClassifyConte
   const listed = await ctx.services.mail_listed_addresses({ ...identity, account: from });
   return {
     from,
-    choices: [...routing.accounts],
+    // A forward sends on a message one account holds, so no other account can be picked for it.
+    choices: action.tool_name === MAIL_FORWARD_TOOL_NAME ? [] : [...routing.accounts],
     new_recipients: mailRecipientsNotListed({ listed, params: action.canonical_params }),
   };
 }
@@ -2605,6 +2610,18 @@ const MAIL_MESSAGE_ARGUMENTS: ReadonlySet<string> = new Set([
   'bcc',
   'subject',
   'body',
+  MAIL_ACCOUNT_ARGUMENT,
+]);
+
+/** The arguments of an Email forward that the card shows as the note, the recipients or the message sent on. */
+const MAIL_FORWARD_ARGUMENTS: ReadonlySet<string> = new Set([
+  'recipients',
+  'cc',
+  'bcc',
+  'body',
+  'email_id',
+  'source_mailbox',
+  'include_attachments',
   MAIL_ACCOUNT_ARGUMENT,
 ]);
 
@@ -2631,28 +2648,41 @@ function mailArgumentMailboxes(value: unknown): Tier3Mailbox[] | null {
 }
 
 /**
- * The message an Email send or draft writes, laid out as a draft for the card: who it goes to, the subject
- * and the whole text. `rest` is every other argument the call carries, so nothing sent is left off the card.
- * Null when the call is not a new message, or when a part of it cannot be shown as written; the card then
- * lists the whole request instead.
+ * The message an Email send, forward or draft writes, laid out as a draft for the card: who it goes to, the
+ * subject and the whole text. A forward also shows the message it sends on. `rest` is every other argument
+ * the call carries, so nothing sent is left off the card. Null when a part of the call cannot be shown as
+ * written, or when a forward's message could not be read; the card then lists the whole request instead.
  */
 function hostMailMessage(action: SentinelAction): {
   email: Tier3Email;
   rest: { text: string | null; truncated: boolean };
 } | null {
   const draft = isHostMailDraft(action);
-  if (!draft && !(isHostMailSend(action) && action.tool_name === MAIL_NEW_MESSAGE_TOOL_NAME)) {
+  if (!draft && !isHostMailSend(action)) {
+    return null;
+  }
+  const forward = !draft && action.tool_name === MAIL_FORWARD_TOOL_NAME ? (action.mail_forward ?? null) : null;
+  if (!draft && action.tool_name !== MAIL_NEW_MESSAGE_TOOL_NAME && forward === null) {
     return null;
   }
   const params = action.canonical_params;
   const to = mailArgumentMailboxes(params['recipients']);
   const cc = mailArgumentMailboxes(params['cc']);
   const bcc = mailArgumentMailboxes(params['bcc']);
-  const subject = params['subject'] ?? '';
-  const body = params['body'];
-  if (to === null || cc === null || bcc === null || typeof subject !== 'string' || typeof body !== 'string') {
+  const subject = forward === null ? (params['subject'] ?? '') : forwardedSubject(forward.subject);
+  const body = forward === null ? params['body'] : (params['body'] ?? '');
+  const attached = params['include_attachments'] ?? true;
+  if (
+    to === null ||
+    cc === null ||
+    bcc === null ||
+    typeof subject !== 'string' ||
+    typeof body !== 'string' ||
+    typeof attached !== 'boolean'
+  ) {
     return null;
   }
+  const shown = forward === null ? MAIL_MESSAGE_ARGUMENTS : MAIL_FORWARD_ARGUMENTS;
   return {
     email: {
       action: draft ? 'save' : 'send',
@@ -2667,11 +2697,20 @@ function hostMailMessage(action: SentinelAction): {
       reply_to: null,
       from_name: null,
       name_left_off: false,
+      forwards:
+        forward === null
+          ? null
+          : {
+              from: escapeDisplayText(forward.from),
+              subject: escapeDisplayText(forward.subject),
+              body: escapeDisplayText(forward.body, { keepNewlines: true }),
+              truncated: forward.truncated,
+              attachments: attached ? forward.attachments.map(name => escapeDisplayText(name)) : [],
+            },
     },
-    rest: renderOutboundArguments(
-      Object.fromEntries(Object.entries(params).filter(([key]) => !MAIL_MESSAGE_ARGUMENTS.has(key))),
-      { valueMaxChars: SEND_VALUE_MAX_CHARS },
-    ),
+    rest: renderOutboundArguments(Object.fromEntries(Object.entries(params).filter(([key]) => !shown.has(key))), {
+      valueMaxChars: SEND_VALUE_MAX_CHARS,
+    }),
   };
 }
 

@@ -278,6 +278,7 @@ describe('Email connector classifier', () => {
         reply_to: null,
         from_name: null,
         name_left_off: false,
+        forwards: null,
       });
       expect(decision.card?.mail_from).toBe('nora@mail.example');
       // The draft is the whole request here, so nothing is listed a second time beside it.
@@ -336,9 +337,93 @@ describe('Email connector classifier', () => {
       expect(decision.card?.outbound_text).toContain(SUBJECT);
     });
 
-    it('a forward keeps the plain listing, because the message it sends on is not in the call', async () => {
+    const FORWARDED = {
+      from: 'Pippa Reed <pippa@example.com>',
+      subject: 'Roof repair quote',
+      body: 'The quote is 1,200 for the whole roof.',
+      truncated: false,
+      attachments: ['quote.pdf'],
+    };
+
+    it('a forward shows the note, the message it sends on and the files that go with it', async () => {
       const decision = await classifyTier(
-        hostMailCall('forward_email', { email_id: 'e1', recipients: [LISTED] }, OUTBOUND_WRITE),
+        {
+          ...hostMailCall(
+            'forward_email',
+            { email_id: 'e1', recipients: [LISTED], body: 'Can you look at this?' },
+            OUTBOUND_WRITE,
+          ),
+          mail_forward: FORWARDED,
+        },
+        ctxWithList([LISTED]),
+      );
+      expect(decision).toMatchObject({ tier: 3, auto_deny: null, reason: 'mail_send' });
+      expect(decision.card?.email).toMatchObject({
+        action: 'send',
+        to: [{ name: '', address: LISTED }],
+        subject: 'Fwd: Roof repair quote',
+        body: 'Can you look at this?',
+        forwards: FORWARDED,
+      });
+      expect(decision.card?.outbound_text).toBeNull();
+    });
+
+    it('a forward with no note still shows the message it sends on, and marks the subject once', async () => {
+      const decision = await classifyTier(
+        {
+          ...hostMailCall('forward_email', { email_id: 'e1', recipients: [LISTED] }, OUTBOUND_WRITE),
+          mail_forward: { ...FORWARDED, subject: 'Fwd: Roof repair quote' },
+        },
+        ctxWithList([LISTED]),
+      );
+      expect(decision.card?.email).toMatchObject({ subject: 'Fwd: Roof repair quote', body: '' });
+    });
+
+    it('a forward that leaves the files behind lists none', async () => {
+      const decision = await classifyTier(
+        {
+          ...hostMailCall(
+            'forward_email',
+            { email_id: 'e1', recipients: [LISTED], include_attachments: false },
+            OUTBOUND_WRITE,
+          ),
+          mail_forward: FORWARDED,
+        },
+        ctxWithList([LISTED]),
+      );
+      expect(decision.card?.email?.forwards?.attachments).toEqual([]);
+    });
+
+    it('a forward offers no other account, because one account holds the message', async () => {
+      const decision = await classifyTier(
+        {
+          ...hostMailCall('forward_email', { email_id: 'e1', recipients: [LISTED] }, OUTBOUND_WRITE),
+          mail_forward: FORWARDED,
+        },
+        ctxWithList([LISTED]),
+      );
+      expect(decision.card?.mail_from).toBe('nora@mail.example');
+      expect(decision.card?.mail_from_choices).toEqual([]);
+    });
+
+    it('a forward to a new address shows the same draft with the new-recipient notice', async () => {
+      const decision = await classifyTier(
+        {
+          ...hostMailCall('forward_email', { email_id: 'e1', recipients: ['stranger@example.com'] }, OUTBOUND_WRITE),
+          mail_forward: FORWARDED,
+        },
+        ctxWithList([LISTED]),
+      );
+      expect(decision.reason).toBe('mail_new_recipient');
+      expect(decision.card?.email?.forwards).toEqual(FORWARDED);
+    });
+
+    it('a forward whose message could not be read keeps the plain listing of the whole request', async () => {
+      const decision = await classifyTier(
+        {
+          ...hostMailCall('forward_email', { email_id: 'e1', recipients: [LISTED] }, OUTBOUND_WRITE),
+          mail_forward: null,
+        },
         ctxWithList([LISTED]),
       );
       expect(decision).toMatchObject({ tier: 3, auto_deny: null });

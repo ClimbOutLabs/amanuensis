@@ -488,3 +488,47 @@ describe('an email from an account connected with an app password', () => {
     expect(screen.queryByText('Also sent with this email')).toBeNull();
   });
 });
+
+describe('a forward', () => {
+  const FORWARDS = {
+    from: 'Pippa Reed <pippa@example.com>',
+    subject: 'Roof repair quote',
+    body: 'The quote is 1,200 for the whole roof.',
+    truncated: false,
+    attachments: ['quote.pdf'],
+  };
+
+  function renderForward({ note, forwards }: { note: string; forwards: typeof FORWARDS }) {
+    const base = cardWith();
+    if (base.email === null) throw new Error('expected an email card');
+    render(
+      <EmailApprovalCard
+        approvalId="approval-1"
+        card={{ ...base, email: { ...base.email, subject: 'Fwd: Roof repair quote', body: note, forwards } }}
+        onApprove={vi.fn()}
+        onDeny={vi.fn()}
+      />,
+    );
+  }
+
+  it('shows the note, the message it sends on and the files that go with it', () => {
+    renderForward({ note: 'Can you look at this?', forwards: FORWARDS });
+    expect(screen.getByText('Your note')).toBeTruthy();
+    expect(screen.getByText('Can you look at this?')).toBeTruthy();
+    expect(
+      screen.getByText('Forwarded message from Pippa Reed <pippa@example.com>, subject “Roof repair quote”'),
+    ).toBeTruthy();
+    expect(screen.getByText('The quote is 1,200 for the whole roof.')).toBeTruthy();
+    expect(screen.getByText('Files sent with it: quote.pdf')).toBeTruthy();
+  });
+
+  it('says when no note is added, no file goes along, and the message is longer than shown', () => {
+    renderForward({ note: '', forwards: { ...FORWARDS, truncated: true, attachments: [] } });
+    expect(screen.getByText('No note is added.')).toBeTruthy();
+    expect(screen.queryByText('This message has no text.')).toBeNull();
+    expect(screen.getByText('No files are sent with it.')).toBeTruthy();
+    expect(
+      screen.getByText('The forwarded message is longer than the part shown here. All of it is sent.'),
+    ).toBeTruthy();
+  });
+});

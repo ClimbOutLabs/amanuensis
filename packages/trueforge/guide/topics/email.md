@@ -29,7 +29,7 @@ Click **Answer the one that's waiting** on the new chat screen. Aman finds the o
 ## Write and send a reply
 
 1. Ask Aman to reply, such as "Reply to Dana and say Thursday works".
-2. Aman writes the email. A card shows the draft: the account it goes from, who it goes to, the subject and the full text. Nothing is sent yet. Anything else that goes with the email, such as an attached file, is listed under the text.
+2. Aman writes the email. A card shows the draft: the account it goes from, who it goes to, the subject and the full text. Nothing is sent yet. Anything else that goes with the email, such as an attached file, is listed under the text. When Aman forwards a message, the card shows your note, the message being forwarded and the names of the files sent with it.
 3. Choose a button on the card.
 
 - **Allow** sends it.

@@ -105,6 +105,18 @@ export const Tier3EmailSchema = z
       .boolean()
       .optional()
       .describe('True when a name was left off an address because it looked like an address.'),
+    // Absent on cards stored before this field existed, and on a message that is not a forward.
+    forwards: z
+      .object({
+        from: z.string().describe('Sender of the message being forwarded.'),
+        subject: z.string().describe('Subject of the message being forwarded.'),
+        body: z.string().describe('Text of the message being forwarded.'),
+        truncated: z.boolean().describe('True when the text is longer than the part shown.'),
+        attachments: z.array(z.string()).describe('Names of the files sent on with the message.'),
+      })
+      .nullable()
+      .optional()
+      .describe('The message a forward sends on, below the note in `body`; null when the message is not a forward.'),
   })
   .describe('The message an email action sends or saves, shown in full.')
   .openapi('Tier3Email');

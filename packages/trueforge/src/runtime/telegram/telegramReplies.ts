@@ -138,6 +138,7 @@ export const TELEGRAM_SHOWN_SECTION_FIELDS = {
     'reply_to',
     'from_name',
     'name_left_off',
+    'forwards',
   ] as const satisfies readonly (keyof z.infer<typeof Tier3EmailSchema>)[],
   calendar_event: [
     'action',
@@ -311,8 +312,26 @@ function approvalCardLines(card: Tier3Card): string[] {
         `Replaces the saved draft "${email.replaces.subject}" to ${email.replaces.to.map(mailboxLine).join(', ')}`,
       );
     }
-    lines.push('Message body:');
-    lines.push(email.body);
+    const forwards = email.forwards ?? null;
+    if (forwards === null) {
+      lines.push('Message body:');
+      lines.push(email.body);
+    } else {
+      lines.push(email.body === '' ? 'No note is added.' : 'Your note:');
+      if (email.body !== '') {
+        lines.push(email.body);
+      }
+      lines.push(`Forwarded message from ${forwards.from}, subject "${forwards.subject}":`);
+      lines.push(forwards.body);
+      if (forwards.truncated) {
+        lines.push('The forwarded message is longer than the part shown here. All of it is sent.');
+      }
+      lines.push(
+        forwards.attachments.length === 0
+          ? 'No files are sent with it.'
+          : `Files sent with it: ${forwards.attachments.join(', ')}`,
+      );
+    }
   }
   const event = card.calendar_event ?? null;
   if (event !== null) {

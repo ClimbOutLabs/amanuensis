@@ -262,6 +262,33 @@ describe('telegram pending replies', () => {
     expect(lines).toContain('attachments (array): ["/files/menu.pdf"]');
   });
 
+  it('shows a forward as the note, the message it sends on and the files that go with it', async () => {
+    const card = cardWith({
+      plain_what: 'Forward an email to sam@example.com?',
+      email: {
+        ...MAIL_FROM_EMAIL,
+        subject: 'Fwd: Roof repair quote',
+        body: 'Can you look at this?',
+        forwards: {
+          from: 'Pippa Reed <pippa@example.com>',
+          subject: 'Roof repair quote',
+          body: 'The quote is 1,200 for the whole roof.',
+          truncated: false,
+          attachments: ['quote.pdf'],
+        },
+      },
+    });
+    const { client, deps } = harness(doneTurnWith(approvalAction(card)));
+    await deliverPendingTelegramReplies(deps);
+    const text = client.sent[0]?.text ?? '';
+    expect(text).toContain('Your note:\nCan you look at this?');
+    expect(text).toContain(
+      'Forwarded message from Pippa Reed <pippa@example.com>, subject "Roof repair quote":\nThe quote is 1,200 for the whole roof.',
+    );
+    expect(text).toContain('Files sent with it: quote.pdf');
+    expect(client.sent[0]?.inline_buttons?.[0]?.map(button => button.text)).toEqual(['Approve', 'Deny']);
+  });
+
   it('shows the account an email goes from, and says to answer in the app to pick another', async () => {
     const card = cardWith({
       plain_what: 'Send this email.',

@@ -12,10 +12,10 @@ import { allowsChatApproval, allowsToolGrant } from '../../../src/core/mcp/appro
 import { createToolCallMemoState, executeToolCalls } from '../../../src/core/mcp/executeToolCalls';
 import { toolResultResponse, type ToolSchema } from '../../../src/core/mcp/IMCPServer';
 import { connectRemoteMcp } from '../../../src/core/mcp/remoteMcpClient';
-import { DeferredTool } from '../../../src/core/runtime/DeferredTool';
 import type { ToolSelectorConfig } from '../../../src/core/mcp/ToolSelectorPolicy';
 import type { AuditRecordInput } from '../../../src/core/permissions/audit';
 import type { SentinelServices } from '../../../src/core/permissions/context';
+import { DeferredTool } from '../../../src/core/runtime/DeferredTool';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 
 jest.mock('../../../src/core/mcp/remoteMcpClient', () => {
@@ -668,6 +668,60 @@ describe("the operator's own Email sidecar, with the annotations the mail server
     expect(response).toMatchObject({
       result: { isError: true, content: [{ type: 'text', text: CALDAV_UNKNOWN_ID_NOTE }] },
     });
+  });
+
+  it('reads the message a forward names, and shows it on the card', async () => {
+    const forwardTool: ToolSchema = { ...sendTool, name: 'forward_email', description: 'Forwards an email.' };
+    const email = makeToolSet({
+      tools: [forwardTool],
+      services: servicesWithGrants([]),
+      firstParty: true,
+      serverName: 'Email',
+      answer: {
+        content: [],
+        structuredContent: {
+          emails: [
+            {
+              email_id: '41',
+              sender: 'Pippa Reed <pippa@example.com>',
+              subject: 'Roof repair quote',
+              body: 'The quote is 1,200 for the whole roof.',
+              attachments: ['quote.pdf'],
+            },
+          ],
+        },
+      },
+    });
+    const forward = await email.toolCallInfo({
+      name: 'forward_email',
+      arguments: { email_id: '41', recipients: ['dana@example.org'] },
+    });
+    expect(forward.is_approval_required).toBe(true);
+    expect(forward.tier3_card?.email).toMatchObject({
+      subject: 'Fwd: Roof repair quote',
+      forwards: {
+        from: 'Pippa Reed <pippa@example.com>',
+        body: 'The quote is 1,200 for the whole roof.',
+        attachments: ['quote.pdf'],
+      },
+    });
+  });
+
+  it('asks about a forward with the plain listing when its message cannot be read', async () => {
+    const forwardTool: ToolSchema = { ...sendTool, name: 'forward_email', description: 'Forwards an email.' };
+    const email = makeToolSet({
+      tools: [forwardTool],
+      services: servicesWithGrants([]),
+      firstParty: true,
+      serverName: 'Email',
+    });
+    const forward = await email.toolCallInfo({
+      name: 'forward_email',
+      arguments: { email_id: '41', recipients: ['dana@example.org'] },
+    });
+    expect(forward.is_approval_required).toBe(true);
+    expect(forward.tier3_card?.email ?? null).toBeNull();
+    expect(forward.tier3_card?.outbound_text).toContain('41');
   });
 
   it('still asks before sending, and no answer covers a send', async () => {
