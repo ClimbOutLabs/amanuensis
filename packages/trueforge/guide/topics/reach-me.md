@@ -15,7 +15,7 @@ How to get there: Click **More** in the left bar, then **Settings**, then **Reac
 - Texts. Once texts are set up and you turn them on, Aman can text your phone when something needs you. See [Text messages from Aman](text-messages.md).
 - Phone calls. Once texts are set up, you can also let Aman phone you when something urgent needs you. Calls are off until you turn them on. See [Phone calls from Aman](phone-calls.md).
 
-A reminder also shows up as a line in the chat where you set it.
+A reminder also shows up as a line in the chat where you set it. A morning brief from your daily schedule leaves a note under the bell when it is ready. See [Your morning brief](daily-brief.md).
 
 ## Let Aman watch for things
 
@@ -38,7 +38,7 @@ The first time you turn it on, Aman starts from that moment, so old mail doesn't
 
 ## How loudly Aman tells you
 
-- A note is quiet. It waits under the **For you** bell. Most things are notes.
+- A note is quiet. It waits under the **For you** bell. Most things are notes, such as a finished morning brief.
 - A nudge is a notice on the devices where you turned notices on.
 - A call is a phone call, once the owner sets up Twilio, the voice parts are running and you switch calls on. Until then it comes as a nudge.
 

@@ -33,6 +33,12 @@ import {
   CALDAV_READ_TOOL_NAMES,
   CALDAV_TOOL_NAMES,
 } from '@truefoundry/trueforge-core/core/calendar/caldav/toolContract';
+import {
+  isMailComposeToolName,
+  isMailSendToolName,
+  MAIL_ACCOUNT_LIST_TOOL_NAME,
+  MAIL_CONNECTOR_TOOL_NAMES,
+} from '@truefoundry/trueforge-core/core/email/mailConnector/toolContract';
 import { randomUUID } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { z } from 'zod';
@@ -55,13 +61,25 @@ export const INERT_WEB_SEARCH_TOOL = 'web_search';
 /** Opt-in (`startInertMcpServer({ searchProvider: true })`) with `web_search` in the search provider's shape. */
 export const INERT_WEB_FETCH_TOOL = 'web_fetch';
 /** Opt-in (`startInertMcpServer({ mail: true })`): the Email sidecar's tool names, unannotated, answering with no mail. */
-export const INERT_MAIL_TOOLS = [
-  'list_emails_metadata',
-  'get_emails_content',
-  'list_mailboxes',
-  'save_draft',
-  'send_email',
-] as const;
+export const INERT_MAIL_TOOLS = [...MAIL_CONNECTOR_TOOL_NAMES, MAIL_ACCOUNT_LIST_TOOL_NAME] as const;
+/** The mail accounts the stand-in lists, the first being the one a call with no account uses. */
+export const INERT_MAIL_ACCOUNTS = ['home@harbour.example', 'work@harbour.example'] as const;
+
+/** The fields of a message the mail stand-in keeps, so a test can compare what arrived with what the card showed. */
+const MAIL_MESSAGE_SHAPE = {
+  account_name: z.string().optional(),
+  recipients: z.array(z.string()).optional(),
+  cc: z.array(z.string()).optional(),
+  bcc: z.array(z.string()).optional(),
+  subject: z.string().optional(),
+  body: z.string().optional(),
+};
+
+/** One call the mail stand-in received. */
+export interface InertMailCall {
+  name: string;
+  arguments: Record<string, unknown>;
+}
 
 /**
  * Opt-in (`startInertMcpServer({ calendar: true })`): the Calendar sidecar's tool names, the reads
@@ -181,6 +199,8 @@ export interface InertMcpServer {
   redirectAllTo: (redirect: InertRedirect | undefined) => void;
   /** HTTP requests received since the last reset, whatever they were answered with. */
   requestsSeen: () => number;
+  /** Every call the mail tools received since the last reset, in order, with the message fields as they arrived. */
+  mailCalls: () => readonly InertMailCall[];
   /**
    * While set, the search provider's `web_search` answers each query with these page links, as JSON results
    * that each carry their own `url` like a real provider's, instead of its invented line. `undefined` restores it.
@@ -309,6 +329,7 @@ function buildMcpServer({
   webSearch,
   searchProvider,
   mail,
+  mailCalls,
   calendar,
   pageById,
   messageSearch,
@@ -322,6 +343,7 @@ function buildMcpServer({
   webSearch: boolean;
   searchProvider: boolean;
   mail: boolean;
+  mailCalls: InertMailCall[];
   calendar: boolean;
   pageById: boolean;
   messageSearch: boolean;
@@ -536,8 +558,17 @@ function buildMcpServer({
     for (const name of INERT_MAIL_TOOLS) {
       server.registerTool(
         name,
-        { description: `Pretends to ${name.replace(/_/g, ' ')}. Never reaches a mailbox.`, inputSchema: {} },
-        () => textResult('[]'),
+        {
+          description: `Pretends to ${name.replace(/_/g, ' ')}. Never reaches a mailbox.`,
+          inputSchema: isMailComposeToolName(name) ? MAIL_MESSAGE_SHAPE : {},
+        },
+        (message: Record<string, unknown>) => {
+          mailCalls.push({ name, arguments: message });
+          if (name === MAIL_ACCOUNT_LIST_TOOL_NAME) {
+            return textResult(JSON.stringify(INERT_MAIL_ACCOUNTS.map(account_name => ({ account_name }))));
+          }
+          return textResult(isMailSendToolName(name) ? 'Email sent successfully to the people named.' : '[]');
+        },
       );
     }
   }
@@ -640,6 +671,7 @@ export async function startInertMcpServer(options?: {
   if (webSearch && searchProvider) {
     throw new Error('inert MCP fixture offers one web_search: pick webSearch or searchProvider');
   }
+  const mailCalls: InertMailCall[] = [];
   const counters: Counters = {
     echo: 0,
     read: 0,
@@ -721,6 +753,7 @@ export async function startInertMcpServer(options?: {
       webSearch,
       searchProvider,
       mail,
+      mailCalls,
       calendar,
       pageById: options?.pageById === true,
       messageSearch: options?.messageSearch === true,
@@ -813,11 +846,13 @@ export async function startInertMcpServer(options?: {
       lastAuthorizationHeader = undefined;
       requestCount = 0;
       redirect = undefined;
+      mailCalls.length = 0;
     },
     redirectAllTo: next => {
       redirect = next;
     },
     requestsSeen: () => requestCount,
+    mailCalls: () => [...mailCalls],
     setSearchResults: results => {
       searchResults.current = results;
     },

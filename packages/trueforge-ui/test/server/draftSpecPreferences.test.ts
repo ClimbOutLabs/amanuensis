@@ -43,7 +43,23 @@ describe('selectDraftSpecPreferences', () => {
       }),
     ).toEqual({
       model: { name: 'm' },
-      config: { sandbox: { enabled: true } },
+      config: { sandbox: { enabled: true }, askUserQuestions: { enabled: false } },
+    });
+  });
+
+  it('starts asking the user questions off for every new agent', () => {
+    expect(
+      selectAgentDraftSpecPreferences({
+        model: { name: 'm' },
+        config: { askUserQuestions: { enabled: true } },
+      }),
+    ).toEqual({
+      model: { name: 'm' },
+      config: { askUserQuestions: { enabled: false } },
+    });
+    expect(selectAgentDraftSpecPreferences({ model: { name: 'm' } })).toEqual({
+      model: { name: 'm' },
+      config: { askUserQuestions: { enabled: false } },
     });
   });
 
@@ -69,6 +85,7 @@ describe('selectDraftSpecPreferences', () => {
         iterationLimit: 4,
         sandbox: { enabled: false, fileDownloads: false },
         contextManagement: { compaction: { enabled: false } },
+        askUserQuestions: { enabled: false },
       },
     });
   });
@@ -94,7 +111,7 @@ describe('draft preference storage', () => {
     expect(readDraftSpecPreferences('chat')).toEqual({ model: { name: 'chat/model' } });
     expect(readDraftSpecPreferences('agent')).toEqual({
       model: { name: 'agent/model' },
-      config: { sandbox: { enabled: true } },
+      config: { sandbox: { enabled: true }, askUserQuestions: { enabled: false } },
     });
   });
 
@@ -118,7 +135,7 @@ describe('draft preference storage', () => {
     expect(readDraftSpecPreferences('agent')).toEqual({
       model: { name: 'legacy/model' },
       skills: [{ name: 'Skill' }],
-      config: { sandbox: { enabled: true } },
+      config: { sandbox: { enabled: true }, askUserQuestions: { enabled: false } },
     });
     expect(window.localStorage.getItem(DRAFT_SPEC_PREFERENCES_STORAGE_KEY)).toBeNull();
   });
@@ -154,7 +171,7 @@ describe('draft preference storage', () => {
     setItemSpy.mockRestore();
     expect(readDraftSpecPreferences('agent')).toEqual({
       model: { name: 'legacy/model' },
-      config: { sandbox: { enabled: true } },
+      config: { sandbox: { enabled: true }, askUserQuestions: { enabled: false } },
     });
     expect(window.localStorage.getItem(DRAFT_SPEC_PREFERENCES_STORAGE_KEY)).toBeNull();
   });
