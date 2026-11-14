@@ -439,7 +439,8 @@ describe('connectionOfferCapability', () => {
       expect(instruction).toContain('"Connect my email"');
       expect(instruction).toContain('"Not now"');
       expect(instruction).toContain('open Settings, then Connectors');
-      expect(instruction).toContain('the Google card there connects mail too');
+      expect(instruction).toContain('from the Email card.');
+      expect(instruction).not.toContain('Google');
       expect(instruction).toContain('without making them ask again');
     });
 

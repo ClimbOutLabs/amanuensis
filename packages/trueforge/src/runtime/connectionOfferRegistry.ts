@@ -27,7 +27,7 @@ export interface OfferableConnector {
   question: string;
   connectOption: string;
   declineOption: string;
-  /** The card in Settings, then Connectors, where the person connects it, and any other way there. */
+  /** The card in Settings, then Connectors, where the person connects it. */
   settingsCard: string;
   /** The whole reply after a no: one line, and it leaves Settings as the person's way back. */
   replyLine: string;
@@ -46,7 +46,7 @@ const EMAIL: OfferableConnector = {
   question: 'Would you like to connect your email so I can do that?',
   connectOption: 'Connect my email',
   declineOption: 'Not now',
-  settingsCard: 'the Email card (for Gmail, the Google card there connects mail too, and its own steps lead that way)',
+  settingsCard: 'the Email card',
   replyLine: 'No problem. You can connect it any time in Settings, then Connectors, from the Email card.',
   connectedVia: async host => {
     if (await host.mailConnectorRegistered()) {
