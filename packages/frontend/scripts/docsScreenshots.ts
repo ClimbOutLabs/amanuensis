@@ -12,6 +12,7 @@ import { chromium, type Browser, type BrowserContext, type Page } from 'playwrig
 import { createServer } from 'vite';
 
 import configuration from '../../trueforge/src/config.ts';
+import { localModelEndpointOf } from '../../trueforge/src/runtime/remoteAddress.ts';
 import { startApprovalTestServer } from '../../trueforge/tests/fixtures/approvalTestServer.ts';
 import { FakeSandboxProvider } from '../../trueforge/tests/fixtures/fakeSandboxProvider.ts';
 import { freePort } from '../tests/journeys/support/builtApp.ts';
@@ -161,6 +162,9 @@ async function main(): Promise<void> {
     modelIds: PROVIDER.models.map(entry => entry.model_id),
   });
   const api = await startApprovalTestServer({ localSignIn: true, sandboxProvider: new FakeSandboxProvider(new Map()) });
+  // The demo model runs on this computer, so its address has to be named before the server will use it.
+  const demoModelEndpoint = localModelEndpointOf(model.baseUrl);
+  if (demoModelEndpoint !== null) configuration.LOCAL_MODEL_ENDPOINTS.push(demoModelEndpoint);
   const viteCache = privateViteCache('docs-screenshots');
   const vite = await createServer({
     cacheDir: viteCache.cacheDir,
