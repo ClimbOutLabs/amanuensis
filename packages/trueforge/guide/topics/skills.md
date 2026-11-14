@@ -51,7 +51,7 @@ A skill script that needs a website or an extra package can't get it on its own.
 
 You need to fill in every box. If you change the address, folder or branch after checking, click **Check skill** again.
 
-You can't add the skill without its websites. If the skill's files change before you click add, nothing is added, and Aman asks you to check again.
+Aman saves the skill at the exact version it checked, so later changes to the branch don't reach you. You can't add the skill without its websites. If the skill's files change before you click add, nothing is added, and Aman asks you to check again.
 
 ## Add a skill from a chat
 

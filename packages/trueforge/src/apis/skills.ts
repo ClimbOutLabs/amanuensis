@@ -20,7 +20,7 @@ import {
   updateSkillNetworkApprovalRoute,
   updateSkillNetworkDeniedHostRoute,
 } from '../routes/skillRoutes';
-import { sameWebsites, settleSkillWebsites, type ReadSkillFiles } from '../runtime/skillWebsites';
+import { sameWebsites, settleSkillWebsites, skillSourceKey, type ReadSkillFiles } from '../runtime/skillWebsites';
 import { skillNetworkTokens } from '../sandbox/skillnet/skillNetworkTokens';
 import type {
   AvailableSkill,
@@ -67,16 +67,28 @@ type SettledManifest =
   { ok: true; manifest: SkillManifest; hosts: readonly string[] } | { ok: false; status: 422; message: string };
 
 /**
- * A git skill is stored with the websites found in its files, never a list sent with it, so what
- * is approved is what Aman itself read. Other skill kinds are stored as sent.
+ * A git skill is stored at the commit Aman read, with the websites found in its files, never a
+ * list sent with it, so what is approved is what Aman itself read. Other skill kinds are stored as
+ * sent.
  */
 async function settleManifest<TTransaction>(input: {
   deps: SettingsSkillsRouterDeps<TTransaction>;
   manifest: SkillManifest;
+  /** The saved version of this skill, if any: an edit that keeps its source is not read again. */
+  saved?: SkillManifest | undefined;
 }): Promise<SettledManifest> {
   const git = parseGitSkill(input.manifest);
   if (git === undefined) {
     return { ok: true, manifest: input.manifest, hosts: [] };
+  }
+  const saved = input.saved === undefined ? undefined : parseGitSkill(input.saved);
+  if (saved !== undefined && skillSourceKey(saved) === skillSourceKey(git) && saved.ref === git.ref) {
+    const kept: GitSkill = { ...git };
+    delete kept.network_hosts;
+    if (saved.network_hosts !== undefined && saved.network_hosts.length > 0) {
+      kept.network_hosts = saved.network_hosts;
+    }
+    return { ok: true, manifest: kept, hosts: saved.network_hosts ?? [] };
   }
   const found = await settleSkillWebsites({
     readFiles: input.deps.readFiles,
@@ -87,7 +99,7 @@ async function settleManifest<TTransaction>(input: {
     return { ok: false, status: 422, message: found.problem === 'too_many' ? TOO_MANY_WEBSITES : UNREADABLE_SKILL };
   }
   // The stored list is always the scan's; whatever the request named is dropped.
-  const manifest: GitSkill = { ...git };
+  const manifest: GitSkill = { ...git, ref: found.value.commit };
   delete manifest.network_hosts;
   if (found.value.hosts.length > 0) {
     manifest.network_hosts = found.value.hosts;
@@ -233,7 +245,9 @@ export function createSkillsRouter<TTransaction>(deps: SettingsSkillsRouterDeps<
   const putHandler: RouteHandler<typeof putSkillRoute> = async c => {
     const body: UpdateSkillRequest = c.req.valid('json');
     const requestContext = deps.resolveRequestContext(c);
-    const settled = await settleManifest({ deps, manifest: body.manifest });
+    const saved =
+      parseGitSkill(body.manifest) === undefined ? undefined : await findSkillRecord(deps, c, body.manifest.name);
+    const settled = await settleManifest({ deps, manifest: body.manifest, saved: saved?.manifest });
     if (!settled.ok) {
       return c.json({ error: { message: settled.message } }, settled.status);
     }
@@ -245,7 +259,7 @@ export function createSkillsRouter<TTransaction>(deps: SettingsSkillsRouterDeps<
       return c.json({ error: { message: WEBSITES_CHANGED } }, 409);
     }
     // A new skill with websites is added only together with their approval.
-    if (!approves && hosts.length > 0 && (await findSkillRecord(deps, c, manifest.name)) === undefined) {
+    if (!approves && hosts.length > 0 && saved === undefined) {
       return c.json({ error: { message: WEBSITES_CHANGED } }, 409);
     }
     const input = { tenant_id: requestContext.tenant_id, name: manifest.name, manifest };

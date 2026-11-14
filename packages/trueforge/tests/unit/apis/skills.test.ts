@@ -113,14 +113,15 @@ describe('skills routers', () => {
     );
   });
 
-  it('PUT upserts a skill and echoes the stored manifest', async () => {
+  it('PUT upserts a skill at the commit it was read at and echoes the stored manifest', async () => {
     const response = await settingsRouter.request('/', putInit(wrapManifest(putBody)));
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ data: configured(putBody) });
+    const stored = { ...putBody, ref: FIXTURE_COMMIT };
+    expect(await response.json()).toEqual({ data: configured(stored) });
 
     const list = await settingsRouter.request('/');
     expect(list.status).toBe(200);
-    expect(await list.json()).toEqual({ data: [configured(putBody)] });
+    expect(await list.json()).toEqual({ data: [configured(stored)] });
   });
 
   it('POST creates a skill and returns 409 on name clash', async () => {
@@ -131,7 +132,8 @@ describe('skills routers', () => {
     };
     const created = await settingsRouter.request('/', postInit(wrapManifest(createBody)));
     expect(created.status).toBe(201);
-    expect(await created.json()).toEqual({ data: configured(createBody) });
+    const stored = { ...createBody, ref: FIXTURE_COMMIT };
+    expect(await created.json()).toEqual({ data: configured(stored) });
 
     const clash = await settingsRouter.request('/', postInit(wrapManifest(createBody)));
     expect(clash.status).toBe(409);
@@ -391,8 +393,47 @@ describe('skills routers', () => {
       );
       expect(created.status).toBe(201);
       const [record] = await skillStore.listSkills({ tenant_id: 'default', names: ['news'] });
-      expect(record?.manifest).toMatchObject({ network_hosts: ['api.news-digest.info'] });
+      expect(record?.manifest).toMatchObject({ network_hosts: ['api.news-digest.info'], ref: FIXTURE_COMMIT });
       expect(record?.network_approval).toEqual(['api.news-digest.info']);
+      await settingsRouter.request('/news', { method: 'DELETE' });
+    });
+
+    it('keeps an edited skill at the version it was read at, without reading it again', async () => {
+      const editRouter = createSkillsRouter({
+        resolveSkillStore: () => skillStore,
+        withTransaction: callback => db.transaction().execute(callback),
+        resolveRequestContext: () => STANDALONE_REQUEST_CONTEXT,
+        catalog: [],
+        readFiles: readFixture,
+      });
+      const created = await editRouter.request(
+        '/',
+        postInit({ manifest: news, approved_websites: ['api.news-digest.info'] }),
+      );
+      expect(created.status).toBe(201);
+      // The repository is gone now; an edit that keeps the saved version still works.
+      const goneRouter = createSkillsRouter({
+        resolveSkillStore: () => skillStore,
+        withTransaction: callback => db.transaction().execute(callback),
+        resolveRequestContext: () => STANDALONE_REQUEST_CONTEXT,
+        catalog: [],
+        readFiles: () => Promise.reject(new Error('repository removed')),
+      });
+      const edited = await goneRouter.request(
+        '/',
+        putInit(wrapManifest({ ...news, ref: FIXTURE_COMMIT, description: 'Reads the morning news.' })),
+      );
+      expect(edited.status).toBe(200);
+      const [record] = await skillStore.listSkills({ tenant_id: 'default', names: ['news'] });
+      expect(record?.manifest).toMatchObject({
+        description: 'Reads the morning news.',
+        ref: FIXTURE_COMMIT,
+        network_hosts: ['api.news-digest.info'],
+      });
+      expect(record?.network_approval).toEqual(['api.news-digest.info']);
+      // Pointing it back at a branch reads it again.
+      const moved = await goneRouter.request('/', putInit(wrapManifest(news)));
+      expect(moved.status).toBe(422);
       await settingsRouter.request('/news', { method: 'DELETE' });
     });
 
