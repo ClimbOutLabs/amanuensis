@@ -76,6 +76,17 @@ const connectedReply = (signIn = 'ok') =>
       default: 'u@example.invalid',
     }),
   );
+/** The flat answer an agent that has not learned the list answer yet gives for one saved account. */
+const flatConnectedReply = (signIn = 'ok') =>
+  new Response(
+    JSON.stringify({
+      connected: true,
+      url: 'https://nas.example.invalid/dav/',
+      username: 'u',
+      email: 'u@example.invalid',
+      sign_in: signIn,
+    }),
+  );
 const emptyReply = () => new Response(JSON.stringify({ connected: false }));
 
 const bootDeps = (
@@ -102,6 +113,37 @@ describe('the Calendar connector follows the saved account', () => {
     const { rows, store } = makeStore();
     await registerCalendarConnectorFromSavedAccountInBackground({
       ...bootDeps(replyingWith([connectedReply()])),
+      mcpServerStore: store,
+    });
+    expect(rows.get('Calendar')?.manifest).toMatchObject({ type: 'remote', url: MCP_URL });
+    expect(rows.get('Calendar')?.first_party).toBe(true);
+  });
+
+  it('reads an agent that still answers with one flat account as a list of one', async () => {
+    const state = await getCalendarAccountState({
+      accountUrl: ACCOUNT_URL,
+      secret: SECRET,
+      logger,
+      fetchImpl: replyingWith([flatConnectedReply()]),
+    });
+    expect(state).toEqual({
+      connected: true,
+      sign_in: 'ok',
+      account: { url: 'https://nas.example.invalid/dav/', username: 'u', email: 'u@example.invalid' },
+      accounts: [
+        {
+          account: { url: 'https://nas.example.invalid/dav/', username: 'u', email: 'u@example.invalid' },
+          sign_in: 'ok',
+        },
+      ],
+      default_key: 'u@example.invalid',
+    });
+  });
+
+  it('registers the connector at boot from an agent that still answers with one flat account', async () => {
+    const { rows, store } = makeStore();
+    await registerCalendarConnectorFromSavedAccountInBackground({
+      ...bootDeps(replyingWith([flatConnectedReply()])),
       mcpServerStore: store,
     });
     expect(rows.get('Calendar')?.manifest).toMatchObject({ type: 'remote', url: MCP_URL });

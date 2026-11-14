@@ -125,6 +125,14 @@ export function createConnectorAccountClient<TAccount>(kind: ConnectorAccountKin
         }
         entries.push({ account, sign_in: signInAnswer(agentField(item, 'sign_in')) });
       }
+    } else {
+      // An agent that still answers with one flat account reads as a list of one. This goes away
+      // once every account agent answers with the list.
+      const account = kind.parseAccount(body);
+      if (account === null) {
+        throw unreachable({ message: kind.connectorUnreachableMessage });
+      }
+      entries.push({ account, sign_in: signInAnswer(agentField(body, 'sign_in')) });
     }
     if (entries.length === 0) {
       throw unreachable({ message: kind.connectorUnreachableMessage });
