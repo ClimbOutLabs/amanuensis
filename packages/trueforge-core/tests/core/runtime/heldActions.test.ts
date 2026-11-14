@@ -872,6 +872,31 @@ describe('approving a held mail send to an address not on the Email list', () =>
     );
   });
 
+  it('an approval that picks no account sends from the account the card showed', async () => {
+    const h = makeHarness([() => toolCallsStream([mailSendCall])], {
+      mail: { listed: ['dana@example.com', 'stranger@example.net'], add: 'loaded' },
+    });
+    h.base.mail_accounts = () =>
+      Promise.resolve({ accounts: ['home@example.com', 'work@example.com'], default_account: 'work@example.com' });
+    const { thread } = await runBrief(h);
+    const context = heldContext(thread);
+    const card = context.flatMap(message =>
+      'role' in message && message.role === 'assistant' ? (message.tool_calls ?? []) : [],
+    )[0]?.tool_info.tier3_card;
+    expect(card).toMatchObject({
+      mail_from: 'work@example.com',
+      mail_from_choices: ['home@example.com', 'work@example.com'],
+    });
+
+    await answer(h, context, [approve('call-mail')]);
+    expect(h.callTool).toHaveBeenCalledTimes(1);
+    expect(h.callTool).toHaveBeenCalledWith(
+      { name: 'send_email', arguments: MAIL_SEND_ARGS },
+      expect.objectContaining({ status: 'allow', from_account: 'work@example.com' }),
+      expect.anything(),
+    );
+  });
+
   it('Cancel adds nothing and sends nothing', async () => {
     const { h, context } = await heldSend(['dana@example.com']);
     await answer(h, context, [deny('call-mail')]);
