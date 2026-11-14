@@ -6,6 +6,7 @@
 import { join } from 'node:path';
 import type { CallToolResponse } from '../../../../src/core/mcp/IMCPServer';
 import { createSentinelHostContext, defaultSentinelServices } from '../../../../src/core/permissions/context';
+import type { GitCommitIdentity } from '../../../../src/core/sandbox/gitCommitIdentity';
 import { gitProbeRunner, observeGitRemotes } from '../../../../src/core/sandbox/gitRemoteObservation';
 import { planHostAuthenticatedGit } from '../../../../src/core/sandbox/hostAuthenticatedGit';
 import type { ExecResult } from '../../../../src/core/sandbox/provider/Provider';
@@ -31,7 +32,11 @@ function slotProvider(input: { diskMb: number; defaultTimeoutSeconds: number }):
 }
 
 /** The Sandbox tools on a real slot, as a chat has them. `switchOn` is the owner's Sandbox switch. */
-function slotSandbox(input: { provider: SlotSandboxProvider; switchOn: boolean }): Sandbox {
+function slotSandbox(input: {
+  provider: SlotSandboxProvider;
+  switchOn: boolean;
+  gitCommitIdentity?: GitCommitIdentity;
+}): Sandbox {
   const services = defaultSentinelServices({ pinned_path: '/usr/bin:/bin' });
   services.sandboxWithoutAsking = () => Promise.resolve(input.switchOn);
   return new Sandbox({
@@ -42,6 +47,7 @@ function slotSandbox(input: { provider: SlotSandboxProvider; switchOn: boolean }
     mcpConnectTimeoutMs: 5_000,
     logger: makeSilentLogger(),
     tracing: NOOP_AGENT_TRACING,
+    gitCommitIdentity: input.gitCommitIdentity,
     sentinel: createSentinelHostContext({
       tenant_id: 'live',
       created_by: 'live',
@@ -250,4 +256,26 @@ describe('coding in the sandbox (live agents)', () => {
     expect(textOf(made)).toContain('venv=0');
     expect(textOf(made)).toContain(`${WORKSPACE}/.venv`);
   }, 180_000);
+
+  test('a plain commit works and carries the name the person chose', async () => {
+    if (SLOTS_DIR === undefined) {
+      return;
+    }
+    const sandbox = slotSandbox({
+      provider: slotProvider({ diskMb: 100, defaultTimeoutSeconds: 30 }),
+      switchOn: false,
+      gitCommitIdentity: { name: 'Sam Rivera', email: 'sam@example.com' },
+    });
+    await allowed(sandbox, {
+      name: 'write_file',
+      arguments: { intent: 'live check', path: 'notes/a.txt', content: 'one\n' },
+    });
+    const committed = await allowed(
+      sandbox,
+      shell('git init -q . && git add a.txt && git commit -q -m first && git log -1 --format="%an <%ae> / %cn <%ce>"', {
+        cwd: `${WORKSPACE}/notes`,
+      }),
+    );
+    expect(committed).toContain('Sam Rivera <sam@example.com> / Sam Rivera <sam@example.com>');
+  }, 120_000);
 });

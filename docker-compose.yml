@@ -128,6 +128,10 @@ services:
       # Local text-to-speech sidecar for spoken replies. When it is down the
       # browser reads replies with its own built-in voice instead.
       TTS_URL: http://aman-tts:8002
+      # Guards both speech sidecars; the same value goes to aman-stt and aman-tts. There is no default:
+      # `pnpm smoke` makes a random one for each run, and for plain `docker compose` set it in the shell
+      # (openssl rand -hex 32).
+      SPEECH_SECRET: ${SPEECH_SECRET:?set SPEECH_SECRET to a random value of 32 or more characters, for example from openssl rand -hex 32}
       # Email send list the server writes, and the sidecar's status file it reads (see mail-email).
       MAIL_POLICY_FILE: /data/mail-policy/allowed_recipients.toml
       MAIL_POLICY_STATUS_FILE: /data/mail-policy-status/loaded.sha256
@@ -209,6 +213,9 @@ services:
       AMAN_STT_CPU_THREADS: '4'
       # Model cache location; matches the stt-model-cache volume below.
       AMAN_STT_MODEL_DIR: /data/stt-cache
+      # The shared secret every transcription call must carry; the same value the server sends (see the
+      # server's SPEECH_SECRET).
+      SPEECH_SECRET: ${SPEECH_SECRET:?set SPEECH_SECRET to a random value of 32 or more characters, for example from openssl rand -hex 32}
     volumes:
       # Persistent Whisper model cache; without this the ~464 MB model
       # downloads again on every container recreate.
@@ -230,6 +237,9 @@ services:
     environment:
       # onnxruntime threads; 4 matches the 4 pinned cores.
       AMAN_TTS_CPU_THREADS: '4'
+      # The shared secret every speak call must carry; the same value the server sends (see the
+      # server's SPEECH_SECRET).
+      SPEECH_SECRET: ${SPEECH_SECRET:?set SPEECH_SECRET to a random value of 32 or more characters, for example from openssl rand -hex 32}
     networks:
       - voice
     restart: unless-stopped

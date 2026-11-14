@@ -47,6 +47,7 @@ import { createPersonalizationRouter } from './apis/personalization';
 import { createPersonasRouter, createSessionPersonasRouter } from './apis/personas';
 import { createChatPrivacyRouter, createPrivateChatSweepRouter } from './apis/privateChats';
 import { createReachRouter } from './apis/reach';
+import { createRecallExclusionsRouter } from './apis/recallExclusions';
 import { createRemindersRouter } from './apis/reminders';
 import { createRepositoriesRouter, createSessionRepositoryRouter } from './apis/repositories';
 import { createScheduleExecutionRouter, createSchedulesRouter } from './apis/schedules';
@@ -60,6 +61,7 @@ import { createSpaceFolderAssignmentsRouter, createSpaceFoldersRouter } from './
 import { createSpacePicturesRouter } from './apis/spacePictures';
 import { createSpacesRouter } from './apis/spaces';
 import { createTextNumberRouter } from './apis/textNumber';
+import { createTodayRouter } from './apis/today';
 import { createTurnsRouter } from './apis/turns';
 import { createVoiceRouter } from './apis/voice';
 import type { Authenticator } from './auth/authenticator';
@@ -106,6 +108,7 @@ import type { IPersonaStore } from './db/personaStore';
 import type { PersonOwner } from './db/personOwner';
 import type { IPushSubscriptionStore } from './db/pushSubscriptionStore';
 import type { IReachSettingsStore } from './db/reachSettingsStore';
+import type { IRecallExclusionStore } from './db/recallExclusionStore';
 import type { IRepositoryStore } from './db/repositoryStore';
 import type { ISandboxProviderStore } from './db/sandboxProviderStore';
 import type { IScheduleStore } from './db/scheduleStore';
@@ -325,6 +328,8 @@ export interface ServerDeps<TTransaction> {
   /** Keeps the past-chat search index for people who turned the search on. */
   chatSearchIndexer: ChatSearchIndexer;
   briefItemStore: IBriefItemCompletionStore;
+  /** Facts pulled out of a chat's recall, stored with the chat. */
+  recallExclusionStore: IRecallExclusionStore;
   deliveryStore: IDeliveryStore;
   pushSubscriptionStore: IPushSubscriptionStore;
   /** The one door into the feed; due reminders go through it. */
@@ -869,6 +874,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         resolveSkillStore: deps.resolveSkillStore,
         resolveSandboxProviderStore: deps.resolveSandboxProviderStore,
         globalSettingsStore: deps.globalSettingsStore,
+        personalizationStore: deps.personalizationStore,
         tokenFactoryBudget: deps.tokenFactoryBudget,
         envManagedModelProviderNames: envManagedProviders,
         checkSavedProvider: createModelProviderChecker({ logger: deps.logger }),
@@ -1034,6 +1040,26 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         sentinelSettingsStore: deps.sentinelSettingsStore,
         resolveRequestContext,
         logger: deps.logger,
+      }),
+      authMiddleware,
+    ),
+  );
+  // The right rail's Home view: the day read from stored state, never from a model turn.
+  app.route(
+    '/api/v1/today',
+    withAuth(
+      createTodayRouter({
+        googleConnectionStore: deps.googleConnectionStore,
+        mcpServerStore: deps.resolveMcpServerStore(),
+        scheduleStore: deps.scheduleStore,
+        sessionStore: deps.sessionStore,
+        sessions: deps.sessions,
+        calendarAccountUrl: configuration.CALENDAR_ACCOUNT_URL,
+        calendarAccountKey: configuration.CALENDAR_ACCOUNT_SECRET,
+        fetchImpl: undefined,
+        resolveRequestContext,
+        logger: deps.logger,
+        now: () => new Date(),
       }),
       authMiddleware,
     ),
@@ -1285,6 +1311,17 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
   app.route(
     '/api/v1/sessions',
     withAuth(
+      createRecallExclusionsRouter({
+        sessionStore: deps.sessionStore,
+        recallExclusionStore: deps.recallExclusionStore,
+        resolveRequestContext,
+      }),
+      authMiddleware,
+    ),
+  );
+  app.route(
+    '/api/v1/sessions',
+    withAuth(
       createBugReportRouter({
         sessions: deps.sessions,
         agentStore: deps.agentStore,
@@ -1416,6 +1453,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         chatSearchIndexer: deps.chatSearchIndexer,
         tokenFactoryBudget: deps.tokenFactoryBudget,
         chatDeletionStore: deps.chatDeletionStore,
+        recallExclusionStore: deps.recallExclusionStore,
         eventSubscriptions: deps.eventSubscriptions,
         resolveSandboxProviderStore: deps.resolveSandboxProviderStore,
         sandboxProviderResolver: deps.sandboxProviderResolver,

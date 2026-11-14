@@ -94,6 +94,7 @@ describe('GitBridge keeps hostile input from using up the server', () => {
       guest,
       sandboxId: 's1-test',
       cwd,
+      commitIdentityEnv: undefined,
       timeoutSeconds: 60,
       signal,
     };

@@ -135,6 +135,7 @@ import {
   isPersonVouchedUrl,
   namesUrl,
   replyLinksWithAddedData,
+  siteName,
   steeredDestinations,
   steeredLinks,
   steeredUrl,
@@ -1729,7 +1730,7 @@ async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext
         ctx,
         plain_what: `Save ${namedWriteTargets(toolTargets)} in a folder where this workspace keeps programs it can run?`,
         cannot_be_undone:
-          'A program saved here could run instead of a trusted one. Approve only if you asked for this file.',
+          'A program saved here could run instead of a trusted one. Allow only if you asked for this file.',
       }),
       reason: 'sandbox_tool_write',
       reason_detail: 'Writes into the sandbox tool folders always require approval.',
@@ -2183,7 +2184,9 @@ async function classifyBrowserOpen(input: { action: SentinelAction; ctx: Classif
       card: browserOpenCard({
         url: shown,
         host: parsed === undefined ? null : escapeDisplayText(parsed.hostname),
-        headline: `Open ${shown}?`,
+        // The question names the site; the full address is its own row on the card.
+        headline:
+          parsed === undefined ? 'Open this page?' : `Open a page on ${escapeDisplayText(siteName(parsed.hostname))}?`,
         say: reasonSay,
         plain_why: plainWhy(ctx.agent_intent),
       }),
@@ -2219,10 +2222,7 @@ async function classifyBrowserOpen(input: { action: SentinelAction; ctx: Classif
     return ctx.services.unattended
       ? steeredSkipped(ctx)
       : steeringChecked({
-          decision: await ask(
-            CONTENT_STEERED_REASON,
-            `${assistant} would only open this because a page it read named it, not you.`,
-          ),
+          decision: await ask(CONTENT_STEERED_REASON, steeredLinkSay({ ctx, url })),
           ctx,
           guests: [],
         });
@@ -2291,6 +2291,27 @@ function privateDetailSkipped(ctx: ClassifyContext): TierDecision {
   });
 }
 
+/** Why opening a link that read content chose asks: where the link came from, said once. */
+function steeredLinkSay({ ctx, url }: { ctx: ClassifyContext; url: string }): string {
+  const assistant = ctx.web_search.assistantName;
+  const steered = steeredDestinations({
+    provenance: ctx.web_search.provenance,
+    addresses: [],
+    values: [url],
+    reply_sender: null,
+  });
+  return steered.length === 0
+    ? `${assistant} found this link in a page it read, not from you.`
+    : steeredDestinationSay({
+        assistant,
+        destinations: steered.map(({ value, kind, origin }) => ({
+          kind,
+          source: origin.source,
+          who: escapeDisplayText(value),
+        })),
+      });
+}
+
 /**
  * A consequential action asks with its card as it is. When a recipient or site the card names came only from content
  * the assistant read, the card says so and no chat grant covers it; a scheduled run skips it. `guests` adds people
@@ -2319,7 +2340,8 @@ function steeringChecked(input: {
     // Only the host-read sender of the one message this replies to; never the model's or the message's own claim.
     reply_sender: mail?.reply_in_thread?.from ?? null,
   });
-  if (steered.length === 0) {
+  // A card that already asks because read content chose it says so once, in its own reason line.
+  if (steered.length === 0 || decision.reason === CONTENT_STEERED_REASON) {
     return decision;
   }
   if (ctx.services.unattended) {

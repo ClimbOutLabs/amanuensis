@@ -8,9 +8,21 @@ const synthetic = {
   CALENDAR_ACCOUNT_SECRET: undefined,
   BROWSER_SECRET: undefined,
   TAVILY_API_KEY: undefined,
+  SPEECH_SECRET: undefined,
 };
 
 describe('getConfiguredSecretValues', () => {
+  it('lists the speech secret', () => {
+    expect(
+      getConfiguredSecretValues({
+        STANDALONE: true,
+        ...synthetic,
+        OIDC: undefined,
+        SPEECH_SECRET: 'synthetic-speech-secret-0012',
+      }),
+    ).toContain('synthetic-speech-secret-0012');
+  });
+
   it('lists the connector account secrets, the browser secret and the search key', () => {
     expect(
       getConfiguredSecretValues({

@@ -138,14 +138,14 @@ describe('a second approval after a resolved one', () => {
     rerender(tree([message('m1', [call('a', 'approved')], false)]));
     await settle();
     expect(screen.queryAllByText('Do a')).toEqual([]);
-    expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Allow' })).not.toBeInTheDocument();
 
     // B arrives as a pending call before its card has been delivered.
     pendingApprovals.current = [{ approvalId: 'b', threadId: 'main' }];
     rerender(tree([message('m1', [call('a', 'approved'), call('b', 'pending')], true)]));
     await settle();
     expect(screen.queryAllByText('Do a')).toEqual([]);
-    expect(screen.queryAllByRole('button', { name: 'Approve' }).length).toBeLessThanOrEqual(1);
+    expect(screen.queryAllByRole('button', { name: 'Allow' }).length).toBeLessThanOrEqual(1);
 
     publish('b', 'Do b');
     await settle();

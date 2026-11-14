@@ -7,6 +7,7 @@ import type { ReadableStreamReadResult } from 'node:stream/web';
 import configuration from '../config';
 import type { OutputFormat } from './audio';
 import type { SpeechRateLimiter } from './speechRateLimit';
+import { speechSecretHeaders } from './speechSecret';
 import { UncheckedSpeechError, WouldChangeTextError, type SpeechSynthesizer } from './transport';
 
 const TTS_STREAM_TIMEOUT_MS = 60_000;
@@ -152,7 +153,7 @@ export class SidecarSpeechSynthesizer implements SpeechSynthesizer {
     for (;;) {
       response = await fetch(`${ttsBaseUrl()}/v1/speak`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', ...speechSecretHeaders() },
         body,
         signal: AbortSignal.any([signal, AbortSignal.timeout(TTS_STREAM_TIMEOUT_MS)]),
       });
