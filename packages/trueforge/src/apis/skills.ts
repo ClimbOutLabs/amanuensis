@@ -20,6 +20,7 @@ import {
 } from '../routes/skillRoutes';
 import {
   SkillCodePinRefusedError,
+  forgetCachedSkillCode,
   resolveSkillCodePin,
   type SkillCodeResolver,
 } from '../sandbox/skillnet/skillNetworkGrant';
@@ -230,6 +231,7 @@ export function createSkillsRouter<TTransaction>(deps: SkillsRouterDeps<TTransac
     if (updated === undefined) {
       return c.json({ error: { message: `No skill with this name: ${name}` } }, 404);
     }
+    forgetCachedSkillCode({ skill_name: name });
     return c.json(
       {
         data: toSkillNetworkApproval(updated, {
@@ -297,6 +299,9 @@ export function createSkillsRouter<TTransaction>(deps: SkillsRouterDeps<TTransac
           });
     if (updated === undefined) {
       return c.json({ error: { message: `No skill with this name: ${name}` } }, 404);
+    }
+    if (code_sha !== null) {
+      forgetCachedSkillCode({ skill_name: name });
     }
     return c.json(
       {

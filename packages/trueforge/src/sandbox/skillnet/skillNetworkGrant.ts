@@ -70,7 +70,20 @@ export async function resolveSkillCodePin(input: {
  * most this much later.
  */
 const CODE_RESOLUTION_TTL_MS = 3 * 60 * 1000;
-const codeResolutionCache = new Map<string, { code_sha: string; expires_at_ms: number }>();
+const codeResolutionCache = new Map<string, { skill_name: string; code_sha: string; expires_at_ms: number }>();
+
+/**
+ * Drops every chat's cached code version for one skill. Called wherever a pin is stored:
+ * the pin is read fresh, so a stale cached version would make the next check see the
+ * fresh approval as moved code and cancel it.
+ */
+export function forgetCachedSkillCode(input: { skill_name: string }): void {
+  for (const [key, entry] of codeResolutionCache) {
+    if (entry.skill_name === input.skill_name) {
+      codeResolutionCache.delete(key);
+    }
+  }
+}
 
 async function resolveCodeShaCached(input: {
   session_id: string;
@@ -85,7 +98,11 @@ async function resolveCodeShaCached(input: {
     return hit.code_sha;
   }
   const code_sha = await input.resolve({ url: input.url, ref: input.ref });
-  codeResolutionCache.set(key, { code_sha, expires_at_ms: Date.now() + CODE_RESOLUTION_TTL_MS });
+  codeResolutionCache.set(key, {
+    skill_name: input.skill_name,
+    code_sha,
+    expires_at_ms: Date.now() + CODE_RESOLUTION_TTL_MS,
+  });
   return code_sha;
 }
 
@@ -489,6 +506,7 @@ export async function recordSkillNetworkAnswer(input: {
           code_sha,
         });
       }
+      forgetCachedSkillCode({ skill_name: input.skill_name });
       input.registry.clearCardRaised({ session_id: input.session_id, skill_name: input.skill_name });
       input.registry.clearCodeChanged({ session_id: input.session_id, skill_name: input.skill_name });
       return;
@@ -528,6 +546,7 @@ export async function recordSkillNetworkAnswer(input: {
         name: input.skill_name,
         code_sha,
       });
+      forgetCachedSkillCode({ skill_name: input.skill_name });
     }
     return;
   }
@@ -556,6 +575,7 @@ export async function recordSkillNetworkAnswer(input: {
         hosts,
         code_sha,
       });
+      forgetCachedSkillCode({ skill_name: input.skill_name });
     }
     return;
   }

@@ -451,7 +451,7 @@ describe('recordSkillNetworkAnswer', () => {
     // The turned-down site is never written into the approval, and the approval still takes
     // effect for the site the person did approve: the grant resolves, and no card asks again.
     expect(records.get('ten-x')?.network_approval).toEqual(['github.com']);
-    const grant = await resolveSkillNetworkGrant({ store, registry, ...CALL, skillNames: ['ten-x'] });
+    const grant = await resolveSkillNetworkGrant({ store, registry, ...CALL, skillNames: ['ten-x'], resolveCodeSha });
     expect(grant?.hosts).toEqual(['github.com']);
     await expect(drainSkillNetworkCards({ store, registry, ...CALL, skillNames: ['ten-x'] })).resolves.toEqual([]);
 
@@ -464,7 +464,7 @@ describe('recordSkillNetworkAnswer', () => {
       decision: 'none',
     });
     await expect(
-      resolveSkillNetworkGrant({ store, registry, ...CALL, skillNames: ['ten-x'] }),
+      resolveSkillNetworkGrant({ store, registry, ...CALL, skillNames: ['ten-x'], resolveCodeSha }),
     ).resolves.toBeUndefined();
     const cardsAfterClear = await drainSkillNetworkCards({ store, registry, ...CALL, skillNames: ['ten-x'] });
     expect(cardsAfterClear).toEqual([{ skill_name: 'ten-x', hosts: TEN_X_HOSTS, reason: 'first_use', code_pin: null }]);
@@ -809,6 +809,41 @@ describe('the code pin on the approval', () => {
     });
     expect(resumed?.hosts).toEqual(['api.github.com', 'github.com']);
     await expect(drainSkillNetworkCards({ store, registry, ...movedCall, skillNames: ['ten-x'] })).resolves.toEqual([]);
+  });
+
+  it('a fresh approval after the branch moved stands, even while the old commit is cached for the chat', async () => {
+    const registry = new SkillNetworkTokenRegistry();
+    const { store, records } = mutableStore([
+      record({
+        manifest: gitManifest({ network_hosts: TEN_X_HOSTS }),
+        network_approval: TEN_X_HOSTS,
+        network_approval_code_sha: PIN_A,
+      }),
+    ]);
+    let branchAt = PIN_A;
+    const resolveCodeSha = async () => branchAt;
+    const call = { ...CALL, session_id: 'pin-fresh-approval-cached' };
+    const cached = await resolveSkillNetworkGrant({ store, registry, ...call, skillNames: ['ten-x'], resolveCodeSha });
+    expect(cached?.hosts).toEqual(['api.github.com', 'github.com']);
+
+    branchAt = PIN_B;
+    await recordSkillNetworkAnswer({
+      store,
+      registry,
+      ...call,
+      skill_name: 'ten-x',
+      hosts: TEN_X_HOSTS,
+      reason: 'first_use',
+      answer: 'always_allow',
+      resolveCodeSha,
+    });
+    expect(records.get('ten-x')?.network_approval_code_sha).toBe(PIN_B);
+
+    const after = await resolveSkillNetworkGrant({ store, registry, ...call, skillNames: ['ten-x'], resolveCodeSha });
+    expect(after?.hosts).toEqual(['api.github.com', 'github.com']);
+    expect(records.get('ten-x')?.network_approval).toEqual(TEN_X_HOSTS);
+    expect(records.get('ten-x')?.network_approval_code_sha).toBe(PIN_B);
+    await expect(drainSkillNetworkCards({ store, registry, ...call, skillNames: ['ten-x'] })).resolves.toEqual([]);
   });
 
   it('allowances alone are bound to the pin, cleared when the code moves, and named on the code-changed card', async () => {

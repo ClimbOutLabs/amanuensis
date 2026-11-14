@@ -8,6 +8,8 @@ import { SkillCatalog } from '../../../src/catalog/SkillCatalog';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqliteSkillStore } from '../../../src/db/sqlite/skill-store/SqliteSkillStore';
+import { resolveSkillNetworkGrant } from '../../../src/sandbox/skillnet/skillNetworkGrant';
+import { SkillNetworkTokenRegistry } from '../../../src/sandbox/skillnet/skillNetworkTokens';
 import { ListSkillsResponseSchema } from '../../../src/schemas/skill';
 import { TRUEFOUNDRY_MANAGED_MESSAGE, trueFoundryManaged } from '../../../src/truefoundry/errors';
 
@@ -387,6 +389,41 @@ describe('skills routers', () => {
       });
       const state = await failingRouter.request('/ten-x/network-approval');
       expect(await state.json()).toMatchObject({ data: { approved_hosts: null } });
+    });
+
+    it('PUT after the branch moved stores an approval the next check keeps, even with the old commit cached', async () => {
+      const db = createSqliteDb(':memory:');
+      await migrateSqliteToLatest(db);
+      const store = new SqliteSkillStore(db);
+      let branchAt = 'a'.repeat(40);
+      const resolveSkillCodeSha = async () => branchAt;
+      const router = createSkillsRouter({
+        resolveSkillStore: () => store,
+        withTransaction: callback => db.transaction().execute(callback),
+        resolveRequestContext: () => STANDALONE_REQUEST_CONTEXT,
+        resolveSkillCodeSha,
+      });
+      expect((await router.request('/', putInit(wrapManifest(tenX)))).status).toBe(200);
+      const approve = () => router.request('/ten-x/network-approval', putInit({ hosts: tenX.network_hosts }));
+      expect((await approve()).status).toBe(200);
+      const registry = new SkillNetworkTokenRegistry();
+      const check = () =>
+        resolveSkillNetworkGrant({
+          store,
+          registry,
+          tenant_id: STANDALONE_REQUEST_CONTEXT.tenant_id,
+          created_by: STANDALONE_REQUEST_CONTEXT.subject.id,
+          session_id: 'settings-fresh-approval-cached',
+          skillNames: ['ten-x'],
+          resolveCodeSha: resolveSkillCodeSha,
+        });
+      expect((await check())?.hosts).toEqual(['api.github.com', 'github.com']);
+
+      branchAt = 'b'.repeat(40);
+      expect((await approve()).status).toBe(200);
+      expect((await check())?.hosts).toEqual(['api.github.com', 'github.com']);
+      const state = await router.request('/ten-x/network-approval');
+      expect(await state.json()).toMatchObject({ data: { approved_hosts: ['github.com', 'api.github.com'] } });
     });
 
     it('PUT refuses a list that is not the declared list, with the next step in plain words', async () => {
