@@ -171,9 +171,11 @@ export async function driveTurns({
   pollIntervalMs,
   turnTimeoutMs,
   progress,
+  clientTimezone,
 }) {
   let status;
-  let pending = await client.createTurn(sessionId, { input, previous_turn_id: previousTurnId });
+  const zone = clientTimezone === undefined ? {} : { client_timezone: clientTimezone };
+  let pending = await client.createTurn(sessionId, { input, previous_turn_id: previousTurnId, ...zone });
   for (let round = 0; ; round += 1) {
     const finished = await waitForFinish({ client, sessionId, turnId: pending.id, pollIntervalMs, turnTimeoutMs });
     if (finished === undefined) {
@@ -196,7 +198,7 @@ export async function driveTurns({
       break;
     }
     progress.approvals += decisions.length;
-    pending = await client.createTurn(sessionId, { input: decisions, previous_turn_id: finished.id });
+    pending = await client.createTurn(sessionId, { input: decisions, previous_turn_id: finished.id, ...zone });
   }
   return status;
 }

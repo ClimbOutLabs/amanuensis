@@ -1,10 +1,11 @@
 // Hand-checked parser for model-set.json. The root has no schema library, so the rules live here.
 import { readFile } from 'node:fs/promises';
 import { APPROVAL_POLICIES } from '../eval-tokens/parse.mjs';
+import { JOURNEYS } from './journey.mjs';
 
 /** Must match the `group` values in packages/trueforge/evals/model-set.json. */
-export const MODEL_SET_GROUPS = Object.freeze(['memory', 'safety']);
-export const MODEL_SET_VERSION = 1;
+export const MODEL_SET_GROUPS = Object.freeze(['memory', 'safety', 'brief']);
+export const MODEL_SET_VERSION = 2;
 export const CHECK_TYPES = Object.freeze([
   'reply_includes',
   'reply_excludes',
@@ -19,9 +20,10 @@ export const CHECK_TYPES = Object.freeze([
  *   | { type: 'tool_called', tools: string[] }
  *   | { type: 'no_tool', tools: string[] }
  *   | { type: 'no_tool_args_include', any: string[] }} Check
- * @typedef {{ id: string, group: string, prompt: string, approval_policy: 'approve' | 'decline', checks: Check[], checklist: string[] }} ModelCase
+ * @typedef {{ type: 'scheduled_run', cron: string, timezone: string }} Journey
+ * @typedef {{ id: string, group: string, prompt: string, approval_policy: 'approve' | 'decline', checks: Check[], checklist: string[], client_timezone?: string, journey?: Journey }} ModelCase
  * @typedef {{ text: string, timestamp: string }} SeedMemory
- * @typedef {{ version: 1, memories: SeedMemory[], cases: ModelCase[] }} ModelSet
+ * @typedef {{ version: 2, memories: SeedMemory[], cases: ModelCase[] }} ModelSet
  */
 
 export class ModelSetError extends Error {
@@ -142,6 +144,20 @@ export function parseModelSet(value) {
     if (Array.isArray(rawChecks) && Array.isArray(rawChecklist) && rawChecks.length + rawChecklist.length === 0) {
       problems.push(`${label} needs at least one check or checklist item, or it can never fail`);
     }
+    const zone = entry.client_timezone;
+    if (zone !== undefined && !isNonEmptyString(zone)) {
+      problems.push(`${label}.client_timezone must be a time zone name such as Europe/London`);
+    }
+    const journey = entry.journey;
+    if (
+      journey !== undefined &&
+      (!isPlainObject(journey) ||
+        !JOURNEYS.includes(journey.type) ||
+        !isNonEmptyString(journey.cron) ||
+        !isNonEmptyString(journey.timezone))
+    ) {
+      problems.push(`${label}.journey needs a type (${JOURNEYS.join(', ')}), a cron and a timezone`);
+    }
     const checks = Array.isArray(rawChecks)
       ? rawChecks.map((check, checkIndex) => parseCheck(check, `${label}.checks[${String(checkIndex)}]`, problems))
       : [];
@@ -153,6 +169,10 @@ export function parseModelSet(value) {
         approval_policy: policy,
         checks: checks.filter(check => check !== undefined),
         checklist: [...rawChecklist],
+        ...(zone === undefined ? {} : { client_timezone: zone }),
+        ...(journey === undefined
+          ? {}
+          : { journey: { type: journey.type, cron: journey.cron, timezone: journey.timezone } }),
       });
     }
   });
