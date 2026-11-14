@@ -7,9 +7,9 @@ import type { ToolSelectorConfig } from '../../../src/core/mcp/ToolSelectorPolic
 import { createToolCallMemoState, executeToolCalls } from '../../../src/core/mcp/executeToolCalls';
 import { connectRemoteMcp } from '../../../src/core/mcp/remoteMcpClient';
 import type { SentinelServices } from '../../../src/core/permissions/context';
+import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
 import { DeferredTool } from '../../../src/core/runtime/DeferredTool';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
-import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
 
 jest.mock('../../../src/core/mcp/remoteMcpClient', () => {
   const actual = jest.requireActual<typeof import('../../../src/core/mcp/remoteMcpClient')>(
@@ -103,11 +103,7 @@ describe('approval card for connector calls', () => {
   });
 
   it.each([
-    [
-      'web_fetch',
-      { urls: ['https://www.usps.com/'], objective: 'o' },
-      'Fetch a web page from www.usps.com?',
-    ],
+    ['web_fetch', { urls: ['https://www.usps.com/'], objective: 'o' }, 'Fetch a web page from www.usps.com?'],
     ['web_search', { objective: 'o', search_queries: ['q'] }, 'Search the web on parallel-web?'],
   ])('shows %s on the Parallel connector the same way directly and through call_tool', async (name, input, what) => {
     const tool: ToolSchema = { name, description: 'Parallel tool.', inputSchema: schema };
