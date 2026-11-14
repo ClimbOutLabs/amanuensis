@@ -223,3 +223,5 @@ export type ListMemoryVaultEntriesOutcome = { ok: true; entries: MemoryVaultEntr
 export type UpdateMemoryVaultEntryOutcome = { ok: true; entry: MemoryVaultEntry } | MemoryVaultFailure;
 
 export type DeleteMemoryVaultEntryOutcome = { ok: true } | MemoryVaultFailure;
+
+export type DeleteShownMemoryOutcome = { ok: true; deleted: number } | MemoryVaultFailure;

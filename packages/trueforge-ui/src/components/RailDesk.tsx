@@ -3,13 +3,14 @@ import { useEffect, useMemo, useState, type FC, type ReactNode } from 'react';
 import { useOptionalSentinelApi } from '../sentinel/SentinelApiContext.js';
 import type { SentinelApprovalInfo } from '../sentinel/types.js';
 import { useOptionalMemoryRecall, type MemoryTurnContext } from './MemoryRecallContext.js';
+import { RailFoldedRow } from './RailFoldedRow.js';
 
 /**
  * The right rail's desk: what the assistant is holding for the person, read from stored state.
  * The Home half mirrors `GET /api/v1/today` exactly (the server owns the shape); the chat half
  * reads the per-turn memory-recall record, the chat's attachments and its held actions. Nothing
- * in this file asks the assistant anything, and no control here writes to memory: pulling a
- * fact out only records a per-chat exclusion on the server.
+ * in this file asks the assistant anything. Pulling a fact out only records a per-chat exclusion
+ * on the server; the one control that changes memory is Delete, and it asks first.
  */
 
 export type RailTodayEvent = {
@@ -62,6 +63,8 @@ export type RailDeskApi = {
   getToday: (input: { timeZone: string | undefined }) => Promise<RailToday>;
   /** Pulls one fact out of this chat's recall for the rest of the chat. Never edits memory. */
   excludeRecallFact: (input: { sessionId: string; factText: string }) => Promise<void>;
+  /** Deletes the memory shown in these words, everywhere. The error it throws says what to do next. */
+  deleteShownMemory: (input: { factText: string }) => Promise<void>;
   /** The files this chat has taken in, from its stored records. */
   listAttachments: (input: { sessionId: string }) => Promise<RailAttachment[]>;
 };
@@ -70,8 +73,12 @@ export type RailDeskApi = {
 const TODAY_POLL_MS = 120_000;
 /** How often the chat desk re-reads the chat's records while it is on screen. */
 const CHAT_POLL_MS = 60_000;
+/** How often it re-reads them while the assistant is working on a turn. */
+const WORKING_POLL_MS = 3_000;
 /** A read older than this says when it was read, so a stale desk never looks fresh. */
 const STALE_AFTER_MS = 10 * 60 * 1000;
+/** The name of the fold that holds the recalled memories; the count follows it. */
+const MEMORY_FOLD_TITLE = 'From memory';
 /** Most memory facts the chat desk lists. */
 const FACT_CAP = 6;
 
@@ -83,8 +90,6 @@ export type RailRecallFact = {
   /** The day the fact is dated with, as the record gives it (`undated` when it gives none). */
   date: string;
   source: RailRecallFactSource;
-  /** True for facts that came from something read or found: shown with a Check tag, never as settled. */
-  needsCheck: boolean;
   /** Where the fact came from, in plain words, for the row's second line. */
   origin: string;
 };
@@ -116,42 +121,40 @@ function parseBlockLine(line: string): RailRecallFact | undefined {
   const label = (AGE_PART.test(rest[0] ?? '') ? rest.slice(1) : rest).join(', ');
   const when = date === 'undated' ? '' : ` on ${date}`;
   if (label === READ_LABEL) {
-    return { text, date, source: 'read', needsCheck: true, origin: `From something read for you${when}` };
+    return { text, date, source: 'read', origin: `From something read for you${when}` };
   }
   if (label === FINDING_LABEL) {
-    return { text, date, source: 'finding', needsCheck: true, origin: `Found earlier by the assistant${when}` };
+    return { text, date, source: 'finding', origin: `Found earlier by the assistant${when}` };
   }
   if (label === REPLY_LABEL) {
-    return { text, date, source: 'assistant', needsCheck: false, origin: `From an earlier reply${when}` };
+    return { text, date, source: 'assistant', origin: `From an earlier reply${when}` };
   }
   if (label === SENT_LABEL) {
-    return { text, date, source: 'person', needsCheck: false, origin: `From a message you sent${when}` };
+    return { text, date, source: 'person', origin: `From a message you sent${when}` };
   }
-  return { text, date, source: 'person', needsCheck: false, origin: `You said this${when}` };
+  return { text, date, source: 'person', origin: `You said this${when}` };
 }
 
 /**
- * The facts a chat's turns recalled, newest turn first, each fact once, capped. Reads only the
- * per-turn recall record: a fact the record does not carry is never invented here.
+ * The facts the latest turn recalled, each fact once, capped. Earlier turns are left out: the desk shows what
+ * the assistant is using now. Reads only the recall record: a fact the record does not carry is never invented here.
  */
 export function parseRecallFacts(turns: readonly MemoryTurnContext[]): RailRecallFact[] {
+  const block = turns.findLast(turn => turn.recall !== undefined)?.recall?.injectedBlock;
+  if (block === undefined || block === null) {
+    return [];
+  }
   const seen = new Set<string>();
   const facts: RailRecallFact[] = [];
-  for (const turn of [...turns].reverse()) {
-    const block = turn.recall?.injectedBlock;
-    if (block === undefined || block === null) {
+  for (const line of block.split('\n')) {
+    const fact = parseBlockLine(line);
+    if (fact === undefined || seen.has(fact.text)) {
       continue;
     }
-    for (const line of block.split('\n')) {
-      const fact = parseBlockLine(line);
-      if (fact === undefined || seen.has(fact.text)) {
-        continue;
-      }
-      seen.add(fact.text);
-      facts.push(fact);
-      if (facts.length >= FACT_CAP) {
-        return facts;
-      }
+    seen.add(fact.text);
+    facts.push(fact);
+    if (facts.length >= FACT_CAP) {
+      break;
     }
   }
   return facts;
@@ -377,20 +380,31 @@ function waitingHeldActions(context: {
 export const RailChatDesk: FC<{
   sessionId: string;
   deskApi: RailDeskApi | undefined;
+  /** Changes when the assistant starts or stops working, so the desk reads the chat again at once. */
+  refreshSignal?: string | undefined;
   onOpenMemorySettings?: (() => void) | undefined;
-}> = ({ sessionId, deskApi, onOpenMemorySettings }) => {
+}> = ({ sessionId, deskApi, refreshSignal, onOpenMemorySettings }) => {
   const memoryApi = useOptionalMemoryRecall();
   const sentinelApi = useOptionalSentinelApi();
   const [turns, setTurns] = useState<MemoryTurnContext[]>([]);
   const [attachments, setAttachments] = useState<RailAttachment[]>([]);
   const [held, setHeld] = useState<SentinelApprovalInfo[]>([]);
   const [pulled, setPulled] = useState<ReadonlySet<string>>(new Set());
+  /** The fact whose Delete was pressed and is waiting for a yes or no. */
+  const [confirming, setConfirming] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   useEffect(() => {
     setTurns([]);
     setAttachments([]);
     setHeld([]);
     setPulled(new Set());
+    setConfirming(null);
+    setDeleteError(null);
+  }, [sessionId]);
+
+  useEffect(() => {
     let cancelled = false;
     const load = async (): Promise<void> => {
       if (memoryApi !== null) {
@@ -425,14 +439,18 @@ export const RailChatDesk: FC<{
       }
     };
     void load();
-    const interval = window.setInterval(() => {
-      void load();
-    }, CHAT_POLL_MS);
+    // While the assistant works, what it recalled for this turn lands a moment after the turn starts.
+    const interval = window.setInterval(
+      () => {
+        void load();
+      },
+      refreshSignal === undefined || refreshSignal === 'idle' ? CHAT_POLL_MS : WORKING_POLL_MS,
+    );
     return () => {
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [sessionId, memoryApi, deskApi, sentinelApi]);
+  }, [sessionId, memoryApi, deskApi, sentinelApi, refreshSignal]);
 
   const facts = useMemo(() => parseRecallFacts(turns).filter(fact => !pulled.has(fact.text)), [turns, pulled]);
 
@@ -451,18 +469,36 @@ export const RailChatDesk: FC<{
     });
   };
 
+  const deleteMemory = async (fact: RailRecallFact): Promise<void> => {
+    if (deskApi === undefined) {
+      return;
+    }
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await deskApi.deleteShownMemory({ factText: fact.text });
+      setPulled(previous => new Set(previous).add(fact.text));
+      setConfirming(null);
+    } catch (error) {
+      setDeleteError(
+        error instanceof Error && error.message !== ''
+          ? error.message
+          : 'The memory was not deleted. Try again in a moment.',
+      );
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   return (
     <>
       {facts.length > 0 && (
-        <DeskSection title="Using">
-          <p className="aman-runtime-rail__desk-note">
-            From memory, for this chat. The × takes a fact out of this chat only; it stays in your memory.
-          </p>
+        <RailFoldedRow section="memory" title={`${MEMORY_FOLD_TITLE} (${String(facts.length)})`}>
           <ul className="aman-runtime-rail__desk-list">
             {facts.map(fact => (
               <li key={fact.text} className="aman-runtime-rail__desk-fact">
                 <div className="aman-runtime-rail__desk-fact-head">
-                  <span className="aman-runtime-rail__desk-row-title">{fact.text}</span>
+                  <span className="aman-runtime-rail__desk-fact-text">{fact.text}</span>
                   <button
                     type="button"
                     className="aman-runtime-rail__desk-pull"
@@ -475,19 +511,70 @@ export const RailChatDesk: FC<{
                     ×
                   </button>
                 </div>
-                <span className="aman-runtime-rail__desk-row-detail">
+                <span className="aman-runtime-rail__desk-fact-origin">
                   {fact.origin}
-                  {fact.needsCheck && <span className="aman-runtime-rail__desk-check">Check</span>}
+                  {deskApi !== undefined && confirming !== fact.text && (
+                    <button
+                      type="button"
+                      className="aman-runtime-rail__desk-forget aman-runtime-rail__desk-delete"
+                      aria-label={`Delete this memory: ${fact.text}`}
+                      onClick={() => {
+                        setConfirming(fact.text);
+                        setDeleteError(null);
+                      }}
+                    >
+                      Delete
+                    </button>
+                  )}
                 </span>
-                {onOpenMemorySettings !== undefined && (
-                  <button type="button" className="aman-runtime-rail__desk-forget" onClick={onOpenMemorySettings}>
-                    Forget everywhere
-                  </button>
+                {confirming === fact.text && (
+                  <div className="aman-runtime-rail__desk-confirm" role="group" aria-label="Delete this memory?">
+                    <span>Delete this memory everywhere? It cannot be brought back.</span>
+                    <span className="aman-runtime-rail__desk-confirm-actions">
+                      <button
+                        type="button"
+                        className="aman-runtime-rail__desk-confirm-yes"
+                        disabled={deleting}
+                        onClick={() => {
+                          void deleteMemory(fact);
+                        }}
+                      >
+                        {deleting ? 'Deleting' : 'Delete memory'}
+                      </button>
+                      <button
+                        type="button"
+                        className="aman-runtime-rail__desk-forget"
+                        disabled={deleting}
+                        onClick={() => {
+                          setConfirming(null);
+                          setDeleteError(null);
+                        }}
+                      >
+                        Keep it
+                      </button>
+                    </span>
+                    {deleteError !== null && (
+                      <span className="aman-runtime-rail__desk-confirm-error" role="alert">
+                        {deleteError}
+                      </span>
+                    )}
+                  </div>
                 )}
               </li>
             ))}
           </ul>
-        </DeskSection>
+          <p className="aman-runtime-rail__desk-note">
+            Used for your last message. The × leaves a memory out of this chat only. Delete removes it everywhere.
+            {onOpenMemorySettings !== undefined && (
+              <>
+                {' '}
+                <button type="button" className="aman-runtime-rail__desk-forget" onClick={onOpenMemorySettings}>
+                  Manage memory
+                </button>
+              </>
+            )}
+          </p>
+        </RailFoldedRow>
       )}
 
       {attachments.length > 0 && (

@@ -7,8 +7,8 @@ const USAGE = `Usage: aman memory-example --replace
 
 Fills the memory of this instance with about two years of made-up notes, so you can try how old and new
 memories are used. The notes are dated back from today. The memory that is there now is not deleted: it is
-moved to a folder named .set-aside inside the memory folder, and the command prints where. Restart Aman
-after it finishes.
+moved to a folder named .set-aside inside the memory folder, and the command prints where. Do not chat
+while it runs, and restart Aman after it finishes.
 
   --replace   Required. Says you want the current memory moved aside and replaced
 `;

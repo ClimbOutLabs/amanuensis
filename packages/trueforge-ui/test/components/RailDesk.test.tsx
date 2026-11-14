@@ -9,7 +9,7 @@ import {
 } from '@/components/MemoryRecallContext.js';
 import { parseRecallFacts, type RailDeskApi, type RailToday } from '@/components/RailDesk.js';
 
-function turnContext(turnId: string, block: string): MemoryTurnContext {
+function turnContext(turnId: string, block: string | null): MemoryTurnContext {
   return {
     turnId,
     recall: {
@@ -42,14 +42,20 @@ function blockOf(lines: string[]): string {
 }
 
 describe('parseRecallFacts', () => {
-  it('takes the newest turn first, each fact once, from the recall record only', () => {
+  it('shows only what the latest turn recalled, each fact once', () => {
     const older = turnContext('t1', blockOf(['[2026-08-14] The gate code is 4417', '[2026-08-15] Ana is a friend']));
     const newer = turnContext('t2', blockOf(['[2026-08-15] Ana is a friend', '[2026-08-20] The ferry leaves at 9']));
     const facts = parseRecallFacts([older, newer]);
-    expect(facts.map(fact => fact.text)).toEqual(['Ana is a friend', 'The ferry leaves at 9', 'The gate code is 4417']);
+    expect(facts.map(fact => fact.text)).toEqual(['Ana is a friend', 'The ferry leaves at 9']);
   });
 
-  it('marks facts from something read or found as needing a check, and never the person\u2019s own', () => {
+  it('shows nothing when the latest turn recalled nothing, whatever earlier turns recalled', () => {
+    const older = turnContext('t1', blockOf(['[2026-08-14] The gate code is 4417']));
+    const newer = turnContext('t2', null);
+    expect(parseRecallFacts([older, newer])).toEqual([]);
+  });
+
+  it('says where each fact came from', () => {
     const turn = turnContext(
       't1',
       blockOf([
@@ -62,10 +68,10 @@ describe('parseRecallFacts', () => {
     );
     const facts = parseRecallFacts([turn]);
     expect(facts).toHaveLength(4);
-    expect(facts[0]).toMatchObject({ source: 'person', needsCheck: false, origin: 'You said this on 2026-08-14' });
-    expect(facts[1]).toMatchObject({ source: 'read', needsCheck: true });
-    expect(facts[2]).toMatchObject({ source: 'finding', needsCheck: true });
-    expect(facts[3]).toMatchObject({ source: 'assistant', needsCheck: false });
+    expect(facts[0]).toMatchObject({ source: 'person', origin: 'You said this on 2026-08-14' });
+    expect(facts[1]).toMatchObject({ source: 'read' });
+    expect(facts[2]).toMatchObject({ source: 'finding' });
+    expect(facts[3]).toMatchObject({ source: 'assistant' });
   });
 
   it('reads lines that also say how long ago the day was, with the same text and source', () => {
@@ -89,10 +95,10 @@ describe('parseRecallFacts', () => {
       'The spare key is under the mat',
       'See you at the ferry',
     ]);
-    expect(facts[0]).toMatchObject({ source: 'person', needsCheck: false, origin: 'You said this on 2024-11-02' });
-    expect(facts[1]).toMatchObject({ source: 'read', needsCheck: true, date: '2026-11-12' });
-    expect(facts[2]).toMatchObject({ source: 'finding', needsCheck: true });
-    expect(facts[3]).toMatchObject({ source: 'assistant', needsCheck: false });
+    expect(facts[0]).toMatchObject({ source: 'person', origin: 'You said this on 2024-11-02' });
+    expect(facts[1]).toMatchObject({ source: 'read', date: '2026-11-12' });
+    expect(facts[2]).toMatchObject({ source: 'finding' });
+    expect(facts[3]).toMatchObject({ source: 'assistant' });
     expect(facts[4]).toMatchObject({ source: 'person', origin: 'You said this' });
     expect(facts[5]).toMatchObject({ source: 'person', origin: 'From a message you sent on 2026-11-10' });
   });
@@ -135,10 +141,12 @@ const TODAY: RailToday = {
 
 function deskApi(today: RailToday): RailDeskApi & {
   excludeRecallFact: ReturnType<typeof vi.fn>;
+  deleteShownMemory: ReturnType<typeof vi.fn>;
 } {
   return {
     getToday: vi.fn(async () => today),
     excludeRecallFact: vi.fn(async () => {}),
+    deleteShownMemory: vi.fn(async () => {}),
     listAttachments: vi.fn(async () => [{ id: 'f1', label: 'tickets.pdf', detail: 'Read' }]),
   };
 }
@@ -226,12 +234,14 @@ describe('the rail desk in a chat', () => {
     expect(await screen.findByText('The gate code is 4417')).toBeInTheDocument();
     expect(screen.getByText('You said this on 2026-08-14')).toBeInTheDocument();
     expect(screen.getByText('The ferry leaves at 9')).toBeInTheDocument();
-    expect(screen.getByText('Check')).toBeInTheDocument();
     expect(screen.getByText('tickets.pdf')).toBeInTheDocument();
 
-    const forgetButtons = screen.getAllByRole('button', { name: 'Forget everywhere' });
-    expect(forgetButtons).toHaveLength(2);
-    fireEvent.click(forgetButtons[0] ?? document.body);
+    // The list is one fold of the panel, closed until opened, like Activity and Rules.
+    const fold = screen.getByText('From memory (2)').closest('details');
+    expect(fold).not.toBeNull();
+    expect(fold).not.toHaveAttribute('open');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Manage memory' }));
     expect(onOpenMemorySettings).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByRole('button', { name: 'Take this out of this chat: The gate code is 4417' }));
@@ -239,6 +249,48 @@ describe('the rail desk in a chat', () => {
     await waitFor(() => {
       expect(screen.queryByText('The gate code is 4417')).not.toBeInTheDocument();
     });
+    expect(screen.getByText('The ferry leaves at 9')).toBeInTheDocument();
+  });
+
+  function renderDesk(api: RailDeskApi): void {
+    render(
+      <MemoryRecallProvider api={memoryApi}>
+        <AmanRuntimeRail status="ready" sessionId="chat-1" deskApi={api} />
+      </MemoryRecallProvider>,
+    );
+  }
+
+  it('deletes a memory only after a yes, and keeps it when the person says keep', async () => {
+    const api = deskApi(TODAY);
+    renderDesk(api);
+    await screen.findByText('The ferry leaves at 9');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete this memory: The ferry leaves at 9' }));
+    expect(screen.getByText('Delete this memory everywhere? It cannot be brought back.')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Keep it' }));
+    expect(api.deleteShownMemory).not.toHaveBeenCalled();
+    expect(screen.getByText('The ferry leaves at 9')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete this memory: The ferry leaves at 9' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete memory' }));
+    expect(api.deleteShownMemory).toHaveBeenCalledWith({ factText: 'The ferry leaves at 9' });
+    await waitFor(() => {
+      expect(screen.queryByText('The ferry leaves at 9')).not.toBeInTheDocument();
+    });
+    expect(screen.getByText('The gate code is 4417')).toBeInTheDocument();
+  });
+
+  it('keeps the memory on the list and says what to do when the delete fails', async () => {
+    const api = deskApi(TODAY);
+    api.deleteShownMemory.mockRejectedValue(
+      new Error('Nothing was deleted. Open Settings, then Memory, and delete it there.'),
+    );
+    renderDesk(api);
+    await screen.findByText('The ferry leaves at 9');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete this memory: The ferry leaves at 9' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete memory' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Open Settings, then Memory');
     expect(screen.getByText('The ferry leaves at 9')).toBeInTheDocument();
   });
 });

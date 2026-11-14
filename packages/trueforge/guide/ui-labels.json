@@ -360,6 +360,6 @@
   "At a set size": "packages/trueforge-ui/src/atoms/draft/AgentRuntimeConfigFields.tsx",
   "Today": "packages/trueforge-ui/src/components/RailDesk.tsx",
   "Due": "packages/trueforge-ui/src/components/RailDesk.tsx",
-  "Using": "packages/trueforge-ui/src/components/RailDesk.tsx",
-  "Forget everywhere": "packages/trueforge-ui/src/components/RailDesk.tsx"
+  "From memory": "packages/trueforge-ui/src/components/RailDesk.tsx",
+  "Manage memory": "packages/trueforge-ui/src/components/RailDesk.tsx"
 }

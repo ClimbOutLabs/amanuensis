@@ -62,7 +62,7 @@ Run this inside the app container:
 aman memory-example --replace
 ```
 
-The notes are dated back from today. Some are things that pass, such as a cold. Some last, such as an allergy. Some were replaced later, such as advice from an accountant that changed. The memory that was there is not deleted. It is moved to a folder named `.set-aside` inside the memory folder, and the command prints where. Restart Aman after the command finishes. To get the old memory back, stop Aman, move those folders back to where they were, and start Aman again.
+The notes are dated back from today. Some are things that pass, such as a cold. Some last, such as an allergy. Some were replaced later, such as advice from an accountant that changed. The memory that was there is not deleted. It is moved to a folder named `.set-aside` inside the memory folder, and the command prints where. Do not chat while the command runs, and restart Aman after it finishes. To get the old memory back, stop Aman, move those folders back to where they were, and start Aman again.
 
 ## Pages about people and matters
 

@@ -64,7 +64,6 @@ import {
   isReplyThatReadNothing,
   noteProvenance,
   SENT_MAIL_SOURCE,
-  withoutNoteTrailer,
   type MemoryNoteSource,
 } from './memoryNotes';
 import { isPersonOrigin, MEMORY_ORIGIN_METADATA_KEY, USER_STATED_ORIGIN, type AmanMemoryOrigin } from './memoryOrigin';
@@ -77,7 +76,7 @@ import {
   sanitizeMemoryText,
 } from './memoryPageLoader';
 import { retainOperationId, submitRetain } from './memoryRetain';
-import { recallFactExcluded } from './recallExclusions';
+import { recallFactExcluded, shownFactText } from './recallExclusions';
 import { rankNamedPeopleFirst } from './recallNameBoost';
 import { ScreenClient, type ScreenClassifyResult } from './screenClient';
 import { TurnReadWatch } from './turnReadWatch';
@@ -544,7 +543,7 @@ function formatItemLine({ item, today }: { item: RecallItem; today: string }): s
   const source =
     from.kind === 'note' ? noteLabelFor(from.source) : from.kind === 'person' ? PERSON_LABEL : READ_CONTENT_LABEL;
   const head = age === undefined ? `${date}, ${source}` : `${date}, ${age}, ${source}`;
-  return `[${head}] ${sanitizeMemoryLine(withoutNoteTrailer(item.text))}`;
+  return `[${head}] ${shownFactText(item.text)}`;
 }
 
 /** Whose words a recalled item is: the person's own, a note the assistant kept, or something it read. */
@@ -1394,9 +1393,7 @@ export class MemoryProcessor implements PreLLMProcessor, PreLLMEphemeralAgentCon
       // one side was shortened to fit a token budget (see recallFactExcluded).
       const exclusions = await this.readRecallExclusions();
       if (exclusions.size > 0) {
-        items = items.filter(
-          item => !recallFactExcluded({ exclusions, shownText: sanitizeMemoryLine(withoutNoteTrailer(item.text)) }),
-        );
+        items = items.filter(item => !recallFactExcluded({ exclusions, shownText: shownFactText(item.text) }));
       }
       // The tool policy reads this to block web_search as a substitute for
       // recall: a web query about material recall already surfaced can never

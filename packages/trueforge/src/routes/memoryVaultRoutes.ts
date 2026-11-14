@@ -6,6 +6,8 @@ import { createRoute, z } from '@hono/zod-openapi';
 import { RequestErrorResponseSchema } from '../schemas/errors';
 import {
   DeleteMemoryVaultEntryResponseSchema,
+  DeleteShownMemoryRequestSchema,
+  DeleteShownMemoryResponseSchema,
   ExportMemoryVaultResponseSchema,
   GetMemoryVaultEntryResponseSchema,
   GetMemoryVaultSharingResponseSchema,
@@ -276,6 +278,39 @@ export const deleteMemoryVaultEntryRoute = createRoute({
     404: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },
       description: 'No vault entry with that id.',
+    },
+  },
+});
+
+export const deleteShownMemoryRoute = createRoute({
+  method: 'post',
+  path: '/delete-shown',
+  tags: [OpenApiTag.CAPABILITIES],
+  summary: 'Delete a memory by the words a chat showed',
+  description:
+    'Delete every memory that recall shows in exactly these words, in any collection. Answers 404 and deletes nothing when no memory, or more than one different memory, fits the words.',
+  'x-fern-sdk-group-name': ['memory', 'vault'],
+  'x-fern-sdk-method-name': 'delete_shown',
+  request: {
+    body: {
+      content: { 'application/json': { schema: DeleteShownMemoryRequestSchema } },
+      required: true,
+    },
+  },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: DeleteShownMemoryResponseSchema } },
+      description: 'The memory was deleted.',
+    },
+    400: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'Invalid request.',
+    },
+    ...UNAUTHENTICATED,
+    ...SERVER_ERROR,
+    404: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'No single memory fits these words.',
     },
   },
 });

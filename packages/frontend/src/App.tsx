@@ -252,7 +252,7 @@ function AmanShell({
   const openChat = (sessionId: string) => {
     setOpenSessionRequest(previous => ({ sessionId, nonce: (previous?.nonce ?? 0) + 1 }));
   };
-  // "Forget everywhere" on a memory fact opens the memory editing path; the rail never edits.
+  // "Manage memory" under the recalled memories opens the place where memory is edited.
   const openMemorySettings = () => {
     setSettingsOpenRequest(previous => ({ section: 'memory', nonce: (previous?.nonce ?? 0) + 1 }));
   };

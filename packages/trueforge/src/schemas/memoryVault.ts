@@ -42,6 +42,22 @@ export const UpdateMemoryVaultEntryRequestSchema = z
 /** Delete is idempotent and returns an empty object. */
 export const DeleteMemoryVaultEntryResponseSchema = z.object({}).openapi('DeleteMemoryVaultEntryResponse');
 
+/** The words the chat's side panel showed for a memory. Every memory shown in exactly these words is deleted. */
+export const DeleteShownMemoryRequestSchema = z
+  .object({
+    shown_text: z.string().trim().min(1).max(2000).describe('The memory, in the plain words recall showed for it.'),
+  })
+  .strict()
+  .openapi('DeleteShownMemoryRequest');
+
+export const DeleteShownMemoryResultSchema = z
+  .object({ deleted: z.number().int().min(1).describe('How many stored copies were deleted.') })
+  .openapi('DeleteShownMemoryResult');
+
+export const DeleteShownMemoryResponseSchema = z
+  .object({ data: DeleteShownMemoryResultSchema })
+  .openapi('DeleteShownMemoryResponse');
+
 /** A vault export: the namespace, when it was taken, and every effective entry. */
 export const MemoryVaultExportSchema = z
   .object({

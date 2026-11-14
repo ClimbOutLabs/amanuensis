@@ -24,7 +24,7 @@
  */
 import { PromiseTimeoutError, withTimeout } from '@truefoundry/trueforge-core/core';
 import { randomUUID } from 'node:crypto';
-import { readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import {
   USER_FACING_STORAGE_UNAVAILABLE_MESSAGE,
@@ -71,6 +71,7 @@ import {
 import { computeMeaningGate, type GateVault, type MeaningGate } from './meaningGate';
 import type {
   DeleteMemoryVaultEntryOutcome,
+  DeleteShownMemoryOutcome,
   ListMemoryVaultEntriesOutcome,
   MemoryClient,
   MemoryVaultEntry,
@@ -93,6 +94,7 @@ import { loadPagesForMessage } from './memoryPageLoader';
 import type { PageListing } from './memoryPages';
 import { ensureMemorySourceLines } from './memorySourceLines';
 import { forgetSortReport } from './pageSortReport';
+import { recallFactExcluded, shownFactText } from './recallExclusions';
 import { rankNamedPeopleFirst } from './recallNameBoost';
 import { pagesNearText, statementIndexFor } from './statementIndex';
 import { VaultEraseError, eraseMarkedEntries } from './vaultErase';
@@ -832,6 +834,61 @@ export class MarkdownMemoryClient implements MemoryClient {
       }
       return { ok: false, code: 'request_failed', reason: failureReason('markdown vault delete failed', error) };
     }
+  }
+
+  /**
+   * Deletes every memory, in any of this tenant's vaults, that recall shows in these words. The side panel
+   * of a chat only has the words, so the match is made here, with the same text recall builds its lines from.
+   */
+  async deleteEntriesShownAs(params: { shownText: string; timeoutMs: number }): Promise<DeleteShownMemoryOutcome> {
+    try {
+      const ids = await withTimeout(
+        this.entryIdsShownAs(params.shownText),
+        params.timeoutMs,
+        'markdown vault find shown memory',
+      );
+      for (const entryId of ids) {
+        const outcome = await this.deleteEntry({ entryId, timeoutMs: params.timeoutMs });
+        if (!outcome.ok) {
+          return outcome;
+        }
+      }
+      return { ok: true, deleted: ids.length };
+    } catch (error) {
+      if (error instanceof PromiseTimeoutError) {
+        return vaultTimeoutFailure(params.timeoutMs);
+      }
+      return { ok: false, code: 'request_failed', reason: failureReason('markdown vault delete failed', error) };
+    }
+  }
+
+  /** Ids of the memories shown in these words. Words that were cut short must point at one memory only, else none is named. */
+  private async entryIdsShownAs(shownText: string): Promise<string[]> {
+    const shown = new Set([shownText]);
+    let folders: string[] = [];
+    try {
+      folders = (await readdir(this.baseDir, { withFileTypes: true }))
+        .filter(entry => entry.isDirectory() && this.vaultTenantScope(entry.name))
+        .map(entry => entry.name);
+    } catch {
+      // No memory folder yet means nothing is stored.
+    }
+    const matches: { id: string; text: string }[] = [];
+    for (const namespace of folders) {
+      const scan = await scanNamespaceEntries({
+        baseDir: this.baseDir,
+        namespace,
+        maxDailyFiles: Number.POSITIVE_INFINITY,
+        resolveTombstones: true,
+      });
+      for (const entry of scan.entries) {
+        const text = shownFactText(entryRecallText(entry.text));
+        if (recallFactExcluded({ exclusions: shown, shownText: text })) {
+          matches.push({ id: entry.id, text });
+        }
+      }
+    }
+    return new Set(matches.map(match => match.text)).size > 1 ? [] : matches.map(match => match.id);
   }
 
   private dayOf(timestamp: string): string {

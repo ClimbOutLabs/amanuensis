@@ -13,6 +13,7 @@ import type { ResolveRequestContext } from '../auth/identity';
 import configuration from '../config';
 import {
   deleteMemoryVaultEntryRoute,
+  deleteShownMemoryRoute,
   exportMemoryVaultRoute,
   getMemoryVaultSharingRoute,
   getMemoryVaultSummaryStatusRoute,
@@ -139,6 +140,28 @@ export function createMemoryVaultRouter(deps: MemoryVaultRouterDeps) {
     return c.json({}, 200);
   };
 
+  const deleteShownHandler: RouteHandler<typeof deleteShownMemoryRoute> = async c => {
+    const body = c.req.valid('json');
+    const requestContext = deps.resolveRequestContext(c);
+    const client = createVaultClient({ logger: deps.logger, tenantId: requestContext.tenant_id });
+    const outcome = await client.deleteEntriesShownAs({ shownText: body.shown_text, timeoutMs: VAULT_TIMEOUT_MS });
+    if (!outcome.ok) {
+      return c.json({ error: { message: outcome.reason } }, 500);
+    }
+    if (outcome.deleted === 0) {
+      return c.json(
+        {
+          error: {
+            message:
+              'Aman could not find one memory with exactly these words, so nothing was deleted. Open Settings, then Memory, and delete it there.',
+          },
+        },
+        404,
+      );
+    }
+    return c.json({ data: { deleted: outcome.deleted } }, 200);
+  };
+
   const exportHandler: RouteHandler<typeof exportMemoryVaultRoute> = async c => {
     const { namespace } = c.req.valid('query');
     const requestContext = deps.resolveRequestContext(c);
@@ -238,6 +261,7 @@ export function createMemoryVaultRouter(deps: MemoryVaultRouterDeps) {
   router.openapi(getMemoryVaultSharingRoute, getSharingHandler);
   router.openapi(putMemoryVaultSharingRoute, putSharingHandler);
   router.openapi(getMemoryVaultSummaryStatusRoute, summaryStatusHandler);
+  router.openapi(deleteShownMemoryRoute, deleteShownHandler);
   router.openapi(updateMemoryVaultEntryRoute, updateHandler);
   router.openapi(deleteMemoryVaultEntryRoute, deleteHandler);
   return router;
