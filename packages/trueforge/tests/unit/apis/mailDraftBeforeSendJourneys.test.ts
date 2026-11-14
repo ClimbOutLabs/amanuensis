@@ -10,6 +10,7 @@ import {
   MAIL_CONNECTOR_NAME,
   MAIL_DRAFT_TOOL_NAME,
 } from '@truefoundry/trueforge-core/core/email/mailConnector/toolContract';
+import type { Tier3Email } from '@truefoundry/trueforge-core/core/permissions/tier';
 import { TENANT_ID } from '../../../src/apis/sessions';
 import configuration from '../../../src/config';
 import { SqliteMcpServerStore } from '../../../src/db/sqlite/mcp-server-store/SqliteMcpServerStore';
@@ -156,12 +157,21 @@ describe('an email Aman sends for the person', () => {
     return card;
   }
 
+  /** The draft a card shows. A card for an email with no draft on it fails the test. */
+  function draftOn(card: { tier3_card?: { email?: Tier3Email | null | undefined } | null | undefined }): Tier3Email {
+    const draft = card.tier3_card?.email;
+    if (draft === undefined || draft === null) {
+      throw new Error('The card shows no draft of the email.');
+    }
+    return draft;
+  }
+
   function answer({ card, approval }: { card: { thread_id: string; id: string }; approval: Answer }): TurnInputItem[] {
     return [{ type: 'user.tool_approval', thread_id: card.thread_id, tool_call_id: card.id, approval }];
   }
 
   it(
-    'shows the whole email on a card first, and the mail server hears of no send until the person approves that card',
+    'shows the email as a draft on a card first, and the mail server hears of no send until the person approves that card',
     async () => {
       const chatId = await createChat();
       const email = emailTo('dana');
@@ -169,10 +179,9 @@ describe('an email Aman sends for the person', () => {
 
       expect(sent()).toEqual([]);
       expect(card.tier).toBe(3);
-      const shown = card.tier3_card?.outbound_text ?? '';
-      expect(shown).toContain(email.recipients[0]);
-      expect(shown).toContain(email.subject);
-      expect(shown).toContain(email.body);
+      // The card is the draft itself: who it goes to, the subject and the whole text, as the email will go.
+      expect(draftOn(card)).toMatchObject({ action: 'send', subject: email.subject, body: email.body });
+      expect(draftOn(card).to.map(person => person.address)).toEqual(email.recipients);
       expect(card.tier3_card?.outbound_truncated).toBe(false);
       expect(card.tier3_card?.mail_from).toBe(HOME_ACCOUNT);
 
@@ -193,7 +202,7 @@ describe('an email Aman sends for the person', () => {
 
       const second = { ...first, subject: 'One more thing', body: 'Could you add a rye loaf?' };
       const secondCard = await askFor({ chatId, tool: 'send_email', email: second });
-      expect(secondCard.tier3_card?.outbound_text).toContain(second.body);
+      expect(draftOn(secondCard).body).toBe(second.body);
       expect(sent()).toHaveLength(1);
 
       await runTurn({ chatId, input: answer({ card: secondCard, approval: { status: 'allow', scope: 'once' } }) });
@@ -239,7 +248,7 @@ describe('an email Aman sends for the person', () => {
       const chatId = await createChat();
       const email = emailTo('ines');
       const card = await askFor({ chatId, tool: 'forward_email', email });
-      expect(card.tier3_card?.outbound_text).toContain(email.recipients[0]);
+      expect(JSON.stringify(card.tier3_card)).toContain(email.recipients[0]);
       expect(sent()).toEqual([]);
 
       await runTurn({ chatId, input: answer({ card, approval: { status: 'allow', scope: 'once' } }) });
@@ -273,7 +282,7 @@ describe('an email Aman sends for the person', () => {
       const chatId = await createChat();
       const email = emailTo('omar');
       const card = await askFor({ chatId, tool: MAIL_DRAFT_TOOL_NAME, email });
-      expect(card.tier3_card?.outbound_text).toContain(email.body);
+      expect(draftOn(card)).toMatchObject({ action: 'save', subject: email.subject, body: email.body });
       expect(savedDrafts()).toEqual([]);
 
       await runTurn({ chatId, input: answer({ card, approval: { status: 'allow', scope: 'once' } }) });
