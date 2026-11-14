@@ -212,6 +212,8 @@ describe('the turn after a turn that saved nothing, with summaries on', () => {
 
     await runSecondTurn(capabilityFor(client));
     expect(savedLogs(dir)).toEqual([]);
+    // A summary that is still being written is not a failed one, so the Memories page shows no warning.
+    expect(await client.summaryPendingSince({ namespace: '' })).toBeUndefined();
 
     finishSummary?.();
     await firstTurn;
@@ -220,6 +222,29 @@ describe('the turn after a turn that saved nothing, with summaries on', () => {
     expect(logs[0]).toContain('The person says thanks often.');
     expect(logs[0]).not.toContain('User:');
     expect(await client.summaryPendingSince({ namespace: '' })).toBeUndefined();
+  });
+
+  it('checks again on the turn after, and marks the vault only if the summary then left no record', async () => {
+    let finishSummary: (() => void) | undefined;
+    mockSummarize.mockImplementation(
+      () =>
+        new Promise(resolve => {
+          finishSummary = () => {
+            resolve({ status: 'nothing_to_keep' });
+          };
+        }),
+    );
+    const firstTurn = drainFirstTurn();
+    await new Promise(resolve => setTimeout(resolve, 20));
+    const capability = capabilityFor(client);
+
+    await runSecondTurn(capability);
+    finishSummary?.();
+    await firstTurn;
+    await runSecondTurn(capability);
+
+    expect(await client.summaryPendingSince({ namespace: '' })).toBeUndefined();
+    expect(savedLogs(dir)).toEqual([]);
   });
 
   it('still rebuilds a vanished turn as its full exchange when summaries are off', async () => {

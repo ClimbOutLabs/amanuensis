@@ -228,7 +228,34 @@ export interface SubmitRetainParams {
  * state) is the retry path for a submission that never reached the provider.
  */
 export async function submitRetain(params: SubmitRetainParams): Promise<void> {
-  await attemptRetainSubmission(params);
+  await whileRetainUnderWay({ params, work: () => attemptRetainSubmission(params) });
+}
+
+/** The turns whose save is being decided or written in this process right now, by operation id. */
+const retainsUnderWay = new Set<string>();
+
+/**
+ * Whether a turn's save is still being worked on here. A summary on a slow model can outlast the person's next
+ * message, and until it ends the store holds no record of the turn. That is not a lost save.
+ */
+export function retainIsUnderWay(operationId: string): boolean {
+  return retainsUnderWay.has(operationId);
+}
+
+async function whileRetainUnderWay<T>({
+  params,
+  work,
+}: {
+  params: Pick<SubmitRetainParams, 'sessionId' | 'turnId'>;
+  work: () => Promise<T>;
+}): Promise<T> {
+  const operationId = retainOperationId({ sessionId: params.sessionId, turnId: params.turnId });
+  retainsUnderWay.add(operationId);
+  try {
+    return await work();
+  } finally {
+    retainsUnderWay.delete(operationId);
+  }
 }
 
 /** Outcome of one retain submission attempt; `skipped` means there was nothing to retain. */
@@ -734,6 +761,10 @@ async function attemptRetainSubmission(
  * accepted by a retry), so callers can make claims about a save only on that outcome.
  */
 export async function submitRetainWithVerification(params: SubmitRetainParams): Promise<boolean> {
+  return whileRetainUnderWay({ params, work: () => retainAndVerify(params) });
+}
+
+async function retainAndVerify(params: SubmitRetainParams): Promise<boolean> {
   // Before the summary model runs: a private chat's words reach neither memory nor its notes.
   if (sessionKeepsNothing({ session: params.session })) {
     return false;
