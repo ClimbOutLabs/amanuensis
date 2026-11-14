@@ -380,7 +380,7 @@ export class MailConnectorSource implements ToolSource {
   }: {
     requested: unknown;
     reads_only: boolean;
-    /** The account the person picked on the approval card for this call, when they picked one. */
+    /** The account the approval names: the one picked on the card, else the one the card showed. */
     picked: string | undefined;
   }): Promise<{ name: string } | { refused: string }> {
     let snapshot = await this.#readAccounts(!reads_only);
@@ -405,7 +405,7 @@ export class MailConnectorSource implements ToolSource {
         ? { name: picked }
         : {
             refused:
-              'The account picked on the approval card cannot be used for this send, so nothing was sent. ' +
+              'The account on the approval card cannot be used for this send, so nothing was sent. ' +
               `The accounts this chat can use are ${listed}.`,
           };
     }
