@@ -13,6 +13,7 @@ import { configureOutboundFetches, extractErrorLogFields } from '@truefoundry/tr
 import type { Context } from 'hono';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
+import { configureRemoteAddressCheck, modelUrlProblem } from './runtime/remoteAddress';
 import {
   ensureLocalSandboxRootParent,
   prepareCodeModeSocketParent,
@@ -50,6 +51,10 @@ try {
   process.exit(1);
 }
 
+// The address check refuses this instance's container networks as well as its own addresses
+// when the installer named them; a host run names none, so its home network stays usable.
+configureRemoteAddressCheck({ ownNetworkRanges: configuration.CONTAINER_NETWORK_RANGES });
+
 configureOutboundFetches({
   model: {
     connectTimeoutMs: configuration.MODEL_HTTP_CONNECT_TIMEOUT_MS,
@@ -57,6 +62,10 @@ configureOutboundFetches({
     bodyTimeoutMs: configuration.MODEL_HTTP_BODY_TIMEOUT_MS,
     maxRetries: configuration.MODEL_HTTP_MAX_RETRIES,
   },
+  // A model provider's base address passes the address check when it is resolved for use; a
+  // redirect the provider answers with is judged by the same rule before it is followed.
+  modelRedirectCheck: async url =>
+    (await modelUrlProblem({ url, endpoints: configuration.LOCAL_MODEL_ENDPOINTS })) === null,
   mcp: {
     connectTimeoutMs: configuration.MCP_HTTP_CONNECT_TIMEOUT_MS,
     headersTimeoutMs: configuration.MCP_HTTP_HEADERS_TIMEOUT_MS,

@@ -7,7 +7,6 @@ import { z } from '@hono/zod-openapi';
 
 import { APPROVAL_EXPIRED_REASON_CODE } from './approvalExpiry';
 import type { ShellApprovalBinding } from './approvalTokens.js';
-import { MAPS_HOLD_REASON } from './mapsToolNames';
 import { Tier3MailboxSchema } from './tierMailbox';
 
 /** Sentinel permission tier: 1 silent, 2 asks unless the user relaxed its kind, 3 always asks. */
@@ -37,63 +36,6 @@ export const CONTENT_STEERED_REASON = 'content_steered';
  * time: an answer that covered later reads would cover whatever they carry.
  */
 export const CONNECTOR_READ_GUARD_REASON = 'connector_read_guard';
-
-/**
- * Tier 3 reason codes for calls the classifier ranks as a send, a mail draft, destructive, install or
- * hint-escalated action. A standing approval is argument-blind, so these never get "Always allow" across chats,
- * whatever the hosting server declares about the tool. Only the chat grant below may cover some of them, inside
- * one chat.
- */
-export const GRANT_BARRED_TIER_REASONS: ReadonlySet<string> = new Set([
-  'external_service',
-  'gmail_send',
-  'gmail_draft',
-  'mail_new_recipient',
-  'mail_send',
-  'destructive_action',
-  'install_action',
-  'mcp_destructive_hint',
-  'mcp_open_world_hint',
-  'connector_send',
-  'calendar_write_guests',
-  'caldav_calendar_guests',
-  'caldav_invitation_reply',
-  'connector_calendar_write',
-  'schedule_write',
-  'persona_write',
-  'skill_install',
-  REMINDER_CANCEL_REASON,
-  SCHEDULE_STATUS_REASON,
-  CONTENT_STEERED_REASON,
-  CONNECTOR_READ_GUARD_REASON,
-  MAPS_HOLD_REASON,
-]);
-
-/**
- * Consequential actions a person may answer once for the whole chat with "Always allow in this chat". The chat grant
- * binds the tool and its destination, never a standing grant across chats, so it is offered only when the card
- * names one. A send, a mail draft, a guest change, a steered call, creating a schedule or a persona, and adding a skill are never
- * among them: each of those asks every time.
- */
-export const CHAT_GRANTABLE_CONSEQUENCE_REASONS: ReadonlySet<string> = new Set([
-  'connector_outbound',
-  'destructive_action',
-  'mcp_destructive_hint',
-  'mcp_open_world_hint',
-]);
-
-/**
- * Calendar changes that touch only the person's own calendar: no guest is invited, reached or cancelled.
- * Only these may get a chat grant, and none gets a grant for every chat. Anything that cannot be shown guest-free
- * is a guest change.
- */
-export const OWN_CALENDAR_CHANGE_REASONS: ReadonlySet<string> = new Set(['calendar_write', 'caldav_calendar_change']);
-
-/**
- * Drive writes touch only the person's own files: a new Doc, or rows added to their own Sheet. Nothing is
- * sent to anyone and nothing is shared, so only these may get an "Always allow" or chat grant.
- */
-export const OWN_DRIVE_WRITE_REASONS: ReadonlySet<string> = new Set(['google_drive_write']);
 
 /** Tier 2 action kinds the user may relax to run without asking. Pinned to the Tier 2 member list. */
 export const TIER2_ACTION_KINDS = ['file_write'] as const;
@@ -442,6 +384,14 @@ export interface TierDecision {
   secret_path_read: boolean;
   /** True for a send through the host's own Email sidecar. Steering changes the reason, never this, so the send-list step still runs. */
   mail_send: boolean;
+  /** True when the classifying branch bars this call from a standing grant across chats. */
+  standing_grant_barred: boolean;
+  /** True when this consequential call may take a chat grant for the target its card names. */
+  chat_grantable_consequence: boolean;
+  /** True when this call changes only the person's own calendar, with no guest reached. */
+  own_calendar_change: boolean;
+  /** True when this call writes only the person's own Drive files and sends nothing to anyone. */
+  own_drive_write: boolean;
 }
 
 /** Hash binding for a tracked executable file execution. */
@@ -481,6 +431,10 @@ export function failClosedDecision(input: { reason_detail: string | null }): Tie
     grant_tool_name: null,
     secret_path_read: false,
     mail_send: false,
+    standing_grant_barred: false,
+    chat_grantable_consequence: false,
+    own_calendar_change: false,
+    own_drive_write: false,
   };
 }
 
@@ -502,6 +456,10 @@ function baseDecision(): Omit<TierDecision, 'tier' | 'reason' | 'reason_detail'>
     grant_tool_name: null,
     secret_path_read: false,
     mail_send: false,
+    standing_grant_barred: false,
+    chat_grantable_consequence: false,
+    own_calendar_change: false,
+    own_drive_write: false,
   };
 }
 
@@ -564,6 +522,10 @@ export function tier3Decision(input: {
   grant_tool_name?: string | null | undefined;
   secret_path_read?: boolean | undefined;
   mail_send?: boolean | undefined;
+  standing_grant_barred?: boolean | undefined;
+  chat_grantable_consequence?: boolean | undefined;
+  own_calendar_change?: boolean | undefined;
+  own_drive_write?: boolean | undefined;
 }): TierDecision {
   return {
     ...baseDecision(),
@@ -582,6 +544,10 @@ export function tier3Decision(input: {
     grant_tool_name: input.grant_tool_name ?? null,
     secret_path_read: input.secret_path_read === true,
     mail_send: input.mail_send === true,
+    standing_grant_barred: input.standing_grant_barred === true,
+    chat_grantable_consequence: input.chat_grantable_consequence === true,
+    own_calendar_change: input.own_calendar_change === true,
+    own_drive_write: input.own_drive_write === true,
   };
 }
 

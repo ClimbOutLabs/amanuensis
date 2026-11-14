@@ -67,6 +67,7 @@ import { createImageReencoder } from '../../src/runtime/chatImages/reencodeInSan
 import { ChatSearchIndexer } from '../../src/runtime/chatSearchIndexing';
 import { EventSubscriptionRegistry } from '../../src/runtime/event-subscription';
 import { createOutboundSecretSource } from '../../src/runtime/outboundSecrets';
+import { localModelEndpointOf } from '../../src/runtime/remoteAddress';
 import { createSentinelServices } from '../../src/runtime/sentinelServices';
 import { TurnDrainRegistry } from '../../src/runtime/turnDrains';
 import { deliveryDeps } from './deliveryDeps';
@@ -335,12 +336,21 @@ export async function startApprovalTestServer(options?: {
   });
 
   const originalFirstPartyOrigins = configuration.FIRST_PARTY_MCP_ORIGINS;
+  const originalLocalModelEndpoints = configuration.LOCAL_MODEL_ENDPOINTS;
   const originalEvalMode = configuration.AMAN_EVAL_MODE;
   const originalAuthMode = configuration.TRUEFORGE_AUTH_MODE;
   if (localSignIn) {
     configuration.TRUEFORGE_AUTH_MODE = 'local';
   }
-  configuration.FIRST_PARTY_MCP_ORIGINS = options?.memoryProvider === true ? [mcp.origin] : [];
+  // The fixture's own servers are this test instance's own services, and the operator of the
+  // instance vouches for them the way the server settings ask: the model's exact endpoint is
+  // named as a local model endpoint, and the connector's origin is listed as the operator's
+  // own, without which the address check refuses both loopback servers. The listing grants the
+  // connector no trust by itself (its row stays first_party false); the memoryProvider option
+  // still decides whether the connector is also registered as the memory provider.
+  configuration.FIRST_PARTY_MCP_ORIGINS = [mcp.origin];
+  const modelEndpoint = localModelEndpointOf(model.baseUrl);
+  configuration.LOCAL_MODEL_ENDPOINTS = modelEndpoint === null ? [] : [modelEndpoint];
 
   // One registry for the server's life, so close() can wait for turn drains the way main.ts does.
   const turnDrains = new TurnDrainRegistry();
@@ -374,6 +384,7 @@ export async function startApprovalTestServer(options?: {
     evalSources,
     close: async () => {
       configuration.FIRST_PARTY_MCP_ORIGINS = originalFirstPartyOrigins;
+      configuration.LOCAL_MODEL_ENDPOINTS = originalLocalModelEndpoints;
       configuration.AMAN_EVAL_MODE = originalEvalMode;
       configuration.TRUEFORGE_AUTH_MODE = originalAuthMode;
       // The guide installs, and the indexing they queue, write into directories removed below, so they finish first.
