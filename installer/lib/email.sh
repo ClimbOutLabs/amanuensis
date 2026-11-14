@@ -433,6 +433,8 @@ cmd_instance_email() {
   load_installed_release
   warn_if_installed_older
   dir=$(instance_dir "$name")
+  # The connector's compose settings need the shared secret, so an instance from before it gets one first.
+  env_secret_backfill "$name" MAIL_EMAIL_ACCOUNT_SECRET
   if [ "$OPT_REMOVE" = 1 ]; then
     # The saved password is deleted for good from the connector's volume, through its account agent.
     # An empty account in the volume means no account is connected.

@@ -12,7 +12,7 @@ import type { InternalToolCallInfo } from '../../llm/LLMTypes';
 import { toolResultResponse, type ToolInvocationContext } from '../../mcp/IMCPServer';
 import { defineTool, LocalToolMCP, type ToolDefinition } from '../../mcp/LocalToolMCP';
 import { stampSentinelDecision } from '../../mcp/ToolSet';
-import { classifyHostToolCall } from '../../permissions/classifier';
+import { classifyHostToolCall, messageForDisplay } from '../../permissions/classifier';
 import type { SentinelHostContext } from '../../permissions/context';
 import { DEMO_SEND_REFUSAL, recipientsAllowed } from '../../permissions/sendAllowlist';
 import { assertAttachmentBatch } from '../../runtime/attachmentStaging';
@@ -20,12 +20,13 @@ import type { ToolBundleName } from '../../runtime/toolBundleCatalog';
 import { SandboxFileUploadError, type SandboxInfo } from '../../sandbox/Sandbox';
 import type { AgentTracing } from '../../tracing/AgentTracing';
 import { assessDraft } from './draftAssessment';
-import { hashDraft, type ReviewableDraft } from './draftReview';
+import { checkCodeOf, hashDraft, type ReviewableDraft } from './draftReview';
 import { mapSkippingMissing, type GmailApiPort } from './gmailApi';
 import { decodeAttachmentData, type GmailMessage } from './gmailWire';
 import { mailboxOf, nameLeftOff } from './mailbox';
 import { headerOf, listAttachments, rawHeaderOf } from './message';
 import { buildRawMessage, replyHeaders, replySubject, type RawDraftContent, type ReplyTarget } from './rawMessage';
+import { buildSendReceiptEvent } from './receiptEvents';
 import { answeredMessageOf, checkReplyThreading, isReply, replyRecipientOf, type AnsweredMessage } from './replyThread';
 import {
   getDraftResult,
@@ -37,6 +38,7 @@ import {
   UNTRUSTED_NOTICE,
   type ResultContext,
 } from './results';
+import type { NotSentReason, SendReceiptResult } from './sendReceipt';
 import {
   DOWNLOAD_ATTACHMENT_TOOL_NAME,
   DownloadAttachmentSchema,
@@ -99,6 +101,30 @@ const NEW_APPROVAL =
 /** A refusal of a send in words the model can relay: what was refused, that nothing went out, and what to do. */
 function sendRefusal(reason: string): string {
   return `${reason} Nothing was sent. ${NEW_APPROVAL}`;
+}
+
+/**
+ * Why a send that threw did not go out. Only a failure after Gmail was asked can leave the outcome unknown: a lost
+ * answer or a server error means the message may have gone, so it is never reported as not sent.
+ */
+function notSentReasonOf(input: { error: unknown; gmailAsked: boolean }): NotSentReason {
+  const { error, gmailAsked } = input;
+  if (error instanceof GoogleReconnectRequiredError || error instanceof GoogleOAuthError) {
+    return 'reconnect_google';
+  }
+  if (!(error instanceof GoogleApiError)) {
+    return 'cannot_send';
+  }
+  if (error.status >= 500) {
+    return gmailAsked ? 'unconfirmed' : 'cannot_send';
+  }
+  if (error.status === 401 || error.status === 403) {
+    return 'reconnect_google';
+  }
+  if (error.status === 429) {
+    return 'rate_limited';
+  }
+  return gmailAsked ? 'gmail_refused' : 'cannot_send';
 }
 
 /**
@@ -338,6 +364,18 @@ export class GmailToolSet extends LocalToolMCP {
       throw new Error(assessed.reason);
     }
     return { ...parsed, review_hash: hashDraft(assessed.draft) };
+  }
+
+  /** A send the host stopped at dispatch went nowhere, and needs a fresh card; its receipt says so. */
+  refusedAtDispatchEvents(input: { params: CallToolRequest['params']; tool_call_id: string }) {
+    return input.params.name === SEND_DRAFT_TOOL_NAME
+      ? [
+          buildSendReceiptEvent({
+            tool_call_id: input.tool_call_id,
+            result: { outcome: 'not_sent', reason: 'needs_ok_again' },
+          }),
+        ]
+      : [];
   }
 
   async #liveDraft(draftId: string) {
@@ -748,6 +786,19 @@ export class GmailToolSet extends LocalToolMCP {
    * Sends only the draft the user approved: the hash of the card shown comes from the host with the approved call,
    * and the draft read right now must still hash to it. A call that arrives without one, by any route, sends nothing.
    */
+  /** Attaches the receipt event the chat turns the approval card into; absent when the call has no id to answer. */
+  #withReceipt<T extends object>(input: { response: T; toolCallId: string | undefined; result: SendReceiptResult }) {
+    const { toolCallId } = input;
+    return toolCallId === undefined
+      ? input.response
+      : { ...input.response, events: [buildSendReceiptEvent({ tool_call_id: toolCallId, result: input.result })] };
+  }
+
+  /**
+   * Sends only the draft the user approved: the hash of the card shown comes from the host with the approved call,
+   * and the draft read right now must still hash to it. A call that arrives without one, by any route, sends nothing.
+   * Every ending leaves a receipt event built from what the gate verified, never from model text.
+   */
   async #sendDraft({
     input,
     context,
@@ -755,23 +806,35 @@ export class GmailToolSet extends LocalToolMCP {
     input: z.infer<typeof DraftIdSchema>;
     context: ToolInvocationContext | undefined;
   }) {
+    const toolCallId = context?.tool_call_id;
+    const notSent = (reason: NotSentReason, response: ReturnType<typeof errorResult>) =>
+      this.#withReceipt({ response, toolCallId, result: { outcome: 'not_sent', reason } });
+    let gmailAsked = false;
     try {
       const live = await this.#liveDraft(input.draft_id);
       const assessed = assessDraft({ message: live, account: this.#options.account, forSend: true });
+      // A card is only shown for a draft that passed these checks, so a failure here means it changed since.
       if (!assessed.ok) {
-        return errorResult(this.#refuseSend(assessed.reason));
+        return notSent('draft_changed', errorResult(this.#refuseSend(assessed.reason)));
       }
       const threading = await this.#threading({ draft: assessed.draft, draftMessageId: live.id });
       if (!threading.ok) {
-        return errorResult(this.#refuseSend(threading.reason));
+        return notSent('draft_changed', errorResult(this.#refuseSend(threading.reason)));
       }
       const approved = context?.approved_params?.['review_hash'];
       if (typeof approved !== 'string') {
-        return errorResult('This send was not approved, so nothing was sent. Ask to send the draft again.');
+        return notSent(
+          'needs_ok_again',
+          errorResult('This send was not approved, so nothing was sent. Ask to send the draft again.'),
+        );
       }
-      if (approved !== hashDraft(assessed.draft)) {
-        return errorResult(
-          'The draft changed after you approved it, so nothing was sent. Ask to send it again to review the new text.',
+      const hash = hashDraft(assessed.draft);
+      if (approved !== hash) {
+        return notSent(
+          'draft_changed',
+          errorResult(
+            'The draft changed after you approved it, so nothing was sent. Ask to send it again to review the new text.',
+          ),
         );
       }
       // Checked again here so the list holds even for a send approved before demo mode limited it.
@@ -783,18 +846,30 @@ export class GmailToolSet extends LocalToolMCP {
           ),
         })
       ) {
-        return errorResult(DEMO_SEND_REFUSAL);
+        return notSent('demo_limited', errorResult(DEMO_SEND_REFUSAL));
       }
+      gmailAsked = true;
       const sent = await this.#options.api.sendDraft(input.draft_id);
-      return jsonResult({
-        account: this.#options.account,
-        draft_id: input.draft_id,
-        message_id: sent.id,
-        thread_id: sent.threadId,
-        status: 'sent',
+      return this.#withReceipt({
+        response: jsonResult({
+          account: this.#options.account,
+          draft_id: input.draft_id,
+          message_id: sent.id,
+          thread_id: sent.threadId,
+          status: 'sent',
+        }),
+        toolCallId,
+        result: {
+          outcome: 'sent',
+          sent_at: new Date().toISOString(),
+          sent_message_id: sent.id,
+          check_code: checkCodeOf(hash),
+          message: messageForDisplay(assessed.draft),
+        },
       });
     } catch (error) {
-      return failureResult(error);
+      const response = failureResult(error);
+      return notSent(notSentReasonOf({ error, gmailAsked }), response);
     }
   }
 }

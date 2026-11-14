@@ -4,7 +4,7 @@ import type { Tier3Mailbox } from './tierMailbox';
 /**
  * One owner per action kind for the words an approval card is made of. Callers supply checked facts
  * (a title, a time, a recipient, an amount); the owner for the kind decides what becomes the headline,
- * what becomes the consequence line, and what becomes the reason behind "Why I'm asking". The UI
+ * what becomes the consequence line, and what becomes the reason line under the headline. The UI
  * renders the three parts and never builds sentences of its own.
  *
  * No part ever carries an internal id: an event is named by its title and time, an email by its

@@ -1,5 +1,5 @@
 import type { AgentSpec, SessionHandle } from '@truefoundry/trueforge-core/agent-session';
-import type { SentinelHostContext } from '@truefoundry/trueforge-core/core';
+import type { SentinelHostContext, SkillNetworkCardRequest } from '@truefoundry/trueforge-core/core';
 import {
   DisabledDriver,
   DockerDriver,
@@ -11,6 +11,7 @@ import {
   SlotDriver,
   type AgentTracing,
   type BoundRepository,
+  type GitCommitIdentity,
   type GitSkill,
   type ModelParams,
   type RemoteMcpHeaders,
@@ -732,6 +733,8 @@ export function buildTurnSandbox(input: {
   logger: Logger;
   gitSkills: readonly GitSkill[];
   githubGitToken?: string | null | undefined;
+  /** Name and email for commits made by shell commands. */
+  gitCommitIdentity?: GitCommitIdentity | undefined;
   githubConnectorAttached?: boolean | undefined;
   webConnectorAttached?: boolean | undefined;
   fileDownloadEnabled: boolean;
@@ -746,6 +749,7 @@ export function buildTurnSandbox(input: {
   loadBoundRepository?: (() => Promise<BoundRepository | undefined>) | undefined;
   loadPackageMirrorToken?: (() => Promise<string | undefined>) | undefined;
   loadSkillNetworkGrant?: (() => Promise<{ token: string; hosts: readonly string[] } | undefined>) | undefined;
+  drainSkillNetworkCards?: (() => Promise<readonly SkillNetworkCardRequest[]>) | undefined;
   loadPackageDownloadsAllowed?: (() => Promise<boolean>) | undefined;
   allowPackageDownloads?: (() => Promise<void>) | undefined;
   onRepositorySources?: RepositoryCommandSourceObserver | undefined;
@@ -779,12 +783,14 @@ export function buildTurnSandbox(input: {
     existingSandboxId: input.existingSandboxId,
     fileDownloadEnabled: input.fileDownloadEnabled,
     githubGitToken: input.githubGitToken ?? null,
+    gitCommitIdentity: input.gitCommitIdentity,
     githubConnectorAttached: input.githubConnectorAttached ?? false,
     webConnectorAttached: input.webConnectorAttached ?? false,
     boundRepository: input.boundRepository,
     loadBoundRepository: input.loadBoundRepository,
     loadPackageMirrorToken: input.loadPackageMirrorToken,
     loadSkillNetworkGrant: input.loadSkillNetworkGrant,
+    drainSkillNetworkCards: input.drainSkillNetworkCards,
     loadPackageDownloadsAllowed: input.loadPackageDownloadsAllowed,
     allowPackageDownloads: input.allowPackageDownloads,
     onRepositorySources: input.onRepositorySources,

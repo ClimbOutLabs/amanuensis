@@ -34,6 +34,7 @@ import { BriefItemCompletionStore } from '../../src/db/briefItemCompletionStore'
 import type { IMcpServerStore } from '../../src/db/mcpServerStore';
 import { McpServerWithAuthStore } from '../../src/db/McpServerWithAuthStore';
 import { migrateSqliteToLatest } from '../../src/db/migrateSqlite';
+import { RecallExclusionStore } from '../../src/db/recallExclusionStore';
 import { SentinelAuditStore } from '../../src/db/sentinelAuditStore';
 import { SqliteAgentStore } from '../../src/db/sqlite/agent-store/SqliteAgentStore';
 import { SqliteApprovalTokenStore } from '../../src/db/sqlite/approval-token-store/SqliteApprovalTokenStore';
@@ -151,6 +152,7 @@ function buildApp(input: {
     approvalTokens: new SqliteApprovalTokenStore(db),
     toolGrants: mcpToolGrantStore,
     outboundSecrets,
+    skillStore,
   });
   const personaStore = new SqlitePersonaStore(db);
   const localUserStore = input.localSignIn ? new SqliteLocalUserStore(db) : undefined;
@@ -201,6 +203,7 @@ function buildApp(input: {
     sentinelAuditStore,
     sentinelSettingsStore,
     briefItemStore: new BriefItemCompletionStore(db),
+    recallExclusionStore: new RecallExclusionStore(db),
     ...deliveryDeps(db),
     sessions: new Sessions({ sessionStore, sentinelServices }),
     activeTurns: new ActiveTurnRegistry(),

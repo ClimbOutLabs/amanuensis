@@ -183,6 +183,30 @@ describe('tool bundles in a turn', () => {
     expect(thread.toSnapshot().capability_state).toBeNull();
   });
 
+  it('adds guidance once: a second read in a later reply gets a short pointer', async () => {
+    const first = await runTurn({ steps: [{ name: 'load_bundle', args: { name: 'spaces' } }, 'answer'] });
+    const snapshot = first.thread.toSnapshot();
+    const later = await runTurn({
+      steps: [{ name: 'load_bundle', args: { name: 'spaces' } }, 'answer'],
+      history: snapshot.context,
+      capabilityState: snapshot.capability_state ?? undefined,
+    });
+    const laterResults = toolResults(later.requests[1]);
+    expect(laterResults.filter(result => result.includes('Spaces hold the notes'))).toHaveLength(1);
+    expect(laterResults[laterResults.length - 1]).toContain('already in this chat');
+  });
+
+  it('returns the guidance again when it is no longer in the chat', async () => {
+    const { requests } = await runTurn({
+      steps: [{ name: 'load_bundle', args: { name: 'spaces' } }, 'answer'],
+      history: [
+        { role: 'user', content: 'Earlier question.' },
+        { role: 'assistant', content: 'A summary took the place of the earlier guidance.' },
+      ],
+    });
+    expect(toolResults(requests[1])[0]).toContain('Spaces hold the notes');
+  });
+
   it("starts the next reply with the previous reply's system prompt and tools", async () => {
     const first = await runTurn({ steps: [{ name: 'load_bundle', args: { name: 'spaces' } }, 'answer'] });
     const lastOfFirst = first.requests[first.requests.length - 1];
@@ -223,6 +247,7 @@ describe('tool bundles in a turn', () => {
       tracing: NOOP_AGENT_TRACING,
       sectionBundles: new Set(TOOL_BUNDLE_NAMES),
       guidance: name => `Guidance for ${name}.`,
+      inChat: () => false,
     });
     bundles.load({ converted: { tools: [], toolMapping: new Map() }, metaToolSet: undefined, deferredServers: false });
     const builder = new InstructionBuilder('test');

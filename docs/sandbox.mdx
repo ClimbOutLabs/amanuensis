@@ -40,6 +40,8 @@ The image and the limits for each run come from the server settings, and change 
 
 A script Aman wrote in the chat's workspace runs with `run_code` by name (`script_path`). The run reads a copy of that one file and never changes it.
 
+A program that is a file in the workspace, such as a project's `main.py` or `server.js`, also runs from the shell: `python3 main.py` or `node server.js`. It runs in the workspace, so it can use the project's other files. It asks first, like any other command that is not on the safe list. Code that is not in a file (`python3 -c`, code piped in) is refused in the shell and goes to `run_code`.
+
 Package installs work only on a sandbox that can reach the package mirrors (sandbox slots). They also need downloads allowed: for the repository a chat is working on, or for your chats without a project. The Docker sandbox has no network for packages, so an install there is refused before any approval card. Build, test and run commands still run there as ordinary commands.
 
 Settings no longer offers a choice of sandbox provider. Docker is the only option offered there.
@@ -61,28 +63,33 @@ The installer uses a second kind of sandbox: two hardened slot containers, inste
 
 ### Disk space and limits
 
-- Each chat's workspace has a size limit (2 GB by default), enforced while a command runs. On Linux, setup (the installer, `aman doctor sandbox --fix`, or `pnpm sandbox:slots --fix`) also gives each slot a fixed-size disk of its own (16 GB by default, `--disk-gb` to change it). Each disk may fill completely, so setup needs that much free for each one, 32 GB for both by default. After asking, it creates the disk files under `/var/lib/aman-slots`, adds them to `/etc/fstab` and mounts them, so a runaway command can fill only its own slot's disk. On Docker Desktop and WSL2 there is no per-slot disk; the virtual machine's disk bounds the workspaces. `installer/install.sh instance remove <name> --purge-data` removes the instance's disk files along with its data (`pnpm sandbox:slots --down --purge` does it for a checkout-only setup).
+- Each chat's workspace has a size limit (2 GB by default), enforced while a command runs. A command that goes over the limit is stopped, and the files it wrote are deleted, largest first, until the workspace fits again. Files that were there before the command stay, and a project's Git history is the last thing to go. The result names what was deleted. On Linux, setup (the installer, `aman doctor sandbox --fix`, or `pnpm sandbox:slots --fix`) also gives each slot a fixed-size disk of its own (16 GB by default, `--disk-gb` to change it). Each disk may fill completely, so setup needs that much free for each one, 32 GB for both by default. After asking, it creates the disk files under `/var/lib/aman-slots`, adds them to `/etc/fstab` and mounts them, so a runaway command can fill only its own slot's disk. On Docker Desktop and WSL2 there is no per-slot disk; the virtual machine's disk bounds the workspaces. `installer/install.sh instance remove <name> --purge-data` removes the instance's disk files along with its data (`pnpm sandbox:slots --down --purge` does it for a checkout-only setup).
+- A shell command's home folder is a temporary one that is empty at the start of every command, so tools such as npm, pip and git can write their own files there. npm keeps the packages it downloads in the chat's workspace, under `.aman/npm-cache`, because they are larger than the temporary space; that folder counts toward the workspace's size limit and is hidden from Git. A Python environment made in a project folder (`.venv`) is hidden from Git the same way.
 - A command can use at most 128 processes. Allowed environment variables for a command are a short list (locale, terminal, language runtime and git settings); others are refused with their names.
 
 ### What is installed
 
-- The guest image has Python 3 with pypdf, pdfplumber, reportlab, python-docx, openpyxl, pandas, matplotlib and Pillow, plus pytest, ruff and mypy for testing and checking code; Node.js with TypeScript, plus vitest, jest, eslint and prettier for testing and checking code; bash and coreutils; git; gcc, g++ and make; and poppler-utils with poppler-data, and Tesseract with language data, for reading PDFs and images. More packages can be downloaded only as described under Package downloads below.
+- The guest image has Python 3 with pypdf, pdfplumber, reportlab, python-docx, openpyxl, pandas, matplotlib, Pillow, requests, pyyaml, httpx and beautifulsoup4 (the last four are what skill scripts use most often), plus pytest, ruff and mypy for testing and checking code, and venv for making a project environment; Node.js with TypeScript, plus vitest, jest, eslint and prettier for testing and checking code; bash and coreutils; git; gcc, g++ and make; and poppler-utils with poppler-data, and Tesseract with language data, for reading PDFs and images. More packages can be downloaded only as described under Package downloads below.
 
 ### Attachments and languages
 
 - Files you attach in chat reach the sandbox the same way as on Docker, and the sandbox never fetches anything: the server sends the file into the chat's workspace (under `/workspace/.aman/uploads`) and offers it to `run_code` under `/ingress`. The text of a PDF or image is read inside the sandbox and placed in the message, so any model sees it without running code. Gmail attachments use the same path: Aman fetches the file from Gmail, sends it into the chat's workspace, and reads it there. Text taken from a file is passed to the model as data, not instructions, and goes through the tool-output screen when one is configured. Office documents, saved emails, web pages and text files are read the same way, inside the sandbox; see [Document attachments](#document-attachments). Other files are read with `run_code`.
 - Languages: PDF text works in any language (poppler-data covers Chinese, Japanese and Korean PDFs). Scanned pages and images are read with Tesseract: it detects each page's script and reads the page with that script's languages only (Latin: English, Portuguese, Spanish, French, German, Italian, Dutch; Devanagari: Hindi, Marathi; Arabic; Cyrillic: Russian; Chinese, simplified and traditional; Japanese; Korean). `DOCUMENT_OCR_LANGUAGES` (default: the Latin set) is used when a page's script cannot be detected, for example a page with very little text. Setting it to a language the image lacks is ignored for that language, so OCR keeps working.
 - `pnpm test:slots-live` (from the checkout, `--instance <name>` for an instance other than `main`) proves it end to end on an installed instance: it reads generated PDFs and scanned images in each script family through that instance's sandbox, prints a line per case, and ends with a verdict. The test images are drawn in a throwaway container, so nothing is installed on the host.
+- `pnpm test:sandbox-coding-live` (same `--instance` option) proves on an installed instance that coding work runs in the sandbox. With no AI model involved, it checks nine things: a command that fills the disk loses only its own files, the shell's home folder can be written and `npm install` works, a command can ask for more time, the Sandbox switch lets new files through without a card, package downloads reach the mirror and nothing else, a Git folder's remote can be read, a project of several files runs from the shell, a Python project environment can be made, and a plain commit carries the chosen name. It prints a line per check and ends with a verdict; the exit code is 0 only when every check passed.
 - `aman doctor` reports `attachments`: ok when a test file sent into the sandbox comes back and the sandbox has the PDF and OCR tools and every language above; a failure with `aman doctor sandbox --fix` otherwise; a warning when the sandbox was too busy to check. A status list (`aman doctor --local`) and the upgrade check skip this live test. An install from before this release gets the tools and languages from `install.sh upgrade`, which rebuilds the sandbox image (about 140 MB larger); a plain `install.sh` re-run also starts running slots again when the image was rebuilt.
 
 ### Status and everyday behavior
 
 - When every slot already holds as many chats as its disk fits, the sandbox is off and the chat's **Add-ons** picker says so: the sandbox is full, and deleting old chats makes room. Any other reason the sandbox is off shows there too. Only a server admin sees the detailed reason; everyone else is told to ask the person who runs Aman. The server log notes once when the slots fill up, not on every check.
 - Files in a chat's `/workspace` persist between commands. Processes do not: a background process ends when its command returns.
-- Optional toolchains: `pnpm sandbox:slots --add go`, `--add rust` or `--add java` (a comma list works) adds Go 1.27, Rust 1.99 (rustc and cargo) or OpenJDK 21 to the guest image and rebuilds it; `--remove` takes one out again, and the choice stays until you remove it. The Go and Rust archives are downloaded on the host and checked against checksums pinned in the repository; Java comes from the Ubuntu archive. Guests have no network of their own, so Go and Cargo dependencies come only through the package mirrors described below, and Maven cannot download dependencies at all.
+- Optional toolchains: `aman doctor sandbox --add go` on an installed Aman, or `pnpm sandbox:slots --add go` from a checkout (`--add rust` and `--add java` too; a comma list works), adds Go 1.27, Rust 1.99 (rustc and cargo) or OpenJDK 21 to the guest image and rebuilds it; `--remove` takes one out again, and the choice stays until you remove it. The Go and Rust archives are downloaded on the host and checked against checksums pinned in the repository; Java comes from the Ubuntu archive. Guests have no network of their own, so Go and Cargo dependencies come only through the package mirrors described below, and Maven cannot download dependencies at all.
+- Your own Python packages: `aman doctor sandbox --add-python feedparser,arxiv` on an installed Aman, or `pnpm sandbox:slots --add-python feedparser,arxiv` from a checkout, adds those packages to the sandbox and rebuilds it. Give each package as a plain name, or a name and an exact version such as `arxiv==2.1.0`. `--remove-python feedparser` takes one out again. The list is kept on this computer and stays through upgrades, and every rebuild installs it again. The packages are downloaded once, while the sandbox is built, from the Python package site. Only ready-made packages are used, so no package code runs while they install. A package that needs a different version of something the sandbox already ships is refused, so your list can never change the packages Aman relies on. The sandbox still has no network while it runs. These packages are not checked by Aman: only add ones you trust, because code in the sandbox can use them.
 - Approvals judge a path in `/workspace` by its name: `..` is collapsed and anything that ends up outside `/workspace` asks, as with a local sandbox. The server cannot follow symlinks inside a slot, so for shell commands the thing that actually keeps a command inside its workspace is the guest, which mounts only that chat's workspace; a silent (Tier 1) command is contained by the guest's view, not by its tier. The slot agent opens every path of its own file reads and writes without following links.
+- With the Sandbox switch on, a file tool makes a new file without asking, and changes a file Aman made in the same chat without asking. A file that was already there still asks. The server cannot see a slot's files, so it asks the slot agent whether anything is at the path; a link, a folder, or a path it cannot check counts as already there.
 - Skills run on slots too. A skill that needs its own websites reaches only the sites you approved, through a gateway on the host. The gateway connects only to a site named in that chat's approval, and logs every refusal with the site, the chat and the approval it was checked against.
-- Git works through the server. `git clone`, `fetch`, `pull`, `ls-remote` and `push` of github.com repositories run as one plain command; the server does the network part with your GitHub connector's token and hands the result to the sandbox as files. The token is never placed in a slot and a slot never contacts GitHub. A push shows an approval card naming the repository, the branch and the commits first, and then sends only those commits as a fast-forward: forced pushes, deleting branches, pushing tags and changes to submodules or `.gitmodules` are refused. Repositories over 100 MB are refused; use `git clone --depth 1`.
+- Commits made in the sandbox carry a name and an email, so a plain `git commit` works. By default the name is the person's own name from Personalization ("Aman" when they gave none) and the email is `aman@localhost`. The person can change both under Settings, Sandbox, "Name on Git commits" (`GET` and `PUT /api/v1/settings/git-commit-identity`); an empty box goes back to the default, and a change applies from the next message. The server passes the choice to each command as `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`, `GIT_COMMITTER_NAME` and `GIT_COMMITTER_EMAIL`. Git reads these before its own `user.name` and `user.email` settings, so the setting decides, unless one command sets the same variables itself. The choice is kept when you export and import your data.
+- Git works through the server. `git clone`, `fetch`, `pull`, `ls-remote` and `push` of github.com repositories run as one plain command; the server does the network part with your GitHub connector's token and hands the result to the sandbox as files. The token is never placed in a slot and a slot never contacts GitHub. A push shows an approval card naming the repository, the branch and the commits first, and then sends only those commits as a fast-forward: forced pushes, deleting branches, pushing tags and changes to submodules or `.gitmodules` are refused. Repositories over 100 MB are refused; use `git clone --depth 1`. A Git command joined to another one (for example `cd repo && git pull`), or one for another host, runs inside the slot with no network; Aman is then told to run it again on its own, and that only github.com can be reached.
 
 ## Package downloads
 
@@ -224,6 +231,32 @@ The shell tool runs repository and workspace commands. It does not run inline co
 through `run_code`. Building and testing a Python project is the exception: `python3 -m pytest`,
 `python3 -m pip`, `python3 -m venv` and `python3 -m unittest` run in the shell.
 
+The sandbox's own Python does not accept installs, so a Python project gets its packages in an
+environment inside the project folder:
+
+```bash
+python3 -m venv --system-site-packages .venv   # keeps the preinstalled tools, such as pytest
+.venv/bin/python -m pip install mcp            # needs Package downloads allowed for the chat
+.venv/bin/python -m pytest -q
+```
+
+If pip is pointed at the sandbox's own Python instead, its refusal comes back with these steps.
+`run_code` runs only the code it is given, in an empty folder: it cannot see the project folder or
+anything installed there, so a project is checked with its tests in the shell.
+
+A script that ships with a skill turned on in the chat runs through its own action, not the shell.
+Aman names the skill, the script's path inside the skill's folder and the script's arguments. The
+server checks that the skill is on in this chat and the script is a Python or JavaScript file in
+its folder. In the sandbox it then checks that the script, followed through any links, is still
+inside that folder. It starts `python3` or `node` from that folder with the script and each argument
+passed as they are, with no shell in between. A skill's script runs without asking while the sandbox
+can't reach the internet. It asks when the sandbox can reach the internet, or when Aman edited a file
+in that skill's folder with its file tools earlier in the chat.
+
+A shell command is stopped after 60 seconds unless Aman asks for longer. It can ask for up to 10
+minutes for one command, which is what a package install, a build or a long test run needs. When a
+command is stopped for taking too long, the result says so and says how to ask for more time.
+
 A reply can do as much work inside the sandbox workspace as the task needs: writing and editing
 files, running code, builds and tests. Two limits still apply to every reply:
 
@@ -234,8 +267,10 @@ files, running code, builds and tests. Two limits still apply to every reply:
   it was tried, even if it answered with an error; one that was refused or never sent does not, and
   reads never do.
 - A step budget of 8 model steps, with one step handed back for each step that saved a file in the
-  sandbox (or wrote to a space), up to 12 more. When it runs out, Aman says what it changed and what
-  is left, and you can ask it to continue.
+  sandbox (or wrote to a space) or ran a shell command there to its end, up to 12 more. So a reply
+  that edits, builds and tests can take up to 20 steps. A failing test run is handed back too; a
+  command that was refused or never started is not. When the budget runs out, Aman says what it
+  changed and what is left, and you can ask it to continue.
 
 The same call made twice with nothing changed in between is skipped as a repeat, so running the
 tests again after a file edit works, and running them twice in a row does not. An action that can

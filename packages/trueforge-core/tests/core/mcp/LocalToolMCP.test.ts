@@ -34,4 +34,24 @@ describe('defineTool inputSchema', () => {
 
     expect(tool.inputSchema.required).toEqual(['message']);
   });
+
+  it('leaves out the safe-integer bound Zod adds to whole numbers, and keeps real bounds', () => {
+    const tool = defineTool({
+      name: 'read_page',
+      description: 'Read a page',
+      schema: z.object({
+        revision: z.number().int().positive(),
+        lines: z.number().int().min(1).max(1000),
+        items: z.array(z.object({ page: z.number().int().nonnegative() })),
+      }),
+      handler: async () => toolResultResponse({ text: 'ok' }),
+    });
+
+    expect(JSON.stringify(tool.inputSchema)).not.toContain(String(Number.MAX_SAFE_INTEGER));
+    expect(tool.inputSchema.properties).toMatchObject({
+      revision: { type: 'integer', exclusiveMinimum: 0 },
+      lines: { type: 'integer', minimum: 1, maximum: 1000 },
+      items: { items: { properties: { page: { type: 'integer', minimum: 0 } } } },
+    });
+  });
 });

@@ -18,7 +18,9 @@ If a page has closed, for example after a restart, Aman opens it again by itself
 
 ## What Aman will not do
 
-- Before a click that would send something, such as a form, a payment or a delete, Aman shows you a card and waits for your OK.
+- Aman follows a plain link to another page without asking. It only opens that page.
+- Before anything else that could send something, Aman shows you a card and waits for your OK. That covers clicking a button, a tab or a menu, typing into a field and picking from a list. A page can send what you type the moment it changes, so the card shows the exact text first.
+- Aman never presses Enter or Tab when it types, and it acts only on the exact thing it checked. If the page changed in between, it reads the page again instead.
 - Aman never types into a password, card or one-time-code field. You do those yourself in the live browser.
 - Aman doesn't open an address with a sign-in name or password in front of the site, such as `https://name@site.example`, because the site would receive it. Ask again with the address without that part.
 

@@ -46,7 +46,8 @@ If the voice service is out of date, Aman shows "The voice service is out of dat
 - Each person can have two voice requests at once, shared between voice mode and replies read aloud by hand. One waits for the other.
 - Each person has one voice conversation per account they sign in to, and at most 3 in all. A new one on the same account replaces the old one.
 - The server holds at most 20 voice conversations at once. Voice mode keeps its tickets in one server's memory, so run a single copy of the server.
-- A reading holds at most 4,000 characters. Longer replies are read in parts. Each person can ask for 30 readings a minute.
+- A reading holds at most 4,000 characters. Longer replies are read in parts.
+- Each person can make 30 voice requests a minute. Readings and transcriptions share that one budget.
 
 ## Settings that need a terminal
 
@@ -57,6 +58,7 @@ Set these in `packages/trueforge/.env` for host development, or in the environme
 | `TTS_ENABLED` | `true` | `false` turns the voice on your computer off. Voice mode does not start, and replies read aloud use the browser's voice. |
 | `TTS_URL` | `http://aman-tts:8002` | Where the server finds `aman-tts`. |
 | `STT_URL` | `http://aman-stt:8001` | Where the server finds `aman-stt`. |
+| `SPEECH_SECRET` | none | The shared secret the server sends to `aman-stt` and `aman-tts`. It must be at least 32 characters. |
 | `VOICE_VAD_MODEL_DIR` | `<app data folder>/voice-model` (the images set `/opt/aman-voice`) | Where the speech-detection model is. |
 | `AMAN_STT_MODEL` | `small` | Which Whisper model `aman-stt` uses. Larger models are more accurate and need more memory. |
 | `AMAN_STT_FALLBACK_MODEL` | `base` | The model used when the main one fails to load. |
@@ -103,13 +105,24 @@ Stop the `aman-tts` container, and replies are read by your browser's voice inst
 
 Compose sets `STT_URL` itself. The server does not wait for `aman-stt` to be healthy, so typed chat works while transcription is down.
 
+## The speech secret
+
+Both speech services check a shared secret on every call, the same way the browser service does:
+
+- The server sends it in the `x-speech-secret` header. A call without it, or with a different value, is refused.
+- The value lives in `SPEECH_SECRET`. The installer makes one for the computer and gives every instance a copy. The compose files require one, and `pnpm smoke` makes a random one for each run.
+- A speech service started without a secret of at least 32 characters does not start at all.
+- The health check is the one exception. It answers without the secret, because the container health check carries none, and it says only whether the model loaded.
+
+The server also keeps voice local. `STT_URL` and `TTS_URL` must point at this computer or its local network: a loopback address, a private address, or an internal service name such as the defaults. Any other address stops the server from starting, with a message that names the setting and what to change.
+
 ## Host development
 
 `pnpm dev:infra` starts `aman-stt` from `docker-compose.dev.yml` next to Postgres and Redis. The server and UI run on your computer with `pnpm dev`.
 
 The service uses the same build, image, memory limit and thread count as the full stack, with two differences:
 
-- It publishes `127.0.0.1:8001`, on your own computer only, because `aman-stt` has no sign-in.
+- It publishes `127.0.0.1:8001`, on your own computer only.
 - Do not give it cores of its own here. The server runs on your computer and cannot be kept off them.
 
 `pnpm dev:infra` rebuilds the images each time, so an older voice service is never reused. The first run builds the image and downloads the model (about 464 MB) into the dev project's own `stt-model-cache` volume.
@@ -122,6 +135,8 @@ TTS_URL=http://localhost:8002
 ```
 
 Without `STT_URL`, the server looks for `http://aman-stt:8001`, which only works inside the compose network, and the microphone stays hidden.
+
+The dev speech services need the speech secret too. Set `SPEECH_SECRET` to a random value of 32 or more characters, for example from `openssl rand -hex 32`. Set it in the shell that runs `pnpm dev:infra`, and set the same value in `packages/trueforge/.env`. Without it, `pnpm dev:infra` stops and says which setting is missing.
 
 `pnpm dev` fetches the speech-detection model by itself when you are online. If you were offline, run this once you are back online:
 

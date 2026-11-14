@@ -26,7 +26,7 @@ export const transcribeVoiceRoute = createRoute({
   tags: [OpenApiTag.AGENT_SESSIONS],
   summary: 'Transcribe a voice recording',
   description:
-    'Accepts 16 kHz mono 16-bit PCM WAV audio and returns the transcript produced by the local STT sidecar. Audio bodies over 30 MB are rejected.',
+    'Accepts 16 kHz mono 16-bit PCM WAV audio and returns the transcript produced by the local STT sidecar. Audio bodies over 30 MB are rejected. Each person may make a limited number of voice requests per minute, shared with spoken replies.',
   'x-fern-sdk-group-name': ['voice'],
   'x-fern-sdk-method-name': 'transcribe',
   request: {
@@ -52,6 +52,10 @@ export const transcribeVoiceRoute = createRoute({
     413: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },
       description: 'Audio body over the 30 MB limit.',
+    },
+    429: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'Too many requests; wait for the Retry-After seconds.',
     },
     503: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },

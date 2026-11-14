@@ -42,10 +42,12 @@ import type { ISentinelAuditStore } from '../db/sentinelAuditStore';
 import type { ISentinelSettingsStore } from '../db/sentinelSettingsStore';
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import type { ISpaceStore } from '../db/spaceStore';
+import type { ITextContactStore } from '../db/textContactStore';
 import type { ITurnArtifactStore, TurnArtifactRecord } from '../db/turnArtifactStore';
 import { personaKnowledgeLocation } from '../personaKnowledge/knowledgePaths';
 import { openPersonaKnowledgeRepository } from '../personaKnowledge/sqliteKnowledgeRepository';
 import type { Persona } from '../personas/persona';
+import { GIT_COMMIT_IDENTITY_SETTING_KEY } from '../runtime/gitCommitIdentitySettings';
 import {
   CURATED_MEMORY_FILE,
   DAILY_LOG_FILE_PATTERN,
@@ -88,6 +90,7 @@ const MEMORY_LIST_TIMEOUT_MS = 10_000;
 /** Instance-wide, non-secret toggles. Anything not listed here never leaves in settings.json. */
 export const EXPORTED_GLOBAL_SETTING_KEYS = [
   DEFAULT_CHAT_MODEL_SETTING_KEY,
+  GIT_COMMIT_IDENTITY_SETTING_KEY,
   MEMORY_RECALL_ENABLED_SETTING_KEY,
   MEMORY_SCREEN_ENABLED_SETTING_KEY,
   MEMORY_SUMMARIZE_SETTING_KEY,
@@ -128,6 +131,7 @@ export interface DataExportDeps<TTransaction> {
   auditStore: Pick<ISentinelAuditStore, 'listOwned'>;
   deliveryStore: Pick<IDeliveryStore, 'listForExport'>;
   reachSettingsStore: Pick<IReachSettingsStore, 'get'>;
+  textContactStore: Pick<ITextContactStore, 'get' | 'listWords'>;
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
   mcpServerStore: IMcpServerStore<TTransaction>;
   /** Only the setups are read; a provider's key never leaves (see modelProviders.ts). */
@@ -573,6 +577,19 @@ export async function runDataExport<TTransaction>(
   // switched off again on import, so a new computer never texts or calls until its owner turns that on.
   const reachSettings = await deps.reachSettingsStore.get({ tenant_id: tenantId, created_by: subjectId });
   await writeJsonArrayEntry(context, 'reach.json', reachSettings === undefined ? [] : [reachSettings]);
+
+  // texts.json: the person's number, Private or Full, and the words they let Aman text, as a list of none or one.
+  // Whether the number was confirmed and any pending code stay behind: an import brings the number in unconfirmed,
+  // to be confirmed again by text.
+  const textOwner = { tenant_id: tenantId, created_by: subjectId };
+  const textContact = await deps.textContactStore.get(textOwner);
+  await writeJsonArrayEntry(
+    context,
+    'texts.json',
+    textContact === undefined
+      ? []
+      : [{ phone: textContact.phone, mode: textContact.mode, words: await deps.textContactStore.listWords(textOwner) }],
+  );
 
   // A persona vault is keyed by the persona's name, so another person's persona with the same name writes into it too.
   const othersPersonaNames = await personaNamesOfOthers(deps, { tenantId, subjectId });

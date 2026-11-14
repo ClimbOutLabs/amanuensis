@@ -41,10 +41,17 @@ export class ToolBundles {
     sectionBundles: ReadonlySet<ToolBundleName>;
     /** A bundle's prompt sections, returned by `load_bundle` instead of sent in the system prompt. */
     guidance: (name: ToolBundleName) => string;
+    /** Whether a tool result with exactly this text is still in the chat. */
+    inChat: (text: string) => boolean;
   }) {
     this.sectionBundles = input.sectionBundles;
     this.guidance = input.guidance;
-    this.toolSet = new LoadBundleTool({ tracing: input.tracing, bundles: this, guidance: input.guidance });
+    this.toolSet = new LoadBundleTool({
+      tracing: input.tracing,
+      bundles: this,
+      guidance: input.guidance,
+      inChat: input.inChat,
+    });
   }
 
   /**
@@ -116,9 +123,14 @@ export class LoadBundleTool extends LocalToolMCP {
   readonly displayName = 'Tool guidance';
   private readonly tools: ToolDefinition[];
 
-  constructor(input: { tracing: AgentTracing; bundles: ToolBundles; guidance: (name: ToolBundleName) => string }) {
+  constructor(input: {
+    tracing: AgentTracing;
+    bundles: ToolBundles;
+    guidance: (name: ToolBundleName) => string;
+    inChat: (text: string) => boolean;
+  }) {
     super({ tracing: input.tracing });
-    const { bundles, guidance } = input;
+    const { bundles, guidance, inChat } = input;
     this.tools = [
       defineTool({
         name: LOAD_BUNDLE_TOOL_NAME,
@@ -144,12 +156,17 @@ export class LoadBundleTool extends LocalToolMCP {
           }
           const tools = bundles.toolsOf(lookup.found);
           const covers = tools.length === 0 ? '' : ` It covers ${tools.join(', ')}, already in your tool list.`;
+          const text = `Guidance for ${lookup.found}.${covers}\n${guidance(lookup.found)}`;
+          // The same text is resent on every later call, so a second copy only makes the chat longer.
+          if (inChat(text)) {
+            return Promise.resolve(
+              toolResultResponse({
+                text: `The guidance for ${lookup.found} is already in this chat, in an earlier ${LOAD_BUNDLE_TOOL_NAME} result. It has not changed, so use that.`,
+              }),
+            );
+          }
           // The guidance lands here, at the end of the chat, so the system prompt never changes.
-          return Promise.resolve(
-            toolResultResponse({
-              text: `Guidance for ${lookup.found}.${covers}\n${guidance(lookup.found)}`,
-            }),
-          );
+          return Promise.resolve(toolResultResponse({ text }));
         },
       }),
     ];

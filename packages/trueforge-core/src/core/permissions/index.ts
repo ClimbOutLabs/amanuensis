@@ -75,11 +75,14 @@ export { requiresNetwork } from './networkRequirements';
 export { RUNNER_WORKFLOWS, isRunnerWorkflow } from './runner';
 export type { RunnerWorkflow } from './runner';
 export { DEMO_CONNECTOR_REFUSAL, DEMO_SEND_REFUSAL, recipientsAllowed } from './sendAllowlist';
+export { buildSkillNetworkCard, skillNetworkAnswerFor } from './skillNetworkCards';
+export type { SkillNetworkAnswer, SkillNetworkCardRequest } from './skillNetworkCards';
 export {
   AUTO_DENY_REASONS,
   ApprovalCardCopySchema,
   TIER2_ACTION_KINDS,
   Tier3CardSchema,
+  Tier3SkillNetworkSchema,
   TierSchema,
   autoDenyDecision,
   failClosedDecision,
@@ -94,6 +97,7 @@ export type {
   Tier2ActionKind,
   Tier3Card,
   Tier3Email,
+  Tier3SkillNetwork,
   TierDecision,
   TrackedExecutionBinding,
 } from './tier';

@@ -91,7 +91,10 @@ export function defineTool<T extends z.ZodType>(config: {
   return {
     name: config.name,
     description: config.description,
-    inputSchema: jsonSchema,
+    inputSchema:
+      jsonSchema.properties === undefined
+        ? jsonSchema
+        : { ...jsonSchema, properties: withoutSafeIntegerBounds(jsonSchema.properties) },
     ...(config.annotations !== undefined && { annotations: config.annotations }),
     requires_network: config.requiresNetwork,
     execute: withValidatedInput(config.schema, config.handler, config.invalidInput),
@@ -216,4 +219,29 @@ export abstract class LocalToolMCP implements IToolSet {
     }
     return tool.execute(params.arguments, approvalDecision, context);
   }
+}
+
+/**
+ * Zod writes the largest safe integer as the bound of every whole-number field. It tells the model
+ * nothing and is sent on every request, so it is left out; the handler still checks the input.
+ */
+function withoutSafeIntegerBounds(properties: Record<string, object>): Record<string, object> {
+  return Object.fromEntries(Object.entries(properties).map(([name, schema]) => [name, withoutBounds(schema)]));
+}
+
+function withoutBounds(schema: object): object {
+  const inner = (value: unknown): unknown =>
+    typeof value === 'object' && value !== null ? withoutBounds(value) : value;
+  if (Array.isArray(schema)) {
+    return schema.map(inner);
+  }
+  return Object.fromEntries(
+    Object.entries(schema)
+      .filter(
+        ([key, value]) =>
+          !(key === 'maximum' && value === Number.MAX_SAFE_INTEGER) &&
+          !(key === 'minimum' && value === Number.MIN_SAFE_INTEGER),
+      )
+      .map(([key, value]) => [key, inner(value)]),
+  );
 }

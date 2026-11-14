@@ -19,7 +19,7 @@ import type { CalendarWriteReview } from '../calendar/eventWrite';
 import { CALENDAR_SERVER_ID, isCalendarReadToolName, isCalendarWriteToolName } from '../calendar/toolContract';
 import { DRIVE_SERVER_ID, isDriveReadToolName, isDriveWriteToolName } from '../drive/toolContract';
 import type { DriveWriteReview } from '../drive/writeReview';
-import type { ReviewableDraft } from '../email/gmail/draftReview';
+import { checkCodeOf, hashDraft, type ReviewableDraft } from '../email/gmail/draftReview';
 import type { AnsweredMessage } from '../email/gmail/replyThread';
 import {
   GMAIL_SERVER_ID,
@@ -135,6 +135,7 @@ import {
   isPersonVouchedUrl,
   namesUrl,
   replyLinksWithAddedData,
+  siteName,
   steeredDestinations,
   steeredLinks,
   steeredUrl,
@@ -206,6 +207,7 @@ import {
   writeTargetTouchesGitControl,
   writeTargetTouchesSandboxTools,
   type FileDigest,
+  type PathMissing,
   type PathResolution,
   type TrackedExecutableScope,
 } from './trackedExecutables';
@@ -352,6 +354,8 @@ export interface ClassifyContext extends SentinelCallIdentity {
   path_resolution?: PathResolution | undefined;
   /** Reads file digests from a remote sandbox, so approvals can bind to file content there too. */
   file_digest?: FileDigest | undefined;
+  /** Asks a remote sandbox whether a path is free, so a write that only creates a file can be told from an edit. */
+  path_missing?: PathMissing | undefined;
   /** `none` when nothing run in the calling sandbox can reach a network; set by the sandbox provider. Absent means it may. */
   sandbox_network?: 'none' | undefined;
 }
@@ -1191,6 +1195,56 @@ function runCodeCardText(params: Record<string, unknown>, ctx: ClassifyContext):
   return scriptFileText({ file: identity, resolution: ctx.path_resolution });
 }
 
+/**
+ * A script that ships with a skill the person turned on runs without a card while the sandbox cannot reach a
+ * network. It still asks when the sandbox can reach one, and when Aman changed a file in that skill's folder
+ * in this chat, since the script is then no longer only the skill's own.
+ */
+async function classifySkillScript(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
+  const skill = stringParam(action.canonical_params, 'skill') ?? '';
+  const script = stringParam(action.canonical_params, 'script') ?? '';
+  const folder = stringParam(action.canonical_params, 'skill_folder');
+  const args = action.canonical_params['args'];
+  const argText = Array.isArray(args) ? args.filter(arg => typeof arg === 'string').join(' ') : '';
+  const shown = argText === '' ? script : `${script} ${argText}`;
+  const folderIdentity =
+    folder === null ? null : canonicalFileIdentity({ p: folder, cwd: folder, resolution: ctx.path_resolution });
+  const changedByAman =
+    folderIdentity === null ||
+    ctx.services.tracked_store.tracksWithin({ scope: workspaceScope(ctx), folder_identity: folderIdentity });
+  if (ctx.sandbox_network === 'none' && !changedByAman) {
+    return tier1Decision({
+      reason: SANDBOX_COMMAND_REASON,
+      reason_detail: `Ran a script from the ${escapeDisplayText(skill)} skill in the sandbox: ${escapeDisplayText(shown)}`,
+      sensitive_read: false,
+    });
+  }
+  const plainWhat = `Run a script from the ${skill} skill?`;
+  const askReason = changedByAman
+    ? "Aman changed a file in this skill's folder in this chat."
+    : 'The sandbox can reach the internet.';
+  return tier3Decision({
+    card: {
+      plain_what: plainWhat,
+      copy: sandboxCardCopy({ headline: plainWhat, undo: "Once this runs, it can't be undone.", reason: askReason }),
+      plain_why: plainWhy(ctx.agent_intent),
+      cannot_be_undone: "Once this runs, it can't be undone.",
+      why_asked_again: null,
+      destination: null,
+      recipient: null,
+      amount: null,
+      parsed_command: shown,
+      outbound_text: null,
+      destination_host: null,
+      outbound_truncated: false,
+    },
+    reason: 'arbitrary_code_execution',
+    reason_detail: askReason,
+    sensitive_read: false,
+    approval_token_id: await mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params }),
+  });
+}
+
 async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
   const { services } = ctx;
   const command = stringParam(action.canonical_params, 'command') ?? '';
@@ -1580,7 +1634,7 @@ function namedWriteTargets(paths: readonly string[]): string {
 }
 
 /** A write target a silent write may touch: a file Aman created in this conversation, or a path that does not exist yet. */
-function silentWriteTarget(input: { p: string; cwd: string; ctx: ClassifyContext }): boolean {
+async function silentWriteTarget(input: { p: string; cwd: string; ctx: ClassifyContext }): Promise<boolean> {
   const { p, cwd, ctx } = input;
   const identity = canonicalWriteIdentity({ p, cwd, resolution: ctx.path_resolution });
   if (
@@ -1589,7 +1643,7 @@ function silentWriteTarget(input: { p: string; cwd: string; ctx: ClassifyContext
   ) {
     return true;
   }
-  return isNewWriteTarget({ p, cwd, resolution: ctx.path_resolution });
+  return isNewWriteTarget({ p, cwd, resolution: ctx.path_resolution, path_missing: ctx.path_missing });
 }
 
 async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
@@ -1685,7 +1739,7 @@ async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext
         ctx,
         plain_what: `Save ${namedWriteTargets(toolTargets)} in a folder where this workspace keeps programs it can run?`,
         cannot_be_undone:
-          'A program saved here could run instead of a trusted one. Approve only if you asked for this file.',
+          'A program saved here could run instead of a trusted one. Allow only if you asked for this file.',
       }),
       reason: 'sandbox_tool_write',
       reason_detail: 'Writes into the sandbox tool folders always require approval.',
@@ -1699,10 +1753,10 @@ async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext
   }
   // A write that stayed inside the workspace and missed every limit above runs silently when the user lets it.
   // Only a new file, or one Aman created in this conversation, may do so: an edit to an existing file asks.
-  const everyTargetIsSilentlyWritable = absolute.every(target =>
-    silentWriteTarget({ p: target, cwd: targets.cwd, ctx }),
-  );
-  if (everyTargetIsSilentlyWritable && (await sandboxWorkRunsSilently(ctx))) {
+  // The switch is read first, so a remote sandbox is only asked about its files when the answer matters.
+  const everyTargetIsSilentlyWritable = async (): Promise<boolean> =>
+    (await Promise.all(absolute.map(target => silentWriteTarget({ p: target, cwd: targets.cwd, ctx })))).every(Boolean);
+  if ((await sandboxWorkRunsSilently(ctx)) && (await everyTargetIsSilentlyWritable())) {
     return tier1Decision({
       reason: SANDBOX_FILE_WRITE_REASON,
       reason_detail: `Changed ${namedWriteTargets(targets.paths)} in your workspace.`,
@@ -2139,7 +2193,9 @@ async function classifyBrowserOpen(input: { action: SentinelAction; ctx: Classif
       card: browserOpenCard({
         url: shown,
         host: parsed === undefined ? null : escapeDisplayText(parsed.hostname),
-        headline: `Open ${shown}?`,
+        // The question names the site; the full address is its own row on the card.
+        headline:
+          parsed === undefined ? 'Open this page?' : `Open a page on ${escapeDisplayText(siteName(parsed.hostname))}?`,
         say: reasonSay,
         plain_why: plainWhy(ctx.agent_intent),
       }),
@@ -2175,10 +2231,7 @@ async function classifyBrowserOpen(input: { action: SentinelAction; ctx: Classif
     return ctx.services.unattended
       ? steeredSkipped(ctx)
       : steeringChecked({
-          decision: await ask(
-            CONTENT_STEERED_REASON,
-            `${assistant} would only open this because a page it read named it, not you.`,
-          ),
+          decision: await ask(CONTENT_STEERED_REASON, steeredLinkSay({ ctx, url })),
           ctx,
           guests: [],
         });
@@ -2247,6 +2300,27 @@ function privateDetailSkipped(ctx: ClassifyContext): TierDecision {
   });
 }
 
+/** Why opening a link that read content chose asks: where the link came from, said once. */
+function steeredLinkSay({ ctx, url }: { ctx: ClassifyContext; url: string }): string {
+  const assistant = ctx.web_search.assistantName;
+  const steered = steeredDestinations({
+    provenance: ctx.web_search.provenance,
+    addresses: [],
+    values: [url],
+    reply_sender: null,
+  });
+  return steered.length === 0
+    ? `${assistant} found this link in a page it read, not from you.`
+    : steeredDestinationSay({
+        assistant,
+        destinations: steered.map(({ value, kind, origin }) => ({
+          kind,
+          source: origin.source,
+          who: escapeDisplayText(value),
+        })),
+      });
+}
+
 /**
  * A consequential action asks with its card as it is. When a recipient or site the card names came only from content
  * the assistant read, the card says so and no chat grant covers it; a scheduled run skips it. `guests` adds people
@@ -2275,7 +2349,8 @@ function steeringChecked(input: {
     // Only the host-read sender of the one message this replies to; never the model's or the message's own claim.
     reply_sender: mail?.reply_in_thread?.from ?? null,
   });
-  if (steered.length === 0) {
+  // A card that already asks because read content chose it says so once, in its own reason line.
+  if (steered.length === 0 || decision.reason === CONTENT_STEERED_REASON) {
     return decision;
   }
   if (ctx.services.unattended) {
@@ -2381,6 +2456,18 @@ function escapedMailbox(mailbox: Tier3Mailbox): Tier3Mailbox {
   return { name: escapeDisplayText(mailbox.name), address: escapeDisplayText(mailbox.address) };
 }
 
+/** The message as a card shows it. The send receipt shows this same text, so both read it from here. */
+export function messageForDisplay(content: ReviewableDraft) {
+  return {
+    to: content.to.map(escapedMailbox),
+    cc: content.cc.map(escapedMailbox),
+    bcc: content.bcc.map(escapedMailbox),
+    subject: escapeDisplayText(content.subject),
+    body: escapeDisplayText(content.body, { keepNewlines: true }),
+    reply_to: content.replyTo === null ? null : escapeDisplayText(content.replyTo),
+  };
+}
+
 function cardText(text: string): string {
   const chars = Array.from(escapeDisplayText(text));
   return chars.length > GMAIL_CARD_SUBJECT_MAX_CHARS
@@ -2438,14 +2525,10 @@ function gmailWriteCard(input: { action: SentinelAction; agent_intent: string | 
     (content.nameLeftOff || replaces?.nameLeftOff === true ? NAME_LEFT_OFF_LINE : '');
   const email: Tier3Email = {
     action: kind,
-    to: content.to.map(escapedMailbox),
-    cc: content.cc.map(escapedMailbox),
-    bcc: content.bcc.map(escapedMailbox),
-    subject: escapeDisplayText(content.subject),
-    body: escapeDisplayText(content.body, { keepNewlines: true }),
-    reply_to: content.replyTo === null ? null : escapeDisplayText(content.replyTo),
+    ...messageForDisplay(content),
     from_name: content.fromName === '' ? null : escapeDisplayText(content.fromName),
     name_left_off: content.nameLeftOff || replaces?.nameLeftOff === true,
+    check_code: kind === 'send' ? checkCodeOf(hashDraft(content)) : null,
     replaces:
       replaces === undefined
         ? null
@@ -4246,6 +4329,9 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
     ) {
       return classifyRunnerTool(action, ctx);
     }
+    if (name === 'run_skill_script') {
+      return await classifySkillScript(action, ctx);
+    }
     if (name === 'run_code' && (await sandboxWorkRunsSilently(ctx))) {
       const silentRun = await runCodePlacement({ params: action.canonical_params, ctx });
       if (silentRun !== null) {
@@ -4420,6 +4506,8 @@ export async function classifyHostToolCall(input: {
   path_resolution?: PathResolution | undefined;
   /** Reads file digests from the calling tool's remote sandbox. */
   file_digest?: FileDigest | undefined;
+  /** Asks the calling tool's remote sandbox whether a path is free. */
+  path_missing?: PathMissing | undefined;
   /** `none` when nothing run in the calling tool's sandbox can reach a network. */
   sandbox_network?: 'none' | undefined;
 }): Promise<TierDecision> {
@@ -4439,6 +4527,7 @@ export async function classifyHostToolCall(input: {
     ...ctx,
     path_resolution: input.path_resolution,
     file_digest: input.file_digest,
+    path_missing: input.path_missing,
     sandbox_network: input.sandbox_network,
   });
   await recordClassificationAudit({

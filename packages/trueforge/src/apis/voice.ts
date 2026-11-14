@@ -23,7 +23,8 @@ import {
   type VoiceTranscription,
 } from '../schemas/voice';
 import { VOICE_SOCKET_PROTOCOL, VOICE_STREAM_PATH } from '../voice/browserTransport';
-import { SpeechRateLimiter, speechLimiter as sharedSpeechLimiter } from '../voice/speechRateLimit';
+import { SpeechRateLimiter, speechLimiter as sharedSpeechLimiter, speechPersonKey } from '../voice/speechRateLimit';
+import { speechSecretHeaders } from '../voice/speechSecret';
 import { isVoiceAvailable, probeSttHealth } from '../voice/sttAvailability';
 import { forwardToSidecar } from '../voice/sttClient';
 import { probeTtsHealth, ttsBaseUrl } from '../voice/ttsClient';
@@ -126,6 +127,10 @@ async function probeStt(logger: Logger): Promise<VoiceStatus> {
 
 /** Voice router (mounted at `/api/v1/voice`). */
 export function createVoiceRouter(deps: VoiceRouterDeps) {
+  const speechLimiter = deps.speechLimiter ?? sharedSpeechLimiter;
+  const connectLimiter =
+    deps.connectLimiter ?? new SpeechRateLimiter({ maxPerWindow: 10, maxInFlight: Number.POSITIVE_INFINITY });
+
   const getVoiceStatusHandler: RouteHandler<typeof getVoiceStatusRoute> = async c => {
     return c.json({ data: await probeStt(deps.logger) }, 200);
   };
@@ -150,6 +155,33 @@ export function createVoiceRouter(deps: VoiceRouterDeps) {
       return errorJson(c, { status: 400, message: 'Audio body is empty', code: 'empty_audio' });
     }
 
+    const { tenant_id, subject } = deps.resolveRequestContext(c);
+    const permit = speechLimiter.acquire(`${tenant_id}:${subject.id}`);
+    if (!permit.allowed) {
+      deps.logger.info('voice transcribe rejected', { reason: 'rate_limited' });
+      c.header('Retry-After', String(permit.retryAfterSeconds));
+      return errorJson(c, {
+        status: 429,
+        message: 'Too many voice requests. Wait a few seconds, then try again.',
+        code: 'rate_limited',
+      });
+    }
+    try {
+      return await transcribeWithSidecar({ c, audio, started });
+    } finally {
+      permit.release();
+    }
+  };
+
+  const transcribeWithSidecar = async ({
+    c,
+    audio,
+    started,
+  }: {
+    c: Parameters<RouteHandler<typeof transcribeVoiceRoute>>[0];
+    audio: Uint8Array;
+    started: number;
+  }) => {
     let upstream: Response;
     try {
       upstream = await forwardToSidecar(audio);
@@ -197,10 +229,6 @@ export function createVoiceRouter(deps: VoiceRouterDeps) {
     return c.json({ data: transcription }, 200);
   };
 
-  const speechLimiter = deps.speechLimiter ?? sharedSpeechLimiter;
-  const connectLimiter =
-    deps.connectLimiter ?? new SpeechRateLimiter({ maxPerWindow: 10, maxInFlight: Number.POSITIVE_INFINITY });
-
   const speakVoiceHandler: RouteHandler<typeof speakVoiceRoute> = async c => {
     if (!configuration.TTS_ENABLED) {
       return errorJson(c, {
@@ -218,7 +246,7 @@ export function createVoiceRouter(deps: VoiceRouterDeps) {
       });
     }
     const { tenant_id, subject } = deps.resolveRequestContext(c);
-    const permit = speechLimiter.acquire(`${tenant_id}:${subject.id}`);
+    const permit = speechLimiter.acquire(speechPersonKey({ tenantId: tenant_id, personId: subject.id }));
     if (!permit.allowed) {
       deps.logger.info('voice speak rejected', { reason: 'rate_limited' });
       c.header('Retry-After', String(permit.retryAfterSeconds));
@@ -234,7 +262,7 @@ export function createVoiceRouter(deps: VoiceRouterDeps) {
       try {
         upstream = await fetch(`${ttsBaseUrl()}/v1/speak`, {
           method: 'POST',
-          headers: { 'content-type': 'application/json' },
+          headers: { 'content-type': 'application/json', ...speechSecretHeaders() },
           body: JSON.stringify(voice === undefined ? { text } : { text, voice }),
           // A caller who stops listening stops the work too, so abandoned replies do not queue up.
           signal: AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(TTS_SPEAK_TIMEOUT_MS)]),
@@ -317,7 +345,7 @@ export function createVoiceRouter(deps: VoiceRouterDeps) {
     const request = c.req.valid('json');
     const { tenant_id, subject } = deps.resolveRequestContext(c);
     // Counted per ask, not per open line: each ask costs a request to the chat and a model check.
-    const permit = connectLimiter.acquire(`${tenant_id}:${subject.id}`);
+    const permit = connectLimiter.acquire(speechPersonKey({ tenantId: tenant_id, personId: subject.id }));
     if (!permit.allowed) {
       c.header('Retry-After', String(permit.retryAfterSeconds));
       return errorJson(c, {

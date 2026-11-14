@@ -186,7 +186,7 @@ async function createChat(options?: { incognito?: boolean }) {
   };
 
   /** Begins a turn with the server's own wiring; the model's reply is a finished turn. */
-  const beginTurn = async ({ turnId, text }: { turnId: string; text: string }) => {
+  const beginTurn = async ({ turnId, text, sessionTitle }: { turnId: string; text: string; sessionTitle?: string }) => {
     const record = await sessionStore.getSession({ tenant_id: TENANT_ID, session_id: SESSION_ID });
     if (record === undefined) {
       throw new Error('test session was never created');
@@ -213,6 +213,7 @@ async function createChat(options?: { incognito?: boolean }) {
       input: [{ type: 'user.message', content: text }],
       previous_turn_id: record.last_turn_id ?? undefined,
       userRef: STANDALONE_REQUEST_CONTEXT.subject.id,
+      session_title: sessionTitle,
       deps,
     });
   };
@@ -345,6 +346,28 @@ describe('a finished first turn gives the chat a subject title', () => {
     expect(mockHelperCall).toHaveBeenCalledTimes(1);
     expect(replaceSpy).not.toHaveBeenCalled();
     expect(await chat.readTitle()).toBe(firstMessage.slice(0, 50));
+  });
+});
+
+describe('a chat the caller named keeps that name', () => {
+  it('sets the caller title and never asks a model for a subject title', async () => {
+    mockHelperCall.mockResolvedValue(helperAnswer('Morning brief'));
+    chat = await createChat();
+    // A schedule run's first message is its task: an instruction sentence, not a name.
+    const taskText = 'Give me my morning brief: read everything new since my last brief and write one digest sentence';
+
+    const { drainInput } = await chat.beginTurn({
+      turnId: 'turn-1',
+      text: taskText,
+      sessionTitle: 'Morning brief · Tuesday, November 10',
+    });
+    await withinBound(drainTurnEvents(drainInput), "the named turn's follow-up");
+
+    // The title step starts detached when it runs at all; give it its chance,
+    // then check it never ran: no helper call, and the caller's title stands.
+    await new Promise(resolve => setTimeout(resolve, 300));
+    expect(mockHelperCall).not.toHaveBeenCalled();
+    expect(await chat.readTitle()).toBe('Morning brief · Tuesday, November 10');
   });
 });
 
