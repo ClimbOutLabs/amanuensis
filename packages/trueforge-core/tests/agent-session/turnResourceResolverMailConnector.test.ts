@@ -436,7 +436,7 @@ describe('Email connector account name', () => {
     );
 
     expect(isError).toBe(true);
-    expect(said).toContain('The account picked on the approval card cannot be used for this send');
+    expect(said).toContain('The account on the approval card cannot be used for this send');
     expect(sidecar.calls.filter(call => call['tool'] === 'send_email')).toEqual([]);
   });
 
