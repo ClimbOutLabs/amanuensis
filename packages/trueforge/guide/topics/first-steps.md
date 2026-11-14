@@ -67,6 +67,8 @@ Aman doesn't come with an AI model. It can't answer until you add one.
 
 How to get there: Click **Choose a model** next to **Add a model** in the checklist. Or click **More** in the left bar, then **Settings**, then **Models**.
 
+Do you run your own model on this computer, such as Ollama? Then you don't need a key. See [A model on this computer](local-model.md).
+
 1. Under "Available", find the company you have a key for, such as Together AI, OpenAI, Anthropic or Google Gemini.
 2. Click **Configure** next to it.
 3. Paste your key into **API key**.

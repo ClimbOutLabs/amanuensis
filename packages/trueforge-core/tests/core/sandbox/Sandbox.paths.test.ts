@@ -47,6 +47,7 @@ import {
   SANDBOX_EXEC_TOOL_NAME,
   SANDBOX_MCP_SERVER_ID,
   SANDBOX_REPLACE_TEXT_TOOL_NAME,
+  SANDBOX_RUN_CODE_TOOL_NAME,
   SANDBOX_RUN_REGISTERED_COMMAND_TOOL_NAME,
   SANDBOX_RUN_SKILL_SCRIPT_TOOL_NAME,
   SANDBOX_SUBMIT_IMPLEMENTATION_PLAN_TOOL_NAME,
@@ -4370,8 +4371,19 @@ describe('Sandbox skills without a network', () => {
   ): Promise<void> {
     const root = mkdtempSync(join(tmpdir(), 'sandbox-skills-'));
     const script = 'import os, sys\nprint(os.getcwd())\nprint(sys.argv[1:])\n';
+    // A made-up module name, so the run stops the way a script whose package the sandbox lacks does.
+    const needsPackage = 'import madeup_news_feed\n';
     const archives = await serveArchives(
-      new Map([['/alpha.tar', skillArchive({ root, name: 'alpha', files: { 'scripts/fetch.py': script } })]]),
+      new Map([
+        [
+          '/alpha.tar',
+          skillArchive({
+            root,
+            name: 'alpha',
+            files: { 'scripts/fetch.py': script, 'scripts/needs.py': needsPackage },
+          }),
+        ],
+      ]),
     );
     try {
       const skillsDir = join(root, 'skills');
@@ -4481,6 +4493,36 @@ describe('Sandbox skills without a network', () => {
       const refused = await runFetch(sandbox, 'scripts/missing.py');
       expect(isCallToolResponseResult(refused) && refused.result.isError).toBe(true);
       expect(execCalls.some(call => call.argv?.[0] === 'python3')).toBe(false);
+    });
+  });
+
+  it('tells the model to stop and say so when a skill script lacks a package, instead of installing it', async () => {
+    await withAlphaScript(async ({ sandbox }) => {
+      const response = await runFetch(sandbox, 'scripts/needs.py');
+      const text = resultText(response);
+      expect(text).toContain("does not have the Python module 'madeup_news_feed'");
+      expect(text).toContain('Do not install it another way.');
+    });
+  });
+
+  it("refuses run_code that names a skill's folder before any card, and points to the skill's own action", async () => {
+    await withAlphaScript(async ({ sandbox, skillsDir }) => {
+      const call = {
+        name: SANDBOX_RUN_CODE_TOOL_NAME,
+        arguments: {
+          intent: 'Get news',
+          language: 'python',
+          code: `import subprocess, sys\nsubprocess.run([sys.executable, "${join(skillsDir, 'alpha')}/scripts/fetch.py"])\n`,
+        },
+      };
+      const info = await sandbox.toolCallInfo(call);
+      expect(info.is_approval_required).toBe(false);
+      // A refusal stamped before dispatch, so turning the skill off later cannot let the code run unasked.
+      expect(info.pre_dispatch_failure?.kind).toBe('policy_blocked');
+      const refused = await sandbox.callTool(call);
+      expect(isCallToolResponseResult(refused) && refused.result.isError).toBe(true);
+      expect(resultText(refused)).toContain(`cannot see the alpha skill's folder`);
+      expect(resultText(refused)).toContain(SANDBOX_RUN_SKILL_SCRIPT_TOOL_NAME);
     });
   });
 

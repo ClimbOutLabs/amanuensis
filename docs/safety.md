@@ -110,7 +110,7 @@ Every other command asks first, unless the **Sandbox** switch covers it. Answeri
 
 Installing a package asks first on every sandbox. The **Sandbox** switch never covers it.
 
-A script that ships with a skill you installed runs without asking, with or without the switch, while the sandbox has no internet. It asks where the sandbox can reach the internet, including a chat that uses a skill you let reach its own sites. It also asks when Aman edited a file in that skill's folder with its file tools earlier in the chat. A script that is a link to a file outside the skill's folder doesn't run.
+A script that ships with a skill you installed runs without asking, with or without the switch, while the sandbox has no internet. It asks where the sandbox can reach the internet, including a chat that uses a skill you let reach its own sites. It also asks when Aman edited a file in that skill's folder with its file tools earlier in the chat. A script that is a link to a file outside the skill's folder doesn't run. Code Aman writes for `run_code` that names a skill's folder is refused before any card, because `run_code` can't see that folder; Aman runs the skill's own script instead.
 
 ??? note "What the Sandbox switch covers"
 
