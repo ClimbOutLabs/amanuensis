@@ -236,11 +236,11 @@ describe('resolveMemoryProvider', () => {
     const { mcpServerStore: isolatedMcpServerStore, tokenStore: isolatedTokenStore } = await freshStores();
     await isolatedMcpServerStore.upsertServer({
       tenant_id: TENANT_ID,
-      name: 'loopback-hindsight',
+      name: 'metadata-hindsight',
       manifest: {
         type: 'remote',
-        name: 'loopback-hindsight',
-        url: 'http://127.0.0.1:8888/mcp/aman/',
+        name: 'metadata-hindsight',
+        url: 'http://169.254.169.254/mcp/aman/',
         description: 'Memory provider at a refused address.',
         memory_provider: true,
       },

@@ -51,7 +51,7 @@ import type { ModelProperties, ModelProviderStreamTimeout } from '../schemas/mod
 import { parseGitSkill } from '../schemas/skill';
 import { isSecretReference, resolveSecretReference } from '../utils/secretReferences';
 import { buildRunCodeHarvestSink } from './artifacts/persistRunCodeHarvests';
-import { modelUrlProblem, remoteUrlProblem } from './remoteAddress';
+import { modelUrlProblem, remoteUrlProblem, type RemoteUrlProblem } from './remoteAddress';
 
 /**
  * A stored connector's address failed the address check (see runtime/remoteAddress) when a
@@ -60,13 +60,15 @@ import { modelUrlProblem, remoteUrlProblem } from './remoteAddress';
  * must not fail (the memory provider lookup) recognize the refusal and degrade instead.
  */
 export class RemoteAddressRefusedError extends McpConnectionError {
-  constructor({ name, problem }: { name: string; problem: 'blocked' | 'unresolved' | 'invalid' }) {
+  constructor({ name, problem }: { name: string; problem: RemoteUrlProblem }) {
     super(
-      problem === 'blocked'
-        ? `The connector "${name}" has an address on this computer, so the server cannot connect to it. Change the connector's address in Settings to one on your home network or the internet.`
-        : problem === 'unresolved'
-          ? `The connector "${name}" has an address that did not resolve, so the server cannot check it or connect to it. Check the connector's address in Settings.`
-          : `The connector "${name}" has an address the server cannot connect to. Enter its full address in Settings, starting with http:// or https://.`,
+      problem === 'protected'
+        ? `The connector "${name}" has a protected network address, so Aman will not connect to it. Change the connector's address in Settings to the address of its server.`
+        : problem === 'internal'
+          ? `The connector "${name}" has an address inside Aman itself, so Aman will not connect to it. To reach a service on this computer, change the connector's address in Settings to use host.docker.internal with the service's port.`
+          : problem === 'unresolved'
+            ? `The connector "${name}" has an address that did not resolve, so the server cannot check it or connect to it. Check the connector's address in Settings.`
+            : `The connector "${name}" has an address the server cannot connect to. Enter its full address in Settings, starting with http:// or https://.`,
       422,
     );
     this.name = 'RemoteAddressRefusedError';
@@ -339,15 +341,25 @@ export async function getModelDetails({
   // The address check runs again here, when a model is resolved for use, not only when its
   // provider was saved: a name that resolved to a public address then can resolve inward now,
   // and a provider written before the check existed, or one set through the environment, is
-  // first judged here. The one exception is an exact endpoint the operator named in
-  // LOCAL_MODEL_ENDPOINTS. A host that does not resolve right now is refused here too: it
+  // first judged here. The owner chose the address, and an exact endpoint the operator named in
+  // LOCAL_MODEL_ENDPOINTS is always allowed. A host that does not resolve right now is refused here too: it
   // cannot be checked, and the answers a name gives can change between a check that failed
   // to resolve it and the dial that follows.
-  const problem = await modelUrlProblem({ url: baseUrl, endpoints: configuration.LOCAL_MODEL_ENDPOINTS });
-  if (problem === 'blocked') {
+  const problem = await modelUrlProblem({
+    url: baseUrl,
+    endpoints: configuration.LOCAL_MODEL_ENDPOINTS,
+    chosenBy: 'owner',
+  });
+  if (problem === 'protected') {
     throw new HTTPException(422, {
       message:
-        "That address is on this computer, so the server cannot use it for a model. To use a model on this computer, name its exact address (host and port) in LOCAL_MODEL_ENDPOINTS. On an installed Aman, that setting is in the instance's settings file, ~/.amanuensis/instances/<name>/.env, below the block the installer manages. Restart the instance after changing it.",
+        "That model's address is a protected network address, so Aman will not use it. Change the provider's address in Settings to the address of the model's server.",
+    });
+  }
+  if (problem === 'internal') {
+    throw new HTTPException(422, {
+      message:
+        "That model's address points inside Aman itself, so Aman will not use it. To use a model on this computer, change the provider's address in Settings to use host.docker.internal with the model's port.",
     });
   }
   if (problem === 'unresolved') {
@@ -566,7 +578,7 @@ export async function getMcpConnection({
     record.manifest.type === 'remote' &&
     !isFirstPartyOrigin({ url: record.manifest.url, origins: configuration.FIRST_PARTY_MCP_ORIGINS })
   ) {
-    const problem = await remoteUrlProblem({ url: record.manifest.url });
+    const problem = await remoteUrlProblem({ url: record.manifest.url, chosenBy: 'owner' });
     if (problem !== null) {
       throw new RemoteAddressRefusedError({ name: record.name, problem });
     }

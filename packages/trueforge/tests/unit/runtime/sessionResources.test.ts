@@ -22,6 +22,7 @@ import { SqliteRepositoryStore } from '../../../src/db/sqlite/repository-store/S
 import { SqliteSandboxProviderStore } from '../../../src/db/sqlite/sandbox-provider-store/SqliteSandboxProviderStore';
 import { SqliteSkillStore } from '../../../src/db/sqlite/skill-store/SqliteSkillStore';
 import { SqliteOAuthTokenStore } from '../../../src/db/sqlite/token-store/SqliteOAuthTokenStore';
+import { configureRemoteAddressCheck } from '../../../src/runtime/remoteAddress';
 import {
   applyTokenFactoryRouting,
   buildGatewayMetadata,
@@ -811,15 +812,35 @@ describe('getModelDetails: the address check at use time', () => {
     return modelProviderStore;
   }
 
-  it('refuses a stored provider at a loopback address, naming the setting that allows it', async () => {
+  /** Runs a case as a container install, where loopback is Aman itself. */
+  async function inContainer(run: () => Promise<void>): Promise<void> {
+    configureRemoteAddressCheck({ ownNetworkRanges: ['172.30.0.0/16'], demo: false });
+    try {
+      await run();
+    } finally {
+      configureRemoteAddressCheck({ ownNetworkRanges: [], demo: false });
+    }
+  }
+
+  it('resolves a stored provider at a loopback address when Aman runs directly on the computer', async () => {
     const store = await setupWithBaseUrl('http://127.0.0.1:11434/v1');
 
     await expect(
       getModelDetails({ tenant_id: 'default', name: 'local-provider/local-model', store }),
-    ).rejects.toMatchObject({
-      status: 422,
-      message: expect.stringContaining('LOCAL_MODEL_ENDPOINTS'),
-    } satisfies Partial<HTTPException>);
+    ).resolves.toMatchObject({ providerConfig: { baseUrl: 'http://127.0.0.1:11434/v1' } });
+  });
+
+  it('refuses a stored provider at a loopback address in a container, pointing at host.docker.internal', async () => {
+    const store = await setupWithBaseUrl('http://127.0.0.1:11434/v1');
+
+    await inContainer(async () => {
+      await expect(
+        getModelDetails({ tenant_id: 'default', name: 'local-provider/local-model', store }),
+      ).rejects.toMatchObject({
+        status: 422,
+        message: expect.stringContaining('host.docker.internal'),
+      } satisfies Partial<HTTPException>);
+    });
   });
 
   it('refuses a stored provider at the cloud metadata address', async () => {
@@ -827,7 +848,10 @@ describe('getModelDetails: the address check at use time', () => {
 
     await expect(
       getModelDetails({ tenant_id: 'default', name: 'local-provider/local-model', store }),
-    ).rejects.toMatchObject({ status: 422 } satisfies Partial<HTTPException>);
+    ).rejects.toMatchObject({
+      status: 422,
+      message: expect.stringContaining('protected network address'),
+    } satisfies Partial<HTTPException>);
   });
 
   it('refuses a stored provider whose name does not resolve, because it cannot be checked', async () => {
@@ -841,14 +865,16 @@ describe('getModelDetails: the address check at use time', () => {
     } satisfies Partial<HTTPException>);
   });
 
-  it('resolves the same loopback provider once the operator names its exact endpoint', async () => {
+  it('resolves a loopback provider in a container once the operator names its exact endpoint', async () => {
     const store = await setupWithBaseUrl('http://127.0.0.1:11434/v1');
     const originalEndpoints = configuration.LOCAL_MODEL_ENDPOINTS;
     configuration.LOCAL_MODEL_ENDPOINTS = ['127.0.0.1:11434'];
     try {
-      await expect(
-        getModelDetails({ tenant_id: 'default', name: 'local-provider/local-model', store }),
-      ).resolves.toMatchObject({ providerConfig: { baseUrl: 'http://127.0.0.1:11434/v1' } });
+      await inContainer(async () => {
+        await expect(
+          getModelDetails({ tenant_id: 'default', name: 'local-provider/local-model', store }),
+        ).resolves.toMatchObject({ providerConfig: { baseUrl: 'http://127.0.0.1:11434/v1' } });
+      });
     } finally {
       configuration.LOCAL_MODEL_ENDPOINTS = originalEndpoints;
     }
@@ -859,9 +885,11 @@ describe('getModelDetails: the address check at use time', () => {
     const originalEndpoints = configuration.LOCAL_MODEL_ENDPOINTS;
     configuration.LOCAL_MODEL_ENDPOINTS = ['127.0.0.1:11434'];
     try {
-      await expect(
-        getModelDetails({ tenant_id: 'default', name: 'local-provider/local-model', store }),
-      ).rejects.toMatchObject({ status: 422 } satisfies Partial<HTTPException>);
+      await inContainer(async () => {
+        await expect(
+          getModelDetails({ tenant_id: 'default', name: 'local-provider/local-model', store }),
+        ).rejects.toMatchObject({ status: 422 } satisfies Partial<HTTPException>);
+      });
     } finally {
       configuration.LOCAL_MODEL_ENDPOINTS = originalEndpoints;
     }

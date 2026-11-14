@@ -8,6 +8,7 @@ import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqliteMcpServerStore } from '../../../src/db/sqlite/mcp-server-store/SqliteMcpServerStore';
 import { SqliteOAuthTokenStore } from '../../../src/db/sqlite/token-store/SqliteOAuthTokenStore';
 import { mcpOAuthCallbackUrl } from '../../../src/mcp/auth/mcpOAuthHelpers';
+import { configureRemoteAddressCheck } from '../../../src/runtime/remoteAddress';
 import { getMcpConnection, RemoteAddressRefusedError } from '../../../src/runtime/sessionResources';
 
 // Name resolution is stubbed for the whole suite: a name with 'unresolvable' in it does not
@@ -670,17 +671,40 @@ describe('getMcpConnection', () => {
       });
     }
 
-    it.each([
-      ['loopback', 'http://127.0.0.1:9999/mcp'],
-      ['the cloud metadata address', 'http://169.254.169.254/mcp'],
-      ['IPv6 loopback', 'http://[::1]:9999/mcp'],
-    ])('refuses a stored server at a %s address', async (_label, url) => {
-      const name = `refused-${_label.replaceAll(' ', '-')}`;
-      await seed(name, url);
+    it('refuses a stored server at the cloud metadata address', async () => {
+      await seed('refused-metadata', 'http://169.254.169.254/mcp');
 
-      const attempt = connectionFor(name);
+      const attempt = connectionFor('refused-metadata');
       await expect(attempt).rejects.toBeInstanceOf(RemoteAddressRefusedError);
       await expect(attempt).rejects.toMatchObject({ statusCode: 422 });
+      await expect(attempt).rejects.toThrow('protected network address');
+    });
+
+    it.each([
+      ['loopback', 'http://127.0.0.1:9999/mcp'],
+      ['IPv6 loopback', 'http://[::1]:9999/mcp'],
+    ])('resolves a stored server at a %s address when Aman runs directly on the computer', async (label, url) => {
+      const name = `direct-${label.replaceAll(' ', '-')}`;
+      await seed(name, url);
+
+      await expect(connectionFor(name)).resolves.toMatchObject({ url });
+    });
+
+    it.each([
+      ['loopback', 'http://127.0.0.1:9999/mcp'],
+      ['IPv6 loopback', 'http://[::1]:9999/mcp'],
+    ])('refuses a stored server at a %s address when Aman runs in a container', async (label, url) => {
+      const name = `refused-${label.replaceAll(' ', '-')}`;
+      await seed(name, url);
+      configureRemoteAddressCheck({ ownNetworkRanges: ['172.30.0.0/16'], demo: false });
+      try {
+        const attempt = connectionFor(name);
+        await expect(attempt).rejects.toBeInstanceOf(RemoteAddressRefusedError);
+        await expect(attempt).rejects.toMatchObject({ statusCode: 422 });
+        await expect(attempt).rejects.toThrow('host.docker.internal');
+      } finally {
+        configureRemoteAddressCheck({ ownNetworkRanges: [], demo: false });
+      }
     });
 
     it('refuses an address carrying credentials in the URL', async () => {

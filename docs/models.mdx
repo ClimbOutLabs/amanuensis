@@ -59,22 +59,17 @@ Use a custom provider for vLLM, Ollama, a company gateway, or any other OpenAI-c
 
 ### A model on the same computer as Aman
 
-Aman checks a provider's base URL when you save it, and again each time the model is used. An address on the internet or on your home network works as it stands. An address of the computer Aman runs on is refused, and so is a link-local or cloud metadata address.
+Aman checks a provider's base URL when you save it, and again each time the model is used.
 
-A model you run yourself on that computer, such as Ollama, is the one exception. Whoever runs Aman names the model's exact address, host and port, in the `LOCAL_MODEL_ENDPOINTS` setting. For a local Ollama that is:
+- An address on the internet or on your home network works as it stands.
+- A link-local or cloud metadata address is always refused. These are protected network addresses.
+- When Aman runs directly on your computer, a model on that same computer works as it stands, for example `http://localhost:11434/v1`.
+- In the installer's Docker setup, `localhost` means Aman's own container, so it is refused. Reach a model on your computer at `host.docker.internal` instead, for example `http://host.docker.internal:11434/v1`. That name points at your computer from inside the container.
+- A demo instance refuses every address on its own computer.
 
-```bash
-LOCAL_MODEL_ENDPOINTS=localhost:11434
-```
+If a model server answers with a redirect, the new address is checked more strictly before Aman follows it. A redirect to an address on Aman's own computer is refused, because the model server chose it, not you.
 
-- On an installed Aman, put it in the instance's settings file, `~/.amanuensis/instances/<name>/.env`, below the block the installer manages. Then restart the instance.
-- When you run from a checkout, put it in `packages/trueforge/.env` and restart the server. See `packages/trueforge/.env.example`.
-
-The match is exact. A different port on the same computer is a different address, and stays refused until it's named too.
-
-In the installer's Docker setup, a model on your computer is reached at `host.docker.internal`, for example `http://host.docker.internal:11434/v1`. That name points at your computer from inside the container, so it works as it stands and doesn't need to be named.
-
-If a model server answers with a redirect, the new address is checked the same way before Aman follows it.
+In a container install, whoever runs Aman can still allow one exact model endpoint that the rules above refuse. Name its host and port in the `LOCAL_MODEL_ENDPOINTS` setting, then restart the instance. On an installed Aman, that setting is in the instance's settings file, `~/.amanuensis/instances/<name>/.env`, below the block the installer manages. See `packages/trueforge/.env.example`.
 
 ## Assign models to jobs
 

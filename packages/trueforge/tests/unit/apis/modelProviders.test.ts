@@ -21,6 +21,7 @@ import { SqliteSandboxProviderStore } from '../../../src/db/sqlite/sandbox-provi
 import { SqliteSkillStore } from '../../../src/db/sqlite/skill-store/SqliteSkillStore';
 import { SqliteOAuthTokenStore } from '../../../src/db/sqlite/token-store/SqliteOAuthTokenStore';
 import type { CheckSavedModelProvider } from '../../../src/runtime/modelProviderCheck';
+import { configureRemoteAddressCheck } from '../../../src/runtime/remoteAddress';
 import { RequestErrorResponseSchema } from '../../../src/schemas/errors';
 import {
   ListAvailableModelsResponseSchema,
@@ -787,18 +788,15 @@ describe('the address check on model providers', () => {
     return RequestErrorResponseSchema.parse(await response.json()).error.message;
   }
 
-  it('refuses a provider at a loopback address, naming the setting that allows a local model', async () => {
+  it('saves a provider at a loopback address when Aman runs directly on the computer', async () => {
     const { settingsRouter } = await createRouters();
 
     const response = await settingsRouter.request(
       '/model-providers',
-      putInit(customAt('local-refused', 'http://127.0.0.1:11434/v1')),
+      putInit(customAt('local-direct', 'http://127.0.0.1:11434/v1')),
     );
 
-    expect(response.status).toBe(400);
-    expect(await errorMessage(response)).toContain('LOCAL_MODEL_ENDPOINTS');
-    const list = await settingsRouter.request('/model-providers');
-    expect(await list.json()).toEqual({ data: [] });
+    expect(response.status).toBe(200);
   });
 
   it('refuses a provider at the cloud metadata address', async () => {
@@ -810,10 +808,7 @@ describe('the address check on model providers', () => {
     );
 
     expect(response.status).toBe(400);
-    const message = await errorMessage(response);
-    expect(message).toContain('That address is on this computer, so the server cannot use it for a model');
-    expect(message).toContain('~/.amanuensis/instances/<name>/.env');
-    expect(message).toContain('Restart the instance after changing it');
+    expect(await errorMessage(response)).toContain('protected network address, so Aman will not use it for a model');
   });
 
   it('refuses an address carrying a name and password', async () => {
@@ -839,40 +834,63 @@ describe('the address check on model providers', () => {
     expect(response.status).toBe(200);
   });
 
-  it('saves a provider at a loopback address once the operator names its exact endpoint', async () => {
-    const { settingsRouter } = await createRouters();
-    const originalEndpoints = configuration.LOCAL_MODEL_ENDPOINTS;
-    configuration.LOCAL_MODEL_ENDPOINTS = ['127.0.0.1:11434', 'localhost:11434'];
-    try {
-      const byLiteral = await settingsRouter.request(
-        '/model-providers',
-        putInit(customAt('local-allowed', 'http://127.0.0.1:11434/v1')),
-      );
-      expect(byLiteral.status).toBe(200);
+  describe('when Aman runs in a container', () => {
+    beforeAll(() => {
+      configureRemoteAddressCheck({ ownNetworkRanges: ['172.30.0.0/16'], demo: false });
+    });
+    afterAll(() => {
+      configureRemoteAddressCheck({ ownNetworkRanges: [], demo: false });
+    });
 
-      const byName = await settingsRouter.request(
-        '/model-providers',
-        putInit(customAt('local-named', 'http://localhost:11434/v1')),
-      );
-      expect(byName.status).toBe(200);
-    } finally {
-      configuration.LOCAL_MODEL_ENDPOINTS = originalEndpoints;
-    }
-  });
+    it('refuses a provider at a loopback address, pointing at host.docker.internal', async () => {
+      const { settingsRouter } = await createRouters();
 
-  it('a named endpoint does not cover a different port on the same host', async () => {
-    const { settingsRouter } = await createRouters();
-    const originalEndpoints = configuration.LOCAL_MODEL_ENDPOINTS;
-    configuration.LOCAL_MODEL_ENDPOINTS = ['127.0.0.1:11434'];
-    try {
       const response = await settingsRouter.request(
         '/model-providers',
-        putInit(customAt('local-wrong-port', 'http://127.0.0.1:9999/v1')),
+        putInit(customAt('local-refused', 'http://127.0.0.1:11434/v1')),
       );
 
       expect(response.status).toBe(400);
-    } finally {
-      configuration.LOCAL_MODEL_ENDPOINTS = originalEndpoints;
-    }
+      expect(await errorMessage(response)).toContain('enter host.docker.internal');
+      const list = await settingsRouter.request('/model-providers');
+      expect(await list.json()).toEqual({ data: [] });
+    });
+
+    it('saves a provider at a loopback address once the operator names its exact endpoint', async () => {
+      const { settingsRouter } = await createRouters();
+      const originalEndpoints = configuration.LOCAL_MODEL_ENDPOINTS;
+      configuration.LOCAL_MODEL_ENDPOINTS = ['127.0.0.1:11434', 'localhost:11434'];
+      try {
+        const byLiteral = await settingsRouter.request(
+          '/model-providers',
+          putInit(customAt('local-allowed', 'http://127.0.0.1:11434/v1')),
+        );
+        expect(byLiteral.status).toBe(200);
+
+        const byName = await settingsRouter.request(
+          '/model-providers',
+          putInit(customAt('local-named', 'http://localhost:11434/v1')),
+        );
+        expect(byName.status).toBe(200);
+      } finally {
+        configuration.LOCAL_MODEL_ENDPOINTS = originalEndpoints;
+      }
+    });
+
+    it('a named endpoint does not cover a different port on the same host', async () => {
+      const { settingsRouter } = await createRouters();
+      const originalEndpoints = configuration.LOCAL_MODEL_ENDPOINTS;
+      configuration.LOCAL_MODEL_ENDPOINTS = ['127.0.0.1:11434'];
+      try {
+        const response = await settingsRouter.request(
+          '/model-providers',
+          putInit(customAt('local-wrong-port', 'http://127.0.0.1:9999/v1')),
+        );
+
+        expect(response.status).toBe(400);
+      } finally {
+        configuration.LOCAL_MODEL_ENDPOINTS = originalEndpoints;
+      }
+    });
   });
 });

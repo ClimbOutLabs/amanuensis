@@ -402,8 +402,8 @@ function withCatalogSearchTools({
 /**
  * The reason a remote connector address may not be used, or undefined when it may. An origin on
  * the operator's own list is the operator's own service and is not second-guessed; every other
- * remote address is resolved and judged by the address check (see runtime/remoteAddress) before
- * anything dials it or writes it. A host that does not resolve is not refused here: it connects
+ * remote address is resolved and judged by the address check (see runtime/remoteAddress), as one
+ * the owner chose, before anything dials it or writes it. A host that does not resolve is not refused here: it connects
  * nowhere, the connection attempt reports its own failure, and the address is judged again on
  * the next check if the name starts resolving. The wording is the same wherever the refusal is
  * served, so the person hears one explanation.
@@ -412,13 +412,15 @@ async function remoteAddressRefusal({ url }: { url: string }): Promise<string | 
   if (isFirstPartyOrigin({ url, origins: configuration.FIRST_PARTY_MCP_ORIGINS })) {
     return undefined;
   }
-  const problem = await remoteUrlProblem({ url });
+  const problem = await remoteUrlProblem({ url, chosenBy: 'owner' });
   switch (problem) {
     case null:
     case 'unresolved':
       return undefined;
-    case 'blocked':
-      return 'That address is on this computer, so the server cannot connect to it. Enter an address on your home network or the internet instead.';
+    case 'protected':
+      return "That address is a protected network address, so Aman will not connect to it. Enter the address of the connector's server instead.";
+    case 'internal':
+      return "That address points inside Aman itself, so Aman will not connect to it. To reach a service on this computer, enter host.docker.internal with the service's port instead, for example http://host.docker.internal:8080.";
     case 'invalid':
       return 'That address is not one the server can connect to. Enter the full address, starting with http:// or https://, without a name and password in it.';
   }

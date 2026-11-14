@@ -51,7 +51,7 @@ export const MCP_OAUTH_HTTP_TIMEOUT_MS = 15_000;
 export class McpOAuthAddressRefusedError extends McpConnectionError {
   constructor(problem: RemoteUrlProblem | 'redirect' | 'bad-redirect') {
     super(
-      problem === 'blocked'
+      problem === 'protected' || problem === 'internal'
         ? "Sign-in stopped. The address this connector's server named for sign-in is one the server may not connect to. Use a connector whose sign-in address is on the internet or your home network."
         : problem === 'unresolved'
           ? "Sign-in stopped. The address this connector's server named for sign-in did not resolve, so the server cannot check it. Try again, or check the connector's address in Settings."
@@ -79,14 +79,14 @@ export class McpOAuthAddressRefusedError extends McpConnectionError {
  */
 export async function dialMcpOAuthUrl(url: string | URL, init: RequestInit): Promise<Response> {
   const start = new URL(url);
-  const startProblem = await remoteUrlProblem({ url: start.href });
+  const startProblem = await remoteUrlProblem({ url: start.href, chosenBy: 'remote' });
   if (startProblem !== null) {
     throw new McpOAuthAddressRefusedError(startProblem);
   }
   const checkedFetch = withCheckedRedirects(
     (input, hopInit) => fetch(input, hopInit),
     async target => {
-      const problem = await remoteUrlProblem({ url: target });
+      const problem = await remoteUrlProblem({ url: target, chosenBy: 'remote' });
       if (problem !== null) {
         throw new McpOAuthAddressRefusedError(problem);
       }

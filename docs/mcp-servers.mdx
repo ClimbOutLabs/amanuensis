@@ -200,14 +200,16 @@ Placing the pins is its own step and always asks, because the addresses are sent
 
     Aman checks a connector's address when you save it, and again each time the connector connects.
 
-    - An address on the internet or on your home network works.
-    - These are refused: an address of the computer Aman runs on, a link-local or cloud metadata address, and an address with a name and password in it.
-    - When Aman runs in a container, every address on the container networks it sits on is refused too. The other members of those networks are Aman's own parts.
+    - An address on the internet or on your home network works. That includes `.local` names and Tailscale addresses.
+    - When Aman runs directly on your computer, a service on that same computer works too, for example `http://localhost:27123`. So does the computer's own home network or Tailscale address.
+    - These are always refused: a link-local or cloud metadata address, and an address with a name and password in it.
+    - When Aman runs in a container, `localhost` and the container networks it sits on are Aman's own parts, so they are refused. Reach a service on your computer at `host.docker.internal` instead, for example `http://host.docker.internal:27123`.
+    - A demo instance refuses every address on its own computer.
     - The check looks at the addresses a name points to, not just the name. A name that points to a refused address is refused.
     - A name that can't be looked up when the connector connects is refused, because it can't be checked.
-    - For OAuth sign-in, the addresses the service names for sign-in are checked the same way before Aman connects to them. That includes every address a sign-in answer redirects to.
+    - For OAuth sign-in, the addresses the service names for sign-in are checked more strictly before Aman connects to them, because the service chose them, not you. An address on Aman's own computer is refused there. That includes every address a sign-in answer redirects to.
 
-    Whoever runs Aman can still allow one exact service on the same computer. List its origin in the `FIRST_PARTY_MCP_ORIGINS` setting (see `packages/trueforge/.env.example`). That marks it as the operator's own service, and the check doesn't second-guess it.
+    Whoever runs Aman can still allow one exact service the rules above refuse. List its origin in the `FIRST_PARTY_MCP_ORIGINS` setting (see `packages/trueforge/.env.example`). That marks it as the operator's own service, and the check doesn't second-guess it.
 
     The Email and Calendar connectors' own addresses are on that list already, because Aman adds them itself. A connector saved at one of those addresses is not refused.
 

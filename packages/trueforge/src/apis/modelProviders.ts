@@ -55,10 +55,10 @@ function envManagedConflict(name: string) {
 }
 
 /**
- * The reason a model base address may not be saved, or undefined when it may. The one exception
- * is an exact endpoint the operator named in `LOCAL_MODEL_ENDPOINTS`: a model running on this
- * computer is allowed once its host and port are named there. Every other address is resolved
- * and judged by the address check (see runtime/remoteAddress) before it is written. A host that
+ * The reason a model base address may not be saved, or undefined when it may. The address is
+ * resolved and judged by the address check (see runtime/remoteAddress) as one the owner chose,
+ * before it is written; an exact endpoint the operator named in `LOCAL_MODEL_ENDPOINTS` is always
+ * allowed. A host that
  * does not resolve is not refused: it connects nowhere, and the address is judged again when
  * the model is used.
  */
@@ -66,13 +66,19 @@ async function modelAddressRefusal({ baseUrl }: { baseUrl: string | undefined })
   if (baseUrl === undefined) {
     return undefined;
   }
-  const problem = await modelUrlProblem({ url: baseUrl, endpoints: configuration.LOCAL_MODEL_ENDPOINTS });
+  const problem = await modelUrlProblem({
+    url: baseUrl,
+    endpoints: configuration.LOCAL_MODEL_ENDPOINTS,
+    chosenBy: 'owner',
+  });
   switch (problem) {
     case null:
     case 'unresolved':
       return undefined;
-    case 'blocked':
-      return "That address is on this computer, so the server cannot use it for a model. To use a model on this computer, name its exact address (host and port) in LOCAL_MODEL_ENDPOINTS. On an installed Aman, that setting is in the instance's settings file, ~/.amanuensis/instances/<name>/.env, below the block the installer manages. Restart the instance after changing it.";
+    case 'protected':
+      return "That address is a protected network address, so Aman will not use it for a model. Enter the address of the model's server instead.";
+    case 'internal':
+      return "That address points inside Aman itself, so Aman will not use it for a model. To use a model on this computer, enter host.docker.internal with the model's port instead, for example http://host.docker.internal:11434.";
     case 'invalid':
       return 'That address is not one the server can connect to. Enter the full address, starting with http:// or https://, without a name and password in it.';
   }

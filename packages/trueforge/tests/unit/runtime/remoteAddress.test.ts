@@ -23,7 +23,7 @@ const PUBLIC = resolverFor({ 'mcp.example.com': ['93.184.216.34'] });
 
 describe('allowedRemoteAddresses', () => {
   it('allows a public address literal without resolving', async () => {
-    await expect(allowedRemoteAddresses({ host: '8.8.8.8' })).resolves.toEqual({
+    await expect(allowedRemoteAddresses({ chosenBy: 'remote', host: '8.8.8.8' })).resolves.toEqual({
       ok: true,
       addresses: ['8.8.8.8'],
     });
@@ -32,6 +32,7 @@ describe('allowedRemoteAddresses', () => {
   it('allows a name that resolves to a public address', async () => {
     await expect(
       allowedRemoteAddresses({
+        chosenBy: 'remote',
         host: 'mcp.example.com',
         deps: { resolveAddresses: PUBLIC, ownAddresses: [] },
       }),
@@ -42,7 +43,9 @@ describe('allowedRemoteAddresses', () => {
     // Pinned empty own addresses: the machine running the suite has its own, and they are not
     // what this case judges.
     for (const host of ['192.168.1.20', '10.0.0.5', '172.16.4.9', '100.64.1.1']) {
-      await expect(allowedRemoteAddresses({ host, deps: { ownAddresses: [] } })).resolves.toMatchObject({
+      await expect(
+        allowedRemoteAddresses({ chosenBy: 'remote', host, deps: { ownAddresses: [] } }),
+      ).resolves.toMatchObject({
         ok: true,
       });
     }
@@ -53,34 +56,46 @@ describe('allowedRemoteAddresses', () => {
       resolveAddresses: resolverFor({ 'homeassistant.local': ['192.168.1.20'] }),
       ownAddresses: [],
     };
-    await expect(allowedRemoteAddresses({ host: 'homeassistant.local', deps })).resolves.toMatchObject({
+    await expect(
+      allowedRemoteAddresses({ chosenBy: 'remote', host: 'homeassistant.local', deps }),
+    ).resolves.toMatchObject({
       ok: true,
     });
   });
 
-  it.each([['127.0.0.1'], ['127.1.2.3'], ['0.0.0.1'], ['::1'], ['169.254.169.254'], ['fe80::1'], ['fd00:ec2::254']])(
-    'refuses %s',
+  it.each([['127.0.0.1'], ['127.1.2.3'], ['0.0.0.1'], ['::1'], ['::']])('refuses %s as this computer', async host => {
+    await expect(allowedRemoteAddresses({ chosenBy: 'remote', host })).resolves.toEqual({
+      ok: false,
+      reason: 'internal',
+    });
+  });
+
+  it.each([['169.254.169.254'], ['fe80::1'], ['fd00:ec2::254'], ['::7f00:1']])(
+    'refuses %s as protected',
     async host => {
-      await expect(allowedRemoteAddresses({ host })).resolves.toEqual({ ok: false, reason: 'blocked' });
+      await expect(allowedRemoteAddresses({ chosenBy: 'remote', host })).resolves.toEqual({
+        ok: false,
+        reason: 'protected',
+      });
     },
   );
 
   it('refuses the cloud metadata addresses inside otherwise allowed ranges', async () => {
-    await expect(allowedRemoteAddresses({ host: '100.100.100.200' })).resolves.toEqual({
+    await expect(allowedRemoteAddresses({ chosenBy: 'remote', host: '100.100.100.200' })).resolves.toEqual({
       ok: false,
-      reason: 'blocked',
+      reason: 'protected',
     });
-    await expect(allowedRemoteAddresses({ host: '168.63.129.16' })).resolves.toEqual({
+    await expect(allowedRemoteAddresses({ chosenBy: 'remote', host: '168.63.129.16' })).resolves.toEqual({
       ok: false,
-      reason: 'blocked',
+      reason: 'protected',
     });
   });
 
   it('refuses a name that resolves to loopback, like localhost does', async () => {
     const deps = { resolveAddresses: resolverFor({ localhost: ['127.0.0.1', '::1'] }) };
-    await expect(allowedRemoteAddresses({ host: 'localhost', deps })).resolves.toEqual({
+    await expect(allowedRemoteAddresses({ chosenBy: 'remote', host: 'localhost', deps })).resolves.toEqual({
       ok: false,
-      reason: 'blocked',
+      reason: 'internal',
     });
   });
 
@@ -88,23 +103,29 @@ describe('allowedRemoteAddresses', () => {
     const deps = {
       resolveAddresses: resolverFor({ 'sneaky.example.com': ['93.184.216.34', '10.0.0.5', '127.0.0.1'] }),
     };
-    await expect(allowedRemoteAddresses({ host: 'sneaky.example.com', deps })).resolves.toEqual({
+    await expect(allowedRemoteAddresses({ chosenBy: 'remote', host: 'sneaky.example.com', deps })).resolves.toEqual({
       ok: false,
-      reason: 'blocked',
+      reason: 'internal',
     });
   });
 
   it('refuses this instance’s own address, and only that address on its network', async () => {
     const deps = { ownAddresses: ['172.20.0.5'] };
-    await expect(allowedRemoteAddresses({ host: '172.20.0.5', deps })).resolves.toEqual({
+    await expect(allowedRemoteAddresses({ chosenBy: 'remote', host: '172.20.0.5', deps })).resolves.toEqual({
       ok: false,
-      reason: 'blocked',
+      reason: 'internal',
     });
     // Another address on the same home network is the person's own server to use: only the
     // machine's own address is refused, not the whole subnet it sits on.
-    await expect(allowedRemoteAddresses({ host: '172.20.9.9', deps })).resolves.toMatchObject({ ok: true });
-    await expect(allowedRemoteAddresses({ host: '172.21.0.1', deps })).resolves.toMatchObject({ ok: true });
-    await expect(allowedRemoteAddresses({ host: '172.20.0.5', deps: { ownAddresses: [] } })).resolves.toMatchObject({
+    await expect(allowedRemoteAddresses({ chosenBy: 'remote', host: '172.20.9.9', deps })).resolves.toMatchObject({
+      ok: true,
+    });
+    await expect(allowedRemoteAddresses({ chosenBy: 'remote', host: '172.21.0.1', deps })).resolves.toMatchObject({
+      ok: true,
+    });
+    await expect(
+      allowedRemoteAddresses({ chosenBy: 'remote', host: '172.20.0.5', deps: { ownAddresses: [] } }),
+    ).resolves.toMatchObject({
       ok: true,
     });
   });
@@ -114,24 +135,28 @@ describe('allowedRemoteAddresses', () => {
     // connector at 172.30.0.4, say) is one of the app's own parts, not a server the person
     // added, so the whole range is refused, not just this instance's own address on it.
     const deps = { ownAddresses: ['172.30.0.5'], ownNetworkRanges: ['172.30.0.0/16', 'fd00:beef::/64'] };
-    await expect(allowedRemoteAddresses({ host: '172.30.0.4', deps })).resolves.toEqual({
+    await expect(allowedRemoteAddresses({ chosenBy: 'remote', host: '172.30.0.4', deps })).resolves.toEqual({
       ok: false,
-      reason: 'blocked',
+      reason: 'internal',
     });
-    await expect(allowedRemoteAddresses({ host: '172.30.255.254', deps })).resolves.toEqual({
+    await expect(allowedRemoteAddresses({ chosenBy: 'remote', host: '172.30.255.254', deps })).resolves.toEqual({
       ok: false,
-      reason: 'blocked',
+      reason: 'internal',
     });
-    await expect(allowedRemoteAddresses({ host: 'fd00:beef::99', deps })).resolves.toEqual({
+    await expect(allowedRemoteAddresses({ chosenBy: 'remote', host: 'fd00:beef::99', deps })).resolves.toEqual({
       ok: false,
-      reason: 'blocked',
+      reason: 'internal',
     });
     // The person's home network is outside the named ranges and stays usable.
-    await expect(allowedRemoteAddresses({ host: '192.168.1.20', deps })).resolves.toMatchObject({ ok: true });
-    await expect(allowedRemoteAddresses({ host: '172.31.0.4', deps })).resolves.toMatchObject({ ok: true });
+    await expect(allowedRemoteAddresses({ chosenBy: 'remote', host: '192.168.1.20', deps })).resolves.toMatchObject({
+      ok: true,
+    });
+    await expect(allowedRemoteAddresses({ chosenBy: 'remote', host: '172.31.0.4', deps })).resolves.toMatchObject({
+      ok: true,
+    });
     // And with no ranges in force, as on a host run, the neighbour address is allowed.
     await expect(
-      allowedRemoteAddresses({ host: '172.30.0.4', deps: { ownAddresses: ['172.30.0.5'] } }),
+      allowedRemoteAddresses({ chosenBy: 'remote', host: '172.30.0.4', deps: { ownAddresses: ['172.30.0.5'] } }),
     ).resolves.toMatchObject({ ok: true });
   });
 
@@ -141,33 +166,39 @@ describe('allowedRemoteAddresses', () => {
       ownAddresses: [],
       ownNetworkRanges: ['172.30.0.0/16'],
     };
-    await expect(allowedRemoteAddresses({ host: 'calendar-caldav', deps })).resolves.toEqual({
+    await expect(allowedRemoteAddresses({ chosenBy: 'remote', host: 'calendar-caldav', deps })).resolves.toEqual({
       ok: false,
-      reason: 'blocked',
+      reason: 'internal',
     });
   });
 
   it('refuses an IPv4-mapped IPv6 address whose IPv4 address is in a container network range', async () => {
     const deps = { ownAddresses: [], ownNetworkRanges: ['172.30.0.0/16'] };
-    await expect(allowedRemoteAddresses({ host: '::ffff:172.30.0.4', deps })).resolves.toEqual({
+    await expect(allowedRemoteAddresses({ chosenBy: 'remote', host: '::ffff:172.30.0.4', deps })).resolves.toEqual({
       ok: false,
-      reason: 'blocked',
+      reason: 'internal',
     });
   });
 
   it('uses the configured container network ranges when a call names none', async () => {
-    configureRemoteAddressCheck({ ownNetworkRanges: ['172.30.0.0/16'] });
+    configureRemoteAddressCheck({ ownNetworkRanges: ['172.30.0.0/16'], demo: false });
     try {
-      await expect(allowedRemoteAddresses({ host: '172.30.0.4', deps: { ownAddresses: [] } })).resolves.toEqual({
+      await expect(
+        allowedRemoteAddresses({ chosenBy: 'remote', host: '172.30.0.4', deps: { ownAddresses: [] } }),
+      ).resolves.toEqual({
         ok: false,
-        reason: 'blocked',
+        reason: 'internal',
       });
       // An explicit set on the call wins over the configured one.
       await expect(
-        allowedRemoteAddresses({ host: '172.30.0.4', deps: { ownAddresses: [], ownNetworkRanges: [] } }),
+        allowedRemoteAddresses({
+          chosenBy: 'remote',
+          host: '172.30.0.4',
+          deps: { ownAddresses: [], ownNetworkRanges: [] },
+        }),
       ).resolves.toMatchObject({ ok: true });
     } finally {
-      configureRemoteAddressCheck({ ownNetworkRanges: [] });
+      configureRemoteAddressCheck({ ownNetworkRanges: [], demo: false });
     }
   });
 
@@ -176,42 +207,140 @@ describe('allowedRemoteAddresses', () => {
       resolveAddresses: resolverFor({ 'this-machine.local': ['172.20.0.5'] }),
       ownAddresses: ['172.20.0.5'],
     };
-    await expect(allowedRemoteAddresses({ host: 'this-machine.local', deps })).resolves.toEqual({
+    await expect(allowedRemoteAddresses({ chosenBy: 'remote', host: 'this-machine.local', deps })).resolves.toEqual({
       ok: false,
-      reason: 'blocked',
+      reason: 'internal',
     });
   });
 
   it('refuses this instance’s own IPv6 address, and only that address on its network', async () => {
     const deps = { ownAddresses: ['fd00:1234::5'] };
-    await expect(allowedRemoteAddresses({ host: 'fd00:1234::5', deps })).resolves.toEqual({
+    await expect(allowedRemoteAddresses({ chosenBy: 'remote', host: 'fd00:1234::5', deps })).resolves.toEqual({
       ok: false,
-      reason: 'blocked',
+      reason: 'internal',
     });
-    await expect(allowedRemoteAddresses({ host: 'fd00:1234::99', deps })).resolves.toMatchObject({ ok: true });
+    await expect(allowedRemoteAddresses({ chosenBy: 'remote', host: 'fd00:1234::99', deps })).resolves.toMatchObject({
+      ok: true,
+    });
   });
 
   it('judges an IPv4-mapped IPv6 address by the IPv4 address inside it', async () => {
-    await expect(allowedRemoteAddresses({ host: '::ffff:127.0.0.1' })).resolves.toEqual({
+    await expect(allowedRemoteAddresses({ chosenBy: 'remote', host: '::ffff:127.0.0.1' })).resolves.toEqual({
       ok: false,
-      reason: 'blocked',
+      reason: 'internal',
     });
-    await expect(allowedRemoteAddresses({ host: '::ffff:7f00:1' })).resolves.toEqual({
+    await expect(allowedRemoteAddresses({ chosenBy: 'remote', host: '::ffff:7f00:1' })).resolves.toEqual({
       ok: false,
-      reason: 'blocked',
+      reason: 'internal',
     });
-    await expect(allowedRemoteAddresses({ host: '::ffff:8.8.8.8', deps: { ownAddresses: [] } })).resolves.toMatchObject(
-      { ok: true },
-    );
+    await expect(
+      allowedRemoteAddresses({ chosenBy: 'remote', host: '::ffff:8.8.8.8', deps: { ownAddresses: [] } }),
+    ).resolves.toMatchObject({ ok: true });
   });
 
   it('reports a host that does not resolve as unresolved, whether the lookup is empty or fails', async () => {
     await expect(
-      allowedRemoteAddresses({ host: 'gone.example.com', deps: { resolveAddresses: async () => [] } }),
+      allowedRemoteAddresses({
+        chosenBy: 'remote',
+        host: 'gone.example.com',
+        deps: { resolveAddresses: async () => [] },
+      }),
     ).resolves.toEqual({ ok: false, reason: 'unresolved' });
     await expect(
-      allowedRemoteAddresses({ host: 'gone.example.com', deps: { resolveAddresses: PUBLIC } }),
+      allowedRemoteAddresses({ chosenBy: 'remote', host: 'gone.example.com', deps: { resolveAddresses: PUBLIC } }),
     ).resolves.toEqual({ ok: false, reason: 'unresolved' });
+  });
+});
+
+describe('addresses the owner chose', () => {
+  // A direct run: no container ranges, not a demo, and this machine at 192.168.1.10 and its
+  // Tailscale address 100.101.102.103.
+  const direct = {
+    ownAddresses: ['127.0.0.1', '::1', '192.168.1.10', '100.101.102.103'],
+    ownNetworkRanges: [],
+    demo: false,
+  };
+
+  it.each([['127.0.0.1'], ['::1'], ['192.168.1.10'], ['100.101.102.103'], ['::ffff:127.0.0.1']])(
+    'allows %s on this computer when Aman runs directly',
+    async host => {
+      await expect(allowedRemoteAddresses({ chosenBy: 'owner', host, deps: direct })).resolves.toMatchObject({
+        ok: true,
+      });
+    },
+  );
+
+  it('allows localhost, a .local name and a Tailscale name that resolve to this computer', async () => {
+    const deps = {
+      ...direct,
+      resolveAddresses: resolverFor({
+        localhost: ['127.0.0.1', '::1'],
+        'box.local': ['192.168.1.10'],
+        'box.example-tailnet.ts.net': ['100.101.102.103'],
+      }),
+    };
+    for (const host of ['localhost', 'box.local', 'box.example-tailnet.ts.net']) {
+      await expect(allowedRemoteAddresses({ chosenBy: 'owner', host, deps })).resolves.toMatchObject({ ok: true });
+    }
+  });
+
+  it('still refuses this computer when a remote server chose the address', async () => {
+    await expect(allowedRemoteAddresses({ chosenBy: 'remote', host: '127.0.0.1', deps: direct })).resolves.toEqual({
+      ok: false,
+      reason: 'internal',
+    });
+    await expect(allowedRemoteAddresses({ chosenBy: 'remote', host: '192.168.1.10', deps: direct })).resolves.toEqual({
+      ok: false,
+      reason: 'internal',
+    });
+  });
+
+  it.each([['169.254.169.254'], ['100.100.100.200'], ['168.63.129.16'], ['fe80::1'], ['fd00:ec2::254']])(
+    'still refuses the protected address %s',
+    async host => {
+      await expect(allowedRemoteAddresses({ chosenBy: 'owner', host, deps: direct })).resolves.toEqual({
+        ok: false,
+        reason: 'protected',
+      });
+    },
+  );
+
+  it('refuses this computer and the container networks when Aman runs in a container', async () => {
+    const container = { ownAddresses: ['127.0.0.1', '172.30.0.5'], ownNetworkRanges: ['172.30.0.0/16'], demo: false };
+    for (const host of ['127.0.0.1', '172.30.0.4', '172.30.0.5']) {
+      await expect(allowedRemoteAddresses({ chosenBy: 'owner', host, deps: container })).resolves.toEqual({
+        ok: false,
+        reason: 'internal',
+      });
+    }
+    // host.docker.internal on Linux: the Docker bridge, outside the instance's own networks.
+    const deps = { ...container, resolveAddresses: resolverFor({ 'host.docker.internal': ['172.17.0.1'] }) };
+    await expect(
+      allowedRemoteAddresses({ chosenBy: 'owner', host: 'host.docker.internal', deps }),
+    ).resolves.toMatchObject({ ok: true });
+  });
+
+  it('judges every address the strict way on a demo instance', async () => {
+    await expect(
+      allowedRemoteAddresses({ chosenBy: 'owner', host: '127.0.0.1', deps: { ...direct, demo: true } }),
+    ).resolves.toEqual({ ok: false, reason: 'internal' });
+  });
+
+  it('uses the configured demo setting when a call names none', async () => {
+    configureRemoteAddressCheck({ ownNetworkRanges: [], demo: true });
+    try {
+      await expect(
+        allowedRemoteAddresses({ chosenBy: 'owner', host: '127.0.0.1', deps: { ownAddresses: [] } }),
+      ).resolves.toEqual({ ok: false, reason: 'internal' });
+    } finally {
+      configureRemoteAddressCheck({ ownNetworkRanges: [], demo: false });
+    }
+  });
+
+  it('passes a model on this computer without naming it in LOCAL_MODEL_ENDPOINTS', async () => {
+    await expect(
+      modelUrlProblem({ chosenBy: 'owner', url: 'http://127.0.0.1:11434/v1', endpoints: [], deps: direct }),
+    ).resolves.toBeNull();
   });
 });
 
@@ -219,6 +348,7 @@ describe('remoteUrlProblem', () => {
   it('passes a public https address', async () => {
     await expect(
       remoteUrlProblem({
+        chosenBy: 'remote',
         url: 'https://mcp.example.com/mcp',
         deps: { resolveAddresses: PUBLIC, ownAddresses: [] },
       }),
@@ -227,31 +357,38 @@ describe('remoteUrlProblem', () => {
 
   it('passes a home-network http address, the shape a LAN server is saved with', async () => {
     await expect(
-      remoteUrlProblem({ url: 'http://192.168.1.20:8123/mcp_server/sse', deps: { ownAddresses: [] } }),
+      remoteUrlProblem({
+        chosenBy: 'remote',
+        url: 'http://192.168.1.20:8123/mcp_server/sse',
+        deps: { ownAddresses: [] },
+      }),
     ).resolves.toBeNull();
   });
 
-  it('refuses a loopback URL as blocked', async () => {
-    await expect(remoteUrlProblem({ url: 'http://127.0.0.1:8080/mcp' })).resolves.toBe('blocked');
+  it('refuses a loopback URL as internal', async () => {
+    await expect(remoteUrlProblem({ chosenBy: 'remote', url: 'http://127.0.0.1:8080/mcp' })).resolves.toBe('internal');
     await expect(
       remoteUrlProblem({
+        chosenBy: 'remote',
         url: 'http://localhost:11434/v1',
         deps: { resolveAddresses: resolverFor({ localhost: ['127.0.0.1'] }) },
       }),
-    ).resolves.toBe('blocked');
+    ).resolves.toBe('internal');
   });
 
-  it('refuses the metadata address as blocked', async () => {
-    await expect(remoteUrlProblem({ url: 'http://169.254.169.254/latest/meta-data' })).resolves.toBe('blocked');
+  it('refuses the metadata address as protected', async () => {
+    await expect(
+      remoteUrlProblem({ chosenBy: 'remote', url: 'http://169.254.169.254/latest/meta-data' }),
+    ).resolves.toBe('protected');
   });
 
-  it('refuses an IPv6 loopback URL as blocked', async () => {
-    await expect(remoteUrlProblem({ url: 'http://[::1]:11434/v1' })).resolves.toBe('blocked');
+  it('refuses an IPv6 loopback URL as internal', async () => {
+    await expect(remoteUrlProblem({ chosenBy: 'remote', url: 'http://[::1]:11434/v1' })).resolves.toBe('internal');
   });
 
   it('reports a name that does not resolve as unresolved', async () => {
     await expect(
-      remoteUrlProblem({ url: 'https://gone.example.com/mcp', deps: { resolveAddresses: PUBLIC } }),
+      remoteUrlProblem({ chosenBy: 'remote', url: 'https://gone.example.com/mcp', deps: { resolveAddresses: PUBLIC } }),
     ).resolves.toBe('unresolved');
   });
 
@@ -262,7 +399,9 @@ describe('remoteUrlProblem', () => {
     ['https://user@mcp.example.com/mcp'],
     ['file:///etc/passwd'],
   ])('refuses %s as invalid', async url => {
-    await expect(remoteUrlProblem({ url, deps: { resolveAddresses: PUBLIC } })).resolves.toBe('invalid');
+    await expect(remoteUrlProblem({ chosenBy: 'remote', url, deps: { resolveAddresses: PUBLIC } })).resolves.toBe(
+      'invalid',
+    );
   });
 });
 
@@ -298,6 +437,7 @@ describe('modelUrlProblem', () => {
   it('passes a public model address', async () => {
     await expect(
       modelUrlProblem({
+        chosenBy: 'remote',
         url: 'https://models.example.com/v1',
         endpoints: [],
         deps: { resolveAddresses: resolverFor({ 'models.example.com': ['93.184.216.34'] }), ownAddresses: [] },
@@ -307,19 +447,20 @@ describe('modelUrlProblem', () => {
 
   it('passes the exact endpoint the operator named, though its address is refused', async () => {
     await expect(
-      modelUrlProblem({ url: 'http://127.0.0.1:11434/v1', endpoints: ['127.0.0.1:11434'] }),
+      modelUrlProblem({ chosenBy: 'remote', url: 'http://127.0.0.1:11434/v1', endpoints: ['127.0.0.1:11434'] }),
     ).resolves.toBeNull();
   });
 
   it('refuses the same address on a port the operator did not name', async () => {
-    await expect(modelUrlProblem({ url: 'http://127.0.0.1:9999/v1', endpoints: ['127.0.0.1:11434'] })).resolves.toBe(
-      'blocked',
-    );
+    await expect(
+      modelUrlProblem({ chosenBy: 'remote', url: 'http://127.0.0.1:9999/v1', endpoints: ['127.0.0.1:11434'] }),
+    ).resolves.toBe('internal');
   });
 
   it('reports a model name that does not resolve as unresolved', async () => {
     await expect(
       modelUrlProblem({
+        chosenBy: 'remote',
         url: 'https://gone.example.com/v1',
         endpoints: [],
         deps: { resolveAddresses: PUBLIC },
