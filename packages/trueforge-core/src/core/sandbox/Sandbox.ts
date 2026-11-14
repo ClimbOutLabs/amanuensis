@@ -421,6 +421,9 @@ export const SANDBOX_TOOL_DECLARATIONS: readonly SandboxToolDeclaration[] = [
   { name: SANDBOX_REPLACE_TEXT_TOOL_NAME, writesFiles: true },
   { name: SANDBOX_WRITE_FILE_TOOL_NAME, writesFiles: true },
   { name: SANDBOX_RUN_REGISTERED_COMMAND_TOOL_NAME, writesFiles: false },
+  // A skill script runs inside the sandbox run, like the code run_code runs. Its parameters
+  // name a script, not a file, so dispatch has no write target of its own to re-check.
+  { name: SANDBOX_RUN_SKILL_SCRIPT_TOOL_NAME, writesFiles: false },
   { name: SANDBOX_SUBMIT_IMPLEMENTATION_PLAN_TOOL_NAME, writesFiles: false },
 ];
 

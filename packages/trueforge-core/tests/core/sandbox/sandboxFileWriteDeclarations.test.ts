@@ -14,13 +14,16 @@ import {
   SANDBOX_REPLACE_TEXT_TOOL_NAME,
   SANDBOX_RUN_CODE_TOOL_NAME,
   SANDBOX_RUN_REGISTERED_COMMAND_TOOL_NAME,
+  SANDBOX_RUN_SKILL_SCRIPT_TOOL_NAME,
   SANDBOX_SUBMIT_IMPLEMENTATION_PLAN_TOOL_NAME,
   SANDBOX_TOOL_DECLARATIONS,
   SANDBOX_WRITE_FILE_TOOL_NAME,
   Sandbox,
   sandboxFileWriteToolNames,
+  type BoundRepository,
   type SandboxToolDeclaration,
 } from '../../../src/core/sandbox/Sandbox';
+import type { ISkillMounter } from '../../../src/core/sandbox/skills/ISkillMounter';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { makeSilentLogger } from '../harnessMocks';
 
@@ -48,7 +51,31 @@ function makeProvider(): SandboxProvider {
   };
 }
 
-function makeSandbox(): Sandbox {
+/** A mounter with one skill mounted, so the sandbox lists its skill script tool. */
+function stubSkillMounter(): ISkillMounter {
+  return {
+    instruction: () => undefined,
+    getSandboxInit: () => ({ command: '', timeoutSeconds: 0, uploads: [] }),
+    planOfflineSkills: () => Promise.resolve({ staged: [], failed: new Map() }),
+    offlineSkillsInit: () => undefined,
+    skillPrerequisites: () => [],
+    skillNames: () => ['declared-skill'],
+  };
+}
+
+const BOUND_REPOSITORY: BoundRepository = {
+  repository_id: 'repo-1',
+  revision: 1,
+  workspace_cwd: '/work',
+  commands: [],
+};
+
+function makeSandbox(
+  options: {
+    boundRepository?: BoundRepository | undefined;
+    skillMounter?: ISkillMounter | undefined;
+  } = {},
+): Sandbox {
   return new Sandbox({
     provider: makeProvider(),
     blockDestructiveToolsInCodeMode: true,
@@ -56,6 +83,8 @@ function makeSandbox(): Sandbox {
     mcpConnectTimeoutMs: 5_000,
     logger: makeSilentLogger(),
     tracing: NOOP_AGENT_TRACING,
+    boundRepository: options.boundRepository,
+    skillMounter: options.skillMounter,
     sentinel: createSentinelHostContext({
       tenant_id: 't1',
       created_by: 'u1',
@@ -81,20 +110,24 @@ describe('sandbox file-write declarations', () => {
     );
   });
 
-  test('every registered sandbox tool is declared exactly once', () => {
-    const names = SANDBOX_TOOL_DECLARATIONS.map(declaration => declaration.name);
-    expect(new Set(names).size).toBe(names.length);
-    expect(new Set(names)).toEqual(
-      new Set([
-        SANDBOX_EXEC_TOOL_NAME,
-        SANDBOX_RUN_CODE_TOOL_NAME,
-        SANDBOX_APPLY_PATCH_TOOL_NAME,
-        SANDBOX_REPLACE_TEXT_TOOL_NAME,
-        SANDBOX_WRITE_FILE_TOOL_NAME,
+  test('every registered sandbox tool is declared exactly once', async () => {
+    // The expected set comes from the registration itself, listed by a sandbox that can show
+    // every tool: the registered command and plan tools are listed only with a repository
+    // bound, and the skill script tool only with skills mounted. Listing with both in place
+    // keeps a conditionally listed tool from slipping past this check undeclared.
+    const sandbox = makeSandbox({ boundRepository: BOUND_REPOSITORY, skillMounter: stubSkillMounter() });
+    const listed = await sandbox.listTools();
+    const registered = listed.result.tools.map(tool => tool.name);
+    expect(registered).toEqual(
+      expect.arrayContaining([
         SANDBOX_RUN_REGISTERED_COMMAND_TOOL_NAME,
+        SANDBOX_RUN_SKILL_SCRIPT_TOOL_NAME,
         SANDBOX_SUBMIT_IMPLEMENTATION_PLAN_TOOL_NAME,
       ]),
     );
+    const declared = SANDBOX_TOOL_DECLARATIONS.map(declaration => declaration.name);
+    expect(new Set(declared).size).toBe(declared.length);
+    expect(new Set(declared)).toEqual(new Set(registered));
   });
 
   test('the sandbox answers isFileWriteTool from the declarations', async () => {
@@ -104,6 +137,7 @@ describe('sandbox file-write declarations', () => {
     expect(sandbox.isFileWriteTool(SANDBOX_REPLACE_TEXT_TOOL_NAME)).toBe(true);
     expect(sandbox.isFileWriteTool(SANDBOX_EXEC_TOOL_NAME)).toBe(false);
     expect(sandbox.isFileWriteTool(SANDBOX_RUN_CODE_TOOL_NAME)).toBe(false);
+    expect(sandbox.isFileWriteTool(SANDBOX_RUN_SKILL_SCRIPT_TOOL_NAME)).toBe(false);
     expect(sandbox.isFileWriteTool('invented_file_writer')).toBe(false);
 
     const listed = await sandbox.listTools();
