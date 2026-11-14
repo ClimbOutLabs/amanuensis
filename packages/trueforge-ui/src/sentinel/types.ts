@@ -734,10 +734,11 @@ function parseSkill(value: unknown): SentinelApprovalSkill | null {
   const source = optionalString(value, 'source');
   const version = optionalString(value, 'version');
   const { starter, instructions } = value;
-  // A card saved before websites were shown has neither field; its approval cannot add websites.
+  // A card saved before websites were shown has none of these; its approval cannot add websites. Through the SDK
+  // the two flags arrive camel-cased.
   const websites = value.websites ?? [];
-  const makesUpAddresses = value.makes_up_addresses ?? false;
-  const canSend = value.can_send ?? false;
+  const makesUpAddresses = value.makes_up_addresses ?? value.makesUpAddresses ?? false;
+  const canSend = value.can_send ?? value.canSend ?? false;
   if (
     !Array.isArray(websites) ||
     !websites.every((site): site is string => typeof site === 'string') ||
