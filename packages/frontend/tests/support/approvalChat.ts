@@ -100,7 +100,10 @@ export async function sendMessage({
 export async function finishedSession({ api, text }: { api: ApprovalTestServer; text: string }): Promise<string> {
   const session = await api.request('/api/v1/sessions', jsonInit({ agent: { spec: AGENT_SPEC } }));
   assert.equal(session.status, 201);
-  const sessionId = ((await session.json()) as { data: { id: string } }).data.id;
+  const body: unknown = await session.json();
+  const data = typeof body === 'object' && body !== null && 'data' in body ? body.data : undefined;
+  const sessionId = typeof data === 'object' && data !== null && 'id' in data ? data.id : undefined;
+  if (typeof sessionId !== 'string') throw new Error('the server made a chat but gave no id for it');
   await sendMessage({ api, sessionId, text });
   return sessionId;
 }
