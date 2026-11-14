@@ -3,6 +3,7 @@ import { mkdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 
+import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 import { migrateSqliteToLatest } from '../db/migrateSqlite';
 import { createSqliteDb } from '../db/sqlite/client';
 import { SqliteGlobalSettingsStore } from '../db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
@@ -21,20 +22,25 @@ import type { Command } from './command';
 import { processEnv, type CliEnv } from './env';
 import { errorCode } from './errorCode';
 import { UsageError, type CliIo } from './io';
+import type { SecretsDatabase } from './secretsRuntime';
 
-const USAGE = `Usage: aman secrets <init|check-recovery> [--sqlite <file>] [--key-file <file>]
+const USAGE = `Usage: aman secrets <init|first-run|check-recovery> [--sqlite <file>] [--key-file <file>] [--if-needed]
 
   init            Set up saved secrets for this database and print its recovery key as {"recovery_key": "..."}.
                   Uses the key file if it is there, and makes one only if it is not.
                   Makes the database too when Aman has not started yet.
+  first-run       The same setup for a person at a terminal: shows the recovery key in plain words,
+                  and says nothing when setup is already done.
   check-recovery  Read a recovery key on stdin and print {"ok": true} if it unlocks this database.
 
---sqlite defaults to SQLITE_PATH, --key-file to SECRETS_KEY_FILE.
+--if-needed makes init print {"already_set_up": true} and change nothing when setup is already done.
+--sqlite defaults to SQLITE_PATH, --key-file to SECRETS_KEY_FILE. With neither --sqlite nor SQLITE_PATH,
+or with STANDALONE=false, the database and key file come from this instance's settings.
 `;
 
-function requiredValue({ value, flag, envKey }: { value: string | undefined; flag: string; envKey: string }): string {
+function requiredKeyFile(value: string | undefined): string {
   if (value === undefined || value.trim() === '') {
-    throw new UsageError(`Missing ${flag} (or ${envKey} in the environment).\n\n${USAGE}`);
+    throw new UsageError(`Missing --key-file (or SECRETS_KEY_FILE in the environment).\n\n${USAGE}`);
   }
   return path.resolve(value);
 }
@@ -61,7 +67,7 @@ async function loadOrCreateKey(keyFile: string): Promise<{ key: Buffer; created:
   return { key, created: true };
 }
 
-async function initSecrets({ settings, keyFile }: { settings: SqliteGlobalSettingsStore; keyFile: string }) {
+async function initSecrets({ settings, keyFile }: { settings: IGlobalSettingsStore; keyFile: string }) {
   const { key, created } = await loadOrCreateKey(keyFile);
   try {
     const state = await checkMasterKey({ settings, key });
@@ -89,7 +95,7 @@ async function initSecrets({ settings, keyFile }: { settings: SqliteGlobalSettin
   }
 }
 
-async function checkRecovery({ settings, io }: { settings: SqliteGlobalSettingsStore; io: CliIo }) {
+async function checkRecovery({ settings, io }: { settings: IGlobalSettingsStore; io: CliIo }) {
   try {
     await recoverMasterKey({ settings, recoveryKey: await io.readStdin() });
   } catch (caught) {
@@ -118,14 +124,14 @@ export async function runSecrets({
   env: CliEnv;
 }): Promise<number> {
   const [action, ...rest] = args;
-  if (action !== 'init' && action !== 'check-recovery') {
+  if (action !== 'init' && action !== 'first-run' && action !== 'check-recovery') {
     throw new UsageError(USAGE);
   }
-  let values: { sqlite?: string; 'key-file'?: string };
+  let values: { sqlite?: string; 'key-file'?: string; 'if-needed'?: boolean };
   try {
     ({ values } = parseArgs({
       args: [...rest],
-      options: { sqlite: { type: 'string' }, 'key-file': { type: 'string' } },
+      options: { sqlite: { type: 'string' }, 'key-file': { type: 'string' }, 'if-needed': { type: 'boolean' } },
       strict: true,
       allowPositionals: false,
     }));
@@ -134,39 +140,96 @@ export async function runSecrets({
       cause: caught,
     });
   }
-  const sqlitePath = requiredValue({
-    value: values.sqlite ?? env['SQLITE_PATH'],
-    flag: '--sqlite',
-    envKey: 'SQLITE_PATH',
+  const database = await openDatabase({
+    action,
+    sqlitePath: values.sqlite ?? (env['STANDALONE'] === 'false' ? undefined : env['SQLITE_PATH']),
+    keyFile: values['key-file'] ?? env['SECRETS_KEY_FILE'],
   });
-  if (action === 'check-recovery' && !existsSync(sqlitePath)) {
-    throw new Error(`No database at ${sqlitePath}. Run "aman secrets init" first.`);
-  }
-  await mkdir(path.dirname(sqlitePath), { recursive: true, mode: 0o700 });
-  const db = createSqliteDb(sqlitePath);
   try {
-    if (action === 'init') {
-      // Setup runs before the first start, so it also makes the database Aman then opens.
-      await migrateSqliteToLatest(db);
-    }
-    const settings = new SqliteGlobalSettingsStore(db);
     if (action === 'check-recovery') {
-      await checkRecovery({ settings, io });
+      await checkRecovery({ settings: database.settings, io });
       await io.stdout(`${JSON.stringify({ ok: true })}\n`);
       return 0;
     }
-    const keyFile = requiredValue({
-      value: values['key-file'] ?? env['SECRETS_KEY_FILE'],
-      flag: '--key-file',
-      envKey: 'SECRETS_KEY_FILE',
-    });
-    const recoveryKey = await initSecrets({ settings, keyFile });
+    if (action === 'first-run') {
+      if (!(await alreadySetUp(database))) {
+        await io.stdout(firstRunNotice({ keyFile: database.keyFile, recoveryKey: await initSecrets(database) }));
+      }
+      return 0;
+    }
+    if (values['if-needed'] === true && (await alreadySetUp(database))) {
+      await io.stdout(`${JSON.stringify({ already_set_up: true })}\n`);
+      return 0;
+    }
+    const recoveryKey = await initSecrets(database);
     await io.stdout(`${JSON.stringify({ recovery_key: recoveryKey })}\n`);
     await io.stderr('Saved secrets are set up. Write down the recovery key now: it is shown only this once.\n');
     return 0;
   } finally {
-    await db.destroy();
+    await database.close();
   }
+}
+
+/** The named SQLite file, or the database this instance is configured to use when none is named. */
+async function openDatabase({
+  action,
+  sqlitePath,
+  keyFile,
+}: {
+  action: 'init' | 'first-run' | 'check-recovery';
+  sqlitePath: string | undefined;
+  keyFile: string | undefined;
+}): Promise<SecretsDatabase> {
+  if (sqlitePath === undefined || sqlitePath.trim() === '') {
+    const { openConfiguredSecretsDatabase } = await import('./secretsRuntime');
+    const configured = await openConfiguredSecretsDatabase();
+    return keyFile === undefined ? configured : { ...configured, keyFile: path.resolve(keyFile) };
+  }
+  const file = path.resolve(sqlitePath);
+  if (action === 'check-recovery' && !existsSync(file)) {
+    throw new Error(`No database at ${file}. Run "aman secrets init" first.`);
+  }
+  await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
+  const db = createSqliteDb(file);
+  try {
+    if (action !== 'check-recovery') {
+      // Setup runs before the first start, so it also makes the database Aman then opens.
+      await migrateSqliteToLatest(db);
+    }
+    return {
+      settings: new SqliteGlobalSettingsStore(db),
+      // Only setup reads the key file, so a recovery check needs none.
+      keyFile: action === 'check-recovery' ? '' : requiredKeyFile(keyFile),
+      close: () => db.destroy(),
+    };
+  } catch (caught) {
+    await db.destroy();
+    throw caught;
+  }
+}
+
+function firstRunNotice({ keyFile, recoveryKey }: { keyFile: string; recoveryKey: string }): string {
+  return `
+Aman keeps your saved logins encrypted with a key stored on this computer:
+  ${keyFile}
+
+Your recovery key is:
+
+  ${recoveryKey}
+
+Write it down and keep it somewhere safe. It is shown only this once.
+You need it to open your data if this computer's key is ever lost.
+
+`;
+}
+
+async function alreadySetUp({ settings, keyFile }: { settings: IGlobalSettingsStore; keyFile: string }) {
+  const loaded = await new FileKeyProvider(keyFile).load();
+  return (
+    loaded.status === 'loaded' &&
+    (await checkMasterKey({ settings, key: loaded.key })) === 'match' &&
+    (await settings.getSetting({ key: RECOVERY_COPY_SETTING })) !== undefined
+  );
 }
 
 export const secrets: Command = ({ args, io }) => runSecrets({ args, io, env: processEnv() });

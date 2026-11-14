@@ -1,5 +1,5 @@
 /** The built app with a real sign-in service beside it, as an installed Aman runs, for journey tests. */
-import { spawn, type ChildProcess } from 'node:child_process';
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
@@ -17,6 +17,7 @@ import {
 const REPO_ROOT = fileURLToPath(new URL('../../../../../', import.meta.url));
 const SERVER_DIR = join(REPO_ROOT, 'packages', 'trueforge');
 const SERVER_ENTRY = join(SERVER_DIR, 'dist', 'main.js');
+const SETUP_ENTRY = join(SERVER_DIR, 'dist', 'aman.js');
 const READY_TIMEOUT_MS = 120_000;
 const CLIENT_ID = 'aman-journey';
 const CLIENT_SECRET = 'journey-secret';
@@ -149,22 +150,25 @@ export async function startBuiltApp({ localModelEndpoints }: { localModelEndpoin
   const port = await freePort();
   const origin = `http://localhost:${String(port)}`;
   const login = await startLoginService({ appOrigin: origin, workDir });
-  const server = spawn(process.execPath, [SERVER_ENTRY], {
+  const env = {
+    ...process.env,
+    ...loginEnv({ issuer: login.issuer, clientId: CLIENT_ID, clientSecret: CLIENT_SECRET }),
+    STANDALONE: 'true',
+    NODE_ENV: 'production',
+    NODE_OPTIONS: '',
+    HOST: '127.0.0.1',
+    PORT: String(port),
+    PUBLIC_BASE_URL: origin,
+    APP_DATA_DIR: join(workDir, 'data'),
+    LOCAL_MODEL_ENDPOINTS: localModelEndpoints.join(','),
+  };
+  // The server waits, locked, until its key is set up, so setup runs first as it does on a real install.
+  execFileSync(process.execPath, [SETUP_ENTRY, 'secrets', 'init', '--if-needed'], {
     cwd: SERVER_DIR,
-    env: {
-      ...process.env,
-      ...loginEnv({ issuer: login.issuer, clientId: CLIENT_ID, clientSecret: CLIENT_SECRET }),
-      STANDALONE: 'true',
-      NODE_ENV: 'production',
-      NODE_OPTIONS: '',
-      HOST: '127.0.0.1',
-      PORT: String(port),
-      PUBLIC_BASE_URL: origin,
-      APP_DATA_DIR: join(workDir, 'data'),
-      LOCAL_MODEL_ENDPOINTS: localModelEndpoints.join(','),
-    },
-    stdio: ['ignore', 'pipe', 'pipe'],
+    env,
+    stdio: 'ignore',
   });
+  const server = spawn(process.execPath, [SERVER_ENTRY], { cwd: SERVER_DIR, env, stdio: ['ignore', 'pipe', 'pipe'] });
   const close = async () => {
     await stop(server);
     await stop(login.child);

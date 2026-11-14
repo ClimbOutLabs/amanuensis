@@ -75,14 +75,6 @@ function applyDefaults(): void {
   }
 }
 
-function recoveryKeyFrom(output: string): string | undefined {
-  const parsed: unknown = JSON.parse(output);
-  if (typeof parsed === 'object' && parsed !== null && 'recovery_key' in parsed) {
-    return typeof parsed.recovery_key === 'string' ? parsed.recovery_key : undefined;
-  }
-  return undefined;
-}
-
 /**
  * Aman never makes its own key at start, so the first run makes it here and shows the recovery key once.
  * When setup fails Aman still starts, and its locked page says what to do.
@@ -90,38 +82,25 @@ function recoveryKeyFrom(output: string): string | undefined {
 function setUpSavedLoginsOnFirstRun(): void {
   const keyFile = process.env['SECRETS_KEY_FILE'];
   const sqlitePath = process.env['SQLITE_PATH'];
-  if (process.env['STANDALONE'] !== 'true' || keyFile === undefined || sqlitePath === undefined) {
+  const standalone = process.env['STANDALONE'] === 'true';
+  // Skips the extra start-up work once a standalone install has both its key and its database.
+  if (
+    standalone &&
+    keyFile !== undefined &&
+    sqlitePath !== undefined &&
+    existsSync(keyFile) &&
+    existsSync(sqlitePath)
+  ) {
     return;
   }
-  if (existsSync(keyFile) && existsSync(sqlitePath)) {
-    return;
-  }
-  let output: string;
   try {
-    output = execFileSync(process.execPath, [fileURLToPath(new URL('./aman.js', import.meta.url)), 'secrets', 'init'], {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe'],
+    execFileSync(process.execPath, [fileURLToPath(new URL('./aman.js', import.meta.url)), 'secrets', 'first-run'], {
+      stdio: 'inherit',
     });
-  } catch (error) {
+  } catch {
+    // The command already printed why.
     console.error('Aman could not set up the key that protects your saved logins.');
-    console.error(error instanceof Error ? error.message : error);
-    return;
   }
-  const recoveryKey = recoveryKeyFrom(output);
-  if (recoveryKey === undefined) {
-    return;
-  }
-  console.log(`
-Aman now keeps your saved logins encrypted with a key stored on this computer:
-  ${keyFile}
-
-Your recovery key is:
-
-  ${recoveryKey}
-
-Write it down and keep it somewhere safe. It is shown only this once.
-You need it to open your data if this computer's key is ever lost.
-`);
 }
 
 function listeningUrl(): string {

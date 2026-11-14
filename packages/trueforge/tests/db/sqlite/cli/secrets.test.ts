@@ -157,6 +157,49 @@ describe('aman secrets', () => {
     expect(await runSecrets({ args: ['check-recovery', '--sqlite', sqlite], io: check, env: {} })).toBe(0);
   }, 120_000);
 
+  it('with --if-needed, sets up once and then changes nothing', async () => {
+    const env = await database();
+    const args = ['init', '--if-needed', '--sqlite', env.databaseFile, '--key-file', keyFile];
+    const first = fakeIo();
+    expect(await runSecrets({ args, io: first, env: {} })).toBe(0);
+    InitResultSchema.parse(JSON.parse(first.out.join('')));
+    const before = await new SqliteGlobalSettingsStore(env.db).getSetting({ key: RECOVERY_COPY_SETTING });
+
+    const second = fakeIo();
+    expect(await runSecrets({ args, io: second, env: {} })).toBe(0);
+    expect(JSON.parse(second.out.join(''))).toEqual({ already_set_up: true });
+    const after = await new SqliteGlobalSettingsStore(env.db).getSetting({ key: RECOVERY_COPY_SETTING });
+    expect(after?.value).toBe(before?.value);
+  }, 120_000);
+
+  it('with --if-needed, still refuses a database that belongs to another key', async () => {
+    const env = await database();
+    await init(env);
+    await writeFile(keyFile, encodeKeyFile(createMasterKey()), { mode: 0o600 });
+
+    await expect(
+      runSecrets({
+        args: ['init', '--if-needed', '--sqlite', env.databaseFile, '--key-file', keyFile],
+        io: fakeIo(),
+        env: {},
+      }),
+    ).rejects.toThrow('different key');
+  }, 120_000);
+
+  it('first-run shows the recovery key in plain words once, then says nothing', async () => {
+    const env = await database();
+    const args = ['first-run', '--sqlite', env.databaseFile, '--key-file', keyFile];
+    const first = fakeIo();
+    expect(await runSecrets({ args, io: first, env: {} })).toBe(0);
+    const shown = /\d{6}(-\d{6}){7}/.exec(first.out.join(''));
+    expect(first.out.join('')).toContain('Write it down');
+    expect(await checkRecovery({ env, recoveryKey: shown?.[0] ?? '' })).toBe(0);
+
+    const second = fakeIo();
+    expect(await runSecrets({ args, io: second, env: {} })).toBe(0);
+    expect([...second.out, ...second.err]).toEqual([]);
+  }, 120_000);
+
   it('explains a missing database and a missing action', async () => {
     await expect(
       runSecrets({

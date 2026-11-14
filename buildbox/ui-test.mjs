@@ -3,7 +3,7 @@
  * buildbox/ui-test.mjs - Aman boot + browser journey with diagnostics
  */
 
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { appendFileSync, existsSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -74,6 +74,13 @@ async function main() {
   // Start backend directly, capture output to file
   const backendLog = `/tmp/ui-test-backend-${jobId}.log`;
   console.log(`[ui-test] Backend log: ${backendLog}`);
+
+  // The server waits, locked, until its key is set up, so setup runs first.
+  spawnSync('npx', ['tsx', 'src/cli/main.ts', 'secrets', 'init', '--if-needed'], {
+    cwd: TRUEFORGE_DIR,
+    env: { ...process.env, NODE_ENV: 'development', NODE_OPTIONS: '--conditions=trueforge-dev' },
+    stdio: 'ignore',
+  });
 
   const backend = spawn('npx', ['tsx', 'src/main.ts'], {
     cwd: TRUEFORGE_DIR,
