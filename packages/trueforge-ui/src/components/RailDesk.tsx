@@ -196,11 +196,25 @@ function parsePageLine({ line, page }: { line: string; page: string }): RailReca
 }
 
 /**
+ * The newest recall of the chat. Event ids grow with time, so the order the turns arrive in does not matter:
+ * the server lists the newest turn first.
+ */
+function latestRecall(turns: readonly MemoryTurnContext[]): MemoryTurnContext['recall'] {
+  let latest: MemoryTurnContext['recall'];
+  for (const { recall } of turns) {
+    if (recall !== undefined && (latest === undefined || recall.id > latest.id)) {
+      latest = recall;
+    }
+  }
+  return latest;
+}
+
+/**
  * The facts the latest turn recalled, each fact once, capped. Earlier turns are left out: the desk shows what
  * the assistant is using now. Reads only the recall record: a fact the record does not carry is never invented here.
  */
 export function parseRecallFacts(turns: readonly MemoryTurnContext[]): RailRecallFact[] {
-  const block = turns.findLast(turn => turn.recall !== undefined)?.recall?.injectedBlock;
+  const block = latestRecall(turns)?.injectedBlock;
   if (block === undefined || block === null) {
     return [];
   }
