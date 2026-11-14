@@ -121,7 +121,7 @@ describe('parseRecallFacts', () => {
     const turn = turnContext(
       't1',
       blockOf([
-        '[page: Sidd — home — person, name not confirmed by you; also called: S — D]',
+        '[page: Sam Rivera — home — person, name not confirmed by you; also called: S — D]',
         'Now:',
         '- Lives in Denver now, after moving from Austin. (read content, not confirmed, since 2025-09-09)',
         '- Drinks coffee black. (you said)',
@@ -138,14 +138,14 @@ describe('parseRecallFacts', () => {
       'I live in Austin, in a rented flat near the river.',
     ]);
     expect(facts[0]).toMatchObject({
-      page: 'Sidd — home',
+      page: 'Sam Rivera — home',
       source: 'read',
-      origin: 'From something read for you · page Sidd — home',
+      origin: 'From something read for you · page Sam Rivera — home',
     });
     expect(facts[1]).toMatchObject({
-      page: 'Sidd — home',
+      page: 'Sam Rivera — home',
       source: 'person',
-      origin: 'You said this · page Sidd — home',
+      origin: 'You said this · page Sam Rivera — home',
     });
     expect(facts[2]?.page).toBeUndefined();
   });
@@ -313,7 +313,7 @@ describe('the rail desk in a chat', () => {
         turnContext(
           't1',
           blockOf([
-            '[page: Sidd — person]',
+            '[page: Sam Rivera — person]',
             'Now:',
             '- Lives in Denver now. (you said)',
             '[2026-08-14] The gate code is 4417',

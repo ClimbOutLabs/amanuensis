@@ -8,7 +8,7 @@ describe('whether a statement is the persons own typed words', () => {
   it('passes a fact restated from what they typed, with their own name left out of the count', () => {
     const said = 'Remember that my sister Lexie is allergic to shellfish.';
     expect(own('Lexie is allergic to shellfish.', said)).toBe(true);
-    expect(own("Sidd's sister Lexie is allergic to shellfish.", said, 'Sidd')).toBe(true);
+    expect(own("Sam's sister Lexie is allergic to shellfish.", said, 'Sam')).toBe(true);
     expect(own('Sister Lexie has a shellfish allergy.', said)).toBe(true);
   });
 
