@@ -2,6 +2,7 @@ import type { CallToolRequest, ToolAnnotations } from '@modelcontextprotocol/sdk
 import type { Logger } from 'winston';
 import { caldavEventReviewFrom, type CaldavEventReview } from '../calendar/caldav/eventReview';
 import { CALDAV_SERVER_NAME } from '../calendar/caldav/toolContract';
+import { caldavResultForModel } from '../calendar/caldav/toolResults';
 import { McpConnectionError, ToolPolicyBlockedError, ToolPreDispatchError } from '../errors';
 import type { ApprovalDecision, ToolResultRemediation } from '../events/schema';
 import type { InternalToolCallInfo, ToolEffectHints } from '../llm/LLMTypes';
@@ -17,7 +18,6 @@ import {
   isApprovalExpiredReason,
 } from '../permissions/approvalExpiry';
 import type { ConnectorBinding } from '../permissions/approvalTokens';
-import { caldavResultNote } from '../permissions/caldavTier';
 import { isChangeRequestReason } from '../permissions/changeRequest';
 import { isHostVouchedDecision, isStandingTrustDecision } from '../permissions/connectorTrust';
 import { isMapsToolName } from '../permissions/mapsToolNames';
@@ -134,6 +134,10 @@ export function stampSentinelDecision(input: {
   | 'grant_tool_name'
   | 'secret_path_read'
   | 'mail_send'
+  | 'standing_grant_barred'
+  | 'chat_grantable_consequence'
+  | 'own_calendar_change'
+  | 'own_drive_write'
 > {
   const decision = input.decision;
   return {
@@ -150,6 +154,10 @@ export function stampSentinelDecision(input: {
     ...(decision.grant_tool_name === null ? {} : { grant_tool_name: decision.grant_tool_name }),
     ...(decision.secret_path_read ? { secret_path_read: true as const } : {}),
     ...(decision.mail_send ? { mail_send: true as const } : {}),
+    standing_grant_barred: decision.standing_grant_barred,
+    chat_grantable_consequence: decision.chat_grantable_consequence,
+    own_calendar_change: decision.own_calendar_change,
+    own_drive_write: decision.own_drive_write,
     ...(decision.silent_search_query === null ? {} : { silent_search_query: decision.silent_search_query }),
     ...(decision.audit_description === null ? {} : { audit_description: decision.audit_description }),
     is_approval_required:
@@ -390,7 +398,7 @@ export class ToolSet implements IToolSet {
       });
     }
 
-    const response = this.withCaldavResultNote({
+    const response = this.withCaldavResultShape({
       params,
       response: normalizeGithubFileContentsResponse({
         serverName: this.name,
@@ -609,8 +617,8 @@ export class ToolSet implements IToolSet {
     }
   }
 
-  /** Adds the plain-words note the CalDAV reply result needs when the calendar sent no reply itself. */
-  private withCaldavResultNote({
+  /** Shapes a CalDAV result for the model: the id to reuse, and plain notes where the calendar gives none. */
+  private withCaldavResultShape({
     params,
     response,
   }: {
@@ -620,14 +628,7 @@ export class ToolSet implements IToolSet {
     if (!this.firstParty || this.name !== CALDAV_SERVER_NAME || !isCallToolResponseResult(response)) {
       return response;
     }
-    const note = caldavResultNote({ tool_name: params.name, structured: response.result.structuredContent });
-    if (note === undefined) {
-      return response;
-    }
-    return {
-      ...response,
-      result: { ...response.result, content: [...response.result.content, { type: 'text', text: note }] },
-    };
+    return { ...response, result: caldavResultForModel({ tool_name: params.name, result: response.result }) };
   }
 
   private async buildToolCallInfo(

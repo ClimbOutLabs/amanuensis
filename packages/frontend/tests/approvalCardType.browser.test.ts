@@ -15,7 +15,7 @@ const RENDER_TIMEOUT_MS = 45_000;
 const KINDS = ['email', 'calendar', 'shell', 'space', 'connector'] as const;
 
 test(
-  'every approval card is set in the body font, with a title at the chat body size',
+  'every approval card is set in the body font, with only the question and a mail body at the chat body size',
   { timeout: 180_000 },
   async () => {
     const viteCache = privateViteCache('approval-card-type');
@@ -51,8 +51,20 @@ test(
 
         const chat = await page.locator('[data-role="chat-line"]').evaluate(el => {
           const style = getComputedStyle(el);
-          return { family: style.fontFamily, size: style.fontSize };
+          const theme = el.closest('.aui-theme-root');
+          if (theme === null) throw new Error('the chat is outside the theme root');
+          // The steps are rem values; the root size turns them into the px a computed style reports.
+          const rootPx = Number.parseFloat(getComputedStyle(document.documentElement).fontSize);
+          const themeStyle = getComputedStyle(theme);
+          return {
+            family: style.fontFamily,
+            size: style.fontSize,
+            xs: Number.parseFloat(themeStyle.getPropertyValue('--text-xs')) * rootPx,
+            sm: Number.parseFloat(themeStyle.getPropertyValue('--text-sm')) * rootPx,
+          };
         });
+        const chatPx = Number.parseFloat(chat.size);
+        assert.ok(chat.xs > 0 && chat.sm > chat.xs && chatPx > chat.sm, `the theme type steps are set (${theme})`);
 
         for (const kind of KINDS) {
           const card = await page.locator(`[data-card="${kind}"]`).evaluate(root => {
@@ -82,20 +94,53 @@ test(
                     size: Number.parseFloat(style.fontSize),
                     family: style.fontFamily,
                     ownFont: el.closest('.font-mono') !== null,
+                    mailBody: el.closest('section[aria-label="Message body"]') !== null,
+                    quiet: el.closest('[data-role="approval-status"], [data-role="approval-reason"], dt') !== null,
                     transform: style.textTransform,
                   };
                 }),
             };
           });
 
+          // Allow leads the row and no choice is filled or inked: every button has the same outlined look.
+          const choices = await page
+            .locator(`[data-card="${kind}"] .aui-approval-card__actions button`)
+            .evaluateAll(buttons =>
+              buttons.map(button => {
+                const style = getComputedStyle(button);
+                return {
+                  label: (button.textContent ?? '').trim(),
+                  background: style.backgroundColor,
+                  color: style.color,
+                };
+              }),
+            );
+          assert.equal(choices[0]?.label, 'Allow', `${kind} (${theme}): Allow is the first choice`);
+          for (const choice of choices) {
+            assert.equal(
+              choice.background,
+              choices[0]?.background,
+              `${kind} (${theme}): "${choice.label}" is not filled`,
+            );
+            assert.equal(choice.color, choices[0]?.color, `${kind} (${theme}): "${choice.label}" has the same ink`);
+          }
+
           assert.equal(`${card.title.size}px`, chat.size, `${kind} (${theme}): title is the chat's body size`);
           assert.equal(card.title.weight, '600', `${kind} (${theme}): title is semibold`);
           assert.equal(card.title.family, chat.family, `${kind} (${theme}): title uses the body font`);
           for (const line of card.text) {
             if (line.ownFont) continue;
-            assert.equal(line.family, chat.family, `${kind} (${theme}): "${line.text}" uses the body font`);
-            assert.equal(`${line.size}px`, chat.size, `${kind} (${theme}): "${line.text}" is the chat's body size`);
-            assert.equal(line.transform, 'none', `${kind} (${theme}): "${line.text}" is not set in capitals`);
+            const where = `${kind} (${theme}): "${line.text}"`;
+            assert.equal(line.family, chat.family, `${where} uses the body font`);
+            assert.equal(line.transform, 'none', `${where} is not set in capitals`);
+            assert.ok(line.size >= chat.xs, `${where} is no smaller than the smallest type step`);
+            if (line.mailBody) {
+              assert.equal(`${line.size}px`, chat.size, `${where} is a mail body at the chat's body size`);
+            } else if (line.quiet) {
+              assert.ok(line.size <= chat.sm, `${where} is a quiet line, smaller than the chat's body size`);
+            } else {
+              assert.ok(line.size < chatPx, `${where} sits below the question, smaller than the chat's body size`);
+            }
           }
         }
         await page.close();

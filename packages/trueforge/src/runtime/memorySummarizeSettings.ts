@@ -24,12 +24,6 @@ export interface MemorySummarizeSetting {
   overridden: boolean;
   /** The `MEMORY_SUMMARIZE` env default used when no override is stored. */
   defaultEnabled: boolean;
-  /**
-   * What the server will actually do for the next turn: the stored setting ANDed with
-   * the markdown-only gate. This is the truth the Settings toggle shows — on any other
-   * backend turns are retained verbatim even when `enabled` is true.
-   */
-  effectiveEnabled: boolean;
 }
 
 export interface ReadMemorySummarizeSettingDeps {
@@ -48,23 +42,10 @@ function parseOverride(value: string): boolean | undefined {
 }
 
 /**
- * The markdown-only gate, owned here: summarization runs only on the markdown backend.
- * `beginTurnExecution` and the effective-state computation both go through this so the
- * Settings toggle can never disagree with what the turn path actually does.
- */
-export function isMemorySummarizeEffective(enabled: boolean): boolean {
-  return enabled && configuration.MEMORY_BACKEND === 'markdown';
-}
-
-/**
  * The turn-summarization stored setting: the persisted override when one is stored,
  * otherwise `MEMORY_SUMMARIZE`. A stored value that is not exactly `'true'`/`'false'`
  * is treated as unset. Fails closed to the env default when the store read throws, so
  * a settings-table outage can never silently flip summarization.
- *
- * The returned `enabled` is the stored setting (override else env default); `effectiveEnabled`
- * is what the server will actually do, with the markdown-only gate applied. See
- * `beginTurnExecution`.
  */
 export async function readMemorySummarizeSetting(
   deps: ReadMemorySummarizeSettingDeps,
@@ -74,7 +55,6 @@ export async function readMemorySummarizeSetting(
     enabled: defaultEnabled,
     overridden: false,
     defaultEnabled,
-    effectiveEnabled: isMemorySummarizeEffective(defaultEnabled),
   };
   let record;
   try {
@@ -100,16 +80,12 @@ export async function readMemorySummarizeSetting(
     enabled: override,
     overridden: true,
     defaultEnabled,
-    effectiveEnabled: isMemorySummarizeEffective(override),
   };
 }
 
 /**
- * Effective on/off for turn construction: the stored setting. Unlike screening there is
- * no external service to AND in, so the stored value is the effective value. When summaries are
- * on, a failed or missing summary saves nothing; the full exchange is never the fallback. The
- * markdown-only gate stays in the turn path (`resolveTurnSummarizeContext`), which also logs why
- * a non-markdown backend retains turns verbatim.
+ * On/off for turn construction: the stored setting. When summaries are on, a failed or missing
+ * summary saves nothing; the full exchange is never the fallback.
  */
 export async function resolveMemorySummarizeEnabled(deps: ReadMemorySummarizeSettingDeps): Promise<boolean> {
   const setting = await readMemorySummarizeSetting(deps);
@@ -134,8 +110,8 @@ export interface ResolveTurnSummarizeContextParams {
   memoryClientPresent: boolean;
   /**
    * The person's name from their personalization profile, as loaded by the caller for this
-   * turn, so saved facts can be written in it. Optional: a caller without a profile resolves a
-   * context with no name, and the summarizer writes about "the person".
+   * turn, for the rare saved fact that is unclear without it. Optional: a caller without a
+   * profile resolves a context with no name, and the summarizer falls back on "the person".
    */
   personName?: string | undefined;
   /** Lines of the person's profile, so a summary that only repeats the profile is not saved. */
@@ -147,7 +123,7 @@ export interface ResolveTurnSummarizeContextParams {
 /**
  * Resolves one turn's summarization context, shared by every turn-creation path (the chat
  * route and `beginTurnExecution`). Returns undefined only when the turn keeps the full exchange
- * (setting off, a backend that digests it itself, or no memory client). When summaries are on,
+ * (setting off, or no memory client). When summaries are on,
  * a context is always returned: a model that cannot be found has no FQN, and the turn then saves
  * nothing rather than the raw exchange. Every outcome is logged at debug.
  *
@@ -172,21 +148,10 @@ export async function resolveTurnSummarizeContext(
     memoryClientPresent,
   } = params;
   const enabled = await resolveMemorySummarizeEnabled({ globalSettingsStore, logger });
-  if (!isMemorySummarizeEffective(enabled)) {
-    if (enabled) {
-      // Summarization is markdown-only; say so once per turn rather than failing silently.
-      logger.debug(
-        'Turn summarization is enabled but the memory backend is not markdown; turns will be retained verbatim',
-        {
-          sessionId,
-          memoryBackend: configuration.MEMORY_BACKEND,
-        },
-      );
-    } else {
-      logger.debug('Turn summarization is off for this turn; retaining the verbatim transcript', {
-        sessionId,
-      });
-    }
+  if (!enabled) {
+    logger.debug('Turn summarization is off for this turn; retaining the verbatim transcript', {
+      sessionId,
+    });
     return undefined;
   }
   if (!memoryClientPresent) {
@@ -208,6 +173,9 @@ export async function resolveTurnSummarizeContext(
       personaModelName,
       sessionAgent,
       agentStore,
+      globalSettingsStore,
+      modelProviderStore,
+      logger,
     });
     if (summarizationModelFqn === undefined || summarizationModelFqn.trim() === '') {
       logger.debug(
@@ -217,6 +185,7 @@ export async function resolveTurnSummarizeContext(
       return {
         tenantId,
         modelProviderStore,
+        globalSettingsStore,
         summarizationModelFqn: undefined,
         tokenFactoryBudget,
         modelUsage,
@@ -229,6 +198,7 @@ export async function resolveTurnSummarizeContext(
     return {
       tenantId,
       modelProviderStore,
+      globalSettingsStore,
       summarizationModelFqn,
       tokenFactoryBudget,
       modelUsage,
@@ -244,6 +214,7 @@ export async function resolveTurnSummarizeContext(
     return {
       tenantId,
       modelProviderStore,
+      globalSettingsStore,
       summarizationModelFqn: undefined,
       tokenFactoryBudget,
       modelUsage,

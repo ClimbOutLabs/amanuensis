@@ -5,13 +5,11 @@ import type { Logger } from 'winston';
 import { hasAdminRole, type ResolveRequestContext } from '../auth/identity';
 import configuration, { getTrueForgeAuthMode, TrueForgeAuthMode, UNSTAMPED_BUILD_REF } from '../config';
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
-import type { IMcpServerStore } from '../db/mcpServerStore';
 import type { ISandboxProviderStore } from '../db/sandboxProviderStore';
 import type { WithTransaction } from '../db/transaction';
 import { PACKAGE_VERSION } from '../packageVersion';
 import { getCapabilitiesRoute } from '../routes/capabilityRoutes';
 import { getEmbeddingSubsystem } from '../runtime/memory/embeddingRetrieval';
-import { findMemoryProviderSettings } from '../runtime/memory/memoryProvider';
 import { readMemoryScreenSetting } from '../runtime/memoryScreenSettings';
 import { readToolOutputScreenSetting } from '../runtime/toolOutputScreenSettings';
 import { isLocalSandboxFallbackEnabled } from '../sandbox/localRuntime';
@@ -126,7 +124,6 @@ function sandboxIsolationCapability(): SandboxIsolationCapability {
  * `MEMORY_SCREEN_AUTH_TOKEN`. `threshold` is omitted when the screen is off.
  */
 async function memoryScreenCapability(deps: {
-  mcpServerStore: IMcpServerStore;
   globalSettingsStore: IGlobalSettingsStore;
   logger: Logger;
 }): Promise<MemoryScreenCapabilityData> {
@@ -137,15 +134,7 @@ async function memoryScreenCapability(deps: {
       globalSettingsStore: deps.globalSettingsStore,
       logger: deps.logger,
     });
-    if (stored.overridden) {
-      settingEnabled = stored.enabled;
-    } else {
-      const settings = await findMemoryProviderSettings({
-        mcpServerStore: deps.mcpServerStore,
-        tenantId: TENANT_ID,
-      });
-      settingEnabled = settings?.screen_enabled ?? configuration.MEMORY_SCREEN_ENABLED;
-    }
+    settingEnabled = stored.enabled;
   } catch (error) {
     deps.logger.warn(
       'Recall screen setting read failed; reporting the recall screen off',
@@ -207,7 +196,6 @@ async function toolOutputScreenCapability(deps: {
 /** The resolved `MEMORY_*` defaults, straight off configuration; no I/O, no credentials. */
 function memoryDefaultsCapability(isAdmin: boolean): MemoryDefaultsCapability {
   return {
-    backend: configuration.MEMORY_BACKEND,
     // The resolved Markdown directory is a host filesystem path: disclose it only to
     // admins. Non-admin authenticated users can read capabilities; they get the rest
     // of the memory status without the path.
@@ -216,15 +204,7 @@ function memoryDefaultsCapability(isAdmin: boolean): MemoryDefaultsCapability {
     recall_query_window: configuration.MEMORY_RECALL_QUERY_WINDOW,
     recall_min_score: configuration.MEMORY_RECALL_MIN_SCORE,
     recall_max_items: configuration.MEMORY_RECALL_MAX_ITEMS,
-    recall_max_entities: configuration.MEMORY_RECALL_MAX_ENTITIES,
     prerecall_gate_enabled: configuration.MEMORY_PRERECALL_GATE_ENABLED,
-    curated_enabled: configuration.MEMORY_CURATED_ENABLED,
-    curated_max_models: configuration.MEMORY_CURATED_MAX_MODELS,
-    curated_max_tokens: configuration.MEMORY_CURATED_MAX_TOKENS,
-    reflect_enabled: configuration.MEMORY_REFLECT_ENABLED,
-    reflect_budget: configuration.MEMORY_REFLECT_BUDGET,
-    reflect_max_tokens: configuration.MEMORY_REFLECT_MAX_TOKENS,
-    reflect_timeout_ms: configuration.MEMORY_REFLECT_TIMEOUT_MS,
   };
 }
 
@@ -236,7 +216,7 @@ function memoryDefaultsCapability(isAdmin: boolean): MemoryDefaultsCapability {
  * counts; it never carries memory text.
  */
 function memoryEmbeddingsCapability(tenantId: string): MemoryEmbeddingsCapabilityData {
-  if (!configuration.MEMORY_EMBEDDINGS_ENABLED || configuration.MEMORY_BACKEND !== 'markdown') {
+  if (!configuration.MEMORY_EMBEDDINGS_ENABLED) {
     return MemoryEmbeddingsCapabilitySchema.parse({
       enabled: false,
       state: 'unavailable',
@@ -270,7 +250,6 @@ export function toBuildIdentity({ version, buildRef }: { version: string; buildR
 
 export interface ComputeCapabilitiesDataDeps<TTransaction> {
   sandboxProviderStore: ISandboxProviderStore<TTransaction>;
-  mcpServerStore: IMcpServerStore<TTransaction>;
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
   logger: Logger;
   /** Whether the requesting identity is an admin (settings capability gate). */
@@ -324,16 +303,14 @@ function signInModeName(): 'local' | 'oidc' | 'standalone' | 'truefoundry' {
 }
 
 /**
- * Maps a resolved sandbox build status plus a local (zero-egress) read of the memory-provider
- * settings to the capability flags. The memory-provider read is a local DB read only, so this
- * stays safe on both the capabilities route and the zero-egress bug-report config_flags path.
+ * Maps a resolved sandbox build status plus the stored recall screen setting to the capability
+ * flags. Both are local reads, so this stays safe on the zero-egress bug-report path too.
  */
 async function capabilitiesFromSandboxStatus({
   status,
   reason,
   isAdmin,
   tenantId,
-  mcpServerStore,
   globalSettingsStore,
   logger,
 }: {
@@ -342,7 +319,6 @@ async function capabilitiesFromSandboxStatus({
   reason: string | null | undefined;
   isAdmin: boolean;
   tenantId: string;
-  mcpServerStore: IMcpServerStore;
   globalSettingsStore: IGlobalSettingsStore;
   logger: Logger;
 }): Promise<CapabilitiesData> {
@@ -362,7 +338,6 @@ async function capabilitiesFromSandboxStatus({
     settings: { enabled: isAdmin },
     voice: { enabled: isVoiceAvailable() },
     memory_screen: await memoryScreenCapability({
-      mcpServerStore,
       globalSettingsStore,
       logger,
     }),
@@ -397,7 +372,6 @@ export async function computeCapabilitiesData<TTransaction>(
       reason,
       isAdmin: deps.isAdmin,
       tenantId: deps.tenantId ?? TENANT_ID,
-      mcpServerStore: deps.mcpServerStore,
       globalSettingsStore: deps.globalSettingsStore,
       logger: deps.logger,
     });
@@ -422,7 +396,6 @@ export async function computeCapabilitiesData<TTransaction>(
     reason,
     isAdmin: deps.isAdmin,
     tenantId: deps.tenantId ?? TENANT_ID,
-    mcpServerStore: deps.mcpServerStore,
     globalSettingsStore: deps.globalSettingsStore,
     logger: deps.logger,
   });
@@ -449,7 +422,6 @@ export async function readLocalCapabilitiesData<TTransaction>(
       reason,
       isAdmin: deps.isAdmin,
       tenantId: deps.tenantId ?? TENANT_ID,
-      mcpServerStore: deps.mcpServerStore,
       globalSettingsStore: deps.globalSettingsStore,
       logger: deps.logger,
     });
@@ -473,7 +445,6 @@ export async function readLocalCapabilitiesData<TTransaction>(
     reason,
     isAdmin: deps.isAdmin,
     tenantId: deps.tenantId ?? TENANT_ID,
-    mcpServerStore: deps.mcpServerStore,
     globalSettingsStore: deps.globalSettingsStore,
     logger: deps.logger,
   });
@@ -481,7 +452,6 @@ export async function readLocalCapabilitiesData<TTransaction>(
 
 export function createCapabilitiesRouter<TTransaction>(deps: {
   resolveSandboxProviderStore: (c: Context) => ISandboxProviderStore<TTransaction>;
-  mcpServerStore: IMcpServerStore<TTransaction>;
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
   withTransaction: WithTransaction<TTransaction>;
   logger: Logger;
@@ -492,7 +462,6 @@ export function createCapabilitiesRouter<TTransaction>(deps: {
     const requestContext = deps.resolveRequestContext(c);
     const data = await computeCapabilitiesData({
       sandboxProviderStore: deps.resolveSandboxProviderStore(c),
-      mcpServerStore: deps.mcpServerStore,
       globalSettingsStore: deps.globalSettingsStore,
       logger: deps.logger,
       tenantId: requestContext.tenant_id,

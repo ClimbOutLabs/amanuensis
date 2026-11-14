@@ -277,6 +277,28 @@ export function modelProviderName(provider: ModelProviderManifest): ResourceName
   return provider.type === 'custom' ? provider.name : provider.type;
 }
 
+/** How the connection check run when a provider was saved came out. */
+export const ModelProviderCheckKindSchema = z
+  .enum(['answered', 'key_refused', 'unreachable', 'timed_out', 'server_error'])
+  .openapi('ModelProviderCheckKind');
+
+export type ModelProviderCheckKind = z.infer<typeof ModelProviderCheckKindSchema>;
+
+/** Outcome of the one test call made when a provider was saved, kept so the person can see it in Settings. */
+export const ModelProviderCheckSchema = z
+  .object({
+    kind: ModelProviderCheckKindSchema,
+    message: z
+      .string()
+      .min(1)
+      .describe('The outcome in plain words, including the one step to take when something went wrong.'),
+    checked_at: z.string().describe('ISO-8601 UTC instant the check ran.'),
+  })
+  .strict()
+  .openapi('ModelProviderCheck');
+
+export type ModelProviderCheck = z.infer<typeof ModelProviderCheckSchema>;
+
 /** Settings wire item: identity column plus nested manifest. */
 export const ConfiguredModelProviderSchema = z
   .object({
@@ -286,6 +308,9 @@ export const ConfiguredModelProviderSchema = z
       .boolean()
       .optional()
       .describe('True when the server derives this provider from its environment; it is read-only here.'),
+    last_check: ModelProviderCheckSchema.optional().describe(
+      'Outcome of the connection check run when this provider was last saved. Absent when no check has run.',
+    ),
   })
   .strict()
   .openapi('ConfiguredModelProvider');

@@ -8,7 +8,8 @@
  * to the text recall returns — a mismatch would re-embed every entry on each pass.
  */
 import { createHash } from 'node:crypto';
-import { readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import type { Stats } from 'node:fs';
+import { readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { MAIN_ASSISTANT_SHARING_KEY } from '@truefoundry/trueforge-core/core/memory/vaultSharing';
@@ -17,18 +18,28 @@ import {
   isDataDirConfigurationError,
   USER_FACING_STORAGE_UNAVAILABLE_MESSAGE,
 } from '../../utils/dataDir';
-import type { RetainItem } from './hindsightClient';
+import type { RetainItem } from './memoryClient';
 import {
   ASSISTANT_RESPONSE_SOURCE,
-  formatNoteMarker,
+  formatMarker,
   isMemoryNoteSource,
+  isReplyThatReadNothing,
   NOTE_DATE_METADATA_KEY,
   NOTE_SOURCE_METADATA_KEY,
   noteProvenanceFromMetadata,
-  parseNoteMarker,
+  parseMarker,
+  REPLY_READ_NOTHING_METADATA_KEY,
   withoutNoteTrailer,
+  type MemoryNoteSource,
 } from './memoryNotes';
-import { MEMORY_ORIGIN_METADATA_KEY, TOOL_INGESTED_ORIGIN, USER_STATED_ORIGIN } from './memoryOrigin';
+import {
+  IMPORTED_ORIGIN,
+  isPersonOrigin,
+  LEARNED_PROFILE_LINE_SOURCE,
+  MEMORY_ORIGIN_METADATA_KEY,
+  TOOL_INGESTED_ORIGIN,
+  USER_STATED_ORIGIN,
+} from './memoryOrigin';
 
 /** Longest namespace directory name; longer names are cut. */
 const NAMESPACE_MAX_LENGTH = 64;
@@ -70,7 +81,8 @@ export function splitEntries(content: string): string[] {
  */
 export function upgradeLegacyEntries(content: string): string {
   const prefix = /(^|\n)(## [^\n]*\n\n)(?:Turn summary: ?)+/g;
-  const trailingTitle = /\n\n> Chat title: [^\n]*(?=(?:\n\n> Source: read content)?(?:\n*$|\n+## ))/g;
+  const trailingTitle =
+    /\n\n> Chat title: [^\n]*(?=(?:\n\n> (?:Source: read content|From you|External source: [^\n]*))?(?:\n*$|\n+## ))/g;
   let upgraded = content;
   for (let previous = ''; previous !== upgraded;) {
     previous = upgraded;
@@ -79,14 +91,24 @@ export function upgradeLegacyEntries(content: string): string {
   return upgraded;
 }
 
-/** Entries of one daily log, with the stable ids recall, the embedding index and the vault share. */
-export function dailyLogEntries(input: { safeNamespace: string; file: string; content: string }): ScannedMemoryEntry[] {
+/** What a deleted note's entry is reduced to in its dated file: it keeps its position, so later notes keep their ids. */
+export const ERASED_ENTRY = '## [erased]';
+
+/** Entries of one daily log, with the stable ids recall, the embedding index and the vault share. Erased entries hold a position but are not returned. */
+export function dailyLogEntries(input: {
+  safeNamespace: string;
+  file: string;
+  content: string;
+  /** Notes the person reviewed as their own; they are handed on closing with "From you". */
+  reviewed?: ReviewedMarks;
+}): ScannedMemoryEntry[] {
   const entries: ScannedMemoryEntry[] = [];
   const parts = splitEntries(upgradeLegacyEntries(input.content));
   for (let index = 0; index < parts.length; index++) {
     const text = parts[index];
-    if (text !== undefined) {
-      entries.push({ id: `md:${input.safeNamespace}:${input.file}#${String(index)}`, file: input.file, index, text });
+    if (text !== undefined && text !== ERASED_ENTRY) {
+      const entry = { id: `md:${input.safeNamespace}:${input.file}#${String(index)}`, file: input.file, index, text };
+      entries.push(input.reviewed === undefined ? entry : withReviewedSource(entry, input.reviewed));
     }
   }
   return entries;
@@ -123,19 +145,89 @@ const SESSION_MARKER_PATTERN = new RegExp(`^<!-- session_id: (${SESSION_ID_CHARA
 export const DOCUMENT_ID_METADATA_KEY = 'document_id';
 
 /**
- * Metadata key (value `true`) asking a store that keeps entries as appended text to replace the
- * item's earlier entries with the same document id, as Hindsight does by itself.
+ * Metadata key (value `true`) asking the store to replace the item's earlier entries with the
+ * same document id.
  */
 export const REPLACE_DOCUMENT_METADATA_KEY = 'replace_document';
 
 /** Hidden trailer carrying the document id. Ids are the host's own (hashes and prefixes), never free text. */
 const DOCUMENT_MARKER_PATTERN = /^<!-- document_id: ([A-Za-z0-9_.-]{1,128}) -->$/;
 
-/** Closing line marking an entry written after the assistant read an email, document, or web page. */
-const READ_CONTENT_SOURCE_LINE = '> Source: read content';
+/** Closing line of an entry that holds the person's own words. */
+const FROM_YOU_SOURCE_LINE = '> From you';
 
-/** What the Memories page shows in place of that line for a note about the assistant's own reply. */
-const ASSISTANT_REPLY_SOURCE_LINE = '> Source: assistant reply';
+/** Start of the closing line of every other entry; what follows names where it came from. */
+const EXTERNAL_SOURCE_LINE_PREFIX = '> External source: ';
+
+/** Closing lines older versions wrote on an entry that is not the person's own. They stay understood. */
+const LEGACY_EXTERNAL_SOURCE_LINES: readonly string[] = [
+  '> Source: read content',
+  '> Source: assistant reply',
+  '> Source: a message you sent',
+];
+
+/** How each kind of note names its source on the closing line. */
+const NOTE_SOURCE_NAMES: Record<MemoryNoteSource, string> = {
+  email: 'email',
+  calendar: 'calendar',
+  web: 'web page',
+  attachment: 'attachment',
+  other: 'tool result',
+  assistant_response: 'assistant reply',
+  sent_mail: 'a message you sent',
+};
+
+/** How a reply names its source when its chat had read nothing from outside up to that reply. */
+const REPLY_READ_NOTHING_SOURCE_NAME = 'assistant reply, nothing read before it';
+
+/** The closing line only the save writes on such a reply. Body text that looks like it is escaped like any source line. */
+const REPLY_READ_NOTHING_SOURCE_LINE = `${EXTERNAL_SOURCE_LINE_PREFIX}${REPLY_READ_NOTHING_SOURCE_NAME}`;
+
+/** The source named for text from a turn that read an email, a page, a document or a tool result. */
+const READ_CONTENT_SOURCE_NAME = 'read content';
+
+/** The source named for a line moved out of a full learned profile. */
+const LEARNED_PROFILE_SOURCE_NAME = 'learned profile';
+
+/** The source named for text that came in through the Memories import. */
+const IMPORTED_SOURCE_NAME = 'imported file';
+
+/** The source named for an entry that carries no source line at all. */
+const NO_RECORD_SOURCE_NAME = 'no record';
+
+/** The closing line of an older note that has no record of where it came from. */
+const NO_RECORD_SOURCE_LINE = `${EXTERNAL_SOURCE_LINE_PREFIX}${NO_RECORD_SOURCE_NAME}`;
+
+function isExternalSourceLine(line: string): boolean {
+  return line.startsWith(EXTERNAL_SOURCE_LINE_PREFIX) || LEGACY_EXTERNAL_SOURCE_LINES.includes(line);
+}
+
+/** Whether a line is one that says where an entry came from. */
+function isSourceLine(line: string): boolean {
+  return line === FROM_YOU_SOURCE_LINE || isExternalSourceLine(line);
+}
+
+/**
+ * The closing line for an entry with this metadata. Only an entry whose origin says the person said it
+ * closes with "From you"; a note, any other origin and a missing origin are named as an external source.
+ */
+function sourceLineFor(metadata: Readonly<Record<string, string>>): string {
+  const note = noteProvenanceFromMetadata(metadata);
+  if (note !== undefined) {
+    return isReplyThatReadNothing(metadata)
+      ? REPLY_READ_NOTHING_SOURCE_LINE
+      : `${EXTERNAL_SOURCE_LINE_PREFIX}${NOTE_SOURCE_NAMES[note.source]}`;
+  }
+  if (isPersonOrigin(metadata)) {
+    return FROM_YOU_SOURCE_LINE;
+  }
+  if (metadata[MEMORY_ORIGIN_METADATA_KEY] === IMPORTED_ORIGIN) {
+    return `${EXTERNAL_SOURCE_LINE_PREFIX}${IMPORTED_SOURCE_NAME}`;
+  }
+  const name =
+    metadata['source'] === LEARNED_PROFILE_LINE_SOURCE ? LEARNED_PROFILE_SOURCE_NAME : READ_CONTENT_SOURCE_NAME;
+  return `${EXTERNAL_SOURCE_LINE_PREFIX}${name}`;
+}
 
 /**
  * The exact on-disk text of one retained entry, trimmed. `retain()` appends one
@@ -144,41 +236,38 @@ const ASSISTANT_REPLY_SOURCE_LINE = '> Source: assistant reply';
  * the embedding indexer hashes this text, and a mismatch would re-embed entries
  * on every pass.
  *
- * Layout: heading, the text with its optional `> context` line, then optional trailer lines (the
- * hidden chat id, the hidden document id, then the read-content marker).
+ * Layout: heading, the text with its optional `> context` line, then the trailer lines: the optional
+ * hidden chat id, document id and note lines, and always, last, the line that says where the entry came from.
  */
 export function formatRetainEntry(item: RetainItem): string {
   const context = item.context?.trim();
   // Only the metadata says what is a note. Its marker, when the content also ends with it, is written once,
   // as a trailer; any other marker-looking last line is body text and is escaped like every other.
   const note = noteProvenanceFromMetadata(item.metadata);
-  const marker = note === undefined ? undefined : formatNoteMarker(note);
+  const marker = note === undefined ? undefined : formatMarker({ kind: 'note', ...note });
   const content =
     marker !== undefined && item.content.trimEnd().endsWith(`\n${marker}`)
       ? withoutNoteTrailer(item.content)
       : item.content;
   const text = context !== undefined && context.length > 0 ? `${content}\n\n> ${context}` : content;
   const parts = [`## ${item.timestamp}`, escapeEntryStructure(text)];
-  const sessionId = item.metadata?.[SESSION_ID_METADATA_KEY];
+  const sessionId = item.metadata[SESSION_ID_METADATA_KEY];
   if (sessionId !== undefined) {
     const marker = `<!-- session_id: ${sessionId} -->`;
     if (SESSION_MARKER_PATTERN.test(marker)) {
       parts.push(marker);
     }
   }
-  if (item.metadata?.[REPLACE_DOCUMENT_METADATA_KEY] === 'true') {
+  if (item.metadata[REPLACE_DOCUMENT_METADATA_KEY] === 'true') {
     const marker = `<!-- document_id: ${item.document_id} -->`;
     if (DOCUMENT_MARKER_PATTERN.test(marker)) {
       parts.push(marker);
     }
   }
-  if (marker !== undefined && parseNoteMarker(marker) !== undefined) {
+  if (marker !== undefined && parseMarker(marker)?.kind === 'note') {
     parts.push(marker);
   }
-  const origin = item.metadata?.[MEMORY_ORIGIN_METADATA_KEY];
-  if (origin !== undefined && origin !== USER_STATED_ORIGIN) {
-    parts.push(READ_CONTENT_SOURCE_LINE);
-  }
+  parts.push(sourceLineFor(item.metadata));
   return parts.join('\n\n');
 }
 
@@ -193,64 +282,182 @@ function escapeEntryStructure(text: string): string {
     .map(line => {
       const trimmed = line.trimEnd();
       return line.startsWith('## ') ||
-        trimmed === READ_CONTENT_SOURCE_LINE ||
-        trimmed === ASSISTANT_REPLY_SOURCE_LINE ||
+        isSourceLine(trimmed) ||
         SESSION_MARKER_PATTERN.test(trimmed) ||
         DOCUMENT_MARKER_PATTERN.test(trimmed) ||
-        parseNoteMarker(trimmed) !== undefined
+        parseMarker(trimmed)?.kind === 'note'
         ? `\\${line}`
         : line;
     })
     .join('\n');
 }
 
-/** An entry's text split into its body and the metadata its trailer lines carry. */
-function splitEntryTrailers(text: string): { body: string; metadata: Record<string, string> } {
+/** What an entry's closing lines say about it. */
+interface EntryTrailers {
+  /** The entry without its closing lines. */
+  body: string;
+  /** What the hidden lines carry, and the origin when a source line is present. */
+  metadata: Record<string, string>;
+  /** The hidden chat id, document id and note lines, in the order they sit on disk. */
+  hiddenLines: string[];
+  /** The external source line nearest the end, as written. */
+  externalLine: string | undefined;
+  /** Whether a "From you" line is among the closing lines. */
+  fromYou: boolean;
+}
+
+/**
+ * An entry's text split into its body and what its closing lines carry. The origin is the person's
+ * only when the entry closes with "From you" and with no external source line; both lines together
+ * read as external, so text that reached an entry's end can never raise it.
+ */
+function splitEntryTrailers(text: string): EntryTrailers {
   const lines = text.split('\n');
   const metadata: Record<string, string> = {};
+  const hiddenLines: string[] = [];
+  let externalLine: string | undefined;
+  let fromYou = false;
   while (lines.length > 0) {
     const line = (lines[lines.length - 1] ?? '').trimEnd();
     const sessionId = SESSION_MARKER_PATTERN.exec(line)?.[1];
     const documentId = DOCUMENT_MARKER_PATTERN.exec(line)?.[1];
-    const note = parseNoteMarker(line);
+    const parsedMarker = parseMarker(line);
+    const note = parsedMarker?.kind === 'note' ? parsedMarker : undefined;
     if (line === '') {
       lines.pop();
-    } else if (line === READ_CONTENT_SOURCE_LINE || line === ASSISTANT_REPLY_SOURCE_LINE) {
-      metadata[MEMORY_ORIGIN_METADATA_KEY] = TOOL_INGESTED_ORIGIN;
+    } else if (line === FROM_YOU_SOURCE_LINE) {
+      fromYou = true;
+      lines.pop();
+    } else if (isExternalSourceLine(line)) {
+      externalLine ??= line;
       lines.pop();
     } else if (sessionId !== undefined) {
       // Every closing marker is dropped; the one nearest the end is the one that counts.
       metadata[SESSION_ID_METADATA_KEY] ??= sessionId;
+      hiddenLines.unshift(line);
       lines.pop();
     } else if (documentId !== undefined) {
       metadata[DOCUMENT_ID_METADATA_KEY] ??= documentId;
+      hiddenLines.unshift(line);
       lines.pop();
     } else if (note !== undefined) {
       metadata[NOTE_SOURCE_METADATA_KEY] ??= note.source;
       metadata[NOTE_DATE_METADATA_KEY] ??= note.date;
+      hiddenLines.unshift(line);
       lines.pop();
     } else {
       break;
     }
   }
-  return { body: lines.join('\n').trim(), metadata };
+  if (externalLine !== undefined) {
+    metadata[MEMORY_ORIGIN_METADATA_KEY] = TOOL_INGESTED_ORIGIN;
+    // Both closing lines must agree: the hidden note line says it is a reply, and the source line says what it had read.
+    if (
+      externalLine === REPLY_READ_NOTHING_SOURCE_LINE &&
+      metadata[NOTE_SOURCE_METADATA_KEY] === ASSISTANT_RESPONSE_SOURCE
+    ) {
+      metadata[REPLY_READ_NOTHING_METADATA_KEY] = 'true';
+    }
+  } else if (fromYou) {
+    metadata[MEMORY_ORIGIN_METADATA_KEY] = USER_STATED_ORIGIN;
+  }
+  return { body: lines.join('\n').trim(), metadata, hiddenLines, externalLine, fromYou };
 }
 
-/** Metadata recall hands back for an entry, read from the trailer lines `formatRetainEntry` wrote. */
-export function entryMetadata(text: string): Record<string, string> | undefined {
+/**
+ * Metadata recall hands back for an entry, read from the closing lines `formatRetainEntry` wrote.
+ * It always names an origin: an entry with no source line is handed back as read content, because
+ * only a written "From you" makes an entry the person's own.
+ */
+export function entryMetadata(text: string): Record<string, string> {
   const { metadata } = splitEntryTrailers(text);
-  return Object.keys(metadata).length === 0 ? undefined : metadata;
+  return { ...metadata, [MEMORY_ORIGIN_METADATA_KEY]: metadata[MEMORY_ORIGIN_METADATA_KEY] ?? TOOL_INGESTED_ORIGIN };
+}
+
+/** The line the Memories page shows for where an entry came from. Old source lines are shown in today's words. */
+function readableSourceLine({ metadata, externalLine, fromYou }: EntryTrailers): string {
+  if (externalLine === undefined) {
+    return fromYou ? FROM_YOU_SOURCE_LINE : NO_RECORD_SOURCE_LINE;
+  }
+  return externalLine.startsWith(EXTERNAL_SOURCE_LINE_PREFIX) ? externalLine : sourceLineFor(metadata);
+}
+
+/** Text as the Memories page or an export holds it, without the closing line that says where it came from. */
+export function withoutSourceLines(text: string): string {
+  const lines = text.split('\n');
+  while (lines.length > 0) {
+    const line = (lines[lines.length - 1] ?? '').trimEnd();
+    if (line !== '' && !isSourceLine(line)) {
+      break;
+    }
+    lines.pop();
+  }
+  return lines.join('\n');
+}
+
+/**
+ * An entry's text for matching words. The line that says where it came from is left out, so a
+ * question with "you" or "email" in it does not match every note that closes with those words.
+ */
+export function entryKeywordText(text: string): string {
+  return text
+    .split('\n')
+    .filter(line => {
+      const trimmed = line.trimEnd();
+      return trimmed !== FROM_YOU_SOURCE_LINE && !trimmed.startsWith(EXTERNAL_SOURCE_LINE_PREFIX);
+    })
+    .join('\n');
+}
+
+/**
+ * One daily log written before every entry said where it came from, with a closing source line on each
+ * entry. An entry that already names an external source is kept as written. Every other entry has no
+ * record of where it came from and is marked that way: a closing "From you" in it was saved as text
+ * before that line meant anything, so it stays text. No entry is added, dropped or moved, so every
+ * entry id stays the same.
+ */
+export function withSourceLines(content: string): { content: string; marked: number } {
+  let marked = 0;
+  const entries = splitEntries(upgradeLegacyEntries(content)).map(entry => {
+    const { body, hiddenLines, externalLine, fromYou } = splitEntryTrailers(entry);
+    // An erased entry holds only its position and must stay byte-identical to be recognised.
+    if (externalLine !== undefined || entry === ERASED_ENTRY) {
+      return entry;
+    }
+    marked += 1;
+    const text = fromYou ? `${body}\n\n\\${FROM_YOU_SOURCE_LINE}` : body;
+    return [text, ...hiddenLines, NO_RECORD_SOURCE_LINE].join('\n\n');
+  });
+  return { content: entries.map(entry => `${entry}\n\n`).join(''), marked };
+}
+
+/**
+ * The entries recall leaves out: those saved in the chat being answered, whose history is already in the
+ * conversation. Age never leaves an entry out; recall shows each one with its day.
+ */
+export function recallExcludedIds({
+  entries,
+  sessionId,
+}: {
+  entries: readonly ScannedMemoryEntry[];
+  sessionId: string | undefined;
+}): Set<string> {
+  return new Set(
+    entries.filter(entry => isFromSession({ metadata: entryMetadata(entry.text), sessionId })).map(entry => entry.id),
+  );
 }
 
 /**
  * True for an entry stored as a copy of a replaced document before entries recorded a document id.
- * Such a copy carries no trailer at all (a document mirror never recorded a chat or a source), and
- * its body closes with the document's own `> context` line. An entry with any trailer is a chat note
- * or an imported note that merely quotes the line, never a copy.
+ * Such a copy carries no hidden line and no source of its own (a document mirror never recorded a chat
+ * or a source; at most it was later marked as having no record), and its body closes with the document's
+ * own `> context` line. Any other entry is a chat note or an imported note that merely quotes the line,
+ * never a copy.
  */
 export function isLegacyDocumentCopy({ text, context }: { text: string; context: string }): boolean {
-  const { body, metadata } = splitEntryTrailers(text);
-  if (Object.keys(metadata).length > 0) {
+  const { body, hiddenLines, externalLine, fromYou } = splitEntryTrailers(text);
+  const sourceLess = !fromYou && (externalLine === undefined || externalLine === NO_RECORD_SOURCE_LINE);
+  if (hiddenLines.length > 0 || !sourceLess) {
     return false;
   }
   const lines = body.split('\n');
@@ -283,20 +490,13 @@ function withoutHeading(body: string): string {
 
 /**
  * The entry text the Memories page shows and edits: the timestamp heading, the hidden chat id, document id
- * and note lines, and an id-shaped context line are dropped. The page shows the time on its own, and a
- * readable `> Source: …` line stays.
+ * and note lines, and an id-shaped context line are dropped. The page shows the time on its own. The text
+ * always closes with one readable line that says where the entry came from.
  */
 export function withoutHiddenMarkers(text: string): string {
-  const { body, metadata } = splitEntryTrailers(text);
-  const readable = splitHiddenContext(withoutHeading(body)).body;
-  if (metadata[MEMORY_ORIGIN_METADATA_KEY] === undefined) {
-    return readable;
-  }
-  const sourceLine =
-    metadata[NOTE_SOURCE_METADATA_KEY] === ASSISTANT_RESPONSE_SOURCE
-      ? ASSISTANT_REPLY_SOURCE_LINE
-      : READ_CONTENT_SOURCE_LINE;
-  return `${readable}\n\n${sourceLine}`;
+  const trailers = splitEntryTrailers(text);
+  const readable = splitHiddenContext(withoutHeading(trailers.body)).body;
+  return `${readable}\n\n${readableSourceLine(trailers)}`;
 }
 
 /** The internal id an entry was filed under (its id-shaped `> ` context line), which the page never shows. */
@@ -304,9 +504,16 @@ export function hiddenContext(text: string): string | undefined {
   return splitHiddenContext(splitEntryTrailers(text).body).context;
 }
 
-/** An entry's text with its internal id put back as the closing `> ` line, the shape the daily logs hold. */
+/**
+ * An entry's page text with its internal id put back as a `> ` line, the shape the daily logs hold:
+ * the id line closes the text, and the line that says where the entry came from stays last.
+ */
 export function withHiddenContext({ text, context }: { text: string; context: string | undefined }): string {
-  return context === undefined ? text : `${text}\n\n> ${context}`;
+  if (context === undefined) {
+    return text;
+  }
+  const readable = withoutSourceLines(text);
+  return `${readable.trimEnd()}\n\n> ${context}${text.slice(readable.length)}`;
 }
 
 /** The instant in an entry's `## ` heading, when the heading is a readable timestamp. */
@@ -319,11 +526,12 @@ function headingInstant(text: string): string | undefined {
 
 /**
  * An edited entry's text with the lines the Memories page left out of the original put back: the timestamp
- * heading, the id-shaped context line, and the hidden chat id, document id and note lines. The readable
- * `> Source: …` line is part of the page text, so an edit that removes it is kept as written.
+ * heading, the id-shaped context line, and the hidden chat id, document id and note lines. Where the entry
+ * came from is always the original's: an edit changes what a note says, never whose words it is.
  */
 export function withOriginalHiddenMarkers({ original, edited }: { original: string; edited: string }): string {
-  const { body: originalBody, metadata: kept } = splitEntryTrailers(original);
+  const originalTrailers = splitEntryTrailers(original);
+  const { body: originalBody, metadata: kept } = originalTrailers;
   const { body: editedBody, metadata } = splitEntryTrailers(edited);
   const heading =
     headingInstant(originalBody) !== undefined && headingInstant(editedBody) === undefined
@@ -348,10 +556,15 @@ export function withOriginalHiddenMarkers({ original, edited }: { original: stri
   const noteSource = note[NOTE_SOURCE_METADATA_KEY];
   const noteDate = note[NOTE_DATE_METADATA_KEY];
   if (noteSource !== undefined && isMemoryNoteSource(noteSource) && noteDate !== undefined) {
-    trailers.push(formatNoteMarker({ source: noteSource, date: noteDate }));
+    trailers.push(formatMarker({ kind: 'note', source: noteSource, date: noteDate }));
   }
-  if (metadata[MEMORY_ORIGIN_METADATA_KEY] !== undefined) {
-    trailers.push(READ_CONTENT_SOURCE_LINE);
+  if (originalTrailers.externalLine === REPLY_READ_NOTHING_SOURCE_LINE) {
+    // The new words are no longer the reply as it was written, so the note is a plain reply note again.
+    trailers.push(`${EXTERNAL_SOURCE_LINE_PREFIX}${NOTE_SOURCE_NAMES[ASSISTANT_RESPONSE_SOURCE]}`);
+  } else if (originalTrailers.externalLine !== undefined) {
+    trailers.push(originalTrailers.externalLine);
+  } else if (originalTrailers.fromYou) {
+    trailers.push(FROM_YOU_SOURCE_LINE);
   }
   return [...heading, body, ...trailers].join('\n\n');
 }
@@ -409,12 +622,108 @@ export function estimateTokens(text: string): number {
   return Math.ceil(text.length / CHARS_PER_TOKEN);
 }
 
+/** One daily log as last read from disk, kept so a scan of the whole history only re-reads what changed. */
+interface ParsedDailyLog {
+  mtimeMs: number;
+  size: number;
+  ino: number;
+  /** False when the file was changed so close to the read that another change could carry the same time. */
+  settled: boolean;
+  chars: number;
+  entries: readonly ScannedMemoryEntry[];
+}
+
+/** A file changed this recently is read again next time, however its size and time compare. */
+const DAILY_LOG_SETTLE_MS = 2000;
+
+/** Most text kept parsed in this process across every vault; the files read longest ago are dropped first. */
+const PARSED_DAILY_LOG_MAX_CHARS = 64 * 1024 * 1024;
+
+/** Daily logs read at once: enough to make a first scan quick, few enough to stay far below the open-file limit. */
+const DAILY_LOG_READ_CONCURRENCY = 16;
+
+const parsedDailyLogs = new Map<string, ParsedDailyLog>();
+let parsedDailyLogChars = 0;
+
+function forgetParsedDailyLog(filePath: string): void {
+  const parsed = parsedDailyLogs.get(filePath);
+  if (parsed !== undefined) {
+    parsedDailyLogChars -= parsed.chars;
+    parsedDailyLogs.delete(filePath);
+  }
+}
+
+function keepParsedDailyLog({ filePath, parsed }: { filePath: string; parsed: ParsedDailyLog }): void {
+  forgetParsedDailyLog(filePath);
+  parsedDailyLogs.set(filePath, parsed);
+  parsedDailyLogChars += parsed.chars;
+  for (const oldest of parsedDailyLogs.keys()) {
+    if (parsedDailyLogChars <= PARSED_DAILY_LOG_MAX_CHARS || oldest === filePath) {
+      break;
+    }
+    forgetParsedDailyLog(oldest);
+  }
+}
+
 /**
- * Reads a namespace's `MEMORY.md` plus daily logs. `maxDailyFiles` bounds the scan:
- * recall passes the recent-files window; the embedding backfill passes `Infinity`
- * to index the whole history. `resolveTombstones` applies the memory vault's
- * edit/delete markers so listings, recall, and the embedding index all see the
- * effective entries; it defaults to false so raw scans stay byte-identical.
+ * One daily log's entries. The file is read again whenever its size, time or identity differs from the
+ * last read, so an edit made by hand or by another process is seen on the next scan.
+ */
+async function readDailyLogEntries({
+  filePath,
+  safeNamespace,
+  file,
+}: {
+  filePath: string;
+  safeNamespace: string;
+  file: string;
+}): Promise<readonly ScannedMemoryEntry[]> {
+  let content: string;
+  let stats: Stats;
+  let readAt: number;
+  try {
+    stats = await stat(filePath);
+    const known = parsedDailyLogs.get(filePath);
+    if (
+      known?.settled === true &&
+      known.mtimeMs === stats.mtimeMs &&
+      known.size === stats.size &&
+      known.ino === stats.ino
+    ) {
+      // Re-inserting moves the file to the recently read end.
+      parsedDailyLogs.delete(filePath);
+      parsedDailyLogs.set(filePath, known);
+      return known.entries;
+    }
+    readAt = Date.now();
+    content = await readFile(filePath, 'utf8');
+  } catch {
+    // A file removed or unreadable mid-scan holds no entries; the rest of the scan goes on.
+    forgetParsedDailyLog(filePath);
+    return [];
+  }
+  // Every later scan hands out these same objects, so a caller that changed one would change it for all.
+  const entries = Object.freeze(dailyLogEntries({ safeNamespace, file, content }).map(entry => Object.freeze(entry)));
+  keepParsedDailyLog({
+    filePath,
+    parsed: {
+      mtimeMs: stats.mtimeMs,
+      size: stats.size,
+      ino: stats.ino,
+      settled: readAt - stats.mtimeMs > DAILY_LOG_SETTLE_MS,
+      chars: content.length,
+      entries,
+    },
+  });
+  return entries;
+}
+
+/**
+ * Reads a namespace's `MEMORY.md` plus daily logs, newest file first. `maxDailyFiles` bounds the scan
+ * for callers that only need recent days; recall, the vault listing and the embedding backfill pass
+ * `Infinity` to read the whole history. `resolveTombstones` applies the memory vault's edit/delete
+ * markers so listings, recall, and the embedding index all see the effective entries; it defaults to
+ * false so raw scans stay byte-identical.
  */
 export async function scanNamespaceEntries(options: {
   baseDir: string;
@@ -437,6 +746,7 @@ export async function scanNamespaceEntries(options: {
   }
 
   const entries: ScannedMemoryEntry[] = [];
+  const reviewed = await readReviewedMarks({ baseDir: options.baseDir, namespace: options.namespace });
   let files: string[] = [];
   try {
     files = (await readdir(path.join(dir, 'memory')))
@@ -447,14 +757,16 @@ export async function scanNamespaceEntries(options: {
   } catch {
     // Missing daily directory is normal for a fresh namespace.
   }
-  for (const file of files) {
-    let content: string;
-    try {
-      content = await readFile(path.join(dir, 'memory', file), 'utf8');
-    } catch {
-      continue;
+  for (let start = 0; start < files.length; start += DAILY_LOG_READ_CONCURRENCY) {
+    const batch = await Promise.all(
+      files
+        .slice(start, start + DAILY_LOG_READ_CONCURRENCY)
+        .map(file => readDailyLogEntries({ filePath: path.join(dir, 'memory', file), safeNamespace, file })),
+    );
+    for (const fileEntries of batch) {
+      // The marks live beside the dated files, so they are applied to each scan and never kept with a parsed file.
+      entries.push(...fileEntries.map(entry => withReviewedSource(entry, reviewed)));
     }
-    entries.push(...dailyLogEntries({ safeNamespace, file, content }));
   }
   if (options.resolveTombstones === true) {
     const tombstones = await readVaultTombstones({ baseDir: options.baseDir, namespace: options.namespace });
@@ -471,10 +783,10 @@ export async function scanNamespaceEntries(options: {
  * so one tenant's vault can never address another tenant's files. `persona:<name>`
  * namespaces are persona vaults; anything else is a topic vault.
  *
- * Edits and deletes never rewrite the daily logs. They append a marker block to
- * `.vault-tombstones.md` in the namespace directory; the marker file itself is
- * append-only, so the whole history (memories and vault actions) stays intact and
- * entry indices never shift. Later markers win per entry id.
+ * Edits and deletes append a marker block to `.vault-tombstones.md` in the namespace
+ * directory, and later markers win per entry id. The dated files are then rewritten in
+ * place (see `vaultErase.ts`) so a deleted note's text, and an edited note's old wording,
+ * do not stay on disk. Entries keep their positions, so entry indices never shift.
  */
 
 /** Wire namespace of the shared vault; also used when the query param is omitted. */
@@ -578,7 +890,7 @@ export function personaForVaultFilesystemNamespace(
   return name === '' ? null : name;
 }
 
-function vaultTombstonesFileFor(baseDir: string, namespace: string): string {
+export function vaultTombstonesFileFor(baseDir: string, namespace: string): string {
   return path.join(namespaceDirFor(baseDir, namespace), VAULT_TOMBSTONES_FILE);
 }
 
@@ -619,7 +931,7 @@ function parseVaultTombstoneBlock(block: { heading: string; markerLine: string }
   };
 }
 
-function formatVaultTombstone(tombstone: VaultTombstone): string {
+export function formatVaultTombstone(tombstone: VaultTombstone): string {
   const payload =
     tombstone.action === 'updated' && tombstone.text !== undefined
       ? ` ${JSON.stringify({ text: tombstone.text })}`
@@ -669,10 +981,7 @@ export function parseVaultTombstones(content: string): VaultTombstone[] {
   return tombstones;
 }
 
-/**
- * Appends one vault marker. The marker file is append-only; only the daily logs
- * would count as history, and they are never touched.
- */
+/** Appends one vault marker. Call it holding the vault lock. */
 export async function appendVaultTombstone(options: {
   baseDir: string;
   namespace: string;
@@ -695,6 +1004,86 @@ export async function appendVaultTombstone(options: {
     }
     throw error;
   }
+}
+
+/** Append-only file in a vault folder that records which older notes the person reviewed as their own. */
+export const REVIEWED_FROM_YOU_FILE = '.reviewed-from-you';
+
+/** Reviewed notes: entry id to the hash of the entry text the person reviewed. */
+export type ReviewedMarks = ReadonlyMap<string, string>;
+
+/** The hash a review records for an entry: SHA-256 of its whole text as the dated file holds it. */
+export function reviewedEntryHash(text: string): string {
+  return createHash('sha256').update(text, 'utf8').digest('hex');
+}
+
+/** One line of `.reviewed-from-you`: the entry id, a tab, and the hash of the entry as reviewed. */
+export function formatReviewedMark({ entryId, text }: { entryId: string; text: string }): string {
+  return `${entryId}\t${reviewedEntryHash(text)}`;
+}
+
+/** Parses the text of `.reviewed-from-you`; a line that is not an id, a tab and a hash is ignored, and the latest line per id wins. */
+export function parseReviewedMarks(content: string): ReviewedMarks {
+  const marks = new Map<string, string>();
+  for (const line of content.split('\n')) {
+    const match = /^(md:[^:\t]+:[^#\t]+#\d+)\t([0-9a-f]{64})$/.exec(line.trimEnd());
+    if (match?.[1] !== undefined && match[2] !== undefined) {
+      marks.set(match[1], match[2]);
+    }
+  }
+  return marks;
+}
+
+/** A namespace's reviewed notes. A missing file reads as none. */
+export async function readReviewedMarks(options: { baseDir: string; namespace: string }): Promise<ReviewedMarks> {
+  try {
+    return parseReviewedMarks(
+      await readFile(path.join(namespaceDirFor(options.baseDir, options.namespace), REVIEWED_FROM_YOU_FILE), 'utf8'),
+    );
+  } catch {
+    return new Map();
+  }
+}
+
+/** The entry's last non-empty line, which closes every entry written since entries name their source. */
+function closingLine(text: string): { lines: string[]; index: number } {
+  const lines = text.split('\n');
+  let index = lines.length - 1;
+  while (index >= 0 && (lines[index] ?? '').trim() === '') {
+    index -= 1;
+  }
+  return { lines, index };
+}
+
+/**
+ * The chat id of an older note that is open to review: it closes with exactly "External source: no record",
+ * names a chat, and is not a note from a document or email. Undefined for any other entry.
+ */
+export function reviewableNoRecordChatId(text: string): string | undefined {
+  const { lines, index } = closingLine(text);
+  if ((lines[index] ?? '').trimEnd() !== NO_RECORD_SOURCE_LINE) {
+    return undefined;
+  }
+  const metadata = splitEntryTrailers(text).metadata;
+  return metadata[NOTE_SOURCE_METADATA_KEY] === undefined ? metadata[SESSION_ID_METADATA_KEY] : undefined;
+}
+
+/**
+ * Hands an entry on as the person's own words when they reviewed it: its id is recorded with the hash of
+ * this very text and it still closes with exactly "External source: no record". Only that line changes.
+ * A hash that no longer matches, or any other closing line, leaves the entry as it is. Applied when entries
+ * are scanned, before vault markers, so every reader and a later edit see the reviewed source.
+ */
+function withReviewedSource(entry: ScannedMemoryEntry, reviewed: ReviewedMarks): ScannedMemoryEntry {
+  if (reviewed.get(entry.id) !== reviewedEntryHash(entry.text)) {
+    return entry;
+  }
+  const { lines, index } = closingLine(entry.text);
+  if ((lines[index] ?? '').trimEnd() !== NO_RECORD_SOURCE_LINE) {
+    return entry;
+  }
+  lines[index] = FROM_YOU_SOURCE_LINE;
+  return { ...entry, text: lines.join('\n') };
 }
 
 /**

@@ -28,10 +28,14 @@ How to get there: Click **More** in the left bar, then **Settings**, then **Skil
 ## Use a skill in a chat
 
 1. In the chat, click **Add files and tools** beside the message box.
-2. Click **Add-ons**, then the **Skills** tab.
+2. Click **Add-ons**, then the **Skills** tab. The list opens just above the message box. If you have many skills, type in **Search skills** to find one.
 3. Select the skill.
 
-When a skill is on for a chat, Aman reads its instructions when the job comes up.
+When a skill is on for a chat, Aman reads its instructions when the job comes up. Reading them doesn't ask you.
+
+Some skills come with their own scripts. Aman runs them in the sandbox, from the skill's folder. A skill's own script runs without asking, because you installed the skill. It asks first when the sandbox can reach the internet, or when Aman edited one of the skill's files in that chat.
+
+A skill script that needs a website or an extra package can't get it on its own. When that happens, Aman tells you instead of trying workarounds.
 
 ## Add your own skill from GitHub
 
@@ -76,11 +80,15 @@ Some skills need to reach certain websites. After you enable one, Aman lists the
 
 The first time a skill that names sites runs in a chat, a card asks if it may reach those sites. Nothing is reached until you answer.
 
-- **Allow once** lets the skill reach those sites in this chat only.
+- **Allow** lets the skill reach those sites in this chat only.
 - **Always allow for this skill** lets it reach them in every chat.
 - **Deny** turns them down. Aman does not ask about them again for that skill.
 
 If a skill tries a site it did not name, the connection is stopped and a card asks about that one site.
+
+An approval covers the skill's code as it is when you say yes. If the skill's code changes later, the approval ends and a card asks again.
+
+Some site names use letters from other alphabets. The card then shows the name in brackets as it is really written, for example `pаypal.com (xn--pypal-4ve.com)`. Check that name before you answer, because such letters can make a site look like a familiar one.
 
 To change an answer later, open Settings, then Skills. A skill that names sites shows them there. Click **Remove network access** to take back an Always allow. Next to a site you allowed or turned down one by one, click **Clear** to take back that answer.
 

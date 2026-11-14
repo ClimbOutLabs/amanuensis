@@ -395,7 +395,7 @@ export async function drainSkillNetworkCards(input: {
 }
 
 /**
- * Records the person's answer to a network card. Allow once adds the sites to this chat only,
+ * Records the person's answer to a network card. Allow adds the sites to this chat only,
  * under the code version the skill is at now; always allow stores them on the skill, pinned to
  * the code as it stands (a first-use or code-changed answer stores the sites the card asked
  * for, together with the declared sites already approved or allowed one by one, and never a

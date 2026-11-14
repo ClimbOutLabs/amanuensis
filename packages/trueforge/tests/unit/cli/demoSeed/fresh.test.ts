@@ -128,7 +128,7 @@ describe('start fresh against the real stores', () => {
 
   async function retainShared(text: string) {
     const retained = await stores.memory.retain({
-      items: [{ content: text, timestamp: NOW.toISOString(), document_id: text }],
+      items: [{ metadata: { origin: 'user_stated' }, content: text, timestamp: NOW.toISOString(), document_id: text }],
       operationId: text,
       timeoutMs: 5000,
     });
@@ -232,7 +232,14 @@ describe('start fresh against the real stores', () => {
       vaultScope: { personaName: 'Marlow mine', personaId: 'persona-mine' },
     });
     const retained = await personaClient.retain({
-      items: [{ content: 'Only in the persona vault', timestamp: NOW.toISOString(), document_id: 'vault-note' }],
+      items: [
+        {
+          metadata: { origin: 'user_stated' },
+          content: 'Only in the persona vault',
+          timestamp: NOW.toISOString(),
+          document_id: 'vault-note',
+        },
+      ],
       operationId: 'vault-op',
       timeoutMs: 5000,
     });

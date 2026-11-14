@@ -6,7 +6,9 @@ import { z } from 'zod';
 import {
   MAX_BYTES_PER_DOCUMENT,
   MAX_CHARS_PER_DOCUMENT,
+  MAX_DOCUMENT_FILES,
   MAX_PAGES_PER_DOCUMENT,
+  MAX_TOTAL_DOCUMENT_BYTES,
   MAX_TOTAL_DOCUMENT_CHARS,
 } from '../../documents/documentExtraction';
 import { DocumentReadError } from '../../documents/documentReadError';
@@ -70,6 +72,7 @@ import {
 import type { SkillNetworkCardRequest } from '../permissions/skillNetworkCards';
 import type { Tier3Card } from '../permissions/tier';
 import type { AbnormalHandoffEvidence } from '../runtime/AbnormalHandoff';
+import { matchesStagedName, stagedNameDigest } from '../runtime/attachmentStaging';
 import {
   DEFERRED_TOOLS_SERVER_ID,
   GET_TOOL_INFO_NAME,
@@ -102,7 +105,8 @@ import { buildProvisioningEvent } from './driver/provisionEvents';
 import { RunCodeInputSchema, type RunCodeInput, type RunCodeResult } from './driver/RunCodeSchemas';
 import { type HarvestedFile, type RunCodeBackend, type TurnAttachment } from './driver/RunCodeService';
 import { buildExecResultShape } from './execResultSemantics';
-import { getGithubConnectorHint, type GithubConnectorState } from './githubConnectorHint';
+import { DEFAULT_GIT_COMMIT_IDENTITY, gitCommitIdentityEnv, type GitCommitIdentity } from './gitCommitIdentity';
+import { getGithubConnectorHint, getOfflineGitFormHint, type GithubConnectorState } from './githubConnectorHint';
 import {
   GIT_REMOTE_CHANGED_REFUSAL,
   gitProbeRunner,
@@ -133,6 +137,7 @@ import {
   packageDownloadCardWhatWithoutProject,
   packageDownloadSitesText,
   packageDownloadsOffNote,
+  PYTHON_PROJECT_ENVIRONMENT_RULE,
 } from './packageMirrors';
 import {
   ensureExecSuccess,
@@ -168,12 +173,18 @@ import {
 } from './workspaceStateCapture';
 // Import submodules, not the ./skills barrel, to avoid a cycle (the mounters import from Sandbox).
 import { createHash, randomUUID } from 'node:crypto';
-import { accessSync, constants as fsConstants, readFileSync } from 'node:fs';
+import { accessSync, constants as fsConstants } from 'node:fs';
 import { dirname, join, delimiter as pathDelimiter, posix, relative } from 'node:path';
 import { convertOpenAIPatchToGitDiff, detectApplyPatchFormat } from './openaiPatchFormat';
 import { matchReplaceText } from './replaceTextDiagnostics';
 import type { ISkillMounter } from './skills/ISkillMounter';
 import { detectSkillUsedEvents } from './skills/skillEvents';
+import {
+  skillScriptRealPathOperands,
+  skillScriptRun,
+  skillScriptStaysInFolder,
+  type SkillScriptRun,
+} from './skills/skillScript';
 import {
   extractStructuredEditPaths,
   repositoryRelativeStructuredEditPath,
@@ -326,6 +337,8 @@ export interface SandboxOptions {
   fileDownloadEnabled?: boolean | undefined;
   /** GitHub token the host injects into allowlisted network git commands only; never written to the sandbox. */
   githubGitToken?: string | null | undefined;
+  /** Name and email for commits made by shell commands; absent, the built-in default is used. */
+  gitCommitIdentity?: GitCommitIdentity | undefined;
   /** Whether the session's agent spec has a GitHub MCP connector configured, regardless of whether its credentials resolved. */
   githubConnectorAttached?: boolean | undefined;
   /** Whether the session's agent spec has a web-search/fetch MCP connector configured. */
@@ -389,7 +402,41 @@ export const SANDBOX_APPLY_PATCH_TOOL_NAME = 'apply_patch';
 export const SANDBOX_REPLACE_TEXT_TOOL_NAME = 'replace_text';
 export const SANDBOX_WRITE_FILE_TOOL_NAME = 'write_file';
 export const SANDBOX_RUN_REGISTERED_COMMAND_TOOL_NAME = 'run_registered_command';
+export const SANDBOX_RUN_SKILL_SCRIPT_TOOL_NAME = 'run_skill_script';
 export const SANDBOX_SUBMIT_IMPLEMENTATION_PLAN_TOOL_NAME = 'submit_implementation_plan';
+
+/** What one registered sandbox tool declares about itself, beside its name. */
+export interface SandboxToolDeclaration {
+  name: string;
+  /** True when the tool writes files in the workspace, so its silent calls are re-checked at dispatch. */
+  writesFiles: boolean;
+}
+
+/**
+ * Every sandbox tool's declaration, in registration order. This is the one place a sandbox tool
+ * states whether it writes files; dispatch and the schedule brief read the set computed from
+ * these declarations, so a tool added here with writesFiles set is covered without any other list.
+ */
+export const SANDBOX_TOOL_DECLARATIONS: readonly SandboxToolDeclaration[] = [
+  { name: SANDBOX_EXEC_TOOL_NAME, writesFiles: false },
+  { name: SANDBOX_RUN_CODE_TOOL_NAME, writesFiles: false },
+  { name: SANDBOX_APPLY_PATCH_TOOL_NAME, writesFiles: true },
+  { name: SANDBOX_REPLACE_TEXT_TOOL_NAME, writesFiles: true },
+  { name: SANDBOX_WRITE_FILE_TOOL_NAME, writesFiles: true },
+  { name: SANDBOX_RUN_REGISTERED_COMMAND_TOOL_NAME, writesFiles: false },
+  // A skill script runs inside the sandbox run, like the code run_code runs. Its parameters
+  // name a script, not a file, so dispatch has no write target of its own to re-check.
+  { name: SANDBOX_RUN_SKILL_SCRIPT_TOOL_NAME, writesFiles: false },
+  { name: SANDBOX_SUBMIT_IMPLEMENTATION_PLAN_TOOL_NAME, writesFiles: false },
+];
+
+/** The names of the tools whose declarations say they write files. */
+export function sandboxFileWriteToolNames(declarations: readonly SandboxToolDeclaration[]): ReadonlySet<string> {
+  return new Set(declarations.filter(declaration => declaration.writesFiles).map(declaration => declaration.name));
+}
+
+/** The sandbox tools that write files, computed from the registrations' declarations. */
+export const SANDBOX_FILE_WRITE_TOOLS: ReadonlySet<string> = sandboxFileWriteToolNames(SANDBOX_TOOL_DECLARATIONS);
 
 /**
  * Appended to an `apply_patch` `git apply --check` failure. `check` alone is git's own error
@@ -1014,6 +1061,9 @@ function injectMCPClientEnv(params: {
   };
 }
 
+/** The longest a model may ask one shell command to run; installs, builds and long test runs need more than the default. */
+export const SANDBOX_EXEC_MAX_TIMEOUT_SECONDS = 600;
+
 export const sandboxExecSchema = z.object({
   intent: z.string().describe('Why you are running this command (user-facing).'),
   purpose: z
@@ -1024,6 +1074,7 @@ export const sandboxExecSchema = z.object({
   command: z.string().describe('Shell command to execute.'),
   cwd: z.string().optional().describe('Working directory.'),
   env: z.record(z.string(), z.string()).optional(),
+  timeout_seconds: z.number().int().min(1).max(SANDBOX_EXEC_MAX_TIMEOUT_SECONDS).optional(),
   output: z
     .object({
       head_lines: z.number().int().min(1).max(1000).optional(),
@@ -1047,6 +1098,13 @@ export const sandboxRunRegisteredCommandSchema = z.object({
 });
 
 const REGISTERED_COMMAND_OUTPUT_TAIL_LINES = 100;
+
+export const sandboxRunSkillScriptSchema = z.object({
+  intent: z.string().describe('Why you are running this script (user-facing).'),
+  skill: z.string().min(1).describe('Name of a skill turned on in this chat.'),
+  script: z.string().min(1).describe("The script's path inside the skill's folder, such as scripts/run.py."),
+  args: z.array(z.string().max(4096)).max(64).optional().describe('Arguments passed to the script, one per item.'),
+});
 
 const sandboxImplementationPlanSchema = ImplementationPlanSchema;
 
@@ -1502,7 +1560,8 @@ export function createSandboxExecDescription({
   return `Run a shell command in the persistent sandbox. cwd sets the repository; HOME does not. Never list, print or expose environment variables. The sandbox holds no git credentials: never ask for or search for tokens.
 Create files with write_file; edit with apply_patch or replace_text. Never bypass them with sed, Perl, Python, heredocs or temp patch files.
 Large output: use output.head_lines, output.tail_lines or output.grep.
-Python and Node go to run_code; interpreter invocations are rejected.
+Stops after 60s; set timeout_seconds (up to 600) for an install, build or long test run.
+Run a script file with python3 or node; other code goes to run_code.
 Status: "ok", "exited" (see exit_code) or "failed" (the host could not run it).
 ${execNetworkSentences({ offline, skillNetworkHosts: skillNetworkHosts ?? [] })} Make separate tool calls in one response; the host runs read-only calls concurrently.${fileOutput}
 `;
@@ -1519,9 +1578,9 @@ function runCodeEnvironmentSentences({
   if (offline) {
     // The package gateway is separate from the sandbox network, so an offline sandbox can still download.
     const packages = packageDownloads
-      ? `Packages can be downloaded for this chat: if one is missing, install it from ${packageDownloadSitesText()}, then run again.`
+      ? `Packages can be downloaded for this chat from ${packageDownloadSitesText()}, into the workspace only. run_code runs only the code it is given, in an empty folder, and cannot see the workspace or what is installed there, so code that needs a downloaded package runs through the project's own tests. ${PYTHON_PROJECT_ENVIRONMENT_RULE}`
       : `Packages cannot be downloaded here, so if one is missing, ${PACKAGE_UNAVAILABLE_RULE}`;
-    return `Preinstalled: Python with pandas, numpy, matplotlib, openpyxl, pdfplumber, pypdf, Pillow, python-docx and reportlab; Node with tsx and typescript. This sandbox has no internet access. Never use it to fetch web content. ${packages}`;
+    return `Preinstalled: Python with pandas, numpy, matplotlib, openpyxl, pdfplumber, pypdf, Pillow, python-docx, reportlab, requests, pyyaml, httpx and beautifulsoup4; Node with tsx and typescript. This sandbox has no internet access. Never use it to fetch web content. ${packages}`;
   }
   if (packageDownloads) {
     return `Preinstalled: pandas, numpy, matplotlib, seaborn, plotly, openpyxl, pdfplumber, Pillow, requests, genson, pydantic, pyyaml, beautifulsoup4, poppler-utils, tesseract-ocr. Packages can be downloaded for this chat: if one is missing, install it from ${packageDownloadSitesText()}, then run again. Never use the network to fetch web content.`;
@@ -1547,7 +1606,7 @@ export function createSandboxRunCodeDescription({
   return `Run Python or Node.js code in an isolated, offline sandbox: language is 'python' (3.13) or 'node' (22). Pass exactly one of code or script_path (a file you wrote under ${workspaceDir}; the run reads a copy of it). cwd is /scratch: read /ingress/<name>, write results to /egress (files left in /scratch are collected too). Returns stdout and stderr (each capped at 256 KiB), the verbatim exit_code, and files_out metadata (name, size, sha256); bytes are never inlined. To give the user a file, list it in a sandbox_artifacts block as [name](run_code/<name>). A non-zero exit is the program's result, not an infra failure.
 ${runCodeEnvironmentSentences({ offline, packageDownloads })}
 files_in is for content you compose; never re-upload an /ingress file.
-If run_code fails, do NOT fall back to exec (or any shell tool) to run the code; interpreter invocations in exec are rejected by a harness guard. If a network call fails, do not retry it through exec or any shell. Fix the code, reduce the input, or report the failure. When you report a run_code failure, quote the error text exactly as returned, including any links; do not paraphrase or reword it. If the code did not run, it produced no output: NEVER state or predict what it would have printed.
+If run_code fails, do NOT fall back to exec (or any shell tool) to run the code; inline code in exec is rejected by a harness guard. If a network call fails, do not retry it through exec or any shell. Fix the code, reduce the input, or report the failure. When you report a run_code failure, quote the error text exactly as returned, including any links; do not paraphrase or reword it. If the code did not run, it produced no output: NEVER state or predict what it would have printed.
 `;
 }
 
@@ -1569,6 +1628,9 @@ export function createSandboxWriteFileDescription({ fileDownload }: { fileDownlo
 export const SANDBOX_RUN_REGISTERED_COMMAND_DESCRIPTION =
   'Run one host-confirmed repository build, test, or verification command by its stable command ID. The host owns the exact command, repository cwd, purpose, and timeout. Do not restate the shell command.';
 
+export const SANDBOX_RUN_SKILL_SCRIPT_DESCRIPTION =
+  "Run a Python or JavaScript script that ships with a skill turned on in this chat, from that skill's folder. Name the skill, the script's path inside it, and its arguments.";
+
 export const SANDBOX_SUBMIT_IMPLEMENTATION_PLAN_DESCRIPTION =
   'Submit a typed implementation plan before editing a bound repository. This tool never edits or executes.';
 
@@ -1580,6 +1642,7 @@ export const SANDBOX_MCP_SERVER_ID = 'sandbox';
 type SandboxExecInput = z.infer<typeof sandboxExecSchema>;
 type SandboxExecOutputInput = z.infer<typeof sandboxExecSchema>['output'];
 type SandboxRunRegisteredCommandInput = z.infer<typeof sandboxRunRegisteredCommandSchema>;
+type SandboxRunSkillScriptInput = z.infer<typeof sandboxRunSkillScriptSchema>;
 type SandboxImplementationPlanInput = z.infer<typeof sandboxImplementationPlanSchema>;
 type SandboxRuntimeExecInput = SandboxExecInput & { timeoutSeconds?: number | undefined };
 type SandboxApplyPatchInput = z.infer<typeof sandboxApplyPatchSchema>;
@@ -1830,15 +1893,15 @@ function applyExecOutputBounds(rawOutput: string, output: SandboxExecOutputInput
  * Host binding for the exec interpreter guard (classifier in `./driver/ExecGuard`).
  * Threat model: `exec` is a trusted-operator tool — the operator already consented
  * to shell access in this session. This guard does not try to contain a malicious
- * model (a determined one has git, npm, and awk); it prevents accidental drift back
- * to shell-based code execution now that `run_code` is the supported path, and it
- * stops a run_code failure from becoming an exec workaround.
+ * model (a determined one has git, npm, and awk); it keeps code that is not a file
+ * in `run_code`, and it stops a run_code failure from becoming an exec workaround.
+ * A program that is a file in the workspace runs here, behind the permission rules.
  *
- * Runs inside `sandboxExecPreflightFailure`, so interpreter invocations are rejected
+ * Runs inside `sandboxExecPreflightFailure`, so code that is not a file is rejected
  * before approval and before the provider ever sees the command. Resolution is
  * best-effort: bare interpreter names are caught without any filesystem access;
  * PATH lookup (from the call's own `env` when it sets PATH — no ambient
- * `process.env` read in core) and shebang reads only sharpen evasion cases.
+ * `process.env` read in core) only sharpens evasion cases.
  * Resolutions are cached per Sandbox because preflight runs on every exec call.
  */
 function execInterpreterGuardFailure(input: {
@@ -1869,16 +1932,6 @@ function execInterpreterGuardFailure(input: {
       }
       input.resolveCache.set(name, resolved);
       return resolved;
-    },
-    readShebang: path => {
-      try {
-        const head = readFileSync(path, 'utf8').slice(0, 128);
-        const newline = head.indexOf('\n');
-        const first = newline === -1 ? head : head.slice(0, newline);
-        return first.startsWith('#!') ? first.slice(2).trim() : undefined;
-      } catch {
-        return undefined;
-      }
     },
   };
   const verdict = classifyExecCommand({ command: input.command, host });
@@ -1962,7 +2015,7 @@ function sandboxExecPreflightFailure(input: {
     (input.purpose === 'inspect' || input.purpose === 'edit' || input.purpose === 'execute') &&
     sandboxCommandUsesUnstructuredOperation(input.command)
   ) {
-    return "Unstructured shell redirection, heredocs, tee, and inline Python evaluation are not allowed for inspect, edit, or execute-purpose exec calls. Use read_file for inspection, write_file for a new file, apply_patch/replace_text for an edit, or run_code for Python or Node code. To trim long output, use the exec tool's output.head_lines, output.tail_lines or output.grep fields instead of a shell pipe.";
+    return "Unstructured shell redirection, heredocs, tee, and inline Python evaluation are not allowed for inspect, edit, or execute-purpose exec calls. Inspect a file with a plain exec command such as cat, head or sed -n, use write_file for a new file, apply_patch/replace_text for an edit, or run_code for Python or Node code. To trim long output, use the exec tool's output.head_lines, output.tail_lines or output.grep fields instead of a shell pipe.";
   }
   // Verification has to stay observable: redirection, substitution, and
   // backgrounding hide what the check actually ran, so a green result would
@@ -2123,6 +2176,14 @@ async function withWorkspaceMutationLock<T>(
     }
   }
 }
+/**
+ * What the model reads for a run. A program that ran and ended with an error says "exited", the word
+ * a shell command uses, so "ok" is never shown beside a failed program.
+ */
+export function runCodeResultText(result: RunCodeResult): string {
+  return JSON.stringify(result.status === 'ok' && result.exit_code !== 0 ? { ...result, status: 'exited' } : result);
+}
+
 function successfulExec(result: ExecResult): result is Extract<ExecResult, { success: true }> {
   return result.success && result.response.exitCode === 0;
 }
@@ -2202,6 +2263,7 @@ export class Sandbox extends LocalToolMCP {
   private cachedSkillsSection?: string | undefined;
   private readonly logger: Logger;
   private readonly githubGitToken: string | null;
+  private readonly gitCommitIdentity: GitCommitIdentity;
   private readonly githubConnectorAttached: boolean;
   private readonly webConnectorAttached: boolean;
   private readonly webConnectorToolHint: string;
@@ -2238,6 +2300,8 @@ export class Sandbox extends LocalToolMCP {
    * model reads them by filename instead of re-uploading bytes via `files_in`.
    */
   private readonly runCodeIngressStaging = new Map<string, TurnAttachment>();
+  /** Staged names of uploads from earlier turns that are still in the workspace; listed once, on first need. */
+  private earlierUploadNames: readonly string[] | undefined;
 
   private tools = [
     defineTool({
@@ -2279,6 +2343,12 @@ export class Sandbox extends LocalToolMCP {
       handler: (input, approvalDecision, context) => this.handleRunRegisteredCommand(input, approvalDecision, context),
     }),
     defineTool({
+      name: SANDBOX_RUN_SKILL_SCRIPT_TOOL_NAME,
+      description: SANDBOX_RUN_SKILL_SCRIPT_DESCRIPTION,
+      schema: sandboxRunSkillScriptSchema,
+      handler: (input, approvalDecision, context) => this.handleRunSkillScript(input, approvalDecision, context),
+    }),
+    defineTool({
       name: SANDBOX_SUBMIT_IMPLEMENTATION_PLAN_TOOL_NAME,
       description: SANDBOX_SUBMIT_IMPLEMENTATION_PLAN_DESCRIPTION,
       schema: sandboxImplementationPlanSchema,
@@ -2306,6 +2376,7 @@ export class Sandbox extends LocalToolMCP {
     this.requestTimeoutSeconds = Math.ceil(mcpBoundTimeoutMs / 1000) + NATS_REQUEST_TIMEOUT_BUFFER_SECONDS;
     this.logger = options.logger.child({ module: 'Sandbox' });
     this.githubGitToken = options.githubGitToken ?? null;
+    this.gitCommitIdentity = options.gitCommitIdentity ?? DEFAULT_GIT_COMMIT_IDENTITY;
     this.provider.hostGit?.setToken(this.githubGitToken);
     this.githubConnectorAttached = options.githubConnectorAttached ?? false;
     this.webConnectorAttached = options.webConnectorAttached ?? false;
@@ -2333,6 +2404,15 @@ export class Sandbox extends LocalToolMCP {
   } {
     const requestedCwd = typeof params.arguments?.['cwd'] === 'string' ? params.arguments['cwd'] : undefined;
     const cwd = requestedCwd ?? this.boundRepository?.workspace_cwd ?? this.provider.getWorkspaceDir();
+    if (params.name === SANDBOX_RUN_SKILL_SCRIPT_TOOL_NAME) {
+      // The folder is worked out here, never taken from the call, so classification judges the real script.
+      const run = this.skillScriptRunFor(params.arguments);
+      return {
+        requestedCwd: undefined,
+        cwd: run?.status === 'ok' ? run.skill_folder : undefined,
+        effectiveArguments: { ...params.arguments, skill_folder: run?.status === 'ok' ? run.skill_folder : null },
+      };
+    }
     const structuredEditToolName = structuredEditToolNameFor(params.name);
     if (structuredEditToolName === undefined || params.arguments === undefined) {
       return { requestedCwd, cwd, effectiveArguments: params.arguments };
@@ -2367,11 +2447,13 @@ export class Sandbox extends LocalToolMCP {
         ? (invocationPolicy?.effect ?? 'execute')
         : params.name === SANDBOX_RUN_REGISTERED_COMMAND_TOOL_NAME
           ? 'verify'
-          : params.name === SANDBOX_APPLY_PATCH_TOOL_NAME ||
-              params.name === SANDBOX_REPLACE_TEXT_TOOL_NAME ||
-              params.name === SANDBOX_WRITE_FILE_TOOL_NAME
-            ? 'edit'
-            : undefined;
+          : params.name === SANDBOX_RUN_SKILL_SCRIPT_TOOL_NAME
+            ? 'execute'
+            : params.name === SANDBOX_APPLY_PATCH_TOOL_NAME ||
+                params.name === SANDBOX_REPLACE_TEXT_TOOL_NAME ||
+                params.name === SANDBOX_WRITE_FILE_TOOL_NAME
+              ? 'edit'
+              : undefined;
     // Syntax-only risk signal for the approval prompt (open_world_hint). Never
     // consulted for admission: a network-tool command is already gated by its
     // ordinary effect (only 'inspect' auto-admits), so this only adds
@@ -2421,6 +2503,8 @@ export class Sandbox extends LocalToolMCP {
     );
     const invalidRegisteredCommand =
       params.name === SANDBOX_RUN_REGISTERED_COMMAND_TOOL_NAME && registeredCommand === undefined;
+    const invalidSkillScript =
+      params.name === SANDBOX_RUN_SKILL_SCRIPT_TOOL_NAME && this.skillScriptRunFor(params.arguments)?.status !== 'ok';
     const planInput =
       params.name === SANDBOX_SUBMIT_IMPLEMENTATION_PLAN_TOOL_NAME
         ? sandboxImplementationPlanSchema.safeParse(params.arguments)
@@ -2529,8 +2613,7 @@ export class Sandbox extends LocalToolMCP {
       // The workspace classification judges this call against: the bound repository, else the
       // session's, else the provider's default. Recorded on the call below so pre-dispatch
       // verification re-checks containment against this same root.
-      classificationWorkspaceCwd =
-        this.boundRepository?.workspace_cwd ?? sentinelHost.workspace_cwd ?? this.provider.getWorkspaceDir() ?? null;
+      classificationWorkspaceCwd = this.sentinelWorkspaceCwd();
       const sentinelDecision = await classifyHostToolCall({
         sentinel: sentinelHost,
         repository_id: this.boundRepository?.repository_id ?? null,
@@ -2539,7 +2622,12 @@ export class Sandbox extends LocalToolMCP {
         // Chosen by the provider, never by a path. A remote sandbox's paths are judged by name because the server
         // cannot follow its symlinks; the slot agent's O_NOFOLLOW walk and the guest's own view contain those.
         path_resolution: this.provider.filesystem,
-        ...(this.provider.filesystem === 'remote' ? { file_digest: (path: string) => this.fileDigest(path) } : {}),
+        ...(this.provider.filesystem === 'remote'
+          ? {
+              file_digest: (path: string) => this.fileDigest(path),
+              path_missing: (path: string) => this.pathMissing(path),
+            }
+          : {}),
         sandbox_network: await this.networkForUnaskedWork(),
         action: {
           tool_name: params.name,
@@ -2630,6 +2718,7 @@ export class Sandbox extends LocalToolMCP {
       invalidWriteFilePath ||
       writeFileScopeFailure ||
       invalidRegisteredCommand ||
+      invalidSkillScript ||
       invalidImplementationPlan ||
       structuredEditPreconditionFailure !== undefined;
     // Legacy approval when Sentinel is not configured: the pre-Sentinel
@@ -3051,6 +3140,21 @@ export class Sandbox extends LocalToolMCP {
     return this.existingSandboxId === undefined ? '' : rawSandboxId(this.existingSandboxId);
   }
 
+  /** The checked command for a run_skill_script call; undefined when its arguments do not parse. */
+  private skillScriptRunFor(argumentsValue: Record<string, unknown> | undefined): SkillScriptRun | undefined {
+    const parsed = sandboxRunSkillScriptSchema.safeParse(argumentsValue);
+    if (!parsed.success) {
+      return undefined;
+    }
+    return skillScriptRun({
+      skillsDir: this.provider.getSkillsDir(this.promptSandboxId()),
+      skillNames: this.skillMounter?.skillNames() ?? [],
+      skill: parsed.data.skill,
+      script: parsed.data.script,
+      args: parsed.data.args ?? [],
+    });
+  }
+
   private buildMcpServersEnvelope(): Record<string, SandboxMcpServerConfig> {
     const out: Record<string, SandboxMcpServerConfig> = {};
     for (const server of this.codeExecToolSets) {
@@ -3067,14 +3171,14 @@ export class Sandbox extends LocalToolMCP {
   }
 
   protected getTools() {
-    const base =
-      this.boundRepository === undefined
-        ? this.tools.filter(
-            tool =>
-              tool.name !== SANDBOX_RUN_REGISTERED_COMMAND_TOOL_NAME &&
-              tool.name !== SANDBOX_SUBMIT_IMPLEMENTATION_PLAN_TOOL_NAME,
-          )
-        : this.tools;
+    const skillsMounted = (this.skillMounter?.skillNames() ?? []).length > 0;
+    const base = this.tools.filter(
+      tool =>
+        (this.boundRepository !== undefined ||
+          (tool.name !== SANDBOX_RUN_REGISTERED_COMMAND_TOOL_NAME &&
+            tool.name !== SANDBOX_SUBMIT_IMPLEMENTATION_PLAN_TOOL_NAME)) &&
+        (skillsMounted || tool.name !== SANDBOX_RUN_SKILL_SCRIPT_TOOL_NAME),
+    );
     // run_code's /ingress list is per-turn: re-render its description on every
     // tool-list read so newly staged attachments are advertised.
     return base.map(tool => {
@@ -3102,6 +3206,11 @@ export class Sandbox extends LocalToolMCP {
     return this.provider.network !== 'none';
   }
 
+  /** Whether the named tool is one of this set's registered tools whose declaration says it writes files. */
+  isFileWriteTool(name: string): boolean {
+    return SANDBOX_FILE_WRITE_TOOLS.has(name);
+  }
+
   /**
    * File edits, run_code (always offline) and plan submissions stay in the workspace. A command stays
    * when it only inspects; otherwise only while nothing it runs can reach the network, and a push
@@ -3118,7 +3227,7 @@ export class Sandbox extends LocalToolMCP {
       return true;
     }
     const networked = this.hasNetwork() || this.skillNetworkHostsForChat.length > 0;
-    if (name === SANDBOX_RUN_REGISTERED_COMMAND_TOOL_NAME) {
+    if (name === SANDBOX_RUN_REGISTERED_COMMAND_TOOL_NAME || name === SANDBOX_RUN_SKILL_SCRIPT_TOOL_NAME) {
       return !networked;
     }
     if (name !== SANDBOX_EXEC_TOOL_NAME) {
@@ -3648,6 +3757,20 @@ export class Sandbox extends LocalToolMCP {
       return createHash('sha256').update(content).digest('hex');
     } catch {
       return null;
+    }
+  }
+
+  /** True only when the sandbox says nothing exists at the path. A link, a folder or a failed read is not missing. */
+  async pathMissing(absolutePath: string): Promise<boolean> {
+    try {
+      const { sandboxInfo } = await this.ensureReadySandbox();
+      await this.provider.downloadFile({
+        sandboxId: this.providerSandboxId(sandboxInfo.sandbox_id),
+        path: absolutePath,
+      });
+      return false;
+    } catch (error) {
+      return error instanceof SandboxFileNotFoundError;
     }
   }
 
@@ -4610,20 +4733,19 @@ export class Sandbox extends LocalToolMCP {
     if (result.response.exitCode === 0) {
       return withStatus;
     }
+    const unplannedGitNetworkCommand =
+      isGitNetworkCommand(input.command) && planHostAuthenticatedGit({ command: input.command }) === undefined;
     const connectorState: GithubConnectorState = !this.githubConnectorAttached
       ? 'not-attached'
       : this.githubGitToken === null
         ? 'unresolved'
-        : isGitNetworkCommand(input.command) &&
-            (planHostAuthenticatedGit({ command: input.command }) === undefined ||
-              Object.keys(input.env ?? {}).length > 0)
+        : unplannedGitNetworkCommand || (isGitNetworkCommand(input.command) && Object.keys(input.env ?? {}).length > 0)
           ? 'unauthenticated-form'
           : 'attached';
-    const remediation = getGithubConnectorHint({
-      command: input.command,
-      output: execResultOutputText(result),
-      connectorState,
-    });
+    const output = execResultOutputText(result);
+    const remediation =
+      getGithubConnectorHint({ command: input.command, output, connectorState }) ??
+      getOfflineGitFormHint({ output, offline: !this.hasNetwork(), ranInSandbox: unplannedGitNetworkCommand });
     return remediation === undefined ? withStatus : { ...withStatus, remediation };
   }
 
@@ -4836,26 +4958,19 @@ export class Sandbox extends LocalToolMCP {
     const requiresDurableCoordination = guarded && this.boundRepository !== undefined;
     if (!requiresDurableCoordination) {
       const workspaceRoot = await this.resolveWorkspaceRoot(sandboxId, input.cwd);
+      // A folder that is not a Git repository has no lock to take, but the command still gets the
+      // chat's download and skill site grants: those belong to the chat, not to a repository.
       const run = (): Promise<ExecResult> =>
-        workspaceRoot === undefined
-          ? this.sandboxPathExec({
-              sandboxId,
-              command: input.command,
-              cwd: input.cwd,
-              env,
-              ...(input.timeoutSeconds === undefined ? {} : { timeoutSeconds: input.timeoutSeconds }),
-              ...(approvedGitRemotes === undefined ? {} : { approvedGitRemotes }),
-            })
-          : this.execWorkspaceExclusive({
-              hostAuthored: false,
-              sandboxId,
-              workspaceRoot,
-              command: input.command,
-              cwd: input.cwd,
-              env,
-              timeoutSeconds: input.timeoutSeconds,
-              approvedGitRemotes,
-            });
+        this.execWorkspaceExclusive({
+          hostAuthored: false,
+          sandboxId,
+          workspaceRoot,
+          command: input.command,
+          cwd: input.cwd,
+          env,
+          timeoutSeconds: input.timeoutSeconds,
+          approvedGitRemotes,
+        });
       // Workspace-root discovery above (unbound path) is complete; the target
       // command is about to reach the provider. A SandboxNotAvailableError from
       // this point on means the target may have run, so replay must stop being
@@ -5297,6 +5412,68 @@ export class Sandbox extends LocalToolMCP {
     );
   }
 
+  /**
+   * The files a run reads under /ingress. Uploads are remembered only for the turn that made them, but the
+   * model keeps their /ingress paths in the chat. So when the code names /ingress, uploads from earlier
+   * turns are read back from the workspace: the ones the code names, or all of them when it names none.
+   * Bytes that no longer match the digest in the name are left out.
+   */
+  private async runCodeAttachments(input: RunCodeInput): Promise<TurnAttachment[]> {
+    const staged = (): TurnAttachment[] => [...this.runCodeIngressStaging.values()];
+    if (this.existingSandboxInfo === undefined) {
+      return staged();
+    }
+    let code = input.code ?? '';
+    if (input.code === undefined && input.script_path !== undefined) {
+      try {
+        code = (await this.readRunCodeScript(input.script_path)).toString('utf8');
+      } catch {
+        // The run reports an unreadable script itself.
+        return staged();
+      }
+    }
+    if (!code.includes('/ingress')) {
+      return staged();
+    }
+    const sandboxId = this.providerSandboxId(this.existingSandboxInfo.sandbox_id);
+    const uploadsDir = this.provider.getFileUploadsDir(sandboxId).replace(/\/+$/u, '');
+    if (this.earlierUploadNames === undefined) {
+      const listing = await this.hostExec({ sandboxId, command: `ls -1t -- ${shellEscape(uploadsDir)}` });
+      this.earlierUploadNames = successfulExec(listing)
+        ? listing.response.result.split('\n').filter(name => stagedNameDigest(name) !== undefined)
+        : [];
+    }
+    const present = new Set(staged().map(attachment => attachment.name));
+    const missing = this.earlierUploadNames.filter(name => !present.has(name));
+    const named = missing.filter(name => code.includes(name));
+    let totalBytes = staged().reduce((total, attachment) => total + attachment.bytes.length, 0);
+    for (const name of named.length > 0 ? named : missing) {
+      if (this.runCodeIngressStaging.size >= MAX_DOCUMENT_FILES) {
+        break;
+      }
+      const filePath = `${uploadsDir}/${name}`;
+      try {
+        const bytes = await this.downloadUserFile(filePath);
+        if (
+          bytes.length > MAX_BYTES_PER_DOCUMENT ||
+          totalBytes + bytes.length > MAX_TOTAL_DOCUMENT_BYTES ||
+          !matchesStagedName({ stagedName: name, content: bytes })
+        ) {
+          this.logger.warn('An earlier upload was left out of /ingress', { name, size: bytes.length });
+          continue;
+        }
+        totalBytes += bytes.length;
+        this.runCodeIngressStaging.set(filePath, { name, bytes });
+      } catch (error) {
+        this.logger.warn('An earlier upload could not be read back for /ingress', {
+          name,
+          ...extractErrorLogFields(error),
+        });
+      }
+    }
+    return staged();
+  }
+
   /** The sandbox directory the file tools write to; script_path is resolved against it. */
   private runCodeWorkspaceDir(): string {
     return this.provider.getWorkspaceDir() ?? '/workspace';
@@ -5411,7 +5588,7 @@ export class Sandbox extends LocalToolMCP {
       result = await service.runCode(input, {
         signal: context?.signal,
         packageMirrorToken,
-        attachments: [...this.runCodeIngressStaging.values()],
+        attachments: await this.runCodeAttachments(input),
         readScript: scriptPath => this.readRunCodeScript(scriptPath),
         onProgress: (message: string) => {
           provisioningMessages.push(message);
@@ -5447,7 +5624,7 @@ export class Sandbox extends LocalToolMCP {
       result = { ...result, stderr: `${result.stderr}\n\n${note}` };
     }
     return toolResultResponse({
-      text: JSON.stringify(result),
+      text: runCodeResultText(result),
       isError: result.status === 'failed',
       ...(provisioningMessages.length > 0
         ? {
@@ -5464,26 +5641,41 @@ export class Sandbox extends LocalToolMCP {
     });
   }
 
+  /** The workspace Sentinel judges this sandbox's calls against: the bound repository, else the session's, else the provider's. */
+  private sentinelWorkspaceCwd(): string | null {
+    return (
+      this.boundRepository?.workspace_cwd ??
+      this.sentinelContext?.workspace_cwd ??
+      this.provider.getWorkspaceDir() ??
+      null
+    );
+  }
+
   /**
    * The paths a write is about to create, checked before it runs. Tracking records only these, so an edit to
    * a file that already existed (a repo file) never makes it a file Aman wrote.
    */
-  private createdWriteTargets(input: { paths: readonly string[]; cwd: string }): string[] {
+  private async createdWriteTargets(input: { paths: readonly string[]; cwd: string }): Promise<string[]> {
     const resolution = this.provider.filesystem;
-    return input.paths.filter(p => isNewWriteTarget({ p, cwd: input.cwd, resolution }));
+    const path_missing = resolution === 'remote' ? (path: string) => this.pathMissing(path) : undefined;
+    const created = await Promise.all(
+      input.paths.map(p => isNewWriteTarget({ p, cwd: input.cwd, resolution, path_missing })),
+    );
+    return input.paths.filter((_, index) => created[index] === true);
   }
 
   /**
    * Sentinel: record agent-created or agent-modified files as tracked
    * executables, so a later attempt to execute them escalates for approval.
-   * Best effort and host-side: paths that do not resolve on the host (for
-   * example a remote sandbox checkout) are skipped silently.
+   * Best effort: a path that cannot be resolved is skipped silently. A remote
+   * sandbox's files are recorded by name.
    */
   private observeSentinelWrites(input: { paths: readonly string[]; cwd: string }): void {
     const ctx = classifyContextFor({
       host: this.sentinelContext,
       repository_id: this.boundRepository?.repository_id ?? null,
-      workspace_cwd: this.boundRepository?.workspace_cwd ?? null,
+      // The workspace calls are classified against, or a file recorded here would never be found again.
+      workspace_cwd: this.sentinelWorkspaceCwd(),
     });
     const resolution = this.provider.filesystem;
     const store = ctx.services.tracked_store;
@@ -5772,15 +5964,18 @@ export class Sandbox extends LocalToolMCP {
     context?: ToolInvocationContext,
     planScope?: ImplementationPlanGrantScope,
   ): Promise<CallToolResponse> {
+    // A host-set limit (a registered command's own) wins over the one the model asked for.
+    const timeoutSeconds = input.timeoutSeconds ?? input.timeout_seconds;
     const resolvedInput: SandboxRuntimeExecInput = {
       ...input,
       cwd: input.cwd ?? this.boundRepository?.workspace_cwd ?? this.provider.getWorkspaceDir(),
+      ...(timeoutSeconds === undefined ? {} : { timeoutSeconds }),
     };
     const preflightFailure = sandboxExecPreflightFailure({
       command: resolvedInput.command,
       purpose: resolvedInput.purpose,
       cwd: resolvedInput.cwd,
-      env: resolvedInput.env,
+      env: input.env,
       output: resolvedInput.output,
       webConnectorAttached: this.webConnectorAttached,
       webConnectorToolHint: this.webConnectorToolHint,
@@ -5853,7 +6048,7 @@ export class Sandbox extends LocalToolMCP {
     const gitPrep =
       this.prepareHostAuthenticatedGit({ sandboxId: rawId, exec: resolvedInput, approvedRemotes }) ??
       this.prepareAllowlistedExec({ sandboxId: rawId, exec: resolvedInput });
-    const env = { ...mcpClientEnv, ...gitPrep.env };
+    const env = { ...gitCommitIdentityEnv(this.gitCommitIdentity), ...mcpClientEnv, ...gitPrep.env };
     const execInput = gitPrep.exec;
 
     const dispatchMarker = { dispatched: false };
@@ -5987,6 +6182,94 @@ export class Sandbox extends LocalToolMCP {
   }
 
   /**
+   * Runs a script that ships with a skill turned on in this chat. The host picks the program and passes the
+   * script and its arguments as separate arguments with no shell, and the shell tool's own limits on starting
+   * Python or Node stay as they are.
+   */
+  private async handleRunSkillScript(
+    input: SandboxRunSkillScriptInput,
+    approvalDecision?: ApprovalDecision,
+    context?: ToolInvocationContext,
+  ): Promise<CallToolResponse> {
+    const run = this.skillScriptRunFor(input);
+    if (run === undefined || run.status === 'invalid') {
+      const message = run?.message ?? 'Name the skill and the script inside it.';
+      return toolResultResponse({ text: JSON.stringify({ error: message }), isError: true });
+    }
+    if (approvalDecision === undefined) {
+      const tool_info = await this.toolCallInfo({ name: SANDBOX_RUN_SKILL_SCRIPT_TOOL_NAME, arguments: input });
+      if (tool_info.pre_dispatch_failure !== undefined) {
+        return hostRefusalResponse(tool_info.pre_dispatch_failure.message);
+      }
+      if (tool_info.is_approval_required) {
+        return { approvalRequired: { tool_info } };
+      }
+    }
+    let sandboxInfo: SandboxInfo;
+    let sandboxCreated: SandboxInfo | undefined;
+    try {
+      ({ sandboxInfo, sandboxCreated } = await this.ensureReadySandbox());
+    } catch (e) {
+      this.logger.error('Sandbox initialization failed', extractErrorLogFields(e));
+      return hostRefusalResponse(SANDBOX_START_FAILED_MESSAGE);
+    }
+    const rawId = this.providerSandboxId(sandboxInfo.sandbox_id);
+    const skillsDir = this.provider.getSkillsDir(rawId);
+    // Checked where it runs, through any links, since the server cannot see the sandbox's files.
+    const located = await this.hostExec({
+      sandboxId: rawId,
+      // A host-built check on the trusted PATH, so a program planted in the workspace cannot answer for realpath.
+      command: ['realpath', '-e', '--', ...skillScriptRealPathOperands({ skillsDir, run })].map(shellEscape).join(' '),
+      signal: context?.signal,
+    });
+    if (
+      !located.success ||
+      located.response.exitCode !== 0 ||
+      !skillScriptStaysInFolder({ skillsDir, skill: input.skill, resolved: located.response.result })
+    ) {
+      return hostRefusalResponse(
+        `The script ${input.script} is not a file inside the ${input.skill} skill's folder, so it did not run. Check the script's path in the skill's instructions.`,
+      );
+    }
+    const skillNetworkGrant = await this.resolveSkillNetworkGrant();
+    const execInput: SandboxRuntimeExecInput = {
+      intent: input.intent,
+      purpose: 'execute',
+      command: run.command,
+      cwd: run.skill_folder,
+    };
+    const result = await this.provider.exec({
+      sandboxId: rawId,
+      command: run.command,
+      argv: run.argv,
+      cwd: run.skill_folder,
+      signal: context?.signal,
+      ...(skillNetworkGrant === undefined
+        ? {}
+        : { skillNetworkToken: skillNetworkGrant.token, skillNetworkHosts: skillNetworkGrant.hosts }),
+    });
+    // Sites the script was refused become cards the same way they do after a shell command.
+    await this.collectSkillNetworkCards();
+    const skillUsedEvents = detectSkillUsedEvents({
+      command: run.command,
+      cwd: run.skill_folder,
+      skillsDir,
+      skillNames: this.skillMounter?.skillNames() ?? [],
+    });
+    return {
+      result: {
+        content: [{ type: 'text', text: this.execResultText(await this.decorateExecResult(result, rawId, execInput)) }],
+        isError: !isExecResultOk(result),
+      },
+      wasInitialized: undefined,
+      sandboxCreated: Boolean(sandboxCreated),
+      sandboxInfo,
+      verificationReceiptCandidate: undefined,
+      events: skillUsedEvents.length > 0 ? skillUsedEvents : undefined,
+    };
+  }
+
+  /**
    * Runs `normalizeStructuredEditArguments` over one structured-edit tool's already-validated
    * input and returns it with the same shape, notes discarded (the notes surfaced to the
    * approval card come from the `toolCallInfo` pass over the same, still-unnormalized input;
@@ -6090,7 +6373,7 @@ export class Sandbox extends LocalToolMCP {
     // failed even though the file was written. Only request the lock when a repository
     // is actually bound; a scratch write has no concurrent-checkout to guard against.
     const workspaceLockRoot = this.boundRepository === undefined ? undefined : workspaceRoot;
-    const createdPaths = this.createdWriteTargets({ paths: [normalizedPath], cwd: scopeResolution.scope.cwd });
+    const createdPaths = await this.createdWriteTargets({ paths: [normalizedPath], cwd: scopeResolution.scope.cwd });
     const observedWrite = await this.runObservedWorkspaceMutation({
       sandboxId: rawId,
       cwd: canonicalScope.cwd,
@@ -6399,7 +6682,7 @@ export class Sandbox extends LocalToolMCP {
     // same root the paths are relative to, rather than the (possibly different) Git toplevel.
     const observationRoot = this.boundRepository?.workspace_cwd ?? input.cwd;
     const createdPaths =
-      workspaceRoot === undefined ? [] : this.createdWriteTargets({ paths: finalPaths, cwd: workspaceRoot });
+      workspaceRoot === undefined ? [] : await this.createdWriteTargets({ paths: finalPaths, cwd: workspaceRoot });
     const observedMutation = await this.runObservedWorkspaceMutation({
       sandboxId: rawId,
       cwd: input.cwd,
@@ -6585,7 +6868,7 @@ export class Sandbox extends LocalToolMCP {
     // observation joins the same root the paths are relative to, rather than the (possibly
     // different) Git toplevel.
     const observationRoot = this.boundRepository?.workspace_cwd ?? input.cwd;
-    const createdPaths = this.createdWriteTargets({ paths: [normalizedPath], cwd: input.cwd });
+    const createdPaths = await this.createdWriteTargets({ paths: [normalizedPath], cwd: input.cwd });
     const observedReplace = await this.runObservedWorkspaceMutation({
       sandboxId: rawId,
       cwd: input.cwd,

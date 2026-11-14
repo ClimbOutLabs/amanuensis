@@ -20,11 +20,20 @@ import { simpleCardCopy } from './cardCopy';
 import type { Tier3Card, Tier3SkillNetwork } from './tier';
 
 /**
- * A site name as a person reads it. Names are stored and matched in their coded form, so an
- * international name shows decoded on the card while the question itself keeps the coded form.
+ * A site name as a person reads it. Names are stored and matched in their coded form. When the
+ * decoded name differs, both are shown, because a decoded name can mix alphabets to pass for a
+ * familiar site while the coded form cannot.
  */
 function displaySiteName(host: string): string {
-  return domainToUnicode(host);
+  const decoded = domainToUnicode(host);
+  return decoded === '' || decoded === host.toLowerCase() ? host : `${decoded} (${host})`;
+}
+
+/** Points the reader at the coded name when a card shows one, so a look-alike name is caught. */
+function codedNameNote(hosts: readonly string[]): string {
+  return hosts.some(host => displaySiteName(host) !== host)
+    ? ' The name in brackets is how the site is really written. Check it, because letters from another alphabet can make a site look like a familiar one.'
+    : '';
 }
 
 /** The three answers a network card takes. */
@@ -66,11 +75,11 @@ export function buildSkillNetworkCard(input: {
   };
   const singleSite = input.hosts.length === 1 ? displaySiteName(input.hosts[0] ?? '') : null;
   if (input.reason === 'code_changed') {
+    const plain_what = `Let the ${input.skill_name} skill reach ${sites}?`;
     return {
-      plain_what: `Let the ${input.skill_name} skill reach ${sites}?`,
-      copy: simpleCardCopy({ headline: `Let the ${input.skill_name} skill reach ${sites}?`, undo: null, reason: null }),
-      plain_why:
-        'This skill\u2019s code changed since you approved it, so the approval was cancelled. Approving again covers the code as it is now.',
+      plain_what,
+      copy: simpleCardCopy({ headline: plain_what, undo: null, reason: null }),
+      plain_why: `This skill\u2019s code changed since you approved it, so the approval was cancelled. Approving again covers the code as it is now.${codedNameNote(input.hosts)}`,
       cannot_be_undone: null,
       why_asked_again: null,
       destination: sites,
@@ -84,10 +93,11 @@ export function buildSkillNetworkCard(input: {
     };
   }
   if (input.reason === 'first_use') {
+    const plain_what = `Let the ${input.skill_name} skill reach ${sites}?`;
     return {
-      plain_what: `Let the ${input.skill_name} skill reach ${sites}?`,
-      copy: simpleCardCopy({ headline: `Let the ${input.skill_name} skill reach ${sites}?`, undo: null, reason: null }),
-      plain_why: 'This skill names these sites as the ones it needs. It cannot reach any of them until you say yes.',
+      plain_what,
+      copy: simpleCardCopy({ headline: plain_what, undo: null, reason: null }),
+      plain_why: `This skill names these sites as the ones it needs. It cannot reach any of them until you say yes.${codedNameNote(input.hosts)}`,
       cannot_be_undone: null,
       why_asked_again: null,
       destination: sites,
@@ -100,10 +110,11 @@ export function buildSkillNetworkCard(input: {
       skill_network,
     };
   }
+  const plain_what = `Allow a connection to ${sites} in this chat?`;
   return {
-    plain_what: `Allow a connection to ${sites} in this chat?`,
-    copy: simpleCardCopy({ headline: `Allow a connection to ${sites} in this chat?`, undo: null, reason: null }),
-    plain_why: `A command in this chat tried to reach ${sites}, which is not one of the sites approved for the skills in this chat, and the connection was refused. Aman cannot tell which skill, if any, made the attempt.`,
+    plain_what,
+    copy: simpleCardCopy({ headline: plain_what, undo: null, reason: null }),
+    plain_why: `A command in this chat tried to reach ${sites}, which is not one of the sites approved for the skills in this chat, and the connection was refused. Aman cannot tell which skill, if any, made the attempt.${codedNameNote(input.hosts)}`,
     cannot_be_undone: null,
     why_asked_again: null,
     destination: sites,

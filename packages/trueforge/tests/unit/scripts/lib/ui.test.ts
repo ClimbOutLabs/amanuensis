@@ -33,6 +33,7 @@ interface FixtureCase {
   name: string;
   verbose: boolean;
   assumeYes: boolean;
+  framed: boolean;
   calls: { name: string; args: Arg[] }[];
   expected: Record<string, string>;
 }
@@ -70,12 +71,14 @@ function parseFixtures(): FixtureCase[] {
     }
     if (line.startsWith('== ')) {
       commit();
-      current = { name: line.slice(3), verbose: false, assumeYes: false, calls: [], expected: {} };
+      current = { name: line.slice(3), verbose: false, assumeYes: false, framed: false, calls: [], expected: {} };
       cases.push(current);
     } else if (line === 'set verbose 1') {
       if (current !== undefined) current.verbose = true;
     } else if (line === 'set assume_yes 1') {
       if (current !== undefined) current.assumeYes = true;
+    } else if (line === 'set framed 1') {
+      if (current !== undefined) current.framed = true;
     } else if (line.startsWith('call ') && mode === undefined) {
       current?.calls.push(tokenize(line.slice(5)));
     } else if (line.startsWith('-- ')) {
@@ -105,7 +108,7 @@ async function render({ fixture, mode }: { fixture: FixtureCase; mode: Mode }): 
   let output = '';
   const sink = { write: (text: string): void => void (output += text), isTTY: false, columns: undefined };
   const options: UiOptions = {
-    env: MODE_ENV[mode],
+    env: fixture.framed ? { ...MODE_ENV[mode], AMAN_UI_FRAMED: '1' } : MODE_ENV[mode],
     out: sink,
     err: sink,
     readLine: () => Promise.resolve(undefined),

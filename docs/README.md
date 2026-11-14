@@ -20,6 +20,7 @@ Aman is a private assistant that runs on your own computer. Start with the secti
 - [Install on Windows](install-windows.md): Install with Aman Setup, one download.
 - [Set up Aman](../packages/trueforge/guide/topics/first-steps.md): Sign in, add a model and have your first chat.
 - [Models and providers](models.mdx): Add a model provider or your own model server.
+- [A model on this computer](../packages/trueforge/guide/topics/local-model.md): Use Ollama or another model you run yourself.
 - [Ideas to try](../packages/trueforge/guide/topics/ideas.md): Ready-made requests to get you going.
 
 ## Features
@@ -75,6 +76,8 @@ These are the same pages Aman's **Help, I'm stuck** answers from.
 
 - [Phone and other devices](../packages/trueforge/guide/topics/phone.md): Use Aman from your phone or another computer.
 - [Reach me](../packages/trueforge/guide/topics/reach-me.md): Choose how Aman gets your attention.
+- [Text messages](../packages/trueforge/guide/topics/text-messages.md): Get a text when something needs you.
+- [Phone calls](../packages/trueforge/guide/topics/phone-calls.md): Let Aman phone you about urgent things.
 
 **Stay in control**
 
@@ -107,6 +110,7 @@ These are the same pages Aman's **Help, I'm stuck** answers from.
 - [Privacy in detail](privacy.md): Every place your data can go.
 - [How schedules hold actions](schedules.md): The full rules for scheduled runs.
 - [How memory works](memory.md): Where memory is stored and how it is used.
+- [How Aman reaches you](reach-me.md): What Aman watches for and how loudly it tells you.
 
 **Settings for experts**
 
@@ -116,6 +120,8 @@ These are the same pages Aman's **Help, I'm stuck** answers from.
 - [A model for each job](model-roles.mdx): Which model answers you, and which does background work.
 - [Personalization details](personalization.mdx): How Aman learns your profile.
 - [Voice setup](voice-input.mdx): Speech services and voice settings.
+- [Text message setup](text-messages.md): Connect Twilio so Aman can text people.
+- [Phone call setup](phone-calls.md): Let Aman call people through Twilio.
 - [Sandbox setup](sandbox.mdx): Where Aman runs code, and its limits.
 - [Browser setup](browser.md): How Aman's browser is set up.
 - [Skills setup](skills.mdx): Add skill packs from git.
@@ -152,6 +158,7 @@ These are the same pages Aman's **Help, I'm stuck** answers from.
 - [Benchmarking](benchmarking.mdx): How the harness compares, and how to rerun it.
 - [Token eval](evals/token-eval.md): Token and step use on a fixed prompt set.
 - [Space eval](evals/space-eval.md): How reliably Aman builds spaces.
+- [Model eval](evals/model-eval.md): Compare models on everyday tasks, safety traps and memory, graded by machine, every week.
 - [Memory design](../ops/memory/DESIGN.md) and [runbook](../ops/memory/RUNBOOK.md): How memory is stored and looked after.
 
 ## Reference

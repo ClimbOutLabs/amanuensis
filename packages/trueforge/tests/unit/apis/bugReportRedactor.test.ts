@@ -64,7 +64,6 @@ function fixtureEvents(): { turn_id: string; event: unknown }[] {
         injected_block: `Recalled: ${PERSONAL_NAME} (${PERSONAL_EMAIL}) — ${PERSONAL_FACT}`,
         stats: {
           items: 2,
-          entities: 1,
           dropped_over_budget: 0,
           dropped_below_threshold: 3,
           estimated_tokens: 120,
@@ -299,7 +298,7 @@ describe('buildBugReportBundle', () => {
       type: 'aman.memory.recall',
       outcome: 'error',
       budget_reason: 'post_compaction',
-      counts: { items: 2, entities: 1, estimated_tokens: 120, dropped_below_threshold: 3 },
+      counts: { items: 2, estimated_tokens: 120, dropped_below_threshold: 3 },
     });
 
     const profileLearned = turn?.events.find(event => event.type === 'aman.profile.learned');

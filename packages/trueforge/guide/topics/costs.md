@@ -23,7 +23,7 @@ You can ask about today, this week, this month or any range of days. Deleted cha
 
 The cost includes the helper jobs behind the answer, such as summaries for your memory.
 
-To hide this line, click **More** in the left bar, then **Settings**, then **Themes**. Under **Answers**, turn off **Show model and cost in answer details**. Aman still counts your use. You just don't see it.
+To hide this line, click **More** in the left bar, then **Settings**, then **Appearance**. Under **Answers**, turn off **Show model and cost in answer details**. Aman still counts your use. You just don't see it.
 
 ## Good to know
 

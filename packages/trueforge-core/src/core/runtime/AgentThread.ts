@@ -74,6 +74,7 @@ import {
   type ThinkingBlock,
 } from '../llm/LLMTypes';
 import { resolveMaxOutputTokens } from '../llm/maxOutputTokens';
+import { ModelUnreachableError } from '../llm/modelUnreachable';
 import { buildModelWaitingEvent } from '../llm/modelWaitingEvent';
 import { describeTurnFailure } from '../llm/plainFailureMessages';
 import { noticeAfter, REPEAT_STOP_NOTE, TOOL_MARKUP_NOTICE, UNBACKED_CLAIM_NOTES } from '../llm/replyNotices';
@@ -84,7 +85,7 @@ import {
   type StreamDeadlineDetails,
 } from '../llm/streamDeadline';
 import { toOpenAIChatMessage } from '../llm/toOpenAIChatMessage';
-import { estimateTokensForString } from '../llm/usage';
+import { estimateTokensForString, PICTURE_TOKEN_ESTIMATE } from '../llm/usage';
 import {
   isContextLengthError,
   isRetryableProviderError,
@@ -147,7 +148,7 @@ import { isExpiredApproval } from '../permissions/approvalExpiry';
 import type { ConnectorBinding } from '../permissions/approvalTokens';
 import { approvalTokenExpiry } from '../permissions/approvalTokens';
 import { recordHeldActionAudit, recordNotPreparedRefusals } from '../permissions/audit';
-import { movesBrowserPage } from '../permissions/browserToolNames';
+import { isAmanBrowserCall } from '../permissions/browserToolNames';
 import { isChangeRequestReason } from '../permissions/changeRequest';
 import { isHostVouchedReadReason } from '../permissions/connectorTrust';
 import {
@@ -215,6 +216,7 @@ import {
   EMAIL_PASSWORD_PROMPT,
   EMPTY_ANSWER_NUDGE_MESSAGE,
   emptyInspectionNudgeMessage,
+  estimateTokensForChatMessageContent,
   estimateTokensForContextMessages,
   failedBatchNudgeMessage,
   findHeldToolCalls,
@@ -240,6 +242,7 @@ import {
   NO_TASK_NO_TOOLS_PROMPT,
   noProgressNudgeMessage,
   personMessageIndex,
+  pictureCount,
   PLAIN_SPEECH_PROMPT,
   policyBlockedNudgeMessage,
   remapToolCallIdSet,
@@ -251,6 +254,7 @@ import {
   UNTRUSTED_TOOL_OUTPUT_PROMPT,
   WEB_IMAGES_PROMPT,
   withHostUniqueToolCallIds,
+  withoutEarlierThinking,
 } from './contextUtils';
 import { CALL_TOOL_NAME, DeferredTool, tryParseCallToolWrapper, tryUnwrapCallToolInput } from './DeferredTool';
 import { applyHostToolCallPolicy, type HostToolCallPolicy, type HostToolCallPolicyLogger } from './HostToolCallPolicy';
@@ -1162,6 +1166,9 @@ function validateApprovalMessage({
   if (
     message.approval.status === 'allow' &&
     message.approval.scope === 'always' &&
+    // "Always allow for this skill" on a skill network card is recorded against the skill, not
+    // as a grant on the held call, so it does not need the call itself to take a standing grant.
+    held?.tool_info.skill_network == null &&
     !(toolGrantsAvailable && allowsToolGrant(pending.tool_info))
   ) {
     throw new InvalidAgentSendInputError(
@@ -1673,6 +1680,18 @@ function isSandboxFileEditCall({
   );
 }
 
+/** Whether the call goes to the sandbox's own shell tool, looked up by the tool it maps to. */
+function isSandboxCommandCall({
+  call,
+  toolMapping,
+}: {
+  call: Pick<InternalEnrichedToolCall, 'function'>;
+  toolMapping: Map<string, MappedMCPTool>;
+}): boolean {
+  const mapped = toolMapping.get(call.function.name);
+  return mapped?.toolSet.name === SANDBOX_MCP_SERVER_ID && mapped.originalToolName === SANDBOX_EXEC_TOOL_NAME;
+}
+
 /** Whether a call reached its tool, whatever it answered. Refused, blocked and unsent calls did not. */
 function toolCallWasAttempted(disposition: ToolResultDisposition): boolean {
   return disposition !== 'denied' && disposition !== 'policy_blocked' && disposition !== 'never_ran';
@@ -2052,6 +2071,17 @@ export class AgentThread {
             this.addBundleGuidance(builder, bundle);
             return builder.build();
           },
+          // A saved tool result is a JSON envelope, so the text sits in it as a JSON string.
+          inChat: text => {
+            const saved = JSON.stringify(text);
+            return this.context.some(
+              message =>
+                isLLMContextMessage(message) &&
+                message.role === 'tool' &&
+                typeof message.content === 'string' &&
+                message.content.includes(saved),
+            );
+          },
         });
     const capabilities = [
       ...(this.toolBundles === undefined ? [] : [this.toolBundles.capability()]),
@@ -2064,9 +2094,11 @@ export class AgentThread {
     this.postToolCallContextProcessor = capabilities.flatMap(c => c.postToolCallProcessors ?? []);
     this.toolResponseProcessors = capabilities.flatMap(c => c.toolResponseProcessors ?? []);
     this.untrustedTextScreens = capabilities.flatMap(c => c.untrustedTextScreens ?? []);
-    this.instructionBuilders = capabilities.flatMap(c =>
-      (c.instructionBuilders ?? []).map(build => ({ bundle: c.bundle, build })),
-    );
+    // A capability's instructions say how to use its tools. A read-only definition gets none of those tools,
+    // so it gets none of their instructions either; context with no tools behind it still goes out.
+    this.instructionBuilders = capabilities
+      .filter(c => !this.definition.readOnly || (c.systemToolSets ?? []).length === 0)
+      .flatMap(c => (c.instructionBuilders ?? []).map(build => ({ bundle: c.bundle, build })));
     const capabilityPreSend = capabilities.flatMap(c => c.preSendProcessors ?? []);
     // OpenToolCallCloser is fixed core before contributed preSend processors.
     this.preSendContextProcessors = [
@@ -2173,6 +2205,11 @@ export class AgentThread {
     }
   }
 
+  /** Whether this thread is given the named connector's tools. A read-only thread is given none. */
+  private holdsConnector(name: string): boolean {
+    return !this.definition.readOnly && (this.definition.toolSets ?? []).some(toolSet => toolSet.name === name);
+  }
+
   private buildInstruction(userInstruction?: string): string {
     const identity = this.parent ? SUB_AGENT_IDENTITY : rootAgentIdentity(this.definition.identity ?? {});
     const builder = InstructionBuilder.createSystemPrompt(identity);
@@ -2218,7 +2255,8 @@ export class AgentThread {
     capabilities.addSection('plain-speech', PLAIN_SPEECH_PROMPT);
     if (this.definition.setUpConnectorNames?.includes(MAIL_CONNECTOR_NAME)) {
       capabilities.addSection('email-passwords', EMAIL_PASSWORD_PROMPT);
-      if (this.sentinel?.services.demoSendAllowlist != null) {
+      // The demo note tells the model to save a draft with the Email tools, so it goes only where those tools do.
+      if (this.sentinel?.services.demoSendAllowlist != null && this.holdsConnector(MAIL_CONNECTOR_NAME)) {
         capabilities.addSection('demo-email', DEMO_EMAIL_PROMPT);
       }
     }
@@ -3123,11 +3161,12 @@ export class AgentThread {
    * is assembled. Mirrors the message assembly in transformToLLMRequest without
    * building the full request body.
    *
-   * Context messages are estimated text-only (see contextMessageTextTokens):
-   * toOpenAIChatMessage preserves image_url / input_audio / file parts with
-   * their full base64 payloads, which the length/4 heuristic would inflate
-   * wildly (a 1MB image reads as ~340k tokens) while the provider does not
-   * bill those bytes as text tokens.
+   * Context messages are estimated with estimateTokensForContextMessages, the
+   * same count compaction sizes its kept tail with: text, tool calls and replayed
+   * thinking. The base64 bytes of a picture are never counted as text (a 1MB image
+   * would read as ~340k tokens); each picture counts as a fixed amount instead,
+   * because the model does take it into its context. What is added for this one
+   * request (recalled memories, screenshots) is counted too.
    *
    * Bails out early once the running total already exceeds `limit`: this runs on
    * every turn, and precision past the guard threshold buys nothing. Pass
@@ -3156,11 +3195,20 @@ export class AgentThread {
         }
       }
     }
-    for (const message of this.context) {
-      total += contextMessageTextTokens(message);
+    // A model that cannot read pictures is sent a line of text in place of each one.
+    const countPictures = this.definition.modelSupportsVision === true;
+    for (const message of withoutEarlierThinking(this.context)) {
+      total += estimateTokensForContextMessages([message]).prompt_tokens;
+      if (countPictures && isLLMContextMessage(message)) {
+        total += pictureCount(message.content) * PICTURE_TOKEN_ESTIMATE;
+      }
       if (total > limit) {
         return total;
       }
+    }
+    total += this.estimateEphemeralTokens();
+    if (total > limit) {
+      return total;
     }
     const taskStateBlock = renderTaskStateBlock({
       state: this.taskState,
@@ -3174,6 +3222,39 @@ export class AgentThread {
     }
     total += estimateTokensForString(JSON.stringify(tools));
     return total;
+  }
+
+  /** The saved chat as it is sent: no `tool_info`, no approval rows, no thinking from earlier replies. */
+  private contextAsChatMessages(): ChatCompletionMessageParam[] {
+    return withoutEarlierThinking(this.context)
+      .filter(message => !isLegacyIncompleteReasoningMessage(message))
+      .filter(isLLMContextMessage)
+      .map(msg => withoutHostNotices(toOpenAIChatMessage(msg)));
+  }
+
+  /**
+   * Tokens of what is added to this one request and never saved: recalled memories, the latest
+   * screenshots. They are sent like any other message, so the size check has to count them.
+   */
+  private estimateEphemeralTokens(): number {
+    if (this.preEphemeralLLMContextProcessors.length === 0) {
+      return 0;
+    }
+    const saved = this.contextAsChatMessages();
+    const modelSupportsVision = this.definition.modelSupportsVision === true;
+    let messages = saved;
+    for (const processor of this.preEphemeralLLMContextProcessors) {
+      messages = processor.processPreLLMEphemeral(messages, { modelSupportsVision }) ?? messages;
+    }
+    // The difference in size, not the new objects: a processor may hand back a saved message as
+    // a copy, and that copy must not count twice.
+    const size = (list: readonly ChatCompletionMessageParam[]): number =>
+      list.reduce(
+        (total, message) =>
+          total + estimateTokensForChatMessageContent({ content: message.content, countPictures: modelSupportsVision }),
+        0,
+      );
+    return Math.max(0, size(messages) - size(saved));
   }
 
   private transformToLLMRequest(tools: ChatCompletionTool[]): LLMCreateParamsStreaming {
@@ -3193,14 +3274,7 @@ export class AgentThread {
       }
     }
 
-    // NOTE: all this code-golf is to remove `tool_info` before sending the message to Gateway
-    // ApprovalDecisionMessage rows are persisted in context but must not be sent to the LLM.
-    const contextMessages = this.context
-      .filter(message => !isLegacyIncompleteReasoningMessage(message))
-      .filter(isLLMContextMessage)
-      .map(msg => withoutHostNotices(toOpenAIChatMessage(msg)));
-
-    messages.push(...contextMessages);
+    messages.push(...this.contextAsChatMessages());
 
     // Order is the cache order: static instruction, history, then this reply's fixed block
     // and the ephemeral recall block, both just before the current message. The history and
@@ -3991,11 +4065,16 @@ export class AgentThread {
     let result: IteratorResult<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage>;
     // The request's size in tokens, estimated from the context it is built from; the silence
     // report names it, so an oversized request is visible in the one line that reports the ending.
-    const requestTokenEstimate = Math.round(estimateTokensForContextMessages(this.context).prompt_tokens);
+    const requestTokenEstimate = Math.round(
+      estimateTokensForContextMessages(withoutEarlierThinking(this.context)).prompt_tokens,
+    );
     // A step that goes silent is retried once before the turn ends: the finished tool results
     // behind it stay in the history the retry sends, and a partial tool call never runs because
     // calls only execute from a completed step. Only a second silence ends the step.
     let silenceRetried = false;
+    // A connection that never started is retried once with the same history, since a short network blip can cause
+    // one. A second one ends the step with words that say no reply was started, never that a reply broke off.
+    let unreachableRetried = false;
     // Retries of the forced answer after the provider said to try again later (see
     // FORCED_ANSWER_RETRY_BACKOFF_MS); never counts toward the stream-fault attempts.
     let providerRetries = 0;
@@ -4170,6 +4249,15 @@ export class AgentThread {
           if (signal?.aborted) {
             throw error;
           }
+          if (error instanceof ModelUnreachableError && !unreachableRetried) {
+            unreachableRetried = true;
+            this.logger.warn('Model connection never started; retrying the call once with the same history', {
+              ...extractErrorLogFields(error),
+              place: error.place,
+              attempt,
+            });
+            continue;
+          }
           if (!(error instanceof ModelStreamFault)) {
             // A definite "try again later" from the provider (5xx, 429) on the forced answer is
             // retried after a short wait, since this step is the only one left and failing it
@@ -4185,7 +4273,12 @@ export class AgentThread {
                 attempt,
                 step: this.metrics.iterations,
               });
-              yield this.generateErrorEvent(MODEL_SERVICE_UNAVAILABLE_MESSAGE, undefined, 'model_stream_fault');
+              // A connection that never started keeps its own words: the service did not refuse anything.
+              yield this.generateErrorEvent(
+                error instanceof ModelUnreachableError ? error.message : MODEL_SERVICE_UNAVAILABLE_MESSAGE,
+                undefined,
+                'model_stream_fault',
+              );
               return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
             }
             providerRetries++;
@@ -4644,15 +4737,19 @@ export class AgentThread {
     // metadata-only delta after assembly so a live client reaches the same
     // authoritative state as a client that reloads the persisted event. Do not
     // repeat function arguments here: delta folders append those fragments.
-    if (agentAssistantMessage.tool_calls?.length) {
+    // Each entry goes to the place its call was streamed at and names the call, because merged
+    // duplicates and replaced ids leave the kept calls at other positions than the stream's.
+    const streamedAt = new Map((uniqueToolCalls ?? []).map((call, index) => [call.id, index]));
+    const callMetadata = (agentAssistantMessage.tool_calls ?? []).flatMap(toolCall => {
+      const index = streamedAt.get(toolCall.id);
+      return index === undefined ? [] : [{ index, id: toolCall.id, tool_info: toolCall.tool_info }];
+    });
+    if (callMetadata.length > 0) {
       yield {
         type: EventType.MODEL_MESSAGE_DELTA,
         id: modelMessageEventId,
         thread_id: this.threadId,
-        tool_calls: agentAssistantMessage.tool_calls.map((toolCall, index) => ({
-          index,
-          tool_info: toolCall.tool_info,
-        })),
+        tool_calls: callMetadata,
       } satisfies ModelMessageDeltaEvent;
     }
 
@@ -4887,9 +4984,14 @@ export class AgentThread {
       // An outside action gets no automatic retry either: one that reported an error may still
       // have gone out, so the model is told to check first.
       const lastRun = turn.callSignatures.get(signature);
+      // Aman's browser shows a live page that changes by itself (it loads, a menu opens late, the
+      // person uses the live view), and a press may not take the first time. So a browser step is
+      // never refused as already done; one that keeps showing nothing new still ends the turn below.
+      const liveBrowserStep = isAmanBrowserCall(call.tool_info);
       const alreadySeen =
         seenInBatch.has(signature) ||
-        (lastRun !== undefined &&
+        (!liveBrowserStep &&
+          lastRun !== undefined &&
           (countsTowardCap ||
             (!retryIsDue({ lastKind: lastRun.lastKind, retried: lastRun.retried }) &&
               lastRun.writesAtLastRun >= changesSeenBy(call.tool_info, turn))));
@@ -5267,17 +5369,15 @@ export class AgentThread {
         if (toolCall !== undefined && changesState(toolCall.tool_info, { countsTowardCap })) {
           nextToolCallMemo.turn.changesThisTurn += 1;
         }
-        // The browser's page has a count of its own: a step counts only when it reaches a page not
+        // The browser's page has a count of its own: a step counts only when it shows a page not
         // seen before in this turn, so a scroll at the bottom of a page, or back and forth between
-        // two pages, moved nothing new.
+        // two pages, showed nothing new. A read counts too: the page may have changed by itself.
         if (toolCall !== undefined) {
           const page = browserPageSeen({ info: toolCall.tool_info, text: result.message.content });
           if (page !== undefined && !nextToolCallMemo.turn.browserPagesSeen.includes(page.digest)) {
             nextToolCallMemo.turn.browserPagesSeen.push(page.digest);
-            if (page.moves) {
-              nextToolCallMemo.turn.browserPageChangesThisTurn += 1;
-              changedByCallId.add(toolCall.id);
-            }
+            nextToolCallMemo.turn.browserPageChangesThisTurn += 1;
+            changedByCallId.add(toolCall.id);
           }
         }
         if (result.toolCallInfo !== undefined) {
@@ -5647,8 +5747,8 @@ export class AgentThread {
         this.noteUnfinished(unfinished);
       }
     }
-    // A step that landed a space write or a sandbox file edit is progress, not spent budget; a build in
-    // parts needs many such steps.
+    // A step that landed a space write or a sandbox file edit, or ran a sandbox command, is progress, not
+    // spent budget; a build in parts needs many such steps.
     const refundsSoFar = replyTurn.progressRefundsByThread.get(this.threadId) ?? 0;
     const refund = progressRefundFor({
       refundsSoFar,
@@ -5664,6 +5764,7 @@ export class AgentThread {
                 failure: result.failure,
                 savedNothing: spaceWriteSavedNothing(result.message.content),
                 sandboxFileEdit: isSandboxFileEditCall({ call, toolMapping }),
+                sandboxCommand: isSandboxCommandCall({ call, toolMapping }),
               },
             ];
       }),
@@ -5714,10 +5815,10 @@ export class AgentThread {
       // snapshot, but not used for the stop/nudge decisions below (see callSignatureCountsThisTurn).
       const previousRecord = nextToolCallMemo.turn.callSignatures.get(signature);
       const settled = settledByCallId.get(callId);
-      // A browser step that moved the page starts from where it left it, so its own move does not
-      // count against it: the same scroll may run again, and is no loop. One that moved nothing is.
-      // A step that keeps moving still has a higher stop of its own (IDENTICAL_MOVE_STOP_AT) and no nudge.
-      const movedPage = movesBrowserPage(call.tool_info) && changedByCallId.has(callId);
+      // A browser step that showed a new page starts from there, so its own move does not count
+      // against it: the same scroll or read may run again, and is no loop. One that showed nothing
+      // new is. A step that keeps moving still has a higher stop of its own (IDENTICAL_MOVE_STOP_AT) and no nudge.
+      const movedPage = changedByCallId.has(callId);
       nextToolCallMemo.turn.callSignatures.set(signature, {
         count: (previousRecord?.count ?? 0) + 1,
         writesAtLastRun: changesSeenBy(call.tool_info, nextToolCallMemo.turn) - (movedPage ? 1 : 0),
@@ -6418,11 +6519,6 @@ function contextMessageTextLength(message: ContextMessage): number {
     return total;
   }
   return 0;
-}
-
-/** Token estimate for one context message counting text only; see contextMessageTextLength. */
-function contextMessageTextTokens(message: ContextMessage): number {
-  return contextMessageTextLength(message) / 4;
 }
 
 function estimateRawContextTextLength(context: readonly ContextMessage[]): number {

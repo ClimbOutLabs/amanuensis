@@ -23,7 +23,7 @@ Most problems are found by one check.
 
     Choose **Check Aman** in the Start menu.
 
-It checks this computer and every instance, and prints one **Next:** line for each problem, with the command that fixes it. It changes nothing. [The aman command](commands.md#check-that-everything-works) lists its options, and the [install guide](install.mdx#doctor) says what each check means.
+It checks this computer and every instance, and prints one **Next:** line for each problem, with the command that fixes it. The box at the end lists every problem again, so you do not have to scroll up. It changes nothing. [The aman command](commands.md#check-that-everything-works) lists its options, and the [install guide](install.mdx#doctor) says what each check means.
 
 Inside Aman, click **Help, I'm stuck** at the top of the screen. The guide checks Aman for a few seconds and tells you what it found. [Get help](../packages/trueforge/guide/topics/getting-help.md) explains it.
 
@@ -132,7 +132,7 @@ Inside Aman, click **Help, I'm stuck** at the top of the screen. The guide check
 ??? question "The model is set, but the chat says it can't reach it"
 
     - For a hosted model, check the key in **Settings**, then **Models**.
-    - For a local model such as Ollama, check that it's running on the same computer.
+    - For a model on this computer, such as Ollama, check that it's running. If Aman still can't reach it, see [A model on this computer](../packages/trueforge/guide/topics/local-model.md).
 
 ??? question "Aman can't run code or read an attachment"
 

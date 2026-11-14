@@ -23,6 +23,8 @@ export interface ToolInvocationContext {
   admission_provenance: ToolAdmissionProvenance;
   /** Stable host identity for one requested provider invocation. */
   dispatch_id?: string | undefined;
+  /** The model's tool call being run; a tool that reports back to the chat names it. */
+  tool_call_id?: string | undefined;
   /** Host-observed structured-edit target state captured before approval. */
   structured_edit_precondition?: StructuredEditPrecondition | undefined;
   /** The params the approval was minted over, for tools that tie an approval to state outside the call. */
@@ -178,6 +180,14 @@ export interface IToolSet {
   staysInWorkspace?(input: { name: string; argumentsText: string }): boolean;
 
   /**
+   * Whether this set's registered tool by that name declares that it writes files, as its own
+   * registration states. Pre-dispatch verification re-checks containment for such tools, because
+   * containment can change between classification and execution. Absent means the set declares
+   * no file-writing tools.
+   */
+  isFileWriteTool?(name: string): boolean;
+
+  /**
    * The connector this call goes to as of now, for re-checking an approval at dispatch. Absent on
    * tool sets whose approvals are not bound to a connector.
    */
@@ -204,6 +214,15 @@ export interface IToolSet {
    * to the call's own arguments. A rejection fails the check closed.
    */
   liveMintParams?(params: CallToolRequest['params']): Promise<Record<string, unknown> | undefined>;
+
+  /**
+   * Turn events for a call the host stopped at dispatch because it no longer matched its approval, so the chat can
+   * say why the action did not happen. Absent for tool sets with nothing to report.
+   */
+  refusedAtDispatchEvents?(input: {
+    params: CallToolRequest['params'];
+    tool_call_id: string;
+  }): readonly RegisteredPassthroughEvent[];
 
   /** The guidance topic a tool is grouped under. Every tool is sent on every request either way. */
   bundleOf?(toolName: string): ToolBundleName | undefined;

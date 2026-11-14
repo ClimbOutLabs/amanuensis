@@ -11,6 +11,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { TENANT_ID } from '../../../src/apis/sessions';
+import configuration from '../../../src/config';
 import { validateGitAgentSkills } from '../../../src/db/gitSkillMounts';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
 import type { ISkillStore } from '../../../src/db/skillStore';
@@ -21,6 +22,7 @@ import { SqliteRepositoryStore } from '../../../src/db/sqlite/repository-store/S
 import { SqliteSandboxProviderStore } from '../../../src/db/sqlite/sandbox-provider-store/SqliteSandboxProviderStore';
 import { SqliteSkillStore } from '../../../src/db/sqlite/skill-store/SqliteSkillStore';
 import { SqliteOAuthTokenStore } from '../../../src/db/sqlite/token-store/SqliteOAuthTokenStore';
+import { configureRemoteAddressCheck } from '../../../src/runtime/remoteAddress';
 import {
   applyTokenFactoryRouting,
   buildGatewayMetadata,
@@ -38,6 +40,34 @@ import {
 } from '../../../src/runtime/sessionResources';
 import { setCachedLocalSandboxSupport } from '../../../src/sandbox/localRuntime';
 import type { ReasoningEffort } from '../../../src/schemas/modelProvider';
+
+// Name resolution is stubbed for the whole suite: a name with 'unresolvable' in it does not
+// resolve, localhost resolves to loopback, the local model bridge resolves to an address on an
+// instance network, host.docker.internal and spark.example.ts.net resolve to Docker's gateway and
+// a Tailscale address of the computer, and every other name resolves to a public address.
+// The address check at use time judges names by what they resolve to, so the suite's answer
+// cannot depend on the DNS of the machine running it.
+jest.mock('node:dns/promises', () => {
+  const actual = jest.requireActual<typeof import('node:dns/promises')>('node:dns/promises');
+  return {
+    ...actual,
+    lookup: async (hostname: string, options?: { all?: boolean | undefined }) => {
+      if (hostname.includes('unresolvable')) {
+        const error = new Error(`getaddrinfo ENOTFOUND ${hostname}`);
+        Reflect.set(error, 'code', 'ENOTFOUND');
+        throw error;
+      }
+      const addresses: Record<string, string> = {
+        localhost: '127.0.0.1',
+        'aman-local-model': '172.30.5.2',
+        'host.docker.internal': '172.17.0.1',
+        'spark.example.ts.net': '100.101.102.103',
+      };
+      const entry = { address: addresses[hostname] ?? '93.184.216.34', family: 4 };
+      return options?.all === true ? [entry] : entry;
+    },
+  };
+});
 
 describe('resolveBoundRepository', () => {
   it('loads only confirmed commands for the bound repository revision', async () => {
@@ -766,6 +796,137 @@ describe('validateAgentSpec', () => {
       status: 422,
       message: 'Skill "echo": preload is not supported for git skills',
     });
+  });
+});
+
+describe('getModelDetails: the address check at use time', () => {
+  async function setupWithBaseUrl(baseUrl: string) {
+    const db = createSqliteDb(':memory:');
+    await migrateSqliteToLatest(db);
+    const modelProviderStore = new SqliteModelProviderStore(db);
+    await modelProviderStore.upsertProvider({
+      tenant_id: 'default',
+      name: 'local-provider',
+      manifest: {
+        type: 'custom',
+        name: 'local-provider',
+        base_url: baseUrl,
+        auth: { api_key: 'sk-test' },
+        models: [
+          {
+            model_id: 'local-model',
+            name: 'local-model',
+            properties: { context_length: 128000, max_output_tokens: 4096 },
+          },
+        ],
+      },
+    });
+    return modelProviderStore;
+  }
+
+  it('refuses a stored provider at a loopback address, naming the setting that allows it', async () => {
+    const store = await setupWithBaseUrl('http://127.0.0.1:11434/v1');
+
+    await expect(
+      getModelDetails({ tenant_id: 'default', name: 'local-provider/local-model', store }),
+    ).rejects.toMatchObject({
+      status: 422,
+      message: expect.stringContaining('LOCAL_MODEL_ENDPOINTS'),
+    } satisfies Partial<HTTPException>);
+  });
+
+  it('refuses a stored provider at the cloud metadata address', async () => {
+    const store = await setupWithBaseUrl('http://169.254.169.254/v1');
+
+    await expect(
+      getModelDetails({ tenant_id: 'default', name: 'local-provider/local-model', store }),
+    ).rejects.toMatchObject({ status: 422 } satisfies Partial<HTTPException>);
+  });
+
+  it('refuses a stored provider whose name does not resolve, because it cannot be checked', async () => {
+    const store = await setupWithBaseUrl('https://models.unresolvable.invalid.example/v1');
+
+    await expect(
+      getModelDetails({ tenant_id: 'default', name: 'local-provider/local-model', store }),
+    ).rejects.toMatchObject({
+      status: 422,
+      message: expect.stringContaining('did not resolve'),
+    } satisfies Partial<HTTPException>);
+  });
+
+  it('resolves the same loopback provider once the operator names its exact endpoint', async () => {
+    const store = await setupWithBaseUrl('http://127.0.0.1:11434/v1');
+    const originalEndpoints = configuration.LOCAL_MODEL_ENDPOINTS;
+    configuration.LOCAL_MODEL_ENDPOINTS = ['127.0.0.1:11434'];
+    try {
+      await expect(
+        getModelDetails({ tenant_id: 'default', name: 'local-provider/local-model', store }),
+      ).resolves.toMatchObject({ providerConfig: { baseUrl: 'http://127.0.0.1:11434/v1' } });
+    } finally {
+      configuration.LOCAL_MODEL_ENDPOINTS = originalEndpoints;
+    }
+  });
+
+  it('does not let a named endpoint cover a different port on the same host', async () => {
+    const store = await setupWithBaseUrl('http://127.0.0.1:9999/v1');
+    const originalEndpoints = configuration.LOCAL_MODEL_ENDPOINTS;
+    configuration.LOCAL_MODEL_ENDPOINTS = ['127.0.0.1:11434'];
+    try {
+      await expect(
+        getModelDetails({ tenant_id: 'default', name: 'local-provider/local-model', store }),
+      ).rejects.toMatchObject({ status: 422 } satisfies Partial<HTTPException>);
+    } finally {
+      configuration.LOCAL_MODEL_ENDPOINTS = originalEndpoints;
+    }
+  });
+
+  it('refuses the local model bridge on an instance network until aman local-model lists its endpoint', async () => {
+    const store = await setupWithBaseUrl('http://aman-local-model:30031/v1');
+    const originalEndpoints = configuration.LOCAL_MODEL_ENDPOINTS;
+    configureRemoteAddressCheck({ ownNetworkRanges: ['172.30.0.0/16'] });
+    try {
+      configuration.LOCAL_MODEL_ENDPOINTS = ['aman-local-model:11434'];
+      await expect(
+        getModelDetails({ tenant_id: 'default', name: 'local-provider/local-model', store }),
+      ).rejects.toMatchObject({
+        status: 422,
+        message: expect.stringContaining('run aman local-model 30031'),
+      } satisfies Partial<HTTPException>);
+
+      configuration.LOCAL_MODEL_ENDPOINTS = ['aman-local-model:30031'];
+      await expect(
+        getModelDetails({ tenant_id: 'default', name: 'local-provider/local-model', store }),
+      ).resolves.toMatchObject({ providerConfig: { baseUrl: 'http://aman-local-model:30031/v1' } });
+    } finally {
+      configureRemoteAddressCheck({ ownNetworkRanges: [] });
+      configuration.LOCAL_MODEL_ENDPOINTS = originalEndpoints;
+    }
+  });
+
+  it.each([
+    'http://100.101.102.103:30031/v1',
+    'https://spark.example.ts.net:8443/v1',
+    'http://192.168.1.20:11434/v1',
+    'http://host.docker.internal:11434/v1',
+  ])('resolves a model on the computer an installed Aman runs on, at %s', async baseUrl => {
+    // The app's containers sit on networks of their own, so this computer's addresses are not the app's.
+    const store = await setupWithBaseUrl(baseUrl);
+    configureRemoteAddressCheck({ ownNetworkRanges: ['172.18.0.0/16', '172.30.0.0/16'] });
+    try {
+      await expect(
+        getModelDetails({ tenant_id: 'default', name: 'local-provider/local-model', store }),
+      ).resolves.toMatchObject({ providerConfig: { baseUrl } });
+    } finally {
+      configureRemoteAddressCheck({ ownNetworkRanges: [] });
+    }
+  });
+
+  it('resolves a stored provider at a public address', async () => {
+    const store = await setupWithBaseUrl('https://8.8.8.8/v1');
+
+    await expect(
+      getModelDetails({ tenant_id: 'default', name: 'local-provider/local-model', store }),
+    ).resolves.toMatchObject({ providerConfig: { baseUrl: 'https://8.8.8.8/v1' } });
   });
 });
 

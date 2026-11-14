@@ -20,6 +20,7 @@ import {
   type PublicCalendarAccount,
 } from '../runtime/calendarAccount';
 import { connectionStateOf } from '../runtime/connectorAccount';
+import { invalidateTodayCalendarCache } from '../runtime/todayCalendar';
 import type { CalendarAccountStatus, SaveCalendarAccountRequest } from '../schemas/calendarAccount';
 import { createConnectorAccountHandlers } from './connectorAccountHandlers';
 import { requireJsonOrSameOrigin } from './crossSite';
@@ -110,12 +111,17 @@ export function createCalendarAccountRouter(deps: CalendarAccountRouterDeps) {
   router.openapi(calendarAccountRoutes.save, async c => {
     const answer = await handlers.save(c.req.valid('json'));
     if (answer.status === 201) {
+      // The account changed, so the rail's cached calendar read is stale from this moment.
+      invalidateTodayCalendarCache();
       return c.json(answer.body, 201);
     }
     return answer.status === 400 ? c.json(answer.body, 400) : c.json(answer.body, 502);
   });
   router.openapi(calendarAccountRoutes.remove, async c => {
     const answer = await handlers.remove();
+    if (answer.status === 200) {
+      invalidateTodayCalendarCache();
+    }
     return answer.status === 200 ? c.json(answer.body, 200) : c.json(answer.body, 502);
   });
   return router;

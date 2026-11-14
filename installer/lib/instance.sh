@@ -56,6 +56,8 @@ machine_render() { # stt image, tts image (may be empty)
   if [ ! -f "$MACHINE_DIR/.env" ]; then
     render_template "$TEMPLATES_DIR/machine/env.tpl" "VOICE_THREADS=$(voice_threads)" | write_if_changed "$MACHINE_DIR/.env" 600 || true
   fi
+  # The secret the speech services check on every call; the instances get copies of the same value.
+  env_secret_backfill_in "$MACHINE_DIR/.env" SPEECH_SECRET
 }
 
 # up -d is a no-op when nothing changed. The speech models load in the background, so this does not wait on them.
@@ -157,6 +159,7 @@ instance_render() {
   instance_tailscale_https_move "$name" "$app_image"
   owner_name_backfill "$name"
   web_push_backfill "$name" "$app_image"
+  speech_secret_backfill "$name"
   app_port=$(reg_get "$name" app_port)
   login_port=$(reg_get "$name" login_port)
   public_url=$(reg_get "$name" public_url)
@@ -185,6 +188,23 @@ instance_render() {
       done < <(network_bind_addresses "$origins")
     fi
   fi
+  # Texts through Twilio get a listener of their own beside the app. Its port is published on 127.0.0.1 only, for
+  # Tailscale Funnel or a web server on this computer to carry on to Twilio. The app port is never opened for it.
+  local sms_port sms_env sms_listen
+  sms_port=$(sms_webhook_port "$name" quiet)
+  sms_env="$(instance_dir "$name")/.env"
+  # A port picked for the person is written down, so it stays the same whatever other instances do later.
+  if [ -n "$sms_port" ] && [ "$(sms_port_wanted "$name")" = auto ] && grep -q '^# >>> managed by the installer' "$sms_env"; then
+    env_managed_set "$sms_env" TWILIO_WEBHOOK_PORT "$sms_port"
+  fi
+  # Published onto the port the app listens on, which differs from the pick only when the pick could not be written.
+  sms_listen=$(env_get "$sms_env" TWILIO_WEBHOOK_PORT)
+  sms_listen=${sms_listen:-$TWILIO_DEFAULT_PORT}
+  reg_set "$name" sms_port "$sms_port"
+  reg_set "$name" sms_settings "$(sms_settings_digest "$name")"
+  if [ -n "$sms_port" ]; then
+    app_ports="${app_ports:+$app_ports$'\n'}      - '127.0.0.1:$sms_port:$sms_listen'"
+  fi
   # Only the app reaches the sign-in service when it passes the sign-in pages through; a browser that goes to the
   # published sign-in port directly needs the service on every address of the namespace.
   if [ -n "$origins" ] || [ "$(gateway_flag "$origins" "$public_url")" = 1 ]; then login_bind=127.0.0.1; fi
@@ -210,7 +230,10 @@ instance_render() {
   # The email connector is part of the compose file only once its image is known. Its wrapper script is copied beside the
   # compose file, because the compose file mounts it from this folder.
   local email_on=0
-  [ -n "${REL_MAIL_EMAIL_IMAGE:-}" ] && email_on=1
+  if [ -n "${REL_MAIL_EMAIL_IMAGE:-}" ]; then
+    email_on=1
+    env_secret_backfill "$name" MAIL_EMAIL_ACCOUNT_SECRET
+  fi
   ensure_private_dir "$dir"
   if [ "$email_on" = 1 ]; then
     write_if_changed "$dir/mail-email-entrypoint.sh" 644 <"$REPO_ROOT/ops/compose/mail-email/entrypoint.sh" || true
@@ -222,6 +245,10 @@ instance_render() {
   if [ "$browser_on" = 1 ]; then
     write_if_changed "$dir/browser-seccomp.json" 644 <"$REPO_ROOT/ops/browser-sidecar/seccomp_profile.json" || true
   fi
+  # The local model bridge, when the owner named a port of this computer for it.
+  local local_model_args=()
+  mapfile -t local_model_args < <(local_model_render_args "$name")
+  if [ -n "$(local_model_ports "$name")" ]; then local_model_files "$dir"; fi
   # The https folders are mounted from the home folder itself, except when the home is the state volume
   # (Windows): then the compose file mounts them from inside the volume, because a host folder the
   # daemon could read does not exist there.
@@ -234,13 +261,96 @@ instance_render() {
     "IF_EDGE=$edge_on" "LOGIN_HOST=$login_host" \
     "LOGIN_PORT=$login_port" "DEX_TELEMETRY_PORT=$DEX_TELEMETRY_PORT" "APP_PORTS=$app_ports" \
     "IF_TLS=$tls_on" "IF_TLS_HOST=$tls_host" "IF_TLS_VOLUME=$tls_volume" "CADDY_IMAGE=$(tls_image)" "TLS_USER=$(id -u):$(id -g)" "TLS_LEAF_DIR=$(tls_leaf_dir "$name")" \
-    "TLS_TRUST_DIR=$(tls_trust_dir "$name")" "TLS_HTTP_IN=$TLS_HTTP_IN" | write_if_changed "$dir/compose.yaml" 644 || true
+    "TLS_TRUST_DIR=$(tls_trust_dir "$name")" "TLS_HTTP_IN=$TLS_HTTP_IN" "${local_model_args[@]}" | write_if_changed "$dir/compose.yaml" 644 || true
   if [ "$tls_on" = 1 ]; then tls_prepare "$name" "$app_image"; fi
   if [ "$edge_on" = 1 ]; then edge_render "$name"; fi
   render_template "$TEMPLATES_DIR/instance/dex.yaml.tpl" \
     "ISSUER=$login_url/dex" "LOGIN_BIND=$login_bind" "LOGIN_PORT=$login_port" "DEX_TELEMETRY_PORT=$DEX_TELEMETRY_PORT" \
     "OWNER_EMAIL=$email" "OWNER_NAME=$(reg_get "$name" owner_name)" "CLIENT_ID=$client_id" "REDIRECT_URIS=$redirects" |
     write_if_changed "$dir/dex.yaml" 644 || true
+}
+
+# The app's own default port for the Twilio listener. It sits outside the ranges app, sign-in and https ports are
+# picked from, so a new instance never lands on it.
+TWILIO_DEFAULT_PORT=9201
+
+# The Twilio port the instance's settings file asks for when it turns texts on, `auto` when it turns them on and sets
+# no port, otherwise nothing. A value that is not a port gives nothing, and the app then says so when it starts.
+sms_port_wanted() { # name
+  local env port provider
+  env="$(instance_dir "$1")/.env"
+  [ -f "$env" ] || return 0
+  provider=$(env_get "$env" REACH_SMS_PROVIDER | tr '[:upper:]' '[:lower:]')
+  [ "$provider" = twilio ] || return 0
+  port=$(env_get "$env" TWILIO_WEBHOOK_PORT)
+  if [ -z "$port" ]; then
+    printf auto
+    return 0
+  fi
+  case $port in
+    *[!0-9]*) return 0 ;;
+  esac
+  if [ "${#port}" -le 5 ] && [ "$port" -ge 1 ] && [ "$port" -le 65535 ]; then printf '%s' "$port"; fi
+}
+
+# The ports the instance's Twilio listener must not use: every instance's app, sign-in and https ports, the ones Aman
+# uses inside the instance, the Twilio port each other instance already publishes, and the one each instance earlier
+# by name asks for. A port already published stays with the instance that has it.
+sms_ports_taken() { # name
+  local name=$1 other taken
+  taken="$(reg_all app_port) $(reg_all login_port) $(reg_all tls_port) $TLS_HTTP_IN $TLS_HTTPS_IN"
+  for other in $(reg_names); do
+    [ "$other" = "$name" ] || taken="$taken $(reg_get "$other" sms_port)"
+  done
+  for other in $(reg_names); do
+    [ "$other" = "$name" ] && break
+    taken="$taken $(sms_webhook_port "$other" quiet)"
+  done
+  printf '%s' "$taken"
+}
+
+# The Twilio port to publish for the instance, or nothing. With no port set, the instance keeps the one it has, else
+# gets the default or the next free port. A port the person set that is taken is not published, and the installer
+# says which line to change, unless asked to be quiet.
+sms_webhook_port() { # name [quiet]
+  local name=$1 quiet=${2:-} port taken own env
+  port=$(sms_port_wanted "$name")
+  [ -n "$port" ] || return 0
+  taken=$(sms_ports_taken "$name")
+  if [ "$port" = auto ]; then
+    own=$(reg_get "$name" sms_port)
+    if [ -n "$own" ] && ! port_reserved "$own" "$taken"; then
+      printf '%s' "$own"
+    else
+      pick_port "$TWILIO_DEFAULT_PORT" "$taken" | tr -d '\n' || true
+    fi
+    return 0
+  fi
+  if port_reserved "$port" "$taken"; then
+    [ -n "$quiet" ] && return 0
+    env="$(instance_dir "$name")/.env"
+    warn "Texts in $name cannot use TWILIO_WEBHOOK_PORT $port, because another instance or Aman itself already uses it. Set TWILIO_WEBHOOK_PORT to another port in $env, for example $(pick_port $((port + 1)) "$taken" || echo 9301), then run the installer again."
+    return 0
+  fi
+  printf '%s' "$port"
+}
+
+# A short digest of the settings file's lines that set up texts, or nothing when it has none, so a plain run of the
+# installer restarts the app after any of them changes, such as a new auth token. The lines themselves are never kept.
+sms_settings_digest() { # name
+  local env lines
+  env="$(instance_dir "$1")/.env"
+  [ -f "$env" ] || return 0
+  lines=$(LC_ALL=C grep -E "$(env_key_line_re '(REACH_SMS_[A-Z0-9_]+|TWILIO_[A-Z0-9_]+)')" "$env" || true)
+  [ -n "$lines" ] || return 0
+  printf '%s\n' "$lines" | sha256_stdin | cut -c1-16
+}
+
+# True when the texts settings in the settings file are not the ones the instance was last started with: the Twilio
+# port to publish, or any line that sets up texts.
+sms_settings_changed() { # name
+  [ "$(reg_get "$1" sms_port)" != "$(sms_webhook_port "$1" quiet)" ] ||
+    [ "$(reg_get "$1" sms_settings)" != "$(sms_settings_digest "$1")" ]
 }
 
 # What Aman calls a person who has not said: the start of their email, cut to the longest name allowed.
@@ -275,14 +385,25 @@ owner_name_backfill() { # name
 # as its last line. A missing file gets nothing: the instance has no settings to run from, and the instance commands
 # say so.
 env_secret_backfill() { # name key
-  local env key=$2 value
-  env="$(instance_dir "$1")/.env"
+  env_secret_backfill_in "$(instance_dir "$1")/.env" "$2"
+}
+
+# The same backfill for a settings file named directly, such as the machine's own file.
+env_secret_backfill_in() { # env key
+  local env=$1 key=$2 value
   [ -f "$env" ] || return 0
   value=$(sed -n "s/^$key=//p" "$env" | tail -n 1)
   if [ "${#value}" -lt 32 ]; then
     value=$(sed -n "s/^$key=\(.\{32,\}\)\$/\1/p" "$env" | tail -n 1)
     [ -n "$value" ] || value=$(rand_hex 32)
   fi
+  env_secret_write "$env" "$key" "$value"
+}
+
+# Writes one secret value into a settings file: inside the installer's managed part when the file has
+# one (dropping any line for the key outside it), otherwise as the file's last line for that key.
+env_secret_write() { # env key value
+  local env=$1 key=$2 value=$3
   if grep -q '^# >>> managed by the installer' "$env"; then
     env_managed_set "$env" "$key" "$value"
     env_drop_outside_block "$env" "$key"
@@ -292,6 +413,19 @@ env_secret_backfill() { # name key
     grep -v "^$key=" "$env" || true
     printf '%s=%s\n' "$key" "$value"
   } | write_if_changed "$env" 600 || true
+}
+
+# The speech services are shared by every instance on the machine, so one secret guards them: the
+# machine's. Each instance's settings carry a copy of that value, so its app can present it. The
+# machine value is made once and never changed, so the copies never go stale.
+speech_secret_backfill() { # name
+  local value
+  [ -f "$MACHINE_DIR/.env" ] || return 0
+  env_secret_backfill_in "$MACHINE_DIR/.env" SPEECH_SECRET
+  value=$(sed -n "s/^SPEECH_SECRET=//p" "$MACHINE_DIR/.env" | tail -n 1)
+  [ "${#value}" -ge 32 ] || return 0
+  [ -f "$(instance_dir "$1")/.env" ] || return 0
+  env_secret_write "$(instance_dir "$1")/.env" SPEECH_SECRET "$value"
 }
 
 # Makes one push key pair with the app image's Node.js, so the computer needs no key tools of its own. Prints the
@@ -382,6 +516,7 @@ instance_up() {
   if reg_exists "$name"; then reg_set "$name" healthy 1; fi
   step_ok "Instance $name is running and answering"
   proxy_trust_sync "$name"
+  container_networks_sync "$name"
 }
 
 # A reverse proxy on this computer reaches an instance with a public address through a published port, so the app sees
@@ -396,6 +531,33 @@ proxy_trust_sync() { # name
   valid_ipv4 "$gateway" || return 0
   [ "$(env_get "$env" TRUSTED_PROXY_ADDRESSES)" != "$gateway" ] || return 0
   env_managed_set "$env" TRUSTED_PROXY_ADDRESSES "$gateway"
+  dc "$name" up -d --force-recreate --no-deps --wait --wait-timeout 120 app >"$STEP_LOG" 2>&1 || warn "The app of instance $name did not start again. Run: aman doctor instance --fix"
+}
+
+# The app refuses every address on the networks its own containers sit on, so a model or connector address a
+# chat is steered to cannot reach a neighbouring container (the calendar account agent, for one). The Email and
+# Calendar connectors' own endpoints stay usable, because the app lists them as its own services. Docker chooses
+# those networks' ranges when the instance starts, so they are learned here and written to the settings
+# file; the app restarts once when they are learned or change. An instance whose networks cannot be read
+# keeps the ranges it already has.
+container_networks_sync() { # name
+  local name=$1 env ranges network subnet
+  reg_exists "$name" || return 0
+  env="$(instance_dir "$name")/.env"
+  [ -f "$env" ] || return 0
+  ranges=""
+  for network in "aman-${name}_default" "aman-${name}_link" "aman-${name}_calendar" "aman-${name}_browser-control" \
+    "aman-${name}_local-model"; do
+    for subnet in $(D network inspect "$network" --format '{{range .IPAM.Config}}{{.Subnet}} {{end}}' 2>/dev/null || true); do
+      case "$subnet" in
+        */*) ranges="${ranges:+$ranges,}$subnet" ;;
+      esac
+    done
+  done
+  [ -n "$ranges" ] || return 0
+  ranges=$(printf '%s' "$ranges" | tr ',' '\n' | sort -u | tr '\n' ',' | sed 's/,$//')
+  [ "$(env_get "$env" CONTAINER_NETWORK_RANGES)" != "$ranges" ] || return 0
+  env_managed_set "$env" CONTAINER_NETWORK_RANGES "$ranges"
   dc "$name" up -d --force-recreate --no-deps --wait --wait-timeout 120 app >"$STEP_LOG" 2>&1 || warn "The app of instance $name did not start again. Run: aman doctor instance --fix"
 }
 
@@ -492,7 +654,7 @@ run_doctor() {
   fi
   # Same Docker access as the rest of the run (direct, sg or sudo), so a fresh docker group member
   # does not get a failing report for a problem the run itself worked around.
-  as_docker_user env "AMANUENSIS_HOME=$AMAN_HOME" "HOME=$HOME" ${bound[@]+"${bound[@]}"} "$(doctor_shim)" doctor "$@"
+  as_docker_user env "AMANUENSIS_HOME=$AMAN_HOME" "HOME=$HOME" ${AMAN_UI_FRAMED:+"AMAN_UI_FRAMED=$AMAN_UI_FRAMED"} ${bound[@]+"${bound[@]}"} "$(doctor_shim)" doctor "$@"
 }
 
 doctor_status() {
@@ -596,7 +758,7 @@ instance_derive() {
   local reserved_app reserved_login all_reserved
   reserved_app=$(reg_all app_port)
   reserved_login=$(reg_all login_port)
-  all_reserved="$reserved_app $reserved_login $(reg_all tls_port)"
+  all_reserved="$reserved_app $reserved_login $(reg_all tls_port) $(reg_all sms_port)"
   if [ -n "${OPT_PORT:-}" ]; then
     check_port_usable "$OPT_PORT" "$all_reserved" "--port"
     I_PORT=$OPT_PORT
@@ -914,12 +1076,18 @@ print_instance_summary() {
 # How a device comes to trust this computer: one short link over plain http, the same link as a code for a phone, and the
 # step an iPhone needs after installing.
 print_trust_lines() { # name
-  local link
+  local link fp
   link=$(tls_trust_link "$1")
+  ui_heading "Let each device trust this computer"
   ui_line "On each device, the browser will first warn that the page is not private. Do not click past the warning."
   ui_line "Instead, open this page once on that device and follow its steps: $link"
   ui_line "On an iPhone: open it in Safari, install the profile, then turn it on in Settings, General, About, Certificate Trust Settings."
-  ui_line "Your device will show a long code called a fingerprint. It must be $(tls_fingerprint). If it differs, stop."
+  fp=$(tls_fingerprint)
+  ui_line "Your device will show a long code called a fingerprint. It must be this one:"
+  # Two lines of 16 pairs, so the code fits a narrow terminal and is easy to compare half by half.
+  ui_line "$(_ui_s 1 "${fp:0:48}")"
+  if [ -n "${fp:48}" ]; then ui_line "$(_ui_s 1 "${fp:48}")"; fi
+  ui_line "If it differs, stop."
   if [ "$TLS_AUTHORITY_REPLACED" = 1 ]; then
     ui_line "This computer's root certificate was made again, so each device must trust it again."
   fi
@@ -951,6 +1119,7 @@ print_backups_row() {
 
 # The last lines of a finished run: how to reach the aman command from this terminal, and how to update later.
 print_closing_lines() {
+  ui_gap
   case ":$PATH:" in
     *":$AMAN_HOME/bin:"*) ;;
     *) ui_line "Open a new terminal window to use the aman command." ;;

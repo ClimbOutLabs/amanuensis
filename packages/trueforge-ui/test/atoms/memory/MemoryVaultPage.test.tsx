@@ -43,6 +43,7 @@ function createCatalog(initial: MemoryVaultEntry[]) {
   const catalog: MemoryVaultCatalog = {
     listEntries: async namespace => (namespace === undefined ? stored : []),
     getSummaryStatus: async () => ({ summaryPending: false }),
+    dismissSummaryStatus: async () => undefined,
     updateEntry: async () => {
       throw new Error('not used in these tests');
     },
@@ -274,6 +275,7 @@ describe('Memory explorer with several collections', () => {
     return {
       listEntries: async () => [],
       getSummaryStatus: async () => ({ summaryPending: false }),
+      dismissSummaryStatus: async () => undefined,
       updateEntry: async () => {
         throw new Error('not used in these tests');
       },
@@ -331,6 +333,7 @@ describe('Memory explorer with several collections', () => {
               }),
             ],
       getSummaryStatus: async namespace => ({ summaryPending: namespace === 'persona:Zara' }),
+      dismissSummaryStatus: async () => undefined,
     });
     renderPersonaPanel(catalog);
 
@@ -344,6 +347,7 @@ describe('Memory explorer with several collections', () => {
     const catalog = catalogWith({
       listEntries: async () => [],
       getSummaryStatus: async () => ({ summaryPending: true }),
+      dismissSummaryStatus: async () => undefined,
     });
     renderPersonaPanel(catalog);
 
@@ -352,10 +356,50 @@ describe('Memory explorer with several collections', () => {
     expect(screen.getAllByText(/Couldn't make a summary/)).toHaveLength(2);
   });
 
+  it('says the day it happened, and Dismiss puts away that one line only', async () => {
+    const dismissed: (string | undefined)[] = [];
+    const catalog = catalogWith({
+      listEntries: async () => [],
+      getSummaryStatus: async () => ({ summaryPending: true, failedAt: '2026-08-14T12:00:00.000Z' }),
+      dismissSummaryStatus: async namespace => {
+        dismissed.push(namespace);
+      },
+    });
+    renderPersonaPanel(catalog);
+
+    const zaraLine = await screen.findByText(ZARA_PENDING_LINE);
+    expect(screen.getAllByText(/^This happened on .*2026\.$/)).toHaveLength(2);
+    const zaraNote = zaraLine.closest('div')?.parentElement;
+    if (zaraNote === null || zaraNote === undefined) throw new Error('the Zara line sits in no note');
+    fireEvent.click(within(zaraNote).getByRole('button', { name: 'Dismiss' }));
+
+    await waitFor(() => expect(screen.queryByText(ZARA_PENDING_LINE)).not.toBeInTheDocument());
+    expect(dismissed).toEqual(['persona:Zara']);
+    expect(screen.getByText(SHARED_PENDING_LINE)).toBeInTheDocument();
+  });
+
+  it('keeps the line and says why when Dismiss does not reach the server', async () => {
+    const catalog = catalogWith({
+      listEntries: async () => [],
+      getSummaryStatus: async namespace => ({ summaryPending: namespace === undefined }),
+      dismissSummaryStatus: async () => {
+        throw new Error('The memory folder cannot be written. Check its disk, then try again.');
+      },
+    });
+    renderPersonaPanel(catalog);
+
+    await screen.findByText(SHARED_PENDING_LINE);
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
+
+    expect(await screen.findByText(/The memory folder cannot be written/)).toBeInTheDocument();
+    expect(screen.getByText(SHARED_PENDING_LINE)).toBeInTheDocument();
+  });
+
   it('does not promise that the failed chat itself is summarised again', async () => {
     const catalog = catalogWith({
       listEntries: async () => [],
       getSummaryStatus: async () => ({ summaryPending: true }),
+      dismissSummaryStatus: async () => undefined,
     });
     renderPersonaPanel(catalog);
 

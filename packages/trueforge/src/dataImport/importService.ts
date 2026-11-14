@@ -25,7 +25,6 @@
  */
 import { AgentSpecSchema, type CreatedBySubject, type ISessionStore } from '@truefoundry/trueforge-core/agent-session';
 import { Kysely } from 'kysely';
-import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -44,6 +43,7 @@ import type { IModelProviderStore } from '../db/modelProviderStore';
 import type { IReachSettingsStore } from '../db/reachSettingsStore';
 import type { ISentinelAuditStore } from '../db/sentinelAuditStore';
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
+import type { ITextContactStore } from '../db/textContactStore';
 import type { WithTransaction } from '../db/transaction';
 import type { ITurnArtifactStore } from '../db/turnArtifactStore';
 import { isReservedConnectorName } from '../mcp/firstParty';
@@ -52,31 +52,30 @@ import { personaKnowledgeLocation } from '../personaKnowledge/knowledgePaths';
 import { amanGuidePersonaId, isAmanGuidePersona, isAnyAmanGuideId } from '../personas/amanGuide/identity';
 import { PERSISTED_ARTIFACT_MIME } from '../runtime/artifacts/persistTurnArtifacts';
 import { requestChatSearchBackfill } from '../runtime/chatSearchIndexing';
-import type { RetainItem } from '../runtime/memory/hindsightClient';
+import { GIT_COMMIT_IDENTITY_SETTING_KEY } from '../runtime/gitCommitIdentitySettings';
+import { HANDLED_NOTES_FILE } from '../runtime/memory/handledNotes';
 import {
   applyVaultTombstones,
   CURATED_MEMORY_FILE,
   dailyLogEntries,
   dailyLogFileAt,
-  DOCUMENT_ID_METADATA_KEY,
-  entryMetadata,
-  hiddenContext,
   latestTombstonesByEntry,
+  parseReviewedMarks,
   parseVaultTombstones,
   personaVaultNamespace,
-  SESSION_ID_METADATA_KEY,
+  REVIEWED_FROM_YOU_FILE,
   upgradeLegacyEntries,
   VAULT_TOMBSTONES_FILE,
   vaultEntryTimestamp,
   vaultFilesystemNamespace,
-  withoutHiddenMarkers,
+  withSourceLines,
 } from '../runtime/memory/markdownMemoryFiles';
-import {
-  isMemoryNoteSource,
-  NOTE_DATE_METADATA_KEY,
-  NOTE_SOURCE_METADATA_KEY,
-  noteRetainContent,
-} from '../runtime/memory/memoryNotes';
+import { isInPageFolder, pageFolder, parsePageFilePath } from '../runtime/memory/memoryPages';
+import { ensureMemorySourceLines } from '../runtime/memory/memorySourceLines';
+import { MEMORY_HELPER_MODEL_SETTING_KEY } from '../runtime/memoryHelperModelSettings';
+import { MEMORY_HELPER_WAIT_SETTING_KEY } from '../runtime/memoryHelperWaitSettings';
+import { MEMORY_NIGHTLY_HOUR_SETTING_KEY, MEMORY_NIGHTLY_SETTING_KEY } from '../runtime/memoryNightlySettings';
+import { MEMORY_PAGE_SORTING_SETTING_KEY } from '../runtime/memoryPageSortingSettings';
 import { MEMORY_RECALL_ENABLED_SETTING_KEY } from '../runtime/memoryRecallSettings';
 import { MEMORY_SCREEN_ENABLED_SETTING_KEY } from '../runtime/memoryScreenSettings';
 import { MEMORY_SUMMARIZE_SETTING_KEY } from '../runtime/memorySummarizeSettings';
@@ -84,8 +83,10 @@ import { DEFAULT_CHAT_MODEL_SETTING_KEY } from '../runtime/tokenFactoryProvider'
 import { TOOL_OUTPUT_SCREEN_ENABLED_SETTING_KEY } from '../runtime/toolOutputScreenSettings';
 import type { ImportDataResult } from '../schemas/dataImport';
 import type { ReachSettings } from '../schemas/reach';
+import { TEXT_WORDS_MAX, type TextContactExport } from '../schemas/textMessages';
 import { newId } from '../utils/id';
 import { detachConnectors, normalizeImportedConnectors, withoutKeptConnector } from './connectorImport';
+import { upgradeArchivedConnectors } from './connectorUpgrade';
 import { upgradeArchivedDeliveries } from './deliveryUpgrade';
 import { damagedExportError, DataImportError } from './importError';
 import {
@@ -124,6 +125,7 @@ import {
   ImportSessionPartRecordSchema,
   ImportSettingsFileSchema,
   ImportSpacesFileSchema,
+  ImportTextsFileSchema,
   isToolType,
   LEFT_OUT_PLURALS,
   UnknownToolTypeError,
@@ -168,8 +170,9 @@ export interface DataImportDeps<TTransaction> extends PreflightDeps<TTransaction
   auditStore: Pick<ISentinelAuditStore, 'importRecords'>;
   /** The feed comes along with the same commit. Push devices never do. */
   deliveryStore: Pick<IDeliveryStore, 'importDeliveries'>;
-  /** Reach me settings come along with the same commit, with texts and calls switched off. */
+  /** Reach me settings and the number for texts come along with the same commit: texts and calls off, the number unconfirmed. */
   reachSettingsStore: Pick<IReachSettingsStore, 'importSettings'>;
+  textContactStore: Pick<ITextContactStore, 'importContact' | 'importWords'>;
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
   withTransaction: WithTransaction<TTransaction>;
   personaKnowledgeDir: string;
@@ -194,7 +197,6 @@ export interface DataImportRequest {
   dryRun?: boolean;
 }
 
-const MEMORY_RETAIN_TIMEOUT_MS = 120_000;
 const MAX_LOGGED_ISSUES = 20;
 /** Chats or sections whose left-out rows are shown in the summary; the import log has them all. */
 const LEFT_OUT_OWNERS_SHOWN = 20;
@@ -255,7 +257,13 @@ function leftOutName(name: string): string {
 /** Instance-wide settings an import may fill in; the permission settings in the archive are never applied. */
 const IMPORTABLE_GLOBAL_SETTING_KEYS: ReadonlySet<string> = new Set<string>([
   DEFAULT_CHAT_MODEL_SETTING_KEY,
+  GIT_COMMIT_IDENTITY_SETTING_KEY,
   MEMORY_RECALL_ENABLED_SETTING_KEY,
+  MEMORY_HELPER_MODEL_SETTING_KEY,
+  MEMORY_HELPER_WAIT_SETTING_KEY,
+  MEMORY_NIGHTLY_HOUR_SETTING_KEY,
+  MEMORY_NIGHTLY_SETTING_KEY,
+  MEMORY_PAGE_SORTING_SETTING_KEY,
   MEMORY_SCREEN_ENABLED_SETTING_KEY,
   MEMORY_SUMMARIZE_SETTING_KEY,
   TOOL_OUTPUT_SCREEN_ENABLED_SETTING_KEY,
@@ -555,6 +563,7 @@ interface ArchiveContents {
   audit: ImportAuditRecord[];
   deliveries: ImportDelivery[];
   reach: ReachSettings[];
+  texts: TextContactExport[];
   files: ReadonlyMap<string, Buffer>;
   sourceTenantId: string;
   /** Internal details from an older version that were repaired or left out, filled in as sections are read. */
@@ -770,7 +779,7 @@ function loadArchive(input: {
   // a damaged section means the archive cannot be trusted as a whole.
   section('chats.json', CommonChatExportFileSchema);
   const folders = section('folders.json', ImportFoldersFileSchema);
-  const connectors = section('connectors.json', ImportConnectorsFileSchema);
+  const connectors = section('connectors.json', ImportConnectorsFileSchema, upgradeArchivedConnectors);
   const sessionEntries = readSessionEntries({
     files,
     logger,
@@ -813,7 +822,9 @@ function loadArchive(input: {
       : [],
     // Absent from exports made before Reach me settings existed.
     reach: files.has('reach.json') ? section('reach.json', ImportReachFileSchema, startReachSwitchesAsNew) : [],
-    files,
+    // Absent from exports made before texts existed.
+    texts: files.has('texts.json') ? section('texts.json', ImportTextsFileSchema) : [],
+    files: manifest.schema_version < MEMORY_SOURCE_LINES_SCHEMA_VERSION ? memoryFilesWithSourceLines(files) : files,
     sourceTenantId: manifest.tenant_id,
     leftOutReport: leftOut,
     personaRepairLines,
@@ -951,6 +962,21 @@ function validateCrossReferences(contents: ArchiveContents): void {
   }
 }
 
+/** The first export format version whose memory notes each close with a line that says where they came from. */
+const MEMORY_SOURCE_LINES_SCHEMA_VERSION = 3;
+
+/** The archive's files with every daily memory file from an older export marked the way a stored one is. */
+function memoryFilesWithSourceLines(files: ReadonlyMap<string, Buffer>): ReadonlyMap<string, Buffer> {
+  const upgraded = new Map(files);
+  for (const [name, data] of files) {
+    const [section, , ...inner] = name.split('/');
+    if (section === 'memory' && dailyLogFileAt(inner.join('/')) !== undefined) {
+      upgraded.set(name, Buffer.from(withSourceLines(data.toString('utf8')).content, 'utf8'));
+    }
+  }
+  return upgraded;
+}
+
 interface ParsedMemoryNamespace {
   seg: string;
   curated: string | undefined;
@@ -959,7 +985,10 @@ interface ParsedMemoryNamespace {
 
 /** Groups the archive's memory/ files by namespace segment and resolves them the way the vault reads them. */
 function parseMemoryNamespaces(files: ReadonlyMap<string, Buffer>): ParsedMemoryNamespace[] {
-  const bySeg = new Map<string, { curated?: string; tombstones?: string; daily: Map<string, string> }>();
+  const bySeg = new Map<
+    string,
+    { curated?: string; tombstones?: string; reviewed?: string; daily: Map<string, string> }
+  >();
   for (const [name, data] of files) {
     if (!name.startsWith('memory/')) {
       continue;
@@ -981,6 +1010,8 @@ function parseMemoryNamespaces(files: ReadonlyMap<string, Buffer>): ParsedMemory
       bucket.curated = data.toString('utf8');
     } else if (inner === VAULT_TOMBSTONES_FILE) {
       bucket.tombstones = data.toString('utf8');
+    } else if (inner === REVIEWED_FROM_YOU_FILE) {
+      bucket.reviewed = data.toString('utf8');
     } else if (dailyFile !== undefined) {
       bucket.daily.set(dailyFile, data.toString('utf8'));
     }
@@ -990,9 +1021,10 @@ function parseMemoryNamespaces(files: ReadonlyMap<string, Buffer>): ParsedMemory
   for (const [seg, bucket] of bySeg) {
     const tombstones = bucket.tombstones === undefined ? [] : parseVaultTombstones(bucket.tombstones);
     const latest = latestTombstonesByEntry(tombstones);
+    const reviewed = parseReviewedMarks(bucket.reviewed ?? '');
     const scanned = [...bucket.daily.keys()]
       .sort()
-      .flatMap(file => dailyLogEntries({ safeNamespace: seg, file, content: bucket.daily.get(file) ?? '' }));
+      .flatMap(file => dailyLogEntries({ safeNamespace: seg, file, content: bucket.daily.get(file) ?? '', reviewed }));
     const entries = applyVaultTombstones(scanned, tombstones).map(entry => {
       const tombstone = latest.get(entry.id);
       return {
@@ -1035,75 +1067,6 @@ function countMemories(namespaces: readonly ParsedMemoryNamespace[]): number {
     (sum, namespace) => sum + namespace.entries.length + (namespace.curated === undefined ? 0 : 1),
     0,
   );
-}
-
-/** Builds retain items for a client (non-Markdown) memory backend from the parsed namespaces. */
-function buildRetainItems(
-  namespaces: readonly ParsedMemoryNamespace[],
-  input: { exportedAt: string; personaWireBySourceSeg: ReadonlyMap<string, string> },
-): RetainItem[] {
-  const items: RetainItem[] = [];
-  const documentIdFor = (seed: string): string =>
-    `import-${createHash('sha256').update(seed, 'utf8').digest('hex').slice(0, 32)}`;
-  for (const namespace of namespaces) {
-    // A client backend has one bank per tenant, so a persona vault's entries
-    // keep their origin as the retain context instead of a separate vault.
-    const vaultContext = input.personaWireBySourceSeg.get(namespace.seg);
-    if (namespace.curated !== undefined) {
-      items.push({
-        content: namespace.curated,
-        timestamp: input.exportedAt,
-        document_id: documentIdFor(`curated:${namespace.seg}`),
-        ...(vaultContext === undefined ? {} : { context: vaultContext }),
-      });
-    }
-    for (const entry of namespace.entries) {
-      let body = entry.text;
-      let entryContext: string | undefined;
-      if (body.startsWith('## ')) {
-        const newline = body.indexOf('\n');
-        body = newline < 0 ? '' : body.slice(newline + 1).replace(/^\n+/, '');
-      }
-      const trailers = entryMetadata(body);
-      const sessionId = trailers?.[SESSION_ID_METADATA_KEY];
-      const noteSource = trailers?.[NOTE_SOURCE_METADATA_KEY];
-      const noteDate = trailers?.[NOTE_DATE_METADATA_KEY];
-      // The page text drops an id-shaped context line, so it is read before the body is cleaned.
-      entryContext = hiddenContext(body);
-      body = withoutHiddenMarkers(body);
-      const contextMatch = /\n\n> ([^\n]*)$/.exec(body);
-      if (contextMatch !== null) {
-        const contextValue = contextMatch[1];
-        if (contextValue !== undefined) {
-          entryContext ??= contextValue;
-          body = body.slice(0, contextMatch.index);
-        }
-      }
-      const itemContext = vaultContext ?? entryContext;
-      items.push({
-        // A note's marker rides inside its text, so a backend that drops metadata still hands it back.
-        content:
-          noteSource !== undefined && isMemoryNoteSource(noteSource) && noteDate !== undefined
-            ? noteRetainContent({ text: body, source: noteSource, date: noteDate })
-            : body,
-        timestamp: entry.timestamp,
-        // A replaceable entry keeps its document id, so a later update replaces it instead of adding a copy.
-        document_id: trailers?.[DOCUMENT_ID_METADATA_KEY] ?? documentIdFor(entry.id),
-        ...(itemContext === undefined ? {} : { context: itemContext }),
-        ...(sessionId === undefined && noteSource === undefined
-          ? {}
-          : {
-              metadata: {
-                ...(sessionId === undefined ? {} : { [SESSION_ID_METADATA_KEY]: sessionId }),
-                ...(noteSource === undefined || noteDate === undefined
-                  ? {}
-                  : { [NOTE_SOURCE_METADATA_KEY]: noteSource, [NOTE_DATE_METADATA_KEY]: noteDate }),
-              },
-            }),
-      });
-    }
-  }
-  return items;
 }
 
 function pluralize(count: number, singular: string, plural: string): string {
@@ -1154,6 +1117,7 @@ function buildSummary({
   deliveryCount,
   standInAgentNames,
   filesLeftBehind,
+  memoryPages,
   leftOut,
   personaChanges,
   trimmedSpaces,
@@ -1177,6 +1141,7 @@ function buildSummary({
   /** Spaces whose history starts after revision 1 in the archive. */
   trimmedSpaces: number;
   filesLeftBehind: number;
+  memoryPages: MemoryPageCounts;
   /** How Aman will address the person, from the name that came over; null when none did. */
   callYouName: string | null;
   /** True when the import leaves Aman not knowing the person's name. */
@@ -1231,6 +1196,19 @@ function buildSummary({
   if (filesLeftBehind > 0) {
     notes.push(
       `${pluralize(filesLeftBehind, 'uploaded file was', 'uploaded files were')} left behind because the export did not include ${filesLeftBehind === 1 ? 'it' : 'them'}; the chats still show ${filesLeftBehind === 1 ? 'its name' : 'their names'}.`,
+    );
+  }
+  if (memoryPages.imported > 0) {
+    notes.push(`${pluralize(memoryPages.imported, 'memory page', 'memory pages')} came along.`);
+  }
+  if (memoryPages.unreadableNames > 0) {
+    notes.push(
+      `${pluralize(memoryPages.unreadableNames, 'memory page has', 'memory pages have')} a name that is not all lowercase, so Aman will not read ${memoryPages.unreadableNames === 1 ? 'it' : 'them'} yet. Rename ${memoryPages.unreadableNames === 1 ? 'it' : 'each one'} to its lowercase name in the memory folder.`,
+    );
+  }
+  if (memoryPages.unusable > 0) {
+    notes.push(
+      `${pluralize(memoryPages.unusable, 'other file was', 'other files were')} in the memory page folders and ${memoryPages.unusable === 1 ? 'was' : 'were'} not copied, because only .md pages are. Copy ${memoryPages.unusable === 1 ? 'it' : 'them'} into the memory folder by hand if you need ${memoryPages.unusable === 1 ? 'it' : 'them'}.`,
     );
   }
   notes.push('Chats keep their dates and totals. Personas, spaces, folders and schedules show the time of the import.');
@@ -1347,28 +1325,61 @@ function planAgents(contents: ArchiveContents): AgentPlan {
 interface PlannedMemoryFile {
   targetPath: string;
   bytes: Buffer;
+  /** True for a `people/` or `matters/` page. */
+  isPage: boolean;
 }
 
-/** Maps the archive's memory/ files onto the target tenant's vault paths. Nothing is written here. */
+/** What the import did with the archive's memory pages, for the summary. */
+interface MemoryPageCounts {
+  imported: number;
+  /** Pages written under a name that is not a lowercase page name, which Aman will not read until it is renamed. */
+  unreadableNames: number;
+  /** Files in a page folder that are not page files (not `.md`, deeper folders, hidden or unsafe names); they are not written. */
+  unusable: number;
+}
+
+/** The vault-relative part of a `memory/<vault>/<file>` archive path, or undefined for any other path. */
+function memoryFileAt(name: string): { sourceSeg: string; inner: string } | undefined {
+  if (!name.startsWith('memory/')) {
+    return undefined;
+  }
+  const rest = name.slice('memory/'.length);
+  const slash = rest.indexOf('/');
+  return slash < 0 ? undefined : { sourceSeg: rest.slice(0, slash), inner: rest.slice(slash + 1) };
+}
+
+/**
+ * Maps the archive's memory/ files onto the target tenant's vault paths. Nothing is written here.
+ * A page keeps its folder and its file name, even one Aman will not read by name; any other file in a
+ * page folder is not written. Nothing can land outside the vault: the archive reader refuses unsafe paths
+ * first and a page name is one plain segment.
+ */
 function planMarkdownMemory(
   markdownDir: string,
   contents: ArchiveContents,
   input: { targetTenantId: string; personaSegBySource: ReadonlyMap<string, string> },
-): PlannedMemoryFile[] {
+): { files: PlannedMemoryFile[]; unusablePages: number; unreadableNames: number } {
   const planned: PlannedMemoryFile[] = [];
-  const knownFiles = new Set([CURATED_MEMORY_FILE, VAULT_TOMBSTONES_FILE]);
+  const targets = new Set<string>();
+  let unusablePages = 0;
+  let unreadableNames = 0;
+  const noteIdFiles = new Set([VAULT_TOMBSTONES_FILE, REVIEWED_FROM_YOU_FILE, HANDLED_NOTES_FILE]);
+  const knownFiles = new Set([CURATED_MEMORY_FILE, ...noteIdFiles]);
   for (const [name, data] of contents.files) {
-    if (!name.startsWith('memory/')) {
+    const file = memoryFileAt(name);
+    if (file === undefined) {
       continue;
     }
-    const rest = name.slice('memory/'.length);
-    const slash = rest.indexOf('/');
-    if (slash < 0) {
+    const { sourceSeg, inner } = file;
+    const page = parsePageFilePath(inner);
+    if (page === undefined && isInPageFolder(inner)) {
+      unusablePages += 1;
       continue;
     }
-    const sourceSeg = rest.slice(0, slash);
-    const inner = rest.slice(slash + 1);
-    if (!knownFiles.has(inner) && dailyLogFileAt(inner) === undefined) {
+    if (page !== undefined && !page.isSlug) {
+      unreadableNames += 1;
+    }
+    if (page === undefined && !knownFiles.has(inner) && dailyLogFileAt(inner) === undefined) {
       continue;
     }
     const targetSeg = targetMemorySegment({
@@ -1381,9 +1392,9 @@ function planMarkdownMemory(
       throw new DataImportError('The memory section of this export belongs to a different account.', 400);
     }
     let bytes = data;
-    if (inner === '.vault-tombstones.md' && targetSeg !== sourceSeg) {
-      // Tombstone entry ids embed the vault namespace segment; retarget them
-      // so edits and deletes still apply under the new tenant.
+    if (noteIdFiles.has(inner) && targetSeg !== sourceSeg) {
+      // Note ids embed the vault namespace segment; retarget them so edits,
+      // deletes, reviews and the list of sorted notes still apply under the new tenant.
       const text = data.toString('utf8').split(`md:${sourceSeg}:`).join(`md:${targetSeg}:`);
       bytes = Buffer.from(text, 'utf8');
     }
@@ -1391,9 +1402,20 @@ function planMarkdownMemory(
       // Entries written before facts-only memory carried a "Turn summary:" prefix and a chat title line.
       bytes = Buffer.from(upgradeLegacyEntries(data.toString('utf8')), 'utf8');
     }
-    planned.push({ targetPath: path.join(markdownDir, targetSeg, inner), bytes });
+    const targetPath =
+      page === undefined
+        ? path.join(markdownDir, targetSeg, inner)
+        : path.join(markdownDir, targetSeg, pageFolder(page.kind), `${page.stem}.md`);
+    if (targets.has(targetPath)) {
+      throw new DataImportError(
+        'This export lists the same memory file twice, so the import was refused and nothing was changed. Export again, then import the new file.',
+        400,
+      );
+    }
+    targets.add(targetPath);
+    planned.push({ targetPath, bytes, isPage: page !== undefined });
   }
-  return planned;
+  return { files: planned, unusablePages, unreadableNames };
 }
 
 /** Writes planned files, each created exclusively so an existing file is never replaced. */
@@ -1568,7 +1590,6 @@ async function importArchive<TTransaction>(
     logger: deps.logger,
   });
   const {
-    manifest,
     sessions,
     folders,
     personas: archivedPersonas,
@@ -1580,6 +1601,7 @@ async function importArchive<TTransaction>(
     audit,
     deliveries,
     reach,
+    texts,
   } = contents;
   const modelProviders = contents.modelProviders;
   // Each person's guide is installed from the bundled pack, so the archived copy is never written again.
@@ -1660,12 +1682,10 @@ async function importArchive<TTransaction>(
   }
 
   const personaSegBySource = new Map<string, string>();
-  const personaWireBySourceSeg = new Map<string, string>();
   for (const { persona } of archivedPersonas) {
     const wire = personaVaultNamespace(persona.display_name);
     const sourceSeg = vaultFilesystemNamespace(contents.sourceTenantId, wire);
     personaSegBySource.set(sourceSeg, vaultFilesystemNamespace(tenantId, wire));
-    personaWireBySourceSeg.set(sourceSeg, wire);
   }
   const memoryNamespaces = parseMemoryNamespaces(contents.files);
   for (const namespace of memoryNamespaces) {
@@ -1683,10 +1703,16 @@ async function importArchive<TTransaction>(
     }
   }
   const memoryCount = countMemories(memoryNamespaces);
-  const plannedMemoryFiles =
-    deps.memoryTarget.kind === 'markdown'
-      ? planMarkdownMemory(deps.memoryTarget.markdownDir, contents, { targetTenantId: tenantId, personaSegBySource })
-      : [];
+  const memoryPlan = planMarkdownMemory(deps.memoryMarkdownDir, contents, {
+    targetTenantId: tenantId,
+    personaSegBySource,
+  });
+  const plannedMemoryFiles = memoryPlan.files;
+  const memoryPages: MemoryPageCounts = {
+    imported: plannedMemoryFiles.filter(file => file.isPage).length,
+    unreadableNames: memoryPlan.unreadableNames,
+    unusable: memoryPlan.unusablePages,
+  };
   for (const file of plannedMemoryFiles) {
     if (existsSync(file.targetPath)) {
       throw new DataImportError(
@@ -1788,6 +1814,7 @@ async function importArchive<TTransaction>(
         deliveryCount: deliveries.length,
         standInAgentNames: agentPlan.placeholders.map(placeholder => placeholder.name),
         filesLeftBehind: 0,
+        memoryPages,
         leftOut,
         personaChanges: contents.personaRepairLines,
         trimmedSpaces,
@@ -1867,27 +1894,9 @@ async function importArchive<TTransaction>(
       });
     }
 
-    if (deps.memoryTarget.kind === 'markdown') {
-      await writeMarkdownMemory(plannedMemoryFiles);
-    } else if (memoryNamespaces.length > 0) {
-      const items = buildRetainItems(memoryNamespaces, {
-        exportedAt: manifest.exported_at,
-        personaWireBySourceSeg,
-      });
-      if (items.length > 0) {
-        const outcome = await deps.memoryTarget.client.retain({
-          items,
-          operationId: `data-import-${newId()}`,
-          timeoutMs: MEMORY_RETAIN_TIMEOUT_MS,
-        });
-        if (!outcome.ok) {
-          throw new DataImportError(
-            `The memory store could not save the imported memories${outcome.reason === undefined ? '' : `: ${outcome.reason}`}. Nothing was imported.`,
-            500,
-          );
-        }
-      }
-    }
+    // The folder's own older notes are marked first, so the imported ones are never taken for older notes.
+    await ensureMemorySourceLines({ baseDir: deps.memoryMarkdownDir });
+    await writeMarkdownMemory(plannedMemoryFiles);
 
     // --- Everything else commits in one transaction, together with the removal of the marker. ---
     let connectorsImported = 0;
@@ -1924,6 +1933,11 @@ async function importArchive<TTransaction>(
       await deps.deliveryStore.importDeliveries({ tenant_id: tenantId, created_by: subjectId, deliveries }, tx);
       for (const settings of reach) {
         await deps.reachSettingsStore.importSettings({ tenant_id: tenantId, created_by: subjectId, settings }, tx);
+      }
+      for (const contact of texts) {
+        const owner = { tenant_id: tenantId, created_by: subjectId };
+        await deps.textContactStore.importContact({ ...owner, contact }, tx);
+        await deps.textContactStore.importWords({ ...owner, words: contact.words, max: TEXT_WORDS_MAX }, tx);
       }
 
       if (personalization !== null && profileNames !== null) {
@@ -2179,6 +2193,7 @@ async function importArchive<TTransaction>(
         deliveryCount: deliveries.length,
         standInAgentNames: agentPlan.placeholders.map(placeholder => placeholder.name),
         filesLeftBehind,
+        memoryPages,
         leftOut,
         personaChanges: contents.personaRepairLines,
         trimmedSpaces,

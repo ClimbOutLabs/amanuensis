@@ -1,9 +1,9 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import type { RecallItem } from '../../../../src/runtime/memory/hindsightClient';
 import { MarkdownMemoryClient } from '../../../../src/runtime/memory/markdownMemoryClient';
 import { formatMemoryBlock } from '../../../../src/runtime/memory/memoryCapability';
+import type { RecallItem } from '../../../../src/runtime/memory/memoryClient';
 
 async function makeClient(): Promise<{ client: MarkdownMemoryClient; dir: string }> {
   const dir = await mkdtemp(path.join(tmpdir(), 'mdscope-'));
@@ -22,8 +22,6 @@ async function recallItems({
   const outcome = await client.recall({
     query,
     maxTokens: 4000,
-    queryTimestamp: '2026-10-26T10:00:00.000Z',
-    entityTokens: 0,
     timeoutMs: 5000,
     currentSessionId,
   });
@@ -46,7 +44,7 @@ function note({
     content,
     timestamp,
     document_id: `doc-${timestamp}`,
-    ...(sessionId === undefined ? {} : { metadata: { session_id: sessionId } }),
+    metadata: { origin: 'user_stated', ...(sessionId === undefined ? {} : { session_id: sessionId }) },
   };
 }
 
@@ -100,8 +98,6 @@ describe('MarkdownMemoryClient recall scope', () => {
       const outcome = await client.recall({
         query: 'follow-up reminder',
         maxTokens: 120,
-        queryTimestamp: '2026-10-26T10:00:00.000Z',
-        entityTokens: 0,
         timeoutMs: 5000,
         currentSessionId: 'chat-now',
       });
@@ -164,7 +160,7 @@ describe('MarkdownMemoryClient recall scope', () => {
       const items = await recallItems({ client, query: 'who is the dentist', currentSessionId: 'chat-now' });
       expect(items).toHaveLength(1);
       expect(items[0]?.text).toContain('Dr Rivera');
-      expect(items[0]?.metadata).toBeUndefined();
+      expect(items[0]?.metadata).toEqual({ origin: 'tool_ingested' });
       expect(items[0]?.occurred_start).toBe('2026-09-19T12:00:00.000Z');
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -187,7 +183,7 @@ describe('MarkdownMemoryClient recall scope', () => {
       });
       const items = await recallItems({ client, query: 'who is the dentist', currentSessionId: 'chat-now' });
       expect(items[0]?.occurred_start).toBe('2026-10-26T09:15:58.000Z');
-      expect(items[0]?.metadata).toEqual({ session_id: 'chat-old' });
+      expect(items[0]?.metadata).toEqual({ origin: 'user_stated', session_id: 'chat-old' });
       expect(items[0]?.text).not.toContain('session_id');
       const stored = await readFile(path.join(dir, 'tenant-1', 'memory', '2026-10-26.md'), 'utf8');
       expect(stored).toContain('<!-- session_id: chat-old -->');
@@ -226,12 +222,12 @@ describe('recalled block', () => {
         timeoutMs: 5000,
       });
       const results = await recallItems({ client, query: 'follow-up reminder', currentSessionId: 'chat-now' });
-      const { block } = formatMemoryBlock({ results, entities: [], budgetTokens: 600 });
+      const { block } = formatMemoryBlock({ today: '2026-11-13', results, budgetTokens: 600 });
       const lines = block.split('\n');
       expect(lines).toContain(
-        '[2026-10-20, from something read for the person] The dentist is Dr Rivera, per a follow-up reminder email.',
+        '[2026-10-20, 3 weeks ago, from something read for the person] The dentist is Dr Rivera, per a follow-up reminder email.',
       );
-      expect(lines).toContain('[2026-09-19] The vet follow-up reminder is booked.');
+      expect(lines).toContain('[2026-09-19, 7 weeks ago, said by the person] The vet follow-up reminder is booked.');
       expect(block).not.toContain('discussed again');
       expect(block).not.toContain('## ');
       expect(block).not.toContain('Source: read content');
