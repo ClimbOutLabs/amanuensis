@@ -989,7 +989,14 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
   );
   app.route(
     '/api/v1/user/deliveries',
-    withAuth(createDeliveriesRouter({ deliveryStore: deps.deliveryStore, resolveRequestContext }), authMiddleware),
+    withAuth(
+      createDeliveriesRouter({
+        deliveryStore: deps.deliveryStore,
+        sessionStore: deps.sessionStore,
+        resolveRequestContext,
+      }),
+      authMiddleware,
+    ),
   );
   app.route(
     '/api/v1/user/reach',

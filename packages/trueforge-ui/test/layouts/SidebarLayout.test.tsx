@@ -466,11 +466,30 @@ describe('SidebarLayout notifications bell', () => {
     localStorage.clear();
   });
 
-  function renderSidebarLayoutWithBell() {
+  function renderSidebarLayoutWithBell({ chatDeleted = false }: { chatDeleted?: boolean } = {}) {
     const { api } = fakeServer([item({ id: 'a' })]);
+    // The bell looks an item's chat up before it opens it, so the chat the item leads to exists here
+    // unless the test deletes it.
+    const gone = new Error('Session not found');
+    gone.name = 'NotFoundError';
+    const server = createMockAgentUIServer({
+      catalog: createMockCatalog(),
+      getSession: async ({ sessionId }) => {
+        if (chatDeleted) {
+          throw gone;
+        }
+        return {
+          id: sessionId,
+          title: 'Reminders',
+          isMutable: true,
+          createdAt: '2026-01-01T00:00:00Z',
+          updatedAt: '2026-01-01T00:00:00Z',
+        };
+      },
+    });
     return render(
       <SlotsProvider>
-        <ServerProvider server={mockServer()}>
+        <ServerProvider server={server}>
           <ShellModeProvider>
             <AgentConfigInstructionsProvider>
               <RuntimeHarness messages={[]}>
@@ -550,5 +569,19 @@ describe('SidebarLayout notifications bell', () => {
 
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Navigation' })).not.toBeInTheDocument());
     expect(screen.queryByRole('dialog', { name: 'For you' })).not.toBeInTheDocument();
+  });
+
+  it('keeps the drawer and the panel open and says so when a bell item leads to a deleted chat', async () => {
+    renderSidebarLayoutWithBell({ chatDeleted: true });
+
+    fireEvent.click(await screen.findByRole('button', { name: /Navigation/ }));
+    const drawer = await screen.findByRole('dialog', { name: 'Navigation' });
+
+    fireEvent.click(within(drawer).getByRole('button', { name: 'For you, 1 unread' }));
+    const panel = await within(drawer).findByRole('dialog', { name: 'For you' });
+    fireEvent.click(within(panel).getByRole('button', { name: /Call the dentist/ }));
+
+    expect(await within(panel).findByRole('alert')).toHaveTextContent('This chat was deleted');
+    expect(screen.getByRole('dialog', { name: 'Navigation' })).toBeInTheDocument();
   });
 });

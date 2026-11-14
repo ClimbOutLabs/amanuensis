@@ -16,6 +16,8 @@ One server-side feed of things Aman wants a person to see, called deliveries. Ea
 
 **Server owns seen state.** Seen on one device is seen on every device. Every read and write is scoped to the tenant and the person who owns the delivery.
 
+**A deleted chat takes its Open away, not the words.** When the feed is read, the chats a page of items links to are checked in one ownership lookup. An item whose chat no longer exists, or belongs to someone else, is served without the link; its text and reason stay in the feed, and there is no Open to fail. An item waiting on an approval in such a chat can never be answered, so it is resolved and leaves the feed. Opening an item looks its chat up first, and the panel stays open until the chat opens; when it cannot open, the panel says so in plain words instead of showing a raw error. Items already in the feed heal on their own, because the check happens when the feed is read, not when the item is written.
+
 **Kinds and channels grow without migrations.** Kind, level and channel are plain text columns. The API validates kind with a discriminated union, so later parts add kinds and channels in code only. A channel sender names its channel (`web_push`, `sms`), so a failure is recorded under the right one. A Try it test names its channel as `test`, so the service tries just that sender and tells it the delivery is a test.
 
 **Push carries no content.** The push payload is the delivery id and a short title such as "Reminder". It never holds the reminder text, the reason or the assistant's name. The page fetches details after the person opens it.

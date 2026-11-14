@@ -34,6 +34,7 @@ Mail is checked every 10 minutes, the calendar every 30 minutes, and approvals e
 ## How loudly
 
 Everything lands under the bell with the reason you got it. The bell is labeled **For you** and sits at the top of the left panel. On a phone it is inside the menu, and the menu button shows how many items you have not seen.
+An item that came from a chat shows **Open chat**, which takes you to that chat. If you deleted the chat, the item stays under the bell without it.
 
 - **Note:** a quiet item under the bell. It never makes a sound. Most things are notes.
 - **Nudge:** a notice on the devices where you turned notices on, and a text if you set up texts and switched them on. See [Text messages](/text-messages).

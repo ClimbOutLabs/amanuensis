@@ -4,7 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DeliveriesProvider, useOptionalDeliveries } from '@/deliveries/DeliveriesContext.js';
 import { DeliveryBell } from '@/deliveries/DeliveryBell.js';
+import { ServerProvider } from '@/server/ServerContext.js';
+import { ShellModeProvider } from '@/server/ShellModeContext.js';
 
+import { createMockAgentUIServer } from '../server/mockServer.js';
 import { fakeServer, item } from './fakeDeliveriesApi.js';
 
 const POLL_MS = 1_000;
@@ -154,6 +157,31 @@ describe('the bell', () => {
     fireEvent.click(bell);
 
     expect(await screen.findByRole('button', { name: /Second thing/ })).toBeTruthy();
+  });
+
+  it('keeps the panel open and says the chat was deleted when an item leads to a deleted chat', async () => {
+    const { api } = fakeServer([item({ id: 'a', text: 'Call the dentist' })]);
+    const gone = new Error('Session not found: reminders-chat');
+    gone.name = 'NotFoundError';
+    const server = createMockAgentUIServer({
+      getSession: async (): Promise<never> => {
+        throw gone;
+      },
+    });
+    render(
+      <DeliveriesProvider api={api} pollMs={POLL_MS}>
+        <ServerProvider server={server}>
+          <ShellModeProvider>
+            <DeliveryBell />
+          </ShellModeProvider>
+        </ServerProvider>
+      </DeliveriesProvider>,
+    );
+    fireEvent.click(await screen.findByRole('button', { name: /For you/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Call the dentist/ }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('This chat was deleted');
+    expect(screen.getByRole('dialog', { name: 'For you' })).toBeTruthy();
   });
 
   it('says what an empty feed means', async () => {
