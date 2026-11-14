@@ -79,7 +79,7 @@ const WORKING_POLL_MS = 3_000;
 const STALE_AFTER_MS = 10 * 60 * 1000;
 /** The name of the fold that holds the recalled memories; the count follows it. */
 const MEMORY_FOLD_TITLE = 'From memory';
-/** Most memory facts the chat desk lists. */
+/** Most saved memories the chat desk lists, and most page lines beside them. */
 const FACT_CAP = 6;
 
 export type RailRecallFactSource = 'person' | 'read' | 'finding' | 'assistant';
@@ -94,6 +94,8 @@ export type RailRecallFact = {
   source: RailRecallFactSource;
   /** Where the fact came from and how long ago, in plain words, for the row's second line. */
   origin: string;
+  /** The page the line sits on. A page line is changed on its page, so its row has no controls. */
+  page?: string;
 };
 
 const READ_LABEL = 'from something read for the person';
@@ -152,6 +154,41 @@ function parseBlockLine(line: string): RailRecallFact | undefined {
   return { text, shown: text, date, source: 'person', origin: `You said this${when}` };
 }
 
+const PAGE_HEADER = /^\[page: (.+?) — /;
+const PAGE_LINE = /^- (.+) \(([^()]+)\)$/;
+/** The lines between these two are how to write to someone, not things remembered about them. */
+const DRAFTING_START = 'How the person writes to these contacts';
+const DRAFTING_END = 'End of the writing instructions.';
+/** Where a page line came from, by how its closing bracket starts. The longer opening comes first. */
+const PAGE_SOURCES: readonly { starts: string; source: RailRecallFactSource; words: string }[] = [
+  { starts: 'you said', source: 'person', words: 'You said this' },
+  { starts: 'you wrote', source: 'person', words: 'You wrote this' },
+  { starts: 'from mail you sent', source: 'person', words: 'From mail you sent' },
+  { starts: 'from mail', source: 'read', words: 'From mail' },
+  { starts: 'from calendar', source: 'read', words: 'From your calendar' },
+  { starts: 'read content', source: 'read', words: 'From something read for you' },
+  { starts: 'inferred', source: 'read', words: 'Worked out from what was read' },
+];
+
+/** One fact line of a page in a recall block, or undefined for the page's other lines. */
+function parsePageLine({ line, page }: { line: string; page: string }): RailRecallFact | undefined {
+  const match = PAGE_LINE.exec(line.trim());
+  const text = (match?.[1] ?? '').trim();
+  const trailer = match?.[2] ?? '';
+  if (text === '') {
+    return undefined;
+  }
+  const from = PAGE_SOURCES.find(entry => trailer.startsWith(entry.starts));
+  return {
+    text,
+    shown: text,
+    date: 'undated',
+    source: from?.source ?? 'read',
+    origin: `${from?.words ?? 'Not confirmed by you'} · page ${page}`,
+    page,
+  };
+}
+
 /**
  * The facts the latest turn recalled, each fact once, capped. Earlier turns are left out: the desk shows what
  * the assistant is using now. Reads only the recall record: a fact the record does not carry is never invented here.
@@ -162,19 +199,39 @@ export function parseRecallFacts(turns: readonly MemoryTurnContext[]): RailRecal
     return [];
   }
   const seen = new Set<string>();
+  const pageFacts: RailRecallFact[] = [];
   const facts: RailRecallFact[] = [];
+  let page: string | undefined;
+  let drafting = false;
   for (const line of block.split('\n')) {
-    const fact = parseBlockLine(line);
-    if (fact === undefined || seen.has(fact.text)) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith(DRAFTING_START) || trimmed === DRAFTING_END) {
+      drafting = trimmed !== DRAFTING_END;
+      page = undefined;
+      continue;
+    }
+    if (drafting) {
+      continue;
+    }
+    const header = PAGE_HEADER.exec(trimmed);
+    if (header !== null) {
+      page = header[1];
+      continue;
+    }
+    const item = parseBlockLine(line);
+    if (item !== undefined) {
+      // Saved memories follow the pages, so a dated line closes the page above it.
+      page = undefined;
+    }
+    const fact = item ?? (page === undefined ? undefined : parsePageLine({ line, page }));
+    const list = fact?.page === undefined ? facts : pageFacts;
+    if (fact === undefined || seen.has(fact.text) || list.length >= FACT_CAP) {
       continue;
     }
     seen.add(fact.text);
-    facts.push(fact);
-    if (facts.length >= FACT_CAP) {
-      break;
-    }
+    list.push(fact);
   }
-  return facts;
+  return [...pageFacts, ...facts];
 }
 
 /** The person's own time zone, which sets both the server's day and the times shown. */
@@ -516,21 +573,23 @@ export const RailChatDesk: FC<{
               <li key={fact.text} className="aman-runtime-rail__desk-fact">
                 <div className="aman-runtime-rail__desk-fact-head">
                   <span className="aman-runtime-rail__desk-fact-text">{fact.shown}</span>
-                  <button
-                    type="button"
-                    className="aman-runtime-rail__desk-pull"
-                    aria-label={`Take this out of this chat: ${fact.shown}`}
-                    title="Not in this chat"
-                    onClick={() => {
-                      pullOut(fact);
-                    }}
-                  >
-                    ×
-                  </button>
+                  {fact.page === undefined && (
+                    <button
+                      type="button"
+                      className="aman-runtime-rail__desk-pull"
+                      aria-label={`Take this out of this chat: ${fact.shown}`}
+                      title="Not in this chat"
+                      onClick={() => {
+                        pullOut(fact);
+                      }}
+                    >
+                      ×
+                    </button>
+                  )}
                 </div>
                 <span className="aman-runtime-rail__desk-fact-origin">
                   {fact.origin}
-                  {deskApi !== undefined && confirming !== fact.text && (
+                  {deskApi !== undefined && fact.page === undefined && confirming !== fact.text && (
                     <button
                       type="button"
                       className="aman-runtime-rail__desk-forget aman-runtime-rail__desk-delete"
@@ -582,6 +641,7 @@ export const RailChatDesk: FC<{
           </ul>
           <p className="aman-runtime-rail__desk-note">
             Used for your last message. The × leaves a memory out of this chat only. Delete removes it everywhere.
+            {facts.some(fact => fact.page !== undefined) && ' A line from a page is changed on its page.'}
             {onOpenMemorySettings !== undefined && (
               <>
                 {' '}

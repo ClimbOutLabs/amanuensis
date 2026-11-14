@@ -117,6 +117,31 @@ describe('parseRecallFacts', () => {
     });
   });
 
+  it('lists the lines of a page the turn used, before the saved memories, and never the writing instructions', () => {
+    const turn = turnContext(
+      't1',
+      blockOf([
+        '[page: Sidd — person, name not confirmed by you]',
+        'Now:',
+        '- Lives in Denver now, after moving from Austin. (read content, not confirmed, since 2025-09-09)',
+        '- Drinks coffee black. (you said)',
+        '[2024-12-29, 22 months ago, said by the person] I live in Austin, in a rented flat near the river.',
+        'How the person writes to these contacts (follow when drafting to them):',
+        '- Keep it short. (you said)',
+        'End of the writing instructions.',
+      ]),
+    );
+    const facts = parseRecallFacts([turn]);
+    expect(facts.map(fact => fact.shown)).toEqual([
+      'Lives in Denver now, after moving from Austin.',
+      'Drinks coffee black.',
+      'I live in Austin, in a rented flat near the river.',
+    ]);
+    expect(facts[0]).toMatchObject({ page: 'Sidd', source: 'read', origin: 'From something read for you · page Sidd' });
+    expect(facts[1]).toMatchObject({ page: 'Sidd', source: 'person', origin: 'You said this · page Sidd' });
+    expect(facts[2]?.page).toBeUndefined();
+  });
+
   it('caps the list at six', () => {
     const lines = Array.from({ length: 8 }, (_, index) => `[2026-08-14] Fact number ${String(index)}`);
     expect(parseRecallFacts([turnContext('t1', blockOf(lines))])).toHaveLength(6);
@@ -273,6 +298,32 @@ describe('the rail desk in a chat', () => {
       </MemoryRecallProvider>,
     );
   }
+
+  it('gives a line from a page no controls, and says where it is changed', async () => {
+    const pageApi: MemoryRecallApi = {
+      listMemoryTurnContext: async () => [
+        turnContext(
+          't1',
+          blockOf([
+            '[page: Sidd — person]',
+            'Now:',
+            '- Lives in Denver now. (you said)',
+            '[2026-08-14] The gate code is 4417',
+          ]),
+        ),
+      ],
+    };
+    render(
+      <MemoryRecallProvider api={pageApi}>
+        <AmanRuntimeRail status="ready" sessionId="chat-1" deskApi={deskApi(TODAY)} />
+      </MemoryRecallProvider>,
+    );
+    expect(await screen.findByText('Lives in Denver now.')).toBeInTheDocument();
+    expect(screen.getByText('From memory (2)')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Delete this memory: Lives in Denver now.' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Delete this memory: The gate code is 4417' })).toBeInTheDocument();
+    expect(screen.getByText(/A line from a page is changed on its page\./)).toBeInTheDocument();
+  });
 
   it('deletes a memory only after a yes, and keeps it when the person says keep', async () => {
     const api = deskApi(TODAY);
