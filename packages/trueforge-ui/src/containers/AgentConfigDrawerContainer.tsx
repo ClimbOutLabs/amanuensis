@@ -148,6 +148,7 @@ export function AgentConfigDrawerContainer({ showClose = false }: { showClose?: 
         modelsError={catalog.error}
         skills={catalog.skills}
         skillsAvailable={capabilities?.skill.enabled === true}
+        sandboxAvailable={capabilities?.sandbox.enabled === true}
         instructions={instructionDraft}
         onOpenEditor={nextEditor => {
           if (canManageAgent) setEditor(nextEditor);

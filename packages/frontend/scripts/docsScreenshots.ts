@@ -162,9 +162,10 @@ async function main(): Promise<void> {
     modelIds: PROVIDER.models.map(entry => entry.model_id),
   });
   const api = await startApprovalTestServer({ localSignIn: true, sandboxProvider: new FakeSandboxProvider(new Map()) });
-  // The demo model runs on this computer, so its address has to be named before the server will use it.
-  const demoModelEndpoint = localModelEndpointOf(model.baseUrl);
-  if (demoModelEndpoint !== null) configuration.LOCAL_MODEL_ENDPOINTS.push(demoModelEndpoint);
+  // The demo model runs on this computer, so it is named as an allowed local model endpoint, as an operator would.
+  const demoEndpoint = localModelEndpointOf(model.baseUrl);
+  if (demoEndpoint !== null)
+    configuration.LOCAL_MODEL_ENDPOINTS = [...configuration.LOCAL_MODEL_ENDPOINTS, demoEndpoint];
   const viteCache = privateViteCache('docs-screenshots');
   const vite = await createServer({
     cacheDir: viteCache.cacheDir,

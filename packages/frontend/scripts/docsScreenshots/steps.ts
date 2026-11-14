@@ -166,7 +166,8 @@ export function enableSkill(name: string): Step {
 /** Opens the More menu in the left bar, or the bottom bar on a phone. */
 export const openMoreMenu: Step = async context => {
   const { page } = context;
-  if (context.phone) await press(/^Navigation/)(context);
+  // The menu button's name gains an unread count when the demo has a notification.
+  if (context.phone) await press(/^Navigation(,|$)/)(context);
   const more = page.getByRole('button', { name: 'More', exact: true });
   await shows(more);
   await more.first().click();
@@ -202,7 +203,7 @@ export function pickTab(name: string): Step {
  */
 export const openChatList: Step = async context => {
   const { page } = context;
-  if (context.phone) await press(/^Navigation/)(context);
+  if (context.phone) await press(/^Navigation(,|$)/)(context);
   const chats = page.getByRole('button', { name: 'Chats', exact: true }).locator('visible=true');
   await shows(chats);
   if ((await page.getByLabel('Recent chats').locator('visible=true').count()) === 0) await chats.first().click();
