@@ -36,6 +36,7 @@ import {
   MAIL_ACCOUNT_ARGUMENT,
   MAIL_CONNECTOR_NAME,
   MAIL_CONTENT_TOOL_NAME,
+  MAIL_NEW_MESSAGE_TOOL_NAME,
 } from '../email/mailConnector/toolContract';
 import { GOOGLE_SETUP_SERVER_ID, GOOGLE_SETUP_STATUS_TOOL_NAME } from '../google/setupToolContract';
 import type { BrowserElementReview, DocumentScope, MapsHosts } from '../llm/LLMTypes';
@@ -71,6 +72,7 @@ import {
   SPACE_WRITE_REASON,
   spaceActivityLine,
 } from '../spaces/toolContract';
+import { isRecord } from '../util/records';
 import { absolutePatchTarget, applyPatchTargets } from './applyPatchTargets';
 import {
   actionIdFor,
@@ -108,6 +110,8 @@ import {
   extractCardFields,
   isCalendarChangeToolName,
   renderOutboundArguments,
+  SEND_VALUE_MAX_CHARS,
+  type ExtractedCardFields,
   type ExtractionResult,
 } from './extractorRegistry';
 import { DEFAULT_MAPS_TRAVEL_MODE, MapsTravelModeSchema } from './mapsRouteSchemas';
@@ -2594,6 +2598,97 @@ async function mailCardFacts(input: { action: SentinelAction; ctx: ClassifyConte
   };
 }
 
+/** The arguments of an Email send or draft that the card shows as the message itself, or as its From line. */
+const MAIL_MESSAGE_ARGUMENTS: ReadonlySet<string> = new Set([
+  'recipients',
+  'cc',
+  'bcc',
+  'subject',
+  'body',
+  MAIL_ACCOUNT_ARGUMENT,
+]);
+
+/** The recipients one sending argument names, or null when an entry has no address the card could show. */
+function mailArgumentMailboxes(value: unknown): Tier3Mailbox[] | null {
+  const items = Array.isArray(value) ? value : value === undefined || value === null ? [] : [value];
+  const mailboxes: Tier3Mailbox[] = [];
+  for (const item of items) {
+    if (typeof item === 'string') {
+      mailboxes.push({ name: '', address: item });
+      continue;
+    }
+    if (!isRecord(item)) {
+      return null;
+    }
+    const address = typeof item['email'] === 'string' ? item['email'] : item['address'];
+    const name = item['name'] ?? '';
+    if (typeof address !== 'string' || typeof name !== 'string') {
+      return null;
+    }
+    mailboxes.push({ name, address });
+  }
+  return mailboxes;
+}
+
+/**
+ * The message an Email send or draft writes, laid out as a draft for the card: who it goes to, the subject
+ * and the whole text. `rest` is every other argument the call carries, so nothing sent is left off the card.
+ * Null when the call is not a new message, or when a part of it cannot be shown as written; the card then
+ * lists the whole request instead.
+ */
+function hostMailMessage(action: SentinelAction): {
+  email: Tier3Email;
+  rest: { text: string | null; truncated: boolean };
+} | null {
+  const draft = isHostMailDraft(action);
+  if (!draft && !(isHostMailSend(action) && action.tool_name === MAIL_NEW_MESSAGE_TOOL_NAME)) {
+    return null;
+  }
+  const params = action.canonical_params;
+  const to = mailArgumentMailboxes(params['recipients']);
+  const cc = mailArgumentMailboxes(params['cc']);
+  const bcc = mailArgumentMailboxes(params['bcc']);
+  const subject = params['subject'] ?? '';
+  const body = params['body'];
+  if (to === null || cc === null || bcc === null || typeof subject !== 'string' || typeof body !== 'string') {
+    return null;
+  }
+  return {
+    email: {
+      action: draft ? 'save' : 'send',
+      to: to.map(escapedMailbox),
+      cc: cc.map(escapedMailbox),
+      bcc: bcc.map(escapedMailbox),
+      subject: escapeDisplayText(subject),
+      body: escapeDisplayText(body, { keepNewlines: true }),
+      check_code: null,
+      replaces: null,
+      reply_in_thread: null,
+      reply_to: null,
+      from_name: null,
+      name_left_off: false,
+    },
+    rest: renderOutboundArguments(
+      Object.fromEntries(Object.entries(params).filter(([key]) => !MAIL_MESSAGE_ARGUMENTS.has(key))),
+      { valueMaxChars: SEND_VALUE_MAX_CHARS },
+    ),
+  };
+}
+
+/**
+ * The message part of an Email card. With a draft to show, the card carries it and lists only the other
+ * arguments beside it; without one, it lists the whole request.
+ */
+function mailMessageCardFields(input: {
+  message: ReturnType<typeof hostMailMessage>;
+  fields: ExtractedCardFields;
+}): Pick<Tier3Card, 'outbound_text' | 'outbound_truncated'> & { email?: Tier3Email } {
+  const { message, fields } = input;
+  return message === null
+    ? { outbound_text: fields.outbound_text, outbound_truncated: fields.outbound_truncated }
+    : { outbound_text: message.rest.text, outbound_truncated: message.rest.truncated, email: message.email };
+}
+
 /**
  * A connector's tool name and arguments do not reliably show whether it sends mail, so a demo instance refuses
  * a connector call that could send. Any other call is refused unless it is declared read-only or is a read by
@@ -3720,6 +3815,8 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
   // naming each new address. A draft naming a new address asks with the same card in draft words:
   // approving adds the addresses to this account's list and saves the draft, and nothing is sent.
   const mailFacts = await mailCardFacts({ action, ctx });
+  // A request already too long to show whole keeps its plain listing, which says what was cut.
+  const mailMessage = extraction.fields.outbound_truncated ? null : hostMailMessage(action);
   const newMailRecipients = mailFacts.new_recipients;
   if (newMailRecipients.length > 0) {
     const { fields } = extraction;
@@ -3756,9 +3853,8 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
         recipient: fields.recipient,
         amount: fields.amount,
         parsed_command: null,
-        outbound_text: fields.outbound_text,
+        ...mailMessageCardFields({ message: mailMessage, fields }),
         destination_host: null,
-        outbound_truncated: fields.outbound_truncated,
         mail_new_recipients: newMailRecipients,
         mail_from: mailFacts.from,
         mail_from_choices: mailFacts.choices,
@@ -3810,9 +3906,8 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
         recipient: fields.recipient,
         amount: fields.amount,
         parsed_command: null,
-        outbound_text: fields.outbound_text,
+        ...mailMessageCardFields({ message: mailMessage, fields }),
         destination_host: null,
-        outbound_truncated: fields.outbound_truncated,
         mail_from: mailFacts.from,
         mail_from_choices: mailFacts.choices,
       },

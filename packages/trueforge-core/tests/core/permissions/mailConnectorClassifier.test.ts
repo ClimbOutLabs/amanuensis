@@ -238,6 +238,115 @@ describe('Email connector classifier', () => {
     });
   });
 
+  describe('a send shows the message as a draft', () => {
+    const LISTED = 'dana@example.com';
+    const BODY = 'Hi Dana,\n\nThe terms look fine to me.\n\nNora';
+
+    function ctxWithList(listed: readonly string[]): ClassifyContext {
+      const ctx = makeCtx();
+      return {
+        ...ctx,
+        services: {
+          ...ctx.services,
+          mail_listed_addresses: () => Promise.resolve(listed),
+          mail_accounts: () =>
+            Promise.resolve({ accounts: ['nora@mail.example'], default_account: 'nora@mail.example' }),
+        },
+      };
+    }
+
+    it('lays out who it goes to, the subject and the whole text, and names the account it goes from', async () => {
+      const decision = await classifyTier(
+        hostMailCall(
+          'send_email',
+          { recipients: [LISTED], cc: [{ name: 'Pippa', email: 'pippa@example.com' }], subject: SUBJECT, body: BODY },
+          OUTBOUND_WRITE,
+        ),
+        ctxWithList([LISTED, 'pippa@example.com']),
+      );
+      expect(decision).toMatchObject({ tier: 3, auto_deny: null });
+      expect(decision.card?.email).toEqual({
+        action: 'send',
+        to: [{ name: '', address: LISTED }],
+        cc: [{ name: 'Pippa', address: 'pippa@example.com' }],
+        bcc: [],
+        subject: SUBJECT,
+        body: BODY,
+        check_code: null,
+        replaces: null,
+        reply_in_thread: null,
+        reply_to: null,
+        from_name: null,
+        name_left_off: false,
+      });
+      expect(decision.card?.mail_from).toBe('nora@mail.example');
+      // The draft is the whole request here, so nothing is listed a second time beside it.
+      expect(decision.card?.outbound_text).toBeNull();
+    });
+
+    it('a send to a new address shows the same draft with the new-recipient notice', async () => {
+      const decision = await classifyTier(
+        hostMailCall(
+          'send_email',
+          { recipients: ['stranger@example.com'], subject: SUBJECT, body: BODY },
+          OUTBOUND_WRITE,
+        ),
+        ctxWithList([LISTED]),
+      );
+      expect(decision.reason).toBe('mail_new_recipient');
+      expect(decision.card?.email).toMatchObject({
+        action: 'send',
+        to: [{ name: '', address: 'stranger@example.com' }],
+        subject: SUBJECT,
+        body: BODY,
+      });
+    });
+
+    it('a draft to a new address shows the draft as something saved, not sent', async () => {
+      const decision = await classifyTier(
+        hostMailCall('save_draft', { recipients: ['stranger@example.com'], subject: SUBJECT, body: BODY }, LOCAL_WRITE),
+        ctxWithList([LISTED]),
+      );
+      expect(decision.card?.mail_draft).toBe(true);
+      expect(decision.card?.email).toMatchObject({ action: 'save', subject: SUBJECT, body: BODY });
+    });
+
+    it('lists every other argument beside the draft, so nothing that is sent is left off the card', async () => {
+      const decision = await classifyTier(
+        hostMailCall(
+          'send_email',
+          { recipients: [LISTED], subject: SUBJECT, body: BODY, attachments: ['/files/lease.pdf'], html: true },
+          OUTBOUND_WRITE,
+        ),
+        ctxWithList([LISTED]),
+      );
+      expect(decision.card?.email?.body).toBe(BODY);
+      expect(decision.card?.outbound_text).toContain('/files/lease.pdf');
+      expect(decision.card?.outbound_text).toContain('html');
+      expect(decision.card?.outbound_text).not.toContain(SUBJECT);
+    });
+
+    it('keeps the plain listing of the whole request when a part of the message cannot be shown as written', async () => {
+      const decision = await classifyTier(
+        hostMailCall('send_email', { recipients: [LISTED], subject: SUBJECT, body: { text: BODY } }, OUTBOUND_WRITE),
+        ctxWithList([LISTED]),
+      );
+      expect(decision).toMatchObject({ tier: 3, auto_deny: null });
+      expect(decision.card?.email ?? null).toBeNull();
+      expect(decision.card?.outbound_text).toContain(SUBJECT);
+    });
+
+    it('a forward keeps the plain listing, because the message it sends on is not in the call', async () => {
+      const decision = await classifyTier(
+        hostMailCall('forward_email', { email_id: 'e1', recipients: [LISTED] }, OUTBOUND_WRITE),
+        ctxWithList([LISTED]),
+      );
+      expect(decision).toMatchObject({ tier: 3, auto_deny: null });
+      expect(decision.card?.email ?? null).toBeNull();
+      expect(decision.card?.outbound_text).toContain('e1');
+    });
+  });
+
   describe('new recipients', () => {
     const LISTED = 'dana@example.com';
     const STRANGER = 'stranger@example.com';
@@ -270,7 +379,7 @@ describe('Email connector classifier', () => {
       expect(decision.card?.mail_draft ?? null).toBeNull();
       expect(decision.card?.cannot_be_undone).toBe("Once this is sent, it can't be unsent.");
       expect(decision.card?.destination_host).toBeNull();
-      expect(decision.card?.outbound_text).toContain(SUBJECT);
+      expect(decision.card?.email?.subject).toBe(SUBJECT);
       expect(decision.approval_token_id).not.toBeNull();
     });
 

@@ -451,3 +451,40 @@ describe('EmailApprovalCard account picker', () => {
     expect(screen.queryByLabelText('From')).toBeNull();
   });
 });
+
+describe('an email from an account connected with an app password', () => {
+  function renderCard(overrides: Partial<SentinelApprovalCard>) {
+    render(
+      <EmailApprovalCard
+        approvalId="approval-1"
+        card={{ ...cardWith(), ...overrides }}
+        onApprove={vi.fn()}
+        onDeny={vi.fn()}
+      />,
+    );
+  }
+
+  it('shows the account the email goes from when there is one account', () => {
+    renderCard({ mail_from: 'sam@mail.example', mail_from_choices: ['sam@mail.example'] });
+    expect(screen.getByText('From')).toBeTruthy();
+    expect(screen.getByText('sam@mail.example')).toBeTruthy();
+    expect(screen.queryByRole('combobox')).toBeNull();
+  });
+
+  it('shows the account once, in the picker, when there are two accounts', () => {
+    renderCard({ mail_from: 'sam@mail.example', mail_from_choices: ['sam@mail.example', 'work@mail.example'] });
+    expect(screen.getByRole('combobox')).toBeTruthy();
+    expect(screen.getAllByText('From')).toHaveLength(1);
+  });
+
+  it('lists what else is sent with the email under the message', () => {
+    renderCard({ outbound_text: 'attachments (array): ["/files/menu.pdf"]' });
+    expect(screen.getByText('Also sent with this email')).toBeTruthy();
+    expect(screen.getByText('attachments (array): ["/files/menu.pdf"]')).toBeTruthy();
+  });
+
+  it('shows no extra block when the email is all that is sent', () => {
+    renderCard({});
+    expect(screen.queryByText('Also sent with this email')).toBeNull();
+  });
+});

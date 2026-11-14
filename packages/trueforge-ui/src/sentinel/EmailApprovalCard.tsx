@@ -25,6 +25,7 @@ import {
 import { ChangeRequestBox } from './ChangeRequestBox.js';
 import { countEmailWords, isLongEmailBody, splitEmailBody } from './emailBody.js';
 import { MailFromPicker, useMailFromPick } from './MailFromPicker.js';
+import { OutboundBlock } from './PermissionApprovalCard.js';
 import type { SentinelApprovalCard, SentinelApprovalEmail, SentinelApprovalMailbox } from './types.js';
 
 export type EmailApprovalCardProps = {
@@ -165,6 +166,10 @@ export const EmailApprovalCard: FC<EmailApprovalCardProps> = ({
           { label: 'Reply in the thread, subject', value: email.reply_in_thread.subject },
           { label: 'Reply in the thread, from', value: email.reply_in_thread.from },
         ]),
+    // With two or more accounts the picker shows the account instead, so it is never listed twice.
+    ...(fromPick.choices.length < 2 && typeof card.mail_from === 'string' && card.mail_from !== ''
+      ? [{ label: 'From', value: card.mail_from }]
+      : []),
     { label: 'To', value: mailboxListText(email.to) },
     ...(email.cc.length > 0 ? [{ label: 'Copy', value: mailboxListText(email.cc) }] : []),
     ...(email.bcc.length > 0 ? [{ label: 'Hidden copy', value: mailboxListText(email.bcc) }] : []),
@@ -222,6 +227,13 @@ export const EmailApprovalCard: FC<EmailApprovalCardProps> = ({
       <section aria-label="Message body" className="rounded-lg border border-border">
         <EmailBody body={email.body} />
       </section>
+      {card.outbound_text !== null && (
+        <OutboundBlock
+          text={card.outbound_text}
+          truncated={card.outbound_truncated}
+          label="Also sent with this email"
+        />
+      )}
 
       {card.plain_why !== null && (
         <p className="text-text-secondary" data-role="approval-intent">

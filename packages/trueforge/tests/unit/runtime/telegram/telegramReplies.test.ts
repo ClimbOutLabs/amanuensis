@@ -246,6 +246,22 @@ describe('telegram pending replies', () => {
     expect(store.pendingApprovals).toHaveLength(1);
   });
 
+  it("lists an email's recipients once, and names anything else the call carries as sent with it", async () => {
+    const card = cardWith({
+      plain_what: 'Send an email to sam@example.com?',
+      recipient: 'sam@example.com',
+      email: MAIL_FROM_EMAIL,
+      outbound_text: 'attachments (array): ["/files/menu.pdf"]',
+    });
+    const { client, deps } = harness(doneTurnWith(approvalAction(card)));
+    await deliverPendingTelegramReplies(deps);
+    const lines = (client.sent[0]?.text ?? '').split('\n');
+    expect(lines.filter(line => line.startsWith('To: '))).toEqual(['To: Sam (sam@example.com)']);
+    expect(lines).toContain('Also sent with this email:');
+    expect(lines).not.toContain('Full request:');
+    expect(lines).toContain('attachments (array): ["/files/menu.pdf"]');
+  });
+
   it('shows the account an email goes from, and says to answer in the app to pick another', async () => {
     const card = cardWith({
       plain_what: 'Send this email.',

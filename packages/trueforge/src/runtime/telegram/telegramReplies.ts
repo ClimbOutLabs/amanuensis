@@ -259,7 +259,8 @@ function approvalCardLines(card: Tier3Card): string[] {
   if (card.why_asked_again !== null) {
     lines.push(card.why_asked_again);
   }
-  if (card.recipient !== null) {
+  // An email lists its own recipients below, so the card's recipient line would only repeat them.
+  if (card.recipient !== null && (card.email ?? null) === null) {
     lines.push(`To: ${card.recipient}`);
   }
   if (card.destination !== null) {
@@ -438,7 +439,8 @@ function approvalCardLines(card: Tier3Card): string[] {
     lines.push(`New email addresses: ${card.mail_new_recipients.join(', ')}`);
   }
   if (card.outbound_text !== null) {
-    lines.push('Full request:');
+    // Beside an email shown in full, these lines are only what else the call carries.
+    lines.push(email === null ? 'Full request:' : 'Also sent with this email:');
     if (card.outbound_truncated) {
       lines.push('Part of this request is not shown in full.');
     }
