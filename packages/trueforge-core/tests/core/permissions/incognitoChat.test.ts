@@ -135,9 +135,11 @@ describe('a connector in an incognito chat may only read', () => {
     expect(await classifyTier(action, incognitoChat())).toMatchObject({ tier: 1, auto_deny: null });
   });
 
-  it('gives a write in a normal chat its card, as before', async () => {
+  it('refuses a write in a normal chat under the carried-payload rule, not the incognito one', async () => {
     const decision = await classifyTier(connectorTool('create_page', {}, { title: 'Trip' }), normalChat());
-    expect(decision.auto_deny).toBeNull();
+    // The call carries words and shows no destination the card can verify, so the refusal is the
+    // unverifiable-destination one. The incognito refusal above is a separate, wider bar.
+    expect(decision.auto_deny).toBe('destination_unverifiable');
     expect(decision.tier).toBe(3);
   });
 });

@@ -419,7 +419,11 @@ describe('Email connector classifier', () => {
     it('a tool the Email connector does not offer with a mail word in its name is never silent', async () => {
       const decision = await classifyTier(hostMailCall('purge_emails', { mailbox: 'INBOX' }, {}), makeCtx());
       expect(decision.tier).not.toBe(1);
-      expect(decision.auto_deny).not.toBeNull();
+      // It asks with the unknown-tool card, like empty_trash below: naming a mailbox reaches only
+      // the connector's own store, so the unverifiable-destination rule no longer refuses it for
+      // the mail word in its name. That refusal came from the deleted name-fragment registry.
+      expect(decision).toMatchObject({ tier: 3, auto_deny: null, reason: 'unrecognized_tool' });
+      expect(decision.card).not.toBeNull();
     });
 
     it('a tool with no recognized name asks with a card and is never silent', async () => {

@@ -12,11 +12,24 @@ import { escapeDisplayText } from './displayText.js';
  * and adding a tool whose params use new key names requires extending those
  * lists, otherwise the fallback triggers.
  *
- * Fallback: for external-service actions (sending email or messages, posting
- * publicly, sharing data with external services, spending money) where the
- * destination cannot be determined server-side, the action is auto-denied with
- * reason `destination_unverifiable`, never carded. Other Tier 3 actions stay
- * Tier 3 with the destination marked unknown.
+ * Fallback: for external-service actions (a call that carries something
+ * addressed out: a recipient, a destination, an amount, a composed message, or
+ * a reference to a message it acts on) where the destination cannot be
+ * determined server-side, the action is auto-denied with
+ * reason `destination_unverifiable`, never carded. The same refusal is
+ * reported separately, as payload_unverifiable, for a call no connector
+ * family claims that is not a known read, is not declared read-only and
+ * closed-world, does not name a mailbox, and carries words or an id under an
+ * argument key that is neither a destination key nor a mailbox key, when it
+ * shows no verifiable destination: payload with nowhere verifiable to go.
+ * That verdict comes from the same carried computation that decides
+ * external-service, and the classifier applies it only after every more
+ * specific mechanism (a family card, a hint escalation, a name-ranked class,
+ * the search and demo flows) has had its say, so it lands on exactly the
+ * calls that would otherwise get the unrecognized-tool card. Other Tier 3 actions
+ * stay Tier 3 with the destination marked unknown. Whether a call is an
+ * external-service action is computed from what the call carries and from
+ * the tool's declared annotations, never from the tool's name.
  */
 
 import { createHash } from 'node:crypto';
@@ -396,65 +409,37 @@ export function hostFromUrl(value: string): string | null {
   }
 }
 
-interface ExtractorEntry {
-  match: (toolName: string) => boolean;
-  extract: CardFieldExtractor;
-  external_service: boolean;
-  /** Delivers a message to a person, so every part of its arguments must be fully visible. */
-  delivers_message: boolean;
-}
+/** Param keys that hold the composed message itself: the words that would be delivered. */
+const MESSAGE_CONTENT_KEYS = ['subject', 'body', 'message'];
+const MESSAGE_CONTENT_KEY_SET = new Set(MESSAGE_CONTENT_KEYS.map(normalizeKey));
 
-function nameIncludes(...fragments: string[]): (toolName: string) => boolean {
-  const lowered = fragments.map(f => f.toLowerCase());
-  return (toolName: string) => {
-    const name = toolName.toLowerCase();
-    return lowered.some(f => name.includes(f));
-  };
-}
+/** Param keys whose value is text or data that would be delivered, on a call already known to send. */
+const DELIVERED_KEY_SET = new Set([...MESSAGE_CONTENT_KEYS, 'text', 'data', 'payload'].map(normalizeKey));
 
 /**
- * Registry entries, checked in order. `external_service` marks actions where
- * an unverifiable destination auto-denies instead of carding.
+ * Param keys that reference a message in an external service. A call that is not a known read
+ * and points at one acts on external content the host cannot see, so what it reaches is no more
+ * verifiable than a destination named outright.
  */
-const EXTRACTOR_REGISTRY: ExtractorEntry[] = [
-  {
-    match: nameIncludes('send_email', 'sendemail', 'email_send', 'emails_send'),
-    extract: genericExtractor,
-    external_service: true,
-    delivers_message: true,
-  },
-  {
-    match: nameIncludes('send_message', 'sendmessage', 'message_send', 'messages_send', 'send_sms', 'sendsms'),
-    extract: genericExtractor,
-    external_service: true,
-    delivers_message: true,
-  },
-  {
-    match: nameIncludes('post_message', 'publish_post', 'create_post', 'post_tweet', 'share_post'),
-    extract: genericExtractor,
-    external_service: true,
-    delivers_message: false,
-  },
-  {
-    match: nameIncludes('payment', 'pay_invoice', 'spend', 'transfer_funds', 'charge_card', 'create_charge'),
-    extract: genericExtractor,
-    external_service: true,
-    delivers_message: false,
-  },
-  {
-    match: nameIncludes('share', 'webhook'),
-    extract: genericExtractor,
-    external_service: true,
-    delivers_message: false,
-  },
-  {
-    // Without this entry the word `email` in the name would make an archive an external send with no destination.
-    match: nameIncludes('archive_email'),
-    extract: genericExtractor,
-    external_service: false,
-    delivers_message: false,
-  },
-];
+const MESSAGE_REFERENCE_KEY_SET = new Set(['message_id'].map(normalizeKey));
+
+/**
+ * Param keys that reference a mailbox. A mailbox is a folder in the connector's own store, like
+ * a repository, so naming one is not on its own a reach outside. It counts as a reference only
+ * when the tool's name is disguised (see externalServiceCarried): a name with lookalike or
+ * hidden characters cannot be taken for the read it resembles.
+ */
+const MAILBOX_REFERENCE_KEY_SET = new Set(['mailbox'].map(normalizeKey));
+
+/** Every destination key, normalized: a value under one of these is the destination itself, never delivered content. */
+const DESTINATION_KEY_SET = new Set(DESTINATION_KEYS.map(normalizeKey));
+
+/**
+ * Destination keys that address a place outside the connector's own store. The repository keys
+ * are left out: a repository is the connector's own place, and the family layer below already
+ * treats a repository write as sending content there.
+ */
+const EXTERNAL_DESTINATION_KEYS = DESTINATION_KEYS.filter(key => key !== 'repo' && key !== 'repository');
 
 /**
  * Lower-cased words of a tool name, joined by underscores and bounded by them, so a phrase
@@ -550,6 +535,8 @@ interface ConnectorFamily {
   sends?: 'message' | 'content';
   /** The call only stages a message as a draft: nothing is delivered, so its card carries no send warning. */
   stages_message?: boolean;
+  /** The call answers something its arguments identify and sends only what its arguments carry, so the card shows its destination. */
+  answers?: boolean;
   /** The card has to name a recipient. */
   needs_recipient?: boolean;
   /** Replaces the recipient when only some addresses in the params receive anything, such as a filter's sender match. */
@@ -617,9 +604,9 @@ const CONNECTOR_READ_WORDS = new Set([
 ]);
 
 /**
- * Connector actions that are not external-service by name but still send data out. They only
+ * Connector actions that are not external-service by what they carry but still send data out. They only
  * change the card's wording and destination: tiers, auto-deny and offline handling come from
- * the registry above. Checked in order.
+ * the carried-property computation in extractCardFields. Checked in order.
  */
 const CONNECTOR_FAMILIES: ConnectorFamily[] = [
   {
@@ -652,6 +639,7 @@ const CONNECTOR_FAMILIES: ConnectorFamily[] = [
   {
     match: words => hasPhrase(words, 'reply'),
     sends: 'message',
+    answers: true,
     describe: ({ where, fields }) => `Send a reply${toRecipient(fields)}${where}?`,
   },
   {
@@ -708,31 +696,19 @@ const CONNECTOR_FAMILIES: ConnectorFamily[] = [
   },
 ];
 
-/** Tool-name fragments treated as external-service actions when unlisted. */
-const EXTERNAL_SERVICE_FRAGMENTS = [
-  'email',
-  'mail',
-  'sms',
-  'message',
-  'post',
-  'publish',
-  'tweet',
-  'share',
-  'payment',
-  'pay',
-  'spend',
-  'transfer',
-  'charge',
-  'invoice',
-  'webhook',
-  'notify',
-];
-
 export interface ExtractionResult {
   fields: ExtractedCardFields;
   /** True when the fallback fired: external-service action, no verifiable destination. */
   destination_unverifiable: boolean;
+  /**
+   * True when an unclaimed call carries words or an id but shows no verifiable destination. The
+   * classifier refuses such a call with the same destination_unverifiable reason, but only after
+   * every more specific mechanism has had its say (see extractCardFields).
+   */
+  payload_unverifiable: boolean;
   external_service: boolean;
+  /** A connector family claims this call as sending or staging content out (a reply, a forward, a draft, a repository write). */
+  family_send: boolean;
   /** A connector call that only reads (see isConnectorRead): never a send, and never an unverifiable destination. */
   connector_read: boolean;
   /** Plain-words description of a known connector action (search, fetch, repo write, mail), or null. */
@@ -1024,6 +1000,158 @@ function incompleteSend(input: {
   return null;
 }
 
+/** True when a value holds words: a non-empty string, or a list holding one. */
+function hasWords(value: unknown): boolean {
+  if (typeof value === 'string') {
+    return value.trim() !== '';
+  }
+  return Array.isArray(value) && value.some(hasWords);
+}
+
+/** True when any top-level argument under one of the keys holds words. */
+function carriesWords(params: Record<string, unknown>, keys: ReadonlySet<string>): boolean {
+  return Object.entries(params).some(([key, value]) => keys.has(normalizeKey(key)) && hasWords(value));
+}
+
+/** True when a top-level argument under one of the keys names something in an external service. */
+function carriesReference(params: Record<string, unknown>, keys: ReadonlySet<string>): boolean {
+  return Object.entries(params).some(
+    ([key, value]) =>
+      keys.has(normalizeKey(key)) &&
+      value !== null &&
+      value !== undefined &&
+      !(typeof value === 'string' && value.trim() === ''),
+  );
+}
+
+/** True when a value carries payload: words at any depth, or a number standing as an id or a quantity. */
+function carriesPayloadValue(value: unknown): boolean {
+  if (typeof value === 'string') {
+    return value.trim() !== '';
+  }
+  if (typeof value === 'number') {
+    return Number.isFinite(value);
+  }
+  if (Array.isArray(value)) {
+    return value.some(carriesPayloadValue);
+  }
+  return isRecord(value) && Object.values(value).some(carriesPayloadValue);
+}
+
+/**
+ * True when an argument outside the destination keys and the mailbox keys carries words or an id.
+ * The destination keys name where a call goes, so their values are the destination itself, and a
+ * mailbox is a folder in the connector's own store: neither one is payload carried somewhere unseen.
+ */
+function carriesUnaddressedPayload(params: Record<string, unknown>): boolean {
+  return Object.entries(params).some(([key, value]) => {
+    const normalized = normalizeKey(key);
+    return (
+      !DESTINATION_KEY_SET.has(normalized) && !MAILBOX_REFERENCE_KEY_SET.has(normalized) && carriesPayloadValue(value)
+    );
+  });
+}
+
+/** True when the tool name holds a lookalike or hidden character, so its words cannot be taken at face value. */
+function nameIsDisguised(toolName: string): boolean {
+  return !/^[A-Za-z0-9._ -]+$/.test(toolName);
+}
+
+/** True when any top-level argument outside the destination keys holds words: content a named destination would receive. */
+function carriesOtherWords(params: Record<string, unknown>): boolean {
+  return Object.entries(params).some(([key, value]) => !DESTINATION_KEY_SET.has(normalizeKey(key)) && hasWords(value));
+}
+
+/**
+ * Recipients at any depth under recipient keys that reach someone: forwarding keys name where
+ * matching mail goes instead, and the from and sender keys name where it came from.
+ */
+function addressedRecipients(params: Record<string, unknown>): string[] {
+  const excluded = new Set([...FORWARD_KEY_SET, normalizeKey('from'), normalizeKey('sender')]);
+  const keys = new Set([...RECIPIENT_KEY_SET].filter(key => !excluded.has(key)));
+  return nestedRecipientValues(params, keys);
+}
+
+/**
+ * Whether the call reaches an external service with something addressed out, computed once from
+ * what the call carries and from the tool's declared annotations, never from fragments in the
+ * tool's name: it is addressed to a recipient, carries an amount, delivers words or data to a
+ * destination outside the connector's own store, carries a composed message, or points at a
+ * message it acts on. A mailbox it names counts only when its name is disguised, since a mailbox
+ * is the connector's own store and a plain name can be taken at face value. A tool declared
+ * read-only and closed-world is not counted as addressed by its arguments alone, since a read's
+ * arguments can name the person or place it reads about: only what it carries to deliver counts
+ * there. A call that only stages a draft delivers nothing, so it never counts. A call a
+ * connector family describes without sending (a fetch, a search, an archive) is not counted as
+ * delivering to a destination it names, since that family already says what the call does there.
+ *
+ * The same computation reports whether the call carries payload with nowhere verifiable to go:
+ * a call no connector family claims, which is not a known read, is not declared read-only and
+ * closed-world, is not a destructive or install action (those keep their own cards, which show
+ * the arguments in full), and does not name a mailbox (a mailbox anchors the call in the
+ * connector's own store, so its other arguments name things inside that store), yet carries
+ * words or an id under a key that is neither a destination key nor a mailbox key. That verdict
+ * is reported apart from external-service itself, because a call that does show a destination
+ * is an ordinary send to it, not an unverifiable one: the extraction adds the shown-destination
+ * conditions, and the classifier refuses only the remainder no other mechanism claims.
+ */
+function externalServiceCarried(input: {
+  params: Record<string, unknown>;
+  fields: ExtractedCardFields;
+  addressed_recipients: readonly string[];
+  staged_draft: boolean;
+  read_only_closed_world: boolean;
+  tool_name: string;
+  nonsend_family: boolean;
+  /** No connector family claims the call, so no family's own rules govern what it carries. */
+  unclaimed: boolean;
+  /** The call is a known connector read (see isConnectorRead). */
+  connector_read: boolean;
+  /** The tool's name ranks it destructive or install, classes with their own cards. */
+  destructive_or_install_name: boolean;
+}): { external_service: boolean; unverifiable_payload: boolean } {
+  if (input.staged_draft) {
+    return { external_service: false, unverifiable_payload: false };
+  }
+  const addressed =
+    !input.read_only_closed_world &&
+    (input.fields.recipient !== null || input.fields.amount !== null || input.addressed_recipients.length > 0);
+  const deliversToDestination =
+    firstOrNull(stringValues(input.params, EXTERNAL_DESTINATION_KEYS)) !== null &&
+    (carriesWords(input.params, DELIVERED_KEY_SET) || (!input.nonsend_family && carriesOtherWords(input.params)));
+  const externalService =
+    addressed ||
+    deliversToDestination ||
+    carriesWords(input.params, MESSAGE_CONTENT_KEY_SET) ||
+    carriesReference(input.params, MESSAGE_REFERENCE_KEY_SET) ||
+    (nameIsDisguised(input.tool_name) && carriesReference(input.params, MAILBOX_REFERENCE_KEY_SET));
+  const unverifiablePayload =
+    input.unclaimed &&
+    !input.connector_read &&
+    !input.read_only_closed_world &&
+    !input.destructive_or_install_name &&
+    !carriesReference(input.params, MAILBOX_REFERENCE_KEY_SET) &&
+    carriesUnaddressedPayload(input.params);
+  return { external_service: externalService, unverifiable_payload: unverifiablePayload };
+}
+
+/**
+ * Whether the call delivers a message to a person, so every part of its arguments must be fully
+ * visible: a message family, or a call addressed to a recipient that carries the delivered text.
+ */
+function deliversMessageCarried(input: {
+  family_sends_message: boolean;
+  fields: ExtractedCardFields;
+  nested_recipients: readonly string[];
+  params: Record<string, unknown>;
+}): boolean {
+  if (input.family_sends_message) {
+    return true;
+  }
+  const addressed = input.fields.recipient !== null || input.nested_recipients.length > 0;
+  return addressed && carriesWords(input.params, DELIVERED_KEY_SET);
+}
+
 /**
  * Extract card fields for a Tier 3 action. Never reads agent text: only the
  * canonical params the server parsed. For a connector (MCP) call the exact
@@ -1045,36 +1173,61 @@ export function extractCardFields(input: {
    */
   host_mail_draft?: boolean | undefined;
 }): ExtractionResult {
-  const entry = EXTRACTOR_REGISTRY.find(e => e.match(input.tool_name));
-  const externalService =
-    entry?.external_service ?? EXTERNAL_SERVICE_FRAGMENTS.some(f => input.tool_name.toLowerCase().includes(f));
-  const base = entry !== undefined ? entry.extract(input.canonical_params) : genericExtractor(input.canonical_params);
-  const destinationUnverifiable = externalService && base.destination === null && base.recipient === null;
+  const base = genericExtractor(input.canonical_params);
+  const nestedRecipients = [...new Set(nestedRecipientValues(input.canonical_params))];
+  const readOnlyClosedWorld = input.read_only_closed_world === true;
   if (input.tool_type !== 'mcp') {
+    const { external_service: externalService } = externalServiceCarried({
+      params: input.canonical_params,
+      fields: base,
+      addressed_recipients: addressedRecipients(input.canonical_params),
+      staged_draft: false,
+      read_only_closed_world: readOnlyClosedWorld,
+      tool_name: input.tool_name,
+      nonsend_family: false,
+      unclaimed: false,
+      connector_read: false,
+      destructive_or_install_name: false,
+    });
+    const incomplete = incompleteSend({
+      hidden: null,
+      sends: externalService,
+      delivers_message: deliversMessageCarried({
+        family_sends_message: false,
+        fields: base,
+        nested_recipients: nestedRecipients,
+        params: input.canonical_params,
+      }),
+      shows_arguments: false,
+      message_send: false,
+      truncated: false,
+      needs_recipient: false,
+      needs_to: false,
+      draft_needs_recipient: false,
+      params: input.canonical_params,
+      fields: base,
+    });
     return {
       fields: base,
-      destination_unverifiable: destinationUnverifiable,
+      // A more specific refusal (a hidden send, a missing recipient) owns the call when one applies.
+      destination_unverifiable:
+        externalService &&
+        base.destination === null &&
+        base.recipient === null &&
+        !readOnlyClosedWorld &&
+        incomplete === null,
+      // The payload fallback covers connector calls only; a host tool's own classes govern it.
+      payload_unverifiable: false,
       external_service: externalService,
+      family_send: false,
       connector_read: false,
       connector_what: null,
       sends: externalService,
       staged_draft: false,
-      incomplete_send: incompleteSend({
-        hidden: null,
-        sends: externalService,
-        delivers_message: entry?.delivers_message === true,
-        shows_arguments: false,
-        message_send: false,
-        truncated: false,
-        needs_recipient: false,
-        needs_to: false,
-        draft_needs_recipient: false,
-        params: input.canonical_params,
-        fields: base,
-      }),
+      incomplete_send: incomplete,
     };
   }
-  const readOnly = input.read_only_closed_world === true;
+  const readOnly = readOnlyClosedWorld;
   const words = nameWords(input.tool_name);
   // Deleting or installing is described by the classifier's own destructive and install cards.
   const family = hasPhrase(words, ...DESTRUCTIVE_AND_INSTALL_WORDS)
@@ -1085,10 +1238,23 @@ export function extractCardFields(input: {
     isConnectorRead({ tool_name: input.tool_name, words, params: input.canonical_params });
   const where =
     input.server_name === undefined || input.server_name === '' ? '' : ` on ${escapeDisplayText(input.server_name)}`;
-  const recipients = [...new Set(nestedRecipientValues(input.canonical_params))];
+  const recipients = nestedRecipients;
   const hidden = readOnly
     ? null
     : hiddenSendKind({ tool_name: input.tool_name, words, params: input.canonical_params });
+  const carried = externalServiceCarried({
+    params: input.canonical_params,
+    fields: base,
+    addressed_recipients: addressedRecipients(input.canonical_params),
+    staged_draft: family?.stages_message === true,
+    read_only_closed_world: readOnly,
+    tool_name: input.tool_name,
+    nonsend_family: family !== undefined && family.sends === undefined,
+    unclaimed: family === undefined,
+    connector_read: connectorRead,
+    destructive_or_install_name: hasPhrase(words, ...DESTRUCTIVE_AND_INSTALL_WORDS),
+  });
+  const externalService = carried.external_service;
   const sends =
     (externalService && !connectorRead) ||
     family?.sends !== undefined ||
@@ -1109,26 +1275,55 @@ export function extractCardFields(input: {
     // Only the connector's own configured URL: a host read from the arguments is the model's claim.
     destination_host: input.server_host === undefined ? null : escapeDisplayText(input.server_host),
   };
+  const incomplete = incompleteSend({
+    hidden,
+    sends,
+    delivers_message: deliversMessageCarried({
+      family_sends_message: family?.sends === 'message',
+      fields,
+      nested_recipients: nestedRecipients,
+      params: input.canonical_params,
+    }),
+    shows_arguments: true,
+    message_send: messageSend,
+    truncated: outbound.truncated,
+    needs_recipient: family?.needs_recipient === true,
+    needs_to: isMailReply({ words: `${words}${nameWords(input.server_name ?? '')}`, params: input.canonical_params }),
+    draft_needs_recipient: input.host_mail_draft === true && family?.stages_message === true,
+    params: input.canonical_params,
+    fields,
+  });
+  // A destination or recipient counts as verifiable when the card can show it from the arguments:
+  // one the arguments name outright, or one a family reads from the arguments (a filter's forward
+  // address). A family's implicit destination (the people a reply or a forward reaches through
+  // the message it answers) is not in the arguments, so it does not count.
+  const shownRecipient = family?.recipient === undefined ? base.recipient : family.recipient(input.canonical_params);
   return {
     fields,
-    destination_unverifiable: destinationUnverifiable && !connectorRead,
+    // A more specific refusal (a hidden send, a missing recipient) owns the call when one applies.
+    // A reply family call answers something its arguments identify and sends only what they
+    // carry, so its destination is shown: the thread on its card. A forward is not one of these,
+    // since what it delivers is the stored message it names, which the card cannot show.
+    destination_unverifiable:
+      externalService &&
+      fields.destination === null &&
+      family?.answers !== true &&
+      shownRecipient === null &&
+      !connectorRead &&
+      !readOnlyClosedWorld &&
+      incomplete === null,
+    // The same refusal as an external-service action gets, reported apart so the classifier can
+    // apply it last, to the unclaimed remainder (see the header comment). The carried verdict
+    // from externalServiceCarried counts only when nothing is shown for the call to go to and
+    // no more specific refusal (a hidden send, a missing recipient) owns it.
+    payload_unverifiable:
+      carried.unverifiable_payload && fields.destination === null && shownRecipient === null && incomplete === null,
     external_service: externalService,
+    family_send: family?.sends !== undefined,
     connector_read: connectorRead,
     sends,
     staged_draft: family?.stages_message === true,
-    incomplete_send: incompleteSend({
-      hidden,
-      sends,
-      delivers_message: entry?.delivers_message === true || family?.sends === 'message',
-      shows_arguments: true,
-      message_send: messageSend,
-      truncated: outbound.truncated,
-      needs_recipient: family?.needs_recipient === true,
-      needs_to: isMailReply({ words: `${words}${nameWords(input.server_name ?? '')}`, params: input.canonical_params }),
-      draft_needs_recipient: input.host_mail_draft === true && family?.stages_message === true,
-      params: input.canonical_params,
-      fields,
-    }),
+    incomplete_send: incomplete,
     connector_what:
       family === undefined
         ? null

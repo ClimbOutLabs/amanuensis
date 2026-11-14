@@ -119,7 +119,7 @@ function build(input: {
       reply: '[]',
       annotations: { readOnlyHint: true, openWorldHint: false },
     }),
-    notes: makeSource({ name: 'Notes', tools: ['save_note'], reply: 'saved' }),
+    notes: makeSource({ name: 'Notes', tools: ['delete_note'], reply: 'deleted' }),
     claim: makeSource({
       name: 'Misc',
       tools: ['do_thing'],
@@ -263,9 +263,13 @@ const CALENDAR_AND_MAIL: CallSpec[] = [
   { id: 'call-calendar', name: 'list_events', args: '{}' },
   { id: 'call-mail', name: 'get_emails_content', args: '{}' },
 ];
+// The write that asks here is a delete, which keeps its own card: a connector write that
+// carries only text and names no destination is refused under the unverifiable-destination
+// rule, so it could never be the call that asked first and was allowed. The machinery under
+// test (ask, answer, reopen, run) is the same for any change that asks.
 const READ_AND_WRITE: CallSpec[] = [
   { id: 'call-calendar', name: 'list_events', args: '{}' },
-  { id: 'call-note', name: 'save_note', args: JSON.stringify({ text: 'Lunch at noon' }) },
+  { id: 'call-note', name: 'delete_note', args: JSON.stringify({ title: 'Lunch at noon' }) },
 ];
 
 describe('a call that asked first and was allowed, when the chat is opened again', () => {
