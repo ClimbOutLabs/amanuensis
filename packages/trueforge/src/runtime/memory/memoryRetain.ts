@@ -242,6 +242,18 @@ export function retainIsUnderWay(operationId: string): boolean {
   return retainsUnderWay.has(operationId);
 }
 
+/**
+ * Counts a turn's save as under way from now until the returned function is called. The work after a turn calls
+ * this before its first step, so the next turn of the chat never finds the save unrecorded and unannounced.
+ */
+export function markRetainUnderWay(params: Pick<SubmitRetainParams, 'sessionId' | 'turnId'>): () => void {
+  const operationId = retainOperationId({ sessionId: params.sessionId, turnId: params.turnId });
+  retainsUnderWay.add(operationId);
+  return () => {
+    retainsUnderWay.delete(operationId);
+  };
+}
+
 async function whileRetainUnderWay<T>({
   params,
   work,
@@ -249,12 +261,11 @@ async function whileRetainUnderWay<T>({
   params: Pick<SubmitRetainParams, 'sessionId' | 'turnId'>;
   work: () => Promise<T>;
 }): Promise<T> {
-  const operationId = retainOperationId({ sessionId: params.sessionId, turnId: params.turnId });
-  retainsUnderWay.add(operationId);
+  const ended = markRetainUnderWay(params);
   try {
     return await work();
   } finally {
-    retainsUnderWay.delete(operationId);
+    ended();
   }
 }
 

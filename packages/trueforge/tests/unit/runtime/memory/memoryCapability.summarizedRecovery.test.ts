@@ -30,6 +30,7 @@ import type { IModelProviderStore } from '../../../../src/db/modelProviderStore'
 import { MarkdownMemoryClient } from '../../../../src/runtime/memory/markdownMemoryClient';
 import { memoryCapability, type MemoryConfig } from '../../../../src/runtime/memory/memoryCapability';
 import {
+  markRetainUnderWay,
   noteUnfinishedTurnOwesNoSummary,
   submitRetainWithVerification,
   type SummarizeTurnContext,
@@ -224,7 +225,7 @@ describe('the turn after a turn that saved nothing, with summaries on', () => {
     expect(await client.summaryPendingSince({ namespace: '' })).toBeUndefined();
   });
 
-  it('checks again on the turn after, and marks the vault only if the summary then left no record', async () => {
+  it('finds the turn recorded once its summary has ended, and still raises no warning', async () => {
     let finishSummary: (() => void) | undefined;
     mockSummarize.mockImplementation(
       () =>
@@ -236,15 +237,25 @@ describe('the turn after a turn that saved nothing, with summaries on', () => {
     );
     const firstTurn = drainFirstTurn();
     await new Promise(resolve => setTimeout(resolve, 20));
-    const capability = capabilityFor(client);
 
-    await runSecondTurn(capability);
+    await runSecondTurn(capabilityFor(client));
     finishSummary?.();
     await firstTurn;
-    await runSecondTurn(capability);
+    await runSecondTurn(capabilityFor(client));
 
     expect(await client.summaryPendingSince({ namespace: '' })).toBeUndefined();
     expect(savedLogs(dir)).toEqual([]);
+  });
+
+  it('raises no warning for a turn whose save was announced and has not begun, and raises it once that ends with no record', async () => {
+    const ended = markRetainUnderWay(TURN);
+
+    await runSecondTurn(capabilityFor(client));
+    expect(await client.summaryPendingSince({ namespace: '' })).toBeUndefined();
+
+    ended();
+    await runSecondTurn(capabilityFor(client));
+    expect(await client.summaryPendingSince({ namespace: '' })).toEqual(expect.any(String));
   });
 
   it('still rebuilds a vanished turn as its full exchange when summaries are off', async () => {
