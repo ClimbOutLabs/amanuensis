@@ -10,6 +10,7 @@ import type { PageChangeOptions } from './memoryPageWriter';
 import { changeNightlyState, readNightlyState } from './nightlyState';
 import { sortNote, type SortModel } from './pageSorter';
 import type { PageSortMode, SortStopCause } from './pageSortMode';
+import { noteOriginOf } from './pageSortOrigin';
 import { readReportedNoteIds } from './pageSortReport';
 import { noteOf } from './pageSortRun';
 
@@ -94,16 +95,17 @@ export async function sortMissedNotes({
   const failed = new Set<string>();
   let failuresInARow = 0;
   for (const entry of missed) {
-    const outcome = await sortNote({
-      mode,
-      note: noteOf({ entry, today }),
-      askModel,
-      options,
-      similarPages,
-    });
-    result.asked += 1;
+    const note = noteOf({ entry, today });
+    const outcome = await sortNote({ mode, note, askModel, options, similarPages });
+    // A note of the assistant's own reply is settled without the model, so it counts as neither asked nor sorted.
+    const modelAsked = noteOriginOf(note.metadata).kind !== 'assistant_reply';
+    if (modelAsked) {
+      result.asked += 1;
+    }
     if (outcome.status === 'sorted') {
-      result.sorted += 1;
+      if (modelAsked) {
+        result.sorted += 1;
+      }
       failuresInARow = 0;
       continue;
     }

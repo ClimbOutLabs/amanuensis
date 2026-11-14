@@ -2,8 +2,8 @@
  * Sorting what a turn saved: it starts after the save, never holds up the save or the reply, uses the
  * summarizer's model, and leaves private chats alone.
  */
-import type { ILLM } from '@truefoundry/trueforge-core/core';
-import { mkdtemp, readFile } from 'node:fs/promises';
+import { execFileRunner, type ILLM } from '@truefoundry/trueforge-core/core';
+import { mkdtemp, readdir, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import winston from 'winston';
@@ -14,11 +14,14 @@ import { MarkdownMemoryClient } from '../../../../src/runtime/memory/markdownMem
 import { memoryBackgroundWorkSettled } from '../../../../src/runtime/memory/memoryBackgroundWork';
 import { USER_STATED_ORIGIN } from '../../../../src/runtime/memory/memoryOrigin';
 import {
+  noteRetainItem,
   submitRetain,
   type SubmitRetainParams,
   type SummarizeTurnContext,
 } from '../../../../src/runtime/memory/memoryRetain';
+import { sortMissedNotes } from '../../../../src/runtime/memory/missedNotes';
 import { SORT_REPORT_FILE } from '../../../../src/runtime/memory/pageSortReport';
+import { sortWrittenNotes, summaryModelForSorting } from '../../../../src/runtime/memory/pageSortRun';
 import { saveSentMail } from '../../../../src/runtime/memory/sentMail';
 import { MEMORY_PAGE_SORTING_SETTING_KEY } from '../../../../src/runtime/memoryPageSortingSettings';
 import { discardedModelUsage } from '../../../fixtures/discardedModelUsage';
@@ -435,5 +438,91 @@ describe('sorting after a save', () => {
     await saveSentMail({ ...common, callId: 'c2', summarize: summarizeContext(model) });
     await waitFor(async () => (await handledCount(vaultDir)) === 1);
     expect(await readFile(path.join(vaultDir, 'people', 'nora.md'), 'utf8')).toContain('src=sent_mail');
+  });
+
+  const REPLY = 'Oat bars travel well, so Nora should keep them for the walk on Sunday.';
+  const pageFolders = async (vaultDir: string) =>
+    (await readdir(vaultDir)).filter(name => name === 'people' || name === 'matters');
+
+  it.each([
+    ['a chat that had read nothing', true],
+    ['a chat that had read something', false],
+  ])('never asks the model about a saved note of the assistant’s reply from %s', async (_name, chatReadNothing) => {
+    const { client, vaultDir } = await openClient();
+    const model = fakeModel({ sortAnswer: newFactAnswer });
+    const saved = await client.retain({
+      items: [
+        noteRetainItem({
+          sessionId: 's1',
+          turnId: 't1',
+          completedAt: TURN.completedAt,
+          note: { source: 'assistant_response', date: '2026-11-06', text: `From Juno's reply, Nov 6: ${REPLY}` },
+          documentId: 'aman-s1-t1-note-0',
+          chatReadNothing,
+        }),
+      ],
+      operationId: 'op-1',
+      timeoutMs: 5000,
+    });
+    expect(saved.written).toHaveLength(1);
+
+    await sortWrittenNotes({
+      mode: 'on',
+      client,
+      written: saved.written ?? [],
+      summarize: summarizeContext(model),
+      timeZone: 'UTC',
+      logger,
+    });
+
+    expect(model.sortCalls).toBe(0);
+    expect(await pageFolders(vaultDir)).toEqual([]);
+    expect([...(await readHandledNotes(vaultDir)).values()]).toEqual(['none']);
+    // The note itself is kept, so it can still be recalled.
+    expect(await readFile(path.join(vaultDir, 'memory', '2026-11-06.md'), 'utf8')).toContain(REPLY);
+  });
+
+  it('keeps the reply of a chat saved in full off the pages when the daily tidy sorts that day', async () => {
+    const { client, vaultDir } = await openClient();
+    const model = fakeModel({ sortAnswer: newFactAnswer });
+    // With no summary model the whole exchange is saved: the person's words, and the reply as a note of its own.
+    await submitRetain({
+      client,
+      session: { is_incognito: false },
+      ...TURN,
+      userText: SHELLFISH,
+      assistantText: REPLY,
+      logger,
+      summarize: undefined,
+    });
+    await memoryBackgroundWorkSettled({ timeoutMs: 5000 });
+    const day = await readFile(path.join(vaultDir, 'memory', '2026-11-06.md'), 'utf8');
+    expect(day).toContain(SHELLFISH);
+    expect(day).toContain(REPLY);
+
+    const prompts: string[] = [];
+    const askModel = summaryModelForSorting({ summarize: summarizeContext(model), logger });
+    if (askModel === undefined) {
+      throw new Error('No model to sort with.');
+    }
+    const result = await sortMissedNotes({
+      mode: 'on',
+      baseDir: path.dirname(vaultDir),
+      namespace: path.basename(vaultDir),
+      options: { vaultDir, runner: execFileRunner, today: '2026-11-07', logger },
+      askModel: messages => {
+        prompts.push(messages.map(message => message.content).join('\n'));
+        return askModel(messages);
+      },
+      similarPages: undefined,
+      countFailedNight: true,
+    });
+
+    expect(result).toEqual({ asked: 1, sorted: 1, reasons: [] });
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]).toContain(SHELLFISH);
+    expect(prompts[0]).not.toContain('Oat bars');
+    expect([...(await readHandledNotes(vaultDir)).values()].sort()).toEqual(['none', 'page']);
+    expect(await readFile(path.join(vaultDir, 'people', 'nora.md'), 'utf8')).not.toContain('Oat bars');
   });
 });
