@@ -105,6 +105,18 @@ test(
           `Activity comes before Rules: ${folds.join(', ')}`,
         );
         assert.equal(await panel.locator('[data-section="memory"]').count(), 0, 'no Memory section');
+
+        // While a page is open, the live browser link shows with a dot that pulses and can be seen.
+        const live = panel.getByRole('link', { name: /Live browser/ });
+        assert.equal(await live.getAttribute('href'), '/browser-live?tab=chat-1');
+        const dot = await live.locator('.aman-runtime-rail__live-dot').evaluate(el => {
+          const style = getComputedStyle(el);
+          const box = el.getBoundingClientRect();
+          return { animation: style.animationName, colour: style.backgroundColor, width: box.width };
+        });
+        assert.notEqual(dot.animation, 'none', 'the live dot pulses');
+        assert.ok(dot.width >= 6, `the live dot can be seen (${String(dot.width)}px wide)`);
+        assert.notEqual(dot.colour, 'rgba(0, 0, 0, 0)', 'the live dot has a colour');
         assert.equal(await panel.locator('[data-section="activity"] li').count(), 5, 'at most five actions');
         assert.equal(await panel.getByText(/·\s*\d/).count(), 0, 'no counts after an action');
 
