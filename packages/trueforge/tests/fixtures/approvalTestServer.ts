@@ -63,6 +63,7 @@ import { createImageReencoder } from '../../src/runtime/chatImages/reencodeInSan
 import { ChatSearchIndexer } from '../../src/runtime/chatSearchIndexing';
 import { EventSubscriptionRegistry } from '../../src/runtime/event-subscription';
 import { memoryBackgroundWorkSettled } from '../../src/runtime/memory/memoryBackgroundWork';
+import { startNightlyMemoryJob, type NightlyMemoryJob } from '../../src/runtime/memory/nightlyService';
 import { createOutboundSecretSource } from '../../src/runtime/outboundSecrets';
 import { localModelEndpointOf } from '../../src/runtime/remoteAddress';
 import { createSentinelServices } from '../../src/runtime/sentinelServices';
@@ -111,6 +112,8 @@ function buildApp(input: {
   /** Signs the one owner in with an email and password, as `TRUEFORGE_AUTH_MODE=local` does. */
   localSignIn: boolean;
   turnDrains: TurnDrainRegistry;
+  /** The tidy-up the Memory settings page starts, for this database. */
+  memoryTidy: (db: SqliteDb) => NightlyMemoryJob;
 }): ReturnType<typeof createServerApp> {
   const { db, sandboxProvider, turnDrains } = input;
   const sessionStore = new SqliteSessionStore(db);
@@ -195,7 +198,7 @@ function buildApp(input: {
     }),
     globalSettingsStore,
     tokenFactoryBudget: uncappedTokenFactoryBudget,
-    memoryTidy: { tidyNow: () => undefined, tidyState: () => ({ status: 'idle' }) },
+    memoryTidy: input.memoryTidy(db),
     sessionStore,
     sentinelAuditStore,
     sentinelSettingsStore,
@@ -238,6 +241,8 @@ export async function startApprovalTestServer(options?: {
   inertMessageSearch?: boolean | undefined;
   /** Runs local sign-in instead of the standalone user: the first request must create the owner's sign-in. */
   localSignIn?: boolean | undefined;
+  /** Runs the real memory tidy-up when the Memory settings page asks for one, instead of doing nothing. */
+  memoryTidy?: boolean | undefined;
 }): Promise<ApprovalTestServer> {
   const localSignIn = options?.localSignIn === true;
   const authenticator = options?.authenticator ?? createAuthenticator({ mode: TrueForgeAuthMode.Standalone });
@@ -334,9 +339,26 @@ export async function startApprovalTestServer(options?: {
   const modelEndpoint = localModelEndpointOf(model.baseUrl);
   configuration.LOCAL_MODEL_ENDPOINTS = modelEndpoint === null ? [] : [modelEndpoint];
 
+  const memoryTidy = (database: SqliteDb): NightlyMemoryJob =>
+    options?.memoryTidy === true
+      ? startNightlyMemoryJob({
+          personaStore: new SqlitePersonaStore(database),
+          modelProviderStore: new SqliteModelProviderStore(database),
+          globalSettingsStore: new SqliteGlobalSettingsStore(database),
+          tokenFactoryBudget: uncappedTokenFactoryBudget,
+          logger: createLogger({ silent: true }),
+        })
+      : { tidyNow: () => undefined, tidyState: () => ({ status: 'idle' }) };
   // One registry for the server's life, so close() can wait for turn drains the way main.ts does.
   const turnDrains = new TurnDrainRegistry();
-  let app = buildApp({ db, sandboxProvider: options?.sandboxProvider, authenticator, localSignIn, turnDrains });
+  let app = buildApp({
+    db,
+    sandboxProvider: options?.sandboxProvider,
+    authenticator,
+    localSignIn,
+    turnDrains,
+    memoryTidy,
+  });
 
   return {
     // Hono's request() is sync-or-async depending on the route; the fixture
@@ -347,7 +369,14 @@ export async function startApprovalTestServer(options?: {
       // A restart stands in for the process going away, so running replies are cut off, not drained.
       await db.destroy();
       db = createSqliteDb(databaseFile);
-      app = buildApp({ db, sandboxProvider: options?.sandboxProvider, authenticator, localSignIn, turnDrains });
+      app = buildApp({
+        db,
+        sandboxProvider: options?.sandboxProvider,
+        authenticator,
+        localSignIn,
+        turnDrains,
+        memoryTidy,
+      });
     },
     mcp,
     model,
