@@ -1,5 +1,7 @@
 import { OpenAPIHono, type RouteHandler } from '@hono/zod-openapi';
+import { extractErrorLogFields } from '@truefoundry/trueforge-core/core';
 import type { Context } from 'hono';
+import type { Logger } from 'winston';
 import type { ResolveRequestContext } from '../auth/identity';
 import configuration from '../config';
 import {
@@ -14,6 +16,7 @@ import {
   listModelProvidersRoute,
   putModelProviderRoute,
 } from '../routes/modelProviderRoutes';
+import type { CheckSavedModelProvider } from '../runtime/modelProviderCheck';
 import { modelUrlProblem } from '../runtime/remoteAddress';
 import {
   modelProviderName,
@@ -30,6 +33,9 @@ export interface ModelProvidersRouterDeps<TTransaction> {
   resolveRequestContext: ResolveRequestContext;
   /** Providers whose record the environment rewrites at startup; the API keeps them read-only. */
   envManagedNames: ReadonlySet<string>;
+  /** Runs the one test call for a just-saved provider; its outcome is stored on the provider. */
+  checkSavedProvider: CheckSavedModelProvider;
+  logger: Logger;
 }
 
 /** Machine-readable `error.code` when a write targets an environment-managed provider. */
@@ -128,7 +134,35 @@ function toWireProvider({
     name: record.name,
     manifest: redactModelProvider(record.manifest),
     ...(envManagedNames.has(record.name) ? { env_managed: true } : {}),
+    ...(record.last_check === null ? {} : { last_check: record.last_check }),
   };
+}
+
+/**
+ * Runs the save-time connection check for a provider that was just saved and stores the
+ * outcome on its row, returning the record to present. The check warns and never blocks:
+ * if the check or the store write itself fails, the saved provider is returned as it was
+ * and the failure is only logged.
+ */
+async function runSaveCheck<TTransaction>({
+  deps,
+  store,
+  tenant_id,
+  record,
+}: {
+  deps: ModelProvidersRouterDeps<TTransaction>;
+  store: IModelProviderStore<TTransaction>;
+  tenant_id: string;
+  record: ModelProviderRecord;
+}): Promise<ModelProviderRecord> {
+  try {
+    const check = await deps.checkSavedProvider({ tenant_id, store, record });
+    const updated = await store.recordProviderCheck({ tenant_id, name: record.name, check });
+    return updated ?? { ...record, last_check: check };
+  } catch (error) {
+    deps.logger.error('Model provider connection check failed to run', extractErrorLogFields(error));
+    return record;
+  }
 }
 
 export function createModelProvidersRouter<TTransaction>(deps: ModelProvidersRouterDeps<TTransaction>) {
@@ -156,11 +190,13 @@ export function createModelProvidersRouter<TTransaction>(deps: ModelProvidersRou
     try {
       // Create has no prior row; redacted keep resolves to MissingStoredSecretError → 400.
       const manifest = resolveModelProviderManifestForWrite({ incoming: provider, existing: undefined });
-      const record = await deps.resolveModelProviderStore(c).createProvider({
+      const store = deps.resolveModelProviderStore(c);
+      const saved = await store.createProvider({
         tenant_id: requestContext.tenant_id,
         name,
         manifest,
       });
+      const record = await runSaveCheck({ deps, store, tenant_id: requestContext.tenant_id, record: saved });
       return c.json({ data: toWireProvider({ record, envManagedNames: deps.envManagedNames }) }, 201);
     } catch (error) {
       if (error instanceof MissingStoredSecretError) {
@@ -190,8 +226,10 @@ export function createModelProvidersRouter<TTransaction>(deps: ModelProvidersRou
     }
     try {
       // Lock → resolve secret from that snapshot → upsert, all in one txn so concurrent keep
-      // cannot re-write a secret over a rotate that committed in between.
-      const record = await deps.withTransaction(async transaction => {
+      // cannot re-write a secret over a rotate that committed in between. The connection check
+      // runs after the transaction commits: it makes a network call, which never belongs
+      // inside a transaction.
+      const saved = await deps.withTransaction(async transaction => {
         const existing = await store.getProviderForUpdate({ tenant_id: requestContext.tenant_id, name }, transaction);
         const manifest = resolveModelProviderManifestForWrite({
           incoming: provider,
@@ -199,6 +237,7 @@ export function createModelProvidersRouter<TTransaction>(deps: ModelProvidersRou
         });
         return store.upsertProvider({ tenant_id: requestContext.tenant_id, name, manifest }, transaction);
       });
+      const record = await runSaveCheck({ deps, store, tenant_id: requestContext.tenant_id, record: saved });
       return c.json({ data: toWireProvider({ record, envManagedNames: deps.envManagedNames }) }, 200);
     } catch (error) {
       if (error instanceof MissingStoredSecretError) {

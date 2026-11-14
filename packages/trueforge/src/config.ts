@@ -50,6 +50,7 @@ import { parseModelPrices, type ModelPrices } from './runtime/modelPricing';
 import { DEFAULT_TOKEN_FACTORY_MODEL } from './runtime/tokenFactoryDefaults';
 import { MAX_CODE_MODE_SOCKET_PARENT_BYTES } from './sandbox/local/core/CodeModeUdsTransport';
 import { isGoModuleHostName } from './sandbox/mirrors/goMirrorPath';
+import { E164_PATTERN } from './schemas/textMessages';
 
 const DEFAULT_PORT = 8790;
 /** Loopback default; container images set HOST=0.0.0.0 so probes and Service traffic reach the process. */
@@ -395,6 +396,26 @@ export function parseMailEmailAccountUrl(raw: string | undefined): string | unde
   return trimmed;
 }
 
+/** The shortest account secret the mail connector accepts; a shorter one keeps its account port closed. */
+const MAIL_EMAIL_ACCOUNT_SECRET_MIN_LENGTH = 32;
+
+/**
+ * Parses `MAIL_EMAIL_ACCOUNT_SECRET`: the value the mail connector's account agent needs before it answers.
+ * Unset or blank means none. A value that is too short fails the boot, since the connector would refuse it.
+ */
+export function parseMailEmailAccountSecret(raw: string | undefined): string | undefined {
+  if (raw === undefined || raw.trim() === '') {
+    return undefined;
+  }
+  const trimmed = raw.trim();
+  if (trimmed.length < MAIL_EMAIL_ACCOUNT_SECRET_MIN_LENGTH) {
+    throw new Error(
+      `MAIL_EMAIL_ACCOUNT_SECRET must be at least ${String(MAIL_EMAIL_ACCOUNT_SECRET_MIN_LENGTH)} characters. Set a longer random value, or remove the line to leave the Email card off.`,
+    );
+  }
+  return trimmed;
+}
+
 /**
  * A sidecar's MCP endpoint derived from its account agent's address: same scheme and host, the MCP
  * port, the /mcp path. Used when the installer has not linked the connector but an account saved
@@ -568,6 +589,102 @@ export function parseWebPushSettings(raw: {
   return { publicKey, privateKey, subject };
 }
 
+/** Twilio, as the one text-message provider. Texts stay off unless `REACH_SMS_PROVIDER` is `twilio` and every value is set. */
+export interface TwilioSettings {
+  accountSid: string;
+  authToken: string;
+  /** The number texts come from, in international form such as +15550100. */
+  fromNumber: string;
+  /** The port of the listener that answers Twilio, apart from the main app. */
+  webhookPort: number;
+  /** The public address Twilio reaches that listener at, without a trailing slash. Request signatures are checked against it. */
+  webhookPublicUrl: string;
+  /** Texts the whole server sends in a day, codes apart, so many accounts together cannot run up the bill. */
+  maxTextsPerDay: number;
+}
+
+export const DEFAULT_MAX_TEXTS_PER_DAY = 500;
+
+/** Outside the ranges the installer picks app, sign-in and https ports from, so no instance lands on it. */
+export const DEFAULT_TWILIO_WEBHOOK_PORT = 9201;
+
+function isPlainHttpsAddress(url: URL | undefined): url is URL {
+  return (
+    url?.protocol === 'https:' && url.username === '' && url.password === '' && url.search === '' && url.hash === ''
+  );
+}
+
+/**
+ * Parses `REACH_SMS_PROVIDER` (default `none`) and the Twilio settings. With no provider, texts are off and the
+ * Twilio values are ignored. With `twilio`, a missing or malformed value fails the boot with the one thing to do next.
+ */
+export function parseTwilioSettings(raw: {
+  provider: string | undefined;
+  accountSid: string | undefined;
+  authToken: string | undefined;
+  fromNumber: string | undefined;
+  webhookPort: string | undefined;
+  webhookPublicUrl: string | undefined;
+  maxTextsPerDay: string | undefined;
+  mainPort: number;
+}): TwilioSettings | undefined {
+  const provider = blankToUndefined(raw.provider)?.toLowerCase() ?? 'none';
+  if (provider === 'none') {
+    return undefined;
+  }
+  if (provider !== 'twilio') {
+    throw new Error('Set REACH_SMS_PROVIDER to none or twilio.');
+  }
+  const accountSid = blankToUndefined(raw.accountSid);
+  const authToken = blankToUndefined(raw.authToken);
+  const fromNumber = blankToUndefined(raw.fromNumber);
+  if (accountSid === undefined || !/^AC[0-9a-fA-F]{32}$/.test(accountSid)) {
+    throw new Error(
+      'TWILIO_ACCOUNT_SID must be your Twilio account id, which starts with AC. Copy it from the Twilio console.',
+    );
+  }
+  if (authToken === undefined) {
+    throw new Error('TWILIO_AUTH_TOKEN is not set. Copy the auth token from the Twilio console.');
+  }
+  if (fromNumber === undefined || !E164_PATTERN.test(fromNumber)) {
+    throw new Error('TWILIO_FROM_NUMBER must be your Twilio number with the country code, such as +15550100.');
+  }
+  const portText = blankToUndefined(raw.webhookPort);
+  const webhookPort = portText === undefined ? DEFAULT_TWILIO_WEBHOOK_PORT : Number(portText);
+  if (!Number.isInteger(webhookPort) || webhookPort < 1 || webhookPort > 65535 || webhookPort === raw.mainPort) {
+    throw new Error(
+      'TWILIO_WEBHOOK_PORT must be a whole number from 1 to 65535 that is not the main app port. Pick another port.',
+    );
+  }
+  const publicUrl = blankToUndefined(raw.webhookPublicUrl);
+  let parsed: URL | undefined;
+  try {
+    parsed = publicUrl === undefined ? undefined : new URL(publicUrl);
+  } catch {
+    parsed = undefined;
+  }
+  if (!isPlainHttpsAddress(parsed)) {
+    throw new Error(
+      'TWILIO_WEBHOOK_PUBLIC_URL must be the https address Twilio reaches, such as https://aman.example.com. Set it to that address.',
+    );
+  }
+  const capText = blankToUndefined(raw.maxTextsPerDay);
+  const maxTextsPerDay = capText === undefined ? DEFAULT_MAX_TEXTS_PER_DAY : Number(capText);
+  if (!Number.isInteger(maxTextsPerDay) || maxTextsPerDay < 1) {
+    throw new Error(
+      'REACH_SMS_MAX_TEXTS_PER_DAY must be a whole number of 1 or more. Set it to the most texts this server may send in a day.',
+    );
+  }
+  return {
+    accountSid,
+    authToken,
+    fromNumber,
+    webhookPort,
+    webhookPublicUrl: parsed.href.replace(/\/+$/, ''),
+    maxTextsPerDay,
+  };
+}
+
 /**
  * Parses `BROWSER_URL`: the browser sidecar's private HTTP address, such as the compose sidecar's
  * `http://browser-relay:8792`. Unset or blank means no browser sidecar is configured. Anything else that is not
@@ -602,6 +719,61 @@ export function parseBrowserSecret(raw: string | undefined): string | undefined 
     );
   }
   return trimmed;
+}
+
+/** The shortest secret the speech sidecars accept; a shorter one keeps their ports closed. */
+const SPEECH_SECRET_MIN_LENGTH = 32;
+
+/**
+ * Parses `SPEECH_SECRET`: the value every request to the speech sidecars must carry. Unset or blank means
+ * none. A value that is too short fails the boot, since the sidecars would refuse it.
+ */
+export function parseSpeechSecret(raw: string | undefined): string | undefined {
+  if (raw === undefined || raw.trim() === '') {
+    return undefined;
+  }
+  const trimmed = raw.trim();
+  if (trimmed.length < SPEECH_SECRET_MIN_LENGTH) {
+    throw new Error(
+      `SPEECH_SECRET must be at least ${String(SPEECH_SECRET_MIN_LENGTH)} characters. Set a random value of that length, the same one the speech services use.`,
+    );
+  }
+  return trimmed;
+}
+
+/**
+ * Parses `STT_URL` and `TTS_URL`: a speech sidecar's address. Voice recordings and reply text are
+ * only ever sent to a speech service on this computer or its local network (a loopback or private
+ * address, or an internal service name such as the compose default), so an address anywhere else
+ * fails the boot instead of quietly sending voice to it.
+ */
+export function parseSpeechUrl({
+  envKey,
+  raw,
+  defaultValue,
+}: {
+  envKey: string;
+  raw: string | undefined;
+  defaultValue: string;
+}): string {
+  const value = raw === undefined || raw.trim() === '' ? defaultValue : raw.trim();
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch (error) {
+    throw new Error(`${envKey} must be a valid URL, for example ${defaultValue}.`, { cause: error });
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error(`${envKey} must be an http(s) URL, for example ${defaultValue}.`);
+  }
+  if (!isPrivateNetworkHost(parsed.hostname)) {
+    throw new Error(
+      `${envKey} points at ${parsed.hostname}, which is not this computer or its local network. ` +
+        `Voice is only sent to a speech service on this computer or its local network. ` +
+        `Change ${envKey} to the local speech service (for example ${defaultValue}), or remove the line to use the default.`,
+    );
+  }
+  return value;
 }
 
 /**
@@ -1554,6 +1726,12 @@ export interface SharedServerConfiguration {
    */
   MAIL_EMAIL_ACCOUNT_URL: string | undefined;
   /**
+   * The secret the mail connector's account agent needs before it answers. The same value is given to the
+   * connector. With an account URL but no secret the Settings Email card is left off.
+   * Env: `MAIL_EMAIL_ACCOUNT_SECRET`. Default unset.
+   */
+  MAIL_EMAIL_ACCOUNT_SECRET: string | undefined;
+  /**
    * The mail sidecar's MCP endpoint this host owns, resolved once: MAIL_EMAIL_MCP_URL, else the one derived
    * from MAIL_EMAIL_ACCOUNT_URL. An Email connector at this address is first-party. Default unset.
    */
@@ -1587,6 +1765,13 @@ export interface SharedServerConfiguration {
    * are unset. Env: `WEB_PUSH_PUBLIC_KEY`, `WEB_PUSH_PRIVATE_KEY`, `WEB_PUSH_SUBJECT` (defaults to the project page).
    */
   WEB_PUSH: WebPushSettings | undefined;
+  /**
+   * Text messages through Twilio. Undefined (the default) means texts are off. Env: `REACH_SMS_PROVIDER` (`none` or
+   * `twilio`), `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER`, and for the separate Twilio listener
+   * `TWILIO_WEBHOOK_PORT` (default 9201) and `TWILIO_WEBHOOK_PUBLIC_URL`. `REACH_SMS_MAX_TEXTS_PER_DAY` (default 500)
+   * caps the texts the whole server sends in a day.
+   */
+  TWILIO: TwilioSettings | undefined;
   /**
    * Turns on Aman's own browser. Off by default: with it off, the browser_* tools do not exist, whatever
    * BROWSER_URL and BROWSER_SECRET are set to. Env: `BROWSER_ENABLED`. Default false.
@@ -2024,15 +2209,23 @@ export interface SharedServerConfiguration {
   /**
    * Base URL of the `aman-stt` speech-to-text sidecar (`POST {url}/v1/transcribe`).
    * The browser never calls it directly; the voice endpoints proxy through this server.
+   * The address must be on this computer or its local network; anything else fails the boot.
    * Env: `STT_URL`. Default `http://aman-stt:8001`.
    */
   STT_URL: string;
   /**
    * Base URL of the `aman-tts` text-to-speech sidecar (`POST {url}/v1/speak`).
    * The browser never calls it directly; `POST /api/v1/voice/speak` proxies through this server.
+   * The address must be on this computer or its local network; anything else fails the boot.
    * Env: `TTS_URL`. Default `http://aman-tts:8002`.
    */
   TTS_URL: string;
+  /**
+   * The shared secret every request to the speech sidecars must carry; the same value is given to
+   * the sidecars. The sidecars do not serve without one, so voice is off until it is set.
+   * Env: `SPEECH_SECRET`. Default unset.
+   */
+  SPEECH_SECRET: string | undefined;
   /**
    * Whether spoken replies and voice mode may use the `aman-tts` sidecar. Off, voice mode does not start
    * and replies are read by the browser's own voice.
@@ -2651,10 +2844,21 @@ const shared: SharedServerConfiguration = {
   MAIL_EMAIL_MCP_URL: mailEmailMcpUrl,
   MAIL_SIDECAR_MCP_URL: mailSidecarMcpUrl,
   MAIL_EMAIL_ACCOUNT_URL: mailEmailAccountUrl,
+  MAIL_EMAIL_ACCOUNT_SECRET: parseMailEmailAccountSecret(getEnv('MAIL_EMAIL_ACCOUNT_SECRET')),
   WEB_PUSH: parseWebPushSettings({
     publicKey: getEnv('WEB_PUSH_PUBLIC_KEY'),
     privateKey: getEnv('WEB_PUSH_PRIVATE_KEY'),
     subject: getEnv('WEB_PUSH_SUBJECT'),
+  }),
+  TWILIO: parseTwilioSettings({
+    provider: getEnv('REACH_SMS_PROVIDER'),
+    accountSid: getEnv('TWILIO_ACCOUNT_SID'),
+    authToken: getEnv('TWILIO_AUTH_TOKEN'),
+    fromNumber: getEnv('TWILIO_FROM_NUMBER'),
+    webhookPort: getEnv('TWILIO_WEBHOOK_PORT'),
+    webhookPublicUrl: getEnv('TWILIO_WEBHOOK_PUBLIC_URL'),
+    maxTextsPerDay: getEnv('REACH_SMS_MAX_TEXTS_PER_DAY'),
+    mainPort: port,
   }),
   MAIL_POLICY_FILE: parseOptionalPath(getEnv('MAIL_POLICY_FILE')),
   MAIL_POLICY_STATUS_FILE: parseOptionalPath(getEnv('MAIL_POLICY_STATUS_FILE')),
@@ -2955,8 +3159,9 @@ const shared: SharedServerConfiguration = {
     defaultValue: false,
   }),
   MEMORY_SCREEN_URL: getEnv('MEMORY_SCREEN_URL', { defaultValue: '' }) ?? '',
-  STT_URL: getEnv('STT_URL', { defaultValue: 'http://aman-stt:8001' }) ?? 'http://aman-stt:8001',
-  TTS_URL: getEnv('TTS_URL', { defaultValue: 'http://aman-tts:8002' }) ?? 'http://aman-tts:8002',
+  STT_URL: parseSpeechUrl({ envKey: 'STT_URL', raw: getEnv('STT_URL'), defaultValue: 'http://aman-stt:8001' }),
+  TTS_URL: parseSpeechUrl({ envKey: 'TTS_URL', raw: getEnv('TTS_URL'), defaultValue: 'http://aman-tts:8002' }),
+  SPEECH_SECRET: parseSpeechSecret(getEnv('SPEECH_SECRET')),
   TTS_ENABLED: parseBoolean({ envKey: 'TTS_ENABLED', raw: getEnv('TTS_ENABLED'), defaultValue: true }),
   VOICE_VAD_MODEL_DIR: voiceModelDirFromEnv(process.env),
   MAPS_GEOCODER_URL: parseMapsUrl({
@@ -3208,6 +3413,12 @@ export const SECRET_SETTING_NAMES = [
   'TRUEFOUNDRY_SANDBOX_API_KEY',
   'POSTGRES_PASSWORD',
   'WEB_PUSH_PRIVATE_KEY',
+  'MAIL_EMAIL_ACCOUNT_SECRET',
+  'CALENDAR_ACCOUNT_SECRET',
+  'BROWSER_SECRET',
+  'TAVILY_API_KEY',
+  'SPEECH_SECRET',
+  'TWILIO_AUTH_TOKEN',
 ] as const;
 
 /** Connection URL settings: secret as a whole, and for the password inside. */
@@ -3238,9 +3449,17 @@ export function secretSettingValues(settings: Partial<Record<SecretSettingName, 
 /** The settings that carry secrets: what {@link getConfiguredSecretValues} reads, so a test can supply just these. */
 export type ConfiguredSecretSettings = Pick<
   SharedServerConfiguration,
-  'TRUEFORGE_API_KEY' | 'NEBIUS_API_KEY' | 'MEMORY_SCREEN_AUTH_TOKEN' | 'OIDC'
+  | 'TRUEFORGE_API_KEY'
+  | 'NEBIUS_API_KEY'
+  | 'MEMORY_SCREEN_AUTH_TOKEN'
+  | 'OIDC'
+  | 'MAIL_EMAIL_ACCOUNT_SECRET'
+  | 'CALENDAR_ACCOUNT_SECRET'
+  | 'BROWSER_SECRET'
+  | 'TAVILY_API_KEY'
+  | 'SPEECH_SECRET'
 > &
-  Partial<Pick<SharedServerConfiguration, 'WEB_PUSH'>> &
+  Partial<Pick<SharedServerConfiguration, 'WEB_PUSH' | 'TWILIO'>> &
   (
     | { STANDALONE: true }
     | ({ STANDALONE: false } & Pick<
@@ -3262,6 +3481,12 @@ export function getConfiguredSecretValues(config: ConfiguredSecretSettings = con
     MEMORY_SCREEN_AUTH_TOKEN: config.MEMORY_SCREEN_AUTH_TOKEN,
     OIDC_CLIENT_SECRET: config.OIDC?.OIDC_CLIENT_SECRET,
     WEB_PUSH_PRIVATE_KEY: config.WEB_PUSH?.privateKey,
+    MAIL_EMAIL_ACCOUNT_SECRET: config.MAIL_EMAIL_ACCOUNT_SECRET,
+    CALENDAR_ACCOUNT_SECRET: config.CALENDAR_ACCOUNT_SECRET,
+    BROWSER_SECRET: config.BROWSER_SECRET,
+    TAVILY_API_KEY: config.TAVILY_API_KEY,
+    SPEECH_SECRET: config.SPEECH_SECRET,
+    TWILIO_AUTH_TOKEN: config.TWILIO?.authToken,
     ...(config.STANDALONE
       ? {}
       : {

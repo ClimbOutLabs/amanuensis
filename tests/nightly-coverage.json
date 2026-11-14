@@ -352,6 +352,10 @@
       "set": "reach",
       "tests": []
     },
+    "route:recallExclusion": {
+      "set": "memory",
+      "tests": []
+    },
     "route:reminder": {
       "set": "reminders",
       "tests": []
@@ -401,6 +405,14 @@
     },
     "route:spaceFolder": {
       "set": "spaces",
+      "tests": []
+    },
+    "route:text": {
+      "set": "reach",
+      "tests": []
+    },
+    "route:today": {
+      "set": "home",
       "tests": []
     },
     "route:tokenFactoryUsage": {
@@ -478,7 +490,8 @@
       "tests": [
         "packages/frontend/tests/homeAndMenu.browser.test.ts",
         "packages/frontend/tests/homeColumn.browser.test.ts",
-        "packages/frontend/tests/homeCards.browser.test.ts"
+        "packages/frontend/tests/homeCards.browser.test.ts",
+        "packages/frontend/tests/homeRailPhone.browser.test.ts"
       ]
     },
     "screen:memory-sharing": {
@@ -796,6 +809,7 @@
     "route:personalization",
     "route:privateChat",
     "route:reach",
+    "route:recallExclusion",
     "route:reminder",
     "route:repository",
     "route:runCode",
@@ -807,6 +821,8 @@
     "route:skill",
     "route:space",
     "route:spaceFolder",
+    "route:text",
+    "route:today",
     "route:tokenFactoryUsage",
     "route:toolOutputScreen",
     "route:voice",

@@ -203,6 +203,8 @@ export {
   TOKEN_FACTORY_DEFAULT_BASE_URL,
   VERCEL_AI_PROVIDER_NAMES,
   VercelAILLM,
+  classifyProviderCallError,
+  describeAuthRefusal,
 } from './llm/VercelAILLM';
 export type { StreamTimeout, VercelAILLMConfig, VercelAIProviderConfig, VercelAIProviderName } from './llm/VercelAILLM';
 
@@ -364,6 +366,7 @@ export {
   ensureExecSuccess,
   executeVerifiedWorkspaceCommit,
   shellEscape,
+  withArgvAsCommandLine,
   withTrustedPath,
   workspaceTerminationCommand,
 } from './sandbox/provider/Provider';
@@ -388,6 +391,7 @@ export type {
 export { TFYSandboxProvider } from './sandbox/provider/TFYSandboxProvider';
 export {
   SANDBOX_RUN_REGISTERED_COMMAND_TOOL_NAME,
+  SANDBOX_RUN_SKILL_SCRIPT_TOOL_NAME,
   SANDBOX_WRITE_FILE_TOOL_NAME,
   SKILL_DOWNLOAD_TIMEOUT_SECONDS,
   Sandbox,
@@ -550,6 +554,7 @@ export {
   searchResultUrls,
 } from './permissions/provenance';
 export type { ChatProvenance, ReadSource, SearchResultUrls } from './permissions/provenance';
+export type { SkillNetworkCardRequest } from './permissions/skillNetworkCards';
 export {
   AUTO_DENY_REASONS,
   TIER2_ACTION_KINDS,

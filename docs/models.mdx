@@ -32,6 +32,8 @@ Nebius Token Factory (`tokenfactory`) is set up by the server, not in Settings.
 2. Under **Available**, click **Configure** next to the provider.
 3. Paste your key into **API key**, and click **Create**.
 
+When you save a provider, Aman makes one small test call to check the connection and the key. The save always goes through. The result of the test shows on the provider in **Settings, Models**, so a wrong key or an address that does not answer is visible right away instead of failing on the first chat. If a chat call is later refused because of the key, the error names the provider and points back to its key in Settings.
+
 All of that provider's models become available right away, in the chat's model button and in the agent model selector. The provider moves to **Configured**, where you can:
 
 - add more of its models under **Available to add**, with **Add**;

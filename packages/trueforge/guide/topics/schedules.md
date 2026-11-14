@@ -62,7 +62,7 @@ A scheduled run happens while you are away, so it never sends or changes anythin
 1. The run reads and searches, the same as a chat.
 2. Anything that would show a card in a chat is held instead. That includes running code and setting a reminder, which a chat may do without asking.
 3. When the run ends, its chat ends with a **Needs your OK** list. Nothing on it has been done yet.
-4. Click **Approve** on an item to do it, or **Deny** to drop it.
+4. Click **Allow** on an item to do it, or **Deny** to drop it.
 5. When you approve, Aman checks the item again. If anything on it changed since, nothing is done, and Aman says to ask again in a chat.
 
 Held items expire after 24 hours.

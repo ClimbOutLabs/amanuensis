@@ -29,6 +29,7 @@ import { SqliteSessionStore } from '../../../src/db/sqlite/session-store/SqliteS
 import { SqliteSpaceStore } from '../../../src/db/sqlite/space-store/SqliteSpaceStore';
 import { SqliteTurnArtifactStore } from '../../../src/db/sqlite/turn-artifact-store/SqliteTurnArtifactStore';
 import type { Database } from '../../../src/db/sqlite/types';
+import { TextContactStore } from '../../../src/db/textContactStore';
 import { TurnStreamingEventSchema } from '../../../src/schemas/events';
 import { GetTurnResponseSchema } from '../../../src/schemas/turn';
 import { MODEL_FQN, startApprovalTestServer, type ApprovalTestServer } from '../../fixtures/approvalTestServer';
@@ -237,6 +238,7 @@ describe('an imported chat never runs a tool without a fresh approval from the o
       auditStore: new SentinelAuditStore(db),
       deliveryStore: new DeliveryStore(db),
       reachSettingsStore: new ReachSettingsStore(db),
+      textContactStore: new TextContactStore(db),
       turnArtifactStore: new SqliteTurnArtifactStore(db),
       mcpServerStore: new SqliteMcpServerStore(db),
       modelProviderStore: new SqliteModelProviderStore(db),

@@ -16,6 +16,7 @@ import {
   SANDBOX_REPLACE_TEXT_TOOL_NAME,
   SANDBOX_RUN_CODE_TOOL_NAME,
   SANDBOX_RUN_REGISTERED_COMMAND_TOOL_NAME,
+  SANDBOX_RUN_SKILL_SCRIPT_TOOL_NAME,
   SANDBOX_WRITE_FILE_TOOL_NAME,
 } from '../sandbox/Sandbox';
 
@@ -129,6 +130,7 @@ const SANDBOX_COMMAND_TOOLS: ReadonlySet<string> = new Set([
   SANDBOX_EXEC_TOOL_NAME,
   SANDBOX_RUN_CODE_TOOL_NAME,
   SANDBOX_RUN_REGISTERED_COMMAND_TOOL_NAME,
+  SANDBOX_RUN_SKILL_SCRIPT_TOOL_NAME,
 ]);
 
 /** Connector tools that clone or download, as opposed to ones that only search or list repositories. */

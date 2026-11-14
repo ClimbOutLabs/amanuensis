@@ -69,6 +69,7 @@ import type { IMcpServerWithAuthStore } from '../db/mcpServerStore';
 import type { IModelProviderStore } from '../db/modelProviderStore';
 import type { IPersonalizationStore } from '../db/personalizationStore';
 import type { IPersonaStore } from '../db/personaStore';
+import type { IRecallExclusionStore } from '../db/recallExclusionStore';
 import type { IRepositoryStore } from '../db/repositoryStore';
 import type { ISandboxProviderStore } from '../db/sandboxProviderStore';
 import type { ISentinelSettingsStore } from '../db/sentinelSettingsStore';
@@ -180,7 +181,7 @@ import {
 import type { DeletedChatUsageReader } from '../runtime/usageSummaryCapability';
 import { packageMirrorTokens } from '../sandbox/mirrors/packageMirrorTokens';
 import { checkSnapshotStatus } from '../sandbox/providerUtils';
-import { resolveSkillNetworkGrant } from '../sandbox/skillnet/skillNetworkGrant';
+import { drainSkillNetworkCards, resolveSkillNetworkGrant } from '../sandbox/skillnet/skillNetworkGrant';
 import { skillNetworkTokens } from '../sandbox/skillnet/skillNetworkTokens';
 import type { MemoryProviderSettings } from '../schemas/mcpServer';
 import { canReadSession } from './agentAccess';
@@ -315,6 +316,8 @@ export interface TurnsRouterDeps {
   tokenFactoryBudget: TokenFactoryBudget;
   /** The usage counts deleted chats left, for the usage tool. */
   chatDeletionStore: DeletedChatUsageReader;
+  /** Facts pulled out of a chat's recall, read by the recall path. Absent, nothing is excluded. */
+  recallExclusionStore?: Pick<IRecallExclusionStore, 'listForSession'> | undefined;
   /** Resumable live turn-event transport: create-turn writes, subscribe polls. */
   eventSubscriptions: EventSubscriptionRegistry<TurnStreamingEvent>;
   resolveSandboxProviderStore: (c: Context) => ISandboxProviderStore;
@@ -358,6 +361,8 @@ export type BeginTurnExecutionDeps = Pick<
   spaceStore: ISpaceStore;
   /** Per-user Google logins; absent, no Gmail tools mount. */
   googleConnectionStore?: IGoogleConnectionStore | undefined;
+  /** Facts pulled out of a chat's recall, read by the recall path. Absent, nothing is excluded. */
+  recallExclusionStore?: Pick<IRecallExclusionStore, 'listForSession'> | undefined;
   /**
    * Per-person settings, for the past-chat search switch and the package download allowance of
    * chats without a project. Absent, the search tool stays off and those chats get no download wiring.
@@ -425,6 +430,8 @@ function createTurnResolver(deps: {
   sentinelSettingsStore?: ISentinelSettingsStore | undefined;
   sessionStore: ISessionStore<SessionCustom, TurnCustom>;
   memoryClient?: MemoryClient | undefined;
+  /** Facts pulled out of a chat's recall, read by the recall path. Absent, nothing is excluded. */
+  recallExclusionStore?: Pick<IRecallExclusionStore, 'listForSession'> | undefined;
   memoryProviderServerName?: string | undefined;
   memorySettings?: MemoryProviderSettings | undefined;
   /** No person watches this turn (a scheduled run): recall stays off, so a recalled earlier task cannot fingerprint-block the run's own searches. Retain and summarize still run. */
@@ -497,6 +504,7 @@ function createTurnResolver(deps: {
     sentinelSettingsStore,
     sessionStore,
     memoryClient,
+    recallExclusionStore,
     memoryProviderServerName,
     memorySettings,
     previousTurnId,
@@ -810,6 +818,22 @@ function createTurnResolver(deps: {
               skillNames: (spec.skills ?? []).map(skill => skill.name),
             });
           },
+          drainSkillNetworkCards: async () => {
+            const currentSession = await sessionStore.getSession({
+              tenant_id,
+              session_id: sessionId,
+            });
+            if (currentSession?.created_by_subject.subject_id !== userRef) {
+              return [];
+            }
+            return drainSkillNetworkCards({
+              store: skillStore,
+              registry: skillNetworkTokens,
+              tenant_id,
+              session_id: sessionId,
+              skillNames: (spec.skills ?? []).map(skill => skill.name),
+            });
+          },
           loadPackageDownloadsAllowed:
             boundRepository === undefined && sentinelSettingsStore === undefined
               ? undefined
@@ -970,6 +994,10 @@ function createTurnResolver(deps: {
       previousTurnId: previousTurnId ?? null,
       providerServerName: memoryProviderServerName,
       keepsNothing: sessionKeepsNothing({ session: session.record }),
+      loadRecallExclusions:
+        recallExclusionStore === undefined
+          ? undefined
+          : () => recallExclusionStore.listForSession({ tenant_id, session_id: sessionId }),
       searchProviderServerName: async () => {
         const servers = await mcpServerStore.listServers({ tenant_id, names: undefined });
         return servers.find(server => server.manifest.type === 'remote' && server.manifest.search_provider === true)
@@ -1820,6 +1848,13 @@ export async function beginTurnExecution(params: {
   unattended?: boolean | undefined;
   /** Built-in tool names this turn does not offer. */
   withheldTools?: readonly string[] | undefined;
+  /**
+   * A title the caller has already chosen for this session (a schedule run names its chat
+   * for the schedule). Set on the first turn instead of the working title derived from the
+   * first user message, and the subject-title follow-up does not run for it: the follow-up
+   * only ever replaces a derived working title.
+   */
+  session_title?: string | undefined;
 }): Promise<{ turn: TurnHandle<TurnCustom>; drainInput: TurnEventDrainInput }> {
   const clocks = startTurnClocks({ sessionId: params.session.session_id, logger: params.deps.logger });
   try {
@@ -1920,6 +1955,7 @@ async function beginAcceptedTurnExecution(
         sessionStore: deps.sessionStore,
         spaceStore: deps.spaceStore,
         googleConnectionStore: deps.googleConnectionStore,
+        recallExclusionStore: deps.recallExclusionStore,
         globalSettingsStore: deps.globalSettingsStore,
         logger: deps.logger,
         signal: abortController.signal,
@@ -1956,8 +1992,11 @@ async function beginAcceptedTurnExecution(
       });
 
       // First turn only: derive the working title from the first user message. The
-      // store never overwrites an existing title.
-      const title = session.record.last_turn_id ? undefined : deriveSessionTitle(input);
+      // store never overwrites an existing title. A caller that names the session
+      // itself (a schedule run) sets that title instead, and the turn then reports no
+      // derived title, so the subject-title follow-up below leaves the name alone.
+      const derivedTitle = session.record.last_turn_id ? undefined : deriveSessionTitle(input);
+      const title = params.session_title ?? derivedTitle;
 
       const turn = await session.createTurn({
         turn_id: turnId,
@@ -1974,7 +2013,12 @@ async function beginAcceptedTurnExecution(
         unattended: params.unattended,
         withheld_tools: params.withheldTools,
       });
-      return { turn, resolver, memorySummarize, derivedTitle: title };
+      return {
+        turn,
+        resolver,
+        memorySummarize,
+        derivedTitle: params.session_title === undefined ? derivedTitle : undefined,
+      };
     },
     discard: ({ turn, resolver }) =>
       abandonTurnThatCouldNotStart({ session, turn, resolver, abortController, logger: deps.logger }),
@@ -2079,6 +2123,8 @@ export async function startTurnInProcess(params: {
   deps: BeginTurnExecutionDeps;
   unattended?: boolean | undefined;
   withheldTools?: readonly string[] | undefined;
+  /** A title the caller has already chosen for this session; see beginTurnExecution. */
+  session_title?: string | undefined;
 }): Promise<TurnHandle<TurnCustom>> {
   const { turn, drainInput } = await beginTurnExecution(params);
 
@@ -2853,6 +2899,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       repositoryStore: deps.repositoryStore,
       sentinelSettingsStore: deps.sentinelSettingsStore,
       sessionStore: deps.sessionStore,
+      recallExclusionStore: deps.recallExclusionStore,
       memoryClient,
       memoryProviderServerName: memoryProvider?.serverName,
       memorySettings: effectiveMemorySettings,

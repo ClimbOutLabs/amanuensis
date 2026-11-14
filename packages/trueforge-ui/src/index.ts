@@ -74,8 +74,8 @@ export type {
 export { RemindersPage } from './atoms/reminders/RemindersPage.js';
 export { RemindersButton } from './atoms/RemindersButton.js';
 export type { RemindersButtonProps } from './atoms/RemindersButton.js';
-export { AllClear, GoldTick, HandNote, Highlight, StubTear } from './atoms/Reward.js';
-export type { AllClearProps, HandNoteProps, RewardPlayProps, StubTearProps } from './atoms/Reward.js';
+export { AllClear, GoldTick, HandNote, Highlight } from './atoms/Reward.js';
+export type { AllClearProps, HandNoteProps, RewardPlayProps } from './atoms/Reward.js';
 export { ScheduleFormDrawer } from './atoms/schedules/ScheduleFormDrawer.js';
 export type { ScheduleFormDrawerProps } from './atoms/schedules/ScheduleFormDrawer.js';
 export { ScheduleFormFields } from './atoms/schedules/ScheduleFormFields.js';
@@ -284,6 +284,16 @@ export {
 export type { PersonalizationApi, PersonalizationProfile } from './components/PersonalizationContext.js';
 export { PersonalizationPanel } from './components/PersonalizationPanel.js';
 export type { PersonalizationPanelProps } from './components/PersonalizationPanel.js';
+export type {
+  RailAttachment,
+  RailDeskApi,
+  RailRecallFact,
+  RailRecallFactSource,
+  RailToday,
+  RailTodayDueReminder,
+  RailTodayEvent,
+  RailTodayNeedsOkItem,
+} from './components/RailDesk.js';
 export {
   RepositoryWorkProvider,
   useOptionalRepositoryWork,
@@ -365,12 +375,12 @@ export type { WorkOnRepoControlsProps } from './containers/WorkOnRepoControls.js
 export { HELP_BUTTON_LABEL, IRIS_HELP_CHOICES } from './help/helpModel.js';
 export type {
   HelpConnectorState,
-  HelpGoogleLoginState,
   HelpHealthCheck,
   HelpHealthItem,
   HelpHealthStatus,
   HelpHostReport,
   HelpHostReportState,
+  HelpSettingsSection,
   HelpSetupStep,
   HelpState,
 } from './help/helpModel.js';
@@ -403,6 +413,8 @@ export { useRuntimeConnectivity } from './hooks/useRuntimeConnectivity.js';
 export type { RuntimeConnectivity, UseRuntimeConnectivityOptions } from './hooks/useRuntimeConnectivity.js';
 export { EmailApprovalCard } from './sentinel/EmailApprovalCard.js';
 export type { EmailApprovalCardProps } from './sentinel/EmailApprovalCard.js';
+export { HeldActionCard } from './sentinel/HeldActionCard.js';
+export type { HeldActionCardProps, HeldActionStatus } from './sentinel/HeldActionCard.js';
 export { OfflineIndicator } from './sentinel/OfflineIndicator.js';
 export { PermissionApprovalCard } from './sentinel/PermissionApprovalCard.js';
 export type { PermissionApprovalCardProps } from './sentinel/PermissionApprovalCard.js';
@@ -495,6 +507,7 @@ export {
   readSessionIsCreateAgent,
   sessionIsCreateAgent,
 } from './atoms/lib/sessionCreateAgent.js';
+export { LightDarkToggleButton } from './atoms/LightDarkToggleButton.js';
 export { SelectAgentEmptyState } from './atoms/SelectAgentEmptyState.js';
 export { ShellActionsActionSlot } from './atoms/ShellActionsActionSlot.js';
 export type { ShellActionsActionSlotProps } from './atoms/ShellActionsActionSlot.js';
@@ -537,6 +550,7 @@ export {
 } from './server/ShellModeContext.js';
 export type {
   AgentConfig,
+  OpenSessionRequest,
   SelectLibraryAgentRequest,
   SettingsOpenRequest,
   ShellMode,
@@ -766,9 +780,13 @@ export type {
   NoticingKind,
   PushDevice,
   ReachApi,
+  ReachChannelState,
   ReachSender,
   ReachSettings,
   ReachView,
+  TextMode,
+  TextStatus,
+  TextsApi,
 } from './deliveries/types.js';
 export { groupReminders, reminderDetailLine, reminderWhenLine } from './reminders/groupReminders.js';
 export { ReminderListProvider, useOptionalReminderList, useReminderList } from './reminders/ReminderListContext.js';

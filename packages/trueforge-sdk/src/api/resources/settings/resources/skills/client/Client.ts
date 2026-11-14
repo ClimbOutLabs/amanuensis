@@ -768,4 +768,490 @@ export class SkillsClient {
             "/api/v1/settings/skills/{name}/network-approval",
         );
     }
+
+    /**
+     * Allows one site for the skill on its own, apart from the declared list approval.
+     *
+     * @param {TrueForge.ResourceName} name
+     * @param {TrueForge.UpdateSkillNetworkHostRequest} request
+     * @param {SkillsClient.RequestOptions} requestOptions - Request-specific configuration.
+     *
+     * @throws {@link TrueForge.BadRequestError}
+     * @throws {@link TrueForge.NotFoundError}
+     * @throws {@link TrueForge.FailedDependencyError}
+     * @throws {@link errors.TrueForgeError}
+     * @throws {@link errors.TrueForgeTimeoutError}
+     *
+     * @example
+     *     await client.settings.skills.createOrUpdateNetworkAllowedHost("name", {
+     *         host: "host"
+     *     })
+     */
+    public createOrUpdateNetworkAllowedHost(
+        name: TrueForge.ResourceName,
+        request: TrueForge.UpdateSkillNetworkHostRequest,
+        requestOptions?: SkillsClient.RequestOptions,
+    ): core.HttpResponsePromise<TrueForge.UpdateSkillNetworkHostResponse> {
+        return core.HttpResponsePromise.fromPromise(
+            this.__createOrUpdateNetworkAllowedHost(name, request, requestOptions),
+        );
+    }
+
+    private async __createOrUpdateNetworkAllowedHost(
+        name: TrueForge.ResourceName,
+        request: TrueForge.UpdateSkillNetworkHostRequest,
+        requestOptions?: SkillsClient.RequestOptions,
+    ): Promise<core.WithRawResponse<TrueForge.UpdateSkillNetworkHostResponse>> {
+        const _authRequest: core.AuthRequest = await this._options.authProvider.getAuthRequest();
+        const _headers: core.Fetcher.Args["headers"] = mergeHeaders(
+            _authRequest.headers,
+            this._options?.headers,
+            requestOptions?.headers,
+        );
+        const _response = await (this._options.fetcher ?? core.fetcher)({
+            url: core.url.join(
+                (await core.Supplier.get(this._options.baseUrl)) ??
+                    (await core.Supplier.get(this._options.environment)),
+                `api/v1/settings/skills/${core.url.encodePathParam(serializers.ResourceName.jsonOrThrow(name, { omitUndefined: true }))}/network-approval/allowed-host`,
+            ),
+            method: "PUT",
+            headers: _headers,
+            contentType: "application/json",
+            queryString: core.url.queryBuilder().mergeAdditional(requestOptions?.queryParams).build(),
+            requestType: "json",
+            body: mergeAdditionalBodyParameters(
+                serializers.UpdateSkillNetworkHostRequest.jsonOrThrow(request, {
+                    unrecognizedObjectKeys: "passthrough",
+                    allowUnrecognizedUnionMembers: true,
+                    allowUnrecognizedEnumValues: true,
+                    omitUndefined: true,
+                }),
+                requestOptions?.additionalBodyParameters,
+            ),
+            timeoutMs: (requestOptions?.timeoutInSeconds ?? this._options?.timeoutInSeconds ?? 60) * 1000,
+            maxRetries: requestOptions?.maxRetries ?? this._options?.maxRetries,
+            abortSignal: requestOptions?.abortSignal,
+            fetchFn: this._options?.fetch,
+            logging: this._options.logging,
+        });
+        if (_response.ok) {
+            return {
+                data: serializers.UpdateSkillNetworkHostResponse.parseOrThrow(_response.body, {
+                    unrecognizedObjectKeys: "passthrough",
+                    allowUnrecognizedUnionMembers: true,
+                    allowUnrecognizedEnumValues: true,
+                    skipValidation: true,
+                    breadcrumbsPrefix: ["response"],
+                }),
+                rawResponse: _response.rawResponse,
+            };
+        }
+
+        if (_response.error.reason === "status-code") {
+            switch (_response.error.statusCode) {
+                case 400:
+                    throw new TrueForge.BadRequestError(
+                        serializers.RequestErrorResponse.parseOrThrow(_response.error.body, {
+                            unrecognizedObjectKeys: "passthrough",
+                            allowUnrecognizedUnionMembers: true,
+                            allowUnrecognizedEnumValues: true,
+                            skipValidation: true,
+                            breadcrumbsPrefix: ["response"],
+                        }),
+                        _response.rawResponse,
+                    );
+                case 404:
+                    throw new TrueForge.NotFoundError(
+                        serializers.RequestErrorResponse.parseOrThrow(_response.error.body, {
+                            unrecognizedObjectKeys: "passthrough",
+                            allowUnrecognizedUnionMembers: true,
+                            allowUnrecognizedEnumValues: true,
+                            skipValidation: true,
+                            breadcrumbsPrefix: ["response"],
+                        }),
+                        _response.rawResponse,
+                    );
+                case 424:
+                    throw new TrueForge.FailedDependencyError(
+                        serializers.RequestErrorResponse.parseOrThrow(_response.error.body, {
+                            unrecognizedObjectKeys: "passthrough",
+                            allowUnrecognizedUnionMembers: true,
+                            allowUnrecognizedEnumValues: true,
+                            skipValidation: true,
+                            breadcrumbsPrefix: ["response"],
+                        }),
+                        _response.rawResponse,
+                    );
+                default:
+                    throw new errors.TrueForgeError({
+                        statusCode: _response.error.statusCode,
+                        body: _response.error.body,
+                        rawResponse: _response.rawResponse,
+                    });
+            }
+        }
+
+        return handleNonStatusCodeError(
+            _response.error,
+            _response.rawResponse,
+            "PUT",
+            "/api/v1/settings/skills/{name}/network-approval/allowed-host",
+        );
+    }
+
+    /**
+     * Clears the one-site allowance. The skill cannot reach the site from the next run on.
+     *
+     * @param {TrueForge.ResourceName} name
+     * @param {TrueForge.settings.DeleteNetworkAllowedHostSkillsRequest} request
+     * @param {SkillsClient.RequestOptions} requestOptions - Request-specific configuration.
+     *
+     * @throws {@link TrueForge.NotFoundError}
+     * @throws {@link TrueForge.FailedDependencyError}
+     * @throws {@link errors.TrueForgeError}
+     * @throws {@link errors.TrueForgeTimeoutError}
+     *
+     * @example
+     *     await client.settings.skills.deleteNetworkAllowedHost("name", {
+     *         host: "host"
+     *     })
+     */
+    public deleteNetworkAllowedHost(
+        name: TrueForge.ResourceName,
+        request: TrueForge.settings.DeleteNetworkAllowedHostSkillsRequest,
+        requestOptions?: SkillsClient.RequestOptions,
+    ): core.HttpResponsePromise<TrueForge.DeleteSkillNetworkHostResponse> {
+        return core.HttpResponsePromise.fromPromise(this.__deleteNetworkAllowedHost(name, request, requestOptions));
+    }
+
+    private async __deleteNetworkAllowedHost(
+        name: TrueForge.ResourceName,
+        request: TrueForge.settings.DeleteNetworkAllowedHostSkillsRequest,
+        requestOptions?: SkillsClient.RequestOptions,
+    ): Promise<core.WithRawResponse<TrueForge.DeleteSkillNetworkHostResponse>> {
+        const { host } = request;
+        const _queryParams: Record<string, unknown> = {
+            host,
+        };
+        const _authRequest: core.AuthRequest = await this._options.authProvider.getAuthRequest();
+        const _headers: core.Fetcher.Args["headers"] = mergeHeaders(
+            _authRequest.headers,
+            this._options?.headers,
+            requestOptions?.headers,
+        );
+        const _response = await (this._options.fetcher ?? core.fetcher)({
+            url: core.url.join(
+                (await core.Supplier.get(this._options.baseUrl)) ??
+                    (await core.Supplier.get(this._options.environment)),
+                `api/v1/settings/skills/${core.url.encodePathParam(serializers.ResourceName.jsonOrThrow(name, { omitUndefined: true }))}/network-approval/allowed-host`,
+            ),
+            method: "DELETE",
+            headers: _headers,
+            queryString: core.url
+                .queryBuilder()
+                .addMany(_queryParams)
+                .mergeAdditional(requestOptions?.queryParams)
+                .build(),
+            timeoutMs: (requestOptions?.timeoutInSeconds ?? this._options?.timeoutInSeconds ?? 60) * 1000,
+            maxRetries: requestOptions?.maxRetries ?? this._options?.maxRetries,
+            abortSignal: requestOptions?.abortSignal,
+            fetchFn: this._options?.fetch,
+            logging: this._options.logging,
+        });
+        if (_response.ok) {
+            return {
+                data: serializers.DeleteSkillNetworkHostResponse.parseOrThrow(_response.body, {
+                    unrecognizedObjectKeys: "passthrough",
+                    allowUnrecognizedUnionMembers: true,
+                    allowUnrecognizedEnumValues: true,
+                    skipValidation: true,
+                    breadcrumbsPrefix: ["response"],
+                }),
+                rawResponse: _response.rawResponse,
+            };
+        }
+
+        if (_response.error.reason === "status-code") {
+            switch (_response.error.statusCode) {
+                case 404:
+                    throw new TrueForge.NotFoundError(
+                        serializers.RequestErrorResponse.parseOrThrow(_response.error.body, {
+                            unrecognizedObjectKeys: "passthrough",
+                            allowUnrecognizedUnionMembers: true,
+                            allowUnrecognizedEnumValues: true,
+                            skipValidation: true,
+                            breadcrumbsPrefix: ["response"],
+                        }),
+                        _response.rawResponse,
+                    );
+                case 424:
+                    throw new TrueForge.FailedDependencyError(
+                        serializers.RequestErrorResponse.parseOrThrow(_response.error.body, {
+                            unrecognizedObjectKeys: "passthrough",
+                            allowUnrecognizedUnionMembers: true,
+                            allowUnrecognizedEnumValues: true,
+                            skipValidation: true,
+                            breadcrumbsPrefix: ["response"],
+                        }),
+                        _response.rawResponse,
+                    );
+                default:
+                    throw new errors.TrueForgeError({
+                        statusCode: _response.error.statusCode,
+                        body: _response.error.body,
+                        rawResponse: _response.rawResponse,
+                    });
+            }
+        }
+
+        return handleNonStatusCodeError(
+            _response.error,
+            _response.rawResponse,
+            "DELETE",
+            "/api/v1/settings/skills/{name}/network-approval/allowed-host",
+        );
+    }
+
+    /**
+     * Stores the site as turned down for the skill, so it is not granted and raises no card.
+     *
+     * @param {TrueForge.ResourceName} name
+     * @param {TrueForge.UpdateSkillNetworkHostRequest} request
+     * @param {SkillsClient.RequestOptions} requestOptions - Request-specific configuration.
+     *
+     * @throws {@link TrueForge.BadRequestError}
+     * @throws {@link TrueForge.NotFoundError}
+     * @throws {@link TrueForge.FailedDependencyError}
+     * @throws {@link errors.TrueForgeError}
+     * @throws {@link errors.TrueForgeTimeoutError}
+     *
+     * @example
+     *     await client.settings.skills.createOrUpdateNetworkDeniedHost("name", {
+     *         host: "host"
+     *     })
+     */
+    public createOrUpdateNetworkDeniedHost(
+        name: TrueForge.ResourceName,
+        request: TrueForge.UpdateSkillNetworkHostRequest,
+        requestOptions?: SkillsClient.RequestOptions,
+    ): core.HttpResponsePromise<TrueForge.UpdateSkillNetworkHostResponse> {
+        return core.HttpResponsePromise.fromPromise(
+            this.__createOrUpdateNetworkDeniedHost(name, request, requestOptions),
+        );
+    }
+
+    private async __createOrUpdateNetworkDeniedHost(
+        name: TrueForge.ResourceName,
+        request: TrueForge.UpdateSkillNetworkHostRequest,
+        requestOptions?: SkillsClient.RequestOptions,
+    ): Promise<core.WithRawResponse<TrueForge.UpdateSkillNetworkHostResponse>> {
+        const _authRequest: core.AuthRequest = await this._options.authProvider.getAuthRequest();
+        const _headers: core.Fetcher.Args["headers"] = mergeHeaders(
+            _authRequest.headers,
+            this._options?.headers,
+            requestOptions?.headers,
+        );
+        const _response = await (this._options.fetcher ?? core.fetcher)({
+            url: core.url.join(
+                (await core.Supplier.get(this._options.baseUrl)) ??
+                    (await core.Supplier.get(this._options.environment)),
+                `api/v1/settings/skills/${core.url.encodePathParam(serializers.ResourceName.jsonOrThrow(name, { omitUndefined: true }))}/network-approval/denied-host`,
+            ),
+            method: "PUT",
+            headers: _headers,
+            contentType: "application/json",
+            queryString: core.url.queryBuilder().mergeAdditional(requestOptions?.queryParams).build(),
+            requestType: "json",
+            body: mergeAdditionalBodyParameters(
+                serializers.UpdateSkillNetworkHostRequest.jsonOrThrow(request, {
+                    unrecognizedObjectKeys: "passthrough",
+                    allowUnrecognizedUnionMembers: true,
+                    allowUnrecognizedEnumValues: true,
+                    omitUndefined: true,
+                }),
+                requestOptions?.additionalBodyParameters,
+            ),
+            timeoutMs: (requestOptions?.timeoutInSeconds ?? this._options?.timeoutInSeconds ?? 60) * 1000,
+            maxRetries: requestOptions?.maxRetries ?? this._options?.maxRetries,
+            abortSignal: requestOptions?.abortSignal,
+            fetchFn: this._options?.fetch,
+            logging: this._options.logging,
+        });
+        if (_response.ok) {
+            return {
+                data: serializers.UpdateSkillNetworkHostResponse.parseOrThrow(_response.body, {
+                    unrecognizedObjectKeys: "passthrough",
+                    allowUnrecognizedUnionMembers: true,
+                    allowUnrecognizedEnumValues: true,
+                    skipValidation: true,
+                    breadcrumbsPrefix: ["response"],
+                }),
+                rawResponse: _response.rawResponse,
+            };
+        }
+
+        if (_response.error.reason === "status-code") {
+            switch (_response.error.statusCode) {
+                case 400:
+                    throw new TrueForge.BadRequestError(
+                        serializers.RequestErrorResponse.parseOrThrow(_response.error.body, {
+                            unrecognizedObjectKeys: "passthrough",
+                            allowUnrecognizedUnionMembers: true,
+                            allowUnrecognizedEnumValues: true,
+                            skipValidation: true,
+                            breadcrumbsPrefix: ["response"],
+                        }),
+                        _response.rawResponse,
+                    );
+                case 404:
+                    throw new TrueForge.NotFoundError(
+                        serializers.RequestErrorResponse.parseOrThrow(_response.error.body, {
+                            unrecognizedObjectKeys: "passthrough",
+                            allowUnrecognizedUnionMembers: true,
+                            allowUnrecognizedEnumValues: true,
+                            skipValidation: true,
+                            breadcrumbsPrefix: ["response"],
+                        }),
+                        _response.rawResponse,
+                    );
+                case 424:
+                    throw new TrueForge.FailedDependencyError(
+                        serializers.RequestErrorResponse.parseOrThrow(_response.error.body, {
+                            unrecognizedObjectKeys: "passthrough",
+                            allowUnrecognizedUnionMembers: true,
+                            allowUnrecognizedEnumValues: true,
+                            skipValidation: true,
+                            breadcrumbsPrefix: ["response"],
+                        }),
+                        _response.rawResponse,
+                    );
+                default:
+                    throw new errors.TrueForgeError({
+                        statusCode: _response.error.statusCode,
+                        body: _response.error.body,
+                        rawResponse: _response.rawResponse,
+                    });
+            }
+        }
+
+        return handleNonStatusCodeError(
+            _response.error,
+            _response.rawResponse,
+            "PUT",
+            "/api/v1/settings/skills/{name}/network-approval/denied-host",
+        );
+    }
+
+    /**
+     * Clears the site being turned down, so a card can ask about it again.
+     *
+     * @param {TrueForge.ResourceName} name
+     * @param {TrueForge.settings.DeleteNetworkDeniedHostSkillsRequest} request
+     * @param {SkillsClient.RequestOptions} requestOptions - Request-specific configuration.
+     *
+     * @throws {@link TrueForge.NotFoundError}
+     * @throws {@link TrueForge.FailedDependencyError}
+     * @throws {@link errors.TrueForgeError}
+     * @throws {@link errors.TrueForgeTimeoutError}
+     *
+     * @example
+     *     await client.settings.skills.deleteNetworkDeniedHost("name", {
+     *         host: "host"
+     *     })
+     */
+    public deleteNetworkDeniedHost(
+        name: TrueForge.ResourceName,
+        request: TrueForge.settings.DeleteNetworkDeniedHostSkillsRequest,
+        requestOptions?: SkillsClient.RequestOptions,
+    ): core.HttpResponsePromise<TrueForge.DeleteSkillNetworkHostResponse> {
+        return core.HttpResponsePromise.fromPromise(this.__deleteNetworkDeniedHost(name, request, requestOptions));
+    }
+
+    private async __deleteNetworkDeniedHost(
+        name: TrueForge.ResourceName,
+        request: TrueForge.settings.DeleteNetworkDeniedHostSkillsRequest,
+        requestOptions?: SkillsClient.RequestOptions,
+    ): Promise<core.WithRawResponse<TrueForge.DeleteSkillNetworkHostResponse>> {
+        const { host } = request;
+        const _queryParams: Record<string, unknown> = {
+            host,
+        };
+        const _authRequest: core.AuthRequest = await this._options.authProvider.getAuthRequest();
+        const _headers: core.Fetcher.Args["headers"] = mergeHeaders(
+            _authRequest.headers,
+            this._options?.headers,
+            requestOptions?.headers,
+        );
+        const _response = await (this._options.fetcher ?? core.fetcher)({
+            url: core.url.join(
+                (await core.Supplier.get(this._options.baseUrl)) ??
+                    (await core.Supplier.get(this._options.environment)),
+                `api/v1/settings/skills/${core.url.encodePathParam(serializers.ResourceName.jsonOrThrow(name, { omitUndefined: true }))}/network-approval/denied-host`,
+            ),
+            method: "DELETE",
+            headers: _headers,
+            queryString: core.url
+                .queryBuilder()
+                .addMany(_queryParams)
+                .mergeAdditional(requestOptions?.queryParams)
+                .build(),
+            timeoutMs: (requestOptions?.timeoutInSeconds ?? this._options?.timeoutInSeconds ?? 60) * 1000,
+            maxRetries: requestOptions?.maxRetries ?? this._options?.maxRetries,
+            abortSignal: requestOptions?.abortSignal,
+            fetchFn: this._options?.fetch,
+            logging: this._options.logging,
+        });
+        if (_response.ok) {
+            return {
+                data: serializers.DeleteSkillNetworkHostResponse.parseOrThrow(_response.body, {
+                    unrecognizedObjectKeys: "passthrough",
+                    allowUnrecognizedUnionMembers: true,
+                    allowUnrecognizedEnumValues: true,
+                    skipValidation: true,
+                    breadcrumbsPrefix: ["response"],
+                }),
+                rawResponse: _response.rawResponse,
+            };
+        }
+
+        if (_response.error.reason === "status-code") {
+            switch (_response.error.statusCode) {
+                case 404:
+                    throw new TrueForge.NotFoundError(
+                        serializers.RequestErrorResponse.parseOrThrow(_response.error.body, {
+                            unrecognizedObjectKeys: "passthrough",
+                            allowUnrecognizedUnionMembers: true,
+                            allowUnrecognizedEnumValues: true,
+                            skipValidation: true,
+                            breadcrumbsPrefix: ["response"],
+                        }),
+                        _response.rawResponse,
+                    );
+                case 424:
+                    throw new TrueForge.FailedDependencyError(
+                        serializers.RequestErrorResponse.parseOrThrow(_response.error.body, {
+                            unrecognizedObjectKeys: "passthrough",
+                            allowUnrecognizedUnionMembers: true,
+                            allowUnrecognizedEnumValues: true,
+                            skipValidation: true,
+                            breadcrumbsPrefix: ["response"],
+                        }),
+                        _response.rawResponse,
+                    );
+                default:
+                    throw new errors.TrueForgeError({
+                        statusCode: _response.error.statusCode,
+                        body: _response.error.body,
+                        rawResponse: _response.rawResponse,
+                    });
+            }
+        }
+
+        return handleNonStatusCodeError(
+            _response.error,
+            _response.rawResponse,
+            "DELETE",
+            "/api/v1/settings/skills/{name}/network-approval/denied-host",
+        );
+    }
 }

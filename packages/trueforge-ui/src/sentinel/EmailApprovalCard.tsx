@@ -4,17 +4,27 @@ import { mailboxText } from '@truefoundry/trueforge-core/core/permissions/tierMa
 import { useLayoutEffect, useRef, useState, type FC } from 'react';
 
 import { cn } from '../atoms/lib/cn.js';
-import { Button } from '../atoms/primitives/Button.js';
+import { useAssistantDisplayName } from '../components/PersonalizationContext.js';
+import {
+  ApprovalActions,
+  ApprovalButton,
+  ApprovalCardShell,
+  ApprovalFacts,
+  type ApprovalFact,
+} from './ApprovalCardParts.js';
 import { APPROVAL_CHOICES, EMAIL_CHOICES, isNewRecipientCard } from './approvalChoices.js';
-import { approvalTime, approveVerb, cardConsequence, cardHeadline, declineVerb, safeVerb } from './approvalCopy.js';
+import {
+  approvalTime,
+  approveVerb,
+  cardConsequence,
+  cardHeadline,
+  cardReason,
+  declineVerb,
+  safeVerb,
+} from './approvalCopy.js';
 import { ChangeRequestBox } from './ChangeRequestBox.js';
 import { countEmailWords, isLongEmailBody, splitEmailBody } from './emailBody.js';
-import {
-  WAITING_FOR_YOU_LABEL,
-  type SentinelApprovalCard,
-  type SentinelApprovalEmail,
-  type SentinelApprovalMailbox,
-} from './types.js';
+import type { SentinelApprovalCard, SentinelApprovalEmail, SentinelApprovalMailbox } from './types.js';
 
 export type EmailApprovalCardProps = {
   /** Id of the approval this card answers; the composer banner finds the card by it. */
@@ -30,8 +40,23 @@ export type EmailApprovalCardProps = {
   onSaveDraft?: (() => void) | undefined;
 };
 
-function mailboxListText(mailboxes: readonly SentinelApprovalMailbox[]): string {
+export function mailboxListText(mailboxes: readonly SentinelApprovalMailbox[]): string {
   return mailboxes.map(mailbox => mailboxText(mailbox, { escape: text => text })).join(', ');
+}
+
+/**
+ * The short code a send card shows and its receipt repeats, so a person can see the message that went is the one
+ * they approved. It sits in the card's field list.
+ */
+export function CheckCodeRow({ code }: { code: string }) {
+  return (
+    <>
+      <dt className="text-text-secondary">Check code</dt>
+      <dd data-role="check-code" className="font-mono font-semibold text-text-primary">
+        {code}
+      </dd>
+    </>
+  );
 }
 
 /** Lines of a message shown before it folds: nine lines at 1.5rem each. */
@@ -41,7 +66,7 @@ const COLLAPSED_HEIGHT_CLASS = 'max-h-[13.5rem] overflow-hidden';
  * The message as the recipient sees it. Line breaks are kept, fenced code reads in mono, and a long
  * message folds to about nine lines. The word count is the whole message, not the visible part.
  */
-function EmailBody({ body }: { body: string }) {
+export function EmailBody({ body }: { body: string }) {
   const [expanded, setExpanded] = useState(false);
   const [clipped, setClipped] = useState(false);
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -68,7 +93,8 @@ function EmailBody({ body }: { body: string }) {
   const long = clipped || isLongEmailBody(body);
   const collapsed = long && !expanded;
   return (
-    <div className="px-4 py-3">
+    // The message is what is being approved, so it reads at the chat's body size while the rest of the card is smaller.
+    <div className="px-4 py-3 text-base">
       <div ref={bodyRef} className={cn('space-y-3 text-text-primary', collapsed && COLLAPSED_HEIGHT_CLASS)}>
         {splitEmailBody(body).map((segment, index) =>
           segment.kind === 'code' ? (
@@ -103,8 +129,9 @@ function EmailBody({ body }: { body: string }) {
 }
 
 /**
- * The card for a mail waiting on the person. It shows the metadata, the message as it will be sent, and
- * one sticky bar of actions. Each field appears once; a Copy or Hidden copy row shows only when there are some.
+ * The card for a mail waiting on the person: the same layout as every approval card, with the message as it
+ * will be sent under the facts and the choices in one bar that stays in view. Each field appears once; a Copy
+ * or Hidden copy row shows only when there are some.
  */
 export const EmailApprovalCard: FC<EmailApprovalCardProps> = ({
   approvalId,
@@ -115,183 +142,133 @@ export const EmailApprovalCard: FC<EmailApprovalCardProps> = ({
   onChangeRequest,
   onSaveDraft,
 }) => {
+  const assistant = useAssistantDisplayName();
   const [changing, setChanging] = useState(false);
-  const [sentAt, setSentAt] = useState<string | null>(null);
+  // When the person answered. A send says "Sending" until the server's receipt replaces this card, because
+  // only the send gate knows whether the message went out.
+  const [answeredAt, setAnsweredAt] = useState<string | null>(null);
   const email: SentinelApprovalEmail | null = card.email;
   if (email === null) return null;
 
   const sending = email.action === 'send';
   const sendNow = () => {
-    setSentAt(approvalTime(new Date()));
+    setAnsweredAt(approvalTime(new Date()));
     onApprove();
   };
-  // A send reaches other people and cannot be unsent, so the server marks its card safe-first:
-  // the safe choice is the primary button and the send follows it in the destructive ink.
+  const facts: ApprovalFact[] = [
+    ...(email.reply_in_thread === null
+      ? []
+      : [
+          { label: 'Reply in the thread, subject', value: email.reply_in_thread.subject },
+          { label: 'Reply in the thread, from', value: email.reply_in_thread.from },
+        ]),
+    { label: 'To', value: mailboxListText(email.to) },
+    ...(email.cc.length > 0 ? [{ label: 'Copy', value: mailboxListText(email.cc) }] : []),
+    ...(email.bcc.length > 0 ? [{ label: 'Hidden copy', value: mailboxListText(email.bcc) }] : []),
+    ...(email.from_name === null || email.from_name === undefined
+      ? []
+      : [{ label: 'Sent as', value: email.from_name }]),
+    ...(email.reply_to === null ? [] : [{ label: 'Replies go to', value: email.reply_to }]),
+    { label: 'Subject', value: email.subject === '' ? 'No subject' : email.subject },
+    ...(email.check_code === null ? [] : [{ label: 'Check code', value: email.check_code, mono: true }]),
+  ];
+  // A send reaches other people and cannot be unsent, so the server marks its card safe-first: the no then
+  // says "Don't send" and takes keyboard focus. Allow still leads the row and no choice is filled.
   const safeFirst = card.safe_choice === true;
   const consequence = cardConsequence(card);
 
   return (
-    <article
+    <ApprovalCardShell
       data-role="approval-ticket"
       data-approval-id={approvalId}
       data-kind="email"
-      className="aui-approval-card my-2 rounded-md border border-border bg-card-bg"
+      className="my-2"
+      question={cardHeadline(card)}
+      reason={cardReason(card)}
+      status={
+        answeredAt === null
+          ? { kind: 'waiting' }
+          : { kind: 'answered', text: sending ? 'Sending…' : `Saved · ${answeredAt}` }
+      }
     >
-      <header className="flex items-center gap-2 px-4 py-3">
-        <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-gold-ink" />
-        <h3 className="aui-approval-card__title min-w-0 flex-1 text-text-primary">{cardHeadline(card)}</h3>
-        <span className="shrink-0 text-text-secondary">Gmail</span>
-        {sentAt === null && <span className="shrink-0 text-text-secondary">{WAITING_FOR_YOU_LABEL}</span>}
-      </header>
-
-      <div className="border-t border-border px-4 py-3">
-        <p className="mb-2 text-text-secondary">{sending ? 'What will be sent' : 'What will be saved'}</p>
-        <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1.5">
-          {email.reply_in_thread !== null && (
-            <>
-              <dt className="text-text-secondary">Reply in the thread, subject</dt>
-              <dd className="break-words text-text-primary">{email.reply_in_thread.subject}</dd>
-              <dt className="text-text-secondary">Reply in the thread, from</dt>
-              <dd className="break-words text-text-primary">{email.reply_in_thread.from}</dd>
-            </>
-          )}
-          <dt className="text-text-secondary">To</dt>
-          <dd className="break-words text-text-primary">{mailboxListText(email.to)}</dd>
-          {email.cc.length > 0 && (
-            <>
-              <dt className="text-text-secondary">Copy</dt>
-              <dd className="break-words text-text-primary">{mailboxListText(email.cc)}</dd>
-            </>
-          )}
-          {email.bcc.length > 0 && (
-            <>
-              <dt className="text-text-secondary">Hidden copy</dt>
-              <dd className="break-words text-text-primary">{mailboxListText(email.bcc)}</dd>
-            </>
-          )}
-          {email.from_name !== null && email.from_name !== undefined && (
-            <>
-              <dt className="text-text-secondary">Sent as</dt>
-              <dd className="break-words text-text-primary">{email.from_name}</dd>
-            </>
-          )}
-          <dt className="text-text-secondary">Subject</dt>
-          <dd className="break-words text-text-primary">{email.subject === '' ? 'No subject' : email.subject}</dd>
-        </dl>
-        {email.name_left_off === true && (
-          <p className="mt-2 text-text-primary">The name was left off an address because it looked like an address.</p>
-        )}
-        {email.reply_in_thread !== null && <p className="mt-2 text-text-secondary">Reply in existing thread</p>}
-        {email.reply_to !== null && <p className="mt-2 text-text-primary">Replies go to: {email.reply_to}</p>}
-        {email.replaces !== null && (
-          <p className="mt-2 text-text-secondary">
-            Replaces the saved draft “{email.replaces.subject}” to {mailboxListText(email.replaces.to)}
-          </p>
-        )}
-        {/* For a new address the server's sentence says that approving adds it; the fields above do not. */}
-        {isNewRecipientCard(card) && <p className="mt-2 text-text-primary">{card.plain_what}</p>}
-        {card.plain_why !== null && <p className="mt-2 text-text-secondary">Why: {card.plain_why}</p>}
-        {consequence !== null && <p className="mt-2 text-text-secondary">{consequence}</p>}
-        {card.why_asked_again !== null && (
-          <p className="mt-2 text-text-secondary">You have seen this before: {card.why_asked_again}</p>
-        )}
-      </div>
-
-      <div className="border-t border-border">
-        <p className="px-4 pt-3 text-text-secondary">Message body</p>
-        <EmailBody body={email.body} />
-      </div>
-
-      {changing && onChangeRequest !== undefined && (
-        <div className="border-t border-border px-4 py-3">
-          <ChangeRequestBox
-            disabled={disabled}
-            onSend={text => {
-              setChanging(false);
-              onChangeRequest(text);
-            }}
-            onCancel={() => {
-              setChanging(false);
-            }}
-          />
-        </div>
+      {/* For a new address the server's sentence says that approving adds it; the fields do not. */}
+      {isNewRecipientCard(card) && <p className="text-text-primary">{card.plain_what}</p>}
+      {consequence !== null && <p className="text-text-secondary">{consequence}</p>}
+      {card.why_asked_again !== null && (
+        <p className="text-text-secondary">You have seen this before: {card.why_asked_again}</p>
       )}
 
-      <div className="aui-approval-card__choices sticky bottom-0 flex flex-wrap items-center gap-2 border-t border-border bg-card-bg px-4 py-3">
-        {sentAt === null ? (
-          <>
-            {safeFirst && (
-              <Button
-                variant="primary"
-                size="small"
-                data-approval-primary
-                title={APPROVAL_CHOICES.deny.hint}
-                onClick={onDeny}
-                disabled={disabled}
-                className="border-transparent bg-text-primary text-card-bg hover:bg-text-primary/90"
-              >
-                {safeVerb(card)}
-              </Button>
-            )}
-            <Button
-              variant={safeFirst ? 'secondary' : 'primary'}
-              size="small"
-              {...(safeFirst ? {} : { 'data-approval-primary': true })}
-              title={APPROVAL_CHOICES.approve.hint}
-              onClick={sendNow}
+      <ApprovalFacts facts={facts} />
+      {email.name_left_off === true && (
+        <p className="text-text-primary">The name was left off an address because it looked like an address.</p>
+      )}
+      {email.replaces !== null && (
+        <p className="text-text-secondary">
+          Replaces the saved draft “{email.replaces.subject}” to {mailboxListText(email.replaces.to)}
+        </p>
+      )}
+
+      <section aria-label="Message body" className="rounded-lg border border-border">
+        <EmailBody body={email.body} />
+      </section>
+
+      {card.plain_why !== null && (
+        <p className="text-text-secondary" data-role="approval-intent">
+          {assistant} says: {card.plain_why}
+        </p>
+      )}
+
+      {changing && onChangeRequest !== undefined && (
+        <ChangeRequestBox
+          disabled={disabled}
+          onSend={text => {
+            setChanging(false);
+            onChangeRequest(text);
+          }}
+          onCancel={() => {
+            setChanging(false);
+          }}
+        />
+      )}
+
+      {/* The negative margins match the card padding, so the bar spans the card edge to edge. */}
+      <div className="sticky bottom-0 -mx-4 -mb-3.5 rounded-b-[0.625rem] bg-card-bg px-4 pb-3.5 pt-1">
+        <ApprovalActions>
+          <ApprovalButton
+            {...(safeFirst ? {} : { 'data-approval-primary': true })}
+            title={APPROVAL_CHOICES.approve.hint}
+            onClick={sendNow}
+            disabled={disabled}
+          >
+            {approveVerb(card)}
+          </ApprovalButton>
+          {onChangeRequest !== undefined && (
+            <ApprovalButton
+              title={EMAIL_CHOICES.changeIt.hint}
+              aria-expanded={changing}
+              onClick={() => {
+                setChanging(true);
+              }}
               disabled={disabled}
-              className={
-                safeFirst
-                  ? cn(card.destructive === true && 'text-failure-bg')
-                  : 'border-transparent bg-text-primary text-card-bg hover:bg-text-primary/90'
-              }
             >
-              {approveVerb(card)}
-            </Button>
-            {onChangeRequest !== undefined && (
-              <Button
-                variant="secondary"
-                size="small"
-                title={EMAIL_CHOICES.edit.hint}
-                aria-expanded={changing}
-                onClick={() => {
-                  setChanging(true);
-                }}
-                disabled={disabled}
-              >
-                {EMAIL_CHOICES.edit.label}
-              </Button>
-            )}
-            {sending && onSaveDraft !== undefined && (
-              <Button
-                variant="secondary"
-                size="small"
-                title={EMAIL_CHOICES.saveDraft.hint}
-                onClick={onSaveDraft}
-                disabled={disabled}
-              >
-                {EMAIL_CHOICES.saveDraft.label}
-              </Button>
-            )}
-            {!safeFirst && (
-              <Button
-                variant="ghost"
-                size="small"
-                title={APPROVAL_CHOICES.deny.hint}
-                onClick={onDeny}
-                disabled={disabled}
-                className="ml-auto border-transparent bg-transparent px-1 text-text-primary shadow-none hover:underline"
-              >
-                {declineVerb(card)}
-              </Button>
-            )}
-          </>
-        ) : (
-          <p className="text-text-secondary">
-            {sending ? 'Sent' : 'Saved'} · {sentAt}
-          </p>
-        )}
+              {EMAIL_CHOICES.changeIt.label}
+            </ApprovalButton>
+          )}
+          {sending && onSaveDraft !== undefined && (
+            <ApprovalButton title={EMAIL_CHOICES.saveDraft.hint} onClick={onSaveDraft} disabled={disabled}>
+              {EMAIL_CHOICES.saveDraft.label}
+            </ApprovalButton>
+          )}
+          <ApprovalButton
+            {...(safeFirst ? { 'data-approval-primary': true } : {})}
+            title={APPROVAL_CHOICES.deny.hint}
+            onClick={onDeny}
+            disabled={disabled}
+          >
+            {safeFirst ? safeVerb(card) : declineVerb(card)}
+          </ApprovalButton>
+        </ApprovalActions>
       </div>
-    </article>
+    </ApprovalCardShell>
   );
 };
