@@ -1,7 +1,8 @@
 /**
  * Walks an email from "Aman wants to send this" to the mail server, through the real server with a scripted
- * model and a stand-in mail server that keeps every call it receives. Each test reads the card the person is
- * shown and what the mail server received, never how the rule is built.
+ * model and a stand-in mail server that keeps every call it receives. An email takes two cards: one to save
+ * it as a draft, then one to send that draft. Each test reads the cards the person is shown and what the mail
+ * server received, never how the rule is built.
  */
 import { z } from '@hono/zod-openapi';
 import type { Turn, TurnInputItem } from '@truefoundry/trueforge-core/agent-session';
@@ -134,8 +135,8 @@ describe('an email Aman sends for the person', () => {
     return GetTurnResponseSchema.parse(await saved.json()).data;
   }
 
-  /** Has Aman try the mail tool with this email, and returns the one card the chat then waits on. */
-  async function askFor({ chatId, tool, email }: { chatId: string; tool: string; email: Email }) {
+  /** Has Aman try the mail tool with this email, and returns the cards the chat then waits on. */
+  async function attempt({ chatId, tool, email }: { chatId: string; tool: string; email: Email }) {
     server.model.next({ toolArguments: email });
     const turn = await runTurn({
       chatId,
@@ -144,16 +145,44 @@ describe('an email Aman sends for the person', () => {
     if (turn.state.status !== 'done') {
       throw new Error(`turn is not done: ${JSON.stringify(turn.state)}`);
     }
-    const waiting = turn.state.required_actions.flatMap(action =>
+    return turn.state.required_actions.flatMap(action =>
       action.type === 'tool.approval_required'
         ? action.tool_calls.map(call => ({ ...call, thread_id: action.thread_id, action }))
         : [],
     );
-    const [card, ...others] = waiting;
+  }
+
+  /** The one card the chat waits on after Aman tries the mail tool. */
+  async function askFor(input: { chatId: string; tool: string; email: Email }) {
+    const [card, ...others] = await attempt(input);
     if (card === undefined || others.length > 0) {
-      throw new Error(`expected one card, found ${String(waiting.length)}`);
+      throw new Error(`expected one card, found ${String(others.length + (card === undefined ? 0 : 1))}`);
     }
     return card;
+  }
+
+  async function approve({ chatId, card }: { chatId: string; card: { thread_id: string; id: string } }) {
+    await runTurn({ chatId, input: answer({ card, approval: { status: 'allow', scope: 'once' } }) });
+  }
+
+  /** Saves the email as a draft the person approved, which is what a later send is checked against. */
+  async function approveDraft({ chatId, tool, email }: { chatId: string; tool: string; email: Email }) {
+    await approve({ chatId, card: await askFor({ chatId, tool, email }) });
+  }
+
+  /** What the card shows of the email, in the order a person reads it. */
+  function shownOn(card: Awaited<ReturnType<typeof askFor>>) {
+    const email = card.tier3_card?.email;
+    if (email == null) {
+      throw new Error('The card shows no draft of the email.');
+    }
+    return {
+      action: email.action,
+      to: email.to.map(person => person.address),
+      subject: email.subject,
+      body: email.body,
+      from: card.tier3_card?.mail_from,
+    };
   }
 
   function answer({ card, approval }: { card: { thread_id: string; id: string }; approval: Answer }): TurnInputItem[] {
@@ -161,104 +190,155 @@ describe('an email Aman sends for the person', () => {
   }
 
   it(
-    'shows the whole email on a card first, and the mail server hears of no send until the person approves that card',
+    'is not sent, and shows no card, when no draft of it was approved first',
+    async () => {
+      const chatId = await createChat();
+      expect(await attempt({ chatId, tool: 'send_email', email: emailTo('abe') })).toEqual([]);
+      expect(sent()).toEqual([]);
+      expect(savedDrafts()).toEqual([]);
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
+    'shows the whole email on a draft card, then on a send card, and reaches the mail server only after both are approved',
     async () => {
       const chatId = await createChat();
       const email = emailTo('dana');
-      const card = await askFor({ chatId, tool: 'send_email', email });
+      const whole = { to: email.recipients, subject: email.subject, body: email.body, from: HOME_ACCOUNT };
 
+      const draftCard = await askFor({ chatId, tool: MAIL_DRAFT_TOOL_NAME, email });
+      expect(draftCard.tier).toBe(3);
+      expect(shownOn(draftCard)).toEqual({ action: 'save', ...whole });
+      expect(savedDrafts()).toEqual([]);
+
+      await approve({ chatId, card: draftCard });
+      expect(savedDrafts()).toHaveLength(1);
       expect(sent()).toEqual([]);
-      expect(card.tier).toBe(3);
-      const shown = card.tier3_card?.outbound_text ?? '';
-      expect(shown).toContain(email.recipients[0]);
-      expect(shown).toContain(email.subject);
-      expect(shown).toContain(email.body);
-      expect(card.tier3_card?.outbound_truncated).toBe(false);
-      expect(card.tier3_card?.mail_from).toBe(HOME_ACCOUNT);
 
-      await runTurn({ chatId, input: answer({ card, approval: { status: 'allow', scope: 'once' } }) });
+      const sendCard = await askFor({ chatId, tool: 'send_email', email });
+      expect(sendCard.tier).toBe(3);
+      expect(shownOn(sendCard)).toEqual({ action: 'send', ...whole });
+      expect(sent()).toEqual([]);
+
+      await approve({ chatId, card: sendCard });
       expect(sent()).toEqual([{ name: 'send_email', arguments: { ...email, account_name: HOME_ACCOUNT } }]);
     },
     TURN_TIMEOUT_MS,
   );
 
   it(
-    'asks again for the next email, also to the same person, and sends only what each card showed',
+    'is sent once: the same send again shows no card and sends nothing',
     async () => {
       const chatId = await createChat();
-      const first = emailTo('lin');
-      const firstCard = await askFor({ chatId, tool: 'send_email', email: first });
-      await runTurn({ chatId, input: answer({ card: firstCard, approval: { status: 'allow', scope: 'once' } }) });
+      const email = emailTo('lin');
+      await approveDraft({ chatId, tool: MAIL_DRAFT_TOOL_NAME, email });
+      await approve({ chatId, card: await askFor({ chatId, tool: 'send_email', email }) });
       expect(sent()).toHaveLength(1);
 
-      const second = { ...first, subject: 'One more thing', body: 'Could you add a rye loaf?' };
-      const secondCard = await askFor({ chatId, tool: 'send_email', email: second });
-      expect(secondCard.tier3_card?.outbound_text).toContain(second.body);
+      expect(await attempt({ chatId, tool: 'send_email', email })).toEqual([]);
       expect(sent()).toHaveLength(1);
+    },
+    TURN_TIMEOUT_MS,
+  );
 
-      await runTurn({ chatId, input: answer({ card: secondCard, approval: { status: 'allow', scope: 'once' } }) });
-      expect(sent().map(call => call.arguments['body'])).toEqual([first.body, second.body]);
+  it.each([
+    { change: 'body', changed: { body: 'Please send me your price list as well.' } },
+    { change: 'subject', changed: { subject: 'A different subject' } },
+    { change: 'recipient', changed: { recipients: ['someone-else@harbour.example'] } },
+  ])(
+    'is not sent when its $change differs from the approved draft',
+    async ({ changed }) => {
+      const chatId = await createChat();
+      const email = emailTo('mira');
+      await approveDraft({ chatId, tool: MAIL_DRAFT_TOOL_NAME, email });
+
+      expect(await attempt({ chatId, tool: 'send_email', email: { ...email, ...changed } })).toEqual([]);
+      expect(sent()).toEqual([]);
     },
     TURN_TIMEOUT_MS,
   );
 
   it(
-    'sends nothing when the person says no',
+    'sends nothing when the person says no to the draft, or to the send',
     async () => {
       const chatId = await createChat();
-      const card = await askFor({ chatId, tool: 'send_email', email: emailTo('noor') });
+      const refusedDraft = emailTo('noor');
+      const draftCard = await askFor({ chatId, tool: MAIL_DRAFT_TOOL_NAME, email: refusedDraft });
+      await runTurn({ chatId, input: answer({ card: draftCard, approval: { status: 'deny' } }) });
+      expect(savedDrafts()).toEqual([]);
+      // A draft the person refused is not one a send can use.
+      expect(await attempt({ chatId, tool: 'send_email', email: refusedDraft })).toEqual([]);
 
-      await runTurn({ chatId, input: answer({ card, approval: { status: 'deny' } }) });
-      expect(sent()).toEqual([]);
-
+      const email = emailTo('nadia');
+      await approveDraft({ chatId, tool: MAIL_DRAFT_TOOL_NAME, email });
+      const sendCard = await askFor({ chatId, tool: 'send_email', email });
+      await runTurn({ chatId, input: answer({ card: sendCard, approval: { status: 'deny' } }) });
       // The card was answered with a no, so a later yes for it has nothing to send.
-      await sendTurn({ chatId, input: answer({ card, approval: { status: 'allow', scope: 'once' } }) });
+      await sendTurn({ chatId, input: answer({ card: sendCard, approval: { status: 'allow', scope: 'once' } }) });
       expect(sent()).toEqual([]);
     },
     TURN_TIMEOUT_MS,
   );
 
   it.each(['chat', 'always'] as const)(
-    'offers no "Always allow", and an answer of "%s" is refused with nothing sent',
+    'offers no "Always allow" on either card, and an answer of "%s" is refused with nothing saved or sent',
     async scope => {
       const chatId = await createChat();
-      const card = await askFor({ chatId, tool: 'send_email', email: emailTo(`sam-${scope}`) });
-      expect(card.can_chat_allow).toBe(false);
-      expect(card.can_always_allow).toBe(false);
+      const email = emailTo(`sam-${scope}`);
+      const draftCard = await askFor({ chatId, tool: MAIL_DRAFT_TOOL_NAME, email });
+      expect(draftCard.can_chat_allow).toBe(false);
+      expect(draftCard.can_always_allow).toBe(false);
+      const refusedDraft = await sendTurn({
+        chatId,
+        input: answer({ card: draftCard, approval: { status: 'allow', scope } }),
+      });
+      expect(refusedDraft.status).toBe(422);
+      expect(savedDrafts()).toEqual([]);
 
-      const refused = await sendTurn({ chatId, input: answer({ card, approval: { status: 'allow', scope } }) });
-      expect(refused.status).toBe(422);
+      await approve({ chatId, card: draftCard });
+      const sendCard = await askFor({ chatId, tool: 'send_email', email });
+      expect(sendCard.can_chat_allow).toBe(false);
+      expect(sendCard.can_always_allow).toBe(false);
+      const refusedSend = await sendTurn({
+        chatId,
+        input: answer({ card: sendCard, approval: { status: 'allow', scope } }),
+      });
+      expect(refusedSend.status).toBe(422);
       expect(sent()).toEqual([]);
     },
     TURN_TIMEOUT_MS,
   );
 
   it(
-    'forwarding an email asks the same way',
+    'forwarding an email takes the same two cards: the first keeps it as a draft, the second forwards it',
     async () => {
       const chatId = await createChat();
       const email = emailTo('ines');
-      const card = await askFor({ chatId, tool: 'forward_email', email });
-      expect(card.tier3_card?.outbound_text).toContain(email.recipients[0]);
+      const first = await askFor({ chatId, tool: 'forward_email', email });
+      expect(first.tier3_card?.mail_draft).toBe(true);
+      await approve({ chatId, card: first });
       expect(sent()).toEqual([]);
 
-      await runTurn({ chatId, input: answer({ card, approval: { status: 'allow', scope: 'once' } }) });
+      const second = await askFor({ chatId, tool: 'forward_email', email });
+      expect(sent()).toEqual([]);
+      await approve({ chatId, card: second });
       expect(sent().map(call => call.name)).toEqual(['forward_email']);
     },
     TURN_TIMEOUT_MS,
   );
 
   it(
-    'in Telegram the same card is a message with the whole email and the account it goes from, and nothing is sent before a tap',
+    'in Telegram the send card is a message with the whole email and the account it goes from, and nothing is sent before a tap',
     async () => {
       const chatId = await createChat();
       const email = emailTo('kai');
+      await approveDraft({ chatId, tool: MAIL_DRAFT_TOOL_NAME, email });
       const card = await askFor({ chatId, tool: 'send_email', email });
 
       const message = approvalPrompt(card.action, card.id);
       // Buttons only ride a message that shows everything the card shows.
       expect(message?.complete).toBe(true);
-      expect(message?.approve_label).toBe('Add and send');
       for (const shown of [email.recipients[0], email.subject, email.body, HOME_ACCOUNT]) {
         expect(message?.text).toContain(shown);
       }
@@ -267,57 +347,45 @@ describe('an email Aman sends for the person', () => {
     TURN_TIMEOUT_MS,
   );
 
-  it(
-    'saving a draft asks first too, and approving it sends nothing',
-    async () => {
-      const chatId = await createChat();
-      const email = emailTo('omar');
-      const card = await askFor({ chatId, tool: MAIL_DRAFT_TOOL_NAME, email });
-      expect(card.tier3_card?.outbound_text).toContain(email.body);
-      expect(savedDrafts()).toEqual([]);
-
-      await runTurn({ chatId, input: answer({ card, approval: { status: 'allow', scope: 'once' } }) });
-      expect(savedDrafts()).toHaveLength(1);
-      expect(sent()).toEqual([]);
-    },
-    TURN_TIMEOUT_MS,
-  );
-
   describe('with more than one email account', () => {
     it(
-      'names the account on the card and sends from that account when the answer picks no other',
+      'names the account on both cards and sends from that account when the answer picks no other',
       async () => {
         const chatId = await createChat();
         const email = { ...emailTo('pia'), account_name: WORK_ACCOUNT };
-        const card = await askFor({ chatId, tool: 'send_email', email });
-        expect(card.tier3_card?.mail_from).toBe(WORK_ACCOUNT);
-        expect(card.tier3_card?.mail_from_choices).toEqual([...INERT_MAIL_ACCOUNTS]);
+        const draftCard = await askFor({ chatId, tool: MAIL_DRAFT_TOOL_NAME, email });
+        expect(draftCard.tier3_card?.mail_from).toBe(WORK_ACCOUNT);
+        expect(draftCard.tier3_card?.mail_from_choices).toEqual([...INERT_MAIL_ACCOUNTS]);
+        await approve({ chatId, card: draftCard });
 
-        await runTurn({ chatId, input: answer({ card, approval: { status: 'allow', scope: 'once' } }) });
+        const sendCard = await askFor({ chatId, tool: 'send_email', email });
+        expect(sendCard.tier3_card?.mail_from).toBe(WORK_ACCOUNT);
+        await approve({ chatId, card: sendCard });
         expect(sent().map(call => call.arguments['account_name'])).toEqual([WORK_ACCOUNT]);
       },
       TURN_TIMEOUT_MS,
     );
 
     it(
-      'sends from the account the person picked on the card, once, with the email the card showed',
+      'sends from the account the person picked on the send card, once, with the email the card showed',
       async () => {
         const chatId = await createChat();
         const email = emailTo('quinn');
         // Both accounts have written to this person before, so a pick of either has no new address.
         for (const account_name of INERT_MAIL_ACCOUNTS) {
-          const earlier = await askFor({ chatId, tool: 'send_email', email: { ...email, account_name } });
-          await runTurn({ chatId, input: answer({ card: earlier, approval: { status: 'allow', scope: 'once' } }) });
+          const earlier = { ...email, account_name, subject: `Earlier, from ${account_name}` };
+          await approveDraft({ chatId, tool: MAIL_DRAFT_TOOL_NAME, email: earlier });
+          await approve({ chatId, card: await askFor({ chatId, tool: 'send_email', email: earlier }) });
         }
         mailServer.resetInvocations();
 
-        const card = await askFor({ chatId, tool: 'send_email', email });
-        expect(card.tier3_card?.mail_from).toBe(HOME_ACCOUNT);
-        expect(sent()).toEqual([]);
+        await approveDraft({ chatId, tool: MAIL_DRAFT_TOOL_NAME, email });
+        const sendCard = await askFor({ chatId, tool: 'send_email', email });
+        expect(sendCard.tier3_card?.mail_from).toBe(HOME_ACCOUNT);
 
         await runTurn({
           chatId,
-          input: answer({ card, approval: { status: 'allow', scope: 'once', from_account: WORK_ACCOUNT } }),
+          input: answer({ card: sendCard, approval: { status: 'allow', scope: 'once', from_account: WORK_ACCOUNT } }),
         });
         expect(sent()).toEqual([{ name: 'send_email', arguments: { ...email, account_name: WORK_ACCOUNT } }]);
       },
@@ -325,15 +393,18 @@ describe('an email Aman sends for the person', () => {
     );
 
     it(
-      'sends nothing when the picked account has never written to that address, and says to ask again from that account',
+      'sends nothing when the account picked on the send card has never written to that address, and says to ask again from that account',
       async () => {
         const chatId = await createChat();
-        const card = await askFor({ chatId, tool: 'send_email', email: emailTo('rosa') });
-        expect(card.tier3_card?.mail_new_recipients).toEqual(['rosa@harbour.example']);
+        const email = emailTo('rosa');
+        const draftCard = await askFor({ chatId, tool: MAIL_DRAFT_TOOL_NAME, email });
+        expect(draftCard.tier3_card?.mail_new_recipients).toEqual(['rosa@harbour.example']);
+        await approve({ chatId, card: draftCard });
+        const sendCard = await askFor({ chatId, tool: 'send_email', email });
 
         const refused = await sendTurn({
           chatId,
-          input: answer({ card, approval: { status: 'allow', scope: 'once', from_account: WORK_ACCOUNT } }),
+          input: answer({ card: sendCard, approval: { status: 'allow', scope: 'once', from_account: WORK_ACCOUNT } }),
         });
         expect(refused.status).toBe(422);
         expect(await refused.text()).toContain('Ask Aman to send it from that account');
@@ -346,12 +417,14 @@ describe('an email Aman sends for the person', () => {
       'sends nothing when the answer names an account that is not one of the person’s own',
       async () => {
         const chatId = await createChat();
-        const card = await askFor({ chatId, tool: 'send_email', email: emailTo('tessa') });
+        const email = emailTo('tessa');
+        await approveDraft({ chatId, tool: MAIL_DRAFT_TOOL_NAME, email });
+        const sendCard = await askFor({ chatId, tool: 'send_email', email });
 
         await sendTurn({
           chatId,
           input: answer({
-            card,
+            card: sendCard,
             approval: { status: 'allow', scope: 'once', from_account: 'someone@elsewhere.example' },
           }),
         });

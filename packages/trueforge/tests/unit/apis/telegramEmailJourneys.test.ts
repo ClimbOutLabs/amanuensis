@@ -2,7 +2,10 @@
  * An email asked for in the Telegram chat, through the real server: the message to the bot, the approval
  * message the bot sends back, the tap on its button, and what the stand-in mail server then receives.
  */
-import { isMailSendToolName } from '@truefoundry/trueforge-core/core/email/mailConnector/toolContract';
+import {
+  isMailSendToolName,
+  MAIL_DRAFT_TOOL_NAME,
+} from '@truefoundry/trueforge-core/core/email/mailConnector/toolContract';
 import { createLogger } from 'winston';
 import { STANDALONE_REQUEST_CONTEXT } from '../../../src/auth/identity';
 import configuration from '../../../src/config';
@@ -153,19 +156,19 @@ describe('an email the person asks for in Telegram', () => {
     }
   }
 
-  /** The person asks the bot to send this email; returns once Aman has stopped to ask. */
-  async function askInTelegram(email: { recipients: string[]; subject: string; body: string }): Promise<void> {
-    server.model.next({ toolArguments: email });
+  /** The person asks the bot for this step of the email; returns once the chat holds this many settled turns. */
+  async function askInTelegram({ tool, turns }: { tool: string; turns: number }): Promise<void> {
+    server.model.next({ toolArguments: EMAIL });
     await deliverUpdate({
       message: {
         message_id: nextUpdateId,
         from: { id: PERSON, is_bot: false, first_name: 'Sam' },
         chat: { id: PERSON, type: 'private' },
         date: Math.floor(Date.now() / 1000),
-        text: `${RUN_DIRECTIVE_PREFIX}send_email to ${email.recipients.join(', ')}`,
+        text: `${RUN_DIRECTIVE_PREFIX}${tool} to ${EMAIL.recipients.join(', ')}`,
       },
     });
-    await turnsSettled(1);
+    await turnsSettled(turns);
   }
 
   /** Sends what the bot owes the Telegram chat, and returns the last message with buttons. */
@@ -193,8 +196,9 @@ describe('an email the person asks for in Telegram', () => {
     body: 'Hi Dana, could I order two loaves for Saturday?',
   };
 
+  /** The newest message the bot sent with buttons. */
   async function approvalMessage() {
-    const asking = (await botMessages()).find(message => message.inline_buttons !== undefined);
+    const asking = (await botMessages()).findLast(message => message.inline_buttons !== undefined);
     if (asking === undefined) {
       throw new Error(`the bot sent no message with buttons: ${JSON.stringify(bot.sent)}`);
     }
@@ -205,37 +209,59 @@ describe('an email the person asks for in Telegram', () => {
     return { text: asking.text, approve, deny };
   }
 
+  /** Saves the draft with a tap, then asks to send it; returns the bot's message about the send. */
+  async function sendMessageAfterApprovedDraft() {
+    await askInTelegram({ tool: MAIL_DRAFT_TOOL_NAME, turns: 1 });
+    const draft = await approvalMessage();
+    await tap({ callback_data: draft.approve.callback_data, from: PERSON });
+    await turnsSettled(2);
+    expect(sent()).toEqual([]);
+    await askInTelegram({ tool: 'send_email', turns: 3 });
+    const send = await approvalMessage();
+    expect(send.approve.callback_data).not.toBe(draft.approve.callback_data);
+    return { draft, send };
+  }
+
   it(
-    'gets the whole email in the bot’s message first, and it is sent only after the person taps to approve',
+    'gets the whole email in the bot’s message for the draft and again for the send, and it is sent only after both taps',
     async () => {
-      await askInTelegram(EMAIL);
-      const message = await approvalMessage();
-      for (const shown of [EMAIL.recipients[0], EMAIL.subject, EMAIL.body, HOME_ACCOUNT]) {
-        expect(message.text).toContain(shown);
+      const { draft, send } = await sendMessageAfterApprovedDraft();
+      for (const message of [draft, send]) {
+        for (const shown of [EMAIL.recipients[0], EMAIL.subject, EMAIL.body, HOME_ACCOUNT]) {
+          expect(message.text).toContain(shown);
+        }
       }
-      expect(message.approve.text).toBe('Add and send');
       expect(sent()).toEqual([]);
 
-      await tap({ callback_data: message.approve.callback_data, from: PERSON });
-      await turnsSettled(2);
+      await tap({ callback_data: send.approve.callback_data, from: PERSON });
+      await turnsSettled(4);
       expect(sent()).toEqual([{ name: 'send_email', arguments: { ...EMAIL, account_name: HOME_ACCOUNT } }]);
 
       // The button is used up: a second tap sends nothing more.
-      await tap({ callback_data: message.approve.callback_data, from: PERSON });
-      await turnsSettled(2);
+      await tap({ callback_data: send.approve.callback_data, from: PERSON });
+      await turnsSettled(4);
       expect(sent()).toHaveLength(1);
     },
     TURN_TIMEOUT_MS,
   );
 
   it(
-    'is not sent when the person taps Deny',
+    'is not sent, and the bot offers no buttons, when it is asked for with no approved draft',
     async () => {
-      await askInTelegram(EMAIL);
-      const message = await approvalMessage();
+      await askInTelegram({ tool: 'send_email', turns: 1 });
+      expect((await botMessages()).filter(message => message.inline_buttons !== undefined)).toEqual([]);
+      expect(sent()).toEqual([]);
+    },
+    TURN_TIMEOUT_MS,
+  );
 
-      await tap({ callback_data: message.deny.callback_data, from: PERSON });
-      await turnsSettled(2);
+  it(
+    'is not sent when the person taps Deny on the send',
+    async () => {
+      const { send } = await sendMessageAfterApprovedDraft();
+
+      await tap({ callback_data: send.deny.callback_data, from: PERSON });
+      await turnsSettled(4);
       expect(sent()).toEqual([]);
     },
     TURN_TIMEOUT_MS,
@@ -244,11 +270,10 @@ describe('an email the person asks for in Telegram', () => {
   it(
     'is not sent when someone other than the paired person taps the button',
     async () => {
-      await askInTelegram(EMAIL);
-      const message = await approvalMessage();
+      const { send } = await sendMessageAfterApprovedDraft();
 
-      await tap({ callback_data: message.approve.callback_data, from: SOMEONE_ELSE });
-      await turnsSettled(1);
+      await tap({ callback_data: send.approve.callback_data, from: SOMEONE_ELSE });
+      await turnsSettled(3);
       expect(sent()).toEqual([]);
     },
     TURN_TIMEOUT_MS,
