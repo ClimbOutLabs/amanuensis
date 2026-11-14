@@ -55,6 +55,7 @@ import { SqliteSkillStore } from '../../src/db/sqlite/skill-store/SqliteSkillSto
 import { SqliteSpaceStore } from '../../src/db/sqlite/space-store/SqliteSpaceStore';
 import { SqliteOAuthTokenStore } from '../../src/db/sqlite/token-store/SqliteOAuthTokenStore';
 import { SqliteTurnArtifactStore } from '../../src/db/sqlite/turn-artifact-store/SqliteTurnArtifactStore';
+import { TelegramStore } from '../../src/db/telegramStore';
 import { evalSources, type EvalSources } from '../../src/eval/fixtures';
 import { closePersonaKnowledgeIndexers } from '../../src/personaKnowledge/knowledgeIndexer';
 import { ActiveTurnRegistry } from '../../src/runtime/activeTurns';
@@ -166,6 +167,7 @@ function buildApp(input: {
     mcpServers: mcpServerStore,
     tokens: tokenStore,
     googleConnections: googleConnectionStore,
+    telegram: new TelegramStore(db),
   });
   const sentinelServices = createSentinelServices({
     demoMode: false,

@@ -14,6 +14,7 @@ import type { ISentinelAuditStore } from '../../db/sentinelAuditStore';
 import type { ISentinelSettingsStore } from '../../db/sentinelSettingsStore';
 import type { SessionCustom, TurnCustom } from '../../db/sessionCustom';
 import type { ISpaceStore } from '../../db/spaceStore';
+import type { ITelegramStore } from '../../db/telegramStore';
 import type { ITextContactStore } from '../../db/textContactStore';
 import type { ITurnArtifactStore } from '../../db/turnArtifactStore';
 import type { IOAuthTokenStore } from '../../mcp/auth/types';
@@ -38,6 +39,7 @@ export interface ExportStores<TTransaction> {
   deliveryStore: IDeliveryStore;
   reachSettingsStore: IReachSettingsStore;
   textContactStore: ITextContactStore;
+  telegramStore: ITelegramStore;
   close(): Promise<void>;
 }
 
