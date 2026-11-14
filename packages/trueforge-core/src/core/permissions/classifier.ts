@@ -3983,7 +3983,8 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
   if (extraction.payload_unverifiable) {
     return autoDenyDecision({
       reason: 'destination_unverifiable',
-      reason_detail: 'A connector call that carries words or an id and shows no verifiable destination is never carded.',
+      reason_detail:
+        'A connector call that carries words or an id and shows no verifiable destination is never carded.',
       sensitive_read: false,
     });
   }

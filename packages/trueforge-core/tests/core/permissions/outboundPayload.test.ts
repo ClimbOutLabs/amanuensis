@@ -736,7 +736,8 @@ describe('connector card does not change the tier', () => {
     for (const toolName of ['web_search', 'frobnicate']) {
       // The unknown name names its destination, so it is carded rather than refused under the
       // carried-payload rule: what is being judged here is the tier and the token, not the rule.
-      const params = toolName === 'frobnicate' ? { query: 'q', target: 'https://api.example.com/data' } : { query: 'q' };
+      const params =
+        toolName === 'frobnicate' ? { query: 'q', target: 'https://api.example.com/data' } : { query: 'q' };
       const decision = await classifyTier(connectorCall({ tool_name: toolName, params }), makeCtx());
       expect(decision.tier).toBe(3);
       expect(decision.auto_deny).toBeNull();

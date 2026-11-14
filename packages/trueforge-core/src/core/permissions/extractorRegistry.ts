@@ -1047,9 +1047,7 @@ function carriesUnaddressedPayload(params: Record<string, unknown>): boolean {
   return Object.entries(params).some(([key, value]) => {
     const normalized = normalizeKey(key);
     return (
-      !DESTINATION_KEY_SET.has(normalized) &&
-      !MAILBOX_REFERENCE_KEY_SET.has(normalized) &&
-      carriesPayloadValue(value)
+      !DESTINATION_KEY_SET.has(normalized) && !MAILBOX_REFERENCE_KEY_SET.has(normalized) && carriesPayloadValue(value)
     );
   });
 }
@@ -1319,10 +1317,7 @@ export function extractCardFields(input: {
     // from externalServiceCarried counts only when nothing is shown for the call to go to and
     // no more specific refusal (a hidden send, a missing recipient) owns it.
     payload_unverifiable:
-      carried.unverifiable_payload &&
-      fields.destination === null &&
-      shownRecipient === null &&
-      incomplete === null,
+      carried.unverifiable_payload && fields.destination === null && shownRecipient === null && incomplete === null,
     external_service: externalService,
     family_send: family?.sends !== undefined,
     connector_read: connectorRead,
