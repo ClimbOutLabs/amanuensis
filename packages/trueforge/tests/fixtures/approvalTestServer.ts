@@ -62,6 +62,7 @@ import { createChatImageService } from '../../src/runtime/chatImages/chatImageSe
 import { createImageReencoder } from '../../src/runtime/chatImages/reencodeInSandbox';
 import { ChatSearchIndexer } from '../../src/runtime/chatSearchIndexing';
 import { EventSubscriptionRegistry } from '../../src/runtime/event-subscription';
+import { memoryBackgroundWorkSettled } from '../../src/runtime/memory/memoryBackgroundWork';
 import { createOutboundSecretSource } from '../../src/runtime/outboundSecrets';
 import { localModelEndpointOf } from '../../src/runtime/remoteAddress';
 import { createSentinelServices } from '../../src/runtime/sentinelServices';
@@ -372,6 +373,8 @@ export async function startApprovalTestServer(options?: {
       // Like main.ts shutdown: a finished turn's drain still writes events and memory (a scheduled
       // run saves to the vault), so it settles before the database and the caller's directories go.
       await turnDrains.shutdownAndWait({ timeoutMs: configuration.TURN_DRAIN_SHUTDOWN_TIMEOUT_MS });
+      // A save may have started sorting or indexing its notes, which writes into the memory folder removed below.
+      await memoryBackgroundWorkSettled({ timeoutMs: configuration.TURN_DRAIN_SHUTDOWN_TIMEOUT_MS });
       await db.destroy();
       await model.close();
       await mcp.close();

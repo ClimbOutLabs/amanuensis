@@ -20,6 +20,7 @@ import { withoutAbilityNotes } from './assistantAbilityNotes';
 import { appendHandledNote } from './handledNotes';
 import { localDay } from './localDay';
 import { normalizedEntryBody, SESSION_ID_METADATA_KEY } from './markdownMemoryFiles';
+import { trackMemoryBackgroundWork } from './memoryBackgroundWork';
 import type { MemoryClient, RetainItem, WrittenEntry } from './memoryClient';
 import { isOperationCompletedStatus, isOperationFailedStatus } from './memoryClient';
 import {
@@ -602,8 +603,12 @@ export function startPageSorting({
     return;
   }
   // The setting is read now, after the save, so a change in Settings applies to the very next save.
-  void readMemoryPageSortingSetting({ globalSettingsStore: summarize.globalSettingsStore, logger }).then(setting =>
-    sortWrittenNotes({ mode: setting.mode, client, written, summarize, timeZone, logger }),
+  void trackMemoryBackgroundWork(
+    readMemoryPageSortingSetting({ globalSettingsStore: summarize.globalSettingsStore, logger })
+      .then(setting => sortWrittenNotes({ mode: setting.mode, client, written, summarize, timeZone, logger }))
+      .catch((error: unknown) => {
+        logger.warn('Notes that were just saved could not be sorted onto pages.', extractErrorLogFields(error));
+      }),
   );
 }
 

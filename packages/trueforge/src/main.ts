@@ -169,6 +169,7 @@ import { instanceOwnerSubjectId } from './runtime/instanceOwner';
 import { registerMailConnectorFromSavedAccountInBackground } from './runtime/mailAccount';
 import { prepareMailPolicyAtBoot, registerMailConnectorAtBoot } from './runtime/mailConnector';
 import { warmEmbeddingsAtBoot } from './runtime/memory/embeddingRetrieval';
+import { memoryBackgroundWorkSettled } from './runtime/memory/memoryBackgroundWork';
 import { ensureMemorySourceLines } from './runtime/memory/memorySourceLines';
 import { startNightlyMemoryJob } from './runtime/memory/nightlyService';
 import { startNotesFolderIndexing } from './runtime/notesFolder/notesFolderRuntime';
@@ -1674,6 +1675,8 @@ try {
         logger.info(`Waiting for ${String(turnDrains.size)} in-flight turn drains before shutdown`);
       }
       await turnDrains.shutdownAndWait({ timeoutMs: configuration.TURN_DRAIN_SHUTDOWN_TIMEOUT_MS });
+      // A drain's save may have started sorting its notes onto pages or indexing them; both write to the memory folder.
+      await memoryBackgroundWorkSettled({ timeoutMs: configuration.TURN_DRAIN_SHUTDOWN_TIMEOUT_MS });
       // Finish the library document being indexed; queued ones resume on the next start.
       await closePersonaKnowledgeIndexers();
       clearInterval(commandExecutionRecoveryTimer);

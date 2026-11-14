@@ -11,6 +11,7 @@ import winston from 'winston';
 import type { IModelProviderStore } from '../../../../src/db/modelProviderStore';
 import { readHandledNotes } from '../../../../src/runtime/memory/handledNotes';
 import { MarkdownMemoryClient } from '../../../../src/runtime/memory/markdownMemoryClient';
+import { memoryBackgroundWorkSettled } from '../../../../src/runtime/memory/memoryBackgroundWork';
 import { USER_STATED_ORIGIN } from '../../../../src/runtime/memory/memoryOrigin';
 import {
   submitRetain,
@@ -173,6 +174,43 @@ describe('sorting after a save', () => {
     await waitFor(async () => (await handledCount(vaultDir)) === 1);
     expect(await readFile(path.join(vaultDir, 'people', 'nora.md'), 'utf8')).toContain(SHELLFISH);
     expect([...(await readHandledNotes(vaultDir)).values()]).toEqual(['page']);
+  });
+
+  it('lets shutdown wait for a sort in flight, so nothing is written after the wait ends', async () => {
+    const { client, vaultDir } = await openClient();
+    let release: () => void = () => undefined;
+    const held = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const model = fakeModel({ sortAnswer: () => held.then(newFactAnswer) });
+
+    await submitRetain({
+      client,
+      session: { is_incognito: false },
+      ...TURN,
+      userText: SHELLFISH,
+      assistantText: 'Noted.',
+      logger,
+      summarize: summarizeContext(model),
+    });
+    await waitFor(() => Promise.resolve(model.sortCalls === 1));
+
+    // A stuck model call does not hang shutdown: the wait gives up at its limit.
+    await memoryBackgroundWorkSettled({ timeoutMs: 50 });
+    expect(await handledCount(vaultDir)).toBe(0);
+
+    let settled = false;
+    const waiting = memoryBackgroundWorkSettled({ timeoutMs: 10_000 }).then(() => {
+      settled = true;
+    });
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(settled).toBe(false);
+    release();
+    await waiting;
+
+    // The page and the record of the sorted note are both on disk by the time the wait ends.
+    expect(await handledCount(vaultDir)).toBe(1);
+    expect(await readFile(path.join(vaultDir, 'people', 'nora.md'), 'utf8')).toContain(SHELLFISH);
   });
 
   it('writes no page in report mode, only a line in the report', async () => {
