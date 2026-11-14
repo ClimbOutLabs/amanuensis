@@ -132,7 +132,7 @@ Inside Aman, click **Help, I'm stuck** at the top of the screen. The guide check
 ??? question "The model is set, but the chat says it can't reach it"
 
     - For a hosted model, check the key in **Settings**, then **Models**.
-    - For a local model such as Ollama, check that it's running on the same computer.
+    - For a model on this computer, such as Ollama, check that it's running. If Aman still can't reach it, see [A model on this computer](../packages/trueforge/guide/topics/local-model.md).
 
 ??? question "Aman can't run code or read an attachment"
 
