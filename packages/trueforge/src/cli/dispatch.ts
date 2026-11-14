@@ -9,6 +9,7 @@ import { importData } from './importData';
 import { UsageError, type CliIo } from './io';
 import { memoryExample } from './memoryExample';
 import { resetPassword } from './resetPassword';
+import { secrets } from './secrets';
 
 const COMMANDS: Readonly<Record<string, Command>> = {
   'hash-password': hashPassword,
@@ -20,6 +21,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
   'import-data': importData,
   'memory-example': memoryExample,
   'reset-password': resetPassword,
+  secrets,
 };
 
 const USAGE = `Usage: aman <command> [options]
@@ -34,6 +36,7 @@ Commands:
   import-data     Restore a data export (--in <file.zip>) into this fresh instance
   memory-example  Replace this instance's memory with two years of made-up notes (--replace), keeping the old
   reset-password  Set a new password for the local sign-in (Aman must be stopped)
+  secrets         Set up saved secrets (init) or test a recovery key (check-recovery)
 
 JSON goes to stdout, messages to stderr. Exit codes: 0 ok, 1 failure, 2 usage.
 `;
