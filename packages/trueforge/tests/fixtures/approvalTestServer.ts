@@ -12,7 +12,7 @@
 import { Sessions, type TurnStreamingEvent } from '@truefoundry/trueforge-core/agent-session';
 import type { SandboxProvider } from '@truefoundry/trueforge-core/core';
 import { RequestReplyRouter } from '@truefoundry/trueforge-core/request-reply';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createLogger } from 'winston';
@@ -62,6 +62,7 @@ import { createChatImageService } from '../../src/runtime/chatImages/chatImageSe
 import { createImageReencoder } from '../../src/runtime/chatImages/reencodeInSandbox';
 import { ChatSearchIndexer } from '../../src/runtime/chatSearchIndexing';
 import { EventSubscriptionRegistry } from '../../src/runtime/event-subscription';
+import { allowedRecipientsFileHash, renderAllowedRecipientsFile } from '../../src/runtime/mailAllowedRecipients';
 import { memoryBackgroundWorkSettled } from '../../src/runtime/memory/memoryBackgroundWork';
 import { startNightlyMemoryJob, type NightlyMemoryJob } from '../../src/runtime/memory/nightlyService';
 import { createOutboundSecretSource } from '../../src/runtime/outboundSecrets';
@@ -69,7 +70,7 @@ import { localModelEndpointOf } from '../../src/runtime/remoteAddress';
 import { createSentinelServices } from '../../src/runtime/sentinelServices';
 import { TurnDrainRegistry } from '../../src/runtime/turnDrains';
 import { deliveryDeps } from './deliveryDeps';
-import { INERT_SERVER_NAME, startInertMcpServer, type InertMcpServer } from './inertMcpServer';
+import { INERT_MAIL_ACCOUNTS, INERT_SERVER_NAME, startInertMcpServer, type InertMcpServer } from './inertMcpServer';
 import { startScriptedModelServer, type ScriptedModelServer } from './scriptedModelServer';
 import { uncappedTokenFactoryBudget } from './uncappedTokenFactoryBudget';
 
@@ -105,6 +106,30 @@ export interface ApprovalTestServer {
   close: () => Promise<void>;
 }
 
+/** The Email send list file and the file where the mail server says which list it runs. */
+interface MailSendListFiles {
+  policyPath: string;
+  statusPath: string;
+}
+
+/**
+ * Stands in for the mail server picking up its send list: whenever the list file changes, its hash is
+ * written to the status file, which is what the host waits on before a send goes out. Returns the stop.
+ */
+async function startMailSendListLoader({ policyPath, statusPath }: MailSendListFiles): Promise<() => void> {
+  const load = async (): Promise<void> => {
+    await writeFile(statusPath, `${allowedRecipientsFileHash(await readFile(policyPath, 'utf8'))}\n`);
+  };
+  await writeFile(policyPath, renderAllowedRecipientsFile([]));
+  await load();
+  const timer = setInterval(() => {
+    void load().catch(() => undefined);
+  }, 50);
+  return () => {
+    clearInterval(timer);
+  };
+}
+
 function buildApp(input: {
   db: SqliteDb;
   sandboxProvider: SandboxProvider | undefined;
@@ -114,8 +139,9 @@ function buildApp(input: {
   turnDrains: TurnDrainRegistry;
   /** The tidy-up the Memory settings page starts, for this database. */
   memoryTidy: (db: SqliteDb) => NightlyMemoryJob;
+  mailSendList: MailSendListFiles | undefined;
 }): ReturnType<typeof createServerApp> {
-  const { db, sandboxProvider, turnDrains } = input;
+  const { db, sandboxProvider, turnDrains, mailSendList } = input;
   const sessionStore = new SqliteSessionStore(db);
   const tokenStore = new SqliteOAuthTokenStore(db);
   const agentStore = new SqliteAgentStore(db);
@@ -144,8 +170,12 @@ function buildApp(input: {
   const sentinelServices = createSentinelServices({
     demoMode: false,
     demoSendAllowlist: [],
-    mailPolicyPath: undefined,
-    mailPolicyStatusPath: undefined,
+    mailPolicyPath: mailSendList?.policyPath,
+    mailPolicyStatusPath: mailSendList?.statusPath,
+    mailAccounts:
+      mailSendList === undefined
+        ? undefined
+        : () => Promise.resolve({ accounts: [...INERT_MAIL_ACCOUNTS], default_account: INERT_MAIL_ACCOUNTS[0] }),
     audit: sentinelAuditStore,
     settings: sentinelSettingsStore,
     approvalTokens: new SqliteApprovalTokenStore(db),
@@ -243,6 +273,8 @@ export async function startApprovalTestServer(options?: {
   localSignIn?: boolean | undefined;
   /** Runs the real memory tidy-up when the Memory settings page asks for one, instead of doing nothing. */
   memoryTidy?: boolean | undefined;
+  /** Gives the server an Email send list and the stand-in mail accounts, so an approved Email send can go out. */
+  mailSendList?: boolean | undefined;
 }): Promise<ApprovalTestServer> {
   const localSignIn = options?.localSignIn === true;
   const authenticator = options?.authenticator ?? createAuthenticator({ mode: TrueForgeAuthMode.Standalone });
@@ -351,6 +383,11 @@ export async function startApprovalTestServer(options?: {
       : { tidyNow: () => undefined, tidyState: () => ({ status: 'idle' }) };
   // One registry for the server's life, so close() can wait for turn drains the way main.ts does.
   const turnDrains = new TurnDrainRegistry();
+  const mailSendList =
+    options?.mailSendList === true
+      ? { policyPath: join(directory, 'mail-send-list.toml'), statusPath: join(directory, 'mail-send-list.loaded') }
+      : undefined;
+  const stopMailSendListLoader = mailSendList === undefined ? undefined : await startMailSendListLoader(mailSendList);
   let app = buildApp({
     db,
     sandboxProvider: options?.sandboxProvider,
@@ -358,6 +395,7 @@ export async function startApprovalTestServer(options?: {
     localSignIn,
     turnDrains,
     memoryTidy,
+    mailSendList,
   });
 
   return {
@@ -376,6 +414,7 @@ export async function startApprovalTestServer(options?: {
         localSignIn,
         turnDrains,
         memoryTidy,
+        mailSendList,
       });
     },
     mcp,
@@ -391,6 +430,7 @@ export async function startApprovalTestServer(options?: {
     },
     evalSources,
     close: async () => {
+      stopMailSendListLoader?.();
       configuration.FIRST_PARTY_MCP_ORIGINS = originalFirstPartyOrigins;
       configuration.LOCAL_MODEL_ENDPOINTS = originalLocalModelEndpoints;
       configuration.AMAN_EVAL_MODE = originalEvalMode;
