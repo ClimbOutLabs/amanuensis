@@ -311,7 +311,6 @@
   "More about you": "packages/trueforge-ui/src/components/PersonalizationPanel.tsx",
   "Pinned preferences": "packages/trueforge-ui/src/components/PersonalizationPanel.tsx",
   "+ Add preference": "packages/trueforge-ui/src/components/PersonalizationPanel.tsx",
-  "Assistant profile": "packages/trueforge-ui/src/components/PersonalizationPanel.tsx",
   "Voice guidance": "packages/trueforge-ui/src/components/PersonalizationPanel.tsx",
   "Identity": "packages/trueforge-ui/src/components/PersonalizationPanel.tsx",
   "Learned profile": "packages/trueforge-ui/src/containers/SettingsBuilder/MemorySection.tsx",
