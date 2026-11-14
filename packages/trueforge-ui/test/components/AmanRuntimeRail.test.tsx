@@ -48,6 +48,34 @@ describe('AmanRuntimeRail', () => {
     vi.unstubAllGlobals();
   });
 
+  it('links to the live browser with a live dot while a page is open, and shows nothing otherwise', () => {
+    const { rerender } = render(
+      <RuntimeHarness messages={[]}>
+        <AmanRuntimeRail liveBrowserHref="/browser-live?tab=chat-1" />
+      </RuntimeHarness>,
+    );
+    const link = screen.getByRole('link', { name: /Live browser/ });
+    expect(link).toHaveAttribute('href', '/browser-live?tab=chat-1');
+    // It opens beside the chat, so the chat stays where it is.
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+    expect(link.querySelector('.aman-runtime-rail__live-dot')).not.toBeNull();
+
+    rerender(
+      <RuntimeHarness messages={[]}>
+        <AmanRuntimeRail />
+      </RuntimeHarness>,
+    );
+    expect(screen.queryByRole('link', { name: /Live browser/ })).not.toBeInTheDocument();
+  });
+
+  it('keeps the live dot still for a person who asks for less motion', () => {
+    const css = readFileSync(findStylesheet(), 'utf8');
+    expect(css).toMatch(
+      /@media \(prefers-reduced-motion: reduce\) \{\s*\.aman-runtime-rail__live-dot \{\s*animation: none;/,
+    );
+  });
+
   it('shows the assistant identity and runtime summary', () => {
     render(
       <RuntimeHarness messages={[]}>

@@ -197,7 +197,14 @@ export function BrowserLivePage() {
       return;
     }
     setTabs(list);
-    setSelected(current => (current !== undefined && list.some(tab => tab.tab === current) ? current : list[0]?.tab));
+    // A link from a chat names that chat's tab, so the page opens on it rather than on the newest one.
+    const asked = new URLSearchParams(window.location.search).get('tab');
+    setSelected(current => {
+      if (current !== undefined && list.some(tab => tab.tab === current)) {
+        return current;
+      }
+      return list.find(tab => tab.tab === asked)?.tab ?? list[0]?.tab;
+    });
     setNote(
       list.length === 0 ? 'Aman has no page open right now. Ask Aman to open the page first, then come back here.' : '',
     );

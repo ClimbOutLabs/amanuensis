@@ -655,6 +655,72 @@
 
 /* The live wait line in the Activity row: it comes from the chat, not the receipt, so it sits
  * above the history and never counts as an entry. */
+/* The live browser link: a card with a blinking dot, so a page waiting on the person is easy to find. */
+.aman-runtime-rail__live-browser {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.625rem;
+  border: 0.0625rem solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.625rem 0.75rem;
+  background: var(--card-bg);
+  color: var(--text-primary);
+  text-decoration: none;
+}
+
+.aman-runtime-rail__live-browser:hover {
+  border-color: var(--gold-line);
+}
+
+.aman-runtime-rail__live-browser:focus-visible {
+  outline: 0.125rem solid var(--focus-ring);
+  outline-offset: 0.125rem;
+}
+
+.aman-runtime-rail__live-dot {
+  flex: none;
+  width: 0.625rem;
+  height: 0.625rem;
+  margin-top: 0.3rem;
+  border-radius: 50%;
+  background: var(--success-bg);
+  animation: aman-runtime-rail-live-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes aman-runtime-rail-live-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .aman-runtime-rail__live-dot {
+    animation: none;
+  }
+}
+
+.aman-runtime-rail__live-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  min-width: 0;
+}
+
+.aman-runtime-rail__live-title {
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.aman-runtime-rail__live-detail {
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  line-height: 1.4;
+}
+
 .aman-runtime-rail__waiting {
   display: flex;
   align-items: center;
