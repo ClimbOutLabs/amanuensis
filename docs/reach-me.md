@@ -37,7 +37,7 @@ Everything lands under the bell with the reason you got it. The bell is labeled 
 An item that came from a chat shows **Open chat**, which takes you to that chat. If you deleted the chat, the item stays under the bell without it.
 
 - **Note:** a quiet item under the bell. It never makes a sound. Most things are notes.
-- **Nudge:** a notice on the devices where you turned notices on, and a text if you set up texts and switched them on. See [Text messages](/text-messages).
+- **Nudge:** a notice on the devices where you turned notices on, a text if you set up texts and switched them on, and a Telegram message if you connected a Telegram bot. See [Text messages](/text-messages) and [Using Aman from Telegram](../packages/trueforge/guide/topics/telegram.md).
 - **Call:** a phone call, if the owner set up Twilio, the voice parts of Aman are running, and you switched calls on. Until then, something that would call you comes as a nudge. See [Phone calls](/phone-calls).
 
 A model reads a short description of each new thing and suggests how loudly to tell you. It can only suggest. Your settings decide. A waiting approval can nudge you but never call. A bill can nudge you only when it came from someone you marked always important and your mail server confirmed the sender, and it never calls. Words in a message, such as "urgent", can never make it louder than a note.

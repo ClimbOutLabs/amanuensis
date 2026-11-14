@@ -42,7 +42,7 @@ Tap the menu button beside the text box in Telegram to see the bot's commands, o
 
 These change only the Telegram chat, the same settings you see when you open that chat in Aman.
 
-Reminders, brief summaries and other notices are sent to Telegram as well. When Aman tries to call you and the phone does not ring, the message comes to Telegram instead. The whole brief always stays in the app, in its chat.
+Reminders and other notices that would show on your devices are sent to Telegram as well. When Aman tries to call you and the phone does not ring, the message comes to Telegram instead. Quiet notes stay under the bell in the app. So when your morning brief is ready, Telegram gets no message: read the brief in its chat in the app.
 
 The bot does not answer anyone else, and it does not work in group chats. Forwarded messages and files are treated as things to read, never as instructions to follow.
 
