@@ -16,7 +16,7 @@ import { HTTPException } from 'hono/http-exception';
 import type { Logger } from 'winston';
 import type { ResolveRequestContext } from '../auth/identity';
 import { safeReturnTo } from '../auth/safeReturnTo';
-import type { McpCatalog } from '../catalog/McpCatalog';
+import type { McpCatalog, SearchDeclaration } from '../catalog/McpCatalog';
 import configuration from '../config';
 import {
   McpServerNameConflictError,
@@ -49,7 +49,7 @@ import {
   putMcpServerRoute,
 } from '../routes/mcpServerRoutes';
 import { remoteUrlProblem } from '../runtime/remoteAddress';
-import { getMcpConnection, RemoteAddressRefusedError } from '../runtime/sessionResources';
+import { getMcpConnection, RemoteAddressRefusedError, resolveManifestRequestHeaders } from '../runtime/sessionResources';
 import type {
   AvailableMcpServer,
   ConfiguredMcpServer,
