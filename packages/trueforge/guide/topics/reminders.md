@@ -13,6 +13,8 @@ How to get there: In any chat, ask Aman to remind you.
 1. In any chat, ask with a time, such as "Remind me at 5 pm to call the pharmacy".
 2. Aman sets it. A line in the chat says when it is due and what it says.
 
+Aman sets a reminder you ask for right away. When it thinks a reminder would help but you didn't ask, it offers one and waits for your yes.
+
 Not sure when? Click **Don't let me forget** on the new chat screen. Aman asks what you must not forget, suggests a good time, and asks before it sets it.
 
 A reminder can also repeat every day, every weekday, or on the days you choose, such as "Remind me every Monday at 8 am to put the bins out".
