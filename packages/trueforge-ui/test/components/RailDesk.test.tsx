@@ -68,7 +68,7 @@ describe('parseRecallFacts', () => {
     );
     const facts = parseRecallFacts([turn]);
     expect(facts).toHaveLength(4);
-    expect(facts[0]).toMatchObject({ source: 'person', origin: 'You said this on 2026-08-14' });
+    expect(facts[0]).toMatchObject({ source: 'person', origin: 'You said this · Aug 14, 2026' });
     expect(facts[1]).toMatchObject({ source: 'read' });
     expect(facts[2]).toMatchObject({ source: 'finding' });
     expect(facts[3]).toMatchObject({ source: 'assistant' });
@@ -95,12 +95,26 @@ describe('parseRecallFacts', () => {
       'The spare key is under the mat',
       'See you at the ferry',
     ]);
-    expect(facts[0]).toMatchObject({ source: 'person', origin: 'You said this on 2024-11-02' });
+    expect(facts[0]).toMatchObject({ source: 'person', origin: 'You said this · 2 years ago' });
     expect(facts[1]).toMatchObject({ source: 'read', date: '2026-11-12' });
     expect(facts[2]).toMatchObject({ source: 'finding' });
     expect(facts[3]).toMatchObject({ source: 'assistant' });
     expect(facts[4]).toMatchObject({ source: 'person', origin: 'You said this' });
-    expect(facts[5]).toMatchObject({ source: 'person', origin: 'From a message you sent on 2026-11-10' });
+    expect(facts[5]).toMatchObject({ source: 'person', origin: 'From a message you sent · 3 days ago' });
+  });
+
+  it('shows a saved note without its label, and says where it came from in plain words', () => {
+    const turn = turnContext(
+      't1',
+      blockOf([
+        '[2026-11-12, yesterday, found earlier by the assistant] From an email, found Nov 12: The CPA said to file early.',
+      ]),
+    );
+    expect(parseRecallFacts([turn])[0]).toMatchObject({
+      text: 'From an email, found Nov 12: The CPA said to file early.',
+      shown: 'The CPA said to file early.',
+      origin: 'From an email · yesterday',
+    });
   });
 
   it('caps the list at six', () => {
@@ -232,7 +246,7 @@ describe('the rail desk in a chat', () => {
     );
 
     expect(await screen.findByText('The gate code is 4417')).toBeInTheDocument();
-    expect(screen.getByText('You said this on 2026-08-14')).toBeInTheDocument();
+    expect(screen.getByText('You said this · Aug 14, 2026')).toBeInTheDocument();
     expect(screen.getByText('The ferry leaves at 9')).toBeInTheDocument();
     expect(screen.getByText('tickets.pdf')).toBeInTheDocument();
 

@@ -85,12 +85,14 @@ const FACT_CAP = 6;
 export type RailRecallFactSource = 'person' | 'read' | 'finding' | 'assistant';
 
 export type RailRecallFact = {
-  /** The fact in the plain words the recall record itself uses; also the exclusion key. */
+  /** The fact in the plain words the recall record itself uses; the key for pulling it out or deleting it. */
   text: string;
+  /** The fact as the row shows it: the same words without the label a saved note opens with. */
+  shown: string;
   /** The day the fact is dated with, as the record gives it (`undated` when it gives none). */
   date: string;
   source: RailRecallFactSource;
-  /** Where the fact came from, in plain words, for the row's second line. */
+  /** Where the fact came from and how long ago, in plain words, for the row's second line. */
   origin: string;
 };
 
@@ -101,6 +103,18 @@ const SENT_LABEL = 'a message the person sent';
 const ITEM_LINE = /^\[([^\]]+)\] (.*)$/;
 /** How long ago the day was, which newer records carry between the day and the label. */
 const AGE_PART = /^(today|yesterday|\d+ (day|week|month|year)s? ago)$/;
+/** The label a saved note opens with, such as "From an email, found Nov 12: ". */
+const NOTE_LABEL = /^(From [^,:]+), (?:found )?[A-Z][a-z]{2} \d{1,2}: (.+)$/;
+
+/** The day in words, for records that do not say how long ago it was. */
+function dayInWords(date: string): string {
+  const instant = new Date(`${date}T12:00:00Z`);
+  return Number.isNaN(instant.getTime())
+    ? date
+    : new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }).format(
+        instant,
+      );
+}
 
 /** One item line of a recall block, or undefined for the block's other lines (People, curated, stats). */
 function parseBlockLine(line: string): RailRecallFact | undefined {
@@ -117,22 +131,25 @@ function parseBlockLine(line: string): RailRecallFact | undefined {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date) && date !== 'undated') {
     return undefined;
   }
-  // The row shows the day itself, so the age is read past; older records have no age and no label for the person.
-  const label = (AGE_PART.test(rest[0] ?? '') ? rest.slice(1) : rest).join(', ');
-  const when = date === 'undated' ? '' : ` on ${date}`;
+  // Older records have no age, and no label for the person's own words.
+  const age = AGE_PART.test(rest[0] ?? '') ? rest[0] : undefined;
+  const label = (age === undefined ? rest : rest.slice(1)).join(', ');
+  const when = date === 'undated' ? '' : ` · ${age ?? dayInWords(date)}`;
+  const note = NOTE_LABEL.exec(text);
+  const shown = note?.[2] ?? text;
   if (label === READ_LABEL) {
-    return { text, date, source: 'read', origin: `From something read for you${when}` };
+    return { text, shown, date, source: 'read', origin: `${note?.[1] ?? 'From something read for you'}${when}` };
   }
   if (label === FINDING_LABEL) {
-    return { text, date, source: 'finding', origin: `Found earlier by the assistant${when}` };
+    return { text, shown, date, source: 'finding', origin: `${note?.[1] ?? 'Found for you earlier'}${when}` };
   }
   if (label === REPLY_LABEL) {
-    return { text, date, source: 'assistant', origin: `From an earlier reply${when}` };
+    return { text, shown, date, source: 'assistant', origin: `From an earlier reply${when}` };
   }
   if (label === SENT_LABEL) {
-    return { text, date, source: 'person', origin: `From a message you sent${when}` };
+    return { text, shown, date, source: 'person', origin: `From a message you sent${when}` };
   }
-  return { text, date, source: 'person', origin: `You said this${when}` };
+  return { text, shown: text, date, source: 'person', origin: `You said this${when}` };
 }
 
 /**
@@ -498,11 +515,11 @@ export const RailChatDesk: FC<{
             {facts.map(fact => (
               <li key={fact.text} className="aman-runtime-rail__desk-fact">
                 <div className="aman-runtime-rail__desk-fact-head">
-                  <span className="aman-runtime-rail__desk-fact-text">{fact.text}</span>
+                  <span className="aman-runtime-rail__desk-fact-text">{fact.shown}</span>
                   <button
                     type="button"
                     className="aman-runtime-rail__desk-pull"
-                    aria-label={`Take this out of this chat: ${fact.text}`}
+                    aria-label={`Take this out of this chat: ${fact.shown}`}
                     title="Not in this chat"
                     onClick={() => {
                       pullOut(fact);
@@ -517,7 +534,7 @@ export const RailChatDesk: FC<{
                     <button
                       type="button"
                       className="aman-runtime-rail__desk-forget aman-runtime-rail__desk-delete"
-                      aria-label={`Delete this memory: ${fact.text}`}
+                      aria-label={`Delete this memory: ${fact.shown}`}
                       onClick={() => {
                         setConfirming(fact.text);
                         setDeleteError(null);

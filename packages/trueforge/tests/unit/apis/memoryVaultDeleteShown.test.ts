@@ -2,6 +2,7 @@ import { OpenAPIHono } from '@hono/zod-openapi';
 import { cp, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { ulid } from 'ulid';
 import winston from 'winston';
 import { z } from 'zod';
 
@@ -10,6 +11,8 @@ import type { RequestContext } from '../../../src/auth/identity';
 import { replaceMemoryWithExample } from '../../../src/cli/memoryExample/replace';
 import configuration from '../../../src/config';
 import { MarkdownMemoryClient } from '../../../src/runtime/memory/markdownMemoryClient';
+import { USER_STATED_ORIGIN } from '../../../src/runtime/memory/memoryOrigin';
+import { buildRetainItem } from '../../../src/runtime/memory/memoryRetain';
 
 const ALICE: RequestContext = {
   tenant_id: 'default',
@@ -92,10 +95,48 @@ describe('deleting a memory by the words a chat showed', () => {
     expect(await texts()).toEqual(before);
   });
 
+  async function addNote({ vault, text }: { vault: string; text: string }): Promise<void> {
+    const item = buildRetainItem({
+      sessionId: 'chat-1',
+      turnId: ulid(),
+      userText: text,
+      completedAt: NOW.toISOString(),
+      memoryText: text,
+      origin: USER_STATED_ORIGIN,
+    });
+    const outcome = await new MarkdownMemoryClient({ baseDir, namespace: vault }).retain({
+      items: item === undefined ? [] : [item],
+      operationId: ulid(),
+      timeoutMs: 10_000,
+    });
+    expect(outcome.ok).toBe(true);
+  }
+
   it('deletes nothing when words that were cut short fit more than one memory', async () => {
+    await addNote({ vault: 'default', text: 'The spare key for the shed is under the blue pot.' });
+    await addNote({ vault: 'default', text: 'The spare key for the shed is with the neighbour now.' });
     const before = await texts();
-    const response = await deleteShown('The CPA, Dana Whitfield, said...');
+    const response = await deleteShown('The spare key for the shed is...');
     expect(response.status).toBe(404);
     expect(await texts()).toEqual(before);
+
+    // The same cut-short words name one memory once the other is gone.
+    expect((await deleteShown('The spare key for the shed is with the neighbour now.')).status).toBe(200);
+    expect((await deleteShown('The spare key for the shed is...')).status).toBe(200);
+    expect((await texts()).some(text => text.includes('spare key'))).toBe(false);
+  });
+
+  it('leaves a memory with the same words in another instance\u2019s folder alone', async () => {
+    await addNote({ vault: 'other', text: JACKET });
+    await addNote({ vault: 'defaultish', text: JACKET });
+    const response = await deleteShown(JACKET);
+    expect(DeletedSchema.parse(await response.json()).data.deleted).toBe(1);
+    for (const vault of ['other', 'defaultish']) {
+      const listed = await new MarkdownMemoryClient({ baseDir, namespace: vault }).listEntries({
+        namespace: '',
+        timeoutMs: 10_000,
+      });
+      expect(listed.ok && listed.entries.some(entry => entry.text.includes('Versace'))).toBe(true);
+    }
   });
 });

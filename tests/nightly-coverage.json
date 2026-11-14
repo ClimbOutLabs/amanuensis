@@ -117,6 +117,10 @@
       "set": "install",
       "tests": []
     },
+    "command:memory-example": {
+      "set": "memory",
+      "tests": []
+    },
     "command:migrate": {
       "set": "install",
       "tests": []
@@ -776,6 +780,7 @@
     "command:doctor",
     "command:import",
     "command:install",
+    "command:memory-example",
     "command:migrate",
     "command:network",
     "command:open",
