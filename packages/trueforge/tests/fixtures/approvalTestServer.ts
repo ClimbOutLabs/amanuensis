@@ -328,8 +328,7 @@ export async function startApprovalTestServer(options?: {
   // instance vouches for them the way the server settings ask: the model's exact endpoint is
   // named as a local model endpoint, and the connector's origin is listed as the operator's
   // own, without which the address check refuses both loopback servers. The listing grants the
-  // connector no trust by itself (its row stays first_party false); the memoryProvider option
-  // still decides whether the connector is also registered as the memory provider.
+  // connector no trust by itself (its row stays first_party false).
   configuration.FIRST_PARTY_MCP_ORIGINS = [mcp.origin];
   const modelEndpoint = localModelEndpointOf(model.baseUrl);
   configuration.LOCAL_MODEL_ENDPOINTS = modelEndpoint === null ? [] : [modelEndpoint];
