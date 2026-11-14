@@ -24,6 +24,7 @@ import {
   waitForCurrentSidecarList,
   waitForSidecarLoadedHash,
 } from './mailAllowedRecipients';
+import { approvedMailDraftsPath, fileApprovedMailDrafts } from './mailApprovedDrafts';
 import { sentinelSettingsServices } from './sentinelSettingsServices';
 
 /**
@@ -111,6 +112,10 @@ export function createSentinelServices(stores: {
     tool_grants: stores.toolGrants,
     outboundSecrets: stores.outboundSecrets,
     demoSendAllowlist: stores.demoMode ? stores.demoSendAllowlist : null,
+    // Without a mail folder there is no Email connector, and the default keeps drafts in memory.
+    ...(stores.mailPolicyPath === undefined
+      ? {}
+      : { mail_approved_drafts: fileApprovedMailDrafts({ path: approvedMailDraftsPath(stores.mailPolicyPath) }) }),
     mail_accounts: () => readMailAccounts(),
     mail_listed_addresses: ({ account }) => listedFor(account),
     mail_add_recipients: async ({ account }, addresses) => {
