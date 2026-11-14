@@ -53,6 +53,7 @@ import { SqliteSpaceStore } from '../src/db/sqlite/space-store/SqliteSpaceStore'
 import { SqliteTokenFactoryUsageStore } from '../src/db/sqlite/token-factory-usage-store/SqliteTokenFactoryUsageStore';
 import { SqliteOAuthTokenStore } from '../src/db/sqlite/token-store/SqliteOAuthTokenStore';
 import { SqliteTurnArtifactStore } from '../src/db/sqlite/turn-artifact-store/SqliteTurnArtifactStore';
+import { TelegramStore } from '../src/db/telegramStore';
 import { TextContactStore } from '../src/db/textContactStore';
 import { ActiveTurnRegistry } from '../src/runtime/activeTurns';
 import { createChatImageService } from '../src/runtime/chatImages/chatImageService';
@@ -62,6 +63,8 @@ import { createDeliveryService } from '../src/runtime/delivery/deliveryService';
 import { EventSubscriptionRegistry } from '../src/runtime/event-subscription';
 import { NO_PHONE_CHANNELS } from '../src/runtime/noticing/reachChannels';
 import { createReminderReach } from '../src/runtime/noticing/reminderReach';
+import { createTelegramSendQueue } from '../src/runtime/telegram/telegramSendQueue';
+import { createTelegramService } from '../src/runtime/telegram/telegramService';
 import { createTextNumberService } from '../src/runtime/texts/textNumber';
 import { createTokenFactoryBudget } from '../src/runtime/tokenFactoryBudget';
 import { TurnDrainRegistry } from '../src/runtime/turnDrains';
@@ -100,6 +103,7 @@ const modelProviderStore = new SqliteModelProviderStore(db);
 const turnArtifactStore = new SqliteTurnArtifactStore(db);
 const chatDeletionStore = new SqliteChatDeletionStore({ db, turnArtifactStore });
 const deliveryStore = new DeliveryStore(db);
+const telegramStore = new TelegramStore(db);
 const personaStore = new SqlitePersonaStore(db);
 const globalSettingsStore = new SqliteGlobalSettingsStore(db);
 const sentinelSettingsStore = new SqliteSentinelSettingsStore(db);
@@ -182,6 +186,9 @@ const app = createServerApp({
     codeKey: 'openapi',
   }),
   webPushPublicKey: undefined,
+  telegramStore,
+  telegramService: createTelegramService({ store: telegramStore, publicBaseUrl: 'http://localhost' }),
+  telegramQueue: createTelegramSendQueue(),
   sessions: new Sessions({ sessionStore }),
   chatImages: createChatImageService({
     store: new SqliteChatImageStore(db),

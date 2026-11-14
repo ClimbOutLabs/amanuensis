@@ -3,7 +3,8 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import EmailSetupPanel from '@/containers/SettingsBuilder/EmailSetupPanel.js';
-import type { EmailAccountStatus, EmailProviderInfo, EmailSetupPort } from '@/server/emailSetup.js';
+import type { AccountConnectionState } from '@/server/accountSetup.js';
+import type { EmailAccountInfo, EmailAccountStatus, EmailProviderInfo, EmailSetupPort } from '@/server/emailSetup.js';
 
 // jsdom does not implement <dialog>.showModal()/close(); CenteredModal calls both.
 const originalShowModal = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'showModal');
@@ -60,22 +61,49 @@ const WEBDE: EmailProviderInfo = {
   helpHint: 'Turn on two-step verification, then make an app password for external email apps.',
 };
 
+function accountOf(address: string, state: AccountConnectionState = 'connected', isDefault = true): EmailAccountInfo {
+  return {
+    address,
+    providerKey: 'gmail',
+    state,
+    isDefault,
+    imapHost: 'imap.gmail.com',
+    imapPort: 993,
+    imapMode: 'ssl',
+    smtpHost: 'smtp.gmail.com',
+    smtpPort: 465,
+    smtpMode: 'ssl',
+  };
+}
+
 function statusOf(overrides: Partial<EmailAccountStatus> = {}): EmailAccountStatus {
   return {
     available: true,
     state: 'not_connected',
     address: null,
     providerKey: 'gmail',
+    accounts: [],
+    defaultAddress: null,
     providers: [GMAIL, WEBDE],
     ...overrides,
   };
 }
 
+function connectedStatus(address = 'person@gmail.com'): EmailAccountStatus {
+  return statusOf({
+    state: 'connected',
+    address,
+    accounts: [accountOf(address)],
+    defaultAddress: address,
+  });
+}
+
 function makePort(status: EmailAccountStatus) {
   const port: EmailSetupPort = {
     getEmailStatus: vi.fn(async () => status),
-    saveEmailAccount: vi.fn(async () => statusOf({ state: 'connected', address: 'person@gmail.com' })),
+    saveEmailAccount: vi.fn(async () => connectedStatus()),
     removeEmailAccount: vi.fn(async () => statusOf()),
+    setDefaultEmailAccount: vi.fn(async () => status),
   };
   return port;
 }
@@ -107,8 +135,9 @@ describe('EmailSetupPanel', () => {
       address: 'person@gmail.com',
       password: CANARY,
     });
-    // After the answer the form is gone and the password is nowhere on the page.
-    expect(await screen.findByText(/Connected as/)).toBeTruthy();
+    // After the answer the form is gone, the account is listed, and the password is nowhere on the page.
+    expect(await screen.findByText('person@gmail.com')).toBeTruthy();
+    expect(screen.getByText('Default')).toBeTruthy();
     expect(document.body.textContent).not.toContain(CANARY);
   });
 
@@ -130,29 +159,62 @@ describe('EmailSetupPanel', () => {
   });
 
   it('shows the stopped line when the saved sign-in no longer works', async () => {
-    const port = makePort(statusOf({ state: 'sign_in_stopped', address: 'person@gmail.com' }));
-    renderPanel(port);
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      'Sign-in stopped working. Make a new app password and save it again.',
+    const port = makePort(
+      statusOf({
+        state: 'sign_in_stopped',
+        address: 'person@gmail.com',
+        accounts: [accountOf('person@gmail.com', 'sign_in_stopped')],
+        defaultAddress: 'person@gmail.com',
+      }),
     );
+    renderPanel(port);
+    expect(await screen.findByText(/Sign-in stopped working/)).toBeTruthy();
   });
 
-  it('remove takes two steps and calls the port once confirmed', async () => {
-    const port = makePort(statusOf({ state: 'connected', address: 'person@gmail.com' }));
+  it('remove takes two steps and calls the port with the account address once confirmed', async () => {
+    const port = makePort(connectedStatus());
     renderPanel(port);
     fireEvent.click(await screen.findByRole('button', { name: 'Remove' }));
     expect(await screen.findByText(/deleted for good/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Remove account' }));
     await waitFor(() => expect(port.removeEmailAccount).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(port.removeEmailAccount).mock.calls[0]?.[0]).toBe('person@gmail.com');
     expect(await screen.findByLabelText(/email provider/i)).toBeTruthy();
   });
 
   it.each(['sign_in_stopped', 'not_working'] as const)('a %s account can still be removed', async state => {
-    const port = makePort(statusOf({ state, address: 'person@gmail.com' }));
+    const port = makePort(
+      statusOf({
+        state,
+        address: 'person@gmail.com',
+        accounts: [accountOf('person@gmail.com', state)],
+        defaultAddress: 'person@gmail.com',
+      }),
+    );
     renderPanel(port);
     fireEvent.click(await screen.findByRole('button', { name: 'Remove' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Remove account' }));
     await waitFor(() => expect(port.removeEmailAccount).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(port.removeEmailAccount).mock.calls[0]?.[0]).toBe('person@gmail.com');
+  });
+
+  it('lists every account, makes another the default, and offers to add one more', async () => {
+    const two = statusOf({
+      state: 'connected',
+      address: 'person@gmail.com',
+      accounts: [accountOf('person@gmail.com'), accountOf('work@example.com', 'connected', false)],
+      defaultAddress: 'person@gmail.com',
+    });
+    const port = makePort(two);
+    renderPanel(port);
+    expect(await screen.findByText('work@example.com')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Make default' }));
+    await waitFor(() => expect(port.setDefaultEmailAccount).toHaveBeenCalledWith('work@example.com'));
+    fireEvent.click(screen.getByRole('button', { name: 'Add another account' }));
+    expect(await screen.findByLabelText(/email provider/i)).toBeTruthy();
+    const emailField = screen.getByLabelText(/email address/i);
+    if (!(emailField instanceof HTMLInputElement)) throw new Error('email address field is not an input');
+    expect(emailField.value).toBe('');
   });
 
   it('Other shows the server fields, and web.de shows its hint with no link', async () => {

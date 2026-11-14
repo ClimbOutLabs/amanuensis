@@ -429,6 +429,10 @@
       "set": "spaces",
       "tests": []
     },
+    "route:telegram": {
+      "set": "reach",
+      "tests": ["packages/frontend/tests/settingsPanels.browser.test.ts"]
+    },
     "route:text": {
       "set": "reach",
       "tests": []

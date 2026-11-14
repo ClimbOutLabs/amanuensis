@@ -29,11 +29,13 @@
  * registry, the same way runtime/memory/memoryEvents.ts registers `aman.memory.recall`.
  */
 import type { SessionRecord, TurnStreamingEvent } from '@truefoundry/trueforge-core/agent-session';
-import { newEventId, type ILLM } from '@truefoundry/trueforge-core/core';
+import { extractErrorLogFields, newEventId, type ILLM } from '@truefoundry/trueforge-core/core';
 import { createHash } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { Logger } from 'winston';
+import type { IAgentStore } from '../db/agentStore';
 import type { ICompletedTurnEventStore } from '../db/completedTurnEvents';
+import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 import type { IModelProviderStore } from '../db/modelProviderStore';
 import { PersonalizationRevisionConflictError, type IPersonalizationStore } from '../db/personalizationStore';
 import {
@@ -45,7 +47,12 @@ import { ProfileLearnedEventSchema, type ProfileLearnedEvent } from '../schemas/
 import type { EventSubscription } from './event-subscription';
 import type { MemoryClient, RetainItem } from './memory/memoryClient';
 import { LEARNED_PROFILE_LINE_SOURCE, MEMORY_ORIGIN_METADATA_KEY, TOOL_INGESTED_ORIGIN } from './memory/memoryOrigin';
-import { summarizeTurnContent, type ProfileLineSuggestion } from './memory/memorySummarize';
+import type { SummarizeTurnContext } from './memory/memoryRetain';
+import {
+  resolveSummarizationModelFqn,
+  summarizeTurnContent,
+  type ProfileLineSuggestion,
+} from './memory/memorySummarize';
 import { uuidv5 } from './memory/uuidv5';
 import type { TurnModelUsage } from './modelUsage';
 import { sessionKeepsNothing } from './privateChat';
@@ -303,6 +310,78 @@ export interface ProfileLearningDrainMember {
   /** The learned profile's lines as the turn began, for the fact call to be shown. */
   knownLines: readonly string[];
   factCall: ProfileLearningFactCall;
+}
+
+/**
+ * The learning member for one turn the person wrote, or undefined when their learning is off (the default, which
+ * costs nothing). Learning rides the turn's fact call; the model found here is asked only when no fact call runs.
+ * The pass reads the switch again after the turn, so turning learning off mid-turn is still obeyed. This runs while
+ * a turn starts, so it must never fail one: a model lookup that throws drops learning for this turn.
+ */
+export async function profileLearningForTurn(params: {
+  profile: Pick<PersonalizationProfile, 'learning_enabled' | 'learned_profile' | 'user_name'> | undefined;
+  session: Pick<SessionRecord, 'is_incognito' | 'agent'>;
+  sessionId: string;
+  personalizationStore: IPersonalizationStore;
+  eventStore: ICompletedTurnEventStore;
+  memoryClient: MemoryClient | undefined;
+  retainTimeoutMs: number;
+  tenantId: string;
+  createdBy: string;
+  userText: string;
+  timeZone: string | undefined;
+  /** The turn's own fact call settings; undefined when no fact call runs, so the model is looked up here. */
+  memorySummarize: SummarizeTurnContext | undefined;
+  personaModelName: string | undefined;
+  agentStore: IAgentStore;
+  globalSettingsStore: IGlobalSettingsStore;
+  modelProviderStore: IModelProviderStore;
+  tokenFactoryBudget: TokenFactoryBudget;
+  modelUsage: TurnModelUsage;
+  logger: Logger;
+}): Promise<ProfileLearningDrainMember | undefined> {
+  const { profile } = params;
+  if (profile?.learning_enabled !== true) {
+    return undefined;
+  }
+  try {
+    return {
+      session: params.session,
+      personalizationStore: params.personalizationStore,
+      eventStore: params.eventStore,
+      memoryClient: params.memoryClient,
+      retainTimeoutMs: params.retainTimeoutMs,
+      tenantId: params.tenantId,
+      createdBy: params.createdBy,
+      userText: params.userText,
+      knownLines: learnedProfileLines(profile.learned_profile),
+      factCall: {
+        modelProviderStore: params.modelProviderStore,
+        summarizationModelFqn:
+          params.memorySummarize === undefined
+            ? await resolveSummarizationModelFqn({
+                tenantId: params.tenantId,
+                personaModelName: params.personaModelName,
+                sessionAgent: params.session.agent,
+                agentStore: params.agentStore,
+                globalSettingsStore: params.globalSettingsStore,
+                modelProviderStore: params.modelProviderStore,
+                logger: params.logger,
+              })
+            : params.memorySummarize.summarizationModelFqn,
+        tokenFactoryBudget: params.tokenFactoryBudget,
+        modelUsage: params.modelUsage,
+        personName: profile.user_name ?? undefined,
+        timeZone: params.timeZone,
+      },
+    };
+  } catch (error) {
+    params.logger.debug('Profile learning disabled for this turn: the model FQN did not resolve', {
+      sessionId: params.sessionId,
+      ...extractErrorLogFields(error),
+    });
+    return undefined;
+  }
 }
 
 export interface SubmitProfileLearningParams extends ProfileLearningDrainMember {

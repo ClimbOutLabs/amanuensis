@@ -10,6 +10,7 @@ import {
   type ISkillStore,
   type ListSkillsInput,
   type SetSkillNetworkApprovalInput,
+  type SetSkillNetworkCodePinInput,
   type SetSkillNetworkHostDecisionInput,
   type SkillRecord,
   type UpsertSkillInput,
@@ -25,6 +26,7 @@ function recordColumns(eb: ExpressionBuilder<Database, 'skill'>) {
     'name' as const,
     jsonText<SkillManifest>(eb.ref('manifest')).as('manifest'),
     jsonText<readonly string[] | null>(eb.ref('network_approval')).as('network_approval'),
+    'network_approval_code_sha' as const,
     jsonText<readonly string[]>(eb.ref('network_allowed_hosts')).as('network_allowed_hosts'),
     jsonText<readonly string[]>(eb.ref('network_denied_hosts')).as('network_denied_hosts'),
     'created_at' as const,
@@ -62,6 +64,7 @@ export class SqliteSkillStore implements ISkillStore<Transaction<Database>> {
           name: input.name,
           manifest: jsonbBind(input.manifest),
           network_approval: null,
+          network_approval_code_sha: null,
           network_allowed_hosts: jsonbBind([]),
           network_denied_hosts: jsonbBind([]),
           created_at: timestamp,
@@ -87,6 +90,7 @@ export class SqliteSkillStore implements ISkillStore<Transaction<Database>> {
         name: input.name,
         manifest: jsonbBind(input.manifest),
         network_approval: null,
+        network_approval_code_sha: null,
         network_allowed_hosts: jsonbBind([]),
         network_denied_hosts: jsonbBind([]),
         created_at: timestamp,
@@ -107,10 +111,35 @@ export class SqliteSkillStore implements ISkillStore<Transaction<Database>> {
     transaction?: Transaction<Database>,
   ): Promise<SkillRecord | undefined> {
     const db = transaction ?? this.#db;
+    if (input.hosts !== null) {
+      return await db
+        .updateTable('skill')
+        .set({
+          network_approval: jsonbBind([...input.hosts]),
+          network_approval_code_sha: input.code_sha,
+          updated_at: nowIso(),
+        })
+        .where('tenant_id', '=', input.tenant_id)
+        .where('name', '=', input.name)
+        .returning(recordColumns)
+        .executeTakeFirst();
+    }
+    // Removing the approval does not unbind the grants that remain: the pin stays while
+    // per-site allowances stand, and clears when none do.
+    const current = await db
+      .selectFrom('skill')
+      .select(recordColumns)
+      .where('tenant_id', '=', input.tenant_id)
+      .where('name', '=', input.name)
+      .executeTakeFirst();
+    if (current === undefined) {
+      return undefined;
+    }
     return await db
       .updateTable('skill')
       .set({
-        network_approval: input.hosts === null ? null : jsonbBind([...input.hosts]),
+        network_approval: null,
+        network_approval_code_sha: current.network_allowed_hosts.length > 0 ? current.network_approval_code_sha : null,
         updated_at: nowIso(),
       })
       .where('tenant_id', '=', input.tenant_id)
@@ -145,11 +174,31 @@ export class SqliteSkillStore implements ISkillStore<Transaction<Database>> {
       allowed.delete(input.host);
       denied.delete(input.host);
     }
+    // With no approval and no allowance left, nothing remains for the pin to bind.
+    const clearPin = current.network_approval === null && allowed.size === 0;
     return await db
       .updateTable('skill')
       .set({
         network_allowed_hosts: jsonbBind([...allowed].sort()),
         network_denied_hosts: jsonbBind([...denied].sort()),
+        network_approval_code_sha: clearPin ? null : current.network_approval_code_sha,
+        updated_at: nowIso(),
+      })
+      .where('tenant_id', '=', input.tenant_id)
+      .where('name', '=', input.name)
+      .returning(recordColumns)
+      .executeTakeFirst();
+  }
+
+  async setSkillNetworkCodePin(
+    input: SetSkillNetworkCodePinInput,
+    transaction?: Transaction<Database>,
+  ): Promise<SkillRecord | undefined> {
+    const db = transaction ?? this.#db;
+    return await db
+      .updateTable('skill')
+      .set({
+        network_approval_code_sha: input.code_sha,
         updated_at: nowIso(),
       })
       .where('tenant_id', '=', input.tenant_id)

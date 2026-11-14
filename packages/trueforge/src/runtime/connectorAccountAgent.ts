@@ -36,6 +36,7 @@ export async function callAccountAgent({
   method,
   payload,
   timeoutMs,
+  path = '/account',
 }: {
   accountUrl: string;
   secret: string | undefined;
@@ -45,6 +46,8 @@ export async function callAccountAgent({
   method: 'GET' | 'POST' | 'DELETE';
   payload?: unknown;
   timeoutMs: number;
+  /** The agent route to call; the account route unless a call says otherwise. */
+  path?: string | undefined;
 }): Promise<AccountAgentAnswer> {
   const doFetch = fetchImpl ?? fetch;
   const headers: Record<string, string> = {};
@@ -56,7 +59,7 @@ export async function callAccountAgent({
   }
   let response: Response;
   try {
-    response = await doFetch(`${accountUrl}/account`, {
+    response = await doFetch(`${accountUrl}${path}`, {
       method,
       headers,
       ...(payload === undefined ? {} : { body: JSON.stringify(payload) }),

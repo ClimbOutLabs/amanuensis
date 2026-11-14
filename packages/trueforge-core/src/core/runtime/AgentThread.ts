@@ -17,8 +17,13 @@ import { extractDocumentsFromSandbox } from '../capabilities/builtins/DocumentTo
 import { SUB_AGENT_IDENTITY } from '../capabilities/builtins/DynamicSubAgents';
 import { TOKEN_BUDGET_SAFETY_MARGIN } from '../capabilities/builtins/tokenBudgetConstants';
 import type { ToolResponseProcessor } from '../capabilities/ToolResponseProcessor';
-import { NEW_RECIPIENT_REFUSED, SEND_LIST_STILL_UPDATING } from '../email/mailConnector/sendListApproval';
-import { MAIL_CONNECTOR_NAME } from '../email/mailConnector/toolContract';
+import { mailRecipientsNotListed } from '../email/mailConnector/recipientList';
+import {
+  NEW_RECIPIENT_ACCOUNT_SWITCHED,
+  NEW_RECIPIENT_REFUSED,
+  SEND_LIST_STILL_UPDATING,
+} from '../email/mailConnector/sendListApproval';
+import { MAIL_ACCOUNT_ARGUMENT, MAIL_CONNECTOR_NAME } from '../email/mailConnector/toolContract';
 import {
   AgentHarnessError,
   InvalidAgentSendInputError,
@@ -417,6 +422,23 @@ const MAX_MODEL_REQUEST_CHARS = 4_000_000;
 const MODEL_STREAM_SILENT = Symbol('model-stream-silent');
 
 /** Human duration for a watchdog timeout in a user-facing error, e.g. "5 minutes", "90 seconds". */
+/**
+ * An approval that names no account sends from the account its card showed, so an answer from a
+ * place that cannot pick (Telegram, a plain Approve) never goes from a different account than the
+ * one the person saw, even if the default changed or the persona cannot use the default.
+ */
+function withShownMailAccount(input: {
+  decision: ApprovalDecision;
+  card: Tier3Card | null | undefined;
+}): ApprovalDecision {
+  const { decision, card } = input;
+  const shown = card?.mail_from;
+  if (decision.status !== 'allow' || decision.from_account !== undefined || typeof shown !== 'string' || shown === '') {
+    return decision;
+  }
+  return { ...decision, from_account: shown };
+}
+
 function describeTimeout(timeoutMs: number): string {
   if (timeoutMs < 60_000) {
     const seconds = Math.max(1, Math.round(timeoutMs / 1000));
@@ -2255,6 +2277,16 @@ export class AgentThread {
     capabilities.addSection('plain-speech', PLAIN_SPEECH_PROMPT);
     if (this.definition.setUpConnectorNames?.includes(MAIL_CONNECTOR_NAME)) {
       capabilities.addSection('email-passwords', EMAIL_PASSWORD_PROMPT);
+      const mailAccounts = this.definition.mailAccounts;
+      if (mailAccounts !== undefined && mailAccounts.names.length > 0) {
+        const listed = mailAccounts.names
+          .map(name => (name === mailAccounts.default_name ? `${name} (the default)` : name))
+          .join(', ');
+        capabilities.addSection(
+          'email-accounts',
+          `The Email connector has these accounts: ${listed}. Name an account by its address when the person means a particular one. Leave the account name out to use the default account.`,
+        );
+      }
       // The demo note tells the model to save a draft with the Email tools, so it goes only where those tools do.
       if (this.sentinel?.services.demoSendAllowlist != null && this.holdsConnector(MAIL_CONNECTOR_NAME)) {
         capabilities.addSection('demo-email', DEMO_EMAIL_PROMPT);
@@ -2590,6 +2622,19 @@ export class AgentThread {
    * server's Email list. New addresses come only from the approved card, and the sidecar must load the list
    * before the call goes out, on the first try and on a retry. Any failure throws before the approval is
    * recorded, so the draft stays pending.
+   *
+   * The list an address joins is the list of the account the message goes from: a card approval joins
+   * the account the approval is for, never another account. The account is the one the person picked
+   * on the card when they picked one, else the one the card showed. An approval stays with its
+   * account: a pick is part of this approval only and changes no default.
+   *
+   * A pick of a different account never adds an address here. The card the person approved named
+   * new addresses for the account it showed, not for the picked one, and a new address can only be
+   * added from a card made for its own account. So when the picked account has an address on the
+   * email that is not on its own list, the send stops before anything is added or sent, and the
+   * person asks for the send again from that account to get its card. Because no add ever happens
+   * for a picked account in this step, the send path's own check of the pick against the accounts
+   * this persona can use always runs before that account's list could change.
    */
   private async prepareMailRecipientAdds(input: {
     approvals: readonly UserToolApprovalMessage[];
@@ -2606,20 +2651,53 @@ export class AgentThread {
         continue;
       }
       const call = input.pendingById.get(approval.tool_call_id) ?? input.heldById.get(approval.tool_call_id);
-      const added = call?.tool_info.tier3_card?.mail_new_recipients ?? [];
       if (call === undefined) {
         // No call behind the approval: the check below would skip it too (no send, no new
         // addresses), so leaving here changes nothing and keeps the call in hand below.
         continue;
       }
+      const card = call.tool_info.tier3_card ?? null;
+      const cardAdded = card?.mail_new_recipients ?? [];
       // Only a send the host itself judged to go through its own Email sidecar, or a card carrying new
       // addresses for one, touches the Email list, however the card was later reworded. A send's addresses
       // still come only from its own card.
-      if (call.tool_info.mail_send !== true && added.length === 0) {
+      if (call.tool_info.mail_send !== true && cardAdded.length === 0) {
         continue;
       }
+      const parsedArgs = tryParseToolArgs(call.function.arguments);
+      const named = parsedArgs[MAIL_ACCOUNT_ARGUMENT];
+      const picked = approval.approval.from_account;
+      let account: string | null =
+        picked ?? card?.mail_from ?? (typeof named === 'string' && named !== '' ? named : null);
+      let added: readonly string[] = cardAdded;
+      if (picked !== undefined && picked !== card?.mail_from) {
+        // The person changed the account on the card: which addresses are new is a question about
+        // the picked account's own list, so it is worked out again for that account. Any address
+        // that is new for the picked account stops the send here, before any add, because the
+        // approved card never named it as new for that account. The refusal shape is used rather
+        // than drawing a fresh card in this step: cards are made when a call is classified, and
+        // this step only settles an approval that is already in hand, so a new card here would
+        // need a whole new hold and answer cycle in the approval path.
+        const listed = await sentinel.services.mail_listed_addresses({ ...ctx, account: picked });
+        added = mailRecipientsNotListed({ listed, params: parsedArgs });
+        if (added.length > 0) {
+          await this.auditMailPrepareFailure({
+            info: call.tool_info,
+            note: 'The picked account has a new address, so the send stopped before anything was added',
+          });
+          throw new InvalidAgentSendInputError(NEW_RECIPIENT_ACCOUNT_SWITCHED);
+        }
+      }
       if (added.length > 0) {
-        const result = await sentinel.services.mail_add_recipients(ctx, added);
+        account ??= (await sentinel.services.mail_accounts(ctx)).default_account;
+        if (account === null) {
+          await this.auditMailPrepareFailure({
+            info: call.tool_info,
+            note: 'The account for this send could not be settled',
+          });
+          throw new InvalidAgentSendInputError(NEW_RECIPIENT_REFUSED);
+        }
+        const result = await sentinel.services.mail_add_recipients({ ...ctx, account }, added);
         if (result === 'refused') {
           await this.auditMailPrepareFailure({
             info: call.tool_info,
@@ -2676,7 +2754,7 @@ export class AgentThread {
           skill_name: request.skill_name,
           hosts: [...request.hosts],
           reason: request.reason,
-          code_pin: null,
+          code_pin: request.code_pin,
         };
         const key = skillNetworkQuestionKey(question);
         if (alreadyAsked.has(key)) {
@@ -2721,9 +2799,12 @@ export class AgentThread {
 
   /**
    * Records the owner's answers to skill network cards before any replay runs, so a re-run
-   * command reads the grant with the answer already in it. A failed record is logged and the
-   * answer still stands: the gateway refuses whatever was not recorded, and a card can be
-   * raised again, so nothing is granted by the failure.
+   * command reads the grant with the answer already in it. Another failed record is logged
+   * and the answer still stands: the gateway refuses whatever was not recorded, and a card
+   * can be raised again, so nothing is granted by the failure. A refusal is different: the
+   * recorder read the skill's code version, could not, and recorded nothing on purpose, so
+   * the send is refused with the recorder's sentence and the card stays undecided, ready
+   * to be answered again once the skill's address is fixed.
    */
   private async prepareSkillNetworkAnswers(input: {
     approvals: readonly UserToolApprovalMessage[];
@@ -2752,6 +2833,9 @@ export class AgentThread {
           }),
         });
       } catch (error) {
+        if (error instanceof Error && error.name === 'SkillCodePinRefusedError') {
+          throw new InvalidAgentSendInputError(error.message, { cause: error });
+        }
         this.logger.warn('Could not record the answer to a skill network card', {
           skill_name: question.skill_name,
           error: error instanceof Error ? error.message : String(error),
@@ -5096,10 +5180,14 @@ export class AgentThread {
       chatApprovalGrants: this.chatApprovalGrants,
       implementationPlanGrants: this.implementationPlanGrants,
     });
+    const openById = new Map(openCalls.map(call => [call.id, call]));
     const decisions = new Map<string, ApprovalDecision>();
     for (const [id, admission] of admissions) {
       if (admission.decision !== undefined) {
-        decisions.set(id, admission.decision);
+        decisions.set(
+          id,
+          withShownMailAccount({ decision: admission.decision, card: openById.get(id)?.tool_info.tier3_card }),
+        );
       }
     }
     const admissionProvenance = new Map([...admissions].map(([id, admission]) => [id, admission.admission_provenance]));
