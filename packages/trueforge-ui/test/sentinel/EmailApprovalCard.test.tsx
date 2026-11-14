@@ -266,11 +266,10 @@ describe('EmailApprovalCard actions', () => {
         onApprove={onApprove}
         onDeny={onDeny}
         onChangeRequest={vi.fn()}
-        onSaveDraft={vi.fn()}
       />,
     );
     const buttons = screen.getAllByRole('button').filter(button => button.closest('section') === null);
-    expect(buttons.map(button => button.textContent)).toEqual(['Allow', 'Change it', 'Save as draft', "Don't send"]);
+    expect(buttons.map(button => button.textContent)).toEqual(['Allow', 'Change it', "Don't send"]);
     for (const button of buttons) {
       expect(button.className).toMatch(/bg-secondary-button-bg/);
       expect(button.className).not.toMatch(/bg-primary-button-bg|text-failure-bg/);
@@ -303,24 +302,6 @@ describe('EmailApprovalCard actions', () => {
     const { onDeny } = renderEmail();
     fireEvent.click(screen.getByRole('button', { name: 'Not now' }));
     expect(onDeny).toHaveBeenCalledTimes(1);
-  });
-
-  it('shows Save as draft only when the server offers a draft option', () => {
-    const { unmount } = render(
-      <EmailApprovalCard approvalId="approval-1" card={cardWith()} onApprove={vi.fn()} onDeny={vi.fn()} />,
-    );
-    expect(screen.queryByRole('button', { name: 'Save as draft' })).not.toBeInTheDocument();
-    unmount();
-
-    const onSaveDraft = vi.fn();
-    renderEmail({}, { onSaveDraft });
-    fireEvent.click(screen.getByRole('button', { name: 'Save as draft' }));
-    expect(onSaveDraft).toHaveBeenCalledTimes(1);
-  });
-
-  it('does not offer Save as draft on a card that is already a draft', () => {
-    renderEmail({ action: 'save' }, { onSaveDraft: vi.fn() });
-    expect(screen.queryByRole('button', { name: 'Save as draft' })).not.toBeInTheDocument();
   });
 
   it('shows Change it only when the container passes a change handler, and sends the typed change', () => {
@@ -357,8 +338,7 @@ describe('EmailApprovalCard for a new recipient', () => {
     mail_new_recipients: ['grace@example.com'],
   };
 
-  it("offers Add and send, Change it, Save as draft and Don't send, with the full recipient list", () => {
-    const onSaveDraft = vi.fn();
+  it("offers Add and send, Change it and Don't send, with the full recipient list", () => {
     render(
       <EmailApprovalCard
         approvalId="approval-1"
@@ -366,11 +346,10 @@ describe('EmailApprovalCard for a new recipient', () => {
         onApprove={vi.fn()}
         onDeny={vi.fn()}
         onChangeRequest={vi.fn()}
-        onSaveDraft={onSaveDraft}
       />,
     );
     const labels = screen.getAllByRole('button').map(button => button.textContent);
-    expect(labels).toEqual(['Add and send', 'Change it', 'Save as draft', "Don't send"]);
+    expect(labels).toEqual(['Add and send', 'Change it', "Don't send"]);
     expect(screen.getByText('grace@example.com, lin@example.com')).toBeInTheDocument();
   });
 

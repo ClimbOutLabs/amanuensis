@@ -69,7 +69,6 @@ A mail card shows who the mail goes to and its full text.
 
 - Click **Allow** to send it.
 - Click **Change it** to ask Aman to change it first.
-- Click **Save as draft** to keep it in your drafts without sending.
 - Click **Don't send** to stop it.
 
 If the mail goes to an address that isn't on your Email list, the buttons change:
