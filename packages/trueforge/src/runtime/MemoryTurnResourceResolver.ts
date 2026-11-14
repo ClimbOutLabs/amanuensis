@@ -47,6 +47,8 @@ export interface MemoryTurnContext {
   turnedOffConnectorKeys?: readonly string[] | undefined;
   /** When false, memory recall is off for this turn: the user disabled it for the session, or the turn runs unattended. */
   recallEnabled?: boolean | undefined;
+  /** Reads the facts the person pulled out of this chat's recall, from where they are stored with the chat. Absent: nothing is excluded. */
+  loadRecallExclusions?: (() => Promise<readonly string[]>) | undefined;
   /** Present when summaries are on for this turn, so a vanished earlier turn is never rebuilt as a raw exchange. */
   summarize: SummarizeTurnContext | undefined;
   /** The person's IANA time zone from the request; a recalled memory's day is shown in it. */
@@ -84,6 +86,7 @@ function memoryCapabilitiesForTurn(input: {
       internalSourceState: memory.internalSourceState,
       webSearch: input.webSearch,
       keepsNothing: memory.keepsNothing,
+      loadRecallExclusions: memory.loadRecallExclusions,
     }),
   ];
 }
