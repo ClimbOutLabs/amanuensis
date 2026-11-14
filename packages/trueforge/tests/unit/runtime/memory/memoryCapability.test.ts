@@ -84,6 +84,11 @@ function pinDay(day: string): void {
   });
 }
 
+// Every test starts on the same day, so no expected line depends on the date the suite runs.
+beforeEach(() => {
+  pinDay('2026-11-13');
+});
+
 afterEach(() => {
   jest.useRealTimers();
 });
@@ -415,7 +420,6 @@ describe('MemoryProcessor.processPreLLM', () => {
       previousTurnId: null,
       timeZone: 'Asia/Tokyo',
     });
-    pinDay('2026-11-13');
     const processor = capability.preLLMProcessors?.[0];
     if (!processor) {
       throw new Error('expected a preLLM processor');
@@ -445,7 +449,6 @@ describe('MemoryProcessor.processPreLLM', () => {
       if (!processor) {
         throw new Error('expected a preLLM processor');
       }
-      pinDay('2026-11-13');
 
       const events = await collect(processor.processPreLLM(makeExecution([{ role: 'user', content: 'hi' }])));
 
@@ -847,7 +850,7 @@ describe('MemoryProcessor and where links come from', () => {
   });
 
   // A finding is recalled only while it is fresh, so its date is today's.
-  const TODAY = new Date().toISOString().slice(0, 10);
+  const TODAY = '2026-11-13';
   const READ_ALBUM = 'https://photos.harbour-prints.example/album';
   const READ_PICTURE = 'https://photos.harbour-prints.example/cover.png';
   const READ_ADDRESS = 'bookings@harbour-prints.example';
@@ -1545,7 +1548,6 @@ describe('MemoryProcessor pages layer', () => {
         loadPages,
       },
     );
-    pinDay('2026-11-13');
     const event = await run({ client, message: 'Is Wendy free Saturday?' });
     expect(loadPages).toHaveBeenCalledWith({
       message: 'Is Wendy free Saturday?',
@@ -1745,7 +1747,6 @@ describe('MemoryProcessor pages layer', () => {
     const wendyDrafting = { ...loadedWendy, drafting: ['Wendy:', '- Short and casual.'] };
 
     it('is last in the block and holds nothing but the contacts lines between its heading and its end line', async () => {
-      pinDay('2026-11-13');
       const event = await run({ client: client({ pages: [wendyDrafting] }), message: 'Wendy?' });
       const block = String(event['injected_block']);
       const lines = block.split('\n');
