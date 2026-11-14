@@ -103,6 +103,8 @@ export interface TelegramClient {
     chat_id: string;
     text: string;
     inline_buttons?: readonly (readonly TelegramInlineButton[])[] | undefined;
+    /** True for a message that carries a link to the app: Telegram then fetches nothing to preview it. */
+    no_link_preview?: boolean | undefined;
   }): Promise<TelegramSentMessage>;
   /** Stops the spinner on a tapped button. A failure here is worth logging, never retrying blindly. */
   answerCallbackQuery(input: { callback_query_id: string; text?: string | undefined }): Promise<void>;
@@ -215,12 +217,13 @@ export function createTelegramClient({
       return updates;
     },
 
-    async sendMessage({ chat_id, text, inline_buttons }) {
+    async sendMessage({ chat_id, text, inline_buttons, no_link_preview }) {
       return call({
         method: 'sendMessage',
         body: {
           chat_id: Number(chat_id),
           text,
+          ...(no_link_preview === true ? { link_preview_options: { is_disabled: true } } : {}),
           ...(inline_buttons === undefined
             ? {}
             : {

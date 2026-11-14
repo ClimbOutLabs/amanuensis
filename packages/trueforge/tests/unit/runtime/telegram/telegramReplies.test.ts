@@ -17,6 +17,7 @@ import {
   TELEGRAM_SHOWN_CARD_FIELDS,
   TELEGRAM_SHOWN_SECTION_FIELDS,
   TELEGRAM_SKILL_INSTRUCTIONS_CHARS,
+  telegramAppAddress,
 } from '../../../../src/runtime/telegram/telegramReplies';
 import { createTelegramService } from '../../../../src/runtime/telegram/telegramService';
 import {
@@ -110,7 +111,7 @@ function doneTurnWith(action: ActionRequiredEvent): TurnRecord<TurnCustom> {
   });
 }
 
-function harness(turn: TurnRecord<TurnCustom> | undefined) {
+function harness(turn: TurnRecord<TurnCustom> | undefined, appAddress?: string) {
   const store = new InMemoryTelegramStore();
   store.connection = fakePairedConnection();
   const client = new FakeTelegramClient();
@@ -128,6 +129,7 @@ function harness(turn: TurnRecord<TurnCustom> | undefined) {
     service,
     queue: immediateQueue,
     sessionStore: { getTurn: () => Promise.resolve(turn) },
+    appAddress,
     logger,
   };
   return { store, client, deps };
@@ -502,7 +504,7 @@ describe('telegram pending replies', () => {
     const text = client.sent.map(message => message.text).join('\n');
     expect(text).toContain("Part of the skill's instructions is not shown in full.");
     expect(text).not.toContain('THE-HIDDEN-END');
-    expect(text).toContain('Open Aman to see the whole thing and answer there.');
+    expect(text).toContain('This is too long to show here in full, so approve or deny it in Aman.');
     expect(client.sent.every(message => message.inline_buttons === undefined)).toBe(true);
     expect(store.pendingApprovals).toHaveLength(0);
   });
@@ -513,7 +515,7 @@ describe('telegram pending replies', () => {
     const { store, client, deps } = harness(doneTurnWith(approvalAction(card)));
     await deliverPendingTelegramReplies(deps);
     expect(client.sent).toHaveLength(1);
-    expect(client.sent[0]?.text).toContain('Telegram cannot show everything it will do');
+    expect(client.sent[0]?.text).toContain("Telegram can't show all of it, so approve or deny it in Aman.");
     expect(client.sent[0]?.inline_buttons).toBeUndefined();
     expect(store.pendingApprovals).toHaveLength(0);
   });
@@ -556,7 +558,7 @@ describe('telegram pending replies', () => {
     const { store, client, deps } = harness(doneTurnWith(approvalAction(card)));
     await deliverPendingTelegramReplies(deps);
     expect(client.sent).toHaveLength(1);
-    expect(client.sent[0]?.text).toContain('Telegram cannot show everything it will do');
+    expect(client.sent[0]?.text).toContain("Telegram can't show all of it, so approve or deny it in Aman.");
     expect(client.sent[0]?.inline_buttons).toBeUndefined();
     expect(store.pendingApprovals).toHaveLength(0);
   });
@@ -571,7 +573,7 @@ describe('telegram pending replies', () => {
     await deliverPendingTelegramReplies(deps);
     expect(client.sent).toHaveLength(1);
     expect(client.sent[0]?.text).toContain('Part of this request is not shown in full.');
-    expect(client.sent[0]?.text).toContain('Open Aman to see the whole thing and answer there.');
+    expect(client.sent[0]?.text).toContain('This is too long to show here in full, so approve or deny it in Aman.');
     expect(client.sent[0]?.inline_buttons).toBeUndefined();
     expect(store.pendingApprovals).toHaveLength(0);
   });
@@ -580,9 +582,56 @@ describe('telegram pending replies', () => {
     const { store, client, deps } = harness(doneTurnWith(approvalAction(null)));
     await deliverPendingTelegramReplies(deps);
     expect(client.sent).toHaveLength(1);
-    expect(client.sent[0]?.text).toContain('Telegram cannot show everything it will do');
+    expect(client.sent[0]?.text).toBe('Aman is waiting for your ok on something.\nApprove or deny it in Aman.');
     expect(client.sent[0]?.inline_buttons).toBeUndefined();
     expect(store.pendingApprovals).toHaveLength(0);
+  });
+
+  it('names the action and who an email goes to when Telegram cannot show it whole', async () => {
+    const card = {
+      ...cardWith({
+        plain_what: 'Send this email to Nora?',
+        email: {
+          action: 'send',
+          to: [{ name: 'Nora', address: 'nora@example.com' }],
+          cc: [],
+          bcc: [],
+          subject: 'Lunch',
+          body: 'See you at noon.',
+          check_code: null,
+          replaces: null,
+          reply_in_thread: null,
+          reply_to: null,
+          from_name: null,
+          name_left_off: false,
+        },
+      }),
+      field_telegram_does_not_know: 'x',
+    };
+    const { client, deps } = harness(doneTurnWith(approvalAction(card)));
+    await deliverPendingTelegramReplies(deps);
+    expect(client.sent[0]?.text).toBe(
+      "Send this email to Nora?\nTo: Nora (nora@example.com)\nTelegram can't show all of it, so approve or deny it in Aman.",
+    );
+  });
+
+  it('links to the chat in the app when the app can be opened from another device, with no preview', async () => {
+    const { client, deps } = harness(doneTurnWith(approvalAction(null)), 'https://aman.example.ts.net');
+    await deliverPendingTelegramReplies(deps);
+    expect(client.sent[0]?.text).toBe(
+      'Aman is waiting for your ok on something.\nApprove or deny it in Aman.\nhttps://aman.example.ts.net/sessions/session-1',
+    );
+    expect(client.sent[0]?.no_link_preview).toBe(true);
+  });
+
+  it('links only to an address another device can open', () => {
+    expect(telegramAppAddress({ publicBaseUrl: 'http://localhost:8000', allowedOrigins: [] })).toBeUndefined();
+    expect(
+      telegramAppAddress({ publicBaseUrl: 'http://127.0.0.1:8000', allowedOrigins: ['http://100.64.0.5:8000'] }),
+    ).toBe('http://100.64.0.5:8000');
+    expect(telegramAppAddress({ publicBaseUrl: 'https://aman.example.com/', allowedOrigins: [] })).toBe(
+      'https://aman.example.com',
+    );
   });
 
   it('tells the person to open the app for an action buttons cannot answer', async () => {
