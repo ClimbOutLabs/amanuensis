@@ -269,6 +269,7 @@ describe('approvals bind to the normalized path', () => {
       tool_type: 'truefoundry-system' as const,
       canonical_params: params,
       tier: 2 as const,
+      sandbox_file_write: true,
       approval_token_id: tokenId,
       approval_binding: null,
       shell_binding: null,

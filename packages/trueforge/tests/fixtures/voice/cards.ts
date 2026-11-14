@@ -4,6 +4,7 @@ import type { PendingApproval } from '../../../src/voice/transport';
 
 const BASE_CARD: Tier3Card = {
   plain_what: 'Send an email to Victor.',
+  copy: { headline: 'Send this reply to Victor?', consequence: "Once this is sent, it can't be unsent.", reason: null },
   plain_why: null,
   cannot_be_undone: null,
   why_asked_again: null,
@@ -27,6 +28,7 @@ export function sendReplyCard(body = 'Thursday at three works for me. See you th
       bcc: [],
       subject: 'Re: Thursday',
       body,
+      check_code: 'A7F39C',
       replaces: null,
       reply_in_thread: { subject: 'Thursday', from: 'Victor' },
       reply_to: null,

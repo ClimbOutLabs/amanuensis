@@ -2,7 +2,7 @@
 // chat, reached only through the browser gateway, which checks the app server's shared secret before
 // it relays a call. Nothing here is published to the host or to any other service.
 import { Buffer } from 'node:buffer';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { createServer } from 'node:http';
@@ -11,8 +11,7 @@ import { URL } from 'node:url';
 import { Worker } from 'node:worker_threads';
 import { chromium } from 'playwright-core';
 
-import { elementAtPath } from './extract.mjs';
-import { RefAssigner, renderSnapshot, sensitivityOf } from './snapshot.mjs';
+import { RefAssigner, renderSnapshot } from './snapshot.mjs';
 
 const MAX_BODY_BYTES = 256 * 1024;
 /** The largest file the live view may upload into a page: 10 MiB, sent as base64. */
@@ -155,10 +154,265 @@ async function closedShadowFieldBoxes(cdp) {
   return boxes;
 }
 
-/** The same bundled module, ending in a read of one element's field, submit and form context. */
-function elementInfoScript(domPath) {
-  return `(() => {\n${EXTRACT_MODULE}\nreturn elementInfo(${JSON.stringify(domPath)});\n})()`;
+/** The bundled module, ending in one read of (and maybe one action on) the element at a snapshot id. */
+function actScript(request) {
+  return `(() => {\n${EXTRACT_MODULE}\nreturn actOnElement(${JSON.stringify(request)});\n})()`;
 }
+
+/**
+ * The name of the script world the sidecar reads pages in. A page's scripts run in their own world
+ * and can replace what the DOM's functions and properties return there; in this world they cannot,
+ * so what the sidecar reads is what the browser holds.
+ */
+const READ_WORLD = 'aman-read';
+
+/** Errors that mean the page moved on while it was read, so the read is tried again on the new page. */
+const PAGE_MOVED_ERRORS = ['Execution context was destroyed', 'Cannot find context with specified id'];
+
+/**
+ * Input events the sidecar's own press or typing makes. While one is in progress, the read world
+ * stops any of these that land outside the element it checked, before the page's own listeners see it.
+ */
+const GUARDED_EVENTS = [
+  'pointerdown',
+  'pointerup',
+  'mousedown',
+  'mouseup',
+  'click',
+  'auxclick',
+  'dblclick',
+  'contextmenu',
+  'keydown',
+  'keypress',
+  'keyup',
+  'beforeinput',
+];
+
+/**
+ * Runs in the read world at the start of every document, before any of the page's scripts, so its
+ * listener on the window comes first. While armed, a real input event whose target is not inside the
+ * checked element is stopped and cancelled, and noted, so the action reports it as changed.
+ */
+const GUARD_SCRIPT = `(() => {
+  const guard = { element: null, mode: null, strayed: false, landed: false, late: false };
+  globalThis.amanGuard = guard;
+  const check = event => {
+    // Only real input is guarded: an event the page's own code makes follows from input that already
+    // landed on the checked element.
+    if (guard.element === null || !event.isTrusted) {
+      return;
+    }
+    const target = event.composedPath()[0];
+    if (target instanceof Node && guard.element.contains(target)) {
+      guard.landed ||= event.type === 'pointerdown';
+      return;
+    }
+    guard.strayed = true;
+    event.stopImmediatePropagation();
+    event.preventDefault();
+  };
+  for (const type of ${JSON.stringify(GUARDED_EVENTS)}) {
+    window.addEventListener(type, check, true);
+  }
+})();`;
+
+/**
+ * Sets up the tab's read world: made again with the guard at the start of every document, and
+ * tracked by its context id, so every read and action of one page uses the same world.
+ */
+async function prepareReadWorld(tab) {
+  const { frameTree } = await tab.cdp.send('Page.getFrameTree');
+  const mainFrameId = frameTree.frame.id;
+  tab.cdp.on('Runtime.executionContextCreated', ({ context }) => {
+    if (context.name === READ_WORLD && context.auxData?.frameId === mainFrameId) {
+      tab.readWorld = context.id;
+    }
+  });
+  tab.cdp.on('Runtime.executionContextDestroyed', ({ executionContextId }) => {
+    if (executionContextId === tab.readWorld) {
+      tab.readWorld = undefined;
+    }
+  });
+  tab.cdp.on('Runtime.executionContextsCleared', () => {
+    tab.readWorld = undefined;
+  });
+  await trackFrameWorlds({ session: tab.cdp, worlds: tab.frameWorlds, isTop: frameId => frameId === mainFrameId });
+  // Scripts for new documents run only for a session with the Page domain on.
+  await tab.cdp.send('Page.enable');
+  await tab.cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: GUARD_SCRIPT, worldName: READ_WORLD });
+  tab.mainFrameId = mainFrameId;
+}
+
+/** Runs an expression in the tab's main frame, in the read world, which the page's own scripts cannot reach. */
+async function inReadWorld({ tab, expression }) {
+  if (tab.readWorld === undefined) {
+    // The tab's first, empty document predates the guard script; it has no page scripts to stay ahead of.
+    const { executionContextId } = await tab.cdp.send('Page.createIsolatedWorld', {
+      frameId: tab.mainFrameId,
+      worldName: READ_WORLD,
+    });
+    tab.readWorld = executionContextId;
+    // The world is the one the guard script made at the start of the document, when there was one. A
+    // guard set up now comes after the page's scripts, so it may not see input first: actions refuse it.
+    await tab.cdp.send('Runtime.evaluate', {
+      expression: `if (globalThis.amanGuard === undefined) {\n${GUARD_SCRIPT}\nglobalThis.amanGuard.late = true;\n}`,
+      contextId: executionContextId,
+    });
+  }
+  const reply = await tab.cdp.send('Runtime.evaluate', { expression, contextId: tab.readWorld, returnByValue: true });
+  if (reply.exceptionDetails !== undefined) {
+    throw new Error(`the page could not be read: ${reply.exceptionDetails.text}`);
+  }
+  return reply.result.value;
+}
+
+/**
+ * Ends the guard of a press or of typing, and says whether its input went anywhere but the checked
+ * element: some landed outside it, a press never reached it, or typing ended with the focus elsewhere.
+ */
+const DISARM_SCRIPT = `(() => {
+  const guard = globalThis.amanGuard;
+  let focused = document.activeElement;
+  while (focused?.shadowRoot?.activeElement) {
+    focused = focused.shadowRoot.activeElement;
+  }
+  const missed = guard.mode === 'press' ? !guard.landed : focused !== guard.element;
+  const strayed = guard.strayed || missed;
+  guard.element = null;
+  guard.mode = null;
+  guard.strayed = false;
+  guard.landed = false;
+  return strayed;
+})()`;
+
+/** True while the point a press is about to land on is still the checked element, and nothing has strayed. */
+function stillOnElementScript({ x, y }) {
+  return `(() => {
+  const guard = globalThis.amanGuard;
+  const hit = document.elementFromPoint(${JSON.stringify(x)}, ${JSON.stringify(y)});
+  return guard.element !== null && !guard.strayed && hit !== null && guard.element.contains(hit);
+})()`;
+}
+
+/**
+ * Sends the real input of an armed action. A press moves the pointer first and checks the point
+ * again, since a page can move things when the pointer arrives: false, and nothing pressed, when it did.
+ * Typing selects what is in the field with a real key press, so the keystrokes replace it. In a
+ * multi-line field a line break or tab is inserted as text, so it never presses Enter or Tab.
+ */
+async function realInput({ tab, result, text }) {
+  const { mouse, keyboard } = tab.page;
+  if (result.status === 'press') {
+    await mouse.move(result.x, result.y);
+    if ((await inReadWorld({ tab, expression: stillOnElementScript(result) })) !== true) {
+      return false;
+    }
+    await mouse.down();
+    await mouse.up();
+    return true;
+  }
+  if (result.clear) {
+    await keyboard.press('ControlOrMeta+A');
+    if (text === '') {
+      await keyboard.press('Backspace');
+    }
+  }
+  for (const part of result.multiline ? text.split(/(\r\n|\r|\n|\t)/) : [text]) {
+    if (part === '\t') {
+      await keyboard.insertText('\t');
+    } else if (part === '\r\n' || part === '\r' || part === '\n') {
+      await keyboard.insertText('\n');
+    } else if (part !== '') {
+      await keyboard.type(part);
+    }
+  }
+  return true;
+}
+
+/** The binding a frame's guard calls when it stops input, so the action that sent it is refused. */
+const FRAME_INPUT_BINDING = 'amanFrameInput';
+
+/**
+ * The name of each frame guard's switch, and the key it answers to. The key is made fresh for each run
+ * of the sidecar. In the frame it is held only in the guard's closure, never in the text of a function
+ * a script can reach, and the sidecar hands it over only through the browser's debugging channel,
+ * never through any of the page's own JavaScript. So a frame's scripts can call the switch but never
+ * turn their guard off.
+ */
+const FRAME_GUARD_SWITCH = 'amanFrameGuard';
+const FRAME_GUARD_KEY = randomBytes(32).toString('hex');
+
+/**
+ * Runs before any script in every frame but the top one. Aman only ever acts on the top page, so any
+ * real input that reaches a frame inside it (a frame the page slid under the pointer, or moved the
+ * focus into) is stopped and cancelled before that frame's own code sees it, and reported. The guard
+ * starts on; the sidecar switches it off only while the person's own live-view act runs, so they can
+ * use a frame (a human check, a card form) by hand.
+ */
+const FRAME_GUARD_SCRIPT = `(() => {
+  if (window === window.top) {
+    return;
+  }
+  const apply = Reflect.apply;
+  const stop = Event.prototype.stopImmediatePropagation;
+  const cancel = Event.prototype.preventDefault;
+  const report = window.${FRAME_INPUT_BINDING};
+  const secret = ${JSON.stringify(FRAME_GUARD_KEY)};
+  let on = true;
+  Object.defineProperty(window, ${JSON.stringify(FRAME_GUARD_SWITCH)}, {
+    value: (key, wanted) => {
+      if (key !== secret) {
+        return false;
+      }
+      on = wanted === true;
+      return true;
+    },
+    writable: false,
+    enumerable: false,
+    configurable: false,
+  });
+  const block = event => {
+    if (!on || !event.isTrusted) {
+      return;
+    }
+    apply(stop, event, []);
+    apply(cancel, event, []);
+    if (typeof report === 'function') {
+      apply(report, window, []);
+    }
+  };
+  for (const type of ${JSON.stringify([...GUARDED_EVENTS, 'input'])}) {
+    window.addEventListener(type, block, true);
+  }
+})();`;
+
+const isStringRecord = value =>
+  typeof value === 'object' &&
+  value !== null &&
+  !Array.isArray(value) &&
+  Object.values(value).every(entry => typeof entry === 'string');
+
+/** An action's checked read as the app sent it, or null when it is missing or not that shape. */
+export function parseElementReview(value) {
+  if (typeof value !== 'object' || value === null) {
+    return null;
+  }
+  const { site, accessible_name, role, is_form_submit, form_values, link_url } = value;
+  if (
+    typeof site !== 'string' ||
+    typeof accessible_name !== 'string' ||
+    typeof role !== 'string' ||
+    typeof is_form_submit !== 'boolean' ||
+    !isStringRecord(form_values) ||
+    (link_url !== null && typeof link_url !== 'string')
+  ) {
+    return null;
+  }
+  return { site, accessible_name, role, is_form_submit, form_values, link_url };
+}
+
+/** How long the sidecar waits after an action for the page to start whatever the action set off. */
+const SETTLE_MS = 500;
 
 /** A URL's scheme, host without a leading `www.`, and port, or undefined for one with no host (about:blank, data:). */
 function siteOf(url) {
@@ -211,15 +465,24 @@ const STAY_PUT = { status: 204 };
  * get the mail read back. `goingBack` marks the one history step the model asked for.
  * `refusedRedirect` is where the last navigation tried to redirect to, off the opened site, and
  * `movedTo` is set when the model's own open was refused that way, until the next open.
+ * `cdp` is the tab's DevTools session, which reads the page in a script world of its own (`readWorld`).
  */
-function createTab({ page }) {
+function createTab({ page, cdp }) {
   return {
     page,
+    cdp,
+    mainFrameId: undefined,
+    readWorld: undefined,
     refs: new RefAssigner(),
     opened: undefined,
     goingBack: false,
     refusedRedirect: undefined,
     movedTo: undefined,
+    frameInput: false,
+    // The page's own script world in each frame but the top one, by context id, with the frame's origin.
+    frameWorlds: new Map(),
+    // The frames from other sites, each with its own CDP session and its script worlds.
+    remoteFrames: new Map(),
     // The page's last open file picker, waiting for the person to upload a file from the live view.
     fileChooser: undefined,
     // The live view's acts, run one at a time in the order they arrived, so typed keys never swap.
@@ -249,7 +512,108 @@ async function capturePage(page, options) {
   }
 }
 
-/** Runs one live-view act after every act sent before it has finished, whether or not that one worked. */
+/**
+ * Keeps the ids of the page's own script worlds in every frame but the top one that a CDP session
+ * reaches, so a frame's guard can be switched there without going through any of the page's scripts.
+ */
+async function trackFrameWorlds({ session, worlds, isTop }) {
+  session.on('Runtime.executionContextCreated', ({ context }) => {
+    if (context.auxData?.isDefault === true && !isTop(context.auxData.frameId)) {
+      worlds.set(context.id, context.origin);
+    }
+  });
+  session.on('Runtime.executionContextDestroyed', ({ executionContextId }) => {
+    worlds.delete(executionContextId);
+  });
+  session.on('Runtime.executionContextsCleared', () => {
+    worlds.clear();
+  });
+  await session.send('Runtime.enable');
+}
+
+/** Errors that mean a frame's script world went away while it was being switched. */
+const WORLD_GONE_ERRORS = ['Cannot find context with specified id', 'Execution context was destroyed', 'Target closed'];
+
+/**
+ * Turns the guard in every frame of the tab on or off, and says whether every frame still on the page
+ * took it. A frame from another site runs in its own process, reached through a CDP session of its
+ * own. A frame that goes away meanwhile is skipped: whatever loads in its place starts with its guard
+ * on. A frame on the page's own origin that has no guard (an empty frame made before any script ran)
+ * is the page's own, so it is not counted as a failure.
+ */
+async function setFrameGuards(tab, on) {
+  for (const frame of tab.page.frames()) {
+    if (frame === tab.page.mainFrame() || tab.remoteFrames.has(frame)) {
+      continue;
+    }
+    // Only a frame from another site's process gets a session; any other frame is in the page's own.
+    const session = await tab.page
+      .context()
+      .newCDPSession(frame)
+      .catch(() => undefined);
+    if (session !== undefined) {
+      const worlds = new Map();
+      tab.remoteFrames.set(frame, { session, worlds });
+      await trackFrameWorlds({ session, worlds, isTop: () => false });
+    }
+  }
+  for (const [frame, remote] of tab.remoteFrames) {
+    if (frame.isDetached()) {
+      tab.remoteFrames.delete(frame);
+      await remote.session.detach().catch(() => undefined);
+    }
+  }
+  const topOrigin = new URL(tab.page.url()).origin;
+  const targets = [
+    ...[...tab.frameWorlds].map(([id, origin]) => ({ session: tab.cdp, id, origin })),
+    ...[...tab.remoteFrames.values()].flatMap(({ session, worlds }) =>
+      [...worlds].map(([id, origin]) => ({ session, id, origin })),
+    ),
+  ];
+  const results = await Promise.all(
+    targets.map(async ({ session, id, origin }) => {
+      try {
+        const reply = await session.send('Runtime.evaluate', {
+          expression: `window[${JSON.stringify(FRAME_GUARD_SWITCH)}]?.(${JSON.stringify(FRAME_GUARD_KEY)}, ${String(on)})`,
+          contextId: id,
+          returnByValue: true,
+        });
+        if (reply.exceptionDetails !== undefined) {
+          return false;
+        }
+        return reply.result.value === true || (reply.result.value === undefined && origin === topOrigin);
+      } catch (error) {
+        return WORLD_GONE_ERRORS.some(message => String(error).includes(message));
+      }
+    }),
+  );
+  return results.every(Boolean);
+}
+
+/** Live-view acts that press or type; a move or a wheel turn is not input the frame guards stop. */
+const GUARDED_LIVE_KINDS = new Set(['click', 'down', 'up', 'type', 'paste', 'key']);
+
+/**
+ * Runs the person's own live-view act with the frame guards off, so it reaches a frame they point at,
+ * and turns them back on before anything else runs on the tab.
+ */
+async function livePersonAct(tab, input) {
+  if (!GUARDED_LIVE_KINDS.has(input.kind)) {
+    return liveAct(tab, input);
+  }
+  await setFrameGuards(tab, false);
+  try {
+    return await liveAct(tab, input);
+  } finally {
+    await setFrameGuards(tab, true);
+  }
+}
+
+/**
+ * Runs one act on the tab's real mouse or keyboard after every act sent before it has finished,
+ * whether or not that one worked. The person's live-view acts and Aman's own checked input share
+ * this one line, so the frame guards are never off while Aman's input runs.
+ */
 function inLiveOrder(tab, act) {
   const run = tab.liveActs.then(act);
   tab.liveActs = run.then(
@@ -315,6 +679,11 @@ async function liveAct(tab, input) {
     case 'type':
       await page.keyboard.type(input.text);
       break;
+    case 'paste':
+      // Pasted text goes in as one insert, the way a real paste does: a line break in it is text,
+      // never a press of Enter that could send a half-filled form.
+      await page.keyboard.insertText(input.text);
+      break;
     case 'key':
       await page.keyboard.press(input.key);
       break;
@@ -323,6 +692,73 @@ async function liveAct(tab, input) {
       break;
   }
   return { status: 'ok' };
+}
+
+/** The most text one copy out of the live view hands back: a code, an address or a few paragraphs. */
+const MAX_LIVE_COPY_LENGTH = 100_000;
+
+/** How long one frame may take to say what is selected, so a page that never answers can't hold the tab. */
+const COPY_FRAME_TIMEOUT_MS = 2000;
+
+/**
+ * What the person has selected in a frame: the selected part of the focused text field, or else the
+ * page's own selection. A password field's text is never read out, as the page itself never lets it
+ * be copied. Runs in the frame, so it must not name anything from this module.
+ */
+function selectedTextInFrame() {
+  const { document, HTMLInputElement, HTMLTextAreaElement } = globalThis;
+  let focused = document.activeElement;
+  while (focused?.shadowRoot?.activeElement) {
+    focused = focused.shadowRoot.activeElement;
+  }
+  const isField = focused instanceof HTMLInputElement || focused instanceof HTMLTextAreaElement;
+  if (isField && focused.type === 'password') {
+    return { focused: document.hasFocus(), password: true, text: '' };
+  }
+  if (isField && typeof focused.selectionStart === 'number' && typeof focused.selectionEnd === 'number') {
+    const text = focused.value.slice(focused.selectionStart, focused.selectionEnd);
+    if (text !== '') {
+      return { focused: document.hasFocus(), password: false, text };
+    }
+  }
+  return { focused: document.hasFocus(), password: false, text: String(globalThis.getSelection()?.toString() ?? '') };
+}
+
+/**
+ * The text the person has selected in the tab, for the live view's copy. The frame that has focus
+ * is asked first, so a selection in a sign-in frame wins over a leftover one in the page around it.
+ */
+async function selectedText(page) {
+  const answers = [];
+  for (const frame of page.frames()) {
+    let timer;
+    const answer = await Promise.race([
+      frame.evaluate(selectedTextInFrame).catch(() => undefined),
+      new Promise(resolve => {
+        timer = setTimeout(resolve, COPY_FRAME_TIMEOUT_MS);
+      }),
+    ]);
+    clearTimeout(timer);
+    if (
+      typeof answer === 'object' &&
+      answer !== null &&
+      typeof answer.text === 'string' &&
+      typeof answer.focused === 'boolean' &&
+      typeof answer.password === 'boolean'
+    ) {
+      answers.push(answer);
+    }
+  }
+  const pick =
+    answers.find(answer => answer.focused && (answer.password || answer.text !== '')) ??
+    answers.find(answer => answer.text !== '');
+  if (pick === undefined) {
+    return { status: 'nothing_selected' };
+  }
+  if (pick.password) {
+    return { status: 'password' };
+  }
+  return { status: 'ok', text: pick.text.slice(0, MAX_LIVE_COPY_LENGTH) };
 }
 
 /**
@@ -533,7 +969,7 @@ export class BrowserSidecar {
       page.on('download', download => {
         download.cancel().catch(() => undefined);
       });
-      const tab = createTab({ page });
+      const tab = createTab({ page, cdp: await profile.context.newCDPSession(page) });
       // A file picker never opens on the virtual screen; the live view fills it with the person's file.
       page.on('filechooser', chooser => {
         tab.fileChooser = chooser;
@@ -544,7 +980,12 @@ export class BrowserSidecar {
           tab.fileChooser = undefined;
         }
       });
-      await guardRedirects({ tab, cdp: await profile.context.newCDPSession(page) });
+      await guardRedirects({ tab, cdp: tab.cdp });
+      await prepareReadWorld(tab);
+      await page.exposeBinding(FRAME_INPUT_BINDING, () => {
+        tab.frameInput = true;
+      });
+      await page.addInitScript(FRAME_GUARD_SCRIPT);
       profile.tabs.set(tabId, tab);
       profile.tabsByPage.set(page, tab);
       if (profile.tabs.size > MAX_TABS_PER_PERSON) {
@@ -593,12 +1034,21 @@ export class BrowserSidecar {
     if (tab.takeover) {
       return { status: 'refused', reason: 'takeover' };
     }
-    tab.refs.reset();
     tab.opened = target.url.href;
+    return this.#navigate({ tab, url: target.url.href });
+  }
+
+  /** Loads an address in the tab, on the site it has open, then reads it. */
+  async #navigate({ tab, url, referer }) {
+    tab.refs.reset();
     tab.refusedRedirect = undefined;
     tab.movedTo = undefined;
     try {
-      await tab.page.goto(target.url.href, { timeout: this.#navTimeoutMs, waitUntil: 'domcontentloaded' });
+      await tab.page.goto(url, {
+        timeout: this.#navTimeoutMs,
+        waitUntil: 'domcontentloaded',
+        ...(referer === undefined ? {} : { referer }),
+      });
     } catch (error) {
       // A refused redirect leaves the navigation without a page, which is reported as the move below.
       if (tab.refusedRedirect === undefined) {
@@ -627,13 +1077,13 @@ export class BrowserSidecar {
         return checked.result;
       }
       try {
-        const nodes = await tab.page.evaluate(EXTRACT_SCRIPT);
+        const nodes = await inReadWorld({ tab, expression: EXTRACT_SCRIPT });
         const refs = tab.refs.refsFor(nodes);
-        const view = await tab.page.evaluate(VIEW_SCRIPT);
+        const view = await inReadWorld({ tab, expression: VIEW_SCRIPT });
         const text = renderSnapshot({ title: await tab.page.title(), url: tab.page.url(), nodes, refs, view });
         return { status: 'ok', text };
       } catch (error) {
-        if (attempt >= READ_ATTEMPTS || !String(error).includes('Execution context was destroyed')) {
+        if (attempt >= READ_ATTEMPTS || !PAGE_MOVED_ERRORS.some(message => String(error).includes(message))) {
           throw error;
         }
         await tab.page.waitForLoadState('domcontentloaded', { timeout: this.#navTimeoutMs }).catch(() => undefined);
@@ -700,7 +1150,7 @@ export class BrowserSidecar {
    * The layout is read in an isolated world, and nothing on the page is changed.
    */
   async #pictureLayout(tab) {
-    const nodes = await tab.page.evaluate(EXTRACT_SCRIPT);
+    const nodes = await inReadWorld({ tab, expression: EXTRACT_SCRIPT });
     const refs = tab.refs.refsFor(nodes);
     const cdp = await tab.page.context().newCDPSession(tab.page);
     try {
@@ -750,104 +1200,131 @@ export class BrowserSidecar {
   }
 
   /**
-   * The live element a ref names in the chat's tab, or the result that says why there is none: no
-   * tab, a page that moved to another site (see `#checkedPage`), an unknown ref, or one the page
-   * no longer has. Only `open` creates a tab, so an action on a chat with no page open is closed.
+   * Reads, and for an action acts on, the element a ref names in the chat's tab, in one step in the
+   * page (see `actOnElement` in extract.mjs). Answers why there is nothing to act on instead: no tab,
+   * a page that moved to another site (see `#checkedPage`), an unknown ref, or one the page no longer
+   * has. Only `open` creates a tab, so an action on a chat with no page open is closed. `settled`
+   * resolves once any page the action set off has loaded, or after a short wait when there is none.
    */
-  async #elementFor({ owner, tab: tabId, ref }) {
+  async #onElement({ owner, tab: tabId, ref, ...request }) {
     const tab = await this.#tabFor({ owner, tab: tabId, create: false });
     if (tab === undefined) {
-      return { ok: false, result: NO_TAB };
+      return { tab, result: NO_TAB };
     }
     const checked = this.#checkedPage(tab);
     if (!checked.ok) {
-      return { ok: false, result: checked.result };
+      return { tab, result: checked.result };
+    }
+    // While the person drives the tab in the live view, Aman only looks; its own steps wait for Hand back.
+    if (request.action !== 'info' && tab.takeover) {
+      return { tab, result: { status: 'refused', reason: 'takeover' } };
     }
     const path = tab.refs.resolve(ref);
     if (path === undefined) {
-      return { ok: false, result: { status: 'refused', reason: 'unknown_ref' } };
+      return { tab, result: { status: 'refused', reason: 'unknown_ref' } };
     }
-    const handle = await tab.page.evaluateHandle(elementAtPath, path);
-    const element = handle.asElement();
-    if (element === null) {
-      return { ok: false, result: { status: 'refused', reason: 'stale_ref' } };
-    }
-    return { ok: true, tab, path, element };
-  }
-
-  /** Field, submit and form context for a ref, without changing the page: the click gate's dry run. */
-  async clickInfo({ owner, tab: tabId, ref }) {
-    const found = await this.#elementFor({ owner, tab: tabId, ref });
-    if (!found.ok) {
-      return found.result;
-    }
-    const info = await found.tab.page.evaluate(elementInfoScript(found.path));
-    if (info === null) {
-      return { status: 'refused', reason: 'stale_ref' };
-    }
-    return {
-      status: 'ok',
-      site: new URL(found.tab.page.url()).hostname,
-      accessible_name: info.accessible_name,
-      is_form_submit: info.is_form_submit,
-      form_values: info.form_values,
-    };
-  }
-
-  /** Performs a click already approved (or found Tier 1), then reads the page it lands on. */
-  async click({ owner, tab: tabId, ref }) {
-    const found = await this.#elementFor({ owner, tab: tabId, ref });
-    if (!found.ok) {
-      return found.result;
-    }
-    if (found.tab.takeover) {
-      return { status: 'refused', reason: 'takeover' };
-    }
-    found.tab.refs.reset();
-    await found.element.click({ timeout: this.#navTimeoutMs });
-    return this.#read(found.tab);
-  }
-
-  /** Types into a field; refuses a password, card or one-time-code field instead of typing into it. */
-  async type({ owner, tab: tabId, ref, text }) {
-    const found = await this.#elementFor({ owner, tab: tabId, ref });
-    if (!found.ok) {
-      return found.result;
-    }
-    if (found.tab.takeover) {
-      return { status: 'refused', reason: 'takeover' };
-    }
-    const info = await found.tab.page.evaluate(elementInfoScript(found.path));
-    if (info === null) {
-      return { status: 'refused', reason: 'stale_ref' };
-    }
-    const sensitive = sensitivityOf({ field_kind: info.field_kind });
-    if (sensitive !== null) {
-      return { status: 'refused', reason: 'sensitive_field' };
-    }
-    await found.element.fill(text, { timeout: this.#navTimeoutMs });
-    return this.#read(found.tab);
-  }
-
-  /** Picks an option on a `<select>`, by its value, falling back to its visible label. */
-  async select({ owner, tab: tabId, ref, option }) {
-    const found = await this.#elementFor({ owner, tab: tabId, ref });
-    if (!found.ok) {
-      return found.result;
-    }
-    if (found.tab.takeover) {
-      return { status: 'refused', reason: 'takeover' };
-    }
-    try {
-      await found.element.selectOption(option, { timeout: this.#navTimeoutMs });
-    } catch {
-      try {
-        await found.element.selectOption({ label: option }, { timeout: this.#navTimeoutMs });
-      } catch {
-        return { status: 'refused', reason: 'no_such_option' };
+    const started = tab.page
+      .waitForEvent('framenavigated', { predicate: frame => frame === tab.page.mainFrame(), timeout: SETTLE_MS })
+      .then(
+        () => true,
+        () => false,
+      );
+    const result = await inReadWorld({ tab, expression: actScript({ path, ...request }) });
+    const settled = started.then(async loading => {
+      if (loading) {
+        await tab.page.waitForLoadState('domcontentloaded', { timeout: this.#navTimeoutMs }).catch(() => undefined);
       }
+    });
+    return { tab, result, settled };
+  }
+
+  /** The read an action on a ref is checked against, without changing the page. */
+  async elementInfo({ owner, tab: tabId, ref }) {
+    const { result } = await this.#onElement({ owner, tab: tabId, ref, action: 'info' });
+    return result.status === 'ok' ? { status: 'ok', ...result.review } : result;
+  }
+
+  /**
+   * Acts on the element at a ref, then reads the page. `expect` is the read the action was checked
+   * against (by `elementInfo`, before anything in the reply ran): the action goes ahead only while the
+   * element at the ref still reads that way. An earlier action in the same reply may have changed the
+   * page, and refs restart on every new page, so the same ref can name another element by now; that
+   * action is refused as changed, and never lands on something nobody checked.
+   */
+  async #act({ owner, tab: tabId, ref, action, expect, ...rest }) {
+    const expected = parseElementReview(expect);
+    if (expected === null) {
+      return { status: 'refused', reason: 'unchecked' };
     }
-    return this.#read(found.tab);
+    const { tab, result, settled } = await this.#onElement({
+      owner,
+      tab: tabId,
+      ref,
+      action,
+      expect: expected,
+      ...rest,
+    });
+    if (result.status === 'navigate') {
+      return onSameSite({ url: result.url, opened: tab.opened })
+        ? this.#navigate({ tab, url: result.url, referer: tab.page.url() })
+        : { status: 'moved', url: result.url };
+    }
+    if (result.status === 'press' || result.status === 'keys') {
+      // Real input, so the page's controls react as they do to a person. The guards stop any of it
+      // that lands outside the checked element, in this page or a frame inside it, before the page sees it.
+      const sent = await inLiveOrder(tab, async () => {
+        // Every live act turns the guards back on; this checks that each frame really took it.
+        if (!(await setFrameGuards(tab, true))) {
+          return 'unguarded';
+        }
+        tab.frameInput = false;
+        return realInput({ tab, result, text: rest.text });
+      }).then(
+        done => ({ done }),
+        error => ({ error }),
+      );
+      // A page that moved on took the guard with it; a fresh document has none armed.
+      const strayed = await inReadWorld({ tab, expression: DISARM_SCRIPT }).catch(() => false);
+      if (sent.error !== undefined) {
+        throw sent.error;
+      }
+      // A frame on the page whose guard could not be checked could take this input unseen.
+      if (sent.done === 'unguarded') {
+        tab.refs.reset();
+        return { status: 'refused', reason: 'unchecked' };
+      }
+      if (!sent.done || strayed === true || tab.frameInput) {
+        tab.refs.reset();
+        return { status: 'refused', reason: 'changed' };
+      }
+    } else if (result.status !== 'done') {
+      return result;
+    }
+    await settled;
+    tab.refs.reset();
+    // A frame's report of stopped input can arrive just after the input itself.
+    if (tab.frameInput) {
+      return { status: 'refused', reason: 'changed' };
+    }
+    return this.#read(tab);
+  }
+
+  /** Clicks the element at a ref. A plain link is not pressed: its address is opened, so no script of the page runs. */
+  async click({ owner, tab: tabId, ref, expect }) {
+    return this.#act({ owner, tab: tabId, ref, action: 'click', expect });
+  }
+
+  /** Types into a field; refuses a password, card or one-time-code field, and a disabled or read-only one. */
+  async type({ owner, tab: tabId, ref, expect, text }) {
+    if (typeof text !== 'string') {
+      return { status: 'refused', reason: 'unchecked' };
+    }
+    return this.#act({ owner, tab: tabId, ref, action: 'type', expect, text });
+  }
+
+  /** Picks an option on a `<select>`, by its value or its visible label. */
+  async select({ owner, tab: tabId, ref, expect, option }) {
+    return this.#act({ owner, tab: tabId, ref, action: 'select', expect, option });
   }
 
   /**
@@ -918,7 +1395,19 @@ export class BrowserSidecar {
     if (tab === undefined) {
       return NO_TAB;
     }
-    return inLiveOrder(tab, () => liveAct(tab, input));
+    return inLiveOrder(tab, () => livePersonAct(tab, input));
+  }
+
+  /**
+   * The text the person selected in the chat's tab, for the live view's copy. It goes back only to
+   * the person's own live view; it is never kept, logged or shown to the model.
+   */
+  async liveCopy({ owner, tab: tabId }) {
+    const tab = await this.#tabFor({ owner, tab: tabId, create: false });
+    if (tab === undefined) {
+      return NO_TAB;
+    }
+    return inLiveOrder(tab, () => selectedText(tab.page));
   }
 
   /**
@@ -1030,8 +1519,8 @@ function parsePoint(body) {
 
 /**
  * A live-view input from the request body, or undefined when it is not one the page can be given:
- * a pointer act with its point (a click, or the takeover acts move, down and up), typed text, one
- * named key, or a scroll step.
+ * a pointer act with its point (a click, or the takeover acts move, down and up), typed or pasted
+ * text, one named key, or a scroll step.
  */
 function parseLiveInput(body) {
   switch (body.kind) {
@@ -1043,8 +1532,9 @@ function parseLiveInput(body) {
       return point === undefined ? undefined : { kind: body.kind, ...point };
     }
     case 'type':
+    case 'paste':
       return typeof body.text === 'string' && body.text !== '' && body.text.length <= MAX_LIVE_TEXT_LENGTH
-        ? { kind: 'type', text: body.text }
+        ? { kind: body.kind, text: body.text }
         : undefined;
     case 'key':
       return typeof body.key === 'string' && body.key !== '' && body.key.length <= 64
@@ -1063,10 +1553,12 @@ const ROUTES = {
   'POST /scroll': (sidecar, where, body) => sidecar.scroll({ ...where, direction: body.direction }),
   'POST /back': (sidecar, where) => sidecar.back(where),
   'POST /screenshot': (sidecar, where) => sidecar.screenshot(where),
-  'POST /click-info': (sidecar, where, body) => sidecar.clickInfo({ ...where, ref: body.ref }),
-  'POST /click': (sidecar, where, body) => sidecar.click({ ...where, ref: body.ref }),
-  'POST /type': (sidecar, where, body) => sidecar.type({ ...where, ref: body.ref, text: body.text }),
-  'POST /select': (sidecar, where, body) => sidecar.select({ ...where, ref: body.ref, option: body.option }),
+  'POST /element-info': (sidecar, where, body) => sidecar.elementInfo({ ...where, ref: body.ref }),
+  'POST /click': (sidecar, where, body) => sidecar.click({ ...where, ref: body.ref, expect: body.expect }),
+  'POST /type': (sidecar, where, body) =>
+    sidecar.type({ ...where, ref: body.ref, expect: body.expect, text: body.text }),
+  'POST /select': (sidecar, where, body) =>
+    sidecar.select({ ...where, ref: body.ref, expect: body.expect, option: body.option }),
   'POST /live/frame': (sidecar, where) => sidecar.liveFrame(where),
   'POST /live/tabs': (sidecar, where) => sidecar.liveTabs(where),
   'POST /live/upload': (sidecar, where, body) =>
@@ -1082,6 +1574,7 @@ const ROUTES = {
     const input = parseLiveInput(body);
     return input === undefined ? { status: 'bad_input' } : sidecar.liveInput({ ...where, input });
   },
+  'POST /live/copy': (sidecar, where) => sidecar.liveCopy(where),
   'POST /live/takeover': (sidecar, where, body) =>
     typeof body.on === 'boolean' ? sidecar.liveTakeover({ ...where, on: body.on }) : { status: 'bad_input' },
 };

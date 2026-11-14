@@ -402,7 +402,6 @@ function reduceTurnEvents(
             ...(budgetReason === 'normal' || budgetReason === 'post_compaction' ? { budget_reason: budgetReason } : {}),
             counts: {
               items: asNumber(field(stats, 'items')) ?? 0,
-              entities: asNumber(field(stats, 'entities')) ?? 0,
               dropped_over_budget: asNumber(field(stats, 'dropped_over_budget')) ?? 0,
               dropped_below_threshold: asNumber(field(stats, 'dropped_below_threshold')) ?? 0,
               estimated_tokens: asNumber(field(stats, 'estimated_tokens')) ?? 0,

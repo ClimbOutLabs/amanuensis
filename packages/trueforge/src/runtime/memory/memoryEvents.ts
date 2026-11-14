@@ -6,21 +6,19 @@
 import { MemoryRecallEventSchema } from '../../schemas/memoryEvents';
 
 export {
-  MemoryCuratedStatsSchema,
   MemoryLayersStatsSchema,
+  MemoryPagesStatsSchema,
   MemoryRecallEventSchema,
   MemoryRecallStatsSchema,
-  MemoryReflectStatsSchema,
   MemoryScreenRecordSchema,
   MemoryScreenStatsSchema,
   MemorySweepStatsSchema,
 } from '../../schemas/memoryEvents';
 export type {
-  MemoryCuratedStats,
   MemoryLayersStats,
+  MemoryPagesStats,
   MemoryRecallEvent,
   MemoryRecallStats,
-  MemoryReflectStats,
   MemoryScreenRecord,
   MemoryScreenStats,
   MemorySweepStats,

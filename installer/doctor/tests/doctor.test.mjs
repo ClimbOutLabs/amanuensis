@@ -36,6 +36,15 @@ let world;
 const make = options => (world = createWorld(options));
 afterEach(() => world?.dispose());
 
+/** The report as one line of words: the sides of its panels dropped and wrapped lines joined. */
+function flatText(text) {
+  return text
+    .split('\n')
+    .map(line => line.replace(/^[|│] (.*?) *[|│]$/, '$1'))
+    .join(' ')
+    .replace(/\s+/g, ' ');
+}
+
 function machine(result, id) {
   return find(result.doc.machine, id);
 }
@@ -126,12 +135,17 @@ describe('document and exit codes', () => {
     world.df(1 * GIB_KB);
     const result = world.run();
     assert.equal(result.code, 1);
-    assert.match(result.stdout, /\nChecking this computer\n/);
+    assert.match(result.stdout, /\n\+- \[ Checking this computer \] -+ \d+ ok, 1 problem -\+\n/);
     assert.match(result.stdout, / x Only 1\.0 GB is free for Docker data/);
     assert.match(result.stdout, /Next: Run aman doctor disk --fix/);
-    assert.match(result.stdout, /\nChecking instance main\n/);
-    assert.match(result.stdout, /1 problem\./);
-    assert.match(result.stdout, /Run the Next command for each, then run aman doctor again\./);
+    assert.match(result.stdout, /\n\+- \[ Checking instance main \]/);
+    assert.match(result.stdout, /\| x 1 problem +\|/);
+    assert.match(
+      result.stdout,
+      /\| x 1 problem +\|[\s\S]* x Only 1\.0 GB is free for Docker data[\s\S]*Next: Run aman doctor disk --fix/,
+      'the closing block lists the problem with its next step',
+    );
+    assert.match(result.stdout, /Do the Next step of each, then run aman doctor again\./);
   });
 
   it('prints one line for skipped checks with the same reason, instead of a row each', () => {
@@ -139,7 +153,7 @@ describe('document and exit codes', () => {
     world.set('info', { out: '', rc: 1, err: 'Cannot connect to the Docker daemon' });
     const result = world.run();
     assert.equal(result.code, 1);
-    const flat = result.stdout.replace(/\s+/g, ' ');
+    const flat = flatText(result.stdout);
     assert.match(flat, /Skipped: Docker is not reachable\. \(images, disk, docker_memory, clock\)/);
     assert.equal(flat.split('Skipped: Docker is not reachable.').length - 1, 2, 'two lines for five skipped checks');
   });
@@ -151,7 +165,7 @@ describe('document and exit codes', () => {
     assert.match(plain.stdout, /All checks passed\./);
     assert.doesNotMatch(plain.stdout, /\(docker\)/);
     const verbose = world.run(['--verbose']);
-    assert.match(verbose.stdout, /Docker 28\.0\.1 is running and Compose 2\.29\.1 is available\. \(docker\)/);
+    assert.match(flatText(verbose.stdout), /Docker 28\.0\.1 is running and Compose 2\.29\.1 is available\. \(docker\)/);
   });
 
   it('--summary is one line when everything passed, with the number of checks and nothing else', () => {
@@ -706,12 +720,29 @@ describe('instance settings file', () => {
     const OWNER = 'owner@x.invalid';
     const fixCommand = 'Run aman doctor instance --fix';
 
-    function setUp({ allowed, envText, hashes = [], registered = true, records = '' }) {
+    const dexYamlWith = entries =>
+      [
+        'issuer: https://login.x.invalid/dex',
+        'enablePasswordDB: true',
+        'staticPasswords:',
+        `  - email: '${OWNER}'`,
+        '    hashFromEnv: DEX_USER_PASSWORD_HASH',
+        "    username: 'Owner'",
+        "    userID: 'owner'",
+        ...entries,
+        'staticClients: []',
+        '',
+      ].join('\n');
+
+    function setUp({ allowed, envText, hashes = [], registered = true, records = '', dex = '' }) {
       world?.dispose();
       make();
       const file = path.join(world.instanceDir('main'), 'dex.env');
       writeFileSync(file, ["DEX_USER_PASSWORD_HASH='SENTINEL-owner-hash'", ...hashes, ''].join('\n'));
       chmodSync(file, 0o600);
+      if (dex) {
+        writeFileSync(path.join(world.instanceDir('main'), 'dex.yaml'), dex);
+      }
       world.writeEnv('main', 0o600, envText ?? (allowed === undefined ? '' : `OIDC_ALLOWED_EMAILS=${allowed}\n`));
       if (registered) {
         const dir = path.join(world.home, 'state', 'instances');
@@ -765,6 +796,59 @@ describe('instance settings file', () => {
       const check = setUp({ allowed: OWNER, hashes: ["DEX_USER_PASSWORD_HASH_JUDGE1='SENTINEL-judge1-hash'"] });
       assert.equal(check.state, 'warn');
       assert.equal(check.detail, 'More than the owner can sign in: judge1.');
+      assert.equal(check.fix, fixCommand);
+      assert.doesNotMatch(world.json().stdout, /SENTINEL/);
+    });
+
+    for (const [what, line] of [
+      ['an indented line', "  DEX_USER_PASSWORD_HASH_GHOST='SENTINEL-ghost-hash'"],
+      ['an export word', "export DEX_USER_PASSWORD_HASH_GHOST='SENTINEL-ghost-hash'"],
+      ['blanks around the equals sign', "DEX_USER_PASSWORD_HASH_GHOST = 'SENTINEL-ghost-hash'"],
+      ['mixed case in the variable name', "Dex_User_Password_Hash_GHOST='SENTINEL-ghost-hash'"],
+    ]) {
+      it(`reads a left-over password hash line Compose also reads: ${what}`, () => {
+        const check = setUp({ allowed: OWNER, hashes: [line] });
+        assert.equal(check.state, 'warn');
+        assert.equal(check.detail, 'More than the owner can sign in: ghost.');
+        assert.equal(check.fix, fixCommand);
+        assert.doesNotMatch(world.json().stdout, /SENTINEL/);
+      });
+    }
+
+    it("is quiet when dex.yaml holds the owner's entry alone", () => {
+      const check = setUp({ allowed: OWNER, dex: dexYamlWith([]) });
+      assert.equal(check.state, 'ok');
+      assert.equal(check.detail, 'The settings files exist and are private to you.');
+    });
+
+    it('warns about a sign-in entry that exists only in dex.yaml', () => {
+      const check = setUp({
+        allowed: OWNER,
+        dex: dexYamlWith([
+          "  - email: 'judge@x.invalid'",
+          "    hash: 'SENTINEL-planted-hash'",
+          "    username: 'judge'",
+          "    userID: 'judge'",
+        ]),
+      });
+      assert.equal(check.state, 'warn');
+      assert.equal(check.detail, 'More than the owner can sign in: judge@x.invalid.');
+      assert.equal(check.fix, fixCommand);
+      assert.doesNotMatch(world.json().stdout, /SENTINEL/);
+    });
+
+    it("warns about a second entry under the owner's own email with a password of its own", () => {
+      const check = setUp({
+        allowed: OWNER,
+        dex: dexYamlWith([
+          `  - email: '${OWNER}'`,
+          "    hash: 'SENTINEL-planted-hash'",
+          "    username: 'owner'",
+          "    userID: 'owner-copy'",
+        ]),
+      });
+      assert.equal(check.state, 'warn');
+      assert.equal(check.detail, 'More than the owner can sign in: owner-copy.');
       assert.equal(check.fix, fixCommand);
       assert.doesNotMatch(world.json().stdout, /SENTINEL/);
     });

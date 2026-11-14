@@ -6,11 +6,12 @@ import { cn } from '@/atoms/lib/cn.js';
 import { tablistTargetIndex } from '@/atoms/lib/tablistKeys.js';
 
 /**
- * The settings sub-tab pattern: an underlined tablist shared by the standalone memory page,
- * the Settings Memory section and Settings Personalization, so the surfaces navigate the
- * same way. Arrow keys move between tabs (focus follows the selection), Home and End jump
- * to the ends, and only the selected tab is in the tab order. When the tabs are wider than the space they get, the
- * strip scrolls sideways rather than squeezing the labels.
+ * The settings sub-tab pattern: an underlined tablist shared by the standalone memory page
+ * and the Settings sections that split into sub-tabs, so they navigate the same way. Arrow keys move
+ * between tabs (focus follows the selection), Home and End jump to the ends, and only the
+ * selected tab is in the tab order. When the tabs are wider than the space they get, the
+ * strip scrolls sideways rather than squeezing the labels. The strip keeps its height when the
+ * panel under it is taller than the space: a box that scrolls may otherwise be squeezed to nothing.
  */
 export function MemoryTabs<TabId extends string>(props: {
   ariaLabel: string;
@@ -35,7 +36,7 @@ export function MemoryTabs<TabId extends string>(props: {
     <div
       role="tablist"
       aria-label={props.ariaLabel}
-      className="flex gap-1 overflow-x-auto border-b border-border"
+      className="flex shrink-0 gap-1 overflow-x-auto border-b border-border"
       onKeyDown={onKeyDown}
     >
       {props.tabs.map((item, index) => (

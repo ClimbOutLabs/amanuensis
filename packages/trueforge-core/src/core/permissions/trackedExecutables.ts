@@ -49,6 +49,8 @@ export interface TrackedExecutableStore {
   untrack(input: { scope: TrackedExecutableScope; file_identity: string }): void;
   /** True when the file identity is in the tracked set for the scope. */
   isTracked(input: { scope: TrackedExecutableScope; file_identity: string }): boolean;
+  /** True when any tracked file for the scope lies inside the folder, by identity. */
+  tracksWithin(input: { scope: TrackedExecutableScope; folder_identity: string }): boolean;
   /**
    * Record an approved (content_hash, argv_hash) pair as a payload-bearing
    * grant keyed by (conversation_id, file_identity). Byte-identical
@@ -82,6 +84,16 @@ export class InMemoryTrackedExecutableStore implements TrackedExecutableStore {
 
   isTracked(input: { scope: TrackedExecutableScope; file_identity: string }): boolean {
     return this.entries.get(scopeKey(input.scope))?.has(input.file_identity) ?? false;
+  }
+
+  tracksWithin(input: { scope: TrackedExecutableScope; folder_identity: string }): boolean {
+    const prefix = `${input.folder_identity.replace(/\/+$/u, '')}/`;
+    for (const identity of this.entries.get(scopeKey(input.scope)) ?? []) {
+      if (identity.startsWith(prefix)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   recordGrant(input: TrackApprovalGrantInput): void {
@@ -312,14 +324,23 @@ export function writeTargetTouchesSandboxTools(input: {
   );
 }
 
+/** Asks a remote sandbox whether nothing exists at a path. True only on a definite "not there". */
+export type PathMissing = (absolutePath: string) => Promise<boolean>;
+
 /**
- * True when a write would create a path that does not exist on the host yet. Anything that exists (a file,
- * a folder, a dangling link) is not new, and a remote sandbox cannot be checked from the server, so nothing
- * there is new.
+ * True when a write would create a path that does not exist yet. Anything that exists (a file, a folder,
+ * a dangling link) is not new. A remote sandbox is asked through `path_missing`; with no way to ask,
+ * nothing there is new.
  */
-export function isNewWriteTarget(input: { p: string; cwd: string; resolution?: PathResolution | undefined }): boolean {
+export async function isNewWriteTarget(input: {
+  p: string;
+  cwd: string;
+  resolution: PathResolution | undefined;
+  path_missing: PathMissing | undefined;
+}): Promise<boolean> {
   if (input.resolution === 'remote') {
-    return false;
+    const identity = lexicalPath(input);
+    return identity !== null && input.path_missing !== undefined && (await input.path_missing(identity));
   }
   const absolute = path.isAbsolute(input.p) ? input.p : path.resolve(input.cwd, input.p);
   try {

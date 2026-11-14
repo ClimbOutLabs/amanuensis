@@ -137,6 +137,16 @@ const PersonalizationPanelContent: FC<Pick<PersonalizationPanelProps, 'onProfile
         </p>
       ) : null}
 
+      {/* The tab strip stays put above the scrolling form, as on the other Settings pages with sub-tabs. */}
+      <div className="mt-4">
+        <MemoryTabs
+          ariaLabel="Personalization sections"
+          tabs={PERSONALIZATION_TABS}
+          activeTab={tab}
+          onTabChange={setTab}
+        />
+      </div>
+
       <div className="mt-4 flex-1 overflow-y-auto pb-4">
         {loading ? (
           <p className="text-sm text-text-secondary" role="status">
@@ -144,13 +154,6 @@ const PersonalizationPanelContent: FC<Pick<PersonalizationPanelProps, 'onProfile
           </p>
         ) : (
           <form className="space-y-4" onSubmit={save}>
-            <MemoryTabs
-              ariaLabel="Personalization sections"
-              tabs={PERSONALIZATION_TABS}
-              activeTab={tab}
-              onTabChange={setTab}
-            />
-
             {tab === 'yours' ? (
               <section
                 className="rounded-xl border border-border bg-card-bg p-4"

@@ -56,8 +56,19 @@ and names the person's profile (`owner`) and the chat's tab (`tab`).
 A step that fails answers 500 with a fixed `reason` (`timeout`, `navigation_failed`, `page_changed`,
 `page_script_error` or `unknown`), never the error's own text; the full error goes to the sidecar's log.
 
-- `POST /click-info`, `POST /click`, `POST /type`, `POST /select { owner, tab, ref, ... }` — act on a
-  control by its ref. The app server asks the person first for a click that would submit something.
+- `POST /element-info { owner, tab, ref }` — reads one element without touching it: the site, the
+  name a person sees on it, its role, whether it submits a form, the form's values (sensitive ones
+  masked), and the address when it is a plain link. The app decides from this read whether an action
+  asks first, and sends it back as `expect` with the action.
+- `POST /type { owner, tab, ref, expect, text }` — types into a field, then returns a read. A password,
+  payment or one-time-code field is refused; the person types those themselves.
+- `POST /select { owner, tab, ref, expect, option }` — picks an option on a dropdown, then returns a read.
+- `POST /click { owner, tab, ref, expect }` — clicks, then returns a read.
+
+An action whose element no longer reads the way `expect` says is refused as `changed`, and the element
+is not touched. One without `expect` is refused as `unchecked`. A disabled element is refused as
+`disabled`, a read-only field as `read_only`, and an element that something else covers as `covered`. The app and the sidecar are built and
+upgraded together, so the app always sends it.
 
 The live view, where the person drives their own tab by hand from the app's `/browser-live` page:
 
@@ -68,6 +79,7 @@ The live view, where the person drives their own tab by hand from the app's `/br
   human check: the check's own frame is on the page, or the page is the full-page check).
 - `POST /live/input { owner, tab, kind, ... }`: one act: `click` (x, y and the frame size it was read
   from), the takeover pointer acts `move`, `down` and `up` (a point, like a click), `type` (text),
+  `paste` (text put in as one insert, as a real paste is, so a line break never presses Enter),
   `key` (one named key) or `wheel` (dy). A click uses the real mouse, so the same
   rules keep the tab on its site. Acts on one tab run one at a time, in the order they arrived.
 - `POST /live/takeover { owner, tab, on }`: hands the tab to the person, or back to the model. The
@@ -75,11 +87,74 @@ The live view, where the person drives their own tab by hand from the app's `/br
   model's own steps on it (`/open`, `/scroll`, `/back`, `/click`, `/type`, `/select`) answer
   `refused` with reason `takeover`, and a streamed `move` is applied in steps from where the
   pointer last was, so the page sees a hand travelling rather than a pointer appearing.
+- `POST /live/copy { owner, tab }`: the text the person selected in the tab, for copying to their
+  own clipboard: the selected part of the focused field, or else the page's selection, from the
+  focused frame first. Answers `nothing_selected`, or `password` for a password field, whose text is
+  never read out. The text is never logged or kept.
 - `POST /live/upload { owner, tab, name, mime, data }` — a file, base64, at most 10 MB, put into the
   file picker the page opened (dropped once the page moves on), or else its first file field. The
   page itself sends it.
 
 The app server calls the live routes only for the signed-in person's own profile.
+
+## Reading and acting on a page
+
+The sidecar reads pages in a script world of its own, beside the page's. The page's own scripts can
+change what the DOM's functions and properties return in their world, but not in this one, so what the
+sidecar reads is what the browser holds. Every read of an element and every action on it runs there.
+
+An action checks its element against `expect` and acts on it in the same step, with no gap in which
+the page could swap the element. A click on a button is a real mouse press at the element's middle.
+The point is checked to land on the element, then checked again once the pointer is there, because a
+page can move things when the pointer arrives. Typing is real keystrokes into the field, focused in
+the same step. What was in the field is selected with a real key press first, so the keystrokes
+replace it. A one-line field refuses text with a line break or tab as `line_break`, because those keys
+would press Enter or Tab and could send the form. In a multi-line field, line breaks and tabs are
+inserted as text, so no key is pressed for them. Any other character that is not plain text is refused as
+`control_character`. Picking sets the option the way a person's choice
+does, so the page's own code sees the change.
+
+While a press or typing runs, two guards watch the input. One is in the sidecar's world in the page,
+set up at the start of every document, before any of the page's scripts. It stops any real input that
+lands outside the checked element, and it notices when a press never reached the element or typing
+ended with the focus somewhere else. The other runs first in every frame inside the page, including
+frames from other sites. Aman never acts inside a frame, so it stops all real input that reaches one.
+Either way the action is refused as `changed`. The frame guard is switched off only while one of the
+person's own live-view clicks or keys runs, so they can use a human check or a card form inside a frame
+by hand. A page's scripts cannot switch it off: the key it answers to is never in any script the
+page can read, and the sidecar hands it over only through the browser's debugging channel. If any
+frame on the page cannot be checked to have its guard on, Aman's input is refused as `unchecked`. The person's acts and Aman's own input take turns on a
+tab, so the frame guard is always on while Aman's input runs. A guard that could only be set up after the page's
+scripts ran is not trusted, so the action is refused as `unchecked`.
+
+The fields an action checks are the ones that decide what it does: a click checks them all,
+and typing or picking checks the site, the name and the role, since earlier typing changes the form.
+
+## Which actions ask first
+
+A click asks the person first unless it is a plain link to another page: an `<a>` or `<area>` with an
+`http` or `https` address the browser would follow with an ordinary page load. The sidecar does not
+press such a link. It opens the link's address, so none of the page's scripts run for it, the same as
+opening the address directly. A link to another site is not followed; the app is told its address,
+and opening it is checked like any other open. Like an open, a link only reads a page, so a site that
+changes something on a plain page load (for example, cancelling an order at a link's address) does it
+without a card, as it would for an open.
+
+A button, a tab, a menu, a link to a spot on the same page, a `javascript:` link and a link marked as a
+button all run the page's own script, which decides what is sent whatever the label says, so every one
+of them asks. A link asks too when its label is a word like pay, buy, send or delete. That word list
+only ever makes a click ask; it never lets one through. A name is read the way a person sees it: an
+icon-only button is named by its image's alt text or label, and characters that show nothing
+(zero-width spaces, soft hyphens) are left out.
+
+Typing and picking an option always ask first, with the exact text or option, the field and the site
+on the card. A page can send what is typed the moment it changes, by any route, so the sidecar does
+not try to hold it back afterwards.
+
+In a scheduled run nobody is there to answer, so actions that ask are saved for the person to approve
+later. A click that comes after typing or picking that is still waiting is not saved: its card would
+show the form as it is now, not as the approved typing leaves it. The model is told to click again
+once the person approves.
 
 ## Running it
 
@@ -109,3 +184,11 @@ inside it, with the same sandbox settings Compose uses: the URL safety rules, th
 snapshot text builder, and fixture pages in a real browser that go through the real egress proxy, with
 only DNS and the final TCP connect stood in for. `npm test` here runs the same tests, and skips the
 browser ones where no Chromium for this Playwright release is installed.
+
+`pnpm test:cobrowse` runs the whole live-view check in one go, with made-up local sites only. It runs:
+
+- the sidecar tests above, which need Docker
+- the live browser page in a real Chromium against a stand-in server
+- the reply loop tests that keep browser steps from being skipped as already done
+
+It exits 0 only when every part passes.

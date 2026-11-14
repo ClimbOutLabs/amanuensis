@@ -8,7 +8,27 @@ import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqliteMcpServerStore } from '../../../src/db/sqlite/mcp-server-store/SqliteMcpServerStore';
 import { SqliteOAuthTokenStore } from '../../../src/db/sqlite/token-store/SqliteOAuthTokenStore';
 import { mcpOAuthCallbackUrl } from '../../../src/mcp/auth/mcpOAuthHelpers';
-import { getMcpConnection } from '../../../src/runtime/sessionResources';
+import { getMcpConnection, RemoteAddressRefusedError } from '../../../src/runtime/sessionResources';
+
+// Name resolution is stubbed for the whole suite: a name with 'unresolvable' in it does not
+// resolve, localhost resolves to loopback, and every other name resolves to a public address.
+// The address check at connection time judges names by what they resolve to, so the suite's
+// answer cannot depend on the DNS of the machine running it.
+jest.mock('node:dns/promises', () => {
+  const actual = jest.requireActual<typeof import('node:dns/promises')>('node:dns/promises');
+  return {
+    ...actual,
+    lookup: async (hostname: string, options?: { all?: boolean | undefined }) => {
+      if (hostname.includes('unresolvable')) {
+        const error = new Error(`getaddrinfo ENOTFOUND ${hostname}`);
+        Reflect.set(error, 'code', 'ENOTFOUND');
+        throw error;
+      }
+      const entry = { address: hostname === 'localhost' ? '127.0.0.1' : '93.184.216.34', family: 4 };
+      return options?.all === true ? [entry] : entry;
+    },
+  };
+});
 
 describe('getMcpConnection', () => {
   let db: ReturnType<typeof createSqliteDb>;
@@ -403,12 +423,16 @@ describe('getMcpConnection', () => {
       configuration.FIRST_PARTY_MCP_ORIGINS = ['http://[::1]:9557'];
       configuration.MAIL_SIDECAR_MCP_URL = 'http://[::1]:9557/mcp';
       expect(await save({ name: 'Email', url: 'http://[0:0:0:0:0:0:0:1]:9557/mcp' })).toBe(true);
-      expect(await save({ name: 'Email', url: 'http://[::2]:9557/mcp' })).toBe(false);
+      // [::2] embeds 0.0.0.2, inside the ranges the address check refuses, and its origin is
+      // not listed: the connection is refused outright rather than resolved untrusted.
+      await expect(save({ name: 'Email', url: 'http://[::2]:9557/mcp' })).rejects.toBeInstanceOf(
+        RemoteAddressRefusedError,
+      );
     });
 
-    it('keeps the mark of a connector with another name that the operator listed', async () => {
-      configuration.FIRST_PARTY_MCP_ORIGINS = [...configuration.FIRST_PARTY_MCP_ORIGINS, 'https://memory.example'];
-      expect(await save({ name: 'Memory', url: 'https://memory.example/mcp', marked: true })).toBe(true);
+    it("ignores a stored mark on a connector with another name, even on the Calendar sidecar's own origin", async () => {
+      expect(await save({ name: 'Memory', url: 'http://calendar-caldav:9558/mcp/memory', marked: true })).toBe(false);
+      expect(await save({ name: 'Memory', url: CALENDAR_URL, marked: true })).toBe(false);
     });
 
     it('trusts the Calendar connector at the sidecar address the host owns even when its record has no mark', async () => {
@@ -431,11 +455,19 @@ describe('getMcpConnection', () => {
       ['a trailing dot on the host', 'http://mail-email.:9557/mcp'],
       ['another port', 'http://mail-email:9558/mcp'],
       ['another scheme', 'https://mail-email:9557/mcp'],
-      ['credentials in the address', 'http://owner@mail-email:9557/mcp'],
       ['a look-alike host', 'http://mail-emai1:9557/mcp'],
     ])('does not trust an Email record at an address with %s', async (_label, url) => {
       configuration.FIRST_PARTY_MCP_ORIGINS = [...configuration.FIRST_PARTY_MCP_ORIGINS, new URL(url).origin];
       expect(await save({ name: 'Email', url })).toBe(false);
+    });
+
+    it('refuses an Email record at an address with credentials in the address', async () => {
+      // The operator's list never vouches for an address carrying credentials, and the address
+      // check refuses such an address outright rather than resolving it untrusted.
+      configuration.FIRST_PARTY_MCP_ORIGINS = [...configuration.FIRST_PARTY_MCP_ORIGINS, 'http://mail-email:9557'];
+      await expect(save({ name: 'Email', url: 'http://owner@mail-email:9557/mcp' })).rejects.toBeInstanceOf(
+        RemoteAddressRefusedError,
+      );
     });
 
     it.each([
@@ -457,7 +489,7 @@ describe('getMcpConnection', () => {
       expect(await save({ name: 'My mail', url: MAIL_URL })).toBe(false);
     });
 
-    it('stops trusting the sidecar once the operator no longer lists its origin', async () => {
+    it('stops trusting the sidecar once its origin is no longer on the list', async () => {
       configuration.FIRST_PARTY_MCP_ORIGINS = [];
       expect(await save({ name: 'Email', url: MAIL_URL })).toBe(false);
     });
@@ -471,8 +503,8 @@ describe('getMcpConnection', () => {
   });
 
   describe('first_party marker', () => {
-    const LISTED_ORIGIN = 'https://hindsight.example.com';
-    const MEMORY_URL = `${LISTED_ORIGIN}/mcp/aman`;
+    const LISTED_ORIGIN = 'https://first-party.example.com';
+    const LISTED_URL = `${LISTED_ORIGIN}/mcp/aman`;
     const originalOrigins = configuration.FIRST_PARTY_MCP_ORIGINS;
 
     beforeEach(() => {
@@ -522,89 +554,32 @@ describe('getMcpConnection', () => {
       return connection;
     }
 
-    it('reports the stored marker while the operator lists the origin, so the turn resolver can tell a first-party connector from the rest', async () => {
+    it.each([
+      ['a plain connector', undefined],
+      ['a connector that signs in with OAuth', { type: 'dcr' as const }],
+    ])('never reports a stored marker for %s, even on a listed origin', async (_label, auth) => {
+      const name = auth === undefined ? 'marked-mcp' : 'marked-oauth-mcp';
       await mcpServerStore.upsertServer({
         tenant_id: 'default',
-        name: 'memory-mcp',
+        name,
         manifest: {
           type: 'remote',
-          name: 'memory-mcp',
-          url: MEMORY_URL,
-          description: 'Memory provider.',
-          memory_provider: true,
+          name,
+          url: LISTED_URL,
+          description: 'A connector an older version marked.',
+          ...(auth === undefined ? {} : { auth }),
         },
         first_party: true,
       });
 
-      expect((await connectionFor('memory-mcp')).first_party).toBe(true);
-      expect((await connectionFor('plain-mcp')).first_party).toBe(false);
+      expect((await connectionFor(name)).first_party).toBe(false);
     });
 
-    it('reports the marker for a connector that authenticates with OAuth too', async () => {
-      await mcpServerStore.upsertServer({
-        tenant_id: 'default',
-        name: 'memory-oauth-mcp',
-        manifest: {
-          type: 'remote',
-          name: 'memory-oauth-mcp',
-          url: MEMORY_URL,
-          description: 'Memory provider behind OAuth.',
-          auth: { type: 'dcr' },
-          memory_provider: true,
-        },
-        first_party: true,
-      });
-
-      expect((await connectionFor('memory-oauth-mcp')).first_party).toBe(true);
-      expect((await connectionFor('plain-oauth-mcp')).first_party).toBe(false);
-    });
-
-    it('stops reporting the marker once the operator no longer lists the origin, without any save', async () => {
-      await mcpServerStore.upsertServer({
-        tenant_id: 'default',
-        name: 'memory-unlisted',
-        manifest: {
-          type: 'remote',
-          name: 'memory-unlisted',
-          url: MEMORY_URL,
-          description: 'Memory provider.',
-          memory_provider: true,
-        },
-        first_party: true,
-      });
-      expect((await connectionFor('memory-unlisted')).first_party).toBe(true);
-
-      configuration.FIRST_PARTY_MCP_ORIGINS = [];
-      expect((await connectionFor('memory-unlisted')).first_party).toBe(false);
-
-      configuration.FIRST_PARTY_MCP_ORIGINS = ['https://another.example.com'];
-      expect((await connectionFor('memory-unlisted')).first_party).toBe(false);
-
-      configuration.FIRST_PARTY_MCP_ORIGINS = [LISTED_ORIGIN];
-      expect((await connectionFor('memory-unlisted')).first_party).toBe(true);
-    });
-
-    it('does not report a stored marker for a URL on an origin other than the listed one', async () => {
-      await mcpServerStore.upsertServer({
-        tenant_id: 'default',
-        name: 'memory-elsewhere',
-        manifest: {
-          type: 'remote',
-          name: 'memory-elsewhere',
-          url: 'https://attacker.example.net/mcp/aman',
-          description: 'Memory provider.',
-          memory_provider: true,
-        },
-        first_party: true,
-      });
-
-      expect((await connectionFor('memory-elsewhere')).first_party).toBe(false);
-    });
-
-    it('never reports a marker the store did not set, however the operator lists the origin', async () => {
+    it('never reports a marker the store did not set, however the origin is listed', async () => {
       configuration.FIRST_PARTY_MCP_ORIGINS = ['https://mcp.plain.example', LISTED_ORIGIN];
 
       expect((await connectionFor('plain-mcp')).first_party).toBe(false);
+      expect((await connectionFor('plain-oauth-mcp')).first_party).toBe(false);
     });
   });
 
@@ -617,5 +592,83 @@ describe('getMcpConnection', () => {
         userRef: STANDALONE_REQUEST_CONTEXT.subject.id,
       }),
     ).resolves.toBeUndefined();
+  });
+
+  describe('the address check at connection time', () => {
+    async function seed(name: string, url: string): Promise<void> {
+      await mcpServerStore.upsertServer({
+        tenant_id: 'default',
+        name,
+        manifest: { type: 'remote', name, url, description: 'Address check case.' },
+        first_party: false,
+      });
+    }
+
+    function connectionFor(name: string) {
+      return getMcpConnection({
+        tenant_id: 'default',
+        name,
+        store: mcpServerStore,
+        userRef: STANDALONE_REQUEST_CONTEXT.subject.id,
+      });
+    }
+
+    it.each([
+      ['loopback', 'http://127.0.0.1:9999/mcp'],
+      ['the cloud metadata address', 'http://169.254.169.254/mcp'],
+      ['IPv6 loopback', 'http://[::1]:9999/mcp'],
+    ])('refuses a stored server at a %s address', async (_label, url) => {
+      const name = `refused-${_label.replaceAll(' ', '-')}`;
+      await seed(name, url);
+
+      const attempt = connectionFor(name);
+      await expect(attempt).rejects.toBeInstanceOf(RemoteAddressRefusedError);
+      await expect(attempt).rejects.toMatchObject({ statusCode: 422 });
+    });
+
+    it('refuses an address carrying credentials in the URL', async () => {
+      await seed('credentialed-mcp', 'https://user:secret@8.8.8.8/mcp');
+
+      await expect(connectionFor('credentialed-mcp')).rejects.toBeInstanceOf(RemoteAddressRefusedError);
+    });
+
+    it('resolves a stored server at a public address', async () => {
+      await seed('public-mcp', 'https://8.8.8.8/mcp');
+
+      await expect(connectionFor('public-mcp')).resolves.toMatchObject({ url: 'https://8.8.8.8/mcp' });
+    });
+
+    it('resolves a stored server at an address outside the refused classes', async () => {
+      // 192.0.2.1 is documentation space (TEST-NET-1), used because a private literal could
+      // collide with whichever private range the test machine itself sits on; home-network
+      // admission itself is pinned in the remoteAddress unit tests with the machine's own
+      // networks faked out.
+      await seed('lan-mcp', 'http://192.0.2.1:8080/mcp');
+
+      await expect(connectionFor('lan-mcp')).resolves.toMatchObject({ url: 'http://192.0.2.1:8080/mcp' });
+    });
+
+    it('refuses a server whose name does not resolve: it cannot be checked, so it is not dialled', async () => {
+      await seed('unresolvable-mcp', 'https://mcp.unresolvable.invalid.example/mcp');
+
+      const attempt = connectionFor('unresolvable-mcp');
+      await expect(attempt).rejects.toBeInstanceOf(RemoteAddressRefusedError);
+      await expect(attempt).rejects.toMatchObject({ statusCode: 422 });
+      await expect(attempt).rejects.toThrow('did not resolve');
+    });
+
+    it('resolves a loopback server the operator listed as their own origin', async () => {
+      await seed('own-loopback-mcp', 'http://127.0.0.1:9999/mcp');
+      const originalOrigins = configuration.FIRST_PARTY_MCP_ORIGINS;
+      configuration.FIRST_PARTY_MCP_ORIGINS = ['http://127.0.0.1:9999'];
+      try {
+        await expect(connectionFor('own-loopback-mcp')).resolves.toMatchObject({
+          url: 'http://127.0.0.1:9999/mcp',
+          first_party: false,
+        });
+      } finally {
+        configuration.FIRST_PARTY_MCP_ORIGINS = originalOrigins;
+      }
+    });
   });
 });

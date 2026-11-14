@@ -6,13 +6,9 @@
  * The database lives in a temp directory rather than `:memory:` so `restart()` can
  * drop every in-process registry and reopen the same durable state.
  *
- * The `inert` connector is stored directly, like one a user added by URL. The first-party
- * memory connector, when asked for, is registered through the real memory-provider setup
- * (`POST /api/v1/settings/mcp-servers` with `memory_provider`), so the server itself marks it, and
- * only because the fixture lists the inert server's origin as the operator would in
- * `FIRST_PARTY_MCP_ORIGINS`. Without that option the list is empty and nothing is first-party.
+ * The `inert` connector is stored directly, like one a user added by URL. The first-party origin
+ * list starts empty, so nothing is first-party until a test sets up an Email or Calendar address.
  */
-import type { OpenAPIHono } from '@hono/zod-openapi';
 import { Sessions, type TurnStreamingEvent } from '@truefoundry/trueforge-core/agent-session';
 import type { SandboxProvider } from '@truefoundry/trueforge-core/core';
 import { RequestReplyRouter } from '@truefoundry/trueforge-core/request-reply';
@@ -34,6 +30,7 @@ import { BriefItemCompletionStore } from '../../src/db/briefItemCompletionStore'
 import type { IMcpServerStore } from '../../src/db/mcpServerStore';
 import { McpServerWithAuthStore } from '../../src/db/McpServerWithAuthStore';
 import { migrateSqliteToLatest } from '../../src/db/migrateSqlite';
+import { RecallExclusionStore } from '../../src/db/recallExclusionStore';
 import { SentinelAuditStore } from '../../src/db/sentinelAuditStore';
 import { SqliteAgentStore } from '../../src/db/sqlite/agent-store/SqliteAgentStore';
 import { SqliteApprovalTokenStore } from '../../src/db/sqlite/approval-token-store/SqliteApprovalTokenStore';
@@ -42,6 +39,7 @@ import { SqliteChatImageStore } from '../../src/db/sqlite/chat-image-store/Sqlit
 import { createSqliteDb } from '../../src/db/sqlite/client';
 import { SqliteGlobalSettingsStore } from '../../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
 import { SqliteGoogleConnectionStore } from '../../src/db/sqlite/google-connection-store/SqliteGoogleConnectionStore';
+import { SqliteLocalUserStore } from '../../src/db/sqlite/local-user-store/SqliteLocalUserStore';
 import { SqliteMcpServerStore } from '../../src/db/sqlite/mcp-server-store/SqliteMcpServerStore';
 import { SqliteMcpToolGrantStore } from '../../src/db/sqlite/mcp-tool-grant-store/SqliteMcpToolGrantStore';
 import { SqliteModelProviderStore } from '../../src/db/sqlite/model-provider-store/SqliteModelProviderStore';
@@ -64,7 +62,9 @@ import { createChatImageService } from '../../src/runtime/chatImages/chatImageSe
 import { createImageReencoder } from '../../src/runtime/chatImages/reencodeInSandbox';
 import { ChatSearchIndexer } from '../../src/runtime/chatSearchIndexing';
 import { EventSubscriptionRegistry } from '../../src/runtime/event-subscription';
+import { memoryBackgroundWorkSettled } from '../../src/runtime/memory/memoryBackgroundWork';
 import { createOutboundSecretSource } from '../../src/runtime/outboundSecrets';
+import { localModelEndpointOf } from '../../src/runtime/remoteAddress';
 import { createSentinelServices } from '../../src/runtime/sentinelServices';
 import { TurnDrainRegistry } from '../../src/runtime/turnDrains';
 import { deliveryDeps } from './deliveryDeps';
@@ -76,8 +76,6 @@ export const MODEL_PROVIDER_NAME = 'scripted';
 export const MODEL_FQN = `${MODEL_PROVIDER_NAME}/scripted-model`;
 /** A second configured model, so a test can prove which one a turn actually used. */
 export const ALT_MODEL_FQN = `${MODEL_PROVIDER_NAME}/scripted-alt-model`;
-/** The inert server registered as the memory provider, when a test asks for it. */
-export const INERT_MEMORY_SERVER_NAME = 'inert-memory';
 
 type SqliteDb = ReturnType<typeof createSqliteDb>;
 
@@ -94,7 +92,7 @@ export interface ApprovalTestServer {
   sessionStore: () => SqliteSessionStore;
   /** The database itself, so a test can construct any other store over the same data. */
   db: () => SqliteDb;
-  /** Replaces the operator's first-party origin list, as booting with another `FIRST_PARTY_MCP_ORIGINS` would. */
+  /** Replaces the first-party origin list, as booting with other Email and Calendar addresses would. */
   setFirstPartyOrigins: (origins: string[]) => void;
   /**
    * Turns eval mode on or off, as booting with another `AMAN_EVAL_MODE` would. While on, Gmail and Google Calendar
@@ -110,9 +108,11 @@ function buildApp(input: {
   db: SqliteDb;
   sandboxProvider: SandboxProvider | undefined;
   authenticator: Authenticator;
+  /** Signs the one owner in with an email and password, as `TRUEFORGE_AUTH_MODE=local` does. */
+  localSignIn: boolean;
   turnDrains: TurnDrainRegistry;
 }): ReturnType<typeof createServerApp> {
-  const { db, sandboxProvider, authenticator, turnDrains } = input;
+  const { db, sandboxProvider, turnDrains } = input;
   const sessionStore = new SqliteSessionStore(db);
   const tokenStore = new SqliteOAuthTokenStore(db);
   const agentStore = new SqliteAgentStore(db);
@@ -148,8 +148,14 @@ function buildApp(input: {
     approvalTokens: new SqliteApprovalTokenStore(db),
     toolGrants: mcpToolGrantStore,
     outboundSecrets,
+    skillStore,
   });
   const personaStore = new SqlitePersonaStore(db);
+  const localUserStore = input.localSignIn ? new SqliteLocalUserStore(db) : undefined;
+  const authenticator =
+    localUserStore === undefined
+      ? input.authenticator
+      : createAuthenticator({ mode: TrueForgeAuthMode.Local, localUserStore, globalSettingsStore });
   return createServerApp({
     chatDeletionStore: new SqliteChatDeletionStore({ db, turnArtifactStore: new SqliteTurnArtifactStore(db) }),
     chatSearchIndexer: new ChatSearchIndexer({
@@ -189,10 +195,12 @@ function buildApp(input: {
     }),
     globalSettingsStore,
     tokenFactoryBudget: uncappedTokenFactoryBudget,
+    memoryTidy: { tidyNow: () => undefined, tidyState: () => ({ status: 'idle' }) },
     sessionStore,
     sentinelAuditStore,
     sentinelSettingsStore,
     briefItemStore: new BriefItemCompletionStore(db),
+    recallExclusionStore: new RecallExclusionStore(db),
     ...deliveryDeps(db),
     sessions: new Sessions({ sessionStore, sentinelServices }),
     activeTurns: new ActiveTurnRegistry(),
@@ -201,7 +209,7 @@ function buildApp(input: {
     eventSubscriptions: new EventSubscriptionRegistry<TurnStreamingEvent>(undefined),
     logger: createLogger({ silent: true }),
     oidcDiscovery: undefined,
-    localUserStore: undefined,
+    localUserStore,
     authenticator,
     authorizer: new TrueForgeAuthorizer(),
     outboundSecrets,
@@ -215,30 +223,11 @@ function buildApp(input: {
   });
 }
 
-/** Registers the inert server as the memory provider through the settings API, as a user would. */
-async function registerMemoryProvider({ app, mcp }: { app: OpenAPIHono; mcp: InertMcpServer }): Promise<void> {
-  const response = await app.request('/api/v1/settings/mcp-servers', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      manifest: {
-        type: 'remote',
-        name: INERT_MEMORY_SERVER_NAME,
-        url: mcp.memoryProviderUrl,
-        description: 'Inert connector registered as the memory provider.',
-        memory_provider: true,
-      },
-    }),
-  });
-  if (response.status !== 201) {
-    throw new Error(`memory provider setup failed (${String(response.status)}): ${await response.text()}`);
-  }
-}
+/** The memory folder the test run was configured with, read before any test changes it. */
+const CONFIGURED_MEMORY_DIR = configuration.MEMORY_MARKDOWN_DIR;
 
 export async function startApprovalTestServer(options?: {
   sandboxProvider?: SandboxProvider | undefined;
-  /** Also register the inert server as the memory provider, which makes that connector first-party. */
-  memoryProvider?: boolean | undefined;
   /** Replaces the standalone authenticator, for tests that need distinct or unauthenticated callers. */
   authenticator?: Authenticator | undefined;
   /** Adds the inert connector's opt-in `web_search` tool. */
@@ -247,7 +236,10 @@ export async function startApprovalTestServer(options?: {
   inertPageById?: boolean | undefined;
   /** Adds the inert connector's opt-in `search_messages` lookup. */
   inertMessageSearch?: boolean | undefined;
+  /** Runs local sign-in instead of the standalone user: the first request must create the owner's sign-in. */
+  localSignIn?: boolean | undefined;
 }): Promise<ApprovalTestServer> {
+  const localSignIn = options?.localSignIn === true;
   const authenticator = options?.authenticator ?? createAuthenticator({ mode: TrueForgeAuthMode.Standalone });
   const mcp = await startInertMcpServer({
     webSearch: options?.inertWebSearch === true,
@@ -321,15 +313,30 @@ export async function startApprovalTestServer(options?: {
   });
 
   const originalFirstPartyOrigins = configuration.FIRST_PARTY_MCP_ORIGINS;
+  const originalLocalModelEndpoints = configuration.LOCAL_MODEL_ENDPOINTS;
   const originalEvalMode = configuration.AMAN_EVAL_MODE;
-  configuration.FIRST_PARTY_MCP_ORIGINS = options?.memoryProvider === true ? [mcp.origin] : [];
+  // Each server keeps its own memory, so one test's chats are never recalled into another's. A test that chose a
+  // memory folder itself keeps it.
+  const originalMemoryDir = configuration.MEMORY_MARKDOWN_DIR;
+  if (originalMemoryDir === CONFIGURED_MEMORY_DIR) {
+    configuration.MEMORY_MARKDOWN_DIR = join(directory, 'memory');
+  }
+  const originalAuthMode = configuration.TRUEFORGE_AUTH_MODE;
+  if (localSignIn) {
+    configuration.TRUEFORGE_AUTH_MODE = 'local';
+  }
+  // The fixture's own servers are this test instance's own services, and the operator of the
+  // instance vouches for them the way the server settings ask: the model's exact endpoint is
+  // named as a local model endpoint, and the connector's origin is listed as the operator's
+  // own, without which the address check refuses both loopback servers. The listing grants the
+  // connector no trust by itself (its row stays first_party false).
+  configuration.FIRST_PARTY_MCP_ORIGINS = [mcp.origin];
+  const modelEndpoint = localModelEndpointOf(model.baseUrl);
+  configuration.LOCAL_MODEL_ENDPOINTS = modelEndpoint === null ? [] : [modelEndpoint];
 
   // One registry for the server's life, so close() can wait for turn drains the way main.ts does.
   const turnDrains = new TurnDrainRegistry();
-  let app = buildApp({ db, sandboxProvider: options?.sandboxProvider, authenticator, turnDrains });
-  if (options?.memoryProvider === true) {
-    await registerMemoryProvider({ app, mcp });
-  }
+  let app = buildApp({ db, sandboxProvider: options?.sandboxProvider, authenticator, localSignIn, turnDrains });
 
   return {
     // Hono's request() is sync-or-async depending on the route; the fixture
@@ -340,7 +347,7 @@ export async function startApprovalTestServer(options?: {
       // A restart stands in for the process going away, so running replies are cut off, not drained.
       await db.destroy();
       db = createSqliteDb(databaseFile);
-      app = buildApp({ db, sandboxProvider: options?.sandboxProvider, authenticator, turnDrains });
+      app = buildApp({ db, sandboxProvider: options?.sandboxProvider, authenticator, localSignIn, turnDrains });
     },
     mcp,
     model,
@@ -356,13 +363,18 @@ export async function startApprovalTestServer(options?: {
     evalSources,
     close: async () => {
       configuration.FIRST_PARTY_MCP_ORIGINS = originalFirstPartyOrigins;
+      configuration.LOCAL_MODEL_ENDPOINTS = originalLocalModelEndpoints;
       configuration.AMAN_EVAL_MODE = originalEvalMode;
+      configuration.MEMORY_MARKDOWN_DIR = originalMemoryDir;
+      configuration.TRUEFORGE_AUTH_MODE = originalAuthMode;
       // The guide installs, and the indexing they queue, write into directories removed below, so they finish first.
       await app.guidesSettled();
       await closePersonaKnowledgeIndexers();
       // Like main.ts shutdown: a finished turn's drain still writes events and memory (a scheduled
       // run saves to the vault), so it settles before the database and the caller's directories go.
       await turnDrains.shutdownAndWait({ timeoutMs: configuration.TURN_DRAIN_SHUTDOWN_TIMEOUT_MS });
+      // A save may have started sorting or indexing its notes, which writes into the memory folder removed below.
+      await memoryBackgroundWorkSettled({ timeoutMs: configuration.TURN_DRAIN_SHUTDOWN_TIMEOUT_MS });
       await db.destroy();
       await model.close();
       await mcp.close();

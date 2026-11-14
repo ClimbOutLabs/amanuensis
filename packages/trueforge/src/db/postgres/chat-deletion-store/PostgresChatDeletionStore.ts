@@ -75,6 +75,12 @@ export class PostgresChatDeletionStore implements IChatDeletionStore {
         }
         const chat = { tenant_id: input.tenant_id, session_id: input.session_id };
         await this.#turnArtifactStore.deleteArtifactsForSession(chat, trx);
+        // The chat's recall exclusions are words from its memories; they go with the chat.
+        await trx
+          .deleteFrom('recall_exclusion')
+          .where('tenant_id', '=', input.tenant_id)
+          .where('session_id', '=', input.session_id)
+          .execute();
         await deleteSession(trx, chat);
         return true;
       });

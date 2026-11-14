@@ -14,6 +14,8 @@ import {
   type ApprovalTokenScope,
   type ApprovalTokenStore,
 } from './approvalTokens';
+import { sameBrowserElementReview } from './browserTier';
+import { BROWSER_CLICK_TOOL_NAME, BROWSER_SELECT_TOOL_NAME, BROWSER_TYPE_TOOL_NAME } from './browserToolNames';
 import type { Tier3Card } from './tier';
 
 /** Most actions one chat holds; past this a call is refused instead of queued. */
@@ -35,6 +37,18 @@ const NOT_SAVED_MESSAGES: Record<NotSavedReason, string> = {
   too_many: "Too many actions are already waiting for the owner's OK, so this one was not saved. Continue without it.",
 };
 
+/**
+ * What the model reads for a click held after held typing or picking: its card would show the form
+ * as it is now, not as the owner's approved typing leaves it, and the click would be refused on replay.
+ */
+export const CLICK_AFTER_HELD_EDIT_MESSAGE =
+  "This click comes after typing or picking that is still waiting for the owner's OK, so it was not saved. The page will look different once that runs. Continue without it, and click again after the owner approves.";
+
+/** Whether a call types into or picks on a browser page. */
+export function isBrowserEdit(info: InternalToolCallInfo): boolean {
+  return info.original_tool_name === BROWSER_TYPE_TOOL_NAME || info.original_tool_name === BROWSER_SELECT_TOOL_NAME;
+}
+
 /** The line the chat shows when the owner turns a held action down. */
 export const HELD_DENIED_NOTE = 'Denied. Nothing was done.';
 
@@ -49,12 +63,12 @@ export function heldActionsNote(waiting: readonly string[]): string {
     // A card sentence that already ends with a question mark keeps it; other
     // sentences get the stop the line needs before the next sentence.
     const firstWithStop = first.endsWith('?') ? first : `${first}.`;
-    return `I need your OK for one thing: ${firstWithStop} Approve it on your Needs your OK list and I'll add it here.`;
+    return `I need your OK for one thing: ${firstWithStop} Allow it on your Needs your OK list and I'll add it here.`;
   }
   return [
     `I need your OK for ${String(lines.length)} things:`,
     ...lines.map(line => `- ${line}`),
-    "Approve them on your Needs your OK list and I'll add them here.",
+    "Allow them on your Needs your OK list and I'll add them here.",
   ].join('\n');
 }
 
@@ -97,6 +111,8 @@ export function holdApprovalCalls(input: {
   message: InternalEnrichedAssistantMessage;
   /** Calls this chat already holds, counted toward the cap. */
   alreadyHeld: number;
+  /** Whether this chat holds browser typing or picking its owner has not answered yet. */
+  browserEditWaiting: boolean;
   /** A helper agent's call cannot be replayed from the main chat, so it is refused. */
   isSubAgent: boolean;
 }): { message: InternalEnrichedAssistantMessage; refused: { id: string; reason: NotSavedReason }[] } {
@@ -105,6 +121,7 @@ export function holdApprovalCalls(input: {
     return { message, refused: [] };
   }
   let held = input.alreadyHeld;
+  let browserEditWaiting = input.browserEditWaiting;
   const toolCalls: InternalEnrichedToolCall[] = [];
   const firstHeld: InternalEnrichedToolCall[] = [];
   const refused: { id: string; reason: NotSavedReason }[] = [];
@@ -120,7 +137,20 @@ export function holdApprovalCalls(input: {
       continue;
     }
     const expires_at = approvalTokenExpiry();
-    if (firstHeld.some(earlier => sameCall(earlier, call))) {
+    if (browserEditWaiting && info.original_tool_name === BROWSER_CLICK_TOOL_NAME) {
+      toolCalls.push({
+        ...call,
+        tool_info: {
+          ...info,
+          is_approval_required: false,
+          pre_dispatch_failure: {
+            kind: 'policy_blocked',
+            message: CLICK_AFTER_HELD_EDIT_MESSAGE,
+            owner_message: CLICK_AFTER_HELD_EDIT_MESSAGE,
+          },
+        },
+      });
+    } else if (firstHeld.some(earlier => sameCall(earlier, call))) {
       toolCalls.push({
         ...call,
         tool_info: { ...info, is_approval_required: false, held_for_owner: { expires_at, duplicate: true } },
@@ -148,6 +178,7 @@ export function holdApprovalCalls(input: {
       };
       firstHeld.push(heldCall);
       toolCalls.push(heldCall);
+      browserEditWaiting ||= isBrowserEdit(info);
     }
   }
   const changed = toolCalls.some((call, index) => call !== message.tool_calls?.[index]);
@@ -163,6 +194,18 @@ function heldRemotesUnchanged(input: { held: InternalToolCallInfo; fresh: Intern
   return approved === undefined || current === undefined
     ? approved === current
     : gitRemotesMatch({ approved, current });
+}
+
+/**
+ * A held browser action acts on the element its owner was shown: the element read again must read
+ * the same way, label included, or the action is refused as changed.
+ */
+function heldElementUnchanged(input: { held: InternalToolCallInfo; fresh: InternalToolCallInfo }): boolean {
+  const approved = input.held.browser_element;
+  const current = input.fresh.browser_element;
+  return approved === undefined || current === undefined
+    ? approved === current
+    : sameBrowserElementReview({ a: approved, b: current });
 }
 
 /** A value with every empty part dropped, so "nothing to show" reads the same however it was stored. */
@@ -198,6 +241,25 @@ function asComparableText(parts: Record<string, unknown>): string {
 }
 
 /**
+ * The held card's copy with the new-recipient notice lifted out of its consequence, where the
+ * notice led it. The notice is the held sentence's own lead: the part before the sentence the
+ * fresh card still shows.
+ */
+function heldCopyWithoutNotice(input: { held: Tier3Card; fresh: Tier3Card }): Tier3Card['copy'] {
+  const { held, fresh } = input;
+  const copy = held.copy ?? null;
+  if (copy?.consequence == null) {
+    return copy;
+  }
+  const notice = held.plain_what.slice(0, held.plain_what.length - fresh.plain_what.length - 1);
+  if (notice === '' || !copy.consequence.startsWith(notice)) {
+    return copy;
+  }
+  const rest = copy.consequence.slice(notice.length).trim();
+  return { ...copy, consequence: rest === '' ? null : rest };
+}
+
+/**
  * Whether a card reads today as it read when the call was held. One difference is expected: approving a mail to
  * new addresses puts them on the Email list, so a later try no longer carries the new-recipient notice. The
  * sentence after that notice, and every other part, must still be what the owner read.
@@ -214,7 +276,7 @@ function readsAsHeld(input: { held: Tier3Card; fresh: Tier3Card }): boolean {
   }
   const withoutNotice = { plain_what: fresh.plain_what, mail_new_recipients: null, mail_draft: null };
   return (
-    asComparableText({ ...partsRead(held), ...withoutNotice }) ===
+    asComparableText({ ...partsRead(held), ...withoutNotice, copy: heldCopyWithoutNotice({ held, fresh }) }) ===
     asComparableText({ ...partsRead(fresh), ...withoutNotice })
   );
 }
@@ -250,12 +312,28 @@ export async function checkHeldReplay(input: {
       return { ok: false, reason: 'changed' };
     }
   }
-  if (!heldRemotesUnchanged({ held, fresh })) {
+  // A skill network card holds no approval token of its own: the person answered a question
+  // about a skill's sites, and the card never showed this call. When the call as classified
+  // now asks for an approval of its own, the network answer cannot stand in for it, so the
+  // replay is refused and the call can be asked about on its own card instead. A call that
+  // does not ask on its own (the standing-grant case these cards are built for) still runs.
+  if (held.skill_network != null && heldTokenId === null && fresh.is_approval_required === true) {
+    return { ok: false, reason: 'changed' };
+  }
+  if (!heldRemotesUnchanged({ held, fresh }) || !heldElementUnchanged({ held, fresh })) {
     return { ok: false, reason: 'changed' };
   }
   const heldCard = held.tier3_card ?? undefined;
   const freshCard = fresh.tier3_card ?? undefined;
-  if (heldCard !== undefined && freshCard !== undefined && !readsAsHeld({ held: heldCard, fresh: freshCard })) {
+  // A skill network card asks about the skill's sites, not about this call, so what its card
+  // shows is not compared with the fresh call's card: the fresh classification governs the call
+  // itself, and the network answer was recorded against the skill before the replay.
+  if (
+    held.skill_network == null &&
+    heldCard !== undefined &&
+    freshCard !== undefined &&
+    !readsAsHeld({ held: heldCard, fresh: freshCard })
+  ) {
     return { ok: false, reason: 'changed' };
   }
   // A fresh call that no longer asks (a standing grant was added meanwhile) runs without the token.

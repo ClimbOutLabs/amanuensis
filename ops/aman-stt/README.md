@@ -38,10 +38,11 @@ wait for the warm model before routing. When the model fails to load (for
 example a weight verification failure), `model_loaded` is `false` and
 `model_error` carries the reason.
 
-No auth on v1: the service is reachable only inside the compose network (the
-full stack publishes no host port; `docker-compose.dev.yml` binds
-`127.0.0.1:8001` for host development). If the port is ever published beyond
-loopback, add a shared-secret header before doing so.
+Calls to `/v1/transcribe` must carry the shared secret from `SPEECH_SECRET`
+in the `x-speech-secret` header, the same check the browser sidecar uses.
+The compose stacks and the installer always set it, and without a value of
+at least 32 characters the service does not start. `/healthz` answers
+without it, because the Docker health check carries no secret.
 
 ## Lifecycle
 
@@ -100,12 +101,16 @@ newer model revision:
 ## Resource isolation and tuning
 
 `aman-stt` and the retrieval embedding model both run bursty CPU work, so
-they are pinned to disjoint cores via Docker `cpuset` (deploy-time
-parameter), with thread caps as defense in depth:
+on a host with enough cores they can be pinned to disjoint cores via Docker
+`cpuset`, with thread caps as defense in depth. The root `docker-compose.yml`
+pins nothing so it starts on any core count; put pins in a
+`docker-compose.override.yml` (see "Dedicated cores" in
+`docs/voice-input.mdx`), for example:
 
-- `aman-stt`: `cpuset: '16-19'` (4 cores), `cpu_threads=4`, memory limit 2 GB.
-- The agent server and its in-process embedding workload are pinned to
-  `cpuset: '0-15'` (see the root `docker-compose.yml`).
+- `aman-stt` and `aman-tts`: `cpuset: '16-19'` (4 cores), `cpu_threads=4`.
+  Their memory limits stay as `docker-compose.yml` sets them: 2 GB for
+  `aman-stt` and 1 GB for `aman-tts`.
+- The agent server and its in-process embedding workload: `cpuset: '0-15'`.
 
 Pinning is the primary mechanism: soft CPU limits still let bursts land on
 shared cores, and `nice` levels only bias the scheduler, neither prevents
@@ -117,7 +122,8 @@ encoder pool does not oversubscribe the set.
 1. Count physical/logical cores. Reserve 4 cores for `aman-stt` at the high
    end of the topology (e.g. `16-19` on a 20-core host), keeping it disjoint
    from the embedding workload's set. On smaller hosts pick any valid
-   disjoint 4-core set and adjust both compose services together.
+   disjoint 4-core set, and pin the server to the rest in the same
+   override file.
 2. Baseline: measure p95 transcription latency for a 10 s utterance with the
    warm model in isolation (protocol: 50 sequential utterances, timed from
    capture stop to transcript). Target: under 3 s.

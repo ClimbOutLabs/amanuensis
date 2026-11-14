@@ -57,6 +57,7 @@ test_fixtures_match() {
         ;;
       'set verbose '*) script="UI_VERBOSE=${line#set verbose }; $script" ;;
       'set assume_yes '*) script="UI_ASSUME_YES=${line#set assume_yes }; $script" ;;
+      'set framed '*) script="AMAN_UI_FRAMED=${line#set framed }; ui_init; $script" ;;
       'call '*) script="$script${line#call }"$'\n' ;;
       '-- '*)
         commit_mode

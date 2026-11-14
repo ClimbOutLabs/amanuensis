@@ -13,6 +13,8 @@ const ServiceSchema = z
     command: z.array(z.string()).optional(),
     environment: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
     volumes: z.array(z.string()).optional(),
+    // Compose takes either a list of names or a map of name to settings.
+    networks: z.union([z.array(z.string()), z.record(z.string(), z.unknown())]).optional(),
     env_file: z
       .array(z.union([z.string(), z.object({ path: z.string(), required: z.boolean().optional() })]))
       .optional(),
@@ -22,9 +24,16 @@ const ServiceSchema = z
 const ComposeSchema = z.object({
   services: z.record(z.string(), ServiceSchema),
   volumes: z.record(z.string(), z.unknown()).optional(),
+  networks: z.record(z.string(), z.unknown()).optional(),
 });
 
 const compose = ComposeSchema.parse(parse(readFileSync(resolve(REPO_ROOT, 'docker-compose.yml'), 'utf8')));
+
+/** The networks a service joins, by name, whichever form the file uses. */
+function networksOf(service: z.infer<typeof ServiceSchema>): string[] {
+  const { networks } = service;
+  return networks === undefined ? [] : Array.isArray(networks) ? networks : Object.keys(networks);
+}
 
 const MAIL_SIDECARS = ['mail-email'];
 
@@ -51,6 +60,16 @@ describe('mail and calendar sidecars', () => {
     expect(service.command).toEqual(['streamable-http', '--host', '0.0.0.0', '--port', '9557']);
   });
 
+  it('mail-email sits on a network of its own that only the app shares', () => {
+    expect(networksOf(serviceNamed('mail-email'))).toEqual(['mail']);
+    expect(networksOf(serviceNamed('loopback'))).toContain('mail');
+    const others = Object.entries(compose.services).filter(
+      ([name, service]) => name !== 'mail-email' && name !== 'loopback' && networksOf(service).includes('mail'),
+    );
+    expect(others).toEqual([]);
+    expect(compose.networks).toHaveProperty('mail');
+  });
+
   it('mail-email runs the account agent on the private network, holding the one account file', () => {
     const service = serviceNamed('mail-email');
     expect(service.environment?.['AMAN_MAIL_ACCOUNT_PORT']).toBe('9559');
@@ -63,6 +82,13 @@ describe('mail and calendar sidecars', () => {
     );
     // The account agent's port is exposed to the Compose network only, never published.
     expect(service.ports).toBeUndefined();
+  });
+
+  it('the server and the account agent share one account secret, and neither side holds its value', () => {
+    const shared =
+      '${MAIL_EMAIL_ACCOUNT_SECRET:?set MAIL_EMAIL_ACCOUNT_SECRET to a random value of 32 or more characters, for example from openssl rand -hex 32}';
+    expect(serviceNamed('server').environment?.['MAIL_EMAIL_ACCOUNT_SECRET']).toBe(shared);
+    expect(serviceNamed('mail-email').environment?.['AMAN_MAIL_ACCOUNT_SECRET']).toBe(shared);
   });
 
   it('the server is pointed at the account agent, never at the Docker socket', () => {
@@ -93,6 +119,24 @@ describe('mail and calendar sidecars', () => {
     expect(service['entrypoint']).toEqual(['/bin/sh', '/usr/local/bin/aman-mail-entrypoint']);
     expect(service.volumes).toContain('./ops/compose/mail-email/entrypoint.sh:/usr/local/bin/aman-mail-entrypoint:ro');
     expect(service.environment?.['AMAN_MAIL_STATUS_FILE']).toBe('/mail-status/loaded.sha256');
+  });
+
+  it('the mail wrapper records the send list only once the server answers on its port', () => {
+    const entrypoint = readFileSync(resolve(REPO_ROOT, 'ops/compose/mail-email/entrypoint.sh'), 'utf8');
+    const start = entrypoint.indexOf('start_server() {');
+    const body = entrypoint.slice(start, entrypoint.indexOf('\n}\n', start));
+    // A start clears the previous start's record before the new server is spawned, so a reader
+    // during the restart cannot take the old record for the new server's list.
+    expect(body.indexOf('rm -f "$status"')).toBeGreaterThan(-1);
+    expect(body.indexOf('rm -f "$status"')).toBeLessThan(body.indexOf('mcp-email-server'));
+    // The record is written only after the port probe passes, never at spawn time.
+    expect(body.indexOf('server_answers')).toBeGreaterThan(-1);
+    expect(body.indexOf('server_answers')).toBeLessThan(body.indexOf('record_loaded'));
+    // The one writer of the record, so no other path writes it before the server answers.
+    expect(entrypoint.split('>"$status.tmp"')).toHaveLength(2);
+    const writer = entrypoint.indexOf('record_loaded() {');
+    expect(entrypoint.indexOf('>"$status.tmp"')).toBeGreaterThan(writer);
+    expect(entrypoint.indexOf('>"$status.tmp"')).toBeLessThan(entrypoint.indexOf('\n}\n', writer));
   });
 
   it('mail-email reads attachment content for the agent as data', () => {

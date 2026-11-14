@@ -8,7 +8,6 @@ import configuration from '../../../src/config';
 import type { GlobalSettingRecord, IGlobalSettingsStore } from '../../../src/db/globalSettingsStore';
 import {
   MEMORY_SCREEN_ENABLED_SETTING_KEY,
-  applyMemoryScreenOverride,
   readMemoryScreenSetting,
   resolveMemoryScreenEnabled,
 } from '../../../src/runtime/memoryScreenSettings';
@@ -47,24 +46,6 @@ beforeEach(() => {
 
 afterEach(() => {
   configuration.MEMORY_SCREEN_URL = originalScreenUrl;
-});
-
-describe('applyMemoryScreenOverride', () => {
-  it('passes settings through unchanged when no override is stored', async () => {
-    const settings = { screen_enabled: true };
-    expect(applyMemoryScreenOverride(settings, undefined)).toBe(settings);
-    expect(applyMemoryScreenOverride(undefined, undefined)).toBeUndefined();
-  });
-
-  it('forces screen_enabled to the override when stored, preserving other settings', async () => {
-    const settings = { screen_enabled: true, recall_timeout_ms: 5000 };
-    expect(applyMemoryScreenOverride(settings, false)).toEqual({
-      screen_enabled: false,
-      recall_timeout_ms: 5000,
-    });
-    // Works when there were no per-bank settings at all (the Markdown backend case).
-    expect(applyMemoryScreenOverride(undefined, true)).toEqual({ screen_enabled: true });
-  });
 });
 
 describe('readMemoryScreenSetting', () => {

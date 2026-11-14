@@ -16,7 +16,7 @@ import path from 'node:path';
 import type { Logger } from 'winston';
 import type { IGlobalSettingsStore } from '../../db/globalSettingsStore';
 import { orderVectorFirst, rankByCosine } from '../memory/embeddingRetrieval';
-import { EmbeddingStore, hashEntryText } from '../memory/embeddingStore';
+import { EmbeddingStore, hashEntryText, LOG_VECTORS_FILE } from '../memory/embeddingStore';
 import {
   folderOverlapProblem,
   INBOX_FILE_MISSING_MESSAGE,
@@ -211,7 +211,10 @@ export class NotesFolderService {
     }
     const notes = await scanNotesFolder(folder);
     const chunks = notes.flatMap(note => chunkNote(note));
-    const store = (this.store ??= await EmbeddingStore.load({ namespaceDir: this.deps.indexDir }));
+    const store = (this.store ??= await EmbeddingStore.load({
+      namespaceDir: this.deps.indexDir,
+      fileName: LOG_VECTORS_FILE,
+    }));
     await this.embedChanged({ store, chunks });
     store.reconcile(new Set(chunks.map(chunk => chunk.id)));
     await store.save();

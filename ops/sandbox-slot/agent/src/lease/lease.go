@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 	"syscall"
+	"time"
 )
 
 // Transport bounds. The server applies the model-facing policy again; these protect the slot.
@@ -174,8 +175,10 @@ func FilesystemUsedBytes(path string) (used, free int64, err error) {
 type Reclaimed struct {
 	Files int
 	Bytes int64
-	// Paths are the removed files relative to the tree, largest first, at most maxReclaimedNames of them.
+	// Paths are the removed files relative to the tree, in the order they went, at most maxReclaimedNames of them.
 	Paths []string
+	// Older is true when a file from before the command had to go too.
+	Older bool
 }
 
 const maxReclaimedNames = 8
@@ -189,8 +192,12 @@ func (r Reclaimed) Notice(limitMB int) string {
 	if r.Files > len(r.Paths) {
 		names += fmt.Sprintf(" and %d more", r.Files-len(r.Paths))
 	}
-	return fmt.Sprintf("The workspace went over its %d MB limit, so %d file%s (%d MB) were deleted, largest first: %s.",
-		limitMB, r.Files, plural(r.Files), r.Bytes>>20, names)
+	which := "that this command wrote"
+	if r.Older {
+		which = "in the workspace"
+	}
+	return fmt.Sprintf("The workspace went over its %d MB limit, so %d file%s (%d MB) %s %s deleted: %s. Free some space, or write less, then run the command again.",
+		limitMB, r.Files, plural(r.Files), r.Bytes>>20, which, wasWere(r.Files), names)
 }
 
 func plural(n int) string {
@@ -200,12 +207,69 @@ func plural(n int) string {
 	return "s"
 }
 
-// Reclaim deletes regular files, largest first, until the tree is within limit bytes. It runs only when
-// no guest is alive.
-func Reclaim(root string, limit int64) Reclaimed {
+func wasWere(n int) string {
+	if n == 1 {
+		return "was"
+	}
+	return "were"
+}
+
+// Order in which Reclaim gives files up. Git's own files go last within each age, because losing one
+// loses the history of the whole project.
+const (
+	reclaimNew = iota
+	reclaimNewGit
+	reclaimOld
+	reclaimOldGit
+)
+
+// changedAt is when a file last changed on disk. A program can set a file's modification time but not
+// this one, so an unpacked archive still counts as written now.
+func changedAt(info fs.FileInfo) time.Time {
+	if st, ok := info.Sys().(*syscall.Stat_t); ok {
+		return time.Unix(int64(st.Ctim.Sec), int64(st.Ctim.Nsec))
+	}
+	return info.ModTime()
+}
+
+// Mark is the tree's own "now", read from a file made in it. File change times come from the kernel's
+// coarse clock, which runs a few milliseconds behind time.Now, so a mark taken from time.Now would
+// count the first files a command writes as older than the command.
+func Mark(root string) time.Time {
+	// Wider than the clock gap, for a tree too full to hold even an empty file.
+	fallback := time.Now().Add(-time.Second)
+	f, err := os.CreateTemp(root, ".aman-mark-")
+	if err != nil {
+		return fallback
+	}
+	info, err := f.Stat()
+	_ = f.Close()
+	_ = os.Remove(f.Name())
+	if err != nil {
+		return fallback
+	}
+	return changedAt(info)
+}
+
+func insideGitDir(rel string) bool {
+	for _, part := range strings.Split(rel, string(filepath.Separator)) {
+		if part == ".git" {
+			return true
+		}
+	}
+	return false
+}
+
+// Reclaim deletes regular files until the tree is within limit bytes. Files changed since the given
+// time go first, largest first, so a command that overshoots loses what it wrote and not what was
+// there before. Older files are touched only when the newer ones are not enough, which happens when
+// the tree was already over a lowered limit. It runs only when no guest is alive.
+func Reclaim(root string, limit int64, since time.Time) Reclaimed {
 	type entry struct {
-		path string
-		size int64
+		path  string
+		rel   string
+		size  int64
+		class int
 	}
 	var all []entry
 	var total int64
@@ -213,18 +277,36 @@ func Reclaim(root string, limit int64) Reclaimed {
 		if err != nil || !d.Type().IsRegular() {
 			return nil
 		}
-		if info, e := d.Info(); e == nil {
-			size := allocatedBytes(info)
-			total += size
-			all = append(all, entry{path, size})
+		info, e := d.Info()
+		if e != nil {
+			return nil
 		}
+		rel, e := filepath.Rel(root, path)
+		if e != nil {
+			rel = filepath.Base(path)
+		}
+		size := allocatedBytes(info)
+		total += size
+		class := reclaimOld
+		if !changedAt(info).Before(since) {
+			class = reclaimNew
+		}
+		if insideGitDir(rel) {
+			class++
+		}
+		all = append(all, entry{path, rel, size, class})
 		return nil
 	})
 	var out Reclaimed
 	if total <= limit {
 		return out
 	}
-	sort.Slice(all, func(i, j int) bool { return all[i].size > all[j].size })
+	sort.Slice(all, func(i, j int) bool {
+		if all[i].class != all[j].class {
+			return all[i].class < all[j].class
+		}
+		return all[i].size > all[j].size
+	})
 	for _, e := range all {
 		if total <= limit {
 			break
@@ -233,12 +315,11 @@ func Reclaim(root string, limit int64) Reclaimed {
 			total -= e.size
 			out.Files++
 			out.Bytes += e.size
+			if e.class >= reclaimOld {
+				out.Older = true
+			}
 			if len(out.Paths) < maxReclaimedNames {
-				rel, err := filepath.Rel(root, e.path)
-				if err != nil {
-					rel = filepath.Base(e.path)
-				}
-				out.Paths = append(out.Paths, rel)
+				out.Paths = append(out.Paths, e.rel)
 			}
 		}
 	}

@@ -760,8 +760,8 @@ test_node_calls_use_the_docker_access_of_the_run() {
   STUB_DOCKER_DENIED=1
   printf 'testuser\n' >"$SB_STATE/group_members"
   install_machine
-  assert_log_has "sg docker -c env DOCKER_BUILDKIT=1 $AMAN_HOME/runtime/node/bin/node $AMAN_HOME/bin/aman-sandbox.mjs --build-only"
-  assert_log_has "sg docker -c env DOCKER_BUILDKIT=1 $AMAN_HOME/runtime/node/bin/node $AMAN_HOME/bin/aman-sandbox.mjs --check --json"
+  assert_log_has "sg docker -c env DOCKER_BUILDKIT=1 AMAN_UI_FRAMED=1 $AMAN_HOME/runtime/node/bin/node $AMAN_HOME/bin/aman-sandbox.mjs --build-only"
+  assert_log_has "sg docker -c env DOCKER_BUILDKIT=1 AMAN_UI_FRAMED=1 $AMAN_HOME/runtime/node/bin/node $AMAN_HOME/bin/aman-sandbox.mjs --check --json"
   sandbox_drop
 }
 

@@ -198,7 +198,7 @@ function SandboxToggleRow({
   );
 }
 
-export function isUnauthenticatedDcrConnector(connector: ConnectorState): boolean {
+function isUnauthenticatedDcrConnector(connector: ConnectorState): boolean {
   const auth = Reflect.get(connector, 'auth');
   return (
     connector.authenticated === false &&

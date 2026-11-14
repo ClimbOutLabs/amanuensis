@@ -25,7 +25,7 @@ export type RewardContext = {
 export type RewardRequest =
   /** A finished line: an item completed by the person or Aman. */
   | { kind: 'tick' }
-  /** An approval the person gave. At most one tear per minute. */
+  /** An approval the person gave: a gold tick on the answered card. At most one per minute. */
   | { kind: 'tear' }
   /** The day's all-clear: the count of things waiting went to zero. Once a day. */
   | { kind: 'allClear' }
@@ -221,7 +221,7 @@ export function pickHighlightedCard({ firstWaitingApprovalId, nextAppointmentId 
   return firstWaitingApprovalId ?? nextAppointmentId ?? null;
 }
 
-/** The id of the card that carries `.aui-ticket--selected` on this screen, or null. */
+/** The id of the card that carries `.aui-approval-card--selected` on this screen, or null. */
 export function useHighlightedCard(candidates: HighlightCandidates): string | null {
   const { firstWaitingApprovalId, nextAppointmentId } = candidates;
   return useMemo(

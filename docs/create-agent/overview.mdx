@@ -41,7 +41,7 @@ Each option below is part of the agent definition. The **Set in** line on each s
   </Accordion>
 
   <Accordion title="Tool approval (API only)" icon="user-shield">
-    Some tool calls shouldn't run without a human's sign-off. **Tool approval** pauses the agent before such a call, shows the tool name and arguments, and resumes only after the user chooses one of the approval choices in the chat UI: **Approve** (this one call only), **Always allow in this chat** (this kind of call for the rest of the chat), **Always allow everywhere** (remember it for every chat, offered only for some tools), or **Deny**.
+    Some tool calls shouldn't run without a human's sign-off. **Tool approval** pauses the agent before such a call, shows the tool name and arguments, and resumes only after the user chooses one of the approval choices in the chat UI: **Allow** (this one call only), **Always allow in this chat** (this kind of call for the rest of the chat), **Always allow everywhere** (remember it for every chat, offered only for some tools), or **Deny**.
 
     **Always allow in this chat** applies only to that exact tool on that exact MCP server for the current session. The grant is stored with the session, shared with its subagents, and does not become a global policy.
 
@@ -128,13 +128,12 @@ Each option below is part of the agent definition. The **Set in** line on each s
 
 ## Create an agent via the UI
 
-1. Open TrueForge and use the chat UI to create or edit an agent.
-2. **Select a model** from the providers you configured under Settings → Models.
-3. **Attach connectors** (MCP servers) the agent should use — and set each server's **preload** toggle if you want its tools loaded upfront.
-4. **Attach skills** if the agent should follow specialized procedures (requires [sandbox](/sandbox) enabled).
-5. Write focused **instructions** — role, audience, and behavior.
-6. Set the **Capabilities** toggles (all on by default): Generative UI, Ask clarifying questions, and Dynamic sub-agents.
-7. **Save** the agent so it appears in the [Agent Library](/agent-library).
+1. Click **More** in the left bar, then **Build agent**. The **Set up your agent** panel opens.
+2. Under **What should it do?**, write focused **instructions**: role, audience, and behavior.
+3. Click **Add a connector** for each app the agent should use. Each connector has a **preload** toggle if you want its tools loaded upfront.
+4. Turn on **Sandbox** (just above Skills) if the agent should run code or work with files. Click **Add a skill** if the agent should follow specialized procedures; skills need the [sandbox](/sandbox), so it stays on while skills are attached.
+5. The **model** and **run settings** are folded under **More settings**. The defaults suit most agents. Open it to pick a different model from the providers you configured under Settings → Models.
+6. Click **Save Agent**, give it a name and say what it's for. A name needs at least one letter from a to z. A name with spaces and capitals is saved in lowercase with hyphens, for example `morning-email-helper`. The window asks only for these two things; everything else comes from the setup panel. The **Capabilities** switches (all on by default: Generative UI, Ask clarifying questions, and Dynamic sub-agents) are in **Run settings** under **More settings**. Then click **Save agent** in the window so it appears in the [Agent Library](/agent-library).
 
 
 Options available in the UI today: **model** (selection), **instructions**, **connectors** (attach + preload), **skills**, **sandbox** on/off, and the **Generative UI**, **Ask clarifying questions**, and **Dynamic sub-agents** toggles.

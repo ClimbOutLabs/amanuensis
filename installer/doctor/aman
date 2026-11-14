@@ -11,6 +11,7 @@
 #   aman restore [NAME] [TIME | --latest]
 #   aman upgrade [--check] [--force]
 #   aman import FILE [--instance NAME] [--display-name NAME] [--dry-run]
+#   aman local-model PORT [--instance NAME] [--remove]
 #   aman migrate --from-compose FOLDER [--user ID]
 #
 # --json never loads the terminal style and is the same document as before.
@@ -86,6 +87,8 @@ usage() {
 Usage: aman doctor [--json] [--verbose] [--only ID] [--instance NAME] [--deep] [--local]
        aman doctor instance|network [--fix [--yes]] [--instance NAME]
        aman doctor sandbox [--fix [--yes]] [--instance NAME] [--disk-gb N] [--no-hard-disk-limit]
+         [--add go,rust,java] [--remove go,rust,java] [--add-python PACKAGES] [--remove-python PACKAGES]
+         --add and --add-python put toolchains or your own Python packages in the sandbox and rebuild it
        aman doctor docker|disk|backup|checkout|tls [--fix [--yes]]
        aman backup [NAME]
        aman restore [NAME] [TIME | --latest]
@@ -95,6 +98,8 @@ Usage: aman doctor [--json] [--verbose] [--only ID] [--instance NAME] [--deep] [
        aman import FILE [--instance NAME] [--display-name NAME] [--dry-run]
          --dry-run checks the file and imports nothing; an instance that has never started is started once first
        aman migrate --from-compose FOLDER [--user ID]
+       aman local-model PORT [--instance NAME] [--remove]
+         lets Aman reach a model server on this computer at that port; --remove takes the port away
 USAGE
 }
 
@@ -1187,6 +1192,32 @@ plural() { # count word
   if [ "$1" = 1 ]; then printf '1 %s' "$2"; else printf '%s %ss' "$1" "$2"; fi
 }
 
+# What a part of the report found, for the right end of its heading: "4 ok, 1 problem, 2 skipped".
+section_counts() { # scope
+  local parts=''
+  count_checks "$1"
+  if [ "$N_OK" -gt 0 ]; then parts="$(_ui_s 32 "$N_OK ok")"; fi
+  if [ "$N_FAIL" -gt 0 ]; then parts="${parts:+$parts, }$(_ui_s 31 "$(plural "$N_FAIL" problem)")"; fi
+  if [ "$N_WARN" -gt 0 ]; then parts="${parts:+$parts, }$(_ui_s 33 "$(plural "$N_WARN" warning)")"; fi
+  if [ "$N_OFF" -gt 0 ]; then parts="${parts:+$parts, }$(_ui_s 2 "$N_OFF skipped")"; fi
+  printf '%s' "$parts"
+}
+
+# Every problem, then every warning, each with the one thing to do next, so the end of a long report says it all.
+list_problems() {
+  local want scope id state detail fix label
+  for want in fail warn; do
+    for scope in machine "${INSTANCES[@]+"${INSTANCES[@]}"}"; do
+      while IFS=$'\t' read -r scope id state detail fix; do
+        [ "$state" = "$want" ] || continue
+        label=$detail
+        if [ "$scope" != machine ]; then label="Instance $scope: $detail"; fi
+        if [ "$want" = fail ]; then ui_fail "$label" "$fix"; else ui_warn_again "$label" "$fix"; fi
+      done < <(visible_records "$scope")
+    done
+  done
+}
+
 # The closing block: how many problems and warnings there are, or that all is well.
 print_verdict() {
   local scope fails=0 warns=0 parts=""
@@ -1197,12 +1228,13 @@ print_verdict() {
   done
   if [ "$fails" -gt 0 ]; then parts="$(plural "$fails" problem)"; fi
   if [ "$warns" -gt 0 ]; then parts="${parts:+$parts, }$(plural "$warns" warning)"; fi
-  if [ "$fails" -gt 0 ]; then
-    ui_summary fail "$parts."
-    ui_line "Run the Next command for each, then run aman doctor again."
-  elif [ "$warns" -gt 0 ]; then
-    ui_summary warn "$parts."
-    ui_line "Run the Next command for each, then run aman doctor again."
+  if [ "$fails" -gt 0 ] || [ "$warns" -gt 0 ]; then
+    if [ "$fails" -gt 0 ]; then ui_summary fail "$parts"; else ui_summary warn "$parts"; fi
+    list_problems
+    # Listed just above with what to do, so the closing block does not repeat them.
+    UI_WARNS=
+    ui_gap
+    ui_line "Do the Next step of each, then run aman doctor again."
   else
     ui_summary ok "All checks passed."
   fi
@@ -1230,10 +1262,11 @@ print_text() {
     print_summary
     return
   fi
-  ui_phase "Checking this computer"
+  ui_title "Checks this computer and each instance." "AMAN DOCTOR"
+  ui_section "Checking this computer" "$(section_counts machine)"
   text_checks machine
   for name in "${INSTANCES[@]+"${INSTANCES[@]}"}"; do
-    ui_phase "Checking instance $name"
+    ui_section "Checking instance $name" "$(section_counts "$name")"
     text_checks "$name"
   done
   print_verdict
@@ -1367,6 +1400,13 @@ doctor_sandbox() {
       --yes) yes=1 ;;
       --verbose) UI_VERBOSE=1 ;;
       --no-hard-disk-limit) passthru+=(--no-hard-disk-limit) ;;
+      --add | --remove | --add-python | --remove-python)
+        # Each changes what is in the sandbox, so it rebuilds it the way --fix does.
+        [ $# -ge 2 ] || die_usage "$1 needs a comma-separated list."
+        passthru+=("$1" "$2")
+        fix=1
+        shift
+        ;;
       --disk-gb)
         [ $# -ge 2 ] || die_usage "--disk-gb needs a number."
         passthru+=(--disk-gb "$2")
@@ -1754,6 +1794,45 @@ run_import() {
   run_installer instance import "$instance" "$file" ${rest[@]+"${rest[@]}"}
 }
 
+# aman local-model PORT: the installer's local model bridge for the one instance on this computer, or the one --instance
+# names.
+run_local_model() {
+  local port="" instance="" name count=0 rest=()
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --instance)
+        [ $# -ge 2 ] || die_usage "--instance needs a name."
+        instance=$2
+        shift
+        ;;
+      --remove) rest+=("$1") ;;
+      -*) die_usage "Unknown argument: $1" ;;
+      *)
+        [ -z "$port" ] || die_usage "Unexpected argument: $1"
+        port=$1
+        ;;
+    esac
+    shift
+  done
+  [ -n "$port" ] || die_usage "aman local-model needs the port your model server listens on. Run aman local-model PORT."
+  if [ -z "$instance" ]; then
+    while IFS= read -r name; do
+      [ -n "$name" ] || continue
+      count=$((count + 1))
+      instance=$name
+    done < <(list_instances)
+    if [ "$count" = 0 ]; then
+      printf 'This computer has no Aman instance yet. Run install.sh first.\n' >&2
+      exit 1
+    fi
+    if [ "$count" -gt 1 ]; then
+      printf 'This computer has %s instances, so Aman cannot tell which one should reach the model. Run aman local-model %s --instance NAME.\n' "$count" "$port" >&2
+      exit 2
+    fi
+  fi
+  run_installer instance local-model "$instance" "$port" ${rest[@]+"${rest[@]}"}
+}
+
 # Any aman command renews an https certificate that has 60 days or fewer left, quietly; the installer does it, so it needs
 # the installer's folder to be safe to run, and it never runs from inside the installer's own run.
 renew_tls_if_due() {
@@ -1874,7 +1953,7 @@ write_host_reports() {
 # ---------------------------------------------------------------- main
 
 case "${1:-}" in
-  doctor | backup | upgrade | import | migrate) renew_tls_if_due ;;
+  doctor | backup | upgrade | import | migrate | local-model) renew_tls_if_due ;;
 esac
 
 case "${1:-}" in
@@ -1883,6 +1962,10 @@ case "${1:-}" in
   import)
     shift
     run_import "$@"
+    ;;
+  local-model)
+    shift
+    run_local_model "$@"
     ;;
   password)
     shift
