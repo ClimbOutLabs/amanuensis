@@ -137,11 +137,20 @@ describe('aman secrets', () => {
     expect([...io.out, ...io.err].join('')).not.toContain(keyText);
   }, 120_000);
 
+  it('makes the database when setup runs before the first start', async () => {
+    const sqlite = path.join(dir, 'data', 'fresh.sqlite');
+    const io = fakeIo();
+    expect(await runSecrets({ args: ['init', '--sqlite', sqlite, '--key-file', keyFile], io, env: {} })).toBe(0);
+    const recoveryKey = InitResultSchema.parse(JSON.parse(io.out.join(''))).recovery_key;
+    const check = fakeIo({ stdin: recoveryKey });
+    expect(await runSecrets({ args: ['check-recovery', '--sqlite', sqlite], io: check, env: {} })).toBe(0);
+  }, 120_000);
+
   it('explains a missing database and a missing action', async () => {
     await expect(
       runSecrets({
-        args: ['init', '--sqlite', path.join(dir, 'none.sqlite'), '--key-file', keyFile],
-        io: fakeIo(),
+        args: ['check-recovery', '--sqlite', path.join(dir, 'none.sqlite')],
+        io: fakeIo({ stdin: '0' }),
         env: {},
       }),
     ).rejects.toThrow('No database');

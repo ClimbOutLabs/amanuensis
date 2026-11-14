@@ -3,6 +3,7 @@ import { mkdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 
+import { migrateSqliteToLatest } from '../db/migrateSqlite';
 import { createSqliteDb } from '../db/sqlite/client';
 import { SqliteGlobalSettingsStore } from '../db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
 import { FileKeyProvider, encodeKeyFile } from '../secrets/fileKeyProvider';
@@ -25,6 +26,7 @@ const USAGE = `Usage: aman secrets <init|check-recovery> [--sqlite <file>] [--ke
 
   init            Set up saved secrets for this database and print its recovery key as {"recovery_key": "..."}.
                   Uses the key file if it is there, and makes one only if it is not.
+                  Makes the database too when Aman has not started yet.
   check-recovery  Read a recovery key on stdin and print {"ok": true} if it unlocks this database.
 
 --sqlite defaults to SQLITE_PATH, --key-file to SECRETS_KEY_FILE.
@@ -136,11 +138,16 @@ export async function runSecrets({
     flag: '--sqlite',
     envKey: 'SQLITE_PATH',
   });
-  if (!existsSync(sqlitePath)) {
-    throw new Error(`No database at ${sqlitePath}. Start Aman once so it makes one, then run this again.`);
+  if (action === 'check-recovery' && !existsSync(sqlitePath)) {
+    throw new Error(`No database at ${sqlitePath}. Run "aman secrets init" first.`);
   }
+  await mkdir(path.dirname(sqlitePath), { recursive: true, mode: 0o700 });
   const db = createSqliteDb(sqlitePath);
   try {
+    if (action === 'init') {
+      // Setup runs before the first start, so it also makes the database Aman then opens.
+      await migrateSqliteToLatest(db);
+    }
     const settings = new SqliteGlobalSettingsStore(db);
     if (action === 'check-recovery') {
       await checkRecovery({ settings, io });

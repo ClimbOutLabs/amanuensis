@@ -11,6 +11,7 @@
  */
 import { configureOutboundFetches, extractErrorLogFields } from '@truefoundry/trueforge-core/core';
 import type { Context } from 'hono';
+import { existsSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { configureRemoteAddressCheck, modelUrlProblem } from './runtime/remoteAddress';
@@ -204,9 +205,16 @@ import { ensureEnvManagedTokenFactoryProvider, seedEnvManagedDefaultChatModel } 
 import { TurnDrainRegistry } from './runtime/turnDrains';
 import { createPackageMirrorAllowanceCheck } from './sandbox/mirrors/packageMirrorAllowance';
 import { slotsBackendEnabled, startPackageMirrorGateway, startSkillNetworkGateway } from './sandbox/slotBackend';
+import { EncryptedGoogleConnectionStore } from './secrets/encryptedGoogleConnectionStore';
+import { EncryptedMcpServerStore } from './secrets/encryptedMcpServerStore';
+import { EncryptedModelProviderStore } from './secrets/encryptedModelProviderStore';
+import { EncryptedOAuthTokenStore } from './secrets/encryptedOAuthTokenStore';
+import { EncryptedSandboxProviderStore } from './secrets/encryptedSandboxProviderStore';
+import { EncryptedTelegramStore } from './secrets/encryptedTelegramStore';
 import { FileKeyProvider } from './secrets/fileKeyProvider';
-import { watchForKey } from './secrets/keyWatch';
+import { checkMasterKey } from './secrets/keyCheck';
 import { SecretVault } from './secrets/secretVault';
+import { waitForMachineKey, type KeyCheckResult } from './secrets/startupGate';
 import { printStandaloneStartupBanner } from './startupBanner';
 import { TENANT_ID } from './tenancy';
 import {
@@ -289,6 +297,69 @@ interface ServerPersistence<TTransaction> {
   redis: RedisClientType | undefined;
   /** One shared client for TrueFoundry store resolvers + auth; undefined when TrueFoundry mode is off. */
   serviceFoundryClient: TrueFoundryServiceFoundryServerClient | undefined;
+}
+
+/**
+ * Aman never makes a key here: it waits for the host to deliver the machine key and unlocks
+ * saved secrets once that key matches this instance's database.
+ */
+function machineKeyProvider(): FileKeyProvider {
+  return new FileKeyProvider(configuration.SECRETS_KEY_FILE);
+}
+
+/** The vault for this instance, unlocked with the key the startup gate just checked. */
+async function openSecretVault(settings: IGlobalSettingsStore): Promise<SecretVault> {
+  const vault = new SecretVault({ provider: machineKeyProvider(), settings });
+  const state = await vault.refresh();
+  if (state.status !== 'unlocked') {
+    throw new Error(`This computer's key stopped being available while Aman was starting: ${state.detail}`);
+  }
+  return vault;
+}
+
+/**
+ * Holds startup until the host has delivered the key this instance was set up with. Until then
+ * the port serves only the locked page.
+ */
+async function waitUntilUnlocked({
+  checkKey,
+  logger,
+}: {
+  checkKey: (key: Buffer) => Promise<KeyCheckResult>;
+  logger: Logger;
+}): Promise<void> {
+  await waitForMachineKey({
+    provider: machineKeyProvider(),
+    checkKey,
+    listen: server =>
+      new Promise((resolve, reject) => {
+        server.once('error', reject);
+        server.listen(configuration.PORT, configuration.HOST, () => {
+          resolve();
+        });
+      }),
+    onLockChange: lock => {
+      logger.warn('Aman is locked and waiting', { reason: lock.reason, detail: lock.detail });
+    },
+  });
+  logger.info("Aman is unlocked with this computer's key");
+}
+
+/** Whether `key` is the key this SQLite instance was set up with. A database that does not exist yet was never set up. */
+async function checkStandaloneKey({ sqlitePath, key }: { sqlitePath: string; key: Buffer }): Promise<KeyCheckResult> {
+  if (!existsSync(sqlitePath)) {
+    return 'not_set_up';
+  }
+  const [{ createSqliteDb }, { SqliteGlobalSettingsStore }] = await Promise.all([
+    import('./db/sqlite/client'),
+    import('./db/sqlite/global-settings-store/SqliteGlobalSettingsStore'),
+  ]);
+  const db = createSqliteDb(sqlitePath);
+  try {
+    return await checkMasterKey({ settings: new SqliteGlobalSettingsStore(db), key });
+  } finally {
+    await db.destroy();
+  }
 }
 
 /** Shared ServiceFoundry HTTP client when TrueFoundry mode is on; otherwise undefined. */
@@ -428,6 +499,8 @@ async function createStandalonePersistence(options: {
   logger: Logger;
 }): Promise<ServerPersistence<Transaction<SqliteDatabase>>> {
   const { sqlitePath, logger } = options;
+  // Nothing of this instance is opened before its key is here and matches.
+  await waitUntilUnlocked({ checkKey: key => checkStandaloneKey({ sqlitePath, key }), logger });
   await mkdir(path.dirname(sqlitePath), { recursive: true, mode: 0o700 });
   const [{ createSqliteDb }, { migrateSqliteToLatest }, sqliteStores] = await Promise.all([
     import('./db/sqlite/client'),
@@ -489,15 +562,23 @@ async function createStandalonePersistence(options: {
   logger.info(`Standalone mode: sqlite at ${sqlitePath}`);
   logger.info('Standalone mode: executor peering disabled and Redis unused');
 
-  const tokenStore = new SqliteOAuthTokenStore(db);
+  const globalSettingsStore = new SqliteGlobalSettingsStore(db);
+  const secretVault = await openSecretVault(globalSettingsStore);
+  const tokenStore = new EncryptedOAuthTokenStore({ store: new SqliteOAuthTokenStore(db), vault: secretVault });
   const agentStore = new SqliteAgentStore(db);
-  const modelProviderStore = new SqliteModelProviderStore(db);
+  const modelProviderStore = new EncryptedModelProviderStore({
+    store: new SqliteModelProviderStore(db),
+    vault: secretVault,
+  });
   const mcpServerStore = new McpServerWithAuthStore({
-    store: new SqliteMcpServerStore(db),
+    store: new EncryptedMcpServerStore({ store: new SqliteMcpServerStore(db), vault: secretVault }),
     tokenStore,
     clientName: configuration.MCP_DCR_OAUTH_CLIENT_NAME,
   });
-  const sandboxProviderStore = new SqliteSandboxProviderStore(db);
+  const sandboxProviderStore = new EncryptedSandboxProviderStore({
+    store: new SqliteSandboxProviderStore(db),
+    vault: secretVault,
+  });
   const skillStore = new SqliteSkillStore(db);
   const turnArtifactStore = new SqliteTurnArtifactStore(db);
   return {
@@ -517,10 +598,13 @@ async function createStandalonePersistence(options: {
     turnArtifactStore,
     chatDeletionStore: new SqliteChatDeletionStore({ db, turnArtifactStore }),
     chatImageStore: new SqliteChatImageStore(db),
-    globalSettingsStore: new SqliteGlobalSettingsStore(db),
+    globalSettingsStore,
     tokenFactoryUsageStore: new SqliteTokenFactoryUsageStore(db),
     mcpToolGrantStore: new SqliteMcpToolGrantStore(db),
-    googleConnectionStore: new SqliteGoogleConnectionStore(db),
+    googleConnectionStore: new EncryptedGoogleConnectionStore({
+      store: new SqliteGoogleConnectionStore(db),
+      vault: secretVault,
+    }),
     localUserStore: new SqliteLocalUserStore(db),
     sentinelAuditStore: new SentinelAuditStore(db as Kysely<SentinelAuditDatabase>),
     sentinelSettingsStore: new SqliteSentinelSettingsStore(db),
@@ -532,7 +616,7 @@ async function createStandalonePersistence(options: {
     phoneCallStore: new PhoneCallStore(db),
     noticingStore: new NoticingStore(db),
     pushSubscriptionStore: new PushSubscriptionStore(db),
-    telegramStore: new TelegramStore(db),
+    telegramStore: new EncryptedTelegramStore({ store: new TelegramStore(db), vault: secretVault }),
     approvalTokenStore: new SqliteApprovalTokenStore(db),
     modelProviderStore,
     resolveModelProviderStore: () => modelProviderStore,
@@ -639,15 +723,24 @@ async function createDistributedPersistence(options: {
   }
   logger.info(`Executor id: ${executorId}`);
   const serviceFoundryClient = createServiceFoundryServerClient(logger);
-  const tokenStore = new PostgresOAuthTokenStore(db);
-  const modelProviderStore = new PostgresModelProviderStore(db);
-  const mcpServerStore = new PostgresMcpServerStore(db);
+  const globalSettingsStore = new PostgresGlobalSettingsStore(db);
+  await waitUntilUnlocked({ checkKey: key => checkMasterKey({ settings: globalSettingsStore, key }), logger });
+  const secretVault = await openSecretVault(globalSettingsStore);
+  const tokenStore = new EncryptedOAuthTokenStore({ store: new PostgresOAuthTokenStore(db), vault: secretVault });
+  const modelProviderStore = new EncryptedModelProviderStore({
+    store: new PostgresModelProviderStore(db),
+    vault: secretVault,
+  });
+  const mcpServerStore = new EncryptedMcpServerStore({ store: new PostgresMcpServerStore(db), vault: secretVault });
   const mcpServerWithAuthStore = new McpServerWithAuthStore({
     store: mcpServerStore,
     tokenStore,
     clientName: configuration.MCP_DCR_OAUTH_CLIENT_NAME,
   });
-  const sandboxProviderStore = new PostgresSandboxProviderStore(db);
+  const sandboxProviderStore = new EncryptedSandboxProviderStore({
+    store: new PostgresSandboxProviderStore(db),
+    vault: secretVault,
+  });
   const skillStore = new PostgresSkillStore(db);
   const turnArtifactStore = new PostgresTurnArtifactStore(db);
   const agentStore = new PostgresAgentStore(db);
@@ -710,10 +803,13 @@ async function createDistributedPersistence(options: {
     turnArtifactStore,
     chatDeletionStore: new PostgresChatDeletionStore({ db, turnArtifactStore }),
     chatImageStore: new PostgresChatImageStore(db),
-    globalSettingsStore: new PostgresGlobalSettingsStore(db),
+    globalSettingsStore,
     tokenFactoryUsageStore: new PostgresTokenFactoryUsageStore(db),
     mcpToolGrantStore: new PostgresMcpToolGrantStore(db),
-    googleConnectionStore: new PostgresGoogleConnectionStore(db),
+    googleConnectionStore: new EncryptedGoogleConnectionStore({
+      store: new PostgresGoogleConnectionStore(db),
+      vault: secretVault,
+    }),
     localUserStore: new PostgresLocalUserStore(db),
     sentinelAuditStore: new SentinelAuditStore(db as Kysely<SentinelAuditDatabase>),
     sentinelSettingsStore: new PostgresSentinelSettingsStore(db),
@@ -725,7 +821,7 @@ async function createDistributedPersistence(options: {
     phoneCallStore: new PhoneCallStore(db),
     noticingStore: new NoticingStore(db),
     pushSubscriptionStore: new PushSubscriptionStore(db),
-    telegramStore: new TelegramStore(db),
+    telegramStore: new EncryptedTelegramStore({ store: new TelegramStore(db), vault: secretVault }),
     approvalTokenStore: new PostgresApprovalTokenStore(db),
     modelProviderStore,
     resolveModelProviderStore,
@@ -781,23 +877,6 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     redis,
     serviceFoundryClient,
   } = persistence;
-
-  // Aman never makes a key here: it waits for the host to deliver the machine key and unlocks
-  // saved secrets once that key matches this instance's database.
-  const secretVault = new SecretVault({
-    provider: new FileKeyProvider(configuration.SECRETS_KEY_FILE),
-    settings: globalSettingsStore,
-  });
-  const stopKeyWatch = watchForKey({
-    vault: secretVault,
-    onChange: state => {
-      if (state.status === 'unlocked') {
-        logger.info('Saved secrets are unlocked');
-      } else {
-        logger.warn('Saved secrets are locked', { reason: state.reason, detail: state.detail });
-      }
-    },
-  });
 
   const modelCatalog = ModelCatalog.load();
   // The env-managed Token Factory provider and default model are written before the first request,
@@ -1341,7 +1420,6 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
         ? []
         : [inboundSmsRoute({ settings: configuration.TWILIO, textNumbers, logger }), ...callRoutes.routes],
     twilioSocketRoutes: configuration.TWILIO === undefined ? [] : callRoutes.sockets,
-    stopKeyWatch,
   };
 }
 
@@ -1431,7 +1509,6 @@ try {
     twilioSocketRoutes,
     smsProvider,
     twilioNumber,
-    stopKeyWatch,
   } = configuration.STANDALONE
     ? await createServerRuntime(
         await createStandalonePersistence({ sqlitePath: configuration.SQLITE_PATH, logger }),
@@ -1732,7 +1809,6 @@ try {
       await closePersonaKnowledgeIndexers();
       clearInterval(commandExecutionRecoveryTimer);
       clearInterval(artifactRetentionTimer);
-      stopKeyWatch();
       oidcDiscovery?.stop();
       clearInterval(googlePendingPurgeTimer);
       // Stop serving peer requests (waits for in-flight replies), then close
