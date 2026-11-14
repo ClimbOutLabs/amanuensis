@@ -156,6 +156,8 @@ const TruefoundrySettingsBuilder = () => {
     if (!settingsOpen) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
+      // A window open on top of Settings takes Escape for itself, so one press closes only that window.
+      if (document.querySelector('dialog[open]') !== null) return;
       event.stopImmediatePropagation();
       closeSettings();
     };
