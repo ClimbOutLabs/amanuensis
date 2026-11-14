@@ -40,6 +40,8 @@ The row under the message box holds everything you can add to a message:
 - The model name at the right end says which model answers. See "Pick the model" below.
 - The microphone and the sound-wave button let you talk instead of type. See [Talk to Aman](voice.md).
 
+A small line under the message box says how much room the chat has taken, such as "This chat has used 72K of 128K the model can hold." The numbers count tokens, which are small pieces of words. When the chat fills up, Aman shortens its older messages.
+
 ## Pick the model
 
 1. Click the model name at the right end of the message box. Its tip says "Select model".

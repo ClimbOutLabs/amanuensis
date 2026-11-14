@@ -25,7 +25,7 @@ How to get there: Click **More** in the left bar, then **Settings**, then **Conn
 - **Configured:** the connectors you already set up, with whether each one works.
 - **Add a connector:** a ready-made list of services. Next to each one, a small label says how it signs in: **None**, **API Key** or **OAuth2** (a sign-in window from the service).
 - **Search connectors:** a box to find a connector by name.
-- **Add MCP Server:** a button to add a service that isn't on the list, by its address.
+- **Add a custom connector:** a button to add a service that isn't on the list, by its address.
 
 Some connectors are technically called MCP servers. MCP is the common language Aman uses to talk to these services.
 
@@ -82,18 +82,18 @@ Aman can then work with your issues, pull requests, repository files and CI stat
 There's no Slack on the list, because Slack's server can't set up its own sign-in. To use Slack:
 
 1. Make your own Slack app with MCP turned on, following Slack's MCP guide.
-2. In Aman, click **Add MCP Server** and choose **OAuth (manual)**.
+2. In Aman, click **Add a custom connector** and choose **OAuth (manual)**.
 3. Type the server address from Slack's guide, and paste your app's **Client ID** and **Client Secret**.
 
 Slack's tools read and post as you. Connecting Slack doesn't make Slack a way to chat with Aman.
 
-## Add a connector by its address
+## Add a custom connector
 
 Use this for a service that isn't on the list. The service gives you its address, which often ends in `/mcp`.
 
 The address can be on the internet or on your home network. A service on the same computer as Aman can't be added here. See "Which addresses a connector may use" below.
 
-1. Click **Add MCP Server**.
+1. Click **Add a custom connector**.
 2. Type a **Name** and a short **Description**.
 3. Paste the address in **URL**.
 4. Under **Auth type**, choose how the service signs in. The service's own help says which one to pick:

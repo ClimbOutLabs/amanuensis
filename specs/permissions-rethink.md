@@ -16,7 +16,7 @@ A three-tier permission system. Tier 1 runs silently. Tier 2 asks by default but
 
 Runs without asking:
 
-- Read-only allowlisted shell commands inside the workspace. The server parses the command: it must be a single simple command (no pipes, redirects, or chaining), argv[0] must match the allowlist exactly, flags must be on the command's enumerated flag list, and positional operands are allowed only where the command's own policy permits them (workspace-relative paths).
+- Read-only allowlisted shell commands inside the workspace. The server parses the command: it must be a single simple command, or a list of them joined by `&&`, `||`, `;` or `|` with an optional `cd` into the workspace (no redirects, substitution, or background jobs). In each command argv[0] must match the allowlist exactly, flags must be on the command's enumerated flag list (listed one-letter flags may be written together, such as `-oiE`, and `head`/`tail` take a `-N` line count), and positional operands are allowed only where the command's own policy permits them (workspace-relative paths). No allowlisted command writes a file: flags and operands that would (`sort -o`, a second `uniq` operand) are absent.
 - Local read-only system tools (first-party tools that only read, never write or reach outside the machine).
 - Connector calls admitted by a standing trust (see Connector Tools).
 

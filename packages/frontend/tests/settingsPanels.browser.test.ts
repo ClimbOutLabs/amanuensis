@@ -121,7 +121,7 @@ const PANELS: readonly PanelCheck[] = [
   },
   {
     surface: 'settings:audit',
-    tab: 'Audit',
+    tab: 'Activity log',
     check: async ({ panel }) => {
       await shows(panel.getByText('Nothing recorded yet.', { exact: true }));
     },

@@ -531,7 +531,7 @@ describe('ConnectorSettings edit flow', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
 
     expect(screen.queryByRole('button', { name: 'Replace Key' })).not.toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Edit MCP server' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Edit connector' })).toBeInTheDocument();
     expect(screen.getByLabelText(/Name/)).toHaveValue(connector.name);
 
     fireEvent.click(screen.getByRole('radio', { name: 'None' }));

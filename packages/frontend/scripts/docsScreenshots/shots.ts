@@ -159,7 +159,7 @@ export const SHOTS: readonly Shot[] = [
     steps: [settingsTab('Permissions'), see('Offline mode')],
     crop: SETTINGS_PANEL,
   },
-  { name: 'activity-log-list', world: 'full', steps: [settingsTab('Audit')], crop: SETTINGS_PANEL },
+  { name: 'activity-log-list', world: 'full', steps: [settingsTab('Activity log')], crop: SETTINGS_PANEL },
   // These make new chats, so they come after the chat list. The help chat comes last of all.
   {
     name: 'incognito-banner',
