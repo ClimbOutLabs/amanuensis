@@ -422,6 +422,23 @@ const MAX_MODEL_REQUEST_CHARS = 4_000_000;
 const MODEL_STREAM_SILENT = Symbol('model-stream-silent');
 
 /** Human duration for a watchdog timeout in a user-facing error, e.g. "5 minutes", "90 seconds". */
+/**
+ * An approval that names no account sends from the account its card showed, so an answer from a
+ * place that cannot pick (Telegram, a plain Approve) never goes from a different account than the
+ * one the person saw, even if the default changed or the persona cannot use the default.
+ */
+function withShownMailAccount(input: {
+  decision: ApprovalDecision;
+  card: Tier3Card | null | undefined;
+}): ApprovalDecision {
+  const { decision, card } = input;
+  const shown = card?.mail_from;
+  if (decision.status !== 'allow' || decision.from_account !== undefined || typeof shown !== 'string' || shown === '') {
+    return decision;
+  }
+  return { ...decision, from_account: shown };
+}
+
 function describeTimeout(timeoutMs: number): string {
   if (timeoutMs < 60_000) {
     const seconds = Math.max(1, Math.round(timeoutMs / 1000));
@@ -5173,10 +5190,14 @@ export class AgentThread {
       chatApprovalGrants: this.chatApprovalGrants,
       implementationPlanGrants: this.implementationPlanGrants,
     });
+    const openById = new Map(openCalls.map(call => [call.id, call]));
     const decisions = new Map<string, ApprovalDecision>();
     for (const [id, admission] of admissions) {
       if (admission.decision !== undefined) {
-        decisions.set(id, admission.decision);
+        decisions.set(
+          id,
+          withShownMailAccount({ decision: admission.decision, card: openById.get(id)?.tool_info.tier3_card }),
+        );
       }
     }
     const admissionProvenance = new Map([...admissions].map(([id, admission]) => [id, admission.admission_provenance]));
