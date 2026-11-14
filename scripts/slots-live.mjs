@@ -1,6 +1,7 @@
-// Proves that PDFs and images are read on an installed instance's sandbox, with nothing installed on this machine.
-// The live attachment tests run in a throwaway container from a small image that holds Python, Pillow and fonts for
-// drawing the test images; it mounts this checkout and the instance's slot control volumes the way its app does.
+// Proves on an installed instance's sandbox that PDFs and images are read, or (`--suite coding`) that coding work
+// runs, with nothing installed on this machine. The live tests run in a throwaway container from a small image that
+// holds Python, Pillow and fonts for drawing the test images; it mounts this checkout and the instance's slot control
+// volumes the way its app does.
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
@@ -12,14 +13,34 @@ export const FIX_COMMAND = 'aman doctor sandbox --fix';
 const DEFAULT_INSTANCE = 'main';
 const INSTANCE_PATTERN = /^[a-z][a-z0-9-]{0,23}$/;
 const CORE_PACKAGE = 'packages/trueforge-core';
-const LIVE_TEST_FILE = 'tests/core/sandbox/slots/slots.integration.test.ts';
-const LIVE_TEST_FILTER = 'reading attachments';
+const DEFAULT_SUITE = 'attachments';
+/** What each suite runs and how it words its lines. `filter` is the jest name filter inside `testFile`. */
+export const SUITES = {
+  attachments: {
+    testFile: 'tests/core/sandbox/slots/slots.integration.test.ts',
+    filter: 'reading attachments',
+    starting: 'Reading attachments on',
+    noneRan: 'No attachment cases ran.',
+    passed: 'cases read correctly on the sandbox.',
+    fix: `Run \`${FIX_COMMAND}\`, then run this again.`,
+  },
+  coding: {
+    testFile: 'tests/core/sandbox/slots/sandboxCoding.live.test.ts',
+    filter: 'coding in the sandbox',
+    starting: 'Checking coding work on',
+    noneRan: 'No coding cases ran.',
+    passed: 'coding cases worked on the sandbox.',
+    fix: 'Update Aman and this checkout to the latest version, then run this again.',
+  },
+};
+const USAGE = 'Usage: pnpm test:slots-live [--instance <name>] [--suite attachments|coding]';
 const CONTROL_DIR_IN_CONTAINER = '/run/aman-slots';
 const JEST_CACHE_VOLUME = 'aman-slots-live-jest-cache';
 
-/** `--instance <name>`, default main. Returns the problem as text when the arguments are not usable. */
+/** `--instance <name>` (default main) and `--suite <name>` (default attachments). Returns the problem as text when the arguments are not usable. */
 export function parseArguments(argv) {
   let instance = DEFAULT_INSTANCE;
+  let suite = DEFAULT_SUITE;
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === '--') {
@@ -30,14 +51,22 @@ export function parseArguments(argv) {
       index += 1;
     } else if (argument.startsWith('--instance=')) {
       instance = argument.slice('--instance='.length);
+    } else if (argument === '--suite') {
+      suite = argv[index + 1] ?? '';
+      index += 1;
+    } else if (argument.startsWith('--suite=')) {
+      suite = argument.slice('--suite='.length);
     } else {
-      return { problem: `Unknown argument ${argument}. Usage: pnpm test:slots-live [--instance <name>]` };
+      return { problem: `Unknown argument ${argument}. ${USAGE}` };
     }
+  }
+  if (!Object.hasOwn(SUITES, suite)) {
+    return { problem: `--suite must be attachments or coding. ${USAGE}` };
   }
   if (!INSTANCE_PATTERN.test(instance)) {
     return { problem: '--instance must be 1 to 24 lowercase letters, digits or hyphens, starting with a letter.' };
   }
-  return { instance };
+  return { instance, suite };
 }
 
 /** The Docker volume holding one slot's control socket, as the installer names it. */
@@ -69,16 +98,17 @@ export function testImageTag(dockerfileText) {
   return `aman-slots-live:${createHash('sha256').update(dockerfileText).digest('hex').slice(0, 12)}`;
 }
 
-const PREPARE_AND_RUN = [
-  'set -e',
-  'mkdir -p /cache && chown "$HOST_UID:$HOST_GID" /cache',
-  `cd "$CHECKOUT/${CORE_PACKAGE}"`,
-  // Past this point nothing runs as root, so the checkout gets no root-owned files.
-  `exec setpriv --reuid="$HOST_UID" --regid="$HOST_GID" --clear-groups env HOME=/tmp sh -c 'node scripts/generate-sandbox-scripts.mjs && node ./node_modules/jest/bin/jest.js --config jest.config.cjs --cacheDirectory=/cache --runTestsByPath ${LIVE_TEST_FILE} -t "${LIVE_TEST_FILTER}" --json --outputFile=/out/report.json'`,
-].join('\n');
+const prepareAndRun = suite =>
+  [
+    'set -e',
+    'mkdir -p /cache && chown "$HOST_UID:$HOST_GID" /cache',
+    `cd "$CHECKOUT/${CORE_PACKAGE}"`,
+    // Past this point nothing runs as root, so the checkout gets no root-owned files.
+    `exec setpriv --reuid="$HOST_UID" --regid="$HOST_GID" --clear-groups env HOME=/tmp sh -c 'node scripts/generate-sandbox-scripts.mjs && node ./node_modules/jest/bin/jest.js --config jest.config.cjs --cacheDirectory=/cache --runTestsByPath ${SUITES[suite].testFile} -t "${SUITES[suite].filter}" --json --outputFile=/out/report.json'`,
+  ].join('\n');
 
 /** The `docker run` arguments of the throwaway container. */
-export function throwawayContainerArguments({ instance, slotCount, checkout, outputDir, testImage, uid, gid }) {
+export function throwawayContainerArguments({ instance, suite, slotCount, checkout, outputDir, testImage, uid, gid }) {
   const mounts = Array.from({ length: slotCount }, (_, index) => [
     '-v',
     `${controlVolumeName({ instance, slot: index + 1 })}:${CONTROL_DIR_IN_CONTAINER}/${String(index + 1)}:ro`,
@@ -110,7 +140,7 @@ export function throwawayContainerArguments({ instance, slotCount, checkout, out
     testImage,
     'bash',
     '-c',
-    PREPARE_AND_RUN,
+    prepareAndRun(suite),
   ];
 }
 
@@ -124,7 +154,8 @@ function firstLine(text) {
 }
 
 /** One line per case (✓ or !) and the verdict, from jest's JSON report. */
-export function summarizeReport(report) {
+export function summarizeReport({ report, suite }) {
+  const words = SUITES[suite];
   const cases = report.testResults
     .flatMap(file => file.assertionResults)
     .filter(result => result.status === 'passed' || result.status === 'failed');
@@ -135,12 +166,12 @@ export function summarizeReport(report) {
   );
   const failed = cases.filter(result => result.status === 'failed').length;
   if (cases.length === 0) {
-    lines.push('! No attachment cases ran.');
+    lines.push(`! ${words.noneRan}`);
   }
   const verdict =
     failed === 0 && cases.length > 0
-      ? `PASS: ${String(cases.length)} of ${String(cases.length)} cases read correctly on the sandbox.`
-      : `FAIL: ${String(failed)} of ${String(cases.length)} cases did not work. Run \`${FIX_COMMAND}\`, then run this again.`;
+      ? `PASS: ${String(cases.length)} of ${String(cases.length)} ${words.passed}`
+      : `FAIL: ${String(failed)} of ${String(cases.length)} cases did not work. ${words.fix}`;
   return { lines, verdict, ok: failed === 0 && cases.length > 0 };
 }
 
@@ -185,7 +216,7 @@ export function main(argv) {
     process.stderr.write(`${parsed.problem}\n`);
     return 2;
   }
-  const { instance } = parsed;
+  const { instance, suite } = parsed;
   const checkout = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   const problem = preflight({ instance, checkout });
   if (problem !== undefined) {
@@ -211,11 +242,13 @@ export function main(argv) {
       return 1;
     }
   }
-  say(`Reading attachments on instance ${instance}...`);
+  say(`${SUITES[suite].starting} instance ${instance}...`);
   const outputDir = mkdtempSync(path.join(tmpdir(), 'aman-slots-live-'));
   try {
     const { uid, gid } = userInfo();
-    const run = docker(throwawayContainerArguments({ instance, slotCount, checkout, outputDir, testImage, uid, gid }));
+    const run = docker(
+      throwawayContainerArguments({ instance, suite, slotCount, checkout, outputDir, testImage, uid, gid }),
+    );
     const reportFile = path.join(outputDir, 'report.json');
     if (!existsSync(reportFile)) {
       say(
@@ -224,7 +257,7 @@ export function main(argv) {
       say(`FAIL: nothing ran. Run \`${FIX_COMMAND}\`, then run this again.`);
       return 1;
     }
-    const summary = summarizeReport(JSON.parse(readFileSync(reportFile, 'utf8')));
+    const summary = summarizeReport({ report: JSON.parse(readFileSync(reportFile, 'utf8')), suite });
     for (const line of summary.lines) {
       say(line);
     }

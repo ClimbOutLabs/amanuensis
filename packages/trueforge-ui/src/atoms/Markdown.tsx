@@ -2,7 +2,7 @@
 
 import { normalizeSandboxArtifactBlocks } from '@truefoundry/trueforge-core/core/sandbox/sandboxArtifacts';
 import type { ComponentProps, ComponentType, ReactNode } from 'react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { isValidElement, useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import rehypeKatex from 'rehype-katex';
 import rehypeRaw from 'rehype-raw';
@@ -395,6 +395,11 @@ function makeComponents(opts: {
     },
     // Strip default <pre> wrapper; each block renderer provides its own container.
     pre({ children }: { children?: ReactNode }) {
+      // A fence with no language carries no class, so the code renderer would draw it inline.
+      if (isValidElement<{ className?: string; children?: ReactNode }>(children) && !children.props.className) {
+        const code = String(children.props.children ?? '').replace(/\n$/, '');
+        return <SyntaxHighlighter code={code} language="text" darkTheme={darkTheme} />;
+      }
       return <>{children}</>;
     },
     code({ className, children }) {

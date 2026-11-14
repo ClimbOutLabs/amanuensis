@@ -4,6 +4,11 @@
  * SkillManifest is a `type`-discriminated oneOf of GitSkill | TrueFoundryRegistrySkill.
  */
 import { z } from '@hono/zod-openapi';
+import {
+  API_SERVICE_DECLARATIONS,
+  apiServiceHostsCanSend,
+  type ApiServiceDeclaration,
+} from '@truefoundry/trueforge-core/core/connectors/apiServices';
 import { NameSchema } from './common';
 
 const SKILL_TYPES = ['git', 'truefoundry'] as const;
@@ -90,6 +95,16 @@ export const SkillNetworkHostSchema = z
   .describe('One exact site name the skill needs to reach.');
 
 /**
+ * True when the value is a site name in the form above: an exact host name, never a bare
+ * address. Every place a host arrives from outside a skill's own declaration (a connection
+ * request, a card answer) is checked with this before the host is recorded, granted or
+ * connected to, so a bare address can never be named on a card or stored as an approval.
+ */
+export function isSkillNetworkHostName(value: string): boolean {
+  return SkillNetworkHostSchema.safeParse(value).success;
+}
+
+/**
  * The sites a skill declares it needs. Optional and backward compatible like `when_to_use`: a
  * skill that declares nothing gets no network, and nothing about it changes. Naming a site here
  * grants nothing by itself; the person approves the list in Settings first.
@@ -101,39 +116,81 @@ export const SkillNetworkHostsSchema = z
   .describe('Exact site names the skill needs to reach. The person approves this list in Settings.');
 
 /**
- * Built-in list of sites where a skill can send mail or change a calendar. When a declared list
- * names one of these, the approval in Settings says so in plain words, because approving the site
+ * True when any of the given sites belongs to a service that declares it can send mail or change
+ * a calendar. The fact lives on the service's own declaration in the API service registry, so a
+ * new service brings its answer with it and no list of sites is kept here. When a declared list
+ * names such a site, the approval in Settings says so in plain words, because approving the site
  * approves the sending too: the gateway cannot see inside the encrypted connection to tell a read
- * from a send.
+ * from a send. A site no service declares counts as read-only reach.
  */
-export const SKILL_NETWORK_SEND_CAPABLE_HOSTS: readonly string[] = [
-  'gmail.googleapis.com',
-  'www.googleapis.com',
-  'graph.microsoft.com',
-  'outlook.office365.com',
-];
-
-/** True when any of the given sites can send mail or change a calendar. */
-export function skillNetworkHostsCanSend(hosts: readonly string[]): boolean {
-  return hosts.some(host => SKILL_NETWORK_SEND_CAPABLE_HOSTS.includes(host));
+export function skillNetworkHostsCanSend(
+  hosts: readonly string[],
+  declarations: readonly ApiServiceDeclaration[] = API_SERVICE_DECLARATIONS,
+): boolean {
+  return apiServiceHostsCanSend({ hosts, declarations });
 }
 
 /**
  * The sites a skill may reach right now, from what it declares and what the person approved.
  * Hosts removed from the declaration drop out on their own. A host added to the declaration is
  * not covered by an earlier approval, so nothing is granted until the person approves the new
- * full list: the approval counts only when it covers every declared site.
+ * list: the approval counts only when it covers every declared site. A site the person turned
+ * down is the one exception: it neither counts against the approval nor is granted by it, so
+ * turning one site down does not switch off the sites the person did approve. The turned-down
+ * site stays out, and since the stored approval never named it, clearing its denial grants
+ * nothing either: the list needs a fresh approval first.
  */
 export function effectiveSkillNetworkHosts(input: {
   declared: readonly string[] | undefined;
   approved: readonly string[] | null;
+  denied: readonly string[];
 }): readonly string[] | null {
   const declared = input.declared ?? [];
   if (input.approved === null || declared.length === 0) {
     return null;
   }
+  const denied = new Set(input.denied);
+  const inForce = declared.filter(host => !denied.has(host));
+  if (inForce.length === 0) {
+    return null;
+  }
   const approved = new Set(input.approved);
-  return declared.every(host => approved.has(host)) ? declared : null;
+  return inForce.every(host => approved.has(host)) ? inForce : null;
+}
+
+/**
+ * Every site a skill may reach, from all the ways the person allowed it: the declared list when
+ * its approval is in force, each site allowed on its own (from a card or Settings), and the
+ * session's allow-once sites. A denied site is never included, even when another rule names it:
+ * a denial is the person's latest word on that site until they clear it in Settings.
+ */
+export function grantedSkillNetworkHosts(input: {
+  declared: readonly string[] | undefined;
+  approved: readonly string[] | null;
+  allowed: readonly string[];
+  denied: readonly string[];
+  session: readonly string[];
+}): readonly string[] {
+  const denied = new Set(input.denied);
+  const hosts = new Set<string>();
+  const effective = effectiveSkillNetworkHosts({
+    declared: input.declared,
+    approved: input.approved,
+    denied: input.denied,
+  });
+  for (const host of effective ?? []) {
+    hosts.add(host);
+  }
+  for (const host of input.allowed) {
+    hosts.add(host);
+  }
+  for (const host of input.session) {
+    hosts.add(host);
+  }
+  for (const host of denied) {
+    hosts.delete(host);
+  }
+  return [...hosts];
 }
 
 /** Configured skill document persisted as `skill.manifest`. */
@@ -253,14 +310,19 @@ export const ListSkillVersionsResponseSchema = z
   .openapi('ListSkillVersionsResponse');
 
 /**
- * Network approval state of one skill, as Settings shows it. `approved_hosts` is the list in
- * force right now: null when the person has not approved, or when the skill's declared list grew
- * past what they approved and they need to approve the new full list.
+ * Network approval state of one skill, as Settings shows it. `approved_hosts` is the declared
+ * list in force right now: null when the person has not approved, or when the skill's declared
+ * list grew past what they approved and they need to approve the new full list. `allowed_hosts`
+ * are sites allowed one by one, `denied_hosts` are sites the person turned down, and
+ * `session_hosts` are sites allowed once in a chat that is still open.
  */
 export const SkillNetworkApprovalSchema = z
   .object({
     declared_hosts: SkillNetworkHostsSchema,
     approved_hosts: z.array(SkillNetworkHostSchema).nullable(),
+    allowed_hosts: z.array(SkillNetworkHostSchema),
+    denied_hosts: z.array(SkillNetworkHostSchema),
+    session_hosts: z.array(SkillNetworkHostSchema),
     send_capable: z.boolean().describe('True when a declared site can send mail or change a calendar.'),
   })
   .strict()
@@ -284,6 +346,27 @@ export const UpdateSkillNetworkApprovalResponseSchema = z
 
 export const DeleteSkillNetworkApprovalResponseSchema = z.object({}).openapi('DeleteSkillNetworkApprovalResponse');
 
+/** One site the person is allowing or turning down for a skill, apart from the declared list. */
+export const UpdateSkillNetworkHostRequestSchema = z
+  .object({
+    host: SkillNetworkHostSchema,
+  })
+  .strict()
+  .openapi('UpdateSkillNetworkHostRequest');
+
+export const UpdateSkillNetworkHostResponseSchema = z
+  .object({ data: SkillNetworkApprovalSchema })
+  .openapi('UpdateSkillNetworkHostResponse');
+
+/** Query for removing one site from a skill's allowed or denied list. */
+export const DeleteSkillNetworkHostRequestQuerySchema = z
+  .object({
+    host: SkillNetworkHostSchema,
+  })
+  .openapi('DeleteSkillNetworkHostRequestQuery');
+
+export const DeleteSkillNetworkHostResponseSchema = z.object({}).openapi('DeleteSkillNetworkHostResponse');
+
 export type ConfiguredSkill = z.infer<typeof ConfiguredSkillSchema>;
 export type CreateSkillRequest = z.infer<typeof CreateSkillRequestSchema>;
 export type UpdateSkillRequest = z.infer<typeof UpdateSkillRequestSchema>;
@@ -291,3 +374,4 @@ export type AvailableSkill = z.infer<typeof AvailableSkillSchema>;
 export type SkillVersion = z.infer<typeof SkillVersionSchema>;
 export type SkillNetworkApproval = z.infer<typeof SkillNetworkApprovalSchema>;
 export type UpdateSkillNetworkApprovalRequest = z.infer<typeof UpdateSkillNetworkApprovalRequestSchema>;
+export type UpdateSkillNetworkHostRequest = z.infer<typeof UpdateSkillNetworkHostRequestSchema>;

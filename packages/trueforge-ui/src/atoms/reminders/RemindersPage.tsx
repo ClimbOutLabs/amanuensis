@@ -19,10 +19,12 @@ import { EmptyScreen } from '../EmptyScreen.js';
 import { cn } from '../lib/cn.js';
 import { PageHeader } from '../PageHeader.js';
 import { Button } from '../primitives/Button.js';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../primitives/Dialog.js';
+import { IconButton } from '../primitives/IconButton.js';
 import { Skeleton } from '../primitives/Skeleton.js';
 
-const ROW_CLASS = 'flex w-full items-center gap-3 px-4 py-3 text-left sm:gap-4';
-const PILL_CLASS = 'inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-medium';
+const ROW_CLASS = 'flex min-w-0 flex-1 items-center gap-3 py-2.5 pr-2 pl-3.5 text-left';
+const PILL_CLASS = 'inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[0.6875rem] leading-4 font-medium';
 
 /** The square at the start of a row: the day it is about, or a mark for a reminder with no day queued. */
 function DayTile({ item, moment }: { item: ReminderItem; moment: string | null }) {
@@ -30,14 +32,14 @@ function DayTile({ item, moment }: { item: ReminderItem; moment: string | null }
   return (
     <span
       aria-hidden
-      className="flex size-11 shrink-0 flex-col items-center justify-center rounded-lg bg-secondary-bg text-text-secondary"
+      className="flex size-9 shrink-0 flex-col items-center justify-center rounded-md bg-primary-bg text-text-secondary"
     >
       {tile === null ? (
         <Icon name={item.state === 'paused' ? 'pause' : 'alarm-clock'} className="size-4" />
       ) : (
         <>
           <span className="text-[0.625rem] leading-3 font-semibold tracking-wide uppercase">{tile.month}</span>
-          <span className="text-base leading-5 font-semibold text-text-primary">{tile.day}</span>
+          <span className="text-sm leading-4 font-semibold text-text-primary">{tile.day}</span>
         </>
       )}
     </span>
@@ -47,24 +49,26 @@ function DayTile({ item, moment }: { item: ReminderItem; moment: string | null }
 /** The at-a-glance word on a row: how far off it is, or that it is paused or was missed. */
 function StatusPill({ item, moment, now }: { item: ReminderItem; moment: string | null; now: Date }) {
   if (item.state === 'paused') {
-    return <span className={cn(PILL_CLASS, 'bg-secondary-bg text-text-secondary')}>Paused</span>;
+    return <span className={cn(PILL_CLASS, 'bg-primary-bg text-text-secondary')}>Paused</span>;
   }
   if (item.state === 'missed') {
     return <span className={cn(PILL_CLASS, 'bg-failure-bg/10 text-failure-bg')}>Missed</span>;
   }
   const words = moment === null ? '' : reminderRelativeWords({ iso: moment, timezone: item.timezone, now });
   if (words === '') return null;
-  return <span className={cn(PILL_CLASS, 'bg-secondary-bg text-text-secondary')}>{words}</span>;
+  return <span className={cn(PILL_CLASS, 'bg-primary-bg text-text-secondary')}>{words}</span>;
 }
 
 function ReminderRow({
   item,
   now,
   onOpenChat,
+  onDelete,
 }: {
   item: ReminderItem;
   now: Date;
   onOpenChat: (sessionId: string) => void;
+  onDelete: (item: ReminderItem) => void;
 }) {
   const sessionId = item.sessionId;
   const moment = reminderMoment(item);
@@ -73,40 +77,51 @@ function ReminderRow({
       <DayTile item={item} moment={moment} />
       <span className="min-w-0 flex-1">
         <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-          <span className="text-[0.9375rem] font-semibold break-words text-text-primary">{item.what}</span>
+          <span className="text-[0.8125rem] leading-5 font-medium break-words text-text-primary">{item.what}</span>
           <StatusPill item={item} moment={moment} now={now} />
         </span>
-        <span className="mt-0.5 flex items-center gap-1 text-sm break-words text-text-secondary">
-          {item.repeats ? <Icon name="repeat" className="size-3.5 shrink-0" aria-hidden /> : null}
+        <span className="flex items-center gap-1 text-xs leading-5 break-words text-text-secondary">
+          {item.repeats ? <Icon name="repeat" className="size-3 shrink-0" aria-hidden /> : null}
           {reminderWhenLine(item)}
         </span>
-        <span className="mt-0.5 block text-xs break-words text-text-secondary opacity-80">
+        <span className="block text-xs leading-5 break-words text-text-secondary opacity-80">
           {reminderDetailLine(item)}
         </span>
       </span>
       {sessionId !== null ? (
-        <span className="flex shrink-0 items-center gap-0.5 text-sm text-text-secondary">
+        <span className="flex shrink-0 items-center gap-0.5 text-xs text-text-secondary">
           <span className="hidden sm:inline">Open chat</span>
-          <Icon name="chevron-right" className="size-4 shrink-0" />
+          <Icon name="chevron-right" className="size-3.5 shrink-0" />
         </span>
       ) : (
         <span className="hidden shrink-0 text-xs text-text-secondary sm:inline">No chat to open</span>
       )}
     </>
   );
-  if (sessionId === null) {
-    return <li className={cn(ROW_CLASS, 'border-b border-border last:border-b-0')}>{content}</li>;
-  }
   return (
-    <li className="border-b border-border last:border-b-0">
-      <button
+    <li className="flex items-center border-b border-border last:border-b-0">
+      {sessionId === null ? (
+        <div className={ROW_CLASS}>{content}</div>
+      ) : (
+        <button
+          type="button"
+          className={cn(ROW_CLASS, 'hover:bg-secondary-button-hover')}
+          onClick={() => onOpenChat(sessionId)}
+          aria-label={`${item.what}. Opens the chat it was set in.`}
+        >
+          {content}
+        </button>
+      )}
+      <IconButton
         type="button"
-        className={cn(ROW_CLASS, 'hover:bg-secondary-button-hover')}
-        onClick={() => onOpenChat(sessionId)}
-        aria-label={`${item.what}. Opens the chat it was set in.`}
+        variant="ghost"
+        aria-label={`Delete the reminder: ${item.what}`}
+        tooltip="Delete"
+        className="mr-2 shrink-0 text-text-secondary hover:text-failure-bg"
+        onClick={() => onDelete(item)}
       >
-        {content}
-      </button>
+        <Icon name="trash" className="size-4" />
+      </IconButton>
     </li>
   );
 }
@@ -117,12 +132,14 @@ function ReminderGroup({
   emptyText,
   now,
   onOpenChat,
+  onDelete,
 }: {
   title: string;
   items: ReminderItem[];
   emptyText: string;
   now: Date;
   onOpenChat: (sessionId: string) => void;
+  onDelete: (item: ReminderItem) => void;
 }) {
   return (
     <section aria-label={title} className="flex flex-col gap-2">
@@ -137,9 +154,9 @@ function ReminderGroup({
           {emptyText}
         </p>
       ) : (
-        <ul className="flex flex-col overflow-hidden rounded-xl border border-border bg-paper">
+        <ul className="flex flex-col overflow-hidden rounded-xl border border-border bg-card-bg">
           {items.map(item => (
-            <ReminderRow key={item.id} item={item} now={now} onOpenChat={onOpenChat} />
+            <ReminderRow key={item.id} item={item} now={now} onOpenChat={onOpenChat} onDelete={onDelete} />
           ))}
         </ul>
       )}
@@ -149,7 +166,7 @@ function ReminderGroup({
 
 /**
  * Every reminder the person set, in one place: what is still to come, and what has already gone out.
- * Read-only on purpose. Reminders are set, changed and cancelled in chat, with the persona that set them.
+ * Reminders are set and changed in chat, with the persona that set them. The page can delete one, after asking.
  */
 export function RemindersPage() {
   const { api } = useReminderList();
@@ -159,6 +176,9 @@ export function RemindersPage() {
   const [now, setNow] = useState(() => new Date());
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const [pendingDelete, setPendingDelete] = useState<ReminderItem | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -192,6 +212,35 @@ export function RemindersPage() {
     setList(null);
     setReloadKey(key => key + 1);
   }, []);
+
+  const askDelete = useCallback((item: ReminderItem) => {
+    setDeleteError(null);
+    setPendingDelete(item);
+  }, []);
+
+  const closeDelete = useCallback(() => {
+    setPendingDelete(null);
+    setDeleteError(null);
+  }, []);
+
+  const confirmDelete = useCallback(
+    (item: ReminderItem) => {
+      setDeleting(true);
+      setDeleteError(null);
+      api.deleteReminder(item.id).then(
+        () => {
+          setDeleting(false);
+          setPendingDelete(null);
+          setList(current => (current === null ? null : current.filter(entry => entry.id !== item.id)));
+        },
+        () => {
+          setDeleting(false);
+          setDeleteError('That reminder could not be deleted. Check your connection, then try again.');
+        },
+      );
+    },
+    [api],
+  );
 
   const nothingAtAll = groups !== null && groups.comingUp.length === 0 && groups.alreadyReminded.length === 0;
 
@@ -228,6 +277,7 @@ export function RemindersPage() {
               emptyText="Nothing coming up. Ask in any chat to be reminded."
               now={now}
               onOpenChat={openChat}
+              onDelete={askDelete}
             />
             <ReminderGroup
               title="Already reminded"
@@ -235,10 +285,44 @@ export function RemindersPage() {
               emptyText="Nothing yet. A reminder moves here once its time has come."
               now={now}
               onOpenChat={openChat}
+              onDelete={askDelete}
             />
           </div>
         ) : null}
       </div>
+      {pendingDelete !== null ? (
+        <Dialog
+          open
+          onOpenChange={open => {
+            if (!open) closeDelete();
+          }}
+          aria-label="Delete reminder"
+          className="max-w-md"
+        >
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Delete reminder</DialogTitle>
+              <p className="text-sm text-text-secondary">
+                “{pendingDelete.what}” will be deleted{pendingDelete.repeats ? ' and will not remind you again' : ''}.
+                This cannot be undone.
+              </p>
+              {deleteError !== null ? (
+                <p className="text-sm text-failure-bg" role="alert">
+                  {deleteError}
+                </p>
+              ) : null}
+            </DialogHeader>
+          </DialogContent>
+          <DialogFooter>
+            <Button.Secondary type="button" onClick={closeDelete}>
+              Cancel
+            </Button.Secondary>
+            <Button.Destructive type="button" disabled={deleting} onClick={() => confirmDelete(pendingDelete)}>
+              Delete
+            </Button.Destructive>
+          </DialogFooter>
+        </Dialog>
+      ) : null}
     </div>
   );
 }

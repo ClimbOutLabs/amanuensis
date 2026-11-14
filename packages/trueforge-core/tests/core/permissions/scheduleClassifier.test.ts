@@ -6,7 +6,7 @@ import {
   type SentinelAction,
 } from '../../../src/core/permissions/classifier';
 import { defaultSentinelServices, forUnattendedRun } from '../../../src/core/permissions/context';
-import { GRANT_BARRED_TIER_REASONS, type Tier3Schedule } from '../../../src/core/permissions/tier';
+import type { Tier3Schedule } from '../../../src/core/permissions/tier';
 import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
 
 function makeCtx(): ClassifyContext {
@@ -129,9 +129,17 @@ describe('Schedule tool classification', () => {
     expect(decision).toMatchObject({ tier: 3, auto_deny: 'destination_unverifiable', card: null });
   });
 
-  it('never offers "Always allow" for a pause, a resume or a cancelled reminder', () => {
-    expect(GRANT_BARRED_TIER_REASONS.has('schedule_status')).toBe(true);
-    expect(GRANT_BARRED_TIER_REASONS.has('reminder_cancel')).toBe(true);
+  it('never offers "Always allow" for a pause, a resume or a cancelled reminder', async () => {
+    const pause = await classifyTier(
+      statusAction('pause_schedule', { ...MORNING_BRIEF_STATUS, action: 'pause' }),
+      makeCtx(),
+    );
+    const cancel = await classifyTier(
+      reminderAction('cancel_reminder', { when: 'Monday, October 26 at 6:00 PM', what: 'Take the medicine' }),
+      makeCtx(),
+    );
+    expect(pause.standing_grant_barred).toBe(true);
+    expect(cancel.standing_grant_barred).toBe(true);
   });
 
   it('fails closed on an unknown schedule tool', async () => {

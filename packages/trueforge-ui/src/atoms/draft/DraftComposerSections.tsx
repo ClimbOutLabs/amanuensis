@@ -28,7 +28,7 @@ export function DraftComposerLeftSection({ disabled, isRunning, onAttach }: Comp
       ? [
           {
             id: 'agent-config',
-            label: 'Agent config',
+            label: 'Agent setup',
             icon: 'sliders',
             onSelect: () => shell?.setAgentConfigOpen(true),
           },

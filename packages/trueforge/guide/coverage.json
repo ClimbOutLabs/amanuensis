@@ -28,9 +28,11 @@
     "route:dataExport": "No topic yet: exporting your data to a file.",
     "route:dataImport": "No topic yet: importing data exported from another Aman.",
     "route:mcpOAuth": "Not a screen: the sign-in step a connector's own login comes back through.",
+    "route:recallExclusion": "Not a screen: the rail's × on a fact writes here, for that chat only.",
     "route:repository": "No topic yet: letting a chat work on a code project.",
     "route:sessionMetrics": "Not a screen: internal numbers for the operator.",
     "route:spaceFolder": "No topic yet: putting saved pages in folders.",
+    "route:today": "Not a screen: the read behind the rail's desk on Home.",
     "settings:about": "No topic yet: the About panel shows the version and build; the help check also reports it."
   },
   "questions": [

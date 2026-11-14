@@ -37,9 +37,8 @@ import CalendarSetupPanel from './CalendarSetupPanel.js';
 import ConnectorDetails from './ConnectorDetails.js';
 import EmailSetupPanel from './EmailSetupPanel.js';
 import GoogleSetupPanel from './GoogleSetupPanel.js';
-import { isMemoryProvider, memoryProviderUpdateRequest, withRemediation } from './memoryProvider.js';
 import NotesFolderSetupPanel from './NotesFolderSetupPanel.js';
-import { searchProviderForNewConnector } from './searchProvider.js';
+import { searchProviderForNewConnector, searchProviderUpdateRequest } from './searchProvider.js';
 
 type ConnectorListItem =
   { connector: ConnectorBase; isConfigured: true } | { connector: ConnectorCatalogEntry; isConfigured: false };
@@ -74,6 +73,15 @@ function homeAssistantCheckMessage(result: HomeAssistantCheck): ConnectorCheckSt
     ok: true,
     message: `Connected. ${String(result.toolCount)} ${result.toolCount === 1 ? 'tool' : 'tools'}, ${String(result.entityCount)} exposed ${result.entityCount === 1 ? 'entity' : 'entities'}`,
   };
+}
+
+/** Joins a message the API wrote to a remediation line without doubling its punctuation. */
+function withRemediation({ message, remediation }: { message: string; remediation: string }): string {
+  const trimmed = message.trim();
+  if (trimmed === '') {
+    return remediation;
+  }
+  return /[.!?]$/.test(trimmed) ? `${trimmed} ${remediation}` : `${trimmed}. ${remediation}`;
 }
 
 function connectionTestFailureMessage(result: { kind: ConnectorConnectionFailureKind; message: string }): string {
@@ -260,10 +268,7 @@ const ConnectorSettings = () => {
   const matchingConnected = useMemo(() => {
     const result: ConnectorBase[] = [];
     for (const item of matchingConnectors) {
-      // The memory bank is stored as an MCP server row but is not a connector a user acts on:
-      // it is never offered in a chat, the model never chooses to call it, and Settings → Memory
-      // owns its whole lifecycle. Listing it here too would invite treating it as a connector.
-      if (item.isConfigured && !isMemoryProvider(item.connector)) {
+      if (item.isConfigured) {
         const authenticated = connectors.authStatusById.get(item.connector.id) ?? item.connector.authenticated;
         result.push(
           authenticated === item.connector.authenticated ? item.connector : { ...item.connector, authenticated },
@@ -372,10 +377,10 @@ const ConnectorSettings = () => {
       const existing = connectors.ordered.find(({ connector }) => connector.id === entry.id);
       const existingConnector = existing?.isConfigured ? existing.connector : undefined;
       if (existingConnector) {
-        // updateConnector sends the full manifest, so the memory-provider flag has to be
-        // resupplied here too or it would be silently cleared by this unrelated key change.
+        // updateConnector sends the full manifest, so the search-provider flag is resupplied
+        // here or this unrelated key change would silently clear it.
         await connectorCatalog.updateConnector(
-          memoryProviderUpdateRequest({ ...existingConnector, auth }, isMemoryProvider(existingConnector)),
+          searchProviderUpdateRequest({ ...existingConnector, auth }, isSearchProvider(existingConnector)),
         );
         // The credential just changed, so any earlier connection test no longer speaks to what
         // is stored now; go back to unverified until it is tested again.

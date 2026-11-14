@@ -26,6 +26,8 @@ module.exports = {
   },
   // pnpm stores packages under node_modules/.pnpm/; AI SDK + transitive deps ship as ESM.
   transformIgnorePatterns: [],
+  // A fixed place for compiled files, so CI can keep them between runs. Jest checks each file's content, so an old entry is never used for a changed file.
+  cacheDirectory: '<rootDir>/node_modules/.cache/jest',
   moduleNameMapper: {
     '^(\\.{1,2}/.*)\\.js$': '$1',
     '^@truefoundry/trueforge-sdk$': '<rootDir>/../trueforge-sdk/src/index.ts',

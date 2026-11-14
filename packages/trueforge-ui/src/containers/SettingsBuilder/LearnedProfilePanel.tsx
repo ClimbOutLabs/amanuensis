@@ -88,8 +88,9 @@ export default function LearnedProfilePanel() {
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium text-text-primary">Learn from conversations</p>
                 <p className="mt-0.5 text-xs leading-snug text-text-secondary">
-                  After a conversation, a local model updates this document from it, at most once an hour. You can edit
-                  or clear it any time.
+                  When you tell {assistant} something lasting about yourself, it adds a line here. This uses the same
+                  model call that saves your memories, so it adds no call of its own. When this fills up, the oldest
+                  facts move to your memories and nothing is lost. You can edit or clear it any time.
                 </p>
               </div>
               <Switch

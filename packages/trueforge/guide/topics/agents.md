@@ -10,11 +10,11 @@ How to get there: Click **More** in the left bar, then **Build agent**.
 
 === "Computer"
 
-    ![The Agent Config panel beside a new chat, with Edit Model and Edit Instructions](../../../../docs/screenshots/app/agents-build-desktop.png)
+    ![The Set up your agent panel beside a new chat, asking what it should do, with Add a connector and Add a skill](../../../../docs/screenshots/app/agents-build-desktop.png)
 
 === "Phone"
 
-    ![The Agent Config panel on a phone, with Edit Model and Edit Instructions](../../../../docs/screenshots/app/agents-build-phone.png)
+    ![The Set up your agent panel on a phone, asking what it should do, with Add a connector and Add a skill](../../../../docs/screenshots/app/agents-build-phone.png)
 
 !!! note "Agent or persona?"
 
@@ -22,14 +22,14 @@ How to get there: Click **More** in the left bar, then **Build agent**.
 
 ## Build an agent
 
-1. Click **More** in the left bar, then **Build agent**. A new chat opens with the **Agent Config** panel beside it.
-2. Click **Edit Model** and choose a model.
-3. Click **Edit Instructions** and write what the agent should do, such as "Every week, sum up my unpaid bills in a short list."
-4. Add any connectors and skills the agent needs in the same panel.
+1. Click **More** in the left bar, then **Build agent**. A new chat opens with the **Set up your agent** panel beside it.
+2. Under **What should it do?**, click **Edit Instructions** and write the job in your own words, such as "Every week, sum up my unpaid bills in a short list."
+3. To let it use your apps, click **Add a connector**. To let it run code and work with files, turn on **Sandbox**. To give it extra know-how, click **Add a skill**. Skills need the sandbox, so it stays on while the agent has skills.
+4. The model and run settings sit under **More settings**. The usual choices work for most agents. To pick another model, open **More settings** and click **Edit Model**.
 5. Try it out in the chat until it does what you want.
 6. Click **Save Agent**.
-7. Type an **Agent name** and a **Description**. You need both.
-8. Click **Save changes**.
+7. Type a **Name** and say **What it's for**. You need both. Spaces and capitals are fine.
+8. Click **Save agent**.
 
 ## Use an agent
 
@@ -37,6 +37,8 @@ How to get there: Click **More** in the left bar, then **Build agent**.
 2. Click **Try** on your agent's row. A chat opens with that agent.
 
 To run it on a schedule, point at its row and click **Schedule**. See [Schedules](schedules.md).
+
+When you make a schedule by asking in a chat, Aman saves an agent for it, named after the schedule. It shows up here, and you can change its tools, instructions or model. Deleting the schedule leaves the agent in place.
 
 ## Change, copy or delete an agent
 
@@ -46,6 +48,16 @@ Open **Agents**, then click the menu at the end of the agent's row:
 - **Clone** makes a copy you can change without touching the original.
 - **Manage Schedules** shows the schedules that use it.
 - **Delete** removes it. Aman asks first.
+
+## Choose when an agent summarizes a long chat
+
+A model can only read so much of a chat at once. When a chat gets long, Aman summarizes its oldest part so the model can keep going.
+
+1. In the **Set up your agent** panel, open **More settings**, then click the edit button on **Run settings**.
+2. Find **When to summarize long chats**.
+3. Pick **Automatic (recommended)** to let Aman decide from the model's size limit. If that limit isn't known, Aman uses a safe default.
+4. Or pick **At a set size** and type the chat size to summarize at. It starts near the size Automatic would use for that model.
+5. Close the panel, then click **Save Agent**.
 
 ## Good to know
 

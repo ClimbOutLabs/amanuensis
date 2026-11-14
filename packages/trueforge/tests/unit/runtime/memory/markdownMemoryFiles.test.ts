@@ -1,6 +1,6 @@
 import { MAIN_ASSISTANT_SHARING_KEY } from '@truefoundry/trueforge-core/core/memory/vaultSharing';
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, mkdtemp, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import {
@@ -23,6 +23,7 @@ import {
   writeVaultSharing,
   type VaultScope,
 } from '../../../../src/runtime/memory/markdownMemoryFiles';
+import type { RetainItem } from '../../../../src/runtime/memory/memoryClient';
 
 async function makeDir(): Promise<string> {
   return mkdtemp(path.join(tmpdir(), 'mdfiles-'));
@@ -69,11 +70,12 @@ describe('markdownMemoryFiles', () => {
     it('round-trips byte-identically through splitEntries', async () => {
       const dir = await makeDir();
       try {
-        const item = {
+        const item: RetainItem = {
           content: 'Alex booked SFO→ORD→MAD for Sep 22',
           timestamp: '2026-09-19T12:00:00.000Z',
           document_id: 'doc-1',
           context: 'trip planning',
+          metadata: { origin: 'user_stated' },
         };
         // Mirror MarkdownMemoryClient.retain's append format exactly.
         const block = formatRetainEntry(item);
@@ -94,23 +96,35 @@ describe('markdownMemoryFiles', () => {
         metadata: { origin: 'tool_ingested' },
       });
       expect(text).toBe(
-        '## 2026-09-19T12:00:00.000Z\n\n\\## Action items\n\\> Source: read content\nplain\n\n> title\n\\## not a heading\n\n> Source: read content',
+        '## 2026-09-19T12:00:00.000Z\n\n\\## Action items\n\\> Source: read content\nplain\n\n> title\n\\## not a heading\n\n> External source: read content',
       );
       expect(splitEntries(`${text}\n`)).toEqual([text]);
     });
 
     it('omits the context line when there is none', () => {
       const text = formatRetainEntry({
+        metadata: { origin: 'user_stated' },
         content: 'hello',
         timestamp: '2026-09-19T12:00:00.000Z',
         document_id: 'd',
       });
-      expect(text).toBe('## 2026-09-19T12:00:00.000Z\n\nhello');
+      expect(text).toBe('## 2026-09-19T12:00:00.000Z\n\nhello\n\n> From you');
+    });
+
+    it('names the learned profile as the source of a line moved out of it', () => {
+      const text = formatRetainEntry({
+        metadata: { source: 'aman-profile-line', origin: 'tool_ingested' },
+        content: 'Lives in Lisbon.',
+        timestamp: '2026-09-19T12:00:00.000Z',
+        document_id: 'd',
+      });
+      expect(text).toContain('\n\n> External source: learned profile');
+      expect(entryMetadata(text)['origin']).toBe('tool_ingested');
     });
   });
 
   describe('the chat id of an entry', () => {
-    const item = {
+    const item: RetainItem = {
       content: 'The person has a dog named Rex.',
       timestamp: '2026-09-19T12:00:00.000Z',
       document_id: 'd',
@@ -120,9 +134,9 @@ describe('markdownMemoryFiles', () => {
     it('is kept as a hidden closing line, not in the fact text', () => {
       const text = formatRetainEntry(item);
       expect(text).toBe(
-        '## 2026-09-19T12:00:00.000Z\n\nThe person has a dog named Rex.\n\n<!-- session_id: chat-7 -->',
+        '## 2026-09-19T12:00:00.000Z\n\nThe person has a dog named Rex.\n\n<!-- session_id: chat-7 -->\n\n> From you',
       );
-      expect(withoutHiddenMarkers(text)).toBe('The person has a dog named Rex.');
+      expect(withoutHiddenMarkers(text)).toBe('The person has a dog named Rex.\n\n> From you');
       expect(splitEntries(`${text}\n`)).toEqual([text]);
     });
 
@@ -135,19 +149,19 @@ describe('markdownMemoryFiles', () => {
     it('is dropped whole when an entry carries more than one closing marker', () => {
       const text =
         '## 2026-09-19T12:00:00.000Z\n\nA fact.\n\n<!-- session_id: old-1 -->\n\n<!-- session_id: chat-2 -->';
-      expect(entryMetadata(text)).toEqual({ session_id: 'chat-2' });
-      expect(withoutHiddenMarkers(text)).toBe('A fact.');
+      expect(entryMetadata(text)).toEqual({ session_id: 'chat-2', origin: 'tool_ingested' });
+      expect(withoutHiddenMarkers(text)).toBe('A fact.\n\n> External source: no record');
     });
 
     it('is dropped from an entry that also closes with the read-content line', () => {
       const text = '## 2026-09-19T12:00:00.000Z\n\nA fact.\n\n<!-- session_id: chat-2 -->\n\n> Source: read content';
-      expect(withoutHiddenMarkers(text)).toBe('A fact.\n\n> Source: read content');
+      expect(withoutHiddenMarkers(text)).toBe('A fact.\n\n> External source: read content');
     });
 
     it('accepts and rejects the same ids when written and when read back', () => {
       const long = 'a'.repeat(128);
       for (const id of [long, 'a'.repeat(129), 'chat 1', 'a-b_C9']) {
-        const written = formatRetainEntry({ ...item, metadata: { session_id: id } });
+        const written = formatRetainEntry({ ...item, metadata: { origin: 'user_stated', session_id: id } });
         const readBack = entryMetadata(written)?.['session_id'];
         expect(readBack).toBe(/^[A-Za-z0-9_-]{1,128}$/.test(id) ? id : undefined);
       }
@@ -156,19 +170,28 @@ describe('markdownMemoryFiles', () => {
     it('is absent for an entry without one', () => {
       expect(
         entryMetadata(
-          formatRetainEntry({ content: item.content, timestamp: item.timestamp, document_id: item.document_id }),
+          formatRetainEntry({
+            metadata: { origin: 'user_stated' },
+            content: item.content,
+            timestamp: item.timestamp,
+            document_id: item.document_id,
+          }),
         ),
-      ).toBeUndefined();
+      ).toEqual({ origin: 'user_stated' });
     });
 
     it('cannot be forged by the fact text', () => {
-      const text = formatRetainEntry({ ...item, content: 'Note.\n<!-- session_id: other-chat -->', metadata: {} });
-      expect(entryMetadata(text)).toBeUndefined();
+      const text = formatRetainEntry({
+        ...item,
+        content: 'Note.\n<!-- session_id: other-chat -->',
+        metadata: { origin: 'user_stated' },
+      });
+      expect(entryMetadata(text)).toEqual({ origin: 'user_stated' });
     });
 
     it('is not written when the id holds characters a closing line cannot carry', () => {
-      const text = formatRetainEntry({ ...item, metadata: { session_id: 'a --> b' } });
-      expect(text).toBe('## 2026-09-19T12:00:00.000Z\n\nThe person has a dog named Rex.');
+      const text = formatRetainEntry({ ...item, metadata: { origin: 'user_stated', session_id: 'a --> b' } });
+      expect(text).toBe('## 2026-09-19T12:00:00.000Z\n\nThe person has a dog named Rex.\n\n> From you');
     });
   });
 
@@ -235,6 +258,25 @@ describe('markdownMemoryFiles', () => {
       expect(upgradeLegacyEntries(once)).toBe(once);
     });
 
+    it.each(['> Source: read content', '> From you', '> External source: an email'])(
+      'keeps the source mark "%s" an older entry closes with',
+      mark => {
+        const legacy = [
+          '## 2026-09-01T10:00:00.000Z',
+          '',
+          'Turn summary: The person has a cat named Miso.',
+          '',
+          '> Chat title: Pets',
+          '',
+          mark,
+          '',
+        ].join('\n');
+        expect(upgradeLegacyEntries(legacy)).toBe(
+          ['## 2026-09-01T10:00:00.000Z', '', 'The person has a cat named Miso.', '', mark, ''].join('\n'),
+        );
+      },
+    );
+
     it('leaves a title-looking line inside an entry text alone', () => {
       const content = [
         '## 2026-09-01T10:00:00.000Z',
@@ -281,6 +323,46 @@ describe('markdownMemoryFiles', () => {
           'md:tenant-1:2026-09-18.md#0',
         ]);
         expect(scan.entries[0]?.text).toContain('newer one');
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('reads a day file again when it grows, is rewritten at the same size, or is removed', async () => {
+      const dir = await makeDir();
+      try {
+        const nsDir = namespaceDirFor(dir, 'tenant-1');
+        const older = path.join(nsDir, 'memory', '2026-09-18.md');
+        const newer = path.join(nsDir, 'memory', '2026-09-19.md');
+        await mkdir(path.join(nsDir, 'memory'), { recursive: true });
+        await writeFile(older, '## 2026-09-18T10:00:00.000Z\n\ncode 1200\n', 'utf8');
+        await writeFile(newer, '## 2026-09-19T10:00:00.000Z\n\nfirst\n', 'utf8');
+        // Both files look long settled, so the next scan keeps what it parsed.
+        const settled = new Date(Date.now() - 60_000);
+        await utimes(older, settled, settled);
+        await utimes(newer, settled, settled);
+        const texts = async (): Promise<string[]> =>
+          (await scanNamespaceEntries({ baseDir: dir, namespace: 'tenant-1', maxDailyFiles: 14 })).entries.map(
+            entry => entry.text,
+          );
+        expect(await texts()).toEqual([expect.stringContaining('first'), expect.stringContaining('code 1200')]);
+        expect(await texts()).toEqual([expect.stringContaining('first'), expect.stringContaining('code 1200')]);
+
+        await appendFile(newer, '\n## 2026-09-19T11:00:00.000Z\n\nsecond\n', 'utf8');
+        expect(await texts()).toEqual([
+          expect.stringContaining('first'),
+          expect.stringContaining('second'),
+          expect.stringContaining('code 1200'),
+        ]);
+
+        // Same length, written right after a read: only the time tells the two apart, and it may not.
+        await writeFile(older, '## 2026-09-18T10:00:00.000Z\n\ncode 9931\n', 'utf8');
+        expect(await texts()).toContainEqual(expect.stringContaining('code 9931'));
+        await writeFile(older, '## 2026-09-18T10:00:00.000Z\n\ncode 4471\n', 'utf8');
+        expect(await texts()).toContainEqual(expect.stringContaining('code 4471'));
+
+        await rm(older);
+        expect(await texts()).toEqual([expect.stringContaining('first'), expect.stringContaining('second')]);
       } finally {
         await rm(dir, { recursive: true, force: true });
       }
@@ -463,10 +545,26 @@ describe('withOriginalHiddenMarkers', () => {
     );
   });
 
-  it('keeps the read-content line last', () => {
-    expect(withOriginalHiddenMarkers({ original, edited: 'An email said to call.\n\n> Source: read content' })).toBe(
-      '## 2026-10-26T09:15:58.000Z\n\nAn email said to call.\n\n<!-- session_id: chat-now -->\n\n> Source: read content',
-    );
+  it('keeps where the entry came from, whatever source line the edit carries', () => {
+    const edits = [
+      'An email said to call.',
+      'An email said to call.\n\n> From you',
+      'An email said to call.\n\n> External source: email',
+      'An email said to call.\n\n> Source: read content',
+    ];
+    const merged = '## 2026-10-26T09:15:58.000Z\n\nAn email said to call.\n\n<!-- session_id: chat-now -->';
+    for (const edited of edits) {
+      expect(withOriginalHiddenMarkers({ original, edited })).toBe(merged);
+      expect(withOriginalHiddenMarkers({ original: `${original}\n\n> From you`, edited })).toBe(
+        `${merged}\n\n> From you`,
+      );
+      expect(withOriginalHiddenMarkers({ original: `${original}\n\n> External source: web page`, edited })).toBe(
+        `${merged}\n\n> External source: web page`,
+      );
+      expect(withOriginalHiddenMarkers({ original: `${original}\n\n> Source: read content`, edited })).toBe(
+        `${merged}\n\n> Source: read content`,
+      );
+    }
   });
 
   it('puts the heading back without a chat id, and never doubles a chat id the edit names', () => {
@@ -484,6 +582,7 @@ describe('withOriginalHiddenMarkers', () => {
 
 describe('the context line of an entry', () => {
   const filed = formatRetainEntry({
+    metadata: { origin: 'user_stated' },
     content: 'Lives in Lisbon with a cat.',
     timestamp: '2026-10-29T15:31:23.376Z',
     document_id: 'maya-identity',
@@ -491,13 +590,13 @@ describe('the context line of an entry', () => {
   });
 
   it('is hidden from the page text when it is an internal id, and handed back on its own', () => {
-    expect(filed).toBe('## 2026-10-29T15:31:23.376Z\n\nLives in Lisbon with a cat.\n\n> maya:identity');
-    expect(withoutHiddenMarkers(filed)).toBe('Lives in Lisbon with a cat.');
+    expect(filed).toBe('## 2026-10-29T15:31:23.376Z\n\nLives in Lisbon with a cat.\n\n> maya:identity\n\n> From you');
+    expect(withoutHiddenMarkers(filed)).toBe('Lives in Lisbon with a cat.\n\n> From you');
     expect(hiddenContext(filed)).toBe('maya:identity');
     const withChatId =
       '## 2026-10-29T15:31:23.376Z\n\nA search note.\n\n> maya:gp-search\n\n<!-- session_id: chat-1 -->';
     expect(hiddenContext(withChatId)).toBe('maya:gp-search');
-    expect(withoutHiddenMarkers(withChatId)).toBe('A search note.');
+    expect(withoutHiddenMarkers(withChatId)).toBe('A search note.\n\n> External source: no record');
   });
 
   it('stays on the page when it has spaces, like a source line or a chat title', () => {
@@ -507,67 +606,78 @@ describe('the context line of an entry', () => {
       document_id: 'd',
       metadata: { origin: 'tool_ingested' },
     });
-    expect(withoutHiddenMarkers(read)).toBe('Priya asked for the signed form.\n\n> Source: read content');
+    expect(withoutHiddenMarkers(read)).toBe('Priya asked for the signed form.\n\n> External source: read content');
     const titled = '## 2026-09-19T12:00:00.000Z\n\nThe dentist is Dr Rivera.\n\n> Chat title: Health admin';
-    expect(withoutHiddenMarkers(titled)).toBe('The dentist is Dr Rivera.\n\n> Chat title: Health admin');
+    expect(withoutHiddenMarkers(titled)).toBe(
+      'The dentist is Dr Rivera.\n\n> Chat title: Health admin\n\n> External source: no record',
+    );
     expect(hiddenContext(titled)).toBeUndefined();
-    expect(withoutHiddenMarkers('## 2026-09-19T12:00:00.000Z\n\nSee a:b for details.')).toBe('See a:b for details.');
+    expect(withoutHiddenMarkers('## 2026-09-19T12:00:00.000Z\n\nSee a:b for details.')).toBe(
+      'See a:b for details.\n\n> External source: no record',
+    );
   });
 
   it('stays on the page when it starts with a digit, like a time, and is hidden when it starts with a letter', () => {
     for (const line of ['> 09:30', '> 3:4']) {
       const note = `## 2026-10-29T15:31:23.376Z\n\nCall the clinic.\n\n${line}`;
-      expect(withoutHiddenMarkers(note)).toBe(`Call the clinic.\n\n${line}`);
+      expect(withoutHiddenMarkers(note)).toBe(`Call the clinic.\n\n${line}\n\n> External source: no record`);
       expect(hiddenContext(note)).toBeUndefined();
     }
     for (const id of ['maya:identity', 'demo_synthetic:gp-search']) {
       const note = `## 2026-10-29T15:31:23.376Z\n\nA filed note.\n\n> ${id}`;
-      expect(withoutHiddenMarkers(note)).toBe('A filed note.');
+      expect(withoutHiddenMarkers(note)).toBe('A filed note.\n\n> External source: no record');
       expect(hiddenContext(note)).toBe(id);
     }
   });
 
   it('comes back, with the time heading, when the page saves an edit', () => {
     const edited = withOriginalHiddenMarkers({ original: filed, edited: 'Lives in Porto with a cat.' });
-    expect(edited).toBe('## 2026-10-29T15:31:23.376Z\n\nLives in Porto with a cat.\n\n> maya:identity');
-    expect(withoutHiddenMarkers(edited)).toBe('Lives in Porto with a cat.');
+    expect(edited).toBe('## 2026-10-29T15:31:23.376Z\n\nLives in Porto with a cat.\n\n> maya:identity\n\n> From you');
+    expect(withoutHiddenMarkers(edited)).toBe('Lives in Porto with a cat.\n\n> From you');
     expect(hiddenContext(edited)).toBe('maya:identity');
   });
 });
 
 describe('document id trailer', () => {
-  const item = {
+  const item: RetainItem = {
     content: 'Likes tea.',
     timestamp: '2026-09-19T12:00:00.000Z',
     document_id: 'aman-learned-profile-abc123',
-    metadata: { session_id: 'chat-7', replace_document: 'true' },
+    metadata: { origin: 'user_stated', session_id: 'chat-7', replace_document: 'true' },
   };
 
   it('is a hidden closing line that survives a round trip and an edit', () => {
     const text = formatRetainEntry(item);
     expect(text).toBe(
-      '## 2026-09-19T12:00:00.000Z\n\nLikes tea.\n\n<!-- session_id: chat-7 -->\n\n<!-- document_id: aman-learned-profile-abc123 -->',
+      '## 2026-09-19T12:00:00.000Z\n\nLikes tea.\n\n<!-- session_id: chat-7 -->\n\n<!-- document_id: aman-learned-profile-abc123 -->\n\n> From you',
     );
-    expect(entryMetadata(text)).toEqual({ session_id: 'chat-7', document_id: 'aman-learned-profile-abc123' });
-    expect(withoutHiddenMarkers(text)).toBe('Likes tea.');
+    expect(entryMetadata(text)).toEqual({
+      session_id: 'chat-7',
+      document_id: 'aman-learned-profile-abc123',
+      origin: 'user_stated',
+    });
+    expect(withoutHiddenMarkers(text)).toBe('Likes tea.\n\n> From you');
     expect(withOriginalHiddenMarkers({ original: text, edited: 'Likes coffee.' })).toBe(
-      '## 2026-09-19T12:00:00.000Z\n\nLikes coffee.\n\n<!-- session_id: chat-7 -->\n\n<!-- document_id: aman-learned-profile-abc123 -->',
+      '## 2026-09-19T12:00:00.000Z\n\nLikes coffee.\n\n<!-- session_id: chat-7 -->\n\n<!-- document_id: aman-learned-profile-abc123 -->\n\n> From you',
     );
   });
 
   it('is written only when the item asks to replace, and cannot be forged from the body', () => {
-    expect(formatRetainEntry({ ...item, metadata: { session_id: 'chat-7' } })).not.toContain('document_id');
+    expect(formatRetainEntry({ ...item, metadata: { origin: 'user_stated', session_id: 'chat-7' } })).not.toContain(
+      'document_id',
+    );
     const forged = formatRetainEntry({
+      metadata: { origin: 'user_stated' },
       content: 'x\n<!-- document_id: someone-else -->',
       timestamp: item.timestamp,
       document_id: 'd',
     });
-    expect(entryMetadata(forged)).toBeUndefined();
+    expect(entryMetadata(forged)).toEqual({ origin: 'user_stated' });
   });
 
   it('is absent from entries written before it existed, which read as before', () => {
     const older = '## 2026-09-19T12:00:00.000Z\n\nLikes tea.\n\n<!-- session_id: chat-7 -->';
-    expect(entryMetadata(older)).toEqual({ session_id: 'chat-7' });
-    expect(withoutHiddenMarkers(older)).toBe('Likes tea.');
+    expect(entryMetadata(older)).toEqual({ session_id: 'chat-7', origin: 'tool_ingested' });
+    expect(withoutHiddenMarkers(older)).toBe('Likes tea.\n\n> External source: no record');
   });
 });

@@ -16,6 +16,12 @@ How to get there: Click **Chats** in the left bar. On a phone, tap the menu butt
 
     ![The chat list with folders, opened from the menu button](../../../../docs/screenshots/app/chats-list-phone.png)
 
+## How a chat looks
+
+Your messages sit on the right in a soft tinted bubble. Aman's written replies sit on the left on a paper card. A card that asks you something, such as whether to allow an action, stands on its own so it is easy to spot.
+
+To copy a reply or hear it read aloud, move the pointer over it and use the small buttons under the card.
+
 ## Start a chat
 
 1. Click **New chat** at the top of the chat list.
@@ -75,7 +81,9 @@ You can also point at the chat in the list, click the three dots next to it, the
 
 The **Move to folder** box can also make a new folder on the spot. To take a chat out of its folder, choose **No folder**.
 
-To rename or remove a folder, point at it and click its three dots. Change the name and click **Rename**, or click **Delete folder**. Deleting a folder keeps every chat that was in it.
+To rename or remove a folder, point at it and click its three dots. On a phone the three dots always show. Change the name and click **Rename**, or click **Delete folder**. Deleting a folder keeps every chat that was in it.
+
+On a computer, the number next to a folder is how many chats are in it.
 
 ## Delete a chat
 
@@ -102,14 +110,24 @@ If a step failed, one plain line under the answer says so, even with the switch 
 
 ## The panel on the right
 
-On a computer, a panel on the right shows how Aman is doing.
+On a computer, a panel on the right shows how Aman is doing, and what is coming up or waiting for you.
 
-- The line under Aman's picture says "Ready", "Waiting for you" when a card needs your answer, or that the connection has a problem. When the connection drops, click **Retry**.
+- The line under Aman's picture says only how Aman is doing: "Ready", "Waiting for you" when a card needs your answer, or that the connection has a problem. When the connection drops, click **Retry**.
 - "Answering" shows the persona that answers this chat, when it is not Aman.
+- On the new chat screen, **Today** lists your calendar for the day and when you are free. **Due** lists today's reminders that have not gone off yet. **Needs your OK** lists actions that wait for your answer. Click a reminder or an action to open its chat.
+- In a chat, **From memory** lists what Aman remembered for your last message. Click it to open the list. When your last message used nothing from memory, the row stays and says so. The × takes a memory out of this chat only. **Delete** removes the memory everywhere, after it asks you once. A line from one of your pages names the page, and you change it on that page. **Manage memory** opens your memory settings.
 - **Activity** lists what Aman did in this chat. Click **Audits** to see the full list in Settings.
 - **Rules** says what Aman may do here without asking, such as web searches, and whether Offline mode is on.
 
-Click the arrow at the top of the panel to fold it away, and again to bring it back. On a phone, or in a narrow window, the panel is a strip at the bottom with only Aman's name.
+Click the arrow at the top of the panel to fold it away, and again to bring it back. On a phone, or in a narrow window, the panel is a strip at the bottom. Open, it shows Aman's name and the same lists, such as **Due** and **Needs your OK**. Scroll the strip to see them all. Folded, it shows only Aman's picture.
+
+When a reminder goes off, it leaves **Due** and shows under the **For you** bell instead.
+
+## See which chats have new answers
+
+In the list of chats, a dot and a bold title mark a chat with an answer you haven't opened yet. Open the chat and the mark goes away.
+
+Each browser keeps its own marks, so reading a chat on your phone doesn't clear its mark on your laptop.
 
 ## Good to know
 

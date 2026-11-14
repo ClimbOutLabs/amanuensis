@@ -108,7 +108,7 @@ export function ThreadContainer({ composer }: ThreadContainerProps) {
       ? shell.mode.agentName != null && shell.mode.agentName.length > 0
         ? shell.mode.agentName
         : shell.mode.isMutable && shell.mode.isCreateAgent
-          ? 'Start building a new Agent'
+          ? 'Try your new agent here'
           : undefined
       : undefined;
 

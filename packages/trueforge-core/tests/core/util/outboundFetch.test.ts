@@ -1,6 +1,8 @@
 import {
+  OutboundRedirectRefusedError,
   isOutboundBodyTimeout,
   isRetryableOutboundTransportError,
+  withCheckedRedirects,
   withOutboundHttpRetries,
   type OutboundFetchOptions,
 } from '../../../src/core/util/outboundFetch';
@@ -228,5 +230,145 @@ describe('withOutboundHttpRetries', () => {
       withOutboundHttpRetries(fetchFn, MODEL_OPTIONS)('https://model.example/v1', { signal: controller.signal }),
     ).rejects.toMatchObject({ name: 'AbortError' });
     expect(calls()).toBe(0);
+  });
+});
+
+describe('withCheckedRedirects', () => {
+  function redirectTo(location: string, status = 302): Response {
+    return new Response(null, { status, headers: { location } });
+  }
+
+  /** A base fetch that answers from a table keyed by URL and records the URLs and inits it saw. */
+  function urlFetch(routes: Record<string, Response>): {
+    fetchFn: jest.Mock;
+    seen: string[];
+    inits: Array<RequestInit | undefined>;
+  } {
+    const seen: string[] = [];
+    const inits: Array<RequestInit | undefined> = [];
+    const fetchFn = jest.fn(async (input: string | URL, init?: RequestInit): Promise<Response> => {
+      const url = String(input);
+      seen.push(url);
+      inits.push(init);
+      const route = routes[url];
+      if (route === undefined) {
+        throw new Error(`no scripted route for ${url}`);
+      }
+      return route;
+    });
+    return { fetchFn, seen, inits };
+  }
+
+  it('returns a non-redirect answer untouched, without asking the check', async () => {
+    const { fetchFn, seen } = urlFetch({ 'https://model.example/v1': response(200) });
+    const check = jest.fn(async (): Promise<boolean> => true);
+    const result = await withCheckedRedirects(fetchFn, check)('https://model.example/v1', {});
+    expect(result.status).toBe(200);
+    expect(seen).toEqual(['https://model.example/v1']);
+    expect(check).not.toHaveBeenCalled();
+  });
+
+  it('follows a redirect the check passes, asking about the target before dialling it', async () => {
+    const { fetchFn, seen } = urlFetch({
+      'https://model.example/v1': redirectTo('https://models.other.example/v1'),
+      'https://models.other.example/v1': response(200),
+    });
+    const checked: string[] = [];
+    const check = async (url: string): Promise<boolean> => {
+      checked.push(url);
+      return true;
+    };
+    const result = await withCheckedRedirects(fetchFn, check)('https://model.example/v1', {});
+    expect(result.status).toBe(200);
+    expect(checked).toEqual(['https://models.other.example/v1']);
+    expect(seen).toEqual(['https://model.example/v1', 'https://models.other.example/v1']);
+  });
+
+  it('refuses a redirect the check fails, and never dials the target', async () => {
+    const { fetchFn, seen } = urlFetch({
+      'https://model.example/v1': redirectTo('http://169.254.169.254/latest/meta-data'),
+      'http://169.254.169.254/latest/meta-data': response(200),
+    });
+    const check = async (): Promise<boolean> => false;
+    await expect(withCheckedRedirects(fetchFn, check)('https://model.example/v1', {})).rejects.toBeInstanceOf(
+      OutboundRedirectRefusedError,
+    );
+    expect(seen).toEqual(['https://model.example/v1']);
+  });
+
+  it('turns a POST into a bodiless GET on a 302, and replays it as sent on a 307', async () => {
+    const post = { method: 'POST', body: '{"prompt":"hi"}' };
+    const moved = urlFetch({
+      'https://model.example/v1': redirectTo('https://model.example/v2', 302),
+      'https://model.example/v2': response(200),
+    });
+    await withCheckedRedirects(moved.fetchFn, async () => true)('https://model.example/v1', post);
+    expect(moved.inits[1]?.method).toBe('GET');
+    expect(moved.inits[1]?.body).toBeNull();
+
+    const kept = urlFetch({
+      'https://model.example/v1': redirectTo('https://model.example/v2', 307),
+      'https://model.example/v2': response(200),
+    });
+    await withCheckedRedirects(kept.fetchFn, async () => true)('https://model.example/v1', post);
+    expect(kept.inits[1]?.method).toBe('POST');
+    expect(kept.inits[1]?.body).toBe('{"prompt":"hi"}');
+  });
+
+  it('drops the credential headers on a 307 to another origin, and keeps them on one within the origin', async () => {
+    const sent = {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer PROVIDER-KEY',
+        Cookie: 'session=person-session',
+        'X-Api-Key': 'provider-key-header',
+        'Api-Key': 'provider-key-alt-header',
+      },
+      body: '{"prompt":"hi"}',
+    };
+
+    const crossed = urlFetch({
+      'https://model.example/v1': redirectTo('https://models.other.example/v1', 307),
+      'https://models.other.example/v1': response(200),
+    });
+    await withCheckedRedirects(crossed.fetchFn, async () => true)('https://model.example/v1', sent);
+    // The first dial carries the credentials, as the caller sent them; the other origin sees none of them.
+    expect(new Headers(crossed.inits[0]?.headers).get('authorization')).toBe('Bearer PROVIDER-KEY');
+    const crossedTarget = new Headers(crossed.inits[1]?.headers);
+    expect(crossedTarget.get('authorization')).toBeNull();
+    expect(crossedTarget.get('cookie')).toBeNull();
+    expect(crossedTarget.get('x-api-key')).toBeNull();
+    expect(crossedTarget.get('api-key')).toBeNull();
+
+    const within = urlFetch({
+      'https://model.example/v1': redirectTo('https://model.example/v2', 307),
+      'https://model.example/v2': response(200),
+    });
+    await withCheckedRedirects(within.fetchFn, async () => true)('https://model.example/v1', sent);
+    const withinTarget = new Headers(within.inits[1]?.headers);
+    expect(withinTarget.get('authorization')).toBe('Bearer PROVIDER-KEY');
+    expect(withinTarget.get('cookie')).toBe('session=person-session');
+    expect(withinTarget.get('x-api-key')).toBe('provider-key-header');
+    expect(withinTarget.get('api-key')).toBe('provider-key-alt-header');
+  });
+
+  it('stops a redirect chain that never ends', async () => {
+    let calls = 0;
+    const fetchFn = jest.fn(async (input: string | URL): Promise<Response> => {
+      calls += 1;
+      return redirectTo(String(input).endsWith('/a') ? 'https://model.example/b' : 'https://model.example/a');
+    });
+    await expect(withCheckedRedirects(fetchFn, async () => true)('https://model.example/a', {})).rejects.toMatchObject({
+      name: 'OutboundRedirectRefusedError',
+      message: expect.stringContaining('kept redirecting'),
+    });
+    expect(calls).toBe(6);
+  });
+
+  it('refuses a redirect that names no usable address', async () => {
+    const { fetchFn } = urlFetch({ 'https://model.example/v1': new Response(null, { status: 302 }) });
+    await expect(
+      withCheckedRedirects(fetchFn, async () => true)('https://model.example/v1', {}),
+    ).rejects.toBeInstanceOf(OutboundRedirectRefusedError);
   });
 });

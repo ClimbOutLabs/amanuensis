@@ -95,7 +95,14 @@ describe('mergeImportedProvider', () => {
         },
       ],
       existing: [
-        { tenant_id: 'default', name: 'tokenfactory', manifest: keyedExisting, created_at: '', updated_at: '' },
+        {
+          tenant_id: 'default',
+          name: 'tokenfactory',
+          manifest: keyedExisting,
+          last_check: null,
+          created_at: '',
+          updated_at: '',
+        },
       ],
       defaultModel: undefined,
       managedElsewhere: false,

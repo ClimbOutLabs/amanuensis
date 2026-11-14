@@ -67,6 +67,7 @@ const MAIL: NonNullable<SentinelApprovalCard['email']> = {
   bcc: [],
   subject: 'Lunch',
   body: 'Lunch at noon?',
+  check_code: null,
   replaces: null,
   reply_in_thread: null,
   reply_to: null,
@@ -164,7 +165,7 @@ describe('NeedsYourOkContainer', () => {
   it('approves exactly the held call once, shows what came of it, then reloads the chat', async () => {
     answerHeldAction.mockResolvedValue('done');
     renderBrief();
-    fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Allow' }));
     await waitFor(() => {
       expect(screen.getByText('Approved and done.')).toBeInTheDocument();
     });
@@ -184,7 +185,7 @@ describe('NeedsYourOkContainer', () => {
   ] as const)('does not call an approved action done when it %s', async (outcome, text) => {
     answerHeldAction.mockResolvedValue(outcome);
     renderBrief();
-    fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Allow' }));
     await waitFor(() => {
       expect(screen.getByText(text)).toBeInTheDocument();
     });
@@ -252,12 +253,12 @@ describe('NeedsYourOkContainer', () => {
       answerHeldAction.mockRejectedValue(refusal(status, code));
       vi.spyOn(console, 'error').mockImplementation(() => undefined);
       renderBrief();
-      fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Allow' }));
       await waitFor(() => {
         expect(screen.getByText(text)).toBeInTheDocument();
       });
       expect(screen.queryByText(/raw validation text/)).not.toBeInTheDocument();
-      expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Allow' })).not.toBeInTheDocument();
       expect(reload).not.toHaveBeenCalled();
     },
   );
@@ -266,44 +267,44 @@ describe('NeedsYourOkContainer', () => {
     answerHeldAction.mockRejectedValue(refusal(409, 'previous_turn_running'));
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
     renderBrief();
-    fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Allow' }));
     await waitFor(() => {
       expect(
         screen.getByText(answerRefusalText({ code: 'previous_turn_running', assistantName: DEFAULT_ASSISTANT_NAME })),
       ).toBeInTheDocument();
     });
-    expect(screen.getByRole('button', { name: 'Approve' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Allow' })).toBeEnabled();
   });
 
   it('keeps the buttons when the reply could not start, since nothing was recorded', async () => {
     answerHeldAction.mockRejectedValue(refusal(409, 'turn_could_not_start'));
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
     renderBrief();
-    fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Allow' }));
     await waitFor(() => {
       expect(
         screen.getByText(answerRefusalText({ code: 'turn_could_not_start', assistantName: DEFAULT_ASSISTANT_NAME })),
       ).toBeInTheDocument();
     });
     expect(screen.queryByText(/already answered/)).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Approve' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Allow' })).toBeEnabled();
   });
 
   it('keeps the buttons and says so when the answer did not go through', async () => {
     answerHeldAction.mockRejectedValue(new Error('network down'));
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
     renderBrief();
-    fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Allow' }));
     await waitFor(() => {
       expect(screen.getByText('That did not go through. Try again in a moment.')).toBeInTheDocument();
     });
-    expect(screen.getByRole('button', { name: 'Approve' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Allow' })).toBeEnabled();
   });
 
   it('shows an action whose hold already ran out as expired, with no buttons', () => {
     renderBrief({ expiresAt: '2020-01-01T00:00:00.000Z' });
     expect(screen.getByText('Expired, nothing was done. Ask again in chat.')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Allow' })).not.toBeInTheDocument();
   });
 
   it('says how many actions were not saved, below the cards', () => {

@@ -16,7 +16,6 @@ import { hasAdminRole, resolveRequestContext } from '../auth/identity';
 import configuration from '../config';
 import { ExportBodyCancelledError, exportResponseBody } from '../dataExport/exportBody';
 import { runDataExport } from '../dataExport/exportService';
-import { resolveMemoryExportSource } from '../dataExport/memorySource';
 import { normalizeSecrets } from '../dataExport/secretScrub';
 import {
   ZipEntryLimitExceededError,
@@ -37,6 +36,7 @@ import type { ISentinelAuditStore } from '../db/sentinelAuditStore';
 import type { ISentinelSettingsStore } from '../db/sentinelSettingsStore';
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import type { ISpaceStore } from '../db/spaceStore';
+import type { ITextContactStore } from '../db/textContactStore';
 import type { ITurnArtifactStore } from '../db/turnArtifactStore';
 import type { IOAuthTokenStore } from '../mcp/auth/types';
 import { PACKAGE_VERSION } from '../packageVersion';
@@ -54,6 +54,7 @@ export interface DataExportRouterDeps<TTransaction> {
   sentinelAuditStore: ISentinelAuditStore;
   deliveryStore: IDeliveryStore;
   reachSettingsStore: IReachSettingsStore;
+  textContactStore: ITextContactStore;
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
   tokenStore: IOAuthTokenStore<TTransaction>;
   resolveMcpServerStore: (c?: Context) => IMcpServerWithAuthStore<TTransaction>;
@@ -99,13 +100,6 @@ export function createDataExportRouter<TTransaction>(deps: DataExportRouterDeps<
     const mcpServerStore = deps.resolveMcpServerStore(c);
     const agentStore = deps.resolveAgentStore(c);
     const secrets = normalizeSecrets(await deps.outboundSecrets({ tenant_id: tenantId, created_by: subjectId }));
-    const memorySource = await resolveMemoryExportSource({
-      mcpServerStore,
-      tokenStore: deps.tokenStore,
-      tenantId,
-      subjectId,
-      logger: deps.logger,
-    });
     const exportedAt = new Date();
 
     const recordAudit = async (description: string): Promise<void> => {
@@ -140,12 +134,13 @@ export function createDataExportRouter<TTransaction>(deps: DataExportRouterDeps<
               auditStore: deps.sentinelAuditStore,
               deliveryStore: deps.deliveryStore,
               reachSettingsStore: deps.reachSettingsStore,
+              textContactStore: deps.textContactStore,
               turnArtifactStore: deps.turnArtifactStore,
               mcpServerStore,
               modelProviderStore: deps.resolveModelProviderStore(c),
               listAgents: () =>
                 listManageableAgents({ store: agentStore, context: requestContext, authorizer: deps.authorizer }),
-              memorySource,
+              memoryMarkdownDir: configuration.MEMORY_MARKDOWN_DIR,
               personaKnowledgeDir: configuration.PERSONA_KNOWLEDGE_DIR,
             },
             {

@@ -8,6 +8,9 @@ import {
 } from '@truefoundry/trueforge-core/core';
 import { normalizeMailAddress } from '@truefoundry/trueforge-core/core/email/mailConnector/recipientList';
 import type { ISentinelSettingsStore } from '../db/sentinelSettingsStore';
+import type { ISkillStore } from '../db/skillStore';
+import { recordSkillNetworkAnswer } from '../sandbox/skillnet/skillNetworkGrant';
+import { skillNetworkTokens } from '../sandbox/skillnet/skillNetworkTokens';
 import {
   accountRecipientListsExist,
   accountRecipientListsPath,
@@ -42,6 +45,8 @@ export function createSentinelServices(stores: {
   mailPolicyPath: string | undefined;
   /** Where the sidecar records the list it loaded; the server waits on it after a change. */
   mailPolicyStatusPath: string | undefined;
+  /** The skill store answers to skill network cards are recorded against; unset records nothing. */
+  skillStore?: ISkillStore | undefined;
   /** How long to wait for the sidecar to load a list; defaults to a full sidecar restart. */
   mailPolicyLoadTimeoutMs?: number;
   /**
@@ -145,6 +150,22 @@ export function createSentinelServices(stores: {
       }))
         ? 'loaded'
         : 'not_loaded';
+    },
+    skill_network_record_answer: async input => {
+      if (stores.skillStore === undefined) {
+        return;
+      }
+      await recordSkillNetworkAnswer({
+        store: stores.skillStore,
+        registry: skillNetworkTokens,
+        tenant_id: input.tenant_id,
+        created_by: input.created_by,
+        session_id: input.session_id,
+        skill_name: input.skill_network.skill_name,
+        hosts: input.skill_network.hosts,
+        reason: input.skill_network.reason,
+        answer: input.answer,
+      });
     },
     ...sentinelSettingsServices(stores.settings),
   };

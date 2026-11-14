@@ -10,11 +10,11 @@ How to get there: Approval cards show up in the chat, right where Aman is workin
 
 === "Computer"
 
-    ![An approval card in a chat, with Allow, Change it and Not now](../../../../docs/screenshots/app/approvals-card-desktop.png)
+    ![A card asking to delete a schedule, with Allow first and Keep it last](../../../../docs/screenshots/app/approvals-card-desktop.png)
 
 === "Phone"
 
-    ![An approval card in a chat, with Allow, Change it and Not now](../../../../docs/screenshots/app/approvals-card-phone.png)
+    ![A card asking to delete a schedule, with Allow first and Keep it last](../../../../docs/screenshots/app/approvals-card-phone.png)
 
 Reading is free. Aman doesn't ask before it reads your mail, searches the web or opens a page. It asks before it sends, saves, deletes or changes something.
 
@@ -24,7 +24,7 @@ The first line says what will happen, in words you would use. An event is named 
 
 When something follows from saying yes, a second line says what it is. Guests get a cancellation. A file is replaced. Money leaves your account.
 
-The (i) on the card opens **Why I'm asking**. It says why this one needs your answer.
+When there is a reason this one needs your answer, a quiet line under the question says it.
 
 If Aman cannot say what an action does, it shows no card. It refuses, says why, and tells you the one thing to do next.
 
@@ -37,7 +37,7 @@ If Aman cannot say what an action does, it shows no card. It refuses, says why, 
 
 A card stays on the screen until you answer it. If you don't want what it asks, click **Not now** and the card closes.
 
-On a card where the action cannot be undone, or where it reaches other people, the safe choice comes first and is the main button. On a delete it says **Keep it**. On a mail send it says **Don't send**. The button that does the thing comes after it.
+**Allow** is always the first button, and all the buttons look the same. Each button keeps the same place on every card. On a card where the action cannot be undone, or where it reaches other people, the last button uses safe words instead of **Not now**. On a delete it says **Keep it**. On a mail send it says **Don't send**.
 
 ## Stop the same question coming back
 
@@ -65,17 +65,17 @@ From then on, Aman asks before it uses that tool again.
 
 ## Mail cards
 
-A mail card shows who the mail goes to and its full text. The safe choice, **Don't send**, comes first as the main button.
+A mail card shows who the mail goes to and its full text.
 
 - Click **Allow** to send it.
+- Click **Change it** to ask Aman to change it first.
 - Click **Save as draft** to keep it in your drafts without sending.
-- Click **Edit** to ask Aman to change it first.
-- Click **Not now** to stop it.
+- Click **Don't send** to stop it.
 
-If the mail goes to an address that isn't on your Email list, the buttons change. The safe choice still comes first:
+If the mail goes to an address that isn't on your Email list, the buttons change:
 
-- **Don't send** stops it, and nothing is added to your list.
 - **Add and send** puts those addresses on your list, then sends.
+- **Don't send** stops it, and nothing is added to your list.
 
 When the card saves a draft instead, they read **Add and save draft** and **Don't save**.
 
@@ -87,13 +87,13 @@ A scheduled run has nobody watching it, so it never acts on its own. It holds ea
 
 1. Open the chat of the scheduled run.
 2. Read each item in the **Needs your OK** list.
-3. Click **Approve** to do it, or **Deny** to drop it. Some items also offer **Always allow everywhere** or **Change it**.
+3. Click **Allow** to do it, or **Deny** to drop it. Some items also offer **Always allow everywhere** or **Change it**.
 
 Held actions expire after 24 hours. [Schedules](schedules.md) explains how runs work.
 
 ## Good to know
 
-- When several actions wait at the same moment, a card may show **Approve all**. It allows all of them together. Some actions never join it, so they still need their own answer.
+- When several actions wait at the same moment, a card may show **Allow all**. It allows all of them together. Some actions never join it, so they still need their own answer.
 - Some cards say "Part of this is not shown in full. Check it before you approve." Open the card and read all of it before you answer.
 - In voice mode, Aman reads an email, calendar or schedule card out loud. It waits for you to say exactly "yes, send it", "yes, approve", "yes, delete it" or "no". Say the whole phrase in one go. Anything else leaves the card waiting.
 - Aman only reads out a card it can say in full: a plain email, a new calendar event with no guests, or deleting a scheduled task. Cards with web links, code, words that are not plain English letters, commands, payments or new addresses stay on the screen. So does a card Aman could not read all the way through.

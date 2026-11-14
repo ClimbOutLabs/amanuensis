@@ -194,7 +194,7 @@ describe('SidebarLayout Chats entry', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Chats' }));
     expect(await screen.findByRole('complementary', { name: 'Recent chats' })).toBeInTheDocument();
-    expect(screen.queryByRole('dialog', { name: 'Agent Config' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Agent setup' })).not.toBeInTheDocument();
   });
 
   it('reveals the chat list inside the mobile drawer without closing it', async () => {

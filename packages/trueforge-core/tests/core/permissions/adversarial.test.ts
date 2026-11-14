@@ -562,7 +562,7 @@ describe('Suite B - workspace containment escapes', () => {
             `Save \`${path}\` in a folder where this workspace keeps programs it can run?`,
           );
           expect(decision.card?.cannot_be_undone).toBe(
-            'A program saved here could run instead of a trusted one. Approve only if you asked for this file.',
+            'A program saved here could run instead of a trusted one. Allow only if you asked for this file.',
           );
         }
         expect((await classifyTier(action(tool, { path: 'src/x.py', content: 'x' }), ctx)).tier).toBe(2);

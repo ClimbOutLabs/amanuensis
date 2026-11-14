@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "providers": [
+    {
+      "name": "meta",
+      "base_url": "https://api.meta.ai/v1",
+      "api_key_env": "META_API_KEY",
+      "models": [
+        {
+          "model_id": "muse-spark-1.1",
+          "name": "muse-spark-1-1",
+          "properties": { "context_length": 1048576, "max_output_tokens": 32768 },
+          "price": { "input_per_million": 1.25, "output_per_million": 4.25 }
+        }
+      ]
+    }
+  ]
+}

@@ -48,6 +48,34 @@ describe('AmanRuntimeRail', () => {
     vi.unstubAllGlobals();
   });
 
+  it('links to the live browser with a live dot while a page is open, and shows nothing otherwise', () => {
+    const { rerender } = render(
+      <RuntimeHarness messages={[]}>
+        <AmanRuntimeRail liveBrowserHref="/browser-live?tab=chat-1" />
+      </RuntimeHarness>,
+    );
+    const link = screen.getByRole('link', { name: /Watch Live or Take Control/ });
+    expect(link).toHaveAttribute('href', '/browser-live?tab=chat-1');
+    // It opens beside the chat, so the chat stays where it is.
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+    expect(link.querySelector('.aman-runtime-rail__live-dot')).not.toBeNull();
+
+    rerender(
+      <RuntimeHarness messages={[]}>
+        <AmanRuntimeRail />
+      </RuntimeHarness>,
+    );
+    expect(screen.queryByRole('link', { name: /Watch Live or Take Control/ })).not.toBeInTheDocument();
+  });
+
+  it('keeps the live dot still for a person who asks for less motion', () => {
+    const css = readFileSync(findStylesheet(), 'utf8');
+    expect(css).toMatch(
+      /@media \(prefers-reduced-motion: reduce\) \{\s*\.aman-runtime-rail__live-dot \{\s*animation: none;/,
+    );
+  });
+
   it('shows the assistant identity and runtime summary', () => {
     render(
       <RuntimeHarness messages={[]}>
@@ -282,6 +310,9 @@ describe('AmanRuntimeRail', () => {
     expect(summaryRule).toMatch(/font-weight: 500;/);
     expect(ruleOf('.aman-runtime-rail__details-body')).toMatch(/font-size: var\(--text-sm\);/);
     expect(ruleOf('.aman-runtime-rail__waiting')).toMatch(/font-size: var\(--text-sm\);/);
+    // The desk's own lines, such as "Free after 6:00 PM.", match the rows they sit under.
+    expect(ruleOf('.aman-runtime-rail__desk-row-detail')).toMatch(/font-size: var\(--text-sm\);/);
+    expect(ruleOf('.aman-runtime-rail__desk-note')).toMatch(/font-size: var\(--text-sm\);/);
     // The Activity row's receipt list (SentinelAuditFeed) must not fall back to the stray
     // 0.875rem the base .aui-receipt rule used before the rail stepped it onto the scale.
     const railReceiptRule = ruleOf('.aman-runtime-rail .aui-receipt');
@@ -854,7 +885,7 @@ describe('AmanRuntimeRail recent actions, rules and Needs you', () => {
     );
     expect(container.querySelector('[data-section="needs-you"]')).toBeNull();
     expect(screen.queryByText(/Needs you/)).not.toBeInTheDocument();
-    expect(container.querySelectorAll('.aui-ticket--selected')).toHaveLength(0);
+    expect(container.querySelectorAll('.aui-approval-card--selected')).toHaveLength(0);
     expect(container.querySelector('.aman-runtime-rail__status')).toHaveTextContent('Waiting for you');
   });
 
