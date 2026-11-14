@@ -1,17 +1,13 @@
-import { promises as fs } from 'node:fs';
-
 import { sql } from 'kysely';
 
-import { SqliteGlobalSettingsStore } from '../../../../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
 import { SqliteModelProviderStore } from '../../../../src/db/sqlite/model-provider-store/SqliteModelProviderStore';
 import type { ModelProviderManifest } from '../../../../src/schemas/modelProvider';
 import { EncryptedModelProviderStore } from '../../../../src/secrets/encryptedModelProviderStore';
-import { createMasterKey, recordKeyCheck } from '../../../../src/secrets/keyCheck';
 import { SecretDecryptError } from '../../../../src/secrets/secretCipher';
-import { SecretVault, SecretsLockedError } from '../../../../src/secrets/secretVault';
+import { SecretsLockedError, type SecretVault } from '../../../../src/secrets/secretVault';
 import { runModelProviderStoreContractSuite } from '../../modelProviderStoreContractSuite';
-import { TestKeyProvider } from '../../secretVaultContractSuite';
 import { createSqliteTestDatabase, type SqliteTestDatabase } from '../testDatabase';
+import { createLockedVault, createUnlockedVault, databaseFilesContain } from './testVault';
 
 const CANARY = 'sk-canary-7f3a9c41d2';
 const TENANT = 'default';
@@ -26,18 +22,12 @@ const manifest = {
 describe('EncryptedModelProviderStore on SQLite', () => {
   let env: SqliteTestDatabase;
   let inner: SqliteModelProviderStore;
-  let provider: TestKeyProvider;
   let vault: SecretVault;
 
   beforeEach(async () => {
     env = await createSqliteTestDatabase();
     inner = new SqliteModelProviderStore(env.db);
-    const settings = new SqliteGlobalSettingsStore(env.db);
-    const key = createMasterKey();
-    await recordKeyCheck({ settings, key });
-    provider = new TestKeyProvider(key);
-    vault = new SecretVault({ provider, settings });
-    await vault.refresh();
+    vault = await createUnlockedVault(env.db);
   }, 120_000);
 
   afterEach(async () => {
@@ -54,10 +44,7 @@ describe('EncryptedModelProviderStore on SQLite', () => {
     const raw = await inner.getProvider({ tenant_id: TENANT, name: 'openai', model_name: 'gpt-test' });
     expect(raw?.manifest.auth?.api_key.startsWith('enc:v1:')).toBe(true);
     await sql`PRAGMA wal_checkpoint(TRUNCATE)`.execute(env.db);
-    for (const suffix of ['', '-wal', '-shm']) {
-      const bytes = await fs.readFile(`${env.databaseFile}${suffix}`).catch(() => Buffer.alloc(0));
-      expect(bytes.includes(CANARY)).toBe(false);
-    }
+    expect(await databaseFilesContain({ databaseFile: env.databaseFile, needle: CANARY })).toBe(false);
   });
 
   it('refuses a key moved to another provider row', async () => {
@@ -87,11 +74,7 @@ describe('EncryptedModelProviderStore on SQLite', () => {
     const unlocked = new EncryptedModelProviderStore({ store: inner, vault });
     await unlocked.upsertProvider({ tenant_id: TENANT, name: 'openai', manifest });
 
-    const locked = new SecretVault({
-      provider: new TestKeyProvider(),
-      settings: new SqliteGlobalSettingsStore(env.db),
-    });
-    await locked.refresh();
+    const locked = await createLockedVault(env.db);
     const store = new EncryptedModelProviderStore({ store: inner, vault: locked });
     await expect(store.listProviders({ tenant_id: TENANT })).rejects.toThrow(SecretsLockedError);
     await expect(store.upsertProvider({ tenant_id: TENANT, name: 'anthropic', manifest })).rejects.toThrow(
