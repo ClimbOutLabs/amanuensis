@@ -72,7 +72,7 @@ Say so when you ask, such as "Remind me at 5 pm to call the pharmacy, it's urgen
 
     ![The Reminders page, with a reminder coming up in 7 days, a link to its chat and a bin to delete it](../../../../docs/screenshots/app/reminders-page-phone.png)
 
-1. Click **Reminders** in the left panel. It lists what is coming up and what has already reminded you, with the persona that set each one. Each reminder shows its day, how far off it is, such as "In 3 weeks", and whether it repeats or is paused. Click a reminder that says **Open chat** to go to the chat you set it in. A reminder says **No chat to open** when its chat was deleted, or when it was set before Aman kept track of the chat. Or, in any chat, ask "What reminders do I have?"
+1. Click **Reminders** in the left panel. On a phone, tap the menu button at the top left first. The same button on the Reminders page opens the menu again. The page lists what is coming up and what has already reminded you, with the persona that set each one. Each reminder shows its day, how far off it is, such as "In 3 weeks", and whether it repeats or is paused. Click a reminder that says **Open chat** to go to the chat you set it in. A reminder says **No chat to open** when its chat was deleted, or when it was set before Aman kept track of the chat. Or, in any chat, ask "What reminders do I have?"
 2. To delete one on that page, click the bin at the end of its row. A box asks you to confirm. Click **Delete** to remove it, or **Cancel** to keep it.
 3. Or ask in a chat, such as "Cancel the pharmacy reminder". A card shows the reminder. Click **Allow** to cancel it, or **Not now** to keep it.
 
