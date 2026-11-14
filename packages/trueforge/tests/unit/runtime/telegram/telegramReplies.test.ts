@@ -219,6 +219,51 @@ describe('telegram pending replies', () => {
     expect(store.pendingApprovals[0]?.prompt).toBe(sent?.text);
   });
 
+  const MAIL_FROM_EMAIL = {
+    action: 'send' as const,
+    to: [{ name: 'Sam', address: 'sam@example.com' }],
+    cc: [],
+    bcc: [],
+    subject: 'Lunch',
+    body: 'Noon?',
+    check_code: null,
+    replaces: null,
+    reply_in_thread: null,
+    reply_to: null,
+  };
+
+  it('shows the account an email goes from, with no choice line when there is one account', async () => {
+    const card = cardWith({
+      plain_what: 'Send this email.',
+      email: MAIL_FROM_EMAIL,
+      mail_from: 'home@example.com',
+      mail_from_choices: ['home@example.com'],
+    });
+    const { store, client, deps } = harness(doneTurnWith(approvalAction(card)));
+    await deliverPendingTelegramReplies(deps);
+    const text = client.sent[0]?.text ?? '';
+    expect(text.split('\n').slice(1, 3)).toEqual(['What will be sent:', 'From: home@example.com']);
+    expect(text).not.toContain('different account');
+    expect(client.sent[0]?.inline_buttons?.[0]?.map(button => button.text)).toEqual(['Approve', 'Deny']);
+    expect(store.pendingApprovals).toHaveLength(1);
+  });
+
+  it('shows the account an email goes from, and says to answer in the app to pick another', async () => {
+    const card = cardWith({
+      plain_what: 'Send this email.',
+      email: MAIL_FROM_EMAIL,
+      mail_from: 'work@example.com',
+      mail_from_choices: ['home@example.com', 'work@example.com'],
+    });
+    const { store, client, deps } = harness(doneTurnWith(approvalAction(card)));
+    await deliverPendingTelegramReplies(deps);
+    const text = client.sent[0]?.text ?? '';
+    expect(text).toContain('From: work@example.com\nTo send from a different account, answer in the app.');
+    expect(text).not.toContain('From: home@example.com');
+    expect(client.sent[0]?.inline_buttons?.[0]?.map(button => button.text)).toEqual(['Approve', 'Deny']);
+    expect(store.pendingApprovals).toHaveLength(1);
+  });
+
   it("shows the card's own headline, reason and consequence, as the app card does, and keeps the buttons", async () => {
     const card = cardWith({
       plain_what: 'Send the email to Sam.',
