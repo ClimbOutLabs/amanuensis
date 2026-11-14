@@ -49,7 +49,7 @@ Each item has one button with a next step, such as drafting a reply. Click it an
 
 The brief shows six items at first. Click the line that says how many more items there are, such as "+ 3 more items", to see the rest. Click **Show fewer** to fold them away again.
 
-At the bottom, one line says how much Aman read and whether anything was sent. When it says "Nothing was sent", nothing left your computer on your behalf.
+At the bottom, one line says how much Aman read and whether anything was sent. When it says "Nothing was sent", nothing left your computer on your behalf. On a very busy day the line is left out, because Aman can only say that when it has checked everything.
 
 !!! note
 
