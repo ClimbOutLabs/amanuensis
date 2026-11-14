@@ -82,14 +82,14 @@ describe('the skill approval card', () => {
     expect(screen.getByRole('listitem')).toHaveTextContent('api.release-feed.info');
     expect(websites).toHaveTextContent('Adding it lets the skill reach these websites and no others.');
     expect(websites).toHaveTextContent('The skill can send any of your data to them');
-    expect(websites).not.toHaveTextContent('send email as you');
+    expect(websites).not.toHaveTextContent('not each email it sends');
     expect(websites).not.toHaveTextContent('makes up some web addresses');
   });
 
   it('warns when one of the websites can send email as the person', () => {
     renderCard({ ...RELEASE_NOTES_CARD, skill: { ...RELEASE_NOTES_CARD.skill, can_send: true } });
     expect(document.querySelector('[data-role="skill-websites"]')).toHaveTextContent(
-      'One of these sites can send email. This skill will be able to send email as you, without asking each time.',
+      'One of these sites can send email. You approve each run of the skill, not each email it sends.',
     );
   });
 

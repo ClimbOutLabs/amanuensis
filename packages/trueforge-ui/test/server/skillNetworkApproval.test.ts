@@ -93,7 +93,7 @@ describe('the approval wording', () => {
 
   it('adds the sending line only when a declared site can send', () => {
     const withoutSend = skillNetworkApprovalLines({ skillName: 'ten-x', state: TEN_X_STATE });
-    assert.ok(!withoutSend.some(line => line.includes('send email as you')));
+    assert.ok(!withoutSend.some(line => line.includes('not each email it sends')));
     const withSend = skillNetworkApprovalLines({
       skillName: 'google',
       state: {
@@ -107,7 +107,7 @@ describe('the approval wording', () => {
     });
     assert.ok(
       withSend.includes(
-        'One of these sites can send email. This skill will be able to send email as you, without asking each time.',
+        'One of these sites can send email. You approve each run of the skill, not each email it sends.',
       ),
     );
   });

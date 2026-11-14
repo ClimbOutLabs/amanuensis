@@ -225,9 +225,7 @@ describe('install_skill', () => {
     );
     const info = await built.tools.toolCallInfo({ name: 'install_skill', arguments: RELEASE_NOTES });
     expect(info.tier3_card?.skill).toMatchObject({ websites: ['gmail.googleapis.com'], can_send: true });
-    expect(info.tier3_card?.plain_what).toContain(
-      'This skill will be able to send email as you, without asking each time.',
-    );
+    expect(info.tier3_card?.plain_what).toContain('You approve each run of the skill, not each email it sends.');
   });
 
   it('adds nothing when the files cannot be read to check them', async () => {
