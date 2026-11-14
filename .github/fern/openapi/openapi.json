@@ -3541,6 +3541,17 @@
         ],
         "type": "object"
       },
+      "GetGitCommitIdentityResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/GitCommitIdentitySetting"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "GetGithubRepositoryDetailsResponse": {
         "additionalProperties": false,
         "properties": {
@@ -4177,6 +4188,39 @@
         },
         "required": [
           "data"
+        ],
+        "type": "object"
+      },
+      "GitCommitIdentitySetting": {
+        "properties": {
+          "default_email": {
+            "description": "The email used while `email` is `null`.",
+            "type": "string"
+          },
+          "default_name": {
+            "description": "The name used while `name` is `null`.",
+            "type": "string"
+          },
+          "email": {
+            "description": "The email the person chose for commits. `null` when they chose none.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "description": "The name the person chose for commits. `null` when they chose none.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "email",
+          "default_name",
+          "default_email"
         ],
         "type": "object"
       },
@@ -15794,6 +15838,39 @@
         ],
         "type": "object"
       },
+      "UpdateGitCommitIdentityRequest": {
+        "example": {
+          "email": null,
+          "name": "Sam Rivera"
+        },
+        "properties": {
+          "email": {
+            "description": "Email to put on commits. `null` goes back to the default.",
+            "maxLength": 254,
+            "minLength": 3,
+            "pattern": "^[^\\s\\p{Cc}<>@]+@[^\\s\\p{Cc}<>@]+$/u",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "description": "Name to put on commits, up to 100 characters. `null` goes back to the default.",
+            "maxLength": 100,
+            "minLength": 1,
+            "pattern": "^[^\\p{Cc}<>]*$/u",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "email"
+        ],
+        "type": "object"
+      },
       "UpdateMCPServerRequest": {
         "additionalProperties": false,
         "properties": {
@@ -25027,6 +25104,116 @@
         "x-fern-sdk-method-name": "create_or_update"
       }
     },
+    "/api/v1/settings/git-commit-identity": {
+      "get": {
+        "description": "The name and email written on Git commits made in the sandbox. A `null` part means the person chose none and the default shown beside it is used.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetGitCommitIdentityResponse"
+                }
+              }
+            },
+            "description": "The chosen name and email, with the defaults."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Admin access required."
+          }
+        },
+        "summary": "Get the name on Git commits",
+        "tags": [
+          "Sandboxes"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "gitCommitIdentity"
+        ],
+        "x-fern-sdk-method-name": "get"
+      },
+      "put": {
+        "description": "Sets the name and email written on Git commits made in the sandbox. `null` for a part goes back to its default. New commits use the change from the next message.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateGitCommitIdentityRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetGitCommitIdentityResponse"
+                }
+              }
+            },
+            "description": "The chosen name and email after the update, with the defaults."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request body."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Admin access required."
+          }
+        },
+        "summary": "Set or clear the name on Git commits",
+        "tags": [
+          "Sandboxes"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "gitCommitIdentity"
+        ],
+        "x-fern-sdk-method-name": "create_or_update"
+      }
+    },
     "/api/v1/settings/mcp-servers": {
       "get": {
         "description": "Configured MCP servers with auth_status. Header secrets are redacted.",
@@ -30516,7 +30703,7 @@
     },
     "/api/v1/voice/transcribe": {
       "post": {
-        "description": "Accepts 16 kHz mono 16-bit PCM WAV audio and returns the transcript produced by the local STT sidecar. Audio bodies over 30 MB are rejected.",
+        "description": "Accepts 16 kHz mono 16-bit PCM WAV audio and returns the transcript produced by the local STT sidecar. Audio bodies over 30 MB are rejected. Each person may make a limited number of voice requests per minute, shared with spoken replies.",
         "requestBody": {
           "content": {
             "audio/wav": {
@@ -30558,6 +30745,16 @@
               }
             },
             "description": "Audio body over the 30 MB limit."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Too many requests; wait for the Retry-After seconds."
           },
           "502": {
             "content": {

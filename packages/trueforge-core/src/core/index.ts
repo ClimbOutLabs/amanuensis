@@ -345,6 +345,8 @@ export type {
 } from './sandbox/driver/RunCodeService';
 export { runCodeStatusFromReadiness } from './sandbox/driver/runCodeStatus';
 export { DisabledDriver } from './sandbox/driver/sandboxDisabled';
+export { DEFAULT_GIT_COMMIT_IDENTITY, GitCommitIdentitySchema } from './sandbox/gitCommitIdentity';
+export type { GitCommitIdentity } from './sandbox/gitCommitIdentity';
 export { GIT_NETWORK_ENV_NAMES, pickGitNetworkEnv } from './sandbox/hostAuthenticatedGit';
 export {
   PACKAGE_GIT_DEPENDENCY_MESSAGE,

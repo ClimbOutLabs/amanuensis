@@ -87,6 +87,7 @@ describe('parseTwilioSettings', () => {
         CALENDAR_ACCOUNT_SECRET: undefined,
         BROWSER_SECRET: undefined,
         TAVILY_API_KEY: undefined,
+        SPEECH_SECRET: undefined,
         TWILIO: settings,
       }),
     ).toContain('token-for-tests');

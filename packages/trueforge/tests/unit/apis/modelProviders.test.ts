@@ -16,6 +16,7 @@ import { SqliteGlobalSettingsStore } from '../../../src/db/sqlite/global-setting
 import { SqliteMcpServerStore } from '../../../src/db/sqlite/mcp-server-store/SqliteMcpServerStore';
 import { SqliteMcpToolGrantStore } from '../../../src/db/sqlite/mcp-tool-grant-store/SqliteMcpToolGrantStore';
 import { SqliteModelProviderStore } from '../../../src/db/sqlite/model-provider-store/SqliteModelProviderStore';
+import { SqlitePersonalizationStore } from '../../../src/db/sqlite/personalization-store/SqlitePersonalizationStore';
 import { SqliteSandboxProviderStore } from '../../../src/db/sqlite/sandbox-provider-store/SqliteSandboxProviderStore';
 import { SqliteSkillStore } from '../../../src/db/sqlite/skill-store/SqliteSkillStore';
 import { SqliteOAuthTokenStore } from '../../../src/db/sqlite/token-store/SqliteOAuthTokenStore';
@@ -122,6 +123,7 @@ async function createRouters(
       resolveSkillStore: () => new SqliteSkillStore(db),
       resolveSandboxProviderStore: () => new SqliteSandboxProviderStore(db),
       globalSettingsStore,
+      personalizationStore: new SqlitePersonalizationStore(db),
       tokenFactoryBudget: uncappedTokenFactoryBudget,
       envManagedModelProviderNames: options.envManagedNames ?? new Set(),
       // Saves in these suites carry no check outcome unless a suite wires its own checker.
