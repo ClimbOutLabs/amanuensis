@@ -104,6 +104,7 @@ export * from "./DeleteMcpServerResponse.js";
 export * from "./DeleteMcpToolGrantResponse.js";
 export * from "./DeleteMemoryPageResponse.js";
 export * from "./DeleteMemoryVaultEntryResponse.js";
+export * from "./DeleteMemoryVaultSummaryStatusResponse.js";
 export * from "./DeleteModelProviderResponse.js";
 export * from "./DeletePersonalizationProfileResponse.js";
 export * from "./DeletePersonaResponse.js";

@@ -107,8 +107,8 @@ describe('submitRetain summary-pending marker', () => {
     expect(afterFailure.ok && afterFailure.entries).toEqual([]);
     // The failure is not silent: Zara's vault is marked as owed a summary, and no
     // other vault is marked.
-    expect(await reader.summaryPending({ namespace: 'persona:Zara' })).toBe(true);
-    expect(await reader.summaryPending({ namespace: '' })).toBe(false);
+    expect(await reader.summaryPendingSince({ namespace: 'persona:Zara' })).toEqual(expect.any(String));
+    expect(await reader.summaryPendingSince({ namespace: '' })).toBeUndefined();
 
     // The next chat with Zara runs the summary job again; this time it succeeds, the
     // summary is stored, and the mark clears.
@@ -132,7 +132,7 @@ describe('submitRetain summary-pending marker', () => {
     if (afterRetry.ok) {
       expect(afterRetry.entries.some(entry => entry.text.includes('The test robot is named Bleep-Bloop.'))).toBe(true);
     }
-    expect(await reader.summaryPending({ namespace: 'persona:Zara' })).toBe(false);
+    expect(await reader.summaryPendingSince({ namespace: 'persona:Zara' })).toBeUndefined();
   });
 
   it('marks the vault when no summary model is set, because the turn could not be saved', async () => {
@@ -151,7 +151,7 @@ describe('submitRetain summary-pending marker', () => {
       summarize: summarizeContext(),
     });
 
-    expect(await reader.summaryPending({ namespace: 'persona:Zara' })).toBe(true);
+    expect(await reader.summaryPendingSince({ namespace: 'persona:Zara' })).toEqual(expect.any(String));
     const listed = await reader.listEntries({ namespace: 'persona:Zara', timeoutMs: 5_000 });
     expect(listed.ok && listed.entries).toEqual([]);
   });
@@ -172,7 +172,7 @@ describe('submitRetain summary-pending marker', () => {
       summarize: summarizeContext(),
     });
 
-    expect(await reader.summaryPending({ namespace: 'persona:Zara' })).toBe(false);
+    expect(await reader.summaryPendingSince({ namespace: 'persona:Zara' })).toBeUndefined();
   });
 
   it('stores nothing, and does not fail, on a client without summary tracking when a summary fails', async () => {

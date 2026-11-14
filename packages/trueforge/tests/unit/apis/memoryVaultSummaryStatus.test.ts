@@ -22,7 +22,9 @@ const ALICE: RequestContext = {
   user_credential: null,
 };
 
-const SummaryStatusResponseSchema = z.object({ data: z.object({ summary_pending: z.boolean() }) });
+const SummaryStatusResponseSchema = z.object({
+  data: z.object({ summary_pending: z.boolean(), failed_at: z.string().nullable() }),
+});
 
 describe('memory vault summary status', () => {
   const originalDir = configuration.MEMORY_MARKDOWN_DIR;
@@ -72,5 +74,38 @@ describe('memory vault summary status', () => {
 
     await zaraClient.noteSummaryOutcome({ outcome: 'summarized' });
     expect(await summaryPending('persona:Zara')).toBe(false);
+  });
+
+  it('says when the summary failed, and puts the note away for that vault only when it is dismissed', async () => {
+    const zaraClient = new MarkdownMemoryClient({
+      baseDir,
+      namespace: 'default',
+      vaultScope: { personaName: 'Zara', personaId: 'p-zara' },
+    });
+    const sharedClient = new MarkdownMemoryClient({ baseDir, namespace: 'default' });
+    await zaraClient.noteSummaryOutcome({ outcome: 'failed', reason: 'model_timeout' });
+    await sharedClient.noteSummaryOutcome({ outcome: 'failed', reason: 'model_timeout' });
+
+    const status = await app.request('/api/v1/memory/vault/summary-status?namespace=persona%3AZara');
+    const failedAt = SummaryStatusResponseSchema.parse(await status.json()).data.failed_at;
+    expect(Date.now() - Date.parse(failedAt ?? '')).toBeLessThan(60_000);
+
+    const dismissed = await app.request('/api/v1/memory/vault/summary-status?namespace=persona%3AZara', {
+      method: 'DELETE',
+    });
+    expect(dismissed.status).toBe(200);
+    expect(await dismissed.json()).toEqual({});
+    expect(await summaryPending('persona:Zara')).toBe(false);
+    expect(await summaryPending()).toBe(true);
+
+    // Dismissing again, with nothing to put away, still answers 200.
+    const again = await app.request('/api/v1/memory/vault/summary-status?namespace=persona%3AZara', {
+      method: 'DELETE',
+    });
+    expect(again.status).toBe(200);
+
+    // A later failed summary shows the note again.
+    await zaraClient.noteSummaryOutcome({ outcome: 'failed', reason: 'model_timeout' });
+    expect(await summaryPending('persona:Zara')).toBe(true);
   });
 });

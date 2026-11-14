@@ -153,7 +153,7 @@ describe('the turn after a turn that saved nothing, with summaries on', () => {
     expect(savedLogs(dir)).toEqual([]);
     // The first turn's own answer stood: the summary model was not asked again.
     expect(mockSummarize).toHaveBeenCalledTimes(1);
-    expect(await client.summaryPending({ namespace: '' })).toBe(false);
+    expect(await client.summaryPendingSince({ namespace: '' })).toBeUndefined();
   });
 
   it('saves nothing, and marks the vault, when the first turn left no record at all', async () => {
@@ -162,7 +162,7 @@ describe('the turn after a turn that saved nothing, with summaries on', () => {
     expect(savedLogs(dir)).toEqual([]);
     // No blocking summary call in the person's turn.
     expect(mockSummarize).not.toHaveBeenCalled();
-    expect(await client.summaryPending({ namespace: '' })).toBe(true);
+    expect(await client.summaryPendingSince({ namespace: '' })).toEqual(expect.any(String));
   });
 
   it('does not mark the vault for a first turn that was stopped or ended in an error', async () => {
@@ -179,7 +179,7 @@ describe('the turn after a turn that saved nothing, with summaries on', () => {
 
     expect(savedLogs(dir)).toEqual([]);
     expect(mockSummarize).not.toHaveBeenCalled();
-    expect(await client.summaryPending({ namespace: '' })).toBe(false);
+    expect(await client.summaryPendingSince({ namespace: '' })).toBeUndefined();
   });
 
   it('still rebuilds a stopped turn as its full exchange when summaries are off', async () => {
@@ -219,7 +219,7 @@ describe('the turn after a turn that saved nothing, with summaries on', () => {
     expect(logs).toHaveLength(1);
     expect(logs[0]).toContain('The person says thanks often.');
     expect(logs[0]).not.toContain('User:');
-    expect(await client.summaryPending({ namespace: '' })).toBe(false);
+    expect(await client.summaryPendingSince({ namespace: '' })).toBeUndefined();
   });
 
   it('still rebuilds a vanished turn as its full exchange when summaries are off', async () => {

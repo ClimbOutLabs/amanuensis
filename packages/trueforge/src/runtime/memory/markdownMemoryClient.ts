@@ -747,14 +747,20 @@ export class MarkdownMemoryClient implements MemoryClient {
     }
   }
 
-  /** Whether the vault for a wire namespace is still owed a turn summary. Never throws. */
-  async summaryPending(params: { namespace: string }): Promise<boolean> {
+  /** When the summary the vault for a wire namespace is still owed failed, or undefined when none is owed. Never throws. */
+  async summaryPendingSince(params: { namespace: string }): Promise<string | undefined> {
     try {
       const filesystemNamespace = vaultFilesystemNamespace(this.namespace, params.namespace);
-      return (await readSummaryPending({ baseDir: this.baseDir, namespace: filesystemNamespace })) !== undefined;
+      return (await readSummaryPending({ baseDir: this.baseDir, namespace: filesystemNamespace }))?.failed_at;
     } catch {
-      return false;
+      return undefined;
     }
+  }
+
+  /** The person has read the failed-summary line for a wire namespace's vault and put it away. */
+  async dismissSummaryPending(params: { namespace: string }): Promise<void> {
+    const filesystemNamespace = vaultFilesystemNamespace(this.namespace, params.namespace);
+    await clearSummaryPending({ baseDir: this.baseDir, namespace: filesystemNamespace });
   }
 
   async updateEntry(params: {

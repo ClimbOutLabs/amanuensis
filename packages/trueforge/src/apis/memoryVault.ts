@@ -13,6 +13,7 @@ import type { ResolveRequestContext } from '../auth/identity';
 import configuration from '../config';
 import {
   deleteMemoryVaultEntryRoute,
+  deleteMemoryVaultSummaryStatusRoute,
   deleteShownMemoryRoute,
   exportMemoryVaultRoute,
   getMemoryVaultSharingRoute,
@@ -249,8 +250,25 @@ export function createMemoryVaultRouter(deps: MemoryVaultRouterDeps) {
     const { namespace } = c.req.valid('query');
     const requestContext = deps.resolveRequestContext(c);
     const client = createVaultClient({ logger: deps.logger, tenantId: requestContext.tenant_id });
-    const summaryPending = await client.summaryPending({ namespace: namespace ?? '' });
-    return c.json({ data: { summary_pending: summaryPending } }, 200);
+    const failedAt = await client.summaryPendingSince({ namespace: namespace ?? '' });
+    const parsedAt = failedAt === undefined ? Number.NaN : Date.parse(failedAt);
+    return c.json(
+      {
+        data: {
+          summary_pending: failedAt !== undefined,
+          failed_at: Number.isNaN(parsedAt) ? null : new Date(parsedAt).toISOString(),
+        },
+      },
+      200,
+    );
+  };
+
+  const dismissSummaryStatusHandler: RouteHandler<typeof deleteMemoryVaultSummaryStatusRoute> = async c => {
+    const { namespace } = c.req.valid('query');
+    const requestContext = deps.resolveRequestContext(c);
+    const client = createVaultClient({ logger: deps.logger, tenantId: requestContext.tenant_id });
+    await client.dismissSummaryPending({ namespace: namespace ?? '' });
+    return c.json({}, 200);
   };
 
   const router = new OpenAPIHono();
@@ -261,6 +279,7 @@ export function createMemoryVaultRouter(deps: MemoryVaultRouterDeps) {
   router.openapi(getMemoryVaultSharingRoute, getSharingHandler);
   router.openapi(putMemoryVaultSharingRoute, putSharingHandler);
   router.openapi(getMemoryVaultSummaryStatusRoute, summaryStatusHandler);
+  router.openapi(deleteMemoryVaultSummaryStatusRoute, dismissSummaryStatusHandler);
   router.openapi(deleteShownMemoryRoute, deleteShownHandler);
   router.openapi(updateMemoryVaultEntryRoute, updateHandler);
   router.openapi(deleteMemoryVaultEntryRoute, deleteHandler);

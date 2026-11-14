@@ -139,6 +139,10 @@ export const MemoryVaultSummaryStatusSchema = z
     summary_pending: z
       .boolean()
       .describe('True when the newest turn summary for this vault failed and has not been made yet.'),
+    failed_at: z.iso
+      .datetime()
+      .nullable()
+      .describe('When that summary failed, or null when none is owed or the time was not kept.'),
   })
   .openapi('MemoryVaultSummaryStatus');
 
@@ -147,6 +151,11 @@ export const GetMemoryVaultSummaryStatusResponseSchema = z
     data: MemoryVaultSummaryStatusSchema,
   })
   .openapi('GetMemoryVaultSummaryStatusResponse');
+
+/** Dismissing is idempotent and returns an empty object. */
+export const DeleteMemoryVaultSummaryStatusResponseSchema = z
+  .object({})
+  .openapi('DeleteMemoryVaultSummaryStatusResponse');
 
 /** One older note the person may mark as their own words. */
 export const MemoryVaultReviewNoteSchema = z
