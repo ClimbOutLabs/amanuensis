@@ -22,12 +22,16 @@ import { SqliteOAuthTokenStore } from '../../db/sqlite/token-store/SqliteOAuthTo
 import { SqliteTurnArtifactStore } from '../../db/sqlite/turn-artifact-store/SqliteTurnArtifactStore';
 import type { Database as SqliteDatabase } from '../../db/sqlite/types';
 import { TextContactStore } from '../../db/textContactStore';
+import { openReadingVault } from '../../secrets/cliVault';
+import { encryptSecretStores, type SecretBearingStores } from '../../secrets/encryptedStores';
 import type { ExportStores } from './stores';
 
 /** Opens an existing SQLite database; a missing file is an error, never an empty export. */
 export async function openSqliteStores(options: {
   sqlitePath: string;
   migrate: boolean;
+  /** Where this computer's key is; saved logins are read through it. */
+  keyFile: string;
 }): Promise<ExportStores<Transaction<SqliteDatabase>>> {
   if (!existsSync(options.sqlitePath)) {
     throw new Error(`No SQLite database at ${options.sqlitePath}. Check SQLITE_PATH and the data volume.`);
@@ -41,21 +45,34 @@ export async function openSqliteStores(options: {
     await db.destroy();
     throw error;
   }
+  const globalSettingsStore = new SqliteGlobalSettingsStore(db);
+  let secretStores: SecretBearingStores<Transaction<SqliteDatabase>>;
+  try {
+    secretStores = encryptSecretStores({
+      vault: await openReadingVault({ settings: globalSettingsStore, keyFile: options.keyFile }),
+      stores: {
+        modelProviderStore: new SqliteModelProviderStore(db),
+        sandboxProviderStore: new SqliteSandboxProviderStore(db),
+        mcpServerStore: new SqliteMcpServerStore(db),
+        tokenStore: new SqliteOAuthTokenStore(db),
+        googleConnectionStore: new SqliteGoogleConnectionStore(db),
+      },
+    });
+  } catch (error) {
+    await db.destroy();
+    throw error;
+  }
   return {
+    ...secretStores,
     sessionStore: new SqliteSessionStore(db),
     personaStore: new SqlitePersonaStore(db),
     personalizationStore: new SqlitePersonalizationStore(db),
     spaceStore: new SqliteSpaceStore(db),
     scheduleStore: new SqliteScheduleStore(db),
-    globalSettingsStore: new SqliteGlobalSettingsStore(db),
+    globalSettingsStore,
     sentinelSettingsStore: new SqliteSentinelSettingsStore(db),
     turnArtifactStore: new SqliteTurnArtifactStore(db),
     agentStore: new SqliteAgentStore(db),
-    modelProviderStore: new SqliteModelProviderStore(db),
-    sandboxProviderStore: new SqliteSandboxProviderStore(db),
-    mcpServerStore: new SqliteMcpServerStore(db),
-    tokenStore: new SqliteOAuthTokenStore(db),
-    googleConnectionStore: new SqliteGoogleConnectionStore(db),
     auditStore: new SentinelAuditStore(db),
     deliveryStore: new DeliveryStore(db),
     reachSettingsStore: new ReachSettingsStore(db),

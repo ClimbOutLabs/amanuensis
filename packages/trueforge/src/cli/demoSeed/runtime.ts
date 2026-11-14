@@ -4,7 +4,9 @@ import { createLogger } from 'winston';
 import { McpCatalog } from '../../catalog/McpCatalog';
 import { SkillCatalog } from '../../catalog/SkillCatalog';
 import { flattenProviderModels } from '../../db/modelProviderStore';
+import { SqliteGlobalSettingsStore } from '../../db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
 import { getPersonaKnowledgeIndexer } from '../../personaKnowledge/knowledgeIndexer';
+import { openCommandVault } from '../../secrets/cliVault';
 import { createKnowledgeLibrary } from './knowledgeLibrary';
 import { buildDemoSession, type DemoSeedSession } from './session';
 
@@ -33,6 +35,7 @@ export async function openDemoSeedSession(): Promise<DemoSeedSession> {
   try {
     await migrateSqliteToLatest(db);
     const { TENANT_ID } = await import('../../tenancy');
+    // Only model names are read here, so the providers' keys stay encrypted and unread.
     const providers = await new SqliteModelProviderStore(db).listProviders({ tenant_id: TENANT_ID });
     // The seed indexes the personas' libraries itself; the logger is quiet because the status of each document is reported.
     const indexer = getPersonaKnowledgeIndexer({
@@ -40,8 +43,13 @@ export async function openDemoSeedSession(): Promise<DemoSeedSession> {
       modelDir: configuration.MEMORY_EMBEDDINGS_MODEL_DIR,
       logger: { info: () => undefined, warn: () => undefined, error: () => undefined },
     });
+    const vault = await openCommandVault({
+      settings: new SqliteGlobalSettingsStore(db),
+      keyFile: configuration.SECRETS_KEY_FILE,
+    });
     return buildDemoSession({
       db,
+      vault,
       tenantId: TENANT_ID,
       memoryDir: configuration.MEMORY_MARKDOWN_DIR,
       models: flattenProviderModels(providers).map(model => model.name),

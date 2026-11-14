@@ -99,6 +99,17 @@ describe('aman secrets', () => {
     ).rejects.toThrow('different key');
   }, 120_000);
 
+  it('leaves no new key file behind when the database belongs to a key that is gone', async () => {
+    const env = await database();
+    await init(env);
+    await rm(keyFile);
+
+    await expect(
+      runSecrets({ args: ['init', '--sqlite', env.databaseFile, '--key-file', keyFile], io: fakeIo(), env: {} }),
+    ).rejects.toThrow('different key');
+    await expect(stat(keyFile)).rejects.toThrow('ENOENT');
+  }, 120_000);
+
   it('finishes a setup that stopped before the recovery key was saved', async () => {
     const env = await database();
     const firstKey = await init(env);

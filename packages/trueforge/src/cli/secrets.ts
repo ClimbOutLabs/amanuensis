@@ -63,29 +63,30 @@ async function loadOrCreateKey(keyFile: string): Promise<{ key: Buffer; created:
 
 async function initSecrets({ settings, keyFile }: { settings: SqliteGlobalSettingsStore; keyFile: string }) {
   const { key, created } = await loadOrCreateKey(keyFile);
-  const state = await checkMasterKey({ settings, key });
-  if (state === 'wrong_key') {
-    throw new Error(
-      'This database was set up with a different key. Unlock it with its recovery key instead of running setup.',
-    );
-  }
-  if (state === 'match' && (await settings.getSetting({ key: RECOVERY_COPY_SETTING })) !== undefined) {
-    throw new Error('Saved secrets are already set up for this database. Nothing was changed.');
-  }
-  if (state === 'not_set_up') {
-    try {
-      await recordKeyCheck({ settings, key });
-    } catch (caught) {
-      if (created) {
-        await rm(keyFile, { force: true });
-      }
-      throw caught;
+  try {
+    const state = await checkMasterKey({ settings, key });
+    if (state === 'wrong_key') {
+      throw new Error(
+        'This database was set up with a different key. Unlock it with its recovery key instead of running setup.',
+      );
     }
+    if (state === 'match' && (await settings.getSetting({ key: RECOVERY_COPY_SETTING })) !== undefined) {
+      throw new Error('Saved secrets are already set up for this database. Nothing was changed.');
+    }
+    if (state === 'not_set_up') {
+      await recordKeyCheck({ settings, key });
+    }
+    // Also finishes a setup that stopped after the key check value was saved but before the recovery key.
+    const recoveryKey = generateRecoveryKey();
+    await saveRecoveryCopy({ settings, masterKey: key, recoveryKey });
+    return recoveryKey;
+  } catch (caught) {
+    // A key made by this run unlocks nothing if setup did not finish, so it is not left behind.
+    if (created && (await checkMasterKey({ settings, key })) !== 'match') {
+      await rm(keyFile, { force: true });
+    }
+    throw caught;
   }
-  // Also finishes a setup that stopped after the key check value was saved but before the recovery key.
-  const recoveryKey = generateRecoveryKey();
-  await saveRecoveryCopy({ settings, masterKey: key, recoveryKey });
-  return recoveryKey;
 }
 
 async function checkRecovery({ settings, io }: { settings: SqliteGlobalSettingsStore; io: CliIo }) {

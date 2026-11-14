@@ -1,6 +1,7 @@
 import type { CalendarDay } from '@truefoundry/trueforge-core/core/util/calendarDay';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../db/sqlite/types';
+import type { SecretVault } from '../../secrets/secretVault';
 import { wipeUserData, type FreshReport } from './fresh';
 import type { DemoKnowledgeLibrary } from './knowledgeLibrary';
 import { resetDemoWorld, seedDemoWorld, type DemoSeedConnectors, type ResetReport, type SeedReport } from './seed';
@@ -33,6 +34,7 @@ export function buildDemoSession({
   models,
   knowledge,
   connectors,
+  vault,
 }: {
   db: Kysely<Database>;
   tenantId: string;
@@ -40,8 +42,9 @@ export function buildDemoSession({
   models: readonly string[];
   knowledge: DemoKnowledgeLibrary;
   connectors: DemoSeedConnectors;
+  vault: SecretVault;
 }): DemoSeedSession {
-  const stores = createSqliteDemoSeedStores({ db, memoryDir, tenantId, knowledge });
+  const stores = createSqliteDemoSeedStores({ db, memoryDir, tenantId, knowledge, vault });
   return {
     models,
     seed: ({ userId, now, timeZone, modelName, today }) =>

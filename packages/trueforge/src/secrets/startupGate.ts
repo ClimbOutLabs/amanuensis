@@ -119,8 +119,11 @@ export async function waitForMachineKey({
   provider: KeyProvider;
   /** Whether `key` is the key this instance's data was set up with. */
   checkKey: (key: Buffer) => Promise<KeyCheckResult>;
-  /** Starts the locked server; called only when the first check finds Aman locked. */
-  listen: (server: Server) => Promise<void>;
+  /**
+   * Starts the locked server; called only when the first check finds Aman locked. A process that
+   * serves no pages leaves it out and just waits.
+   */
+  listen?: (server: Server) => Promise<void>;
   onLockChange: (lock: StartupLock) => void;
   fastMs?: number;
   fastForMs?: number;
@@ -154,7 +157,7 @@ export async function waitForMachineKey({
       reported = current;
       onLockChange(lock);
     }
-    if (server === undefined) {
+    if (server === undefined && listen !== undefined) {
       server = createLockedServer(() => lock);
       await listen(server);
     }

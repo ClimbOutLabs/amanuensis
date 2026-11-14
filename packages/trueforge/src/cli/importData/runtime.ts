@@ -3,6 +3,10 @@ import path from 'node:path';
 
 import { createLogger, format, transports } from 'winston';
 
+import { openCommandVault } from '../../secrets/cliVault';
+import { EncryptedMcpServerStore } from '../../secrets/encryptedMcpServerStore';
+import { EncryptedModelProviderStore } from '../../secrets/encryptedModelProviderStore';
+import type { SecretVault } from '../../secrets/secretVault';
 import type { ImportDataSession } from './session';
 
 /** Messages go to stderr so stdout stays the printed summary; the JSON result is on stderr too. */
@@ -119,6 +123,16 @@ export async function openImportDataSession(): Promise<ImportDataSession> {
     import('../../db/sqlite/turn-artifact-store/SqliteTurnArtifactStore'),
   ]);
 
+  // An import saves connectors and model providers, so it needs this computer's key like the server does.
+  const globalSettingsStore = new SqliteGlobalSettingsStore(db);
+  let vault: SecretVault;
+  try {
+    vault = await openCommandVault({ settings: globalSettingsStore, keyFile: configuration.SECRETS_KEY_FILE });
+  } catch (error) {
+    await db.destroy();
+    throw error;
+  }
+
   const modelDir = configuration.MEMORY_EMBEDDINGS_MODEL_DIR;
   const embeddingModel = getSharedEmbeddingModel({ modelDir });
   const logger = stderrLogger();
@@ -135,14 +149,14 @@ export async function openImportDataSession(): Promise<ImportDataSession> {
           personalizationStore: new SqlitePersonalizationStore(db),
           spaceStore: new SqliteSpaceStore(db),
           scheduleStore: new SqliteScheduleStore(db),
-          globalSettingsStore: new SqliteGlobalSettingsStore(db),
+          globalSettingsStore,
           auditStore: audit,
           deliveryStore: new DeliveryStore(db),
           reachSettingsStore: new ReachSettingsStore(db),
           textContactStore: new TextContactStore(db),
           turnArtifactStore: new SqliteTurnArtifactStore(db),
-          mcpServerStore: new SqliteMcpServerStore(db),
-          modelProviderStore: new SqliteModelProviderStore(db),
+          mcpServerStore: new EncryptedMcpServerStore({ store: new SqliteMcpServerStore(db), vault }),
+          modelProviderStore: new EncryptedModelProviderStore({ store: new SqliteModelProviderStore(db), vault }),
           agentStore: new SqliteAgentStore(db),
           mcpCatalog,
           withTransaction: callback => db.transaction().execute(callback),

@@ -21,6 +21,8 @@ import type { Database as PostgresDatabase } from '../../db/postgres/types';
 import { ReachSettingsStore } from '../../db/reachSettingsStore';
 import { SentinelAuditStore } from '../../db/sentinelAuditStore';
 import { TextContactStore } from '../../db/textContactStore';
+import { openReadingVault } from '../../secrets/cliVault';
+import { encryptSecretStores, type SecretBearingStores } from '../../secrets/encryptedStores';
 import type { ExportStores } from './stores';
 
 export async function openPostgresStores(options: {
@@ -30,6 +32,8 @@ export async function openPostgresStores(options: {
   idleInTransactionSessionTimeoutMs: number;
   connectionTimeoutMs: number;
   migrate: boolean;
+  /** Where this computer's key is; saved logins are read through it. */
+  keyFile: string;
 }): Promise<ExportStores<Transaction<PostgresDatabase>>> {
   const db = createDb({
     connectionString: options.connectionString,
@@ -50,21 +54,34 @@ export async function openPostgresStores(options: {
     await db.destroy();
     throw error;
   }
+  const globalSettingsStore = new PostgresGlobalSettingsStore(db);
+  let secretStores: SecretBearingStores<Transaction<PostgresDatabase>>;
+  try {
+    secretStores = encryptSecretStores({
+      vault: await openReadingVault({ settings: globalSettingsStore, keyFile: options.keyFile }),
+      stores: {
+        modelProviderStore: new PostgresModelProviderStore(db),
+        sandboxProviderStore: new PostgresSandboxProviderStore(db),
+        mcpServerStore: new PostgresMcpServerStore(db),
+        tokenStore: new PostgresOAuthTokenStore(db),
+        googleConnectionStore: new PostgresGoogleConnectionStore(db),
+      },
+    });
+  } catch (error) {
+    await db.destroy();
+    throw error;
+  }
   return {
+    ...secretStores,
     sessionStore: new PostgresSessionStore(db),
     personaStore: new PostgresPersonaStore(db),
     personalizationStore: new PostgresPersonalizationStore(db),
     spaceStore: new PostgresSpaceStore(db),
     scheduleStore: new PostgresScheduleStore(db),
-    globalSettingsStore: new PostgresGlobalSettingsStore(db),
+    globalSettingsStore,
     sentinelSettingsStore: new PostgresSentinelSettingsStore(db),
     turnArtifactStore: new PostgresTurnArtifactStore(db),
     agentStore: new PostgresAgentStore(db),
-    modelProviderStore: new PostgresModelProviderStore(db),
-    sandboxProviderStore: new PostgresSandboxProviderStore(db),
-    mcpServerStore: new PostgresMcpServerStore(db),
-    tokenStore: new PostgresOAuthTokenStore(db),
-    googleConnectionStore: new PostgresGoogleConnectionStore(db),
     auditStore: new SentinelAuditStore(db),
     deliveryStore: new DeliveryStore(db),
     reachSettingsStore: new ReachSettingsStore(db),
