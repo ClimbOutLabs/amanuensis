@@ -3,7 +3,7 @@ import type { SentinelApprovalCard } from './types.js';
 
 /** The approval choices, in the order every approval surface shows them. */
 export const APPROVAL_CHOICES = {
-  approve: { label: 'Approve', hint: 'Allow this one call only.' },
+  approve: { label: 'Allow', hint: 'Allow this one call only.' },
   approveForChat: { label: 'Always allow in this chat', hint: "Don't ask again for this kind of action in this chat." },
   alwaysAllow: { label: 'Always allow everywhere', hint: 'Remember this for every chat.' },
   alwaysAllowTool: {
@@ -29,9 +29,12 @@ export const NEW_RECIPIENT_DRAFT_CHOICES = {
   cancel: { label: "Don't save", hint: 'Do not save this draft. Nothing is added to your send list.' },
 } as const;
 
-/** The buttons on a mail card. Edit is the same path as Change it: the persona revises the mail first. */
+/** The buttons on a mail card. Change it shares the label of every other card; only its hint names sending. */
 export const EMAIL_CHOICES = {
-  edit: { label: 'Edit', hint: 'Ask the persona to change this first. Nothing is sent now.' },
+  changeIt: {
+    label: APPROVAL_CHOICES.changeIt.label,
+    hint: 'Ask the persona to change this first. Nothing is sent now.',
+  },
   saveDraft: { label: 'Save as draft', hint: 'Save this as a draft. Nothing is sent.' },
 } as const;
 
@@ -42,19 +45,23 @@ export const EMAIL_CHOICES = {
 export const SAVE_DRAFT_OPTION_ID = 'save_draft';
 
 /**
- * The choices on a skill network card. Approving once covers this chat, always covers the skill
- * until cleared in skill settings, and denying remembers the sites as turned down for the skill.
+ * The choices on a skill network card. Allow covers this chat, always covers the skill until cleared
+ * in skill settings, and Deny remembers the sites as turned down for the skill. Allow and Deny share
+ * the label of every other card; only their hints say what is remembered.
  */
 export const SKILL_NETWORK_CHOICES = {
   approve: {
-    label: 'Allow once',
+    label: APPROVAL_CHOICES.approve.label,
     hint: 'Allow these sites for this chat only. The command runs again with them, unless it needs an approval of its own.',
   },
   alwaysAllow: {
     label: 'Always allow for this skill',
     hint: 'Let this skill reach these sites in every chat, until you remove it in skill settings.',
   },
-  deny: { label: 'Deny', hint: 'Do not run this call, and do not ask about these sites for this skill again.' },
+  deny: {
+    label: APPROVAL_CHOICES.deny.label,
+    hint: 'Do not run this call, and do not ask about these sites for this skill again.',
+  },
 } as const;
 
 /** A card asking whether a skill may reach the sites it names. */

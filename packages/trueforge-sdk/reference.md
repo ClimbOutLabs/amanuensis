@@ -6874,6 +6874,70 @@ await client.spaces.revert("space_id", {
 </dl>
 </details>
 
+## Today
+<details><summary><code>client.today.<a href="/src/api/resources/today/client/Client.ts">get</a>({ ...params }) -> TrueForge.GetTodayResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+The person's day read from stored state: calendar events, free time, due reminders, held actions and how many schedules are on. Nothing here asks the assistant anything, and no model is called.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.today.get();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.GetTodayRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `TodayClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
 ## Deliveries
 <details><summary><code>client.deliveries.<a href="/src/api/resources/deliveries/client/Client.ts">list</a>({ ...params }) -> TrueForge.ListDeliveriesResponse</code></summary>
 <dl>
@@ -9897,6 +9961,80 @@ await client.reach.texts.removeWord("word");
 </dl>
 </details>
 
+## Sessions RecallExclusions
+<details><summary><code>client.sessions.recallExclusions.<a href="/src/api/resources/sessions/resources/recallExclusions/client/Client.ts">create</a>(session_id, { ...params }) -> TrueForge.CreateRecallExclusionResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Stops one recalled fact from being recalled again in this chat. The memory itself is not changed or deleted, and other chats still recall it.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.sessions.recallExclusions.create("session_id", {
+    factText: "fact_text"
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**session_id:** `string` — Session identifier.
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.sessions.CreateRecallExclusionRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `RecallExclusionsClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
 ## Settings FirstRunGuide
 <details><summary><code>client.settings.firstRunGuide.<a href="/src/api/resources/settings/resources/firstRunGuide/client/Client.ts">get</a>() -> TrueForge.GetFirstRunGuideResponse</code></summary>
 <dl>
@@ -10007,6 +10145,128 @@ await client.settings.firstRunGuide.createOrUpdate({
 <dd>
 
 **requestOptions:** `FirstRunGuideClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+## Settings GitCommitIdentity
+<details><summary><code>client.settings.gitCommitIdentity.<a href="/src/api/resources/settings/resources/gitCommitIdentity/client/Client.ts">get</a>() -> TrueForge.GetGitCommitIdentityResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+The name and email written on Git commits made in the sandbox. A `null` part means the person chose none and the default shown beside it is used.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.gitCommitIdentity.get();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**requestOptions:** `GitCommitIdentityClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.settings.gitCommitIdentity.<a href="/src/api/resources/settings/resources/gitCommitIdentity/client/Client.ts">createOrUpdate</a>({ ...params }) -> TrueForge.GetGitCommitIdentityResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Sets the name and email written on Git commits made in the sandbox. `null` for a part goes back to its default. New commits use the change from the next message.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.gitCommitIdentity.createOrUpdate({
+    email: null,
+    name: "Sam Rivera"
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.settings.UpdateGitCommitIdentityRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `GitCommitIdentityClient.RequestOptions`
 
 </dd>
 </dl>

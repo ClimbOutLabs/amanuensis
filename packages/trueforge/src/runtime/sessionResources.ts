@@ -11,6 +11,7 @@ import {
   SlotDriver,
   type AgentTracing,
   type BoundRepository,
+  type GitCommitIdentity,
   type GitSkill,
   type ModelParams,
   type RemoteMcpHeaders,
@@ -719,6 +720,8 @@ export function buildTurnSandbox(input: {
   logger: Logger;
   gitSkills: readonly GitSkill[];
   githubGitToken?: string | null | undefined;
+  /** Name and email for commits made by shell commands. */
+  gitCommitIdentity?: GitCommitIdentity | undefined;
   githubConnectorAttached?: boolean | undefined;
   webConnectorAttached?: boolean | undefined;
   fileDownloadEnabled: boolean;
@@ -767,6 +770,7 @@ export function buildTurnSandbox(input: {
     existingSandboxId: input.existingSandboxId,
     fileDownloadEnabled: input.fileDownloadEnabled,
     githubGitToken: input.githubGitToken ?? null,
+    gitCommitIdentity: input.gitCommitIdentity,
     githubConnectorAttached: input.githubConnectorAttached ?? false,
     webConnectorAttached: input.webConnectorAttached ?? false,
     boundRepository: input.boundRepository,

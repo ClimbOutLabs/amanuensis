@@ -144,7 +144,7 @@ function unknownGuestsMessage(tool: CaldavToolName): string {
 function reachFor({ tool, assistant }: { tool: CaldavToolName; assistant: string }): {
   reason: string;
   reason_detail: string;
-  /** The tier reason the card shows behind "Why I'm asking", or null when the ask needs no reason. */
+  /** The tier reason the card shows on its own line under the question, or null when the ask needs no reason. */
   reason_text: string | null;
 } {
   if (tool === 'respond_to_event') {

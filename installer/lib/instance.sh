@@ -56,6 +56,8 @@ machine_render() { # stt image, tts image (may be empty)
   if [ ! -f "$MACHINE_DIR/.env" ]; then
     render_template "$TEMPLATES_DIR/machine/env.tpl" "VOICE_THREADS=$(voice_threads)" | write_if_changed "$MACHINE_DIR/.env" 600 || true
   fi
+  # The secret the speech services check on every call; the instances get copies of the same value.
+  env_secret_backfill_in "$MACHINE_DIR/.env" SPEECH_SECRET
 }
 
 # up -d is a no-op when nothing changed. The speech models load in the background, so this does not wait on them.
@@ -157,6 +159,7 @@ instance_render() {
   instance_tailscale_https_move "$name" "$app_image"
   owner_name_backfill "$name"
   web_push_backfill "$name" "$app_image"
+  speech_secret_backfill "$name"
   app_port=$(reg_get "$name" app_port)
   login_port=$(reg_get "$name" login_port)
   public_url=$(reg_get "$name" public_url)
@@ -227,7 +230,10 @@ instance_render() {
   # The email connector is part of the compose file only once its image is known. Its wrapper script is copied beside the
   # compose file, because the compose file mounts it from this folder.
   local email_on=0
-  [ -n "${REL_MAIL_EMAIL_IMAGE:-}" ] && email_on=1
+  if [ -n "${REL_MAIL_EMAIL_IMAGE:-}" ]; then
+    email_on=1
+    env_secret_backfill "$name" MAIL_EMAIL_ACCOUNT_SECRET
+  fi
   ensure_private_dir "$dir"
   if [ "$email_on" = 1 ]; then
     write_if_changed "$dir/mail-email-entrypoint.sh" 644 <"$REPO_ROOT/ops/compose/mail-email/entrypoint.sh" || true
@@ -375,14 +381,25 @@ owner_name_backfill() { # name
 # as its last line. A missing file gets nothing: the instance has no settings to run from, and the instance commands
 # say so.
 env_secret_backfill() { # name key
-  local env key=$2 value
-  env="$(instance_dir "$1")/.env"
+  env_secret_backfill_in "$(instance_dir "$1")/.env" "$2"
+}
+
+# The same backfill for a settings file named directly, such as the machine's own file.
+env_secret_backfill_in() { # env key
+  local env=$1 key=$2 value
   [ -f "$env" ] || return 0
   value=$(sed -n "s/^$key=//p" "$env" | tail -n 1)
   if [ "${#value}" -lt 32 ]; then
     value=$(sed -n "s/^$key=\(.\{32,\}\)\$/\1/p" "$env" | tail -n 1)
     [ -n "$value" ] || value=$(rand_hex 32)
   fi
+  env_secret_write "$env" "$key" "$value"
+}
+
+# Writes one secret value into a settings file: inside the installer's managed part when the file has
+# one (dropping any line for the key outside it), otherwise as the file's last line for that key.
+env_secret_write() { # env key value
+  local env=$1 key=$2 value=$3
   if grep -q '^# >>> managed by the installer' "$env"; then
     env_managed_set "$env" "$key" "$value"
     env_drop_outside_block "$env" "$key"
@@ -392,6 +409,19 @@ env_secret_backfill() { # name key
     grep -v "^$key=" "$env" || true
     printf '%s=%s\n' "$key" "$value"
   } | write_if_changed "$env" 600 || true
+}
+
+# The speech services are shared by every instance on the machine, so one secret guards them: the
+# machine's. Each instance's settings carry a copy of that value, so its app can present it. The
+# machine value is made once and never changed, so the copies never go stale.
+speech_secret_backfill() { # name
+  local value
+  [ -f "$MACHINE_DIR/.env" ] || return 0
+  env_secret_backfill_in "$MACHINE_DIR/.env" SPEECH_SECRET
+  value=$(sed -n "s/^SPEECH_SECRET=//p" "$MACHINE_DIR/.env" | tail -n 1)
+  [ "${#value}" -ge 32 ] || return 0
+  [ -f "$(instance_dir "$1")/.env" ] || return 0
+  env_secret_write "$(instance_dir "$1")/.env" SPEECH_SECRET "$value"
 }
 
 # Makes one push key pair with the app image's Node.js, so the computer needs no key tools of its own. Prints the

@@ -117,6 +117,7 @@ import type { PostgresAgentStore } from './db/postgres/agent-store/PostgresAgent
 import type { Database as PostgresDatabase } from './db/postgres/types';
 import { PushSubscriptionStore, type IPushSubscriptionStore } from './db/pushSubscriptionStore';
 import { ReachSettingsStore, type IReachSettingsStore } from './db/reachSettingsStore';
+import { RecallExclusionStore, type IRecallExclusionStore } from './db/recallExclusionStore';
 import type { IRepositoryStore } from './db/repositoryStore';
 import type { ISandboxProviderStore } from './db/sandboxProviderStore';
 import type { IScheduleStore } from './db/scheduleStore';
@@ -254,6 +255,7 @@ interface ServerPersistence<TTransaction> {
   sentinelAuditStore: ISentinelAuditStore;
   sentinelSettingsStore: ISentinelSettingsStore<TTransaction>;
   briefItemStore: IBriefItemCompletionStore;
+  recallExclusionStore: IRecallExclusionStore;
   deliveryStore: IDeliveryStore;
   reachSettingsStore: IReachSettingsStore;
   textContactStore: ITextContactStore;
@@ -501,6 +503,7 @@ async function createStandalonePersistence(options: {
     sentinelAuditStore: new SentinelAuditStore(db as Kysely<SentinelAuditDatabase>),
     sentinelSettingsStore: new SqliteSentinelSettingsStore(db),
     briefItemStore: new BriefItemCompletionStore(db),
+    recallExclusionStore: new RecallExclusionStore(db),
     deliveryStore: new DeliveryStore(db),
     reachSettingsStore: new ReachSettingsStore(db),
     textContactStore: new TextContactStore(db),
@@ -692,6 +695,7 @@ async function createDistributedPersistence(options: {
     sentinelAuditStore: new SentinelAuditStore(db as Kysely<SentinelAuditDatabase>),
     sentinelSettingsStore: new PostgresSentinelSettingsStore(db),
     briefItemStore: new BriefItemCompletionStore(db),
+    recallExclusionStore: new RecallExclusionStore(db),
     deliveryStore: new DeliveryStore(db),
     reachSettingsStore: new ReachSettingsStore(db),
     textContactStore: new TextContactStore(db),
@@ -815,6 +819,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
   if (configuration.MAIL_EMAIL_MCP_URL === undefined) {
     registerMailConnectorFromSavedAccountInBackground({
       accountUrl: configuration.MAIL_EMAIL_ACCOUNT_URL,
+      secret: configuration.MAIL_EMAIL_ACCOUNT_SECRET,
       mcpUrl: configuration.MAIL_SIDECAR_MCP_URL,
       policyPath: configuration.MAIL_POLICY_FILE,
       fetchImpl: undefined,
@@ -1010,7 +1015,11 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
   const noticingService = createNoticingService({
     sources: createSidecarNoticingSources({
       mailUrl: configuration.MAIL_SIDECAR_MCP_URL,
-      mailAgentUrl: configuration.MAIL_EMAIL_ACCOUNT_URL,
+      // The account agent answers no caller without its secret, so without one the shared mailbox is not watched.
+      mailAgent:
+        configuration.MAIL_EMAIL_ACCOUNT_URL === undefined || configuration.MAIL_EMAIL_ACCOUNT_SECRET === undefined
+          ? undefined
+          : { url: configuration.MAIL_EMAIL_ACCOUNT_URL, secret: configuration.MAIL_EMAIL_ACCOUNT_SECRET },
       calendarUrl: configuration.CALENDAR_SIDECAR_MCP_URL,
       primary: createGoogleNoticingSources({ connections: googleConnectionStore, fetchImpl: undefined, logger }),
       instanceOwner: noticingInstanceOwner,
@@ -1172,6 +1181,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     repositoryStore,
     turnArtifactStore,
     chatDeletionStore,
+    recallExclusionStore: persistence.recallExclusionStore,
     globalSettingsStore,
     tokenFactoryBudget,
     sessionStore,
