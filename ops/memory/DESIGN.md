@@ -225,14 +225,14 @@ stays valid). Only those accents are dropped, so `Ελένη`, `ΕΛΕΝΗ` and 
 marks are part of the letter and stay, so `김민수` is `people/김민수.md`, `ジョン` is not `ション`, and
 `ハル` is not `バル`. Text is compared in its composed form, so a name typed in either form is the same
 name. `José` and `Jose` share one page. A page's file name must be exactly that
-lowercase slug, such as `people/wendy.md`. A file with any other name, such as `people/Wendy.md` or
+lowercase slug, such as `people/nora.md`. A file with any other name, such as `people/Nora.md` or
 `people/my notes.md`, is not a page: it is never loaded. Each turn that skips such a file writes one
 warning to the server log with the number of files skipped. It does not name them, since file names can be people's names. To use a file, rename it to the lowercase slug.
 
 Export and import move pages with the rest of memory. An export (format version 3) holds every `.md`
 file directly in each vault's `people/` and `matters/` folders as `memory/<vault>/people/<name>.md` and
 `memory/<vault>/matters/<name>.md`, byte for byte apart from the usual removal of keys and passwords.
-That includes a file such as `people/Wendy.md` whose name is not a lowercase slug: it travels under its
+That includes a file such as `people/Nora.md` whose name is not a lowercase slug: it travels under its
 own name, so a move loses nothing, and the loader keeps skipping it with the same warning until it is
 renamed. Only regular files are exported, a folder that is a link is skipped, and a hidden name or one
 with control characters stays behind.
@@ -324,7 +324,7 @@ whether it is a bullet or plain text.
 
 Before recall, the host looks at the person's message for names. It compares each page's title and
 other names with the message as whole words. Case, Latin and Greek accents and punctuation around a name are ignored,
-so `(Wendy)` and `Wendy,` both match. An email address counts as one word, so putting an address in
+so `(Nora)` and `Nora,` both match. An email address counts as one word, so putting an address in
 `aliases` finds the page when the person pastes that address. A trailing dot is ignored, so `W.`
 matches `W`. Names in Chinese, Japanese, Korean or Thai are written without spaces, so those match
 anywhere in the message: `田中` is found in `田中さんに会った`. A name never matches part of a
@@ -338,7 +338,7 @@ chat that the recall query already holds. A page named only in an earlier messag
 page named in the newest one, so a question such as "What can she not eat?" still loads the page for
 the person named a message ago.
 
-A name followed by `'s` (`Wendy's flight`) is a possessive match. It loads the page, but ranks below
+A name followed by `'s` (`Nora's flight`) is a possessive match. It loads the page, but ranks below
 a direct mention, since the page may be about the owner and not the subject.
 
 Matches are ordered by:
@@ -571,7 +571,7 @@ and each write is a commit that can be undone.
 
 **Every change is one commit.** Under the vault lock the host does these steps. It makes the history ready.
 It takes in the person's hand edits (below). It makes the change. It commits the change with a message such
-as `Aman saved: Likes tulips. (Wendy)`, `Aman changed: ... to ... (Wendy)` or `Aman removed: ... (Wendy)`.
+as `Aman saved: Likes tulips. (Nora)`, `Aman changed: ... to ... (Nora)` or `Aman removed: ... (Nora)`.
 Each call also adds an entry to the activity log. The daily log is never written by these tools.
 If the history fails before the change, nothing is written and the model is told to try again. If it fails
 after, the page is already saved and the failure is logged. If git is not installed, pages are still

@@ -11,7 +11,7 @@ describe('ended statements move to Earlier', () => {
     await writePage(
       vaultDir,
       'matter',
-      'wendy',
+      'nora',
       pageWith({
         now: [
           '- Booked the movie. <!-- fact: id=f_01 src=mail since=2026-10-30 until=2026-11-01 -->',
@@ -32,15 +32,15 @@ describe('ended statements move to Earlier', () => {
     const moved = await moveEndedStatements({ options: changeOptions(vaultDir) });
 
     expect(moved).toBe(3);
-    const wendy = await readPage(vaultDir, 'matter', 'wendy');
-    expect(wendy).toMatch(
+    const nora = await readPage(vaultDir, 'matter', 'nora');
+    expect(nora).toMatch(
       /## Earlier\n- Booked the movie\. <!-- fact: id=f_01 src=mail since=2026-10-30 until=2026-11-01 -->/,
     );
-    expect(wendy).toContain(
+    expect(nora).toContain(
       '- Dinner is at seven. <!-- fact: id=f_02 src=you_said since=2026-11-01 until=2026-11-10 -->',
     );
-    expect(wendy.indexOf('## Earlier')).toBeLessThan(wendy.indexOf('Dinner is at seven'));
-    expect(wendy.indexOf('## Now')).toBeLessThan(wendy.indexOf('## Open'));
+    expect(nora.indexOf('## Earlier')).toBeLessThan(nora.indexOf('Dinner is at seven'));
+    expect(nora.indexOf('## Now')).toBeLessThan(nora.indexOf('## Open'));
     expect(history(vaultDir).filter(entry => entry.startsWith('Aman'))).toEqual([
       'Aman moved 3 ended lines to Earlier',
     ]);
@@ -56,10 +56,10 @@ describe('ended statements move to Earlier', () => {
         '- No end. <!-- fact: id=f_04 src=you_said since=2026-11-01 -->',
       ],
     });
-    await writePage(vaultDir, 'matter', 'wendy', content);
+    await writePage(vaultDir, 'matter', 'nora', content);
 
     expect(await moveEndedStatements({ options: changeOptions(vaultDir) })).toBe(0);
-    expect(await readPage(vaultDir, 'matter', 'wendy')).toBe(content);
+    expect(await readPage(vaultDir, 'matter', 'nora')).toBe(content);
   });
 
   it('leaves Unconfirmed and “How you write to them” alone', async () => {
@@ -67,9 +67,9 @@ describe('ended statements move to Earlier', () => {
     const content = [
       '---',
       'kind: person',
-      'title: Wendy',
+      'title: Nora',
       '---',
-      '# Wendy',
+      '# Nora',
       '',
       '## How you write to them',
       '- Short and casual. <!-- fact: id=f_01 src=sent_mail since=2026-01-01 until=2026-02-01 -->',
@@ -80,10 +80,10 @@ describe('ended statements move to Earlier', () => {
       '## Earlier',
       '',
     ].join('\n');
-    await writePage(vaultDir, 'person', 'wendy', content);
+    await writePage(vaultDir, 'person', 'nora', content);
 
     expect(await moveEndedStatements({ options: changeOptions(vaultDir) })).toBe(0);
-    expect(await readPage(vaultDir, 'person', 'wendy')).toBe(content);
+    expect(await readPage(vaultDir, 'person', 'nora')).toBe(content);
   });
 
   it('writes nothing when nothing ended: no history entry, not even a history', async () => {
@@ -91,7 +91,7 @@ describe('ended statements move to Earlier', () => {
     await writePage(
       vaultDir,
       'matter',
-      'wendy',
+      'nora',
       pageWith({ now: ['- Fine. <!-- fact: id=f_01 src=you_said since=2026-11-01 -->'] }),
     );
 

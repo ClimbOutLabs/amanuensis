@@ -20,7 +20,7 @@ import {
 } from './nightlyTestKit';
 
 const CITIES = pageWith({
-  title: 'Wendy',
+  title: 'Nora',
   now: [
     '- Lives in Madrid. <!-- fact: id=f_01 src=you_said since=2026-01 -->',
     '- Works at Brightline. <!-- fact: id=f_03 src=you_said since=2026-02 -->',
@@ -32,7 +32,7 @@ const PAIR = { pairs: [{ a: 'f_01', b: 'f_02', reason: 'Two different cities.' }
 
 async function setUp() {
   const base = await makeBase();
-  await writePage(base.vaultDir, 'matter', 'wendy', CITIES);
+  await writePage(base.vaultDir, 'matter', 'nora', CITIES);
   return base;
 }
 
@@ -40,8 +40,8 @@ const look = (vaultDir: string, askModel: SortModel) =>
   listDisagreements({ vaultDir, today: TODAY, askModel, logger: silentLogger });
 
 async function livePairs(vaultDir: string) {
-  const page = await readPageForTest(vaultDir, 'matter', 'wendy');
-  return (await readDisagreementsForScreen(vaultDir))({ kind: 'matter', slug: 'wendy', page });
+  const page = await readPageForTest(vaultDir, 'matter', 'nora');
+  return (await readDisagreementsForScreen(vaultDir))({ kind: 'matter', slug: 'nora', page });
 }
 
 describe('lines that disagree', () => {
@@ -59,7 +59,7 @@ describe('lines that disagree', () => {
       reason: 'Two different cities.',
       foundOn: TODAY,
     });
-    expect(await readFile(pagePath({ vaultDir, kind: 'matter', slug: 'wendy' }), 'utf8')).toBe(CITIES);
+    expect(await readFile(pagePath({ vaultDir, kind: 'matter', slug: 'nora' }), 'utf8')).toBe(CITIES);
     expect(history(vaultDir)).toEqual([]);
   });
 
@@ -68,7 +68,7 @@ describe('lines that disagree', () => {
     await writePage(
       vaultDir,
       'matter',
-      'wendy',
+      'nora',
       CITIES.replace(
         '## Earlier\n',
         '## Earlier\n- Lived in Paris. <!-- fact: id=f_09 src=you_said since=2020 until=2024 -->\n',
@@ -121,7 +121,7 @@ describe('lines that disagree', () => {
       { length: 8 },
       (_, i) => `- Line ${String(i)}. <!-- fact: id=f_0${String(i)} src=you_said since=2026-01 -->`,
     );
-    await writePage(vaultDir, 'matter', 'wendy', pageWith({ now: lines }));
+    await writePage(vaultDir, 'matter', 'nora', pageWith({ now: lines }));
     const pairs = [1, 2, 3, 4, 5, 6, 7].map(i => ({ a: 'f_00', b: `f_0${String(i)}`, reason: 'No.' }));
 
     const result = await look(
@@ -135,7 +135,7 @@ describe('lines that disagree', () => {
   it('drops a pair when a line changed while the model was thinking', async () => {
     const { vaultDir } = await setUp();
     const model: SortModel = async () => {
-      await writePage(vaultDir, 'matter', 'wendy', CITIES.replace('Lives in Madrid.', 'Lives in Porto.'));
+      await writePage(vaultDir, 'matter', 'nora', CITIES.replace('Lives in Madrid.', 'Lives in Porto.'));
       return { ok: true, reply: JSON.stringify(PAIR) };
     };
 
@@ -150,13 +150,13 @@ describe('lines that disagree', () => {
     );
     expect(await livePairs(vaultDir)).toHaveLength(1);
 
-    await writePage(vaultDir, 'matter', 'wendy', CITIES.replace('Lives in Lisbon.', 'Lives in Lisbon, Portugal.'));
+    await writePage(vaultDir, 'matter', 'nora', CITIES.replace('Lives in Lisbon.', 'Lives in Lisbon, Portugal.'));
     expect(await livePairs(vaultDir)).toEqual([]);
 
     await writePage(
       vaultDir,
       'matter',
-      'wendy',
+      'nora',
       CITIES.replace(
         '## Earlier\n',
         '## Earlier\n- Lives in Madrid. <!-- fact: id=f_01 src=you_said since=2026-01 until=2026-10 -->\n',
@@ -173,7 +173,7 @@ describe('lines that disagree', () => {
     await look(vaultDir, model);
     expect(model.prompts).toHaveLength(1);
 
-    await writePage(vaultDir, 'matter', 'wendy', CITIES.replace('Brightline', 'Acme'));
+    await writePage(vaultDir, 'matter', 'nora', CITIES.replace('Brightline', 'Acme'));
     await look(vaultDir, model);
     expect(model.prompts).toHaveLength(2);
   });
@@ -186,16 +186,16 @@ describe('lines that disagree', () => {
     );
     const [pair] = await livePairs(vaultDir);
 
-    expect(await dismissDisagreement({ vaultDir, kind: 'matter', slug: 'wendy', id: pair?.id ?? '' })).toBe(true);
+    expect(await dismissDisagreement({ vaultDir, kind: 'matter', slug: 'nora', id: pair?.id ?? '' })).toBe(true);
     expect(await livePairs(vaultDir)).toEqual([]);
 
-    await writePage(vaultDir, 'matter', 'wendy', CITIES.replace('Brightline', 'Acme'));
+    await writePage(vaultDir, 'matter', 'nora', CITIES.replace('Brightline', 'Acme'));
     await look(
       vaultDir,
       modelAnswering(() => PAIR),
     );
     expect(await livePairs(vaultDir)).toEqual([]);
-    expect(await dismissDisagreement({ vaultDir, kind: 'matter', slug: 'wendy', id: pair?.id ?? '' })).toBe(false);
+    expect(await dismissDisagreement({ vaultDir, kind: 'matter', slug: 'nora', id: pair?.id ?? '' })).toBe(false);
   });
 
   it('looks at no more than 20 pages a run and takes the rest next time', async () => {
@@ -209,7 +209,7 @@ describe('lines that disagree', () => {
         vaultDir,
         'matter',
         `page-${String(i).padStart(2, '0')}`,
-        two.replace('title: Wendy', `title: Page ${String(i)}`),
+        two.replace('title: Nora', `title: Page ${String(i)}`),
       );
     }
 

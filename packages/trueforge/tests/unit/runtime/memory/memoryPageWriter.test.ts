@@ -24,7 +24,7 @@ import { VAULT_HISTORY_DIR } from '../../../../src/runtime/memory/vaultGit';
 import { writePageFile } from './pageFixtures';
 
 const TODAY = '2026-11-06';
-const fallback = { kind: 'person', title: 'Wendy' } as const;
+const fallback = { kind: 'person', title: 'Nora' } as const;
 
 async function makeVault(): Promise<string> {
   return mkdtemp(path.join(tmpdir(), 'writer-'));
@@ -59,7 +59,7 @@ function log(vaultDir: string): string[] {
     .split('\n');
 }
 
-const COMMITTED = `# Wendy
+const COMMITTED = `# Nora
 
 ## Now
 - Likes tea. <!-- fact: id=f_a src=you_said since=2026-01 -->
@@ -143,31 +143,31 @@ describe('commitPageChange', () => {
         writeMemoryPage({
           vaultDir,
           kind: 'person',
-          slug: 'wendy',
-          page: addFact(parseMemoryPage({ content: '# Wendy\n', fallback }), {
+          slug: 'nora',
+          page: addFact(parseMemoryPage({ content: '# Nora\n', fallback }), {
             section: 'Now',
             fact: { text: 'Likes tea.', marker: { kind: 'fact', id: newId(), src: 'you_said' } },
           }),
         }),
     });
     expect(log(vaultDir)).toEqual(['You: remembered x']);
-    expect(await readFile(pagePath({ vaultDir, kind: 'person', slug: 'wendy' }), 'utf8')).toContain('Likes tea.');
+    expect(await readFile(pagePath({ vaultDir, kind: 'person', slug: 'nora' }), 'utf8')).toContain('Likes tea.');
   });
 
   it('takes in the person\'s edits first as "Your edits", marks them, then commits the change on top', async () => {
     const vaultDir = await makeVault();
-    await writePageFile({ vaultDir, kind: 'person', slug: 'wendy', content: COMMITTED });
+    await writePageFile({ vaultDir, kind: 'person', slug: 'nora', content: COMMITTED });
     const add =
       (text: string) =>
       async ({ newId }: { newId: () => string }) => {
-        const page = await readMemoryPage({ vaultDir, kind: 'person', slug: 'wendy' });
+        const page = await readMemoryPage({ vaultDir, kind: 'person', slug: 'nora' });
         if (page === undefined) {
           throw new Error('missing');
         }
         await writeMemoryPage({
           vaultDir,
           kind: 'person',
-          slug: 'wendy',
+          slug: 'nora',
           page: addFact(page, {
             section: 'Now',
             fact: { text, marker: { kind: 'fact', id: newId(), src: 'you_said' } },
@@ -176,7 +176,7 @@ describe('commitPageChange', () => {
       };
     // The first write commits the page as it stands; the person edits it afterwards.
     await commitPageChange({ options: optionsFor(vaultDir), message: 'You: remembered one', change: add('One.') });
-    const file = pagePath({ vaultDir, kind: 'person', slug: 'wendy' });
+    const file = pagePath({ vaultDir, kind: 'person', slug: 'nora' });
     const first = await readFile(file, 'utf8');
     await (
       await import('node:fs/promises')
@@ -197,7 +197,7 @@ describe('commitPageChange', () => {
       await writeMemoryPage({
         vaultDir,
         kind: 'person',
-        slug: 'wendy',
+        slug: 'nora',
         page: parseMemoryPage({ content: `${COMMITTED}\n`, fallback }),
       });
     };
@@ -208,8 +208,8 @@ describe('commitPageChange', () => {
 
   it('leaves a file that is not named like a page alone', async () => {
     const vaultDir = await makeVault();
-    await writePageFile({ vaultDir, kind: 'person', slug: 'wendy', content: COMMITTED });
-    const odd = path.join(vaultDir, 'people', 'Wendy B.md');
+    await writePageFile({ vaultDir, kind: 'person', slug: 'nora', content: COMMITTED });
+    const odd = path.join(vaultDir, 'people', 'Nora B.md');
     await (await import('node:fs/promises')).writeFile(odd, '- no marker here\n');
     await commitPageChange({ options: optionsFor(vaultDir), message: 'noop', change: () => Promise.resolve() });
     expect(await readFile(odd, 'utf8')).toBe('- no marker here\n');
@@ -217,7 +217,7 @@ describe('commitPageChange', () => {
 
   it('serialises concurrent changes to one page so none is lost', async () => {
     const vaultDir = await makeVault();
-    await writePageFile({ vaultDir, kind: 'person', slug: 'wendy', content: '# Wendy\n' });
+    await writePageFile({ vaultDir, kind: 'person', slug: 'nora', content: '# Nora\n' });
     await Promise.all(
       Array.from({ length: 12 }, (_unused, index) =>
         commitPageChange({
@@ -225,14 +225,14 @@ describe('commitPageChange', () => {
           options: optionsFor(vaultDir, { newId: () => `f_c${String(index)}`, lockWaitMs: 55_000 }),
           message: `add ${String(index)}`,
           change: async ({ newId }) => {
-            const page = await readMemoryPage({ vaultDir, kind: 'person', slug: 'wendy' });
+            const page = await readMemoryPage({ vaultDir, kind: 'person', slug: 'nora' });
             if (page === undefined) {
               throw new Error('missing');
             }
             await writeMemoryPage({
               vaultDir,
               kind: 'person',
-              slug: 'wendy',
+              slug: 'nora',
               page: addFact(page, {
                 section: 'Now',
                 fact: { text: `Fact ${String(index)}.`, marker: { kind: 'fact', id: newId(), src: 'you_said' } },
@@ -242,7 +242,7 @@ describe('commitPageChange', () => {
         }),
       ),
     );
-    const text = await readFile(pagePath({ vaultDir, kind: 'person', slug: 'wendy' }), 'utf8');
+    const text = await readFile(pagePath({ vaultDir, kind: 'person', slug: 'nora' }), 'utf8');
     for (let index = 0; index < 12; index += 1) {
       expect(text).toContain(`Fact ${String(index)}.`);
     }
@@ -266,13 +266,13 @@ describe('commitPageChange', () => {
         await writeMemoryPage({
           vaultDir,
           kind: 'person',
-          slug: 'wendy',
+          slug: 'nora',
           page: parseMemoryPage({ content: COMMITTED, fallback }),
         });
       };
       await commitPageChange({ options: optionsFor(vaultDir, { runner: missing, logger }), message: 'one', change });
       await commitPageChange({ options: optionsFor(vaultDir, { runner: missing, logger }), message: 'two', change });
-      expect(await readFile(pagePath({ vaultDir, kind: 'person', slug: 'wendy' }), 'utf8')).toBe(COMMITTED);
+      expect(await readFile(pagePath({ vaultDir, kind: 'person', slug: 'nora' }), 'utf8')).toBe(COMMITTED);
       expect(warn.mock.calls.map(call => call[0])).toEqual([
         'Git is not installed on this server, so page history is off. Pages are still saved.',
       ]);
@@ -282,7 +282,7 @@ describe('commitPageChange', () => {
   describe('when the history fails', () => {
     it('stops before the change if it fails before, and keeps the saved page if it fails after', async () => {
       const vaultDir = await makeVault();
-      await writePageFile({ vaultDir, kind: 'person', slug: 'wendy', content: COMMITTED });
+      await writePageFile({ vaultDir, kind: 'person', slug: 'nora', content: COMMITTED });
       const failOn = (word: string): HostCommandRunner => ({
         run: input =>
           input.argv.includes(word)
@@ -317,12 +317,12 @@ describe('commitPageChange', () => {
           await writeMemoryPage({
             vaultDir,
             kind: 'person',
-            slug: 'wendy',
+            slug: 'nora',
             page: parseMemoryPage({ content: `${COMMITTED}- Z.\n`, fallback }),
           });
         },
       });
-      expect(await readFile(pagePath({ vaultDir, kind: 'person', slug: 'wendy' }), 'utf8')).toContain('- Z.');
+      expect(await readFile(pagePath({ vaultDir, kind: 'person', slug: 'nora' }), 'utf8')).toContain('- Z.');
       expect(warn).toHaveBeenCalledWith(
         'A page was saved but its history entry could not be written.',
         expect.anything(),

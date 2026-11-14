@@ -5,7 +5,7 @@ import { MarkdownMemoryClient } from '../../../../src/runtime/memory/markdownMem
 import type { RetainItem } from '../../../../src/runtime/memory/memoryClient';
 
 const MESSAGE =
-  "Hi June, remember Wendy's is coming up in December in India and I wont be able to attend. Can you come up with 3 gift ideas and create a space for me";
+  "Hi June, remember Nora's is coming up in December in India and I wont be able to attend. Can you come up with 3 gift ideas and create a space for me";
 
 // Long background notes that share many words with the question ("and", "for", "with", "can",
 // "you", "come", "able", "space", "ideas", "create") without being about it.
@@ -22,13 +22,13 @@ const BACKGROUND_NOTES = [
   'Furniture for the Lisbon flat: a desk with space for two screens, a comfortable chair you can adjust, and shelves for books; ideas for second-hand shops, and create a list of measurements before buying.',
 ];
 
-const WENDY_NOTES = [
-  "Maya's really good friend is Wendy.",
-  "Maya won't be able to attend Wendy's in December 2026 in India.",
+const NORA_NOTES = [
+  "Maya's really good friend is Nora.",
+  "Maya won't be able to attend Nora's in December 2026 in India.",
 ];
 
 describe('MarkdownMemoryClient recall ranks notes naming the person asked about first', () => {
-  it('keeps both Wendy notes in the top ten despite long background notes sharing more words', async () => {
+  it('keeps both Nora notes in the top ten despite long background notes sharing more words', async () => {
     const dir = await mkdtemp(path.join(tmpdir(), 'mdnames-'));
     try {
       const client = new MarkdownMemoryClient({ baseDir: dir, namespace: 'tenant-1' });
@@ -40,10 +40,10 @@ describe('MarkdownMemoryClient recall ranks notes naming the person asked about 
             document_id: `bg-${String(index)}`,
             metadata: { origin: 'user_stated' },
           })),
-          ...WENDY_NOTES.map((content, index): RetainItem => ({
+          ...NORA_NOTES.map((content, index): RetainItem => ({
             content,
             timestamp: `2026-10-28T1${String(index)}:00:00Z`,
-            document_id: `wendy-${String(index)}`,
+            document_id: `nora-${String(index)}`,
             metadata: { origin: 'user_stated' },
           })),
         ],
@@ -60,9 +60,9 @@ describe('MarkdownMemoryClient recall ranks notes naming the person asked about 
         throw new Error(outcome.reason);
       }
       const topTen = outcome.results.slice(0, 10).map(item => item.text);
-      expect(topTen.filter(text => text.includes('Wendy'))).toHaveLength(2);
-      expect(topTen[0]).toContain('Wendy');
-      expect(topTen[1]).toContain('Wendy');
+      expect(topTen.filter(text => text.includes('Nora'))).toHaveLength(2);
+      expect(topTen[0]).toContain('Nora');
+      expect(topTen[1]).toContain('Nora');
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

@@ -15,13 +15,13 @@ import {
 } from '../../../../src/runtime/memory/memoryPages';
 
 /** A person page as a person would keep it. */
-export const WENDY = `---
+export const NORA = `---
 kind: person
-title: Wendy
-aliases: [Wendy, my wife, wendy@example.com]
+title: Nora
+aliases: [Nora, my wife, nora@example.com]
 household: true
 ---
-# Wendy
+# Nora
 
 The owner's wife. Lives with them; plans are shared.
 

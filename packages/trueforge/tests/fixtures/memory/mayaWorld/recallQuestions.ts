@@ -82,7 +82,7 @@ export const MAYA_RECALL_QUESTIONS: readonly RecallQuestion[] = z.array(RecallQu
   {
     id: 'q09',
     as_of_day: 50,
-    message: 'Where does Wendy work now?',
+    message: 'Where does Nora work now?',
     category: 'current_value_of_changed_fact',
     expected_text: 'Fernhill Design',
     must_not_text: 'designer at Brightline Studio',
@@ -132,7 +132,7 @@ export const MAYA_RECALL_QUESTIONS: readonly RecallQuestion[] = z.array(RecallQu
     as_of_day: 10,
     message: 'Who is Elena?',
     category: 'relationship',
-    expected_text: "Wendy's sister",
+    expected_text: "Nora's sister",
     source_entry_ids: ['d09_e01'],
   },
   {
@@ -175,13 +175,13 @@ export const MAYA_RECALL_QUESTIONS: readonly RecallQuestion[] = z.array(RecallQu
     message: 'When is Elena coming to stay?',
     category: 'household_plan',
     expected_text: 'September 1 to September 8',
-    page_wording: ['Elena is staying with Maya and Wendy', '2026-09-01 to 2026-09-08'],
+    page_wording: ['Elena is staying with Maya and Nora', '2026-09-01 to 2026-09-08'],
     source_entry_ids: ['d23_e03'],
   },
   {
     id: 'q20',
     as_of_day: 12,
-    message: 'Who waters the plants while Wendy is away?',
+    message: 'Who waters the plants while Nora is away?',
     category: 'household_plan',
     expected_text: 'Aiko is watering the plants',
     page_wording: ['Aiko waters the plants'],
@@ -250,7 +250,7 @@ export const MAYA_RECALL_QUESTIONS: readonly RecallQuestion[] = z.array(RecallQu
   {
     id: 'q28',
     as_of_day: 12,
-    message: 'Write Wendy an email about dinner on Friday.',
+    message: 'Write Nora an email about dinner on Friday.',
     category: 'how_you_write_to_them',
     expected_text: 'W, your train to the airport',
     page_wording: ['Opens with "W,"'],
@@ -270,10 +270,10 @@ export const MAYA_RECALL_QUESTIONS: readonly RecallQuestion[] = z.array(RecallQu
   {
     id: 'q30',
     as_of_day: 25,
-    message: "Is Wendy's car back from the garage?",
+    message: "Is Nora's car back from the garage?",
     category: 'temporary_fact',
     expected_text: 'garage until August 20',
-    page_wording: ["Wendy's car is at the garage", 'to 2026-08-20'],
+    page_wording: ["Nora's car is at the garage", 'to 2026-08-20'],
     source_entry_ids: ['d06_e04'],
   },
   {
@@ -291,7 +291,7 @@ export const MAYA_RECALL_QUESTIONS: readonly RecallQuestion[] = z.array(RecallQu
     message: 'Is Elena still staying with us?',
     category: 'temporary_fact',
     expected_text: 'Elena left this morning',
-    page_wording: ['Elena is staying with Maya and Wendy', 'to 2026-09-08'],
+    page_wording: ['Elena is staying with Maya and Nora', 'to 2026-09-08'],
     source_entry_ids: ['d39_e01'],
   },
   {
@@ -316,7 +316,7 @@ export const MAYA_RECALL_QUESTIONS: readonly RecallQuestion[] = z.array(RecallQu
   {
     id: 'q35',
     as_of_day: 50,
-    message: 'Where did Wendy work before Fernhill?',
+    message: 'Where did Nora work before Fernhill?',
     category: 'earlier_fact',
     expected_text: 'Brightline Studio',
     source_entry_ids: ['d01_e03'],
@@ -413,7 +413,7 @@ export const MAYA_RECALL_QUESTIONS: readonly RecallQuestion[] = z.array(RecallQu
   {
     id: 'q46',
     as_of_day: 26,
-    message: 'Does Wendy have any food allergies?',
+    message: 'Does Nora have any food allergies?',
     category: 'unconfirmed_claim',
     expected_text: 'shellfish and kiwi',
     must_not_text: 'no food allergies',
@@ -440,7 +440,7 @@ export const MAYA_RECALL_QUESTIONS: readonly RecallQuestion[] = z.array(RecallQu
   {
     id: 'q49',
     as_of_day: 22,
-    earlier_messages: ['I am planning dinner with Wendy on Friday.'],
+    earlier_messages: ['I am planning dinner with Nora on Friday.'],
     message: 'What can she not eat?',
     category: 'no_name_in_message',
     expected_text: 'shellfish',
@@ -506,7 +506,7 @@ export const MAYA_RECALL_QUESTIONS: readonly RecallQuestion[] = z.array(RecallQu
     as_of_day: 30,
     message: 'Does my wife have any siblings?',
     category: 'asked_in_other_words',
-    expected_text: "Wendy's sister",
+    expected_text: "Nora's sister",
     source_entry_ids: ['d09_e01'],
   },
   {
@@ -547,7 +547,7 @@ export const MAYA_RECALL_QUESTIONS: readonly RecallQuestion[] = z.array(RecallQu
     as_of_day: 40,
     message: 'When was my wife born?',
     category: 'asked_in_other_words',
-    expected_text: "Wendy's birthday is March 14",
+    expected_text: "Nora's birthday is March 14",
     source_entry_ids: ['d16_e01'],
   },
   {

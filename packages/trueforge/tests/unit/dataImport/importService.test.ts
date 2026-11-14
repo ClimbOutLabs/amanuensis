@@ -5505,11 +5505,11 @@ describe('runDataImport keeps the source label of saved findings', () => {
 });
 
 describe('runDataImport memory pages', () => {
-  const WENDY = '---\ntitle: Wendy\naliases: [my wife]\n---\n## How you write to them\n- Short and casual.\n';
+  const NORA = '---\ntitle: Nora\naliases: [my wife]\n---\n## How you write to them\n- Short and casual.\n';
   const KIM = '---\ntitle: 김민수\n---\n## Now\n- Lives in Seoul. <!-- fact: id=f_a1 src=you_said -->\n';
   const TRIP = '---\ntitle: Lisbon trip\n---\n## Open\n- Which hotel?\n';
   const PAGES: Record<string, string> = {
-    'people/wendy.md': WENDY,
+    'people/nora.md': NORA,
     'people/김민수.md': KIM,
     'matters/lisbon-trip.md': TRIP,
   };
@@ -5550,7 +5550,7 @@ describe('runDataImport memory pages', () => {
       const index = await loadAliasIndex({ vaultDir: join(target.memoryDir, TENANT) });
       expect(matchAliases({ index, text: '김민수씨에게 메일 / ask my wife' }).map(match => match.slug)).toEqual([
         '김민수',
-        'wendy',
+        'nora',
       ]);
     } finally {
       await source.close();
@@ -5584,17 +5584,17 @@ describe('runDataImport memory pages', () => {
   it('writes every .md page under its own name and says which ones Aman cannot read yet', async () => {
     const { source, archive } = await seededArchive();
     const edited = await repack(archive, entries => {
-      entries.set(`memory/${TENANT}/people/wendy.md`, Buffer.from(WENDY, 'utf8'));
-      entries.set(`memory/${TENANT}/people/Wendy2.md`, Buffer.from('x', 'utf8'));
+      entries.set(`memory/${TENANT}/people/nora.md`, Buffer.from(NORA, 'utf8'));
+      entries.set(`memory/${TENANT}/people/Nora2.md`, Buffer.from('x', 'utf8'));
       entries.set(`memory/${TENANT}/people/my notes.md`, Buffer.from('y', 'utf8'));
     });
     const target = await makeInstance('target-bad-names');
     try {
       const result = await runDataImport(importDeps(target), importRequest(edited));
       expect((await readdir(join(target.memoryDir, TENANT, 'people'))).sort()).toEqual([
-        'Wendy2.md',
+        'Nora2.md',
         'my notes.md',
-        'wendy.md',
+        'nora.md',
       ]);
       expect(await readFile(join(target.memoryDir, TENANT, 'people', 'my notes.md'), 'utf8')).toBe('y');
       expect(result.summary).toContain('3 memory pages came along.');
@@ -5686,7 +5686,7 @@ describe('runDataImport memory pages', () => {
         (caught: unknown) => caught,
       );
       expect(error).toBeInstanceOf(DataImportError);
-      expect(existsSync(join(target.memoryDir, TENANT, 'people', 'wendy.md'))).toBe(false);
+      expect(existsSync(join(target.memoryDir, TENANT, 'people', 'nora.md'))).toBe(false);
       expect(existsSync(join(target.memoryDir, TENANT, 'people', '김민수.md'))).toBe(false);
       expect(existsSync(join(target.memoryDir, TENANT, 'MEMORY.md'))).toBe(false);
     } finally {

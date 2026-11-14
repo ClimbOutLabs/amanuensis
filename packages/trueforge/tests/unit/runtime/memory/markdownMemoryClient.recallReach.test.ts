@@ -103,13 +103,13 @@ describe('MarkdownMemoryClient recall reach', () => {
   });
 
   it('shows something saved on several days once, as its newest copy', async () => {
-    await retain([personFact({ text: 'Wendy is allergic to shellfish.', age: 300 })]);
-    await retain([personFact({ text: 'Wendy is allergic to  SHELLFISH.', age: 150 })]);
-    await retain([personFact({ text: 'Wendy is allergic to shellfish.', age: 2 })]);
-    await retain([personFact({ text: 'Wendy is allergic to peanuts too.', age: 100 })]);
+    await retain([personFact({ text: 'Nora is allergic to shellfish.', age: 300 })]);
+    await retain([personFact({ text: 'Nora is allergic to  SHELLFISH.', age: 150 })]);
+    await retain([personFact({ text: 'Nora is allergic to shellfish.', age: 2 })]);
+    await retain([personFact({ text: 'Nora is allergic to peanuts too.', age: 100 })]);
 
     const outcome = await client.recall({
-      query: 'what is Wendy allergic to?',
+      query: 'what is Nora allergic to?',
       maxTokens: 600,
       timeoutMs: 5000,
     });
@@ -117,8 +117,8 @@ describe('MarkdownMemoryClient recall reach', () => {
     expect(outcome.ok).toBe(true);
     if (outcome.ok) {
       expect(outcome.results.map(item => item.text)).toEqual([
-        'Wendy is allergic to shellfish.',
-        'Wendy is allergic to peanuts too.',
+        'Nora is allergic to shellfish.',
+        'Nora is allergic to peanuts too.',
       ]);
       expect(outcome.results[0]?.occurred_start).toBe(daysAgo(2));
     }

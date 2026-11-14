@@ -75,25 +75,22 @@ describe('vaultGit', () => {
 
   it('stages and commits only people/ and matters/ pages, whatever else is in the vault', async () => {
     const vaultDir = await makeVault();
-    await put(vaultDir, 'people/wendy.md', 'a\n');
+    await put(vaultDir, 'people/nora.md', 'a\n');
     await put(vaultDir, 'matters/trip.md', 'b\n');
     await put(vaultDir, 'people/photo.png', 'not a page');
     await put(vaultDir, 'people/nested/deep.md', 'too deep');
-    await put(vaultDir, 'people/.wendy.md.tmp-1234', 'a crashed write');
+    await put(vaultDir, 'people/.nora.md.tmp-1234', 'a crashed write');
     await put(vaultDir, 'MEMORY.md', 'the long-term file');
     await put(vaultDir, 'memory/2026-11-06.md', 'the daily log');
     await put(vaultDir, '.memory-state/aliases.json', '{}');
     await put(vaultDir, '.operations.json', '{}');
     await ensureHistory({ vaultDir, runner: execFileRunner });
-    expect(await changedPagePaths({ vaultDir, runner: execFileRunner })).toEqual([
-      'matters/trip.md',
-      'people/wendy.md',
-    ]);
+    expect(await changedPagePaths({ vaultDir, runner: execFileRunner })).toEqual(['matters/trip.md', 'people/nora.md']);
     const outcome = await commitPages({ vaultDir, runner: execFileRunner, message: 'Your edits' });
     expect(outcome.committed).toBe(true);
     expect(history(vaultDir, 'ls-tree', '-r', '--name-only', 'HEAD').trim().split('\n')).toEqual([
       'matters/trip.md',
-      'people/wendy.md',
+      'people/nora.md',
     ]);
     expect(history(vaultDir, 'log', '--format=%an <%ae> %s')).toBe('Aman memory <memory@localhost> Your edits\n');
   });
@@ -102,28 +99,22 @@ describe('vaultGit', () => {
     const vaultDir = await makeVault();
     await put(vaultDir, '.gitignore', 'people/\nmatters/*.md\n*.md\n');
     await put(vaultDir, 'people/.gitignore', '*\n');
-    await put(vaultDir, 'people/wendy.md', 'a\n');
+    await put(vaultDir, 'people/nora.md', 'a\n');
     await put(vaultDir, 'matters/trip.md', 'b\n');
     await put(vaultDir, 'people/photo.png', 'not a page');
     await put(vaultDir, 'people/nested/deep.md', 'too deep');
     await put(vaultDir, 'MEMORY.md', 'the long-term file');
     await put(vaultDir, 'notes.md', 'outside');
     await ensureHistory({ vaultDir, runner: execFileRunner });
-    expect(await changedPagePaths({ vaultDir, runner: execFileRunner })).toEqual([
-      'matters/trip.md',
-      'people/wendy.md',
-    ]);
+    expect(await changedPagePaths({ vaultDir, runner: execFileRunner })).toEqual(['matters/trip.md', 'people/nora.md']);
     await commitPages({ vaultDir, runner: execFileRunner, message: 'first' });
     expect(history(vaultDir, 'ls-tree', '-r', '--name-only', 'HEAD').trim().split('\n')).toEqual([
       'matters/trip.md',
-      'people/wendy.md',
+      'people/nora.md',
     ]);
-    await put(vaultDir, 'people/wendy.md', 'changed\n');
+    await put(vaultDir, 'people/nora.md', 'changed\n');
     await (await import('node:fs/promises')).rm(path.join(vaultDir, 'matters', 'trip.md'));
-    expect(await changedPagePaths({ vaultDir, runner: execFileRunner })).toEqual([
-      'matters/trip.md',
-      'people/wendy.md',
-    ]);
+    expect(await changedPagePaths({ vaultDir, runner: execFileRunner })).toEqual(['matters/trip.md', 'people/nora.md']);
   });
 
   it('works when a page folder is missing or empty', async () => {
@@ -181,7 +172,7 @@ describe('vaultGit', () => {
       const vaultDir = await makeVault();
       execFileSync('git', ['init', '-q'], { cwd: vaultDir });
       await writeFile(path.join(vaultDir, '.gitignore'), 'secret.txt\n');
-      await put(vaultDir, 'people/wendy.md', 'a\n');
+      await put(vaultDir, 'people/nora.md', 'a\n');
       execFileSync('git', ['add', '.'], { cwd: vaultDir });
       execFileSync('git', ['-c', 'user.name=T', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'theirs'], {
         cwd: vaultDir,
@@ -190,7 +181,7 @@ describe('vaultGit', () => {
       const ignoreBefore = await readFile(path.join(vaultDir, '.gitignore'), 'utf8');
 
       await ensureHistory({ vaultDir, runner: execFileRunner });
-      await put(vaultDir, 'people/wendy.md', 'b\n');
+      await put(vaultDir, 'people/nora.md', 'b\n');
       await commitPages({ vaultDir, runner: execFileRunner, message: 'ours' });
 
       expect(await snapshot(path.join(vaultDir, '.git'))).toEqual(before);

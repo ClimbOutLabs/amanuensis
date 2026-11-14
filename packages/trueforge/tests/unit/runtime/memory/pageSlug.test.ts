@@ -4,7 +4,7 @@ import { foldName, isPageSlug, pageSlug, UNTITLED_PAGE_SLUG } from '../../../../
 
 describe('pageSlug', () => {
   it('lowercases, folds accents and joins words with one dash', () => {
-    expect(pageSlug('Wendy')).toBe('wendy');
+    expect(pageSlug('Nora')).toBe('nora');
     expect(pageSlug('Sam (plumber)')).toBe('sam-plumber');
     expect(pageSlug('José')).toBe('jose');
     expect(pageSlug('Jose')).toBe('jose');

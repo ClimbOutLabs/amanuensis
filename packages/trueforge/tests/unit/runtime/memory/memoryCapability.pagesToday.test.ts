@@ -30,7 +30,7 @@ async function dayHandedOver({ instant, timeZone }: { instant: string; timeZone:
     await collect(
       processor.processPreLLM(
         makeExecution([
-          { role: 'user', content: 'Plan dinner with Wendy.' },
+          { role: 'user', content: 'Plan dinner with Nora.' },
           { role: 'assistant', content: 'OK.' },
           { role: 'user', content: 'What can she not eat?' },
         ]),
@@ -47,7 +47,7 @@ describe('what the memory step hands the page loader', () => {
     const utc = await dayHandedOver({ instant: '2026-11-10T23:30:00Z', timeZone: 'UTC' });
     expect(utc).toMatchObject({
       message: 'What can she not eat?',
-      earlierMessages: ['Plan dinner with Wendy.'],
+      earlierMessages: ['Plan dinner with Nora.'],
       today: '2026-11-10',
     });
     const tokyo = await dayHandedOver({ instant: '2026-11-10T23:30:00Z', timeZone: 'Asia/Tokyo' });

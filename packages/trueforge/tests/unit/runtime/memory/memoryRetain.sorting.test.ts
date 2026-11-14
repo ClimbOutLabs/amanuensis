@@ -39,7 +39,7 @@ jest.mock('../../../../src/config', () => {
 });
 
 const SORT_SYSTEM = 'You sort one saved note onto the pages';
-const SHELLFISH = 'Wendy is allergic to shellfish.';
+const SHELLFISH = 'Nora is allergic to shellfish.';
 
 interface Model {
   llm: ILLM;
@@ -128,9 +128,9 @@ const newFactAnswer = () =>
       decisions: [
         {
           decision: 'new',
-          about: 'wendy',
+          about: 'nora',
           page_kind: 'person',
-          title: 'Wendy',
+          title: 'Nora',
           section: 'Now',
           text: SHELLFISH,
           reason: 'The person said it.',
@@ -171,7 +171,7 @@ describe('sorting after a save', () => {
     await waitFor(() => Promise.resolve(model.sortCalls === 1));
     release();
     await waitFor(async () => (await handledCount(vaultDir)) === 1);
-    expect(await readFile(path.join(vaultDir, 'people', 'wendy.md'), 'utf8')).toContain(SHELLFISH);
+    expect(await readFile(path.join(vaultDir, 'people', 'nora.md'), 'utf8')).toContain(SHELLFISH);
     expect([...(await readHandledNotes(vaultDir)).values()]).toEqual(['page']);
   });
 
@@ -197,7 +197,7 @@ describe('sorting after a save', () => {
       ),
     );
     expect(await handledCount(vaultDir)).toBe(0);
-    await expect(readFile(path.join(vaultDir, 'people', 'wendy.md'), 'utf8')).rejects.toThrow();
+    await expect(readFile(path.join(vaultDir, 'people', 'nora.md'), 'utf8')).rejects.toThrow();
   });
 
   it('never calls the model for the sorter when sorting is off', async () => {
@@ -290,7 +290,7 @@ describe('sorting after a save', () => {
     expect(model.sortCalls).toBe(0);
     expect(await readFile(path.join(vaultDir, 'memory', '2026-11-06.md'), 'utf8')).toContain(SHELLFISH);
     expect([...(await readHandledNotes(vaultDir)).values()]).toEqual(['chat']);
-    await expect(readFile(path.join(vaultDir, 'people', 'wendy.md'), 'utf8')).rejects.toThrow();
+    await expect(readFile(path.join(vaultDir, 'people', 'nora.md'), 'utf8')).rejects.toThrow();
   });
 
   it('records that note as filed by the chat with sorting off too, so turning sorting on later does not sort it', async () => {
@@ -354,7 +354,7 @@ describe('sorting after a save', () => {
     const { client, vaultDir } = await openClient();
     const mail = {
       kind: 'send' as const,
-      recipients: ['wendy@example.com'],
+      recipients: ['nora@example.com'],
       cc: [],
       bcc: [],
       subject: 'Lisbon',
@@ -383,9 +383,9 @@ describe('sorting after a save', () => {
             decisions: [
               {
                 decision: 'new',
-                about: 'wendy',
+                about: 'nora',
                 page_kind: 'person',
-                title: 'Wendy',
+                title: 'Nora',
                 section: 'How you write to them',
                 text: 'Opens with "W," and signs off "x".',
                 reason: 'A sent message.',
@@ -396,6 +396,6 @@ describe('sorting after a save', () => {
     });
     await saveSentMail({ ...common, callId: 'c2', summarize: summarizeContext(model) });
     await waitFor(async () => (await handledCount(vaultDir)) === 1);
-    expect(await readFile(path.join(vaultDir, 'people', 'wendy.md'), 'utf8')).toContain('src=sent_mail');
+    expect(await readFile(path.join(vaultDir, 'people', 'nora.md'), 'utf8')).toContain('src=sent_mail');
   });
 });

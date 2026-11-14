@@ -8,8 +8,8 @@ export const MAYA_EVENTS: readonly MayaEvent[] = z.array(MayaEventSchema).parse(
   {
     day: 20,
     kind: 'hand_edit',
-    about: mayaPageSlug('wendy'),
-    before_line: 'Wendy is allergic to shellfish.',
-    after_line: 'Wendy is allergic to shellfish and kiwi.',
+    about: mayaPageSlug('nora'),
+    before_line: 'Nora is allergic to shellfish.',
+    after_line: 'Nora is allergic to shellfish and kiwi.',
   },
 ]);

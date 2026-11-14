@@ -160,15 +160,19 @@ const PAGE_LINE = /^- (.+) \(([^()]+)\)$/;
 /** The lines between these two are how to write to someone, not things remembered about them. */
 const DRAFTING_START = 'How the person writes to these contacts';
 const DRAFTING_END = 'End of the writing instructions.';
-/** Where a page line came from, by how its closing bracket starts. The longer opening comes first. */
+/**
+ * Where a page line came from, by how its closing bracket starts. The longer opening comes first. A line the assistant
+ * wrote in its own words is not the person's, whether it came from a web page or from older memories, so it
+ * is called the assistant's note and not something read.
+ */
 const PAGE_SOURCES: readonly { starts: string; source: RailRecallFactSource; words: string }[] = [
   { starts: 'you said', source: 'person', words: 'You said this' },
   { starts: 'you wrote', source: 'person', words: 'You wrote this' },
   { starts: 'from mail you sent', source: 'person', words: 'From mail you sent' },
-  { starts: 'from mail', source: 'read', words: 'From mail' },
-  { starts: 'from calendar', source: 'read', words: 'From your calendar' },
-  { starts: 'read content', source: 'read', words: 'From something read for you' },
-  { starts: 'inferred', source: 'read', words: 'Worked out from what was read' },
+  { starts: 'from mail', source: 'read', words: 'From mail, not confirmed' },
+  { starts: 'from calendar', source: 'read', words: 'From your calendar, not confirmed' },
+  { starts: 'read content', source: 'read', words: 'Noted by your assistant, not confirmed' },
+  { starts: 'inferred', source: 'read', words: 'Noted by your assistant, not confirmed' },
 ];
 
 /** One fact line of a page in a recall block, or undefined for the page's other lines. */

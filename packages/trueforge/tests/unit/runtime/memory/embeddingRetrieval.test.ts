@@ -403,7 +403,7 @@ describe('EmbeddingSubsystem', () => {
   it('backfills every entry, persists, and reports ready', async () => {
     const fixture = await makeFixture();
     try {
-      await retainTexts(fixture, ['Alex booked SFO→ORD→MAD for Sep 22', 'Lexie is a Bernese Mountain Dog']);
+      await retainTexts(fixture, ['Alex booked SFO→ORD→MAD for Sep 22', 'Pippa is a Bernese Mountain Dog']);
       fixture.subsystem.ensureWarmed();
       await waitForState(fixture.subsystem, 'ready');
       const status = fixture.subsystem.getStatus();
@@ -797,7 +797,7 @@ describe('EmbeddingSubsystem', () => {
             metadata: { origin: 'user_stated', session_id: 'chat-now' },
           },
           {
-            content: 'Turn summary: Lexie is a Bernese Mountain Dog',
+            content: 'Turn summary: Pippa is a Bernese Mountain Dog',
             timestamp: '2026-09-19T10:02:00.000Z',
             document_id: 'd3',
             metadata: { origin: 'user_stated', session_id: 'chat-other' },
@@ -838,7 +838,7 @@ describe('EmbeddingSubsystem', () => {
     try {
       await retainTexts(fixture, ['Alex hotel in Madrid is Petit Palace'], '2026-01-05');
       for (let day = 1; day <= 20; day += 1) {
-        await retainTexts(fixture, ['Lexie went to the park'], `2026-09-${String(day).padStart(2, '0')}`);
+        await retainTexts(fixture, ['Pippa went to the park'], `2026-09-${String(day).padStart(2, '0')}`);
       }
       fixture.model.vectorForText = text => (text.includes('hotel') ? oneHot(0) : oneHot(1));
       // With 21 notes the log is judged by meaning: ordinary messages must sit away from the note.
@@ -869,7 +869,7 @@ describe('EmbeddingSubsystem', () => {
   it('finds a memory by meaning when keywords do not match', async () => {
     const fixture = await makeFixture();
     try {
-      await retainTexts(fixture, ['Alex hotel in Madrid is Petit Palace', 'Lexie is a Bernese Mountain Dog']);
+      await retainTexts(fixture, ['Alex hotel in Madrid is Petit Palace', 'Pippa is a Bernese Mountain Dog']);
       fixture.model.vectorForText = text => (text.includes('hotel') ? oneHot(0) : oneHot(1));
       fixture.model.queryVector = oneHot(0);
       fixture.subsystem.ensureWarmed();

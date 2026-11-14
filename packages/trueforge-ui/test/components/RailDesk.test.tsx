@@ -140,7 +140,7 @@ describe('parseRecallFacts', () => {
     expect(facts[0]).toMatchObject({
       page: 'Sam Rivera — home',
       source: 'read',
-      origin: 'From something read for you · page Sam Rivera — home',
+      origin: 'Noted by your assistant, not confirmed · page Sam Rivera — home',
     });
     expect(facts[1]).toMatchObject({
       page: 'Sam Rivera — home',

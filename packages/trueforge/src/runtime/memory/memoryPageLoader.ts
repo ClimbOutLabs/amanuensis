@@ -22,7 +22,7 @@ import { foldName } from './pageSlug';
 import { endedBefore } from './statementDates';
 import { statementHits, type StatementHit } from './statementIndex';
 
-/** Why a page was loaded: its name was in the message (`direct`, or `possessive` for "Wendy's"), or one of its statements was found by meaning. */
+/** Why a page was loaded: its name was in the message (`direct`, or `possessive` for "Nora's"), or one of its statements was found by meaning. */
 type PageLoadReason = 'direct' | 'possessive' | 'meaning';
 
 export interface LoadedPage {

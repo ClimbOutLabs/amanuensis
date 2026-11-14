@@ -17,10 +17,10 @@ import {
   factsOf,
   formatFactMarker,
   MADRID,
+  NORA,
   pageOf,
   pageText,
   SECTION_NAMES,
-  WENDY,
   writePageFile,
 } from './pageFixtures';
 
@@ -33,11 +33,11 @@ async function makeVault(): Promise<string> {
 describe('memoryPages', () => {
   describe('parse', () => {
     it('reads the front matter, ignoring unknown keys', () => {
-      const wendy = parseMemoryPage({ content: WENDY, fallback });
-      expect(wendy.frontMatter).toEqual({
+      const nora = parseMemoryPage({ content: NORA, fallback });
+      expect(nora.frontMatter).toEqual({
         kind: 'person',
-        title: 'Wendy',
-        aliases: ['Wendy', 'my wife', 'wendy@example.com'],
+        title: 'Nora',
+        aliases: ['Nora', 'my wife', 'nora@example.com'],
         household: true,
       });
       const madrid = parseMemoryPage({ content: MADRID, fallback: { kind: 'matter', title: 'x' } });
@@ -50,7 +50,7 @@ describe('memoryPages', () => {
     });
 
     it('reads every fact with its section', () => {
-      const facts = factsOf(parseMemoryPage({ content: WENDY, fallback }));
+      const facts = factsOf(parseMemoryPage({ content: NORA, fallback }));
       expect(facts.map(entry => [entry.section.name, entry.fact.marker.id, entry.fact.text])).toEqual([
         ['How you write to them', 'f_01', 'Short and casual. No sign-off.'],
         ['Now', 'f_02', 'Booked the movie for Saturday 7 PM.'],
@@ -106,7 +106,7 @@ describe('memoryPages', () => {
     });
 
     it('survives Obsidian-style edits: moved line, extra blanks, re-indented bullet', () => {
-      const edited = WENDY.replace(
+      const edited = NORA.replace(
         '## Now\n- Booked the movie for Saturday 7 PM. <!-- fact: id=f_02 src=mail since=2026-10-30 until=2026-11-01 -->\n',
         '## Now\n\n\n    - Booked the movie for Saturday 7 PM.   <!-- fact: id=f_02 src=mail since=2026-10-30 until=2026-11-01 -->\n',
       );
@@ -117,11 +117,11 @@ describe('memoryPages', () => {
     });
 
     it('reads a CRLF person page: settings, sections and facts', () => {
-      const page = parseMemoryPage({ content: WENDY.replace(/\n/g, '\r\n'), fallback });
+      const page = parseMemoryPage({ content: NORA.replace(/\n/g, '\r\n'), fallback });
       expect(page.frontMatter).toEqual({
         kind: 'person',
-        title: 'Wendy',
-        aliases: ['Wendy', 'my wife', 'wendy@example.com'],
+        title: 'Nora',
+        aliases: ['Nora', 'my wife', 'nora@example.com'],
         household: true,
       });
       expect(page.sections.map(entry => entry.name)).toEqual([
@@ -131,7 +131,7 @@ describe('memoryPages', () => {
         'Earlier',
       ]);
       expect(factsOf(page).map(entry => [entry.section.name, entry.fact.marker.id, entry.fact.text])).toEqual(
-        factsOf(parseMemoryPage({ content: WENDY, fallback })).map(entry => [
+        factsOf(parseMemoryPage({ content: NORA, fallback })).map(entry => [
           entry.section.name,
           entry.fact.marker.id,
           entry.fact.text,
@@ -230,9 +230,9 @@ describe('memoryPages', () => {
 
   describe('byte order mark', () => {
     it('reads the front matter after a leading mark', () => {
-      const content = `﻿${WENDY}`;
+      const content = `﻿${NORA}`;
       const page = parseMemoryPage({ content, fallback });
-      expect(page.frontMatter).toMatchObject({ kind: 'person', title: 'Wendy', household: true });
+      expect(page.frontMatter).toMatchObject({ kind: 'person', title: 'Nora', household: true });
     });
   });
 
@@ -240,29 +240,29 @@ describe('memoryPages', () => {
     it('lists and reads pages per kind, and skips files whose name is not a slug', async () => {
       const vaultDir = await makeVault();
       expect(await listMemoryPages(vaultDir)).toEqual([]);
-      await writePageFile({ vaultDir, kind: 'person', slug: 'wendy', content: WENDY });
+      await writePageFile({ vaultDir, kind: 'person', slug: 'nora', content: NORA });
       await writePageFile({ vaultDir, kind: 'matter', slug: 'the-madrid-move', content: MADRID });
-      await writeFile(path.join(vaultDir, 'people', 'wendy.archive.md'), '# Wendy (earlier)\n');
-      await writeFile(path.join(vaultDir, 'people', 'Wendy.md'), '# Wendy\n');
+      await writeFile(path.join(vaultDir, 'people', 'nora.archive.md'), '# Nora (earlier)\n');
+      await writeFile(path.join(vaultDir, 'people', 'Nora.md'), '# Nora\n');
       await writeFile(path.join(vaultDir, 'people', 'my notes.md'), '# Notes\n');
       expect(await listMemoryPages(vaultDir)).toEqual([
-        { kind: 'person', slug: 'wendy' },
+        { kind: 'person', slug: 'nora' },
         { kind: 'matter', slug: 'the-madrid-move' },
       ]);
-      expect(await readFile(pagePath({ vaultDir, kind: 'person', slug: 'wendy' }), 'utf8')).toBe(WENDY);
-      const read = await readMemoryPage({ vaultDir, kind: 'person', slug: 'wendy' });
-      expect(read?.frontMatter.title).toBe('Wendy');
+      expect(await readFile(pagePath({ vaultDir, kind: 'person', slug: 'nora' }), 'utf8')).toBe(NORA);
+      const read = await readMemoryPage({ vaultDir, kind: 'person', slug: 'nora' });
+      expect(read?.frontMatter.title).toBe('Nora');
       expect(await readMemoryPage({ vaultDir, kind: 'person', slug: 'nobody' })).toBeUndefined();
     });
 
     it('never reads the history or state folders as pages', async () => {
       const vaultDir = await makeVault();
-      await writePageFile({ vaultDir, kind: 'person', slug: 'wendy', content: WENDY });
+      await writePageFile({ vaultDir, kind: 'person', slug: 'nora', content: NORA });
       for (const folder of ['.memory-history/people', '.memory-state/people', '.memory-history']) {
         await mkdir(path.join(vaultDir, folder), { recursive: true });
-        await writeFile(path.join(vaultDir, folder, 'copy.md'), WENDY);
+        await writeFile(path.join(vaultDir, folder, 'copy.md'), NORA);
       }
-      expect(await listMemoryPages(vaultDir)).toEqual([{ kind: 'person', slug: 'wendy' }]);
+      expect(await listMemoryPages(vaultDir)).toEqual([{ kind: 'person', slug: 'nora' }]);
     });
 
     it('uses the slug as the fallback title for a page with no front matter', async () => {
@@ -277,7 +277,7 @@ describe('memoryPages', () => {
 
     it('rejects a slug that is not one', () => {
       expect(() => pagePath({ vaultDir: '/v', kind: 'person', slug: '../x' })).toThrow();
-      expect(() => pagePath({ vaultDir: '/v', kind: 'person', slug: 'Wendy' })).toThrow();
+      expect(() => pagePath({ vaultDir: '/v', kind: 'person', slug: 'Nora' })).toThrow();
     });
   });
 
@@ -414,11 +414,11 @@ describe('memoryPages', () => {
 
 describe('page file paths', () => {
   it.each([
-    ['people/wendy.md', { kind: 'person', stem: 'wendy', isSlug: true }],
+    ['people/nora.md', { kind: 'person', stem: 'nora', isSlug: true }],
     ['matters/lisbon-trip.md', { kind: 'matter', stem: 'lisbon-trip', isSlug: true }],
     ['people/김민수.md', { kind: 'person', stem: '김민수', isSlug: true }],
     [`people/${'김민수'.normalize('NFD')}.md`, { kind: 'person', stem: '김민수', isSlug: true }],
-    ['people/Wendy.md', { kind: 'person', stem: 'Wendy', isSlug: false }],
+    ['people/Nora.md', { kind: 'person', stem: 'Nora', isSlug: false }],
     ['people/my notes.md', { kind: 'person', stem: 'my notes', isSlug: false }],
     ['matters/Trip (2026).md', { kind: 'matter', stem: 'Trip (2026)', isSlug: false }],
   ])('reads %s as a page file', (relativePath, expected) => {
@@ -433,15 +433,15 @@ describe('page file paths', () => {
     'people/.md',
     'people/..md',
     'people/.hidden.md',
-    'people/wendy.txt',
-    'people/wendy',
-    'people/deeper/wendy.md',
-    'people\\wendy.md',
+    'people/nora.txt',
+    'people/nora',
+    'people/deeper/nora.md',
+    'people\\nora.md',
     'people/a\\b.md',
     'people/a\u0000b.md',
     'people/a\nb.md',
-    '/people/wendy.md',
-    'notes/wendy.md',
+    '/people/nora.md',
+    'notes/nora.md',
     'MEMORY.md',
     '.memory-state/aliases.json',
     `people/${'a'.repeat(300)}.md`,
@@ -450,7 +450,7 @@ describe('page file paths', () => {
   });
 
   it('knows which paths sit in a page folder', () => {
-    expect(isInPageFolder('people/Wendy.md')).toBe(true);
+    expect(isInPageFolder('people/Nora.md')).toBe(true);
     expect(isInPageFolder('matters/x/y.md')).toBe(true);
     expect(isInPageFolder('people')).toBe(false);
     expect(isInPageFolder('memory/2026-10-01.md')).toBe(false);

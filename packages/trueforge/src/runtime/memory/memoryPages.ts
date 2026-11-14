@@ -523,7 +523,7 @@ function isCarryableStem(stem: string): boolean {
 }
 
 /**
- * The page file a vault-relative path such as `people/wendy.md` names: its folder and the file name
+ * The page file a vault-relative path such as `people/nora.md` names: its folder and the file name
  * without `.md`. `isSlug` says whether the name is a lowercase slug, the only kind Aman reads; any other
  * plain name is still carried as it is, so a move loses nothing. A path with more folders, no `.md`, a
  * hidden name or control characters is not a page file. A slug typed in decomposed form (as some archive

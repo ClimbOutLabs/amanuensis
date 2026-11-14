@@ -18,7 +18,7 @@ function makeCtx(): ClassifyContext {
 function action(tool_name: string, mcp_server_name = 'memory_pages'): SentinelAction {
   return {
     tool_name,
-    canonical_params: { about: 'Wendy' },
+    canonical_params: { about: 'Nora' },
     tool_type: 'truefoundry-system',
     mcp_server_name,
     mcp_hints: { read_only_hint: false, destructive_hint: false, open_world_hint: false },

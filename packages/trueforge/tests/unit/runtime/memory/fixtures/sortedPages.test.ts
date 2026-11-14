@@ -75,12 +75,12 @@ describe('the pages a perfect sorter would write', () => {
   });
 
   it('changes the words of a hand edit and keeps the marker', () => {
-    const slug = mayaPageSlug('wendy');
+    const slug = mayaPageSlug('nora');
     const before = pageOf({ throughDay: 19, slug }).content;
     const after = pageOf({ throughDay: 20, slug }).content;
-    const marker = /Wendy is allergic to shellfish\. (<!-- fact: [^>]*-->)/.exec(before)?.[1];
+    const marker = /Nora is allergic to shellfish\. (<!-- fact: [^>]*-->)/.exec(before)?.[1];
     expect(marker).toBeDefined();
-    expect(after).toContain(`Wendy is allergic to shellfish and kiwi. ${marker ?? ''}`);
+    expect(after).toContain(`Nora is allergic to shellfish and kiwi. ${marker ?? ''}`);
     expect(after).not.toContain('allergic to shellfish. <!--');
   });
 

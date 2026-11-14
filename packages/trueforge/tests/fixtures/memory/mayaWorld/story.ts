@@ -160,21 +160,21 @@ export const MAYA_STORY: readonly StoryLine[] = [
   // Day 1, Saturday August 1
   said({
     at: [1, 1],
-    text: "Maya's wife is Wendy. They live together with their daughter Zoe, who is seven.",
+    text: "Maya's wife is Nora. They live together with their daughter Zoe, who is seven.",
     then: [
-      fresh({ page: 'wendy', text: "Wendy is Maya's wife." }),
-      fresh({ page: 'zoe', text: "Zoe is Maya and Wendy's daughter, aged seven." }),
+      fresh({ page: 'nora', text: "Nora is Maya's wife." }),
+      fresh({ page: 'zoe', text: "Zoe is Maya and Nora's daughter, aged seven." }),
     ],
   }),
   said({
     at: [1, 2],
-    text: 'Wendy is allergic to shellfish.',
-    then: [fresh({ page: 'wendy', text: 'Wendy is allergic to shellfish.' })],
+    text: 'Nora is allergic to shellfish.',
+    then: [fresh({ page: 'nora', text: 'Nora is allergic to shellfish.' })],
   }),
   said({
     at: [1, 3],
-    text: 'Wendy works as a designer at Brightline Studio.',
-    then: [fresh({ page: 'wendy', text: 'Wendy works as a designer at Brightline Studio.' })],
+    text: 'Nora works as a designer at Brightline Studio.',
+    then: [fresh({ page: 'nora', text: 'Nora works as a designer at Brightline Studio.' })],
   }),
   said({
     at: [1, 4],
@@ -217,7 +217,7 @@ export const MAYA_STORY: readonly StoryLine[] = [
   // Day 3
   said({
     at: [3, 1],
-    text: 'Maya and Wendy are planning a trip to Madrid from October 9 to October 14.',
+    text: 'Maya and Nora are planning a trip to Madrid from October 9 to October 14.',
     then: [fresh({ page: 'madrid', text: 'The trip runs from October 9 to October 14.' })],
   }),
   said({
@@ -230,7 +230,7 @@ export const MAYA_STORY: readonly StoryLine[] = [
   }),
   said({
     at: [3, 3],
-    text: 'For the Madrid trip, Maya and Wendy will stay at Hotel Lumbre.',
+    text: 'For the Madrid trip, Maya and Nora will stay at Hotel Lumbre.',
     then: [fresh({ page: 'madrid', section: 'Decided', text: 'Staying at Hotel Lumbre.' })],
   }),
   reply({ at: [3, 4], text: 'Suggested three hotels near Plaza Mayor and compared their prices.' }),
@@ -278,8 +278,8 @@ export const MAYA_STORY: readonly StoryLine[] = [
   }),
   said({
     at: [5, 4],
-    text: "Maya's wife Wendy cannot eat shellfish.",
-    then: [same({ page: 'wendy', matches: 'Wendy is allergic to shellfish.', why: 'The same fact in other words.' })],
+    text: "Maya's wife Nora cannot eat shellfish.",
+    then: [same({ page: 'nora', matches: 'Nora is allergic to shellfish.', why: 'The same fact in other words.' })],
   }),
   said({
     at: [5, 5],
@@ -308,8 +308,8 @@ export const MAYA_STORY: readonly StoryLine[] = [
   }),
   said({
     at: [6, 4],
-    text: "Wendy's car is at the garage until August 20.",
-    then: [fresh({ page: 'wendy', text: "Wendy's car is at the garage.", until: '2026-08-20' })],
+    text: "Nora's car is at the garage until August 20.",
+    then: [fresh({ page: 'nora', text: "Nora's car is at the garage.", until: '2026-08-20' })],
   }),
 
   // Day 7
@@ -328,11 +328,11 @@ export const MAYA_STORY: readonly StoryLine[] = [
   }),
   said({
     at: [7, 2],
-    text: 'Wendy will be in Lisbon for a conference from August 10 to August 14.',
+    text: 'Nora will be in Lisbon for a conference from August 10 to August 14.',
     then: [
       fresh({
-        page: 'wendy',
-        text: 'Wendy is in Lisbon for a conference.',
+        page: 'nora',
+        text: 'Nora is in Lisbon for a conference.',
         since: '2026-08-10',
         until: '2026-08-14',
       }),
@@ -346,18 +346,18 @@ export const MAYA_STORY: readonly StoryLine[] = [
       fresh({ page: 'aiko', text: 'Aiko waters the plants when the family is away.' }),
     ],
   }),
-  reply({ at: [7, 4], text: "Drafted a packing list for Wendy's Lisbon conference." }),
+  reply({ at: [7, 4], text: "Drafted a packing list for Nora's Lisbon conference." }),
 
   // Day 8
   said({
     at: [8, 1],
-    text: 'Wendy is allergic to shellfish.',
-    then: [same({ page: 'wendy', matches: 'Wendy is allergic to shellfish.' })],
+    text: 'Nora is allergic to shellfish.',
+    then: [same({ page: 'nora', matches: 'Nora is allergic to shellfish.' })],
   }),
   sent({
     at: [8, 2],
-    text: 'To wendy@example.com, subject "Lisbon": W, your train to the airport is the 7:40 on Monday. I put the tickets in your blue folder. x',
-    then: [style({ page: 'wendy', text: 'Opens with "W," and signs off "x".' })],
+    text: 'To nora@example.com, subject "Lisbon": W, your train to the airport is the 7:40 on Monday. I put the tickets in your blue folder. x',
+    then: [style({ page: 'nora', text: 'Opens with "W," and signs off "x".' })],
   }),
   mail({
     at: [8, 3],
@@ -374,9 +374,9 @@ export const MAYA_STORY: readonly StoryLine[] = [
   // Day 9
   said({
     at: [9, 1],
-    text: "Elena Petrova is Wendy's sister. She lives in Leeds.",
+    text: "Elena Petrova is Nora's sister. She lives in Leeds.",
     then: [
-      fresh({ page: 'elena', text: "Elena Petrova is Wendy's sister." }),
+      fresh({ page: 'elena', text: "Elena Petrova is Nora's sister." }),
       fresh({ page: 'elena', text: 'Elena lives in Leeds.' }),
     ],
   }),
@@ -401,7 +401,7 @@ export const MAYA_STORY: readonly StoryLine[] = [
   // Day 10
   said({
     at: [10, 1],
-    text: 'Aiko is watering the plants this week while Wendy is away.',
+    text: 'Aiko is watering the plants this week while Nora is away.',
     then: [
       same({
         page: 'aiko',
@@ -481,7 +481,7 @@ export const MAYA_STORY: readonly StoryLine[] = [
   }),
 
   // Day 14
-  said({ at: [14, 1], text: 'Wendy is back from Lisbon.', then: [ignore(END_KNOWN)] }),
+  said({ at: [14, 1], text: 'Nora is back from Lisbon.', then: [ignore(END_KNOWN)] }),
   said({
     at: [14, 2],
     text: 'Priya got the Halvorsen budget table today.',
@@ -514,8 +514,8 @@ export const MAYA_STORY: readonly StoryLine[] = [
   // Day 16
   said({
     at: [16, 1],
-    text: "Wendy's birthday is March 14.",
-    then: [fresh({ page: 'wendy', text: "Wendy's birthday is March 14." })],
+    text: "Nora's birthday is March 14.",
+    then: [fresh({ page: 'nora', text: "Nora's birthday is March 14." })],
   }),
   said({
     at: [16, 2],
@@ -575,17 +575,17 @@ export const MAYA_STORY: readonly StoryLine[] = [
   // Day 19
   said({
     at: [19, 1],
-    text: 'Wendy is thinking about leaving Brightline Studio.',
-    then: [fresh({ page: 'wendy', section: 'Open', text: 'Wendy is thinking about leaving Brightline Studio.' })],
+    text: 'Nora is thinking about leaving Brightline Studio.',
+    then: [fresh({ page: 'nora', section: 'Open', text: 'Nora is thinking about leaving Brightline Studio.' })],
   }),
   said({
     at: [19, 2],
-    text: 'Maya and Wendy decided to rent a car in Madrid for one day to visit Toledo.',
+    text: 'Maya and Nora decided to rent a car in Madrid for one day to visit Toledo.',
     then: [fresh({ page: 'madrid', section: 'Decided', text: 'Rent a car for one day to visit Toledo.' })],
   }),
   reply({ at: [19, 3], text: 'Compared three car rental firms at Atocha station.' }),
 
-  // Day 20: the person also edits Wendy's page by hand (see MAYA_EVENTS).
+  // Day 20: the person also edits Nora's page by hand (see MAYA_EVENTS).
   said({
     at: [20, 1],
     text: 'Priya is happy with the first Halvorsen draft.',
@@ -619,7 +619,7 @@ export const MAYA_STORY: readonly StoryLine[] = [
   // Day 22
   said({
     at: [22, 1],
-    text: "The Madrid trip has moved because of Wendy's work. It is now October 16 to October 21.",
+    text: "The Madrid trip has moved because of Nora's work. It is now October 16 to October 21.",
     then: [
       changed({
         page: 'madrid',
@@ -659,11 +659,11 @@ export const MAYA_STORY: readonly StoryLine[] = [
   }),
   said({
     at: [23, 3],
-    text: 'Elena is staying with Maya and Wendy from September 1 to September 8.',
+    text: 'Elena is staying with Maya and Nora from September 1 to September 8.',
     then: [
       fresh({
         page: 'elena',
-        text: 'Elena is staying with Maya and Wendy.',
+        text: 'Elena is staying with Maya and Nora.',
         since: '2026-09-01',
         until: '2026-09-08',
       }),
@@ -692,11 +692,11 @@ export const MAYA_STORY: readonly StoryLine[] = [
   // Day 25: read content that contradicts the hand edit of day 20.
   mail({
     at: [25, 1],
-    text: 'A restaurant booking form filled in for Wendy says she has no food allergies.',
+    text: 'A restaurant booking form filled in for Nora says she has no food allergies.',
     then: [
       unsure({
-        page: 'wendy',
-        text: 'A booking form says Wendy has no food allergies.',
+        page: 'nora',
+        text: 'A booking form says Nora has no food allergies.',
         seen: 25,
         why: "It contradicts the person's own line, and read content never replaces that.",
       }),
@@ -726,12 +726,12 @@ export const MAYA_STORY: readonly StoryLine[] = [
   }),
   sent({
     at: [26, 4],
-    text: 'To elena.petrova@example.com, subject "September": Hi Elena, the spare room is yours from the 1st. Wendy will pick you up at the station at 17:10. Love, M',
+    text: 'To elena.petrova@example.com, subject "September": Hi Elena, the spare room is yours from the 1st. Nora will pick you up at the station at 17:10. Love, M',
     then: [
       style({ page: 'elena', text: 'Opens with "Hi Elena," and signs off "Love, M".' }),
       unsure({
         page: 'elena',
-        text: 'Wendy picks Elena up at the station at 17:10 on September 1.',
+        text: 'Nora picks Elena up at the station at 17:10 on September 1.',
         seen: 26,
         why: 'A plan the person wrote in a message, not yet said to the assistant.',
       }),
@@ -773,9 +773,9 @@ export const MAYA_STORY: readonly StoryLine[] = [
   }),
   sent({
     at: [28, 3],
-    text: 'To wendy@example.com, subject "Flights": W, flights are booked. We sit in 14C and 14D. x',
+    text: 'To nora@example.com, subject "Flights": W, flights are booked. We sit in 14C and 14D. x',
     then: [
-      same({ page: 'wendy', matches: 'Opens with "W," and signs off "x".', why: 'The same way of writing as before.' }),
+      same({ page: 'nora', matches: 'Opens with "W," and signs off "x".', why: 'The same way of writing as before.' }),
     ],
   }),
 
@@ -794,7 +794,7 @@ export const MAYA_STORY: readonly StoryLine[] = [
   // Day 30
   said({
     at: [30, 1],
-    text: 'Maya and Wendy changed hotels for Madrid. They will now stay at Petit Palace Posada.',
+    text: 'Maya and Nora changed hotels for Madrid. They will now stay at Petit Palace Posada.',
     then: [
       changed({ page: 'madrid', from: 'Staying at Hotel Lumbre.', to: 'Staying at Petit Palace Posada.', on: 30 }),
     ],
@@ -815,10 +815,10 @@ export const MAYA_STORY: readonly StoryLine[] = [
   // Day 31, August 31
   said({
     at: [31, 1],
-    text: 'Wendy handed in her notice at Brightline Studio.',
+    text: 'Nora handed in her notice at Brightline Studio.',
     then: [
-      fresh({ page: 'wendy', text: 'Wendy handed in her notice at Brightline Studio.' }),
-      ended({ page: 'wendy', text: 'Wendy is thinking about leaving Brightline Studio.', on: 31 }),
+      fresh({ page: 'nora', text: 'Nora handed in her notice at Brightline Studio.' }),
+      ended({ page: 'nora', text: 'Nora is thinking about leaving Brightline Studio.', on: 31 }),
     ],
   }),
   mail({
@@ -834,7 +834,7 @@ export const MAYA_STORY: readonly StoryLine[] = [
     at: [32, 1],
     text: 'Elena arrived today.',
     then: [
-      same({ page: 'elena', matches: 'Elena is staying with Maya and Wendy.', why: 'The stay was already known.' }),
+      same({ page: 'elena', matches: 'Elena is staying with Maya and Nora.', why: 'The stay was already known.' }),
     ],
   }),
   said({ at: [32, 2], text: 'Elena is vegetarian.', then: [fresh({ page: 'elena', text: 'Elena is vegetarian.' })] }),
@@ -880,13 +880,13 @@ export const MAYA_STORY: readonly StoryLine[] = [
   // Day 35
   said({
     at: [35, 1],
-    text: 'Wendy starts at Fernhill Design on September 14.',
+    text: 'Nora starts at Fernhill Design on September 14.',
     then: [
       {
         decision: 'changed',
-        about: mayaPageSlug('wendy'),
-        old_text: 'Wendy works as a designer at Brightline Studio.',
-        new_text: 'Wendy works at Fernhill Design.',
+        about: mayaPageSlug('nora'),
+        old_text: 'Nora works as a designer at Brightline Studio.',
+        new_text: 'Nora works at Fernhill Design.',
         until_old: '2026-09-11',
         since_new: '2026-09-14',
         reason: 'A new job replaces the old one from the day it starts.',
@@ -895,8 +895,8 @@ export const MAYA_STORY: readonly StoryLine[] = [
   }),
   said({
     at: [35, 2],
-    text: "Wendy's last day at Brightline is September 11.",
-    then: [fresh({ page: 'wendy', text: 'Wendy is working out her notice at Brightline.', until: '2026-09-11' })],
+    text: "Nora's last day at Brightline is September 11.",
+    then: [fresh({ page: 'nora', text: 'Nora is working out her notice at Brightline.', until: '2026-09-11' })],
   }),
 
   // Day 36
@@ -960,7 +960,7 @@ export const MAYA_STORY: readonly StoryLine[] = [
   said({
     at: [39, 1],
     text: 'Elena left this morning.',
-    then: [same({ page: 'elena', matches: 'Elena is staying with Maya and Wendy.', why: END_KNOWN })],
+    then: [same({ page: 'elena', matches: 'Elena is staying with Maya and Nora.', why: END_KNOWN })],
   }),
   said({
     at: [39, 2],
@@ -1026,19 +1026,19 @@ export const MAYA_STORY: readonly StoryLine[] = [
   // Day 42, September 11
   said({
     at: [42, 1],
-    text: "Today is Wendy's last day at Brightline.",
-    then: [same({ page: 'wendy', matches: 'Wendy is working out her notice at Brightline.', why: END_KNOWN })],
+    text: "Today is Nora's last day at Brightline.",
+    then: [same({ page: 'nora', matches: 'Nora is working out her notice at Brightline.', why: END_KNOWN })],
   }),
   said({
     at: [42, 2],
     text: 'Maya wants to get W. flowers for her first day at Fernhill.',
     then: [
       fresh({
-        page: 'wendy',
+        page: 'nora',
         section: 'Open',
-        text: 'Get Wendy flowers for her first day at Fernhill.',
+        text: 'Get Nora flowers for her first day at Fernhill.',
         until: '2026-09-14',
-        why: 'W. is Wendy.',
+        why: 'W. is Nora.',
       }),
     ],
   }),
@@ -1083,15 +1083,13 @@ export const MAYA_STORY: readonly StoryLine[] = [
   // Day 45, September 14
   said({
     at: [45, 1],
-    text: 'Wendy started at Fernhill Design today.',
-    then: [
-      same({ page: 'wendy', matches: 'Wendy works at Fernhill Design.', why: 'The start date was already known.' }),
-    ],
+    text: 'Nora started at Fernhill Design today.',
+    then: [same({ page: 'nora', matches: 'Nora works at Fernhill Design.', why: 'The start date was already known.' })],
   }),
   said({
     at: [45, 2],
-    text: "Wendy's new manager at Fernhill is called Ruth.",
-    then: [fresh({ page: 'wendy', text: "Wendy's manager at Fernhill is called Ruth." })],
+    text: "Nora's new manager at Fernhill is called Ruth.",
+    then: [fresh({ page: 'nora', text: "Nora's manager at Fernhill is called Ruth." })],
   }),
 
   // Day 46, September 15
@@ -1230,8 +1228,8 @@ export const MAYA_STORY: readonly StoryLine[] = [
   // Day 55, September 24
   said({
     at: [55, 1],
-    text: 'Wendy has a team dinner with Fernhill on October 1.',
-    then: [fresh({ page: 'wendy', text: 'Wendy has a team dinner with Fernhill.', until: '2026-10-01' })],
+    text: 'Nora has a team dinner with Fernhill on October 1.',
+    then: [fresh({ page: 'nora', text: 'Nora has a team dinner with Fernhill.', until: '2026-10-01' })],
   }),
   said({
     at: [55, 2],
@@ -1278,11 +1276,11 @@ export const MAYA_STORY: readonly StoryLine[] = [
   }),
   said({
     at: [58, 2],
-    text: 'Wendy is allergic to shellfish and kiwi.',
+    text: 'Nora is allergic to shellfish and kiwi.',
     then: [
       same({
-        page: 'wendy',
-        matches: 'Wendy is allergic to shellfish and kiwi.',
+        page: 'nora',
+        matches: 'Nora is allergic to shellfish and kiwi.',
         why: 'The person had already written this on the page by hand.',
       }),
     ],

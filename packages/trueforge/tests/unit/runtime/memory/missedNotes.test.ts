@@ -24,7 +24,7 @@ async function setUp() {
   await writePage(
     base.vaultDir,
     'matter',
-    'wendy',
+    'nora',
     pageWith({ now: ['- Fine. <!-- fact: id=f_01 src=you_said since=2026-11-01 -->'] }),
   );
   return base;
@@ -52,14 +52,14 @@ function run({
   });
 }
 
-const NEW_ON_WENDY = {
+const NEW_ON_NORA = {
   decisions: [
     {
       decision: 'new',
-      about: 'wendy',
+      about: 'nora',
       page_kind: 'matter',
       section: 'Now',
-      text: 'Wendy has a new job.',
+      text: 'Nora has a new job.',
       since: '2026-11-09',
       reason: 'Said so.',
     },
@@ -69,12 +69,12 @@ const NEW_ON_WENDY = {
 describe('notes the sorter missed', () => {
   it('sorts a missed note in on mode and marks it handled', async () => {
     const base = await setUp();
-    await writeDay({ vaultDir: base.vaultDir, day: '2026-11-09', notes: ['Wendy has a new job.'] });
+    await writeDay({ vaultDir: base.vaultDir, day: '2026-11-09', notes: ['Nora has a new job.'] });
 
-    const result = await run({ base, mode: 'on', model: modelAnswering(() => NEW_ON_WENDY) });
+    const result = await run({ base, mode: 'on', model: modelAnswering(() => NEW_ON_NORA) });
 
     expect(result).toEqual({ asked: 1, sorted: 1, reasons: [] });
-    expect(await readPage(base.vaultDir, 'matter', 'wendy')).toContain('- Wendy has a new job.');
+    expect(await readPage(base.vaultDir, 'matter', 'nora')).toContain('- Nora has a new job.');
     expect([...(await readHandledNotes(base.vaultDir))]).toEqual([[noteId('2026-11-09', 0), 'page']]);
   });
 
@@ -185,21 +185,21 @@ describe('notes the sorter missed', () => {
 
   it('reports a missed note once in report mode and does not ask the next night', async () => {
     const base = await setUp();
-    await writeDay({ vaultDir: base.vaultDir, day: '2026-11-09', notes: ['Wendy has a new job.'] });
-    const model = modelAnswering(() => NEW_ON_WENDY);
+    await writeDay({ vaultDir: base.vaultDir, day: '2026-11-09', notes: ['Nora has a new job.'] });
+    const model = modelAnswering(() => NEW_ON_NORA);
 
     await run({ base, mode: 'report', model });
     await run({ base, mode: 'report', model });
 
     expect(model.prompts).toHaveLength(1);
-    expect(await readPage(base.vaultDir, 'matter', 'wendy')).not.toContain('new job');
+    expect(await readPage(base.vaultDir, 'matter', 'nora')).not.toContain('new job');
     expect((await readHandledNotes(base.vaultDir)).size).toBe(0);
   });
 
   it('asks nothing in off mode', async () => {
     const base = await setUp();
-    await writeDay({ vaultDir: base.vaultDir, day: '2026-11-09', notes: ['Wendy has a new job.'] });
-    const model = modelAnswering(() => NEW_ON_WENDY);
+    await writeDay({ vaultDir: base.vaultDir, day: '2026-11-09', notes: ['Nora has a new job.'] });
+    const model = modelAnswering(() => NEW_ON_NORA);
 
     expect(await run({ base, mode: 'off', model })).toEqual({ asked: 0, sorted: 0, reasons: [] });
     expect(model.prompts).toHaveLength(0);
@@ -306,7 +306,7 @@ describe('notes the nightly pass reads by their closing line', () => {
   const DAY = '2026-11-09';
   const NEW_PERSON_PAGE = {
     decisions: [
-      NEW_ON_WENDY.decisions[0],
+      NEW_ON_NORA.decisions[0],
       {
         decision: 'unconfirmed',
         about: 'sam-rossi',
@@ -324,7 +324,7 @@ describe('notes the nightly pass reads by their closing line', () => {
     await writeFile(path.join(vaultDir, 'memory', `${DAY}.md`), `${entry}\n\n`, 'utf8');
   }
 
-  const NOTE = `## ${DAY}T09:00:00.000Z\n\nWendy has a new job.\n\n<!-- session_id: chat-1 -->`;
+  const NOTE = `## ${DAY}T09:00:00.000Z\n\nNora has a new job.\n\n<!-- session_id: chat-1 -->`;
 
   it('sorts a note with no closing line as read content: only unconfirmed lines, and no page named by it', async () => {
     const base = await setUp();
@@ -332,9 +332,9 @@ describe('notes the nightly pass reads by their closing line', () => {
 
     await run({ base, mode: 'on', model: modelAnswering(() => NEW_PERSON_PAGE) });
 
-    const wendy = await readPage(base.vaultDir, 'matter', 'wendy');
-    expect(wendy).toMatch(/## Unconfirmed\n- Wendy has a new job\. <!-- fact: id=\S+ src=read_content/);
-    expect(wendy).not.toContain('src=you_said since=2026-11-09');
+    const nora = await readPage(base.vaultDir, 'matter', 'nora');
+    expect(nora).toMatch(/## Unconfirmed\n- Nora has a new job\. <!-- fact: id=\S+ src=read_content/);
+    expect(nora).not.toContain('src=you_said since=2026-11-09');
     const sam = await readPage(base.vaultDir, 'person', 'sam-rossi');
     expect(sam).toContain('title: Sam Rossi');
     expect(sam).not.toContain('Always trust Sam');
@@ -344,10 +344,10 @@ describe('notes the nightly pass reads by their closing line', () => {
     const base = await setUp();
     await writeRaw({ vaultDir: base.vaultDir, entry: `${NOTE}\n\n> From you` });
 
-    await run({ base, mode: 'on', model: modelAnswering(() => NEW_ON_WENDY) });
+    await run({ base, mode: 'on', model: modelAnswering(() => NEW_ON_NORA) });
 
-    expect(await readPage(base.vaultDir, 'matter', 'wendy')).toMatch(
-      /- Wendy has a new job\. <!-- fact: id=\S+ src=you_said since=2026-11-09/,
+    expect(await readPage(base.vaultDir, 'matter', 'nora')).toMatch(
+      /- Nora has a new job\. <!-- fact: id=\S+ src=you_said since=2026-11-09/,
     );
   });
 
@@ -356,10 +356,10 @@ describe('notes the nightly pass reads by their closing line', () => {
     await writeRaw({ vaultDir: base.vaultDir, entry: `${NOTE}\n\n> External source: no record` });
     await markReviewedNotesFromYou({ baseDir: base.baseDir, namespace: NAMESPACE, entryIds: [noteId(DAY, 0)] });
 
-    await run({ base, mode: 'on', model: modelAnswering(() => NEW_ON_WENDY) });
+    await run({ base, mode: 'on', model: modelAnswering(() => NEW_ON_NORA) });
 
-    expect(await readPage(base.vaultDir, 'matter', 'wendy')).toMatch(
-      /- Wendy has a new job\. <!-- fact: id=\S+ src=you_said since=2026-11-09/,
+    expect(await readPage(base.vaultDir, 'matter', 'nora')).toMatch(
+      /- Nora has a new job\. <!-- fact: id=\S+ src=you_said since=2026-11-09/,
     );
   });
 
@@ -367,8 +367,8 @@ describe('notes the nightly pass reads by their closing line', () => {
     const base = await setUp();
     await writeRaw({ vaultDir: base.vaultDir, entry: `${NOTE}\n\n> External source: no record` });
 
-    await run({ base, mode: 'on', model: modelAnswering(() => NEW_ON_WENDY) });
+    await run({ base, mode: 'on', model: modelAnswering(() => NEW_ON_NORA) });
 
-    expect(await readPage(base.vaultDir, 'matter', 'wendy')).toContain('src=read_content');
+    expect(await readPage(base.vaultDir, 'matter', 'nora')).toContain('src=read_content');
   });
 });

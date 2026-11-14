@@ -61,11 +61,11 @@ describe('1. persona isolation: pages load only from the vaults the scope may re
 
   // Every page's only fact says which vault holds it, so a leak shows in the page text too.
   const SEEDS: Seed[] = [
-    { vault: 'owner', kind: 'person', slug: 'wendy', title: 'Wendy' },
+    { vault: 'owner', kind: 'person', slug: 'nora', title: 'Nora' },
     { vault: 'owner', kind: 'person', slug: 'sam', title: 'Sam' },
     { vault: 'owner', kind: 'matter', slug: 'madrid', title: 'Madrid' },
     { vault: 'owner', kind: 'matter', slug: 'taxes', title: 'Taxes' },
-    { vault: 'alpha', kind: 'person', slug: 'wendy', title: 'Wendy' },
+    { vault: 'alpha', kind: 'person', slug: 'nora', title: 'Nora' },
     { vault: 'alpha', kind: 'person', slug: 'kiran', title: 'Kiran' },
     { vault: 'alpha', kind: 'matter', slug: 'garden', title: 'Garden' },
     { vault: 'alpha', kind: 'matter', slug: 'madrid', title: 'Madrid' },
@@ -99,12 +99,12 @@ describe('1. persona isolation: pages load only from the vaults the scope may re
     message: string;
     expected: string[];
   }[] = [
-    { name: 'same slug in own and shared vault: own wins', asks: 'alpha', message: 'Wendy', expected: ['alpha:wendy'] },
+    { name: 'same slug in own and shared vault: own wins', asks: 'alpha', message: 'Nora', expected: ['alpha:nora'] },
     {
       name: 'persona sees the owner copy of a name its own vault lacks',
       asks: 'beta',
-      message: 'Wendy',
-      expected: ['owner:wendy'],
+      message: 'Nora',
+      expected: ['owner:nora'],
     },
     { name: 'name only in another persona vault, not readable', asks: 'beta', message: 'Kiran', expected: [] },
     {
@@ -143,14 +143,14 @@ describe('1. persona isolation: pages load only from the vaults the scope may re
     {
       name: 'mixed people and matters across three vaults, Alpha',
       asks: 'alpha',
-      message: 'Sam, Wendy and Taxes',
-      expected: ['alpha:wendy', 'owner:sam', 'owner:taxes'],
+      message: 'Sam, Nora and Taxes',
+      expected: ['alpha:nora', 'owner:sam', 'owner:taxes'],
     },
     {
       name: 'mixed across three vaults, Gamma: own taxes first, shared duplicates dropped',
       asks: 'gamma',
-      message: 'Sam, Wendy and Taxes',
-      expected: ['gamma:taxes', 'owner:sam', 'owner:wendy'],
+      message: 'Sam, Nora and Taxes',
+      expected: ['gamma:taxes', 'owner:sam', 'owner:nora'],
     },
     {
       name: 'Beta: mentioned names in an unreadable vault add nothing',
@@ -161,8 +161,8 @@ describe('1. persona isolation: pages load only from the vaults the scope may re
     {
       name: 'main assistant: owner then granted vault',
       asks: 'main',
-      message: 'Zed and Wendy',
-      expected: ['owner:wendy', 'gamma:zed'],
+      message: 'Zed and Nora',
+      expected: ['owner:nora', 'gamma:zed'],
     },
     { name: 'no name mentioned loads nothing', asks: 'alpha', message: 'nobody I know', expected: [] },
   ];

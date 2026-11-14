@@ -338,9 +338,9 @@ describe('the sorting report after a delete or an edit', () => {
     decisions: [
       {
         decision: 'unconfirmed' as const,
-        about: 'wendy',
+        about: 'nora',
         page_kind: 'person' as const,
-        text: 'Wendy keeps the spare key.',
+        text: 'Nora keeps the spare key.',
         seen: DAY,
         reason: 'A fact.',
       },
@@ -350,8 +350,8 @@ describe('the sorting report after a delete or an edit', () => {
   it('drops what the sorter planned for a deleted note and for an edited one', async () => {
     const { client, dir, vault } = await makeClient();
     try {
-      await retainOne(client, 'Wendy keeps the spare key.', 9, 'a');
-      await retainOne(client, 'Wendy moved to Porto.', 10, 'b');
+      await retainOne(client, 'Nora keeps the spare key.', 9, 'a');
+      await retainOne(client, 'Nora moved to Porto.', 10, 'b');
       await retainOne(client, 'The dentist is on Friday.', 11, 'c');
       const [first, second, third] = (await listed(client)).map(entry => entry.id).sort();
       if (first === undefined || second === undefined || third === undefined) {
@@ -363,7 +363,7 @@ describe('the sorting report after a delete or an edit', () => {
 
       expect(await client.deleteEntry({ entryId: first, timeoutMs: TIMEOUT_MS })).toMatchObject({ ok: true });
       expect(
-        await client.updateEntry({ entryId: second, text: 'Wendy moved to Lisbon.', timeoutMs: TIMEOUT_MS }),
+        await client.updateEntry({ entryId: second, text: 'Nora moved to Lisbon.', timeoutMs: TIMEOUT_MS }),
       ).toMatchObject({ ok: true });
 
       const kept = (await readFile(path.join(vault, SORT_REPORT_FILE), 'utf8')).trim().split('\n');

@@ -4,7 +4,7 @@ The memory recall test checks whether Aman puts the right memories in front of t
 
 ## What is in it
 
-**Maya's world.** Sixty days of a made-up household's memory, from August 1 to September 29, 2026. Maya lives with her wife Wendy and their daughter Zoe. Around them are a plumber and a colleague who are both called Sam, a manager, friends, a client, a trip to Madrid, a kitchen renovation and a tax return. The world is written as about 520 daily-log entries:
+**Maya's world.** Sixty days of a made-up household's memory, from August 1 to September 29, 2026. Maya lives with her wife Nora and their daughter Zoe. Around them are a plumber and a colleague who are both called Sam, a manager, friends, a client, a trip to Madrid, a kitchen renovation and a tax return. The world is written as about 520 daily-log entries:
 
 - about 155 hand-written entries that tell the story,
 - about 365 entries of everyday noise, such as receipts, calendar entries and passing remarks.

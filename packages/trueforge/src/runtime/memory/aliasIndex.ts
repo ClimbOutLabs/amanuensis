@@ -190,7 +190,7 @@ function earliestHit(hits: AliasHit[]): AliasHit | undefined {
  * Pages whose title or an alias appears in `text` as whole words (anywhere in the text for a
  * name in a script written without spaces, such as Chinese, Japanese, Korean or Thai, where the longest
  * name in the index wins a span), case- and accent-
- * insensitive, with punctuation around a hit ignored (`(Wendy)`, `Wendy,`, `Wendy!`) and a
+ * insensitive, with punctuation around a hit ignored (`(Nora)`, `Nora,`, `Nora!`) and a
  * trailing `.` on an alias or a word ignored (`W.` finds `W.` and `W`). A hit followed by
  * `'s` (or a bare `'` after an `s`, as in `James' car`) is possessive. One match per page: the earliest hit, and a direct hit anywhere wins
  * over a possessive one. Results are ordered by `position`.

@@ -35,7 +35,7 @@ function wrapped(tool: string, input: unknown, server = 'Email'): RawToolCall {
 
 const send: SentMail = {
   kind: 'send',
-  recipients: ['wendy@example.com'],
+  recipients: ['nora@example.com'],
   cc: [],
   bcc: [],
   subject: 'Saturday',
@@ -47,7 +47,7 @@ describe('sentMailFromCall', () => {
     expect(
       sentMailFromCall(
         call('Email__send_email', {
-          recipients: ['wendy@example.com'],
+          recipients: ['nora@example.com'],
           cc: ['sam@example.com'],
           bcc: [{ email: 'me@example.com' }],
           subject: 'Saturday',
@@ -56,7 +56,7 @@ describe('sentMailFromCall', () => {
       ),
     ).toEqual({
       kind: 'send',
-      recipients: ['wendy@example.com'],
+      recipients: ['nora@example.com'],
       cc: ['sam@example.com'],
       bcc: ['me@example.com'],
       subject: 'Saturday',
@@ -124,17 +124,17 @@ function resultEvent(result: unknown): string {
 
 describe('sentMailWentThrough', () => {
   it.each([
-    ['a plain text answer', resultEvent('Email sent successfully to wendy@example.com. Message-Id: <a@b.example>')],
+    ['a plain text answer', resultEvent('Email sent successfully to nora@example.com. Message-Id: <a@b.example>')],
     [
       'a structured answer',
-      resultEvent({ result: 'Email sent successfully to wendy@example.com with 1 attachment(s)' }),
+      resultEvent({ result: 'Email sent successfully to nora@example.com with 1 attachment(s)' }),
     ],
     [
       'content blocks',
-      resultEvent({ content: [{ type: 'text', text: 'Email sent successfully to wendy@example.com' }] }),
+      resultEvent({ content: [{ type: 'text', text: 'Email sent successfully to nora@example.com' }] }),
     ],
-    ['a forward', resultEvent('Email forwarded successfully to wendy@example.com. Message-Id: <a@b.example>')],
-    ['an answer kept as text', resultEvent('{"result":"Email sent successfully to wendy@example.com"}')],
+    ['a forward', resultEvent('Email forwarded successfully to nora@example.com. Message-Id: <a@b.example>')],
+    ['an answer kept as text', resultEvent('{"result":"Email sent successfully to nora@example.com"}')],
   ])('accepts %s', (_name, content) => {
     expect(sentMailWentThrough(content)).toBe(true);
   });
@@ -143,18 +143,18 @@ describe('sentMailWentThrough', () => {
     expect(
       sentMailWentThrough(
         resultEvent(
-          'Email delivery [succeeded: wendy@example.com; message-id: <a@b.example>; sent-copy: failed (Sent); warning: reconciliation needed]',
+          'Email delivery [succeeded: nora@example.com; message-id: <a@b.example>; sent-copy: failed (Sent); warning: reconciliation needed]',
         ),
       ),
     ).toBe(true);
   });
 
   it.each([
-    ['a failed delivery', resultEvent('Email delivery [failed: wendy@example.com (rejected); sent-copy: skipped]')],
+    ['a failed delivery', resultEvent('Email delivery [failed: nora@example.com (rejected); sent-copy: skipped]')],
     [
       'an uncertain delivery',
       resultEvent({
-        result: 'Email delivery [unknown: wendy@example.com; sent-copy: unknown; warning: reconciliation needed]',
+        result: 'Email delivery [unknown: nora@example.com; sent-copy: unknown; warning: reconciliation needed]',
       }),
     ],
     [
@@ -163,7 +163,7 @@ describe('sentMailWentThrough', () => {
     ],
     ['an error text', resultEvent({ error: 'Recipient(s) not in allowlist' })],
     ['an answer with no text', resultEvent(null)],
-    ['content that is not JSON', 'Email sent successfully to wendy@example.com'],
+    ['content that is not JSON', 'Email sent successfully to nora@example.com'],
   ])('refuses %s', (_name, content) => {
     expect(sentMailWentThrough(content)).toBe(false);
   });
@@ -175,29 +175,29 @@ describe('sentMailNoteText', () => {
       sentMailNoteText({
         mail: {
           ...send,
-          recipients: ['wendy@example.com', 'sam@example.com'],
+          recipients: ['nora@example.com', 'sam@example.com'],
           cc: ['pat@example.com'],
           bcc: ['me@example.com'],
         },
         maxBodyCharacters: CAP,
       }),
     ).toBe(
-      'To wendy@example.com, sam@example.com, cc pat@example.com, bcc me@example.com, subject "Saturday": See you at 7.',
+      'To nora@example.com, sam@example.com, cc pat@example.com, bcc me@example.com, subject "Saturday": See you at 7.',
     );
     expect(sentMailNoteText({ mail: { ...send, subject: '', body: '' }, maxBodyCharacters: CAP })).toBe(
-      'To wendy@example.com',
+      'To nora@example.com',
     );
   });
 
   it('names a forward as one and never invents a subject', () => {
     expect(
       sentMailNoteText({ mail: { ...send, kind: 'forward', subject: '', body: 'FYI' }, maxBodyCharacters: CAP }),
-    ).toBe('Forwarded to wendy@example.com: FYI');
+    ).toBe('Forwarded to nora@example.com: FYI');
   });
 
   it('cuts a long text on a whole character and says so', () => {
     const text = sentMailNoteText({ mail: { ...send, body: '😀'.repeat(10) }, maxBodyCharacters: 4 });
-    expect(text).toBe(`To wendy@example.com, subject "Saturday": ${'😀'.repeat(4)} (cut)`);
+    expect(text).toBe(`To nora@example.com, subject "Saturday": ${'😀'.repeat(4)} (cut)`);
   });
 
   it('does not mark a text that fits', () => {
@@ -254,7 +254,7 @@ describe('a sent message in memory', () => {
     const [note, ...rest] = await entries();
     expect(rest).toEqual([]);
     expect(note?.text).toContain(
-      'From a message you sent, Oct 31: To wendy@example.com, subject "Saturday": See you at 7.',
+      'From a message you sent, Oct 31: To nora@example.com, subject "Saturday": See you at 7.',
     );
   });
 
@@ -306,7 +306,7 @@ describe('a sent message in memory', () => {
     expect(note?.text.endsWith('> External source: a message you sent')).toBe(true);
 
     const recalled = await client.recall({
-      query: 'Wendy Saturday',
+      query: 'Nora Saturday',
       maxTokens: 2_000,
       timeoutMs: 1_000,
     });
@@ -326,7 +326,7 @@ describe('a sent message in memory', () => {
     // The page text hides the note line and the chat id; only the origin is read from its closing line.
     expect(entryMetadata(withoutHiddenMarkers(item.text))).toEqual({ [MEMORY_ORIGIN_METADATA_KEY]: 'tool_ingested' });
     const block = formatMemoryBlock({ today: '2026-11-13', results: [item], budgetTokens: 2_000 }).block;
-    expect(block).toContain(', a message the person sent] From a message you sent, Oct 31: To wendy@example.com');
+    expect(block).toContain(', a message the person sent] From a message you sent, Oct 31: To nora@example.com');
   });
 
   it('cannot be forged by a body that carries the source line', async () => {
@@ -399,7 +399,7 @@ describe('saving sent messages safely', () => {
   const logger = winston.createLogger({ silent: true });
   const mail: SentMail = {
     kind: 'send',
-    recipients: ['wendy@example.com'],
+    recipients: ['nora@example.com'],
     cc: [],
     bcc: [],
     subject: 'Saturday',

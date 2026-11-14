@@ -978,17 +978,17 @@ describe('MemoryProcessor internal-source state', () => {
   it('records recalled content on the turn state through the real recall path', async () => {
     const recall = jest.fn().mockResolvedValue({
       ok: true,
-      results: [{ id: '1', occurred_start: '2026-08-14', text: 'Lexie is a Bernese Mountain Dog' }],
+      results: [{ id: '1', occurred_start: '2026-08-14', text: 'Pippa is a Bernese Mountain Dog' }],
     });
     const internalSourceState = createInternalSourceState();
     const { processor } = processorWithState(recall, internalSourceState);
 
-    await collect(processor.processPreLLM(makeExecution([{ role: 'user', content: 'what do you know about Lexie' }])));
+    await collect(processor.processPreLLM(makeExecution([{ role: 'user', content: 'what do you know about Pippa' }])));
 
     // The recall call site (not just noteRecallContent in isolation) feeds
     // the turn's tool policy: the recorded tokens arm the recall rule.
     expect(internalSourceState.recallTokens).toBeDefined();
-    expect(internalSourceState.recallTokens).toContain('lexie');
+    expect(internalSourceState.recallTokens).toContain('pippa');
     expect(internalSourceState.recallTokens).toContain('bernese');
     const policy = buildInternalSourceToolPolicy(internalSourceState);
     expect(
@@ -1015,13 +1015,13 @@ describe('MemoryProcessor internal-source state', () => {
   it('never persists recall tokens to the durable capability state', async () => {
     const recall = jest.fn().mockResolvedValue({
       ok: true,
-      results: [{ id: '1', occurred_start: '2026-08-14', text: 'Lexie is a Bernese Mountain Dog' }],
+      results: [{ id: '1', occurred_start: '2026-08-14', text: 'Pippa is a Bernese Mountain Dog' }],
     });
     const internalSourceState = createInternalSourceState();
     const { processor } = processorWithState(recall, internalSourceState);
 
     const events = await collect(
-      processor.processPreLLM(makeExecution([{ role: 'user', content: 'what do you know about Lexie' }])),
+      processor.processPreLLM(makeExecution([{ role: 'user', content: 'what do you know about Pippa' }])),
     );
 
     // Any capability-state snapshot emitted this turn must not carry the
@@ -1032,7 +1032,7 @@ describe('MemoryProcessor internal-source state', () => {
         throw new Error('expected a capability_state event');
       }
       const serialized = JSON.stringify(event.state);
-      expect(serialized).not.toContain('lexie');
+      expect(serialized).not.toContain('pippa');
       expect(serialized).not.toContain('bernese');
     }
   });
@@ -1494,20 +1494,20 @@ describe('memory block framing', () => {
 });
 
 describe('MemoryProcessor pages layer', () => {
-  const wendyText = '[page: Wendy — person, household]\nNow:\n- Booked the movie. (you said)';
-  const loadedWendy = {
+  const noraText = '[page: Nora — person, household]\nNow:\n- Booked the movie. (you said)';
+  const loadedNora = {
     vaultDir: '/v',
     kind: 'person' as const,
-    slug: 'wendy',
-    title: 'Wendy',
+    slug: 'nora',
+    title: 'Nora',
     reason: 'direct' as const,
-    page: pageOf({ front: { kind: 'person', title: 'Wendy', aliases: [], household: true } }),
-    text: wendyText,
+    page: pageOf({ front: { kind: 'person', title: 'Nora', aliases: [], household: true } }),
+    text: noraText,
     drafting: new Array<string>(),
     holdsOutsideText: false,
-    ownLines: wendyText.split('\n'),
+    ownLines: noraText.split('\n'),
     readLines: new Array<string>(),
-    estimatedTokens: estimateTokens(wendyText),
+    estimatedTokens: estimateTokens(noraText),
   };
   const fact: RecallItem = { id: '1', occurred_start: '2026-08-14', text: 'filed on 14 April' };
 
@@ -1538,7 +1538,7 @@ describe('MemoryProcessor pages layer', () => {
 
   it('puts the pages the message names ahead of recalled items and records the layer', async () => {
     const loadPages = jest.fn().mockResolvedValue({
-      pages: [loadedWendy],
+      pages: [loadedNora],
       stats: { candidates: 2, loaded: 1, dropped_over_count: 0, dropped_over_budget: 1 },
       skippedFiles: [],
     });
@@ -1548,9 +1548,9 @@ describe('MemoryProcessor pages layer', () => {
         loadPages,
       },
     );
-    const event = await run({ client, message: 'Is Wendy free Saturday?' });
+    const event = await run({ client, message: 'Is Nora free Saturday?' });
     expect(loadPages).toHaveBeenCalledWith({
-      message: 'Is Wendy free Saturday?',
+      message: 'Is Nora free Saturday?',
       earlierMessages: [],
       today: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
       maxPages: 6,
@@ -1560,7 +1560,7 @@ describe('MemoryProcessor pages layer', () => {
       [
         '<aman-memory>',
         MEMORY_FRAMING_SENTENCE,
-        wendyText,
+        noraText,
         '[2026-08-14, 2 months ago, from something read for the person] filed on 14 April',
         '(memory: 1 items; 20 tokens of 2048 budget; 1 pages)',
         '</aman-memory>',
@@ -1574,20 +1574,20 @@ describe('MemoryProcessor pages layer', () => {
   it('injects a page even when recall finds nothing', async () => {
     const client: MemoryClient = Object.assign(makeClient({}), {
       loadPages: jest.fn().mockResolvedValue({
-        pages: [loadedWendy],
+        pages: [loadedNora],
         stats: { candidates: 1, loaded: 1, dropped_over_count: 0, dropped_over_budget: 0 },
         skippedFiles: [],
       }),
     });
-    const event = await run({ client, message: 'Wendy?' });
-    expect(event['injected_block']).toContain(wendyText);
+    const event = await run({ client, message: 'Nora?' });
+    expect(event['injected_block']).toContain(noraText);
     expect(event['layers']).toMatchObject({ pages: { loaded: 1 } });
   });
 
   it('records no pages layer on a client without pages, and keeps the block as before', async () => {
     const event = await run({
       client: makeClient({ recall: jest.fn().mockResolvedValue({ ok: true, results: [fact] }) }),
-      message: 'Wendy?',
+      message: 'Nora?',
     });
     expect(event['injected_block']).toBe(
       formatMemoryBlock({ today: '2026-11-13', results: [fact], budgetTokens: 2048 }).block,
@@ -1598,17 +1598,17 @@ describe('MemoryProcessor pages layer', () => {
   it('drops pages past the page budget and counts them', async () => {
     const client: MemoryClient = Object.assign(makeClient({}), {
       loadPages: jest.fn().mockResolvedValue({
-        pages: [loadedWendy, { ...loadedWendy, slug: 'sam', title: 'Sam', text: 'x'.repeat(400) }],
+        pages: [loadedNora, { ...loadedNora, slug: 'sam', title: 'Sam', text: 'x'.repeat(400) }],
         stats: { candidates: 2, loaded: 2, dropped_over_count: 0, dropped_over_budget: 0 },
         skippedFiles: [],
       }),
     });
     const event = await run({
       client,
-      message: 'Wendy and Sam',
-      config: { ...DEFAULT_CONFIG, pages: { maxCount: 6, maxTokens: estimateTokens(wendyText) + 10 } },
+      message: 'Nora and Sam',
+      config: { ...DEFAULT_CONFIG, pages: { maxCount: 6, maxTokens: estimateTokens(noraText) + 10 } },
     });
-    expect(event['injected_block']).toContain(wendyText);
+    expect(event['injected_block']).toContain(noraText);
     expect(event['injected_block']).not.toContain('xxxx');
     expect(event['injected_block']).toContain('1 pages; 1 pages dropped over budget');
     expect(event['layers']).toMatchObject({ pages: { loaded: 1, dropped_over_budget: 1 } });
@@ -1626,7 +1626,7 @@ describe('MemoryProcessor pages layer', () => {
       makeClient({ recall: jest.fn().mockResolvedValue({ ok: true, results: [fact] }) }),
       {
         loadPages: jest.fn().mockResolvedValue({
-          pages: [loadedWendy],
+          pages: [loadedNora],
           stats: { candidates: 1, loaded: 1, dropped_over_count: 0, dropped_over_budget: 0 },
           skippedFiles: [],
         }),
@@ -1634,7 +1634,7 @@ describe('MemoryProcessor pages layer', () => {
     );
     const event = await run({
       client,
-      message: 'Wendy?',
+      message: 'Nora?',
       config: {
         ...DEFAULT_CONFIG,
         screen: {
@@ -1658,15 +1658,15 @@ describe('MemoryProcessor pages layer', () => {
   });
 
   it('puts a household contact’s style lines and the household line under one fixed heading after the pages', async () => {
-    const wendyPage = parseMemoryPage({
+    const noraPage = parseMemoryPage({
       content: [
         '---',
         'kind: person',
-        'title: Wendy',
+        'title: Nora',
         'aliases: [my wife]',
         'household: true',
         '---',
-        '# Wendy',
+        '# Nora',
         '',
         '## How you write to them',
         '- Short and casual. No sign-off. <!-- fact: id=f_01 src=sent_mail since=2026-10-31 -->',
@@ -1675,13 +1675,13 @@ describe('MemoryProcessor pages layer', () => {
         '- Booked the movie for Saturday. <!-- fact: id=f_02 src=mail since=2026-10-30 -->',
         '',
       ].join('\n'),
-      fallback: { kind: 'person', title: 'Wendy' },
+      fallback: { kind: 'person', title: 'Nora' },
     });
-    const text = renderPageForModel({ title: 'Wendy', page: wendyPage });
-    const drafting = draftingLines({ title: 'Wendy', page: wendyPage });
+    const text = renderPageForModel({ title: 'Nora', page: noraPage });
+    const drafting = draftingLines({ title: 'Nora', page: noraPage });
     const client: MemoryClient = Object.assign(makeClient({}), {
       loadPages: jest.fn().mockResolvedValue({
-        pages: [{ ...loadedWendy, page: wendyPage, text, drafting, estimatedTokens: estimateTokens(text) }],
+        pages: [{ ...loadedNora, page: noraPage, text, drafting, estimatedTokens: estimateTokens(text) }],
         stats: { candidates: 1, loaded: 1, dropped_over_count: 0, dropped_over_budget: 0 },
         skippedFiles: [],
       }),
@@ -1690,7 +1690,7 @@ describe('MemoryProcessor pages layer', () => {
     const block = String(event['injected_block']);
     expect(block).toContain(
       [
-        '[page: Wendy — person, household, name not confirmed by you; also called: my wife]',
+        '[page: Nora — person, household, name not confirmed by you; also called: my wife]',
         'Now:',
         '- Booked the movie for Saturday. (from mail, not confirmed, since 2026-10-30)',
       ].join('\n'),
@@ -1699,7 +1699,7 @@ describe('MemoryProcessor pages layer', () => {
       block.endsWith(
         [
           DRAFTING_HEADING,
-          'Wendy:',
+          'Nora:',
           '- Short and casual. No sign-off.',
           `- ${HOUSEHOLD_LINE}`,
           DRAFTING_END,
@@ -1744,16 +1744,16 @@ describe('MemoryProcessor pages layer', () => {
       );
     }
 
-    const wendyDrafting = { ...loadedWendy, drafting: ['Wendy:', '- Short and casual.'] };
+    const noraDrafting = { ...loadedNora, drafting: ['Nora:', '- Short and casual.'] };
 
     it('is last in the block and holds nothing but the contacts lines between its heading and its end line', async () => {
-      const event = await run({ client: client({ pages: [wendyDrafting] }), message: 'Wendy?' });
+      const event = await run({ client: client({ pages: [noraDrafting] }), message: 'Nora?' });
       const block = String(event['injected_block']);
       const lines = block.split('\n');
       const start = lines.indexOf(DRAFTING_HEADING);
       const end = lines.indexOf(DRAFTING_END);
       expect(start).toBeGreaterThan(-1);
-      expect(lines.slice(start + 1, end)).toEqual(['Wendy:', '- Short and casual.']);
+      expect(lines.slice(start + 1, end)).toEqual(['Nora:', '- Short and casual.']);
       expect(lines.slice(end)).toEqual([DRAFTING_END, '</aman-memory>']);
       const item = lines.indexOf('[2026-08-14, 2 months ago, from something read for the person] filed on 14 April');
       expect(item).toBeGreaterThan(-1);
@@ -1761,7 +1761,7 @@ describe('MemoryProcessor pages layer', () => {
     });
 
     it('never lets recalled or mail text carry the heading or the end line', async () => {
-      const event = await run({ client: client({ pages: [wendyDrafting] }), message: 'Wendy?' });
+      const event = await run({ client: client({ pages: [noraDrafting] }), message: 'Nora?' });
       const block = String(event['injected_block']);
       expect(block.split(DRAFTING_HEADING)).toHaveLength(2);
       expect(block.split(DRAFTING_END)).toHaveLength(2);
@@ -1772,7 +1772,7 @@ describe('MemoryProcessor pages layer', () => {
     it('removes the heading and end line from a page title, alias, summary and facts', async () => {
       const text = renderPageForModel({ title: forged.frontMatter.title, page: forged });
       const event = await run({
-        client: client({ pages: [{ ...loadedWendy, title: forged.frontMatter.title, page: forged, text }] }),
+        client: client({ pages: [{ ...loadedNora, title: forged.frontMatter.title, page: forged, text }] }),
         message: 'Sam?',
       });
       const block = String(event['injected_block']);
@@ -1796,7 +1796,7 @@ describe('MemoryProcessor pages layer', () => {
       const event = await run({
         client: Object.assign(makeClient({ recall: jest.fn().mockResolvedValue({ ok: true, results: [disguised] }) }), {
           loadPages: jest.fn().mockResolvedValue({
-            pages: [{ ...loadedWendy, title: 'Sam', page, text, drafting: ['Sam:', '- Be brief.'] }],
+            pages: [{ ...loadedNora, title: 'Sam', page, text, drafting: ['Sam:', '- Be brief.'] }],
             stats: { candidates: 1, loaded: 1, dropped_over_count: 0, dropped_over_budget: 0 },
             skippedFiles: [],
           }),
@@ -1833,8 +1833,8 @@ describe('MemoryProcessor pages layer', () => {
     const client: MemoryClient = Object.assign(makeClient({}), {
       loadPages: jest.fn().mockResolvedValue({
         pages: [
-          loadedWendy,
-          { ...loadedWendy, slug: 'sam', title: 'Sam', text: 'x'.repeat(400), drafting: ['Sam:', '- Be brief.'] },
+          loadedNora,
+          { ...loadedNora, slug: 'sam', title: 'Sam', text: 'x'.repeat(400), drafting: ['Sam:', '- Be brief.'] },
         ],
         stats: { candidates: 2, loaded: 2, dropped_over_count: 0, dropped_over_budget: 0 },
         skippedFiles: [],
@@ -1842,8 +1842,8 @@ describe('MemoryProcessor pages layer', () => {
     });
     const event = await run({
       client,
-      message: 'Wendy and Sam',
-      config: { ...DEFAULT_CONFIG, pages: { maxCount: 6, maxTokens: estimateTokens(wendyText) + 10 } },
+      message: 'Nora and Sam',
+      config: { ...DEFAULT_CONFIG, pages: { maxCount: 6, maxTokens: estimateTokens(noraText) + 10 } },
     });
     expect(event['injected_block']).not.toContain(DRAFTING_HEADING);
     expect(event['injected_block']).not.toContain('Be brief');
@@ -1859,14 +1859,14 @@ describe('MemoryProcessor pages layer', () => {
     }));
     const client: MemoryClient = Object.assign(makeClient({}), {
       loadPages: jest.fn().mockResolvedValue({
-        pages: [{ ...loadedWendy, drafting: ['Wendy:', '- Be brief.'] }],
+        pages: [{ ...loadedNora, drafting: ['Nora:', '- Be brief.'] }],
         stats: { candidates: 1, loaded: 1, dropped_over_count: 0, dropped_over_budget: 0 },
         skippedFiles: [],
       }),
     });
     const event = await run({
       client,
-      message: 'Wendy?',
+      message: 'Nora?',
       config: {
         ...DEFAULT_CONFIG,
         screen: {
@@ -1888,16 +1888,16 @@ describe('MemoryProcessor pages layer', () => {
     const warn = jest.spyOn(logger, 'warn');
     const client: MemoryClient = Object.assign(makeClient({}), {
       loadPages: jest.fn().mockResolvedValue({
-        pages: [loadedWendy],
+        pages: [loadedNora],
         stats: { candidates: 1, loaded: 1, dropped_over_count: 0, dropped_over_budget: 0 },
-        skippedFiles: ['people/Wendy.md'],
+        skippedFiles: ['people/Nora.md'],
       }),
     });
-    const event = await run({ client, message: 'Wendy?', logger });
-    expect(event['injected_block']).toContain(wendyText);
+    const event = await run({ client, message: 'Nora?', logger });
+    expect(event['injected_block']).toContain(noraText);
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('Rename them to lowercase'), { count: 1 });
-    expect(JSON.stringify(warn.mock.calls)).not.toContain('Wendy.md');
+    expect(JSON.stringify(warn.mock.calls)).not.toContain('Nora.md');
   });
 
   it('keeps the turn going when loading pages throws', async () => {
@@ -1907,7 +1907,7 @@ describe('MemoryProcessor pages layer', () => {
         loadPages: jest.fn().mockRejectedValue(new Error('disk gone')),
       },
     );
-    const event = await run({ client, message: 'Wendy?' });
+    const event = await run({ client, message: 'Nora?' });
     expect(event['injected_block']).toContain('filed on 14 April');
     expect(event).not.toHaveProperty('layers');
   });
@@ -1934,28 +1934,28 @@ describe('applyRelevanceGate', () => {
     const items: RecallItem[] = [
       recallItem({ id: 'lisbon', text: 'Photo gear for Lisbon walks.', score: 0.9 }),
       recallItem({ id: 'fado', text: 'Fado nights are on Thursdays.', score: 0.8 }),
-      recallItem({ id: 'wendy', text: "Maya's really good friend is Wendy.", score: 0.6 }),
-      recallItem({ id: 'low', text: 'Wendy likes tea.', score: 0.1 }),
+      recallItem({ id: 'nora', text: "Maya's really good friend is Nora.", score: 0.6 }),
+      recallItem({ id: 'low', text: 'Nora likes tea.', score: 0.1 }),
     ];
     const result = applyRelevanceGate({
       items,
       minScore: 0.5,
       maxItems: 12,
-      message: "Hi June, remember Wendy's is coming up in December.",
+      message: "Hi June, remember Nora's is coming up in December.",
     });
-    expect(result.items.map(item => item.id)).toEqual(['wendy', 'lisbon', 'fado']);
+    expect(result.items.map(item => item.id)).toEqual(['nora', 'lisbon', 'fado']);
     expect(result.droppedBelowThreshold).toBe(1);
   });
 
   it('keeps provider order when the message names nobody or only uses a lowercase common word', () => {
     const items: RecallItem[] = [
       recallItem({ id: 'lisbon', text: 'Photo gear for Lisbon walks.' }),
-      recallItem({ id: 'wendy', text: "Maya's really good friend is Wendy." }),
+      recallItem({ id: 'nora', text: "Maya's really good friend is Nora." }),
       recallItem({ id: 'fado', text: 'Fado nights are on Thursdays.' }),
     ];
-    for (const message of ['what did I say about photo gear?', 'I want to attend a fado night with wendy']) {
+    for (const message of ['what did I say about photo gear?', 'I want to attend a fado night with nora']) {
       const result = applyRelevanceGate({ items, minScore: 0.5, maxItems: 12, message });
-      expect(result.items.map(item => item.id)).toEqual(['lisbon', 'wendy', 'fado']);
+      expect(result.items.map(item => item.id)).toEqual(['lisbon', 'nora', 'fado']);
     }
   });
 

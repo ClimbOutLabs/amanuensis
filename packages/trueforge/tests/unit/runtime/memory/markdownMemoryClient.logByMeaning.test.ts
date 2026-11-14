@@ -104,16 +104,16 @@ describe('the daily log, searched by meaning', () => {
       note({ topic: 1, age: 2 }),
       note({ topic: 3, age: 3 }),
       note({ topic: 4, age: 4 }),
-      note({ topic: 5, age: 5, extra: 'for Wendy' }),
+      note({ topic: 5, age: 5, extra: 'for Nora' }),
       note({ topic: 2, age: 6, extra: 'plain' }),
-      note({ topic: 2, age: 7, extra: 'about Wendy' }),
+      note({ topic: 2, age: 7, extra: 'about Nora' }),
     ];
 
     it('puts a chosen note that names the person first', async () => {
       const { client } = await open({ model: new HandChosenModel(), notes });
 
-      expect(await recallTexts({ client, query: `${askAbout({ topic: 2, closeness: 1 })} and Wendy` })).toEqual([
-        'Remember topic2 about Wendy',
+      expect(await recallTexts({ client, query: `${askAbout({ topic: 2, closeness: 1 })} and Nora` })).toEqual([
+        'Remember topic2 about Nora',
         'Remember topic2 plain',
       ]);
     });
@@ -121,9 +121,9 @@ describe('the daily log, searched by meaning', () => {
     it('never adds a note that names the person but is not about the message', async () => {
       const { client } = await open({ model: new HandChosenModel(), notes });
 
-      const texts = await recallTexts({ client, query: `${askAbout({ topic: 2, closeness: 1 })} and Wendy` });
+      const texts = await recallTexts({ client, query: `${askAbout({ topic: 2, closeness: 1 })} and Nora` });
 
-      expect(texts).not.toContain('Remember topic5 for Wendy');
+      expect(texts).not.toContain('Remember topic5 for Nora');
     });
   });
 

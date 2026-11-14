@@ -72,9 +72,9 @@ describe('recall after the sorter has handled a note', () => {
       model: saying([
         {
           decision: 'unconfirmed',
-          about: 'wendy',
+          about: 'nora',
           page_kind: 'person',
-          title: 'Wendy',
+          title: 'Nora',
           text: MAIL_TEXT,
           seen: DAY,
           reason: 'Read in mail.',

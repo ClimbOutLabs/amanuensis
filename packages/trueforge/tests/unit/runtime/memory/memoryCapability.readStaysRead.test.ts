@@ -65,9 +65,9 @@ describe('what is recalled from memory keeps its side', () => {
     await writePageFile({
       vaultDir,
       kind: 'person',
-      slug: 'wendy',
+      slug: 'nora',
       content: pageText({
-        front: { kind: 'person', title: 'Wendy', aliases: ['Wendy'], household: false },
+        front: { kind: 'person', title: 'Nora', aliases: ['Nora'], household: false },
         facts: [
           {
             section: 'Now',
@@ -87,7 +87,7 @@ describe('what is recalled from memory keeps its side', () => {
         loadPagesForMessage({ vaultDirs: [vaultDir], writeVaultDir: vaultDir, ...input }),
     });
 
-    const provenance = await recallInto({ client, message: 'What does Wendy like?' });
+    const provenance = await recallInto({ client, message: 'What does Nora like?' });
 
     expect(isTrusted(provenance, 'own-cafe.example')).toBe(true);
     expect(isTrusted(provenance, OWN_ADDRESS)).toBe(true);

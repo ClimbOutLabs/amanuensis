@@ -25,14 +25,14 @@ function line(over: Partial<MemoryPageLine> & { text: string }): MemoryPageLine 
   };
 }
 
-const WENDY: MemoryPageDetail = {
+const NORA: MemoryPageDetail = {
   kind: 'person',
-  slug: 'wendy',
-  title: 'Wendy',
+  slug: 'nora',
+  title: 'Nora',
   otherNames: ['my wife'],
   summary: 'The owner’s wife.',
   confirmableSections: ['How you write to them', 'Now'],
-  text: '# Wendy\n\n## Now\n- Likes tea.\n',
+  text: '# Nora\n\n## Now\n- Likes tea.\n',
   version: 'v1',
   disagreements: [],
   sections: [
@@ -53,7 +53,7 @@ const WENDY: MemoryPageDetail = {
 };
 
 const MADRID: MemoryPageDetail = {
-  ...WENDY,
+  ...NORA,
   kind: 'matter',
   slug: 'madrid',
   title: 'The Madrid move',
@@ -82,7 +82,7 @@ function summaryOf(page: MemoryPageDetail) {
   };
 }
 
-function createCatalog({ pages = [WENDY, MADRID] }: { pages?: MemoryPageDetail[] }) {
+function createCatalog({ pages = [NORA, MADRID] }: { pages?: MemoryPageDetail[] }) {
   let stored = pages;
   const calls = {
     confirm: vi.fn(),
@@ -146,9 +146,9 @@ function renderPanel(catalog: MemoryPagesCatalog) {
   );
 }
 
-async function openWendy() {
-  fireEvent.click(await screen.findByRole('button', { name: /^Wendy/ }));
-  await screen.findByRole('heading', { name: 'Wendy' });
+async function openNora() {
+  fireEvent.click(await screen.findByRole('button', { name: /^Nora/ }));
+  await screen.findByRole('heading', { name: 'Nora' });
 }
 
 afterEach(() => {
@@ -157,10 +157,10 @@ afterEach(() => {
 
 describe('MemoryPagesPanel', () => {
   it('shows a block of lines that disagree, with both lines and the reason, and drops the pair on Not a problem', async () => {
-    const { catalog, calls } = createCatalog({ pages: [{ ...WENDY, disagreements: [PAIR] }, MADRID] });
+    const { catalog, calls } = createCatalog({ pages: [{ ...NORA, disagreements: [PAIR] }, MADRID] });
     renderPanel(catalog);
     expect(await screen.findByText('1 pair disagrees')).toBeInTheDocument();
-    await openWendy();
+    await openNora();
 
     const block = screen.getByRole('region', { name: 'These lines disagree' });
     expect(within(block).getByText('Plays tennis on Fridays.')).toBeInTheDocument();
@@ -169,14 +169,14 @@ describe('MemoryPagesPanel', () => {
 
     fireEvent.click(within(block).getByRole('button', { name: /^Not a problem/ }));
     await waitFor(() =>
-      expect(calls.notAProblem).toHaveBeenCalledWith(expect.objectContaining({ disagreementId: 'p1', slug: 'wendy' })),
+      expect(calls.notAProblem).toHaveBeenCalledWith(expect.objectContaining({ disagreementId: 'p1', slug: 'nora' })),
     );
     await waitFor(() => expect(screen.queryByRole('region', { name: 'These lines disagree' })).not.toBeInTheDocument());
   });
 
   it('shows no block when no lines disagree', async () => {
     renderPanel(createCatalog({}).catalog);
-    await openWendy();
+    await openNora();
     expect(screen.queryByRole('region', { name: 'These lines disagree' })).not.toBeInTheDocument();
   });
 
@@ -189,7 +189,7 @@ describe('MemoryPagesPanel', () => {
   it('lists people and matters with no count of lines to confirm, and searches names and other names', async () => {
     renderPanel(createCatalog({}).catalog);
     const people = await screen.findByRole('region', { name: 'People' });
-    expect(within(people).getByText('Wendy')).toBeInTheDocument();
+    expect(within(people).getByText('Nora')).toBeInTheDocument();
     expect(within(people).queryByText(/to confirm/)).not.toBeInTheDocument();
     expect(within(screen.getByRole('region', { name: 'Matters' })).getByText('The Madrid move')).toBeInTheDocument();
     expect(within(people).getByText('The owner’s wife.')).toBeInTheDocument();
@@ -197,14 +197,14 @@ describe('MemoryPagesPanel', () => {
 
     fireEvent.change(screen.getByRole('searchbox', { name: 'Search pages' }), { target: { value: 'my wife' } });
     expect(screen.queryByText('The Madrid move')).not.toBeInTheDocument();
-    expect(screen.getByText('Wendy')).toBeInTheDocument();
+    expect(screen.getByText('Nora')).toBeInTheDocument();
     fireEvent.change(screen.getByRole('searchbox', { name: 'Search pages' }), { target: { value: 'zzz' } });
     expect(screen.getByText(/No page has that name/)).toBeInTheDocument();
   });
 
   it('says where every line came from, shows days as people write them, and collapses Earlier', async () => {
     renderPanel(createCatalog({}).catalog);
-    await openWendy();
+    await openNora();
     const unconfirmed = screen.getByRole('region', { name: 'Unconfirmed' });
     expect(within(unconfirmed).getByText(/You do not need to do anything/)).toBeInTheDocument();
     expect(within(unconfirmed).getByText('External source: read content')).toBeInTheDocument();
@@ -222,12 +222,12 @@ describe('MemoryPagesPanel', () => {
   it('confirms a line into the chosen section and dismisses another', async () => {
     const { catalog, calls } = createCatalog({});
     renderPanel(catalog);
-    await openWendy();
+    await openNora();
     fireEvent.click(screen.getByRole('button', { name: 'More for: Might travel in November.' }));
     fireEvent.click(screen.getByRole('button', { name: 'Confirm: Might travel in November.' }));
     await waitFor(() =>
       expect(calls.confirm).toHaveBeenCalledWith(
-        expect.objectContaining({ factId: 'f_03', section: 'Now', slug: 'wendy' }),
+        expect.objectContaining({ factId: 'f_03', section: 'Now', slug: 'nora' }),
       ),
     );
     await waitFor(() => expect(screen.queryByRole('button', { name: /^Confirm:/ })).not.toBeInTheDocument());
@@ -236,7 +236,7 @@ describe('MemoryPagesPanel', () => {
   it('dismisses an unconfirmed line', async () => {
     const { catalog, calls } = createCatalog({});
     renderPanel(catalog);
-    await openWendy();
+    await openNora();
     fireEvent.click(screen.getByRole('button', { name: 'More for: Might travel in November.' }));
     fireEvent.click(screen.getByRole('button', { name: 'Dismiss: Might travel in November.' }));
     await waitFor(() => expect(calls.dismiss).toHaveBeenCalledWith(expect.objectContaining({ factId: 'f_03' })));
@@ -252,15 +252,15 @@ describe('MemoryPagesPanel', () => {
       throw new Error(refusal);
     };
     renderPanel(catalog);
-    await openWendy();
+    await openNora();
     fireEvent.click(screen.getByRole('button', { name: /^Edit page/ }));
     const editor = screen.getByRole('textbox', { name: 'Edit page text' });
-    expect(editor).toHaveValue(WENDY.text);
+    expect(editor).toHaveValue(NORA.text);
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
-    fireEvent.change(editor, { target: { value: `${WENDY.text}- hi\n` } });
+    fireEvent.change(editor, { target: { value: `${NORA.text}- hi\n` } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     expect(await screen.findByRole('alert')).toHaveTextContent(refusal);
-    expect(calls.save).toHaveBeenCalledWith(expect.objectContaining({ version: 'v1', text: `${WENDY.text}- hi\n` }));
+    expect(calls.save).toHaveBeenCalledWith(expect.objectContaining({ version: 'v1', text: `${NORA.text}- hi\n` }));
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(screen.queryByRole('textbox', { name: 'Edit page text' })).not.toBeInTheDocument();
   });
@@ -268,7 +268,7 @@ describe('MemoryPagesPanel', () => {
   it('closes the editor after a good save', async () => {
     const { catalog } = createCatalog({});
     renderPanel(catalog);
-    await openWendy();
+    await openNora();
     fireEvent.click(screen.getByRole('button', { name: /^Edit page/ }));
     fireEvent.change(screen.getByRole('textbox', { name: 'Edit page text' }), { target: { value: 'new text' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
@@ -279,13 +279,13 @@ describe('MemoryPagesPanel', () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const { catalog, calls } = createCatalog({});
     renderPanel(catalog);
-    await openWendy();
-    fireEvent.click(screen.getByRole('button', { name: /^Delete page: Wendy/ }));
+    await openNora();
+    fireEvent.click(screen.getByRole('button', { name: /^Delete page: Nora/ }));
     expect(await screen.findByText('Page deleted.')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /^Wendy/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Nora/ })).not.toBeInTheDocument();
     act(() => vi.advanceTimersByTime(FORGET_UNDO_MS + 100));
     await waitFor(() =>
-      expect(calls.remove).toHaveBeenCalledWith(expect.objectContaining({ kind: 'person', slug: 'wendy' })),
+      expect(calls.remove).toHaveBeenCalledWith(expect.objectContaining({ kind: 'person', slug: 'nora' })),
     );
   });
 
@@ -293,17 +293,17 @@ describe('MemoryPagesPanel', () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const { catalog, calls } = createCatalog({});
     renderPanel(catalog);
-    await openWendy();
-    fireEvent.click(screen.getByRole('button', { name: /^Delete page: Wendy/ }));
+    await openNora();
+    fireEvent.click(screen.getByRole('button', { name: /^Delete page: Nora/ }));
     fireEvent.click(await screen.findByRole('button', { name: 'Undo' }));
-    expect(await screen.findByRole('button', { name: /^Wendy/ })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /^Nora/ })).toBeInTheDocument();
     act(() => vi.advanceTimersByTime(FORGET_UNDO_MS * 2));
     expect(calls.remove).not.toHaveBeenCalled();
   });
 
   it('leaves a repeated summary out of the page, and shows a summary of its own with the day the page changed', async () => {
-    renderPanel(createCatalog({ pages: [{ ...WENDY, summary: 'Plays tennis on Fridays.' }, MADRID] }).catalog);
-    await openWendy();
+    renderPanel(createCatalog({ pages: [{ ...NORA, summary: 'Plays tennis on Fridays.' }, MADRID] }).catalog);
+    await openNora();
     expect(screen.getAllByText('Plays tennis on Fridays.')).toHaveLength(1);
     expect(screen.queryByRole('region', { name: 'Summary' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Back to all pages' }));
@@ -324,13 +324,13 @@ describe('MemoryPagesPanel', () => {
     Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
     const { catalog, calls } = createCatalog({});
     renderPanel(catalog);
-    fireEvent.click(await screen.findByRole('button', { name: 'Copy page: Wendy' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Copy page: Nora' }));
     expect(await screen.findByRole('status')).toHaveTextContent('Copied');
     expect(writeText).toHaveBeenCalledWith(
-      'Wendy\n\nThe owner’s wife.\n\nNow\n- Plays tennis on Fridays.\n\nUnconfirmed\n- Might travel in November.\n\nEarlier\n- Worked at Acme.',
+      'Nora\n\nThe owner’s wife.\n\nNow\n- Plays tennis on Fridays.\n\nUnconfirmed\n- Might travel in November.\n\nEarlier\n- Worked at Acme.',
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Edit page: Wendy' }));
-    expect(await screen.findByRole('textbox', { name: 'Edit page text' })).toHaveValue(WENDY.text);
+    fireEvent.click(screen.getByRole('button', { name: 'Edit page: Nora' }));
+    expect(await screen.findByRole('textbox', { name: 'Edit page text' })).toHaveValue(NORA.text);
     fireEvent.click(screen.getByRole('button', { name: 'Back to all pages' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Delete page: The Madrid move' }));
     expect(await screen.findByText('Page deleted.')).toBeInTheDocument();

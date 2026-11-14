@@ -8,8 +8,8 @@ import {
 
 function pageOf(body: string) {
   return parseMemoryPage({
-    content: `---\nkind: person\ntitle: Wendy\n---\n# Wendy\n${body}`,
-    fallback: { kind: 'person', title: 'Wendy' },
+    content: `---\nkind: person\ntitle: Nora\n---\n# Nora\n${body}`,
+    fallback: { kind: 'person', title: 'Nora' },
   });
 }
 
@@ -49,8 +49,8 @@ describe('the line Aman writes on what a page covers', () => {
     const described = withPageAbout(page, 'Wife. Read when planning: weekends, gifts.');
     expect(renderMemoryPage(described)).toBe(
       renderMemoryPage(page).replace(
-        'title: Wendy\n---',
-        'title: Wendy\nabout: "Wife. Read when planning: weekends, gifts."\n---',
+        'title: Nora\n---',
+        'title: Nora\nabout: "Wife. Read when planning: weekends, gifts."\n---',
       ),
     );
     const read = parseMemoryPage({ content: renderMemoryPage(described), fallback: { kind: 'person', title: 'W' } });
@@ -64,11 +64,11 @@ describe('the line Aman writes on what a page covers', () => {
   });
 
   it('leaves a page with no settings block, or a line spread over several lines by hand, unchanged', () => {
-    const bare = parseMemoryPage({ content: '# Wendy\n', fallback: { kind: 'person', title: 'Wendy' } });
+    const bare = parseMemoryPage({ content: '# Nora\n', fallback: { kind: 'person', title: 'Nora' } });
     expect(withPageAbout(bare, 'Wife.')).toBe(bare);
     const spread = parseMemoryPage({
-      content: '---\nkind: person\ntitle: Wendy\nabout: >\n  Typed over\n  two lines.\n---\n# Wendy\n',
-      fallback: { kind: 'person', title: 'Wendy' },
+      content: '---\nkind: person\ntitle: Nora\nabout: >\n  Typed over\n  two lines.\n---\n# Nora\n',
+      fallback: { kind: 'person', title: 'Nora' },
     });
     expect(withPageAbout(spread, 'Wife.')).toBe(spread);
   });

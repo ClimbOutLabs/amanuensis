@@ -59,7 +59,7 @@ describe("Maya's world", () => {
     expect(new Set(titles.map(page => page.title.split(' ')[0])).size).toBeLessThan(titles.length);
 
     const story = MAYA_ENTRIES.filter(entry => MAYA_STORY_IDS.has(entry.id)).map(entry => entry.content);
-    for (const way of ["Maya's wife", 'Wendy', 'W.', 'wendy@example.com']) {
+    for (const way of ["Maya's wife", 'Nora', 'W.', 'nora@example.com']) {
       expect(story.some(content => content.includes(way))).toBe(true);
     }
   });
@@ -169,12 +169,12 @@ describe("Maya's world", () => {
 
   it('holds a hand edit, and later read content that contradicts it without replacing it', () => {
     const edit = MAYA_EVENTS.find(event => event.day === 20);
-    expect(edit?.about).toBe(mayaPageSlug('wendy'));
+    expect(edit?.about).toBe(mayaPageSlug('nora'));
     const contradiction = MAYA_ENTRIES.filter(
       entry => entry.day === 25 && entry.origin === TOOL_INGESTED_ORIGIN,
     ).flatMap(entry => entry.expected);
     expect(contradiction).toContainEqual(
-      expect.objectContaining({ decision: 'unconfirmed', about: mayaPageSlug('wendy') }),
+      expect.objectContaining({ decision: 'unconfirmed', about: mayaPageSlug('nora') }),
     );
   });
 
@@ -214,7 +214,7 @@ describe("Maya's world", () => {
       const page = await readMemoryPage({
         vaultDir: path.join(dir, MAYA_NAMESPACE),
         kind: 'person',
-        slug: mayaPageSlug('wendy'),
+        slug: mayaPageSlug('nora'),
       });
       expect(
         page?.sections.flatMap(section =>

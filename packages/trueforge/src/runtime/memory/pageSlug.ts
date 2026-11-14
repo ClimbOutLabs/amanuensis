@@ -62,7 +62,7 @@ function cutAtLetters(text: string): string {
  * The file stem for a page title: lowercase, Latin accents folded away, every other run of
  * characters that are not letters, marks or digits turned into one dash. Letters in other
  * scripts stay as written, so `東京` and `김민수` keep their names and `people/김민수.md` loads.
- * Lowercase keeps `Wendy` and `wendy` one file on case-insensitive disks. Never `sanitizeNamespace`,
+ * Lowercase keeps `Nora` and `nora` one file on case-insensitive disks. Never `sanitizeNamespace`,
  * which drops every non-ASCII letter.
  */
 export function pageSlug(title: string): string {

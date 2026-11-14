@@ -12,7 +12,7 @@ export interface MayaPage {
 
 /** Everyone and everything in Maya's world that could have a page. Maya is the owner and has none. */
 export const MAYA_PAGES = {
-  wendy: { title: 'Wendy', kind: 'person', names: [], roles: ['wife'] },
+  nora: { title: 'Nora', kind: 'person', names: [], roles: ['wife'] },
   zoe: { title: 'Zoe', kind: 'person', names: [], roles: ['daughter'] },
   samRossi: { title: 'Sam Rossi', kind: 'person', names: [], roles: ['plumber'] },
   samWhitfield: { title: 'Sam Whitfield', kind: 'person', names: [], roles: [] },

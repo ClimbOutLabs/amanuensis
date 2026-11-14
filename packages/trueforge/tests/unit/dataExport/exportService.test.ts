@@ -236,7 +236,7 @@ describe('runDataExport memory', () => {
         await vault(TENANT_ID, { 'MEMORY.md': '# Shared\n' });
         await vault(mine, {});
         await writePages(TENANT_ID, {
-          'people/wendy.md': '---\ntitle: Wendy\n---\n',
+          'people/nora.md': '---\ntitle: Nora\n---\n',
           'people/김민수.md': '---\ntitle: 김민수\n---\n',
           'matters/lisbon-trip.md': '---\ntitle: Lisbon trip\n---\n',
           '.memory-state/aliases.json': '{}',
@@ -244,7 +244,7 @@ describe('runDataExport memory', () => {
           '.memory-state/lock.1': '{}',
           '.memory-history/HEAD': 'ref: refs/heads/main',
           '.memory-history/info/exclude': '/*',
-          '.memory-history/people/wendy.md': 'a copy kept by the history',
+          '.memory-history/people/nora.md': 'a copy kept by the history',
         });
         await writePages(mine, { 'people/sam.md': 'Sam\n' });
         const { deps, close } = await makeDeps(memoryDir);
@@ -257,7 +257,7 @@ describe('runDataExport memory', () => {
           expect(names.sort()).toEqual(
             [
               `memory/${TENANT_ID}/MEMORY.md`,
-              `memory/${TENANT_ID}/people/wendy.md`,
+              `memory/${TENANT_ID}/people/nora.md`,
               `memory/${TENANT_ID}/people/김민수.md`,
               `memory/${TENANT_ID}/matters/lisbon-trip.md`,
               `memory/${mine}/people/sam.md`,
@@ -272,7 +272,7 @@ describe('runDataExport memory', () => {
       it('takes a page whose name is not a lowercase slug as it is, and leaves out files that are not .md pages', async () => {
         await vault(TENANT_ID, {});
         await writePages(TENANT_ID, {
-          'people/Wendy.md': 'x',
+          'people/Nora.md': 'x',
           'people/my notes.md': 'x',
           'people/photo.png': 'x',
           'people/.hidden.md': 'x',
@@ -281,7 +281,7 @@ describe('runDataExport memory', () => {
         const names = await exportedNames({});
         expect(names.filter(name => name.startsWith('memory/')).sort()).toEqual(
           [
-            `memory/${TENANT_ID}/people/Wendy.md`,
+            `memory/${TENANT_ID}/people/Nora.md`,
             `memory/${TENANT_ID}/people/my notes.md`,
             `memory/${TENANT_ID}/people/ok.md`,
           ].sort(),
@@ -304,8 +304,8 @@ describe('runDataExport memory', () => {
         await vault(TENANT_ID, {});
         await vault('other-tenant', {});
         await vault(theirs, {});
-        await writePages('other-tenant', { 'people/wendy.md': 'x' });
-        await writePages(theirs, { 'people/wendy.md': 'x' });
+        await writePages('other-tenant', { 'people/nora.md': 'x' });
+        await writePages(theirs, { 'people/nora.md': 'x' });
         const names = await exportedNames({});
         expect(names.filter(name => name.startsWith('memory/'))).toEqual([]);
       });

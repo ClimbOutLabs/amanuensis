@@ -36,12 +36,12 @@ import { QuietMemoryClient } from '../../fixtures/memory/quietMemoryClient';
 
 const NOW = '2026-10-31T12:00:00.000Z';
 const SEND_ARGS = JSON.stringify({
-  recipients: ['wendy@example.com'],
+  recipients: ['nora@example.com'],
   subject: 'Saturday',
   body: 'See you at 7.',
 });
-const SENT_TEXT = 'To wendy@example.com, subject "Saturday": See you at 7.';
-const CLEAN = 'Email sent successfully to wendy@example.com. Message-Id: <abc@mail.example>';
+const SENT_TEXT = 'To nora@example.com, subject "Saturday": See you at 7.';
+const CLEAN = 'Email sent successfully to nora@example.com. Message-Id: <abc@mail.example>';
 
 /** A result as the sidecar's answer reaches the turn: structured content wrapped by the host's envelope. */
 function resultContent(text: string): string {
@@ -98,7 +98,7 @@ async function drain({
         : {
             client,
             session: { is_incognito: privateChat },
-            userText: 'Tell Wendy I will be there at 7.',
+            userText: 'Tell Nora I will be there at 7.',
             attachedFiles: false,
           },
   });
@@ -243,17 +243,17 @@ describe('a sent message in the drain of a turn', () => {
     const { client, retain } = memoryClient();
     const args = JSON.stringify({
       email_id: '7',
-      recipients: ['wendy@example.com'],
+      recipients: ['nora@example.com'],
       body: 'Look at this.',
     });
     await drain({
       client,
       stream: streamOf(
-        sendRound({ name: 'Email__forward_email', args, text: 'Email forwarded successfully to wendy@example.com' }),
+        sendRound({ name: 'Email__forward_email', args, text: 'Email forwarded successfully to nora@example.com' }),
       ),
     });
     const [note] = sentNotes(retain);
-    expect(note?.content).toContain('Forwarded to wendy@example.com: Look at this.');
+    expect(note?.content).toContain('Forwarded to nora@example.com: Look at this.');
     expect(note?.content).not.toContain('subject');
   });
 
@@ -282,12 +282,12 @@ describe('a sent message in the drain of a turn', () => {
   );
 
   it.each([
-    ['a failed delivery', 'Email delivery [failed: wendy@example.com (rejected); sent-copy: skipped]'],
+    ['a failed delivery', 'Email delivery [failed: nora@example.com (rejected); sent-copy: skipped]'],
     [
       'an uncertain delivery',
-      'Email delivery [unknown: wendy@example.com; sent-copy: unknown; warning: reconciliation needed]',
+      'Email delivery [unknown: nora@example.com; sent-copy: unknown; warning: reconciliation needed]',
     ],
-    ['a forward that failed', 'Email forward [failed: wendy@example.com (rejected); sent-copy: skipped]'],
+    ['a forward that failed', 'Email forward [failed: nora@example.com (rejected); sent-copy: skipped]'],
   ])('writes nothing for %s that the sidecar reports as a normal result', async (_name, text) => {
     const { client, retain } = memoryClient();
     await drain({ client, stream: streamOf(sendRound({ text })) });
@@ -300,7 +300,7 @@ describe('a sent message in the drain of a turn', () => {
       client,
       stream: streamOf(
         sendRound({
-          text: 'Email delivery [succeeded: wendy@example.com; message-id: <a@b.example>; sent-copy: failed (Sent); warning: reconciliation needed]',
+          text: 'Email delivery [succeeded: nora@example.com; message-id: <a@b.example>; sent-copy: failed (Sent); warning: reconciliation needed]',
         }),
       ),
     });
@@ -523,7 +523,7 @@ async function chatWithSendCard({ approve, sidecarText = CLEAN }: { approve: boo
 
   const first = await run({
     turnId: 'turn-1',
-    input: [{ type: EventType.USER_MESSAGE, content: 'Tell Wendy I will be there at 7.' }],
+    input: [{ type: EventType.USER_MESSAGE, content: 'Tell Nora I will be there at 7.' }],
     previousTurnId: 'none',
   });
   const paused = await session.getTurn(first.id);
@@ -559,7 +559,7 @@ describe('a send approved on a card', () => {
   it('is not saved when the sidecar says the delivery failed', async () => {
     const chat = await chatWithSendCard({
       approve: true,
-      sidecarText: 'Email delivery [failed: wendy@example.com (rejected); sent-copy: skipped]',
+      sidecarText: 'Email delivery [failed: nora@example.com (rejected); sent-copy: skipped]',
     });
     expect(chat.sendEmail).toHaveBeenCalledTimes(1);
     expect(sentNotes(chat.retain)).toHaveLength(0);

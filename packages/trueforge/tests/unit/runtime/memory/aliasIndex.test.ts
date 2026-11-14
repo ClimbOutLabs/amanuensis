@@ -18,10 +18,10 @@ const index: AliasIndexFile = {
   pages: [
     {
       kind: 'person',
-      slug: 'wendy',
-      title: 'Wendy',
+      slug: 'nora',
+      title: 'Nora',
       content_hash: 'a',
-      aliases: ['Wendy', 'my wife', 'wendy@example.com', 'W.'],
+      aliases: ['Nora', 'my wife', 'nora@example.com', 'W.'],
     },
     { kind: 'person', slug: 'sam', title: 'Sam', content_hash: 'b', aliases: ['Sam'] },
     { kind: 'person', slug: 'sam-plumber', title: 'Sam (plumber)', content_hash: 'c', aliases: ['Sam', 'the plumber'] },
@@ -47,17 +47,17 @@ async function makeVault(): Promise<string> {
 describe('aliasIndex', () => {
   describe('normalizeAliasText', () => {
     it('lowercases, folds accents and flattens punctuation but keeps emails and possessives', () => {
-      expect(normalizeAliasText('  Hello, José!  (wendy@example.com) ')).toBe(
-        'hello josé wendy@example.com'.replace('josé', 'jose'),
+      expect(normalizeAliasText('  Hello, José!  (nora@example.com) ')).toBe(
+        'hello josé nora@example.com'.replace('josé', 'jose'),
       );
-      expect(normalizeAliasText("Wendy's")).toBe("wendy's");
+      expect(normalizeAliasText("Nora's")).toBe("nora's");
       expect(normalizeAliasText('W.')).toBe('w.');
     });
   });
 
   describe('apostrophes', () => {
     it('folds curly apostrophes and drops quotes around a word', () => {
-      expect(normalizeAliasText('Wendy\u2019s')).toBe("wendy's");
+      expect(normalizeAliasText('Nora\u2019s')).toBe("nora's");
       expect(normalizeAliasText("'Sam'")).toBe('sam');
       expect(normalizeAliasText('\u2018Sam\u2019')).toBe('sam');
       expect(normalizeAliasText("James' car")).toBe("james' car");
@@ -71,8 +71,8 @@ describe('aliasIndex', () => {
     });
 
     it('treats a curly possessive like a straight one', () => {
-      expect(matchAliases({ index, text: 'Wendy\u2019s sister' })).toEqual([
-        expect.objectContaining({ slug: 'wendy', possessive: true }),
+      expect(matchAliases({ index, text: 'Nora\u2019s sister' })).toEqual([
+        expect.objectContaining({ slug: 'nora', possessive: true }),
       ]);
     });
 
@@ -95,22 +95,22 @@ describe('aliasIndex', () => {
 
   describe('matchAliases', () => {
     it('finds a page by title, alias, email or initial, whatever the case', () => {
-      expect(slugs('Is Wendy free on Saturday?')).toEqual(['wendy']);
-      expect(slugs('my WIFE said yes')).toEqual(['wendy']);
-      expect(slugs('mail wendy@example.com about it')).toEqual(['wendy']);
-      expect(slugs('ask W. about it')).toEqual(['wendy']);
-      expect(slugs('ask W about it')).toEqual(['wendy']);
+      expect(slugs('Is Nora free on Saturday?')).toEqual(['nora']);
+      expect(slugs('my WIFE said yes')).toEqual(['nora']);
+      expect(slugs('mail nora@example.com about it')).toEqual(['nora']);
+      expect(slugs('ask W. about it')).toEqual(['nora']);
+      expect(slugs('ask W about it')).toEqual(['nora']);
     });
 
     it('ignores punctuation around a hit', () => {
-      expect(slugs('(Wendy)')).toEqual(['wendy']);
-      expect(slugs('Wendy, then')).toEqual(['wendy']);
-      expect(slugs('Wendy!')).toEqual(['wendy']);
-      expect(slugs('"Wendy"')).toEqual(['wendy']);
+      expect(slugs('(Nora)')).toEqual(['nora']);
+      expect(slugs('Nora, then')).toEqual(['nora']);
+      expect(slugs('Nora!')).toEqual(['nora']);
+      expect(slugs('"Nora"')).toEqual(['nora']);
     });
 
     it('matches whole words only', () => {
-      expect(slugs('Wendyline is a town')).toEqual([]);
+      expect(slugs('Noraline is a town')).toEqual([]);
       expect(slugs('the samples arrived')).toEqual([]);
       expect(slugs('moved on')).toEqual([]);
     });
@@ -211,10 +211,10 @@ describe('aliasIndex', () => {
     });
 
     it('marks a possessive hit, and a direct hit anywhere wins over it', () => {
-      const sister = matchAliases({ index, text: "Wendy's sister is visiting" });
-      expect(sister).toEqual([expect.objectContaining({ slug: 'wendy', possessive: true })]);
-      const both = matchAliases({ index, text: "Wendy's sister asked Wendy" });
-      expect(both).toEqual([expect.objectContaining({ slug: 'wendy', possessive: false, position: 0 })]);
+      const sister = matchAliases({ index, text: "Nora's sister is visiting" });
+      expect(sister).toEqual([expect.objectContaining({ slug: 'nora', possessive: true })]);
+      const both = matchAliases({ index, text: "Nora's sister asked Nora" });
+      expect(both).toEqual([expect.objectContaining({ slug: 'nora', possessive: false, position: 0 })]);
     });
 
     it('returns every page an alias is shared by, ordered by first appearance', () => {
@@ -228,7 +228,7 @@ describe('aliasIndex', () => {
 
     it('reports the alias that hit and where', () => {
       expect(matchAliases({ index, text: 'Hi. Is my wife home?' })).toEqual([
-        { kind: 'person', slug: 'wendy', title: 'Wendy', alias: 'my wife', possessive: false, position: 7 },
+        { kind: 'person', slug: 'nora', title: 'Nora', alias: 'my wife', possessive: false, position: 7 },
       ]);
     });
 
@@ -244,8 +244,8 @@ describe('aliasIndex', () => {
       await writePageFile({
         vaultDir,
         kind: 'person',
-        slug: 'wendy',
-        content: pageText({ front: { kind: 'person', title: 'Wendy', aliases: ['my wife'], household: true } }),
+        slug: 'nora',
+        content: pageText({ front: { kind: 'person', title: 'Nora', aliases: ['my wife'], household: true } }),
       });
       await writePageFile({
         vaultDir,
@@ -255,7 +255,7 @@ describe('aliasIndex', () => {
       });
       const loaded = await loadAliasIndex({ vaultDir, persist: true });
       expect(loaded.pages.map(page => [page.kind, page.slug, page.title, page.aliases])).toEqual([
-        ['person', 'wendy', 'Wendy', ['my wife']],
+        ['person', 'nora', 'Nora', ['my wife']],
         ['matter', 'madrid', 'Madrid', ['the move']],
       ]);
       const cached: unknown = JSON.parse(await readFile(path.join(vaultDir, ALIAS_INDEX_FILE), 'utf8'));
@@ -264,8 +264,8 @@ describe('aliasIndex', () => {
 
     it('reuses the cache while pages are unchanged, and rebuilds when any page changes', async () => {
       const vaultDir = await makeVault();
-      const front: PageFrontMatter = { kind: 'person', title: 'Wendy', aliases: ['my wife'], household: true };
-      await writePageFile({ vaultDir, kind: 'person', slug: 'wendy', content: pageText({ front }) });
+      const front: PageFrontMatter = { kind: 'person', title: 'Nora', aliases: ['my wife'], household: true };
+      await writePageFile({ vaultDir, kind: 'person', slug: 'nora', content: pageText({ front }) });
       const first = await loadAliasIndex({ vaultDir, persist: true });
       const cacheFile = path.join(vaultDir, ALIAS_INDEX_FILE);
       const tampered: AliasIndexFile = {
@@ -278,8 +278,8 @@ describe('aliasIndex', () => {
       await writePageFile({
         vaultDir,
         kind: 'person',
-        slug: 'wendy',
-        content: pageText({ front: { kind: 'person', title: 'Wendy', aliases: ['my wife', 'W.'], household: true } }),
+        slug: 'nora',
+        content: pageText({ front: { kind: 'person', title: 'Nora', aliases: ['my wife', 'W.'], household: true } }),
       });
       expect((await loadAliasIndex({ vaultDir, persist: true })).pages[0]?.aliases).toEqual(['my wife', 'W.']);
 
@@ -290,13 +290,13 @@ describe('aliasIndex', () => {
         content: pageText({ front: { kind: 'person', title: 'Sam', aliases: [], household: false } }),
       });
       expect((await loadAliasIndex({ vaultDir, persist: true })).pages.map(entry => entry.slug)).toEqual([
+        'nora',
         'sam',
-        'wendy',
       ]);
     });
 
     describe('hashing pages', () => {
-      const front: PageFrontMatter = { kind: 'person', title: 'Wendy', aliases: ['my wife'], household: true };
+      const front: PageFrontMatter = { kind: 'person', title: 'Nora', aliases: ['my wife'], household: true };
 
       afterEach(() => {
         jest.restoreAllMocks();
@@ -319,8 +319,8 @@ describe('aliasIndex', () => {
 
       it('does not read a page again while its size and timestamps are unchanged', async () => {
         const vaultDir = await makeVault();
-        const file = path.join(vaultDir, 'people', 'wendy.md');
-        await writePageFile({ vaultDir, kind: 'person', slug: 'wendy', content: pageText({ front }) });
+        const file = path.join(vaultDir, 'people', 'nora.md');
+        await writePageFile({ vaultDir, kind: 'person', slug: 'nora', content: pageText({ front }) });
         await loadSettled(vaultDir);
         const readFileSpy = jest.spyOn(fsPromises, 'readFile');
         await loadAliasIndex({ vaultDir, persist: true });
@@ -330,8 +330,8 @@ describe('aliasIndex', () => {
 
       it('sees a page that changed, even to the same size', async () => {
         const vaultDir = await makeVault();
-        const file = path.join(vaultDir, 'people', 'wendy.md');
-        await writePageFile({ vaultDir, kind: 'person', slug: 'wendy', content: pageText({ front }) });
+        const file = path.join(vaultDir, 'people', 'nora.md');
+        await writePageFile({ vaultDir, kind: 'person', slug: 'nora', content: pageText({ front }) });
         await loadSettled(vaultDir);
         const original = await readFile(file, 'utf8');
         await writeFile(file, original.replace('my wife', 'my mate'));
@@ -341,8 +341,8 @@ describe('aliasIndex', () => {
 
       it('sees a same-size edit whose modification time was set back', async () => {
         const vaultDir = await makeVault();
-        const file = path.join(vaultDir, 'people', 'wendy.md');
-        await writePageFile({ vaultDir, kind: 'person', slug: 'wendy', content: pageText({ front }) });
+        const file = path.join(vaultDir, 'people', 'nora.md');
+        await writePageFile({ vaultDir, kind: 'person', slug: 'nora', content: pageText({ front }) });
         const old = new Date(Date.now() - 60_000);
         await utimes(file, old, old);
         await loadSettled(vaultDir);
@@ -355,8 +355,8 @@ describe('aliasIndex', () => {
 
       it('reads a page that was changed a moment ago every time, because its timestamp may be coarse', async () => {
         const vaultDir = await makeVault();
-        const file = path.join(vaultDir, 'people', 'wendy.md');
-        await writePageFile({ vaultDir, kind: 'person', slug: 'wendy', content: pageText({ front }) });
+        const file = path.join(vaultDir, 'people', 'nora.md');
+        await writePageFile({ vaultDir, kind: 'person', slug: 'nora', content: pageText({ front }) });
         await loadAliasIndex({ vaultDir, persist: true });
         const readFileSpy = jest.spyOn(fsPromises, 'readFile');
         await loadAliasIndex({ vaultDir, persist: true });
@@ -365,8 +365,8 @@ describe('aliasIndex', () => {
 
       it('drops a page that was deleted', async () => {
         const vaultDir = await makeVault();
-        const file = path.join(vaultDir, 'people', 'wendy.md');
-        await writePageFile({ vaultDir, kind: 'person', slug: 'wendy', content: pageText({ front }) });
+        const file = path.join(vaultDir, 'people', 'nora.md');
+        await writePageFile({ vaultDir, kind: 'person', slug: 'nora', content: pageText({ front }) });
         await loadSettled(vaultDir);
         await rm(file);
         expect((await loadAliasIndex({ vaultDir, persist: true })).pages).toEqual([]);
@@ -374,12 +374,12 @@ describe('aliasIndex', () => {
 
       it('keeps hashes for a bounded number of vaults, and a turn only touches the vaults it reads', async () => {
         const first = await makeVault();
-        const file = path.join(first, 'people', 'wendy.md');
-        await writePageFile({ vaultDir: first, kind: 'person', slug: 'wendy', content: pageText({ front }) });
+        const file = path.join(first, 'people', 'nora.md');
+        await writePageFile({ vaultDir: first, kind: 'person', slug: 'nora', content: pageText({ front }) });
         await loadSettled(first);
         for (let count = 0; count < 70; count++) {
           const other = await makeVault();
-          await writePageFile({ vaultDir: other, kind: 'person', slug: 'wendy', content: pageText({ front }) });
+          await writePageFile({ vaultDir: other, kind: 'person', slug: 'nora', content: pageText({ front }) });
           await loadSettled(other);
         }
         const readFileSpy = jest.spyOn(fsPromises, 'readFile');
@@ -393,11 +393,11 @@ describe('aliasIndex', () => {
       await writePageFile({
         vaultDir,
         kind: 'person',
-        slug: 'wendy',
-        content: pageText({ front: { kind: 'person', title: 'Wendy', aliases: ['my wife'], household: true } }),
+        slug: 'nora',
+        content: pageText({ front: { kind: 'person', title: 'Nora', aliases: ['my wife'], household: true } }),
       });
       const loaded = await loadAliasIndex({ vaultDir });
-      expect(loaded.pages.map(page => page.slug)).toEqual(['wendy']);
+      expect(loaded.pages.map(page => page.slug)).toEqual(['nora']);
       expect(await readdir(vaultDir)).toEqual(['people']);
     });
 

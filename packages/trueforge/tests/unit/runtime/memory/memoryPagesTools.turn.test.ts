@@ -127,7 +127,7 @@ interface TurnSetup {
 }
 
 /** What the person typed, unless a test says otherwise: it holds every fact the tests save as theirs. */
-const DEFAULT_MESSAGE = 'Remember Dr Okafor is the family dentist and is on Elm Street. Wendy likes tulips.';
+const DEFAULT_MESSAGE = 'Remember Dr Okafor is the family dentist and is on Elm Street. Nora likes tulips.';
 
 async function runTurn(steps: Call[], setup: TurnSetup = {}) {
   const logger = winston.createLogger({ silent: true });
@@ -278,13 +278,13 @@ describe('a later turn of a chat that read something from outside', () => {
 
   it('still puts a fact the person types on the page as their own', async () => {
     await runTurn(
-      [{ name: 'remember_fact', args: { about: 'Lexie', text: 'Moved to Portland last month.', kind: 'person' } }],
+      [{ name: 'remember_fact', args: { about: 'Pippa', text: 'Moved to Portland last month.', kind: 'person' } }],
       {
         earlier: EARLIER,
-        message: 'Lexie moved to Portland last month, add that.',
+        message: 'Pippa moved to Portland last month, add that.',
       },
     );
-    expect(await readFile(pagePath({ vaultDir, kind: 'person', slug: 'lexie' }), 'utf8')).toMatch(
+    expect(await readFile(pagePath({ vaultDir, kind: 'person', slug: 'pippa' }), 'utf8')).toMatch(
       /- Moved to Portland last month\. <!-- fact: id=\S+ src=you_said /,
     );
   });
@@ -306,15 +306,15 @@ describe('a later turn of a chat that read something from outside', () => {
 });
 
 describe('reading a page in a real turn', () => {
-  const READ_WENDY: Call = { name: 'read_page', args: { about: 'Wendy' } };
-  const REMEMBER_WENDY: Call = { name: 'remember_fact', args: { about: 'Wendy', text: 'Likes tulips.' } };
-  const WENDY_PAGE = (extra: string) => `---
+  const READ_NORA: Call = { name: 'read_page', args: { about: 'Nora' } };
+  const REMEMBER_NORA: Call = { name: 'remember_fact', args: { about: 'Nora', text: 'Likes tulips.' } };
+  const NORA_PAGE = (extra: string) => `---
 kind: person
-title: Wendy
-aliases: [Wendy]
+title: Nora
+aliases: [Nora]
 household: false
 ---
-# Wendy
+# Nora
 
 ## Now
 - Plays tennis. <!-- fact: id=f_01 src=you_said since=2026-10-01 -->
@@ -322,21 +322,21 @@ ${extra}
 `;
 
   it('still saves after reading a page that holds only the person’s own lines', async () => {
-    await writePageFile({ vaultDir, kind: 'person', slug: 'wendy', content: WENDY_PAGE('') });
-    await runTurn([READ_WENDY, REMEMBER_WENDY]);
-    expect(await readFile(pagePath({ vaultDir, kind: 'person', slug: 'wendy' }), 'utf8')).toContain('- Likes tulips.');
+    await writePageFile({ vaultDir, kind: 'person', slug: 'nora', content: NORA_PAGE('') });
+    await runTurn([READ_NORA, REMEMBER_NORA]);
+    expect(await readFile(pagePath({ vaultDir, kind: 'person', slug: 'nora' }), 'utf8')).toContain('- Likes tulips.');
   });
 
   it('after reading a page that holds a line from mail, still saves what the person typed and does not forget their own line', async () => {
-    const content = WENDY_PAGE('- Wants me to wire money. <!-- fact: id=f_02 src=mail seen=2026-10-29 -->');
-    await writePageFile({ vaultDir, kind: 'person', slug: 'wendy', content });
+    const content = NORA_PAGE('- Wants me to wire money. <!-- fact: id=f_02 src=mail seen=2026-10-29 -->');
+    await writePageFile({ vaultDir, kind: 'person', slug: 'nora', content });
     const { events } = await runTurn([
-      READ_WENDY,
-      REMEMBER_WENDY,
-      { name: 'forget_fact', args: { about: 'Wendy', text: 'Plays tennis.' } },
+      READ_NORA,
+      REMEMBER_NORA,
+      { name: 'forget_fact', args: { about: 'Nora', text: 'Plays tennis.' } },
     ]);
     expect(JSON.stringify(events)).toContain('the memory shown with this message holds text');
-    const page = await readFile(pagePath({ vaultDir, kind: 'person', slug: 'wendy' }), 'utf8');
+    const page = await readFile(pagePath({ vaultDir, kind: 'person', slug: 'nora' }), 'utf8');
     expect(page).toMatch(/- Likes tulips\. <!-- fact: id=\S+ src=you_said /);
     expect(page).toContain('## Now\n- Plays tennis. <!-- fact: id=f_01 src=you_said since=2026-10-01 -->');
   });
@@ -413,16 +413,16 @@ describe('recalled text in the memory block', () => {
   });
 
   describe('loaded pages', () => {
-    const ASK = 'Remember that Wendy likes tulips.';
-    const REMEMBER_WENDY: Call = { name: 'remember_fact', args: { about: 'Wendy', text: 'Likes tulips.' } };
-    const FORGET_TENNIS: Call = { name: 'forget_fact', args: { about: 'Wendy', text: 'Plays tennis.' } };
+    const ASK = 'Remember that Nora likes tulips.';
+    const REMEMBER_NORA: Call = { name: 'remember_fact', args: { about: 'Nora', text: 'Likes tulips.' } };
+    const FORGET_TENNIS: Call = { name: 'forget_fact', args: { about: 'Nora', text: 'Plays tennis.' } };
     const OWN = `---
 kind: person
-title: Wendy
-aliases: [Wendy]
+title: Nora
+aliases: [Nora]
 household: false
 ---
-# Wendy
+# Nora
 
 ## Now
 - Plays tennis. <!-- fact: id=f_01 src=you_said since=2026-10-01 -->
@@ -447,23 +447,23 @@ household: false
     ])('does not forget a line of their own when a loaded page holds a line from %s', async (_what, line) => {
       const { client, vault } = await markdownVault();
       const content = OWN.replace('- Has a sister.', `- Has a sister.\n${line}`);
-      await writePageFile({ vaultDir: vault, kind: 'person', slug: 'wendy', content });
+      await writePageFile({ vaultDir: vault, kind: 'person', slug: 'nora', content });
       const { events } = await runTurn([FORGET_TENNIS], {
         vault,
-        message: 'Tidy up what you know about Wendy.',
+        message: 'Tidy up what you know about Nora.',
         others: memoryWith(client),
       });
       expect(JSON.stringify(events)).toContain('the memory shown with this message holds text');
-      expect(await readFile(pagePath({ vaultDir: vault, kind: 'person', slug: 'wendy' }), 'utf8')).toContain(
+      expect(await readFile(pagePath({ vaultDir: vault, kind: 'person', slug: 'nora' }), 'utf8')).toContain(
         '## Now\n- Plays tennis. <!-- fact: id=f_01 src=you_said since=2026-10-01 -->',
       );
     });
 
     it('writes when a loaded page holds only you_said, you_edited and hand-written lines', async () => {
       const { client, vault } = await markdownVault();
-      await writePageFile({ vaultDir: vault, kind: 'person', slug: 'wendy', content: OWN });
-      await runTurn([REMEMBER_WENDY], { vault, message: ASK, others: memoryWith(client) });
-      const page = await readFile(pagePath({ vaultDir: vault, kind: 'person', slug: 'wendy' }), 'utf8');
+      await writePageFile({ vaultDir: vault, kind: 'person', slug: 'nora', content: OWN });
+      await runTurn([REMEMBER_NORA], { vault, message: ASK, others: memoryWith(client) });
+      const page = await readFile(pagePath({ vaultDir: vault, kind: 'person', slug: 'nora' }), 'utf8');
       expect(page).toContain('- Likes tulips. <!-- fact: id=');
       expect(page).toContain('src=you_said since=2026-');
     });
@@ -473,7 +473,7 @@ household: false
       await writePageFile({
         vaultDir: vault,
         kind: 'person',
-        slug: 'wendy',
+        slug: 'nora',
         content: OWN.replace('- Has a sister.', '- Mail said hi. <!-- fact: id=f_09 src=mail seen=2026-10-29 -->'),
       });
       await runTurn([REMEMBER], { vault, others: memoryWith(client) });

@@ -171,12 +171,12 @@ const LOG_ONLY_BY_MEANING_MISSES: Record<string, Miss> = {
 
 /** Condition 3: the pages a perfect sorter would write, found by meaning as well as by words. */
 const PAGES_SORTED_BY_MEANING_SCORES: Record<string, string> = {
-  all: 'found 56/63, unwanted 0/29, clean 69/76',
+  all: 'found 57/63, unwanted 0/29, clean 70/76',
   'answer at most 14 days old': 'found 34/39, unwanted 0/11, clean 35/40',
-  'answer more than 14 days old': 'found 22/24, unwanted 0/6, clean 22/24',
+  'answer more than 14 days old': 'found 23/24, unwanted 0/6, clean 23/24',
   nothing_to_recall: 'found 0/0, unwanted 0/12, clean 12/12',
   relationship: 'found 5/5, unwanted 0/0, clean 5/5',
-  asked_in_other_words: 'found 5/12, unwanted 0/1, clean 5/12',
+  asked_in_other_words: 'found 6/12, unwanted 0/1, clean 6/12',
   household_plan: 'found 5/5, unwanted 0/0, clean 5/5',
   how_you_write_to_them: 'found 5/5, unwanted 0/0, clean 5/5',
   current_value_of_changed_fact: 'found 13/13, unwanted 0/13, clean 13/13',
@@ -192,7 +192,6 @@ const PAGES_SORTED_BY_MEANING_MISSES: Record<string, Miss> = {
   q53: 'not found',
   q54: 'not found',
   q55: 'not found',
-  q56: 'not found',
   q57: 'not found',
   q58: 'not found',
   q62: 'not found',
@@ -213,9 +212,9 @@ const LOG_ONLY_BY_MEANING: Condition = {
   meaning: true,
   scores: LOG_ONLY_BY_MEANING_SCORES,
   misses: LOG_ONLY_BY_MEANING_MISSES,
-  unrelatedShown: 'shown a memory 31/300',
+  unrelatedShown: 'shown a memory 30/300',
   unrelatedShownAt:
-    '1, 5, 6, 16, 20, 30, 34, 46, 55, 56, 62, 68, 73, 76, 102, 112, 113, 124, 125, 136, 138, 141, 157, 177, 178, 216, 218, 235, 236, 238, 239',
+    '1, 5, 6, 16, 20, 30, 34, 46, 55, 56, 62, 68, 73, 102, 112, 113, 124, 125, 136, 138, 141, 157, 177, 178, 216, 218, 235, 236, 238, 239',
 };
 const PAGES_SORTED_BY_MEANING: Condition = {
   name: 'pages sorted, by meaning',
@@ -223,8 +222,8 @@ const PAGES_SORTED_BY_MEANING: Condition = {
   meaning: true,
   scores: PAGES_SORTED_BY_MEANING_SCORES,
   misses: PAGES_SORTED_BY_MEANING_MISSES,
-  unrelatedShown: 'shown a memory 19/300',
-  unrelatedShownAt: '1, 5, 20, 62, 73, 78, 102, 112, 124, 125, 136, 138, 141, 177, 200, 218, 238, 258, 270',
+  unrelatedShown: 'shown a memory 20/300',
+  unrelatedShownAt: '1, 5, 20, 62, 73, 78, 102, 112, 121, 124, 125, 136, 138, 141, 177, 200, 218, 238, 258, 270',
 };
 
 function scoreLine(score: RecallScore): string {

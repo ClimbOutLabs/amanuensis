@@ -31,8 +31,8 @@ function ownNote({ topic, age, extra = '' }: { topic: number; age: number; extra
 async function writeStatements({ vaultDir, topics }: { vaultDir: string; topics: number[] }): Promise<void> {
   await writeStatementPage({
     vaultDir,
-    slug: 'wendy',
-    title: 'Wendy',
+    slug: 'nora',
+    title: 'Nora',
     summary: 'My wife.',
     sections: {
       Now: topics.map(topic => ownBullet({ text: `Likes topic${String(topic)} a lot.`, id: `f_0${String(topic)}` })),

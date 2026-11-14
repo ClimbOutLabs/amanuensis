@@ -92,7 +92,7 @@ describe('turnReadOutsideText', () => {
         USER,
         { role: 'assistant', content: null, tool_calls: [hostCall('c1', 'list_pages'), hostCall('c2', 'read_page')] },
         { role: 'tool', tool_call_id: 'c1', content: '{"pages":[]}' },
-        { role: 'tool', tool_call_id: 'c2', content: '[page: Wendy]' },
+        { role: 'tool', tool_call_id: 'c2', content: '[page: Nora]' },
       ]),
     ).toBe(false);
     expect(callReturnsOutsideContent(call('c3', 'Notes__read_page'))).toBe(true);

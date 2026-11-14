@@ -12,14 +12,14 @@ The pages and their format are described in [the design](DESIGN.md#pages). You c
 
 If the server log warns that page files were skipped, some files in `people/` or `matters/` do not have a lowercase
 page name. The log gives a count, not names. Look for such files and rename them, for example
-`people/Wendy.md` to `people/wendy.md`. Aman picks it up on the next turn.
+`people/Nora.md` to `people/nora.md`. Aman picks it up on the next turn.
 
 ### Moving pages to a new server
 
 `aman export-data` and `aman import-data` carry each vault's `people/` and `matters/` pages. Run them
 as usual; there is nothing extra to copy. After an import, the summary lists the pages that came
 along. If it says some pages have a name that is not all lowercase, rename each one to its lowercase
-name in the memory folder, for example `people/Wendy.md` to `people/wendy.md`; Aman reads it on the next
+name in the memory folder, for example `people/Nora.md` to `people/nora.md`; Aman reads it on the next
 turn. If it says other files were not copied, they were not `.md` pages; copy them by hand if you need
 them. If it says pages were left out because memory is kept in a different way, pages only work with the
 Markdown memory backend. `.memory-state/` and `.memory-history/` are not exported. The cache is
@@ -62,8 +62,8 @@ To look at the history, use the same two folders every time. Replace `VAULT` wit
 To undo Aman's last change to one page, stop Aman first so that no write is running, then put the page
 back from the commit before it:
 
-    git --git-dir=VAULT/.memory-history --work-tree=VAULT checkout HEAD~1 -- people/wendy.md
-    git --git-dir=VAULT/.memory-history --work-tree=VAULT commit -m "Undo by hand" people/wendy.md
+    git --git-dir=VAULT/.memory-history --work-tree=VAULT checkout HEAD~1 -- people/nora.md
+    git --git-dir=VAULT/.memory-history --work-tree=VAULT commit -m "Undo by hand" people/nora.md
 
 Change `HEAD~1` to any commit from the log to go further back. If you skip the second command, Aman
 commits the restored page as "Your edits" the next time it writes. A forgotten fact is not lost: it sits

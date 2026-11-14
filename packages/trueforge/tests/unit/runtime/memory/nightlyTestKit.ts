@@ -55,7 +55,7 @@ export const readPage = (vaultDir: string, kind: PageKind, slug: string) =>
 
 /** A page with the given lines under "Now" and "Unconfirmed". */
 export function pageWith({
-  title = 'Wendy',
+  title = 'Nora',
   now = [],
   unconfirmed = [],
   open = [],

@@ -83,9 +83,9 @@ describe('an old value counts only when it is shown as current', () => {
       HEADER,
       'Earlier:',
       `- Sam Rossi comes on ${OLD}. (you said, 2026-08-02 to 2026-08-18)`,
-      '[page: Wendy — person]',
+      '[page: Nora — person]',
       'Now:',
-      `- Wendy hears about ${OLD}. (you said, since 2026-08-02)`,
+      `- Nora hears about ${OLD}. (you said, since 2026-08-02)`,
     );
     expect(judgeBlock({ block: shown, question: staleQuestion }).unwanted).toBe(true);
   });

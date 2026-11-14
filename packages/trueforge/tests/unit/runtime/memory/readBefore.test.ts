@@ -114,7 +114,7 @@ describe('reading each thing once', () => {
     const { llm, asked } = modelAnswering(NOTHING);
     await ask({ llm, userText: 'yes', assistantText: 'Shall I book the table for seven?' });
     await ask({ llm, userText: 'yes', assistantText: 'Shall I book the table for seven?' });
-    await ask({ llm, userText: 'yes', assistantText: 'Is Wendy still allergic to shellfish?' });
+    await ask({ llm, userText: 'yes', assistantText: 'Is Nora still allergic to shellfish?' });
     expect(asked()).toBe(2);
   });
 

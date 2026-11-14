@@ -220,7 +220,7 @@ export interface PageCommit {
   sha: string;
   committedAt: string;
   message: string;
-  /** Vault-relative page paths such as `people/wendy.md`, sorted. */
+  /** Vault-relative page paths such as `people/nora.md`, sorted. */
   paths: string[];
 }
 

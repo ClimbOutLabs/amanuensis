@@ -18,7 +18,7 @@ import {
   withFactMarker,
   writeMemoryPage,
 } from '../../../../src/runtime/memory/memoryPages';
-import { MADRID, pageText, SECTION_NAMES, WENDY, writePageFile } from './pageFixtures';
+import { MADRID, NORA, pageText, SECTION_NAMES, writePageFile } from './pageFixtures';
 
 const person = { kind: 'person', title: 'Someone' } as const;
 const matter = { kind: 'matter', title: 'Something' } as const;
@@ -28,17 +28,17 @@ function roundTrip(content: string, fallback: typeof person | typeof matter = pe
 }
 
 const FIXTURES: Record<string, string> = {
-  'a person page': WENDY,
+  'a person page': NORA,
   'a matter page': MADRID,
-  'a person page with Windows line endings': WENDY.replace(/\n/g, '\r\n'),
-  'a page with a byte order mark': `﻿${WENDY}`,
-  'a page with no final line break': WENDY.trimEnd(),
-  'a page that ends on a bare carriage return': `${WENDY.trimEnd()}\r`,
-  'a page with mixed line endings': WENDY.replace('\n## Now', '\r\n## Now').replace('Wendy\n\nThe', 'Wendy\r\n\nThe'),
+  'a person page with Windows line endings': NORA.replace(/\n/g, '\r\n'),
+  'a page with a byte order mark': `﻿${NORA}`,
+  'a page with no final line break': NORA.trimEnd(),
+  'a page that ends on a bare carriage return': `${NORA.trimEnd()}\r`,
+  'a page with mixed line endings': NORA.replace('\n## Now', '\r\n## Now').replace('Nora\n\nThe', 'Nora\r\n\nThe'),
   'an empty file': '',
   'a single line break': '\n',
   'only a byte order mark': '﻿',
-  'front matter with no closing fence': '---\nkind: person\n# Wendy\n',
+  'front matter with no closing fence': '---\nkind: person\n# Nora\n',
   'an empty front matter': '---\n---\n',
   'front matter that is not a map': '---\n- a\n- b\n---\n## Now\n- x\n',
   'a page with no headings': 'Just a note.\n- one\n- two\n',
@@ -146,7 +146,7 @@ describe('renderMemoryPage', () => {
           ),
           facts => {
             const content = pageText({
-              front: { kind: 'person', title: 'Wendy', aliases: ['W'], household: false },
+              front: { kind: 'person', title: 'Nora', aliases: ['W'], household: false },
               facts,
             });
             expect(roundTrip(content)).toBe(content);
@@ -162,7 +162,7 @@ describe('renderMemoryPage', () => {
 
   describe('a new page', () => {
     it('reads back with its settings and returns the same bytes', () => {
-      for (const title of ['Wendy', 'Sam: plumber', 'yes', '#1 fan', "O'Brien", '東京']) {
+      for (const title of ['Nora', 'Sam: plumber', 'yes', '#1 fan', "O'Brien", '東京']) {
         const page = addFact(newMemoryPage({ kind: 'person', title }), {
           section: 'Now',
           fact: { text: 'Likes tea.', marker: { kind: 'fact', id: 'f_1', src: 'you_said', since: '2026-11-06' } },
@@ -184,12 +184,12 @@ describe('renderMemoryPage', () => {
     const marker = (id: string): FactMarker => ({ kind: 'fact', id, src: 'you_said', since: '2026-11-06' });
 
     it('adds a fact after the last line of its section and keeps the blank line that closes it', () => {
-      const page = parseMemoryPage({ content: WENDY, fallback: person });
+      const page = parseMemoryPage({ content: NORA, fallback: person });
       const text = renderMemoryPage(
         addFact(page, { section: 'Now', fact: { text: 'New fact.', marker: marker('f_n1') } }),
       );
       expect(text).toBe(
-        WENDY.replace(
+        NORA.replace(
           'until=2026-11-01 -->\n',
           'until=2026-11-01 -->\n- New fact. <!-- fact: id=f_n1 src=you_said since=2026-11-06 -->\n',
         ),
@@ -197,7 +197,7 @@ describe('renderMemoryPage', () => {
     });
 
     it('creates a missing section in its usual place with a blank line between sections', () => {
-      let page = newMemoryPage({ kind: 'person', title: 'Wendy' });
+      let page = newMemoryPage({ kind: 'person', title: 'Nora' });
       page = addFact(page, { section: 'Earlier', fact: { text: 'Old.', marker: marker('f_e') } });
       page = addFact(page, { section: 'How you write to them', fact: { text: 'Short.', marker: marker('f_w') } });
       page = addFact(page, { section: 'Now', fact: { text: 'Now.', marker: marker('f_n') } });
@@ -221,7 +221,7 @@ describe('renderMemoryPage', () => {
     });
 
     it('keeps a Windows page in Windows line endings', () => {
-      const page = parseMemoryPage({ content: WENDY.replace(/\n/g, '\r\n'), fallback: person });
+      const page = parseMemoryPage({ content: NORA.replace(/\n/g, '\r\n'), fallback: person });
       const text = renderMemoryPage(addFact(page, { section: 'Now', fact: { text: 'New.', marker: marker('f_n1') } }));
       expect(text.replace(/\r\n/g, '')).not.toMatch(/[\r\n]/);
     });
@@ -240,7 +240,7 @@ describe('renderMemoryPage', () => {
     });
 
     it('moves a fact to Earlier with an end date, keeping its text, id and source and dropping seen', () => {
-      const page = parseMemoryPage({ content: WENDY, fallback: person });
+      const page = parseMemoryPage({ content: NORA, fallback: person });
       const at = pageFacts(page).find(entry => entry.fact.marker.id === 'f_03');
       expect(at).toBeDefined();
       if (at === undefined) {
@@ -248,7 +248,7 @@ describe('renderMemoryPage', () => {
       }
       const text = renderMemoryPage(moveFactToEarlier(page, { at, until: '2026-11-06' }));
       expect(text).toBe(
-        WENDY.replace(
+        NORA.replace(
           '- Might be travelling the week of Nov 16. <!-- fact: id=f_03 src=read_content seen=2026-10-29 -->\n',
           '',
         ).replace(
@@ -259,12 +259,12 @@ describe('renderMemoryPage', () => {
     });
 
     it('leaves a fact that is already under Earlier where it is', () => {
-      const page = parseMemoryPage({ content: WENDY, fallback: person });
+      const page = parseMemoryPage({ content: NORA, fallback: person });
       const at = pageFacts(page).find(entry => entry.fact.marker.id === 'f_04');
       if (at === undefined) {
         throw new Error('fixture changed');
       }
-      expect(renderMemoryPage(moveFactToEarlier(page, { at, until: '2026-11-06' }))).toBe(WENDY);
+      expect(renderMemoryPage(moveFactToEarlier(page, { at, until: '2026-11-06' }))).toBe(NORA);
     });
 
     it('rewrites only the marker of a line, even when the line is oddly spaced', () => {
@@ -301,25 +301,23 @@ describe('renderMemoryPage', () => {
   describe('files', () => {
     it('writes a page by temp file and rename and leaves no temp file behind', async () => {
       const vaultDir = await mkdtemp(path.join(tmpdir(), 'render-'));
-      const page = addFact(newMemoryPage({ kind: 'person', title: 'Wendy' }), {
+      const page = addFact(newMemoryPage({ kind: 'person', title: 'Nora' }), {
         section: 'Now',
         fact: { text: 'Likes tea.', marker: { kind: 'fact', id: 'f_1', src: 'you_said' } },
       });
-      await writeMemoryPage({ vaultDir, kind: 'person', slug: 'wendy', page });
-      expect(await readFile(pagePath({ vaultDir, kind: 'person', slug: 'wendy' }), 'utf8')).toBe(
-        renderMemoryPage(page),
-      );
-      expect(await readdir(path.join(vaultDir, 'people'))).toEqual(['wendy.md']);
+      await writeMemoryPage({ vaultDir, kind: 'person', slug: 'nora', page });
+      expect(await readFile(pagePath({ vaultDir, kind: 'person', slug: 'nora' }), 'utf8')).toBe(renderMemoryPage(page));
+      expect(await readdir(path.join(vaultDir, 'people'))).toEqual(['nora.md']);
     });
 
     it('chooses a free page name', async () => {
       const vaultDir = await mkdtemp(path.join(tmpdir(), 'slug-'));
-      expect(await freePageSlug({ vaultDir, kind: 'person', title: 'Wendy' })).toBe('wendy');
-      await writePageFile({ vaultDir, kind: 'person', slug: 'wendy', content: WENDY });
-      await writePageFile({ vaultDir, kind: 'person', slug: 'wendy-2', content: WENDY });
-      expect(await freePageSlug({ vaultDir, kind: 'person', title: 'Wendy' })).toBe('wendy-3');
-      expect(await freePageSlug({ vaultDir, kind: 'matter', title: 'Wendy' })).toBe('wendy');
-      expect((await readMemoryPage({ vaultDir, kind: 'person', slug: 'wendy' }))?.frontMatter.title).toBe('Wendy');
+      expect(await freePageSlug({ vaultDir, kind: 'person', title: 'Nora' })).toBe('nora');
+      await writePageFile({ vaultDir, kind: 'person', slug: 'nora', content: NORA });
+      await writePageFile({ vaultDir, kind: 'person', slug: 'nora-2', content: NORA });
+      expect(await freePageSlug({ vaultDir, kind: 'person', title: 'Nora' })).toBe('nora-3');
+      expect(await freePageSlug({ vaultDir, kind: 'matter', title: 'Nora' })).toBe('nora');
+      expect((await readMemoryPage({ vaultDir, kind: 'person', slug: 'nora' }))?.frontMatter.title).toBe('Nora');
     });
   });
 });

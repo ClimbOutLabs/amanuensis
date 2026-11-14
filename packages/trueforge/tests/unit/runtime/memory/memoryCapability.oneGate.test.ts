@@ -25,8 +25,8 @@ describe('one meaning gate for each message', () => {
     const vaultDir = await makeVault();
     await writeStatementPage({
       vaultDir,
-      slug: 'wendy',
-      title: 'Wendy',
+      slug: 'nora',
+      title: 'Nora',
       summary: 'My wife.',
       sections: {
         Now: [0, 1, 2].map(topic =>

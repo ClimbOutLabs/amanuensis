@@ -63,7 +63,7 @@ describe('MemoryVaultEntryRow', () => {
   });
 
   it("shows only the time for a memory of the person's own, and keeps its source line in the text being edited", () => {
-    const text = 'Sister Lexie is allergic to shellfish.\n\n> From you';
+    const text = 'Sister Pippa is allergic to shellfish.\n\n> From you';
     const { container } = render(
       <MemoryVaultEntryRow
         entry={{ ...ENTRY, text }}

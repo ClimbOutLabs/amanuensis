@@ -8,8 +8,8 @@ const TODAY = '2026-11-10';
 async function writeTopics({ vaultDir, topics }: { vaultDir: string; topics: number[] }): Promise<void> {
   await writeStatementPage({
     vaultDir,
-    slug: 'wendy',
-    title: 'Wendy',
+    slug: 'nora',
+    title: 'Nora',
     summary: 'My wife.',
     sections: {
       Now: topics.map(topic => ownBullet({ text: `Likes topic${String(topic)} a lot.`, id: `f_0${String(topic)}` })),
@@ -33,8 +33,8 @@ describe('statement index', () => {
     const vaultDir = await makeVault();
     await writeStatementPage({
       vaultDir,
-      slug: 'wendy',
-      title: 'Wendy',
+      slug: 'nora',
+      title: 'Nora',
       summary: 'My wife.',
       sections: {
         'How you write to them': [ownBullet({ text: 'Short topic0.', id: 'f_00' })],
@@ -54,10 +54,10 @@ describe('statement index', () => {
 
     expect([...model.passages].sort()).toEqual(
       [
-        'Wendy (My wife.): Likes topic1 tea.',
-        'Wendy (My wife.): Typed topic2',
-        'Wendy (My wife.): Maybe topic4',
-        'Wendy (My wife.): Used topic5.',
+        'Nora (My wife.): Likes topic1 tea.',
+        'Nora (My wife.): Typed topic2',
+        'Nora (My wife.): Maybe topic4',
+        'Nora (My wife.): Used topic5.',
       ].sort(),
     );
     expect(index.size).toBe(4);
@@ -73,8 +73,8 @@ describe('statement index', () => {
 
     await writeStatementPage({
       vaultDir,
-      slug: 'wendy',
-      title: 'Wendy',
+      slug: 'nora',
+      title: 'Nora',
       summary: 'My wife.',
       sections: {
         Now: [
@@ -88,11 +88,11 @@ describe('statement index', () => {
     });
     await index.refresh();
 
-    expect(model.passages.slice(6)).toEqual(['Wendy (My wife.): Dislikes topic1 now.']);
+    expect(model.passages.slice(6)).toEqual(['Nora (My wife.): Dislikes topic1 now.']);
     expect(index.size).toBe(5);
     const stored = await EmbeddingStore.load({ namespaceDir: vaultDir, fileName: '.statement-embeddings.json' });
     expect(stored.ids()).toHaveLength(5);
-    expect(stored.ids()).not.toContain('person/wendy#f_05');
+    expect(stored.ids()).not.toContain('person/nora#f_05');
   });
 
   it('embeds nothing the second time for the same vault, even in a new process', async () => {
@@ -123,15 +123,13 @@ describe('statement index', () => {
   });
 
   it('embeds the title, the summary and the statement, or the title and statement when they are one', () => {
-    expect(statementEmbedText({ title: 'Wendy', summary: 'My wife.', statement: 'Likes tea.' })).toBe(
-      'Wendy (My wife.): Likes tea.',
+    expect(statementEmbedText({ title: 'Nora', summary: 'My wife.', statement: 'Likes tea.' })).toBe(
+      'Nora (My wife.): Likes tea.',
     );
-    expect(statementEmbedText({ title: 'Wendy', summary: 'Likes tea.', statement: 'Likes tea.' })).toBe(
-      'Wendy: Likes tea.',
+    expect(statementEmbedText({ title: 'Nora', summary: 'Likes tea.', statement: 'Likes tea.' })).toBe(
+      'Nora: Likes tea.',
     );
-    expect(statementEmbedText({ title: 'Wendy', summary: undefined, statement: 'Likes tea.' })).toBe(
-      'Wendy: Likes tea.',
-    );
+    expect(statementEmbedText({ title: 'Nora', summary: undefined, statement: 'Likes tea.' })).toBe('Nora: Likes tea.');
   });
 });
 

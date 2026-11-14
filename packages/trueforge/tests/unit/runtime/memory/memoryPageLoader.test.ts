@@ -19,13 +19,13 @@ import {
 import { parseMemoryPage, type PageFrontMatter } from '../../../../src/runtime/memory/memoryPages';
 import { pageText, writePageFile, writingInstructionsOf, type FixtureFact } from './pageFixtures';
 
-const WENDY = `---
+const NORA = `---
 kind: person
-title: Wendy
-aliases: [Wendy, my wife, wendy@example.com]
+title: Nora
+aliases: [Nora, my wife, nora@example.com]
 household: true
 ---
-# Wendy
+# Nora
 
 The owner's wife. Lives with them; plans are shared.
 
@@ -68,12 +68,12 @@ async function exists(file: string): Promise<boolean> {
 describe('memoryPageLoader', () => {
   it('renders a page for the model with sources and dates in plain words', () => {
     const text = renderPageForModel({
-      title: 'Wendy',
-      page: parseMemoryPage({ content: WENDY, fallback: { kind: 'person', title: 'Wendy' } }),
+      title: 'Nora',
+      page: parseMemoryPage({ content: NORA, fallback: { kind: 'person', title: 'Nora' } }),
     });
     expect(text).toBe(
       [
-        '[page: Wendy — person, household; also called: my wife, wendy@example.com]',
+        '[page: Nora — person, household; also called: my wife, nora@example.com]',
         "The owner's wife. Lives with them; plans are shared.",
         'Now:',
         '- Booked the movie for Saturday 7 PM. (from mail, not confirmed, 2026-10-30 to 2026-11-01)',
@@ -87,28 +87,28 @@ describe('memoryPageLoader', () => {
   });
 
   it('puts the drafting lines in their own block, with the household line, and not in the page text', () => {
-    const page = parseMemoryPage({ content: WENDY, fallback: { kind: 'person', title: 'Wendy' } });
-    expect(draftingLines({ title: 'Wendy', page })).toEqual([
-      'Wendy:',
+    const page = parseMemoryPage({ content: NORA, fallback: { kind: 'person', title: 'Nora' } });
+    expect(draftingLines({ title: 'Nora', page })).toEqual([
+      'Nora:',
       '- Short and casual. No sign-off.',
       `- ${HOUSEHOLD_LINE}`,
     ]);
     expect(DRAFTING_HEADING).toContain('follow when drafting');
-    expect(renderPageForModel({ title: 'Wendy', page })).not.toContain('Short and casual');
+    expect(renderPageForModel({ title: 'Nora', page })).not.toContain('Short and casual');
   });
 
   it('adds the household line even when a household page has no style lines, and nothing for others', () => {
     const household = parseMemoryPage({
-      content: '---\nkind: person\ntitle: Wendy\nhousehold: true\n---\n',
-      fallback: { kind: 'person', title: 'Wendy' },
+      content: '---\nkind: person\ntitle: Nora\nhousehold: true\n---\n',
+      fallback: { kind: 'person', title: 'Nora' },
     });
-    expect(draftingLines({ title: 'Wendy', page: household })).toEqual(['Wendy:', `- ${HOUSEHOLD_LINE}`]);
+    expect(draftingLines({ title: 'Nora', page: household })).toEqual(['Nora:', `- ${HOUSEHOLD_LINE}`]);
     const plain = parseMemoryPage({ content: '## Now\n- x\n', fallback: { kind: 'person', title: 'Sam' } });
     expect(draftingLines({ title: 'Sam', page: plain })).toEqual([]);
   });
 
   it('lists the writing instructions of a person page', () => {
-    const page = parseMemoryPage({ content: WENDY, fallback: { kind: 'person', title: 'Wendy' } });
+    const page = parseMemoryPage({ content: NORA, fallback: { kind: 'person', title: 'Nora' } });
     expect(writingInstructionsOf(page)).toEqual(['Short and casual. No sign-off.']);
   });
 
@@ -222,10 +222,10 @@ describe('memoryPageLoader', () => {
   it('uses a later vault’s copy when an earlier vault’s page cannot be read', async () => {
     const own = await makeVault();
     const shared = await makeVault();
-    await writeFresh(own, 'wendy', { kind: 'person', title: 'Wendy', aliases: [], household: true });
-    await writeFresh(shared, 'wendy', { kind: 'person', title: 'Wendy', aliases: [], household: false });
+    await writeFresh(own, 'nora', { kind: 'person', title: 'Nora', aliases: [], household: true });
+    await writeFresh(shared, 'nora', { kind: 'person', title: 'Nora', aliases: [], household: false });
     await loadAliasIndex({ vaultDir: own, persist: true });
-    const ownFile = path.join(own, 'people', 'wendy.md');
+    const ownFile = path.join(own, 'people', 'nora.md');
     const quiet = new Date(Date.now() - 60_000);
     await utimes(ownFile, quiet, quiet);
     await loadAliasIndex({ vaultDir: own, persist: true });
@@ -239,7 +239,7 @@ describe('memoryPageLoader', () => {
     const { pages, stats } = await loadPagesForMessage({
       vaultDirs: [own, shared],
       writeVaultDir: own,
-      message: 'Wendy?',
+      message: 'Nora?',
       maxPages: 6,
       maxTokens: 5_000,
     });
@@ -254,7 +254,7 @@ describe('memoryPageLoader', () => {
       vaultDir,
       kind: 'person',
       slug: 'ann',
-      content: WENDY.replace('Wendy', 'Ann').replace('my wife', 'ann'),
+      content: NORA.replace('Nora', 'Ann').replace('my wife', 'ann'),
     });
     const roomy = await loadPagesForMessage({
       vaultDirs: [vaultDir],
@@ -363,10 +363,10 @@ describe('memoryPageLoader', () => {
     });
   });
 
-  it('hands back Wendy’s drafting lines when a message names "my wife"', async () => {
+  it('hands back Nora’s drafting lines when a message names "my wife"', async () => {
     const vaultDir = await makeVault();
     await mkdir(path.join(vaultDir, 'people'), { recursive: true });
-    await writeFile(path.join(vaultDir, 'people', 'wendy.md'), WENDY);
+    await writeFile(path.join(vaultDir, 'people', 'nora.md'), NORA);
     const { pages } = await loadPagesForMessage({
       vaultDirs: [vaultDir],
       writeVaultDir: vaultDir,
@@ -375,7 +375,7 @@ describe('memoryPageLoader', () => {
       maxTokens: 5000,
     });
     expect(pages.map(page => page.drafting)).toEqual([
-      ['Wendy:', '- Short and casual. No sign-off.', `- ${HOUSEHOLD_LINE}`],
+      ['Nora:', '- Short and casual. No sign-off.', `- ${HOUSEHOLD_LINE}`],
     ]);
     expect(pages[0]?.text).not.toContain('Short and casual');
   });
@@ -383,7 +383,7 @@ describe('memoryPageLoader', () => {
   it('loads the pages a message names, own vault first, people before matters', async () => {
     const own = await makeVault();
     const shared = await makeVault();
-    await writeFresh(own, 'wendy', { kind: 'person', title: 'Wendy', aliases: ['my wife'], household: true });
+    await writeFresh(own, 'nora', { kind: 'person', title: 'Nora', aliases: ['my wife'], household: true });
     await writeFresh(shared, 'madrid', { kind: 'matter', title: 'Madrid', aliases: ['the move'], status: 'active' });
     await writeFresh(shared, 'sam', { kind: 'person', title: 'Sam', aliases: [], household: false });
     const { pages, stats } = await loadPagesForMessage({
@@ -394,12 +394,12 @@ describe('memoryPageLoader', () => {
       maxTokens: 5_000,
     });
     expect(pages.map(page => [page.slug, page.vaultDir === own ? 'own' : 'shared', page.reason])).toEqual([
-      ['wendy', 'own', 'direct'],
+      ['nora', 'own', 'direct'],
       ['sam', 'shared', 'direct'],
       ['madrid', 'shared', 'direct'],
     ]);
     expect(stats).toEqual({ candidates: 3, loaded: 3, dropped_over_count: 0, dropped_over_budget: 0 });
-    expect(pages[0]?.text).toContain('[page: Wendy — person, household');
+    expect(pages[0]?.text).toContain('[page: Nora — person, household');
     // Reading a vault the scope does not write never leaves files in it.
     expect(await exists(path.join(own, '.memory-state', 'aliases.json'))).toBe(true);
     expect(await exists(path.join(shared, '.memory-state', 'aliases.json'))).toBe(false);
@@ -407,47 +407,47 @@ describe('memoryPageLoader', () => {
 
   it('ranks a direct mention above a possessive one, whatever their order in the message', async () => {
     const vaultDir = await makeVault();
-    await writeFresh(vaultDir, 'wendy', { kind: 'person', title: 'Wendy', aliases: [], household: true });
+    await writeFresh(vaultDir, 'nora', { kind: 'person', title: 'Nora', aliases: [], household: true });
     await writeFresh(vaultDir, 'sam', { kind: 'person', title: 'Sam', aliases: [], household: false });
     const { pages } = await loadPagesForMessage({
       vaultDirs: [vaultDir],
       writeVaultDir: vaultDir,
-      message: "Wendy's sister asked Sam about it",
+      message: "Nora's sister asked Sam about it",
       maxPages: 6,
       maxTokens: 5_000,
     });
     expect(pages.map(page => [page.slug, page.reason])).toEqual([
       ['sam', 'direct'],
-      ['wendy', 'possessive'],
+      ['nora', 'possessive'],
     ]);
   });
 
   it('names page files whose file name is not a lowercase page name, and still loads the rest', async () => {
     const vaultDir = await makeVault();
-    await writeFresh(vaultDir, 'wendy', { kind: 'person', title: 'Wendy', aliases: [], household: false });
-    await writeFile(path.join(vaultDir, 'people', 'Wendy.md'), '# Wendy\n');
+    await writeFresh(vaultDir, 'nora', { kind: 'person', title: 'Nora', aliases: [], household: false });
+    await writeFile(path.join(vaultDir, 'people', 'Nora.md'), '# Nora\n');
     await mkdir(path.join(vaultDir, 'matters'), { recursive: true });
     await writeFile(path.join(vaultDir, 'matters', 'my notes.md'), '# Notes\n');
     const { pages, skippedFiles } = await loadPagesForMessage({
       vaultDirs: [vaultDir],
       writeVaultDir: vaultDir,
-      message: 'Wendy?',
+      message: 'Nora?',
       maxPages: 6,
       maxTokens: 5_000,
     });
-    expect(pages.map(page => page.slug)).toEqual(['wendy']);
-    expect(skippedFiles.sort()).toEqual(['matters/my notes.md', 'people/Wendy.md']);
+    expect(pages.map(page => page.slug)).toEqual(['nora']);
+    expect(skippedFiles.sort()).toEqual(['matters/my notes.md', 'people/Nora.md']);
   });
 
   it('skips a slug already loaded from an earlier vault', async () => {
     const own = await makeVault();
     const shared = await makeVault();
-    await writeFresh(own, 'wendy', { kind: 'person', title: 'Wendy', aliases: ['own copy'], household: true });
-    await writeFresh(shared, 'wendy', { kind: 'person', title: 'Wendy', aliases: ['shared copy'], household: false });
+    await writeFresh(own, 'nora', { kind: 'person', title: 'Nora', aliases: ['own copy'], household: true });
+    await writeFresh(shared, 'nora', { kind: 'person', title: 'Nora', aliases: ['shared copy'], household: false });
     const { pages, stats } = await loadPagesForMessage({
       vaultDirs: [own, shared],
       writeVaultDir: own,
-      message: 'Wendy?',
+      message: 'Nora?',
       maxPages: 6,
       maxTokens: 5_000,
     });
@@ -504,7 +504,7 @@ describe('memoryPageLoader', () => {
     const result = await loadPagesForMessage({
       vaultDirs: [vaultDir, path.join(vaultDir, 'missing')],
       writeVaultDir: vaultDir,
-      message: 'Wendy',
+      message: 'Nora',
       maxPages: 6,
       maxTokens: 1_000,
     });

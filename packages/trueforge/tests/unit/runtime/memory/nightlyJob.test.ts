@@ -80,15 +80,15 @@ function setUpDeps({
 async function vaultWithPage(baseDir: string, namespace: string) {
   const vaultDir = namespaceDirFor(baseDir, namespace);
   await mkdir(vaultDir, { recursive: true });
-  await writePage(vaultDir, 'matter', 'wendy', TWO_LINES);
+  await writePage(vaultDir, 'matter', 'nora', TWO_LINES);
   return vaultDir;
 }
 
 describe('the nightly job', () => {
   it('does all three steps for a vault and logs one line of counts', async () => {
     const { baseDir, vaultDir } = await makeBase();
-    await writePage(vaultDir, 'matter', 'wendy', TWO_LINES);
-    await writeDay({ vaultDir, day: '2026-11-09', notes: ['A secret note about Wendy.'] });
+    await writePage(vaultDir, 'matter', 'nora', TWO_LINES);
+    await writeDay({ vaultDir, day: '2026-11-09', notes: ['A secret note about Nora.'] });
     const { deps, info } = setUpDeps({ baseDir });
 
     const outcome = await runNightlyForVault({ vault: SHARED, deps });
@@ -106,7 +106,7 @@ describe('the nightly job', () => {
       },
     });
     expect(history(vaultDir)).toContain('Aman moved 1 ended line to Earlier');
-    expect(await readPage(vaultDir, 'matter', 'wendy')).toContain('## Earlier\n- Booked the movie.');
+    expect(await readPage(vaultDir, 'matter', 'nora')).toContain('## Earlier\n- Booked the movie.');
     const summary = info.mock.calls.filter(([message]) => String(message).startsWith('Nightly memory tidy'));
     expect(summary).toHaveLength(1);
     expect(JSON.stringify(summary)).not.toMatch(/secret|Madrid|Lisbon|movie/);
@@ -114,7 +114,7 @@ describe('the nightly job', () => {
 
   it('moves ended lines in every mode but asks no model with sorting off', async () => {
     const { baseDir, vaultDir } = await makeBase();
-    await writePage(vaultDir, 'matter', 'wendy', TWO_LINES);
+    await writePage(vaultDir, 'matter', 'nora', TWO_LINES);
     const { deps, summarizeFor } = setUpDeps({ baseDir, mode: 'off' });
 
     await runNightlyForVault({ vault: SHARED, deps });
@@ -125,7 +125,7 @@ describe('the nightly job', () => {
 
   it('skips the model steps when no model is configured, and still moves ended lines', async () => {
     const { baseDir, vaultDir } = await makeBase();
-    await writePage(vaultDir, 'matter', 'wendy', TWO_LINES);
+    await writePage(vaultDir, 'matter', 'nora', TWO_LINES);
     const { deps } = setUpDeps({ baseDir });
     deps.summarizeFor = () => Promise.resolve(undefined);
 
@@ -139,7 +139,7 @@ describe('the nightly job', () => {
 
   it('does not count a vault as missing a model when sorting is off', async () => {
     const { baseDir, vaultDir } = await makeBase();
-    await writePage(vaultDir, 'matter', 'wendy', TWO_LINES);
+    await writePage(vaultDir, 'matter', 'nora', TWO_LINES);
     const { deps } = setUpDeps({ baseDir, mode: 'off' });
 
     const outcome = await runNightlyForVault({ vault: SHARED, deps });
@@ -149,7 +149,7 @@ describe('the nightly job', () => {
 
   it('runs once a day per vault, and again the next day', async () => {
     const { baseDir, vaultDir } = await makeBase();
-    await writePage(vaultDir, 'matter', 'wendy', TWO_LINES);
+    await writePage(vaultDir, 'matter', 'nora', TWO_LINES);
     const { deps } = setUpDeps({ baseDir });
 
     expect((await runNightlyForVault({ vault: SHARED, deps })).status).toBe('ran');
@@ -161,7 +161,7 @@ describe('the nightly job', () => {
 
   it('runs once when two runners start at the same moment', async () => {
     const { baseDir, vaultDir } = await makeBase();
-    await writePage(vaultDir, 'matter', 'wendy', TWO_LINES);
+    await writePage(vaultDir, 'matter', 'nora', TWO_LINES);
     const first = setUpDeps({ baseDir });
     const second = setUpDeps({ baseDir });
 
@@ -205,7 +205,7 @@ describe('the nightly job', () => {
 
   it('runs at any hour when the person asks, and does not take the day', async () => {
     const { baseDir, vaultDir } = await makeBase();
-    await writePage(vaultDir, 'matter', 'wendy', TWO_LINES);
+    await writePage(vaultDir, 'matter', 'nora', TWO_LINES);
     const noon = new Date(2026, 10, 11, 12, 0, 0);
     const { deps } = setUpDeps({ baseDir, now: noon });
 
@@ -218,7 +218,7 @@ describe('the nightly job', () => {
 
   it('does nothing outside the quiet hours, and skips a vault that has no folder yet', async () => {
     const { baseDir, vaultDir } = await makeBase();
-    await writePage(vaultDir, 'matter', 'wendy', TWO_LINES);
+    await writePage(vaultDir, 'matter', 'nora', TWO_LINES);
     const noon = new Date(2026, 10, 11, 12, 0, 0);
     const { deps } = setUpDeps({ baseDir, now: noon });
 
@@ -238,7 +238,7 @@ describe('the nightly job', () => {
 
   it('does not hold up a page edit that happens while the model is thinking', async () => {
     const { baseDir, vaultDir } = await makeBase();
-    await writePage(vaultDir, 'matter', 'wendy', TWO_LINES);
+    await writePage(vaultDir, 'matter', 'nora', TWO_LINES);
     let release: () => void = () => undefined;
     const gate = new Promise<void>(resolve => {
       release = resolve;
@@ -265,8 +265,8 @@ describe('the nightly job', () => {
         await writePage(
           vaultDir,
           'matter',
-          'wendy',
-          (await readPage(vaultDir, 'matter', 'wendy')).replace('Madrid', 'Porto'),
+          'nora',
+          (await readPage(vaultDir, 'matter', 'nora')).replace('Madrid', 'Porto'),
         );
       },
     });

@@ -15,7 +15,7 @@ import {
 import { pagePath } from '../../../src/runtime/memory/memoryPages';
 import { listDisagreements } from '../../../src/runtime/memory/pageDisagreements';
 import { modelAnswering, silentLogger } from '../runtime/memory/nightlyTestKit';
-import { MADRID, WENDY, writePageFile } from '../runtime/memory/pageFixtures';
+import { MADRID, NORA, writePageFile } from '../runtime/memory/pageFixtures';
 
 function contextFor(tenant: string): RequestContext {
   return {
@@ -78,13 +78,13 @@ describe('memory pages API', () => {
     body: JSON.stringify(body),
   });
 
-  async function readPage(path = '/person/wendy') {
+  async function readPage(path = '/person/nora') {
     const response = await call(path);
     expect(response.status).toBe(200);
     return PageSchema.parse(DataSchema.parse(await response.json()).data);
   }
 
-  function fileText(slug = 'wendy') {
+  function fileText(slug = 'nora') {
     return readFile(pagePath({ vaultDir: vault(), kind: 'person', slug }), 'utf8');
   }
 
@@ -93,7 +93,7 @@ describe('memory pages API', () => {
   }
 
   async function seed() {
-    await writePageFile({ vaultDir: vault(), kind: 'person', slug: 'wendy', content: WENDY });
+    await writePageFile({ vaultDir: vault(), kind: 'person', slug: 'nora', content: NORA });
     await writePageFile({ vaultDir: vault(), kind: 'matter', slug: 'the-madrid-move', content: MADRID });
   }
 
@@ -121,11 +121,11 @@ describe('memory pages API', () => {
     await writeFile(join(vault(), 'people', 'Bob Smith.md'), '# Bob\n');
     const body = PageListSchema.parse(await (await call('')).json());
     expect(body.data.pages.map(page => [page['kind'], page['slug'], page['title']])).toEqual([
-      ['person', 'wendy', 'Wendy'],
+      ['person', 'nora', 'Nora'],
       ['matter', 'the-madrid-move', 'The Madrid move'],
     ]);
     expect(body.data.pages[0]?.['summary']).toBe("The owner's wife. Lives with them; plans are shared.");
-    expect(body.data.pages[0]?.['other_names']).toEqual(['Wendy', 'my wife', 'wendy@example.com']);
+    expect(body.data.pages[0]?.['other_names']).toEqual(['Nora', 'my wife', 'nora@example.com']);
     expect(body.data.pages[0]?.['changed_on']).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(body.data.skipped_files).toEqual(['people/Bob Smith.md']);
   });
@@ -133,8 +133,8 @@ describe('memory pages API', () => {
   it('reads a page with sources, own and read lines, and its Markdown', async () => {
     await seed();
     await writeFile(
-      pagePath({ vaultDir: vault(), kind: 'person', slug: 'wendy' }),
-      `${WENDY}\n## Open\n- Typed by hand\n`,
+      pagePath({ vaultDir: vault(), kind: 'person', slug: 'nora' }),
+      `${NORA}\n## Open\n- Typed by hand\n`,
     );
     const page = await readPage();
     const lines = new Map(
@@ -173,8 +173,8 @@ describe('memory pages API', () => {
   it('labels a line the way a note names its source: "From you" or "External source: ..."', async () => {
     await seed();
     await writeFile(
-      pagePath({ vaultDir: vault(), kind: 'person', slug: 'wendy' }),
-      `${WENDY}\n## Open\n- Guessed. <!-- fact: id=f_20 src=inferred seen=2026-10-29 -->\n- On the calendar. <!-- fact: id=f_21 src=calendar since=2026-10-29 -->\n- Edited by you. <!-- fact: id=f_22 src=you_edited since=2026-10-29 -->\n`,
+      pagePath({ vaultDir: vault(), kind: 'person', slug: 'nora' }),
+      `${NORA}\n## Open\n- Guessed. <!-- fact: id=f_20 src=inferred seen=2026-10-29 -->\n- On the calendar. <!-- fact: id=f_21 src=calendar since=2026-10-29 -->\n- Edited by you. <!-- fact: id=f_22 src=you_edited since=2026-10-29 -->\n`,
     );
     const page = await readPage();
     const labels = new Map(page.sections.flatMap(section => section.lines.map(line => [line.text, line.source_label])));
@@ -189,7 +189,7 @@ describe('memory pages API', () => {
     const edited = page.text
       .replace('## Now\n', '## Now\n- Likes tea in the morning.\n')
       .replace('Worked at Acme.', 'Worked at Acme Corp.');
-    const response = await call('/person/wendy', json('PUT', { text: edited, version: page.version }));
+    const response = await call('/person/nora', json('PUT', { text: edited, version: page.version }));
     expect(response.status).toBe(200);
     const saved = await readPage();
     const now = saved.sections.find(section => section.name === 'Now');
@@ -201,14 +201,14 @@ describe('memory pages API', () => {
     const earlier = saved.sections.find(section => section.name === 'Earlier');
     expect(earlier?.lines[0]).toMatchObject({ text: 'Worked at Acme Corp.', source: 'you_edited' });
     const { changes: list } = await changes();
-    expect(list[0]?.message).toBe('You: edited the page for Wendy');
+    expect(list[0]?.message).toBe('You: edited the page for Nora');
     expect(list.map(change => change.message)).toContain('Your edits');
   });
 
   it('shows the page for editing without its settings or hidden notes', async () => {
     await seed();
     const { text } = await readPage();
-    expect(text.startsWith('# Wendy\n')).toBe(true);
+    expect(text.startsWith('# Nora\n')).toBe(true);
     expect(text).not.toContain('---');
     expect(text).not.toContain('<!--');
     expect(text).not.toContain('household');
@@ -220,7 +220,7 @@ describe('memory pages API', () => {
     const before = await fileText();
     const page = await readPage();
     const response = await call(
-      '/person/wendy',
+      '/person/nora',
       json('PUT', {
         text: page.text.replace('## Now\n', '## Now\n- Likes tea in the morning.\n'),
         version: page.version,
@@ -231,7 +231,7 @@ describe('memory pages API', () => {
     for (const line of before.split('\n').filter(stored => stored.includes('<!-- fact:'))) {
       expect(after).toContain(`${line}\n`);
     }
-    expect(after.startsWith(before.slice(0, before.indexOf('# Wendy')))).toBe(true);
+    expect(after.startsWith(before.slice(0, before.indexOf('# Nora')))).toBe(true);
     const saved = await readPage();
     const unconfirmed = saved.sections.find(section => section.name === 'Unconfirmed');
     expect(unconfirmed?.lines[0]).toMatchObject({ id: 'f_03', source: 'read_content', own: false });
@@ -243,7 +243,7 @@ describe('memory pages API', () => {
     const moved = page.text
       .replace('- Might be travelling the week of Nov 16.\n', '')
       .replace('## Now\n', '## Now\n- Might be travelling the week of Nov 16.\n');
-    expect((await call('/person/wendy', json('PUT', { text: moved, version: page.version }))).status).toBe(200);
+    expect((await call('/person/nora', json('PUT', { text: moved, version: page.version }))).status).toBe(200);
     const now = (await readPage()).sections.find(section => section.name === 'Now');
     expect(now?.lines.find(line => line.id === 'f_03')).toMatchObject({ source: 'read_content', own: false });
   });
@@ -252,12 +252,12 @@ describe('memory pages API', () => {
     await writePageFile({
       vaultDir: vault(),
       kind: 'person',
-      slug: 'wendy',
-      content: `${WENDY}- Twin line. <!-- fact: id=f_30 src=you_said since=2026-01 -->\n\n## Open\n- Twin line. <!-- fact: id=f_31 src=mail since=2026-02 -->\n`,
+      slug: 'nora',
+      content: `${NORA}- Twin line. <!-- fact: id=f_30 src=you_said since=2026-01 -->\n\n## Open\n- Twin line. <!-- fact: id=f_31 src=mail since=2026-02 -->\n`,
     });
     const page = await readPage();
     const response = await call(
-      '/person/wendy',
+      '/person/nora',
       json('PUT', {
         text: page.text.replace('Might be travelling the week of Nov 16.', 'Travelling the week of Nov 16.'),
         version: page.version,
@@ -277,13 +277,13 @@ describe('memory pages API', () => {
     await writePageFile({
       vaultDir: vault(),
       kind: 'person',
-      slug: 'wendy',
-      content: `${WENDY}- Note on the next line.\n<!-- fact: id=f_40 src=mail since=2026-02 -->\n- Broken note. <!-- fact: id= -->\n`,
+      slug: 'nora',
+      content: `${NORA}- Note on the next line.\n<!-- fact: id=f_40 src=mail since=2026-02 -->\n- Broken note. <!-- fact: id= -->\n`,
     });
     const page = await readPage();
     expect(page.text).toContain('- Note on the next line.\n- Broken note.\n');
     const response = await call(
-      '/person/wendy',
+      '/person/nora',
       json('PUT', { text: page.text.replace('## Now\n', '## Now\n- Likes tea.\n'), version: page.version }),
     );
     expect(response.status).toBe(200);
@@ -302,58 +302,58 @@ describe('memory pages API', () => {
     await seed();
     const page = await readPage();
     const renamed = await call(
-      '/person/wendy',
-      json('PUT', { text: page.text.replace('# Wendy', '# Wendy Smith'), version: page.version }),
+      '/person/nora',
+      json('PUT', { text: page.text.replace('# Nora', '# Nora Smith'), version: page.version }),
     );
     expect(renamed.status).toBe(200);
     const saved = await readPage();
-    expect(saved.title).toBe('Wendy Smith');
-    expect(await fileText()).toContain('title: Wendy Smith\n');
-    expect(await fileText()).toContain('aliases: [Wendy, my wife, wendy@example.com]\n');
+    expect(saved.title).toBe('Nora Smith');
+    expect(await fileText()).toContain('title: Nora Smith\n');
+    expect(await fileText()).toContain('aliases: [Nora, my wife, nora@example.com]\n');
     const unnamed = await call(
-      '/person/wendy',
-      json('PUT', { text: saved.text.replace('# Wendy Smith\n', ''), version: saved.version }),
+      '/person/nora',
+      json('PUT', { text: saved.text.replace('# Nora Smith\n', ''), version: saved.version }),
     );
     expect(unnamed.status).toBe(200);
-    expect((await readPage()).text.startsWith('# Wendy Smith\n')).toBe(true);
+    expect((await readPage()).text.startsWith('# Nora Smith\n')).toBe(true);
   });
 
   it('refuses a stale save and text that is not a page', async () => {
     await seed();
     const page = await readPage();
-    await call('/person/wendy', json('PUT', { text: page.text.replace('Acme', 'Beta'), version: page.version }));
-    const stale = await call('/person/wendy', json('PUT', { text: page.text, version: page.version }));
+    await call('/person/nora', json('PUT', { text: page.text.replace('Acme', 'Beta'), version: page.version }));
+    const stale = await call('/person/nora', json('PUT', { text: page.text, version: page.version }));
     expect(stale.status).toBe(409);
     expect(ErrorSchema.parse(await stale.json()).error.message).toContain('Reload');
     const fresh = await readPage();
     const hiddenNote = await call(
-      '/person/wendy',
+      '/person/nora',
       json('PUT', { text: `${fresh.text}\n- bad <!-- oops\n`, version: fresh.version }),
     );
     expect(hiddenNote.status).toBe(400);
     expect(ErrorSchema.parse(await hiddenNote.json()).error.message).toContain('<!--');
     const noteEnd = await call(
-      '/person/wendy',
+      '/person/nora',
       json('PUT', { text: `${fresh.text}\n- bad --> oops\n`, version: fresh.version }),
     );
     expect(noteEnd.status).toBe(400);
     const noName = await call(
-      '/person/wendy',
-      json('PUT', { text: fresh.text.replace('# Wendy', '# '), version: fresh.version }),
+      '/person/nora',
+      json('PUT', { text: fresh.text.replace('# Nora', '# '), version: fresh.version }),
     );
     expect(noName.status).toBe(400);
     expect(ErrorSchema.parse(await noName.json()).error.message).toContain('no name');
-    const blank = await call('/person/wendy', json('PUT', { text: '   \n', version: fresh.version }));
+    const blank = await call('/person/nora', json('PUT', { text: '   \n', version: fresh.version }));
     expect(blank.status).toBe(400);
-    const huge = await call('/person/wendy', json('PUT', { text: 'x'.repeat(60_001), version: fresh.version }));
+    const huge = await call('/person/nora', json('PUT', { text: 'x'.repeat(60_001), version: fresh.version }));
     expect(huge.status).toBe(400);
     expect((await call('/person/nobody', json('PUT', { text: fresh.text, version: fresh.version }))).status).toBe(404);
   });
 
   it('confirms a line into the chosen section as the person’s own', async () => {
     await seed();
-    expect((await call('/person/wendy/lines/f_03/confirm', json('POST', { section: 'Decided' }))).status).toBe(400);
-    const response = await call('/person/wendy/lines/f_03/confirm', json('POST', {}));
+    expect((await call('/person/nora/lines/f_03/confirm', json('POST', { section: 'Decided' }))).status).toBe(400);
+    const response = await call('/person/nora/lines/f_03/confirm', json('POST', {}));
     expect(response.status).toBe(200);
     const page = await readPage();
     expect(page.sections.find(section => section.name === 'Unconfirmed')?.lines).toEqual([]);
@@ -364,14 +364,14 @@ describe('memory pages API', () => {
       },
     );
     expect((await changes()).changes[0]?.message).toContain('You: confirmed Might be travelling');
-    expect((await call('/person/wendy/lines/f_03/confirm', json('POST', {}))).status).toBe(404);
+    expect((await call('/person/nora/lines/f_03/confirm', json('POST', {}))).status).toBe(404);
     const matter = await call('/matter/the-madrid-move/lines/f_12/confirm', json('POST', {}));
     expect(matter.status).toBe(404);
   });
 
   it('dismisses a line and deletes a page', async () => {
     await seed();
-    expect((await call('/person/wendy/lines/f_03/dismiss', json('POST', {}))).status).toBe(200);
+    expect((await call('/person/nora/lines/f_03/dismiss', json('POST', {}))).status).toBe(200);
     const page = await readPage();
     expect(page.text).not.toContain('Might be travelling');
     expect((await changes()).changes[0]?.message).toContain('You: dismissed');
@@ -384,17 +384,17 @@ describe('memory pages API', () => {
   it('undoes an edit, a confirm, a dismiss and a delete', async () => {
     await seed();
     const original = await fileText();
-    await call('/person/wendy/lines/f_03/confirm', json('POST', {}));
+    await call('/person/nora/lines/f_03/confirm', json('POST', {}));
     const afterConfirm = await fileText();
     await undo(0);
     expect(await fileText()).toBe(original);
 
-    await call('/person/wendy/lines/f_03/dismiss', json('POST', {}));
+    await call('/person/nora/lines/f_03/dismiss', json('POST', {}));
     await undo(0);
     expect(await fileText()).toBe(original);
 
     const base = await readPage();
-    await call('/person/wendy', json('PUT', { text: base.text.replace('Acme', 'Beta'), version: base.version }));
+    await call('/person/nora', json('PUT', { text: base.text.replace('Acme', 'Beta'), version: base.version }));
     await undo(0);
     expect(await fileText()).toBe(original);
 
@@ -416,10 +416,10 @@ describe('memory pages API', () => {
 
   it('refuses to undo while a later change left the page different, and allows it after that is undone', async () => {
     await seed();
-    await call('/person/wendy/lines/f_03/dismiss', json('POST', {}));
+    await call('/person/nora/lines/f_03/dismiss', json('POST', {}));
     const first = (await changes()).changes[0];
     const page = await readPage();
-    await call('/person/wendy', json('PUT', { text: page.text.replace('Acme', 'Beta'), version: page.version }));
+    await call('/person/nora', json('PUT', { text: page.text.replace('Acme', 'Beta'), version: page.version }));
     const second = (await changes()).changes[0];
     const listed = (await changes()).changes;
     expect(listed.find(change => change.id === first?.id)?.undo_blocked_by).toBe(second?.message);
@@ -439,18 +439,18 @@ describe('memory pages API', () => {
       vaultDir: vault('persona:Ada'),
       kind: 'person',
       slug: 'ada-friend',
-      content: WENDY.replace('Wendy', 'Zed'),
+      content: NORA.replace('Nora', 'Zed'),
     });
     const shared = PageListSchema.parse(await (await call('')).json());
-    expect(shared.data.pages.map(page => page['slug'])).toEqual(['wendy', 'the-madrid-move']);
+    expect(shared.data.pages.map(page => page['slug'])).toEqual(['nora', 'the-madrid-move']);
     const persona = PageListSchema.parse(await (await call('?namespace=persona%3AAda')).json());
     expect(persona.data.pages.map(page => page['slug'])).toEqual(['ada-friend']);
-    expect((await call('/person/wendy?namespace=persona%3AAda')).status).toBe(404);
-    expect((await call('/person/wendy?namespace=persona%3AAda', { method: 'DELETE' })).status).toBe(404);
+    expect((await call('/person/nora?namespace=persona%3AAda')).status).toBe(404);
+    expect((await call('/person/nora?namespace=persona%3AAda', { method: 'DELETE' })).status).toBe(404);
     tenant = 'someone-else';
     const other = PageListSchema.parse(await (await call('')).json());
     expect(other.data.pages).toEqual([]);
-    expect((await call('/person/wendy')).status).toBe(404);
+    expect((await call('/person/nora')).status).toBe(404);
     expect((await changes()).changes).toEqual([]);
   });
 
@@ -483,10 +483,10 @@ describe('memory pages API', () => {
       await findPair();
       const list = PageListSchema.parse(await (await call('')).json());
       expect(list.data.pages.map(page => [page['slug'], page['disagreement_count']])).toEqual([
-        ['wendy', 1],
+        ['nora', 1],
         ['the-madrid-move', 0],
       ]);
-      const [pair] = DisagreementsSchema.parse(await (await call('/person/wendy')).json()).data.disagreements;
+      const [pair] = DisagreementsSchema.parse(await (await call('/person/nora')).json()).data.disagreements;
       expect(pair).toMatchObject({
         first: { id: 'f_02', text: 'Booked the movie for Saturday 7 PM.' },
         second: { id: 'f_03', text: 'Might be travelling the week of Nov 16.' },
@@ -497,16 +497,16 @@ describe('memory pages API', () => {
 
     it('drops a pair on “Not a problem”, changes no line and makes no history entry', async () => {
       await findPair();
-      const before = await readFile(pagePath({ vaultDir: vault(), kind: 'person', slug: 'wendy' }), 'utf8');
-      const [pair] = DisagreementsSchema.parse(await (await call('/person/wendy')).json()).data.disagreements;
+      const before = await readFile(pagePath({ vaultDir: vault(), kind: 'person', slug: 'nora' }), 'utf8');
+      const [pair] = DisagreementsSchema.parse(await (await call('/person/nora')).json()).data.disagreements;
 
-      const response = await call(`/person/wendy/disagreements/${pair?.id ?? ''}/dismiss`, json('POST', {}));
+      const response = await call(`/person/nora/disagreements/${pair?.id ?? ''}/dismiss`, json('POST', {}));
 
       expect(response.status).toBe(200);
       expect(DisagreementsSchema.parse(await response.json()).data.disagreements).toEqual([]);
-      expect(await readFile(pagePath({ vaultDir: vault(), kind: 'person', slug: 'wendy' }), 'utf8')).toBe(before);
+      expect(await readFile(pagePath({ vaultDir: vault(), kind: 'person', slug: 'nora' }), 'utf8')).toBe(before);
       expect((await changes()).changes).toEqual([]);
-      const again = await call(`/person/wendy/disagreements/${pair?.id ?? ''}/dismiss`, json('POST', {}));
+      const again = await call(`/person/nora/disagreements/${pair?.id ?? ''}/dismiss`, json('POST', {}));
       expect(again.status).toBe(404);
       expect(ErrorSchema.parse(await again.json()).error.message).toContain('Reload the page');
     });
