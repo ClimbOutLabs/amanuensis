@@ -684,8 +684,7 @@ export class ToolSet implements IToolSet {
       if (!isCallToolResponseResult(response) || response.result.isError === true) {
         return null;
       }
-      const [id] = Array.isArray(read['email_ids']) ? read['email_ids'] : [];
-      return typeof id === 'string' ? mailForwardReviewFrom({ id, result: response.result }) : null;
+      return mailForwardReviewFrom({ id: read.email_ids[0], result: response.result });
     } catch {
       return null;
     }

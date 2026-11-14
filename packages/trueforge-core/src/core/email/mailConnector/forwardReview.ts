@@ -25,7 +25,9 @@ export function forwardedSubject(subject: string): string {
  * The read that fetches the message a forward names, from the same account and folder the forward uses.
  * Undefined when the call names no message.
  */
-export function mailForwardReadArguments(args: Record<string, unknown>): Record<string, unknown> | undefined {
+export function mailForwardReadArguments(
+  args: Record<string, unknown>,
+): ({ email_ids: [string]; mark_as_read: false } & Record<string, unknown>) | undefined {
   const id = args['email_id'];
   if (typeof id !== 'string' && typeof id !== 'number') {
     return undefined;

@@ -38,10 +38,10 @@ export function inMemoryApprovedMailDrafts(): ApprovedMailDrafts {
 }
 
 function addressesOf(value: unknown): string[] {
-  const items = Array.isArray(value) ? value : value === undefined || value === null ? [] : [value];
+  const items: unknown[] = Array.isArray(value) ? value : value === undefined || value === null ? [] : [value];
   return items
     .map(item => {
-      const address = isRecord(item) ? (item['email'] ?? item['address']) : item;
+      const address: unknown = isRecord(item) ? (item['email'] ?? item['address']) : item;
       return typeof address === 'string' ? normalizeMailAddress(address) : JSON.stringify(item);
     })
     .sort();
