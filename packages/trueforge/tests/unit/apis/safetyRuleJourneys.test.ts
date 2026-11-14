@@ -1231,6 +1231,9 @@ describe('a notes connector the person adds by its address', () => {
     server = await startApprovalTestServer();
     // Stands in for a notes app's connector running on the same computer, outside Aman.
     notes = await startInertMcpServer({ notes: true });
+    // A connector on this computer is refused unless its origin is listed as the operator's own. The fixture
+    // restores the list on close.
+    server.setFirstPartyOrigins([server.mcp.origin, notes.origin]);
     const added = await server.request(
       '/api/v1/settings/mcp-servers',
       jsonInit({ manifest: { type: 'remote', name: NOTES, url: notes.url, description: 'My notes folder.' } }),
