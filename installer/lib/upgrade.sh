@@ -146,7 +146,7 @@ upgrade_old_connector_notice() { # file, connector name
   local file=$1 connector=$2 name
   for name in $(reg_names); do
     if [ -s "$(instance_dir "$name")/$file" ]; then
-      say "$connector was set up the old way. Connect it again in Settings, then Connectors, then $connector."
+      UI_FD=2 ui_warn "$connector was set up the old way, so its account was not carried over." "Connect it again in Settings, then Connectors, then $connector."
       return 0
     fi
   done

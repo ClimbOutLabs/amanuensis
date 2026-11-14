@@ -21,6 +21,16 @@ UI_ASKING=0
 UI_IN_PROMPT=0
 UI_LAST_BLANK=1
 UI_SUMMARY_CODE=1
+# UI_FULL is the width of the screen block; UI_WIDTH is what text may take, 4 columns less inside a panel.
+UI_FULL=72
+UI_PANEL=0
+# The stream the panel was opened on, so it closes and opens again there even when a question writes to stderr.
+UI_PANEL_FD=1
+UI_PANEL_RESUME=0
+UI_PENDING_BLANK=0
+# Set in a command this run starts while a panel is open (the doctor's summary, the sandbox setup), so its lines join
+# that panel instead of opening their own.
+UI_FRAMED=0
 S_OK=+ S_WARN=! S_FAIL=x S_PROMPT=">" S_SKIP=- S_RULE=- S_ELL=... S_ARROW="->"
 S_TL=+ S_TR=+ S_BL=+ S_BR=+ S_H=- S_V="|" S_BAR_ON="#" S_BAR_OFF=-
 
@@ -61,6 +71,15 @@ ui_init() {
     esac
     if [ "$UI_WIDTH" -lt 40 ]; then UI_WIDTH=40; fi
   fi
+  UI_FULL=$UI_WIDTH
+  UI_PANEL=0
+  UI_PANEL_RESUME=0
+  UI_PENDING_BLANK=0
+  UI_FRAMED=0
+  if [ "${AMAN_UI_FRAMED:-}" = 1 ]; then
+    UI_FRAMED=1
+    UI_WIDTH=$((UI_FULL - 4))
+  fi
   if [ "$UI_UTF8" = 1 ]; then
     S_OK=✓ S_WARN=! S_FAIL=✗ S_PROMPT=› S_SKIP=· S_RULE=─ S_ELL=… S_ARROW=→
     S_TL=╭ S_TR=╮ S_BL=╰ S_BR=╯ S_H=─ S_V=│ S_BAR_ON=━ S_BAR_OFF=─
@@ -85,12 +104,82 @@ _ui_s() {
   fi
 }
 
-# Any line that is not part of a question ends the question block, so the next question gets its separator again.
+# Any line that is not part of a question ends the question block, so the next question gets its separator again,
+# and reopens the panel the questions closed. Inside a panel a line gets the panel's sides, and a blank line waits for
+# the next line, so a panel never ends on an empty row.
 _ui_out() {
-  if [ "$UI_IN_PROMPT" != 1 ]; then UI_ASKING=0; fi
+  if [ "$UI_IN_PROMPT" != 1 ]; then
+    UI_ASKING=0
+    if [ "$UI_PANEL_RESUME" = 1 ]; then
+      UI_PANEL_RESUME=0
+      UI_FD=$UI_PANEL_FD _ui_gap
+      UI_FD=$UI_PANEL_FD _ui_panel_open ""
+    fi
+  fi
+  if [ "$UI_PANEL" = 1 ] || [ "$UI_FRAMED" = 1 ]; then
+    UI_LAST_BLANK=1
+    if [ -z "$1" ]; then
+      UI_PENDING_BLANK=1
+      return 0
+    fi
+    if [ "$UI_PENDING_BLANK" = 1 ]; then _ui_raw "$(_ui_framed "")"; fi
+    UI_PENDING_BLANK=0
+    UI_LAST_BLANK=0
+    _ui_raw "$(_ui_framed "$1")"
+    return 0
+  fi
   if [ -z "$1" ]; then UI_LAST_BLANK=1; else UI_LAST_BLANK=0; fi
-  printf '%s\n' "$1" >&"$UI_FD"
+  _ui_raw "$1"
 }
+
+_ui_raw() { printf '%s\n' "$1" >&"$UI_FD"; }
+
+# A line between the two sides of a panel. A line too long for it (a word that cannot break, such as a fingerprint)
+# keeps only the left side, so the word stays whole for copying.
+_ui_framed() { # line
+  local pad=$((UI_FULL - 4 - $(_ui_width "$1")))
+  if [ "$pad" -lt 0 ]; then
+    printf '%s %s' "$(_ui_s 2 "$S_V")" "$1"
+    return 0
+  fi
+  printf '%s %s%*s %s' "$(_ui_s 2 "$S_V")" "$1" "$pad" '' "$(_ui_s 2 "$S_V")"
+}
+
+# Opens a panel: a top line with LEFT (already styled) after the corner and RIGHT before the other corner.
+_ui_panel_open() { # left [right]
+  local left=${1:-} right=${2:-} head tail fill
+  _ui_panel_close
+  if [ -n "$left" ]; then head="$(_ui_s 2 "$S_TL$S_H") $left "; else head=$(_ui_s 2 "$S_TL"); fi
+  if [ -n "$right" ]; then tail=" $right $(_ui_s 2 "$S_H$S_TR")"; else tail=$(_ui_s 2 "$S_TR"); fi
+  fill=$((UI_FULL - $(_ui_width "$head") - $(_ui_width "$tail")))
+  if [ "$fill" -lt 1 ] && [ -n "$right" ]; then
+    tail=$(_ui_s 2 "$S_TR")
+    fill=$((UI_FULL - $(_ui_width "$head") - 1))
+  fi
+  if [ "$fill" -lt 0 ]; then fill=0; fi
+  _ui_raw "$head$(_ui_s 2 "$(_ui_repeat "$S_H" "$fill")")$tail"
+  UI_PANEL=1
+  UI_PANEL_FD=$UI_FD
+  UI_WIDTH=$((UI_FULL - 4))
+  UI_LAST_BLANK=1
+  UI_PENDING_BLANK=0
+  export AMAN_UI_FRAMED=1
+}
+
+# Closes the open panel with its bottom line; does nothing when none is open.
+_ui_panel_close() {
+  UI_PANEL_RESUME=0
+  [ "$UI_PANEL" = 1 ] || return 0
+  UI_PANEL=0
+  UI_PENDING_BLANK=0
+  UI_WIDTH=$UI_FULL
+  unset AMAN_UI_FRAMED
+  UI_FD=$UI_PANEL_FD _ui_raw "$(UI_FD=$UI_PANEL_FD _ui_s 2 "$S_BL$(_ui_repeat "$S_H" $((UI_FULL - 2)))$S_BR")"
+  UI_LAST_BLANK=0
+}
+
+# Ends the step panel, for a run that stops without its closing block.
+ui_panel_end() { _ui_panel_close; }
 
 # One blank line between blocks, never two.
 _ui_gap() {
@@ -145,15 +234,15 @@ _ui_color_on() {
 
 # A box around short lines of text, as wide as the screen. CODE colors the frame; the lines keep their own styles.
 _ui_box() { # code line...
-  local code=$1 line pad inner=$((UI_WIDTH - 4))
+  local code=$1 line pad inner=$((UI_FULL - 4))
   shift
-  _ui_out "$(_ui_s "$code" "$S_TL$(_ui_repeat "$S_H" $((UI_WIDTH - 2)))$S_TR")"
+  _ui_out "$(_ui_s "$code" "$S_TL$(_ui_repeat "$S_H" $((UI_FULL - 2)))$S_TR")"
   for line in "$@"; do
     pad=$((inner - $(_ui_width "$line")))
     if [ "$pad" -lt 0 ]; then pad=0; fi
     _ui_out "$(_ui_s "$code" "$S_V") $line$(printf '%*s' "$pad" '') $(_ui_s "$code" "$S_V")"
   done
-  _ui_out "$(_ui_s "$code" "$S_BL$(_ui_repeat "$S_H" $((UI_WIDTH - 2)))$S_BR")"
+  _ui_out "$(_ui_s "$code" "$S_BL$(_ui_repeat "$S_H" $((UI_FULL - 2)))$S_BR")"
 }
 
 # Words wrapped to WIDTH columns, one line per output line.
@@ -240,6 +329,7 @@ _ui_elapsed_since() {
 # The banner at the top of a run: the name in bold color, then what the run does, in a box.
 ui_title() { # text [name]
   local name=${2:-AMAN} line first=1
+  _ui_panel_close
   while IFS= read -r line; do
     if [ "$first" = 1 ]; then
       set -- "$(_ui_s "1;36" "$name")  $line"
@@ -247,30 +337,42 @@ ui_title() { # text [name]
     else
       set -- "$@" "$(printf '%*s' $((${#name} + 2)) '')$line"
     fi
-  done < <(_ui_wrap $((UI_WIDTH - 6 - ${#name})) "$1")
+  done < <(_ui_wrap $((UI_FULL - 6 - ${#name})) "$1")
   _ui_box 36 "$@"
 }
 
-# A step of a run: "1 of 6" as a badge, the step in bold, and how far the run has come as a bar on the right.
+# A step of a run, in a panel of its own: "1 of 6" as a badge and the step in bold in the panel's top line, and how far
+# the run has come as a bar at its right end.
 ui_phase() { # text [n total]
   local line bar='' off
-  _ui_gap
   if [ -z "${2:-}" ]; then
-    _ui_out "$(_ui_badge 36 "$1")"
-    return 0
+    line=$(_ui_badge 36 "$1")
+  else
+    line="$(_ui_badge 36 "$2 of $3")  $(_ui_s 1 "$1")"
+    # With color the part still to come is the same thick line, dimmed; without color it has to be a different
+    # character.
+    off=$S_BAR_OFF
+    if _ui_color_on; then off=$S_BAR_ON; fi
+    bar="$(_ui_s 32 "$(_ui_repeat "$S_BAR_ON" $((2 * $2)))")$(_ui_s 2 "$(_ui_repeat "$off" $((2 * ($3 - $2))))")"
   fi
-  line="$(_ui_badge 36 "$2 of $3")  $(_ui_s 1 "$1")"
-  # With color the part still to come is the same thick line, dimmed; without color it has to be a different character.
-  off=$S_BAR_OFF
-  if _ui_color_on; then off=$S_BAR_ON; fi
-  bar="$(_ui_s 32 "$(_ui_repeat "$S_BAR_ON" $((2 * $2)))")$(_ui_s 2 "$(_ui_repeat "$off" $((2 * ($3 - $2))))")"
-  _ui_out "$(_ui_spread "$line" "$bar")"
+  _ui_open_part "$line" "$bar"
 }
 
-# A part of a report: its name as a badge and, on the right, a short count of what was found.
+# A part of a report, in a panel of its own: its name as a badge and, at the right end, a short count of what was found.
 ui_section() { # text [counts]
+  _ui_open_part "$(_ui_badge 36 "$1")" "${2:-}"
+}
+
+# A panel for a step or a part; inside another command's panel, a heading line, since panels do not nest.
+_ui_open_part() { # left right
+  if [ "$UI_FRAMED" = 1 ]; then
+    _ui_gap
+    _ui_out "$(_ui_spread "$1" "$2")"
+    return 0
+  fi
+  _ui_panel_close
   _ui_gap
-  _ui_out "$(_ui_spread "$(_ui_badge 36 "$1")" "${2:-}")"
+  _ui_panel_open "$1" "$2"
 }
 
 # The elapsed time sits at the right edge when the line has room, so the times of a step line up.
@@ -324,6 +426,16 @@ ui_hint() { _ui_block "  " 2 "$1" 2; }
 
 # A command to copy, on a line of its own and never wrapped, so it pastes whole however narrow the terminal is.
 ui_command() { _ui_out "    $(_ui_s 1 "$1")"; }
+
+# Lines of plain text from the older output helpers, kept inside the open panel: each line's leading spaces stay as
+# its indent.
+ui_say() { # text
+  local text lead
+  while IFS= read -r text; do
+    lead="  ${text%%[! ]*}"
+    _ui_block "$lead" "${#lead}" "${text#"${lead#  }"}"
+  done <<<"$1"
+}
 
 # Plain indented text, for lists under a heading.
 ui_line() { _ui_block "  " 2 "$1"; }
@@ -403,6 +515,7 @@ ui_summary() { # ok|warn|fail verdict
       ;;
   esac
   UI_SUMMARY_CODE=$code
+  _ui_panel_close
   while IFS= read -r line; do
     if [ "$first" = 1 ]; then
       set -- "$(_ui_s "1;$code" "$marker $line")"
@@ -410,7 +523,7 @@ ui_summary() { # ok|warn|fail verdict
     else
       set -- "$@" "  $(_ui_s "1;$code" "$line")"
     fi
-  done < <(_ui_wrap $((UI_WIDTH - 6)) "$2")
+  done < <(_ui_wrap $((UI_FULL - 6)) "$2")
   _ui_gap
   _ui_box "$code" "$@"
   _ui_out ""
@@ -419,6 +532,7 @@ ui_summary() { # ok|warn|fail verdict
 # The warnings of the run again, then a closing rule in the verdict's color with the total time at its end.
 ui_summary_end() { # [total elapsed]
   local w end
+  _ui_panel_close
   if [ -n "$UI_WARNS" ]; then
     _ui_gap
     _ui_out "$(_ui_s "1;33" "Warnings")"
@@ -428,20 +542,25 @@ ui_summary_end() { # [total elapsed]
   fi
   _ui_gap
   if [ -z "${1:-}" ]; then
-    _ui_out "$(_ui_s "$UI_SUMMARY_CODE" "$(_ui_repeat "$S_RULE" "$UI_WIDTH")")"
+    _ui_out "$(_ui_s "$UI_SUMMARY_CODE" "$(_ui_repeat "$S_RULE" "$UI_FULL")")"
     return 0
   fi
   end=" Done in $1 "
-  _ui_out "$(_ui_s "$UI_SUMMARY_CODE" "$(_ui_repeat "$S_RULE" $((UI_WIDTH - ${#end} - 2)))")$(_ui_s 2 "$end")$(_ui_s "$UI_SUMMARY_CODE" "$S_RULE$S_RULE")"
+  _ui_out "$(_ui_s "$UI_SUMMARY_CODE" "$(_ui_repeat "$S_RULE" $((UI_FULL - ${#end} - 2)))")$(_ui_s 2 "$end")$(_ui_s "$UI_SUMMARY_CODE" "$S_RULE$S_RULE")"
 }
 
 # ---- prompts (stderr) -----------------------------------------------------------------------------
 
 # A separator line before a question, so the moment the run waits for a person stands out. Questions in a row share
-# one; any other line in between ends the group, and the next question gets its own separator.
+# one; any other line in between ends the group, and the next question gets its own separator. Questions stand
+# outside the step's panel, which reopens after them.
 ui_ask_begin() {
   local UI_FD=2 label="Your answer is needed"
   if [ "$UI_ASKING" = 1 ]; then return 0; fi
+  if [ "$UI_PANEL" = 1 ]; then
+    _ui_panel_close
+    UI_PANEL_RESUME=1
+  fi
   _ui_gap
   _ui_out "$(_ui_s "1;36" "$S_PROMPT $label") $(_ui_s 2 "$(_ui_repeat "$S_RULE" $((UI_WIDTH - ${#label} - 3)))")"
   UI_ASKING=1
@@ -522,10 +641,20 @@ ui_password() { # VAR label
 # One progress line while a long step runs: a spinner with the elapsed time on a terminal, a start line and a
 # "still working" line every minute elsewhere. The tool's own output belongs in LOG, not on the screen.
 ui_step_start() { # text [log file]
-  local text=$1 log=${2:-} t0=$SECONDS note=''
+  local text=$1 log=${2:-} t0=$SECONDS note='' side
   UI_STEP_T0=$t0
   if [ -n "$log" ]; then note="log: $(ui_path "$log")"; fi
   if [ "$UI_ANIM" = 1 ]; then
+    # Inside a panel the progress line has the panel's left side; a blank row waiting above it is printed first,
+    # so the result line lands where the progress line was.
+    side=''
+    if [ "$UI_PANEL" = 1 ] || [ "$UI_FRAMED" = 1 ]; then
+      side="$(UI_FD=2 _ui_s 2 "$S_V") "
+      if [ "$UI_PENDING_BLANK" = 1 ]; then
+        UI_FD=2 _ui_raw "$(UI_FD=2 _ui_framed "")"
+        UI_PENDING_BLANK=0
+      fi
+    fi
     (
       i=0
       n=${#UI_FRAMES[@]}
@@ -537,8 +666,8 @@ ui_step_start() { # text [log file]
         if [ "$e" -ge 5 ]; then line="$line  $(ui_fmt_elapsed "$e")"; fi
         if [ -n "$note" ] && [ $((${#line} + 3 + ${#note})) -lt "$UI_WIDTH" ]; then line="$line   $note"; fi
         if [ "${#line}" -ge "$UI_WIDTH" ]; then line="${line:0:$((UI_WIDTH - 4))}$S_ELL"; fi
-        printf '\r%*s\r%s' "$shown" '' "$line" >&2
-        shown=${#line}
+        printf '\r%*s\r%s%s' "$shown" '' "$side" "$line" >&2
+        shown=$((${#line} + 2))
         i=$((i + 1))
         sleep 0.2 >/dev/null 2>&1 || sleep 1 >/dev/null 2>&1
       done
@@ -570,7 +699,7 @@ ui_step_abort() {
     kill "$UI_STEP_PID" 2>/dev/null || true
     wait "$UI_STEP_PID" 2>/dev/null || true
     UI_STEP_PID=
-    if [ "$UI_ANIM" = 1 ]; then printf '\r%*s\r' "$UI_WIDTH" '' >&2; fi
+    if [ "$UI_ANIM" = 1 ]; then printf '\r%*s\r' "$UI_FULL" '' >&2; fi
   fi
 }
 

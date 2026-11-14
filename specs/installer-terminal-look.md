@@ -17,17 +17,23 @@ One look for all three commands, set in the shared style file
 `installer/lib/ui.sh`:
 
 - A banner at the top in a box: the name, then what the run does.
-- Each step starts with a badge such as `4 of 6`, the step in bold, and a bar
-  on the right that fills up as the run goes on. Parts of the doctor report
-  get a badge with the part's name and a count of what it found, such as
-  `4 ok, 1 problem`.
+- Each step sits in a framed panel. The panel's top line carries a badge such
+  as `4 of 6`, the step in bold, and at its right end a bar that fills up as
+  the run goes on. Each part of the doctor report is a panel too, with the
+  part's name and a count of what it found, such as `4 ok, 1 problem`.
+- A command the run starts inside a step, such as the doctor's summary or the
+  sandbox setup, prints its lines inside that step's panel, not a panel of its
+  own (`AMAN_UI_FRAMED=1` tells it so).
+- A line too long for the panel, such as a fingerprint, keeps only the left
+  side, so the long word stays whole.
 - A separator line, "Your answer is needed", before each group of questions,
   so a person sees at once that the run waits for them. The rules or hints for
-  a question sit under it.
+  a question sit under it. Questions stand outside the step's panel: it closes
+  before them and a plain panel opens again for the lines after them.
 - Elapsed times line up at the right edge.
 - The verdict at the end sits in a box colored by how the run went (green,
-  yellow or red). Only the verdict is boxed: addresses and commands under it
-  stay unframed, so they copy cleanly. A closing rule ends the block, with the
+  yellow or red). Only the verdict is boxed in the closing block: the
+  addresses and commands under it stay unframed, so they copy cleanly. A closing rule ends the block, with the
   total time.
 - `aman upgrade` gets the same banner, four numbered steps and verdict box.
 - `aman doctor` lists every problem and warning again in its closing block,

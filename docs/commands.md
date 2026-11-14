@@ -246,7 +246,7 @@ Every command says what went wrong and the one thing to do next. If that doesn't
 
 ## Colors and plain text
 
-In a terminal, the installer, `aman upgrade` and `aman doctor` use color, numbered steps and boxes. The colors come from your terminal's own theme, so they work on light and dark backgrounds. To turn color off, set `NO_COLOR=1`:
+In a terminal, the installer, `aman upgrade` and `aman doctor` use color, and put each numbered step (or each part of the doctor's report) in a framed panel. A command to copy keeps its whole line, so it copies cleanly. The colors come from your terminal's own theme, so they work on light and dark backgrounds. To turn color off, set `NO_COLOR=1`:
 
 ```bash
 NO_COLOR=1 aman doctor
