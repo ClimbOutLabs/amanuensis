@@ -525,7 +525,8 @@ export function SidebarLayout({ className }: { className?: string }) {
             role="dialog"
             aria-label="Navigation"
             tabIndex={-1}
-            className="absolute inset-y-0 left-0 z-10 flex shadow-lg outline-none md:hidden"
+            // Stops short of the right edge, so a narrow phone still shows a strip to tap to close it.
+            className="absolute inset-y-0 left-0 z-10 flex max-w-[calc(100%-2rem)] shadow-lg outline-none md:hidden"
           >
             <SidebarRail
               onNavigate={() => setMobileNavOpen(false)}
@@ -537,7 +538,7 @@ export function SidebarLayout({ className }: { className?: string }) {
               <div
                 role="complementary"
                 aria-label="Recent chats"
-                className="h-full w-64 shrink-0 border-l border-border bg-sidebar-bg"
+                className="h-full w-64 min-w-0 border-l border-border bg-sidebar-bg"
               >
                 <ThreadListContainer variant="recent-history" onThreadOpen={() => setMobileNavOpen(false)} />
               </div>
