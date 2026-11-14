@@ -11,7 +11,11 @@ const useThreadIsRunning = vi.fn(() => false);
 let auiState: { threadListItem?: { remoteId?: string } } = {
   threadListItem: { remoteId: 'session-1' },
 };
-const useTrueFoundryAgentSpec = vi.fn(() => ({ agentSpec: null }));
+type SpecStub = { agentSpec: { model: { name: string } } | null };
+const useTrueFoundryAgentSpec = vi.fn((): SpecStub => ({ agentSpec: null }));
+type ModelStub = { name: string; properties: { contextLength?: number; maxOutputTokens?: number } };
+let catalogModels: ModelStub[] = [];
+const ensureLoaded = vi.fn();
 const useOptionalServer = vi.fn((): HarnessChatServerExtensions | null => null);
 
 vi.mock('@assistant-ui/core/react', () => ({
@@ -24,6 +28,10 @@ vi.mock('@assistant-ui/react', () => ({
 
 vi.mock('@truefoundry/assistant-ui-runtime', () => ({
   useTrueFoundryAgentSpec: () => useTrueFoundryAgentSpec(),
+}));
+
+vi.mock('@/atoms/draft/DraftCatalogProvider.js', () => ({
+  useDraftCatalog: () => ({ models: catalogModels, ensureLoaded }),
 }));
 
 vi.mock('@/server/ServerContext.js', () => ({
@@ -51,7 +59,42 @@ describe('useCompactionStatus', () => {
     useThreadIsRunning.mockReturnValue(false);
     auiState = { threadListItem: { remoteId: 'session-1' } };
     useTrueFoundryAgentSpec.mockReturnValue({ agentSpec: null });
+    catalogModels = [];
     useOptionalServer.mockReturnValue(server);
+  });
+
+  it('reads what the model can hold from the model list, by the name the chat uses', async () => {
+    useTrueFoundryAgentSpec.mockReturnValue({ agentSpec: { model: { name: 'demo/small' } } });
+    catalogModels = [
+      { name: 'demo/large', properties: { contextLength: 1_000_000 } },
+      { name: 'demo/small', properties: { contextLength: 131_072, maxOutputTokens: 8_192 } },
+    ];
+    getLastCallInputTokens.mockResolvedValueOnce(12);
+
+    const { result } = renderHook(() => useCompactionStatus());
+
+    await waitFor(() => expect(result.current.liveTokens).toBe(12));
+    expect(ensureLoaded).toHaveBeenCalled();
+    expect(result.current.contextLimit).toBe(131_072);
+    expect(result.current.maxOutputTokens).toBe(8_192);
+  });
+
+  it('leaves the limit unknown when the model list does not say it', async () => {
+    useTrueFoundryAgentSpec.mockReturnValue({ agentSpec: { model: { name: 'demo/small' } } });
+    catalogModels = [{ name: 'demo/small', properties: {} }];
+    getLastCallInputTokens.mockResolvedValueOnce(12);
+
+    const { result } = renderHook(() => useCompactionStatus());
+
+    await waitFor(() => expect(result.current.liveTokens).toBe(12));
+    expect(result.current.contextLimit).toBeNull();
+  });
+
+  it('does not load the model list for a chat with nothing to show yet', async () => {
+    const { result } = renderHook(() => useCompactionStatus());
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(ensureLoaded).not.toHaveBeenCalled();
   });
 
   it('fetches the compaction status for the active session', async () => {

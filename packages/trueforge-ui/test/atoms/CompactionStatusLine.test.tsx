@@ -40,11 +40,18 @@ describe('CompactionStatusLine', () => {
     expect(screen.getByText('This chat has used 900 of 200K the model can hold.')).toBeInTheDocument();
   });
 
-  it('gives the size alone when the model limit is unknown', () => {
+  it('gives the size alone, with its unit, when the model limit is unknown', () => {
     stubStatus({ liveTokens: 4_000 });
     render(<CompactionStatusLine />);
 
-    expect(screen.getByText('This chat has used 4K so far.')).toBeInTheDocument();
+    expect(screen.getByText('This chat has used 4K tokens so far.')).toBeInTheDocument();
+  });
+
+  it('keeps the unit on a very small chat with no known limit', () => {
+    stubStatus({ liveTokens: 12 });
+    render(<CompactionStatusLine />);
+
+    expect(screen.getByText('This chat has used 12 tokens so far.')).toBeInTheDocument();
   });
 
   it('adds when older messages were last shortened', () => {

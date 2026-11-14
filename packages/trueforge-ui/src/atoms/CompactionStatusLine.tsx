@@ -19,7 +19,7 @@ export function memoryUseText({
 }): string | null {
   if (liveTokens == null) return null;
   if (contextLimit == null || contextLimit <= 0) {
-    return `This chat has used ${formatTokenCount(liveTokens)} so far.`;
+    return `This chat has used ${formatTokenCount(liveTokens)} tokens so far.`;
   }
   return `This chat has used ${formatTokenCount(liveTokens)} of ${formatTokenCount(contextLimit)} the model can hold.`;
 }
