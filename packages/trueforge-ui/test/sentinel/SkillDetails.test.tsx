@@ -136,5 +136,11 @@ describe('the skill approval card', () => {
     const { websites: _w, makes_up_addresses: _m, can_send: _c, ...older } = RELEASE_NOTES_CARD.skill;
     const [old] = extractSentinelFromEvent(event(older));
     expect(old?.card.skill).toMatchObject({ websites: [], makes_up_addresses: false, can_send: false });
+
+    // Through the SDK the two flags arrive camel-cased, and the email warning still shows.
+    const [camel] = extractSentinelFromEvent(
+      event({ ...older, websites: ['api.example-weather.test'], makesUpAddresses: true, canSend: true }),
+    );
+    expect(camel?.card.skill).toMatchObject({ makes_up_addresses: true, can_send: true });
   });
 });
