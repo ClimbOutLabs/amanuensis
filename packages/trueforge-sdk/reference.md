@@ -13689,7 +13689,7 @@ await client.settings.calendar.saveAccount({
 </dl>
 </details>
 
-<details><summary><code>client.settings.calendar.<a href="/src/api/resources/settings/resources/calendar/client/Client.ts">removeAccount</a>() -> TrueForge.RemoveCalendarAccountResponse</code></summary>
+<details><summary><code>client.settings.calendar.<a href="/src/api/resources/settings/resources/calendar/client/Client.ts">removeAccount</a>({ ...params }) -> TrueForge.RemoveCalendarAccountResponse</code></summary>
 <dl>
 <dd>
 
@@ -13701,7 +13701,7 @@ await client.settings.calendar.saveAccount({
 <dl>
 <dd>
 
-Deletes the saved account and its app password from the sidecar for good.
+Deletes the named account and its app password from the sidecar for good, or every account when the body names none.
 </dd>
 </dl>
 </dd>
@@ -13732,6 +13732,79 @@ await client.settings.calendar.removeAccount();
 <dl>
 <dd>
 
+**request:** `TrueForge.settings.RemoveCalendarAccountRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `CalendarClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.settings.calendar.<a href="/src/api/resources/settings/resources/calendar/client/Client.ts">setDefaultAccount</a>({ ...params }) -> TrueForge.SetDefaultCalendarAccountResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Makes the named connected account the default. Naming an account that is not connected changes nothing.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.calendar.setDefaultAccount({
+    address: "address"
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.settings.SetDefaultCalendarAccountRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
 **requestOptions:** `CalendarClient.RequestOptions`
 
 </dd>
@@ -13756,7 +13829,7 @@ await client.settings.calendar.removeAccount();
 <dl>
 <dd>
 
-Returns whether a calendar account is connected, its email, login and calendar address, and the provider table for the picker. The app password is never returned.
+Returns whether a calendar account is connected, its accounts and the default among them, and the provider table for the picker. The app password is never returned.
 </dd>
 </dl>
 </dd>
@@ -13867,7 +13940,7 @@ await client.settings.email.saveAccount({
 </dl>
 </details>
 
-<details><summary><code>client.settings.email.<a href="/src/api/resources/settings/resources/email/client/Client.ts">removeAccount</a>() -> TrueForge.RemoveEmailAccountResponse</code></summary>
+<details><summary><code>client.settings.email.<a href="/src/api/resources/settings/resources/email/client/Client.ts">removeAccount</a>({ ...params }) -> TrueForge.RemoveEmailAccountResponse</code></summary>
 <dl>
 <dd>
 
@@ -13879,7 +13952,7 @@ await client.settings.email.saveAccount({
 <dl>
 <dd>
 
-Deletes the saved account and its app password from the sidecar for good.
+Deletes the named account and its app password from the sidecar for good, or every account when the body names none.
 </dd>
 </dl>
 </dd>
@@ -13910,6 +13983,79 @@ await client.settings.email.removeAccount();
 <dl>
 <dd>
 
+**request:** `TrueForge.settings.RemoveEmailAccountRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `EmailClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.settings.email.<a href="/src/api/resources/settings/resources/email/client/Client.ts">setDefaultAccount</a>({ ...params }) -> TrueForge.SetDefaultEmailAccountResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Makes the named connected account the default. Naming an account that is not connected changes nothing.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.email.setDefaultAccount({
+    address: "address"
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.settings.SetDefaultEmailAccountRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
 **requestOptions:** `EmailClient.RequestOptions`
 
 </dd>
@@ -13934,7 +14080,7 @@ await client.settings.email.removeAccount();
 <dl>
 <dd>
 
-Returns whether an email account is connected, its address and provider, and the provider table for the picker. The app password is never returned.
+Returns whether an email account is connected, its accounts and the default among them, and the provider table for the picker. The app password is never returned.
 </dd>
 </dl>
 </dd>

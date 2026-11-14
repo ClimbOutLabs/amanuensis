@@ -42,16 +42,31 @@ export interface SentinelServices {
   incognito: boolean;
   /** On a demo instance, the only addresses mail may go to; null when this is not a demo. Empty allows no send. */
   demoSendAllowlist: readonly string[] | null;
-  /** Addresses the Email connector may send to without a new-recipient card, lowercased. Empty allows no send. */
-  mail_listed_addresses: (input: { tenant_id: string; created_by: string }) => Promise<readonly string[]>;
   /**
-   * Adds exact addresses to the Email send list, then waits until the sidecar loads it. The default adds nothing,
-   * so a host that does not implement it fails closed.
+   * Addresses the Email connector may send to from one account without a new-recipient card, lowercased.
+   * The account is named by its address; null means the default account. Empty allows no send.
+   */
+  mail_listed_addresses: (input: {
+    tenant_id: string;
+    created_by: string;
+    account: string | null;
+  }) => Promise<readonly string[]>;
+  /**
+   * Adds exact addresses to one account's Email send list, then waits until the sidecar loads it. The
+   * default adds nothing, so a host that does not implement it fails closed.
    */
   mail_add_recipients: (
-    input: { tenant_id: string; created_by: string },
+    input: { tenant_id: string; created_by: string; account: string },
     addresses: readonly string[],
   ) => Promise<MailAddRecipientsResult>;
+  /**
+   * The connected Email accounts and which of them is the default, for the approval card's account
+   * picker. Empty when no account is connected or the accounts cannot be read.
+   */
+  mail_accounts: (input: {
+    tenant_id: string;
+    created_by: string;
+  }) => Promise<{ accounts: readonly string[]; default_account: string | null }>;
   /**
    * Waits until the sidecar runs the Email list the server holds. Checked before every approved mail send, so a
    * send never runs on a list the sidecar has not loaded. Fails closed by default.
@@ -117,6 +132,7 @@ export function defaultSentinelServices(input: { pinned_path: string }): Sentine
     demoSendAllowlist: null,
     mail_listed_addresses: () => Promise.resolve([]),
     mail_add_recipients: () => Promise.resolve('not_loaded'),
+    mail_accounts: () => Promise.resolve({ accounts: [], default_account: null }),
     mail_list_loaded: () => Promise.resolve('not_loaded'),
     skill_network_record_answer: () => Promise.resolve(),
   };

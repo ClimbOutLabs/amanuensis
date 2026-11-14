@@ -6,12 +6,19 @@ import {
   type SentinelServices,
   type ToolGrantStore,
 } from '@truefoundry/trueforge-core/core';
+import { normalizeMailAddress } from '@truefoundry/trueforge-core/core/email/mailConnector/recipientList';
 import type { ISentinelSettingsStore } from '../db/sentinelSettingsStore';
 import type { ISkillStore } from '../db/skillStore';
 import { recordSkillNetworkAnswer } from '../sandbox/skillnet/skillNetworkGrant';
 import { skillNetworkTokens } from '../sandbox/skillnet/skillNetworkTokens';
 import {
-  addAllowedRecipients,
+  accountRecipientListsExist,
+  accountRecipientListsPath,
+  addAccountRecipients,
+  readAccountRecipientLists,
+  seedAccountListsFromSidecarList,
+} from './mailAccountRecipients';
+import {
   readAllowedRecipientsFile,
   SIDECAR_LOAD_TIMEOUT_MS,
   waitForCurrentSidecarList,
@@ -42,8 +49,61 @@ export function createSentinelServices(stores: {
   skillStore?: ISkillStore | undefined;
   /** How long to wait for the sidecar to load a list; defaults to a full sidecar restart. */
   mailPolicyLoadTimeoutMs?: number;
+  /**
+   * The connected Email accounts and the default among them, read from the account agent; unset
+   * when no agent is configured, so no account can be named and every send is checked as new.
+   */
+  mailAccounts?: (() => Promise<{ accounts: readonly string[]; default_account: string | null }>) | undefined;
 }): SentinelServices {
   const loadTimeoutMs = stores.mailPolicyLoadTimeoutMs ?? SIDECAR_LOAD_TIMEOUT_MS;
+
+  /** The connected accounts; a read that fails names none, so checks fail closed. */
+  async function readMailAccounts(): Promise<{ accounts: readonly string[]; default_account: string | null }> {
+    if (stores.mailAccounts === undefined) {
+      return { accounts: [], default_account: null };
+    }
+    try {
+      return await stores.mailAccounts();
+    } catch {
+      return { accounts: [], default_account: null };
+    }
+  }
+
+  /**
+   * One account's own send list. Before an install's lists are seeded (the per-account file is not
+   * there yet), the one connected account's list is the shared list the sidecar already holds, which
+   * is exactly what the seed records when it runs.
+   */
+  async function listedFor(account: string | null): Promise<readonly string[]> {
+    const { mailPolicyPath } = stores;
+    if (mailPolicyPath === undefined) {
+      return [];
+    }
+    const listsPath = accountRecipientListsPath(mailPolicyPath);
+    const lists = await readAccountRecipientLists({ path: listsPath });
+    const named = account ?? (await readMailAccounts()).default_account;
+    const target = named === null ? null : normalizeMailAddress(named);
+    if (target !== null) {
+      const own = lists.get(target);
+      if (own !== undefined) {
+        return own;
+      }
+    }
+    if (!(await accountRecipientListsExist({ path: listsPath }))) {
+      const routing = await readMailAccounts();
+      const [sole] = routing.accounts;
+      if (
+        target !== null &&
+        routing.accounts.length === 1 &&
+        sole !== undefined &&
+        normalizeMailAddress(sole) === target
+      ) {
+        return readAllowedRecipientsFile({ path: mailPolicyPath });
+      }
+    }
+    return [];
+  }
+
   return {
     ...defaultSentinelServices({ pinned_path: DEFAULT_PINNED_PATH }),
     audit: stores.audit,
@@ -51,18 +111,26 @@ export function createSentinelServices(stores: {
     tool_grants: stores.toolGrants,
     outboundSecrets: stores.outboundSecrets,
     demoSendAllowlist: stores.demoMode ? stores.demoSendAllowlist : null,
-    mail_listed_addresses: () =>
-      stores.mailPolicyPath === undefined
-        ? Promise.resolve([])
-        : readAllowedRecipientsFile({ path: stores.mailPolicyPath }),
-    mail_add_recipients: async (_input, addresses) => {
+    mail_accounts: () => readMailAccounts(),
+    mail_listed_addresses: ({ account }) => listedFor(account),
+    mail_add_recipients: async ({ account }, addresses) => {
       const { mailPolicyPath, mailPolicyStatusPath } = stores;
       if (mailPolicyPath === undefined || mailPolicyStatusPath === undefined) {
         return 'refused';
       }
+      const listsPath = accountRecipientListsPath(mailPolicyPath);
       let hash: string;
       try {
-        hash = await addAllowedRecipients({ path: mailPolicyPath, addresses: [...addresses] });
+        // An install whose lists were never seeded keeps its shared list under its one account
+        // first, so this add cannot lend those addresses to a different account by omission.
+        const routing = await readMailAccounts();
+        await seedAccountListsFromSidecarList({ policyPath: mailPolicyPath, listsPath, accounts: routing.accounts });
+        hash = await addAccountRecipients({
+          policyPath: mailPolicyPath,
+          listsPath,
+          account,
+          addresses: [...addresses],
+        });
       } catch {
         return 'refused';
       }

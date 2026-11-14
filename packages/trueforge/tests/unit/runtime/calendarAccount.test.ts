@@ -110,6 +110,10 @@ describe('the Calendar connector follows the saved account', () => {
       connected: true,
       sign_in: 'ok',
       account: { url: 'https://a.example.invalid/', username: 'u', email: 'u@example.invalid' },
+      accounts: [
+        { account: { url: 'https://a.example.invalid/', username: 'u', email: 'u@example.invalid' }, sign_in: 'ok' },
+      ],
+      default_key: 'u@example.invalid',
     };
     await syncCalendarConnectorWithAccount({ state, mcpUrl: MCP_URL, mcpServerStore: store, tenant_id: 't1', logger });
     expect(rows.size).toBe(1);

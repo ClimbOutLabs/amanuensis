@@ -33,6 +33,7 @@ import {
   isMailDraftToolName,
   isMailReadToolName,
   isMailSendToolName,
+  MAIL_ACCOUNT_ARGUMENT,
   MAIL_CONNECTOR_NAME,
   MAIL_CONTENT_TOOL_NAME,
 } from '../email/mailConnector/toolContract';
@@ -2561,16 +2562,36 @@ function demoRefusal(reason_detail: string): TierDecision {
   return autoDenyDecision({ reason: 'outbound_guard', reason_detail, sensitive_read: false });
 }
 
-/** The addresses a mail send or draft would reach that are not on the Email list; empty for any other call. */
-async function mailNewRecipients(input: { action: SentinelAction; ctx: ClassifyContext }): Promise<string[]> {
+/** What a mail card needs to know about the account it goes from. */
+interface MailCardFacts {
+  /** The account the message goes from: the one the call named, or the default; null when neither is known. */
+  from: string | null;
+  /** Every connected account, for the card's account picker; empty when they could not be read. */
+  choices: string[];
+  /** The addresses the message would reach that are not on the from account's own list. */
+  new_recipients: string[];
+}
+
+/**
+ * The account facts for a mail send or draft card. Recipients are checked against the list of the
+ * account the message goes from, never against another account's list: being listed for one account
+ * says nothing about the person meaning to send to them from another.
+ */
+async function mailCardFacts(input: { action: SentinelAction; ctx: ClassifyContext }): Promise<MailCardFacts> {
   const { action, ctx } = input;
   if (!isHostMailSend(action) && !isHostMailDraft(action)) {
-    return [];
+    return { from: null, choices: [], new_recipients: [] };
   }
-  return mailRecipientsNotListed({
-    listed: await ctx.services.mail_listed_addresses({ tenant_id: ctx.tenant_id, created_by: ctx.created_by }),
-    params: action.canonical_params,
-  });
+  const identity = { tenant_id: ctx.tenant_id, created_by: ctx.created_by };
+  const routing = await ctx.services.mail_accounts(identity);
+  const named = action.canonical_params[MAIL_ACCOUNT_ARGUMENT];
+  const from = typeof named === 'string' && named !== '' ? named : routing.default_account;
+  const listed = await ctx.services.mail_listed_addresses({ ...identity, account: from });
+  return {
+    from,
+    choices: [...routing.accounts],
+    new_recipients: mailRecipientsNotListed({ listed, params: action.canonical_params }),
+  };
 }
 
 /**
@@ -3695,10 +3716,11 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     return demoRefusal(DEMO_CONNECTOR_REFUSAL);
   }
 
-  // A mail send to an address the owner has never mailed asks with its own card, naming each new address.
-  // A draft naming a new address asks with the same card in draft words: approving adds the addresses and
-  // saves the draft, and nothing is sent.
-  const newMailRecipients = await mailNewRecipients({ action, ctx });
+  // A mail send to an address the owner has never mailed from this account asks with its own card,
+  // naming each new address. A draft naming a new address asks with the same card in draft words:
+  // approving adds the addresses to this account's list and saves the draft, and nothing is sent.
+  const mailFacts = await mailCardFacts({ action, ctx });
+  const newMailRecipients = mailFacts.new_recipients;
   if (newMailRecipients.length > 0) {
     const { fields } = extraction;
     const draft = isHostMailDraft(action);
@@ -3738,6 +3760,8 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
         destination_host: null,
         outbound_truncated: fields.outbound_truncated,
         mail_new_recipients: newMailRecipients,
+        mail_from: mailFacts.from,
+        mail_from_choices: mailFacts.choices,
         ...(draft ? { mail_draft: true } : {}),
       },
       mail_send: !draft,
@@ -3789,6 +3813,8 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
         outbound_text: fields.outbound_text,
         destination_host: null,
         outbound_truncated: fields.outbound_truncated,
+        mail_from: mailFacts.from,
+        mail_from_choices: mailFacts.choices,
       },
       mail_send: true,
       standing_grant_barred: true,

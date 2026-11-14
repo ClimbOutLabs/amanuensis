@@ -110,6 +110,7 @@ import { effectiveGitCommitIdentity, readStoredGitCommitIdentity } from '../runt
 import { buildInternalSourceToolPolicy, type InternalSourceState } from '../runtime/internalSourceGuard';
 import { stampLatestAnswer, type LatestAnswerSessionStore } from '../runtime/latestAnswer';
 import { placeOfModelHost } from '../runtime/localModels';
+import { getMailAccountState } from '../runtime/mailAccount';
 import { mailAccountDirectory } from '../runtime/mailConnector';
 import { createMemoryClient } from '../runtime/memory/createMemoryClient';
 import type { MemoryClient } from '../runtime/memory/memoryClient';
@@ -373,7 +374,7 @@ export type BeginTurnExecutionDeps = Pick<
    */
   sentinelSettingsStore?: ISentinelSettingsStore | undefined;
   /** Lists the person's personas for the past-chat search; absent, the search tool stays off. */
-  personaStore?: Pick<IPersonaStore, 'listPersonas'> | undefined;
+  personaStore?: Pick<IPersonaStore, 'listPersonas' | 'getPersona'> | undefined;
   /** Adds finished turns to the past-chat search for people who turned it on; absent, nothing is added. */
   chatSearchIndexer?: ChatSearchIndexer | undefined;
   /** persists run_code's harvested result files as turn artifacts at harvest time. */
@@ -448,7 +449,7 @@ function createTurnResolver(deps: {
   /** The person's past-chat search switch for this turn; off, the search tool is not offered. */
   chatSearchEnabled: boolean;
   /** Lists the person's personas, so the search keeps to the chats this persona may recall; absent, the tool is not offered. */
-  personaStore: Pick<IPersonaStore, 'listPersonas'> | undefined;
+  personaStore: Pick<IPersonaStore, 'listPersonas' | 'getPersona'> | undefined;
   spaceStore: ISpaceStore;
   /** Per-user Google logins; absent, no Gmail tools mount. */
   googleConnectionStore?: IGoogleConnectionStore | undefined;
@@ -681,6 +682,34 @@ function createTurnResolver(deps: {
       setUpConnectorNames: async () =>
         setUpConnectorNamesOf(await mcpServerStore.listServers({ tenant_id, names: undefined })),
       mailAccounts: mailAccountDirectory,
+      mailAccountFacts: async () => {
+        const state = await getMailAccountState({
+          accountUrl: configuration.MAIL_EMAIL_ACCOUNT_URL,
+          secret: configuration.MAIL_EMAIL_ACCOUNT_SECRET,
+          fetchImpl: undefined,
+          logger,
+        }).catch(() => undefined);
+        if (state === undefined || !state.connected || state.accounts.length === 0) {
+          return undefined;
+        }
+        return { names: state.accounts.map(entry => entry.account.address), default_name: state.default_key };
+      },
+      mailRouting: async () => {
+        const state = await getMailAccountState({
+          accountUrl: configuration.MAIL_EMAIL_ACCOUNT_URL,
+          secret: configuration.MAIL_EMAIL_ACCOUNT_SECRET,
+          fetchImpl: undefined,
+          logger,
+        }).catch(() => undefined);
+        let allowed: readonly string[] | null = null;
+        if (personaContext !== undefined && personaStore !== undefined) {
+          const persona = await personaStore
+            .getPersona({ tenant_id, id: personaContext.persona_id, created_by: userRef })
+            .catch(() => undefined);
+          allowed = persona?.mail_accounts ?? null;
+        }
+        return { default_name: state?.default_key ?? null, allowed };
+      },
       mcpRequestTimeoutMs: configuration.MCP_REQUEST_TIMEOUT_MS,
       mcpConnectTimeoutMs: configuration.MCP_CONNECT_TIMEOUT_MS,
       mcpMaxResponseBytes: configuration.MCP_TOOL_CALL_MAX_RESPONSE_BYTES,

@@ -150,10 +150,12 @@ describe('the installer and Settings share one account store', () => {
     const response = await agentFetch();
     const body = JSON.parse(await response.text());
     expect(body.connected).toBe(true);
-    expect(body.address).toBe(ADDRESS);
-    expect(body.imap_host).toBe('localhost');
-    expect(body.imap_port).toBe(imapPort);
-    expect(body.sign_in).toBe('ok');
+    expect(body.default).toBe(ADDRESS);
+    expect(body.accounts).toHaveLength(1);
+    expect(body.accounts[0].address).toBe(ADDRESS);
+    expect(body.accounts[0].imap_host).toBe('localhost');
+    expect(body.accounts[0].imap_port).toBe(imapPort);
+    expect(body.accounts[0].sign_in).toBe('ok');
   }, 30_000);
 
   it('an account saved through the agent is byte-for-byte what the installer writes', async () => {

@@ -166,7 +166,7 @@ import { createDeliveryService, type DeliveryService } from './runtime/delivery/
 import { createWebPushSender } from './runtime/delivery/webPushSender';
 import { EventSubscriptionRegistry } from './runtime/event-subscription';
 import { instanceOwnerSubjectId } from './runtime/instanceOwner';
-import { registerMailConnectorFromSavedAccountInBackground } from './runtime/mailAccount';
+import { getMailAccountState, registerMailConnectorFromSavedAccountInBackground } from './runtime/mailAccount';
 import { prepareMailPolicyAtBoot, registerMailConnectorAtBoot } from './runtime/mailConnector';
 import { warmEmbeddingsAtBoot } from './runtime/memory/embeddingRetrieval';
 import { memoryBackgroundWorkSettled } from './runtime/memory/memoryBackgroundWork';
@@ -1068,6 +1068,18 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     outboundSecrets,
     mailPolicyPath: configuration.MAIL_POLICY_FILE,
     mailPolicyStatusPath: configuration.MAIL_POLICY_STATUS_FILE,
+    mailAccounts: async () => {
+      const state = await getMailAccountState({
+        accountUrl: configuration.MAIL_EMAIL_ACCOUNT_URL,
+        secret: configuration.MAIL_EMAIL_ACCOUNT_SECRET,
+        fetchImpl: undefined,
+        logger,
+      });
+      return {
+        accounts: state.accounts.map(entry => entry.account.address),
+        default_account: state.default_key,
+      };
+    },
     skillStore,
   });
   const sessions = new Sessions({ sessionStore, sentinelServices });

@@ -18,6 +18,8 @@ import {
 import { createSentinelServices } from '../../../src/runtime/sentinelServices';
 
 const alice = { tenant_id: 't1', created_by: 'alice' };
+/** Alice's one connected account, which her adds name. */
+const aliceAccount = { ...alice, account: 'owner@example.com' };
 
 describe('the Email send list add', () => {
   let directory: string;
@@ -56,6 +58,7 @@ describe('the Email send list add', () => {
       approvalTokens: new SqliteApprovalTokenStore(db),
       toolGrants: new SqliteMcpToolGrantStore(db),
       outboundSecrets: () => Promise.resolve([]),
+      mailAccounts: () => Promise.resolve({ accounts: ['owner@example.com'], default_account: 'owner@example.com' }),
     });
     return { services, close: () => db.destroy() };
   }
@@ -67,8 +70,8 @@ describe('the Email send list add', () => {
       setTimeout(() => {
         void writeFile(statusPath, `${expected}\n`);
       }, 30);
-      await expect(services.mail_add_recipients(alice, ['dana@example.com'])).resolves.toBe('loaded');
-      await expect(services.mail_listed_addresses(alice)).resolves.toEqual(['dana@example.com']);
+      await expect(services.mail_add_recipients(aliceAccount, ['dana@example.com'])).resolves.toBe('loaded');
+      await expect(services.mail_listed_addresses(aliceAccount)).resolves.toEqual(['dana@example.com']);
       expect(await readFile(policyPath, 'utf8')).toBe(renderAllowedRecipientsFile(['dana@example.com']));
     } finally {
       await close();
@@ -78,8 +81,8 @@ describe('the Email send list add', () => {
   it('refuses a wildcard and leaves the list as it was', async () => {
     const { services, close } = await servicesWith({ mailPolicyPath: policyPath, mailPolicyStatusPath: statusPath });
     try {
-      await expect(services.mail_add_recipients(alice, ['*@example.com'])).resolves.toBe('refused');
-      await expect(services.mail_listed_addresses(alice)).resolves.toEqual([]);
+      await expect(services.mail_add_recipients(aliceAccount, ['*@example.com'])).resolves.toBe('refused');
+      await expect(services.mail_listed_addresses(aliceAccount)).resolves.toEqual([]);
     } finally {
       await close();
     }
@@ -110,7 +113,22 @@ describe('the Email send list add', () => {
   it('refuses every add when no send list is configured', async () => {
     const { services, close } = await servicesWith({ mailPolicyPath: undefined, mailPolicyStatusPath: undefined });
     try {
-      await expect(services.mail_add_recipients(alice, ['dana@example.com'])).resolves.toBe('refused');
+      await expect(services.mail_add_recipients(aliceAccount, ['dana@example.com'])).resolves.toBe('refused');
+    } finally {
+      await close();
+    }
+  });
+
+  it('an address added for one account is not listed for another', async () => {
+    const { services, close } = await servicesWith({ mailPolicyPath: policyPath, mailPolicyStatusPath: statusPath });
+    try {
+      const expected = allowedRecipientsFileHash(renderAllowedRecipientsFile(['dana@example.com']));
+      setTimeout(() => {
+        void writeFile(statusPath, `${expected}\n`);
+      }, 30);
+      await expect(services.mail_add_recipients(aliceAccount, ['dana@example.com'])).resolves.toBe('loaded');
+      await expect(services.mail_listed_addresses({ ...alice, account: 'second@example.com' })).resolves.toEqual([]);
+      await expect(services.mail_listed_addresses(aliceAccount)).resolves.toEqual(['dana@example.com']);
     } finally {
       await close();
     }

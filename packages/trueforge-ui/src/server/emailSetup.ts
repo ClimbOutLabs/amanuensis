@@ -21,6 +21,21 @@ export interface EmailProviderInfo {
   helpHint: string;
 }
 
+/** One connected email account, as the Settings card lists it. */
+export interface EmailAccountInfo {
+  address: string;
+  providerKey: string;
+  state: AccountConnectionState;
+  /** Whether new mail goes out from this account unless another is picked. */
+  isDefault: boolean;
+  imapHost: string;
+  imapPort: number;
+  imapMode: 'ssl' | 'starttls';
+  smtpHost: string;
+  smtpPort: number;
+  smtpMode: 'ssl' | 'starttls';
+}
+
 /** The Email card's state. The app password is never part of it: the field is write-only. */
 export interface EmailAccountStatus {
   /** Whether this instance has the Email connector at all; when false, no card is shown. */
@@ -28,6 +43,10 @@ export interface EmailAccountStatus {
   state: AccountConnectionState;
   address: string | null;
   providerKey: string;
+  /** Every connected account, in saved order. */
+  accounts: EmailAccountInfo[];
+  /** The account new mail goes out from; null when none is connected. */
+  defaultAddress: string | null;
   providers: EmailProviderInfo[];
 }
 
@@ -47,8 +66,10 @@ export interface EmailSetupPort {
   getEmailStatus(): Promise<EmailAccountStatus>;
   /** Checks the sign-in first; a refused or unreachable check saves nothing and the error says why. */
   saveEmailAccount(req: EmailAccountSaveRequest): Promise<EmailAccountStatus>;
-  /** Deletes the saved account and its app password for good. */
-  removeEmailAccount(): Promise<EmailAccountStatus>;
+  /** Deletes one saved account and its app password for good; with no address, every account. */
+  removeEmailAccount(address?: string): Promise<EmailAccountStatus>;
+  /** Makes a connected account the one new mail goes out from. */
+  setDefaultEmailAccount(address: string): Promise<EmailAccountStatus>;
 }
 
 /** Whether a catalog implements the email port; another host's catalog may not. */

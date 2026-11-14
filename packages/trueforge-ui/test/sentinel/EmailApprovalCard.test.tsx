@@ -422,3 +422,32 @@ describe('EmailApprovalCard server sentences', () => {
     expect(screen.getByText("Once this is sent, it can't be unsent.")).toBeInTheDocument();
   });
 });
+
+describe('EmailApprovalCard account picker', () => {
+  it('offers the connected accounts and approves with the picked one', () => {
+    const onApprove = vi.fn();
+    render(
+      <EmailApprovalCard
+        approvalId="approval-1"
+        card={{
+          ...cardWith(),
+          mail_from: 'home@example.com',
+          mail_from_choices: ['home@example.com', 'work@example.com'],
+        }}
+        onApprove={onApprove}
+        onDeny={vi.fn()}
+      />,
+    );
+    const picker = screen.getByLabelText('From');
+    if (!(picker instanceof HTMLSelectElement)) throw new Error('From picker is not a select');
+    expect(picker.value).toBe('home@example.com');
+    fireEvent.change(picker, { target: { value: 'work@example.com' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Allow' }));
+    expect(onApprove).toHaveBeenCalledWith('work@example.com');
+  });
+
+  it('shows no picker when there is only one account to send from', () => {
+    renderEmail();
+    expect(screen.queryByLabelText('From')).toBeNull();
+  });
+});

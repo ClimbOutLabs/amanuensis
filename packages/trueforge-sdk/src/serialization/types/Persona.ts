@@ -7,11 +7,19 @@ import type * as serializers from "../index.js";
 export const Persona: core.serialization.ObjectSchema<serializers.Persona.Raw, TrueForge.Persona> =
     core.serialization.object({
         aliases: core.serialization.list(core.serialization.string()),
+        calendarAccounts: core.serialization.property(
+            "calendar_accounts",
+            core.serialization.list(core.serialization.string()).optional(),
+        ),
         createdAt: core.serialization.property("created_at", core.serialization.date()),
         createdBy: core.serialization.property("created_by", core.serialization.string()),
         displayName: core.serialization.property("display_name", core.serialization.string()),
         id: core.serialization.string(),
         instructions: core.serialization.string(),
+        mailAccounts: core.serialization.property(
+            "mail_accounts",
+            core.serialization.list(core.serialization.string()).optional(),
+        ),
         modelName: core.serialization.property("model_name", core.serialization.string()),
         updatedAt: core.serialization.property("updated_at", core.serialization.date()),
         updatedBy: core.serialization.property("updated_by", core.serialization.string()),
@@ -20,11 +28,13 @@ export const Persona: core.serialization.ObjectSchema<serializers.Persona.Raw, T
 export declare namespace Persona {
     export interface Raw {
         aliases: string[];
+        calendar_accounts?: string[] | null;
         created_at: string;
         created_by: string;
         display_name: string;
         id: string;
         instructions: string;
+        mail_accounts?: string[] | null;
         model_name: string;
         updated_at: string;
         updated_by: string;

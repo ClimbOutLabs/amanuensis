@@ -1,11 +1,14 @@
 import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
+import type { MailAccount } from '../../../../src/core/email/mailConnector/accountFile';
 import {
   MAIL_ACCOUNT_FILE_HEADER,
+  defaultMailAccount,
   parseMailAccountEnv,
+  parseMailAccountsEnv,
   publicMailAccount,
   renderMailAccountEnv,
-  type MailAccount,
+  renderMailAccountsEnv,
 } from '../../../../src/core/email/mailConnector/accountFile';
 
 const REPO_ROOT = resolve(__dirname, '..', '..', '..', '..', '..', '..');
@@ -99,5 +102,53 @@ describe('the mail account file format', () => {
     const view = publicMailAccount(ACCOUNT);
     expect(JSON.stringify(view)).not.toContain(ACCOUNT.password);
     expect(view.address).toBe(ACCOUNT.address);
+  });
+});
+
+describe('the mail account file as a list', () => {
+  const SECOND: MailAccount = {
+    address: 'work@example.com',
+    password: 'canary-password-5678',
+    imap_host: 'imap.work.example',
+    imap_port: 993,
+    imap_mode: 'ssl',
+    smtp_host: 'smtp.work.example',
+    smtp_port: 465,
+    smtp_mode: 'ssl',
+  };
+
+  it('renders one account with no named default byte for byte as the single-account form', () => {
+    expect(renderMailAccountsEnv({ accounts: [ACCOUNT], default_address: null })).toBe(EXPECTED_TEXT);
+  });
+
+  it('renders several accounts with a default line and parses them back', () => {
+    const list = { accounts: [ACCOUNT, SECOND], default_address: SECOND.address };
+    const text = renderMailAccountsEnv(list);
+    expect(text).toContain(`AMAN_MAIL_DEFAULT_ACCOUNT=${SECOND.address}\n`);
+    expect(parseMailAccountsEnv(text)).toEqual(list);
+  });
+
+  it('the default is the named account, else the first', () => {
+    expect(defaultMailAccount({ accounts: [ACCOUNT, SECOND], default_address: SECOND.address })).toEqual(SECOND);
+    expect(defaultMailAccount({ accounts: [ACCOUNT, SECOND], default_address: null })).toEqual(ACCOUNT);
+    expect(defaultMailAccount({ accounts: [], default_address: null })).toBeNull();
+  });
+
+  it('a named default that is not saved falls back to the first account', () => {
+    expect(defaultMailAccount({ accounts: [ACCOUNT], default_address: 'gone@example.com' })).toEqual(ACCOUNT);
+  });
+
+  it('parses the single-account file as a one-entry list with no named default', () => {
+    expect(parseMailAccountsEnv(EXPECTED_TEXT)).toEqual({ accounts: [ACCOUNT], default_address: null });
+    expect(parseMailAccountEnv(EXPECTED_TEXT)).toEqual(ACCOUNT);
+  });
+
+  it('an incomplete second block is left out and the complete account stays', () => {
+    const text = `${EXPECTED_TEXT}MCP_EMAIL_SERVER_EMAIL_ADDRESS=half@example.com\n`;
+    expect(parseMailAccountsEnv(text).accounts).toEqual([ACCOUNT]);
+  });
+
+  it('renders an empty list as an empty file', () => {
+    expect(renderMailAccountsEnv({ accounts: [], default_address: null })).toBe('');
   });
 });
