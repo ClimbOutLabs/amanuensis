@@ -21,6 +21,8 @@ import {
 import { useOptionalPersonalization } from './PersonalizationContext.js';
 import { personDisplayName } from './personDisplayName.js';
 
+/** The most audit entries one read can ask for. */
+const BRIEF_AUDIT_READ = 100;
 /** The fade a done row takes before its Undo shows. */
 const DONE_FADE_MS = 225;
 /** How long Undo stays in a row's place. */
@@ -345,9 +347,10 @@ function BriefFooter({ sessionId }: { sessionId: string | undefined }) {
     if (api === null || sessionId === undefined) return;
     let cancelled = false;
     api
-      .listAuditEntries({ sessionId, limit: 200 })
+      .listAuditEntries({ sessionId, limit: BRIEF_AUDIT_READ })
       .then(entries => {
-        if (!cancelled) setSummary(summarizeBriefAudit(entries));
+        // A full read may have left entries out, so no count is shown rather than a partial one.
+        if (!cancelled) setSummary(entries.length < BRIEF_AUDIT_READ ? summarizeBriefAudit(entries) : null);
       })
       .catch(() => {
         if (!cancelled) setSummary(null);
