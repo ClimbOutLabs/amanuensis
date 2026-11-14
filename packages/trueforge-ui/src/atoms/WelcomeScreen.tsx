@@ -5,11 +5,18 @@ import { cn } from './lib/cn.js';
 
 export type WelcomeScreenProps = {
   heading?: ReactNode;
+  /** One short line under the heading that says what this chat is for. */
+  subheading?: ReactNode;
   icon?: ReactNode;
   className?: string;
 };
 
-export function WelcomeScreen({ heading = 'How can I help you today?', icon = null, className }: WelcomeScreenProps) {
+export function WelcomeScreen({
+  heading = 'How can I help you today?',
+  subheading,
+  icon = null,
+  className,
+}: WelcomeScreenProps) {
   const preset = useOptionalThemePreset();
 
   return (
@@ -35,6 +42,11 @@ export function WelcomeScreen({ heading = 'How can I help you today?', icon = nu
       >
         {heading}
       </h1>
+      {subheading === undefined ? null : (
+        <p className="text-text-secondary mt-2 max-w-md text-sm fill-mode-both motion-safe:animate-in motion-safe:fade-in motion-reduce:animate-none delay-75 duration-200">
+          {subheading}
+        </p>
+      )}
     </div>
   );
 }

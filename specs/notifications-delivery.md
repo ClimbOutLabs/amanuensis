@@ -20,6 +20,8 @@ One server-side feed of things Aman wants a person to see, called deliveries. Ea
 
 **Kinds and channels grow without migrations.** Kind, level and channel are plain text columns. The API validates kind with a discriminated union, so later parts add kinds and channels in code only. A channel sender names its channel (`web_push`, `sms`), so a failure is recorded under the right one. A Try it test names its channel as `test`, so the service tries just that sender and tells it the delivery is a test.
 
+**A finished brief is a quiet note.** When a scheduled morning brief finishes with an answer, one `note` delivery at the `note` level goes to the bell. Its text is the brief's digest sentence, or "Your morning brief is ready." when the answer holds none, and it links to the brief's chat. The run id fixes the delivery id, so a run seen twice makes one item. A failed, stopped or empty run makes nothing. As a note it is never pushed or texted, and the daily nudge limit counts only nudges, so it never uses that up. No new kind is needed: the bell already shows a note in plain words.
+
 **Push carries no content.** The push payload is the delivery id and a short title such as "Reminder". It never holds the reminder text, the reason or the assistant's name. The page fetches details after the person opens it.
 
 **Push names no one.** The contact every push carries defaults to the project's public page, not the owner's email. The owner can set their own with `WEB_PUSH_SUBJECT`.
@@ -47,6 +49,7 @@ One server-side feed of things Aman wants a person to see, called deliveries. Ea
 - A bell with the unread count in the left panel and a panel that lists deliveries; opening an item marks it seen
 - A reminder becomes a delivery only when it goes off. One still to come today shows in the right rail's Due list on Home, never in the bell, and the Reminders page stays the full list for managing reminders
 - Web Push with a service worker, per-device opt-in in Settings, and plain words for iPhone (Home Screen needed), unsupported and blocked browsers, and for each kind of failure while turning notices on or off
+- A scheduled morning brief that finishes leaves one note in the bell, linked to its chat
 - Every delivery and every channel attempt is written to the Activity log in plain words
 - Deliveries are included in data export and import, with an upgrade step and an older-shape fixture; push subscriptions are not exported
 
