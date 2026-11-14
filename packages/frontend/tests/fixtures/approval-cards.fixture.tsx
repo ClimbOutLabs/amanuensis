@@ -81,6 +81,7 @@ const emailCard: SentinelApprovalCard = {
     bcc: [],
     subject: 'Lease',
     body: 'Thursday works.\n\nBest,\nAda',
+    check_code: null,
     replaces: null,
     reply_in_thread: null,
     reply_to: null,

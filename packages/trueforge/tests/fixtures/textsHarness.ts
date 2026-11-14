@@ -31,7 +31,15 @@ export async function textsHarness({
   provider = true,
   codeKey = 'test-code-key',
   maxTextsPerDay = 500,
-}: { assistantName?: string | null; provider?: boolean; codeKey?: string; maxTextsPerDay?: number } = {}) {
+  smsProvider: wire,
+}: {
+  assistantName?: string | null;
+  provider?: boolean;
+  codeKey?: string;
+  maxTextsPerDay?: number;
+  /** A provider to send through instead of the recording one, such as the real one over a fake Twilio. */
+  smsProvider?: SmsProvider;
+} = {}) {
   const db = createSqliteDb(':memory:');
   await migrateSqliteToLatest(db);
   const logger = winston.createLogger({ silent: true });
@@ -40,14 +48,16 @@ export async function textsHarness({
   const deliveryStore = new DeliveryStore(db);
   const sent: SentText[] = [];
   const next: { result: SmsSendResult } = { result: { outcome: 'sent' } };
-  const smsProvider: SmsProvider | undefined = provider
-    ? {
-        send: input => {
-          sent.push(input);
-          return Promise.resolve(next.result);
-        },
-      }
-    : undefined;
+  const smsProvider: SmsProvider | undefined =
+    wire ??
+    (provider
+      ? {
+          send: input => {
+            sent.push(input);
+            return Promise.resolve(next.result);
+          },
+        }
+      : undefined);
   const activity: { tool_name: string; description: string; created_by: string }[] = [];
   const audit = {
     record: (input: { tool_name: string; description: string; created_by: string }) => {

@@ -5,6 +5,7 @@ import { type NormalizedClientOptionsWithAuth, normalizeClientOptionsWithAuth } 
 import { CalendarClient } from "../resources/calendar/client/Client.js";
 import { EmailClient } from "../resources/email/client/Client.js";
 import { FirstRunGuideClient } from "../resources/firstRunGuide/client/Client.js";
+import { GitCommitIdentityClient } from "../resources/gitCommitIdentity/client/Client.js";
 import { GoogleClient } from "../resources/google/client/Client.js";
 import { McpServersClient } from "../resources/mcpServers/client/Client.js";
 import { MemoryRecallsClient } from "../resources/memoryRecalls/client/Client.js";
@@ -25,6 +26,7 @@ export declare namespace SettingsClient {
 export class SettingsClient {
     protected readonly _options: NormalizedClientOptionsWithAuth<SettingsClient.Options>;
     protected _firstRunGuide: FirstRunGuideClient | undefined;
+    protected _gitCommitIdentity: GitCommitIdentityClient | undefined;
     protected _mcpServers: McpServersClient | undefined;
     protected _memoryRecalls: MemoryRecallsClient | undefined;
     protected _memoryScreens: MemoryScreensClient | undefined;
@@ -46,6 +48,10 @@ export class SettingsClient {
 
     public get firstRunGuide(): FirstRunGuideClient {
         return (this._firstRunGuide ??= new FirstRunGuideClient(this._options));
+    }
+
+    public get gitCommitIdentity(): GitCommitIdentityClient {
+        return (this._gitCommitIdentity ??= new GitCommitIdentityClient(this._options));
     }
 
     public get mcpServers(): McpServersClient {

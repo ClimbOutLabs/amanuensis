@@ -1,15 +1,16 @@
 /**
  * Aman's browser, live: the signed-in person watches one of their own browser tabs and drives it
  * by hand, for the steps only a person can do (finishing a sign-in, a code sent to their phone, a
- * cookie banner). A frame is asked for about twice a second; clicks, typing and scrolls go back to
- * the same tab. Every call goes to the app server with the person's own session: the browser's
- * secret never reaches this page.
+ * cookie banner). A frame is asked for about twice a second; clicks, typing, pastes and scrolls go
+ * back to the same tab, and text selected in the tab can be copied out. Every call goes to the app
+ * server with the person's own session: the browser's secret never reaches this page.
  */
 import {
   useCallback,
   useEffect,
   useRef,
   useState,
+  type ClipboardEvent as ReactClipboardEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
@@ -99,6 +100,42 @@ const NAMED_KEYS = new Set([
   'PageDown',
 ]);
 
+/** The most text one paste may put in the page, as the app server takes it. */
+const MAX_PASTE_LENGTH = 10000;
+
+/**
+ * Puts text on the person's own clipboard. The text is still on its way from the tab when the
+ * copy starts, so where the browser can, the clipboard is handed the coming text at once, while the
+ * person's key press or click still counts; otherwise it is written once the text is here.
+ */
+async function writeClipboard(text: Promise<string>): Promise<void> {
+  // Every path below reads the text's failure itself; this keeps an early return from leaving it unread.
+  text.catch(() => undefined);
+  const clipboard = typeof navigator === 'undefined' ? undefined : navigator.clipboard;
+  if (clipboard === undefined) {
+    throw new Error('Copying needs Aman opened over a secure link (one that starts with https).');
+  }
+  if (typeof ClipboardItem !== 'undefined' && typeof clipboard.write === 'function') {
+    const blob = text.then(value => new Blob([value], { type: 'text/plain' }));
+    try {
+      await clipboard.write([new ClipboardItem({ 'text/plain': blob })]);
+      return;
+    } catch (error) {
+      // A copy whose text failed to arrive carries the route's own reason; anything else falls through.
+      const reason = await text.then(
+        () => undefined,
+        (failure: unknown) => failure,
+      );
+      if (reason !== undefined) {
+        throw reason instanceof Error
+          ? reason
+          : new Error('The text could not be copied. Try again.', { cause: error });
+      }
+    }
+  }
+  await clipboard.writeText(await text);
+}
+
 /** The person's open tabs, or null when the live routes could not be reached. */
 async function loadTabs(): Promise<LiveTab[] | null> {
   try {
@@ -119,11 +156,16 @@ export function BrowserLivePage() {
   const [tabs, setTabs] = useState<LiveTab[]>([]);
   const [selected, setSelected] = useState<string | undefined>(undefined);
   const [frame, setFrame] = useState<string | undefined>(undefined);
+  // The shown picture's own size, so it can be fitted to the window without changing its shape.
+  const [frameShape, setFrameShape] = useState<{ width: number; height: number } | undefined>(undefined);
   const [note, setNote] = useState('Loading your tabs...');
   // Whether the shown tab answered closed; kept apart from `note` so a new frame never wipes an upload's answer.
   const [closed, setClosed] = useState(false);
   const [done, setDone] = useState(false);
   const [typeText, setTypeText] = useState('');
+  // What the person's password manager filled in, held only until it is put in the page.
+  const [signInName, setSignInName] = useState('');
+  const [signInPassword, setSignInPassword] = useState('');
   // Whose hand is on the shown tab, and whether it is asking for a human check; both read from the
   // frame answers, so this page shows the browser's own state rather than its guess at it.
   const [takeover, setTakeover] = useState(false);
@@ -335,6 +377,12 @@ export function BrowserLivePage() {
   };
 
   const onKeyDown = (event: ReactKeyboardEvent) => {
+    // Select all goes to the page, so a field's text can be selected there and then copied out.
+    if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === 'a') {
+      event.preventDefault();
+      sendInput({ kind: 'key', key: 'ControlOrMeta+A' });
+      return;
+    }
     // AltGr reports Ctrl and Alt together on Windows, and is how @, € and { are typed on many layouts.
     const altGraph = event.getModifierState('AltGraph');
     if (event.metaKey || ((event.ctrlKey || event.altKey) && !altGraph)) {
@@ -347,6 +395,74 @@ export function BrowserLivePage() {
       event.preventDefault();
       sendInput({ kind: 'key', key: event.key });
     }
+  };
+
+  /** Puts the person's text in the page as one paste. It is never kept here or shown anywhere. */
+  const pasteText = (text: string) => {
+    if (text === '') {
+      return;
+    }
+    if (text.length > MAX_PASTE_LENGTH) {
+      setNote('That is too much text to paste at once. Paste up to 10,000 characters.');
+      return;
+    }
+    sendInput({ kind: 'paste', text });
+  };
+
+  const onFramePaste = (event: ReactClipboardEvent) => {
+    event.preventDefault();
+    pasteText(event.clipboardData.getData('text/plain'));
+  };
+
+  /** Copies what is selected in the page to the person's own clipboard. */
+  const copyFromPage = () => {
+    if (selected === undefined) {
+      return;
+    }
+    const tab = selected;
+    // The copy waits its turn behind any keys still on their way, such as a select all.
+    const text = inputQueueRef.current.then(async () => {
+      const data = await liveCall('/api/browser/live/copy', { tab });
+      if (!isRecord(data) || typeof data.text !== 'string') {
+        throw new Error('The text could not be copied. Try again.');
+      }
+      return data.text;
+    });
+    writeClipboard(text)
+      .then(() => {
+        setNote('Copied. You can paste it anywhere on your computer now.');
+      })
+      .catch((error: unknown) => {
+        setNote(error instanceof Error ? error.message : 'The text could not be copied. Try again.');
+      });
+  };
+
+  const onFrameCopy = (event: ReactClipboardEvent) => {
+    event.preventDefault();
+    copyFromPage();
+  };
+
+  /** Pastes from the person's clipboard by button, for a phone or a browser with no paste key. */
+  const onPasteButton = () => {
+    const clipboard = typeof navigator === 'undefined' ? undefined : navigator.clipboard;
+    if (clipboard === undefined || typeof clipboard.readText !== 'function') {
+      setNote('Click the picture, then press Ctrl+V (Cmd+V on a Mac) to paste.');
+      return;
+    }
+    clipboard
+      .readText()
+      .then(text => {
+        if (text === '') {
+          setNote('Your clipboard has no text to paste.');
+          return;
+        }
+        pasteText(text);
+      })
+      .catch(() => {
+        setNote(
+          'Your browser did not let Aman read the clipboard. Click the picture, then press Ctrl+V (Cmd+V on a Mac).',
+        );
+      });
   };
 
   const onUpload = (file: File | undefined) => {
@@ -383,6 +499,16 @@ export function BrowserLivePage() {
     }
     sendInput({ kind: 'type', text: typeText });
     setTypeText('');
+  };
+
+  const onSignInNameSubmit = () => {
+    pasteText(signInName);
+    setSignInName('');
+  };
+
+  const onSignInPasswordSubmit = () => {
+    pasteText(signInPassword);
+    setSignInPassword('');
   };
 
   /** Hands the shown tab to the person, or back to Aman; the answer says which hand holds it now. */
@@ -442,8 +568,13 @@ export function BrowserLivePage() {
   if (done) {
     return (
       <main className="browser-live">
+        <header className="browser-live-bar">
+          <div className="browser-live-brand">
+            <span className="browser-live-dot" aria-hidden="true" />
+            <h1 className="browser-live-title">Aman&apos;s browser, live</h1>
+          </div>
+        </header>
         <div className="browser-live-body">
-          <h1 className="browser-live-title">Aman&apos;s browser, live</h1>
           <p className="browser-live-note">
             Done. Go back to the chat and tell Aman you are finished. Everything you did stays in the page.
           </p>
@@ -452,21 +583,33 @@ export function BrowserLivePage() {
     );
   }
 
+  const live = frame !== undefined && !closed;
+  // The picture fits the window's height as well as its width, keeping the page's own shape, so the
+  // whole page shows without scrolling this one. Its shape comes from the picture itself once loaded.
+  const frameStyle =
+    frameShape === undefined
+      ? undefined
+      : { width: `min(100%, calc((100dvh - 9.5rem) * ${String(frameShape.width / frameShape.height)}))` };
+
   return (
     <main className="browser-live">
-      <div className="browser-live-body">
-        <h1 className="browser-live-title">Aman&apos;s browser, live</h1>
-        <p className="browser-live-text">
-          This is the page Aman has open. Click, scroll and type to use it yourself, for example to finish a sign-in.
-          When you are done, press Done, then go back to the chat and tell Aman.
-        </p>
-        <div className="browser-live-row" role="group" aria-label="Open tabs">
+      <header className="browser-live-bar">
+        <div className="browser-live-brand">
+          <span
+            className={live ? 'browser-live-dot browser-live-dot-on' : 'browser-live-dot'}
+            role="img"
+            aria-label={live ? 'Live' : 'Not live'}
+          />
+          <h1 className="browser-live-title">Aman&apos;s browser, live</h1>
+        </div>
+        <div className="browser-live-tabs" role="group" aria-label="Open tabs">
           {tabs.map(tab => (
             <button
               key={tab.tab}
               type="button"
-              className="browser-live-button"
+              className="browser-live-chip"
               aria-pressed={tab.tab === selected}
+              title={tab.title === '' ? tab.url : `${tab.title}\n${tab.url}`}
               onClick={() => {
                 // Leaving a taken-over tab for another one hands it back first.
                 if (tab.tab !== selected) {
@@ -484,90 +627,16 @@ export function BrowserLivePage() {
               {tab.title === '' ? tab.url : tab.title}
             </button>
           ))}
-          <button type="button" className="browser-live-button" onClick={refreshTabs}>
+          <button type="button" className="browser-live-chip browser-live-chip-quiet" onClick={refreshTabs}>
             Refresh tabs
           </button>
         </div>
-        {closed ? (
-          <p className="browser-live-note" role="status">
-            That page is closed now. Pick another tab, or ask Aman to open the page again.
-          </p>
-        ) : null}
-        {note !== '' ? (
-          <p className="browser-live-note" role="status">
-            {note}
-          </p>
-        ) : null}
-        {selected !== undefined && !closed ? (
-          <div className="browser-live-row">
+        <div className="browser-live-actions">
+          {selected !== undefined && !closed ? (
             <button type="button" className="browser-live-button" aria-pressed={takeover} onClick={onTakeoverToggle}>
               {takeover ? 'Hand back' : 'Take over'}
             </button>
-            {takeover ? (
-              <span className="browser-live-text">You are driving this page. Aman will not touch it.</span>
-            ) : null}
-          </div>
-        ) : null}
-        {takeover && challenge ? (
-          <p className="browser-live-note" role="status">
-            This site is asking for a human check. Takeover gives you your best chance at it.
-          </p>
-        ) : null}
-        {frame !== undefined ? (
-          <div
-            className={takeover ? 'browser-live-frame browser-live-frame-takeover' : 'browser-live-frame'}
-            tabIndex={0}
-            onKeyDown={onKeyDown}
-            onWheel={onFrameWheel}
-          >
-            <img
-              ref={imgRef}
-              src={`data:image/jpeg;base64,${frame}`}
-              alt="The page Aman has open, as it looks now"
-              draggable={takeover ? false : undefined}
-              onClick={onFrameClick}
-              onPointerDown={onFramePointerDown}
-              onPointerMove={onFramePointerMove}
-              onPointerUp={onFramePointerUp}
-              onPointerCancel={onFramePointerUp}
-            />
-          </div>
-        ) : null}
-        <p className="browser-live-hint">
-          {takeover
-            ? 'Move and press on the picture to use the page, just as your hand does. Typing still works after you press the picture.'
-            : 'Click the picture, then type to fill in a field. Scrolling over the picture scrolls the page.'}
-        </p>
-        <div className="browser-live-row">
-          <input
-            className="browser-live-input"
-            aria-label="Text to type into the page"
-            value={typeText}
-            onChange={event => {
-              setTypeText(event.target.value);
-            }}
-            onKeyDown={event => {
-              if (event.key === 'Enter') {
-                onTypeSubmit();
-              }
-            }}
-            placeholder="Text or a code to type into the page"
-          />
-          <button type="button" className="browser-live-button" onClick={onTypeSubmit}>
-            Type it
-          </button>
-        </div>
-        <label className="browser-live-text">
-          Upload a file into the page:{' '}
-          <input
-            type="file"
-            onChange={event => {
-              onUpload(event.target.files?.[0]);
-              event.target.value = '';
-            }}
-          />
-        </label>
-        <div className="browser-live-row">
+          ) : null}
           <button
             type="button"
             className="browser-live-button browser-live-button-primary"
@@ -580,6 +649,175 @@ export function BrowserLivePage() {
             Done
           </button>
         </div>
+      </header>
+      <div className="browser-live-body">
+        {closed ? (
+          <p className="browser-live-note" role="status">
+            That page is closed now. Pick another tab, or ask Aman to open the page again.
+          </p>
+        ) : null}
+        {note !== '' ? (
+          <p className="browser-live-note" role="status">
+            {note}
+          </p>
+        ) : null}
+        {takeover ? (
+          <p className="browser-live-note browser-live-note-driving" role="status">
+            You are driving this page. Aman will not touch it.
+            {challenge ? ' This site is asking for a human check. Takeover gives you your best chance at it.' : ''}
+          </p>
+        ) : null}
+        {frame !== undefined ? (
+          <div
+            className={takeover ? 'browser-live-frame browser-live-frame-takeover' : 'browser-live-frame'}
+            style={frameStyle}
+            tabIndex={0}
+            onKeyDown={onKeyDown}
+            onPaste={onFramePaste}
+            onCopy={onFrameCopy}
+            onWheel={onFrameWheel}
+          >
+            <img
+              ref={imgRef}
+              src={`data:image/jpeg;base64,${frame}`}
+              alt="The page Aman has open, as it looks now"
+              draggable={takeover ? false : undefined}
+              onLoad={event => {
+                const { naturalWidth, naturalHeight } = event.currentTarget;
+                if (
+                  naturalWidth > 0 &&
+                  naturalHeight > 0 &&
+                  (frameShape?.width !== naturalWidth || frameShape.height !== naturalHeight)
+                ) {
+                  setFrameShape({ width: naturalWidth, height: naturalHeight });
+                }
+              }}
+              onClick={onFrameClick}
+              onPointerDown={onFramePointerDown}
+              onPointerMove={onFramePointerMove}
+              onPointerUp={onFramePointerUp}
+              onPointerCancel={onFramePointerUp}
+            />
+          </div>
+        ) : null}
+        <div className="browser-live-tools">
+          <button
+            type="button"
+            className="browser-live-button"
+            onClick={onPasteButton}
+            disabled={selected === undefined}
+          >
+            Paste into page
+          </button>
+          <button
+            type="button"
+            className="browser-live-button"
+            onClick={copyFromPage}
+            disabled={selected === undefined}
+          >
+            Copy from page
+          </button>
+          <div className="browser-live-type">
+            <input
+              className="browser-live-input"
+              aria-label="Text to type into the page"
+              value={typeText}
+              onChange={event => {
+                setTypeText(event.target.value);
+              }}
+              onKeyDown={event => {
+                if (event.key === 'Enter') {
+                  onTypeSubmit();
+                }
+              }}
+              placeholder="Text or a code to type into the page"
+            />
+            <button type="button" className="browser-live-button" onClick={onTypeSubmit}>
+              Type it
+            </button>
+          </div>
+          <label className="browser-live-button browser-live-file">
+            Upload a file
+            <input
+              type="file"
+              aria-label="Upload a file into the page"
+              onChange={event => {
+                onUpload(event.target.files?.[0]);
+                event.target.value = '';
+              }}
+            />
+          </label>
+        </div>
+        <p className="browser-live-hint">
+          {takeover
+            ? 'Move and press on the picture to use the page, just as your hand does. Typing still works after you press the picture.'
+            : 'Click the picture, then type to fill in a field. Scrolling over the picture scrolls the page.'}{' '}
+          Paste with Ctrl+V (Cmd+V on a Mac). To copy, select text in the page, then press Ctrl+C (Cmd+C). When you are
+          done, press Done, then tell Aman in the chat.
+        </p>
+        {/* These boxes sit on Aman's own address, so they ask the password manager not to offer or save
+            Aman's own sign-in here: the person picks the outside site's login by hand. */}
+        <details className="browser-live-panel">
+          <summary className="browser-live-panel-title">Sign in with your password manager</summary>
+          <form
+            className="browser-live-sign-in"
+            aria-label="Sign in with your password manager"
+            onSubmit={event => {
+              // Nothing is sent anywhere by the form itself; each box has its own button.
+              event.preventDefault();
+            }}
+          >
+            <p className="browser-live-text">
+              Click the site&apos;s name or password box in the picture, fill the matching box below from your password
+              manager, then press its Put in page button. Nothing you put here is saved or shown to Aman.
+            </p>
+            <div className="browser-live-type">
+              <input
+                className="browser-live-input"
+                aria-label="Name or email for the page"
+                name="page-name"
+                autoComplete="off"
+                value={signInName}
+                onChange={event => {
+                  setSignInName(event.target.value);
+                }}
+                onKeyDown={event => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    onSignInNameSubmit();
+                  }
+                }}
+                placeholder="Name or email"
+              />
+              <button type="button" className="browser-live-button" onClick={onSignInNameSubmit}>
+                Put name in page
+              </button>
+            </div>
+            <div className="browser-live-type">
+              <input
+                className="browser-live-input"
+                aria-label="Password for the page"
+                type="password"
+                name="page-password"
+                autoComplete="off"
+                value={signInPassword}
+                onChange={event => {
+                  setSignInPassword(event.target.value);
+                }}
+                onKeyDown={event => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    onSignInPasswordSubmit();
+                  }
+                }}
+                placeholder="Password"
+              />
+              <button type="button" className="browser-live-button" onClick={onSignInPasswordSubmit}>
+                Put password in page
+              </button>
+            </div>
+          </form>
+        </details>
       </div>
     </main>
   );

@@ -11,6 +11,7 @@ import {
   SlotDriver,
   type AgentTracing,
   type BoundRepository,
+  type GitCommitIdentity,
   type GitSkill,
   type ModelParams,
   type RemoteMcpHeaders,
@@ -50,6 +51,27 @@ import type { ModelProperties, ModelProviderStreamTimeout } from '../schemas/mod
 import { parseGitSkill } from '../schemas/skill';
 import { isSecretReference, resolveSecretReference } from '../utils/secretReferences';
 import { buildRunCodeHarvestSink } from './artifacts/persistRunCodeHarvests';
+import { modelUrlProblem, remoteUrlProblem } from './remoteAddress';
+
+/**
+ * A stored connector's address failed the address check (see runtime/remoteAddress) when a
+ * connection was being resolved. It rides on McpConnectionError so the handlers that already
+ * turn a connection failure into a response keep working; the distinct class lets a caller that
+ * must not fail (the memory provider lookup) recognize the refusal and degrade instead.
+ */
+export class RemoteAddressRefusedError extends McpConnectionError {
+  constructor({ name, problem }: { name: string; problem: 'blocked' | 'unresolved' | 'invalid' }) {
+    super(
+      problem === 'blocked'
+        ? `The connector "${name}" has an address on this computer, so the server cannot connect to it. Change the connector's address in Settings to one on your home network or the internet.`
+        : problem === 'unresolved'
+          ? `The connector "${name}" has an address that did not resolve, so the server cannot check it or connect to it. Check the connector's address in Settings.`
+          : `The connector "${name}" has an address the server cannot connect to. Enter its full address in Settings, starting with http:// or https://.`,
+      422,
+    );
+    this.name = 'RemoteAddressRefusedError';
+  }
+}
 
 export interface McpConnection {
   url: string;
@@ -314,6 +336,32 @@ export async function getModelDetails({
   // Provider types are adapter names, so this assignment is what keeps them so: a type with no
   // `buildLanguageModel` case fails to compile here.
   const { type, base_url: baseUrl, stream_timeout } = provider.manifest;
+  // The address check runs again here, when a model is resolved for use, not only when its
+  // provider was saved: a name that resolved to a public address then can resolve inward now,
+  // and a provider written before the check existed, or one set through the environment, is
+  // first judged here. The one exception is an exact endpoint the operator named in
+  // LOCAL_MODEL_ENDPOINTS. A host that does not resolve right now is refused here too: it
+  // cannot be checked, and the answers a name gives can change between a check that failed
+  // to resolve it and the dial that follows.
+  const problem = await modelUrlProblem({ url: baseUrl, endpoints: configuration.LOCAL_MODEL_ENDPOINTS });
+  if (problem === 'blocked') {
+    throw new HTTPException(422, {
+      message:
+        "That address is on this computer, so the server cannot use it for a model. To use a model on this computer, name its exact address (host and port) in LOCAL_MODEL_ENDPOINTS. On an installed Aman, that setting is in the instance's settings file, ~/.amanuensis/instances/<name>/.env, below the block the installer manages. Restart the instance after changing it.",
+    });
+  }
+  if (problem === 'unresolved') {
+    throw new HTTPException(422, {
+      message:
+        "That model's address did not resolve, so the server cannot check it or use it. Check the provider's address in Settings and try again.",
+    });
+  }
+  if (problem === 'invalid') {
+    throw new HTTPException(422, {
+      message:
+        "That model's address is not one the server can connect to. Enter its full address in Settings, starting with http:// or https://.",
+    });
+  }
   return {
     providerConfig: {
       provider: { type, name: provider.name },
@@ -507,6 +555,22 @@ export async function getMcpConnection({
       ? isHostOwnConnector({ name: record.name, url: record.manifest.url })
       : record.first_party) &&
     isFirstPartyOrigin({ url: record.manifest.url, origins: configuration.FIRST_PARTY_MCP_ORIGINS });
+  // The address check runs again here, on every connection resolution, not only at save time: a
+  // name that resolved to a public address when the connector was saved can resolve inward
+  // later, and a record written before the check existed, or one that arrived by import, is first
+  // judged here. An origin on the operator's own list is the operator's own service and is not
+  // second-guessed. A host that does not resolve right now is refused here too: it cannot be
+  // checked, and the answers a name gives can change between a check that failed to resolve it
+  // and the dial that follows.
+  if (
+    record.manifest.type === 'remote' &&
+    !isFirstPartyOrigin({ url: record.manifest.url, origins: configuration.FIRST_PARTY_MCP_ORIGINS })
+  ) {
+    const problem = await remoteUrlProblem({ url: record.manifest.url });
+    if (problem !== null) {
+      throw new RemoteAddressRefusedError({ name: record.name, problem });
+    }
+  }
   const searchProvider =
     record.manifest.type === 'remote' && record.manifest.search_provider === true
       ? { tools: record.manifest.search_tools ?? [] }
@@ -719,6 +783,8 @@ export function buildTurnSandbox(input: {
   logger: Logger;
   gitSkills: readonly GitSkill[];
   githubGitToken?: string | null | undefined;
+  /** Name and email for commits made by shell commands. */
+  gitCommitIdentity?: GitCommitIdentity | undefined;
   githubConnectorAttached?: boolean | undefined;
   webConnectorAttached?: boolean | undefined;
   fileDownloadEnabled: boolean;
@@ -767,6 +833,7 @@ export function buildTurnSandbox(input: {
     existingSandboxId: input.existingSandboxId,
     fileDownloadEnabled: input.fileDownloadEnabled,
     githubGitToken: input.githubGitToken ?? null,
+    gitCommitIdentity: input.gitCommitIdentity,
     githubConnectorAttached: input.githubConnectorAttached ?? false,
     webConnectorAttached: input.webConnectorAttached ?? false,
     boundRepository: input.boundRepository,

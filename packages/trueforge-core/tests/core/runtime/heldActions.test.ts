@@ -351,7 +351,7 @@ describe('an unattended run', () => {
     // reaches: a call is now classed by what it carries, not by fragments in its name.
     expect(brief.result.output).toMatchObject({
       content: expect.stringContaining(
-        "All done.\n\nI need your OK for one thing: Perform an external action affecting ana@example.com? Approve it on your Needs your OK list and I'll add it here.",
+        "All done.\n\nI need your OK for one thing: Perform an external action affecting ana@example.com? Allow it on your Needs your OK list and I'll add it here.",
       ),
     });
     expect(brief.events.map(event => event.type)).not.toContain(EventType.TOOL_EXECUTION_STARTED);

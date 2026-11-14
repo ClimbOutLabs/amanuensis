@@ -34,7 +34,7 @@ import type { CurrentContextUsage } from '@truefoundry/trueforge-core/core/runti
 import type { HelpAreaId } from '@truefoundry/trueforge-core/schemas/personalizationHelpAreas';
 import type { ColumnType, Generated, JSONColumnType } from 'kysely';
 import type { McpServerManifest } from '../../schemas/mcpServer';
-import type { ModelProviderManifest } from '../../schemas/modelProvider';
+import type { ModelProviderCheck, ModelProviderManifest } from '../../schemas/modelProvider';
 import type {
   SandboxBuildMetadata,
   SandboxBuildStatus,
@@ -51,6 +51,7 @@ import type { NoticingCheckpointTable, NoticingEventTable, ReachLeaseTable } fro
 import type { PhoneCallTable } from '../phoneCallStore';
 import type { PushSubscriptionTable } from '../pushSubscriptionStore';
 import type { ReachSettingsTable } from '../reachSettingsStore';
+import type { RecallExclusionTable } from '../recallExclusionStore';
 import type { TextContactTable, TextSendCountTable, TextWordTable } from '../textContactStore';
 
 /**
@@ -517,6 +518,8 @@ export interface ModelProviderTable {
   name: string;
   /** ModelProviderManifest document; replaced whole on every upsert */
   manifest: JsonbColumn<ModelProviderManifest>;
+  /** Outcome of the save-time connection check; null when no check has run */
+  last_check: JsonbColumn<ModelProviderCheck> | null;
   created_at: string;
   updated_at: string;
 }
@@ -834,6 +837,7 @@ export interface Database {
   space_folder_assignment: SpaceFolderAssignmentTable;
   sentinel_audit: SentinelAuditTable;
   brief_item_completion: BriefItemCompletionTable;
+  recall_exclusion: RecallExclusionTable;
   delivery: DeliveryTable;
   delivery_attempt: DeliveryAttemptTable;
   reach_settings: ReachSettingsTable;

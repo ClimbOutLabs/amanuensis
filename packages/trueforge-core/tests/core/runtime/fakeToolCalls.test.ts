@@ -24,6 +24,7 @@ import { toolResultResponse, type IToolSet } from '../../../src/core/mcp/IMCPSer
 import {
   createToolCallMemoState,
   createTurnToolCallLedger,
+  IDENTICAL_CALL_STOP_AT,
   IDENTICAL_MOVE_STOP_AT,
   MAX_TOOL_MARKUP_RETRIES_PER_TURN,
   MAX_WRITE_CALLS_PER_TURN,
@@ -1471,27 +1472,18 @@ describe('write cap leaves work inside the sandbox workspace alone', () => {
     expect(events.at(-1)).toMatchObject({ type: InternalEventType.AGENT_DONE, status: 'done' });
   });
 
-  it('stops a scroll that keeps landing on the same screen at the bottom of the page', async () => {
-    const toolSet = makeBrowserToolSet({ screens: 2 });
-    const scroll = { name: 'browser_scroll', args: { direction: 'down' } };
-    const thread = makeThread({ toolSet, create: scriptedArgs([[scroll], [scroll], [scroll], [scroll]]) });
-    await drain(thread);
-
-    // The first scroll reached the bottom, the second showed the same screen, the third is a loop.
-    expect(callToolNames(toolSet)).toEqual(['browser_scroll', 'browser_scroll']);
-    expect(toolResults(thread).some(result => result.content.includes(REPEATED_ACTION_RESULT))).toBe(true);
-  });
-
-  it('ends the reply when the model keeps scrolling at the bottom of the page', async () => {
+  it('lets a scroll at the bottom of the page run again, and ends the reply once it keeps showing the same screen', async () => {
     const toolSet = makeBrowserToolSet({ screens: 2 });
     const scroll = { name: 'browser_scroll', args: { direction: 'down' } };
     const thread = makeThread({ toolSet, create: scriptedArgs(Array.from({ length: 12 }, () => [scroll])) });
     const events = await drain(thread);
 
-    expect(callToolNames(toolSet)).toEqual(['browser_scroll', 'browser_scroll']);
-    // The guard ended the reply before the model's twelve steps ran out.
-    expect(toolResults(thread).length).toBeLessThan(12);
-    expect(events.at(-1)).not.toMatchObject({ output: { content: 'Done.' } });
+    // A live page can still be loading, so no scroll is refused as already done; the loop stop ends it.
+    // The loop stop leaves the model one step to answer, then ends the reply well before its twelve steps.
+    expect(callToolNames(toolSet).length).toBeGreaterThanOrEqual(IDENTICAL_CALL_STOP_AT);
+    expect(callToolNames(toolSet).length).toBeLessThan(12);
+    expect(toolResults(thread).some(result => result.content.includes(REPEATED_ACTION_RESULT))).toBe(false);
+    expect(events.at(-1)).toMatchObject({ type: InternalEventType.AGENT_DONE, handoff_cause: 'loop_detected' });
   });
 
   it('still stops the same scroll on a page whose text changes on every read', async () => {
@@ -1519,22 +1511,33 @@ describe('write cap leaves work inside the sandbox workspace alone', () => {
     });
     const events = await drain(thread);
 
-    // Each page is new once; after that the same two steps only go between pages already seen.
-    expect(callToolNames(toolSet)).toEqual(['browser_click', 'browser_back', 'browser_click', 'browser_back']);
-    // The guard ended the reply before the model's twelve steps ran out.
-    expect(toolResults(thread).length).toBeLessThan(12);
-    expect(events.at(-1)).not.toMatchObject({ output: { content: 'Done.' } });
+    // Each page is new once; after that the same two steps only go between pages already seen,
+    // and the click's fourth run ends the reply.
+    expect(callToolNames(toolSet).length).toBeGreaterThanOrEqual(2 * IDENTICAL_CALL_STOP_AT - 1);
+    expect(callToolNames(toolSet).length).toBeLessThan(12);
+    expect(events.at(-1)).toMatchObject({ type: InternalEventType.AGENT_DONE, handoff_cause: 'loop_detected' });
   });
 
-  it('does not count a scroll that failed as a move', async () => {
+  it('clicks the same button again when the first click showed nothing new', async () => {
+    const toolSet = makeBrowserToolSet();
+    const click = { name: 'browser_click', args: { ref: 'e3' } };
+    const read = { name: 'browser_read', args: {} };
+    const thread = makeThread({ toolSet, create: scriptedArgs([[click], [read], [click], [read]]) });
+    const events = await drain(thread);
+
+    expect(callToolNames(toolSet)).toEqual(['browser_click', 'browser_read', 'browser_click', 'browser_read']);
+    expect(toolResults(thread).some(result => result.content.includes(REPEATED_ACTION_RESULT))).toBe(false);
+    expect(events.at(-1)).toMatchObject({ type: InternalEventType.AGENT_DONE, status: 'done' });
+  });
+
+  it('reads the page again after a scroll that failed, as the page may have changed by itself', async () => {
     const toolSet = makeBrowserToolSet({ failingScroll: true });
     const read = { name: 'browser_read', args: {} };
     const scroll = { name: 'browser_scroll', args: { direction: 'down' } };
     const thread = makeThread({ toolSet, create: scriptedArgs([[read], [scroll], [read]]) });
     await drain(thread);
 
-    expect(callToolNames(toolSet)).toEqual(['browser_read', 'browser_scroll']);
-    expect(toolResults(thread).at(-1)?.content).toContain(REPEATED_ACTION_RESULT);
+    expect(callToolNames(toolSet)).toEqual(['browser_read', 'browser_scroll', 'browser_read']);
   });
 
   it('lets no other tool repeat because the browser page moved', async () => {
@@ -1547,14 +1550,13 @@ describe('write cap leaves work inside the sandbox workspace alone', () => {
     expect(callToolNames(toolSet)).toEqual(['page_notes', 'browser_scroll']);
   });
 
-  it('still refuses to read an unchanged page twice in a row', async () => {
+  it('reads an unchanged page again, and still skips the same read written twice in one step', async () => {
     const toolSet = makeBrowserToolSet();
     const read = { name: 'browser_read', args: {} };
-    const thread = makeThread({ toolSet, create: scriptedArgs([[read], [read]]) });
+    const thread = makeThread({ toolSet, create: scriptedArgs([[read], [read], [read, read]]) });
     await drain(thread);
 
-    expect(callToolNames(toolSet)).toEqual(['browser_read']);
-    expect(toolResults(thread).at(-1)?.content).toContain(REPEATED_ACTION_RESULT);
+    expect(callToolNames(toolSet)).toEqual(['browser_read', 'browser_read', 'browser_read']);
   });
 
   it('still caps git pushes out of the sandbox', async () => {

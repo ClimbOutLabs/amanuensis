@@ -11,7 +11,7 @@ import type { Logger } from 'winston';
 import type { IMcpServerStore } from '../../db/mcpServerStore';
 import type { IOAuthTokenStore } from '../../mcp/auth/types';
 import type { MemoryProviderSettings } from '../../schemas/mcpServer';
-import { getMcpConnection } from '../sessionResources';
+import { getMcpConnection, RemoteAddressRefusedError } from '../sessionResources';
 
 const MEMORY_PROVIDER_URL_PATTERN = /^(?<apiBase>https?:\/\/[^/]+)\/mcp\/(?<bank>[^/]+)\/?$/;
 
@@ -79,6 +79,9 @@ export async function resolveMemoryProvider(deps: {
     });
     return undefined;
   }
+  // A provider whose address fails the address check degrades to no memory for the turn, like
+  // the invalid URL above: memory being off must never fail the turn itself. Any other failure
+  // from resolving the connection keeps propagating, as it did before.
   const connection = await getMcpConnection({
     tenant_id: tenantId,
     name: provider.name,
@@ -86,6 +89,15 @@ export async function resolveMemoryProvider(deps: {
     tokenStore,
     clientName,
     userRef,
+  }).catch((error: unknown) => {
+    if (error instanceof RemoteAddressRefusedError) {
+      logger.warn('Memory provider address failed the address check; memory is disabled for this turn', {
+        serverName: provider.name,
+        url: provider.manifest.url,
+      });
+      return undefined;
+    }
+    throw error;
   });
   if (connection === undefined) {
     return undefined;

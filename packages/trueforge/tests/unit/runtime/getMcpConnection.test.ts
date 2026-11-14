@@ -8,7 +8,27 @@ import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqliteMcpServerStore } from '../../../src/db/sqlite/mcp-server-store/SqliteMcpServerStore';
 import { SqliteOAuthTokenStore } from '../../../src/db/sqlite/token-store/SqliteOAuthTokenStore';
 import { mcpOAuthCallbackUrl } from '../../../src/mcp/auth/mcpOAuthHelpers';
-import { getMcpConnection } from '../../../src/runtime/sessionResources';
+import { getMcpConnection, RemoteAddressRefusedError } from '../../../src/runtime/sessionResources';
+
+// Name resolution is stubbed for the whole suite: a name with 'unresolvable' in it does not
+// resolve, localhost resolves to loopback, and every other name resolves to a public address.
+// The address check at connection time judges names by what they resolve to, so the suite's
+// answer cannot depend on the DNS of the machine running it.
+jest.mock('node:dns/promises', () => {
+  const actual = jest.requireActual<typeof import('node:dns/promises')>('node:dns/promises');
+  return {
+    ...actual,
+    lookup: async (hostname: string, options?: { all?: boolean | undefined }) => {
+      if (hostname.includes('unresolvable')) {
+        const error = new Error(`getaddrinfo ENOTFOUND ${hostname}`);
+        Reflect.set(error, 'code', 'ENOTFOUND');
+        throw error;
+      }
+      const entry = { address: hostname === 'localhost' ? '127.0.0.1' : '93.184.216.34', family: 4 };
+      return options?.all === true ? [entry] : entry;
+    },
+  };
+});
 
 describe('getMcpConnection', () => {
   let db: ReturnType<typeof createSqliteDb>;
@@ -403,7 +423,11 @@ describe('getMcpConnection', () => {
       configuration.FIRST_PARTY_MCP_ORIGINS = ['http://[::1]:9557'];
       configuration.MAIL_SIDECAR_MCP_URL = 'http://[::1]:9557/mcp';
       expect(await save({ name: 'Email', url: 'http://[0:0:0:0:0:0:0:1]:9557/mcp' })).toBe(true);
-      expect(await save({ name: 'Email', url: 'http://[::2]:9557/mcp' })).toBe(false);
+      // [::2] embeds 0.0.0.2, inside the ranges the address check refuses, and its origin is
+      // not listed: the connection is refused outright rather than resolved untrusted.
+      await expect(save({ name: 'Email', url: 'http://[::2]:9557/mcp' })).rejects.toBeInstanceOf(
+        RemoteAddressRefusedError,
+      );
     });
 
     it('keeps the mark of a connector with another name that the operator listed', async () => {
@@ -431,11 +455,19 @@ describe('getMcpConnection', () => {
       ['a trailing dot on the host', 'http://mail-email.:9557/mcp'],
       ['another port', 'http://mail-email:9558/mcp'],
       ['another scheme', 'https://mail-email:9557/mcp'],
-      ['credentials in the address', 'http://owner@mail-email:9557/mcp'],
       ['a look-alike host', 'http://mail-emai1:9557/mcp'],
     ])('does not trust an Email record at an address with %s', async (_label, url) => {
       configuration.FIRST_PARTY_MCP_ORIGINS = [...configuration.FIRST_PARTY_MCP_ORIGINS, new URL(url).origin];
       expect(await save({ name: 'Email', url })).toBe(false);
+    });
+
+    it('refuses an Email record at an address with credentials in the address', async () => {
+      // The operator's list never vouches for an address carrying credentials, and the address
+      // check refuses such an address outright rather than resolving it untrusted.
+      configuration.FIRST_PARTY_MCP_ORIGINS = [...configuration.FIRST_PARTY_MCP_ORIGINS, 'http://mail-email:9557'];
+      await expect(save({ name: 'Email', url: 'http://owner@mail-email:9557/mcp' })).rejects.toBeInstanceOf(
+        RemoteAddressRefusedError,
+      );
     });
 
     it.each([
@@ -617,5 +649,83 @@ describe('getMcpConnection', () => {
         userRef: STANDALONE_REQUEST_CONTEXT.subject.id,
       }),
     ).resolves.toBeUndefined();
+  });
+
+  describe('the address check at connection time', () => {
+    async function seed(name: string, url: string): Promise<void> {
+      await mcpServerStore.upsertServer({
+        tenant_id: 'default',
+        name,
+        manifest: { type: 'remote', name, url, description: 'Address check case.' },
+        first_party: false,
+      });
+    }
+
+    function connectionFor(name: string) {
+      return getMcpConnection({
+        tenant_id: 'default',
+        name,
+        store: mcpServerStore,
+        userRef: STANDALONE_REQUEST_CONTEXT.subject.id,
+      });
+    }
+
+    it.each([
+      ['loopback', 'http://127.0.0.1:9999/mcp'],
+      ['the cloud metadata address', 'http://169.254.169.254/mcp'],
+      ['IPv6 loopback', 'http://[::1]:9999/mcp'],
+    ])('refuses a stored server at a %s address', async (_label, url) => {
+      const name = `refused-${_label.replaceAll(' ', '-')}`;
+      await seed(name, url);
+
+      const attempt = connectionFor(name);
+      await expect(attempt).rejects.toBeInstanceOf(RemoteAddressRefusedError);
+      await expect(attempt).rejects.toMatchObject({ statusCode: 422 });
+    });
+
+    it('refuses an address carrying credentials in the URL', async () => {
+      await seed('credentialed-mcp', 'https://user:secret@8.8.8.8/mcp');
+
+      await expect(connectionFor('credentialed-mcp')).rejects.toBeInstanceOf(RemoteAddressRefusedError);
+    });
+
+    it('resolves a stored server at a public address', async () => {
+      await seed('public-mcp', 'https://8.8.8.8/mcp');
+
+      await expect(connectionFor('public-mcp')).resolves.toMatchObject({ url: 'https://8.8.8.8/mcp' });
+    });
+
+    it('resolves a stored server at an address outside the refused classes', async () => {
+      // 192.0.2.1 is documentation space (TEST-NET-1), used because a private literal could
+      // collide with whichever private range the test machine itself sits on; home-network
+      // admission itself is pinned in the remoteAddress unit tests with the machine's own
+      // networks faked out.
+      await seed('lan-mcp', 'http://192.0.2.1:8080/mcp');
+
+      await expect(connectionFor('lan-mcp')).resolves.toMatchObject({ url: 'http://192.0.2.1:8080/mcp' });
+    });
+
+    it('refuses a server whose name does not resolve: it cannot be checked, so it is not dialled', async () => {
+      await seed('unresolvable-mcp', 'https://mcp.unresolvable.invalid.example/mcp');
+
+      const attempt = connectionFor('unresolvable-mcp');
+      await expect(attempt).rejects.toBeInstanceOf(RemoteAddressRefusedError);
+      await expect(attempt).rejects.toMatchObject({ statusCode: 422 });
+      await expect(attempt).rejects.toThrow('did not resolve');
+    });
+
+    it('resolves a loopback server the operator listed as their own origin', async () => {
+      await seed('own-loopback-mcp', 'http://127.0.0.1:9999/mcp');
+      const originalOrigins = configuration.FIRST_PARTY_MCP_ORIGINS;
+      configuration.FIRST_PARTY_MCP_ORIGINS = ['http://127.0.0.1:9999'];
+      try {
+        await expect(connectionFor('own-loopback-mcp')).resolves.toMatchObject({
+          url: 'http://127.0.0.1:9999/mcp',
+          first_party: false,
+        });
+      } finally {
+        configuration.FIRST_PARTY_MCP_ORIGINS = originalOrigins;
+      }
+    });
   });
 });

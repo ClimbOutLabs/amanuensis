@@ -36,13 +36,29 @@ Some steps only you can do: signing in, typing a code sent to your phone, a pict
 
 1. Open the live browser link Aman gives you in the chat.
 2. At the top, click the tab you want. Each button is one of Aman's open pages. If a page is missing, click **Refresh tabs**.
-3. Use the picture of the page just like the page itself: click it, scroll over it and type.
+3. Use the picture of the page just like the page itself: click it, scroll over it and type. The green dot at the top blinks while the picture is live.
 4. To type a code or a longer text, put it in the box under the picture and click **Type it**.
-5. To upload a file, pick it under "Upload a file into the page", then click the page's own upload or send button. Files up to 10 MB work.
-6. When you are finished, click **Done**.
-7. Go back to the chat and tell Aman you are done.
+5. To paste, click the picture, then press Ctrl+V (Cmd+V on a Mac). You can also click **Paste into page**.
+6. To copy, select text in the page, then press Ctrl+C (Cmd+C on a Mac) or click **Copy from page**. Ctrl+A (Cmd+A) selects everything in the field you clicked. Passwords can't be copied out of the page.
+7. To upload a file, click **Upload a file** and pick it, then click the page's own upload or send button. Files up to 10 MB work.
+8. When you are finished, click **Done**.
+9. Go back to the chat and tell Aman you are done.
 
 Aman carries on from where you left the page. A sign-in you finished stays signed in.
+
+## Sign in with your password manager
+
+Your password manager can't fill the picture of the page, because the picture has no real boxes. Use the name and password boxes under the picture instead.
+
+1. Under the picture, click **Sign in with your password manager** to open the boxes.
+2. In the picture, click the site's name or email box.
+3. In **Name or email**, fill your name from your password manager, then click **Put name in page**.
+4. In the picture, click the site's password box.
+5. In **Password**, fill your password from your password manager, then click **Put password in page**.
+
+Your password manager won't suggest a login in these boxes by itself, because it sees Aman's address, not the site's. Pick the site's login yourself. In Chrome, right-click the box and choose Passwords. In LastPass, click its icon in the box and search for the site. Never pick your Aman login here.
+
+What you put in these boxes goes only into the page. It is not saved, not written to any log, and never shown to Aman. Each box empties once you use it.
 
 ## When a human check won't let you through
 

@@ -90,13 +90,15 @@ export function steeredDestinationSay(input: {
   destinations: readonly { who: string; kind: 'address' | 'link'; source: ReadSource }[];
 }): string {
   const { assistant } = input;
+  // The card already shows every link it sends to, so one link is not named again; several are, to say which.
+  const oneLink = input.destinations.filter(({ kind }) => kind === 'link').length === 1;
   const sentences = input.destinations.map(({ who, kind, source }) => {
     if (source === 'reply') {
       const what = kind === 'link' ? 'which' : 'whose address';
       return `This goes to ${who}, ${what} was only in an earlier reply from ${assistant}, not in your own words.`;
     }
     if (kind === 'link') {
-      return `This goes to ${who}, which was in ${READ_PLACE[source]} ${assistant} read.`;
+      return `${assistant} found ${oneLink ? 'this link' : who} in ${READ_PLACE[source]} it read, not from you.`;
     }
     return source === 'email_sender'
       ? `This goes to ${who}, who sent the email ${assistant} just read.`

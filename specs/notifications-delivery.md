@@ -43,6 +43,7 @@ One server-side feed of things Aman wants a person to see, called deliveries. Ea
 - Reminders create a delivery, then write their line into the chat the reminder was set in, and the delivery links to that chat; a reply running in that chat holds the line, never the delivery; the old browser polling and per-browser storage are removed
 - A reminder set outside a chat, one saved before the origin chat was recorded, and one whose origin chat has been deleted create a delivery with no link and no chat line; no chat is made for them, and there is no shared Reminders chat anymore
 - A bell with the unread count in the left panel and a panel that lists deliveries; opening an item marks it seen
+- A reminder becomes a delivery only when it goes off. One still to come today shows in the right rail's Due list on Home, never in the bell, and the Reminders page stays the full list for managing reminders
 - Web Push with a service worker, per-device opt-in in Settings, and plain words for iPhone (Home Screen needed), unsupported and blocked browsers, and for each kind of failure while turning notices on or off
 - Every delivery and every channel attempt is written to the Activity log in plain words
 - Deliveries are included in data export and import, with an upgrade step and an older-shape fixture; push subscriptions are not exported
