@@ -14,6 +14,7 @@ import {
 } from '../../reminders/groupReminders.js';
 import { useReminderList } from '../../reminders/ReminderListContext.js';
 import type { ReminderItem } from '../../reminders/types.js';
+import { useOptionalServer } from '../../server/ServerContext.js';
 import { useOptionalShellMode } from '../../server/ShellModeContext.js';
 import { EmptyScreen } from '../EmptyScreen.js';
 import { cn } from '../lib/cn.js';
@@ -171,6 +172,8 @@ function ReminderGroup({
 export function RemindersPage() {
   const { api } = useReminderList();
   const shell = useOptionalShellMode();
+  const server = useOptionalServer();
+  const [openError, setOpenError] = useState<string | null>(null);
   const [list, setList] = useState<ReminderItem[] | null>(null);
   // Read once per load, so every row counts from the same moment.
   const [now, setNow] = useState(() => new Date());
@@ -203,9 +206,12 @@ export function RemindersPage() {
   const openChat = useCallback(
     (sessionId: string) => {
       if (shell === null) return;
-      openDeliveryLink({ shell, link: { type: 'chat', sessionId } });
+      // The chat is looked up before it opens; when it cannot open, the page says why in plain words.
+      void openDeliveryLink({ shell, server, link: { type: 'chat', sessionId } }).then(outcome => {
+        setOpenError(outcome.opened ? null : outcome.message);
+      });
     },
-    [shell],
+    [shell, server],
   );
 
   const retry = useCallback(() => {
@@ -248,6 +254,11 @@ export function RemindersPage() {
     <div className="flex h-full min-h-0 flex-col bg-primary-bg">
       <PageHeader helpAction title="Reminders" />
       <div className="min-h-0 flex-1 overflow-auto px-4 py-4">
+        {openError !== null ? (
+          <p role="alert" className="mx-auto mb-4 w-full max-w-3xl text-sm text-failure-bg">
+            {openError}
+          </p>
+        ) : null}
         {list === null && error === null ? (
           <div className="flex flex-col gap-2" role="status" aria-label="Loading reminders">
             {Array.from({ length: 5 }, (_, i) => (

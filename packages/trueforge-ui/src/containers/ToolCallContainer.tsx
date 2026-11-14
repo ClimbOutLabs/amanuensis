@@ -155,7 +155,7 @@ function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
     nextAppointmentId: null,
   });
 
-  const respond = (response: ToolApprovalResponse) => {
+  const respond = (response: ToolApprovalResponse & { fromAccount?: string }) => {
     if (part.approval == null) return;
 
     let approved: boolean | undefined;
@@ -179,9 +179,12 @@ function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
       approved,
       ...(optionId != null && optionId !== '__allow' && optionId !== '__deny' ? { optionId } : {}),
       ...('reason' in response && response.reason != null ? { reason: response.reason } : {}),
+      ...(response.fromAccount != null ? { fromAccount: response.fromAccount } : {}),
     };
 
-    if (isNestedReadonly || normalizedResponse.optionId === 'allow-chat') {
+    // The message part's own response narrows an approval to approved, option and reason, so an
+    // answer carrying an account pick rides the runtime path, which carries it to the server.
+    if (isNestedReadonly || normalizedResponse.optionId === 'allow-chat' || 'fromAccount' in normalizedResponse) {
       respondToNestedApproval(normalizedResponse);
       return;
     }
@@ -207,13 +210,14 @@ function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
     });
   };
 
-  const onSelectOption = (optionId: string, reason?: string) => {
-    if (optionId === 'allow-once') return respond({ optionId, approved: true });
-    if (optionId === 'allow-chat') return respond({ optionId, approved: true });
+  const onSelectOption = (optionId: string, reason?: string, fromAccount?: string) => {
+    const picked = fromAccount === undefined ? {} : { fromAccount };
+    if (optionId === 'allow-once') return respond({ optionId, approved: true, ...picked });
+    if (optionId === 'allow-chat') return respond({ optionId, approved: true, ...picked });
     if (optionId === 'deny') return respond({ optionId, approved: false, reason });
-    if (optionId === '__allow') return respond({ approved: true });
+    if (optionId === '__allow') return respond({ approved: true, ...picked });
     if (optionId === '__deny') return respond({ approved: false, reason });
-    return respond({ optionId, reason });
+    return respond({ optionId, reason, ...picked });
   };
 
   const options = buildApprovalOptions(part.approval?.options);
@@ -272,10 +276,14 @@ function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
         <EmailApprovalCard
           approvalId={approvalInfo.toolCallId}
           card={approvalInfo.card}
-          onApprove={() => onSelectOption(allowOnceId)}
+          onApprove={fromAccount => onSelectOption(allowOnceId, undefined, fromAccount)}
           onDeny={onDeny}
           onChangeRequest={onChangeRequest}
-          onSaveDraft={saveDraftOption === undefined ? undefined : () => onSelectOption(SAVE_DRAFT_OPTION_ID)}
+          onSaveDraft={
+            saveDraftOption === undefined
+              ? undefined
+              : fromAccount => onSelectOption(SAVE_DRAFT_OPTION_ID, undefined, fromAccount)
+          }
           disabled={!canManageSession}
         />
       );

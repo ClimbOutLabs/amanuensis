@@ -369,3 +369,6 @@ export const DUE_REMINDER = { text: 'Call the pharmacy', minutesAgo: 20 };
 export const MAILBOX_CHATS: readonly ChatKey[] = ['calendarEvent'];
 
 export const EXCHANGES: readonly DemoExchange[] = Object.values(CHATS);
+
+/** Words that only test data shows. No picture of the demo world may show one. */
+export const TEST_WORDS = ['scripted', 'inert', 'trueforge-default', 'run:', 'Request failed', 'test.example'];

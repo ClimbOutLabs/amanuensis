@@ -1,7 +1,9 @@
 import {
+  labeledNoteText,
   noteLabel,
   noteProvenance,
   noteRetainContent,
+  noteTextWithoutLabel,
   parseMarker,
   withoutNoteTrailer,
 } from '../../../../src/runtime/memory/memoryNotes';
@@ -31,6 +33,30 @@ describe('noteLabel', () => {
     );
     expect(noteLabel({ source: 'assistant_response', date: '2026-10-29', assistantName: undefined })).toBe(
       "From the assistant's reply, Oct 29",
+    );
+  });
+});
+
+describe('noteTextWithoutLabel', () => {
+  const sources = ['email', 'calendar', 'web', 'attachment', 'other', 'sent_mail', 'assistant_response'] as const;
+
+  it('removes every label noteLabel writes, with or without a name or a readable day', () => {
+    for (const source of sources) {
+      for (const assistantName of [undefined, 'Juno', "Mr. O'Hara"]) {
+        for (const date of ['2026-10-29', 'someday']) {
+          const text = labeledNoteText({ label: noteLabel({ source, date, assistantName }), text: 'Bring: two maps.' });
+          expect(noteTextWithoutLabel(text)).toBe('Bring: two maps.');
+        }
+      }
+    }
+  });
+
+  it('leaves text with no label as it is', () => {
+    expect(noteTextWithoutLabel('From what Nora said, Friday works: bring maps.')).toBe(
+      'From what Nora said, Friday works: bring maps.',
+    );
+    expect(noteTextWithoutLabel('Nora is away. From an email, found Oct 29: more.')).toBe(
+      'Nora is away. From an email, found Oct 29: more.',
     );
   });
 });

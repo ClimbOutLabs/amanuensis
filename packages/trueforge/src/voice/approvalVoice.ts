@@ -48,7 +48,7 @@ export interface PendingCard {
   tier: 1 | 2 | 3 | undefined;
 }
 
-type FieldRule = 'context' | 'empty' | 'shape';
+type FieldRule = 'context' | 'empty' | 'shape' | 'unspoken';
 
 /**
  * Every field of a card and what voice may do with it. A card is read aloud only when each field it
@@ -56,7 +56,9 @@ type FieldRule = 'context' | 'empty' | 'shape';
  * on the list, so a card carrying it stays on the screen until someone decides how it is read.
  * What a person hears is the shape, word for word. The card's own wording is `context`: it repeats the
  * shape, so anything it adds must be in the shape too. `destination` and `recipient` are further held to
- * the shape in `cardWordingMatchesShape`.
+ * the shape in `cardWordingMatchesShape`. `unspoken` is shown on the screen only and never changes what
+ * a "yes" approves: the other accounts a mail could go from are offered there, while a spoken "yes"
+ * approves the from account that was read out.
  */
 export const CARD_FIELD_RULES: Record<keyof Tier3Card, FieldRule> = {
   plain_what: 'context',
@@ -81,6 +83,8 @@ export const CARD_FIELD_RULES: Record<keyof Tier3Card, FieldRule> = {
   skill: 'empty',
   mail_new_recipients: 'empty',
   mail_draft: 'context',
+  mail_from: 'shape',
+  mail_from_choices: 'unspoken',
   skill_network: 'empty',
 };
 
@@ -227,8 +231,14 @@ function readableBody(card: Tier3Card): string[] | undefined {
   if (shapes.length !== 1) {
     return undefined;
   }
+  // The account the mail goes from is an address like the recipients, so it is read the same way.
+  const from = typeof card.mail_from === 'string' && card.mail_from !== '' ? card.mail_from : null;
+  if (from !== null && (email === null || email === undefined)) {
+    return undefined;
+  }
   if (email !== null && email !== undefined) {
     if (
+      (from !== null && !staysOnItsLine(from)) ||
       !fieldsAreListed({ shape: email, rules: EMAIL_FIELD_RULES }) ||
       ![...email.to, ...email.cc].every(mailbox => fieldsAreListed({ shape: mailbox, rules: MAILBOX_FIELD_RULES })) ||
       email.from_name === undefined ||
@@ -253,6 +263,7 @@ function readableBody(card: Tier3Card): string[] | undefined {
         : `I'll save a draft of this email to ${addresses}${copies}. It will not be sent.`,
       ...(email.reply_to === null ? [] : [`Replies will go to ${spokenAddress(email.reply_to)}.`]),
       ...(email.name_left_off ? ['The name was left off an address because it looked like an address.'] : []),
+      ...(from === null ? [] : [`From ${spokenAddress(from)}`]),
       ...email.to.map(mailbox => mailboxLine({ lead: 'To', mailbox })),
       ...email.cc.map(mailbox => mailboxLine({ lead: 'Copying', mailbox })),
       ...(email.from_name === null ? [] : [`It will be sent as: ${email.from_name}`]),

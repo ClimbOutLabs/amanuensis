@@ -24,6 +24,7 @@ import {
 } from './approvalCopy.js';
 import { ChangeRequestBox } from './ChangeRequestBox.js';
 import { countEmailWords, isLongEmailBody, splitEmailBody } from './emailBody.js';
+import { MailFromPicker, useMailFromPick } from './MailFromPicker.js';
 import type { SentinelApprovalCard, SentinelApprovalEmail, SentinelApprovalMailbox } from './types.js';
 
 export type EmailApprovalCardProps = {
@@ -32,12 +33,13 @@ export type EmailApprovalCardProps = {
   /** A card whose `email` is set. Anything else renders nothing. */
   card: SentinelApprovalCard;
   disabled?: boolean;
-  onApprove: () => void;
+  /** Approves; with the account picked on the card when the person changed it. */
+  onApprove: (fromAccount?: string) => void;
   onDeny: () => void;
   /** Passed only when the card may be revised. The text is the change the person typed. */
   onChangeRequest?: ((text: string) => void) | undefined;
   /** Passed only when the server offers a draft option for this approval. */
-  onSaveDraft?: (() => void) | undefined;
+  onSaveDraft?: ((fromAccount?: string) => void) | undefined;
 };
 
 export function mailboxListText(mailboxes: readonly SentinelApprovalMailbox[]): string {
@@ -147,13 +149,14 @@ export const EmailApprovalCard: FC<EmailApprovalCardProps> = ({
   // When the person answered. A send says "Sending" until the server's receipt replaces this card, because
   // only the send gate knows whether the message went out.
   const [answeredAt, setAnsweredAt] = useState<string | null>(null);
+  const fromPick = useMailFromPick(card);
   const email: SentinelApprovalEmail | null = card.email;
   if (email === null) return null;
 
   const sending = email.action === 'send';
   const sendNow = () => {
     setAnsweredAt(approvalTime(new Date()));
-    onApprove();
+    onApprove(fromPick.picked);
   };
   const facts: ApprovalFact[] = [
     ...(email.reply_in_thread === null
@@ -198,6 +201,14 @@ export const EmailApprovalCard: FC<EmailApprovalCardProps> = ({
         <p className="text-text-secondary">You have seen this before: {card.why_asked_again}</p>
       )}
 
+      {fromPick.choices.length > 1 && (
+        <MailFromPicker
+          choices={fromPick.choices}
+          value={fromPick.value}
+          onChange={fromPick.onChange}
+          disabled={disabled}
+        />
+      )}
       <ApprovalFacts facts={facts} />
       {email.name_left_off === true && (
         <p className="text-text-primary">The name was left off an address because it looked like an address.</p>
@@ -255,7 +266,11 @@ export const EmailApprovalCard: FC<EmailApprovalCardProps> = ({
             </ApprovalButton>
           )}
           {sending && onSaveDraft !== undefined && (
-            <ApprovalButton title={EMAIL_CHOICES.saveDraft.hint} onClick={onSaveDraft} disabled={disabled}>
+            <ApprovalButton
+              title={EMAIL_CHOICES.saveDraft.hint}
+              onClick={() => onSaveDraft(fromPick.picked)}
+              disabled={disabled}
+            >
               {EMAIL_CHOICES.saveDraft.label}
             </ApprovalButton>
           )}

@@ -8,6 +8,7 @@ import configuration from '../config';
 import {
   callBrowserSidecar,
   callBrowserSidecarForOwner,
+  LiveCloseReplySchema,
   LiveCopyReplySchema,
   LiveFrameReplySchema,
   LiveInputReplySchema,
@@ -120,7 +121,7 @@ export function createBrowserLiveRouter(deps: BrowserLiveRouterDeps) {
   });
 
   // Every act below drives the person's own tab, so a form posted from another site must not reach it.
-  for (const path of ['/frame', '/input', '/copy', '/upload', '/takeover']) {
+  for (const path of ['/frame', '/input', '/copy', '/close', '/upload', '/takeover']) {
     app.use(path, requireJsonOrSameOrigin());
   }
 
@@ -188,6 +189,23 @@ export function createBrowserLiveRouter(deps: BrowserLiveRouterDeps) {
       case 'closed':
         return c.json({ error: { message: 'That tab has closed. Ask Aman to open the page again.' } }, 409);
     }
+  });
+
+  // The person ends the session: the chat's tab closes, and Aman has to open a page again to go on.
+  app.post('/close', async c => {
+    const body: unknown = await c.req.json().catch(() => undefined);
+    const request = FrameRequestSchema.safeParse(body);
+    if (!request.success) {
+      return c.json({ error: { message: 'That request to end the session was not understood. Try again.' } }, 400);
+    }
+    const tab: BrowserTabRef = { ...profileOf(c), chat_id: request.data.tab };
+    const result = await callBrowserSidecar({ path: '/live/close', tab, schema: LiveCloseReplySchema });
+    if (!result.ok) {
+      deps.logger.warn('browser live close failed', { message: result.message });
+      return c.json({ error: { message: result.message } }, 502);
+    }
+    // A tab that had already closed is ended all the same.
+    return c.json({ data: { status: 'ok' } }, 200);
   });
 
   app.post('/takeover', async c => {

@@ -104,13 +104,13 @@ An incognito chat can't add a skill. A scheduled run can't add one either, becau
 
 The sandbox is the sealed-off space on your computer where Aman runs code.
 
-In the sandbox, a command that only reads inside the workspace runs without asking. That's still true when several reads are joined, as in `cd repo && git status`. Reads are listing files, reading a file or part of one, searching files, and looking at git history. A file named by its full path counts the same as one named from the workspace, so Aman reading an installed skill's instructions doesn't ask. A full path outside the workspace still asks.
+In the sandbox, a command that only reads inside the workspace runs without asking. That's still true when several reads are joined, as in `cd repo && git status`. That's also true when one read feeds the next, as in a search whose results are cut to the first 60 lines. Reads are listing files, reading a file or part of one, searching files, counting or sorting lines, and looking at git history. Writing the results to a file still asks. A file named by its full path counts the same as one named from the workspace, so Aman reading an installed skill's instructions doesn't ask. A full path outside the workspace still asks.
 
 Every other command asks first, unless the **Sandbox** switch covers it. Answering **Always allow in this chat** on a command covers running that same command again in this chat, and nothing else.
 
 Installing a package asks first on every sandbox. The **Sandbox** switch never covers it.
 
-A script that ships with a skill you installed runs without asking, with or without the switch, while the sandbox has no internet. It asks where the sandbox can reach the internet, including a chat that uses a skill you let reach its own sites. It also asks when Aman edited a file in that skill's folder with its file tools earlier in the chat. A script that is a link to a file outside the skill's folder doesn't run.
+A script that ships with a skill you installed runs without asking, with or without the switch, while the sandbox has no internet. It asks where the sandbox can reach the internet, including a chat that uses a skill you let reach its own sites. It also asks when Aman edited a file in that skill's folder with its file tools earlier in the chat. A script that is a link to a file outside the skill's folder doesn't run. Code Aman writes for `run_code` that names a skill's folder is refused before any card, because `run_code` can't see that folder; Aman runs the skill's own script instead.
 
 ??? note "What the Sandbox switch covers"
 
@@ -183,7 +183,7 @@ A scheduled run has nobody watching it, so it never sends anything by itself. Th
 ??? note "Every rule for scheduled runs"
 
     - It can read and search, the same as a chat.
-    - It can make and change any space without asking, so a list it keeps for you stays up to date. Every change keeps a version you can ask Aman to bring back. Each change a run saves is also one line in the activity log, under **Settings**, **Audit**.
+    - It can make and change any space without asking, so a list it keeps for you stays up to date. Every change keeps a version you can ask Aman to bring back. Each change a run saves is also one line in the activity log, under **Settings**, **Activity log**.
     - Aman can't delete a space.
     - A space only keeps a clickable link that you gave or that a search returned. A link that only an email or a web page supplied is kept as plain text.
     - Any action that would show a card in a chat is held instead. It doesn't run, and the model is told it was saved for you.

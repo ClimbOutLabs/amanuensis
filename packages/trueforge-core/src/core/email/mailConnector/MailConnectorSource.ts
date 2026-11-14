@@ -42,7 +42,7 @@ const MAX_CACHED_CHATS = 1000;
 
 const ACCOUNTS_UNREADABLE =
   'The list of Email accounts could not be read, so nothing was done. Try again in a minute, and tell the person if it keeps failing.';
-const ACCOUNT_NOTE = 'Leave it out when there is one account; it is filled in for you.';
+const ACCOUNT_NOTE = 'Leave it out to use the default account; it is filled in for you.';
 const MAILBOX_NOTE = `A name from ${MAIL_MAILBOX_LIST_TOOL_NAME}. A common name such as Sent, Drafts, Trash or Spam is matched to this account's own folder.`;
 /** The sidecar's catch-all for a mail server request that failed; its own words say nothing about what to do. */
 const PROVIDER_FAILURE_WORDS = 'provider_failure';
@@ -143,11 +143,21 @@ function plainRecipientRefusal(response: CallToolResponse): CallToolResponse {
 }
 
 /**
- * Keeps each chat's Email account names per connector address. A fresh read replaces what is kept, and a
+ * What one read of the Email accounts settles for a chat: every connected account, which of them is
+ * the default, and which of them this chat's persona may use (null when the persona is not limited).
+ */
+export interface MailAccountSnapshot {
+  names: readonly string[];
+  default_name: string | null;
+  allowed: readonly string[] | null;
+}
+
+/**
+ * Keeps each chat's Email account snapshot per connector address. A fresh read replaces what is kept, and a
  * failed read is not kept, so the next call reads again.
  */
 export class MailAccountDirectory {
-  readonly #byChat = new Map<string, Promise<readonly string[]>>();
+  readonly #byChat = new Map<string, Promise<MailAccountSnapshot>>();
 
   accounts({
     chat_id,
@@ -158,8 +168,8 @@ export class MailAccountDirectory {
     chat_id: string;
     connector_url: string;
     fresh: boolean;
-    read: () => Promise<readonly string[]>;
-  }): Promise<readonly string[]> {
+    read: () => Promise<MailAccountSnapshot>;
+  }): Promise<MailAccountSnapshot> {
     const key = JSON.stringify([chat_id, connector_url]);
     const cached = this.#byChat.get(key);
     if (cached !== undefined && !fresh) {
@@ -181,8 +191,12 @@ export class MailAccountDirectory {
   }
 }
 
-/** Reads the sidecar's account names. Throws when the list cannot be read or names no account. */
-export async function readMailAccountNames(source: Pick<ToolSource, 'callTool'>): Promise<readonly string[]> {
+/**
+ * Reads the account snapshot the sidecar settles: the connected account names. The sidecar names no
+ * default and no persona limit, so both stay unset here; the host layers its own routing on top.
+ * Throws when the list cannot be read or names no account.
+ */
+export async function readMailAccountSnapshot(source: Pick<ToolSource, 'callTool'>): Promise<MailAccountSnapshot> {
   const response = await source.callTool({ name: MAIL_ACCOUNT_LIST_TOOL_NAME, arguments: {} });
   if (!isCallToolResponseResult(response) || response.result.isError === true) {
     throw new Error('The Email sidecar did not return its account list.');
@@ -191,7 +205,7 @@ export async function readMailAccountNames(source: Pick<ToolSource, 'callTool'>)
   if (names.length === 0) {
     throw new Error('The Email sidecar listed no account.');
   }
-  return names;
+  return { names, default_name: null, allowed: null };
 }
 
 /**
@@ -200,7 +214,7 @@ export async function readMailAccountNames(source: Pick<ToolSource, 'callTool'>)
  */
 export class MailConnectorSource implements ToolSource {
   readonly #inner: ToolSource;
-  readonly #accounts: (options: { fresh: boolean }) => Promise<readonly string[]>;
+  readonly #accounts: (options: { fresh: boolean }) => Promise<MailAccountSnapshot>;
   readonly #now: () => Date;
   readonly #timeZone: string | undefined;
 
@@ -211,8 +225,8 @@ export class MailConnectorSource implements ToolSource {
     timeZone,
   }: {
     inner: ToolSource;
-    /** The account names; `fresh` reads them again instead of using a kept list. */
-    accounts: (options: { fresh: boolean }) => Promise<readonly string[]>;
+    /** The account snapshot; `fresh` reads it again instead of using a kept one. */
+    accounts: (options: { fresh: boolean }) => Promise<MailAccountSnapshot>;
     now: () => Date;
     /** The user's IANA time zone, in which a date the model gives without an offset is read; UTC when unknown. */
     timeZone: string | undefined;
@@ -267,6 +281,7 @@ export class MailConnectorSource implements ToolSource {
     const account = await this.#accountFor({
       requested: given[MAIL_ACCOUNT_ARGUMENT],
       reads_only: isMailReadToolName(params.name),
+      picked: approvalDecision?.status === 'allow' ? approvalDecision.from_account : undefined,
     });
     if ('refused' in account) {
       return refusal(account.refused);
@@ -342,7 +357,7 @@ export class MailConnectorSource implements ToolSource {
     return { args: resolved };
   }
 
-  async #readAccounts(fresh: boolean): Promise<readonly string[] | undefined> {
+  async #readAccounts(fresh: boolean): Promise<MailAccountSnapshot | undefined> {
     try {
       return await this.#accounts({ fresh });
     } catch {
@@ -351,41 +366,81 @@ export class MailConnectorSource implements ToolSource {
   }
 
   /**
-   * The account the call goes to. A name left out is filled in when there is one account. A name not on the
-   * list is refused, except that a read with one account goes to that account. Anything but a read uses a
-   * fresh list, and a kept list is read again before a name is refused.
+   * The account the call goes to. The person's pick on an approval card wins over everything: an
+   * approval stays with the account it was given on. A name left out is filled with the default
+   * account, or the first usable one when the default is not usable in this chat. A name outside
+   * this chat persona's accounts is refused, and a read with one usable account goes to that
+   * account even when the name is off. Anything but a read uses a fresh list, and a kept list is
+   * read again before a name is refused.
    */
   async #accountFor({
     requested,
     reads_only,
+    picked,
   }: {
     requested: unknown;
     reads_only: boolean;
+    /** The account the person picked on the approval card for this call, when they picked one. */
+    picked: string | undefined;
   }): Promise<{ name: string } | { refused: string }> {
-    let names = await this.#readAccounts(!reads_only);
-    if (names !== undefined && reads_only && !isAccountLeftOut(requested) && !names.some(name => name === requested)) {
-      names = await this.#readAccounts(true);
+    let snapshot = await this.#readAccounts(!reads_only);
+    if (
+      snapshot !== undefined &&
+      reads_only &&
+      !isAccountLeftOut(requested) &&
+      !snapshot.names.some(name => name === requested)
+    ) {
+      snapshot = await this.#readAccounts(true);
     }
-    const [only, ...others] = names ?? [];
-    if (names === undefined || only === undefined) {
+    if (snapshot === undefined || snapshot.names.length === 0) {
       return { refused: ACCOUNTS_UNREADABLE };
     }
-    const listed = names.map(name => `'${name}'`).join(', ');
-    if (isAccountLeftOut(requested)) {
-      return others.length === 0
-        ? { name: only }
-        : { refused: `Say which Email account to use. The accounts are ${listed}.` };
+    const usable =
+      snapshot.allowed === null
+        ? snapshot.names
+        : snapshot.names.filter(name => snapshot.allowed?.includes(name) === true);
+    const listed = usable.map(name => `'${name}'`).join(', ');
+    if (picked !== undefined) {
+      return usable.some(name => name === picked)
+        ? { name: picked }
+        : {
+            refused:
+              'The account picked on the approval card cannot be used for this send, so nothing was sent. ' +
+              `The accounts this chat can use are ${listed}.`,
+          };
     }
-    const match = names.find(name => name === requested);
+    if (usable.length === 0) {
+      return {
+        refused: 'This persona cannot use any of the connected Email accounts, so nothing was done.',
+      };
+    }
+    const [first] = usable;
+    if (first === undefined) {
+      return { refused: ACCOUNTS_UNREADABLE };
+    }
+    if (isAccountLeftOut(requested)) {
+      return {
+        name:
+          snapshot.default_name !== null && usable.some(name => name === snapshot.default_name)
+            ? snapshot.default_name
+            : first,
+      };
+    }
+    const match = usable.find(name => name === requested);
     if (match !== undefined) {
       return { name: match };
     }
-    if (reads_only && others.length === 0) {
-      return { name: only };
+    if (reads_only && usable.length === 1) {
+      return { name: first };
+    }
+    if (typeof requested === 'string' && snapshot.names.some(name => name === requested)) {
+      return {
+        refused: `This persona cannot use the Email account '${requested}'. The accounts it can use are ${listed}.`,
+      };
     }
     const named = typeof requested === 'string' ? `named '${requested}'` : 'by that name';
     return {
-      refused: `There is no Email account ${named}. The accounts are ${listed}; use one of these names, or leave the name out when there is one account.`,
+      refused: `There is no Email account ${named}. The accounts are ${listed}; use one of these names, or leave the name out to use the default account.`,
     };
   }
 }

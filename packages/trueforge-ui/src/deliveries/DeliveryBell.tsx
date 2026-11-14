@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import {
   auiButtonClass,
@@ -11,6 +11,7 @@ import {
 import { cn } from '../atoms/lib/cn.js';
 import { Icon } from '../icons/Icon.js';
 import { reminderRelativeWords } from '../reminders/groupReminders.js';
+import { useOptionalServer } from '../server/ServerContext.js';
 import { useOptionalShellMode } from '../server/ShellModeContext.js';
 import { useOptionalDeliveries } from './DeliveriesContext.js';
 import { openDeliveryLink } from './openDelivery.js';
@@ -112,9 +113,16 @@ function DeliveryRow({ item, now, onOpen }: { item: DeliveryItem; now: Date; onO
 export function DeliveryBell({ onNavigate }: { onNavigate?: () => void }) {
   const deliveries = useOptionalDeliveries();
   const shell = useOptionalShellMode();
+  const server = useOptionalServer();
   const rootRef = useRef<HTMLDivElement>(null);
+  const [openError, setOpenError] = useState<string | null>(null);
   const open = deliveries?.panelOpen === true;
   const setPanelOpen = deliveries?.setPanelOpen;
+
+  // A message about an item that would not open belongs to the open panel; it goes with it.
+  useEffect(() => {
+    if (!open) setOpenError(null);
+  }, [open]);
 
   useEffect(() => {
     if (!open || setPanelOpen === undefined) return;
@@ -139,11 +147,18 @@ export function DeliveryBell({ onNavigate }: { onNavigate?: () => void }) {
 
   const onOpen = (item: DeliveryItem) => {
     void markSeen([item.id]);
-    if (item.link !== null && shell !== null) {
-      deliveries.setPanelOpen(false);
-      openDeliveryLink({ shell, link: item.link });
-      onNavigate?.();
-    }
+    if (item.link === null || shell === null) return;
+    // The panel stays open until the chat is really open; when it cannot open, the panel
+    // stays and says why, in plain words.
+    void openDeliveryLink({ shell, server, link: item.link }).then(outcome => {
+      if (outcome.opened) {
+        setOpenError(null);
+        deliveries.setPanelOpen(false);
+        onNavigate?.();
+      } else {
+        setOpenError(outcome.message);
+      }
+    });
   };
 
   return (
@@ -194,6 +209,11 @@ export function DeliveryBell({ onNavigate }: { onNavigate?: () => void }) {
               </button>
             ) : null}
           </div>
+          {openError !== null ? (
+            <p role="alert" className="border-border text-text-secondary border-b px-3 py-2 text-xs">
+              {openError}
+            </p>
+          ) : null}
           {items.length === 0 ? (
             <div className="flex flex-col items-center gap-2 px-6 py-8 text-center">
               <span

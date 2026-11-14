@@ -38,6 +38,8 @@ function parsePersona(data: unknown): Persona {
     aliases: persona.aliases,
     instructions: persona.instructions,
     model_name: persona.model_name,
+    ...(isStringArray(persona.mail_accounts) ? { mail_accounts: persona.mail_accounts } : {}),
+    ...(isStringArray(persona.calendar_accounts) ? { calendar_accounts: persona.calendar_accounts } : {}),
   };
 }
 

@@ -18,6 +18,12 @@ import {
   updateSkillNetworkApprovalRoute,
   updateSkillNetworkDeniedHostRoute,
 } from '../routes/skillRoutes';
+import {
+  SkillCodePinRefusedError,
+  forgetCachedSkillCode,
+  resolveSkillCodePin,
+  type SkillCodeResolver,
+} from '../sandbox/skillnet/skillNetworkGrant';
 import { skillNetworkTokens } from '../sandbox/skillnet/skillNetworkTokens';
 import type {
   AvailableSkill,
@@ -41,6 +47,8 @@ export interface SkillsRouterDeps<TTransaction> {
   resolveSkillStore: ResolveSkillStore<TTransaction>;
   withTransaction: WithTransaction<TTransaction>;
   resolveRequestContext: ResolveRequestContext;
+  /** Reads the commit a git skill's ref names now, for pinning an approval to the code. */
+  resolveSkillCodeSha?: SkillCodeResolver | undefined;
 }
 
 function toConfiguredSkill(record: SkillRecord): ConfiguredSkill {
@@ -203,14 +211,27 @@ export function createSkillsRouter<TTransaction>(deps: SkillsRouterDeps<TTransac
         422,
       );
     }
+    // The approval is pinned to the skill's code as it stands now; code nobody could
+    // identify is never approved, so an unreadable code version refuses the approval.
+    let code_sha: string | null;
+    try {
+      code_sha = await resolveSkillCodePin({ manifest: record.manifest, resolve: deps.resolveSkillCodeSha });
+    } catch (error) {
+      if (error instanceof SkillCodePinRefusedError) {
+        return c.json({ error: { message: error.message } }, 422);
+      }
+      throw error;
+    }
     const updated = await deps.resolveSkillStore(c).setSkillNetworkApproval({
       tenant_id: requestContext.tenant_id,
       name,
       hosts: [...declared],
+      code_sha,
     });
     if (updated === undefined) {
       return c.json({ error: { message: `No skill with this name: ${name}` } }, 404);
     }
+    forgetCachedSkillCode({ skill_name: name });
     return c.json(
       {
         data: toSkillNetworkApproval(updated, {
@@ -241,9 +262,46 @@ export function createSkillsRouter<TTransaction>(deps: SkillsRouterDeps<TTransac
     const { name } = c.req.valid('param');
     const body: UpdateSkillNetworkHostRequest = c.req.valid('json');
     const requestContext = deps.resolveRequestContext(c);
-    const updated = await setHostDecision(c, name, body.host, 'allowed');
+    const record = await findSkillRecord(deps, c, name);
+    if (record === undefined) {
+      return c.json({ error: { message: `No skill with this name: ${name}` } }, 404);
+    }
+    // Allowing a site on a skill with no approval and no pin yet binds the allowance to
+    // the skill's code as it stands: the pin is read before anything is stored, and a code
+    // version that cannot be read refuses the allowance, like approving.
+    let code_sha: string | null = null;
+    if (record.network_approval === null && record.network_approval_code_sha === null) {
+      try {
+        code_sha = await resolveSkillCodePin({ manifest: record.manifest, resolve: deps.resolveSkillCodeSha });
+        if (code_sha === null) {
+          // A manifest that names no code version cannot be pinned; refuse like an
+          // unreadable one rather than store an unbound allowance.
+          throw new SkillCodePinRefusedError();
+        }
+      } catch (error) {
+        if (error instanceof SkillCodePinRefusedError) {
+          return c.json({ error: { message: error.message } }, 422);
+        }
+        throw error;
+      }
+    }
+    const decided = await setHostDecision(c, name, body.host, 'allowed');
+    if (decided === undefined) {
+      return c.json({ error: { message: `No skill with this name: ${name}` } }, 404);
+    }
+    const updated =
+      code_sha === null
+        ? decided
+        : await deps.resolveSkillStore(c).setSkillNetworkCodePin({
+            tenant_id: requestContext.tenant_id,
+            name,
+            code_sha,
+          });
     if (updated === undefined) {
       return c.json({ error: { message: `No skill with this name: ${name}` } }, 404);
+    }
+    if (code_sha !== null) {
+      forgetCachedSkillCode({ skill_name: name });
     }
     return c.json(
       {
@@ -306,10 +364,13 @@ export function createSkillsRouter<TTransaction>(deps: SkillsRouterDeps<TTransac
   const deleteNetworkApprovalHandler: RouteHandler<typeof deleteSkillNetworkApprovalRoute> = async c => {
     const { name } = c.req.valid('param');
     const requestContext = deps.resolveRequestContext(c);
+    // Removing the approval leaves any per-site allowances standing, still bound to the
+    // pin; the store clears the pin only when no grants remain.
     const updated = await deps.resolveSkillStore(c).setSkillNetworkApproval({
       tenant_id: requestContext.tenant_id,
       name,
       hosts: null,
+      code_sha: null,
     });
     if (updated === undefined) {
       return c.json({ error: { message: `No skill with this name: ${name}` } }, 404);

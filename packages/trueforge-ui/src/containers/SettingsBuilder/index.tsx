@@ -185,7 +185,7 @@ const TruefoundrySettingsBuilder = () => {
     }
     if (hasSentinel) {
       baseSections.push({ id: 'permissions', label: 'Permissions', icon: 'lock' });
-      baseSections.push({ id: 'audit', label: 'Audit', icon: 'clock-rotate-left' });
+      baseSections.push({ id: 'audit', label: 'Activity log', icon: 'clock-rotate-left' });
     }
     if (hasDeliveries) {
       baseSections.push({ id: 'reach-me', label: 'Reach me', icon: 'bell' });

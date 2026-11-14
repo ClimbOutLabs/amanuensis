@@ -1,3 +1,4 @@
+import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { createLogger } from 'winston';
 import {
   RemoteMCP,
@@ -6,6 +7,7 @@ import {
   defaultSentinelServices,
   type ToolSource,
 } from '../../../src/core';
+import { CALDAV_UNKNOWN_ID_NOTE } from '../../../src/core/calendar/caldav/toolResults';
 import { allowsChatApproval, allowsToolGrant } from '../../../src/core/mcp/approvalGrant';
 import { createToolCallMemoState, executeToolCalls } from '../../../src/core/mcp/executeToolCalls';
 import { toolResultResponse, type ToolSchema } from '../../../src/core/mcp/IMCPServer';
@@ -35,13 +37,15 @@ function makeToolSet(params: {
   requireApprovalForTools?: string[];
   firstParty?: boolean;
   serverName?: string;
+  answer?: CallToolResult;
 }): ToolSet {
   mockConnect.mockImplementation(() =>
     Promise.resolve({
       transportType: 'streamable-http' as const,
       sessionId: null,
       listTools: () => Promise.resolve({ tools: params.tools }),
-      callTool: callParams => Promise.resolve({ content: [{ type: 'text', text: `called ${callParams.name}` }] }),
+      callTool: callParams =>
+        Promise.resolve(params.answer ?? { content: [{ type: 'text', text: `called ${callParams.name}` }] }),
       close: () => Promise.resolve(),
     }),
   );
@@ -641,6 +645,29 @@ describe("the operator's own Email sidecar, with the annotations the mail server
     });
     const info = await calendar.toolCallInfo({ name: 'list_events', arguments: {} });
     expect(info).toMatchObject({ tier: 1, tier_reason: 'caldav_private_read', is_approval_required: false });
+  });
+
+  it('answers a made-up calendar id with the one thing to do next', async () => {
+    const getEvent: ToolSchema = {
+      name: 'get_event',
+      description: 'Reads one event.',
+      inputSchema: schema,
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    };
+    const calendar = makeToolSet({
+      tools: [getEvent],
+      services: servicesWithGrants([]),
+      firstParty: true,
+      serverName: 'Calendar',
+      answer: {
+        isError: true,
+        content: [{ type: 'text', text: 'caldav-mcp: "guess@caldav-mcp" is not an id this server issued.' }],
+      },
+    });
+    const response = await calendar.callTool({ name: 'get_event', arguments: { id: 'guess@caldav-mcp' } });
+    expect(response).toMatchObject({
+      result: { isError: true, content: [{ type: 'text', text: CALDAV_UNKNOWN_ID_NOTE }] },
+    });
   });
 
   it('still asks before sending, and no answer covers a send', async () => {
