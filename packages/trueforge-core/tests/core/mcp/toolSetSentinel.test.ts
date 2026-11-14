@@ -12,10 +12,10 @@ import { allowsChatApproval, allowsToolGrant } from '../../../src/core/mcp/appro
 import { createToolCallMemoState, executeToolCalls } from '../../../src/core/mcp/executeToolCalls';
 import { toolResultResponse, type ToolSchema } from '../../../src/core/mcp/IMCPServer';
 import { connectRemoteMcp } from '../../../src/core/mcp/remoteMcpClient';
-import { DeferredTool } from '../../../src/core/runtime/DeferredTool';
 import type { ToolSelectorConfig } from '../../../src/core/mcp/ToolSelectorPolicy';
 import type { AuditRecordInput } from '../../../src/core/permissions/audit';
 import type { SentinelServices } from '../../../src/core/permissions/context';
+import { DeferredTool } from '../../../src/core/runtime/DeferredTool';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 
 jest.mock('../../../src/core/mcp/remoteMcpClient', () => {
@@ -25,6 +25,7 @@ jest.mock('../../../src/core/mcp/remoteMcpClient', () => {
   return { __esModule: true as const, ...actual, connectRemoteMcp: jest.fn() };
 });
 
+import { everyMailDraftApproved } from '../fixtures/approvedMailDrafts';
 const mockConnect = jest.mocked(connectRemoteMcp);
 const noopLogger = createLogger({ silent: true });
 const SERVER_NAME = 'notes';
@@ -103,7 +104,11 @@ const destructiveRead: ToolSchema = {
 const unannotated: ToolSchema = { name: 'poke_note', description: 'Does something.', inputSchema: schema };
 
 function servicesWithGrants(toolNames: string[]): SentinelServices {
-  const services = defaultSentinelServices({ pinned_path: '/usr/bin:/bin' });
+  // The draft step counts as done here, so a send reaches its own card; the draft-first tests use a real record.
+  const services = {
+    ...defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }),
+    mail_approved_drafts: everyMailDraftApproved,
+  };
   for (const tool_name of toolNames) {
     void services.tool_grants.recordToolGrant({
       tenant_id: 't1',
@@ -668,6 +673,82 @@ describe("the operator's own Email sidecar, with the annotations the mail server
     expect(response).toMatchObject({
       result: { isError: true, content: [{ type: 'text', text: CALDAV_UNKNOWN_ID_NOTE }] },
     });
+  });
+
+  it('reads the message a forward names, and shows it on the card', async () => {
+    const forwardTool: ToolSchema = { ...sendTool, name: 'forward_email', description: 'Forwards an email.' };
+    const email = makeToolSet({
+      tools: [forwardTool],
+      services: servicesWithGrants([]),
+      firstParty: true,
+      serverName: 'Email',
+      answer: {
+        content: [],
+        structuredContent: {
+          emails: [
+            {
+              email_id: '41',
+              sender: 'Pippa Reed <pippa@example.com>',
+              subject: 'Roof repair quote',
+              body: 'The quote is 1,200 for the whole roof.',
+              attachments: ['quote.pdf'],
+            },
+          ],
+        },
+      },
+    });
+    const forward = await email.toolCallInfo({
+      name: 'forward_email',
+      arguments: { email_id: '41', recipients: ['dana@example.org'] },
+    });
+    expect(forward.is_approval_required).toBe(true);
+    expect(forward.tier3_card?.email).toMatchObject({
+      subject: 'Fwd: Roof repair quote',
+      forwards: {
+        from: 'Pippa Reed <pippa@example.com>',
+        body: 'The quote is 1,200 for the whole roof.',
+        attachments: ['quote.pdf'],
+      },
+    });
+  });
+
+  it('asks about a forward with the plain listing when its message cannot be read', async () => {
+    const forwardTool: ToolSchema = { ...sendTool, name: 'forward_email', description: 'Forwards an email.' };
+    const email = makeToolSet({
+      tools: [forwardTool],
+      services: servicesWithGrants([]),
+      firstParty: true,
+      serverName: 'Email',
+    });
+    const forward = await email.toolCallInfo({
+      name: 'forward_email',
+      arguments: { email_id: '41', recipients: ['dana@example.org'] },
+    });
+    expect(forward.is_approval_required).toBe(true);
+    expect(forward.tier3_card?.email ?? null).toBeNull();
+    expect(forward.tier3_card?.outbound_text).toContain('41');
+  });
+
+  it('keeps a forward as a draft on its first approval, and sends it on the second', async () => {
+    const forwardTool: ToolSchema = { ...sendTool, name: 'forward_email', description: 'Forwards an email.' };
+    const email = makeToolSet({
+      tools: [forwardTool],
+      services: {
+        ...defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }),
+        mail_listed_addresses: () => Promise.resolve(['dana@example.org']),
+      },
+      firstParty: true,
+      serverName: 'Email',
+    });
+    const call = { name: 'forward_email', arguments: { email_id: '41', recipients: ['dana@example.org'] } };
+
+    expect(await email.toolCallInfo(call)).toMatchObject({ tier_reason: 'mail_draft', is_approval_required: true });
+    const kept = await email.callTool(call, { status: 'allow' });
+    expect(kept).toMatchObject({ result: { content: [{ text: expect.stringContaining('kept as a draft') }] } });
+
+    expect(await email.toolCallInfo(call)).toMatchObject({ tier_reason: 'mail_send', is_approval_required: true });
+    const sent = await email.callTool(call, { status: 'allow' });
+    expect(sent).toMatchObject({ result: { content: [{ text: 'called forward_email' }] } });
   });
 
   it('still asks before sending, and no answer covers a send', async () => {
