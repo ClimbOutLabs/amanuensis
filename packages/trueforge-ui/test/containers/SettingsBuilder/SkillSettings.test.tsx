@@ -438,7 +438,7 @@ describe('SkillSettings network approval', () => {
       ),
     ).toBeTruthy();
     // GitHub cannot send mail, so no sending line appears for it.
-    expect(screen.queryByText(/will be able to send email as you/)).toBeNull();
+    expect(screen.queryByText(/not each email it sends/)).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: 'Allow' }));
 
@@ -540,7 +540,7 @@ describe('SkillSettings network approval', () => {
 
     expect(
       await screen.findByText(
-        'One of these sites can send email. This skill will be able to send email as you, without asking each time.',
+        'One of these sites can send email. You approve each run of the skill, not each email it sends.',
       ),
     ).toBeTruthy();
   });
@@ -598,7 +598,7 @@ describe('SkillSettings website check', () => {
     );
     fireEvent.click(await screen.findByRole('button', { name: 'Enable Code Review' }));
     await screen.findByText('It sends requests to these websites:');
-    expect(screen.getByText(/send email as you, without asking each time/)).toBeInTheDocument();
+    expect(screen.getByText(/not each email it sends/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(host.added).toEqual([]);
 

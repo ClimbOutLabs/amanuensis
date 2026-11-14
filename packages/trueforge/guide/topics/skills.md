@@ -99,7 +99,7 @@ To change an answer later, open Settings, then Skills. A skill that names sites 
 
 !!! warning
 
-    A skill with internet access can send any of your data to the sites it lists. Only allow this for a skill you trust. If a site can send email, Aman says so, because the skill could then send email as you without asking each time.
+    A skill with internet access can send any of your data to the sites it lists. Only allow this for a skill you trust. If a site can send email, Aman says so. Each time the skill runs, it asks you first. Once you allow a run, it does not ask again for each email that run sends.
 
 ## Good to know
 

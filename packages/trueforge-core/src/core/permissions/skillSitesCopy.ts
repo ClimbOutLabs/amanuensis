@@ -4,4 +4,4 @@ export const SKILL_SITES_DATA_WARNING =
 
 /** The added warning when one of the sites can send email as the person. */
 export const SKILL_SITES_SEND_WARNING =
-  'One of these sites can send email. This skill will be able to send email as you, without asking each time.';
+  'One of these sites can send email. You approve each run of the skill, not each email it sends.';
