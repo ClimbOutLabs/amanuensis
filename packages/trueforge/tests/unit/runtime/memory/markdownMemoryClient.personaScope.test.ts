@@ -1,4 +1,4 @@
-import { access, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import {
@@ -7,7 +7,7 @@ import {
   type EmbeddingModelPhase,
 } from '../../../../src/runtime/memory/embeddingModel';
 import { EmbeddingSubsystem } from '../../../../src/runtime/memory/embeddingRetrieval';
-import { EmbeddingStore, hashEntryText } from '../../../../src/runtime/memory/embeddingStore';
+import { EmbeddingStore, hashEntryText, LOG_VECTORS_FILE } from '../../../../src/runtime/memory/embeddingStore';
 import { MarkdownMemoryClient } from '../../../../src/runtime/memory/markdownMemoryClient';
 import { writeVaultSharing, type VaultScope } from '../../../../src/runtime/memory/markdownMemoryFiles';
 
@@ -40,11 +40,12 @@ async function retainMany(client: MarkdownMemoryClient, contents: string[], oper
       content,
       timestamp: `2026-09-26T10:0${String(index)}:00.000Z`,
       document_id: `doc-${String(operationCounter)}-${String(index)}`,
+      metadata: { origin: 'user_stated' },
     })),
     operationId: operationId ?? `op-${String(operationCounter)}`,
     timeoutMs: TIMEOUT_MS,
   });
-  expect(outcome).toEqual({ ok: true });
+  expect(outcome).toMatchObject({ ok: true });
 }
 
 async function retain(client: MarkdownMemoryClient, content: string, operationId?: string): Promise<void> {
@@ -59,13 +60,13 @@ async function retainFromChat(client: MarkdownMemoryClient, content: string, ses
         content,
         timestamp: '2026-09-26T10:00:00.000Z',
         document_id: `doc-${String(operationCounter)}`,
-        metadata: { session_id: sessionId },
+        metadata: { origin: 'user_stated', session_id: sessionId },
       },
     ],
     operationId: `op-${String(operationCounter)}`,
     timeoutMs: TIMEOUT_MS,
   });
-  expect(outcome).toEqual({ ok: true });
+  expect(outcome).toMatchObject({ ok: true });
 }
 
 async function recall(
@@ -77,8 +78,6 @@ async function recall(
   const outcome = await client.recall({
     query,
     maxTokens,
-    queryTimestamp: '2026-09-27T10:00:00.000Z',
-    entityTokens: 0,
     timeoutMs: TIMEOUT_MS,
     currentSessionId,
   });
@@ -240,7 +239,7 @@ describe('MarkdownMemoryClient persona vault scope', () => {
         throw new Error('expected one persona vault entry');
       }
 
-      expect(await alpha.deleteEntry({ entryId, timeoutMs: TIMEOUT_MS })).toEqual({ ok: true });
+      expect(await alpha.deleteEntry({ entryId, timeoutMs: TIMEOUT_MS })).toMatchObject({ ok: true });
 
       expect(await recall(clientFor(ALPHA), 'quince jam')).toEqual([]);
     });
@@ -487,7 +486,7 @@ async function waitForIndexed(subsystem: EmbeddingSubsystem, entries: number): P
 }
 
 async function storedIds(namespace: string): Promise<string[]> {
-  return (await EmbeddingStore.load({ namespaceDir: path.join(baseDir, namespace) })).ids();
+  return (await EmbeddingStore.load({ namespaceDir: path.join(baseDir, namespace), fileName: LOG_VECTORS_FILE })).ids();
 }
 
 describe('MarkdownMemoryClient persona vault scope with embeddings', () => {
@@ -571,9 +570,12 @@ describe('MarkdownMemoryClient persona vault scope with embeddings', () => {
     await alpha.updateEntry({ entryId: entry.id, text: edited, timeoutMs: TIMEOUT_MS });
 
     expect([...requested]).toEqual(['tenant-1__persona_Alpha']);
-    // The index keeps the entry's time heading with the fact, as it does for a newly retained entry.
+    // The index keeps the entry's time heading with the fact, as it does for a newly retained entry, and leaves the source line out.
     await waitFor(async () => {
-      const store = await EmbeddingStore.load({ namespaceDir: path.join(baseDir, 'tenant-1__persona_Alpha') });
+      const store = await EmbeddingStore.load({
+        namespaceDir: path.join(baseDir, 'tenant-1__persona_Alpha'),
+        fileName: LOG_VECTORS_FILE,
+      });
       return store.get(entry.id)?.hash === hashEntryText(`## ${entry.timestamp}\n\n${edited}`);
     }, 'the edited fact to be re-indexed');
     expect(await storedIds(TENANT)).toEqual([]);

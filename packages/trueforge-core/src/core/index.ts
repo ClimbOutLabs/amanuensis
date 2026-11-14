@@ -428,6 +428,7 @@ export { existingSandboxIdForProvider, formatSandboxId, parseSandboxId, rawSandb
 export type { SandboxRefParts } from './sandbox/sandboxRef';
 export { GitBridge } from './sandbox/slots/git/gitBridge';
 export { execFileRunner } from './sandbox/slots/git/hostCommand';
+export type { HostCommandRunner } from './sandbox/slots/git/hostCommand';
 export { probeSlotAttachments } from './sandbox/slots/slotAttachmentProbe';
 export type { SlotAttachmentProbeResult } from './sandbox/slots/slotAttachmentProbe';
 export {
@@ -464,7 +465,10 @@ export type { HostToolCallPolicy, HostToolCallPolicyBlock, HostToolCallPolicyCal
 export {
   callResultSource,
   callReturnsOutsideContent,
+  contextCalledMemoryPagesWriter,
   contextHasOutsideToolResult,
+  personTypedText,
+  turnReadOutsideText,
 } from './capabilities/builtins/ChatProvenance';
 export type { ToolResultSource } from './capabilities/builtins/ChatProvenance';
 export {
@@ -548,10 +552,12 @@ export {
 export { checkOutboundStrings, collectOutboundStrings } from './permissions/outboundGuard';
 export type { OutboundGuardRule, OutboundGuardVerdict } from './permissions/outboundGuard';
 export {
+  hasReadContent,
   isTrustedLink,
   isTrustedPicture,
   recordPageImageUrls,
   recordPersonText,
+  recordReplyText,
   recordUntrustedText,
   searchResultUrls,
 } from './permissions/provenance';
@@ -584,6 +590,7 @@ export type { ToolGrantIdentity, ToolGrantKey, ToolGrantStore } from './permissi
 export {
   PAGE_PICTURES_LABEL,
   SILENT_SEARCH_LIMIT,
+  chatSawOutsideText,
   createWebSearchTurnState,
   pageImageUrls,
 } from './permissions/webSearch';

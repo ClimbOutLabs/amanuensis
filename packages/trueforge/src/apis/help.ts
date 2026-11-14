@@ -69,7 +69,6 @@ export function createHelpRouter(deps: HelpRouterDeps) {
       }),
       computeCapabilitiesData({
         sandboxProviderStore: deps.resolveSandboxProviderStore(c),
-        mcpServerStore,
         globalSettingsStore: deps.globalSettingsStore,
         logger: deps.logger,
         tenantId,

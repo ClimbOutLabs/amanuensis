@@ -3,8 +3,6 @@
 export interface MemorySummarize {
     /** The `MEMORY_SUMMARIZE` env default used when no override is stored. */
     defaultEnabled: boolean;
-    /** What the server will actually do: the stored setting with the markdown-only gate applied. The Settings toggle shows this value. */
-    effectiveEnabled: boolean;
     /** The stored setting: the persisted override when set, else the `MEMORY_SUMMARIZE` env default. */
     enabled: boolean;
     /** Whether a persisted override is currently stored. */

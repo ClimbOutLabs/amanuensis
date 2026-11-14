@@ -1,35 +1,88 @@
 /**
- * Backend-agnostic interface for the long-term memory provider Aman speaks to each turn.
+ * The long-term memory store Aman speaks to each turn, and the shapes its calls hand back.
  *
- * `HindsightClient` (REST API over a Hindsight bank) and `MarkdownMemoryClient` (local
- * Markdown files, OpenClaw-style) both implement this. Callers must depend on this
- * interface, never on a concrete client, so the backend selected by `MEMORY_BACKEND`
- * is a drop-in replacement.
- *
- * The contract mirrors `HindsightClient`'s: every method returns a discriminated `{ ok }`
- * result and never throws, so a memory failure degrades a turn instead of failing it.
+ * Every method returns a discriminated `{ ok }` result and never throws, so a memory failure
+ * degrades a turn instead of failing it.
  */
-import type {
-  GetOperationOutcome,
-  GetProfileOutcome,
-  ListMentalModelsOutcome,
-  RecallOutcome,
-  ReflectBudget,
-  ReflectOutcome,
-  RetainItem,
-  RetainOutcome,
-  RetryOperationOutcome,
-} from './hindsightClient';
+import type { MeaningGate } from './meaningGate';
+import type { RetainMetadata } from './memoryOrigin';
+import type { LoadedPage, PageLoadStats } from './memoryPageLoader';
+import type { PageListing } from './memoryPages';
+
+export interface RecallItem {
+  id: string;
+  text: string;
+  entities?: string[];
+  occurred_start?: string;
+  occurred_end?: string;
+  context?: string;
+  /** Provenance and bookkeeping stored with the memory (e.g. `origin`, `turn_id`), so the recall screen can read its origin. */
+  metadata?: Record<string, string>;
+  /** Relevance score, when the store ranks by one; absent means the array order is the ranking. */
+  score?: number;
+}
+
+/** One failed call. `code` is what callers switch on; `reason` is the line for logs. */
+export interface MemoryFailure {
+  ok: false;
+  code: 'request_failed' | 'timeout';
+  reason: string;
+}
+
+export function timeoutFailure(timeoutMs: number): MemoryFailure {
+  return { ok: false, code: 'timeout', reason: `request timed out after ${String(timeoutMs)}ms` };
+}
+
+export type RecallOutcome = { ok: true; results: RecallItem[] } | MemoryFailure;
+
+export interface RetainItem {
+  content: string;
+  timestamp: string;
+  context?: string;
+  document_id: string;
+  /** Always names where the memory came from; a save without it is refused. */
+  metadata: RetainMetadata;
+}
+
+/** One entry a retain added to the daily log, as the log keeps it. */
+export interface WrittenEntry {
+  /** Stable id `md:{namespace}:{file}#{index}`. */
+  id: string;
+  /** The whole entry: heading, text and hidden trailer lines. */
+  text: string;
+}
+
+export interface RetainOutcome {
+  ok: boolean;
+  reason?: string;
+  /** The entries this call added. Absent when the call added none. */
+  written?: readonly WrittenEntry[];
+}
+
+export type GetOperationOutcome = { ok: true; status: string } | MemoryFailure;
+
+/** The only readings of an operation status the host relies on. */
+export function isOperationCompletedStatus(status: string): boolean {
+  return status === 'completed' || status === 'success' || status === 'succeeded';
+}
+
+export function isOperationFailedStatus(status: string): boolean {
+  return status === 'failed' || status === 'error';
+}
+
+export interface RetryOperationOutcome {
+  ok: boolean;
+}
 
 export interface MemoryClient {
   recall(params: {
     query: string;
     maxTokens: number;
-    queryTimestamp: string;
-    entityTokens: number;
     timeoutMs: number;
     /** The chat being answered: notes retained from it are never returned (its history is already in the conversation). */
     currentSessionId?: string | undefined;
+    /** The meaning gate of this message, worked out once by `meaningGate`; left out, recall works it out itself. */
+    gate?: MeaningGate | undefined;
   }): Promise<RecallOutcome>;
 
   retain(params: { items: RetainItem[]; operationId: string; timeoutMs: number }): Promise<RetainOutcome>;
@@ -45,17 +98,6 @@ export interface MemoryClient {
 
   retryOperation(id: string, timeoutMs: number): Promise<RetryOperationOutcome>;
 
-  getProfile(timeoutMs: number): Promise<GetProfileOutcome>;
-
-  listMentalModels(params: { limit: number; timeoutMs: number }): Promise<ListMentalModelsOutcome>;
-
-  reflect(params: {
-    query: string;
-    budget: ReflectBudget;
-    maxTokens: number;
-    timeoutMs: number;
-  }): Promise<ReflectOutcome>;
-
   /**
    * Memory vault: the effective entries of one vault namespace, newest first.
    * `namespace` is the wire namespace: empty or `default` for the shared vault,
@@ -67,7 +109,7 @@ export interface MemoryClient {
 
   /**
    * Memory vault: the live entries in the newest `maxDailyFiles` daily files of the vault this client's
-   * `retain` writes into. Absent on a backend without a cheap listing.
+   * `retain` writes into. Absent on a client without a cheap listing.
    */
   listRecentWrittenEntries?(params: {
     maxDailyFiles: number;
@@ -91,8 +133,7 @@ export interface MemoryClient {
   /**
    * Optional: note the outcome of one turn-summary attempt for this client's vault, so a
    * failed summary stays visible on the Memories page until a later summary succeeds.
-   * Only the markdown client implements it, matching the markdown-only gate on turn
-   * summarization itself. Never throws.
+   * Never throws.
    */
   noteSummaryOutcome?(params: SummaryOutcomeNote): Promise<void>;
 
@@ -102,6 +143,50 @@ export interface MemoryClient {
    * chat. Only the markdown client implements it. Never throws.
    */
   completeOperation?(operationId: string): Promise<void>;
+
+  /**
+   * Optional: the people and matter pages a message names, across every vault this client may
+   * read, in priority order and within the caps, then the single statements it is about. Only the markdown client implements it, as
+   * pages live beside the daily logs. Never throws.
+   */
+  loadPages?(params: {
+    message: string;
+    /** The person's earlier messages of this chat, oldest first; a page they name is loaded too. */
+    earlierMessages: readonly string[];
+    /** The calendar day `YYYY-MM-DD` in the person's time zone. */
+    today: string;
+    maxPages: number;
+    maxTokens: number;
+    /** The meaning gate of this message, worked out once by `meaningGate`; left out, it is worked out here. */
+    gate?: MeaningGate | undefined;
+  }): Promise<PageLoadResult>;
+
+  /**
+   * Optional: whether the message is clearly about something remembered, and which page statements and log
+   * notes it is about. Worked out once per message and handed to both `recall` and `loadPages`, so the
+   * page path and the log path never disagree. Only the markdown client implements it. Never throws.
+   */
+  meaningGate?(params: { message: string; currentSessionId?: string | undefined }): Promise<MeaningGate>;
+
+  /**
+   * Optional: the folder of the one vault this client's chat writes pages to (its persona's vault, else the
+   * shared vault). Only the markdown client implements it, so only it offers the memory page tools.
+   */
+  pagesWriteDir?(): string;
+
+  /**
+   * Optional: the pages in this client's write vault whose statements are closest in meaning to a text, nearest
+   * first. Empty until the meaning search is ready. Only the markdown client implements it. Never throws.
+   */
+  pagesByMeaning?(params: { text: string; limit: number }): Promise<PageListing[]>;
+}
+
+/** What `loadPages` hands back: the pages the model sees and the counts the memory event records. */
+export interface PageLoadResult {
+  pages: LoadedPage[];
+  stats: PageLoadStats;
+  /** Page files left out because their name is not a page name (e.g. `people/Nora.md`). */
+  skippedFiles: string[];
 }
 
 /** One turn-summary attempt's outcome, noted on the client that owns the turn's vault. */
@@ -138,3 +223,5 @@ export type ListMemoryVaultEntriesOutcome = { ok: true; entries: MemoryVaultEntr
 export type UpdateMemoryVaultEntryOutcome = { ok: true; entry: MemoryVaultEntry } | MemoryVaultFailure;
 
 export type DeleteMemoryVaultEntryOutcome = { ok: true } | MemoryVaultFailure;
+
+export type DeleteShownMemoryOutcome = { ok: true; deleted: number } | MemoryVaultFailure;

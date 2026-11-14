@@ -62,7 +62,7 @@ const MAX_NAMED_PEOPLE = 15;
 
 /**
  * Names of people the message mentions: capitalized words that do not open a sentence and are not
- * common words. "Hi June, remember Wendy's is coming up" yields Wendy: "Hi" opens the sentence
+ * common words. "Hi June, remember Nora's is coming up" yields Nora: "Hi" opens the sentence
  * and June is a month, like "I", other months and weekdays.
  */
 export function namedPeopleInMessage(message: string): string[] {

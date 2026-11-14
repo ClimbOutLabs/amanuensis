@@ -5,7 +5,7 @@ import {
   type ResolvedAgentDefinition,
 } from '@truefoundry/trueforge-core/agent-session';
 import type { AgentCapability } from '@truefoundry/trueforge-core/core';
-import { TOOL_TAG_READ_ONLY } from '@truefoundry/trueforge-core/core';
+import { createSentinelHostContext, execFileRunner } from '@truefoundry/trueforge-core/core';
 import { CALDAV_SERVER_NAME, CALDAV_TOOL_NAMES } from '@truefoundry/trueforge-core/core/calendar/caldav/toolContract';
 import {
   connectorOffKey,
@@ -21,24 +21,24 @@ import type { PersonaKnowledgeHit } from '../personaKnowledge/knowledgeRetrieval
 import type { PersonalizationProfile } from '../personalization/profile';
 import type { PersonaContext } from '../personas/persona';
 import type { InternalSourceState } from './internalSourceGuard';
-import { hindsightMemoryCapability, type MemoryConfig } from './memory/memoryCapability';
+import { memoryCapability, type MemoryConfig } from './memory/memoryCapability';
 import type { MemoryClient } from './memory/memoryClient';
+import { memoryPagesCapability } from './memory/memoryPagesTools';
 import type { SummarizeTurnContext } from './memory/memoryRetain';
+import { TurnReadWatch } from './memory/turnReadWatch';
 import { PersonaTurnResourceResolver, type PersonaSwitchNotice } from './PersonaTurnResourceResolver';
 import { isStaleSearchProviderMount } from './sessionResources';
 import { toolOutputScreenCapability, type ToolOutputScreenConfig } from './toolOutputScreen';
 
 export type { ToolOutputScreenConfig } from './toolOutputScreen';
 
-/** Everything one turn needs from the configured memory provider, resolved once in `apis/turns.ts`. */
+/** Everything one turn needs from memory, resolved once in `apis/turns.ts`. */
 export interface MemoryTurnContext {
-  /** Undefined when no usable memory provider is configured: the turn then runs without memory. */
+  /** Undefined when the turn runs without memory. */
   client: MemoryClient | undefined;
   config: MemoryConfig;
   sessionId: string;
   previousTurnId: string | null;
-  /** MCP server name of the provider, so its mount can be narrowed to reads. Undefined with no provider. */
-  providerServerName: string | undefined;
   /** Name of the connector designated as the web search provider, looked up per turn. Undefined when none is designated. */
   searchProviderServerName?: (() => Promise<string | undefined>) | undefined;
   /** Names of the catalog presets offered as a web search provider. Absent: no remembered mount is dropped as stale. */
@@ -68,13 +68,16 @@ function memoryCapabilitiesForTurn(input: {
   webSearch: WebSearchTurnState;
   logger: PersonaTurnResourceResolver['logger'];
   isSubAgent: boolean;
+  /** The memory page tools for this turn and the watch they share with the memory block, when they are offered. */
+  pageTools: { capability: AgentCapability; watch: TurnReadWatch } | undefined;
 }): AgentCapability[] {
   const { memory } = input;
   if (memory.client === undefined || input.isSubAgent) {
     return [];
   }
   return [
-    hindsightMemoryCapability({
+    ...(input.pageTools === undefined ? [] : [input.pageTools.capability]),
+    memoryCapability({
       client: memory.client,
       config: memory.config,
       logger: input.logger,
@@ -86,37 +89,10 @@ function memoryCapabilitiesForTurn(input: {
       internalSourceState: memory.internalSourceState,
       webSearch: input.webSearch,
       keepsNothing: memory.keepsNothing,
+      pageToolsWatch: input.pageTools?.watch,
       loadRecallExclusions: memory.loadRecallExclusions,
     }),
   ];
-}
-
-/**
- * Narrows the memory provider's own mount to its read tools, preloaded.
- *
- * The host already retains every completed turn into that bank, so the model has nothing to
- * gain from the bank's write tools and three things to lose: a duplicate write, an approval
- * prompt for a retention that already happened, and a turn spent narrating a call it cannot
- * make. Preloading what survives also lifts the connector out of deferred discovery
- * (`DeferredTool` lists a server only while `preload` is false), so the model reads real tool
- * definitions instead of inferring a tool name from a server name.
- *
- * `@read-only` is annotation-driven (`readOnlyHint === true`) and fails closed: a bank whose
- * tools carry no annotations contributes nothing, which is the safe end of that trade when the
- * host owns retention either way. `disable_tools` is left as configured, so an operator can
- * still subtract from what survives.
- */
-function withMemoryProviderNarrowedToReads(spec: AgentSpec, providerServerName: string): AgentSpec {
-  const servers = spec.mcp_servers;
-  if (!servers?.some(entry => entry.name === providerServerName)) {
-    return spec;
-  }
-  return {
-    ...spec,
-    mcp_servers: servers.map(entry =>
-      entry.name === providerServerName ? { ...entry, enable_tools: [TOOL_TAG_READ_ONLY], preload: true } : entry,
-    ),
-  };
 }
 
 /**
@@ -188,6 +164,13 @@ function withoutStaleSearchProviderMounts(input: {
 export class MemoryTurnResourceResolver extends PersonaTurnResourceResolver {
   readonly #memory: MemoryTurnContext;
   readonly #toolOutputScreen: ToolOutputScreenConfig;
+  readonly #personName: string | undefined;
+  #chatWrotePages = false;
+
+  /** True once a page tool has changed a page in this turn: the chat filed the message itself. */
+  get chatWrotePages(): boolean {
+    return this.#chatWrotePages;
+  }
 
   constructor(
     deps: ConstructorParameters<typeof PersonaTurnResourceResolver>[0],
@@ -216,6 +199,7 @@ export class MemoryTurnResourceResolver extends PersonaTurnResourceResolver {
     });
     this.#memory = memory;
     this.#toolOutputScreen = toolOutputScreen;
+    this.#personName = profile?.user_name ?? undefined;
   }
 
   /** True in an incognito chat: nothing from it may outlive it. */
@@ -242,11 +226,55 @@ export class MemoryTurnResourceResolver extends PersonaTurnResourceResolver {
     return next;
   }
 
+  /**
+   * The memory page tools, offered only where pages can be written: the Markdown backend, a chat with memory on,
+   * and a root thread. A chat with memory switched off, an unattended run (recall off) and a private chat get none.
+   */
+  #pageTools({
+    input,
+    recallEnabled,
+    isSubAgent,
+  }: {
+    input: Parameters<PersonaTurnResourceResolver['resolveAgentDefinition']>[0];
+    recallEnabled: boolean;
+    isSubAgent: boolean;
+  }): { capability: AgentCapability; watch: TurnReadWatch } | undefined {
+    const vaultDir =
+      isSubAgent || !recallEnabled || this.#memory.keepsNothing ? undefined : this.#memory.client?.pagesWriteDir?.();
+    if (vaultDir === undefined) {
+      return undefined;
+    }
+    const watch = new TurnReadWatch();
+    const capability = memoryPagesCapability({
+      vaultDir,
+      runner: execFileRunner,
+      timeZone: this.#memory.clientTimezone,
+      now: () => new Date(),
+      logger: this.logger,
+      tracing: input.tracing,
+      sentinel: createSentinelHostContext({
+        services: input.sentinel_services,
+        tenant_id: input.tenant_id,
+        created_by: input.created_by,
+        conversation_id: input.session_id,
+        workspace_cwd: input.workspace_cwd ?? null,
+        web_search: this.webSearchTurn,
+      }),
+      keepsNothing: this.#memory.keepsNothing,
+      maxPageTokens: this.#memory.config.pages.maxTokens,
+      watch,
+      personName: this.#personName,
+      onPageWritten: () => {
+        this.#chatWrotePages = true;
+      },
+    });
+    return { capability, watch };
+  }
+
   override async resolveAgentDefinition(
     input: Parameters<PersonaTurnResourceResolver['resolveAgentDefinition']>[0],
   ): Promise<ResolvedAgentDefinition> {
     const isSubAgent = input.agent_info !== undefined;
-    const providerServerName = this.#memory.providerServerName;
     // Root threads only, matching where the memory capability itself is attached: a sub-agent
     // is not the thread the host retains, so its mounts are left exactly as the spec states them.
     const designatedSearchProvider = isSubAgent ? undefined : await this.#memory.searchProviderServerName?.();
@@ -268,17 +296,13 @@ export class MemoryTurnResourceResolver extends PersonaTurnResourceResolver {
           logger: this.logger,
         });
     const defaultedSpec = isSubAgent ? baseSpec : await this.#withDefaultSourcesAttached(baseSpec, turnedOff);
-    const narrowedSpec =
-      providerServerName === undefined || isSubAgent
-        ? defaultedSpec
-        : withMemoryProviderNarrowedToReads(defaultedSpec, providerServerName);
     // Narrowing only takes tools away, so it also applies while the set-up list cannot be read.
     const narrowsHostConnector = (name: string): boolean =>
       setUpConnectorNames === undefined || setUpConnectorNames.includes(name);
     // The host's Email connector is offered only its eight tools on every thread, sub-agents included.
     const mailNarrowedSpec = narrowsHostConnector(MAIL_CONNECTOR_NAME)
-      ? narrowConnectorTools(narrowedSpec, { server_name: MAIL_CONNECTOR_NAME, tools: MAIL_CONNECTOR_TOOL_NAMES })
-      : narrowedSpec;
+      ? narrowConnectorTools(defaultedSpec, { server_name: MAIL_CONNECTOR_NAME, tools: MAIL_CONNECTOR_TOOL_NAMES })
+      : defaultedSpec;
     // The host's Calendar connector is offered only its eight tools on every thread, sub-agents included.
     const calendarNarrowedSpec = narrowsHostConnector(CALDAV_SERVER_NAME)
       ? narrowConnectorTools(mailNarrowedSpec, { server_name: CALDAV_SERVER_NAME, tools: CALDAV_TOOL_NAMES })
@@ -296,6 +320,7 @@ export class MemoryTurnResourceResolver extends PersonaTurnResourceResolver {
       webSearch: this.webSearchTurn,
       logger: this.logger,
       isSubAgent,
+      pageTools: this.#pageTools({ input, recallEnabled, isSubAgent }),
     });
     const outputScreen = toolOutputScreenCapability({ config: this.#toolOutputScreen });
     const extraCapabilities = [

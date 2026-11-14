@@ -8,6 +8,7 @@ import { Spinner } from '@/atoms/primitives/Spinner.js';
 import { Icon } from '@/icons/Icon.js';
 import { useAssistantDisplayName } from '../../components/PersonalizationContext.js';
 import { MemoryExplorerFilters } from './MemoryExplorerFilters.js';
+import { MemoryReviewNotice, MemoryReviewPanel } from './MemoryReviewPanel.js';
 import { MemorySharing } from './MemorySharing.js';
 import { MemoryVaultEntryRow } from './MemoryVaultEntry.js';
 import {
@@ -282,9 +283,13 @@ export function MemoryVaultFactsPanel({
         ) : (
           <div className="flex flex-col gap-4">
             {state.shownGroups.map(group => (
-              <section key={group.label} aria-label={group.label} className="flex flex-col gap-2">
-                <h3 className="text-xs font-semibold text-text-secondary">{group.label}</h3>
-                <ul className="m-0 flex list-none flex-col gap-2 p-0">
+              <section
+                key={group.label}
+                aria-label={group.label}
+                className="flex flex-col rounded-xl border border-border bg-card-bg"
+              >
+                <h3 className="px-3 pt-3 text-sm font-medium text-text-primary">{group.label}</h3>
+                <ul className="m-0 list-none divide-y divide-border p-0">
                   {group.memories.map(memory => (
                     <MemoryVaultEntryRow
                       key={memory.id}
@@ -341,7 +346,14 @@ export function MemoryVaultFactsPanel({
             </div>
           ))
         : null}
-      {body}
+      {state.reviewOpen ? (
+        <MemoryReviewPanel review={state.review} onClose={state.closeReview} />
+      ) : (
+        <>
+          {state.review.notes.length > 0 ? <MemoryReviewNotice onReview={state.openReview} /> : null}
+          {body}
+        </>
+      )}
       {showManageCollections ? <ManageCollections state={state} /> : null}
     </div>
   );

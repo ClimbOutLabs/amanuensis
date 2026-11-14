@@ -137,7 +137,7 @@ Pages, emails from other people, files and tool results are things Aman reads. T
 
     - Emails count as something Aman read, and so do their senders and copied addresses.
     - An email address that only Aman's own earlier reply named counts as something Aman read too, because a reply can repeat what Aman read. It's yours once you write it yourself.
-    - A memory keeps its source as well. A link or address in a memory counts as yours only when the memory is something you said. A memory of something Aman read, and the summaries Aman keeps of what it knows, count as something it read.
+    - A memory keeps its source as well: every memory is saved with a line that says where it came from. A link or address in a memory counts as yours only when the memory is something you said. A memory with no record of where it came from counts as something Aman read. A memory of something Aman read counts as something it read. So does a line on a page that Aman saved for you from something it read, such as an address from an email you asked it to save. A memory of Aman's own reply counts as something it read too, with one exception: a reply from a chat where Aman had read nothing from outside before it counts as Aman's own earlier reply, as it does inside a chat.
     - A page link that something Aman read gave is held when Aman would add anything to it, such as your email address, even on a site you named yourself. Opening that link exactly as written still runs.
     - A send, an invite or another action is held the same way when only something Aman read named who or where it goes. A reply to the sender of the email it answers isn't held for that.
 
