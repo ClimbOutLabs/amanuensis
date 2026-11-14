@@ -55,7 +55,13 @@ export const INERT_WEB_SEARCH_TOOL = 'web_search';
 /** Opt-in (`startInertMcpServer({ searchProvider: true })`) with `web_search` in the search provider's shape. */
 export const INERT_WEB_FETCH_TOOL = 'web_fetch';
 /** Opt-in (`startInertMcpServer({ mail: true })`): the Email sidecar's tool names, unannotated, answering with no mail. */
-export const INERT_MAIL_TOOLS = ['list_emails_metadata', 'get_emails_content', 'list_mailboxes', 'send_email'] as const;
+export const INERT_MAIL_TOOLS = [
+  'list_emails_metadata',
+  'get_emails_content',
+  'list_mailboxes',
+  'save_draft',
+  'send_email',
+] as const;
 
 /**
  * Opt-in (`startInertMcpServer({ calendar: true })`): the Calendar sidecar's tool names, the reads

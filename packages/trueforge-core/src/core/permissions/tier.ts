@@ -46,6 +46,7 @@ export const AUTO_DENY_REASONS = [
   APPROVAL_EXPIRED_REASON_CODE,
   'cannot_describe',
   'destination_unverifiable',
+  'draft_first',
   'incognito_chat',
   'incomplete_send_card',
   'lookup_limit',

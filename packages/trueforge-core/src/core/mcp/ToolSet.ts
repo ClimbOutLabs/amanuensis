@@ -3,6 +3,7 @@ import type { Logger } from 'winston';
 import { caldavEventReviewFrom, type CaldavEventReview } from '../calendar/caldav/eventReview';
 import { CALDAV_SERVER_NAME } from '../calendar/caldav/toolContract';
 import { caldavResultForModel } from '../calendar/caldav/toolResults';
+import { mailDraftKey, type ApprovedMailDraft } from '../email/mailConnector/approvedDrafts';
 import {
   mailForwardReadArguments,
   mailForwardReviewFrom,
@@ -12,6 +13,9 @@ import {
   MAIL_CONNECTOR_NAME,
   MAIL_CONTENT_TOOL_NAME,
   MAIL_FORWARD_TOOL_NAME,
+  isMailDraftToolName,
+  isMailSendToolName,
+  mailSendOutcome,
 } from '../email/mailConnector/toolContract';
 import { McpConnectionError, ToolPolicyBlockedError, ToolPreDispatchError } from '../errors';
 import type { ApprovalDecision, ToolResultRemediation } from '../events/schema';
@@ -195,10 +199,16 @@ function searchNotRunText(input: { detail: string; unattended: boolean }): strin
   return JSON.stringify({ error: `The web search was not run. ${input.detail} ${next}` });
 }
 
+/** What the model is told when a forward was approved as a draft only. */
+const FORWARD_KEPT_AS_DRAFT =
+  'The forward is kept as a draft. Nothing was sent. Tell the person it is ready. When they ask for it to be sent, call forward_email again with exactly the same arguments.';
+
 function autoDenyMessage(decision: TierDecision): string {
   switch (decision.auto_deny) {
     case 'offline_mode':
       return 'Auto-denied: offline mode is on.';
+    case 'draft_first':
+      return `Not sent: ${decision.reason_detail ?? 'the person approves a draft before an email is sent.'}`;
     case 'incomplete_send_card':
       return `Auto-denied: ${decision.reason_detail ?? 'the send cannot be shown in full.'}`;
     case 'unattended_run':
@@ -412,7 +422,25 @@ export class ToolSet implements IToolSet {
       });
     }
 
-    const response = this.withCaldavResultShape({
+    const mailDraft = await this.mailDraftFor(params);
+    if (mailDraft?.step === 'keep') {
+      // The card the person just approved was the draft of a forward: nothing is sent on this call.
+      await mailDraft.drafts.add(mailDraft.draft);
+      return toolResultResponse({ text: FORWARD_KEPT_AS_DRAFT });
+    }
+
+    const response = await this.dispatchShaped({ params, decision, context });
+    await this.recordMailDraft({ mailDraft, response });
+    return this.withPagesRecorded({ params, response, wasInitialized: listed.wasInitialized });
+  }
+
+  private async dispatchShaped(input: {
+    params: CallToolRequest['params'];
+    decision: ApprovalDecision | undefined;
+    context: ToolInvocationContext | undefined;
+  }): Promise<CallToolResponse> {
+    const { params, decision, context } = input;
+    return this.withCaldavResultShape({
       params,
       response: normalizeGithubFileContentsResponse({
         serverName: this.name,
@@ -420,6 +448,14 @@ export class ToolSet implements IToolSet {
         response: await this.dispatch({ params, decision, context }),
       }),
     });
+  }
+
+  private withPagesRecorded(input: {
+    params: CallToolRequest['params'];
+    response: CallToolResponse;
+    wasInitialized: CallToolResolvedResponse['wasInitialized'];
+  }): CallToolResponse {
+    const { params, response, wasInitialized } = input;
     if (
       this.pages !== undefined &&
       this.pagesScope !== undefined &&
@@ -457,8 +493,8 @@ export class ToolSet implements IToolSet {
     }
     // The priming listTools() may have captured the first-connect init; carry it forward since the
     // subsequent callTool sees an already-open connection and reports none.
-    if (listed.wasInitialized && isCallToolResponseResult(response) && !response.wasInitialized) {
-      return { ...response, wasInitialized: listed.wasInitialized };
+    if (wasInitialized && isCallToolResponseResult(response) && !response.wasInitialized) {
+      return { ...response, wasInitialized };
     }
     return response;
   }
@@ -652,6 +688,54 @@ export class ToolSet implements IToolSet {
       return typeof id === 'string' ? mailForwardReviewFrom({ id, result: response.result }) : null;
     } catch {
       return null;
+    }
+  }
+
+  /**
+   * Where an Email call stands in the two steps a message takes. `save` is a draft being saved, `keep` a
+   * forward the person has only approved as a draft, and `send` a message whose draft they approved.
+   */
+  private async mailDraftFor(params: CallToolRequest['params']): Promise<
+    | {
+        step: 'save' | 'keep' | 'send';
+        draft: ApprovedMailDraft;
+        drafts: SentinelHostContext['services']['mail_approved_drafts'];
+      }
+    | undefined
+  > {
+    const { sentinel } = this;
+    if (!this.firstParty || this.name !== MAIL_CONNECTOR_NAME || sentinel === undefined) {
+      return undefined;
+    }
+    const send = isMailSendToolName(params.name);
+    if (!send && !isMailDraftToolName(params.name)) {
+      return undefined;
+    }
+    const drafts = sentinel.services.mail_approved_drafts;
+    const draft = {
+      tenant_id: sentinel.tenant_id,
+      created_by: sentinel.created_by,
+      key: mailDraftKey({ tool_name: params.name, params: isRecord(params.arguments) ? params.arguments : {} }),
+    };
+    if (!send) {
+      return { step: 'save', draft, drafts };
+    }
+    return { step: (await drafts.has(draft)) ? 'send' : 'keep', draft, drafts };
+  }
+
+  /** A saved draft becomes one that may be sent; a draft that went out may not be sent a second time. */
+  private async recordMailDraft(input: {
+    mailDraft: Awaited<ReturnType<ToolSet['mailDraftFor']>>;
+    response: CallToolResponse;
+  }): Promise<void> {
+    const { mailDraft, response } = input;
+    if (mailDraft === undefined || !isCallToolResponseResult(response) || response.result.isError === true) {
+      return;
+    }
+    if (mailDraft.step === 'save') {
+      await mailDraft.drafts.add(mailDraft.draft);
+    } else if (resultTexts(response.result).some(text => mailSendOutcome(text) === 'sent')) {
+      await mailDraft.drafts.remove(mailDraft.draft);
     }
   }
 

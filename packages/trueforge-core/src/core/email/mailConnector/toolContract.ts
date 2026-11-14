@@ -20,9 +20,6 @@ export function isMailReadToolName(tool_name: string): boolean {
 /** Tools that deliver a message to recipients, so each recipient must be on the Email list. */
 export const MAIL_SEND_TOOL_NAMES = ['send_email', 'forward_email'] as const;
 
-/** Sends a message written in the call itself; a forward sends on a message the mailbox already holds. */
-export const MAIL_NEW_MESSAGE_TOOL_NAME = 'send_email';
-
 /** Sends on a message the mailbox already holds, with an optional note above it. */
 export const MAIL_FORWARD_TOOL_NAME = 'forward_email';
 

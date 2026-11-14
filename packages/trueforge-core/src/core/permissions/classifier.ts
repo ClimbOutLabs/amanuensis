@@ -37,7 +37,6 @@ import {
   MAIL_CONNECTOR_NAME,
   MAIL_CONTENT_TOOL_NAME,
   MAIL_FORWARD_TOOL_NAME,
-  MAIL_NEW_MESSAGE_TOOL_NAME,
 } from '../email/mailConnector/toolContract';
 import { GOOGLE_SETUP_SERVER_ID, GOOGLE_SETUP_STATUS_TOOL_NAME } from '../google/setupToolContract';
 import type { BrowserElementReview, DocumentScope, MapsHosts } from '../llm/LLMTypes';
@@ -95,6 +94,7 @@ import {
 } from './browserToolNames';
 import {
   FIRST_PARTY_TOOL_REASON,
+  MAIL_DRAFT_REASON,
   MAIL_MARK_AS_READ_REASON,
   MAIL_NEW_RECIPIENT_REASON,
   MAIL_READ_REASON,
@@ -229,6 +229,7 @@ import {
 
 import type { CaldavEventReview } from '../calendar/caldav/eventReview';
 import { CALDAV_SERVER_NAME, isCaldavReadToolName } from '../calendar/caldav/toolContract';
+import { mailDraftKey } from '../email/mailConnector/approvedDrafts';
 import { forwardedSubject, type MailForwardReview } from '../email/mailConnector/forwardReview';
 import {
   HOME_ASSISTANT_SERVER_NAME,
@@ -2653,16 +2654,16 @@ function mailArgumentMailboxes(value: unknown): Tier3Mailbox[] | null {
  * the call carries, so nothing sent is left off the card. Null when a part of the call cannot be shown as
  * written, or when a forward's message could not be read; the card then lists the whole request instead.
  */
-function hostMailMessage(action: SentinelAction): {
+function hostMailMessage(input: { action: SentinelAction; draft: boolean }): {
   email: Tier3Email;
   rest: { text: string | null; truncated: boolean };
 } | null {
-  const draft = isHostMailDraft(action);
-  if (!draft && !isHostMailSend(action)) {
+  const { action, draft } = input;
+  if (!isHostMailDraft(action) && !isHostMailSend(action)) {
     return null;
   }
-  const forward = !draft && action.tool_name === MAIL_FORWARD_TOOL_NAME ? (action.mail_forward ?? null) : null;
-  if (!draft && action.tool_name !== MAIL_NEW_MESSAGE_TOOL_NAME && forward === null) {
+  const forward = action.tool_name === MAIL_FORWARD_TOOL_NAME ? (action.mail_forward ?? null) : null;
+  if (action.tool_name === MAIL_FORWARD_TOOL_NAME && forward === null) {
     return null;
   }
   const params = action.canonical_params;
@@ -3855,11 +3856,29 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
   // approving adds the addresses to this account's list and saves the draft, and nothing is sent.
   const mailFacts = await mailCardFacts({ action, ctx });
   // A request already too long to show whole keeps its plain listing, which says what was cut.
-  const mailMessage = extraction.fields.outbound_truncated ? null : hostMailMessage(action);
+  // A message goes out in two steps, each with its own card: the draft first, then the send. A send
+  // that matches no draft the person approved is not a send yet. A new message is refused, because
+  // the draft tool saves it first; a forward has no draft tool, so its first card keeps it as a draft.
+  const draftApproved =
+    isHostMailSend(action) &&
+    (await ctx.services.mail_approved_drafts.has({
+      tenant_id: ctx.tenant_id,
+      created_by: ctx.created_by,
+      key: mailDraftKey({ tool_name: action.tool_name, params: action.canonical_params }),
+    }));
+  if (isHostMailSend(action) && !draftApproved && action.tool_name !== MAIL_FORWARD_TOOL_NAME) {
+    return autoDenyDecision({
+      reason: 'draft_first',
+      reason_detail:
+        'An email is saved as a draft and approved by the person before it can be sent. Save this message with save_draft first. Once the person approves the draft and asks for it to be sent, call send_email with exactly the same recipients, subject and body.',
+      sensitive_read: readsPrivateData,
+    });
+  }
+  const draft = isHostMailDraft(action) || (isHostMailSend(action) && !draftApproved);
+  const mailMessage = extraction.fields.outbound_truncated ? null : hostMailMessage({ action, draft });
   const newMailRecipients = mailFacts.new_recipients;
   if (newMailRecipients.length > 0) {
     const { fields } = extraction;
-    const draft = isHostMailDraft(action);
     const sentence = externalServiceWhat({
       tool_name: action.tool_name,
       destination: fields.destination,
@@ -3905,6 +3924,41 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
       reason_detail: draft
         ? 'A mail draft to an address that is not on the Email list.'
         : 'A mail send to an address that is not on the Email list.',
+      sensitive_read: readsPrivateData,
+      approval_token_id: await mintPlainToken({
+        ctx,
+        tool_name: action.tool_name,
+        params: action.canonical_params,
+        connector: connectorBindingFor(action),
+      }),
+    });
+  }
+
+  // A draft through the host's own Email sidecar always asks, as a Gmail draft does: the draft the
+  // person approves here is the only message a later send may carry.
+  if (draft) {
+    const { fields } = extraction;
+    const plain_what = mailMessage === null ? (extraction.connector_what ?? 'Save this draft?') : 'Save this draft?';
+    return tier3Decision({
+      card: {
+        plain_what,
+        copy: { headline: plain_what, consequence: 'Nothing is sent. Sending it asks you again.', reason: null },
+        plain_why: plainWhy(ctx.agent_intent),
+        cannot_be_undone: null,
+        why_asked_again: null,
+        destination: fields.destination,
+        recipient: fields.recipient,
+        amount: fields.amount,
+        parsed_command: null,
+        ...mailMessageCardFields({ message: mailMessage, fields }),
+        destination_host: null,
+        mail_from: mailFacts.from,
+        mail_from_choices: mailFacts.choices,
+        mail_draft: true,
+      },
+      standing_grant_barred: true,
+      reason: MAIL_DRAFT_REASON,
+      reason_detail: 'A mail draft through the Email sidecar always asks.',
       sensitive_read: readsPrivateData,
       approval_token_id: await mintPlainToken({
         ctx,

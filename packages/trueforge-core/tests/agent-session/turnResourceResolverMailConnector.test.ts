@@ -17,6 +17,15 @@ jest.mock('../../src/core/mcp/remoteMcpClient', () => {
   return { __esModule: true as const, ...actual, connectRemoteMcp: jest.fn() };
 });
 
+import { defaultSentinelServices, type SentinelServices } from '../../src/core/permissions';
+import { everyMailDraftApproved } from '../core/fixtures/approvedMailDrafts';
+
+/** These tests are about which account a send goes from, so every draft counts as approved. */
+const SERVICES = {
+  ...defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }),
+  mail_approved_drafts: everyMailDraftApproved,
+};
+
 const mockConnect = jest.mocked(connectRemoteMcp);
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -92,7 +101,12 @@ const SIDECAR_TOOLS = [
     description: 'Send an email.',
     inputSchema: {
       type: 'object' as const,
-      properties: { account_name: accountProperty, recipients: { type: 'array' }, subject: { type: 'string' } },
+      properties: {
+        account_name: accountProperty,
+        recipients: { type: 'array' },
+        subject: { type: 'string' },
+        body: { type: 'string' },
+      },
       required: ['account_name', 'recipients', 'subject'],
     },
   },
@@ -162,7 +176,7 @@ function scriptedSidecar({
       return Promise.resolve(text({ emails: [] }));
     }
     if (params.name === 'send_email') {
-      return Promise.resolve(text({ sent: true }));
+      return Promise.resolve({ content: [{ type: 'text', text: 'Email sent successfully to the recipients' }] });
     }
     if (params.name === 'save_draft') {
       return Promise.resolve(draftResult());
@@ -242,7 +256,11 @@ function makeSpec(): AgentSpec {
   });
 }
 
-async function emailToolSet(resolver: TurnResourceResolver, session_id = 'chat-1'): Promise<IToolSet> {
+async function emailToolSet(
+  resolver: TurnResourceResolver,
+  session_id = 'chat-1',
+  services: SentinelServices = SERVICES,
+): Promise<IToolSet> {
   const { definition } = await resolver.resolveAgentDefinition({
     spec: makeSpec(),
     signal: new AbortController().signal,
@@ -250,6 +268,7 @@ async function emailToolSet(resolver: TurnResourceResolver, session_id = 'chat-1
     tenant_id: 'tenant-1',
     created_by: 'user-1',
     session_id,
+    sentinel_services: services,
   });
   const [toolSet] = definition.toolSets ?? [];
   if (toolSet === undefined) {
@@ -767,5 +786,77 @@ describe('Email connector folders', () => {
     }
     const tool = listed.result.tools.find(entry => entry.name === 'get_emails_content');
     expect(JSON.stringify(tool?.inputSchema.properties?.['mailbox'])).toContain('Sent, Drafts, Trash or Spam');
+  });
+});
+
+describe('an Email message is a draft the person approved before it is sent', () => {
+  const MESSAGE = { recipients: ['friend@example.com'], subject: 'Hi', body: 'See you Saturday.' };
+
+  async function toolSetWithDrafts(): Promise<IToolSet> {
+    // A record of its own, so nothing counts as approved until a draft is saved here.
+    return emailToolSet(
+      makeResolver(new MailAccountDirectory()),
+      'chat-1',
+      defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }),
+    );
+  }
+
+  const sent = (sidecar: ReturnType<typeof scriptedSidecar>) =>
+    sidecar.calls.filter(call => call['tool'] === 'send_email');
+
+  it('refuses a send with no draft, even when it comes with an approval, and sends nothing', async () => {
+    const sidecar = scriptedSidecar({ accountList: oneAccount });
+    const toolSet = await toolSetWithDrafts();
+
+    const { text: said, isError } = resultText(
+      await toolSet.callTool({ name: 'send_email', arguments: MESSAGE }, APPROVED),
+    );
+
+    expect(isError).toBe(true);
+    expect(said).toContain('save_draft');
+    expect(sent(sidecar)).toEqual([]);
+  });
+
+  it('sends the message once its draft was approved and saved, and only once', async () => {
+    const sidecar = scriptedSidecar({ accountList: oneAccount });
+    const toolSet = await toolSetWithDrafts();
+
+    await toolSet.callTool({ name: 'save_draft', arguments: MESSAGE }, APPROVED);
+    expect(sent(sidecar)).toEqual([]);
+
+    await toolSet.callTool({ name: 'send_email', arguments: MESSAGE }, APPROVED);
+    expect(sent(sidecar)).toHaveLength(1);
+
+    // The draft went out, so the same message needs a new draft before it can go again.
+    const again = resultText(await toolSet.callTool({ name: 'send_email', arguments: MESSAGE }, APPROVED));
+    expect(again.isError).toBe(true);
+    expect(sent(sidecar)).toHaveLength(1);
+  });
+
+  it('refuses a send whose text differs from the approved draft, and sends nothing', async () => {
+    const sidecar = scriptedSidecar({ accountList: oneAccount });
+    const toolSet = await toolSetWithDrafts();
+
+    await toolSet.callTool({ name: 'save_draft', arguments: MESSAGE }, APPROVED);
+    const changed = resultText(
+      await toolSet.callTool({ name: 'send_email', arguments: { ...MESSAGE, body: 'See you Sunday.' } }, APPROVED),
+    );
+
+    expect(changed.isError).toBe(true);
+    expect(sent(sidecar)).toEqual([]);
+  });
+
+  it('does not count a draft that failed to save', async () => {
+    const sidecar = scriptedSidecar({
+      accountList: oneAccount,
+      draftResult: () => text('Error executing tool save_draft: the mail server did not answer', true),
+    });
+    const toolSet = await toolSetWithDrafts();
+
+    await toolSet.callTool({ name: 'save_draft', arguments: MESSAGE }, APPROVED);
+    const send = resultText(await toolSet.callTool({ name: 'send_email', arguments: MESSAGE }, APPROVED));
+
+    expect(send.isError).toBe(true);
+    expect(sent(sidecar)).toEqual([]);
   });
 });

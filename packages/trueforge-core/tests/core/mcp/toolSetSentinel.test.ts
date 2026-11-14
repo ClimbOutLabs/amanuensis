@@ -25,6 +25,7 @@ jest.mock('../../../src/core/mcp/remoteMcpClient', () => {
   return { __esModule: true as const, ...actual, connectRemoteMcp: jest.fn() };
 });
 
+import { everyMailDraftApproved } from '../fixtures/approvedMailDrafts';
 const mockConnect = jest.mocked(connectRemoteMcp);
 const noopLogger = createLogger({ silent: true });
 const SERVER_NAME = 'notes';
@@ -103,7 +104,11 @@ const destructiveRead: ToolSchema = {
 const unannotated: ToolSchema = { name: 'poke_note', description: 'Does something.', inputSchema: schema };
 
 function servicesWithGrants(toolNames: string[]): SentinelServices {
-  const services = defaultSentinelServices({ pinned_path: '/usr/bin:/bin' });
+  // The draft step counts as done here, so a send reaches its own card; the draft-first tests use a real record.
+  const services = {
+    ...defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }),
+    mail_approved_drafts: everyMailDraftApproved,
+  };
   for (const tool_name of toolNames) {
     void services.tool_grants.recordToolGrant({
       tenant_id: 't1',
@@ -722,6 +727,28 @@ describe("the operator's own Email sidecar, with the annotations the mail server
     expect(forward.is_approval_required).toBe(true);
     expect(forward.tier3_card?.email ?? null).toBeNull();
     expect(forward.tier3_card?.outbound_text).toContain('41');
+  });
+
+  it('keeps a forward as a draft on its first approval, and sends it on the second', async () => {
+    const forwardTool: ToolSchema = { ...sendTool, name: 'forward_email', description: 'Forwards an email.' };
+    const email = makeToolSet({
+      tools: [forwardTool],
+      services: {
+        ...defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }),
+        mail_listed_addresses: () => Promise.resolve(['dana@example.org']),
+      },
+      firstParty: true,
+      serverName: 'Email',
+    });
+    const call = { name: 'forward_email', arguments: { email_id: '41', recipients: ['dana@example.org'] } };
+
+    expect(await email.toolCallInfo(call)).toMatchObject({ tier_reason: 'mail_draft', is_approval_required: true });
+    const kept = await email.callTool(call, { status: 'allow' });
+    expect(kept).toMatchObject({ result: { content: [{ text: expect.stringContaining('kept as a draft') }] } });
+
+    expect(await email.toolCallInfo(call)).toMatchObject({ tier_reason: 'mail_send', is_approval_required: true });
+    const sent = await email.callTool(call, { status: 'allow' });
+    expect(sent).toMatchObject({ result: { content: [{ text: 'called forward_email' }] } });
   });
 
   it('still asks before sending, and no answer covers a send', async () => {
