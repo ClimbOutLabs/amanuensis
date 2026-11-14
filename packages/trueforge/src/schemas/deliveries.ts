@@ -6,7 +6,9 @@ import { z } from '@hono/zod-openapi';
 export const DeliveryLevelSchema = z.enum(['note', 'nudge', 'call']).openapi('DeliveryLevel');
 
 /** Where a delivery was tried. Later channels are added here; stored values are plain text. */
-export const DeliveryChannelSchema = z.enum(['in_app', 'web_push', 'sms', 'call']).openapi('DeliveryChannel');
+export const DeliveryChannelSchema = z
+  .enum(['in_app', 'web_push', 'sms', 'call', 'telegram'])
+  .openapi('DeliveryChannel');
 
 export const DeliveryAttemptOutcomeSchema = z
   .enum(['sent', 'failed', 'gone', 'skipped'])

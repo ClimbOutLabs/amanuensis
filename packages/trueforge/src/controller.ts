@@ -1,33 +1,66 @@
+import type { ISessionStore } from '@truefoundry/trueforge-core/agent-session';
 import type { Logger } from 'winston';
+import { getPublicBaseUrl } from './config';
 import { Controller } from './controller/Controller';
 import { noticingLoops } from './controller/noticingLoops';
 import { privateChatSweepLoop } from './controller/privateChatSweep';
 import { scheduleDispatchLoop } from './controller/scheduleDispatch';
+import { telegramPollLoop, telegramReplyLoop, type TelegramUpdateExecutor } from './controller/telegramDispatch';
 import type { IScheduleStore } from './db/scheduleStore';
+import type { SessionCustom, TurnCustom } from './db/sessionCustom';
+import type { ITelegramStore } from './db/telegramStore';
 import type { WithTransaction } from './db/transaction';
+import { createTelegramService, type TelegramService } from './runtime/telegram/telegramService';
+
+/** What the Telegram loops need: the connection store, a way to read finished turns, and the service that builds bot clients. */
+export interface TelegramControllerDeps {
+  store: ITelegramStore;
+  sessionStore: Pick<ISessionStore<SessionCustom, TurnCustom>, 'getTurn'>;
+  service?: TelegramService;
+  executeUpdate?: TelegramUpdateExecutor;
+}
 
 /**
  * Controller whose loops (schedule runs, noticing, the expired private chat sweep) hand work to the server over HTTP
  * (`SERVER_URL` + `TRUEFORGE_API_KEY` from process config). Standalone uses
  * loopback; distributed uses the dedicated controller against the server Service.
+ * With Telegram deps it also runs the channel's polling and reply loops.
  */
 export function createController<TTransaction>(params: {
   scheduleStore: IScheduleStore<TTransaction>;
   withTransaction: WithTransaction<TTransaction>;
   logger: Logger;
+  telegram?: TelegramControllerDeps;
 }): Controller {
-  return new Controller({
-    loops: [
-      scheduleDispatchLoop({
-        scheduleStore: params.scheduleStore,
-        withTransaction: params.withTransaction,
+  const loops = [
+    scheduleDispatchLoop({
+      scheduleStore: params.scheduleStore,
+      withTransaction: params.withTransaction,
+      logger: params.logger,
+    }),
+    ...noticingLoops({ logger: params.logger }),
+    privateChatSweepLoop({ logger: params.logger }),
+  ];
+  if (params.telegram !== undefined) {
+    const service =
+      params.telegram.service ??
+      createTelegramService({ store: params.telegram.store, publicBaseUrl: getPublicBaseUrl(), logger: params.logger });
+    loops.push(
+      telegramPollLoop({
+        store: params.telegram.store,
+        service,
+        ...(params.telegram.executeUpdate === undefined ? {} : { executeUpdate: params.telegram.executeUpdate }),
         logger: params.logger,
       }),
-      ...noticingLoops({ logger: params.logger }),
-      privateChatSweepLoop({ logger: params.logger }),
-    ],
-    logger: params.logger,
-  });
+      telegramReplyLoop({
+        store: params.telegram.store,
+        service,
+        sessionStore: params.telegram.sessionStore,
+        logger: params.logger,
+      }),
+    );
+  }
+  return new Controller({ loops, logger: params.logger });
 }
 
 /**
@@ -37,6 +70,7 @@ export function runController<TTransaction>(params: {
   scheduleStore: IScheduleStore<TTransaction>;
   withTransaction: WithTransaction<TTransaction>;
   logger: Logger;
+  telegram?: TelegramControllerDeps;
   gracefulTimeoutSeconds: number;
   /** Releases what the caller opened for the loops, e.g. its database pool. */
   onStopped?: () => Promise<void>;

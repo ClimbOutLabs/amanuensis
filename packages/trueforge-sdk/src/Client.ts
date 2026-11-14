@@ -28,6 +28,7 @@ import { SettingsClient } from "./api/resources/settings/client/Client.js";
 import { SkillsClient } from "./api/resources/skills/client/Client.js";
 import { SpaceFoldersClient } from "./api/resources/spaceFolders/client/Client.js";
 import { SpacesClient } from "./api/resources/spaces/client/Client.js";
+import { TelegramClient } from "./api/resources/telegram/client/Client.js";
 import { TodayClient } from "./api/resources/today/client/Client.js";
 import { VoiceClient } from "./api/resources/voice/client/Client.js";
 import type { BaseClientOptions, BaseRequestOptions } from "./BaseClient.js";
@@ -43,6 +44,7 @@ export declare namespace TrueForge {
 export class TrueForge {
     protected readonly _options: NormalizedClientOptionsWithAuth<TrueForge.Options>;
     protected _internal: InternalClient | undefined;
+    protected _telegram: TelegramClient | undefined;
     protected _agents: AgentsClient | undefined;
     protected _auth: AuthClient | undefined;
     protected _bugReports: BugReportsClient | undefined;
@@ -79,6 +81,10 @@ export class TrueForge {
 
     public get internal(): InternalClient {
         return (this._internal ??= new InternalClient(this._options));
+    }
+
+    public get telegram(): TelegramClient {
+        return (this._telegram ??= new TelegramClient(this._options));
     }
 
     public get agents(): AgentsClient {

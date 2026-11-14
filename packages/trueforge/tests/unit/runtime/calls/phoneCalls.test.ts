@@ -106,6 +106,7 @@ describe('phone calls as a channel of the delivery layer', () => {
     const delivery = await h.callDelivery();
     await h.status('no-answer');
     await h.waitFor(() => h.pushes.length > 0);
+    expect(h.telegrams).toEqual([delivery.id]);
     const history = await readReachHistory({
       history: h.deliveryStore,
       owner: ALICE,
@@ -128,6 +129,7 @@ describe('phone calls as a channel of the delivery layer', () => {
       ['sms', 'skipped'],
     ]);
     expect(h.pushes).toEqual([delivery.id]);
+    expect(h.telegrams).toEqual([delivery.id]);
   });
 
   it('does not ring while the voice parts are not running, says so, and sends a text and a push instead', async () => {

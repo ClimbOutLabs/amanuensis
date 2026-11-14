@@ -25,6 +25,7 @@ import { hasNotesFolderSetup, type NotesFolderStatus } from '@/server/notesFolde
 import { isSearchProvider, type SearchProviderFields } from '@/server/searchProviderTypes.js';
 import { useCatalogServer } from '@/server/ServerContext.js';
 import { shellIsMutable, useShellMode } from '@/server/ShellModeContext.js';
+import { hasTelegramSetup, type TelegramAccountStatus } from '@/server/telegramSetup.js';
 import type { AgentSpec, ConnectorAuth, ConnectorBase, ConnectorCatalogEntry } from '@/server/types.js';
 import { getErrorMessage } from '@/utils/getErrorMessage.js';
 import { buildHomeAssistantEndpoint } from '@/utils/homeAssistantPreset.js';
@@ -39,6 +40,7 @@ import EmailSetupPanel from './EmailSetupPanel.js';
 import GoogleSetupPanel from './GoogleSetupPanel.js';
 import NotesFolderSetupPanel from './NotesFolderSetupPanel.js';
 import { searchProviderForNewConnector, searchProviderUpdateRequest } from './searchProvider.js';
+import TelegramSetupPanel from './TelegramSetupPanel.js';
 
 type ConnectorListItem =
   { connector: ConnectorBase; isConfigured: true } | { connector: ConnectorCatalogEntry; isConfigured: false };
@@ -162,6 +164,9 @@ const ConnectorSettings = () => {
   const [calendarStatusFailed, setCalendarStatusFailed] = useState(false);
   const [calendarPanelOpen, setCalendarPanelOpen] = useState(false);
 
+  const [telegramStatus, setTelegramStatus] = useState<TelegramAccountStatus | null>(null);
+  const [telegramStatusFailed, setTelegramStatusFailed] = useState(false);
+  const [telegramPanelOpen, setTelegramPanelOpen] = useState(false);
   const [notesFolderStatus, setNotesFolderStatus] = useState<NotesFolderStatus | null>(null);
   const [notesFolderStatusFailed, setNotesFolderStatusFailed] = useState(false);
   const [notesFolderPanelOpen, setNotesFolderPanelOpen] = useState(false);
@@ -233,6 +238,12 @@ const ConnectorSettings = () => {
         const next = await connectorCatalog.getCalendarStatus().catch(() => null);
         setCalendarStatus(next !== null && next.available ? next : null);
         setCalendarStatusFailed(next === null);
+      }
+      // The Telegram card likewise.
+      if (hasTelegramSetup(connectorCatalog)) {
+        const next = await connectorCatalog.getTelegramStatus().catch(() => null);
+        setTelegramStatus(next !== null && next.available ? next : null);
+        setTelegramStatusFailed(next === null);
       }
       // The Notes folder card likewise, but it has no "available" state: the folder is a local
       // path, so every instance offers it and only a failed read shows as a failure.
@@ -730,6 +741,7 @@ const ConnectorSettings = () => {
 
   const emailMatchesQuery = normalizedQuery === '' || 'email mail'.includes(normalizedQuery);
   const calendarMatchesQuery = normalizedQuery === '' || 'calendar caldav events'.includes(normalizedQuery);
+  const telegramMatchesQuery = normalizedQuery === '' || 'telegram bot chat messages'.includes(normalizedQuery);
   const notesFolderMatchesQuery =
     normalizedQuery === '' || 'notes folder obsidian markdown vault'.includes(normalizedQuery);
 
@@ -995,6 +1007,37 @@ const ConnectorSettings = () => {
             ) : null}
 
             {!loading &&
+            (telegramStatus !== null || telegramStatusFailed) &&
+            telegramMatchesQuery &&
+            hasTelegramSetup(connectorCatalog) ? (
+              <AccountConnectorCard
+                id="telegram"
+                title="Telegram"
+                glyph="T"
+                description="Message your assistant from Telegram. Replies, reminders and ok requests come back there; the bot answers only you."
+                connectedLine={
+                  telegramStatus?.botName
+                    ? `Connected as ${telegramStatus.botName}${telegramStatus.botUsername !== null ? ` (@${telegramStatus.botUsername})` : ''}.`
+                    : null
+                }
+                stoppedLine="The bot stopped answering. Open Manage to connect it again."
+                notWorkingLine="Telegram could not be reached just now. Check your internet connection, then open Manage."
+                failedLabel="Couldn't check Telegram right now"
+                pillLabel={telegramStatus?.state === 'awaiting_pairing' ? 'Waiting for pairing' : undefined}
+                lineOverride={
+                  telegramStatus?.state === 'awaiting_pairing'
+                    ? 'Your bot is connected. Open Manage and enter the code it sent you to finish pairing.'
+                    : undefined
+                }
+                actionLabel={telegramStatus?.state === 'awaiting_pairing' ? 'Pair' : undefined}
+                state={telegramStatus?.state === 'connected' ? 'connected' : 'not_connected'}
+                failed={telegramStatusFailed}
+                onOpen={() => setTelegramPanelOpen(true)}
+                onRetry={() => void refresh()}
+              />
+            ) : null}
+
+            {!loading &&
             (notesFolderStatus !== null || notesFolderStatusFailed) &&
             notesFolderMatchesQuery &&
             hasNotesFolderSetup(connectorCatalog) ? (
@@ -1204,6 +1247,17 @@ const ConnectorSettings = () => {
             <CalendarSetupPanel
               open={calendarPanelOpen}
               onOpenChange={setCalendarPanelOpen}
+              port={connectorCatalog}
+              onChanged={() => {
+                void refresh();
+              }}
+            />
+          ) : null}
+
+          {hasTelegramSetup(connectorCatalog) ? (
+            <TelegramSetupPanel
+              open={telegramPanelOpen}
+              onOpenChange={setTelegramPanelOpen}
               port={connectorCatalog}
               onChanged={() => {
                 void refresh();

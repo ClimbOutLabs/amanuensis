@@ -47,6 +47,7 @@ const CHANNEL_WORDS: Record<DeliveryChannel, string> = {
   web_push: 'a push notice',
   sms: 'a text message',
   call: 'a phone call',
+  telegram: 'Telegram',
 };
 
 /** What failed, when a sender broke before it could say so itself, and where to see the item instead. */
@@ -55,6 +56,7 @@ const FAILED_WORDS: Record<DeliveryChannel, string> = {
   web_push: 'The push notice could not be sent. Open the app to see it in your feed.',
   sms: 'The text could not be sent. Open the app to see it in your feed.',
   call: 'The call could not be made. Open the app to see it in your feed.',
+  telegram: 'The Telegram message could not be sent. Open the app to see it in your feed.',
 };
 
 function conversationOf(delivery: Delivery): string {

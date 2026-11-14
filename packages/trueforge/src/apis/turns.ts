@@ -121,7 +121,7 @@ import {
   type SummarizeTurnContext,
 } from '../runtime/memory/memoryRetain';
 import { serverMemoryConfig, withMemoryScreenOverride } from '../runtime/memory/memorySettings';
-import { resolveSummarizationModelFqn, type ProfileLineSuggestion } from '../runtime/memory/memorySummarize';
+import type { ProfileLineSuggestion } from '../runtime/memory/memorySummarize';
 import { saveSentMail, sentMailFromCall, sentMailWentThrough } from '../runtime/memory/sentMail';
 import { createOutsideInputTracker, inputAttachesFiles } from '../runtime/memory/turnOutsideInput';
 import { readMemoryRecallSetting } from '../runtime/memoryRecallSettings';
@@ -142,7 +142,7 @@ import type { PersonaTurnContext } from '../runtime/personaCapability';
 import type { PersonaSwitchNotice } from '../runtime/PersonaTurnResourceResolver';
 import { privateChatExpiry, sessionKeepsNothing } from '../runtime/privateChat';
 import {
-  learnedProfileLines,
+  profileLearningForTurn,
   submitProfileLearning,
   type ProfileLearningDrainMember,
 } from '../runtime/profileLearning';
@@ -1863,6 +1863,7 @@ export interface TurnEventDrainInput {
   answerMark?: DrainTurnEventsInput['answerMark'];
   chatTitle?: DrainTurnEventsInput['chatTitle'];
   privateChat?: DrainTurnEventsInput['privateChat'];
+  profileLearning?: DrainTurnEventsInput['profileLearning'];
 }
 
 /**
@@ -1879,6 +1880,11 @@ export async function beginTurnExecution(params: {
   unattended?: boolean | undefined;
   /** Built-in tool names this turn does not offer. */
   withheldTools?: readonly string[] | undefined;
+  /**
+   * Set when the person wrote this turn themselves (a Telegram message), so their profile may learn from it
+   * when they have learning on. A scheduled run leaves it unset: nobody wrote its input.
+   */
+  profileLearning?: { personalizationStore: IPersonalizationStore } | undefined;
   /**
    * A title the caller has already chosen for this session (a schedule run names its chat
    * for the schedule). Set on the first turn instead of the working title derived from the
@@ -2056,6 +2062,33 @@ async function beginAcceptedTurnExecution(
   }
   const { turn, resolver, memorySummarize, derivedTitle } = setup.value;
 
+  // Only a turn the person wrote can teach the profile. Like the chat title below, resolved after the turn exists
+  // and never allowed to fail it.
+  const profileLearning =
+    params.profileLearning === undefined
+      ? undefined
+      : await profileLearningForTurn({
+          profile: deps.personalizationProfile,
+          session: session.record,
+          sessionId,
+          personalizationStore: params.profileLearning.personalizationStore,
+          eventStore: deps.sessionStore,
+          memoryClient: deps.memoryClient,
+          retainTimeoutMs: configuration.MEMORY_RETAIN_TIMEOUT_MS,
+          tenantId: tenant_id,
+          createdBy: userRef,
+          userText: extractUserMessageText(input ?? []),
+          timeZone: deps.clientTimezone,
+          memorySummarize,
+          personaModelName: deps.personaContext?.model_name,
+          agentStore: deps.agentStore,
+          globalSettingsStore: deps.globalSettingsStore,
+          modelProviderStore: deps.modelProviderStore,
+          tokenFactoryBudget: deps.tokenFactoryBudget,
+          modelUsage,
+          logger: deps.logger,
+        });
+
   // A first turn that set a working title also carries the context for the
   // subject-title step its follow-up starts. Resolved here, after the turn exists,
   // and never allowed to fail the turn (the resolver returns undefined instead).
@@ -2112,6 +2145,7 @@ async function beginAcceptedTurnExecution(
       logger: deps.logger,
       turnDrains: deps.turnDrains,
       modelUsage: { ledger: modelUsage, eventStore: deps.sessionStore },
+      profileLearning,
       answerMark: { sessionStore: deps.sessionStore, tenantId: tenant_id },
       privateChat: privateChatDrainMember({ session, sessionStore: deps.sessionStore }),
       chatSearch:
@@ -2152,6 +2186,7 @@ export async function startTurnInProcess(params: {
   deps: BeginTurnExecutionDeps;
   unattended?: boolean | undefined;
   withheldTools?: readonly string[] | undefined;
+  profileLearning?: { personalizationStore: IPersonalizationStore } | undefined;
   /** A title the caller has already chosen for this session; see beginTurnExecution. */
   session_title?: string | undefined;
 }): Promise<TurnHandle<TurnCustom>> {
@@ -2802,53 +2837,28 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
     });
 
     // Read off the profile already loaded for the personalization context, so learning left off
-    // (the default) costs nothing here. Learning rides the turn's fact call; the model named here
-    // is asked only when no fact call runs for the turn. The switch is read again after the turn,
-    // so a user who turns it off mid-turn is still obeyed.
-    //
-    // This runs on the create-turn path, so it must not fail a turn: an agent-store read that
-    // throws drops learning for this turn and nothing more.
-    let profileLearning: ProfileLearningDrainMember | undefined;
-    if (profile?.learning_enabled === true) {
-      try {
-        profileLearning = {
-          session: session.record,
-          personalizationStore: deps.personalizationStore,
-          eventStore: deps.sessionStore,
-          memoryClient,
-          retainTimeoutMs: configuration.MEMORY_RETAIN_TIMEOUT_MS,
-          tenantId: requestContext.tenant_id,
-          createdBy: userRef,
-          userText: extractUserMessageText(body.input),
-          knownLines: learnedProfileLines(profile.learned_profile),
-          factCall: {
-            modelProviderStore,
-            summarizationModelFqn:
-              memorySummarize === undefined
-                ? await resolveSummarizationModelFqn({
-                    tenantId: requestContext.tenant_id,
-                    personaModelName: persona?.kind === 'persona' ? persona.persona.model_name : undefined,
-                    sessionAgent: session.record.agent,
-                    agentStore,
-                    globalSettingsStore: deps.globalSettingsStore,
-                    modelProviderStore,
-                    logger: deps.logger,
-                  })
-                : memorySummarize.summarizationModelFqn,
-            tokenFactoryBudget: deps.tokenFactoryBudget,
-            modelUsage,
-            personName: profile.user_name ?? undefined,
-            timeZone: body.client_timezone,
-          },
-        };
-      } catch (error) {
-        deps.logger.debug('Profile learning disabled for this turn: the model FQN did not resolve', {
-          sessionId,
-          ...extractErrorLogFields(error),
-        });
-        profileLearning = undefined;
-      }
-    }
+    // (the default) costs nothing here.
+    const profileLearning = await profileLearningForTurn({
+      profile,
+      session: session.record,
+      sessionId,
+      personalizationStore: deps.personalizationStore,
+      eventStore: deps.sessionStore,
+      memoryClient,
+      retainTimeoutMs: configuration.MEMORY_RETAIN_TIMEOUT_MS,
+      tenantId: requestContext.tenant_id,
+      createdBy: userRef,
+      userText: extractUserMessageText(body.input),
+      timeZone: body.client_timezone,
+      memorySummarize,
+      personaModelName: persona?.kind === 'persona' ? persona.persona.model_name : undefined,
+      agentStore,
+      globalSettingsStore: deps.globalSettingsStore,
+      modelProviderStore,
+      tokenFactoryBudget: deps.tokenFactoryBudget,
+      modelUsage,
+      logger: deps.logger,
+    });
 
     const turnId = mintPeeredTurnId(configuration.EXECUTOR_ID);
     // One read per turn: the persisted override (or env default) applies to the whole turn.

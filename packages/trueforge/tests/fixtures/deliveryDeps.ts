@@ -6,10 +6,13 @@ import { DeliveryStore, type DeliveryDatabase } from '../../src/db/deliveryStore
 import { NoticingStore, type NoticingDatabase } from '../../src/db/noticingStore';
 import { PushSubscriptionStore, type PushSubscriptionDatabase } from '../../src/db/pushSubscriptionStore';
 import { ReachSettingsStore, type ReachSettingsDatabase } from '../../src/db/reachSettingsStore';
+import { TelegramStore, type TelegramDatabase } from '../../src/db/telegramStore';
 import { TextContactStore, type TextContactDatabase } from '../../src/db/textContactStore';
 import { createDeliveryService } from '../../src/runtime/delivery/deliveryService';
 import { NO_PHONE_CHANNELS } from '../../src/runtime/noticing/reachChannels';
 import { createReminderReach } from '../../src/runtime/noticing/reminderReach';
+import { createTelegramSendQueue } from '../../src/runtime/telegram/telegramSendQueue';
+import { createTelegramService } from '../../src/runtime/telegram/telegramService';
 import { createTextNumberService } from '../../src/runtime/texts/textNumber';
 
 /**
@@ -18,7 +21,12 @@ import { createTextNumberService } from '../../src/runtime/texts/textNumber';
  */
 export function deliveryDeps(
   db: Kysely<
-    DeliveryDatabase & PushSubscriptionDatabase & ReachSettingsDatabase & NoticingDatabase & TextContactDatabase
+    DeliveryDatabase &
+      PushSubscriptionDatabase &
+      ReachSettingsDatabase &
+      NoticingDatabase &
+      TextContactDatabase &
+      TelegramDatabase
   >,
   audit: AuditLogWriter = { record: () => Promise.resolve() },
 ) {
@@ -26,6 +34,7 @@ export function deliveryDeps(
   const reachSettingsStore = new ReachSettingsStore(db);
   const textContactStore = new TextContactStore(db);
   const noticingStore = new NoticingStore(db);
+  const telegramStore = new TelegramStore(db);
   return {
     deliveryStore,
     pushSubscriptionStore: new PushSubscriptionStore(db),
@@ -59,5 +68,8 @@ export function deliveryDeps(
     }),
     phoneCalls: { place: () => Promise.reject(new Error('No calls in this test.')) },
     webPushPublicKey: undefined,
+    telegramStore,
+    telegramService: createTelegramService({ store: telegramStore, publicBaseUrl: 'http://localhost' }),
+    telegramQueue: createTelegramSendQueue({ gapMs: 0 }),
   };
 }

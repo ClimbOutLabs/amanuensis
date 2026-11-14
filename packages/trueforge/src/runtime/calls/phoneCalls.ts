@@ -8,7 +8,7 @@ import type { IPersonalizationStore } from '../../db/personalizationStore';
 import type { IPhoneCallStore } from '../../db/phoneCallStore';
 import type { IReachSettingsStore } from '../../db/reachSettingsStore';
 import type { ITextContactStore } from '../../db/textContactStore';
-import type { Delivery, DeliveryAttempt } from '../../schemas/deliveries';
+import type { Delivery, DeliveryAttempt, DeliveryChannel } from '../../schemas/deliveries';
 import {
   CallStatusParamsSchema,
   VoiceWebhookParamsSchema,
@@ -33,6 +33,9 @@ import { callFailureWords, MEDIA_STREAM_PATH, type CallProvider } from './twilio
 /** Said where calls are offered while this server has no Twilio account. */
 export const CALLS_NOT_SET_UP =
   'Calls are not set up on this server. To set them up, add the Twilio details to the settings file and restart Aman.';
+
+/** A phone that never rang is told through these instead, once, as a nudge. */
+const CALL_FALLBACK_CHANNELS: readonly DeliveryChannel[] = ['sms', 'web_push', 'telegram'];
 
 /**
  * Twilio's requests for a call are refused after this, and no media session can open. Twilio rings for 25 seconds and
@@ -261,7 +264,7 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
       }),
     });
     if (await store.claimFallback(call.id)) {
-      await deps.deliveries().fallBack({ ...owner, delivery_id: call.delivery_id, channels: ['sms', 'web_push'] });
+      await deps.deliveries().fallBack({ ...owner, delivery_id: call.delivery_id, channels: CALL_FALLBACK_CHANNELS });
     }
   }
 
@@ -369,8 +372,7 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
 
   const sender: DeliveryChannelSender = {
     channel: 'call',
-    // A phone that never rang is told through a text and a push instead, once.
-    fallsBackTo: ['sms', 'web_push'],
+    fallsBackTo: CALL_FALLBACK_CHANNELS,
     async send({ delivery, tenant_id, created_by, test }) {
       if (!test && delivery.level !== 'call') {
         return [];

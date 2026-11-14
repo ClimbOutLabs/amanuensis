@@ -429,6 +429,10 @@
       "set": "spaces",
       "tests": []
     },
+    "route:telegram": {
+      "set": "reach",
+      "tests": []
+    },
     "route:text": {
       "set": "reach",
       "tests": []
@@ -853,6 +857,7 @@
     "route:skill",
     "route:space",
     "route:spaceFolder",
+    "route:telegram",
     "route:text",
     "route:today",
     "route:tokenFactoryUsage",

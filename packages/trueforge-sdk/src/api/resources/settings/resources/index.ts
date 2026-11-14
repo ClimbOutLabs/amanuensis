@@ -30,6 +30,8 @@ export * from "./sandboxProviders/client/requests/index.js";
 export * as sandboxProviders from "./sandboxProviders/index.js";
 export * from "./skills/client/requests/index.js";
 export * as skills from "./skills/index.js";
+export * from "./telegram/client/requests/index.js";
+export * as telegram from "./telegram/index.js";
 export * as tokenFactoryUsage from "./tokenFactoryUsage/index.js";
 export * from "./toolOutputScreens/client/requests/index.js";
 export * as toolOutputScreens from "./toolOutputScreens/index.js";
