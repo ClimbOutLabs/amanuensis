@@ -394,13 +394,16 @@ export type {
 } from './sandbox/provider/Provider';
 export { TFYSandboxProvider } from './sandbox/provider/TFYSandboxProvider';
 export {
+  SANDBOX_FILE_WRITE_TOOLS,
   SANDBOX_RUN_REGISTERED_COMMAND_TOOL_NAME,
   SANDBOX_RUN_SKILL_SCRIPT_TOOL_NAME,
+  SANDBOX_TOOL_DECLARATIONS,
   SANDBOX_WRITE_FILE_TOOL_NAME,
   SKILL_DOWNLOAD_TIMEOUT_SECONDS,
   Sandbox,
   buildWriteAndRunScriptCommand,
   forgetShownSkillNotices,
+  sandboxFileWriteToolNames,
 } from './sandbox/Sandbox';
 export type {
   BoundRepository,
@@ -412,6 +415,7 @@ export type {
   RepositoryCommandSourceObservation,
   RepositoryCommandSourceObserver,
   SandboxInfo,
+  SandboxToolDeclaration,
   WorkspaceVerificationCoordinator,
 } from './sandbox/Sandbox';
 export { extractSandboxArtifactsFromMessage, parseSandboxArtifacts } from './sandbox/sandboxArtifacts';

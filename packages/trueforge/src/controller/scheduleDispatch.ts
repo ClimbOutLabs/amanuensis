@@ -1,6 +1,5 @@
 import type { SessionHandle, Sessions, TurnInputItem } from '@truefoundry/trueforge-core/agent-session';
-import { DOCUMENT_REPORT_TOOL_NAMES } from '@truefoundry/trueforge-core/core';
-import { SANDBOX_FILE_WRITE_TOOLS } from '@truefoundry/trueforge-core/core/permissions/dispatch';
+import { DOCUMENT_REPORT_TOOL_NAMES, SANDBOX_FILE_WRITE_TOOLS } from '@truefoundry/trueforge-core/core';
 import { isMorningBriefPrompt, isMorningBriefSchedule } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
 import { SPACE_WRITE_TOOL_NAMES } from '@truefoundry/trueforge-core/core/spaces/toolContract';
 import { TrueForge } from '@truefoundry/trueforge-sdk';

@@ -98,6 +98,8 @@ export type RailRecallFact = {
 };
 
 const READ_LABEL = 'from something read for the person';
+/** For anything the person did not type and whose source is not known. It never claims the text was read somewhere. */
+const NOT_THEIR_WORDS = 'Noted by your assistant, not confirmed';
 const FINDING_LABEL = 'found earlier by the assistant';
 const REPLY_LABEL = "the assistant's earlier reply";
 const SENT_LABEL = 'a message the person sent';
@@ -139,7 +141,7 @@ function parseBlockLine(line: string): RailRecallFact | undefined {
   const note = NOTE_LABEL.exec(text);
   const shown = note?.[2] ?? text;
   if (label === READ_LABEL) {
-    return { text, shown, date, source: 'read', origin: `${note?.[1] ?? 'From something read for you'}${when}` };
+    return { text, shown, date, source: 'read', origin: `${note?.[1] ?? NOT_THEIR_WORDS}${when}` };
   }
   if (label === FINDING_LABEL) {
     return { text, shown, date, source: 'finding', origin: `${note?.[1] ?? 'Found for you earlier'}${when}` };
@@ -170,8 +172,8 @@ const PAGE_SOURCES: readonly { starts: string; source: RailRecallFactSource; wor
   { starts: 'from mail you sent', source: 'person', words: 'From mail you sent' },
   { starts: 'from mail', source: 'read', words: 'From mail, not confirmed' },
   { starts: 'from calendar', source: 'read', words: 'From your calendar, not confirmed' },
-  { starts: 'read content', source: 'read', words: 'Noted by your assistant, not confirmed' },
-  { starts: 'inferred', source: 'read', words: 'Noted by your assistant, not confirmed' },
+  { starts: 'read content', source: 'read', words: NOT_THEIR_WORDS },
+  { starts: 'inferred', source: 'read', words: NOT_THEIR_WORDS },
 ];
 
 /** One fact line of a page in a recall block, or undefined for the page's other lines. */
