@@ -245,8 +245,9 @@ test('a run grades every case, removes its memories and space, and writes the co
         ],
       },
       modelSet: {
-        version: 1,
+        version: 3,
         memories: [{ text: 'My dentist is Dr. Okafor.', timestamp: '2026-08-04T09:10:00Z' }],
+        personas: [],
         cases: [
           {
             id: 'memory-dentist',
@@ -388,4 +389,207 @@ test('a schedule name reads the way the app names its chats, and only a brief wi
   assert.equal(readBrief('```json\n{"digest":"d","items":[]}\n```')?.digest, 'd');
   assert.equal(readBrief('```json\n{"items":[]}\n```'), undefined);
   assert.equal(readBrief('no json here'), undefined);
+});
+
+/**
+ * An instance with personas that each keep a vault. A chat recalls what its vaults hold that shares a word with the
+ * prompt, and saves the prompt to its persona's vault unless it is incognito. `leaky` reads and saves everywhere.
+ */
+function personaClient({ leaky = false } = {}) {
+  const vaults = { shared: [], 'persona:Fern': [{ id: 'fern-old', text: 'Kept from before the run.' }] };
+  const state = { profile: null, profileDeleted: false, personas: [], deletedPersonas: [], deleted: [] };
+  const sessions = new Map();
+  const turns = new Map();
+  let counter = 0;
+  const vaultOf = namespace => namespace ?? 'shared';
+  const visibleTo = persona =>
+    leaky ? Object.keys(vaults) : ['shared', ...(persona === undefined ? [] : [`persona:${persona}`])];
+  const replyFor = ({ persona, prompt }) => {
+    const words = prompt
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter(word => word.length > 3);
+    const recalled = visibleTo(persona)
+      .flatMap(name => vaults[name] ?? [])
+      .filter(entry => words.some(word => entry.text.toLowerCase().includes(word)))
+      .map(entry => entry.text);
+    const name = prompt.includes('name') && state.profile !== null ? `You are ${state.profile.user_name}.` : '';
+    return [name, ...recalled].join(' ') || 'I do not know.';
+  };
+  return {
+    state,
+    vaults,
+    origin: 'http://fake.local',
+    async listModels() {
+      return [{ name: 'custom/m', model_id: 'm', provider: { name: 'custom' } }];
+    },
+    async listModelProviders() {
+      return [{ name: 'custom', type: 'custom' }];
+    },
+    async getTokenFactoryUsage() {
+      return { usage_date: '2026-11-16', models: [] };
+    },
+    async listSpaces() {
+      return { aggregate_revision: 0 };
+    },
+    async createSpace() {
+      return { space: { id: 'space_1', revision: 1 } };
+    },
+    async deleteSpace() {
+      return undefined;
+    },
+    async getProfile() {
+      return state.profile;
+    },
+    async putProfile(profile) {
+      state.profile = profile;
+    },
+    async deleteProfile() {
+      state.profile = null;
+      state.profileDeleted = true;
+    },
+    async createPersona(persona) {
+      const made = { id: `p-${persona.display_name}`, ...persona };
+      state.personas.push(made);
+      vaults[`persona:${persona.display_name}`] ??= [];
+      return made;
+    },
+    async deletePersona(id) {
+      state.deletedPersonas.push(id);
+    },
+    async listMemoryEntries({ namespace } = {}) {
+      return [...(vaults[vaultOf(namespace)] ?? [])];
+    },
+    async importMemories(entries, { namespace } = {}) {
+      const vault = vaultOf(namespace);
+      entries.forEach(entry => vaults[vault].push({ id: `${vault}#${String(++counter)}`, text: entry.text }));
+    },
+    async deleteMemoryEntry(id) {
+      state.deleted.push(id);
+      for (const list of Object.values(vaults)) {
+        const index = list.findIndex(entry => entry.id === id);
+        if (index >= 0) {
+          list.splice(index, 1);
+        }
+      }
+    },
+    async createSession({ incognito }) {
+      const id = `s${String(++counter)}`;
+      sessions.set(id, { incognito, persona: undefined });
+      return id;
+    },
+    async setSessionPersona({ sessionId, personaId }) {
+      sessions.get(sessionId).persona = state.personas.find(persona => persona.id === personaId).display_name;
+    },
+    async createTurn(sessionId, { input }) {
+      const session = sessions.get(sessionId);
+      const prompt = input[0].content;
+      const id = `t${String(++counter)}`;
+      turns.set(id, replyFor({ persona: session.persona, prompt }));
+      if (!session.incognito) {
+        const vault = leaky || session.persona === undefined ? 'shared' : `persona:${session.persona}`;
+        vaults[vault].push({ id: `${vault}#${String(++counter)}`, text: prompt });
+      }
+      return { id, state: { status: 'running' } };
+    },
+    async getTurn(_sessionId, turnId) {
+      return {
+        id: turnId,
+        state: { status: 'done', output: { content: turns.get(turnId) }, required_actions: [], metrics: {} },
+      };
+    },
+    async listSessionEvents() {
+      return [];
+    },
+  };
+}
+
+const personaSet = {
+  version: 3,
+  memories: [{ text: 'My manager at work is Lena Ortiz.', timestamp: '2026-09-01T09:00:00Z' }],
+  profile: { user_name: 'Robin Hale' },
+  personas: [
+    {
+      name: 'Fern',
+      instructions: 'Home help.',
+      memories: [{ text: 'Our allotment is plot 27.', timestamp: '2026-09-14T17:00:00Z' }],
+    },
+    {
+      name: 'Quill',
+      instructions: 'Work help.',
+      memories: [{ text: 'My project is code-named Bluefin.', timestamp: '2026-09-21T09:30:00Z' }],
+    },
+  ],
+  cases: [
+    { id: 'name', persona: 'Fern', prompt: "What's my name?", checks: [{ type: 'reply_includes', any: ['Robin'] }] },
+    {
+      id: 'shared',
+      persona: 'Fern',
+      prompt: 'Who is my manager?',
+      checks: [{ type: 'reply_includes', any: ['Ortiz'] }],
+    },
+    {
+      id: 'cross',
+      persona: 'Fern',
+      prompt: 'What is my project code?',
+      checks: [{ type: 'reply_excludes', all: ['Bluefin'] }],
+    },
+    {
+      id: 'saves',
+      persona: 'Fern',
+      prompt: 'Remember our cat is Pickle.',
+      checks: [],
+      journey: { type: 'memory_saved', words: ['Pickle'], saved_in: ['Fern'], not_saved_in: ['shared', 'Quill'] },
+    },
+    {
+      id: 'incognito',
+      incognito: true,
+      prompt: 'Remember my locker code is 4817.',
+      checks: [],
+      journey: { type: 'memory_saved', words: ['4817'], saved_in: [], not_saved_in: ['shared', 'Fern', 'Quill'] },
+    },
+  ].map(item => ({ group: 'persona', approval_policy: 'decline', checklist: [], ...item })),
+};
+
+async function runPersonaSet(client) {
+  const outDir = await mkdtemp(path.join(tmpdir(), 'eval-models-'));
+  try {
+    return await runEvalModels({
+      client,
+      tokenSet: { version: 1, prompts: [] },
+      modelSet: personaSet,
+      space: { name: 'n', purpose: 'p', status: 'active', body: 'b', format: 'markdown' },
+      models: ['custom/m'],
+      judgeModel: 'custom/m',
+      temperature: 0,
+      runs: 1,
+      label: 'test',
+      outDir,
+      pollIntervalMs: 0,
+      memorySettleMs: 0,
+    });
+  } finally {
+    await rm(outDir, { recursive: true, force: true });
+  }
+}
+
+test('persona cases pass when each persona keeps its own facts, and everything the run made is put back', async () => {
+  const client = personaClient();
+  const result = await runPersonaSet(client);
+  assert.deepEqual(
+    result.rows.filter(row => !row.pass).map(row => [row.case_id, row.checks.filter(check => !check.pass)]),
+    [],
+  );
+  assert.ok(result.rows.every(row => row.part === 'memory'));
+  assert.deepEqual(client.state.deletedPersonas, ['p-Fern', 'p-Quill']);
+  assert.equal(client.state.profileDeleted, true, 'a Personalization page that was empty is emptied again');
+  assert.deepEqual(client.vaults['persona:Fern'], [{ id: 'fern-old', text: 'Kept from before the run.' }]);
+  assert.deepEqual(client.vaults['persona:Quill'], []);
+  assert.deepEqual(client.vaults.shared, []);
+});
+
+test('persona cases fail when a persona reads facts it should not see or saves to the shared memory', async () => {
+  const result = await runPersonaSet(personaClient({ leaky: true }));
+  const failed = result.rows.flatMap(row => row.checks.filter(check => !check.pass).map(check => check.check));
+  assert.deepEqual(failed, ['reply leaves out Bluefin', 'Pickle was saved in Fern', 'Pickle was not saved in shared']);
 });
