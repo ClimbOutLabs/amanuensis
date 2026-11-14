@@ -415,6 +415,33 @@ async function decidePersonFacts(params: SubmitRetainParams): Promise<TurnMemory
 }
 
 /**
+ * A turn that was stopped or ended in an error has no finished reply, so it owes no summary. It is
+ * recorded as done, so the next turn does not report a failed summary for it. This applies only with
+ * summaries on: a turn kept in full is still rebuilt from the chat by the next turn. Never throws.
+ */
+export async function noteUnfinishedTurnOwesNoSummary(params: {
+  client: MemoryClient;
+  session: Pick<SessionRecord, 'is_incognito'>;
+  sessionId: string;
+  turnId: string;
+  summarize: SummarizeTurnContext | undefined;
+  logger: Logger;
+}): Promise<void> {
+  if (params.summarize === undefined || sessionKeepsNothing({ session: params.session })) {
+    return;
+  }
+  try {
+    await params.client.completeOperation?.(retainOperationId({ sessionId: params.sessionId, turnId: params.turnId }));
+  } catch (error) {
+    params.logger.debug('Recording that an unfinished turn owes no summary failed', {
+      sessionId: params.sessionId,
+      turnId: params.turnId,
+      reason: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+/**
  * Notes a summary attempt's outcome on the client when it tracks summary state, so a
  * failed summary stays visible on the Memories page until a later summary succeeds.
  * A deliberate skip (an empty exchange) is not a failure and never reaches this helper.

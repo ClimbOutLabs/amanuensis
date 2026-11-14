@@ -2815,6 +2815,10 @@
         "properties": {},
         "type": "object"
       },
+      "DeleteMemoryVaultSummaryStatusResponse": {
+        "properties": {},
+        "type": "object"
+      },
       "DeleteModelProviderResponse": {
         "properties": {},
         "type": "object"
@@ -8309,13 +8313,22 @@
       },
       "MemoryVaultSummaryStatus": {
         "properties": {
+          "failed_at": {
+            "description": "When that summary failed, or null when none is owed or the time was not kept.",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "summary_pending": {
             "description": "True when the newest turn summary for this vault failed and has not been made yet.",
             "type": "boolean"
           }
         },
         "required": [
-          "summary_pending"
+          "summary_pending",
+          "failed_at"
         ],
         "type": "object"
       },
@@ -21187,6 +21200,73 @@
       }
     },
     "/api/v1/memory/vault/summary-status": {
+      "delete": {
+        "description": "Put away the note that one vault namespace is owed a turn summary. Nothing in memory changes, and a later failed summary shows the note again.",
+        "parameters": [
+          {
+            "description": "Vault namespace: omit for the shared vault, `persona:<name>` for a persona vault, else a topic name.",
+            "in": "query",
+            "name": "namespace",
+            "required": false,
+            "schema": {
+              "description": "Vault namespace: omit for the shared vault, `persona:<name>` for a persona vault, else a topic name.",
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteMemoryVaultSummaryStatusResponse"
+                }
+              }
+            },
+            "description": "The note is put away."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid namespace."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The vault operation failed."
+          }
+        },
+        "summary": "Dismiss a failed turn summary",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "memory",
+          "vault"
+        ],
+        "x-fern-sdk-method-name": "dismiss_summary_status"
+      },
       "get": {
         "description": "Say whether one vault namespace is still owed a turn summary after a failed attempt.",
         "parameters": [

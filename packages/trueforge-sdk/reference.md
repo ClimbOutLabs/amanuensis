@@ -9961,6 +9961,69 @@ await client.memory.vault.getSummaryStatus();
 </dl>
 </details>
 
+<details><summary><code>client.memory.vault.<a href="/src/api/resources/memory/resources/vault/client/Client.ts">dismissSummaryStatus</a>({ ...params }) -> TrueForge.DeleteMemoryVaultSummaryStatusResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Put away the note that one vault namespace is owed a turn summary. Nothing in memory changes, and a later failed summary shows the note again.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.memory.vault.dismissSummaryStatus();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.memory.DismissSummaryStatusVaultRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `VaultClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
 <details><summary><code>client.memory.vault.<a href="/src/api/resources/memory/resources/vault/client/Client.ts">update</a>(entry_id, { ...params }) -> TrueForge.GetMemoryVaultEntryResponse</code></summary>
 <dl>
 <dd>

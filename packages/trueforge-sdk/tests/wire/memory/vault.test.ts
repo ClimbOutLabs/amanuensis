@@ -778,7 +778,7 @@ describe("VaultClient", () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
 
-        const rawResponseBody = { data: { summary_pending: true } };
+        const rawResponseBody = { data: { failed_at: "2024-01-15T09:30:00Z", summary_pending: true } };
 
         server
             .mockEndpoint()
@@ -791,6 +791,7 @@ describe("VaultClient", () => {
         const response = await client.memory.vault.getSummaryStatus();
         expect(response).toEqual({
             data: {
+                failedAt: new Date("2024-01-15T09:30:00.000Z"),
                 summaryPending: true,
             },
         });
@@ -850,6 +851,81 @@ describe("VaultClient", () => {
 
         await expect(async () => {
             return await client.memory.vault.getSummaryStatus();
+        }).rejects.toThrow(TrueForgeTypes.InternalServerError);
+    });
+
+    test("dismiss_summary_status (1)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = {};
+
+        server
+            .mockEndpoint()
+            .delete("/api/v1/memory/vault/summary-status")
+            .respondWith()
+            .statusCode(200)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        const response = await client.memory.vault.dismissSummaryStatus();
+        expect(response).toEqual({});
+    });
+
+    test("dismiss_summary_status (2)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .delete("/api/v1/memory/vault/summary-status")
+            .respondWith()
+            .statusCode(400)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.memory.vault.dismissSummaryStatus();
+        }).rejects.toThrow(TrueForgeTypes.BadRequestError);
+    });
+
+    test("dismiss_summary_status (3)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .delete("/api/v1/memory/vault/summary-status")
+            .respondWith()
+            .statusCode(401)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.memory.vault.dismissSummaryStatus();
+        }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+    });
+
+    test("dismiss_summary_status (4)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .delete("/api/v1/memory/vault/summary-status")
+            .respondWith()
+            .statusCode(500)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.memory.vault.dismissSummaryStatus();
         }).rejects.toThrow(TrueForgeTypes.InternalServerError);
     });
 

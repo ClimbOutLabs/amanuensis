@@ -113,7 +113,7 @@ The **Settings** tab also has these:
 - Your memories stay on your computer. Searching them uses a small helper that also runs on your computer.
 - A chat you delete leaves the past-chat search at once.
 - An incognito chat can use your memories, but Aman saves nothing from it.
-- If Aman couldn't save anything from your latest chat, the **Memories** tab tells you. Ask it to remember the important part again in your next chat.
+- If Aman couldn't save anything from your latest chat, the **Memories** tab tells you. Ask it to remember the important part again in your next chat. The note says the day it happened. It goes away after the next chat that saves, or when you click **Dismiss**. Dismissing changes nothing in memory.
 - To learn where memories are kept and how Aman finds them, see [How memory works](../../../../docs/memory.md).
 
 ## Related

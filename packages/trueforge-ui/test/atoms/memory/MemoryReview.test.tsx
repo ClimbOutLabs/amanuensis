@@ -34,6 +34,7 @@ function createCatalog({ notes, result }: { notes: MemoryVaultReviewNote[]; resu
         ? [{ id: 'x', text: 'Drinks tea.', timestamp: new Date().toISOString(), persona: null }]
         : [],
     getSummaryStatus: async () => ({ summaryPending: false }),
+    dismissSummaryStatus: async () => undefined,
     updateEntry: async () => {
       throw new Error('not used in these tests');
     },

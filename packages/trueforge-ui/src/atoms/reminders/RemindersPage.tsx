@@ -23,8 +23,8 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { IconButton } from '../primitives/IconButton.js';
 import { Skeleton } from '../primitives/Skeleton.js';
 
-const ROW_CLASS = 'flex min-w-0 flex-1 items-center gap-3 py-3 pr-2 pl-4 text-left sm:gap-4';
-const PILL_CLASS = 'inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-medium';
+const ROW_CLASS = 'flex min-w-0 flex-1 items-center gap-3 py-2.5 pr-2 pl-3.5 text-left';
+const PILL_CLASS = 'inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[0.6875rem] leading-4 font-medium';
 
 /** The square at the start of a row: the day it is about, or a mark for a reminder with no day queued. */
 function DayTile({ item, moment }: { item: ReminderItem; moment: string | null }) {
@@ -32,14 +32,14 @@ function DayTile({ item, moment }: { item: ReminderItem; moment: string | null }
   return (
     <span
       aria-hidden
-      className="flex size-11 shrink-0 flex-col items-center justify-center rounded-lg bg-secondary-bg text-text-secondary"
+      className="flex size-9 shrink-0 flex-col items-center justify-center rounded-md bg-primary-bg text-text-secondary"
     >
       {tile === null ? (
         <Icon name={item.state === 'paused' ? 'pause' : 'alarm-clock'} className="size-4" />
       ) : (
         <>
           <span className="text-[0.625rem] leading-3 font-semibold tracking-wide uppercase">{tile.month}</span>
-          <span className="text-base leading-5 font-semibold text-text-primary">{tile.day}</span>
+          <span className="text-sm leading-4 font-semibold text-text-primary">{tile.day}</span>
         </>
       )}
     </span>
@@ -49,14 +49,14 @@ function DayTile({ item, moment }: { item: ReminderItem; moment: string | null }
 /** The at-a-glance word on a row: how far off it is, or that it is paused or was missed. */
 function StatusPill({ item, moment, now }: { item: ReminderItem; moment: string | null; now: Date }) {
   if (item.state === 'paused') {
-    return <span className={cn(PILL_CLASS, 'bg-secondary-bg text-text-secondary')}>Paused</span>;
+    return <span className={cn(PILL_CLASS, 'bg-primary-bg text-text-secondary')}>Paused</span>;
   }
   if (item.state === 'missed') {
     return <span className={cn(PILL_CLASS, 'bg-failure-bg/10 text-failure-bg')}>Missed</span>;
   }
   const words = moment === null ? '' : reminderRelativeWords({ iso: moment, timezone: item.timezone, now });
   if (words === '') return null;
-  return <span className={cn(PILL_CLASS, 'bg-secondary-bg text-text-secondary')}>{words}</span>;
+  return <span className={cn(PILL_CLASS, 'bg-primary-bg text-text-secondary')}>{words}</span>;
 }
 
 function ReminderRow({
@@ -77,21 +77,21 @@ function ReminderRow({
       <DayTile item={item} moment={moment} />
       <span className="min-w-0 flex-1">
         <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-          <span className="text-[0.9375rem] font-semibold break-words text-text-primary">{item.what}</span>
+          <span className="text-[0.8125rem] leading-5 font-medium break-words text-text-primary">{item.what}</span>
           <StatusPill item={item} moment={moment} now={now} />
         </span>
-        <span className="mt-0.5 flex items-center gap-1 text-sm break-words text-text-secondary">
-          {item.repeats ? <Icon name="repeat" className="size-3.5 shrink-0" aria-hidden /> : null}
+        <span className="flex items-center gap-1 text-xs leading-5 break-words text-text-secondary">
+          {item.repeats ? <Icon name="repeat" className="size-3 shrink-0" aria-hidden /> : null}
           {reminderWhenLine(item)}
         </span>
-        <span className="mt-0.5 block text-xs break-words text-text-secondary opacity-80">
+        <span className="block text-xs leading-5 break-words text-text-secondary opacity-80">
           {reminderDetailLine(item)}
         </span>
       </span>
       {sessionId !== null ? (
-        <span className="flex shrink-0 items-center gap-0.5 text-sm text-text-secondary">
+        <span className="flex shrink-0 items-center gap-0.5 text-xs text-text-secondary">
           <span className="hidden sm:inline">Open chat</span>
-          <Icon name="chevron-right" className="size-4 shrink-0" />
+          <Icon name="chevron-right" className="size-3.5 shrink-0" />
         </span>
       ) : (
         <span className="hidden shrink-0 text-xs text-text-secondary sm:inline">No chat to open</span>
@@ -154,7 +154,7 @@ function ReminderGroup({
           {emptyText}
         </p>
       ) : (
-        <ul className="flex flex-col overflow-hidden rounded-xl border border-border bg-paper">
+        <ul className="flex flex-col overflow-hidden rounded-xl border border-border bg-card-bg">
           {items.map(item => (
             <ReminderRow key={item.id} item={item} now={now} onOpenChat={onOpenChat} onDelete={onDelete} />
           ))}
