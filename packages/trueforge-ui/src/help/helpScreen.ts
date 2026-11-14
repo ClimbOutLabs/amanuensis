@@ -11,7 +11,7 @@ const SETTINGS_SECTION_NAMES: Record<SettingsSection, string> = {
   personalization: 'Personalization',
   themes: 'Appearance',
   permissions: 'Permissions',
-  audit: 'Audit',
+  audit: 'Activity log',
   'reach-me': 'Reach me',
   account: 'Account',
   about: 'About',
@@ -48,7 +48,7 @@ export function describeHelpScreen(state: HelpScreenState | null): string {
     return 'Agent library';
   }
   if (state.sessionsOpen) {
-    return 'Sessions';
+    return 'Chat stats';
   }
   return 'Chat';
 }

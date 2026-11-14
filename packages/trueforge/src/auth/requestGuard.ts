@@ -7,8 +7,11 @@ import { readBearerToken } from './token';
 
 const STATE_CHANGING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 const LOOPBACK_ORIGIN_HOSTS = ['localhost', '127.0.0.1', '[::1]'];
-/** Reachable without a browser session: probes, the service-key route, and the connector OAuth redirect. */
-const ORIGIN_EXEMPT_PATHS = ['/healthz', '/api/internal/schedules', '/api/v1/mcp-servers/oauth'];
+/**
+ * Reachable without a browser session: probes, the service-key route, the connector OAuth redirect,
+ * and the Telegram webhook, which carries its own secret instead of a session.
+ */
+const ORIGIN_EXEMPT_PATHS = ['/healthz', '/api/internal/schedules', '/api/v1/mcp-servers/oauth', '/api/telegram'];
 
 function isPathExempt(path: string): boolean {
   return ORIGIN_EXEMPT_PATHS.some(exempt => path === exempt || path.startsWith(`${exempt}/`));

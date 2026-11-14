@@ -25,7 +25,7 @@ import { useIsMobile } from '../atoms/lib/useIsMobile.js';
 import { useLightDismiss } from '../atoms/lib/useLightDismiss.js';
 import { LightDarkToggleButton } from '../atoms/LightDarkToggleButton.js';
 import { NamedAgentHeaderLabel } from '../atoms/NamedAgentHeaderLabel.js';
-import { PageHeader } from '../atoms/PageHeader.js';
+import { PageHeader, PageHeaderStartProvider } from '../atoms/PageHeader.js';
 import { DropdownMenu } from '../atoms/primitives/DropdownMenu.js';
 import { Spinner } from '../atoms/primitives/Spinner.js';
 import { ShellActions } from '../atoms/ShellActions.js';
@@ -324,6 +324,41 @@ export function SidebarLayout({ className }: { className?: string }) {
     }
   }, [mobileNavOpen]);
 
+  // The phone's way to the rail. Sits in a rail-wide strip on the rail's background, so it lines up with the rail it opens.
+  // Pages that fill the screen show it in their own header, since the chat header is hidden there.
+  const navigationButton = (
+    <div
+      className={cn(
+        railWidthClassName,
+        '-ml-4 flex shrink-0 items-center justify-center self-stretch border-r border-border bg-sidebar-bg md:hidden',
+      )}
+    >
+      <button
+        ref={menuBtnRef}
+        type="button"
+        aria-label={
+          unreadCount > 0
+            ? `Navigation, ${String(unreadCount)} unread ${unreadCount === 1 ? 'notification' : 'notifications'}`
+            : 'Navigation'
+        }
+        aria-expanded={mobileNavOpen}
+        className={cn(auiButtonClass({ variant: 'ghost', size: 'icon' }), 'relative')}
+        onClick={() => setMobileNavOpen(true)}
+      >
+        <Icon name="bars" />
+        {unreadCount > 0 ? (
+          <span
+            data-role="navigation-unread-count"
+            aria-hidden
+            className="bg-gold text-text-primary absolute -top-0.5 -right-0.5 min-w-4 rounded-full px-1 text-center text-[0.625rem] leading-4 font-semibold"
+          >
+            {unreadCount > 99 ? '99+' : unreadCount}
+          </span>
+        ) : null}
+      </button>
+    </div>
+  );
+
   return (
     <div className={cn('relative flex h-full min-h-0 w-full min-w-0', className)}>
       <HelpNewChatBridge />
@@ -358,41 +393,7 @@ export function SidebarLayout({ className }: { className?: string }) {
             // has no menu button or title there, so hide it at every width rather than leave a blank band.
             overlayOpen && 'hidden',
           )}
-          start={
-            !overlayOpen ? (
-              // Sits in a rail-wide strip on the rail's background, so it lines up with the rail it opens.
-              <div
-                className={cn(
-                  railWidthClassName,
-                  '-ml-4 flex shrink-0 items-center justify-center self-stretch border-r border-border bg-sidebar-bg md:hidden',
-                )}
-              >
-                <button
-                  ref={menuBtnRef}
-                  type="button"
-                  aria-label={
-                    unreadCount > 0
-                      ? `Navigation, ${String(unreadCount)} unread ${unreadCount === 1 ? 'notification' : 'notifications'}`
-                      : 'Navigation'
-                  }
-                  aria-expanded={mobileNavOpen}
-                  className={cn(auiButtonClass({ variant: 'ghost', size: 'icon' }), 'relative')}
-                  onClick={() => setMobileNavOpen(true)}
-                >
-                  <Icon name="bars" />
-                  {unreadCount > 0 ? (
-                    <span
-                      data-role="navigation-unread-count"
-                      aria-hidden
-                      className="bg-gold text-text-primary absolute -top-0.5 -right-0.5 min-w-4 rounded-full px-1 text-center text-[0.625rem] leading-4 font-semibold"
-                    >
-                      {unreadCount > 99 ? '99+' : unreadCount}
-                    </span>
-                  ) : null}
-                </button>
-              </div>
-            ) : null
-          }
+          start={!overlayOpen ? navigationButton : null}
           title={!overlayOpen ? <NamedAgentHeaderLabel /> : null}
           end={
             !overlayOpen ? (
@@ -438,11 +439,15 @@ export function SidebarLayout({ className }: { className?: string }) {
                 <TruefoundrySettingsBuilder />
               </Suspense>
             ) : sessionsOpen ? (
-              <SessionsPage />
+              <PageHeaderStartProvider value={navigationButton}>
+                <SessionsPage />
+              </PageHeaderStartProvider>
             ) : libraryOpen && shell?.libraryAgentId != null ? (
               <AgentDetailsPage key={shell.libraryAgentId} agentId={shell.libraryAgentId} />
             ) : libraryOpen ? (
-              <AgentsLibrary onSelectAgent={() => setMobileNavOpen(false)} />
+              <PageHeaderStartProvider value={navigationButton}>
+                <AgentsLibrary onSelectAgent={() => setMobileNavOpen(false)} />
+              </PageHeaderStartProvider>
             ) : schedulesOpen ? (
               <Suspense
                 fallback={
@@ -457,7 +462,9 @@ export function SidebarLayout({ className }: { className?: string }) {
                   </div>
                 }
               >
-                <SchedulesPage />
+                <PageHeaderStartProvider value={navigationButton}>
+                  <SchedulesPage />
+                </PageHeaderStartProvider>
               </Suspense>
             ) : remindersOpen ? (
               <Suspense
@@ -473,7 +480,9 @@ export function SidebarLayout({ className }: { className?: string }) {
                   </div>
                 }
               >
-                <RemindersPage />
+                <PageHeaderStartProvider value={navigationButton}>
+                  <RemindersPage />
+                </PageHeaderStartProvider>
               </Suspense>
             ) : spacesOpen ? (
               <Suspense
@@ -516,7 +525,8 @@ export function SidebarLayout({ className }: { className?: string }) {
             role="dialog"
             aria-label="Navigation"
             tabIndex={-1}
-            className="absolute inset-y-0 left-0 z-10 flex shadow-lg outline-none md:hidden"
+            // Stops short of the right edge, so a narrow phone still shows a strip to tap to close it.
+            className="absolute inset-y-0 left-0 z-10 flex max-w-[calc(100%-2rem)] shadow-lg outline-none md:hidden"
           >
             <SidebarRail
               onNavigate={() => setMobileNavOpen(false)}
@@ -528,7 +538,7 @@ export function SidebarLayout({ className }: { className?: string }) {
               <div
                 role="complementary"
                 aria-label="Recent chats"
-                className="h-full w-64 shrink-0 border-l border-border bg-sidebar-bg"
+                className="h-full w-64 min-w-0 border-l border-border bg-sidebar-bg"
               >
                 <ThreadListContainer variant="recent-history" onThreadOpen={() => setMobileNavOpen(false)} />
               </div>

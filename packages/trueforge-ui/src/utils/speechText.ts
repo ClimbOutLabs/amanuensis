@@ -55,6 +55,14 @@ export function limitSpeechWords(text: string, maxWords: number = SPOKEN_WORD_LI
 }
 
 /**
+ * What a readout says for an answer: the whole answer when the person has asked to hear whole
+ * messages, otherwise the first stretch with the rest left on screen.
+ */
+export function answerReadoutText(plainAnswer: string, { readWhole }: { readWhole: boolean }): string {
+  return readWhole ? plainAnswer : limitSpeechWords(plainAnswer);
+}
+
+/**
  * The answer a person hears: the text after the last tool call or thinking step, in plain words.
  * Status text that came before a tool call is not part of it.
  */

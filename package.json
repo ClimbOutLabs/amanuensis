@@ -29,6 +29,7 @@
     "guide:check": "node scripts/check-aman-guide-fresh.mjs",
     "docs:site:build": "node scripts/build-docs-site.mjs && mkdocs build -f docs-site/build.yml",
     "docs:screenshots": "pnpm --filter frontend docs:screenshots",
+    "ui:sweep": "pnpm --filter frontend ui:sweep",
     "help:pr-check": "node scripts/check-help-pr.mjs",
     "format:check": "prettier --check \"**/*.{js,jsx,ts,tsx,json,md}\" --cache --cache-location .prettiercache --cache-strategy content --error-on-unmatched-pattern --config .prettierrc",
     "format:check:files": "prettier --check --ignore-unknown --config .prettierrc --",

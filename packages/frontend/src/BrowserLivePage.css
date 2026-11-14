@@ -300,9 +300,26 @@
 .browser-live-sign-in {
   margin: 0;
   padding: 0 0.875rem 0.875rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+  gap: 0.5rem 0.75rem;
+}
+
+.browser-live-sign-in > .browser-live-text {
+  grid-column: 1 / -1;
+}
+
+/* One line each: the box and its button side by side, never stretched taller than a normal box. */
+.browser-live-sign-in-row {
   display: flex;
-  flex-direction: column;
+  align-items: center;
   gap: 0.5rem;
+  min-width: 0;
+}
+
+.browser-live-sign-in-row > .browser-live-button {
+  flex: none;
+  white-space: nowrap;
 }
 
 /* On a phone the bar stacks: name and actions on one line, the tabs on the next. */
