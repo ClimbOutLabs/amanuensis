@@ -426,7 +426,14 @@ describe('demo seed against the real stores', () => {
         expected_aggregate_revision: (await stores.spaceStore.getAggregate(real)).revision,
       });
       const retained = await stores.memory.retain({
-        items: [{ content: 'A real note about my dog.', timestamp: DAY_ONE.toISOString(), document_id: 'real-note' }],
+        items: [
+          {
+            metadata: { origin: 'user_stated' },
+            content: 'A real note about my dog.',
+            timestamp: DAY_ONE.toISOString(),
+            document_id: 'real-note',
+          },
+        ],
         operationId: 'real-op',
         timeoutMs: 5000,
       });
@@ -509,6 +516,7 @@ describe('demo seed against the real stores', () => {
       const retained = await stores.memory.retain({
         items: [
           {
+            metadata: { origin: 'user_stated' },
             content: 'Maya is allergic to penicillin.',
             timestamp: DAY_ONE.toISOString(),
             context: `${LEGACY_MARKER}:health-allergy`,

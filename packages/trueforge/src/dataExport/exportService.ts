@@ -2,11 +2,12 @@
  * Streams one user's data export archive: one JSON file per section (chats
  * spread over numbered `sessions/` files), the memory tree as Markdown, and
  * uploaded files only when requested. Never
- * exported: model providers and their keys, OAuth tokens, registered OAuth
+ * exported: model provider keys, OAuth tokens, registered OAuth
  * clients, approval tokens, always-allow grants, skills and registered
  * repositories, sandbox state, schedule run history, and anything another
- * user owns. The owner's own permission history (audit rows) and each chat's
- * persona choices do travel.
+ * user owns. A model provider's setup (its type, address and models) does
+ * travel, so an import can put it back and ask only for the key. The owner's
+ * own permission history (audit rows) and each chat's persona choices travel.
  *
  * Every JSON value (except identity fields) and every memory file passes both
  * secret layers before it is written; uploaded files ship byte-exact.
@@ -32,6 +33,7 @@ import type { AgentRecord } from '../db/agentStore';
 import type { IDeliveryStore } from '../db/deliveryStore';
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 import type { IMcpServerStore } from '../db/mcpServerStore';
+import type { IModelProviderStore } from '../db/modelProviderStore';
 import type { IPersonalizationStore } from '../db/personalizationStore';
 import type { IPersonaStore } from '../db/personaStore';
 import type { IReachSettingsStore } from '../db/reachSettingsStore';
@@ -40,23 +42,28 @@ import type { ISentinelAuditStore } from '../db/sentinelAuditStore';
 import type { ISentinelSettingsStore } from '../db/sentinelSettingsStore';
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import type { ISpaceStore } from '../db/spaceStore';
+import type { ITextContactStore } from '../db/textContactStore';
 import type { ITurnArtifactStore, TurnArtifactRecord } from '../db/turnArtifactStore';
 import { personaKnowledgeLocation } from '../personaKnowledge/knowledgePaths';
 import { openPersonaKnowledgeRepository } from '../personaKnowledge/sqliteKnowledgeRepository';
 import type { Persona } from '../personas/persona';
 import { CONNECTION_OFFER_DECLINED_SETTING_KEYS } from '../runtime/connectionOfferRegistry';
+import { GIT_COMMIT_IDENTITY_SETTING_KEY } from '../runtime/gitCommitIdentitySettings';
+import { HANDLED_NOTES_FILE } from '../runtime/memory/handledNotes';
 import {
   CURATED_MEMORY_FILE,
   DAILY_LOG_FILE_PATTERN,
+  REVIEWED_FROM_YOU_FILE,
   VAULT_TOMBSTONES_FILE,
   personaForVaultFilesystemNamespace,
-  personaVaultNamespace,
   sanitizeNamespace,
-  vaultFilesystemNamespace,
   vaultWriteNamespace,
-  withHiddenContext,
 } from '../runtime/memory/markdownMemoryFiles';
-import type { MemoryClient } from '../runtime/memory/memoryClient';
+import { listPageFiles, pageFolder, parsePageFilePath } from '../runtime/memory/memoryPages';
+import { MEMORY_HELPER_MODEL_SETTING_KEY } from '../runtime/memoryHelperModelSettings';
+import { MEMORY_HELPER_WAIT_SETTING_KEY } from '../runtime/memoryHelperWaitSettings';
+import { MEMORY_NIGHTLY_HOUR_SETTING_KEY, MEMORY_NIGHTLY_SETTING_KEY } from '../runtime/memoryNightlySettings';
+import { MEMORY_PAGE_SORTING_SETTING_KEY } from '../runtime/memoryPageSortingSettings';
 import { MEMORY_RECALL_ENABLED_SETTING_KEY } from '../runtime/memoryRecallSettings';
 import { MEMORY_SCREEN_ENABLED_SETTING_KEY } from '../runtime/memoryScreenSettings';
 import { MEMORY_SUMMARIZE_SETTING_KEY } from '../runtime/memorySummarizeSettings';
@@ -64,13 +71,18 @@ import { DEFAULT_CHAT_MODEL_SETTING_KEY } from '../runtime/tokenFactoryProvider'
 import { TOOL_OUTPUT_SCREEN_ENABLED_SETTING_KEY } from '../runtime/toolOutputScreenSettings';
 import { sessionToCommonChat } from './chatMapping';
 import type { CommonChat } from './commonChatFormat';
+import { exportableModelProvider } from './modelProviders';
 import { createExportScrubber, type ExportScrubber } from './secretScrub';
 import { exportableEvents, exportedThreads, sessionPartName, withoutDeploymentBoundFields } from './sessionRecords';
 import { ZipEntrySizeCapExceededError, ZipStreamWriter } from './zipStreamWriter';
 
 export const EXPORT_FORMAT = 'aman-export';
-/** 2: chats moved from one sessions.json to numbered sessions/ files of chat and turn records. */
-export const EXPORT_SCHEMA_VERSION = 2;
+/**
+ * 2: chats moved from one sessions.json to numbered sessions/ files of chat and turn records.
+ * 3: every memory note closes with a line that says where it came from, and memory vaults carry their
+ *    `people/` and `matters/` pages.
+ */
+export const EXPORT_SCHEMA_VERSION = 3;
 
 const PAGE_LIMIT = 200;
 
@@ -80,14 +92,17 @@ const SESSION_PART_TARGET_BYTES = 64 * 1024 * 1024;
 /** Persona choices read per chat; a chat records one per turn at most. */
 const PERSONA_ACTIVATION_LIMIT = 100_000;
 
-/** Same bound the memory vault API uses for one list call. */
-const MEMORY_LIST_TIMEOUT_MS = 10_000;
-
 /** Instance-wide, non-secret toggles. Anything not listed here never leaves in settings.json. */
 export const EXPORTED_GLOBAL_SETTING_KEYS = [
   DEFAULT_CHAT_MODEL_SETTING_KEY,
   ...CONNECTION_OFFER_DECLINED_SETTING_KEYS,
+  GIT_COMMIT_IDENTITY_SETTING_KEY,
   MEMORY_RECALL_ENABLED_SETTING_KEY,
+  MEMORY_HELPER_MODEL_SETTING_KEY,
+  MEMORY_HELPER_WAIT_SETTING_KEY,
+  MEMORY_NIGHTLY_HOUR_SETTING_KEY,
+  MEMORY_NIGHTLY_SETTING_KEY,
+  MEMORY_PAGE_SORTING_SETTING_KEY,
   MEMORY_SCREEN_ENABLED_SETTING_KEY,
   MEMORY_SUMMARIZE_SETTING_KEY,
   TOOL_OUTPUT_SCREEN_ENABLED_SETTING_KEY,
@@ -105,17 +120,6 @@ export interface ExportSubject {
   includeInstanceData: boolean;
 }
 
-/**
- * Where memory comes from: the Markdown backend is read from its files
- * verbatim; any other backend is read through its MemoryClient and rendered
- * into Markdown files in the same layout. `unavailable` is a backend that is
- * selected but not set up (no provider), which skips memory with a note.
- */
-export type MemoryExportSource =
-  | { kind: 'markdown'; markdownDir: string }
-  | { kind: 'client'; backend: string; client: Pick<MemoryClient, 'listEntries'> }
-  | { kind: 'unavailable'; backend: string; reason: string };
-
 export interface DataExportDeps<TTransaction> {
   sessionStore: ISessionStore<SessionCustom, TurnCustom>;
   personaStore: IPersonaStore<TTransaction>;
@@ -127,11 +131,15 @@ export interface DataExportDeps<TTransaction> {
   auditStore: Pick<ISentinelAuditStore, 'listOwned'>;
   deliveryStore: Pick<IDeliveryStore, 'listForExport'>;
   reachSettingsStore: Pick<IReachSettingsStore, 'get'>;
+  textContactStore: Pick<ITextContactStore, 'get' | 'listWords'>;
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
   mcpServerStore: IMcpServerStore<TTransaction>;
+  /** Only the setups are read; a provider's key never leaves (see modelProviders.ts). */
+  modelProviderStore: Pick<IModelProviderStore<TTransaction>, 'listProviders'>;
   /** The agents the user may manage; the entry point resolves them because access rules differ per deployment. */
   listAgents: () => Promise<readonly AgentRecord[]>;
-  memorySource: MemoryExportSource;
+  /** Root dir of the Markdown memory files. */
+  memoryMarkdownDir: string;
   /** Root dir of the per-persona knowledge SQLite files. */
   personaKnowledgeDir: string;
 }
@@ -514,6 +522,18 @@ export async function runDataExport<TTransaction>(
   }
   await writeJsonArrayEntry(context, 'connectors.json', connectorEntries());
 
+  // model_providers.json: each provider's setup (type, address, models), never its key.
+  async function* providerEntries(): AsyncIterable<unknown> {
+    const providers = await deps.modelProviderStore.listProviders({ tenant_id: tenantId });
+    for (const provider of providers) {
+      const entry = exportableModelProvider(provider, scrub);
+      if (entry !== null) {
+        yield entry;
+      }
+    }
+  }
+  await writeJsonArrayEntry(context, 'model_providers.json', providerEntries());
+
   // settings.json: the caller's own permission settings, plus instance toggles for administrators.
   const permissionSettings = await deps.sentinelSettingsStore.get({ tenant_id: tenantId, created_by: subjectId });
   const instanceSettings: { key: string; value: string }[] = [];
@@ -558,6 +578,19 @@ export async function runDataExport<TTransaction>(
   // switched off again on import, so a new computer never texts or calls until its owner turns that on.
   const reachSettings = await deps.reachSettingsStore.get({ tenant_id: tenantId, created_by: subjectId });
   await writeJsonArrayEntry(context, 'reach.json', reachSettings === undefined ? [] : [reachSettings]);
+
+  // texts.json: the person's number, Private or Full, and the words they let Aman text, as a list of none or one.
+  // Whether the number was confirmed and any pending code stay behind: an import brings the number in unconfirmed,
+  // to be confirmed again by text.
+  const textOwner = { tenant_id: tenantId, created_by: subjectId };
+  const textContact = await deps.textContactStore.get(textOwner);
+  await writeJsonArrayEntry(
+    context,
+    'texts.json',
+    textContact === undefined
+      ? []
+      : [{ phone: textContact.phone, mode: textContact.mode, words: await deps.textContactStore.listWords(textOwner) }],
+  );
 
   // A persona vault is keyed by the persona's name, so another person's persona with the same name writes into it too.
   const othersPersonaNames = await personaNamesOfOthers(deps, { tenantId, subjectId });
@@ -662,7 +695,12 @@ async function writeUploadedFiles<TTransaction>(
   return stored;
 }
 
-const MARKDOWN_MEMORY_FILES = [CURATED_MEMORY_FILE, VAULT_TOMBSTONES_FILE] as const;
+const MARKDOWN_MEMORY_FILES = [
+  CURATED_MEMORY_FILE,
+  VAULT_TOMBSTONES_FILE,
+  REVIEWED_FROM_YOU_FILE,
+  HANDLED_NOTES_FILE,
+] as const;
 
 /** Persona names held by everyone else who has chats on this instance. */
 async function personaNamesOfOthers<TTransaction>(
@@ -706,7 +744,6 @@ async function writeMemoryEntries<TTransaction>(
   context: ExportContext<TTransaction>,
   { personas, leftOut }: { personas: readonly Persona[]; leftOut: number },
 ): Promise<MemoryReport> {
-  const { memorySource } = context.deps;
   const sharedIncluded = context.request.subject.includeInstanceData;
   const leftOutNote =
     leftOut === 0
@@ -714,30 +751,9 @@ async function writeMemoryEntries<TTransaction>(
       : {
           note: `Memory of ${String(leftOut)} persona(s) was left out: another person here has a persona with the same name, so that memory is shared and cannot be split.`,
         };
-  if (memorySource.kind === 'unavailable') {
-    return {
-      backend: memorySource.backend,
-      status: 'skipped',
-      vaults: 0,
-      shared_vaults_included: false,
-      persona_vaults_left_out: 0,
-      note: memorySource.reason,
-    };
-  }
-  if (memorySource.kind === 'markdown') {
-    const vaults = await writeMarkdownMemoryFiles(context, { markdownDir: memorySource.markdownDir, personas });
-    return {
-      backend: 'markdown',
-      status: 'included',
-      vaults,
-      shared_vaults_included: sharedIncluded,
-      persona_vaults_left_out: leftOut,
-      ...leftOutNote,
-    };
-  }
-  const vaults = await writeClientMemoryFiles(context, { client: memorySource.client, personas });
+  const vaults = await writeMarkdownMemoryFiles(context, { markdownDir: context.deps.memoryMarkdownDir, personas });
   return {
-    backend: memorySource.backend,
+    backend: 'markdown',
     status: 'included',
     vaults,
     shared_vaults_included: sharedIncluded,
@@ -801,7 +817,36 @@ async function regularFileText(filePath: string): Promise<string | undefined> {
   }
 }
 
-/** Verbatim Markdown-backend files: MEMORY.md, daily logs, tombstones. Derived caches and sharing config stay behind. */
+/**
+ * The vault's hand-written pages, every `.md` file directly in `people/` and `matters/` under its own
+ * name (a file Aman cannot read by name still travels, so a move loses nothing), as regular files only.
+ * A page folder that is a link is skipped, so nothing outside the vault is read. `.memory-state/`
+ * (cache and lock) and `.memory-history/` (page history) stay behind.
+ */
+async function writeMarkdownPages<TTransaction>(
+  context: ExportContext<TTransaction>,
+  { dirName, dirPath }: { dirName: string; dirPath: string },
+): Promise<void> {
+  const realFolders = new Map<string, boolean>();
+  for (const { kind, stem } of await listPageFiles(dirPath)) {
+    const folder = pageFolder(kind);
+    // A name that cannot travel (control characters, a hidden file) is left in place.
+    if (parsePageFilePath(`${folder}/${stem}.md`) === undefined) {
+      continue;
+    }
+    let isReal = realFolders.get(folder);
+    if (isReal === undefined) {
+      isReal = (await lstat(path.join(dirPath, folder))).isDirectory();
+      realFolders.set(folder, isReal);
+    }
+    const text = isReal ? await regularFileText(path.join(dirPath, folder, `${stem}.md`)) : undefined;
+    if (text !== undefined) {
+      await context.zip.addTextEntry(`memory/${dirName}/${folder}/${stem}.md`, context.scrub.text(text));
+    }
+  }
+}
+
+/** Verbatim Markdown-backend files: MEMORY.md, daily logs, tombstones, reviewed notes, pages. Derived caches and sharing config stay behind. */
 async function writeMarkdownMemoryFiles<TTransaction>(
   context: ExportContext<TTransaction>,
   input: { markdownDir: string; personas: readonly Persona[] },
@@ -826,6 +871,7 @@ async function writeMarkdownMemoryFiles<TTransaction>(
         await context.zip.addTextEntry(`memory/${dirName}/${fileName}`, context.scrub.text(text));
       }
     }
+    await writeMarkdownPages(context, { dirName, dirPath });
     const dailyDir = path.join(dirPath, 'memory');
     if (!existsSync(dailyDir)) {
       continue;
@@ -842,46 +888,4 @@ async function writeMarkdownMemoryFiles<TTransaction>(
     }
   }
   return dirNames.length;
-}
-
-/**
- * Non-Markdown backends render their vault entries into Markdown files in
- * the same layout the Markdown backend uses, one file per namespace named
- * for the export day, entries oldest first in the retain format
- * (`## <timestamp>` heading, then the text).
- */
-async function writeClientMemoryFiles<TTransaction>(
-  context: ExportContext<TTransaction>,
-  input: { client: Pick<MemoryClient, 'listEntries'>; personas: readonly Persona[] },
-): Promise<number> {
-  const { subject, exportedAt } = context.request;
-  const wireNamespaces: (string | undefined)[] = [
-    ...(subject.includeInstanceData ? [undefined] : []),
-    ...input.personas.map(persona => personaVaultNamespace(persona.display_name)),
-  ];
-  const fileDate = exportedAt.toISOString().slice(0, 10);
-  let vaults = 0;
-  for (const wireNamespace of wireNamespaces) {
-    const outcome = await input.client.listEntries({
-      namespace: wireNamespace ?? '',
-      timeoutMs: MEMORY_LIST_TIMEOUT_MS,
-    });
-    if (!outcome.ok) {
-      // Memory is part of the export; a namespace that cannot be read fails
-      // the export rather than silently shipping without those memories.
-      throw new Error(`Memory export failed for a namespace: ${outcome.reason}`);
-    }
-    if (outcome.entries.length === 0) {
-      continue;
-    }
-    const fsNamespace = vaultFilesystemNamespace(subject.tenantId, wireNamespace);
-    const rendered = [...outcome.entries]
-      .reverse()
-      // The internal id goes back as the closing line, so the file matches a daily log and needs no import step.
-      .map(entry => `## ${entry.timestamp}\n\n${withHiddenContext({ text: entry.text, context: entry.context })}`)
-      .join('\n\n');
-    await context.zip.addTextEntry(`memory/${fsNamespace}/memory/${fileDate}.md`, `${context.scrub.text(rendered)}\n`);
-    vaults += 1;
-  }
-  return vaults;
 }

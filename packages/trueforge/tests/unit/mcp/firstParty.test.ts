@@ -1,16 +1,14 @@
 /**
- * The whole first-party policy as tables: which URLs fall on an origin the operator listed, and
- * which saves grant the mark. A change of policy is a change to these tables and to
+ * The first-party policy as tables: which URLs fall on an origin the operator listed, and which
+ * connectors are the host's own sidecars. A change of policy is a change to these tables and to
  * `src/mcp/firstParty.ts`, nothing else.
  */
 import {
-  firstPartyAfterSave,
   isFirstPartyOrigin,
   isHostSidecar,
   isReservedConnectorName,
   normalizedOrigin,
 } from '../../../src/mcp/firstParty';
-import type { McpServerManifest } from '../../../src/schemas/mcpServer';
 
 const LISTED_ORIGIN = 'https://memory.internal:8443';
 const LISTED_URL = `${LISTED_ORIGIN}/mcp/aman`;
@@ -74,68 +72,6 @@ describe('isFirstPartyOrigin', () => {
     expect(isFirstPartyOrigin({ url: 'https://one.internal/mcp/a', origins })).toBe(true);
     expect(isFirstPartyOrigin({ url: LISTED_URL, origins })).toBe(true);
     expect(isFirstPartyOrigin({ url: 'https://two.internal/mcp/a', origins })).toBe(false);
-  });
-});
-
-function remote(overrides: { url?: string; memory_provider?: boolean } = {}): McpServerManifest {
-  return {
-    type: 'remote',
-    name: 'memory',
-    url: overrides.url ?? LISTED_URL,
-    description: 'Memory connector.',
-    ...(overrides.memory_provider === undefined ? {} : { memory_provider: overrides.memory_provider }),
-  };
-}
-
-const gatewayManifest: McpServerManifest = {
-  type: 'truefoundry',
-  name: 'memory',
-  url: LISTED_URL,
-  description: 'Gateway connector.',
-};
-
-describe('firstPartyAfterSave', () => {
-  it.each([
-    ['a memory provider on a listed origin whose check passed', remote({ memory_provider: true }), true, ORIGINS, true],
-    [
-      'a memory provider moved to another bank on the listed origin',
-      remote({ url: `${LISTED_ORIGIN}/mcp/other`, memory_provider: true }),
-      true,
-      ORIGINS,
-      true,
-    ],
-    [
-      'a memory provider on an origin the operator did not list',
-      remote({ url: 'https://attacker.example/mcp/aman', memory_provider: true }),
-      true,
-      ORIGINS,
-      false,
-    ],
-    [
-      'a memory provider on a lookalike of the listed origin',
-      remote({ url: 'https://memory.internal:9443/mcp/aman', memory_provider: true }),
-      true,
-      ORIGINS,
-      false,
-    ],
-    ['a memory provider when the operator listed nothing', remote({ memory_provider: true }), true, [], false],
-    [
-      'a memory provider whose check did not pass in this save',
-      remote({ memory_provider: true }),
-      false,
-      ORIGINS,
-      false,
-    ],
-    ['a connector added by URL on a listed origin', remote(), true, ORIGINS, false],
-    ['a connector whose memory provider designation is off', remote({ memory_provider: false }), true, ORIGINS, false],
-  ] as const)('%s', (_label, manifest, memoryProviderChecked, origins, expected) => {
-    expect(firstPartyAfterSave({ manifest, memoryProviderChecked, origins })).toBe(expected);
-  });
-
-  it('never marks a gateway-managed manifest', () => {
-    expect(firstPartyAfterSave({ manifest: gatewayManifest, memoryProviderChecked: true, origins: ORIGINS })).toBe(
-      false,
-    );
   });
 });
 

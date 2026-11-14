@@ -3,7 +3,6 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import ConnectorSettings from '@/containers/SettingsBuilder/ConnectorSettings.js';
-import type { ConnectorWithMemoryProvider } from '@/containers/SettingsBuilder/memoryProvider.js';
 import type { CalendarAccountStatus, CalendarSetupPort } from '@/server/calendarSetup.js';
 import type { ConnectorChecks, ConnectorConnectionTest } from '@/server/connectorChecks.js';
 import type { EmailAccountStatus, EmailSetupPort } from '@/server/emailSetup.js';
@@ -72,18 +71,6 @@ const github: ConnectorBase = {
 
 const configuredConnectors = [parallelWeb, github];
 
-const hindsight: ConnectorWithMemoryProvider = {
-  id: 'hindsight',
-  name: 'hindsight',
-  description: 'Long-term memory bank',
-  url: 'https://hindsight.example.com/mcp/aman/',
-  authenticated: true,
-  requiresAuth: false,
-  auth: { type: 'header' },
-};
-
-const hindsightAsProvider: ConnectorWithMemoryProvider = { ...hindsight, memoryProvider: true };
-
 vi.mock('@truefoundry/assistant-ui-runtime', () => ({
   useTrueFoundryAgentSpec: () => ({ agentSpec }),
   useTrueFoundryUpdateAgentSpec: () => updateAgentSpec,
@@ -144,23 +131,6 @@ describe('ConnectorSettings chat enablement', () => {
     };
     updateAgentSpec.mockReset();
     disconnectConnector.mockClear();
-  });
-
-  it('does not list the memory bank, which Settings → Memory owns, while listing ordinary connectors', async () => {
-    renderSettings([parallelWeb, hindsightAsProvider]);
-
-    expect(await screen.findByText(parallelWeb.name)).toBeInTheDocument();
-    // Stored as an MCP server row, but not a connector a user attaches to anything.
-    expect(screen.queryByText(hindsightAsProvider.name)).not.toBeInTheDocument();
-    // Its explanation moved with it: nothing about memory is left on this page.
-    expect(screen.queryByText(/recalls relevant memories before every model call/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/HINDSIGHT_API_TENANT_API_KEY/)).not.toBeInTheDocument();
-  });
-
-  it('still lists a bank that is not flagged as the memory provider, since it is then an ordinary connector', async () => {
-    renderSettings([parallelWeb, hindsight]);
-
-    expect(await screen.findByText(hindsight.name)).toBeInTheDocument();
   });
 
   it('reports the tool count when a connection test reaches the connector', async () => {

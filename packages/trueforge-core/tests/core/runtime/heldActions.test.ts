@@ -349,7 +349,7 @@ describe('an unattended run', () => {
     // The run's last message names what it held, so the owner knows to look at the list.
     expect(brief.result.output).toMatchObject({
       content: expect.stringContaining(
-        "All done.\n\nI need your OK for one thing: Allow this new tool from mail? Approve it on your Needs your OK list and I'll add it here.",
+        "All done.\n\nI need your OK for one thing: Allow this new tool from mail? Allow it on your Needs your OK list and I'll add it here.",
       ),
     });
     expect(brief.events.map(event => event.type)).not.toContain(EventType.TOOL_EXECUTION_STARTED);
@@ -382,7 +382,7 @@ describe('an unattended run', () => {
       ...OWNER,
       mcp_server_name: 'mail',
       tool_name: 'read_note',
-      mcp_server_host: null,
+      connector_binding: null,
     });
     const { brief } = await runBrief(h);
 
@@ -667,13 +667,32 @@ describe('approving a held action later', () => {
     expect(h.callTool).not.toHaveBeenCalled();
   });
 
+  it('records no standing grant when the Always allow decision is never saved', async () => {
+    const h = makeHarness([() => toolCallsStream([{ id: 'call-read', name: 'read_note', args: '{}' }])]);
+    const { thread } = await runBrief(h);
+    const grantKey = { ...OWNER, mcp_server_name: 'mail', tool_name: 'read_note', connector_binding: null };
+
+    const replay = h.build({ unattended: false, context: heldContext(thread), stopAfterToolResponse: true });
+    // The host fails to save what the decision appended, so the decision never lands.
+    const saveFails = async () => {
+      for await (const _event of replay.orchestrator.send([approve('call-read', 'always')])) {
+        void _event;
+        throw new Error('the decision could not be saved');
+      }
+    };
+    await expect(saveFails()).rejects.toThrow('the decision could not be saved');
+
+    expect(await h.base.tool_grants.hasToolGrant(grantKey)).toBe(false);
+    expect(h.callTool).not.toHaveBeenCalled();
+  });
+
   it('records a standing grant when the owner picks Always allow on a read-only tool', async () => {
     const h = makeHarness([() => toolCallsStream([{ id: 'call-read', name: 'read_note', args: '{}' }])]);
     const { thread, brief } = await runBrief(h);
     expect(brief.events.find(event => event.type === EventType.TOOL_APPROVAL_REQUIRED)).toMatchObject({
       tool_calls: [{ id: 'call-read', held: true, can_always_allow: true }],
     });
-    const grantKey = { ...OWNER, mcp_server_name: 'mail', tool_name: 'read_note', mcp_server_host: null };
+    const grantKey = { ...OWNER, mcp_server_name: 'mail', tool_name: 'read_note', connector_binding: null };
     expect(await h.base.tool_grants.hasToolGrant(grantKey)).toBe(false);
 
     const replay = h.build({ unattended: false, context: heldContext(thread), stopAfterToolResponse: true });
@@ -1222,7 +1241,7 @@ describe('the per-reply call cap in an unattended run (owner ruling, 2026-10-19)
       ...OWNER,
       mcp_server_name: 'mail',
       tool_name: 'read_note',
-      mcp_server_host: null,
+      connector_binding: null,
     });
     const { brief } = await runBrief(h);
 
@@ -1262,7 +1281,7 @@ describe('the per-reply call cap in an unattended run (owner ruling, 2026-10-19)
       ...OWNER,
       mcp_server_name: 'mail',
       tool_name: 'read_note',
-      mcp_server_host: null,
+      connector_binding: null,
     });
     const { brief } = await runBrief(h);
 
@@ -1282,7 +1301,7 @@ describe('the per-reply call cap in an unattended run (owner ruling, 2026-10-19)
       ...OWNER,
       mcp_server_name: 'mail',
       tool_name: 'read_note',
-      mcp_server_host: null,
+      connector_binding: null,
     });
     const { brief } = await runBrief(h);
 
@@ -1302,7 +1321,7 @@ describe('the per-reply call cap in an unattended run (owner ruling, 2026-10-19)
       ...OWNER,
       mcp_server_name: 'mail',
       tool_name: 'read_note',
-      mcp_server_host: null,
+      connector_binding: null,
     });
     const { brief } = await runBrief(h);
 
@@ -1323,7 +1342,7 @@ describe('the per-reply call cap in an unattended run (owner ruling, 2026-10-19)
         ...OWNER,
         mcp_server_name: 'mail',
         tool_name: 'read_note',
-        mcp_server_host: null,
+        connector_binding: null,
       });
       const { orchestrator } = h.build({ unattended });
       const turn = await runTurn({

@@ -9,6 +9,7 @@ import type {
 } from '../events/schema';
 import type { BrowserElementReview, InternalToolCallInfo } from '../llm/LLMTypes';
 import type { ConnectorBinding } from '../permissions/approvalTokens';
+import type { SkillNetworkCardRequest } from '../permissions/skillNetworkCards';
 import type { SandboxInfo, WorkspaceVerificationReceiptCandidate } from '../sandbox/Sandbox';
 import type { StructuredEditPrecondition } from '../sandbox/structuredEditPrecondition';
 import type { GitRemotePrecondition } from '../sandbox/gitRemoteObservation';
@@ -22,6 +23,8 @@ export interface ToolInvocationContext {
   admission_provenance: ToolAdmissionProvenance;
   /** Stable host identity for one requested provider invocation. */
   dispatch_id?: string | undefined;
+  /** The model's tool call being run; a tool that reports back to the chat names it. */
+  tool_call_id?: string | undefined;
   /** Host-observed structured-edit target state captured before approval. */
   structured_edit_precondition?: StructuredEditPrecondition | undefined;
   /** The params the approval was minted over, for tools that tie an approval to state outside the call. */
@@ -72,6 +75,9 @@ export interface CallToolResolvedResponse {
   // Host-only candidate. AgentThread activates it only after the terminal
   // response has crossed the durable context-persistence boundary.
   verificationReceiptCandidate: WorkspaceVerificationReceiptCandidate | undefined;
+  // Host-only skill network cards this call's outcome asks for, or undefined when it asks for
+  // none. AgentThread raises them as held cards after the result is persisted.
+  skillNetworkCards?: readonly SkillNetworkCardRequest[] | undefined;
   events?: readonly RegisteredPassthroughEvent[] | undefined;
 }
 
@@ -179,6 +185,9 @@ export interface IToolSet {
    */
   resolveConnector?(params: CallToolRequest['params']): ConnectorBinding | undefined;
 
+  /** What an "Always allow" grant for this call binds to as of now (see `ToolGrantKey`); absent when none. */
+  resolveGrantBinding?(params: CallToolRequest['params']): string | undefined;
+
   /**
    * The canonical params an approval for this call is minted over, derived from the wire arguments the same way
    * classification derives them. Absent on tool sets whose wire arguments are already canonical.
@@ -198,6 +207,15 @@ export interface IToolSet {
    */
   liveMintParams?(params: CallToolRequest['params']): Promise<Record<string, unknown> | undefined>;
 
+  /**
+   * Turn events for a call the host stopped at dispatch because it no longer matched its approval, so the chat can
+   * say why the action did not happen. Absent for tool sets with nothing to report.
+   */
+  refusedAtDispatchEvents?(input: {
+    params: CallToolRequest['params'];
+    tool_call_id: string;
+  }): readonly RegisteredPassthroughEvent[];
+
   /** The guidance topic a tool is grouped under. Every tool is sent on every request either way. */
   bundleOf?(toolName: string): ToolBundleName | undefined;
 
@@ -213,6 +231,8 @@ export interface ToolSource {
   readonly description?: string | undefined;
   /** Host of the remote server's configured URL, shown on approval cards; absent for local sources. */
   readonly serverHost?: string | undefined;
+  /** What an "Always allow" grant on this source binds to (see `ToolGrantKey`); absent when the host set none. */
+  readonly grantBinding?: string | undefined;
 
   listTools(): Promise<ListToolsResolvedResponse | AuthRequiredResponse>;
 

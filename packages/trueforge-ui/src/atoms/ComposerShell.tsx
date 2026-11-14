@@ -76,7 +76,7 @@ export function ComposerShell({
     <div
       data-slot="aui_composer-shell"
       className={cn(
-        'border-border bg-card-bg focus-within:border-gold-line flex w-full flex-col gap-2 rounded-[1.25rem] border px-3.5 pt-3.5 pb-2.5 transition-colors',
+        'border-border bg-card-bg focus-within:border-gold-line flex w-full flex-col gap-2 rounded-[1.25rem] border px-3.5 pt-3.5 pb-2.5 transition-colors shadow-[var(--shadow-raise)]',
         className,
       )}
     >

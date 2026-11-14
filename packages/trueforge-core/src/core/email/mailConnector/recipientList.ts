@@ -52,12 +52,22 @@ export function mailRecipientsNotListed({
   return [...notListed];
 }
 
-/** The addresses a mail call names in its `recipients` field, as written, for a plain line to the person. Entries with no readable address are left out. */
-export function namedMailRecipients(params: Record<string, unknown>): string[] {
-  const value = params['recipients'];
+/** The addresses a mail call names in one sending field, as written. Entries with no readable address are left out. */
+function namedAddressesIn(params: Record<string, unknown>, field: (typeof SENDING_FIELDS)[number]): string[] {
+  const value = params[field];
   const items = Array.isArray(value) ? value : value === undefined ? [] : [value];
   return items.flatMap(item => {
     const address = addressOf(item);
     return address === undefined ? [] : [address];
   });
+}
+
+/** The addresses a mail call names in its `recipients` field, as written, for a plain line to the person. Entries with no readable address are left out. */
+export function namedMailRecipients(params: Record<string, unknown>): string[] {
+  return namedAddressesIn(params, 'recipients');
+}
+
+/** The addresses a mail call names in its `cc` and `bcc` fields, as written. */
+export function namedMailCopies(params: Record<string, unknown>): { cc: string[]; bcc: string[] } {
+  return { cc: namedAddressesIn(params, 'cc'), bcc: namedAddressesIn(params, 'bcc') };
 }

@@ -28,7 +28,7 @@ On a computer you can use keys instead. Hold ++ctrl+shift+space++ while you talk
 
 To pick other keys, or turn them off:
 
-1. Click **More** in the left bar, then **Settings**, then **Themes**.
+1. Click **More** in the left bar, then **Settings**, then **Appearance**.
 2. Under **Talking to Aman**, pick from **Hold-to-talk keys**.
 
 The choice is saved in this browser only.
@@ -102,24 +102,26 @@ To hear any other reply, click **Read aloud** under it. Click **Stop reading alo
 
 To change this:
 
-1. Click **More** in the left bar, then **Settings**, then **Themes**.
+1. Click **More** in the left bar, then **Settings**, then **Appearance**.
 2. Under **Voice replies**, turn **Speak replies when I use my voice** on or off.
-3. In **Voice**, pick one of six voices. Heart is the default. Aman plays a short sample when you pick one.
+3. In **Voice**, pick one of twelve voices. Heart is the default. Aman plays a short sample when you pick one.
 
 **Backup voice** is your browser's own voice. It reads replies when the voice on your computer is not running. These choices are saved in this browser only.
 
 === "Computer"
 
-    ![The Talking to Aman and Voice replies settings on the Themes page](../../../../docs/screenshots/app/appearance-themes-desktop.png)
+    ![The Talking to Aman and Voice replies settings on the Appearance page](../../../../docs/screenshots/app/appearance-themes-desktop.png)
 
 === "Phone"
 
-    ![The Talking to Aman and Voice replies settings on the Themes page](../../../../docs/screenshots/app/appearance-themes-phone.png)
+    ![The Talking to Aman and Voice replies settings on the Appearance page](../../../../docs/screenshots/app/appearance-themes-phone.png)
 
 ## Good to know
 
 - Your recordings, the words written down from them, and the spoken replies never leave your computer. No speech service on the internet is used.
 - Recordings are not saved. Only the messages themselves stay in the chat, like typed ones.
+- If the microphone heard nothing, it says "Nothing was heard" instead of leaving the message box empty. Tap the microphone and try again.
+- A recording also stops if you switch chats or the app moves to the background. The microphone says so when you come back, so a recording never disappears without a word.
 - If the browser says the microphone is blocked, the microphone button shows a line through it. Tap it for help, allow the microphone in your browser's site settings, then click **Try again**.
 - To paste copied text into your message, click **Add**, then "Paste from clipboard".
 - How the voice runs, and the settings that need a terminal, are in [Voice setup](../../../../docs/voice-input.mdx).

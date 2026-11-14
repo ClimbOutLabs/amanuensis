@@ -4,7 +4,7 @@ title: Schedules
 covers: approval:schedule, route:schedule
 ---
 
-A schedule asks Aman to do the same job again and again, such as "Every weekday at 7:30, send me my morning brief". Each run is saved as a chat, so you can open it and see what Aman found.
+A schedule asks Aman to do the same job again and again, such as "Every weekday at 7:30, send me my morning brief". Each run is saved as a chat, so you can open it and see what Aman found. The chat is named for the schedule and the day it ran, such as "Morning brief · Thursday, November 13".
 
 How to get there: Click **Schedules** in the left bar.
 
@@ -23,9 +23,13 @@ A schedule repeats and does work for you. For a simple nudge at a set time, use 
 1. Click **Chats** in the left bar, then click **New chat**.
 2. Type what you want and how often, such as "Every weekday at 7:30, send me my morning brief". If the time is unclear, Aman asks.
 3. A card shows the schedule: its name, when it runs, who runs it, the next few runs, and what it will do each time. Check it.
-4. Click **Allow** to start it. Click **Change it** to reword it first, or **Not now** to drop it.
+4. The card also lists what the schedule may use: your **Connectors**, your **Skills**, **Run code** and **Memory**. Aman ticks the ones it thinks the task needs. Tick or untick any of them. A skill needs **Run code**, so that box stays ticked while a skill is ticked.
+5. If you changed a tick, click **Update the card**. Aman shows the card again with your choices.
+6. Click **Allow** to start it. Click **Change it** to reword it first, or **Not now** to drop it.
 
-A schedule you make in a chat runs as the same assistant, and keeps the persona you were using.
+Aman saves your choices as a new agent with the same name as the schedule. To change them later, click **Agents** in the left bar and open that agent. Deleting the schedule doesn't delete the agent. The schedule keeps the persona you were using.
+
+If you ask from a chat that already uses one of your agents, the schedule runs as that agent. The card then shows that agent's tools, with nothing to tick.
 
 ## Make a schedule on the Schedules page
 
@@ -58,7 +62,7 @@ A scheduled run happens while you are away, so it never sends or changes anythin
 1. The run reads and searches, the same as a chat.
 2. Anything that would show a card in a chat is held instead. That includes running code and setting a reminder, which a chat may do without asking.
 3. When the run ends, its chat ends with a **Needs your OK** list. Nothing on it has been done yet.
-4. Click **Approve** on an item to do it, or **Deny** to drop it.
+4. Click **Allow** on an item to do it, or **Deny** to drop it.
 5. When you approve, Aman checks the item again. If anything on it changed since, nothing is done, and Aman says to ask again in a chat.
 
 Held items expire after 24 hours.

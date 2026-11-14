@@ -12,6 +12,7 @@ import { chromium, type Browser, type BrowserContext, type Page } from 'playwrig
 import { createServer } from 'vite';
 
 import configuration from '../../trueforge/src/config.ts';
+import { localModelEndpointOf } from '../../trueforge/src/runtime/remoteAddress.ts';
 import { startApprovalTestServer } from '../../trueforge/tests/fixtures/approvalTestServer.ts';
 import { FakeSandboxProvider } from '../../trueforge/tests/fixtures/fakeSandboxProvider.ts';
 import { freePort } from '../tests/journeys/support/builtApp.ts';
@@ -161,6 +162,10 @@ async function main(): Promise<void> {
     modelIds: PROVIDER.models.map(entry => entry.model_id),
   });
   const api = await startApprovalTestServer({ localSignIn: true, sandboxProvider: new FakeSandboxProvider(new Map()) });
+  // The demo model runs on this computer, so it is named as an allowed local model endpoint, as an operator would.
+  const demoEndpoint = localModelEndpointOf(model.baseUrl);
+  if (demoEndpoint !== null)
+    configuration.LOCAL_MODEL_ENDPOINTS = [...configuration.LOCAL_MODEL_ENDPOINTS, demoEndpoint];
   const viteCache = privateViteCache('docs-screenshots');
   const vite = await createServer({
     cacheDir: viteCache.cacheDir,
@@ -171,6 +176,7 @@ async function main(): Promise<void> {
   });
   let browser: Browser | undefined;
   const problems: string[] = [];
+  let taken = 0;
   try {
     await vite.listen();
     const origin = `http://127.0.0.1:${String(port)}`;
@@ -192,6 +198,7 @@ async function main(): Promise<void> {
       for (const shot of inWorld) {
         // Both sizes of one shot are taken together, so a step that changes the world changes it for both.
         for (const size of SIZES) {
+          if (shot.computerOnly === true && size.phone) continue;
           const context = await newContext({ browser, origin, owner, size });
           const page = await context.newPage();
           const failures: string[] = [];
@@ -201,6 +208,7 @@ async function main(): Promise<void> {
               failures.push(`${String(response.status())} from ${response.url()}`);
             }
           });
+          taken += 1;
           try {
             const path = await takeShot({ shot, size, context: { page, origin, phone: size.phone, api, owner } });
             console.log(`saved ${path}`);
@@ -223,7 +231,7 @@ async function main(): Promise<void> {
     await rm(dataDir, { recursive: true, force: true });
   }
   const seconds = Math.round((Date.now() - started) / 1000);
-  console.log(`Took ${String(shots.length * SIZES.length)} screenshots in ${String(seconds)} seconds.`);
+  console.log(`Took ${String(taken)} screenshots in ${String(seconds)} seconds.`);
   if (problems.length > 0) {
     console.error(`Some screens need a look. Pictures of them are in ${failedDir}.\n- ${problems.join('\n- ')}`);
     process.exitCode = 1;

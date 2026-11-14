@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
-import { AssistantMessageBubble } from '@/atoms/AssistantMessageBubble.js';
+import { AssistantMessageBubble, AssistantTextCard } from '@/atoms/AssistantMessageBubble.js';
 
 describe('AssistantMessageBubble', () => {
   it('renders message, error, and action content in their regions', () => {
@@ -28,5 +28,27 @@ describe('AssistantMessageBubble', () => {
     expect(screen.getByText('Only the message')).toBeInTheDocument();
     expect(container.querySelector('.text-failure-bg')).not.toBeInTheDocument();
     expect(container.querySelector('.mt-1')).not.toBeInTheDocument();
+  });
+
+  it('leaves the reply itself unframed, so cards inside it are not boxed twice', () => {
+    const { container } = render(<AssistantMessageBubble>Only the message</AssistantMessageBubble>);
+
+    const root = container.querySelector('[data-slot="aui_assistant-message-root"]');
+    expect(root).not.toHaveClass('border');
+    expect(root).not.toHaveClass('bg-assistant-message-bg');
+  });
+});
+
+describe('AssistantTextCard', () => {
+  it('puts written text on the paper card', () => {
+    const { container } = render(
+      <AssistantTextCard>
+        <p>Written reply</p>
+      </AssistantTextCard>,
+    );
+
+    const card = container.querySelector('[data-slot="aui_assistant-text-card"]');
+    expect(card).toContainElement(screen.getByText('Written reply'));
+    expect(card).toHaveClass('bg-assistant-message-bg', 'border');
   });
 });

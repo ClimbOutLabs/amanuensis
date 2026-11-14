@@ -7,11 +7,12 @@ import type { IModelProviderStore } from '../../../src/db/modelProviderStore';
 import type { GetSessionPersonaInput } from '../../../src/db/personaStore';
 import type { PersonaActivation } from '../../../src/personas/persona';
 import { EventSubscriptionRegistry } from '../../../src/runtime/event-subscription';
-import { HindsightClient } from '../../../src/runtime/memory/hindsightClient';
 import { summarizeTurnContent } from '../../../src/runtime/memory/memorySummarize';
 import { TurnDrainRegistry } from '../../../src/runtime/turnDrains';
 import { TurnExecutionDeadline } from '../../../src/runtime/turnExecutionDeadline';
 import { discardedModelUsage } from '../../fixtures/discardedModelUsage';
+import { inMemoryGlobalSettingsStore } from '../../fixtures/inMemoryGlobalSettingsStore';
+import { QuietMemoryClient } from '../../fixtures/memory/quietMemoryClient';
 import { uncappedTokenFactoryBudget } from '../../fixtures/uncappedTokenFactoryBudget';
 
 jest.mock('../../../src/runtime/memory/memorySummarize', () => {
@@ -31,11 +32,13 @@ const abilityNoteSummary = "I can't read email right now.";
 /** Summarization context that is only ever read by the mocked summarizer. */
 function summarizeContext() {
   const modelProviderStore: IModelProviderStore = {
+    managedElsewhere: false,
     listProviders: jest.fn(),
     getProvider: jest.fn(),
     getProviderForUpdate: jest.fn(),
     createProvider: jest.fn(),
     upsertProvider: jest.fn(),
+    recordProviderCheck: jest.fn(async () => undefined),
     listModels: jest.fn(),
     deleteProvider: jest.fn(),
   };
@@ -44,6 +47,7 @@ function summarizeContext() {
     modelProviderStore,
     summarizationModelFqn: 'openai/gpt-4o',
     tokenFactoryBudget: uncappedTokenFactoryBudget,
+    globalSettingsStore: inMemoryGlobalSettingsStore(),
     modelUsage: discardedModelUsage,
   };
 }
@@ -101,12 +105,7 @@ async function drainTurn(input: {
   retainFails?: boolean;
   abilityNotesOnly?: boolean;
 }) {
-  const client = new HindsightClient({
-    apiBase: 'https://hindsight.test.example',
-    bank: 'aman',
-    headers: {},
-    fetchImpl: () => Promise.reject(new Error('drain tests must not reach the network')),
-  });
+  const client = new QuietMemoryClient();
   const retain = jest
     .spyOn(client, 'retain')
     .mockResolvedValue(input.retainFails ? { ok: false, reason: 'provider unreachable' } : { ok: true });

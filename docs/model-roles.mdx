@@ -20,12 +20,16 @@ Two Settings pages work together:
 | **Main chat model**         | Answers you directly (`model` on the agent spec).                     | You need to choose one.   |
 | **Coding / subagent model** | Runs the helper tasks Aman hands off (`auxiliary_models.delegation`). | Uses the main chat model. |
 | **Compaction model**        | Summarizes older parts of a long chat (`auxiliary_models.compaction`). | Uses the main chat model. |
-| **Summarization model**     | Condenses each turn before it goes into memory, when **Turn summaries** is on (`auxiliary_models.summarization`). | Uses the main chat model. |
+| **Background model**            | Saves what to remember after each chat, tidies your pages and names the chat. | Uses the main chat model. |
 
 - A job left empty follows the main chat model at the moment it runs. So when you change the main chat model, every job left empty changes with it.
 - Clearing a job removes its own choice. It does not copy today's main chat model into it.
 - A helper task that asks for a specific model still gets that model. Your default never overrides a deliberate request.
-- A poor compaction or summarization model hurts later answers and memories, so choose one you trust.
+- A poor compaction or background model hurts later answers and memories, so choose one you trust.
+- The background model is one choice for all of Aman. It is kept on the computer Aman runs on, so it is the same in every browser. The daily tidy-up follows it too. A smaller, faster model works well here.
+- If you later remove the background model under **Models**, the background work goes back to the main chat model. Settings then shows a note under the choice.
+- The background model also does the after-chat work for chats with a persona, even when that persona has its own model. So a persona you keep on a model on your own computer has its memories picked out by the background model. Leave the background model on **Default** if that work must stay on the persona's model.
+- An agent that names its own summarization model (`auxiliary_models.summarization`) keeps that model for its chats.
 
 !!! note "Short background checks"
 
@@ -66,7 +70,7 @@ Cost is an estimate from a price table, in US dollars per million tokens. It say
 - A model with no price shows tokens only.
 - **Settings → Models** shows today's tokens and cost for each Token Factory model, and how much of the daily limit is left.
 
-To hide the line and the helper rows, go to **Settings → Themes** and, under **Answers**, turn off **Show model and cost in answer details**. Usage is still counted.
+To hide the line and the helper rows, go to **Settings → Appearance** and, under **Answers**, turn off **Show model and cost in answer details**. Usage is still counted.
 
 ## Personas
 

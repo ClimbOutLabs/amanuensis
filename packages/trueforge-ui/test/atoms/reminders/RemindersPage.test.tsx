@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { RemindersPage } from '@/atoms/reminders/RemindersPage.js';
@@ -47,9 +47,9 @@ function item(overrides: Partial<ReminderItem>): ReminderItem {
   };
 }
 
-function renderPage(api: RemindersApi) {
+function renderPage(api: Pick<RemindersApi, 'listReminders'> & Partial<RemindersApi>) {
   return render(
-    <ReminderListProvider api={api}>
+    <ReminderListProvider api={{ deleteReminder: () => Promise.resolve(), ...api }}>
       <RemindersPage />
     </ReminderListProvider>,
   );
@@ -98,7 +98,65 @@ describe('the Reminders page', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Take the bins out. Opens the chat it was set in.' }));
     expect(shell?.setRemindersOpen).toHaveBeenCalledWith(false);
     expect(shell?.openHistorySession).toHaveBeenCalledWith({ sessionId: 'chat-7', isMutable: false });
-    expect(screen.queryByRole('button', { name: /Water the plants/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Water the plants\. Opens the chat/ })).toBeNull();
+    expect(screen.getAllByText('Open chat')).toHaveLength(1);
+    expect(screen.getByText('No chat to open')).toBeTruthy();
+  });
+
+  it('deletes a reminder only after the person confirms, and takes it off the list', async () => {
+    const deleteReminder = vi.fn<RemindersApi['deleteReminder']>().mockResolvedValue(undefined);
+    renderPage({
+      listReminders: () =>
+        Promise.resolve([item({ id: 'a', what: 'Take the bins out' }), item({ id: 'b', what: 'Water the plants' })]),
+      deleteReminder,
+    });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete the reminder: Take the bins out' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Delete reminder', hidden: true });
+    expect(dialog.textContent).toContain('“Take the bins out” will be deleted. This cannot be undone.');
+    expect(deleteReminder).not.toHaveBeenCalled();
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete', hidden: true }));
+    await waitFor(() => expect(screen.queryByText('Take the bins out')).toBeNull());
+    expect(deleteReminder).toHaveBeenCalledWith('a');
+    expect(screen.getByText('Water the plants')).toBeTruthy();
+  });
+
+  it('keeps the reminder when the person cancels', async () => {
+    const deleteReminder = vi.fn<RemindersApi['deleteReminder']>().mockResolvedValue(undefined);
+    renderPage({ listReminders: () => Promise.resolve([item({ id: 'a' })]), deleteReminder });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete the reminder: Take the bins out' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Delete reminder', hidden: true });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel', hidden: true }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Delete reminder', hidden: true })).toBeNull());
+    expect(deleteReminder).not.toHaveBeenCalled();
+    expect(screen.getByText('Take the bins out')).toBeTruthy();
+  });
+
+  it('says a repeating reminder will not remind again', async () => {
+    renderPage({
+      listReminders: () => Promise.resolve([item({ id: 'a', repeats: true, timing: 'Every Friday at 8:00 AM' })]),
+    });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete the reminder: Take the bins out' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Delete reminder', hidden: true });
+    expect(dialog.textContent).toContain('will be deleted and will not remind you again. This cannot be undone.');
+  });
+
+  it('keeps the reminder and says what to do when the delete fails', async () => {
+    const deleteReminder = vi.fn<RemindersApi['deleteReminder']>().mockRejectedValue(new Error('offline'));
+    renderPage({ listReminders: () => Promise.resolve([item({ id: 'a' })]), deleteReminder });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete the reminder: Take the bins out' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Delete reminder', hidden: true });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete', hidden: true }));
+
+    expect((await within(dialog).findByRole('alert', { hidden: true })).textContent).toBe(
+      'That reminder could not be deleted. Check your connection, then try again.',
+    );
+    expect(screen.getAllByText('Take the bins out').length).toBeGreaterThan(0);
   });
 
   it('says there are no reminders yet when none were set', async () => {
@@ -125,7 +183,7 @@ describe('the Reminders page', () => {
 });
 
 describe('the Reminders button in the left panel', () => {
-  const api: RemindersApi = { listReminders: () => Promise.resolve([]) };
+  const api: RemindersApi = { listReminders: () => Promise.resolve([]), deleteReminder: () => Promise.resolve() };
 
   it('opens the Reminders page', () => {
     render(
@@ -136,6 +194,18 @@ describe('the Reminders button in the left panel', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Reminders' }));
     expect(shell?.setRemindersOpen).toHaveBeenCalledWith(true);
+  });
+
+  it('shows an alarm clock, so the bell in the left panel means notifications only', () => {
+    render(
+      <ReminderListProvider api={api}>
+        <RemindersButton />
+      </ReminderListProvider>,
+    );
+
+    const icon = screen.getByRole('button', { name: 'Reminders' }).querySelector('svg');
+    expect(icon?.getAttribute('class')).toContain('alarm-clock');
+    expect(icon?.getAttribute('class')).not.toContain('bell');
   });
 
   it('is not shown where there is no reminders list to open', () => {

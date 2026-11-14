@@ -42,6 +42,7 @@ jobs:
       chart: ${{ inputs.all_packages || steps.filter.outputs.chart }}
       store: ${{ inputs.all_packages || steps.filter.outputs.store }}
       local_sandbox: ${{ inputs.all_packages || steps.filter.outputs.local_sandbox }}
+      twilio: ${{ inputs.all_packages || steps.filter.outputs.twilio }}
       installer: ${{ inputs.all_packages || steps.filter.outputs.installer }}
       screenshot_folder: ${{ steps.stamp.outputs.folder }}
       dependencies: ${{ inputs.all_packages || steps.filter.outputs.dependencies }}
@@ -193,6 +194,17 @@ jobs:
               - 'pnpm-workspace.yaml'
               - 'tsconfig.base.json'
               - '.github/workflows/ci.yml'
+            twilio:
+              - 'packages/trueforge/src/runtime/twilio/**'
+              - 'packages/trueforge/src/runtime/texts/smsProvider.ts'
+              - 'packages/trueforge/src/runtime/calls/twilioCalls.ts'
+              - 'packages/trueforge/tests/unit/runtime/twilio/**'
+              - 'packages/trueforge/jest.twilio-live.config.cjs'
+              - 'packages/trueforge/package.json'
+              - 'package.json'
+              - 'pnpm-workspace.yaml'
+              - 'tsconfig.base.json'
+              - '.github/workflows/ci.yml'
             installer:
               - 'installer/**'
               - 'package.json'
@@ -268,7 +280,7 @@ jobs:
           if (changed('GMAIL_MCP')) changedPackages.push('gmail-mcp');
           if (changed('PROMPT_GUARD')) changedPackages.push('prompt-guard');
           console.log(`list=${JSON.stringify(changedPackages)}`);
-          const arm64Images = ['app'];
+          const arm64Images = [];
           if (changed('AMAN_STT_IMAGE')) arm64Images.push('aman-stt');
           if (changed('AMAN_TTS_IMAGE')) arm64Images.push('aman-tts');
           if (changed('CALENDAR_IMAGE')) arm64Images.push('calendar');
@@ -460,6 +472,15 @@ jobs:
         if: matrix.arch == 'arm64' && (matrix.package == 'frontend' || matrix.package == 'trueforge')
         working-directory: packages/${{ matrix.package }}
         run: pnpm exec playwright-core install --with-deps chromium
+
+      # These suites compile every dependency they load, which takes longer than the tests themselves on a cold run.
+      - name: Cache compiled test files
+        if: matrix.package == 'trueforge' || matrix.package == 'trueforge-core'
+        uses: actions/cache@v6.1.0
+        with:
+          path: packages/${{ matrix.package }}/node_modules/.cache/jest
+          key: jest-${{ matrix.package }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: jest-${{ matrix.package }}-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Test
         env:
@@ -748,6 +769,37 @@ jobs:
       - name: Sandbox contract tests
         run: pnpm test:local-sandbox:contract
 
+  # Our text and call providers against Twilio's test credentials. Skips with one line when the secrets are absent,
+  # as on a pull request from a fork.
+  twilio-live:
+    name: Twilio test credentials
+    needs: detect-changes
+    if: needs.detect-changes.outputs.twilio == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Twilio test credentials
+        env:
+          TWILIO_TEST_ACCOUNT_SID: ${{ secrets.TWILIO_TEST_ACCOUNT_SID }}
+          TWILIO_TEST_AUTH_TOKEN: ${{ secrets.TWILIO_TEST_AUTH_TOKEN }}
+        run: pnpm test:twilio-live
+
   # Root-level script tests. Each is small, so they run on every change. The guide's tests run in Help guide.
   root-script-tests:
     name: Root script tests
@@ -789,6 +841,7 @@ jobs:
         run: |
           pnpm test:eval-tokens
           pnpm test:eval-spaces
+          pnpm test:eval-models
 
   # AGENTS.md forbids `as T` and `x!`. Older ones are still being removed, so this reads only the
   # lines a pull request adds; a merge queue, manual or nightly run has no base to compare with.
@@ -843,7 +896,8 @@ jobs:
         run: node scripts/check-repo-rules.mjs
 
   # No dependency install: must run fast and stay green even when pnpm install fails.
-  # Also runs the outside-hosts check and the nightly report's test, which need nothing installed either.
+  # Also runs the outside-hosts check, the nightly report's test and the local model bridge's test, which need nothing
+  # installed either.
   private-data-scan:
     name: Private data scan
     runs-on: ubuntu-latest
@@ -877,6 +931,9 @@ jobs:
 
       - name: Test the nightly report
         run: npm run test:nightly-report
+
+      - name: Test the local model bridge
+        run: npm run test:local-model-bridge
 
   # The help behind "Help, I'm stuck": its pack is regenerated from its sources, every surface has a
   # topic, and every label, path, command and link a topic names is real.
@@ -997,10 +1054,11 @@ jobs:
 
   # Aman runs in Docker, and on Apple silicon and arm servers the installer builds every image for arm64.
   # Each image is built natively on an arm64 runner the way installer/lib/release.sh builds it. The app
-  # image is also started the way an instance starts it, which builds the sandbox slot image too.
+  # image is built and started in the arm64 compose smoke job below, so it is not built a second time here.
   arm64-images:
     name: Image (${{ matrix.image }}, arm64)
     needs: detect-changes
+    if: needs.detect-changes.outputs.arm64-images != '[]'
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 45
     strategy:
@@ -1011,10 +1069,6 @@ jobs:
     steps:
       - name: Check out repository code
         uses: actions/checkout@v7
-
-      - name: Build and start the app image
-        if: matrix.image == 'app'
-        run: bash installer/tests/image-runtime.sh
 
       - name: Build the speech-to-text image
         if: matrix.image == 'aman-stt'
@@ -1048,6 +1102,54 @@ jobs:
             [ "$arch" = arm64 ] || { echo "$key resolved to $arch, not arm64" >&2; exit 1; }
           done
 
+  # `docker compose up` from source, the documented way to run the full stack, on both architectures:
+  # every image must build and every service must report healthy. On arm64 the app image this job built
+  # is then started the way an instance starts it, which builds the sandbox slot image too.
+  compose-smoke:
+    name: Compose smoke (${{ matrix.arch }})
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x64, arm64]
+
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: '.nvmrc'
+
+      - name: No core pins in the checked-in compose files
+        run: pnpm test:default-compose
+
+      - name: Use the example settings
+        run: cp packages/trueforge/.env.example packages/trueforge/.env
+
+      - name: Start the stack and check it answers
+        run: pnpm smoke
+
+      - name: Show the stack's logs
+        if: failure()
+        run: pnpm smoke:logs --tail 100
+
+      - name: Stop the stack
+        if: always()
+        run: pnpm smoke:down -v
+
+      # Reuses the image the stack built, after the stack is gone so the two do not share the runner's memory.
+      - name: Start the app image the way an instance does
+        if: matrix.arch == 'arm64'
+        env:
+          AMAN_TEST_IMAGE: truefoundry-server:latest
+        run: pnpm test:installer-image
+
   # https://github.com/marketplace/actions/alls-green#why
   check:
     if: always()
@@ -1064,6 +1166,7 @@ jobs:
       - store-tests
       - dependency-licenses
       - local-sandbox-contract
+      - twilio-live
       - root-script-tests
       - new-assertions
       - repo-rules
@@ -1073,6 +1176,7 @@ jobs:
       - generated-contract-drift
       - arm64-build
       - arm64-images
+      - compose-smoke
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -1090,6 +1194,7 @@ jobs:
           STORE_TESTS: ${{ needs.store-tests.result }}
           DEPENDENCY_LICENSES: ${{ needs.dependency-licenses.result }}
           LOCAL_SANDBOX_CONTRACT: ${{ needs.local-sandbox-contract.result }}
+          TWILIO_LIVE: ${{ needs.twilio-live.result }}
           ROOT_SCRIPT_TESTS: ${{ needs.root-script-tests.result }}
           NEW_ASSERTIONS: ${{ needs.new-assertions.result }}
           REPO_RULES: ${{ needs.repo-rules.result }}
@@ -1099,9 +1204,10 @@ jobs:
           GENERATED_CONTRACT_DRIFT: ${{ needs.generated-contract-drift.result }}
           ARM64_BUILD: ${{ needs.arm64-build.result }}
           ARM64_IMAGES: ${{ needs.arm64-images.result }}
+          COMPOSE_SMOKE: ${{ needs.compose-smoke.result }}
         run: |
           ok() { [ "$1" = success ] || [ "$1" = skipped ]; }
-          echo "detect-changes=$DETECT_CHANGES migration-order=$MIGRATION_ORDER typecheck-and-build=$TYPECHECK_AND_BUILD npx-smoke=$NPX_SMOKE package-checks=$PACKAGE_CHECKS screenshots=$SCREENSHOTS installer-shell=$INSTALLER_SHELL chart-checks=$CHART_CHECKS store-tests=$STORE_TESTS local-sandbox-contract=$LOCAL_SANDBOX_CONTRACT root-script-tests=$ROOT_SCRIPT_TESTS new-assertions=$NEW_ASSERTIONS repo-rules=$REPO_RULES dependency-licenses=$DEPENDENCY_LICENSES private-data-scan=$PRIVATE_DATA_SCAN help-guide=$HELP_GUIDE feature-coverage=$FEATURE_COVERAGE generated-contract-drift=$GENERATED_CONTRACT_DRIFT arm64-build=$ARM64_BUILD arm64-images=$ARM64_IMAGES"
+          echo "detect-changes=$DETECT_CHANGES migration-order=$MIGRATION_ORDER typecheck-and-build=$TYPECHECK_AND_BUILD npx-smoke=$NPX_SMOKE package-checks=$PACKAGE_CHECKS screenshots=$SCREENSHOTS installer-shell=$INSTALLER_SHELL chart-checks=$CHART_CHECKS store-tests=$STORE_TESTS local-sandbox-contract=$LOCAL_SANDBOX_CONTRACT twilio-live=$TWILIO_LIVE root-script-tests=$ROOT_SCRIPT_TESTS new-assertions=$NEW_ASSERTIONS repo-rules=$REPO_RULES dependency-licenses=$DEPENDENCY_LICENSES private-data-scan=$PRIVATE_DATA_SCAN help-guide=$HELP_GUIDE feature-coverage=$FEATURE_COVERAGE generated-contract-drift=$GENERATED_CONTRACT_DRIFT arm64-build=$ARM64_BUILD arm64-images=$ARM64_IMAGES compose-smoke=$COMPOSE_SMOKE"
           [ "$DETECT_CHANGES" = success ] || exit 1
           [ "$MIGRATION_ORDER" = success ] || exit 1
           [ "$TYPECHECK_AND_BUILD" = success ] || exit 1
@@ -1114,6 +1220,7 @@ jobs:
           ok "$STORE_TESTS" || exit 1
           ok "$DEPENDENCY_LICENSES" || exit 1
           ok "$LOCAL_SANDBOX_CONTRACT" || exit 1
+          ok "$TWILIO_LIVE" || exit 1
           [ "$ROOT_SCRIPT_TESTS" = success ] || exit 1
           ok "$NEW_ASSERTIONS" || exit 1
           [ "$REPO_RULES" = success ] || exit 1
@@ -1122,4 +1229,5 @@ jobs:
           [ "$FEATURE_COVERAGE" = success ] || exit 1
           [ "$GENERATED_CONTRACT_DRIFT" = success ] || exit 1
           [ "$ARM64_BUILD" = success ] || exit 1
-          [ "$ARM64_IMAGES" = success ] || exit 1
+          ok "$ARM64_IMAGES" || exit 1
+          [ "$COMPOSE_SMOKE" = success ] || exit 1

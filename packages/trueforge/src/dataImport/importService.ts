@@ -9,7 +9,7 @@
  * last: agents, folders and chats, persona knowledge files and memory files are
  * written one by one and recorded as they succeed, so a failure undoes exactly
  * what this run created; the remaining records (personas, personalization,
- * spaces, schedules, connectors, settings, artifacts) commit in one
+ * spaces, schedules, connectors, model providers, settings, artifacts) commit in one
  * transaction or not at all. A marker setting names the planned writes while
  * they run, and the transaction removes it, so a crash is cleaned up by the
  * next run.
@@ -18,12 +18,13 @@
  * links inside chats keep working. Schedules arrive switched off. Connectors
  * arrive unattached, without credentials, trust marks or search and memory roles;
  * the instance's untouched default web search connector stays as it is.
+ * Model providers arrive as setups without keys, and a persona whose model
+ * did not come over is pointed at a model that is here.
  * The recall and tool-output screen toggles come along; permission settings
  * and Always allow choices never do, so each tool asks again.
  */
 import { AgentSpecSchema, type CreatedBySubject, type ISessionStore } from '@truefoundry/trueforge-core/agent-session';
 import { Kysely } from 'kysely';
-import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -38,9 +39,11 @@ import { sessionPartIndex, sessionPartName } from '../dataExport/sessionRecords'
 import { ZIP_MAX_ENTRIES } from '../dataExport/zipStreamWriter';
 import type { IDeliveryStore } from '../db/deliveryStore';
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
+import type { IModelProviderStore } from '../db/modelProviderStore';
 import type { IReachSettingsStore } from '../db/reachSettingsStore';
 import type { ISentinelAuditStore } from '../db/sentinelAuditStore';
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
+import type { ITextContactStore } from '../db/textContactStore';
 import type { WithTransaction } from '../db/transaction';
 import type { ITurnArtifactStore } from '../db/turnArtifactStore';
 import { isReservedConnectorName } from '../mcp/firstParty';
@@ -50,31 +53,30 @@ import { amanGuidePersonaId, isAmanGuidePersona, isAnyAmanGuideId } from '../per
 import { PERSISTED_ARTIFACT_MIME } from '../runtime/artifacts/persistTurnArtifacts';
 import { requestChatSearchBackfill } from '../runtime/chatSearchIndexing';
 import { CONNECTION_OFFER_DECLINED_SETTING_KEYS } from '../runtime/connectionOfferRegistry';
-import type { RetainItem } from '../runtime/memory/hindsightClient';
+import { GIT_COMMIT_IDENTITY_SETTING_KEY } from '../runtime/gitCommitIdentitySettings';
+import { HANDLED_NOTES_FILE } from '../runtime/memory/handledNotes';
 import {
   applyVaultTombstones,
   CURATED_MEMORY_FILE,
   dailyLogEntries,
   dailyLogFileAt,
-  DOCUMENT_ID_METADATA_KEY,
-  entryMetadata,
-  hiddenContext,
   latestTombstonesByEntry,
+  parseReviewedMarks,
   parseVaultTombstones,
   personaVaultNamespace,
-  SESSION_ID_METADATA_KEY,
+  REVIEWED_FROM_YOU_FILE,
   upgradeLegacyEntries,
   VAULT_TOMBSTONES_FILE,
   vaultEntryTimestamp,
   vaultFilesystemNamespace,
-  withoutHiddenMarkers,
+  withSourceLines,
 } from '../runtime/memory/markdownMemoryFiles';
-import {
-  isMemoryNoteSource,
-  NOTE_DATE_METADATA_KEY,
-  NOTE_SOURCE_METADATA_KEY,
-  noteRetainContent,
-} from '../runtime/memory/memoryNotes';
+import { isInPageFolder, pageFolder, parsePageFilePath } from '../runtime/memory/memoryPages';
+import { ensureMemorySourceLines } from '../runtime/memory/memorySourceLines';
+import { MEMORY_HELPER_MODEL_SETTING_KEY } from '../runtime/memoryHelperModelSettings';
+import { MEMORY_HELPER_WAIT_SETTING_KEY } from '../runtime/memoryHelperWaitSettings';
+import { MEMORY_NIGHTLY_HOUR_SETTING_KEY, MEMORY_NIGHTLY_SETTING_KEY } from '../runtime/memoryNightlySettings';
+import { MEMORY_PAGE_SORTING_SETTING_KEY } from '../runtime/memoryPageSortingSettings';
 import { MEMORY_RECALL_ENABLED_SETTING_KEY } from '../runtime/memoryRecallSettings';
 import { MEMORY_SCREEN_ENABLED_SETTING_KEY } from '../runtime/memoryScreenSettings';
 import { MEMORY_SUMMARIZE_SETTING_KEY } from '../runtime/memorySummarizeSettings';
@@ -82,8 +84,10 @@ import { DEFAULT_CHAT_MODEL_SETTING_KEY } from '../runtime/tokenFactoryProvider'
 import { TOOL_OUTPUT_SCREEN_ENABLED_SETTING_KEY } from '../runtime/toolOutputScreenSettings';
 import type { ImportDataResult } from '../schemas/dataImport';
 import type { ReachSettings } from '../schemas/reach';
+import { TEXT_WORDS_MAX, type TextContactExport } from '../schemas/textMessages';
 import { newId } from '../utils/id';
 import { detachConnectors, normalizeImportedConnectors, withoutKeptConnector } from './connectorImport';
+import { upgradeArchivedConnectors } from './connectorUpgrade';
 import { upgradeArchivedDeliveries } from './deliveryUpgrade';
 import { damagedExportError, DataImportError } from './importError';
 import {
@@ -113,6 +117,7 @@ import {
   ImportDeliveriesFileSchema,
   ImportFoldersFileSchema,
   ImportManifestSchema,
+  ImportModelProvidersFileSchema,
   ImportPersonalizationFileSchema,
   ImportPersonasFileSchema,
   ImportReachFileSchema,
@@ -121,6 +126,7 @@ import {
   ImportSessionPartRecordSchema,
   ImportSettingsFileSchema,
   ImportSpacesFileSchema,
+  ImportTextsFileSchema,
   isToolType,
   LEFT_OUT_PLURALS,
   UnknownToolTypeError,
@@ -131,6 +137,7 @@ import {
   type ImportDelivery,
   type ImportFolderRecord,
   type ImportManifest,
+  type ImportModelProviderRecord,
   type ImportPersonalizationFile,
   type ImportPersonasFile,
   type ImportScheduleRecord,
@@ -143,6 +150,12 @@ import {
 } from './importSchemas';
 import { writePersonaKnowledge, type KnowledgeEmbedder } from './knowledgeImport';
 import { countingLeftOut, isRecord, type LeftOutCounts } from './lenient';
+import {
+  planModelProviderImport,
+  planPersonaModelSwitches,
+  type ModelProviderImportPlan,
+  type PersonaModelSwitch,
+} from './modelProviderImport';
 import { repairPersonaNames } from './personaNames';
 import { startReachSwitchesAsNew } from './reachUpgrade';
 import { assembleSessionParts } from './sessionParts';
@@ -152,12 +165,15 @@ import { readZipArchive, ZipArchiveError, type ZipArchiveEntry } from './zipArch
 export interface DataImportDeps<TTransaction> extends PreflightDeps<TTransaction> {
   sessionStore: ISessionStore<SessionCustom, TurnCustom>;
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
+  /** Provider setups are restored in the same commit as the rest; keys never travel, so none are written from the archive. */
+  modelProviderStore: IModelProviderStore<TTransaction>;
   /** Permission history is imported with the same commit as the rest, and never removed again. */
   auditStore: Pick<ISentinelAuditStore, 'importRecords'>;
   /** The feed comes along with the same commit. Push devices never do. */
   deliveryStore: Pick<IDeliveryStore, 'importDeliveries'>;
-  /** Reach me settings come along with the same commit, with texts and calls switched off. */
+  /** Reach me settings and the number for texts come along with the same commit: texts and calls off, the number unconfirmed. */
   reachSettingsStore: Pick<IReachSettingsStore, 'importSettings'>;
+  textContactStore: Pick<ITextContactStore, 'importContact' | 'importWords'>;
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
   withTransaction: WithTransaction<TTransaction>;
   personaKnowledgeDir: string;
@@ -182,7 +198,6 @@ export interface DataImportRequest {
   dryRun?: boolean;
 }
 
-const MEMORY_RETAIN_TIMEOUT_MS = 120_000;
 const MAX_LOGGED_ISSUES = 20;
 /** Chats or sections whose left-out rows are shown in the summary; the import log has them all. */
 const LEFT_OUT_OWNERS_SHOWN = 20;
@@ -244,7 +259,13 @@ function leftOutName(name: string): string {
 const IMPORTABLE_GLOBAL_SETTING_KEYS: ReadonlySet<string> = new Set<string>([
   DEFAULT_CHAT_MODEL_SETTING_KEY,
   ...CONNECTION_OFFER_DECLINED_SETTING_KEYS,
+  GIT_COMMIT_IDENTITY_SETTING_KEY,
   MEMORY_RECALL_ENABLED_SETTING_KEY,
+  MEMORY_HELPER_MODEL_SETTING_KEY,
+  MEMORY_HELPER_WAIT_SETTING_KEY,
+  MEMORY_NIGHTLY_HOUR_SETTING_KEY,
+  MEMORY_NIGHTLY_SETTING_KEY,
+  MEMORY_PAGE_SORTING_SETTING_KEY,
   MEMORY_SCREEN_ENABLED_SETTING_KEY,
   MEMORY_SUMMARIZE_SETTING_KEY,
   TOOL_OUTPUT_SCREEN_ENABLED_SETTING_KEY,
@@ -536,10 +557,15 @@ interface ArchiveContents {
   spaces: ImportSpacesFile;
   schedules: ImportScheduleRecord[];
   connectors: ImportConnectorRecord[];
+  /** Provider setups to restore; empty when the export carried none. */
+  modelProviders: ImportModelProviderRecord[];
+  /** False for exports made before provider setups travelled, which the summary words differently. */
+  modelProvidersSectionPresent: boolean;
   settings: ImportSettingsFile;
   audit: ImportAuditRecord[];
   deliveries: ImportDelivery[];
   reach: ReachSettings[];
+  texts: TextContactExport[];
   files: ReadonlyMap<string, Buffer>;
   sourceTenantId: string;
   /** Internal details from an older version that were repaired or left out, filled in as sections are read. */
@@ -755,7 +781,7 @@ function loadArchive(input: {
   // a damaged section means the archive cannot be trusted as a whole.
   section('chats.json', CommonChatExportFileSchema);
   const folders = section('folders.json', ImportFoldersFileSchema);
-  const connectors = section('connectors.json', ImportConnectorsFileSchema);
+  const connectors = section('connectors.json', ImportConnectorsFileSchema, upgradeArchivedConnectors);
   const sessionEntries = readSessionEntries({
     files,
     logger,
@@ -784,6 +810,11 @@ function loadArchive(input: {
     spaces: section('spaces.json', ImportSpacesFileSchema),
     schedules: section('schedules.json', ImportSchedulesFileSchema),
     connectors,
+    // Absent from exports made before provider setups travelled.
+    modelProviders: files.has('model_providers.json')
+      ? section('model_providers.json', ImportModelProvidersFileSchema)
+      : [],
+    modelProvidersSectionPresent: files.has('model_providers.json'),
     settings: section('settings.json', ImportSettingsFileSchema),
     // Absent from exports made before permission history travelled.
     audit: files.has('audit.json') ? section('audit.json', ImportAuditFileSchema) : [],
@@ -793,7 +824,9 @@ function loadArchive(input: {
       : [],
     // Absent from exports made before Reach me settings existed.
     reach: files.has('reach.json') ? section('reach.json', ImportReachFileSchema, startReachSwitchesAsNew) : [],
-    files,
+    // Absent from exports made before texts existed.
+    texts: files.has('texts.json') ? section('texts.json', ImportTextsFileSchema) : [],
+    files: manifest.schema_version < MEMORY_SOURCE_LINES_SCHEMA_VERSION ? memoryFilesWithSourceLines(files) : files,
     sourceTenantId: manifest.tenant_id,
     leftOutReport: leftOut,
     personaRepairLines,
@@ -853,7 +886,7 @@ function checkSessions(
 }
 
 function validateCrossReferences(contents: ArchiveContents): void {
-  const { agents, personas, spaces, spaceFolders, schedules, connectors } = contents;
+  const { agents, personas, spaces, spaceFolders, schedules, connectors, modelProviders } = contents;
 
   const agentIds = new Set<string>();
   const agentNames = new Set<string>();
@@ -921,6 +954,29 @@ function validateCrossReferences(contents: ArchiveContents): void {
     }
     connectorNames.add(connector.name);
   }
+
+  const providerNames = new Set<string>();
+  for (const provider of modelProviders) {
+    if (providerNames.has(provider.name)) {
+      throw damagedExportError(`model provider ${provider.name} appears twice.`);
+    }
+    providerNames.add(provider.name);
+  }
+}
+
+/** The first export format version whose memory notes each close with a line that says where they came from. */
+const MEMORY_SOURCE_LINES_SCHEMA_VERSION = 3;
+
+/** The archive's files with every daily memory file from an older export marked the way a stored one is. */
+function memoryFilesWithSourceLines(files: ReadonlyMap<string, Buffer>): ReadonlyMap<string, Buffer> {
+  const upgraded = new Map(files);
+  for (const [name, data] of files) {
+    const [section, , ...inner] = name.split('/');
+    if (section === 'memory' && dailyLogFileAt(inner.join('/')) !== undefined) {
+      upgraded.set(name, Buffer.from(withSourceLines(data.toString('utf8')).content, 'utf8'));
+    }
+  }
+  return upgraded;
 }
 
 interface ParsedMemoryNamespace {
@@ -931,7 +987,10 @@ interface ParsedMemoryNamespace {
 
 /** Groups the archive's memory/ files by namespace segment and resolves them the way the vault reads them. */
 function parseMemoryNamespaces(files: ReadonlyMap<string, Buffer>): ParsedMemoryNamespace[] {
-  const bySeg = new Map<string, { curated?: string; tombstones?: string; daily: Map<string, string> }>();
+  const bySeg = new Map<
+    string,
+    { curated?: string; tombstones?: string; reviewed?: string; daily: Map<string, string> }
+  >();
   for (const [name, data] of files) {
     if (!name.startsWith('memory/')) {
       continue;
@@ -953,6 +1012,8 @@ function parseMemoryNamespaces(files: ReadonlyMap<string, Buffer>): ParsedMemory
       bucket.curated = data.toString('utf8');
     } else if (inner === VAULT_TOMBSTONES_FILE) {
       bucket.tombstones = data.toString('utf8');
+    } else if (inner === REVIEWED_FROM_YOU_FILE) {
+      bucket.reviewed = data.toString('utf8');
     } else if (dailyFile !== undefined) {
       bucket.daily.set(dailyFile, data.toString('utf8'));
     }
@@ -962,9 +1023,10 @@ function parseMemoryNamespaces(files: ReadonlyMap<string, Buffer>): ParsedMemory
   for (const [seg, bucket] of bySeg) {
     const tombstones = bucket.tombstones === undefined ? [] : parseVaultTombstones(bucket.tombstones);
     const latest = latestTombstonesByEntry(tombstones);
+    const reviewed = parseReviewedMarks(bucket.reviewed ?? '');
     const scanned = [...bucket.daily.keys()]
       .sort()
-      .flatMap(file => dailyLogEntries({ safeNamespace: seg, file, content: bucket.daily.get(file) ?? '' }));
+      .flatMap(file => dailyLogEntries({ safeNamespace: seg, file, content: bucket.daily.get(file) ?? '', reviewed }));
     const entries = applyVaultTombstones(scanned, tombstones).map(entry => {
       const tombstone = latest.get(entry.id);
       return {
@@ -1009,77 +1071,44 @@ function countMemories(namespaces: readonly ParsedMemoryNamespace[]): number {
   );
 }
 
-/** Builds retain items for a client (non-Markdown) memory backend from the parsed namespaces. */
-function buildRetainItems(
-  namespaces: readonly ParsedMemoryNamespace[],
-  input: { exportedAt: string; personaWireBySourceSeg: ReadonlyMap<string, string> },
-): RetainItem[] {
-  const items: RetainItem[] = [];
-  const documentIdFor = (seed: string): string =>
-    `import-${createHash('sha256').update(seed, 'utf8').digest('hex').slice(0, 32)}`;
-  for (const namespace of namespaces) {
-    // A client backend has one bank per tenant, so a persona vault's entries
-    // keep their origin as the retain context instead of a separate vault.
-    const vaultContext = input.personaWireBySourceSeg.get(namespace.seg);
-    if (namespace.curated !== undefined) {
-      items.push({
-        content: namespace.curated,
-        timestamp: input.exportedAt,
-        document_id: documentIdFor(`curated:${namespace.seg}`),
-        ...(vaultContext === undefined ? {} : { context: vaultContext }),
-      });
-    }
-    for (const entry of namespace.entries) {
-      let body = entry.text;
-      let entryContext: string | undefined;
-      if (body.startsWith('## ')) {
-        const newline = body.indexOf('\n');
-        body = newline < 0 ? '' : body.slice(newline + 1).replace(/^\n+/, '');
-      }
-      const trailers = entryMetadata(body);
-      const sessionId = trailers?.[SESSION_ID_METADATA_KEY];
-      const noteSource = trailers?.[NOTE_SOURCE_METADATA_KEY];
-      const noteDate = trailers?.[NOTE_DATE_METADATA_KEY];
-      // The page text drops an id-shaped context line, so it is read before the body is cleaned.
-      entryContext = hiddenContext(body);
-      body = withoutHiddenMarkers(body);
-      const contextMatch = /\n\n> ([^\n]*)$/.exec(body);
-      if (contextMatch !== null) {
-        const contextValue = contextMatch[1];
-        if (contextValue !== undefined) {
-          entryContext ??= contextValue;
-          body = body.slice(0, contextMatch.index);
-        }
-      }
-      const itemContext = vaultContext ?? entryContext;
-      items.push({
-        // A note's marker rides inside its text, so a backend that drops metadata still hands it back.
-        content:
-          noteSource !== undefined && isMemoryNoteSource(noteSource) && noteDate !== undefined
-            ? noteRetainContent({ text: body, source: noteSource, date: noteDate })
-            : body,
-        timestamp: entry.timestamp,
-        // A replaceable entry keeps its document id, so a later update replaces it instead of adding a copy.
-        document_id: trailers?.[DOCUMENT_ID_METADATA_KEY] ?? documentIdFor(entry.id),
-        ...(itemContext === undefined ? {} : { context: itemContext }),
-        ...(sessionId === undefined && noteSource === undefined
-          ? {}
-          : {
-              metadata: {
-                ...(sessionId === undefined ? {} : { [SESSION_ID_METADATA_KEY]: sessionId }),
-                ...(noteSource === undefined || noteDate === undefined
-                  ? {}
-                  : { [NOTE_SOURCE_METADATA_KEY]: noteSource, [NOTE_DATE_METADATA_KEY]: noteDate }),
-              },
-            }),
-      });
-    }
-  }
-  return items;
-}
-
 function pluralize(count: number, singular: string, plural: string): string {
   return `${String(count)} ${count === 1 ? singular : plural}`;
+}
+
+/** A name that holds something besides spaces, else null. */
+function presentName(value: string | null): string | null {
+  return value !== null && value.trim() !== '' ? value : null;
+}
+
+/**
+ * The names an imported profile is saved with. The installer's name stays
+ * where the archive has none, since the app offers it only once. The summary
+ * reads the same values, so what it says Aman will call the person is what
+ * the saved profile holds.
+ */
+function importedProfileNames(
+  personalization: { user_name: string | null; address_as: string | null },
+  installerName: string,
+): { user_name: string | null; address_as: string | null } {
+  const ownerName = presentName(installerName);
+  return {
+    user_name: presentName(personalization.user_name) ?? ownerName,
+    address_as: presentName(personalization.address_as) ?? ownerName,
+  };
+}
+
+/** What the summary reports about model providers: how many setups came over, and what still needs doing. */
+interface ModelProviderSummary {
+  /** Provider setups restored (or, on a dry run, that would be). */
+  restored: number;
+  /** Restored providers that still have no key, in the order the export listed them. */
+  needsKeyNames: string[];
+  /** False for exports made before provider setups travelled. */
+  sectionPresent: boolean;
+  /** Provider setups in the export that were not written because this instance's providers are managed elsewhere. */
+  notWrittenManaged: number;
+  /** Personas moved to a model that is here because their own did not come over. */
+  personaSwitches: readonly PersonaModelSwitch[];
 }
 
 function buildSummary({
@@ -1090,9 +1119,13 @@ function buildSummary({
   deliveryCount,
   standInAgentNames,
   filesLeftBehind,
+  memoryPages,
   leftOut,
   personaChanges,
   trimmedSpaces,
+  callYouName,
+  nameNotIncluded,
+  modelProviders,
   dryRun,
 }: {
   result: Omit<ImportDataResult, 'summary' | 'schedules_off'>;
@@ -1110,11 +1143,20 @@ function buildSummary({
   /** Spaces whose history starts after revision 1 in the archive. */
   trimmedSpaces: number;
   filesLeftBehind: number;
+  memoryPages: MemoryPageCounts;
+  /** How Aman will address the person, from the name that came over; null when none did. */
+  callYouName: string | null;
+  /** True when the import leaves Aman not knowing the person's name. */
+  nameNotIncluded: boolean;
+  modelProviders: ModelProviderSummary;
 }): string {
   const counts = [
     `  ${pluralize(result.chats, 'chat', 'chats')}`,
     `  ${pluralize(result.memories, 'memory', 'memories')}`,
     `  ${pluralize(result.personas, 'persona', 'personas')}`,
+    ...(modelProviders.restored > 0
+      ? [`  ${pluralize(modelProviders.restored, 'model provider', 'model providers')}`]
+      : []),
     `  ${pluralize(result.spaces, 'space', 'spaces')}`,
     `  ${pluralize(result.agents, 'agent', 'agents')}`,
     result.schedules === 0
@@ -1122,6 +1164,13 @@ function buildSummary({
       : `  ${pluralize(result.schedules, 'schedule', 'schedules')} (they will be off)`,
   ];
   const notes: string[] = [];
+  if (callYouName !== null) {
+    notes.push(`Aman will call you: ${callYouName}.`);
+  } else if (nameNotIncluded) {
+    notes.push(
+      'This export did not include your name, so Aman does not know it yet. Aman will ask in your first chat, or you can set it in Settings under Personalization.',
+    );
+  }
   if (trimmedSpaces > 0) {
     notes.push(
       trimmedSpaces === 1
@@ -1151,6 +1200,19 @@ function buildSummary({
       `${pluralize(filesLeftBehind, 'uploaded file was', 'uploaded files were')} left behind because the export did not include ${filesLeftBehind === 1 ? 'it' : 'them'}; the chats still show ${filesLeftBehind === 1 ? 'its name' : 'their names'}.`,
     );
   }
+  if (memoryPages.imported > 0) {
+    notes.push(`${pluralize(memoryPages.imported, 'memory page', 'memory pages')} came along.`);
+  }
+  if (memoryPages.unreadableNames > 0) {
+    notes.push(
+      `${pluralize(memoryPages.unreadableNames, 'memory page has', 'memory pages have')} a name that is not all lowercase, so Aman will not read ${memoryPages.unreadableNames === 1 ? 'it' : 'them'} yet. Rename ${memoryPages.unreadableNames === 1 ? 'it' : 'each one'} to its lowercase name in the memory folder.`,
+    );
+  }
+  if (memoryPages.unusable > 0) {
+    notes.push(
+      `${pluralize(memoryPages.unusable, 'other file was', 'other files were')} in the memory page folders and ${memoryPages.unusable === 1 ? 'was' : 'were'} not copied, because only .md pages are. Copy ${memoryPages.unusable === 1 ? 'it' : 'them'} into the memory folder by hand if you need ${memoryPages.unusable === 1 ? 'it' : 'them'}.`,
+    );
+  }
   notes.push('Chats keep their dates and totals. Personas, spaces, folders and schedules show the time of the import.');
   notes.push("'Approve for this chat' choices do not carry over.");
   if (auditEntries > 0) {
@@ -1161,9 +1223,31 @@ function buildSummary({
   if (deliveryCount > 0) {
     notes.push(`${pluralize(deliveryCount, 'item', 'items')} from your feed came along.`);
   }
-  notes.push(
-    'Not brought over: model keys, connector sign-ins, your own skills.\n    Add your model again and sign in to your connectors.',
-  );
+  if (modelProviders.restored > 0) {
+    notes.push('Your model settings came over, but their keys never travel in an export.');
+    for (const name of modelProviders.needsKeyNames) {
+      notes.push(`Add the key for ${name} in Settings under Models, so its models can answer.`);
+    }
+  } else if (modelProviders.notWrittenManaged > 0) {
+    notes.push(
+      `Model settings did not come over, because this Aman's models are managed by TrueFoundry. Personas use the models it already has.`,
+    );
+  } else if (!modelProviders.sectionPresent) {
+    notes.push(
+      'Model settings are not in this export, because it was made by an older Aman. Add your model in Settings under Models.',
+    );
+  }
+  for (const personaSwitch of modelProviders.personaSwitches.slice(0, PERSONA_CHANGES_SHOWN)) {
+    notes.push(
+      `${personaSwitch.personaName} was set to a model that is not on this Aman, so it now uses ${personaSwitch.modelName}.`,
+    );
+  }
+  if (modelProviders.personaSwitches.length > PERSONA_CHANGES_SHOWN) {
+    notes.push(
+      `And ${String(modelProviders.personaSwitches.length - PERSONA_CHANGES_SHOWN)} more personas were moved to a model that is here.`,
+    );
+  }
+  notes.push('Not brought over: connector sign-ins and your own skills.\n    Sign in to your connectors again.');
   notes.push('Permissions start fresh, so each tool will ask again.');
 
   const sections: string[] = [[dryRun ? 'This export has:' : 'Imported:', ...counts].join('\n')];
@@ -1243,28 +1327,61 @@ function planAgents(contents: ArchiveContents): AgentPlan {
 interface PlannedMemoryFile {
   targetPath: string;
   bytes: Buffer;
+  /** True for a `people/` or `matters/` page. */
+  isPage: boolean;
 }
 
-/** Maps the archive's memory/ files onto the target tenant's vault paths. Nothing is written here. */
+/** What the import did with the archive's memory pages, for the summary. */
+interface MemoryPageCounts {
+  imported: number;
+  /** Pages written under a name that is not a lowercase page name, which Aman will not read until it is renamed. */
+  unreadableNames: number;
+  /** Files in a page folder that are not page files (not `.md`, deeper folders, hidden or unsafe names); they are not written. */
+  unusable: number;
+}
+
+/** The vault-relative part of a `memory/<vault>/<file>` archive path, or undefined for any other path. */
+function memoryFileAt(name: string): { sourceSeg: string; inner: string } | undefined {
+  if (!name.startsWith('memory/')) {
+    return undefined;
+  }
+  const rest = name.slice('memory/'.length);
+  const slash = rest.indexOf('/');
+  return slash < 0 ? undefined : { sourceSeg: rest.slice(0, slash), inner: rest.slice(slash + 1) };
+}
+
+/**
+ * Maps the archive's memory/ files onto the target tenant's vault paths. Nothing is written here.
+ * A page keeps its folder and its file name, even one Aman will not read by name; any other file in a
+ * page folder is not written. Nothing can land outside the vault: the archive reader refuses unsafe paths
+ * first and a page name is one plain segment.
+ */
 function planMarkdownMemory(
   markdownDir: string,
   contents: ArchiveContents,
   input: { targetTenantId: string; personaSegBySource: ReadonlyMap<string, string> },
-): PlannedMemoryFile[] {
+): { files: PlannedMemoryFile[]; unusablePages: number; unreadableNames: number } {
   const planned: PlannedMemoryFile[] = [];
-  const knownFiles = new Set([CURATED_MEMORY_FILE, VAULT_TOMBSTONES_FILE]);
+  const targets = new Set<string>();
+  let unusablePages = 0;
+  let unreadableNames = 0;
+  const noteIdFiles = new Set([VAULT_TOMBSTONES_FILE, REVIEWED_FROM_YOU_FILE, HANDLED_NOTES_FILE]);
+  const knownFiles = new Set([CURATED_MEMORY_FILE, ...noteIdFiles]);
   for (const [name, data] of contents.files) {
-    if (!name.startsWith('memory/')) {
+    const file = memoryFileAt(name);
+    if (file === undefined) {
       continue;
     }
-    const rest = name.slice('memory/'.length);
-    const slash = rest.indexOf('/');
-    if (slash < 0) {
+    const { sourceSeg, inner } = file;
+    const page = parsePageFilePath(inner);
+    if (page === undefined && isInPageFolder(inner)) {
+      unusablePages += 1;
       continue;
     }
-    const sourceSeg = rest.slice(0, slash);
-    const inner = rest.slice(slash + 1);
-    if (!knownFiles.has(inner) && dailyLogFileAt(inner) === undefined) {
+    if (page !== undefined && !page.isSlug) {
+      unreadableNames += 1;
+    }
+    if (page === undefined && !knownFiles.has(inner) && dailyLogFileAt(inner) === undefined) {
       continue;
     }
     const targetSeg = targetMemorySegment({
@@ -1277,9 +1394,9 @@ function planMarkdownMemory(
       throw new DataImportError('The memory section of this export belongs to a different account.', 400);
     }
     let bytes = data;
-    if (inner === '.vault-tombstones.md' && targetSeg !== sourceSeg) {
-      // Tombstone entry ids embed the vault namespace segment; retarget them
-      // so edits and deletes still apply under the new tenant.
+    if (noteIdFiles.has(inner) && targetSeg !== sourceSeg) {
+      // Note ids embed the vault namespace segment; retarget them so edits,
+      // deletes, reviews and the list of sorted notes still apply under the new tenant.
       const text = data.toString('utf8').split(`md:${sourceSeg}:`).join(`md:${targetSeg}:`);
       bytes = Buffer.from(text, 'utf8');
     }
@@ -1287,9 +1404,20 @@ function planMarkdownMemory(
       // Entries written before facts-only memory carried a "Turn summary:" prefix and a chat title line.
       bytes = Buffer.from(upgradeLegacyEntries(data.toString('utf8')), 'utf8');
     }
-    planned.push({ targetPath: path.join(markdownDir, targetSeg, inner), bytes });
+    const targetPath =
+      page === undefined
+        ? path.join(markdownDir, targetSeg, inner)
+        : path.join(markdownDir, targetSeg, pageFolder(page.kind), `${page.stem}.md`);
+    if (targets.has(targetPath)) {
+      throw new DataImportError(
+        'This export lists the same memory file twice, so the import was refused and nothing was changed. Export again, then import the new file.',
+        400,
+      );
+    }
+    targets.add(targetPath);
+    planned.push({ targetPath, bytes, isPage: page !== undefined });
   }
-  return planned;
+  return { files: planned, unusablePages, unreadableNames };
 }
 
 /** Writes planned files, each created exclusively so an existing file is never replaced. */
@@ -1464,7 +1592,6 @@ async function importArchive<TTransaction>(
     logger: deps.logger,
   });
   const {
-    manifest,
     sessions,
     folders,
     personas: archivedPersonas,
@@ -1476,7 +1603,9 @@ async function importArchive<TTransaction>(
     audit,
     deliveries,
     reach,
+    texts,
   } = contents;
+  const modelProviders = contents.modelProviders;
   // Each person's guide is installed from the bundled pack, so the archived copy is never written again.
   // Its memory still maps to the person's own guide, and the summary still counts it.
   const personas = archivedPersonas.filter(({ persona }) => !isAmanGuidePersona(persona));
@@ -1555,12 +1684,10 @@ async function importArchive<TTransaction>(
   }
 
   const personaSegBySource = new Map<string, string>();
-  const personaWireBySourceSeg = new Map<string, string>();
   for (const { persona } of archivedPersonas) {
     const wire = personaVaultNamespace(persona.display_name);
     const sourceSeg = vaultFilesystemNamespace(contents.sourceTenantId, wire);
     personaSegBySource.set(sourceSeg, vaultFilesystemNamespace(tenantId, wire));
-    personaWireBySourceSeg.set(sourceSeg, wire);
   }
   const memoryNamespaces = parseMemoryNamespaces(contents.files);
   for (const namespace of memoryNamespaces) {
@@ -1578,10 +1705,16 @@ async function importArchive<TTransaction>(
     }
   }
   const memoryCount = countMemories(memoryNamespaces);
-  const plannedMemoryFiles =
-    deps.memoryTarget.kind === 'markdown'
-      ? planMarkdownMemory(deps.memoryTarget.markdownDir, contents, { targetTenantId: tenantId, personaSegBySource })
-      : [];
+  const memoryPlan = planMarkdownMemory(deps.memoryMarkdownDir, contents, {
+    targetTenantId: tenantId,
+    personaSegBySource,
+  });
+  const plannedMemoryFiles = memoryPlan.files;
+  const memoryPages: MemoryPageCounts = {
+    imported: plannedMemoryFiles.filter(file => file.isPage).length,
+    unreadableNames: memoryPlan.unreadableNames,
+    unusable: memoryPlan.unusablePages,
+  };
   for (const file of plannedMemoryFiles) {
     if (existsSync(file.targetPath)) {
       throw new DataImportError(
@@ -1632,7 +1765,36 @@ async function importArchive<TTransaction>(
     });
   }
   const trimmedSpaces = spaces.filter(({ revisions }) => revisions.every(revision => revision.revision > 1)).length;
+  // The names the imported profile is saved with, and from them how Aman
+  // will address the person: the preferred form when there is one, else
+  // their name; null when neither the export nor the installer gave one,
+  // which the summary says plainly instead of guessing.
+  const profileNames = personalization === null ? null : importedProfileNames(personalization, deps.ownerName);
+  const callYouName =
+    [profileNames?.address_as, profileNames?.user_name]
+      .map(value => value?.trim())
+      .find(value => value !== undefined && value !== '') ?? null;
+  const providerSummaryOf = (
+    plan: ModelProviderImportPlan,
+    personaSwitches: PersonaModelSwitch[],
+  ): ModelProviderSummary => ({
+    restored: plan.writes.length,
+    needsKeyNames: plan.writes.filter(write => write.needsKey).map(write => write.name),
+    sectionPresent: contents.modelProvidersSectionPresent,
+    notWrittenManaged: deps.modelProviderStore.managedElsewhere ? modelProviders.length : 0,
+    personaSwitches,
+  });
   if (lock === undefined) {
+    const existingProviders = await deps.modelProviderStore.listProviders({ tenant_id: tenantId });
+    const currentDefault = await deps.globalSettingsStore.getSetting({ key: DEFAULT_CHAT_MODEL_SETTING_KEY });
+    const importedDefault = settings.instance.find(setting => setting.key === DEFAULT_CHAT_MODEL_SETTING_KEY)?.value;
+    const plan = planModelProviderImport({
+      imported: modelProviders,
+      existing: existingProviders,
+      defaultModel: currentDefault?.value ?? importedDefault,
+      managedElsewhere: deps.modelProviderStore.managedElsewhere,
+    });
+    const personaSwitches = planPersonaModelSwitches({ personas: personas.map(entry => entry.persona), plan });
     const result: Omit<ImportDataResult, 'summary'> = {
       chats: sessions.ids.length,
       memories: memoryCount,
@@ -1654,9 +1816,13 @@ async function importArchive<TTransaction>(
         deliveryCount: deliveries.length,
         standInAgentNames: agentPlan.placeholders.map(placeholder => placeholder.name),
         filesLeftBehind: 0,
+        memoryPages,
         leftOut,
         personaChanges: contents.personaRepairLines,
         trimmedSpaces,
+        callYouName,
+        nameNotIncluded: callYouName === null,
+        modelProviders: providerSummaryOf(plan, personaSwitches),
         dryRun: true,
       }),
     };
@@ -1730,31 +1896,20 @@ async function importArchive<TTransaction>(
       });
     }
 
-    if (deps.memoryTarget.kind === 'markdown') {
-      await writeMarkdownMemory(plannedMemoryFiles);
-    } else if (memoryNamespaces.length > 0) {
-      const items = buildRetainItems(memoryNamespaces, {
-        exportedAt: manifest.exported_at,
-        personaWireBySourceSeg,
-      });
-      if (items.length > 0) {
-        const outcome = await deps.memoryTarget.client.retain({
-          items,
-          operationId: `data-import-${newId()}`,
-          timeoutMs: MEMORY_RETAIN_TIMEOUT_MS,
-        });
-        if (!outcome.ok) {
-          throw new DataImportError(
-            `The memory store could not save the imported memories${outcome.reason === undefined ? '' : `: ${outcome.reason}`}. Nothing was imported.`,
-            500,
-          );
-        }
-      }
-    }
+    // The folder's own older notes are marked first, so the imported ones are never taken for older notes.
+    await ensureMemorySourceLines({ baseDir: deps.memoryMarkdownDir });
+    await writeMarkdownMemory(plannedMemoryFiles);
 
     // --- Everything else commits in one transaction, together with the removal of the marker. ---
     let connectorsImported = 0;
     let filesLeftBehind = 0;
+    let modelProviderSummary: ModelProviderSummary = {
+      restored: 0,
+      needsKeyNames: [],
+      sectionPresent: contents.modelProvidersSectionPresent,
+      notWrittenManaged: 0,
+      personaSwitches: [],
+    };
     await lock.pauseRenewal();
     await deps.withTransaction(async tx => {
       for (const { persona } of personas) {
@@ -1781,11 +1936,14 @@ async function importArchive<TTransaction>(
       for (const settings of reach) {
         await deps.reachSettingsStore.importSettings({ tenant_id: tenantId, created_by: subjectId, settings }, tx);
       }
+      for (const contact of texts) {
+        const owner = { tenant_id: tenantId, created_by: subjectId };
+        await deps.textContactStore.importContact({ ...owner, contact }, tx);
+        await deps.textContactStore.importWords({ ...owner, words: contact.words, max: TEXT_WORDS_MAX }, tx);
+      }
 
-      if (personalization !== null) {
+      if (personalization !== null && profileNames !== null) {
         // Replaces the empty profile the app creates on first sign-in; the emptiness check ruled out a filled one.
-        // The installer's name stays where the archive has none, since the app offers it only once.
-        const ownerName = deps.ownerName === '' ? null : deps.ownerName;
         await deps.personalizationStore.upsertProfile(
           {
             tenant_id: tenantId,
@@ -1793,8 +1951,8 @@ async function importArchive<TTransaction>(
             assistant_name: personalization.assistant_name,
             assistant_identity: personalization.assistant_identity,
             voice_guidance: personalization.voice_guidance,
-            user_name: personalization.user_name ?? ownerName,
-            address_as: personalization.address_as ?? ownerName,
+            user_name: profileNames.user_name,
+            address_as: profileNames.address_as,
             user_profile: personalization.user_profile,
             pinned_preferences: personalization.pinned_preferences,
             help_areas: personalization.help_areas,
@@ -1909,6 +2067,48 @@ async function importArchive<TTransaction>(
         }
       }
 
+      // Provider setups land with the settings, so a persona's model can be
+      // checked against what is actually here before the commit.
+      const existingProviders = await deps.modelProviderStore.listProviders({ tenant_id: tenantId }, tx);
+      const defaultModel = await deps.globalSettingsStore.getSetting({ key: DEFAULT_CHAT_MODEL_SETTING_KEY }, tx);
+      const providerPlan = planModelProviderImport({
+        imported: modelProviders,
+        existing: existingProviders,
+        defaultModel: defaultModel?.value,
+        managedElsewhere: deps.modelProviderStore.managedElsewhere,
+      });
+      for (const write of providerPlan.writes) {
+        await deps.modelProviderStore.upsertProvider(
+          { tenant_id: tenantId, name: write.name, manifest: write.manifest },
+          tx,
+        );
+      }
+      const personaSwitches = planPersonaModelSwitches({
+        personas: personas.map(entry => entry.persona),
+        plan: providerPlan,
+      });
+      const personaById = new Map(personas.map(entry => [entry.persona.id, entry.persona]));
+      for (const personaSwitch of personaSwitches) {
+        const persona = personaById.get(personaSwitch.personaId);
+        if (persona === undefined) {
+          continue;
+        }
+        await deps.personaStore.updatePersona(
+          {
+            tenant_id: tenantId,
+            created_by: subjectId,
+            id: persona.id,
+            display_name: persona.display_name,
+            aliases: persona.aliases,
+            instructions: persona.instructions,
+            model_name: personaSwitch.modelName,
+            updated_by: subjectId,
+          },
+          tx,
+        );
+      }
+      modelProviderSummary = providerSummaryOf(providerPlan, personaSwitches);
+
       for (const entry of sessions.entries()) {
         for (const activation of entry.persona_activations) {
           await deps.personaStore.recordPersonaActivation(
@@ -1995,9 +2195,13 @@ async function importArchive<TTransaction>(
         deliveryCount: deliveries.length,
         standInAgentNames: agentPlan.placeholders.map(placeholder => placeholder.name),
         filesLeftBehind,
+        memoryPages,
         leftOut,
         personaChanges: contents.personaRepairLines,
         trimmedSpaces,
+        callYouName,
+        nameNotIncluded: callYouName === null,
+        modelProviders: modelProviderSummary,
         dryRun: false,
       }),
     };

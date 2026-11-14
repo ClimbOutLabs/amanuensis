@@ -444,6 +444,8 @@ describe('Data export route', () => {
     // Settings: an exported toggle, and one that must stay behind.
     const globalSettings = new SqliteGlobalSettingsStore(db);
     await globalSettings.setSetting({ key: 'tool_output_screen_enabled', value: 'true' });
+    await globalSettings.setSetting({ key: 'memory_page_sorting_mode', value: 'report' });
+    await globalSettings.setSetting({ key: 'memory_nightly_job_enabled', value: 'true' });
     await globalSettings.setSetting({ key: 'export_test_unlisted_setting', value: 'enabled' });
     await new SqliteSentinelSettingsStore(db).patch({
       tenant_id: TENANT_ID,
@@ -596,10 +598,12 @@ describe('Data export route', () => {
       'agents.json',
       'schedules.json',
       'connectors.json',
+      'model_providers.json',
       'settings.json',
       'audit.json',
       'deliveries.json',
       'reach.json',
+      'texts.json',
     ]);
     for (const section of manifest.sections) {
       expect(names).toContain(section);
@@ -671,7 +675,11 @@ describe('Data export route', () => {
         permission_settings: z.object({ offline_mode: z.boolean() }),
       })
       .parse(zipEntryJson(entries, 'settings.json'));
-    expect(settings.instance).toEqual([{ key: 'tool_output_screen_enabled', value: 'true' }]);
+    expect(settings.instance).toEqual([
+      { key: 'memory_nightly_job_enabled', value: 'true' },
+      { key: 'memory_page_sorting_mode', value: 'report' },
+      { key: 'tool_output_screen_enabled', value: 'true' },
+    ]);
     expect(settings.permission_settings.offline_mode).toBe(true);
 
     // No uploaded file bytes without the tick.
@@ -775,6 +783,20 @@ describe('Data export route', () => {
     const planted = connectors.find(connector => connector.name === 'planted-connector');
     expect(planted?.manifest).not.toHaveProperty('auth');
     expect(planted?.manifest.url).toBe('https://connector.example.com/mcp/[redacted]/v1');
+  });
+
+  it('exports model provider setups without their keys', async () => {
+    const entries = readZipEntries(await exportZip('alice'));
+    const providers = z
+      .array(z.object({ name: z.string(), manifest: z.object({ type: z.string() }).passthrough() }))
+      .parse(zipEntryJson(entries, 'model_providers.json'));
+    const planted = providers.find(provider => provider.name === 'planted-provider');
+    expect(planted?.manifest).not.toHaveProperty('auth');
+    expect(planted?.manifest).toMatchObject({
+      type: 'custom',
+      base_url: 'https://provider.example.com/v1',
+      models: [{ model_id: 'planted-model', name: 'planted-model' }],
+    });
   });
 
   it('leaves out deployment-bound session fields', async () => {

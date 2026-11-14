@@ -7,7 +7,7 @@
 #   APP_VERSION — npm version to install, e.g. 0.1.0
 #
 # Example:
-#   docker build --build-arg APP_VERSION=0.1.0 -t trueforge:0.1.0 .
+#   docker build --build-arg APP_VERSION=0.1.0 -t aman:0.1.0 .
 
 FROM node:24-slim AS runner
 WORKDIR /app
@@ -50,8 +50,10 @@ RUN groupadd --gid 10001 trueforge \
 # first write. The Email send list volume mounts at /data/mail-policy and the
 # server is its only writer, so the dir is created here the same way; without
 # it the fresh volume starts out owned by root and the first write fails.
-RUN mkdir -p /data/memory /data/persona-knowledge /data/app /data/mail-policy \
-  && chown -R 10001:10001 /data
+# The local model bridge's two sides share socket files in a volume mounted at
+# /run/aman-local-model, made here for the same reason.
+RUN mkdir -p /data/memory /data/persona-knowledge /data/app /data/mail-policy /run/aman-local-model \
+  && chown -R 10001:10001 /data /run/aman-local-model
 
 # Image-level defaults so either image works without deploy-specific env: the
 # data roots above are writable by the runtime user. Deploys that pin their own

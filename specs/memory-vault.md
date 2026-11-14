@@ -32,8 +32,6 @@ A Memory Vault UI and API layer on top of the existing Markdown memory backend. 
 
 **Views.** The shared vault is not a global view of all facts. Any "all vaults" view in the UI is a union for the signed-in user only and never widens what a persona recalls.
 
-**Markdown backend only.** The vault and persona scoping need the Markdown backend. Hindsight stays cold-archived and has no vaults.
-
 ## Scope
 
 - Fact list per vault with source attribution (which file, when recorded)
@@ -64,4 +62,3 @@ A Memory Vault UI and API layer on top of the existing Markdown memory backend. 
 
 - Encryption at rest (see private-by-architecture)
 - Automatic fact deduplication or merging
-- Memory backend migration (Hindsight stays cold-archived)

@@ -15,6 +15,7 @@ function email(overrides: Partial<SentinelApprovalEmail> = {}): SentinelApproval
     bcc: [],
     subject: 'Lease',
     body: 'Thursday works.\n\nBest,\nAda',
+    check_code: null,
     replaces: null,
     reply_in_thread: null,
     reply_to: null,
@@ -116,11 +117,10 @@ describe('EmailApprovalCard title and verb', () => {
     expect(screen.getByRole('button', { name: 'Allow' })).toBeInTheDocument();
   });
 
-  it('shows the Gmail label, one waiting line, and no all-caps', () => {
+  it('shows one waiting line and no all-caps', () => {
     const { container } = render(
       <EmailApprovalCard approvalId="approval-1" card={cardWith()} onApprove={vi.fn()} onDeny={vi.fn()} />,
     );
-    expect(screen.getByText('Gmail')).toBeInTheDocument();
     expect(screen.getAllByText('Waiting for you')).toHaveLength(1);
     expect(container.querySelector('.uppercase')).toBeNull();
   });
@@ -152,22 +152,21 @@ describe('EmailApprovalCard fields', () => {
     const { unmount } = render(
       <EmailApprovalCard approvalId="approval-1" card={cardWith()} onApprove={vi.fn()} onDeny={vi.fn()} />,
     );
-    expect(screen.queryByText('Reply in existing thread')).not.toBeInTheDocument();
     expect(screen.queryByText('Reply in the thread, subject')).not.toBeInTheDocument();
     expect(screen.queryByText('Reply in the thread, from')).not.toBeInTheDocument();
     unmount();
 
     renderEmail({ reply_in_thread: { subject: 'Lease', from: 'Grace' }, subject: 'Re: Lease' });
-    expect(screen.getByText('Reply in existing thread')).toBeInTheDocument();
     expect(screen.getByText('Reply in the thread, subject')).toBeInTheDocument();
-    expect(screen.getByText('Lease', { selector: 'dd' })).toBeInTheDocument();
+    expect(screen.getByText('Lease', { selector: 'dd span' })).toBeInTheDocument();
     expect(screen.getByText('Reply in the thread, from')).toBeInTheDocument();
-    expect(screen.getByText('Grace', { selector: 'dd' })).toBeInTheDocument();
+    expect(screen.getByText('Grace', { selector: 'dd span' })).toBeInTheDocument();
   });
 
-  it('shows an address replies go to, on its own line, before the person approves', () => {
+  it('shows an address replies go to, on its own row, before the person approves', () => {
     renderEmail({ reply_to: 'mallory@example.com' });
-    expect(screen.getByText('Replies go to: mallory@example.com')).toBeInTheDocument();
+    expect(screen.getByText('Replies go to', { selector: 'dt' })).toBeInTheDocument();
+    expect(screen.getByText('mallory@example.com', { selector: 'dd span' })).toBeInTheDocument();
   });
 
   it('shows no reply line when replies go to the sender', () => {
@@ -177,14 +176,15 @@ describe('EmailApprovalCard fields', () => {
 
   it('labels the metadata and the message body', () => {
     renderEmail();
-    expect(screen.getByText('What will be sent')).toBeInTheDocument();
-    expect(screen.getByText('Message body')).toBeInTheDocument();
+    expect(screen.getByText('To', { selector: 'dt' })).toBeInTheDocument();
+    expect(screen.getByText('Subject', { selector: 'dt' })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Message body' })).toBeInTheDocument();
   });
 
-  it('says what will be saved, not sent, on a draft card', () => {
+  it('says it will be saved, not sent, on a draft card', () => {
     renderEmail({ action: 'save' });
-    expect(screen.getByText('What will be saved')).toBeInTheDocument();
-    expect(screen.queryByText('What will be sent')).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Save this draft?' })).toBeInTheDocument();
+    expect(screen.queryByText(/sent/i)).not.toBeInTheDocument();
   });
 
   it('shows the full recipient list, not a count', () => {
@@ -233,7 +233,7 @@ describe('EmailApprovalCard body', () => {
   it('keeps the action bar visible under a 3000-word body', () => {
     renderEmail({ body: longBody(300, 10) });
     const send = screen.getByRole('button', { name: 'Allow' });
-    const bar = send.parentElement;
+    const bar = send.parentElement?.parentElement ?? null;
     if (bar === null) throw new Error('the allow button has no action bar');
     expect(bar).toHaveClass('sticky', 'bottom-0');
     expect(within(bar).getByRole('button', { name: 'Not now' })).toBeInTheDocument();
@@ -247,12 +247,56 @@ describe('EmailApprovalCard body', () => {
 });
 
 describe('EmailApprovalCard actions', () => {
-  it('sends once, then shows Sent with the time and no buttons', () => {
+  it('sends once, then says Sending with no buttons, and never claims Sent before the server does', () => {
     const { onApprove } = renderEmail();
     fireEvent.click(screen.getByRole('button', { name: 'Allow' }));
     expect(onApprove).toHaveBeenCalledTimes(1);
-    expect(screen.getByText(/^Sent · /)).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('Sending…');
+    expect(screen.queryByText(/^Sent/)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Allow' })).not.toBeInTheDocument();
+  });
+
+  it("puts Allow first and Don't send last on a safe-first send, all alike, and each sends its own answer", () => {
+    const onApprove = vi.fn();
+    const onDeny = vi.fn();
+    render(
+      <EmailApprovalCard
+        approvalId="approval-1"
+        card={{ ...cardWith(), safe_choice: true, destructive: true }}
+        onApprove={onApprove}
+        onDeny={onDeny}
+        onChangeRequest={vi.fn()}
+        onSaveDraft={vi.fn()}
+      />,
+    );
+    const buttons = screen.getAllByRole('button').filter(button => button.closest('section') === null);
+    expect(buttons.map(button => button.textContent)).toEqual(['Allow', 'Change it', 'Save as draft', "Don't send"]);
+    for (const button of buttons) {
+      expect(button.className).toMatch(/bg-secondary-button-bg/);
+      expect(button.className).not.toMatch(/bg-primary-button-bg|text-failure-bg/);
+    }
+    expect(screen.getByRole('button', { name: "Don't send" }).hasAttribute('data-approval-primary')).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: "Don't send" }));
+    expect(onDeny).toHaveBeenCalledTimes(1);
+    expect(onApprove).not.toHaveBeenCalled();
+  });
+
+  it('shows the check code of a send, which its receipt repeats', () => {
+    render(
+      <EmailApprovalCard
+        approvalId="approval-1"
+        card={cardWith({ check_code: 'A7F39C' })}
+        onApprove={vi.fn()}
+        onDeny={vi.fn()}
+      />,
+    );
+    expect(screen.getByText('Check code')).toBeInTheDocument();
+    expect(screen.getByText('A7F39C')).toBeInTheDocument();
+  });
+
+  it('shows no check code on a card that has none', () => {
+    render(<EmailApprovalCard approvalId="approval-1" card={cardWith()} onApprove={vi.fn()} onDeny={vi.fn()} />);
+    expect(screen.queryByText('Check code')).not.toBeInTheDocument();
   });
 
   it('calls onDeny from Not now', () => {
@@ -279,16 +323,16 @@ describe('EmailApprovalCard actions', () => {
     expect(screen.queryByRole('button', { name: 'Save as draft' })).not.toBeInTheDocument();
   });
 
-  it('shows Edit only when the container passes a change handler, and sends the typed change', () => {
+  it('shows Change it only when the container passes a change handler, and sends the typed change', () => {
     const { unmount } = render(
       <EmailApprovalCard approvalId="approval-1" card={cardWith()} onApprove={vi.fn()} onDeny={vi.fn()} />,
     );
-    expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Change it' })).not.toBeInTheDocument();
     unmount();
 
     const onChangeRequest = vi.fn();
     renderEmail({}, { onChangeRequest });
-    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Change it' }));
     const box = screen.getByRole('textbox');
     fireEvent.change(box, { target: { value: '  Make it shorter.  ' } });
     // The change box's own submit button; the card's primary Send is a plain button.
@@ -313,7 +357,7 @@ describe('EmailApprovalCard for a new recipient', () => {
     mail_new_recipients: ['grace@example.com'],
   };
 
-  it("offers Add and send, Edit, Save as draft and Don't send, with the full recipient list", () => {
+  it("offers Add and send, Change it, Save as draft and Don't send, with the full recipient list", () => {
     const onSaveDraft = vi.fn();
     render(
       <EmailApprovalCard
@@ -326,8 +370,24 @@ describe('EmailApprovalCard for a new recipient', () => {
       />,
     );
     const labels = screen.getAllByRole('button').map(button => button.textContent);
-    expect(labels).toEqual(['Add and send', 'Edit', 'Save as draft', "Don't send"]);
+    expect(labels).toEqual(['Add and send', 'Change it', 'Save as draft', "Don't send"]);
     expect(screen.getByText('grace@example.com, lin@example.com')).toBeInTheDocument();
+  });
+
+  it("keeps Add and send first and Don't send last on a safe-first card, with no filled button", () => {
+    render(
+      <EmailApprovalCard
+        approvalId="approval-1"
+        card={{ ...card, safe_choice: true, destructive: true }}
+        onApprove={vi.fn()}
+        onDeny={vi.fn()}
+      />,
+    );
+    const buttons = screen.getAllByRole('button');
+    expect(buttons.map(button => button.textContent)).toEqual(['Add and send', "Don't send"]);
+    for (const button of buttons) {
+      expect(button.className).not.toMatch(/bg-primary-button-bg|text-failure-bg/);
+    }
   });
 
   it('says in the server sentence that approving adds the address and sends', () => {
@@ -358,7 +418,7 @@ describe('EmailApprovalCard server sentences', () => {
         onDeny={vi.fn()}
       />,
     );
-    expect(screen.getByText('Why: You asked for the lease reply.')).toBeInTheDocument();
+    expect(screen.getByText(/says: You asked for the lease reply\.$/)).toBeInTheDocument();
     expect(screen.getByText("Once this is sent, it can't be unsent.")).toBeInTheDocument();
   });
 });
