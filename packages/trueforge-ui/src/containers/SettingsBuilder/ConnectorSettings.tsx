@@ -933,7 +933,7 @@ const ConnectorSettings = () => {
               }}
             >
               <Icon name="plus" size="1rem" className="mr-1" />
-              Add by address
+              Add a custom connector
             </Button>
           </div>
 
