@@ -15,7 +15,7 @@ let failed = false;
 try {
   const page = context.pages()[0] ?? (await context.newPage());
   await page.goto('chrome://prefs-internals');
-  const prefs = JSON.parse(await page.evaluate(() => document.body.innerText));
+  const prefs = JSON.parse(await page.innerText('body'));
   for (const keys of PREFS) {
     const pref = keys.reduce((value, key) => value?.[key], prefs);
     const managedOff = pref?.value === false && Array.isArray(pref.metadata) && pref.metadata.includes('managed');
