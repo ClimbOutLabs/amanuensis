@@ -61,8 +61,9 @@ Open **Export, import, and topics** at the bottom of the **Memories** tab.
 A [persona](personas.md) is a helper with its own name that answers in your chats. Each persona keeps its own notes from its chats. Notes from chats with your main assistant are shared, so every persona can read them.
 
 1. Open the **Sharing** tab.
-2. Find the persona's row. The first column, **Can also read notes from**, lists your main assistant and each persona.
-3. In that row, check the box under each persona or topic whose notes it may read. Each change saves at once.
+2. Find the row of the persona that should read more. Your main assistant has a row too. Each row says in words what it reads now.
+3. Click **Select** in that row. Under **Can also read notes from**, check each persona or topic whose notes it may read. Each change saves at once.
+4. Click **Done** to close the row.
 
 A persona's own notes stay private to it until you share them here.
 
