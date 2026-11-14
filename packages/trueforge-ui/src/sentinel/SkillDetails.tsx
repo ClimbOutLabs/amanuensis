@@ -2,8 +2,11 @@
 
 import type { FC } from 'react';
 
+import {
+  SKILL_SITES_DATA_WARNING,
+  SKILL_SITES_SEND_WARNING,
+} from '@truefoundry/trueforge-core/core/permissions/skillSitesCopy';
 import { Icon } from '../icons/Icon.js';
-import { SKILL_SITES_DATA_WARNING, SKILL_SITES_SEND_WARNING } from '../server/skillNetworkApproval.js';
 import type { SentinelApprovalSkill } from './types.js';
 
 /** A commit is long; the first seven characters are enough to tell versions apart at a glance. */
