@@ -122,6 +122,63 @@ const BASELINE: Record<PersonalInstanceName, Baseline> = {
       tavily_search: 134,
     },
   },
+  /**
+   * Measured 2026-11-12: the personal setup before email is connected, so the offer to connect it
+   * (its instruction and its two tools) is sent. Its own case, so growth in the offer text is caught.
+   */
+  'personal-with-connection-offer': {
+    total: 10647,
+    rows: {
+      'agent-identity': 184,
+      'model-identity': 79,
+      'agent-capabilities': 1184,
+      'agent-capabilities/internal-messages': 59,
+      'agent-capabilities/untrusted-tool-output': 104,
+      'agent-capabilities/ability-boundaries': 91,
+      'agent-capabilities/no-task-no-tools': 101,
+      'agent-capabilities/check-before-asking': 69,
+      'agent-capabilities/plain-speech': 114,
+      'agent-capabilities/tool-bundles': 176,
+      'agent-capabilities/active-speaker-context': 91,
+      'current-date': 38,
+      ask_user_question: 261,
+      load_bundle: 100,
+      connection_offer_status: 120,
+      record_connection_offer_decline: 120,
+      get_current_datetime: 102,
+      create_document_report: 305,
+      extract_document_text: 324,
+      summarize_net_worth: 482,
+      render_map: 227,
+      render_places: 396,
+      render_route: 298,
+      get_openui_instructions: 101,
+      apply_patch: 297,
+      exec: 542,
+      replace_text: 362,
+      run_code: 541,
+      write_file: 305,
+      cancel_reminder: 87,
+      create_schedule: 329,
+      delete_schedule: 91,
+      list_reminders: 56,
+      list_schedules: 75,
+      pause_schedule: 97,
+      resume_schedule: 99,
+      set_reminder: 289,
+      create_space: 389,
+      edit_space: 958,
+      get_space: 175,
+      list_blocks: 287,
+      list_spaces: 129,
+      move_space: 161,
+      revert_space: 208,
+      create_sub_agent: 272,
+      usage_summary: 292,
+      tavily_extract: 130,
+      tavily_search: 155,
+    },
+  },
   'personal-no-sandbox': {
     total: 6631,
     rows: {
@@ -271,6 +328,14 @@ const SANDBOX_SECTIONS: Record<string, string[]> = {
 };
 
 describe('system prompt sections follow the tools a chat has', () => {
+  it('sends the connection offer only in the setup where nothing is connected yet', async () => {
+    const offer = await measurePersonalInstance({ name: 'personal-with-connection-offer', turn: 'core-only' });
+    const personal = await measurePersonalInstance({ name: 'personal', turn: 'core-only' });
+    const offerTools = ['connection_offer_status', 'record_connection_offer_decline'];
+    expect(offer.tools.map(row => row.name)).toEqual(expect.arrayContaining(offerTools));
+    expect(personal.tools.some(row => offerTools.includes(row.name))).toBe(false);
+  });
+
   it.each(PERSONAL_INSTANCE_NAMES)('sends %s no email-password row when no Email connector is set up', async name => {
     const report = await measurePersonalInstance({ name, turn: 'core-only' });
     expect(report.sections.map(row => row.name)).not.toContain('agent-capabilities/email-passwords');

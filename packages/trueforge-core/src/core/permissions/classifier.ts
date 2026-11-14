@@ -17,6 +17,11 @@ import path from 'path';
 import { DOCUMENTS_SERVER_ID, EXTRACT_DOCUMENT_TEXT_TOOL_NAME } from '../../documents/toolContract';
 import type { CalendarWriteReview } from '../calendar/eventWrite';
 import { CALENDAR_SERVER_ID, isCalendarReadToolName, isCalendarWriteToolName } from '../calendar/toolContract';
+import {
+  CONNECTION_OFFER_SERVER_ID,
+  CONNECTION_OFFER_STATUS_TOOL_NAME,
+  RECORD_CONNECTION_OFFER_DECLINE_TOOL_NAME,
+} from '../connectors/connectionOfferContract';
 import { DRIVE_SERVER_ID, isDriveReadToolName, isDriveWriteToolName } from '../drive/toolContract';
 import type { DriveWriteReview } from '../drive/writeReview';
 import { checkCodeOf, hashDraft, type ReviewableDraft } from '../email/gmail/draftReview';
@@ -2662,6 +2667,31 @@ function classifyGoogleSetupTool(action: SentinelAction): TierDecision {
 }
 
 /**
+ * The connection offer tools are the host's own, named by server like the Google setup read. The
+ * status read says only whether one connector is connected and whether the person already turned
+ * its offer down: no connector content, so it runs without asking and is not a sensitive read.
+ * Recording the decline writes down the answer the person just gave in that same chat, so it also
+ * runs without asking. Anything else on this server fails closed.
+ */
+function classifyConnectionOfferTool(action: SentinelAction): TierDecision {
+  if (action.tool_name === CONNECTION_OFFER_STATUS_TOOL_NAME) {
+    return tier1Decision({
+      reason: 'connection_offer_read',
+      reason_detail: 'Read whether a connector is connected.',
+      sensitive_read: false,
+    });
+  }
+  if (action.tool_name === RECORD_CONNECTION_OFFER_DECLINE_TOOL_NAME) {
+    return tier1Decision({
+      reason: 'connection_offer_decline',
+      reason_detail: 'Remember that you turned down an offer to connect a connector.',
+      sensitive_read: false,
+    });
+  }
+  return failClosedDecision({ reason_detail: 'Unknown connection offer tool.' });
+}
+
+/**
  * Gmail tools are the host's own, named by server so a connector's tool of the same name never takes this
  * path. Reads are silent but flagged as sensitive, and a session that read mail can no longer search silently.
  */
@@ -4329,6 +4359,9 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
   }
   if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === GOOGLE_SETUP_SERVER_ID) {
     return steeringChecked({ decision: classifyGoogleSetupTool(action), ctx, guests: [] });
+  }
+  if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === CONNECTION_OFFER_SERVER_ID) {
+    return steeringChecked({ decision: classifyConnectionOfferTool(action), ctx, guests: [] });
   }
   if (isHostMailRead(action)) {
     return classifyMailRead(action, ctx);

@@ -47,6 +47,7 @@ import type { ITurnArtifactStore, TurnArtifactRecord } from '../db/turnArtifactS
 import { personaKnowledgeLocation } from '../personaKnowledge/knowledgePaths';
 import { openPersonaKnowledgeRepository } from '../personaKnowledge/sqliteKnowledgeRepository';
 import type { Persona } from '../personas/persona';
+import { CONNECTION_OFFER_DECLINED_SETTING_KEYS } from '../runtime/connectionOfferRegistry';
 import { GIT_COMMIT_IDENTITY_SETTING_KEY } from '../runtime/gitCommitIdentitySettings';
 import { HANDLED_NOTES_FILE } from '../runtime/memory/handledNotes';
 import {
@@ -94,6 +95,7 @@ const PERSONA_ACTIVATION_LIMIT = 100_000;
 /** Instance-wide, non-secret toggles. Anything not listed here never leaves in settings.json. */
 export const EXPORTED_GLOBAL_SETTING_KEYS = [
   DEFAULT_CHAT_MODEL_SETTING_KEY,
+  ...CONNECTION_OFFER_DECLINED_SETTING_KEYS,
   GIT_COMMIT_IDENTITY_SETTING_KEY,
   MEMORY_RECALL_ENABLED_SETTING_KEY,
   MEMORY_HELPER_MODEL_SETTING_KEY,

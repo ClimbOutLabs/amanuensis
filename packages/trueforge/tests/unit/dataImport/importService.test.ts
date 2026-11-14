@@ -48,6 +48,7 @@ import type { WithTransaction } from '../../../src/db/transaction';
 import { personaKnowledgeLocation } from '../../../src/personaKnowledge/knowledgePaths';
 import { openPersonaKnowledgeRepository } from '../../../src/personaKnowledge/sqliteKnowledgeRepository';
 import { amanGuidePersonaId, legacyAmanGuidePersonaId } from '../../../src/personas/amanGuide/identity';
+import { CONNECTION_OFFER_DECLINED_SETTING_KEYS } from '../../../src/runtime/connectionOfferRegistry';
 import { loadAliasIndex, matchAliases } from '../../../src/runtime/memory/aliasIndex';
 import { EMBEDDING_DIMENSIONS } from '../../../src/runtime/memory/embeddingModel';
 import { appendHandledNote, readHandledNotes } from '../../../src/runtime/memory/handledNotes';
@@ -1357,6 +1358,37 @@ describe('runDataImport keeps what the archive recorded', () => {
       expect((await target.stores.globalSettingsStore.getSetting({ key: 'memory_screen_enabled' }))?.value).toBe(
         'false',
       );
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('carries every remembered connection offer decline through export and import', async () => {
+    const { source } = await seededArchive();
+    const target = await makeInstance('target-offer-decline');
+    try {
+      expect(CONNECTION_OFFER_DECLINED_SETTING_KEYS.length).toBeGreaterThan(0);
+      for (const key of CONNECTION_OFFER_DECLINED_SETTING_KEYS) {
+        await source.stores.globalSettingsStore.setSetting({ key, value: 'true' });
+      }
+      const archive = await exportArchive(source);
+      const settings = recordAt(
+        parseJson(
+          new Map(readZipEntries(archive).map(entry => [entry.name, entry.data])).get('settings.json'),
+          'settings.json',
+        ),
+        'settings',
+      );
+      const instance = recordsAt(settings['instance'], 'instance settings');
+      for (const key of CONNECTION_OFFER_DECLINED_SETTING_KEYS) {
+        expect(instance.find(setting => setting['key'] === key)?.['value']).toBe('true');
+      }
+
+      await runDataImport(importDeps(target), importRequest(archive));
+      for (const key of CONNECTION_OFFER_DECLINED_SETTING_KEYS) {
+        expect((await target.stores.globalSettingsStore.getSetting({ key }))?.value).toBe('true');
+      }
     } finally {
       await source.close();
       await target.close();
