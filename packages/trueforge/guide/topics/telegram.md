@@ -29,6 +29,19 @@ If the name is not yours, do not pair. Someone else messaged your bot first. Cli
 
 Send the bot a message and it is answered in the Telegram chat, with the same memory and the same care as a chat here. The Telegram chat is listed with your other chats, and you can open it in Aman to change the model or the connectors it uses, as in any chat; the bot answers with them from your next message. With **Learn from conversations** on, Aman also learns about you from what you send the bot. Anything a chat would show you as a card first is asked as a message with **Approve** and **Deny** buttons, and nothing runs until you tap one. On a card for email addresses you have not sent to before, the first button says **Add and send** instead, or **Add and save draft** when the card saves a draft and sends nothing, because approving adds those addresses to your send list. The message shows everything the card in the app shows: the whole email, the whole request, the exact command, and for a new skill where it comes from, its exact version and its instructions. An email shows the account it is sent from, and **Approve** sends it from that account. When you have more than one email account, the message says so. To send from a different account, answer in the app. When Telegram cannot show an action in full, for example a skill whose instructions are too long, the message says to open Aman instead and has no buttons, and the action waits for you there.
 
+## Change what the chat uses
+
+Tap the menu button beside the text box in Telegram to see the bot's commands, or send one yourself:
+
+- /new starts a fresh chat. The earlier one stays in Aman.
+- /model shows your models as buttons. The one in use is ticked. Tap another to switch.
+- /persona shows your personas as buttons. Tap one and it answers from your next message. You can also ask for a persona by name in a message, as in the app.
+- /connectors shows the connectors you have set up. Tap one to turn it on or off for this chat. To connect a new one, open Aman.
+- /status shows the model, the persona and the connectors this chat uses.
+- /help lists these commands.
+
+These change only the Telegram chat, the same settings you see when you open that chat in Aman.
+
 Reminders, brief summaries and other notices are sent to Telegram as well. When Aman tries to call you and the phone does not ring, the message comes to Telegram instead. The whole brief always stays in the app, in its chat.
 
 The bot does not answer anyone else, and it does not work in group chats. Forwarded messages and files are treated as things to read, never as instructions to follow.
