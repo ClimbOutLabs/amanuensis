@@ -16,12 +16,21 @@ Aman also has its own local link to a model on this computer. You do not need it
 To set it up:
 
 1. Find the port your model server listens on. Ollama uses 11434 unless you changed it.
-2. On the computer where Aman is installed, open a terminal and type `aman local-model 11434`, with your port in place of 11434. With more than one Aman instance, add `--instance` and the instance name.
+2. On the computer where Aman is installed, open a terminal and run this, with your port in place of 11434. With more than one Aman instance, add `--instance` and the instance name.
+
+   ```bash
+   aman local-model 11434
+   ```
+
 3. Wait for the message that Aman reaches the model. It shows the address to use, such as `http://aman-local-model:11434/v1`.
    The command also lets Aman use that address, and it starts Aman again so the change takes effect.
 4. Open Settings, then Models. Give the model that address.
 
-To take the port away again, type `aman local-model 11434 --remove`.
+To take the port away again, run:
+
+```bash
+aman local-model 11434 --remove
+```
 
 The local link is not available in Aman Setup on Windows yet. There, use the `host.docker.internal` address above.
 
