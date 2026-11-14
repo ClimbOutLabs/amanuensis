@@ -18,8 +18,8 @@ import {
 type PersonalizationTab = 'yours' | 'assistant';
 
 const PERSONALIZATION_TABS: ReadonlyArray<{ id: PersonalizationTab; label: string }> = [
-  { id: 'yours', label: 'Your Profile' },
-  { id: 'assistant', label: 'Assistant Profile' },
+  { id: 'yours', label: 'Your profile' },
+  { id: 'assistant', label: 'Assistant profile' },
 ];
 
 export type PersonalizationPanelProps = {

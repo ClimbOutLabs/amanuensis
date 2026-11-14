@@ -8,19 +8,19 @@ Tell Aman who you are and how you like to be spoken to. You can also give the as
 
 How to get there: Click **More** in the left bar, then **Settings**, then **Personalization**.
 
-The page has two tabs. **Your Profile** is about you. **Assistant Profile** is about the assistant. One **Save personalization** button saves both tabs at once.
+The page has two tabs. **Your profile** is about you. **Assistant profile** is about the assistant. One **Save personalization** button saves both tabs at once.
 
 === "Computer"
 
-    ![The Personalization page in Settings, open on the Your Profile tab](../../../../docs/screenshots/app/personalization-page-desktop.png)
+    ![The Personalization page in Settings, open on the Your profile tab](../../../../docs/screenshots/app/personalization-page-desktop.png)
 
 === "Phone"
 
-    ![The Personalization page in Settings, open on the Your Profile tab](../../../../docs/screenshots/app/personalization-page-phone.png)
+    ![The Personalization page in Settings, open on the Your profile tab](../../../../docs/screenshots/app/personalization-page-phone.png)
 
 ## Tell Aman about you
 
-1. Click the **Your Profile** tab. Under **About you**, type **Your name**, such as Sam Rivera.
+1. Click the **Your profile** tab. Under **About you**, type **Your name**, such as Sam Rivera.
 2. In the next box, type how Aman should address you, such as Sam or Dr. Rivera. Leave it empty to be called by your name.
 3. In **More about you**, add anything that helps, such as where you live, what you work on and what you care about.
 4. Under **Pinned preferences**, click **+ Add preference** and type one thing you always want, such as "Use short bullet points". You can pin up to 12.
@@ -28,7 +28,7 @@ The page has two tabs. **Your Profile** is about you. **Assistant Profile** is a
 
 ## Give the assistant a name and a voice
 
-1. Click the **Assistant Profile** tab. Type a **Name**, such as Mannie. Aman uses this name everywhere in the app.
+1. Click the **Assistant profile** tab. Type a **Name**, such as Mannie. Aman uses this name everywhere in the app.
 2. In **Voice guidance**, describe how it should sound, such as "Warm, direct, concise".
 3. In **Identity**, describe its role, such as "You are my chief of staff. Keep my week calm and organized."
 4. Click **Save personalization**.

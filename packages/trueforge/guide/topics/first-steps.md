@@ -104,9 +104,9 @@ Aman greets you by name and speaks to you the way you ask.
 
 How to get there: Click **Open Personalization** in the checklist. Or click **More** in the left bar, then **Settings**, then **Personalization**.
 
-1. On the **Your Profile** tab, type your name in **Your name**.
+1. On the **Your profile** tab, type your name in **Your name**.
 2. If you like, fill in how Aman should address you, and a few lines about where you live, what you work on and what you care about.
-3. If you like, click the **Assistant Profile** tab and give the assistant a different name.
+3. If you like, click the **Assistant profile** tab and give the assistant a different name.
 4. Click **Save personalization**. It saves both tabs at once.
 
 Everything you type here stays on your computer.

@@ -79,9 +79,9 @@ describe('PersonalizationPanel', () => {
     expect(firstSection).toHaveAccessibleName('About you');
     expect(firstSection).toContainElement(nameField);
     expect(firstSection).toContainElement(addressField);
-    // The page opens on the Your Profile sub-tab, so the name fields come before everything
-    // else: the assistant's own profile sits behind the Assistant Profile sub-tab.
-    expect(screen.getByRole('tab', { name: 'Your Profile' })).toHaveAttribute('aria-selected', 'true');
+    // The page opens on the Your profile sub-tab, so the name fields come before everything
+    // else: the assistant's own profile sits behind the Assistant profile sub-tab.
+    expect(screen.getByRole('tab', { name: 'Your profile' })).toHaveAttribute('aria-selected', 'true');
     expect(screen.queryByLabelText('Name')).not.toBeInTheDocument();
 
     fireEvent.change(nameField, { target: { value: 'Sam Rivera' } });
@@ -94,7 +94,7 @@ describe('PersonalizationPanel', () => {
       ),
     );
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Assistant Profile' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Assistant profile' }));
     expect(screen.getByRole('region', { name: 'Assistant profile' })).toContainElement(screen.getByLabelText('Name'));
     expect(screen.queryByLabelText('Your name')).not.toBeInTheDocument();
   });
@@ -114,13 +114,13 @@ describe('PersonalizationPanel', () => {
       </PersonalizationProvider>,
     );
 
-    // The assistant's name lives on the Assistant Profile sub-tab; the rail shows it either way.
-    fireEvent.click(await screen.findByRole('tab', { name: 'Assistant Profile' }));
+    // The assistant's name lives on the Assistant profile sub-tab; the rail shows it either way.
+    fireEvent.click(await screen.findByRole('tab', { name: 'Assistant profile' }));
     expect(await screen.findByDisplayValue('Mira')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Mira' })).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Sage' } });
-    fireEvent.click(screen.getByRole('tab', { name: 'Your Profile' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Your profile' }));
     fireEvent.change(screen.getByLabelText('Pinned preference 1'), { target: { value: 'No em dashes.' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save personalization' }));
 
@@ -205,7 +205,7 @@ describe('PersonalizationPanel', () => {
       </PersonalizationProvider>,
     );
 
-    fireEvent.click(await screen.findByRole('tab', { name: 'Assistant Profile' }));
+    fireEvent.click(await screen.findByRole('tab', { name: 'Assistant profile' }));
     await screen.findByDisplayValue('Mira');
     expect(screen.queryByText('What would help you most?')).not.toBeInTheDocument();
     expect(screen.queryByRole('checkbox', { name: 'I just moved here' })).not.toBeInTheDocument();
@@ -236,7 +236,7 @@ describe('PersonalizationPanel', () => {
       </PersonalizationProvider>,
     );
 
-    fireEvent.click(await screen.findByRole('tab', { name: 'Assistant Profile' }));
+    fireEvent.click(await screen.findByRole('tab', { name: 'Assistant profile' }));
     expect(await screen.findByDisplayValue('Mira')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Clear all' }));
 
@@ -310,7 +310,7 @@ describe('PersonalizationPanel', () => {
       </PersonalizationProvider>,
     );
 
-    fireEvent.click(await screen.findByRole('tab', { name: 'Assistant Profile' }));
+    fireEvent.click(await screen.findByRole('tab', { name: 'Assistant profile' }));
     await screen.findByDisplayValue('Mira');
     expect(screen.queryByRole('heading', { name: 'Learned profile' })).not.toBeInTheDocument();
     expect(screen.queryByRole('switch', { name: 'Learn from conversations' })).not.toBeInTheDocument();
@@ -342,7 +342,7 @@ describe('PersonalizationPanel', () => {
     expect(screen.queryByRole('heading', { name: 'Learned profile' })).not.toBeInTheDocument();
     fireEvent.change(nameField, { target: { value: 'Sam Rivera' } });
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Assistant Profile' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Assistant profile' }));
     expect(screen.queryByLabelText('Your name')).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Learned profile' })).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Sage' } });
