@@ -1,4 +1,5 @@
 import { Agent, fetch as undiciFetch } from 'undici';
+import { isRedirectStatus } from './redirects';
 
 /**
  * Outbound HTTP for model providers and remote MCP: one undici Agent per audience, carrying
@@ -8,9 +9,11 @@ import { Agent, fetch as undiciFetch } from 'undici';
  *
  * Ported from upstream trueforge #894 and #756, adapted to this fork: upstream builds these
  * fetches on its SSRF guard's pinned DNS lookup; the fork checks outbound addresses at each
- * call site instead, so this module owns only the timeouts and the retries. The MCP body
- * timeout lives here too: an idle MCP event stream is silent for long stretches, and undici's
- * default 300s bodyTimeout kills it, so the connection drops and reconnects every few minutes.
+ * call site instead, so this module owns the timeouts, the retries, and the hops of a model
+ * redirect, each of which is put to the check the host configures before it is followed. The
+ * MCP body timeout lives here too: an idle MCP event stream is silent for long stretches, and
+ * undici's default 300s bodyTimeout kills it, so the connection drops and reconnects every few
+ * minutes.
  */
 
 /** The timeouts and retry count one audience (model calls or MCP calls) runs with. */
@@ -262,6 +265,107 @@ async function materializeReplayableOutboundRequest(
 type FetchFn = (input: string | URL, init?: RequestInit) => Promise<Response>;
 
 /**
+ * Judges one redirect target before the model fetch follows it: true when the target may be
+ * dialled. The host app supplies the check, because its address rules live there; this module
+ * only refuses to follow a redirect the check has not passed.
+ */
+export type OutboundRedirectCheck = (url: string) => Promise<boolean>;
+
+/** Why a checked redirect was stopped: the target named no usable address, the chain ran too long, or the check refused the target. */
+export type OutboundRedirectRefusalKind = 'bad-redirect' | 'too-many' | 'refused';
+
+/** A request was stopped at a redirect the redirect check refuses or cannot judge. */
+export class OutboundRedirectRefusedError extends Error {
+  readonly kind: OutboundRedirectRefusalKind;
+
+  constructor(message: string, kind: OutboundRedirectRefusalKind = 'refused') {
+    super(message);
+    this.name = 'OutboundRedirectRefusedError';
+    this.kind = kind;
+  }
+}
+
+const MAX_CHECKED_REDIRECTS = 5;
+
+/**
+ * The request with its credential headers taken out, for a redirect hop to another origin:
+ * Authorization, Cookie, and the API key headers (`x-api-key`, `api-key`). Those belong to
+ * the origin the caller configured, so none of them travels to a different one. Every other
+ * header, and the rest of the request, travels as it was. This is the one place that decides
+ * which headers are credentials for a cross-origin hop; every checked redirect loop uses it.
+ */
+export function withoutCrossOriginCredentials(init: RequestInit): RequestInit {
+  if (init.headers === undefined) {
+    return init;
+  }
+  const headers = new Headers(init.headers);
+  headers.delete('authorization');
+  headers.delete('cookie');
+  headers.delete('x-api-key');
+  headers.delete('api-key');
+  return { ...init, headers };
+}
+
+/**
+ * Follow redirects by hand, putting every target to `check` before dialling it: a provider
+ * whose base address passed the host's address check can still answer with a redirect to an
+ * address that would have been refused, so no hop is followed on the transport's say-so. The
+ * MCP sign-in dial follows redirects through this same loop: at most MAX_CHECKED_REDIRECTS
+ * hops, 301, 302 and 303 turn a POST into a bodiless GET while 307 and 308 replay the
+ * request as it was, and a hop to another origin goes without the caller's credential
+ * headers (see withoutCrossOriginCredentials). Those headers belong to the origin the
+ * caller configured, the principle the MCP connection's redirect guard enforces by refusing
+ * such hops outright.
+ */
+export function withCheckedRedirects(fetchFn: FetchFn, check: OutboundRedirectCheck): FetchFn {
+  return async (input, init) => {
+    let currentUrl = new URL(input);
+    let currentInit: RequestInit = init ?? {};
+    for (let hop = 0; ; hop += 1) {
+      const response = await fetchFn(currentUrl, { ...currentInit, redirect: 'manual' });
+      if (!isRedirectStatus(response.status)) {
+        return response;
+      }
+      const location = response.headers.get('location');
+      let target: URL | undefined;
+      if (location !== null) {
+        try {
+          target = new URL(location, currentUrl);
+        } catch {
+          target = undefined;
+        }
+      }
+      await response.body?.cancel().catch(() => undefined);
+      if (target === undefined || (target.protocol !== 'http:' && target.protocol !== 'https:')) {
+        throw new OutboundRedirectRefusedError(
+          `model server answered HTTP ${String(response.status)} with a redirect that does not name an http(s) address, so the request was stopped`,
+          'bad-redirect',
+        );
+      }
+      if (hop >= MAX_CHECKED_REDIRECTS) {
+        throw new OutboundRedirectRefusedError(
+          `model server kept redirecting (more than ${String(MAX_CHECKED_REDIRECTS)} redirects), so the request was stopped`,
+          'too-many',
+        );
+      }
+      if (!(await check(target.href))) {
+        throw new OutboundRedirectRefusedError(
+          `model server answered HTTP ${String(response.status)} with a redirect to ${target.origin}, and that address is not one the server may connect to, so the request was stopped`,
+        );
+      }
+      // 307 and 308 repeat the request as it was; the older codes turn a POST into a bodiless GET.
+      if (response.status !== 307 && response.status !== 308 && currentInit.method?.toUpperCase() === 'POST') {
+        currentInit = { ...currentInit, method: 'GET', body: null };
+      }
+      if (target.origin !== currentUrl.origin) {
+        currentInit = withoutCrossOriginCredentials(currentInit);
+      }
+      currentUrl = target;
+    }
+  };
+}
+
+/**
  * Retry `fetchFn` on the failures that mean the request never got an answer: connect timeouts,
  * retryable gateway statuses, and (for idempotent callers only) statuses where upstream may
  * already have processed the request. Honors Retry-After up to 5s; a longer one returns the
@@ -335,9 +439,13 @@ function agentFetch(agent: Agent): FetchFn {
 }
 
 /** Builds a pooled undici Agent + fetch with the given timeouts and retries. */
-function createOutboundFetch(options: OutboundFetchOptions): OutboundFetch {
+function createOutboundFetch(
+  options: OutboundFetchOptions,
+  redirectCheck: OutboundRedirectCheck | undefined,
+): OutboundFetch {
   const agent = createOutboundAgent(options);
-  const retried = withOutboundHttpRetries(agentFetch(agent), options);
+  const base = redirectCheck === undefined ? agentFetch(agent) : withCheckedRedirects(agentFetch(agent), redirectCheck);
+  const retried = withOutboundHttpRetries(base, options);
   return {
     // A `Request` input is normalized to URL + merged init once; the retries then replay
     // that pair, never the one-shot Request itself.
@@ -355,15 +463,26 @@ function createOutboundFetch(options: OutboundFetchOptions): OutboundFetch {
 // The Agents are built on first use, not at import: importing this module (directly or via
 // the core index) must not open a connection pool or depend on undici being constructible.
 let modelOptions: OutboundFetchOptions = defaultModelOutboundFetchOptions();
+let modelRedirectCheck: OutboundRedirectCheck | undefined;
 let modelOutbound: OutboundFetch | undefined;
 let mcpOptions: OutboundFetchOptions = defaultMcpOutboundFetchOptions();
 let mcpAgent: Agent | undefined;
 
 /** Replace the outbound Agents (timeouts and retries) from server configuration. */
-export function configureOutboundFetches(config: { model: OutboundTimeouts; mcp: OutboundTimeouts }): void {
+export function configureOutboundFetches(config: {
+  model: OutboundTimeouts;
+  mcp: OutboundTimeouts;
+  /**
+   * The check every model redirect target must pass before the model fetch follows it. A host
+   * that enforces address rules on model providers supplies it; without one, model redirects
+   * are followed by the transport as before.
+   */
+  modelRedirectCheck?: OutboundRedirectCheck | undefined;
+}): void {
   const previousModel = modelOutbound;
   const previousMcpAgent = mcpAgent;
   modelOptions = { ...config.model, idempotent: true };
+  modelRedirectCheck = config.modelRedirectCheck;
   modelOutbound = undefined;
   // Tool calls are not safe to replay once upstream may have received them.
   mcpOptions = { ...config.mcp, idempotent: false };
@@ -374,7 +493,7 @@ export function configureOutboundFetches(config: { model: OutboundTimeouts; mcp:
 
 /** Drop-in fetch for model-provider HTTP, with the model timeouts and retries. */
 export async function modelOutboundFetch(input: string | URL | Request, init?: RequestInit): Promise<Response> {
-  modelOutbound ??= createOutboundFetch(modelOptions);
+  modelOutbound ??= createOutboundFetch(modelOptions, modelRedirectCheck);
   return modelOutbound.fetch(input, init);
 }
 

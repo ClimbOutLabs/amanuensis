@@ -216,6 +216,126 @@ export function parseFirstPartyMcpOrigins(raw: string | undefined): string[] {
 }
 
 /**
+ * Parses `LOCAL_MODEL_ENDPOINTS`: comma-separated exact `host:port` endpoints of model servers
+ * running on this computer that the operator names as allowed. A model base
+ * URL normally has to resolve to an address the server may connect to (see runtime/remoteAddress),
+ * which refuses this computer's own addresses; a base URL that names one of these exact
+ * endpoints is the one exception. Unset / blank → none, so no local model endpoint is allowed
+ * until the operator names it. Each entry is normalized (host lowercased, IPv6 hosts bracketed,
+ * the port written without leading zeros) and matched exactly, port included. Anything that is
+ * not an exact host and port fails the boot: a silently dropped typo would read as "no local
+ * model is allowed", and a bare host would suggest a match wider than the one the list makes.
+ */
+export function parseLocalModelEndpoints(raw: string | undefined): string[] {
+  if (raw === undefined || raw.trim() === '') {
+    return [];
+  }
+  const endpoints = new Set<string>();
+  for (const entry of raw
+    .split(',')
+    .map(part => part.trim())
+    .filter(part => part.length > 0)) {
+    const endpoint = normalizedLocalModelEndpoint(entry);
+    if (endpoint === undefined) {
+      throw new Error(
+        `LOCAL_MODEL_ENDPOINTS entries must be exact host:port endpoints such as localhost:11434 or [::1]:11434, got: ${entry}`,
+      );
+    }
+    endpoints.add(endpoint);
+  }
+  return [...endpoints];
+}
+
+function normalizedLocalModelEndpoint(entry: string): string | undefined {
+  let host: string;
+  let rawPort: string;
+  if (entry.startsWith('[')) {
+    const close = entry.indexOf(']');
+    if (close < 0 || entry.charAt(close + 1) !== ':') {
+      return undefined;
+    }
+    const inside = entry.slice(1, close);
+    if (isIP(inside) !== 6) {
+      return undefined;
+    }
+    host = `[${inside.toLowerCase()}]`;
+    rawPort = entry.slice(close + 2);
+  } else {
+    const colon = entry.lastIndexOf(':');
+    if (colon < 1) {
+      return undefined;
+    }
+    const rawHost = entry.slice(0, colon);
+    if (!/^[a-z0-9._-]+$/i.test(rawHost) || rawHost.includes('*')) {
+      return undefined;
+    }
+    host = rawHost.toLowerCase();
+    rawPort = entry.slice(colon + 1);
+  }
+  if (!/^\d+$/.test(rawPort)) {
+    return undefined;
+  }
+  const port = Number(rawPort);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    return undefined;
+  }
+  return `${host}:${String(port)}`;
+}
+
+/**
+ * Parses `CONTAINER_NETWORK_RANGES`: comma-separated CIDR ranges of the container networks this
+ * instance sits on, which the remote address check refuses as well as this instance's own
+ * addresses (see runtime/remoteAddress). The installer writes the setting once it has started an
+ * instance and learned the ranges Docker gave its networks, so a container install refuses its
+ * neighbours (the app's own connectors among them). Unset / blank → none: an app run directly on
+ * the host names no ranges, and only its own addresses are refused, so its home network stays
+ * usable. Each entry is normalized (the address lowercased, the prefix written without leading
+ * zeros) and matched as a range. Anything that is not an exact address and prefix fails the
+ * boot, naming the entry: a silently dropped typo would read as "no range is refused".
+ */
+export function parseContainerNetworkRanges(raw: string | undefined): string[] {
+  if (raw === undefined || raw.trim() === '') {
+    return [];
+  }
+  const ranges = new Set<string>();
+  for (const entry of raw
+    .split(',')
+    .map(part => part.trim())
+    .filter(part => part.length > 0)) {
+    const range = normalizedContainerNetworkRange(entry);
+    if (range === undefined) {
+      throw new Error(
+        `CONTAINER_NETWORK_RANGES entries must be exact CIDR ranges such as 172.30.0.0/16 or fd00:1234::/64, got: ${entry}`,
+      );
+    }
+    ranges.add(range);
+  }
+  return [...ranges];
+}
+
+function normalizedContainerNetworkRange(entry: string): string | undefined {
+  const slash = entry.lastIndexOf('/');
+  if (slash < 1) {
+    return undefined;
+  }
+  const address = entry.slice(0, slash);
+  const family = isIP(address);
+  if (family === 0) {
+    return undefined;
+  }
+  const rawPrefix = entry.slice(slash + 1);
+  if (!/^\d+$/.test(rawPrefix)) {
+    return undefined;
+  }
+  const prefix = Number(rawPrefix);
+  const maxPrefix = family === 6 ? 128 : 32;
+  if (!Number.isInteger(prefix) || prefix < 0 || prefix > maxPrefix) {
+    return undefined;
+  }
+  return `${address.toLowerCase()}/${String(prefix)}`;
+}
+
+/**
  * The mail sidecar is the operator's own service, so its origin is first-party whenever it is configured.
  * Listing it by hand would be one more value to keep in step, and compose's `environment` would replace
  * the one in `.env`.
@@ -1578,6 +1698,23 @@ export interface SharedServerConfiguration {
    */
   FIRST_PARTY_MCP_ORIGINS: string[];
   /**
+   * Exact `host:port` endpoints of model servers on this computer that the
+   * operator named as allowed, as normalized strings. A model base URL that names one of these
+   * endpoints may be saved and used even though its address is one the address check otherwise
+   * refuses. Empty means no local model endpoint is allowed. Env: `LOCAL_MODEL_ENDPOINTS`
+   * (comma-separated). Default empty.
+   */
+  LOCAL_MODEL_ENDPOINTS: string[];
+  /**
+   * CIDR ranges of the container networks this instance sits on, which the remote address check
+   * refuses as well as this instance's own addresses, so a steered address cannot reach a
+   * neighbouring container. The installer writes them for a container install once it learns the
+   * ranges Docker gave the instance's networks. Empty means no ranges are named: an app run
+   * directly on the host refuses only its own addresses, and its home network stays usable.
+   * Env: `CONTAINER_NETWORK_RANGES` (comma-separated). Default empty.
+   */
+  CONTAINER_NETWORK_RANGES: string[];
+  /**
    * MCP endpoint of the mail sidecar. When set, the Email connector is registered at boot; when unset, the
    * sidecar is not configured and nothing mail-related is offered. Env: `MAIL_EMAIL_MCP_URL`. Default unset.
    */
@@ -2702,6 +2839,8 @@ const shared: SharedServerConfiguration = {
     }),
     mailUrl: mailSidecarMcpUrl,
   }),
+  LOCAL_MODEL_ENDPOINTS: parseLocalModelEndpoints(getEnv('LOCAL_MODEL_ENDPOINTS')),
+  CONTAINER_NETWORK_RANGES: parseContainerNetworkRanges(getEnv('CONTAINER_NETWORK_RANGES')),
   MAIL_EMAIL_MCP_URL: mailEmailMcpUrl,
   MAIL_SIDECAR_MCP_URL: mailSidecarMcpUrl,
   MAIL_EMAIL_ACCOUNT_URL: mailEmailAccountUrl,
