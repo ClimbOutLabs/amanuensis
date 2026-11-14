@@ -49,6 +49,13 @@ describe('parseRecallFacts', () => {
     expect(facts.map(fact => fact.text)).toEqual(['Ana is a friend', 'The ferry leaves at 9']);
   });
 
+  it('finds the latest turn whichever way round the turns arrive, as the server lists the newest first', () => {
+    const older = turnContext('t1', blockOf(['[2026-08-14] The gate code is 4417']));
+    const newer = turnContext('t2', blockOf(['[2026-08-20] The ferry leaves at 9']));
+    expect(parseRecallFacts([newer, older]).map(fact => fact.text)).toEqual(['The ferry leaves at 9']);
+    expect(parseRecallFacts([turnContext('t2', null), older])).toEqual([]);
+  });
+
   it('shows nothing when the latest turn recalled nothing, whatever earlier turns recalled', () => {
     const older = turnContext('t1', blockOf(['[2026-08-14] The gate code is 4417']));
     const newer = turnContext('t2', null);
