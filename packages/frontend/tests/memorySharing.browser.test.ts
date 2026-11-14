@@ -145,6 +145,16 @@ test(
           });
           await openSharingTab(page);
 
+          // The row of memory tabs stays whole above the grid, so the other tabs can still be reached.
+          const tabs = page.getByRole('tablist', { name: 'Memory sections' });
+          const tabsBox = await tabs.boundingBox();
+          const tabBox = await tabs.getByRole('tab', { name: 'Memories' }).boundingBox();
+          assert.ok(tabsBox !== null && tabBox !== null, `the memory tabs are on screen (${viewport.name} ${theme})`);
+          assert.ok(
+            tabBox.height >= 32 && tabsBox.height >= tabBox.height,
+            `the memory tabs are squeezed: the row is ${tabsBox.height}px and a tab is ${tabBox.height}px (${viewport.name} ${theme})`,
+          );
+
           const { rowBottom, footerTop, viewport: viewportHeight } = await lastRowAboveFooter(page);
           assert.ok(
             rowBottom <= footerTop,
