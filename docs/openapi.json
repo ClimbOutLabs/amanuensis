@@ -2857,6 +2857,45 @@
         "properties": {},
         "type": "object"
       },
+      "DeleteShownMemoryRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "shown_text": {
+            "description": "The memory, in the plain words recall showed for it.",
+            "maxLength": 2000,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "shown_text"
+        ],
+        "type": "object"
+      },
+      "DeleteShownMemoryResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/DeleteShownMemoryResult"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "DeleteShownMemoryResult": {
+        "properties": {
+          "deleted": {
+            "description": "How many stored copies were deleted.",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "deleted"
+        ],
+        "type": "object"
+      },
       "DeleteSkillNetworkApprovalResponse": {
         "properties": {},
         "type": "object"
@@ -20680,6 +20719,82 @@
           "vault"
         ],
         "x-fern-sdk-method-name": "list"
+      }
+    },
+    "/api/v1/memory/vault/delete-shown": {
+      "post": {
+        "description": "Delete every memory that recall shows in exactly these words, in any collection. Answers 404 and deletes nothing when no memory, or more than one different memory, fits the words.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteShownMemoryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteShownMemoryResponse"
+                }
+              }
+            },
+            "description": "The memory was deleted."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "No single memory fits these words."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The vault operation failed."
+          }
+        },
+        "summary": "Delete a memory by the words a chat showed",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "memory",
+          "vault"
+        ],
+        "x-fern-sdk-method-name": "delete_shown"
       }
     },
     "/api/v1/memory/vault/export": {

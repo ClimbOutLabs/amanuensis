@@ -111,6 +111,8 @@ export * from "./DeletePushSubscriptionResponse.js";
 export * from "./DeleteScheduleResponse.js";
 export * from "./DeleteSessionFolderResponse.js";
 export * from "./DeleteSessionRepositoryBindingResponse.js";
+export * from "./DeleteShownMemoryResponse.js";
+export * from "./DeleteShownMemoryResult.js";
 export * from "./DeleteSkillNetworkApprovalResponse.js";
 export * from "./DeleteSkillNetworkHostResponse.js";
 export * from "./DeleteSkillResponse.js";

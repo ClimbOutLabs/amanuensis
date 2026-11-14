@@ -1,3 +1,4 @@
+export type { DeleteShownMemoryRequest } from "./DeleteShownMemoryRequest.js";
 export type { ExportEntriesVaultRequest } from "./ExportEntriesVaultRequest.js";
 export type { GetSummaryStatusVaultRequest } from "./GetSummaryStatusVaultRequest.js";
 export type { ImportMemoryVaultRequest } from "./ImportMemoryVaultRequest.js";

@@ -9453,6 +9453,71 @@ await client.memory.vault.list();
 </dl>
 </details>
 
+<details><summary><code>client.memory.vault.<a href="/src/api/resources/memory/resources/vault/client/Client.ts">deleteShown</a>({ ...params }) -> TrueForge.DeleteShownMemoryResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Delete every memory that recall shows in exactly these words, in any collection. Answers 404 and deletes nothing when no memory, or more than one different memory, fits the words.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.memory.vault.deleteShown({
+    shownText: "shown_text"
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.memory.DeleteShownMemoryRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `VaultClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
 <details><summary><code>client.memory.vault.<a href="/src/api/resources/memory/resources/vault/client/Client.ts">exportEntries</a>({ ...params }) -> TrueForge.ExportMemoryVaultResponse</code></summary>
 <dl>
 <dd>
