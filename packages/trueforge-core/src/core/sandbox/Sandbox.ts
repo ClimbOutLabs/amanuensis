@@ -398,6 +398,36 @@ export const SANDBOX_RUN_REGISTERED_COMMAND_TOOL_NAME = 'run_registered_command'
 export const SANDBOX_RUN_SKILL_SCRIPT_TOOL_NAME = 'run_skill_script';
 export const SANDBOX_SUBMIT_IMPLEMENTATION_PLAN_TOOL_NAME = 'submit_implementation_plan';
 
+/** What one registered sandbox tool declares about itself, beside its name. */
+export interface SandboxToolDeclaration {
+  name: string;
+  /** True when the tool writes files in the workspace, so its silent calls are re-checked at dispatch. */
+  writesFiles: boolean;
+}
+
+/**
+ * Every sandbox tool's declaration, in registration order. This is the one place a sandbox tool
+ * states whether it writes files; dispatch and the schedule brief read the set computed from
+ * these declarations, so a tool added here with writesFiles set is covered without any other list.
+ */
+export const SANDBOX_TOOL_DECLARATIONS: readonly SandboxToolDeclaration[] = [
+  { name: SANDBOX_EXEC_TOOL_NAME, writesFiles: false },
+  { name: SANDBOX_RUN_CODE_TOOL_NAME, writesFiles: false },
+  { name: SANDBOX_APPLY_PATCH_TOOL_NAME, writesFiles: true },
+  { name: SANDBOX_REPLACE_TEXT_TOOL_NAME, writesFiles: true },
+  { name: SANDBOX_WRITE_FILE_TOOL_NAME, writesFiles: true },
+  { name: SANDBOX_RUN_REGISTERED_COMMAND_TOOL_NAME, writesFiles: false },
+  { name: SANDBOX_SUBMIT_IMPLEMENTATION_PLAN_TOOL_NAME, writesFiles: false },
+];
+
+/** The names of the tools whose declarations say they write files. */
+export function sandboxFileWriteToolNames(declarations: readonly SandboxToolDeclaration[]): ReadonlySet<string> {
+  return new Set(declarations.filter(declaration => declaration.writesFiles).map(declaration => declaration.name));
+}
+
+/** The sandbox tools that write files, computed from the registrations' declarations. */
+export const SANDBOX_FILE_WRITE_TOOLS: ReadonlySet<string> = sandboxFileWriteToolNames(SANDBOX_TOOL_DECLARATIONS);
+
 /**
  * Appended to an `apply_patch` `git apply --check` failure. `check` alone is git's own error
  * text (e.g. "error: <path>: No such file or directory", "error: patch failed"), which does not
@@ -3153,6 +3183,11 @@ export class Sandbox extends LocalToolMCP {
   /** False when the provider's sandbox cannot reach a network at all. */
   hasNetwork(): boolean {
     return this.provider.network !== 'none';
+  }
+
+  /** Whether the named tool is one of this set's registered tools whose declaration says it writes files. */
+  isFileWriteTool(name: string): boolean {
+    return SANDBOX_FILE_WRITE_TOOLS.has(name);
   }
 
   /**

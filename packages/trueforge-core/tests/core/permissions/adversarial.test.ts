@@ -22,6 +22,7 @@ import { verifyPreDispatch, type VerifiableCall } from '../../../src/core/permis
 import type { ShellAllowlistConfig } from '../../../src/core/permissions/shellAllowlist';
 import type { Tier, TrackedExecutionBinding } from '../../../src/core/permissions/tier';
 import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
+import { SANDBOX_FILE_WRITE_TOOLS } from '../../../src/core/sandbox/Sandbox';
 import { TEST_TOKEN_SCOPE, testApprovalOwner } from './approvalTokenFixtures';
 
 function servicesWithTempAllowlist(): { services: SentinelServices; cleanup: () => void } {
@@ -118,11 +119,14 @@ function verifiableCall(overrides: {
   approval_binding?: TrackedExecutionBinding | null;
   shell_binding?: ShellApprovalBinding | null;
 }): VerifiableCall {
+  const tool_name = overrides.tool_name ?? 'exec';
   return {
-    tool_name: overrides.tool_name ?? 'exec',
+    tool_name,
     tool_type: overrides.tool_type ?? 'truefoundry-system',
     canonical_params: overrides.canonical_params ?? {},
     tier: overrides.tier ?? 3,
+    // The host stamps this from the tool set's own declaration, as executeToolCalls does.
+    sandbox_file_write: SANDBOX_FILE_WRITE_TOOLS.has(tool_name),
     approval_token_id: overrides.approval_token_id ?? null,
     approval_binding: overrides.approval_binding ?? null,
     shell_binding: overrides.shell_binding ?? null,
