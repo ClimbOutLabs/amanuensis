@@ -14,6 +14,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { createLogger, transports } from 'winston';
 import { TENANT_ID } from '../../../src/apis/sessions';
 import configuration from '../../../src/config';
+import { SqliteSkillStore } from '../../../src/db/sqlite/skill-store/SqliteSkillStore';
 import { MarkdownMemoryClient } from '../../../src/runtime/memory/markdownMemoryClient';
 import { SkillNetworkGateway } from '../../../src/sandbox/skillnet/skillNetworkGateway';
 import { skillNetworkTokens } from '../../../src/sandbox/skillnet/skillNetworkTokens';
@@ -1623,21 +1624,20 @@ describe('a skill that reaches a site on the internet', () => {
     await gateway.listenOnSockets([gatewaySocketPath]);
     sandbox = new SkillSiteSandbox(gatewaySocketPath);
     server = await startApprovalTestServer({ sandboxProvider: sandbox });
-    const added = await server.request('/api/v1/settings/skills', {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        manifest: {
-          type: 'git',
-          name: SKILL_NAME,
-          url: 'https://github.com/example/daily-notes',
-          ref: 'main',
-          description: 'Fetches the notes for today.',
-          network_hosts: [SKILL_SITE],
-        },
-      }),
+    // Saved straight to the store: adding it in Settings would read its files and approve its site with it, and
+    // these journeys start from a skill that names a site nobody has allowed yet.
+    await new SqliteSkillStore(server.db()).upsertSkill({
+      tenant_id: TENANT_ID,
+      name: SKILL_NAME,
+      manifest: {
+        type: 'git',
+        name: SKILL_NAME,
+        url: 'https://github.com/example/daily-notes',
+        ref: 'main',
+        description: 'Fetches the notes for today.',
+        network_hosts: [SKILL_SITE],
+      },
     });
-    expect(added.status).toBe(200);
   });
 
   afterAll(async () => {

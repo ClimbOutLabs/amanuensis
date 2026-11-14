@@ -9,6 +9,8 @@
  */
 import { z } from 'zod';
 
+import type { CreateSkillRequest } from './types.js';
+
 const SkillNetworkApprovalResponseSchema = z.object({
   data: z.object({
     declared_hosts: z.array(z.string()),
@@ -113,4 +115,34 @@ export function skillNetworkApprovalLines(input: { skillName: string; state: Ski
 /** The line shown once the approval is in force, naming what ends it. */
 export function skillNetworkApprovedLine(): string {
   return 'Network access is on for this skill. Chats using it can reach the sites above, and no others.';
+}
+
+/** The websites a skill sends requests to, as the server found them in its files before it is added. */
+export interface SkillWebsiteCheck {
+  /** The exact commit whose files were read. */
+  commit: string;
+  websites: string[];
+  /** True when the skill builds web addresses while it runs, which cannot be read ahead of time. */
+  makesUpAddresses: boolean;
+  /** True when one of the websites can send email or change a calendar. */
+  canSend: boolean;
+}
+
+/**
+ * Adding a skill with its websites. Adding is all or nothing: the server saves the skill only
+ * together with the approval of exactly the websites its check found.
+ */
+export interface SkillWebsites {
+  /** Reads the skill's files and lists its websites. Nothing is saved. */
+  checkSkillWebsites(req: { repoURL: string; path: string; ref: string }): Promise<SkillWebsiteCheck>;
+  /** Adds the skill and allows exactly `approvedWebsites`, which must be the list the check showed. */
+  addSkillWithWebsites(req: CreateSkillRequest & { approvedWebsites: string[] }): Promise<void>;
+}
+
+/** Whether a catalog can check a skill's websites; another host's catalog may not. */
+export function hasSkillWebsites(catalog: object): catalog is SkillWebsites {
+  return (
+    typeof Reflect.get(catalog, 'checkSkillWebsites') === 'function' &&
+    typeof Reflect.get(catalog, 'addSkillWithWebsites') === 'function'
+  );
 }

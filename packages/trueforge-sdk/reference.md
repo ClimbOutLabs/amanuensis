@@ -12904,6 +12904,72 @@ await client.settings.skills.createOrUpdate({
 </dl>
 </details>
 
+<details><summary><code>client.settings.skills.<a href="/src/api/resources/settings/resources/skills/client/Client.ts">checkWebsites</a>({ ...params }) -> TrueForge.CheckSkillWebsitesResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Reads every file of a git skill and lists the websites it sends requests to. Nothing is saved. Approve the list when adding the skill.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.skills.checkWebsites({
+    ref: "ref",
+    url: "url"
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.settings.CheckSkillWebsitesRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `SkillsClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
 <details><summary><code>client.settings.skills.<a href="/src/api/resources/settings/resources/skills/client/Client.ts">delete</a>(name) -> TrueForge.DeleteSkillResponse</code></summary>
 <dl>
 <dd>

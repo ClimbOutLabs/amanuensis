@@ -122,6 +122,7 @@ async function createRouters(
   return {
     settingsRouter: createSettingsRouter({
       mcpCatalog: McpCatalog.loadShipped(),
+      skillCatalog: { list: () => [] },
       resolveModelProviderStore: () => modelProviderStore,
       resolveMcpServerStore: () =>
         new McpServerWithAuthStore({

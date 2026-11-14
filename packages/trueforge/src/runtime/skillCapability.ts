@@ -9,10 +9,8 @@ import {
   classifyHostToolCall,
   defineTool,
   LocalToolMCP,
-  scanSkillSites,
   toolResultResponse,
   type GitSkillSource,
-  type SkillFile,
   type ToolDefinition,
 } from '@truefoundry/trueforge-core/core';
 import type { ApprovalDecision } from '@truefoundry/trueforge-core/core/events/schema';
@@ -32,7 +30,6 @@ import {
   SkillGitRefSchema,
   SkillManifestSchema,
   skillNetworkHostsCanSend,
-  SkillNetworkHostsSchema,
   type GitSkill,
 } from '../schemas/skill';
 import type { CatalogSkill } from '../schemas/skillCatalog';
@@ -44,6 +41,7 @@ import {
   type SkillAddress,
   type SkillLookupDeps,
 } from './skillSource';
+import { findSkillWebsites, skillSourceKey, type ReadSkillFiles } from './skillWebsites';
 
 /** A description is shown whole on the card and to the model in every chat that uses the skill. */
 const SKILL_DESCRIPTION_MAX_LENGTH = 1024;
@@ -79,7 +77,7 @@ export interface SkillTurnContext {
   /** How a skill is read from GitHub; a test passes its own. */
   lookup: SkillLookupDeps;
   /** Reads every file of a skill at one exact commit, so the host can see which websites it sends requests to. */
-  readFiles: (source: GitSkillSource) => Promise<{ objectId: string; files: SkillFile[] }>;
+  readFiles: ReadSkillFiles;
 }
 
 interface SkillToolSetOptions extends SkillTurnContext {
@@ -126,15 +124,6 @@ function plainIssues(error: z.ZodError): string {
 
 function repositoryUrl(address: Pick<SkillAddress, 'owner' | 'repo'>): string {
   return `https://github.com/${address.owner}/${address.repo}`;
-}
-
-/** One form for comparing two places a skill can come from: the repository in lower case and the folder without edge slashes. */
-function sourceKey(input: { url: string; path?: string | undefined }): string {
-  const repository = input.url
-    .toLowerCase()
-    .replace(/\.git$/, '')
-    .replace(/\/+$/, '');
-  return `${repository}#${(input.path ?? '').replace(/^\/+|\/+$/g, '')}`;
 }
 
 /** A skill's own name in the form a stored skill name takes, or undefined when it cannot be made into one. */
@@ -310,10 +299,10 @@ export class SkillToolSet extends LocalToolMCP {
   /** A starter skill is taken as shipped, with no lookup. Anything else is read from GitHub at one exact commit. */
   async #settle(address: SkillAddress): Promise<Prepared<Omit<PreparedInstall, 'approved'>>> {
     const url = repositoryUrl(address);
-    const key = sourceKey({ url, path: address.path });
+    const key = skillSourceKey({ url, path: address.path });
     const starter = this.#options.catalog.find(
       entry =>
-        sourceKey({ url: entry.url, path: entry.path }) === key &&
+        skillSourceKey({ url: entry.url, path: entry.path }) === key &&
         (address.ref === undefined || address.ref === entry.ref),
     );
     if (starter !== undefined) {
@@ -364,27 +353,17 @@ export class SkillToolSet extends LocalToolMCP {
     });
   }
 
-  /**
-   * Marketplace skills do not say which websites they use, so the host reads every file of the
-   * skill at the commit being added and finds them itself. Nothing in the skill runs.
-   */
+  /** Finds the websites at the exact commit on the card; a different commit means the files cannot be trusted. */
   async #scan(source: GitSkillSource): Promise<Prepared<{ hosts: string[]; makesUpAddresses: boolean }>> {
-    let read: Awaited<ReturnType<SkillTurnContext['readFiles']>>;
-    try {
-      read = await this.#options.readFiles(source);
-    } catch {
+    const found = await findSkillWebsites({ readFiles: this.#options.readFiles, source });
+    if (!found.ok) {
+      return { ok: false, message: found.problem === 'too_many' ? TOO_MANY_WEBSITES : UNREADABLE_FILES };
+    }
+    if (found.value.commit !== source.ref) {
       return { ok: false, message: UNREADABLE_FILES };
     }
-    if (read.objectId !== source.ref) {
-      return { ok: false, message: UNREADABLE_FILES };
-    }
-    const scan = scanSkillSites(read.files);
-    if (!SkillNetworkHostsSchema.safeParse(scan.hosts).success) {
-      return { ok: false, message: TOO_MANY_WEBSITES };
-    }
-    return { ok: true, value: { hosts: scan.hosts, makesUpAddresses: scan.unknown.length > 0 } };
+    return { ok: true, value: { hosts: found.value.hosts, makesUpAddresses: found.value.makesUpAddresses } };
   }
-
   /** Checks the skill against the same rules the Settings page saves under. */
   #manifest(input: {
     fields: Omit<GitSkill, 'type'>;
@@ -416,10 +395,10 @@ export class SkillToolSet extends LocalToolMCP {
   /** Why this skill cannot be added beside the ones already there, or undefined when it can. */
   #clash(input: { manifest: GitSkill; existing: readonly SkillRecord[] }): string | undefined {
     const { manifest } = input;
-    const key = sourceKey(manifest);
+    const key = skillSourceKey(manifest);
     for (const record of input.existing) {
       const git = parseGitSkill(record.manifest);
-      if (git !== undefined && sourceKey(git) === key) {
+      if (git !== undefined && skillSourceKey(git) === key) {
         return git.ref === manifest.ref
           ? `Nothing was added because this skill is already added, as "${record.name}". Tell the user it is ready to use.`
           : `Nothing was added because this skill is already added, as "${record.name}", at another version. Tell the user to remove it in Settings, under Skills, and then ask again to get this version.`;
@@ -436,14 +415,14 @@ export class SkillToolSet extends LocalToolMCP {
     const sources = new Set(
       installed.flatMap(record => {
         const git = parseGitSkill(record.manifest);
-        return git === undefined ? [] : [sourceKey(git)];
+        return git === undefined ? [] : [skillSourceKey(git)];
       }),
     );
     const names = new Set(installed.map(record => record.name));
     return jsonResult({
       added: installed.map(record => ({ name: record.name, description: record.manifest.description })),
       starter_skills_to_add: this.#options.catalog
-        .filter(entry => !names.has(entry.name) && !sources.has(sourceKey(entry)))
+        .filter(entry => !names.has(entry.name) && !sources.has(skillSourceKey(entry)))
         .map(entry => ({
           name: entry.name,
           description: entry.description,

@@ -249,10 +249,20 @@ export const ConfiguredSkillSchema = z
   .strict()
   .openapi('ConfiguredSkill');
 
+/**
+ * The websites the person approved together with adding a git skill. Adding is all or nothing: the
+ * list must be exactly what the website check found, or nothing is saved.
+ */
+const ApprovedWebsitesSchema = z
+  .array(SkillNetworkHostSchema)
+  .max(20)
+  .describe('The websites the person approved with this skill, exactly as the website check listed them.');
+
 /** Create/update $ref SkillManifest so OpenAPI SkillType stays git|truefoundry. */
 export const CreateSkillRequestSchema = z
   .object({
     manifest: SkillManifestSchema,
+    approved_websites: ApprovedWebsitesSchema.optional(),
   })
   .strict()
   .openapi('CreateSkillRequest');
@@ -260,9 +270,39 @@ export const CreateSkillRequestSchema = z
 export const UpdateSkillRequestSchema = z
   .object({
     manifest: SkillManifestSchema,
+    approved_websites: ApprovedWebsitesSchema.optional(),
   })
   .strict()
   .openapi('UpdateSkillRequest');
+
+/** Where a git skill is, to check which websites it sends requests to before it is added. */
+export const CheckSkillWebsitesRequestSchema = z
+  .object({
+    url: SkillGitUrlSchema,
+    path: SkillGitPathSchema.optional(),
+    ref: SkillGitRefSchema,
+  })
+  .strict()
+  .openapi('CheckSkillWebsitesRequest');
+
+/** The websites a skill sends requests to, as found in its files at one commit. */
+export const SkillWebsitesSchema = z
+  .object({
+    commit: z.string().describe('The exact commit whose files were read.'),
+    websites: z
+      .array(SkillNetworkHostSchema)
+      .describe('The websites the skill sends requests to. Approving allows these.'),
+    makes_up_addresses: z
+      .boolean()
+      .describe('True when the skill also builds web addresses while it runs, which cannot be read ahead of time.'),
+    can_send: z.boolean().describe('True when one of the websites can send email or change a calendar.'),
+  })
+  .strict()
+  .openapi('SkillWebsites');
+
+export const CheckSkillWebsitesResponseSchema = z
+  .object({ data: SkillWebsitesSchema })
+  .openapi('CheckSkillWebsitesResponse');
 
 export const GetSkillResponseSchema = z.object({ data: ConfiguredSkillSchema }).openapi('GetSkillResponse');
 export const ListSkillsResponseSchema = z
@@ -369,6 +409,8 @@ export const DeleteSkillNetworkHostResponseSchema = z.object({}).openapi('Delete
 
 export type ConfiguredSkill = z.infer<typeof ConfiguredSkillSchema>;
 export type CreateSkillRequest = z.infer<typeof CreateSkillRequestSchema>;
+export type CheckSkillWebsitesRequest = z.infer<typeof CheckSkillWebsitesRequestSchema>;
+export type SkillWebsitesView = z.infer<typeof SkillWebsitesSchema>;
 export type UpdateSkillRequest = z.infer<typeof UpdateSkillRequestSchema>;
 export type AvailableSkill = z.infer<typeof AvailableSkillSchema>;
 export type SkillVersion = z.infer<typeof SkillVersionSchema>;

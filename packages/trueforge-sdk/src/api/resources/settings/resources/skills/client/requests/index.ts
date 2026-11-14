@@ -1,3 +1,4 @@
+export type { CheckSkillWebsitesRequest } from "./CheckSkillWebsitesRequest.js";
 export type { CreateSkillRequest } from "./CreateSkillRequest.js";
 export type { DeleteNetworkAllowedHostSkillsRequest } from "./DeleteNetworkAllowedHostSkillsRequest.js";
 export type { DeleteNetworkDeniedHostSkillsRequest } from "./DeleteNetworkDeniedHostSkillsRequest.js";

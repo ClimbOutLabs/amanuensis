@@ -121,6 +121,7 @@ export class SkillsClient {
      *
      * @throws {@link TrueForge.BadRequestError}
      * @throws {@link TrueForge.ConflictError}
+     * @throws {@link TrueForge.UnprocessableEntityError}
      * @throws {@link TrueForge.FailedDependencyError}
      * @throws {@link errors.TrueForgeError}
      * @throws {@link errors.TrueForgeTimeoutError}
@@ -216,6 +217,17 @@ export class SkillsClient {
                         }),
                         _response.rawResponse,
                     );
+                case 422:
+                    throw new TrueForge.UnprocessableEntityError(
+                        serializers.RequestErrorResponse.parseOrThrow(_response.error.body, {
+                            unrecognizedObjectKeys: "passthrough",
+                            allowUnrecognizedUnionMembers: true,
+                            allowUnrecognizedEnumValues: true,
+                            skipValidation: true,
+                            breadcrumbsPrefix: ["response"],
+                        }),
+                        _response.rawResponse,
+                    );
                 case 424:
                     throw new TrueForge.FailedDependencyError(
                         serializers.RequestErrorResponse.parseOrThrow(_response.error.body, {
@@ -246,6 +258,8 @@ export class SkillsClient {
      * @param {SkillsClient.RequestOptions} requestOptions - Request-specific configuration.
      *
      * @throws {@link TrueForge.BadRequestError}
+     * @throws {@link TrueForge.ConflictError}
+     * @throws {@link TrueForge.UnprocessableEntityError}
      * @throws {@link TrueForge.FailedDependencyError}
      * @throws {@link errors.TrueForgeError}
      * @throws {@link errors.TrueForgeTimeoutError}
@@ -330,6 +344,28 @@ export class SkillsClient {
                         }),
                         _response.rawResponse,
                     );
+                case 409:
+                    throw new TrueForge.ConflictError(
+                        serializers.RequestErrorResponse.parseOrThrow(_response.error.body, {
+                            unrecognizedObjectKeys: "passthrough",
+                            allowUnrecognizedUnionMembers: true,
+                            allowUnrecognizedEnumValues: true,
+                            skipValidation: true,
+                            breadcrumbsPrefix: ["response"],
+                        }),
+                        _response.rawResponse,
+                    );
+                case 422:
+                    throw new TrueForge.UnprocessableEntityError(
+                        serializers.RequestErrorResponse.parseOrThrow(_response.error.body, {
+                            unrecognizedObjectKeys: "passthrough",
+                            allowUnrecognizedUnionMembers: true,
+                            allowUnrecognizedEnumValues: true,
+                            skipValidation: true,
+                            breadcrumbsPrefix: ["response"],
+                        }),
+                        _response.rawResponse,
+                    );
                 case 424:
                     throw new TrueForge.FailedDependencyError(
                         serializers.RequestErrorResponse.parseOrThrow(_response.error.body, {
@@ -351,6 +387,120 @@ export class SkillsClient {
         }
 
         return handleNonStatusCodeError(_response.error, _response.rawResponse, "PUT", "/api/v1/settings/skills");
+    }
+
+    /**
+     * Reads every file of a git skill and lists the websites it sends requests to. Nothing is saved. Approve the list when adding the skill.
+     *
+     * @param {TrueForge.settings.CheckSkillWebsitesRequest} request
+     * @param {SkillsClient.RequestOptions} requestOptions - Request-specific configuration.
+     *
+     * @throws {@link TrueForge.BadRequestError}
+     * @throws {@link TrueForge.UnprocessableEntityError}
+     * @throws {@link errors.TrueForgeError}
+     * @throws {@link errors.TrueForgeTimeoutError}
+     *
+     * @example
+     *     await client.settings.skills.checkWebsites({
+     *         ref: "ref",
+     *         url: "url"
+     *     })
+     */
+    public checkWebsites(
+        request: TrueForge.settings.CheckSkillWebsitesRequest,
+        requestOptions?: SkillsClient.RequestOptions,
+    ): core.HttpResponsePromise<TrueForge.CheckSkillWebsitesResponse> {
+        return core.HttpResponsePromise.fromPromise(this.__checkWebsites(request, requestOptions));
+    }
+
+    private async __checkWebsites(
+        request: TrueForge.settings.CheckSkillWebsitesRequest,
+        requestOptions?: SkillsClient.RequestOptions,
+    ): Promise<core.WithRawResponse<TrueForge.CheckSkillWebsitesResponse>> {
+        const _authRequest: core.AuthRequest = await this._options.authProvider.getAuthRequest();
+        const _headers: core.Fetcher.Args["headers"] = mergeHeaders(
+            _authRequest.headers,
+            this._options?.headers,
+            requestOptions?.headers,
+        );
+        const _response = await (this._options.fetcher ?? core.fetcher)({
+            url: core.url.join(
+                (await core.Supplier.get(this._options.baseUrl)) ??
+                    (await core.Supplier.get(this._options.environment)),
+                "api/v1/settings/skills/check-websites",
+            ),
+            method: "POST",
+            headers: _headers,
+            contentType: "application/json",
+            queryString: core.url.queryBuilder().mergeAdditional(requestOptions?.queryParams).build(),
+            requestType: "json",
+            body: mergeAdditionalBodyParameters(
+                serializers.settings.CheckSkillWebsitesRequest.jsonOrThrow(request, {
+                    unrecognizedObjectKeys: "passthrough",
+                    allowUnrecognizedUnionMembers: true,
+                    allowUnrecognizedEnumValues: true,
+                    omitUndefined: true,
+                }),
+                requestOptions?.additionalBodyParameters,
+            ),
+            timeoutMs: (requestOptions?.timeoutInSeconds ?? this._options?.timeoutInSeconds ?? 60) * 1000,
+            maxRetries: requestOptions?.maxRetries ?? this._options?.maxRetries,
+            abortSignal: requestOptions?.abortSignal,
+            fetchFn: this._options?.fetch,
+            logging: this._options.logging,
+        });
+        if (_response.ok) {
+            return {
+                data: serializers.CheckSkillWebsitesResponse.parseOrThrow(_response.body, {
+                    unrecognizedObjectKeys: "passthrough",
+                    allowUnrecognizedUnionMembers: true,
+                    allowUnrecognizedEnumValues: true,
+                    skipValidation: true,
+                    breadcrumbsPrefix: ["response"],
+                }),
+                rawResponse: _response.rawResponse,
+            };
+        }
+
+        if (_response.error.reason === "status-code") {
+            switch (_response.error.statusCode) {
+                case 400:
+                    throw new TrueForge.BadRequestError(
+                        serializers.RequestErrorResponse.parseOrThrow(_response.error.body, {
+                            unrecognizedObjectKeys: "passthrough",
+                            allowUnrecognizedUnionMembers: true,
+                            allowUnrecognizedEnumValues: true,
+                            skipValidation: true,
+                            breadcrumbsPrefix: ["response"],
+                        }),
+                        _response.rawResponse,
+                    );
+                case 422:
+                    throw new TrueForge.UnprocessableEntityError(
+                        serializers.RequestErrorResponse.parseOrThrow(_response.error.body, {
+                            unrecognizedObjectKeys: "passthrough",
+                            allowUnrecognizedUnionMembers: true,
+                            allowUnrecognizedEnumValues: true,
+                            skipValidation: true,
+                            breadcrumbsPrefix: ["response"],
+                        }),
+                        _response.rawResponse,
+                    );
+                default:
+                    throw new errors.TrueForgeError({
+                        statusCode: _response.error.statusCode,
+                        body: _response.error.body,
+                        rawResponse: _response.rawResponse,
+                    });
+            }
+        }
+
+        return handleNonStatusCodeError(
+            _response.error,
+            _response.rawResponse,
+            "POST",
+            "/api/v1/settings/skills/check-websites",
+        );
     }
 
     /**

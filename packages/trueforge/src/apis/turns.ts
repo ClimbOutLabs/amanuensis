@@ -39,7 +39,6 @@ import {
   newEventId,
   PromiseTimeoutError,
   rawSandboxId,
-  readGitSkillFiles,
   redisKey,
   SandboxError,
   SandboxFileNotFoundError,
@@ -170,6 +169,7 @@ import {
   withGatewayMetadataHeaders,
 } from '../runtime/sessionResources';
 import type { SkillTurnContext } from '../runtime/skillCapability';
+import { readSkillFilesFromGit } from '../runtime/skillWebsites';
 import { SPACE_WRITE_TOOL_ARGUMENT_LIMITS, SpaceTurnResourceResolver } from '../runtime/spaceCapability';
 import { TokenFactoryMeteredLLM, tokenFactoryRole, type TokenFactoryBudget } from '../runtime/tokenFactoryBudget';
 import { resolveToolOutputScreenEnabled } from '../runtime/toolOutputScreenSettings';
@@ -2947,7 +2947,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
               catalog: deps.skillCatalog.list(),
               sandboxReady: serverSandboxAvailable,
               lookup: { fetchImpl: undefined, resolveAddresses: undefined },
-              readFiles: source => readGitSkillFiles({ skill: source }),
+              readFiles: readSkillFilesFromGit,
             },
       schedules:
         deps.schedules === undefined || chatRunner === undefined

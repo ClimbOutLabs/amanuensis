@@ -1939,6 +1939,45 @@
         ],
         "type": "object"
       },
+      "CheckSkillWebsitesRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "description": "Path to the skill directory within the repository. Omit to use the repository root.",
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9._\\-/]+$",
+            "type": "string"
+          },
+          "ref": {
+            "description": "Git ref — branch name, tag, or commit SHA.",
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9._\\-/]+$",
+            "type": "string"
+          },
+          "url": {
+            "description": "Full HTTPS URL of a GitHub or GitLab repository.",
+            "minLength": 1,
+            "pattern": "^https:\\/\\/(github\\.com\\/[A-Za-z0-9._-]+\\/[A-Za-z0-9._-]+|gitlab\\.com\\/[A-Za-z0-9._-]+(?:\\/[A-Za-z0-9._-]+)+)(\\/|\\.git)?$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url",
+          "ref"
+        ],
+        "type": "object"
+      },
+      "CheckSkillWebsitesResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/SkillWebsites"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "ClientTimezoneInput": {
         "description": "IANA timezone name of the client (e.g. \"America/Los_Angeles\"), typically Intl.DateTimeFormat().resolvedOptions().timeZone from the browser. Used to report local time from get_current_datetime and in the ambient current-date context. An unrecognized name and an omitted field both fall back to UTC.",
         "minLength": 1,
@@ -2615,6 +2654,17 @@
       "CreateSkillRequest": {
         "additionalProperties": false,
         "properties": {
+          "approved_websites": {
+            "description": "The websites the person approved with this skill, exactly as the website check listed them.",
+            "items": {
+              "description": "One exact site name the skill needs to reach.",
+              "maxLength": 253,
+              "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$",
+              "type": "string"
+            },
+            "maxItems": 20,
+            "type": "array"
+          },
           "manifest": {
             "$ref": "#/components/schemas/SkillManifest"
           }
@@ -12923,6 +12973,40 @@
         ],
         "type": "object"
       },
+      "SkillWebsites": {
+        "additionalProperties": false,
+        "properties": {
+          "can_send": {
+            "description": "True when one of the websites can send email or change a calendar.",
+            "type": "boolean"
+          },
+          "commit": {
+            "description": "The exact commit whose files were read.",
+            "type": "string"
+          },
+          "makes_up_addresses": {
+            "description": "True when the skill also builds web addresses while it runs, which cannot be read ahead of time.",
+            "type": "boolean"
+          },
+          "websites": {
+            "description": "The websites the skill sends requests to. Approving allows these.",
+            "items": {
+              "description": "One exact site name the skill needs to reach.",
+              "maxLength": 253,
+              "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$",
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "commit",
+          "websites",
+          "makes_up_addresses",
+          "can_send"
+        ],
+        "type": "object"
+      },
       "Space": {
         "additionalProperties": false,
         "properties": {
@@ -16830,6 +16914,17 @@
       "UpdateSkillRequest": {
         "additionalProperties": false,
         "properties": {
+          "approved_websites": {
+            "description": "The websites the person approved with this skill, exactly as the website check listed them.",
+            "items": {
+              "description": "One exact site name the skill needs to reach.",
+              "maxLength": 253,
+              "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$",
+              "type": "string"
+            },
+            "maxItems": 20,
+            "type": "array"
+          },
           "manifest": {
             "$ref": "#/components/schemas/SkillManifest"
           }
@@ -28422,7 +28517,17 @@
                 }
               }
             },
-            "description": "A skill with this name already exists."
+            "description": "A skill with this name already exists, or its websites are not the approved list."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The skill's files could not be read to check its websites."
           },
           "424": {
             "content": {
@@ -28478,6 +28583,26 @@
             },
             "description": "Invalid request body."
           },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "A new skill whose websites are not the approved list."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The skill's files could not be read to check its websites."
+          },
           "424": {
             "content": {
               "application/json": {
@@ -28498,6 +28623,62 @@
           "skills"
         ],
         "x-fern-sdk-method-name": "create_or_update"
+      }
+    },
+    "/api/v1/settings/skills/check-websites": {
+      "post": {
+        "description": "Reads every file of a git skill and lists the websites it sends requests to. Nothing is saved. Approve the list when adding the skill.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CheckSkillWebsitesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckSkillWebsitesResponse"
+                }
+              }
+            },
+            "description": "The websites the skill sends requests to."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request body."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The skill's files could not be read, or it uses too many websites."
+          }
+        },
+        "summary": "Check a skill's websites",
+        "tags": [
+          "Skills"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "skills"
+        ],
+        "x-fern-sdk-method-name": "check_websites"
       }
     },
     "/api/v1/settings/skills/{name}": {

@@ -5,7 +5,7 @@ import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import SkillSettings from '@/containers/SettingsBuilder/SkillSettings.js';
 import { ServerProvider } from '@/server/ServerContext.js';
-import type { SkillNetworkApprovalState } from '@/server/skillNetworkApproval.js';
+import type { SkillNetworkApprovalState, SkillWebsiteCheck } from '@/server/skillNetworkApproval.js';
 import type { CreateSkillRequest, DefinedSkill, SkillCatalogEntry } from '@/server/types.js';
 import { createMockAgentUIServer, createMockCatalog } from '../../server/mockServer.js';
 
@@ -30,8 +30,13 @@ const catalogEntry: SkillCatalogEntry = {
 /** In-memory host: catalog is fixed, defined skills live in a mutable list. */
 function createFakeHost(
   initial: DefinedSkill[] = [],
-  options: { networkApprovals?: Record<string, SkillNetworkApprovalState> } = {},
+  options: {
+    networkApprovals?: Record<string, SkillNetworkApprovalState>;
+    /** When given, the host checks websites and adds skills with their approval. */
+    websites?: Record<string, SkillWebsiteCheck>;
+  } = {},
 ) {
+  const added: { name: string; approvedWebsites: string[] }[] = [];
   let defined = [...initial];
   const created: CreateSkillRequest[] = [];
   const approvals = new Map(Object.entries(options.networkApprovals ?? {}));
@@ -61,6 +66,24 @@ function createFakeHost(
     deleteSkill: async ({ id }: { id: string }) => {
       defined = defined.filter(skill => skill.id !== id);
     },
+    ...(options.websites === undefined
+      ? {}
+      : {
+          checkSkillWebsites: async ({ repoURL }: { repoURL: string }) => {
+            const found = options.websites?.[repoURL];
+            if (found === undefined) throw new Error("Aman could not read this skill's files.");
+            return found;
+          },
+          addSkillWithWebsites: async (req: CreateSkillRequest & { approvedWebsites: string[] }) => {
+            added.push({ name: req.name, approvedWebsites: req.approvedWebsites });
+            defined = [
+              ...defined,
+              'catalogId' in req
+                ? { id: `db-${req.catalogId}`, name: req.name, description: req.description, catalogId: req.catalogId }
+                : { id: `db-${req.name}`, name: req.name, description: req.description },
+            ];
+          },
+        }),
     ...(options.networkApprovals === undefined
       ? {}
       : {
@@ -147,6 +170,7 @@ function createFakeHost(
 
   return {
     created,
+    added,
     approvalCalls,
     getDefined: () => defined,
     wrapper: ({ children }: { children: ReactNode }) => <ServerProvider server={server}>{children}</ServerProvider>,
@@ -545,5 +569,64 @@ describe('SkillSettings network approval', () => {
     expect(await screen.findByRole('button', { name: 'Remove ten-x' })).toBeTruthy();
     expect(screen.queryByText(/needs to reach these sites/)).toBeNull();
     expect(screen.queryByRole('button', { name: 'Allow' })).toBeNull();
+  });
+});
+
+describe('SkillSettings website check', () => {
+  const sends = { commit: 'a'.repeat(40), websites: ['api.news-digest.info'], makesUpAddresses: false, canSend: true };
+  const quiet = { commit: 'a'.repeat(40), websites: [], makesUpAddresses: false, canSend: false };
+
+  it('adds a starter skill that sends no requests straight away', async () => {
+    const host = createFakeHost([], { websites: { [catalogEntry.repoURL]: quiet } });
+    render(
+      <host.wrapper>
+        <SkillSettings />
+      </host.wrapper>,
+    );
+    fireEvent.click(await screen.findByRole('button', { name: 'Enable Code Review' }));
+    await waitFor(() => {
+      expect(host.added).toEqual([{ name: catalogEntry.name, approvedWebsites: [] }]);
+    });
+  });
+
+  it('asks before adding a starter skill that sends requests to websites, and Cancel adds nothing', async () => {
+    const host = createFakeHost([], { websites: { [catalogEntry.repoURL]: sends } });
+    render(
+      <host.wrapper>
+        <SkillSettings />
+      </host.wrapper>,
+    );
+    fireEvent.click(await screen.findByRole('button', { name: 'Enable Code Review' }));
+    await screen.findByText('It sends requests to these websites:');
+    expect(screen.getByText(/send email as you, without asking each time/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(host.added).toEqual([]);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Enable Code Review' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Add skill and allow websites' }));
+    await waitFor(() => {
+      expect(host.added).toEqual([{ name: catalogEntry.name, approvedWebsites: ['api.news-digest.info'] }]);
+    });
+  });
+
+  it('imports from GitHub only after the websites are shown, and allows exactly those', async () => {
+    const host = createFakeHost([], { websites: { 'https://github.com/org/news': sends } });
+    render(
+      <host.wrapper>
+        <SkillSettings />
+      </host.wrapper>,
+    );
+    fireEvent.click(await screen.findByRole('button', { name: /Import from GitHub/ }));
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'news' } });
+    fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'Reads the news' } });
+    fireEvent.change(screen.getByLabelText('Repository URL'), { target: { value: 'https://github.com/org/news' } });
+    fireEvent.change(screen.getByLabelText('Folder containing the SKILL.md'), { target: { value: 'skills/news' } });
+    fireEvent.change(screen.getByLabelText('Branch'), { target: { value: 'main' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Check skill' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Add skill and allow websites' }));
+    await waitFor(() => {
+      expect(host.added).toEqual([{ name: 'news', approvedWebsites: ['api.news-digest.info'] }]);
+    });
+    expect(host.created).toEqual([]);
   });
 });

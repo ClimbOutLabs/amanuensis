@@ -207,6 +207,34 @@ describe("SkillsClient", () => {
             .post("/api/v1/settings/skills")
             .jsonBody(rawRequestBody)
             .respondWith()
+            .statusCode(422)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.settings.skills.create({
+                manifest: {
+                    description: "x",
+                    name: "xy",
+                    ref: "x",
+                    type: "git",
+                    url: "x",
+                },
+            });
+        }).rejects.toThrow(TrueForgeTypes.UnprocessableEntityError);
+    });
+
+    test("create (5)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { manifest: { description: "x", name: "xy", ref: "x", type: "git", url: "x" } };
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .post("/api/v1/settings/skills")
+            .jsonBody(rawRequestBody)
+            .respondWith()
             .statusCode(424)
             .jsonBody(rawResponseBody)
             .build();
@@ -322,6 +350,62 @@ describe("SkillsClient", () => {
             .put("/api/v1/settings/skills")
             .jsonBody(rawRequestBody)
             .respondWith()
+            .statusCode(409)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.settings.skills.createOrUpdate({
+                manifest: {
+                    description: "x",
+                    name: "xy",
+                    ref: "x",
+                    type: "git",
+                    url: "x",
+                },
+            });
+        }).rejects.toThrow(TrueForgeTypes.ConflictError);
+    });
+
+    test("create_or_update (4)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { manifest: { description: "x", name: "xy", ref: "x", type: "git", url: "x" } };
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .put("/api/v1/settings/skills")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(422)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.settings.skills.createOrUpdate({
+                manifest: {
+                    description: "x",
+                    name: "xy",
+                    ref: "x",
+                    type: "git",
+                    url: "x",
+                },
+            });
+        }).rejects.toThrow(TrueForgeTypes.UnprocessableEntityError);
+    });
+
+    test("create_or_update (5)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { manifest: { description: "x", name: "xy", ref: "x", type: "git", url: "x" } };
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .put("/api/v1/settings/skills")
+            .jsonBody(rawRequestBody)
+            .respondWith()
             .statusCode(424)
             .jsonBody(rawResponseBody)
             .build();
@@ -337,6 +421,83 @@ describe("SkillsClient", () => {
                 },
             });
         }).rejects.toThrow(TrueForgeTypes.FailedDependencyError);
+    });
+
+    test("check_websites (1)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { ref: "ref", url: "url" };
+        const rawResponseBody = {
+            data: { can_send: true, commit: "commit", makes_up_addresses: true, websites: ["websites"] },
+        };
+
+        server
+            .mockEndpoint()
+            .post("/api/v1/settings/skills/check-websites")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(200)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        const response = await client.settings.skills.checkWebsites({
+            ref: "ref",
+            url: "url",
+        });
+        expect(response).toEqual({
+            data: {
+                canSend: true,
+                commit: "commit",
+                makesUpAddresses: true,
+                websites: ["websites"],
+            },
+        });
+    });
+
+    test("check_websites (2)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { ref: "x", url: "x" };
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .post("/api/v1/settings/skills/check-websites")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(400)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.settings.skills.checkWebsites({
+                ref: "x",
+                url: "x",
+            });
+        }).rejects.toThrow(TrueForgeTypes.BadRequestError);
+    });
+
+    test("check_websites (3)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { ref: "x", url: "x" };
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .post("/api/v1/settings/skills/check-websites")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(422)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.settings.skills.checkWebsites({
+                ref: "x",
+                url: "x",
+            });
+        }).rejects.toThrow(TrueForgeTypes.UnprocessableEntityError);
     });
 
     test("delete (1)", async () => {
