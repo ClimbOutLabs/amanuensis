@@ -39,6 +39,8 @@ Click **Answer the one that's waiting** on the new chat screen. Aman finds the o
 
 When Aman only saves a draft, the card asks "Save this draft?" Saving a draft asks every time too.
 
+If you connected more than one email account, new email goes out from your default account. The card has a From picker, so you can pick another account before you approve. Tell Aman which account you mean, or leave it to the default.
+
 When you send from Gmail, the card also shows a short check code, such as A7F39C.
 
 - While the email goes out, the card says "Sending…".
@@ -49,7 +51,7 @@ When you send from Gmail, the card also shows a short check code, such as A7F39C
 
 ## Sending to someone new
 
-For an account connected with an app password, Aman keeps a list of people you write to. It starts with the people in your Sent folder.
+For an account connected with an app password, Aman keeps a list of people you write to. It starts with the people in your Sent folder. Each account has its own list.
 
 If an email goes to an address that isn't on that list, the card says so. The buttons change:
 

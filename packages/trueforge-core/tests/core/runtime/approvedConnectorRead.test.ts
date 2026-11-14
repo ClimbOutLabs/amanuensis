@@ -438,6 +438,8 @@ describe('a send steered by something the chat read', () => {
     const services = makeServices();
     const addRecipients = jest.fn(() => Promise.resolve('loaded' as const));
     services.mail_add_recipients = addRecipients;
+    // The mail world of this test holds one account, which the sidecar names default.
+    services.mail_accounts = () => Promise.resolve({ accounts: ['default'], default_account: 'default' });
     const send: CallSpec = {
       id: 'call-send',
       name: 'send_email',
@@ -477,6 +479,6 @@ describe('a send steered by something the chat read', () => {
     );
 
     expect(addRecipients).toHaveBeenCalledTimes(1);
-    expect(addRecipients).toHaveBeenCalledWith(OWNER, ['collect@evil.example']);
+    expect(addRecipients).toHaveBeenCalledWith({ ...OWNER, account: 'default' }, ['collect@evil.example']);
   });
 });

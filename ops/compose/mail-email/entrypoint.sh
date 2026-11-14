@@ -4,11 +4,13 @@
 # this records the hash of the list it started with, once the started server answers on its port. The server
 # waits for that hash before it sends, so the record must not appear while the server is still starting.
 # A stale hash only makes the server wait or refuse, never let a send through.
-# The mail account comes from the account file in this sidecar's own volume. The installer writes it
+# The mail accounts come from the account file in this sidecar's own volume. The installer writes it
 # through the account agent's command line and the Settings Email card changes it through the account
-# agent (started below, on this container's private network port). The sidecar always starts from the
-# account file, never from the environment Docker loaded at container start, which can hold an older
-# account; when the account file changes, the sidecar restarts on the new account.
+# agent (started below, on this container's private network port). The server reads its accounts from
+# a config file, so at each start this wrapper composes that file from the send list and the accounts
+# the agent renders, and starts the server on the composed file. The server never starts from the
+# environment Docker loaded at container start, which can hold an older account; when the account
+# file changes, the sidecar restarts on the new accounts.
 set -eu
 
 # The list file is the only source of recipients. An env list would let the sidecar send to addresses the file lacks.
@@ -18,6 +20,9 @@ policy=${MCP_EMAIL_SERVER_CONFIG_PATH:?set MCP_EMAIL_SERVER_CONFIG_PATH to the s
 status=${AMAN_MAIL_STATUS_FILE:?set AMAN_MAIL_STATUS_FILE to the loaded-list status file}
 account=${AMAN_MAIL_ACCOUNT_FILE:?set AMAN_MAIL_ACCOUNT_FILE to the account file}
 agent=${AMAN_MAIL_ACCOUNT_AGENT:?set AMAN_MAIL_ACCOUNT_AGENT to the account agent}
+# The composed config lives beside the account file, in the volume this sidecar owns: it holds the
+# accounts' passwords, so it is written mode 600 and never leaves this container.
+config=${AMAN_MAIL_CONFIG_FILE:-$(dirname "$account")/config.toml}
 
 # How long a stop is given before the server is forced down. The server holds nothing across a
 # restart (mail connections are made per tool call, and sessions are the client's to rebuild), so
@@ -120,15 +125,30 @@ record_loaded() {
   recorded=yes
 }
 
-# Puts this shell's mail account variables in the account file's state: its account, or none.
-load_account() {
-  eval "$(python3 "$agent" --print-child-env)"
+# Writes the file the server reads: the send list first, then the accounts in the server's own
+# config form, rendered by the account agent from the account file. Replaced in one step, so the
+# server never reads a half-written file.
+compose_config() {
+  tmp="$config.tmp"
+  cat "$policy" >"$tmp"
+  python3 "$agent" --print-config >>"$tmp" || true
+  chmod 600 "$tmp"
+  mv "$tmp" "$config"
 }
 
 start_server() {
   loaded=$(list_hash)
   loaded_account=$(account_hash)
-  load_account
+  compose_config
+  # The server reads the composed file, and no account comes from this process's environment:
+  # an env account would be added to the file's accounts under a name nothing else knows.
+  export MCP_EMAIL_SERVER_CONFIG_PATH="$config"
+  unset MCP_EMAIL_SERVER_EMAIL_ADDRESS MCP_EMAIL_SERVER_PASSWORD MCP_EMAIL_SERVER_USER_NAME \
+    MCP_EMAIL_SERVER_FULL_NAME MCP_EMAIL_SERVER_ACCOUNT_NAME \
+    MCP_EMAIL_SERVER_IMAP_HOST MCP_EMAIL_SERVER_IMAP_PORT MCP_EMAIL_SERVER_IMAP_SSL \
+    MCP_EMAIL_SERVER_IMAP_START_SSL MCP_EMAIL_SERVER_IMAP_VERIFY_SSL \
+    MCP_EMAIL_SERVER_SMTP_HOST MCP_EMAIL_SERVER_SMTP_PORT MCP_EMAIL_SERVER_SMTP_SSL \
+    MCP_EMAIL_SERVER_SMTP_START_SSL MCP_EMAIL_SERVER_SMTP_VERIFY_SSL
   # A start begins here, so the loaded record goes first: while this server is still coming up,
   # nothing may read the previous start's record as this start's list. On an account change the
   # list hash is the same, so a leftover record would otherwise pass for the new server's own.

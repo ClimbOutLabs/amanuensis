@@ -1,6 +1,8 @@
 import {
   parseMailAccountEnv,
+  parseMailAccountsEnv,
   renderMailAccountEnv,
+  renderMailAccountsEnv,
   type MailAccount,
 } from '@truefoundry/trueforge-core/core/email/mailConnector/accountFile';
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
@@ -39,6 +41,8 @@ describe('the mail account agent', () => {
   let imap: ChildProcess | undefined;
   let agent: ChildProcess | undefined;
   let agentOutput = '';
+  let certPath = '';
+  let keyPath = '';
 
   function accountWith(password: string): MailAccount {
     return {
@@ -58,11 +62,17 @@ describe('the mail account agent', () => {
     return { provider_key: 'other', ...accountWith(password) };
   }
 
-  async function rawAgentCall(
-    method: string,
-    authorization: string | undefined,
-    body?: unknown,
-  ): Promise<{ status: number; text: string }> {
+  async function rawAgentCall({
+    method,
+    authorization,
+    body,
+    path = '/account',
+  }: {
+    method: string;
+    authorization: string | undefined;
+    body?: unknown;
+    path?: string;
+  }): Promise<{ status: number; text: string }> {
     const headers: Record<string, string> = { 'content-type': 'application/json' };
     if (authorization !== undefined) {
       headers['authorization'] = authorization;
@@ -71,12 +81,12 @@ describe('the mail account agent', () => {
     if (body !== undefined) {
       init.body = JSON.stringify(body);
     }
-    const response = await fetch(`http://127.0.0.1:${String(AGENT_PORT)}/account`, init);
+    const response = await fetch(`http://127.0.0.1:${String(AGENT_PORT)}${path}`, init);
     return { status: response.status, text: await response.text() };
   }
 
   async function agentCall(method: string, body?: unknown): Promise<{ status: number; text: string }> {
-    return rawAgentCall(method, `Bearer ${SECRET}`, body);
+    return rawAgentCall({ method, authorization: `Bearer ${SECRET}`, body });
   }
 
   beforeAll(async () => {
@@ -86,6 +96,8 @@ describe('the mail account agent', () => {
     // A self-signed certificate for localhost, trusted by the check through SSL_CERT_FILE.
     const cert = join(dir, 'cert.pem');
     const key = join(dir, 'key.pem');
+    certPath = cert;
+    keyPath = key;
     execFileSync(
       'openssl',
       [
@@ -146,17 +158,20 @@ describe('the mail account agent', () => {
   it('starts with no account connected', async () => {
     const { status, text } = await agentCall('GET');
     expect(status).toBe(200);
-    expect(JSON.parse(text).connected).toBe(false);
+    const body = JSON.parse(text);
+    expect(body.connected).toBe(false);
+    expect(body.accounts).toEqual([]);
+    expect(body.default).toBeNull();
     expect(text).not.toContain(CANARY);
   });
 
   it('refuses a caller that presents no secret, and changes nothing for it', async () => {
     for (const method of ['GET', 'DELETE']) {
-      const { status, text } = await rawAgentCall(method, undefined);
+      const { status, text } = await rawAgentCall({ method, authorization: undefined });
       expect(status).toBe(401);
       expect(JSON.parse(text).error).toBe('unauthorized');
     }
-    const { status, text } = await rawAgentCall('POST', undefined, postBody(CANARY));
+    const { status, text } = await rawAgentCall({ method: 'POST', authorization: undefined, body: postBody(CANARY) });
     expect(status).toBe(401);
     expect(JSON.parse(text).error).toBe('unauthorized');
     const after = await agentCall('GET');
@@ -165,14 +180,14 @@ describe('the mail account agent', () => {
   });
 
   it('refuses a caller that presents the wrong secret', async () => {
-    const { status, text } = await rawAgentCall('GET', `Bearer ${WRONG_SECRET}`);
+    const { status, text } = await rawAgentCall({ method: 'GET', authorization: `Bearer ${WRONG_SECRET}` });
     expect(status).toBe(401);
     expect(JSON.parse(text).error).toBe('unauthorized');
     expect(text).not.toContain(WRONG_SECRET);
   });
 
   it('refuses a caller whose secret does not arrive as a bearer value', async () => {
-    const { status, text } = await rawAgentCall('GET', SECRET);
+    const { status, text } = await rawAgentCall({ method: 'GET', authorization: SECRET });
     expect(status).toBe(401);
     expect(JSON.parse(text).error).toBe('unauthorized');
   });
@@ -201,8 +216,10 @@ describe('the mail account agent', () => {
     expect(text).not.toContain(CANARY);
     const body = JSON.parse(text);
     expect(body.connected).toBe(true);
-    expect(body.address).toBe(ADDRESS);
-    expect(body.sign_in).toBe('ok');
+    expect(body.accounts).toHaveLength(1);
+    expect(body.accounts[0].address).toBe(ADDRESS);
+    expect(body.accounts[0].sign_in).toBe('ok');
+    expect(body.default).toBe(ADDRESS);
     expect(readFileSync(accountFile, 'utf8')).toBe(renderMailAccountEnv(accountWith(CANARY)));
     expect(statSync(accountFile).mode & 0o777).toBe(0o600);
     // The fake server recorded the exact password the check signed in with: the password
@@ -215,7 +232,7 @@ describe('the mail account agent', () => {
     const { text } = await agentCall('GET');
     const body = JSON.parse(text);
     expect(body.connected).toBe(true);
-    expect(body.sign_in).toBe('refused');
+    expect(body.accounts[0].sign_in).toBe('refused');
     expect(text).not.toContain(WRONG);
   }, 30_000);
 
@@ -247,29 +264,89 @@ describe('the mail account agent', () => {
     expect(status).toBe(403);
   });
 
+  it('holds several accounts: a second save adds, the default can move, and remove takes one', async () => {
+    const secondAddress = 'work@example.com';
+    const secondPortFile = join(dir, 'imap2.port');
+    const secondImap = spawn('python3', [FAKE_IMAP, 'ssl', certPath, keyPath, secondAddress, CANARY, secondPortFile], {
+      stdio: 'ignore',
+    });
+    try {
+      await eventually(async () => existsSync(secondPortFile) && readFileSync(secondPortFile, 'utf8').trim() !== '');
+      const secondPort = Number(readFileSync(secondPortFile, 'utf8').trim());
+      const second: MailAccount = {
+        address: secondAddress,
+        password: CANARY,
+        imap_host: 'localhost',
+        imap_port: secondPort,
+        imap_mode: 'ssl',
+        smtp_host: 'localhost',
+        smtp_port: 465,
+        smtp_mode: 'ssl',
+      };
+      await agentCall('POST', postBody(CANARY));
+      const added = await agentCall('POST', { provider_key: 'other', ...second });
+      expect(added.status).toBe(200);
+      const both = JSON.parse(added.text);
+      expect(both.accounts.map((entry: { address: string }) => entry.address)).toEqual([ADDRESS, secondAddress]);
+      expect(both.default).toBe(ADDRESS);
+      expect(parseMailAccountsEnv(readFileSync(accountFile, 'utf8')).accounts).toHaveLength(2);
+
+      const moved = await rawAgentCall({
+        method: 'POST',
+        authorization: `Bearer ${SECRET}`,
+        body: { address: secondAddress },
+        path: '/account/default',
+      });
+      expect(moved.status).toBe(200);
+      expect(JSON.parse(moved.text).default).toBe(secondAddress);
+      expect(parseMailAccountsEnv(readFileSync(accountFile, 'utf8')).default_address).toBe(secondAddress);
+
+      const unknown = await rawAgentCall({
+        method: 'POST',
+        authorization: `Bearer ${SECRET}`,
+        body: { address: 'nobody@example.com' },
+        path: '/account/default',
+      });
+      expect(unknown.status).toBe(400);
+      expect(JSON.parse(unknown.text).error).toBe('invalid');
+
+      const removed = await agentCall('DELETE', { address: ADDRESS });
+      expect(removed.status).toBe(200);
+      const left = JSON.parse(removed.text);
+      expect(left.accounts.map((entry: { address: string }) => entry.address)).toEqual([secondAddress]);
+      expect(left.default).toBe(secondAddress);
+      expect(readFileSync(accountFile, 'utf8')).toBe(
+        renderMailAccountsEnv({ accounts: [second], default_address: secondAddress }),
+      );
+    } finally {
+      secondImap.kill('SIGKILL');
+      await agentCall('DELETE');
+    }
+  }, 60_000);
+
+  it('the server config comes from the account file, and clears when the account goes', async () => {
+    await agentCall('POST', postBody(CANARY));
+    const withAccount = execFileSync('python3', [AGENT, '--print-config'], {
+      env: { ...process.env, AMAN_MAIL_ACCOUNT_FILE: accountFile },
+      encoding: 'utf8',
+    });
+    expect(withAccount).toContain('[[emails]]');
+    expect(withAccount).toContain(`account_name = "${ADDRESS}"`);
+    expect(withAccount).toContain(`email_address = "${ADDRESS}"`);
+    await agentCall('DELETE');
+    const without = execFileSync('python3', [AGENT, '--print-config'], {
+      env: { ...process.env, AMAN_MAIL_ACCOUNT_FILE: accountFile },
+      encoding: 'utf8',
+    });
+    expect(without).toBe('');
+  }, 30_000);
+
   it('the agent never printed the password or the secret anywhere', () => {
     expect(agentOutput).not.toContain(CANARY);
     expect(agentOutput).not.toContain(WRONG);
     expect(agentOutput).not.toContain(SECRET);
     expect(agentOutput).not.toContain(WRONG_SECRET);
   });
-
-  it('the child env comes from the account file, and clears when the account goes', async () => {
-    await agentCall('POST', postBody(CANARY));
-    const withAccount = execFileSync('python3', [AGENT, '--print-child-env'], {
-      env: { ...process.env, AMAN_MAIL_ACCOUNT_FILE: accountFile },
-      encoding: 'utf8',
-    });
-    expect(withAccount).toContain(`MCP_EMAIL_SERVER_EMAIL_ADDRESS=${ADDRESS}`);
-    expect(withAccount).toContain('MCP_EMAIL_SERVER_IMAP_SSL=true');
-    await agentCall('DELETE');
-    const without = execFileSync('python3', [AGENT, '--print-child-env'], {
-      env: { ...process.env, AMAN_MAIL_ACCOUNT_FILE: accountFile },
-      encoding: 'utf8',
-    });
-    expect(without).not.toContain('MCP_EMAIL_SERVER_EMAIL_ADDRESS=');
-    expect(without).toContain('unset MCP_EMAIL_SERVER_EMAIL_ADDRESS MCP_EMAIL_SERVER_PASSWORD');
-  }, 30_000);
 });
 
 describe('the mail account agent with no usable secret', () => {
@@ -332,11 +409,11 @@ describe('the mail account agent with no usable secret', () => {
   });
 
   it('the command line still works with no secret set', () => {
-    const out = execFileSync('python3', [AGENT, '--print-child-env'], {
+    const out = execFileSync('python3', [AGENT, '--print-config'], {
       env: agentEnv(undefined, 19774),
       encoding: 'utf8',
     });
-    expect(out).toContain('unset MCP_EMAIL_SERVER_EMAIL_ADDRESS');
+    expect(out).toBe('');
   });
 });
 

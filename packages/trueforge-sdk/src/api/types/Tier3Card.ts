@@ -18,6 +18,10 @@ export interface Tier3Card {
     email?: TrueForge.Tier3Email | null;
     /** True when a card carrying mail_new_recipients approves saving a draft rather than sending. */
     mailDraft?: boolean;
+    /** For a card on the Email connector: the account the message goes from. Otherwise null. */
+    mailFrom?: string | null;
+    /** For a card on the Email connector: every connected account the person could pick instead. Otherwise null. */
+    mailFromChoices?: string[] | null;
     /** For a mail send to addresses not yet on the Email list: those addresses, lowercased. Otherwise null. */
     mailNewRecipients?: string[] | null;
     /** Lines of outbound_text that a search service adds on its own, repeated so the card can fold them. Null when none. */
