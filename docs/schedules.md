@@ -73,7 +73,7 @@ A run also holds a few things a chat may do without asking:
 
 Some actions are skipped instead of held, and the run tells you in one line. That happens when only something Aman read chose where an action goes. A held read through a connector still waits for you.
 
-Gmail is stricter. A scheduled run can read your Gmail, but it never saves a Gmail draft or sends Gmail mail.
+Mail is stricter. A scheduled run can read your mail, but it never drafts or sends mail.
 
 ### The Needs your OK list
 

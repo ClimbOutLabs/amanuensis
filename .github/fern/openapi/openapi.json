@@ -10212,6 +10212,13 @@
           "mail_problem": {
             "$ref": "#/components/schemas/MailProblem"
           },
+          "mail_sender_confirmation": {
+            "description": "Whether the mail source read from reports sender confirmation, as the source states about itself. Null until mail has been checked once, or when the last checks predate the fact being recorded.",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
           "mail_source": {
             "$ref": "#/components/schemas/MailSourceKind"
           },
@@ -10251,7 +10258,8 @@
           "max_levels",
           "mail_problem",
           "calendar_problem",
-          "mail_source"
+          "mail_source",
+          "mail_sender_confirmation"
         ],
         "type": "object"
       },

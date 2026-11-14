@@ -52,6 +52,7 @@ const otherMail: MailSource = {
   readText: () => Promise.resolve(''),
   laterInThread: () => Promise.resolve([]),
   trustedAuthenticationServers: [],
+  reportsSenderConfirmation: false,
 };
 
 /**

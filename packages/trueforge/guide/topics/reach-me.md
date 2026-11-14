@@ -26,7 +26,7 @@ Aman watches for nothing until you turn it on. Reminders you set reach you eithe
 
 Once it is on, Aman watches for:
 
-- Mail from people you marked always important. It counts only when your mail server confirms the sender. This needs a Google account. With the shared Email connector, senders can't be confirmed yet, so their mail is treated as ordinary mail.
+- Mail from people you marked always important. It counts only when your mail server confirms the sender. Whether senders can be confirmed depends on where your mail is read from. Where they can't be confirmed yet, mail from these people is treated as ordinary mail.
 - A bill or deadline in new mail that is due within three days.
 - Two things on your own calendar at the same time.
 - Time to leave for an event with a place.
