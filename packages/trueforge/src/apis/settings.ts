@@ -13,6 +13,7 @@ import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 import type { IMcpServerWithAuthStore } from '../db/mcpServerStore';
 import type { IMcpToolGrantStore } from '../db/mcpToolGrantStore';
 import type { IModelProviderStore } from '../db/modelProviderStore';
+import type { IPersonalizationStore } from '../db/personalizationStore';
 import type { ISandboxProviderStore } from '../db/sandboxProviderStore';
 import type { WithTransaction } from '../db/transaction';
 import type { IOAuthTokenStore } from '../mcp/auth/types';
@@ -21,6 +22,7 @@ import { getSharedRunCodeService } from '../runtime/sessionResources';
 import type { TokenFactoryBudget } from '../runtime/tokenFactoryBudget';
 import { sandboxDisabledByInstaller } from '../sandbox/slotBackend';
 import { createFirstRunGuideRouter } from './firstRunGuide';
+import { createGitCommitIdentityRouter } from './gitCommitIdentity';
 import { createSettingsMcpServersRouter } from './mcpServers';
 import { createMemoryRecallRouter } from './memoryRecall';
 import { createMemoryScreensRouter } from './memoryScreens';
@@ -41,6 +43,7 @@ export interface SettingsRouterDeps<TTransaction> {
   resolveSkillStore: ResolveSkillStore<TTransaction>;
   resolveSandboxProviderStore: (c: Context) => ISandboxProviderStore<TTransaction>;
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
+  personalizationStore: Pick<IPersonalizationStore<TTransaction>, 'getProfile'>;
   tokenFactoryBudget: TokenFactoryBudget;
   /** Model providers the environment owns (see `envManagedModelProviderNames`). */
   envManagedModelProviderNames: ReadonlySet<string>;
@@ -113,6 +116,15 @@ export function createSettingsRouter<TTransaction>(deps: SettingsRouterDeps<TTra
     '/memory-screens',
     createMemoryScreensRouter({
       globalSettingsStore: deps.globalSettingsStore,
+      logger: deps.logger,
+    }),
+  );
+  router.route(
+    '/git-commit-identity',
+    createGitCommitIdentityRouter({
+      globalSettingsStore: deps.globalSettingsStore,
+      personalizationStore: deps.personalizationStore,
+      resolveRequestContext: deps.resolveRequestContext,
       logger: deps.logger,
     }),
   );

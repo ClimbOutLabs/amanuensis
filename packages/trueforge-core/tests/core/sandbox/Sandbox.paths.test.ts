@@ -4164,6 +4164,8 @@ function runGuestCommand(input: {
  * A slot-like provider: its commands and files are real, under `root`. Like the slot agent, it refuses
  * every env name except TFY_SKILLS_DIR at the skills directory.
  */
+const COMMIT_NAME_ENV = new Set(['GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL', 'GIT_COMMITTER_NAME', 'GIT_COMMITTER_EMAIL']);
+
 function slotLikeProvider(input: {
   root: string;
   skillsDir: string;
@@ -4177,7 +4179,10 @@ function slotLikeProvider(input: {
     exec: (params): Promise<ExecResult> => {
       execCalls.push(params);
       const env = params.env ?? {};
-      const refused = Object.keys(env).filter(name => name !== 'TFY_SKILLS_DIR' || env[name] !== skillsDir);
+      // Like the slot agent: it lets the commit name through, and the skills folder only at its fixed path.
+      const refused = Object.keys(env).filter(name =>
+        name === 'TFY_SKILLS_DIR' ? env[name] !== skillsDir : !COMMIT_NAME_ENV.has(name),
+      );
       if (refused.length > 0) {
         return Promise.resolve({ success: false, error: `env names are not allowed: ${refused.join(', ')}` });
       }
@@ -4743,7 +4748,7 @@ describe('Sandbox skills without a network', () => {
       network: 'none',
       exec: (params): Promise<ExecResult> => {
         execCalls.push(params);
-        const envNames = Object.keys(params.env ?? {});
+        const envNames = Object.keys(params.env ?? {}).filter(name => !COMMIT_NAME_ENV.has(name));
         if (envNames.length > 0) {
           return Promise.resolve({ success: false, error: `env names are not allowed: ${envNames.join(', ')}` });
         }

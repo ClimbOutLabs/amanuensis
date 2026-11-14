@@ -102,6 +102,7 @@ import { buildProvisioningEvent } from './driver/provisionEvents';
 import { RunCodeInputSchema, type RunCodeInput, type RunCodeResult } from './driver/RunCodeSchemas';
 import { type HarvestedFile, type RunCodeBackend, type TurnAttachment } from './driver/RunCodeService';
 import { buildExecResultShape } from './execResultSemantics';
+import { DEFAULT_GIT_COMMIT_IDENTITY, gitCommitIdentityEnv, type GitCommitIdentity } from './gitCommitIdentity';
 import { getGithubConnectorHint, getOfflineGitFormHint, type GithubConnectorState } from './githubConnectorHint';
 import {
   GIT_REMOTE_CHANGED_REFUSAL,
@@ -333,6 +334,8 @@ export interface SandboxOptions {
   fileDownloadEnabled?: boolean | undefined;
   /** GitHub token the host injects into allowlisted network git commands only; never written to the sandbox. */
   githubGitToken?: string | null | undefined;
+  /** Name and email for commits made by shell commands; absent, the built-in default is used. */
+  gitCommitIdentity?: GitCommitIdentity | undefined;
   /** Whether the session's agent spec has a GitHub MCP connector configured, regardless of whether its credentials resolved. */
   githubConnectorAttached?: boolean | undefined;
   /** Whether the session's agent spec has a web-search/fetch MCP connector configured. */
@@ -2216,6 +2219,7 @@ export class Sandbox extends LocalToolMCP {
   private cachedSkillsSection?: string | undefined;
   private readonly logger: Logger;
   private readonly githubGitToken: string | null;
+  private readonly gitCommitIdentity: GitCommitIdentity;
   private readonly githubConnectorAttached: boolean;
   private readonly webConnectorAttached: boolean;
   private readonly webConnectorToolHint: string;
@@ -2326,6 +2330,7 @@ export class Sandbox extends LocalToolMCP {
     this.requestTimeoutSeconds = Math.ceil(mcpBoundTimeoutMs / 1000) + NATS_REQUEST_TIMEOUT_BUFFER_SECONDS;
     this.logger = options.logger.child({ module: 'Sandbox' });
     this.githubGitToken = options.githubGitToken ?? null;
+    this.gitCommitIdentity = options.gitCommitIdentity ?? DEFAULT_GIT_COMMIT_IDENTITY;
     this.provider.hostGit?.setToken(this.githubGitToken);
     this.githubConnectorAttached = options.githubConnectorAttached ?? false;
     this.webConnectorAttached = options.webConnectorAttached ?? false;
@@ -5930,7 +5935,7 @@ export class Sandbox extends LocalToolMCP {
     const gitPrep =
       this.prepareHostAuthenticatedGit({ sandboxId: rawId, exec: resolvedInput, approvedRemotes }) ??
       this.prepareAllowlistedExec({ sandboxId: rawId, exec: resolvedInput });
-    const env = { ...mcpClientEnv, ...gitPrep.env };
+    const env = { ...gitCommitIdentityEnv(this.gitCommitIdentity), ...mcpClientEnv, ...gitPrep.env };
     const execInput = gitPrep.exec;
 
     const dispatchMarker = { dispatched: false };
