@@ -1,83 +1,23 @@
 /**
- * Server-side `requires_network` annotation for Sentinel offline mode.
+ * The `requires_network` declaration for Sentinel offline mode.
  *
- * Populated from this hand-curated per-tool registry, not from tool
- * self-declaration. Trusted only for first-party/server-authored tools;
- * third-party and MCP tools default to `requires_network: true` unless
- * individually reviewed (the reviewed set below). Consulted both when
- * filtering the model-visible tool list and at call time for the
- * stale-context guard.
+ * Every tool declares, where it is registered, whether it needs the network, alongside the
+ * other per-tool metadata its tool set carries. Offline mode reads that declaration: it
+ * filters the model-visible tool list and blocks calls at call time. There is no side table
+ * of tool names here, so a tool that gains a network path changes its own declaration in the
+ * same change, and a new tool is born with its declaration made.
+ *
+ * A call whose tool declared nothing is read as needing the network. For a tool another
+ * server serves that is the standing rule (its registration is not Aman's to make). For a
+ * first-party tool it is a registration error: `defineTool` requires the declaration, and a
+ * tool set that lists a tool without one fails loudly rather than defaulting silently.
  */
-
-/** Tool provenance for the network annotation. */
-export type ToolProvenance = 'first-party' | 'third-party';
 
 /**
- * Hand-curated first-party network requirements. Unknown first-party tools
- * fail closed to true.
+ * Whether a call needs the network, from the declaration the tool's own registration made.
+ * An absent declaration reads as true: the call is blocked offline rather than let through
+ * on a guess.
  */
-const FIRST_PARTY_REQUIRES_NETWORK: Record<string, boolean> = {
-  // Sandbox tools run against the local sandbox: no network by construction.
-  exec: false,
-  run_code: false,
-  apply_patch: false,
-  replace_text: false,
-  write_file: false,
-  run_registered_command: false,
-  run_skill_script: false,
-  run_workflow: false,
-  submit_implementation_plan: false,
-  // Local builtins.
-  ask_user_question: false,
-  get_current_datetime: false,
-  extract_document_text: false,
-  create_document_report: false,
-  summarize_net_worth: false,
-  create_sub_agent: false,
-  get_openui_instructions: false,
-  replace_task_checklist: false,
-  load_bundle: false,
-  list_skills: false,
-  // Networked builtins.
-  web_search: true,
-  // Adding a skill reads it from the site it comes from.
-  install_skill: true,
-  // Embedded maps: geocoding, routing, and tiles all leave the machine.
-  render_map: true,
-  render_route: true,
-  render_places: true,
-  // Aman's own browser: every tool reaches the browser sidecar, which goes on to the open internet.
-  browser_open: true,
-  browser_read: true,
-  browser_scroll: true,
-  browser_back: true,
-  browser_screenshot: true,
-  browser_type: true,
-  browser_select: true,
-  browser_click: true,
-};
-
-/**
- * Individually reviewed third-party/MCP tools that provably need no network.
- * Everything else third-party defaults to requires_network: true.
- */
-const REVIEWED_THIRD_PARTY_NO_NETWORK: ReadonlySet<string> = new Set([
-  // Empty until a third-party tool is individually reviewed. Additions require
-  // a reviewer to confirm the tool cannot reach the network.
-]);
-
-/** Server-side network annotation for a tool. Fail-closed default: true. */
-export function requiresNetwork(input: { tool_name: string; provenance: ToolProvenance }): boolean {
-  if (input.provenance === 'third-party') {
-    return REVIEWED_THIRD_PARTY_NO_NETWORK.has(input.tool_name) ? false : true;
-  }
-  return FIRST_PARTY_REQUIRES_NETWORK[input.tool_name] ?? true;
-}
-
-/**
- * Provenance of a tool call for the network annotation. Sandbox and
- * truefoundry-system tools are first-party; mcp tools are third-party.
- */
-export function provenanceForToolType(toolType: 'truefoundry-system' | 'mcp'): ToolProvenance {
-  return toolType === 'mcp' ? 'third-party' : 'first-party';
+export function requiresNetwork(input: { declared: boolean | undefined }): boolean {
+  return input.declared ?? true;
 }

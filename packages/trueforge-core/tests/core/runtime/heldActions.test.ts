@@ -234,7 +234,7 @@ function makeHarness(
         firstParty: options.mail !== undefined && options.mail.hostOwned !== false,
         searchProvider:
           options.searchProviderAsks === true || options.searchProvider === true
-            ? { tools: ['web_search'], plumbing_fields: [] }
+            ? { tools: ['web_search'], page_read_tools: [], plumbing_fields: [], served_in_process: false }
             : undefined,
       });
       const threadInput: AgentThreadConstructorInput = {

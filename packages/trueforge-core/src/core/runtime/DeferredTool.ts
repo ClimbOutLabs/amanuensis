@@ -412,6 +412,7 @@ export class DeferredTool extends LocalToolMCP {
   private buildListTools(): ToolDefinition {
     return defineTool({
       name: LIST_TOOLS_NAME,
+      requiresNetwork: false,
       description: dedent`
         List tool names available on an MCP server.
         Returns tool names only — use ${GET_TOOL_INFO_NAME} to get full details before calling a tool.`,
@@ -466,6 +467,7 @@ export class DeferredTool extends LocalToolMCP {
   private buildGetToolInfo(): ToolDefinition {
     return defineTool({
       name: GET_TOOL_INFO_NAME,
+      requiresNetwork: false,
       description: dedent`
         Get description, inputSchema and outputSchema for a tool, by its server and name.
         If outputSchema is null, it will NOT be present in ${GET_TOOL_OUTPUT_SCHEMA_NAME} as well.
@@ -519,6 +521,7 @@ export class DeferredTool extends LocalToolMCP {
   private buildGetToolOutputSchema(): ToolDefinition {
     return defineTool({
       name: GET_TOOL_OUTPUT_SCHEMA_NAME,
+      requiresNetwork: false,
       description: dedent`
         Get the outputSchema for a specific tool on an MCP server.
         The Agent MUST not call ${GET_TOOL_OUTPUT_SCHEMA_NAME} and ${GET_TOOL_INFO_NAME} for the same tool.
@@ -574,6 +577,7 @@ export class DeferredTool extends LocalToolMCP {
   private buildCallTool(): ToolDefinition {
     return defineTool({
       name: CALL_TOOL_NAME,
+      requiresNetwork: true,
       description: dedent`
         Call a tool by its server and name.
         The Agent MUST call ${GET_TOOL_INFO_NAME} before calling a tool. Built-in tools are called directly by name, never through ${CALL_TOOL_NAME}.

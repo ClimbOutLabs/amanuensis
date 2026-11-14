@@ -359,6 +359,7 @@ export class ScheduleToolSet extends LocalToolMCP {
     this.#tools = [
       defineTool({
         name: CREATE_SCHEDULE_TOOL_NAME,
+        requiresNetwork: false,
         description:
           "The only way to make a recurring task, not a calendar event. For a plain reminder use set_reminder. Never say it is scheduled unless this succeeded. Ask first if how often or when is unclear. Times use the user's time zone. Morning brief: set morning_brief, not task. The user approves a card first.",
         schema: CreateScheduleToolSchema,
@@ -367,6 +368,7 @@ export class ScheduleToolSet extends LocalToolMCP {
       }),
       defineTool({
         name: LIST_SCHEDULES_TOOL_NAME,
+        requiresNetwork: false,
         description:
           "List the user's schedules: name, when each runs, whether it is active or paused, and its next run.",
         schema: ListSchedulesToolSchema,
@@ -375,6 +377,7 @@ export class ScheduleToolSet extends LocalToolMCP {
       }),
       defineTool({
         name: PAUSE_SCHEDULE_TOOL_NAME,
+        requiresNetwork: false,
         description:
           'Pause a schedule by name or id so it stops running until resumed. The user approves a card first.',
         schema: ScheduleRefToolSchema,
@@ -383,6 +386,7 @@ export class ScheduleToolSet extends LocalToolMCP {
       }),
       defineTool({
         name: RESUME_SCHEDULE_TOOL_NAME,
+        requiresNetwork: false,
         description:
           'Resume a paused schedule by name or id so it runs again from its next time. The user approves a card first.',
         schema: ScheduleRefToolSchema,
@@ -391,6 +395,7 @@ export class ScheduleToolSet extends LocalToolMCP {
       }),
       defineTool({
         name: DELETE_SCHEDULE_TOOL_NAME,
+        requiresNetwork: false,
         description: 'Delete a schedule by name or id, for good. The user approves a card first.',
         schema: ScheduleRefToolSchema,
         annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
@@ -398,6 +403,7 @@ export class ScheduleToolSet extends LocalToolMCP {
       }),
       defineTool({
         name: SET_REMINDER_TOOL_NAME,
+        requiresNetwork: false,
         description:
           'Set a reminder for the user. It only reaches them and needs no approval. For work you should do, use create_schedule.',
         schema: SetReminderToolSchema,
@@ -406,6 +412,7 @@ export class ScheduleToolSet extends LocalToolMCP {
       }),
       defineTool({
         name: LIST_REMINDERS_TOOL_NAME,
+        requiresNetwork: false,
         description: 'List upcoming reminders.',
         schema: ListSchedulesToolSchema,
         annotations: { readOnlyHint: true, openWorldHint: false },
@@ -413,6 +420,7 @@ export class ScheduleToolSet extends LocalToolMCP {
       }),
       defineTool({
         name: CANCEL_REMINDER_TOOL_NAME,
+        requiresNetwork: false,
         description: 'Cancel a reminder, for good. The user approves a card first.',
         schema: CancelReminderToolSchema,
         annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
@@ -458,6 +466,7 @@ export class ScheduleToolSet extends LocalToolMCP {
         tool_name: call.name,
         canonical_params: prepared?.value.approved ?? call.arguments ?? {},
         tool_type: 'truefoundry-system',
+        requires_network: info.requires_network,
         mcp_server_name: SCHEDULE_SERVER_ID,
         mcp_hints: {
           read_only_hint: info.read_only_hint,

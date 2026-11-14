@@ -61,6 +61,7 @@ class MapLikeTools extends LocalToolMCP {
   private readonly tools: ToolDefinition[] = [
     defineTool({
       name: 'render_map',
+      requiresNetwork: false,
       description: 'Renders a map for a place.',
       schema: z.object({ place_name: z.string() }).strict(),
       handler: (input: { place_name: string }) => {
@@ -70,6 +71,7 @@ class MapLikeTools extends LocalToolMCP {
     }),
     defineTool({
       name: 'render_route',
+      requiresNetwork: false,
       description: 'Renders a route between two places.',
       schema: z.object({ from_place: z.string(), to_place: z.string() }).strict(),
       handler: (input: { from_place: string; to_place: string }) => {

@@ -19,6 +19,13 @@ export interface EmailProviderPreset {
   smtp_port: number;
   smtp_mode: MailServerMode;
   /**
+   * True when this provider shows app passwords in groups split by spaces: the spaces are
+   * display only and are stripped before the password is checked or saved. The installer's
+   * copy of this table carries the same flag in its last column, and its email_clean_password
+   * reads the flag from the row, the same as the app does here.
+   */
+  app_password_spaces_stripped: boolean;
+  /**
    * The provider's own help page for making an app password, checked by hand when it was added.
    * Null when no official page could be checked (web.de's help is not reachable from here), so the
    * card shows the hint without a link rather than guessing an address.
@@ -38,6 +45,7 @@ export const EMAIL_PROVIDER_PRESETS: readonly EmailProviderPreset[] = [
     smtp_host: 'smtp.gmail.com',
     smtp_port: 465,
     smtp_mode: 'ssl',
+    app_password_spaces_stripped: true,
     help_url: 'https://support.google.com/accounts/answer/185833',
     help_hint: 'Gmail: turn on 2-Step Verification, then make an app password under Security, App passwords.',
   },
@@ -50,6 +58,7 @@ export const EMAIL_PROVIDER_PRESETS: readonly EmailProviderPreset[] = [
     smtp_host: 'smtp.mail.yahoo.com',
     smtp_port: 465,
     smtp_mode: 'ssl',
+    app_password_spaces_stripped: true,
     help_url: 'https://help.yahoo.com/kb/SLN15241.html',
     help_hint: 'Yahoo: make an app password under Account Security, Generate app password.',
   },
@@ -62,6 +71,7 @@ export const EMAIL_PROVIDER_PRESETS: readonly EmailProviderPreset[] = [
     smtp_host: 'smtp.aol.com',
     smtp_port: 465,
     smtp_mode: 'ssl',
+    app_password_spaces_stripped: true,
     help_url: 'https://help.aol.com/articles/Create-and-manage-app-password',
     help_hint: 'AOL: make an app password under Account Security, Generate app password.',
   },
@@ -74,6 +84,7 @@ export const EMAIL_PROVIDER_PRESETS: readonly EmailProviderPreset[] = [
     smtp_host: 'smtp.mail.me.com',
     smtp_port: 587,
     smtp_mode: 'starttls',
+    app_password_spaces_stripped: true,
     help_url: 'https://support.apple.com/en-us/102654',
     help_hint: 'iCloud: make an app-specific password at account.apple.com under Sign-In and Security.',
   },
@@ -86,6 +97,7 @@ export const EMAIL_PROVIDER_PRESETS: readonly EmailProviderPreset[] = [
     smtp_host: 'smtp.fastmail.com',
     smtp_port: 465,
     smtp_mode: 'ssl',
+    app_password_spaces_stripped: true,
     help_url: 'https://www.fastmail.help/hc/en-us/articles/360058752854-App-passwords',
     help_hint: 'Fastmail: make an app password under Settings, Privacy & Security, Manage app passwords.',
   },
@@ -98,6 +110,7 @@ export const EMAIL_PROVIDER_PRESETS: readonly EmailProviderPreset[] = [
     smtp_host: 'smtp.zoho.com',
     smtp_port: 465,
     smtp_mode: 'ssl',
+    app_password_spaces_stripped: false,
     help_url: 'https://www.zoho.com/mail/help/adminconsole/two-factor-authentication.html',
     help_hint: 'Zoho: turn on two-factor authentication, then make an app password under Security, App passwords.',
   },
@@ -110,6 +123,7 @@ export const EMAIL_PROVIDER_PRESETS: readonly EmailProviderPreset[] = [
     smtp_host: 'mail.gmx.net',
     smtp_port: 465,
     smtp_mode: 'ssl',
+    app_password_spaces_stripped: false,
     help_url: 'https://support.gmx.com/security/2fa/application-specific-passwords.html',
     help_hint:
       'GMX: turn on two-factor authentication, then make an application-specific password under Security Options.',
@@ -123,6 +137,7 @@ export const EMAIL_PROVIDER_PRESETS: readonly EmailProviderPreset[] = [
     smtp_host: 'smtp.web.de',
     smtp_port: 587,
     smtp_mode: 'starttls',
+    app_password_spaces_stripped: false,
     help_url: null,
     help_hint:
       'web.de: turn on two-factor authentication, then make an application-specific password under Security Options.',
@@ -159,15 +174,14 @@ export function mailModeForCustomPort(kind: 'imap' | 'smtp', port: number): Mail
 }
 
 /**
- * The providers whose app passwords are shown grouped in fours: spaces are display only and are
- * stripped before the password is checked or saved. Mirrors the installer's email_clean_password,
- * which cleans for exactly these providers.
+ * The password as it is checked and saved: display spaces removed when the provider's own
+ * preset record says it groups them. A provider with no preset record keeps its password as
+ * typed. The installer's email_clean_password reads the same flag from its copy of the table.
  */
-const SPACE_STRIPPED_PROVIDERS: ReadonlySet<string> = new Set(['gmail', 'icloud', 'yahoo', 'aol', 'fastmail']);
-
-/** The password as it is checked and saved: display spaces removed for the providers that group them. */
-export function cleanMailPassword(input: { provider_key: string; password: string }): string {
-  return SPACE_STRIPPED_PROVIDERS.has(input.provider_key) ? input.password.replaceAll(' ', '') : input.password;
+export function cleanMailPassword(input: { preset: EmailProviderPreset | undefined; password: string }): string {
+  return input.preset !== undefined && input.preset.app_password_spaces_stripped
+    ? input.password.replaceAll(' ', '')
+    : input.password;
 }
 
 /**

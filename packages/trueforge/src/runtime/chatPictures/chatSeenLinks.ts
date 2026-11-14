@@ -1,10 +1,5 @@
 import type { ISessionStore, PersistedTurnEvent } from '@truefoundry/trueforge-core/agent-session';
-import {
-  isPageReaderTool,
-  isSearchResultTool,
-  pageImageUrls,
-  searchResultUrls,
-} from '@truefoundry/trueforge-core/core';
+import { pageImageUrls, searchResultUrls } from '@truefoundry/trueforge-core/core';
 
 import { replyImageUrls } from '../chatImages/imageLinks';
 
@@ -89,7 +84,8 @@ function toolResponseText(event: PersistedTurnEvent): string | undefined {
  * Whether one picture link was seen in this chat: a search result's own link or a picture it listed,
  * a picture on a page the chat opened, or a picture the reply itself showed. Nothing here comes from the client: every
  * candidate is read back from the chat's stored turn events, and a tool result only counts when
- * the call that produced it is named as a search or page reader by the model's own message, ran
+ * the host's stamp on the call that produced it names it a search or page-read call of the
+ * designated provider, it ran
  * to completion, and was not screened (a screened result's stored text is not what the model saw).
  * A picture whose evidence sits past the newest ten pages of the feed is not seen, so it stays
  * blank rather than being fetched on a guess.
@@ -110,7 +106,7 @@ export async function isChatSeenLink(input: {
       seen.add(normalized);
     }
   };
-  const callNames = new Map<string, string>();
+  const callRoles = new Map<string, { search_result: boolean; page_reader: boolean }>();
   const toolResponses: PersistedTurnEvent[] = [];
   let pageToken: string | undefined;
   for (let page = 0; page < MAX_PAGES; page += 1) {
@@ -136,10 +132,13 @@ export async function isChatSeenLink(input: {
               typeof call.id === 'string' &&
               'tool_info' in call &&
               typeof call.tool_info === 'object' &&
-              'name' in call.tool_info &&
-              typeof call.tool_info.name === 'string'
+              call.tool_info !== null
             ) {
-              callNames.set(call.id, call.tool_info.name);
+              const info = call.tool_info;
+              callRoles.set(call.id, {
+                search_result: 'search_result_call' in info && info.search_result_call === true,
+                page_reader: 'page_read_call' in info && info.page_read_call === true,
+              });
             }
           }
         }
@@ -159,8 +158,8 @@ export async function isChatSeenLink(input: {
     if (event.type !== 'tool.response' && event.type !== 'tool.response.v2') {
       continue;
     }
-    const name = callNames.get(event.tool_call_id);
-    if (name === undefined) {
+    const roles = callRoles.get(event.tool_call_id);
+    if (roles === undefined) {
       continue;
     }
     const text = toolResponseText(event);
@@ -168,12 +167,12 @@ export async function isChatSeenLink(input: {
       continue;
     }
     const payload = toolResultPayload(text);
-    if (isSearchResultTool(name)) {
+    if (roles.search_result) {
       const found = searchResultUrls(payload);
       for (const url of [...found.links, ...found.pictures]) {
         add(url);
       }
-    } else if (isPageReaderTool(name)) {
+    } else if (roles.page_reader) {
       // A page result is text: the unwrapped string when the stored result is JSON, or the raw
       // text when it was stored unquoted. Anything else carries no page to read pictures from.
       const pageText = typeof payload === 'string' ? payload : payload === undefined ? text : undefined;

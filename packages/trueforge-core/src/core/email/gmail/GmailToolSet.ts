@@ -199,6 +199,7 @@ export class GmailToolSet extends LocalToolMCP {
       tools.push(
         defineTool({
           name: LIST_INBOX_THREADS_TOOL_NAME,
+          requiresNetwork: true,
           description:
             'List or search mail threads with Gmail search syntax (in:inbox, in:sent, is:unread, from:, to:, subject:, newer_than:2d, has:attachment, plain words). The single list and search tool.',
           schema: ListInboxThreadsSchema,
@@ -207,6 +208,7 @@ export class GmailToolSet extends LocalToolMCP {
         }),
         defineTool({
           name: GET_THREAD_TOOL_NAME,
+          requiresNetwork: true,
           description: 'Read one thread, oldest message first. Pass exactly one of thread_id or message_id.',
           schema: GetThreadSchema,
           annotations: READ_ANNOTATIONS,
@@ -214,6 +216,7 @@ export class GmailToolSet extends LocalToolMCP {
         }),
         defineTool({
           name: READ_EMAIL_TOOL_NAME,
+          requiresNetwork: true,
           description: 'Read one message by message_id, with its attachments listed.',
           schema: ReadEmailSchema,
           annotations: READ_ANNOTATIONS,
@@ -221,6 +224,7 @@ export class GmailToolSet extends LocalToolMCP {
         }),
         defineTool({
           name: LIST_DRAFTS_TOOL_NAME,
+          requiresNetwork: true,
           description: 'List the saved drafts with subject, recipients and a snippet.',
           schema: ListDraftsSchema,
           annotations: READ_ANNOTATIONS,
@@ -228,6 +232,7 @@ export class GmailToolSet extends LocalToolMCP {
         }),
         defineTool({
           name: GET_DRAFT_TOOL_NAME,
+          requiresNetwork: true,
           description: 'Read one saved draft in full, by draft_id.',
           schema: DraftIdSchema,
           annotations: READ_ANNOTATIONS,
@@ -239,6 +244,7 @@ export class GmailToolSet extends LocalToolMCP {
         tools.push(
           defineTool({
             name: DOWNLOAD_ATTACHMENT_TOOL_NAME,
+            requiresNetwork: true,
             description: `Fetch one attachment of a message into the sandbox workspace and return its path, so you can read it there with ${EXTRACT_DOCUMENT_TEXT_TOOL_NAME} (PDFs, images, Word, Excel, CSV, PowerPoint, OpenDocument, RTF, HTML, forwarded .eml or .msg e-mails, calendar invites and text files). Name the attachment by its handle from the message's attachments list.`,
             schema: DownloadAttachmentSchema,
             annotations: READ_ANNOTATIONS,
@@ -252,6 +258,7 @@ export class GmailToolSet extends LocalToolMCP {
       tools.push(
         defineTool({
           name: DRAFT_EMAIL_TOOL_NAME,
+          requiresNetwork: true,
           description:
             'Save a new plain-text draft. Nothing is sent. Pass in_reply_to (a message id) to reply inside that thread; the subject then becomes "Re: <original subject>", and without a "to" the reply is addressed to that message\'s sender. The user is asked before the draft is saved.',
           schema: DraftEmailSchema,
@@ -260,6 +267,7 @@ export class GmailToolSet extends LocalToolMCP {
         }),
         defineTool({
           name: UPDATE_DRAFT_TOOL_NAME,
+          requiresNetwork: true,
           description:
             'Replace the content of a saved plain-text draft, keeping its draft_id and its place in a thread. A draft with attachments or formatting cannot be changed. The user is asked first.',
           schema: UpdateDraftSchema,
@@ -268,6 +276,7 @@ export class GmailToolSet extends LocalToolMCP {
         }),
         defineTool({
           name: SEND_DRAFT_TOOL_NAME,
+          requiresNetwork: true,
           description:
             'Send a saved draft. The only way to send. The user always sees the whole message and is asked first; a draft with attachments or formatting, or one that is very long, cannot be sent.',
           schema: DraftIdSchema,
@@ -311,6 +320,7 @@ export class GmailToolSet extends LocalToolMCP {
         tool_name: params.name,
         canonical_params: this.#approvedParams({ call: params, draft: prepared.draft }),
         tool_type: 'truefoundry-system',
+        requires_network: info.requires_network,
         mcp_server_name: GMAIL_SERVER_ID,
         mcp_hints: {
           read_only_hint: info.read_only_hint,

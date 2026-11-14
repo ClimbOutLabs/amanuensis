@@ -48,7 +48,12 @@ function guideSearchToolSet(): IToolSet {
     source,
     selectors: { enableTools: ['@all'], disableTools: [], preloadTools: [], requireApprovalForTools: [] },
     preload: true,
-    searchProvider: { tools: [AMAN_SOURCES_TOOL_NAME], plumbing_fields: [] },
+    searchProvider: {
+      tools: [AMAN_SOURCES_TOOL_NAME],
+      page_read_tools: [],
+      plumbing_fields: [],
+      served_in_process: false,
+    },
   });
 }
 

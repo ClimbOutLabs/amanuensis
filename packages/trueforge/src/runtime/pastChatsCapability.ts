@@ -64,6 +64,7 @@ class PastChatsTool extends LocalToolMCP {
   private readonly tools: ToolDefinition[] = [
     defineTool({
       name: SEARCH_PAST_CHATS_TOOL_NAME,
+      requiresNetwork: false,
       description: SEARCH_PAST_CHATS_DESCRIPTION,
       schema: SEARCH_PAST_CHATS_INPUT_SCHEMA,
       annotations: { readOnlyHint: true, openWorldHint: false },

@@ -1,9 +1,4 @@
-import {
-  FetchedPageStore,
-  isSearchResultTool,
-  recordSearchResults,
-  type FetchedPageScope,
-} from '../../../src/core/search/fetchedPages';
+import { FetchedPageStore, recordSearchResults, type FetchedPageScope } from '../../../src/core/search/fetchedPages';
 import { groundPlace } from '../../../src/core/search/groundPlace';
 
 const SCOPE: FetchedPageScope = { tenant_id: 'tenant-1', conversation_id: 'chat-a' };
@@ -271,15 +266,6 @@ describe('recordSearchResults', () => {
     for (const place of places) {
       const claim = { ...place, languages: null, hours: null, price: null, phone: null };
       expect(groundPlace({ claim, pages, scope: SCOPE })).toMatchObject({ ok: true });
-    }
-  });
-
-  it('treats only true search tools as search tools', () => {
-    for (const name of ['tavily_search', 'web_search', 'web_search_exa', 'web_search_advanced_exa']) {
-      expect(isSearchResultTool(name)).toBe(true);
-    }
-    for (const name of ['web_fetch_exa', 'tavily_extract', 'web_fetch', 'tavily_crawl']) {
-      expect(isSearchResultTool(name)).toBe(false);
     }
   });
 });

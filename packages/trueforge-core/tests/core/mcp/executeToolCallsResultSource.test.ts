@@ -12,7 +12,7 @@ const SEARCH_RESULT = JSON.stringify({ results: [{ title: 'Oslo weather', url: R
 
 /** Runs one search-named tool that needs no card, and returns where the links of its result are recorded as from. */
 async function provenanceAfterSearch(
-  stamp: Pick<InternalToolCallInfo, 'search_provider_call'>,
+  stamp: Pick<InternalToolCallInfo, 'search_provider_call' | 'search_result_call'>,
 ): Promise<ChatProvenance> {
   const callTool = jest.fn(() => Promise.resolve(toolResultResponse({ text: SEARCH_RESULT })));
   const toolSet: IToolSet = {
@@ -71,7 +71,7 @@ async function provenanceAfterSearch(
 
 describe('where the links of a fresh search result come from', () => {
   it('counts the links the chosen search provider returned as found for the person', async () => {
-    const provenance = await provenanceAfterSearch({ search_provider_call: true });
+    const provenance = await provenanceAfterSearch({ search_provider_call: true, search_result_call: true });
     expect(isTrustedLink({ provenance, url: RESULT_LINK })).toBe(true);
   });
 

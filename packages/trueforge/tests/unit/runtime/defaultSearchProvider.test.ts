@@ -65,7 +65,8 @@ describe('seedDefaultSearchProvider', () => {
       type: 'remote',
       url: PARALLEL_URL,
       search_provider: true,
-      search_tools: ['web_search', 'web_fetch'],
+      search_tools: ['web_search'],
+      page_read_tools: ['web_fetch'],
     });
     expect(stored?.manifest.auth).toBeUndefined();
     expect(stored?.first_party).toBe(false);
@@ -85,9 +86,12 @@ describe('seedDefaultSearchProvider', () => {
     if (connection?.search_provider === undefined) {
       throw new Error('expected the seeded connector to be the search provider');
     }
-    expect(
-      f.catalog.searchProviderGrant({ url: connection.url, storedTools: connection.search_provider.tools }),
-    ).toEqual({ tools: ['web_search', 'web_fetch'], plumbing_fields: ['session_id', 'model_name'] });
+    expect(f.catalog.searchProviderGrant({ manifest: connection.search_provider })).toEqual({
+      tools: ['web_search'],
+      page_read_tools: ['web_fetch'],
+      plumbing_fields: ['session_id', 'model_name'],
+      served_in_process: false,
+    });
     expect(DEFAULT_SENTINEL_USER_SETTINGS.search_without_asking).toBe(true);
   });
 

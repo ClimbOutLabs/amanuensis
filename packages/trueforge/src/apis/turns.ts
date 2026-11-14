@@ -669,10 +669,11 @@ function createTurnResolver(deps: {
           }),
           first_party: connection.first_party,
           grant_binding: connection.grant_binding,
+          declared_change_tools: connection.declared_change_tools,
           search_provider:
             connection.search_provider === undefined
               ? undefined
-              : mcpCatalog.searchProviderGrant({ url: connection.url, storedTools: connection.search_provider.tools }),
+              : mcpCatalog.searchProviderGrant({ manifest: connection.search_provider }),
         };
       },
       setUpConnectorNames: async () =>

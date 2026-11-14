@@ -65,6 +65,7 @@ export class GoogleSetupToolSet extends LocalToolMCP {
     this.#tools = [
       defineTool({
         name: GOOGLE_SETUP_STATUS_TOOL_NAME,
+        requiresNetwork: false,
         description:
           'Read the state of the Google connection: whether it is connected, which of mail and calendar it may use, and the next step. Call it when the person asks for the Google card or Google Drive, and again after they finish on the Settings page.',
         schema: GoogleSetupStatusSchema,

@@ -134,6 +134,7 @@ export class LoadBundleTool extends LocalToolMCP {
     this.tools = [
       defineTool({
         name: LOAD_BUNDLE_TOOL_NAME,
+        requiresNetwork: false,
         description:
           'Optional. Returns the longer guidance for a topic in the guidance index. Every tool is callable without it.',
         schema: loadBundleSchema,

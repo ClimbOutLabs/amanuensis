@@ -22,7 +22,7 @@ import { actionIdFor, verifyApprovalToken, type ApprovalToken } from './approval
 import { canonicalShellFormFor } from './classifier';
 import type { SentinelCallIdentity, SentinelServices } from './context';
 import { extractCardFields } from './extractorRegistry';
-import { provenanceForToolType, requiresNetwork } from './networkRequirements';
+import { requiresNetwork } from './networkRequirements';
 import {
   hashArgv,
   matchAllowlist,
@@ -51,6 +51,8 @@ import {
 export interface VerifiableCall {
   tool_name: string;
   tool_type: 'truefoundry-system' | 'mcp';
+  /** Whether the tool needs the network, as its own registration declared it. Absent reads as needing it. */
+  requires_network?: boolean | undefined;
   canonical_params: Record<string, unknown>;
   tier: Tier;
   approval_token_id: string | null;
@@ -101,7 +103,7 @@ function offlineViolation(call: VerifiableCall, ctx: DispatchCheckContext): stri
     }
     return undefined;
   }
-  if (requiresNetwork({ tool_name: call.tool_name, provenance: provenanceForToolType(call.tool_type) })) {
+  if (requiresNetwork({ declared: call.requires_network })) {
     return 'Auto-denied: offline mode is on and this tool needs network access.';
   }
   if (extractCardFields({ tool_name: call.tool_name, canonical_params: call.canonical_params }).external_service) {

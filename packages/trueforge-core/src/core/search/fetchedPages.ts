@@ -1,7 +1,6 @@
 import { collectOutboundStrings } from '../permissions/outboundGuard';
 import { namesUrl } from '../permissions/provenance';
 import { hasMixedScriptWord, normalizedWords, significantWords } from './groundPlace';
-import { TAVILY_EXTRACT_TOOL_NAME, TAVILY_SEARCH_TOOL_NAME } from './TavilyClient';
 
 /**
  * Short-lived server memory of the pages any page reading tool returned, so a place claim can be
@@ -394,31 +393,13 @@ function collectPages(node: unknown, into: { url: string; text: string }[], dept
 }
 
 /**
- * The tools that read a page for the person, by name. Only these record what they return: any other
- * tool may echo the link it was given, or any text, and a page that tool never read must not count.
+ * Which of a server's tools are its search tools and which are its page readers is the server's
+ * own declaration to make, captured on the connector record when the person designates the
+ * server as the search provider. Nothing in this module keeps a list of tool names: the
+ * recording entry points below are called only for tools the record declares, because any
+ * other tool may echo the link it was given, or any text, and a page that tool never read
+ * must not count.
  */
-const PAGE_READER_TOOL_NAMES: ReadonlySet<string> = new Set(['web_fetch', TAVILY_EXTRACT_TOOL_NAME]);
-
-/** Whether a tool reads a page, so its result may be recorded as page text. */
-export function isPageReaderTool(name: string): boolean {
-  return PAGE_READER_TOOL_NAMES.has(name);
-}
-
-/**
- * The tools whose results are a list of search hits, by name. Only these record snippets: a page
- * reader's output links to pages it never showed, so its results are never search hits.
- */
-const SEARCH_RESULT_TOOL_NAMES: ReadonlySet<string> = new Set([
-  TAVILY_SEARCH_TOOL_NAME,
-  'web_search',
-  'web_search_exa',
-  'web_search_advanced_exa',
-]);
-
-/** Whether a tool's results may be recorded one search hit at a time. */
-export function isSearchResultTool(name: string): boolean {
-  return SEARCH_RESULT_TOOL_NAMES.has(name) && !PAGE_READER_TOOL_NAMES.has(name);
-}
 
 /**
  * Records what a page reading tool actually read, so a later place claim can be checked against it.

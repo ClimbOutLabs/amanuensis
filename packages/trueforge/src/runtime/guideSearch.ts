@@ -12,11 +12,7 @@ import {
   AmanSourcesSource,
   amanSourcePrefixes,
 } from '@truefoundry/trueforge-core/core/search/AmanSourcesSource';
-import {
-  TavilyClient,
-  isTavilyConnectorUrl,
-  tavilyAuthFromHeader,
-} from '@truefoundry/trueforge-core/core/search/TavilyClient';
+import { TavilyClient, tavilyAuthFromHeader } from '@truefoundry/trueforge-core/core/search/TavilyClient';
 import type { Logger } from 'winston';
 
 /**
@@ -53,8 +49,10 @@ async function authorizationHeaderOf(headers: RemoteMcpHeaders | undefined): Pro
 
 /**
  * Builds the guide's one live tool, the search over Aman's public sources, or
- * undefined when this turn may not have it. The tool exists only when Tavily is
- * the configured provider and offline mode is off; every other case returns
+ * undefined when this turn may not have it. The tool exists only when the
+ * designated provider is the one the host serves in process (the Tavily
+ * provider, whose record carries that mark from its designation) and offline
+ * mode is off; every other case returns
  * undefined and the guide answers from its built-in help alone. The check fails
  * closed: any surprise while setting the tool up leaves the guide without it.
  * Approval follows the same rule as web search: the tool set carries the search
@@ -76,7 +74,7 @@ export async function buildGuideSearchToolSet(input: {
       return undefined;
     }
     const connection = await input.connectionFor(providerName);
-    if (connection.search_provider === undefined || !isTavilyConnectorUrl(connection.url)) {
+    if (connection.search_provider === undefined || !connection.search_provider.served_in_process) {
       return undefined;
     }
     const offline =
@@ -105,7 +103,12 @@ export async function buildGuideSearchToolSet(input: {
         conversation_id: input.sessionId,
         services: input.sentinelServices,
       }),
-      searchProvider: { tools: [AMAN_SOURCES_TOOL_NAME], plumbing_fields: [] },
+      searchProvider: {
+        tools: [AMAN_SOURCES_TOOL_NAME],
+        page_read_tools: [],
+        plumbing_fields: [],
+        served_in_process: false,
+      },
       logger: input.logger,
     });
   } catch (error) {

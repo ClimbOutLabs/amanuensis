@@ -1,9 +1,11 @@
+import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
   cleanMailPassword,
   EMAIL_PROVIDER_PRESETS,
   emailProviderPreset,
+  type EmailProviderPreset,
   isMicrosoftMailAddress,
   mailAddressProblem,
   mailHostProblem,
@@ -53,6 +55,7 @@ describe('email provider presets', () => {
         preset.smtp_host,
         String(preset.smtp_port),
         preset.smtp_mode,
+        preset.app_password_spaces_stripped ? 'strip-spaces' : 'keep-spaces',
       ]);
     }
   });
@@ -70,13 +73,50 @@ describe('email provider presets', () => {
     expect(mailModeForCustomPort('smtp', 587)).toBe('starttls');
   });
 
-  it('strips display spaces only for the providers the installer strips them for', () => {
-    for (const key of ['gmail', 'icloud', 'yahoo', 'aol', 'fastmail']) {
-      expect(cleanMailPassword({ provider_key: key, password: 'ab cd ef' })).toBe('abcdef');
+  it('strips display spaces exactly when the provider preset record says it groups them', () => {
+    for (const preset of EMAIL_PROVIDER_PRESETS) {
+      expect(cleanMailPassword({ preset, password: 'ab cd ef' })).toBe(
+        preset.app_password_spaces_stripped ? 'abcdef' : 'ab cd ef',
+      );
     }
-    for (const key of ['zoho', 'gmx', 'webde', 'other']) {
-      expect(cleanMailPassword({ provider_key: key, password: 'ab cd ef' })).toBe('ab cd ef');
-    }
+    expect(cleanMailPassword({ preset: undefined, password: 'ab cd ef' })).toBe('ab cd ef');
+  });
+
+  it('strips display spaces for an invented provider whose record carries the flag, and keeps them without it', () => {
+    const invented: EmailProviderPreset = {
+      key: 'northmail',
+      name: 'Northmail',
+      imap_host: 'imap.northmail.example',
+      imap_port: 993,
+      imap_mode: 'ssl',
+      smtp_host: 'smtp.northmail.example',
+      smtp_port: 465,
+      smtp_mode: 'ssl',
+      app_password_spaces_stripped: true,
+      help_url: null,
+      help_hint: 'Northmail: make an app password under Security.',
+    };
+    expect(cleanMailPassword({ preset: invented, password: 'ab cd ef' })).toBe('abcdef');
+    expect(
+      cleanMailPassword({ preset: { ...invented, app_password_spaces_stripped: false }, password: 'ab cd ef' }),
+    ).toBe('ab cd ef');
+  });
+
+  it('the installer cleans a password by the flag on the row, for an invented provider too', () => {
+    const script = [
+      'source "$1"',
+      'EMAIL_PRESETS="northmail imap.northmail.example 993 ssl smtp.northmail.example 465 ssl strip-spaces',
+      'plainmail imap.plainmail.example 993 ssl smtp.plainmail.example 465 ssl keep-spaces"',
+      'email_clean_password northmail "ab cd ef"; echo',
+      'email_clean_password plainmail "ab cd ef"; echo',
+      'email_clean_password gmail "ab cd ef"; echo',
+    ].join('\n');
+    const out = execFileSync('bash', ['-c', script, 'test', resolve(REPO_ROOT, 'installer/lib/email.sh')], {
+      encoding: 'utf8',
+    });
+    // The invented strip-spaces row strips, the keep-spaces row keeps, and gmail keeps its
+    // spaces here because the replaced table has no gmail row at all.
+    expect(out.split('\n').slice(0, 3)).toEqual(['abcdef', 'ab cd ef', 'ab cd ef']);
   });
 
   it('refuses passwords the account file cannot hold, in plain words', () => {

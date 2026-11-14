@@ -69,6 +69,7 @@ class TaskChecklistTool extends LocalToolMCP {
   private readonly tools: ToolDefinition[] = [
     defineTool({
       name: REPLACE_TASK_CHECKLIST_TOOL_NAME,
+      requiresNetwork: false,
       description:
         'Replace the durable task checklist with up to 50 ordered items. Each item has only an id, text, and done flag. Read the current revision from the injected checklist and retry a stale write at most once.',
       schema: ReplaceTaskChecklistRequestSchema,

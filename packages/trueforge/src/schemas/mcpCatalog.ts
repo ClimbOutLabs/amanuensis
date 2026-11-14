@@ -5,6 +5,7 @@
 import { z } from '@hono/zod-openapi';
 import { NameSchema, uniqueNames } from './common';
 import {
+  McpSearchPlumbingFieldsSchema,
   McpSearchToolsSchema,
   McpServerDescriptionSchema,
   McpServerManifestAuthSchema,
@@ -16,9 +17,6 @@ import {
  * `truefoundry` is TrueFoundry-managed.
  */
 export const CatalogMcpServerTypeSchema = McpServerTypeSchema.exclude(['truefoundry']).openapi('CatalogMCPServerType');
-
-/** Argument names of a search provider's tools that carry its own bookkeeping, not the user's text. */
-const McpSearchPlumbingFieldsSchema = z.array(z.string().min(1).max(128)).max(16);
 
 /** Catalog entry — discovery preset the settings UI copies into a PUT body. */
 export const CatalogMcpServerSchema = z
@@ -36,6 +34,9 @@ export const CatalogMcpServerSchema = z
     search_tools: McpSearchToolsSchema.optional().describe(
       'Search tools of this server that run without asking when it is the web search provider.',
     ),
+    page_read_tools: McpSearchToolsSchema.optional().describe(
+      'Page-read tools of this server that run without asking when it is the web search provider.',
+    ),
   })
   .strict()
   .openapi('CatalogMCPServer');
@@ -45,6 +46,12 @@ const CatalogPresetSchema = z
   .object({
     ...CatalogMcpServerSchema.shape,
     search_plumbing_fields: McpSearchPlumbingFieldsSchema.optional(),
+    search_in_process: z
+      .boolean()
+      .optional()
+      .describe(
+        'When true, the host serves this preset’s search itself, in process, once it is the web search provider.',
+      ),
   })
   .strict();
 
