@@ -11,11 +11,7 @@ import type { SentinelServices } from '../../../src/core/permissions/context';
 import { isSearchHoldCardText } from '../../../src/core/permissions/searchHoldText';
 import { NO_HOST_STAMP, recordToolResultProvenance } from '../../../src/core/permissions/webSearch';
 import { FetchedPageStore } from '../../../src/core/search/fetchedPages';
-import {
-  TAVILY_EXTRACT_TOOL_NAME,
-  TAVILY_SEARCH_TOOL_NAME,
-  TavilyClient,
-} from '../../../src/core/search/TavilyClient';
+import { TAVILY_EXTRACT_TOOL_NAME, TAVILY_SEARCH_TOOL_NAME, TavilyClient } from '../../../src/core/search/TavilyClient';
 import { TavilySource } from '../../../src/core/search/TavilySource';
 import { GARDEN_URL, HARBOUR_URL, extractResponse, searchResponse } from './tavilyFixtures';
 

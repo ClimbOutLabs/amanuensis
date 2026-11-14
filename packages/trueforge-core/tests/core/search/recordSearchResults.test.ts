@@ -1,8 +1,4 @@
-import {
-  FetchedPageStore,
-  recordSearchResults,
-  type FetchedPageScope,
-} from '../../../src/core/search/fetchedPages';
+import { FetchedPageStore, recordSearchResults, type FetchedPageScope } from '../../../src/core/search/fetchedPages';
 import { groundPlace } from '../../../src/core/search/groundPlace';
 
 const SCOPE: FetchedPageScope = { tenant_id: 'tenant-1', conversation_id: 'chat-a' };

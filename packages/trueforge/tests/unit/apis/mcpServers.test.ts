@@ -1243,7 +1243,9 @@ describe('mcp-servers routers', () => {
       );
       expect(response.status).toBe(200);
       const stored = await mcpServerStore.getServer({ tenant_id: TENANT_ID, name: 'catalog-search' });
-      expect(stored?.manifest.type === 'remote' ? stored.manifest.url : undefined).toBe('https://other.example.com/mcp');
+      expect(stored?.manifest.type === 'remote' ? stored.manifest.url : undefined).toBe(
+        'https://other.example.com/mcp',
+      );
       expect(stored?.manifest.type === 'remote' ? stored.manifest.search_tools : undefined).toBeUndefined();
       expect(stored?.manifest.type === 'remote' ? stored.manifest.page_read_tools : undefined).toBeUndefined();
     });
@@ -1279,9 +1281,7 @@ describe('mcp-servers routers', () => {
         // The fixture's own web_search takes queries and its web_fetch takes page addresses,
         // both declared read-only by the server itself, and no preset names either.
         expect(stored?.manifest.type === 'remote' ? stored.manifest.search_tools : undefined).toEqual(['web_search']);
-        expect(stored?.manifest.type === 'remote' ? stored.manifest.page_read_tools : undefined).toEqual([
-          'web_fetch',
-        ]);
+        expect(stored?.manifest.type === 'remote' ? stored.manifest.page_read_tools : undefined).toEqual(['web_fetch']);
         expect(stored?.manifest.type === 'remote' ? stored.manifest.search_plumbing_fields : undefined).toBeUndefined();
         expect(stored?.manifest.type === 'remote' ? stored.manifest.search_in_process : undefined).toBeUndefined();
       } finally {
@@ -1337,9 +1337,7 @@ describe('mcp-servers routers', () => {
         expect(response.status).toBe(200);
         const stored = await mcpServerStore.getServer({ tenant_id: TENANT_ID, name: 'home-search' });
         expect(stored?.manifest.type === 'remote' ? stored.manifest.search_tools : undefined).toEqual(['web_search']);
-        expect(stored?.manifest.type === 'remote' ? stored.manifest.page_read_tools : undefined).toEqual([
-          'web_fetch',
-        ]);
+        expect(stored?.manifest.type === 'remote' ? stored.manifest.page_read_tools : undefined).toEqual(['web_fetch']);
       } finally {
         unlist();
         await inert.stop();
@@ -1372,7 +1370,6 @@ describe('mcp-servers routers', () => {
       expect(response.status).toBe(200);
       expect((await storedManifest('home-assistant'))?.declared_change_tools).toBeUndefined();
     });
-
 
     it('keeps the stored declaration across a re-save at the same address, and drops it at a new one', async () => {
       await mcpServerStore.upsertServer({

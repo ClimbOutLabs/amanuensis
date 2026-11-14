@@ -19,9 +19,7 @@
 export interface SearchProviderToolListEntry {
   name: string;
   inputSchema?: { properties?: Record<string, unknown> | undefined } | undefined;
-  annotations?:
-    | { readOnlyHint?: boolean | undefined; openWorldHint?: boolean | undefined }
-    | undefined;
+  annotations?: { readOnlyHint?: boolean | undefined; openWorldHint?: boolean | undefined } | undefined;
 }
 
 /** The declaration captured from one server's tool list. */

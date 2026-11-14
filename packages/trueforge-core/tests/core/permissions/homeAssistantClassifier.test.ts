@@ -333,7 +333,11 @@ describe('Home Assistant standing grants', () => {
     const ctx = makeCtx();
     await recordGrant(ctx, 'ha:domain:switch');
     const decision = await classifyTier(
-      haAction('HassBrewCoffee', { entity_id: 'switch.coffee_machine' }, { mcp_declared_change_tools: ['HassBrewCoffee'] }),
+      haAction(
+        'HassBrewCoffee',
+        { entity_id: 'switch.coffee_machine' },
+        { mcp_declared_change_tools: ['HassBrewCoffee'] },
+      ),
       ctx,
     );
     expect(decision).toMatchObject({ tier: 1, reason: TOOL_GRANT_REASON, card: null });

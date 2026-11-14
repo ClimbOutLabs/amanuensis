@@ -153,7 +153,11 @@ function makeToolResult(params: {
     message: { role: 'tool', tool_call_id: 'call-1', content: rawContent },
     images: [],
     rawContent,
-    toolCallInfo: toolCallInfoFor(underlyingToolName, 'mcp', pageRead ? { search_provider_call: true, page_read_call: true } : {}),
+    toolCallInfo: toolCallInfoFor(
+      underlyingToolName,
+      'mcp',
+      pageRead ? { search_provider_call: true, page_read_call: true } : {},
+    ),
     screen: undefined,
     // `info` reflects the function the model actually called (the dispatcher's own name when
     // reached through `call_tool`), which is why matching against it — the pre-fix bug — never

@@ -291,7 +291,8 @@ export const NO_HOST_STAMP: HostToolStamp = {
 
 /** Reads the host's stamp from the call info it wrote; a call with no info earns no standing. */
 export function hostToolStamp(
-  info: Pick<InternalToolCallInfo, 'type' | 'search_provider_call' | 'search_result_call' | 'page_read_call'> | undefined,
+  info:
+    Pick<InternalToolCallInfo, 'type' | 'search_provider_call' | 'search_result_call' | 'page_read_call'> | undefined,
 ): HostToolStamp {
   return info === undefined
     ? NO_HOST_STAMP

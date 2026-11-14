@@ -1,5 +1,6 @@
 import {
   HOME_ASSISTANT_REFUSAL,
+  homeAssistantDeclaredChangeTools,
   homeAssistantDomainOfEntity,
   homeAssistantDomainsLabel,
   homeAssistantEntityLabel,
@@ -10,7 +11,6 @@ import {
   homeAssistantTargetLabel,
   homeAssistantToolBase,
   homeAssistantToolPrefix,
-  homeAssistantDeclaredChangeTools,
   isHomeAssistantCallActionTool,
   isHomeAssistantDeclaredChangeTool,
   isHomeAssistantLiveContextTool,
@@ -60,9 +60,9 @@ describe('Home Assistant tool names', () => {
       { name: 'HassBrewCoffee', annotations: { readOnlyHint: false } },
     ]);
     expect(isHomeAssistantDeclaredChangeTool({ tool_name: 'HassTurnOn', declared_change_tools: declared })).toBe(true);
-    expect(isHomeAssistantDeclaredChangeTool({ tool_name: 'intent__HassTurnOn', declared_change_tools: declared })).toBe(
-      true,
-    );
+    expect(
+      isHomeAssistantDeclaredChangeTool({ tool_name: 'intent__HassTurnOn', declared_change_tools: declared }),
+    ).toBe(true);
     expect(isHomeAssistantDeclaredChangeTool({ tool_name: 'HassBrewCoffee', declared_change_tools: declared })).toBe(
       true,
     );

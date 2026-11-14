@@ -97,9 +97,9 @@ describe('email provider presets', () => {
       help_hint: 'Northmail: make an app password under Security.',
     };
     expect(cleanMailPassword({ preset: invented, password: 'ab cd ef' })).toBe('abcdef');
-    expect(cleanMailPassword({ preset: { ...invented, app_password_spaces_stripped: false }, password: 'ab cd ef' })).toBe(
-      'ab cd ef',
-    );
+    expect(
+      cleanMailPassword({ preset: { ...invented, app_password_spaces_stripped: false }, password: 'ab cd ef' }),
+    ).toBe('ab cd ef');
   });
 
   it('the installer cleans a password by the flag on the row, for an invented provider too', () => {

@@ -180,7 +180,12 @@ function makeSearchProviderToolSet() {
     selectors: { enableTools: ['@all'], disableTools: [], preloadTools: [], requireApprovalForTools: undefined },
     preload: true,
     sentinel,
-    searchProvider: { tools: ['web_search'], page_read_tools: ['web_fetch'], plumbing_fields: [], served_in_process: false },
+    searchProvider: {
+      tools: ['web_search'],
+      page_read_tools: ['web_fetch'],
+      plumbing_fields: [],
+      served_in_process: false,
+    },
   });
   return { source, toolSet, sentinel };
 }

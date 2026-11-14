@@ -49,7 +49,9 @@ const CatalogPresetSchema = z
     search_in_process: z
       .boolean()
       .optional()
-      .describe('When true, the host serves this preset’s search itself, in process, once it is the web search provider.'),
+      .describe(
+        'When true, the host serves this preset’s search itself, in process, once it is the web search provider.',
+      ),
   })
   .strict();
 

@@ -49,7 +49,11 @@ import {
   putMcpServerRoute,
 } from '../routes/mcpServerRoutes';
 import { remoteUrlProblem } from '../runtime/remoteAddress';
-import { getMcpConnection, RemoteAddressRefusedError, resolveManifestRequestHeaders } from '../runtime/sessionResources';
+import {
+  getMcpConnection,
+  RemoteAddressRefusedError,
+  resolveManifestRequestHeaders,
+} from '../runtime/sessionResources';
 import type {
   AvailableMcpServer,
   ConfiguredMcpServer,
@@ -421,7 +425,9 @@ export function createSettingsMcpServersRouter<TTransaction>(
       if (isAuthRequired(response)) {
         // The designation is saved with no declaration: the server's tools are captured when
         // they are next read, after the person has connected it.
-        deps.logger.warn(`Search provider tool capture needs sign-in for "${manifest.name}"; saving without a declaration`);
+        deps.logger.warn(
+          `Search provider tool capture needs sign-in for "${manifest.name}"; saving without a declaration`,
+        );
         return { declaration: undefined };
       }
       const declaration = declaredSearchProviderTools(response.result.tools);
@@ -958,8 +964,7 @@ export function createMcpServersRouter<TTransaction>(deps: McpServersRouterDeps<
       logger: deps.logger,
       signal: c.req.raw.signal,
     });
-    let listedTools: readonly { name: string; annotations?: { readOnlyHint?: boolean | undefined } | undefined }[] =
-      [];
+    let listedTools: readonly { name: string; annotations?: { readOnlyHint?: boolean | undefined } | undefined }[] = [];
     const probe: HomeAssistantProbeClient = {
       listTools: async () => {
         const response = await remote.listTools();
