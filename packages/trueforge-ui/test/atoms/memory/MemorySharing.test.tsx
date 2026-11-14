@@ -33,12 +33,17 @@ function renderSharing(options: {
   return { onSave, container: view.container };
 }
 
-/** The grid row whose persona is `label`, found by its row heading. */
+/** The row of the reader called `label`. */
 function row(label: string): HTMLElement {
-  const heading = screen.getByRole('rowheader', { name: new RegExp(`^${label}`) });
-  const tr = heading.closest('tr');
-  if (tr === null) throw new Error(`No grid row for ${label}`);
-  return tr;
+  return within(screen.getByRole('list', { name: 'Which notes each persona can read' })).getByRole('listitem', {
+    name: label,
+  });
+}
+
+/** Opens a reader's boxes and returns its row. */
+function openRow(label: string): HTMLElement {
+  fireEvent.click(screen.getByRole('button', { name: `Select what ${label} can read` }));
+  return row(label);
 }
 
 describe('MemorySharing', () => {
@@ -55,87 +60,98 @@ describe('MemorySharing', () => {
     }
   });
 
-  it('shows one grid: a row per reader and a column per set of notes', () => {
+  it('shows one row per reader, the main assistant first, with no boxes until one is opened', () => {
     renderSharing({ namespaces: [HEALTH] });
-    expect(screen.getByRole('table', { name: 'Which notes each persona can read' })).toBeInTheDocument();
-    // Persona columns come first, topic collections after them.
-    expect(screen.getAllByRole('columnheader').map(header => header.textContent)).toEqual([
-      'Can also read notes from',
-      'Theo',
-      'June',
-      'Health',
-    ]);
-    expect(screen.getByRole('rowheader', { name: /^Theo/ })).toBeInTheDocument();
-    expect(screen.getByRole('rowheader', { name: /^June/ })).toBeInTheDocument();
-    expect(screen.getByRole('rowheader', { name: /^Juniper/ })).toBeInTheDocument();
-  });
-
-  it('gives each crossing a real checkbox that reports its state', () => {
-    renderSharing({ shares: { [THEO.id]: [personaVaultNamespace('June')] } });
-
-    const theo = within(row('Theo')).getByRole('checkbox', { name: 'June' });
-    expect(theo).toBeChecked();
-    const june = within(row('June')).getByRole('checkbox', { name: 'Theo' });
-    expect(june).not.toBeChecked();
-    // The main assistant is listed by its display name, and offered every persona's notes.
     expect(
-      within(row('Juniper'))
-        .getAllByRole('checkbox')
-        .map(box => box.getAttribute('aria-label')),
-    ).toEqual(['Theo', 'June']);
+      within(screen.getByRole('list', { name: 'Which notes each persona can read' }))
+        .getAllByRole('listitem')
+        .map(item => item.getAttribute('aria-label')),
+    ).toEqual(['Juniper', 'Theo', 'June']);
+    expect(screen.queryByRole('table')).toBeNull();
+    expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
   });
 
-  it('leaves the self crossing blank: a persona is never offered its own notes', () => {
-    renderSharing({});
-    expect(within(row('Theo')).queryByRole('checkbox', { name: 'Theo' })).toBeNull();
-    expect(within(row('June')).queryByRole('checkbox', { name: 'June' })).toBeNull();
-    // The main assistant keeps no notes of its own, so it has no column.
-    expect(screen.queryByRole('columnheader', { name: 'Juniper' })).toBeNull();
-    // Every row still has one cell per column, the blank one included.
-    for (const label of ['Theo', 'June', 'Juniper']) {
-      expect(row(label).querySelectorAll('td')).toHaveLength(2);
-    }
-  });
+  it('says in words what each reader reads', () => {
+    renderSharing({
+      namespaces: [HEALTH],
+      shares: { [THEO.id]: [personaVaultNamespace('June'), 'topic:health'] },
+    });
 
-  it('says "Only its own notes" in muted text in the row when nothing is ticked', () => {
-    renderSharing({ shares: { [THEO.id]: [personaVaultNamespace('June')] } });
-
-    const quiet = within(row('June')).getByText('Only its own notes');
-    expect(quiet).toHaveClass('text-text-muted');
+    expect(within(row('Theo')).getByText('Also reads notes from June and Health')).toBeInTheDocument();
     expect(within(row('Theo')).queryByText('Only its own notes')).toBeNull();
+    expect(within(row('June')).getByText('Only its own notes')).toHaveClass('text-text-muted');
     expect(within(row('Juniper')).getByText('Only the shared notes')).toBeInTheDocument();
   });
 
-  it('offers the topic collections on every row, the main assistant included', async () => {
+  it('keeps the line short when a reader reads many sets of notes', () => {
+    const many = ['Ada', 'Ben', 'Cy', 'Dee', 'Eli'].map(name => ({ id: `p-${name}`, displayName: name }));
+    renderSharing({
+      personas: [THEO, ...many],
+      shares: { [THEO.id]: many.map(persona => personaVaultNamespace(persona.displayName)) },
+    });
+    expect(within(row('Theo')).getByText('Also reads notes from Ada, Ben and 3 more')).toBeInTheDocument();
+  });
+
+  it('opens one reader at a time, with a real checkbox per set of notes that reports its state', () => {
+    renderSharing({ shares: { [THEO.id]: [personaVaultNamespace('June')] } });
+
+    expect(within(openRow('Theo')).getByRole('checkbox', { name: 'June' })).toBeChecked();
+    expect(screen.getByRole('button', { name: 'Close the choices for Theo' })).toHaveAttribute('aria-expanded', 'true');
+
+    // Opening another reader closes the first.
+    expect(within(openRow('June')).getByRole('checkbox', { name: 'Theo' })).not.toBeChecked();
+    expect(within(row('Theo')).queryAllByRole('checkbox')).toHaveLength(0);
+
+    // The main assistant is listed by its display name, and offered every persona's notes.
+    expect(
+      within(openRow('Juniper'))
+        .getAllByRole('checkbox')
+        .map(box => box.getAttribute('aria-label')),
+    ).toEqual(['Theo', 'June']);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close the choices for Juniper' }));
+    expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
+  });
+
+  it('never offers a persona its own notes, and never offers the main assistant as a set of notes', () => {
+    renderSharing({});
+    expect(within(openRow('Theo')).queryByRole('checkbox', { name: 'Theo' })).toBeNull();
+    expect(within(openRow('June')).queryByRole('checkbox', { name: 'June' })).toBeNull();
+    expect(within(row('June')).queryByRole('checkbox', { name: 'Juniper' })).toBeNull();
+  });
+
+  it('offers the topic collections to every reader, the main assistant included', async () => {
     const { onSave } = renderSharing({ namespaces: [HEALTH] });
-    for (const label of ['Theo', 'June', 'Juniper']) {
-      expect(within(row(label)).getByRole('checkbox', { name: 'Health' })).not.toBeChecked();
+    for (const label of ['Theo', 'Juniper', 'June']) {
+      const opened = openRow(label);
+      expect(within(opened).getByRole('group', { name: 'Topics' })).toBeInTheDocument();
+      expect(within(opened).getByRole('checkbox', { name: 'Health' })).not.toBeChecked();
     }
 
     fireEvent.click(within(row('June')).getByRole('checkbox', { name: 'Health' }));
 
     await waitFor(() => expect(onSave).toHaveBeenCalledWith({ shares: { [JUNE.id]: ['topic:health'] } }));
+    expect(within(row('June')).getByText('Also reads notes from Health')).toBeInTheDocument();
   });
 
   it('leaves out the Help persona unless it keeps notes, and then calls it Help', () => {
     const { container } = renderSharing({ personas: [THEO, JUNE, GUIDE] });
     expect(container.textContent).not.toContain(AMAN_GUIDE_NAME);
-    expect(screen.queryByRole('rowheader', { name: /^Help/ })).toBeNull();
-    expect(screen.queryByRole('columnheader', { name: 'Help' })).toBeNull();
-    expect(screen.queryAllByRole('checkbox', { name: 'Help' })).toHaveLength(0);
+    expect(screen.queryByRole('listitem', { name: 'Help' })).toBeNull();
+    expect(within(openRow('Theo')).queryByRole('checkbox', { name: 'Help' })).toBeNull();
   });
 
   it('lists the Help persona as Help when it keeps notes of its own', () => {
     renderSharing({ personas: [THEO, JUNE, GUIDE], withNotes: [AMAN_GUIDE_NAME] });
     expect(row('Help')).toBeInTheDocument();
-    expect(within(row('Theo')).getByRole('checkbox', { name: 'Help' })).not.toBeChecked();
+    expect(within(openRow('Theo')).getByRole('checkbox', { name: 'Help' })).not.toBeChecked();
   });
 
   it('saves each change as it is made, with no save button, and says Saved', async () => {
     const { onSave } = renderSharing({});
     expect(screen.queryByRole('button', { name: /save/i })).toBeNull();
 
-    fireEvent.click(within(row('Juniper')).getByRole('checkbox', { name: 'Theo' }));
+    fireEvent.click(within(openRow('Juniper')).getByRole('checkbox', { name: 'Theo' }));
 
     await waitFor(() =>
       expect(onSave).toHaveBeenCalledWith({
@@ -151,21 +167,22 @@ describe('MemorySharing', () => {
       namespaces: [HEALTH],
     });
 
-    fireEvent.click(within(row('Theo')).getByRole('checkbox', { name: 'June' }));
+    fireEvent.click(within(openRow('Theo')).getByRole('checkbox', { name: 'June' }));
 
     await waitFor(() => expect(onSave).toHaveBeenCalledWith({ shares: { [THEO.id]: ['topic:health'] } }));
   });
 
-  it('puts the box back and says what to do when a save fails', async () => {
+  it('puts the box and the line back and says what to do when a save fails', async () => {
     renderSharing({ onSave: vi.fn(async () => Promise.reject(new Error('offline'))) });
 
-    const box = within(row('Theo')).getByRole('checkbox', { name: 'June' });
+    const box = within(openRow('Theo')).getByRole('checkbox', { name: 'June' });
     fireEvent.click(box);
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'That change was not saved. Check your connection, then try again.',
     );
     expect(box).not.toBeChecked();
+    expect(within(row('Theo')).getByText('Only its own notes')).toBeInTheDocument();
   });
 
   it('says there is nothing to share before any persona exists', () => {

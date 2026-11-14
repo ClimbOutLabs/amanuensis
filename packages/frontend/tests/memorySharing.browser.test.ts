@@ -17,19 +17,19 @@ const VIEWPORTS = [
   { name: 'phone', width: 390, height: 844 },
 ] as const;
 const THEMES = ['light', 'dark'] as const;
-const GRID_NAME = 'Which notes each persona can read';
+const LIST_NAME = 'Which notes each persona can read';
 
 /** Opens Settings > Memory > Sharing from the shell, the way a person reaches it. */
 async function openSharingTab(page: Page) {
   await page.getByRole('button', { name: 'Settings', exact: true }).first().click();
   await page.getByRole('tab', { name: 'Memory', exact: true }).click();
   await page.getByRole('tab', { name: 'Sharing' }).click();
-  await page.getByRole('table', { name: GRID_NAME }).waitFor({ timeout: RENDER_TIMEOUT_MS });
+  await page.getByRole('list', { name: LIST_NAME }).waitFor({ timeout: RENDER_TIMEOUT_MS });
 }
 
 /** Scrolls the last persona row to the end of its scroll area and returns its box and the footer's top edge. */
 async function lastRowAboveFooter(page: Page): Promise<{ rowBottom: number; footerTop: number; viewport: number }> {
-  const row: Locator = page.getByRole('table', { name: GRID_NAME }).getByRole('row').last();
+  const row: Locator = page.getByRole('list', { name: LIST_NAME }).getByRole('listitem').last();
   await row.evaluate(element => element.scrollIntoView({ block: 'end' }));
   const footer = page.locator('footer').filter({ has: page.getByRole('button', { name: 'Settings', exact: true }) });
   const rowBox = await row.boundingBox();
@@ -44,36 +44,33 @@ async function lastRowAboveFooter(page: Page): Promise<{ rowBottom: number; foot
 
 type Box = { left: number; right: number; top: number; bottom: number };
 
-/** Measures the settings scroll area, the grid's own sideways scroll box, each row's persona name, and each checkbox. */
-async function sharingGeometry(
-  page: Page,
-): Promise<{ panel: Box; grid: Box; names: Box[]; boxes: Box[]; boxRows: Box[][] }> {
-  const table = page.getByRole('table', { name: GRID_NAME });
+/** Opens the first row's choices and measures the settings scroll area, the list, that row's name and button, and each choice. */
+async function sharingGeometry(page: Page): Promise<{ panel: Box; list: Box; name: Box; button: Box; choices: Box[] }> {
+  const list = page.getByRole('list', { name: LIST_NAME });
+  await list
+    .getByRole('button', { name: /^Select what / })
+    .first()
+    .click();
+  await list.getByRole('checkbox').first().waitFor({ timeout: RENDER_TIMEOUT_MS });
   // Plain rects only: a named helper here would be rewritten by the test transform and fail in the page.
-  const geometry = await table.evaluate(element => {
+  return await list.evaluate(element => {
     let panelElement: Element | null = element.parentElement;
     while (panelElement !== null && !['auto', 'scroll'].includes(getComputedStyle(panelElement).overflowY)) {
       panelElement = panelElement.parentElement;
     }
-    if (panelElement === null) throw new Error('No scrolling settings panel around the sharing grid');
-    const gridElement = element.parentElement ?? element;
-    const rows = Array.from(element.querySelectorAll('tbody > tr'));
+    if (panelElement === null) throw new Error('No scrolling settings panel around the sharing list');
+    const row = element.querySelector('li');
+    const button = row?.querySelector('button');
+    const name = button?.previousElementSibling;
+    if (row === null || button == null || name == null) throw new Error('The first sharing row is incomplete');
     return {
       panel: panelElement.getBoundingClientRect().toJSON(),
-      grid: gridElement.getBoundingClientRect().toJSON(),
-      names: rows.map(row => (row.querySelector(':scope > th') ?? row).getBoundingClientRect().toJSON()),
-      boxRows: rows.map(row =>
-        Array.from(row.querySelectorAll('input[type="checkbox"]')).map(box => box.getBoundingClientRect().toJSON()),
-      ),
+      list: element.getBoundingClientRect().toJSON(),
+      name: name.getBoundingClientRect().toJSON(),
+      button: button.getBoundingClientRect().toJSON(),
+      choices: Array.from(row.querySelectorAll('label')).map(choice => choice.getBoundingClientRect().toJSON()),
     };
   });
-  return {
-    panel: geometry.panel,
-    grid: geometry.grid,
-    names: geometry.names,
-    boxes: geometry.boxRows.flat(),
-    boxRows: geometry.boxRows,
-  };
 }
 
 function overlaps(a: Box, b: Box): boolean {
@@ -81,30 +78,31 @@ function overlaps(a: Box, b: Box): boolean {
 }
 
 /**
- * The grid sits inside the settings panel and scrolls sideways in its own box when it is wider, so
- * no checkbox widens the page. No checkbox covers a persona name or another checkbox.
+ * The list sits inside the settings panel and its choices wrap inside it, so nothing widens the
+ * page. No choice covers the persona's name, its button or another choice.
  */
-function assertGridInsidePanel(geometry: Awaited<ReturnType<typeof sharingGeometry>>, label: string) {
-  assert.ok(geometry.boxes.length > 0, `there are checkboxes to check (${label})`);
+function assertListInsidePanel(geometry: Awaited<ReturnType<typeof sharingGeometry>>, label: string) {
+  assert.ok(geometry.choices.length > 0, `there are choices to check (${label})`);
   assert.ok(
-    geometry.grid.left >= geometry.panel.left && geometry.grid.right <= geometry.panel.right,
-    `the grid ${JSON.stringify(geometry.grid)} runs past the panel ${JSON.stringify(geometry.panel)} (${label})`,
+    geometry.list.left >= geometry.panel.left && geometry.list.right <= geometry.panel.right,
+    `the list ${JSON.stringify(geometry.list)} runs past the panel ${JSON.stringify(geometry.panel)} (${label})`,
   );
-  geometry.names.forEach((name, rowIndex) => {
-    const rowBoxes = geometry.boxRows[rowIndex] ?? [];
-    for (const box of rowBoxes) {
-      assert.ok(!overlaps(name, box), `a checkbox covers the name in row ${rowIndex} (${label})`);
+  assert.ok(!overlaps(geometry.name, geometry.button), `the button covers the persona's name (${label})`);
+  geometry.choices.forEach((choice, index) => {
+    assert.ok(
+      choice.left >= geometry.list.left && choice.right <= geometry.list.right,
+      `choice ${index} runs past the list (${label})`,
+    );
+    assert.ok(!overlaps(choice, geometry.name), `choice ${index} covers the persona's name (${label})`);
+    assert.ok(!overlaps(choice, geometry.button), `choice ${index} covers the button (${label})`);
+    for (const other of geometry.choices.slice(index + 1)) {
+      assert.ok(!overlaps(choice, other), `two choices overlap (${label})`);
     }
-    rowBoxes.forEach((box, boxIndex) => {
-      for (const other of rowBoxes.slice(boxIndex + 1)) {
-        assert.ok(!overlaps(box, other), `two checkboxes overlap in row ${rowIndex} (${label})`);
-      }
-    });
   });
 }
 
 test(
-  'the sharing grid stays inside the panel, its checkboxes clear the persona names, and the last row clears the footer, at desktop and phone width',
+  'the sharing list stays inside the panel, an open row keeps its choices clear of the name and each other, and the last row clears the footer, at desktop and phone width',
   { timeout: 300_000 },
   async () => {
     const frontendRoot = fileURLToPath(new URL('../', import.meta.url));
@@ -155,7 +153,11 @@ test(
             (await page.evaluate(() => document.documentElement.scrollWidth)) <= viewport.width,
             `sharing overflows horizontally at ${viewport.name} ${theme}`,
           );
-          assertGridInsidePanel(await sharingGeometry(page), `${viewport.name} ${theme}`);
+          assertListInsidePanel(await sharingGeometry(page), `${viewport.name} ${theme}`);
+          assert.ok(
+            (await page.evaluate(() => document.documentElement.scrollWidth)) <= viewport.width,
+            `an open sharing row overflows horizontally at ${viewport.name} ${theme}`,
+          );
 
           await page.screenshot({
             path: await featureShotPath({
