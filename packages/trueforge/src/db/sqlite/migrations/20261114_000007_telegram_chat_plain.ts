@@ -7,7 +7,7 @@ import { sql, type Kysely } from 'kysely';
  * Only Telegram chats bound to a host-made agent of the same owner change. Mirrors
  * db/postgres/migrations/20261114_000007_telegram_chat_plain.ts.
  */
-export async function up(db: Kysely<unknown>): Promise<void> {
+export async function up<TDatabase>(db: Kysely<TDatabase>): Promise<void> {
   await db.transaction().execute(async trx => {
     await sql`
       UPDATE session

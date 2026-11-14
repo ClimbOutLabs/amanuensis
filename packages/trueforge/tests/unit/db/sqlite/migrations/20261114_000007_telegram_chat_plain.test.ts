@@ -1,5 +1,4 @@
 import { AgentSpecSchema, Sessions } from '@truefoundry/trueforge-core/agent-session';
-import type { Kysely } from 'kysely';
 
 import { migrateSqliteToLatest } from '../../../../../src/db/migrateSqlite';
 import { SqliteAgentStore } from '../../../../../src/db/sqlite/agent-store/SqliteAgentStore';
@@ -51,7 +50,7 @@ describe('SQLite Telegram chat becomes a plain chat', () => {
       await bind('saved-agent-telegram', 'telegram:someone', saved);
       await bind('someone-else', `telegram:${OTHER.subject_id}`, hidden);
 
-      await up(db as unknown as Kysely<unknown>);
+      await up(db);
 
       const agentOf = async (session_id: string) =>
         (await sessionStore.getSession({ tenant_id: TENANT, session_id }))?.agent;
