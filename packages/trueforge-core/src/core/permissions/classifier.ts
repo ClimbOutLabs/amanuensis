@@ -240,6 +240,7 @@ import {
   simpleCardCopy,
 } from './cardCopy';
 import { classifyHomeAssistantTool } from './homeAssistantTier';
+import { SKILL_SITES_DATA_WARNING, SKILL_SITES_SEND_WARNING } from './skillSitesCopy';
 
 export interface SentinelAction {
   /** Original tool name (sandbox name or mcp server tool name). */
@@ -3204,11 +3205,8 @@ function skillWebsitesSentence(review: Tier3Skill): string {
   if (websites.length === 0) {
     return '';
   }
-  const send =
-    review.can_send === true
-      ? ' One of these sites can send email. This skill will be able to send email as you, without asking each time.'
-      : '';
-  return ` It sends requests to ${websites.map(site => escapeDisplayText(site)).join(', ')}. Adding it lets the skill reach these websites and no others. The skill can send any of your data to them, so only allow this for a skill you trust.${send}`;
+  const send = review.can_send === true ? ` ${SKILL_SITES_SEND_WARNING}` : '';
+  return ` It sends requests to ${websites.map(site => escapeDisplayText(site)).join(', ')}. Adding it lets the skill reach these websites and no others. ${SKILL_SITES_DATA_WARNING}${send}`;
 }
 
 function skillInstallCard(input: { review: Tier3Skill; assistant: string; agent_intent: string | null }): Tier3Card {

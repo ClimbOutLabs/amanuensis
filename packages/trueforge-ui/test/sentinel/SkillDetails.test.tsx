@@ -62,6 +62,11 @@ describe('the skill approval card', () => {
     expect(region).toHaveTextContent('github.com/acme/skills, folder skills/release-notes · version aaaaaaa');
     expect(region).toHaveTextContent('Written by someone else. Add it only if you trust where it comes from.');
     expect(region).toHaveTextContent('Running its code still asks you first.');
+    expect(screen.getAllByRole('heading', { level: 4 }).map(h => h.textContent)).toEqual([
+      'What it does',
+      'Websites it can reach',
+      'Where it comes from',
+    ]);
 
     const instructions = screen.getByRole('region', { name: 'Skill instructions' });
     const details = instructions.closest('details');
@@ -73,12 +78,12 @@ describe('the skill approval card', () => {
   it('lists the websites the skill sends requests to, and says approving allows only those', () => {
     renderCard(RELEASE_NOTES_CARD);
     const websites = document.querySelector('[data-role="skill-websites"]');
-    expect(websites).toHaveTextContent('It sends requests to these websites');
+    expect(screen.getByRole('list', { name: 'Websites' })).toBeInTheDocument();
     expect(screen.getByRole('listitem')).toHaveTextContent('api.release-feed.info');
     expect(websites).toHaveTextContent('Adding it lets the skill reach these websites and no others.');
     expect(websites).toHaveTextContent('The skill can send any of your data to them');
     expect(websites).not.toHaveTextContent('send email as you');
-    expect(websites).not.toHaveTextContent('makes up web addresses');
+    expect(websites).not.toHaveTextContent('makes up some web addresses');
   });
 
   it('warns when one of the websites can send email as the person', () => {
@@ -94,17 +99,15 @@ describe('the skill approval card', () => {
       skill: { ...RELEASE_NOTES_CARD.skill, websites: [], makes_up_addresses: true },
     });
     const websites = document.querySelector('[data-role="skill-websites"]');
-    expect(websites).toHaveTextContent("It doesn't send requests to any website.");
+    expect(websites).toHaveTextContent("None. It doesn't send requests to any website.");
     expect(websites).toHaveTextContent(
-      "Aman also found code that makes up web addresses while it runs. Those websites stay blocked, and you'll be asked about each one.",
+      "It also makes up some web addresses while it runs. Those stay blocked, and you'll be asked about each one.",
     );
   });
 
   it('says a starter skill comes with the app, and keeps only its exact version under Details', () => {
     renderCard({ ...RELEASE_NOTES_CARD, skill: { ...RELEASE_NOTES_CARD.skill, starter: true, instructions: null } });
-    expect(document.querySelector('[data-role="skill"]')).toHaveTextContent(
-      'One of the starter skills that come with the app.',
-    );
+    expect(document.querySelector('[data-role="skill"]')).toHaveTextContent('A starter skill that comes with Aman.');
     expect(screen.queryByRole('region', { name: 'Skill instructions' })).toBeNull();
     expect(document.querySelector('details')).toHaveTextContent(`Exact version: ${COMMIT}`);
   });

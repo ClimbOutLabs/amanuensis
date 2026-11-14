@@ -1,6 +1,10 @@
 import type { ISessionStore } from '@truefoundry/trueforge-core/agent-session';
 import type { Tier3Card } from '@truefoundry/trueforge-core/core';
 import type { ActionRequiredEvent, ModelMessageEvent } from '@truefoundry/trueforge-core/core/events/schema';
+import {
+  SKILL_SITES_DATA_WARNING,
+  SKILL_SITES_SEND_WARNING,
+} from '@truefoundry/trueforge-core/core/permissions/skillSitesCopy';
 import type {
   Tier3CalendarEventSchema,
   Tier3EmailSchema,
@@ -172,6 +176,9 @@ export const TELEGRAM_SHOWN_SECTION_FIELDS = {
     'version',
     'starter',
     'instructions',
+    'websites',
+    'makes_up_addresses',
+    'can_send',
   ] as const satisfies readonly (keyof z.infer<typeof Tier3SkillSchema>)[],
   skill_network: ['skill_name', 'hosts', 'reason', 'code_pin'] as const satisfies readonly (keyof z.infer<
     typeof Tier3SkillNetworkSchema
@@ -385,6 +392,21 @@ function approvalCardLines(card: Tier3Card): string[] {
         : 'This skill was written by someone else. Add it only if you trust where it comes from.',
     );
     lines.push('It may bring files and scripts along. Running code still asks you first, as always.');
+    const websites = skill.websites ?? [];
+    if (websites.length === 0) {
+      lines.push("It doesn't send requests to any website.");
+    } else {
+      lines.push(`It sends requests to these websites: ${websites.join(', ')}`);
+      lines.push(`Adding it lets the skill reach these websites and no others. ${SKILL_SITES_DATA_WARNING}`);
+      if (skill.can_send === true) {
+        lines.push(SKILL_SITES_SEND_WARNING);
+      }
+    }
+    if (skill.makes_up_addresses === true) {
+      lines.push(
+        "Aman also found code that makes up web addresses while it runs. Those websites stay blocked, and you'll be asked about each one.",
+      );
+    }
     if (skill.instructions !== null) {
       lines.push('Instructions:');
       if (skillInstructionsCut(skill.instructions)) {

@@ -7,6 +7,10 @@
  * `schemas/skill.ts`); this module is its single owner on the client. It collapses into the
  * generated SDK once that carries `/settings/skills/{name}/network-approval`.
  */
+import {
+  SKILL_SITES_DATA_WARNING,
+  SKILL_SITES_SEND_WARNING,
+} from '@truefoundry/trueforge-core/core/permissions/skillSitesCopy';
 import { z } from 'zod';
 
 import type { CreateSkillRequest } from './types.js';
@@ -93,14 +97,6 @@ export function parseSkillNetworkApproval(body: unknown): SkillNetworkApprovalSt
  * The lines the approval panel shows, in the design's words. Nothing here claims anything is
  * inspected or checked in flight: the approval is the trust decision, and the panel says so.
  */
-/** The warning every grant of sites carries: what is sent to them is not checked. */
-export const SKILL_SITES_DATA_WARNING =
-  'The skill can send any of your data to them, so only allow this for a skill you trust.';
-
-/** The added warning when one of the sites can send email as the person. */
-export const SKILL_SITES_SEND_WARNING =
-  'One of these sites can send email. This skill will be able to send email as you, without asking each time.';
-
 export function skillNetworkApprovalLines(input: { skillName: string; state: SkillNetworkApprovalState }): string[] {
   const lines = [
     `The ${input.skillName} skill needs to reach these sites to work:`,
