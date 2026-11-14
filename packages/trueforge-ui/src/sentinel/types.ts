@@ -236,7 +236,7 @@ export type SentinelApprovalCard = {
   skill_network?: SentinelApprovalSkillNetwork | null;
 };
 
-const APPROVAL_SKILL_NETWORK_REASONS = ['first_use', 'undeclared_host'] as const;
+const APPROVAL_SKILL_NETWORK_REASONS = ['first_use', 'undeclared_host', 'code_changed'] as const;
 
 export type SentinelApprovalSkillNetworkReason = (typeof APPROVAL_SKILL_NETWORK_REASONS)[number];
 

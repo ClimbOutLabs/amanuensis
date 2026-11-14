@@ -8,8 +8,10 @@ import type { Skill } from '../../../../src/core/sandbox/skills/SkillMounter';
 import {
   copySkillsIntoSandbox,
   fetchRegistryArchive,
+  resolveGitSkillObjectId,
   skillCopyFailedNotice,
   SkillDownloadError,
+  SkillMissingVersionError,
   SkillTooLargeError,
   type SkillCopyDeps,
 } from '../../../../src/core/sandbox/skills/slotSkillCopy';
@@ -390,6 +392,26 @@ describe('copySkillsIntoSandbox for git skills', () => {
     expect(result.staged.map(({ objectId }) => objectId)).toEqual([commit]);
   });
 
+  test('stages the pinned commit, not the branch tip, when the ref is a stored commit id', async () => {
+    const pinned = commit;
+    writeFileSync(join(repo, 'skills', 'echo', 'SKILL.md'), '# echo, newer\n');
+    commitAll('newer skill');
+    expect(commit).not.toBe(pinned);
+
+    const result = await copySkillsIntoSandbox({
+      skills: [gitSkill({ ref: pinned, path: 'skills/echo' })],
+      skillsDir: SKILLS_DIR,
+      archiveDir: ARCHIVE_DIR,
+      deps: { host: fileGit },
+    });
+
+    expect(result.failed.size).toBe(0);
+    const [echo] = result.staged;
+    expect(echo?.objectId).toBe(pinned);
+    const archive = echo?.archive.content ?? Buffer.alloc(0);
+    expect(archiveText(archive, 'SKILL.md')).toBe('# echo\n');
+  });
+
   test('reports a branch or tag the repository does not have as a missing version', async () => {
     const result = await copySkillsIntoSandbox({
       skills: [gitSkill({ ref: 'no-such-branch', path: 'skills/echo' })],
@@ -468,5 +490,68 @@ describe('copySkillsIntoSandbox for git skills', () => {
 
     expect(result.staged).toEqual([]);
     expect(result.failed.get('echo')).toEqual({ cause: 'no_files' });
+  });
+});
+
+describe('resolveGitSkillObjectId', () => {
+  let root: string;
+  let repo: string;
+  let commit: string;
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'skill-resolve-test-'));
+    repo = join(root, 'source');
+    mkdirSync(join(repo, 'skills', 'echo'), { recursive: true });
+    writeFileSync(join(repo, 'skills', 'echo', 'SKILL.md'), '# echo\n');
+    git(root, ['init', '-q', '-b', 'main', repo]);
+    git(repo, ['add', '-A']);
+    git(repo, ['commit', '-q', '-m', 'skill']);
+    commit = git(repo, ['rev-parse', 'HEAD']);
+  });
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  test('resolves a branch to the commit at its tip', async () => {
+    const objectId = await resolveGitSkillObjectId({
+      skill: { url: `file://${repo}`, ref: 'main' },
+      deps: { host: fileGit },
+    });
+    expect(objectId).toBe(commit);
+  });
+
+  test('resolves to the new commit after the branch moves', async () => {
+    writeFileSync(join(repo, 'skills', 'echo', 'SKILL.md'), '# echo, newer\n');
+    git(repo, ['add', '-A']);
+    git(repo, ['commit', '-q', '-m', 'newer skill']);
+    const moved = git(repo, ['rev-parse', 'HEAD']);
+    expect(moved).not.toBe(commit);
+
+    const objectId = await resolveGitSkillObjectId({
+      skill: { url: `file://${repo}`, ref: 'main' },
+      deps: { host: fileGit },
+    });
+    expect(objectId).toBe(moved);
+  });
+
+  test('a full commit id is its own resolution, with no remote read', async () => {
+    const noRemote: HostCommandRunner = {
+      run: () => Promise.reject(new Error('the remote must not be read for a commit id ref')),
+    };
+    const objectId = await resolveGitSkillObjectId({
+      skill: { url: `file://${repo}`, ref: commit },
+      deps: { host: noRemote },
+    });
+    expect(objectId).toBe(commit);
+  });
+
+  test('a ref the repository does not have is a missing version', async () => {
+    await expect(
+      resolveGitSkillObjectId({
+        skill: { url: `file://${repo}`, ref: 'no-such-branch' },
+        deps: { host: fileGit },
+      }),
+    ).rejects.toBeInstanceOf(SkillMissingVersionError);
   });
 });

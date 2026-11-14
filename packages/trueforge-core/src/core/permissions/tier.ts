@@ -198,29 +198,6 @@ export const Tier3PersonaSchema = z
   .describe('The persona a chat call adds, shown in full.')
   .openapi('Tier3Persona');
 
-/** Why a skill network card is asked: the skill's first use, or a site it reached for without declaring. */
-export const Tier3SkillNetworkReasonSchema = z
-  .enum(['first_use', 'undeclared_host'])
-  .describe('Why the card is asked: the skill\u2019s first use, or a site it did not declare.')
-  .openapi('Tier3SkillNetworkReason');
-
-/**
- * The network question a skill network card asks, shown in full: the skill, the sites, and why.
- * `code_pin` names the exact code the approval covers once code pinning lands; until then null.
- */
-export const Tier3SkillNetworkSchema = z
-  .object({
-    skill_name: z.string().describe('Name of the skill asking for network access.'),
-    hosts: z.array(z.string()).describe('The sites the skill asks to reach.'),
-    reason: Tier3SkillNetworkReasonSchema,
-    code_pin: z
-      .string()
-      .nullable()
-      .describe('The code version the approval is pinned to, or null when no pin is in force.'),
-  })
-  .describe('The skill network access a card asks about, shown in full.')
-  .openapi('Tier3SkillNetwork');
-
 /** A skill that a chat call adds, as the host read it from where it comes from. */
 export const Tier3SkillSchema = z
   .object({
@@ -236,6 +213,35 @@ export const Tier3SkillSchema = z
   })
   .describe('The skill a chat call adds, shown in full.')
   .openapi('Tier3Skill');
+
+/**
+ * Why a skill network card is asked: the skill's first use, a site it reached for without
+ * declaring, or its code changed since the person approved it.
+ */
+export const Tier3SkillNetworkReasonSchema = z
+  .enum(['first_use', 'undeclared_host', 'code_changed'])
+  .describe(
+    'Why the card is asked: the skill\u2019s first use, a site it did not declare, or its code changed since it was approved.',
+  )
+  .openapi('Tier3SkillNetworkReason');
+
+/**
+ * The network question a skill network card asks, shown in full: the skill, the sites, and why.
+ * `code_pin` names the exact code the approval covers: the commit a git skill's approval is
+ * pinned to, or null when no pin is in force.
+ */
+export const Tier3SkillNetworkSchema = z
+  .object({
+    skill_name: z.string().describe('Name of the skill asking for network access.'),
+    hosts: z.array(z.string()).describe('The sites the skill asks to reach.'),
+    reason: Tier3SkillNetworkReasonSchema,
+    code_pin: z
+      .string()
+      .nullable()
+      .describe('The code version the approval is pinned to, or null when no pin is in force.'),
+  })
+  .describe('The skill network access a card asks about, shown in full.')
+  .openapi('Tier3SkillNetwork');
 
 /**
  * The words an approval card is made of, produced in trueforge-core by one owner per action kind

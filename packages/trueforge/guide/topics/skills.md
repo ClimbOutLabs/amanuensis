@@ -86,6 +86,8 @@ The first time a skill that names sites runs in a chat, a card asks if it may re
 
 If a skill tries a site it did not name, the connection is stopped and a card asks about that one site.
 
+An approval covers the skill's code as it is when you say yes. If the skill's code changes later, the approval ends and a card asks again.
+
 Some site names use letters from other alphabets. The card then shows the name in brackets as it is really written, for example `pаypal.com (xn--pypal-4ve.com)`. Check that name before you answer, because such letters can make a site look like a familiar one.
 
 To change an answer later, open Settings, then Skills. A skill that names sites shows them there. Click **Remove network access** to take back an Always allow. Next to a site you allowed or turned down one by one, click **Clear** to take back that answer.

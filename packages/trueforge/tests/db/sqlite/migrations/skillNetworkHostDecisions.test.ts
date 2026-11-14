@@ -95,7 +95,8 @@ describe('20261112_000002_skill_network_host_decisions migration', () => {
     expect((await migrator.migrateTo(PREVIOUS_MIGRATION)).error).toBeUndefined();
     expect((await migrator.migrateTo(THIS_MIGRATION)).error).toBeUndefined();
 
-    const skills = await new SqliteSkillStore(db).listSkills({ tenant_id: 't1', names: ['daily-notes'] });
-    expect(skills.map(skill => skill.name)).toEqual(['daily-notes']);
+    // Read the row directly: the store reads columns that later migrations add.
+    const skills = await sql<{ name: string }>`SELECT name FROM skill WHERE tenant_id = 't1'`.execute(db);
+    expect(skills.rows.map(skill => skill.name)).toEqual(['daily-notes']);
   });
 });

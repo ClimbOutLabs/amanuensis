@@ -1,6 +1,6 @@
 import type { Skill as SkillMount } from '@truefoundry/trueforge-core/core';
 import { HTTPException } from 'hono/http-exception';
-import { parseGitSkill } from '../schemas/skill';
+import { effectiveSkillNetworkHosts, parseGitSkill } from '../schemas/skill';
 import type { AgentSkillsInput, ISkillStore } from './skillStore';
 
 /** Admit configured git skills; reject preload. */
@@ -62,13 +62,22 @@ export async function resolveGitTurnSkills(
         message: `Skill "${skill.name}" is not a git skill`,
       });
     }
+    // While a network approval is in force, the mount fetches the exact code the approval
+    // covers: the stored pin, never the ref, so the code that was checked is the code that
+    // runs. Without an approval in force the manifest ref is used, as before.
+    const approvalInForce =
+      effectiveSkillNetworkHosts({
+        declared: git.network_hosts,
+        approved: record.network_approval,
+        denied: record.network_denied_hosts,
+      }) !== null;
     resolved.push({
       type: 'git',
       name: git.name,
       description: git.description,
       url: git.url,
       path: git.path ?? '',
-      ref: git.ref,
+      ref: approvalInForce && record.network_approval_code_sha !== null ? record.network_approval_code_sha : git.ref,
     });
   }
   return resolved;

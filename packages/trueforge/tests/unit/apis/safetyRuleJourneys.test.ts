@@ -1631,7 +1631,8 @@ describe('a skill that reaches a site on the internet', () => {
           type: 'git',
           name: SKILL_NAME,
           url: 'https://github.com/example/daily-notes',
-          ref: 'main',
+          // A commit id names its own code version, so approving pins it without reaching GitHub.
+          ref: '0123456789abcdef0123456789abcdef01234567',
           description: 'Fetches the notes for today.',
           network_hosts: [SKILL_SITE],
         },

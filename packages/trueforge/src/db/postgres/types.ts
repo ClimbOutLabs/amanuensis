@@ -685,6 +685,8 @@ export interface SkillTable {
   manifest: JSONColumnType<SkillManifest, SkillManifest, SkillManifest>;
   /** The person's approved site list for this skill's network access, or null when not approved */
   network_approval: JSONColumnType<string[], string[], string[]> | null;
+  /** The code version the approval is pinned to, or null when there is no pin */
+  network_approval_code_sha: string | null;
   /** Sites the person allowed one by one for this skill */
   network_allowed_hosts: JSONColumnType<string[], string[], string[]>;
   /** Sites the person turned down for this skill */

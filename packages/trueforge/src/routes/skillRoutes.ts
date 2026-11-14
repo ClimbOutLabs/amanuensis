@@ -277,7 +277,8 @@ export const updateSkillNetworkAllowedHostRoute = createRoute({
   path: '/{name}/network-approval/allowed-host',
   tags: [OpenApiTag.SKILLS],
   summary: 'Allow one site for a skill',
-  description: 'Allows one site for the skill on its own, apart from the declared list approval.',
+  description:
+    "Allows one site for the skill on its own, apart from the declared list approval. On a skill with no approval yet, the allowance is bound to the skill's code as it stands, and a code version that cannot be read refuses it.",
   'x-fern-sdk-group-name': ['settings', 'skills'],
   'x-fern-sdk-method-name': 'create_or_update_network_allowed_host',
   request: {
@@ -299,6 +300,10 @@ export const updateSkillNetworkAllowedHostRoute = createRoute({
     404: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },
       description: 'No skill with this name',
+    },
+    422: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: "The skill's code version could not be read, so nothing was stored.",
     },
     424: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },

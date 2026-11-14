@@ -14137,10 +14137,11 @@
         ]
       },
       "Tier3SkillNetworkReason": {
-        "description": "Why the card is asked: the skill’s first use, or a site it did not declare.",
+        "description": "Why the card is asked: the skill’s first use, a site it did not declare, or its code changed since it was approved.",
         "enum": [
           "first_use",
-          "undeclared_host"
+          "undeclared_host",
+          "code_changed"
         ],
         "type": "string"
       },
@@ -28782,7 +28783,7 @@
         "x-fern-sdk-method-name": "delete_network_allowed_host"
       },
       "put": {
-        "description": "Allows one site for the skill on its own, apart from the declared list approval.",
+        "description": "Allows one site for the skill on its own, apart from the declared list approval. On a skill with no approval yet, the allowance is bound to the skill's code as it stands, and a code version that cannot be read refuses it.",
         "parameters": [
           {
             "in": "path",
@@ -28833,6 +28834,16 @@
               }
             },
             "description": "No skill with this name"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The skill's code version could not be read, so nothing was stored."
           },
           "424": {
             "content": {

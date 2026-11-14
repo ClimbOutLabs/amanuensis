@@ -708,6 +708,28 @@ describe("SkillsClient", () => {
             .put("/api/v1/settings/skills/xy/network-approval/allowed-host")
             .jsonBody(rawRequestBody)
             .respondWith()
+            .statusCode(422)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.settings.skills.createOrUpdateNetworkAllowedHost("xy", {
+                host: "host",
+            });
+        }).rejects.toThrow(TrueForgeTypes.UnprocessableEntityError);
+    });
+
+    test("create_or_update_network_allowed_host (5)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { host: "host" };
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .put("/api/v1/settings/skills/xy/network-approval/allowed-host")
+            .jsonBody(rawRequestBody)
+            .respondWith()
             .statusCode(424)
             .jsonBody(rawResponseBody)
             .build();

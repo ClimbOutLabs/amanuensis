@@ -686,6 +686,7 @@ describe('validateAgentSpec', () => {
             version: 1,
           },
           network_approval: null,
+          network_approval_code_sha: null,
           network_allowed_hosts: [],
           network_denied_hosts: [],
           created_at: now,
@@ -705,6 +706,9 @@ describe('validateAgentSpec', () => {
         throw new Error('unused');
       },
       setSkillNetworkHostDecision: async () => {
+        throw new Error('unused');
+      },
+      setSkillNetworkCodePin: async () => {
         throw new Error('unused');
       },
       listSkillVersions: async () => [],

@@ -13164,7 +13164,7 @@ await client.settings.skills.deleteNetworkApproval("name");
 <dl>
 <dd>
 
-Allows one site for the skill on its own, apart from the declared list approval.
+Allows one site for the skill on its own, apart from the declared list approval. On a skill with no approval yet, the allowance is bound to the skill's code as it stands, and a code version that cannot be read refuses it.
 </dd>
 </dl>
 </dd>

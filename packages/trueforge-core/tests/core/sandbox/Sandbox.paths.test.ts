@@ -4440,6 +4440,7 @@ describe('Sandbox skills without a network', () => {
       skill_name: 'alpha',
       hosts: ['news.example.com'],
       reason: 'undeclared_host',
+      code_pin: null,
     };
     let owed: SkillNetworkCardRequest[] = [];
     await withAlphaScript(
