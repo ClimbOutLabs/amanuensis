@@ -18,7 +18,7 @@ How to get there: Click **Chats** in the left bar. On a phone, tap the menu butt
 
 ## How a chat looks
 
-Your messages sit on the right in a soft tinted bubble. Aman's written replies sit on the left on a paper card. A card that asks you something, such as whether to allow an action, stands on its own so it is easy to spot.
+Your messages sit on the right in a soft tinted bubble. Aman's written replies sit on the left on a paper card. With **Agent details** on, the short lines Aman writes between steps show as plain text, so the card always marks the answer. A card that asks you something, such as whether to allow an action, stands on its own so it is easy to spot.
 
 To copy a reply or hear it read aloud, move the pointer over it and use the small buttons under the card.
 

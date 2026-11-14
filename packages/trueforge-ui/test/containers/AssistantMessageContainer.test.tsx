@@ -701,6 +701,29 @@ describe('AssistantMessageContainer with agent details off', () => {
     expect(screen.queryByTestId('assistant-message-step-not-finished')).not.toBeInTheDocument();
   });
 
+  it('keeps the paper card for the answer and shows in-between lines as plain text', async () => {
+    await renderWithDetailsOn([{ role: 'assistant', content: workedReply() }]);
+
+    const card = '[data-slot="aui_assistant-text-card"]';
+    const statusLine = '[data-slot="aui_assistant-status-line"]';
+    expect(screen.getByText(FINAL).closest(card)).not.toBeNull();
+    for (const line of [FIRST_LINE, SECOND_LINE]) {
+      expect(screen.getByText(line).closest(card)).toBeNull();
+      expect(screen.getByText(line).closest(statusLine)).not.toBeNull();
+    }
+  });
+
+  it('puts the last line on the card when a finished reply has no text after its last step', async () => {
+    await renderWithDetailsOn([
+      {
+        role: 'assistant',
+        content: [{ type: 'text', text: FIRST_LINE }, noteCall('note-1', { result: { ok: true } })],
+      },
+    ]);
+
+    expect(screen.getByText(FIRST_LINE).closest('[data-slot="aui_assistant-text-card"]')).not.toBeNull();
+  });
+
   it('still shows the approval card, and nothing else of the work', async () => {
     const onRespondToToolApproval = vi.fn();
     renderAssistantMessage(

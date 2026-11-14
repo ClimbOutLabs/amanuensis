@@ -10,7 +10,7 @@ import {
 } from '@assistant-ui/react';
 import { useTrueFoundryResumeUnavailable } from '@truefoundry/assistant-ui-runtime';
 import { parseMorningBrief, unreadableBriefText } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
-import { useState, type ReactNode } from 'react';
+import { createContext, useContext, useState, type ReactNode } from 'react';
 
 import { copyText } from '@/utils/copyText.js';
 import { AssistantTextCard } from '../atoms/AssistantMessageBubble.js';
@@ -134,7 +134,30 @@ function buildInternalsSummary({ toolCount, thinkingCount }: { toolCount: number
   return segments.length > 0 ? segments.join(' · ') : 'Details';
 }
 
-type GroupKey = `group-agentSteps-${number}` | 'group-reasoning' | 'group-interimText';
+type GroupKey = `group-agentSteps-${number}` | 'group-reasoning' | 'group-interimText' | 'group-statusLine';
+
+// True under an in-between line shown with agent details on.
+const StatusLineContext = createContext(false);
+
+/**
+ * A written reply sits on the paper card. An in-between line is part of the work, so it stays as
+ * plain text between the steps and the card keeps meaning "this is the answer".
+ */
+function AssistantReplyText() {
+  const isStatusLine = useContext(StatusLineContext);
+  if (isStatusLine) {
+    return (
+      <div data-slot="aui_assistant-status-line" className="mt-3 mb-1">
+        <AssistantTextContainer />
+      </div>
+    );
+  }
+  return (
+    <AssistantTextCard>
+      <AssistantTextContainer />
+    </AssistantTextCard>
+  );
+}
 
 // Each folded run gets its own group key so interleaved runs stay distinct disclosures.
 function agentStepsGroupKey(runIndex: number): `group-agentSteps-${number}` {
@@ -212,9 +235,7 @@ export function AssistantMessageContainer() {
     lastInterim !== undefined &&
     parts.slice(lastInterim + 1).some(part => toolStepErrored(part) && isUnrecovered(part));
   const keptAsAnswer = settled && !hasFinal && !failedAfterLastInterim ? lastInterim : undefined;
-  const hiddenTextIndices = agentDetailsVisible
-    ? new Set<number>()
-    : new Set(interimTextIndices.filter(index => index !== keptAsAnswer));
+  const inBetweenTextIndices = new Set(interimTextIndices.filter(index => index !== keptAsAnswer));
   const showNotFinished =
     !agentDetailsVisible &&
     settled &&
@@ -333,7 +354,7 @@ export function AssistantMessageContainer() {
 
   const groupBy = (part: PartState, _context: GroupByContext): readonly GroupKey[] | null => {
     const index = parts.findIndex(p => p === part);
-    if (hiddenTextIndices.has(index)) return ['group-interimText'];
+    if (inBetweenTextIndices.has(index)) return [agentDetailsVisible ? 'group-statusLine' : 'group-interimText'];
     const runIndex = runIndexOfPart(index);
     if (runIndex === -1) return null;
     return part.type === 'reasoning'
@@ -366,12 +387,10 @@ export function AssistantMessageContainer() {
               return isMessageRunning && agentDetailsVisible ? <ReasoningContainer group={part} /> : null;
             case 'group-interimText':
               return null;
+            case 'group-statusLine':
+              return <StatusLineContext.Provider value={true}>{children}</StatusLineContext.Provider>;
             case 'text':
-              return briefHidesText ? null : (
-                <AssistantTextCard>
-                  <AssistantTextContainer />
-                </AssistantTextCard>
-              );
+              return briefHidesText ? null : <AssistantReplyText />;
             case 'reasoning':
               return isMessageRunning && agentDetailsVisible ? <AssistantLeafPartContainer part={part} /> : null;
             case 'tool-call':
