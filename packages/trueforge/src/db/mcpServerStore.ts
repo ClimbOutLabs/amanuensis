@@ -14,8 +14,8 @@ export interface McpServerRecord {
   name: ResourceName;
   manifest: McpServerManifest;
   /**
-   * Server-owned trust marker, never part of the manifest or any request: no save sets it. Loading the
-   * connector for a turn also requires its origin to be on the first-party list.
+   * True only on a row the host registered itself at start-up; no request or import sets it. It records
+   * where the row came from and grants no trust: a turn judges the connector's name and address afresh.
    */
   first_party: boolean;
   /** ISO-8601 UTC instant. */
