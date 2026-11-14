@@ -5,8 +5,9 @@ import type { TelegramService } from '../telegram/telegramService';
 import type { DeliveryChannelSender } from './deliveryChannel';
 
 /**
- * The Telegram channel of the delivery feed: a delivery at nudge or call level is also sent to
- * the paired Telegram chat, as its own text. A note stays in the app, as it does for push. No
+ * The Telegram channel of the delivery feed: a nudge is also sent to the paired Telegram chat,
+ * as its own text. A note stays in the app, and a call reaches Telegram only as the nudge it
+ * falls back to when the phone did not ring, as it does for texts and push. No
  * connection, or a bot not paired yet, means no attempt: there is nobody it could reach. The
  * full item always stays in the feed; for an approval the message says to open Aman, where the
  * card itself lives. Sends go through the queue and are attempted once, never retried blindly.
@@ -33,7 +34,7 @@ export function createTelegramSender({
   return {
     channel: 'telegram',
     async send({ delivery, tenant_id, created_by }) {
-      if (delivery.level === 'note') {
+      if (delivery.level !== 'nudge') {
         return [];
       }
       const connection = await store.getConnection({ tenant_id, created_by });

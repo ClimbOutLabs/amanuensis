@@ -98,6 +98,8 @@ export interface VoiceSessionDeps {
   onLatency?: (latency: TurnLatency) => void;
   /** Called with a short reason code and no words, for the logs. */
   onNote?: (note: string) => void;
+  /** Called when the person starts to speak, before any words are known. */
+  onSpeechStarted?: () => void;
 }
 
 /** A card whose read-back was made and which is to be waited on. */
@@ -122,6 +124,8 @@ interface Heard {
   speechEndedAtMs: number;
   /** The speech began while the assistant was speaking or just after: never taken as an approval. */
   startedInGuard: boolean;
+  /** The speech began while a line that holds the floor was still playing. */
+  startedOverHeldLine: boolean;
 }
 
 interface Marks {
@@ -167,6 +171,11 @@ export class VoiceSession {
   #cancelMax: (() => void) | undefined;
   #cancelling: Promise<void> = Promise.resolve();
   #guardAtSpeechStart = false;
+  #overHeldLineAtSpeechStart = false;
+  /** A line that holds the floor is being handed over, or plays until this time. */
+  #floorHeld = false;
+  #floorUntilMs = Number.NEGATIVE_INFINITY;
+  #lineAbort: AbortController | undefined;
   #awaiting: Awaiting | undefined;
   #state: VoiceState = 'listening';
   #ended = false;
@@ -186,7 +195,7 @@ export class VoiceSession {
     this.#lastArrivalAtMs = this.#clock.now();
     this.#resetIdle();
     this.#cancelMax = this.#clock.after(MAX_CONVERSATION_MS, () => {
-      void this.#finish('That was a long conversation, so voice mode has ended. Tap voice mode to start again.');
+      this.#finishAlone('That was a long conversation, so voice mode has ended. Tap voice mode to start again.');
     });
   }
 
@@ -196,10 +205,30 @@ export class VoiceSession {
     await this.end();
   }
 
+  /** Ends the conversation on its own, from a timer or a check. A failure to end it is noted and ends it again. */
+  #finishAlone(notice: string): void {
+    this.#finish(notice).catch((error: unknown) => {
+      this.#abandon({ error, where: 'finish' });
+    });
+  }
+
+  /** Something the conversation runs on its own failed: note its kind and end the conversation. */
+  #abandon({ error, where }: { error: unknown; where: string }): void {
+    this.#deps.onNote?.(`${where}_failed:${error instanceof Error ? error.name : 'unknown'}`);
+    if (this.#ended) {
+      return;
+    }
+    this.#finish('Voice mode stopped because something went wrong. Tap voice mode to start again.').catch(
+      (second: unknown) => {
+        this.#deps.onNote?.(`end_failed:${second instanceof Error ? second.name : 'unknown'}`);
+      },
+    );
+  }
+
   #resetIdle(): void {
     this.#cancelIdle?.();
     this.#cancelIdle = this.#clock.after(IDLE_END_MS, () => {
-      void this.#finish('Voice mode ended because it was quiet for a while. Tap voice mode to start again.');
+      this.#finishAlone('Voice mode ended because it was quiet for a while. Tap voice mode to start again.');
     });
   }
 
@@ -217,7 +246,7 @@ export class VoiceSession {
     if (this.#creditMs < 0) {
       // A microphone delivers one second of sound per second; more than that is not a microphone.
       this.#deps.onNote?.('faster_than_real_time');
-      void this.#finish('Voice mode could not keep up with your microphone. Tap voice mode to start again.');
+      this.#finishAlone('Voice mode could not keep up with your microphone. Tap voice mode to start again.');
       return;
     }
     const joined = new Int16Array(this.#samples.length + incoming.length);
@@ -234,7 +263,7 @@ export class VoiceSession {
       if (this.#backlog >= MAX_BACKLOG_WINDOWS) {
         // Audio is arriving faster than it can be listened to, which a microphone never does.
         this.#deps.onNote?.('backlog');
-        void this.#finish('Voice mode could not keep up with your microphone. Tap voice mode to start again.');
+        this.#finishAlone('Voice mode could not keep up with your microphone. Tap voice mode to start again.');
         return;
       }
       this.#backlog += 1;
@@ -245,6 +274,55 @@ export class VoiceSession {
         });
     }
     this.#samples = joined.slice(offset);
+  }
+
+  /**
+   * Speaks a line that no turn asked for, such as the opening of a phone call, after anything already queued. The
+   * person can interrupt it like any reply, unless `interruptible` is false: then it plays to the end, and what the
+   * person says over it still becomes a turn, marked as started over that line. With `exact`, the line goes to the
+   * voice whole and is said only as written, or not at all. Resolves once it has been handed to the line: false when
+   * the voice could not say all of it.
+   */
+  say(
+    text: string,
+    { interruptible = true, exact = false }: { interruptible?: boolean; exact?: boolean } = {},
+  ): Promise<boolean> {
+    const spoken = this.#turnChain.then(async () => {
+      if (this.#ended) {
+        return false;
+      }
+      const abort = new AbortController();
+      if (interruptible) {
+        this.#turnAbort = abort;
+        this.#speechAbort = abort;
+      } else {
+        this.#lineAbort = abort;
+        this.#floorHeld = true;
+      }
+      const now = this.#clock.now();
+      const speech = this.#speechFor({ signal: abort.signal, marks: { speechEndedAtMs: now, utteranceAtMs: now } });
+      for (const sentence of exact ? [text] : splitSentences(text)) {
+        speech.say({ text: sentence, role: 'body', exact });
+      }
+      const whole = (await speech.drain()) === 'complete';
+      if (this.#turnAbort === abort) {
+        this.#turnAbort = undefined;
+      }
+      if (!interruptible) {
+        this.#lineAbort = undefined;
+        this.#floorHeld = false;
+        this.#floorUntilMs = this.#timeline.endsAtMs;
+      }
+      this.#refreshState();
+      // A line the person cut off was said well enough; only a voice that could not say it counts as unsaid.
+      return whole || abort.signal.aborted;
+    });
+    // The caller gets the failure through `spoken`, so the chain itself only has to carry on.
+    this.#turnChain = spoken.then(
+      () => undefined,
+      () => undefined,
+    );
+    return spoken;
   }
 
   /** Resolves once the audio pushed so far, and the turn it started, have been dealt with. */
@@ -269,6 +347,7 @@ export class VoiceSession {
     }
     const hadTurn = this.#turnAbort !== undefined;
     this.#turnAbort?.abort();
+    this.#lineAbort?.abort();
     this.#timeline.stop();
     this.#deps.transport.clearAudio();
     // Only a turn this conversation started is cancelled; one the person typed in the chat is left alone.
@@ -317,10 +396,15 @@ export class VoiceSession {
   #onDetected(event: DetectorEvent): void {
     if (event.type === 'speech_started') {
       this.#guardAtSpeechStart = this.#timeline.inGuard(event.startedAtMs);
+      this.#overHeldLineAtSpeechStart =
+        this.#holdsFloor() && (this.#timeline.isPlaying() || event.startedAtMs < this.#timeline.endsAtMs);
       if (this.#state === 'listening') {
         this.#resetIdle();
       }
-      this.#talkedOver(event.startedAtMs);
+      this.#deps.onSpeechStarted?.();
+      if (!this.#holdsFloor()) {
+        this.#talkedOver(event.startedAtMs);
+      }
       return;
     }
     if (event.type !== 'utterance') {
@@ -331,6 +415,7 @@ export class VoiceSession {
       startedAtMs: event.startedAtMs,
       speechEndedAtMs: event.speechEndedAtMs,
       startedInGuard: this.#guardAtSpeechStart,
+      startedOverHeldLine: this.#overHeldLineAtSpeechStart,
     };
     if (this.#sttAborts.size >= MAX_PARALLEL_TRANSCRIPTIONS) {
       // Never dropped silently: it may have been the answer to a waiting card, and the person may not be
@@ -397,13 +482,17 @@ export class VoiceSession {
       return;
     }
     // A reply that began while the person was already talking must not play on after they finish.
-    if (this.#timeline.isPlaying(heard.speechEndedAtMs)) {
+    // A line that holds the floor is never cut, even when the person spoke over it.
+    if (this.#timeline.isPlaying(heard.speechEndedAtMs) && !heard.startedOverHeldLine && !this.#holdsFloor()) {
       this.#stopSound();
     }
     this.#abortTurn();
     this.#working += 1;
     this.#turnChain = this.#turnChain
       .then(() => this.#handle({ heard, text, marks }))
+      .catch((error: unknown) => {
+        this.#abandon({ error, where: 'turn' });
+      })
       .finally(() => {
         this.#working -= 1;
         this.#refreshState();
@@ -427,6 +516,11 @@ export class VoiceSession {
     this.#stopSound();
     // A turn that is still working is not quiet, so the quiet clock must not start.
     this.#refreshState();
+  }
+
+  /** A line that holds the floor is being handed over or still playing: it is not cut off. */
+  #holdsFloor(): boolean {
+    return this.#floorHeld || this.#clock.now() < this.#floorUntilMs;
   }
 
   #stopSound(): void {
@@ -469,7 +563,7 @@ export class VoiceSession {
         return;
       }
       this.#deps.transport.sendEvent({ type: 'heard', text });
-      await this.#runTurn({ text, signal, speechSignal, marks });
+      await this.#runTurn({ text, startedOverHeldLine: heard.startedOverHeldLine, signal, speechSignal, marks });
     } finally {
       if (this.#turnAbort === abort) {
         this.#turnAbort = undefined;
@@ -510,11 +604,13 @@ export class VoiceSession {
 
   async #runTurn({
     text,
+    startedOverHeldLine,
     signal,
     speechSignal,
     marks,
   }: {
     text: string;
+    startedOverHeldLine: boolean;
     signal: AbortSignal;
     speechSignal: AbortSignal;
     marks: Marks;
@@ -536,6 +632,7 @@ export class VoiceSession {
     };
     const outcome = await this.#deps.turns.sendMessage({
       text,
+      startedOverHeldLine,
       signal,
       onText: delta => {
         splitter.push(delta).forEach(say);
@@ -849,4 +946,10 @@ export class VoiceSession {
     }
     this.#deps.transport.sendEvent({ type: 'state', state });
   }
+}
+
+/** The sentences of a line no turn asked for, so the first is spoken before the rest is made. */
+function splitSentences(text: string): string[] {
+  const splitter = new SentenceSplitter();
+  return [...splitter.push(text), ...splitter.flush()];
 }

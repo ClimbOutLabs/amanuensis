@@ -28,6 +28,7 @@ vi.mock('@truefoundry/assistant-ui-runtime', async importOriginal => {
 function card(plain_what: string): SentinelApprovalCard {
   return {
     plain_what,
+    copy: { headline: plain_what, consequence: null, reason: null },
     plain_why: null,
     cannot_be_undone: null,
     why_asked_again: null,
@@ -147,25 +148,25 @@ afterEach(() => {
 describe('ToolCallContainer Sentinel approvals', () => {
   it('renders the plain-language card for a Tier 2 approval', () => {
     renderPending([{ id: 'a', tier: 2 }]);
-    expect(screen.getByText('Do a')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Do a' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Allow' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Not now' })).toBeInTheDocument();
   });
 
   it('approves a single Tier 2 call through the part, without a batch button', () => {
     const { onRespondToToolApproval } = renderPending([{ id: 'a', tier: 2 }]);
-    expect(screen.queryByRole('button', { name: /Approve all/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Allow all/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Allow' }));
     expect(onRespondToToolApproval).toHaveBeenCalledWith(expect.objectContaining({ approvalId: 'a', approved: true }));
   });
 
-  it('Approve all sends one allow per pending Tier 2 call id', () => {
+  it('Allow all sends one allow per pending Tier 2 call id', () => {
     renderPending([
       { id: 'a', tier: 2 },
       { id: 'b', tier: 2 },
       { id: 'c', tier: 2 },
     ]);
-    fireEvent.click(firstButton('Approve all (3)'));
+    fireEvent.click(firstButton('Allow all (3)'));
     expect(respondToApproval.mock.calls).toEqual([
       [{ approvalId: 'a', approved: true, optionId: 'allow-once' }],
       [{ approvalId: 'b', approved: true, optionId: 'allow-once' }],
@@ -173,7 +174,7 @@ describe('ToolCallContainer Sentinel approvals', () => {
     ]);
   });
 
-  it('Approve all sends allow-once for each call even when allow-chat is declared first', () => {
+  it('Allow all sends allow-once for each call even when allow-chat is declared first', () => {
     const chatFirst: ApprovalOptions = [
       { id: 'allow-chat', kind: 'allow-always', label: 'Always allow in this chat' },
       { id: 'allow-once', kind: 'allow-once' },
@@ -183,14 +184,14 @@ describe('ToolCallContainer Sentinel approvals', () => {
       { id: 'a', tier: 2, options: chatFirst },
       { id: 'b', tier: 2, options: chatFirst },
     ]);
-    fireEvent.click(firstButton('Approve all (2)'));
+    fireEvent.click(firstButton('Allow all (2)'));
     expect(respondToApproval.mock.calls).toEqual([
       [{ approvalId: 'a', approved: true, optionId: 'allow-once' }],
       [{ approvalId: 'b', approved: true, optionId: 'allow-once' }],
     ]);
   });
 
-  it('Approve all sends a plain allow for a call that declares no allow-once option', () => {
+  it('Allow all sends a plain allow for a call that declares no allow-once option', () => {
     const chatOnly: ApprovalOptions = [
       { id: 'allow-chat', kind: 'allow-always' },
       { id: 'deny', kind: 'reject-once', confirm: {} },
@@ -199,34 +200,34 @@ describe('ToolCallContainer Sentinel approvals', () => {
       { id: 'a', tier: 2, options: chatOnly },
       { id: 'b', tier: 2 },
     ]);
-    fireEvent.click(firstButton('Approve all (2)'));
+    fireEvent.click(firstButton('Allow all (2)'));
     expect(respondToApproval.mock.calls).toEqual([
       [{ approvalId: 'a', approved: true }],
       [{ approvalId: 'b', approved: true, optionId: 'allow-once' }],
     ]);
   });
 
-  it('never batches a Tier 3 call and never offers Approve all on its card', () => {
+  it('never batches a Tier 3 call and never offers Allow all on its card', () => {
     renderPending([
       { id: 'a', tier: 2 },
       { id: 'b', tier: 2 },
       { id: 'danger', tier: 3 },
     ]);
-    const tier3Card = screen.getByText('Do danger').closest('article');
+    const tier3Card = screen.getByRole('heading', { name: 'Do danger' }).closest('article');
     expect(tier3Card).not.toBeNull();
     if (tier3Card instanceof HTMLElement) {
-      expect(within(tier3Card).queryByRole('button', { name: /Approve all/ })).not.toBeInTheDocument();
+      expect(within(tier3Card).queryByRole('button', { name: /Allow all/ })).not.toBeInTheDocument();
     }
-    fireEvent.click(firstButton('Approve all (2)'));
+    fireEvent.click(firstButton('Allow all (2)'));
     expect(respondToApproval.mock.calls.map(([response]) => response.approvalId)).toEqual(['a', 'b']);
   });
 
-  it('does not offer Approve all for a lone Tier 2 call next to a Tier 3 call', () => {
+  it('does not offer Allow all for a lone Tier 2 call next to a Tier 3 call', () => {
     renderPending([
       { id: 'a', tier: 2 },
       { id: 'danger', tier: 3 },
     ]);
-    expect(screen.queryByRole('button', { name: /Approve all/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Allow all/ })).not.toBeInTheDocument();
   });
 
   it('Deny on a Tier 2 card denies only that call', () => {
@@ -246,7 +247,7 @@ describe('ToolCallContainer Sentinel approvals', () => {
       { id: 'sub-1', tier: 2, thread: 'sub-agent' },
       { id: 'sub-2', tier: 2, thread: 'sub-agent' },
     ]);
-    fireEvent.click(firstButton('Approve all (2)'));
+    fireEvent.click(firstButton('Allow all (2)'));
     expect(respondToApproval.mock.calls.map(([response]) => response.approvalId)).toEqual(['a', 'b']);
   });
 
@@ -256,7 +257,7 @@ describe('ToolCallContainer Sentinel approvals', () => {
       { id: 'a', tier: 2 },
       { id: 'b', tier: 2 },
     ]);
-    fireEvent.click(firstButton('Approve all (2)'));
+    fireEvent.click(firstButton('Allow all (2)'));
     expect(respondToApproval.mock.calls.map(([response]) => response.approvalId)).toEqual(['a', 'b']);
   });
 
@@ -266,33 +267,30 @@ describe('ToolCallContainer Sentinel approvals', () => {
       { id: 'sub', tier: 2, thread: 'sub-agent' },
       { id: 'old', tier: 2, event: 'evt-0' },
     ]);
-    expect(screen.queryByRole('button', { name: /Approve all/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Allow all/ })).not.toBeInTheDocument();
   });
 
-  it.each([2, 3] as const)(
-    'Approve on a Tier %i card sends allow-once even when allow-chat is declared first',
-    tier => {
-      const { onRespondToToolApproval } = renderPending([
-        {
-          id: 'a',
-          tier,
-          options: [
-            { id: 'allow-chat', kind: 'allow-always', label: 'Always allow in this chat' },
-            { id: 'allow-once', kind: 'allow-once' },
-            { id: 'deny', kind: 'reject-once', confirm: {} },
-          ],
-        },
-      ]);
-      fireEvent.click(screen.getByRole('button', { name: 'Allow' }));
-      expect(onRespondToToolApproval).toHaveBeenCalledWith(
-        expect.objectContaining({ approvalId: 'a', approved: true, optionId: 'allow-once' }),
-      );
-      // Chat scope is routed through the runtime hook; it must stay untouched.
-      expect(respondToApproval).not.toHaveBeenCalled();
-    },
-  );
+  it.each([2, 3] as const)('Allow on a Tier %i card sends allow-once even when allow-chat is declared first', tier => {
+    const { onRespondToToolApproval } = renderPending([
+      {
+        id: 'a',
+        tier,
+        options: [
+          { id: 'allow-chat', kind: 'allow-always', label: 'Always allow in this chat' },
+          { id: 'allow-once', kind: 'allow-once' },
+          { id: 'deny', kind: 'reject-once', confirm: {} },
+        ],
+      },
+    ]);
+    fireEvent.click(screen.getByRole('button', { name: 'Allow' }));
+    expect(onRespondToToolApproval).toHaveBeenCalledWith(
+      expect.objectContaining({ approvalId: 'a', approved: true, optionId: 'allow-once' }),
+    );
+    // Chat scope is routed through the runtime hook; it must stay untouched.
+    expect(respondToApproval).not.toHaveBeenCalled();
+  });
 
-  it('Approve falls back to a plain single-use allow when no allow-once option is declared', () => {
+  it('Allow falls back to a plain single-use allow when no allow-once option is declared', () => {
     const { onRespondToToolApproval } = renderPending([
       {
         id: 'a',
@@ -329,6 +327,22 @@ describe('ToolCallContainer Sentinel approvals', () => {
     it('follows the declared options when an older server says nothing', () => {
       renderPending([{ id: 'a', tier: 3, options: declaredChat }]);
       expect(screen.getByRole('button', { name: 'Always allow in this chat' })).toBeInTheDocument();
+    });
+
+    // Each button in the row sends its own answer, whatever order the row shows them in.
+    it.each([
+      { button: 'Allow', approved: true, optionId: 'allow-once' },
+      { button: 'Always allow in this chat', approved: true, optionId: 'allow-chat' },
+      { button: 'Not now', approved: false, optionId: 'deny' },
+    ])('$button sends approved=$approved with option $optionId', ({ button, approved, optionId }) => {
+      const { onRespondToToolApproval } = renderPending([
+        { id: 'a', tier: 3, options: declaredChat, chatAllowOffered: true, alwaysAllowOffered: true },
+      ]);
+      fireEvent.click(screen.getByRole('button', { name: button }));
+      const sent = [...onRespondToToolApproval.mock.calls, ...respondToApproval.mock.calls].map(
+        ([response]) => response,
+      );
+      expect(sent).toEqual([expect.objectContaining({ approvalId: 'a', approved, optionId })]);
     });
   });
 });
@@ -491,6 +505,11 @@ describe('ToolCallContainer sandbox approval', () => {
         args: { command },
         card: {
           plain_what: 'Run this command?',
+          copy: {
+            headline: 'Run this command?',
+            consequence: 'Commands can change or delete files.',
+            reason: null,
+          },
           plain_why: null,
           cannot_be_undone: 'Commands can change or delete files.',
           why_asked_again: null,

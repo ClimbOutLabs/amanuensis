@@ -103,14 +103,56 @@ export function createInstanceClient({ baseUrl, token, fetchImpl = fetch }) {
       return await request('GET', '/healthz');
     },
     /**
-     * @param {{ model: string, temperature: number }} options
+     * An incognito chat is neither remembered nor shown remembered facts, which keeps a judge's chats out of memory.
+     * @param {{ model: string, temperature: number, incognito?: boolean }} options
      * @returns {Promise<string>} session id
      */
-    async createSession({ model, temperature }) {
+    async createSession({ model, temperature, incognito = false }) {
       const body = await request('POST', '/api/v1/sessions', {
         agent: { spec: { model: { name: model, params: { temperature } } } },
+        ...(incognito ? { is_incognito: true } : {}),
       });
       return readSessionId(body);
+    },
+    /** @returns {Promise<{ name: string, model_id: string, provider: { name: string } }[]>} */
+    async listModels() {
+      const body = await request('GET', '/api/v1/models');
+      if (!isRecord(body) || !Array.isArray(body.data)) {
+        throw new Error('The instance did not return its models. Is --instance a TrueForge server?');
+      }
+      return body.data;
+    },
+    /** Provider names with their type, such as `tokenfactory`. Keys are never returned by the server. */
+    async listModelProviders() {
+      const body = await request('GET', '/api/v1/settings/model-providers');
+      if (!isRecord(body) || !Array.isArray(body.data)) {
+        throw new Error('The instance did not return its model providers. Is --instance a TrueForge server?');
+      }
+      return body.data.map(provider => ({ name: provider?.name, type: provider?.manifest?.type }));
+    },
+    /** Today's Token Factory use per model, priced by the server. */
+    async getTokenFactoryUsage() {
+      const body = await request('GET', '/api/v1/settings/token-factory-usage');
+      if (!isRecord(body) || !isRecord(body.data) || !Array.isArray(body.data.models)) {
+        throw new Error('The instance did not return its Token Factory use. Is --instance a TrueForge server?');
+      }
+      return body.data;
+    },
+    /** @returns {Promise<{ id: string, text: string }[]>} entries of the shared memory */
+    async listMemoryEntries() {
+      const body = await request('GET', '/api/v1/memory/vault');
+      if (!isRecord(body) || !Array.isArray(body.data)) {
+        throw new Error('The instance did not return its memory. Is the memory turned on in the eval instance?');
+      }
+      return body.data;
+    },
+    /** @param {{ text: string, timestamp: string }[]} entries */
+    async importMemories(entries) {
+      await request('POST', '/api/v1/memory/vault/import', { entries });
+    },
+    /** @param {string} id */
+    async deleteMemoryEntry(id) {
+      await request('DELETE', `/api/v1/memory/vault/${encodeURIComponent(id)}`);
     },
     /**
      * Starts a turn without streaming. Poll `getTurn` until the state leaves `running`.

@@ -34,9 +34,9 @@ Every date counts from the day the demo is seeded. The examples here use Monday 
 ### 3. Draft, approval card, send (30 seconds) serves Tech, Design
 
 - Type: `Reply to Lucía in Spanish: Thursday works, she picks the place. Keep it warm and short.`
-- On screen: a draft in Lucía's thread with recipient, subject and body, written by Aman live. Then the approval card: who it goes to, the subject, a body preview, and four buttons: **Approve**, **Approve for this chat**, **Always allow**, **Deny**.
-- Presenter: "Nothing leaves this computer until I press this. Approve once, approve for this chat, or always. And a setting you turn off stays off."
-- Click **Approve**. On screen: the thread shows the reply as sent, under Lucía's message.
+- On screen: a draft in Lucía's thread with recipient, subject and body, written by Aman live. Then the approval card: who it goes to, the subject, a body preview, and four buttons: **Allow**, **Change it**, **Save as draft**, **Don't send**.
+- Presenter: "Nothing leaves this computer until I press this. I can send it, ask for a change, or keep it as a draft."
+- Click **Allow**. On screen: the thread shows the reply as sent, under Lucía's message.
 - Fallback: if the send fails with a provider error, the card keeps the draft and shows Retry; press it once. If Gmail is disconnected, show the draft only and say "the card is the only door out, and today it stays shut."
 
 ### 4. Attachments in the sandbox (30 seconds) serves Tech, Impact
@@ -51,7 +51,7 @@ Every date counts from the day the demo is seeded. The examples here use Monday 
 ### 5. Scheduled morning brief that waits (30 seconds) serves Idea, Design
 
 - Click: left rail, **Schedules**, then **Run now** on "morning briefing" (the live run takes under a minute; in the video, cut to the finished run).
-- On screen: the run's chat covers this week's mail and calendar, including Thursday's GP appointment, and her mother's birthday in three days. It ends with the **Needs your OK** box, with Aman's held drafts inside, each with Approve and Deny. Rehearsal check: the drafts include a reply to Teresa Matos about the plumber visit; the brief should mention the GP visit and the allergy Maya's memory holds (fixture 25 in EXPECTATIONS.md).
+- On screen: the run's chat covers this week's mail and calendar, including Thursday's GP appointment, and her mother's birthday in three days. It ends with the **Needs your OK** box, with Aman's held drafts inside, each with Allow and Deny. Rehearsal check: the drafts include a reply to Teresa Matos about the plumber visit; the brief should mention the GP visit and the allergy Maya's memory holds (fixture 25 in EXPECTATIONS.md).
 - Presenter: "Every morning Aman reads the inbox and the calendar and prepares what Maya would want sent. It never sends while she sleeps. It waits."
 - Click **Deny** on every held draft so the demo world stays clean.
 - Fallback: if the run stalls, press **Run now** again, or type the schedule's task text into a new chat and let Aman do it live.

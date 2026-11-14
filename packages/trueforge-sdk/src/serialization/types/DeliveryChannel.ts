@@ -5,8 +5,8 @@ import * as core from "../../core/index.js";
 import type * as serializers from "../index.js";
 
 export const DeliveryChannel: core.serialization.Schema<serializers.DeliveryChannel.Raw, TrueForge.DeliveryChannel> =
-    core.serialization.enum_(["in_app", "web_push", "telegram"]);
+    core.serialization.enum_(["in_app", "web_push", "sms", "call", "telegram"]);
 
 export declare namespace DeliveryChannel {
-    export type Raw = "in_app" | "web_push" | "telegram";
+    export type Raw = "in_app" | "web_push" | "sms" | "call" | "telegram";
 }

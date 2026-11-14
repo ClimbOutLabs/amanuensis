@@ -134,6 +134,10 @@ export function stampSentinelDecision(input: {
   | 'grant_tool_name'
   | 'secret_path_read'
   | 'mail_send'
+  | 'standing_grant_barred'
+  | 'chat_grantable_consequence'
+  | 'own_calendar_change'
+  | 'own_drive_write'
 > {
   const decision = input.decision;
   return {
@@ -150,6 +154,10 @@ export function stampSentinelDecision(input: {
     ...(decision.grant_tool_name === null ? {} : { grant_tool_name: decision.grant_tool_name }),
     ...(decision.secret_path_read ? { secret_path_read: true as const } : {}),
     ...(decision.mail_send ? { mail_send: true as const } : {}),
+    standing_grant_barred: decision.standing_grant_barred,
+    chat_grantable_consequence: decision.chat_grantable_consequence,
+    own_calendar_change: decision.own_calendar_change,
+    own_drive_write: decision.own_drive_write,
     ...(decision.silent_search_query === null ? {} : { silent_search_query: decision.silent_search_query }),
     ...(decision.audit_description === null ? {} : { audit_description: decision.audit_description }),
     is_approval_required:
@@ -582,7 +590,8 @@ export class ToolSet implements IToolSet {
 
   /**
    * The event a CalDAV change names, read once before it is classified so the card can say what it
-   * changes. Null when that read fails, and the card then says the title could not be read.
+   * changes. Null when that read fails, and the change is then refused instead of carded, because a
+   * card cannot name an event it could not read.
    */
   private async caldavEventFor(params: CallToolRequest['params']): Promise<CaldavEventReview | null | undefined> {
     if (!this.firstParty || this.name !== CALDAV_SERVER_NAME) {

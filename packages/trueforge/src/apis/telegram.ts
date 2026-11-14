@@ -33,7 +33,6 @@ import {
 import { chatAssistantAgentName, getOrCreateChatAssistantAgent } from '../runtime/chatAssistant';
 import { resolveDefaultChatModel } from '../runtime/defaultChatModel';
 import { createMemoryClient } from '../runtime/memory/createMemoryClient';
-import { resolveMemoryProvider } from '../runtime/memory/memoryProvider';
 import {
   createTelegramRefusalThrottle,
   processTelegramUpdate,
@@ -157,26 +156,10 @@ async function startTelegramTurn<TTransaction>(params: {
       ? await deps.agentStore.getAgent({ tenant_id, id: session.record.agent.id })
       : undefined;
   // Memory wiring mirrors the chat route: without a client the turn retains nothing.
-  const memoryProvider =
-    configuration.MEMORY_BACKEND === 'hindsight'
-      ? await resolveMemoryProvider({
-          mcpServerStore: deps.resolveMcpServerStore(c, agent),
-          tokenStore: deps.tokenStore,
-          tenantId: tenant_id,
-          clientName: configuration.MCP_DCR_OAUTH_CLIENT_NAME,
-          userRef,
-          logger: deps.logger,
-        })
-      : undefined;
   const memoryClient = createMemoryClient({
-    backend: configuration.MEMORY_BACKEND,
     markdownDir: configuration.MEMORY_MARKDOWN_DIR,
     namespace: tenant_id,
     vaultScope: undefined,
-    hindsight:
-      memoryProvider === undefined
-        ? undefined
-        : { apiBase: memoryProvider.apiBase, bank: memoryProvider.bank, headers: memoryProvider.headers },
     embeddings: configuration.MEMORY_EMBEDDINGS_ENABLED
       ? {
           modelDir: configuration.MEMORY_EMBEDDINGS_MODEL_DIR,
@@ -217,8 +200,6 @@ async function startTelegramTurn<TTransaction>(params: {
       personalizationProfile,
       personaContext: undefined,
       memoryClient,
-      memoryProviderServerName: memoryProvider?.serverName,
-      memorySettings: memoryProvider?.settings,
       logger: deps.logger,
       clientTimezone: undefined,
     },

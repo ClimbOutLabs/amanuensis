@@ -583,7 +583,7 @@ test_the_fingerprint_is_shown_where_trust_is_given() {
   local fingerprint
   fingerprint=$(cat "$AMAN_HOME/tls/ca/root.fingerprint")
   assert_contains "$fingerprint" ":"
-  assert_flat_contains "$OUT" "Your device will show a long code called a fingerprint. It must be $fingerprint. If it differs, stop."
+  assert_flat_contains "$OUT" "Your device will show a long code called a fingerprint. It must be this one: ${fingerprint:0:48} ${fingerprint:48} If it differs, stop."
   local page
   page=$(cat "$AMAN_HOME/tls/trust/main/index.html")
   assert_not_contains "$page" "$fingerprint" "the plain-http page does not show a value it cannot vouch for"

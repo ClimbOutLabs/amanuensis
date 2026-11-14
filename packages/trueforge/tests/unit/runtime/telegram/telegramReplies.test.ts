@@ -6,6 +6,7 @@ import {
   Tier3EmailSchema,
   Tier3PersonaSchema,
   Tier3ScheduleSchema,
+  Tier3SkillNetworkSchema,
   Tier3SkillSchema,
 } from '@truefoundry/trueforge-core/core/permissions/tier';
 import winston from 'winston';
@@ -54,6 +55,7 @@ const APPROVAL_ACTION: ActionRequiredEvent = {
       source_event_id: 'event-1',
       tier3_card: {
         plain_what: 'Send the email to Sam.',
+        copy: null,
         plain_why: 'You asked for the summary to be sent.',
         cannot_be_undone: null,
         why_asked_again: null,
@@ -74,6 +76,7 @@ type Card = Tier3Card;
 function cardWith(overrides: Partial<Card>): Card {
   return {
     plain_what: 'Do the thing.',
+    copy: null,
     plain_why: null,
     cannot_be_undone: null,
     why_asked_again: null,
@@ -193,6 +196,7 @@ describe('telegram pending replies', () => {
         bcc: [],
         subject: 'The summary you asked for',
         body: 'Hello Sam,\n\nHere is the whole body, every word of it.\n\nBye.',
+        check_code: null,
         replaces: null,
         reply_in_thread: null,
         reply_to: null,
@@ -211,6 +215,60 @@ describe('telegram pending replies', () => {
     expect(sent?.inline_buttons?.[0]?.map(button => button.text)).toEqual(['Approve', 'Deny']);
     expect(store.pendingApprovals).toHaveLength(1);
     expect(store.pendingApprovals[0]?.prompt).toBe(sent?.text);
+  });
+
+  it("shows the card's own headline, reason and consequence, as the app card does, and keeps the buttons", async () => {
+    const card = cardWith({
+      plain_what: 'Send the email to Sam.',
+      copy: {
+        headline: 'Send "The summary" to Sam?',
+        consequence: 'Sam gets it right away.',
+        reason: 'Sending email always asks first.',
+      },
+      cannot_be_undone: 'This older line is not shown when the card has its own words.',
+      safe_choice: true,
+      destructive: true,
+      email: {
+        action: 'send',
+        to: [{ name: 'Sam', address: 'sam@example.com' }],
+        cc: [],
+        bcc: [],
+        subject: 'The summary',
+        body: 'Hi Sam.',
+        check_code: '4821',
+        replaces: null,
+        reply_in_thread: null,
+        reply_to: null,
+      },
+    });
+    const { client, deps } = harness(doneTurnWith(approvalAction(card)));
+    await deliverPendingTelegramReplies(deps);
+    const text = client.sent[0]?.text ?? '';
+    expect(text.split('\n').slice(0, 2)).toEqual(['Send "The summary" to Sam?', 'Sending email always asks first.']);
+    expect(text).toContain('Sam gets it right away.');
+    expect(text).toContain('Check code: 4821');
+    expect(text).not.toContain('Send the email to Sam.');
+    expect(text).not.toContain('This older line');
+    expect(client.sent[0]?.inline_buttons?.[0]?.map(button => button.text)).toEqual(['Approve', 'Deny']);
+  });
+
+  it('sends a skill network approval with the skill, its sites and why it asks', async () => {
+    const card = cardWith({
+      plain_what: 'Let the skill reach the internet.',
+      skill_network: {
+        skill_name: 'weather',
+        hosts: ['api.example.com', 'maps.example.com'],
+        reason: 'undeclared_host',
+        code_pin: null,
+      },
+    });
+    const { client, deps } = harness(doneTurnWith(approvalAction(card)));
+    await deliverPendingTelegramReplies(deps);
+    const text = client.sent[0]?.text ?? '';
+    expect(text).toContain('Skill: weather');
+    expect(text).toContain('Sites it asks to reach: api.example.com, maps.example.com');
+    expect(text).toContain('The skill did not say it would reach these sites.');
+    expect(client.sent[0]?.inline_buttons?.[0]?.map(button => button.text)).toEqual(['Approve', 'Deny']);
   });
 
   it.each([
@@ -234,6 +292,7 @@ describe('telegram pending replies', () => {
         bcc: [],
         subject: 'Hello',
         body: 'Hi.',
+        check_code: null,
         replaces: null,
         reply_in_thread: null,
         reply_to: null,
@@ -473,6 +532,11 @@ describe('telegram pending replies', () => {
     { section: 'schedule', shown: TELEGRAM_SHOWN_SECTION_FIELDS.schedule, schema: Tier3ScheduleSchema.shape },
     { section: 'persona', shown: TELEGRAM_SHOWN_SECTION_FIELDS.persona, schema: Tier3PersonaSchema.shape },
     { section: 'skill', shown: TELEGRAM_SHOWN_SECTION_FIELDS.skill, schema: Tier3SkillSchema.shape },
+    {
+      section: 'skill_network',
+      shown: TELEGRAM_SHOWN_SECTION_FIELDS.skill_network,
+      schema: Tier3SkillNetworkSchema.shape,
+    },
   ])(
     'shows every field of the $section section: a new field fails here until Telegram shows it',
     ({ shown, schema }) => {

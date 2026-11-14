@@ -95,7 +95,6 @@ describe('profile learning from Telegram', () => {
   let memoryDir = '';
   let nextUpdateId = 1;
   const original = {
-    MEMORY_BACKEND: configuration.MEMORY_BACKEND,
     MEMORY_MARKDOWN_DIR: configuration.MEMORY_MARKDOWN_DIR,
     MEMORY_EMBEDDINGS_ENABLED: configuration.MEMORY_EMBEDDINGS_ENABLED,
   };
@@ -155,7 +154,6 @@ describe('profile learning from Telegram', () => {
   beforeAll(async () => {
     memoryDir = await mkdtemp(join(tmpdir(), 'telegram-profile-learning-'));
     Object.assign(configuration, {
-      MEMORY_BACKEND: 'markdown',
       MEMORY_MARKDOWN_DIR: memoryDir,
       MEMORY_EMBEDDINGS_ENABLED: false,
     });

@@ -6,7 +6,6 @@ import {
   contextCompaction,
   contextUsesSandboxTools,
   CONVERSATION_REQUIRED_SUMMARY_SECTIONS,
-  DEFAULT_CONTEXT_COMPACTION_THRESHOLD_TOKENS,
   HOST_SUMMARY_PREFACE,
   replaceBoundRepositorySection,
   REQUIRED_SUMMARY_SECTIONS,
@@ -15,6 +14,7 @@ import {
 } from '../../../../src/core/capabilities/builtins/ContextCompaction';
 import { repositoryBindingContext } from '../../../../src/core/capabilities/builtins/RepositoryBindingContext';
 import type { TaskChecklistAccess } from '../../../../src/core/capabilities/builtins/TaskChecklist';
+import { DEFAULT_CONTEXT_COMPACTION_THRESHOLD_TOKENS } from '../../../../src/core/capabilities/builtins/tokenBudgetConstants';
 import { createToolResponseV2, newEventId, type ToolResultDisposition } from '../../../../src/core/events/schema';
 import type { InternalEnrichedToolCall, InternalToolCallInfo } from '../../../../src/core/llm/LLMTypes';
 import {
@@ -1802,6 +1802,48 @@ none
       }
     }
   });
+
+  it.each([
+    { modelSupportsVision: true, keptPictures: 0 },
+    { modelSupportsVision: false, keptPictures: 2 },
+  ])(
+    'sizes pictures in the kept tail when the model reads them ($modelSupportsVision)',
+    async ({ modelSupportsVision, keptPictures }) => {
+      const picture = (text: string): ContextMessage => ({
+        role: 'user',
+        content: [
+          { type: 'text', text },
+          { type: 'image_url', image_url: { url: 'data:image/png;base64,AAAA' } },
+        ],
+      });
+      const model = makeMockILLM({
+        createNonStream: jest.fn().mockResolvedValue({
+          output: { role: 'assistant', content: completedSummary('unbound') },
+          usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
+          finish_reason: 'stop',
+        }),
+      });
+      const events = await collectProcessPreLLM(
+        contextCompaction({
+          logger: undefined,
+          definition: { modelId: undefined, configuredModels: undefined, modelClient: model, modelSupportsVision },
+          boundRepository: STUB_BOUND_REPOSITORY,
+          compactionThresholdTokens: ALWAYS_TRIGGERS_THRESHOLD,
+        }),
+        [
+          { role: 'user', content: 'help me with this' },
+          { role: 'assistant', content: 'here is an approach' },
+          picture('first photo'),
+          picture('second photo'),
+        ],
+      );
+      const overwrite = events.find(event => event.type === 'agent.context.overwrite');
+      if (overwrite === undefined || overwrite.type !== 'agent.context.overwrite') {
+        throw new Error('expected compaction overwrite');
+      }
+      expect(JSON.stringify(overwrite.context).split('"image_url":').length - 1).toBe(keptPictures);
+    },
+  );
 
   it('ensures the tail never starts with a tool message', async () => {
     const callId = 'tool-call-1';

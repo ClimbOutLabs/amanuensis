@@ -1,6 +1,7 @@
 import { TurnStreamingEventSchema } from '../../../src/schemas/events';
 import { MemoryRecallPersistedEventSchema } from '../../../src/schemas/memoryEvents';
 import { ProfileLearnedPersistedEventSchema } from '../../../src/schemas/profileLearningEvents';
+import { SendReceiptPersistedEventSchema } from '../../../src/schemas/sendReceiptEvents';
 import { ListTurnEventsResponseSchema } from '../../../src/schemas/turn';
 
 describe('wire event schemas', () => {
@@ -8,11 +9,9 @@ describe('wire event schemas', () => {
     type: 'aman.memory.recall',
     id: 'evt_0000000000000000000000001',
     created_at: '2026-09-01T10:00:00.000Z',
-    injected_block:
-      '<aman-memory>\n[2026-08-14] Example.\n(memory: 1 items, 0 entities; 7 tokens of 2048 budget)\n</aman-memory>',
+    injected_block: '<aman-memory>\n[2026-08-14] Example.\n(memory: 1 items; 7 tokens of 2048 budget)\n</aman-memory>',
     stats: {
       items: 1,
-      entities: 0,
       dropped_over_budget: 0,
       dropped_below_threshold: 0,
       estimated_tokens: 9,
@@ -42,15 +41,41 @@ describe('wire event schemas', () => {
     ...memoryEvent,
     id: 'evt_0000000000000000000000003',
     injected_block:
-      '<aman-memory>\n[2026-08-14] Example.\n(memory: 1 items, 0 entities; 10 tokens of 2048 budget; 1 withheld by screen)\n</aman-memory>',
+      '<aman-memory>\n[2026-08-14] Example.\n(memory: 1 items; 10 tokens of 2048 budget; 1 withheld by screen)\n</aman-memory>',
     screen: {
       withheld: 1,
       records: [
         { id: 'item:#0', score: 0.91, reason: 'flagged_malicious', origin: 'tool_ingested', withheld: true },
-        { id: 'entity:#0', score: 0.72, reason: 'flagged_but_user_origin', origin: 'user_stated', withheld: false },
+        { id: 'page:#0', score: 0.72, reason: 'flagged_but_user_origin', origin: 'user_stated', withheld: false },
       ],
     },
   };
+
+  it('accepts a memory recall event that only carries the pages layer', () => {
+    const parsed = MemoryRecallPersistedEventSchema.safeParse({
+      ...memoryEvent,
+      layers: {
+        pages: { candidates: 2, loaded: 1, dropped_over_count: 0, dropped_over_budget: 1, withheld: 0 },
+      },
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  it('still reads an older event that carries entities, curated and reflect stats, and drops those fields', () => {
+    const parsed = MemoryRecallPersistedEventSchema.safeParse({
+      ...memoryEvent,
+      stats: { ...memoryEvent.stats, entities: 2 },
+      layers: {
+        curated: { profile: false, mental_models: 0, candidates: 0, withheld: 0, dropped: 0, outcome: 'empty' },
+        reflect: { route: 'recall', outcome: 'skipped', reflect_ms: 0, based_on: 0 },
+      },
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.stats).not.toHaveProperty('entities');
+      expect(parsed.data.layers).toEqual({});
+    }
+  });
 
   it('accepts the screened memory recall event standalone', () => {
     const parsed = MemoryRecallPersistedEventSchema.safeParse(screenedMemoryEvent);
@@ -127,5 +152,42 @@ describe('wire event schemas', () => {
       tokens_before: 12000,
     });
     expect(parsed.success).toBe(true);
+  });
+
+  const sentReceipt = {
+    type: 'aman.email.send_receipt',
+    id: 'evt_0000000000000000000000005',
+    created_at: '2026-09-01T10:00:00.000Z',
+    tool_call_id: 'call_1',
+    result: {
+      outcome: 'sent',
+      sent_at: '2026-09-01T09:12:00.000Z',
+      sent_message_id: 'm-sent-1',
+      check_code: 'A7F39C',
+      message: {
+        to: [{ name: 'Grace', address: 'grace@example.com' }],
+        cc: [],
+        bcc: [],
+        subject: 'Lease',
+        body: 'Thursday works.',
+        reply_to: null,
+      },
+    },
+  };
+  const notSentReceipt = {
+    ...sentReceipt,
+    id: 'evt_0000000000000000000000006',
+    result: { outcome: 'not_sent', reason: 'draft_changed' },
+  };
+
+  it.each([sentReceipt, notSentReceipt])('accepts the send receipt event everywhere it travels', event => {
+    expect(SendReceiptPersistedEventSchema.safeParse(event).success).toBe(true);
+    expect(TurnStreamingEventSchema.safeParse(event).success).toBe(true);
+    expect(ListTurnEventsResponseSchema.safeParse({ data: [event], pagination: { limit: 50 } }).success).toBe(true);
+  });
+
+  it('refuses a send receipt that claims a send without its message id', () => {
+    const withoutId = { ...sentReceipt.result, sent_message_id: undefined };
+    expect(SendReceiptPersistedEventSchema.safeParse({ ...sentReceipt, result: withoutId }).success).toBe(false);
   });
 });

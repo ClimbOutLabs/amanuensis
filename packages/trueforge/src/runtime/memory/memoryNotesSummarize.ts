@@ -14,14 +14,12 @@ import type { TurnModelUsage } from '../modelUsage';
 import type { TokenFactoryBudget } from '../tokenFactoryBudget';
 import { ASSISTANT_RESPONSE_SOURCE, type MemoryNoteSource } from './memoryNotes';
 import {
+  askSummaryModel,
   boundedText,
   describeTurnDate,
   extractReplyJson,
-  flattenLlmContent,
   keepFactsFromPerson,
-  SUMMARIZE_MAX_OUTPUT_TOKENS,
   summaryLlmResolver,
-  withSummarizeSlot,
 } from './memorySummarize';
 import { LIST_ITEM_LINE, openUiSentences } from './openUiText';
 
@@ -478,34 +476,32 @@ export async function summarizeTurnNotes(params: {
   ) {
     return [];
   }
-  try {
-    return await withSummarizeSlot(async () => {
-      const llm = await (params.resolveLlm ?? summaryLlmResolver(params))(summarizationModelFqn);
-      const result = await llm.createNonStream({
-        messages: buildNotesMessages({
-          results,
-          replySentences: sentences,
-          turnDate: params.turnDate,
-          timeZone: params.timeZone,
-        }),
-        max_tokens: SUMMARIZE_MAX_OUTPUT_TOKENS,
-      });
-      const reply = flattenLlmContent(result.output.content ?? null).trim();
-      if (reply === '' || reply.length > NOTES_MAX_REPLY_CHARACTERS) {
-        return [];
-      }
-      return parseNotesReply({
-        reply,
-        results,
-        sentences,
-        personName: params.personName,
-        assistantName: params.assistantName,
-      });
-    });
-  } catch (error) {
-    logger.debug('Memory note summarization failed', {
-      reason: error instanceof Error ? error.message : String(error),
-    });
+  // The shared call retries once with more room when the cap cut the reply off before any answer, so a
+  // model that thinks first does not lose the turn's findings.
+  const answer = await askSummaryModel({
+    messages: buildNotesMessages({
+      results,
+      replySentences: sentences,
+      turnDate: params.turnDate,
+      timeZone: params.timeZone,
+    }),
+    modelFqn: summarizationModelFqn,
+    resolveLlm: params.resolveLlm ?? summaryLlmResolver(params),
+    isReadable: reply => NotesReplySchema.safeParse(extractReplyJson(reply)).success,
+    logger,
+  });
+  if (answer.status !== 'answered') {
+    logger.debug('Memory note summarization failed', { reason: answer.reason });
     return [];
   }
+  if (answer.reply === '' || answer.reply.length > NOTES_MAX_REPLY_CHARACTERS) {
+    return [];
+  }
+  return parseNotesReply({
+    reply: answer.reply,
+    results,
+    sentences,
+    personName: params.personName,
+    assistantName: params.assistantName,
+  });
 }

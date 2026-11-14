@@ -79,7 +79,7 @@ Gmail is stricter. A scheduled run can read your Gmail, but it never saves a Gma
 
 When the run finishes, its chat ends with a **Needs your OK** list: "Aman held these for you. Nothing has been done yet."
 
-- Each item shows what will happen, with **Approve** and **Deny**. Some read-only connector tools also offer **Always allow everywhere**.
+- Each item shows what will happen, with **Allow** and **Deny**. Some read-only connector tools also offer **Always allow everywhere**.
 - The app builds the list from what was held, not from the model's words. The model can't hide an item or add a fake one.
 - When you approve an item, Aman checks it again first. If anything the card showed has changed since, such as the guests of an event or the text of a message, nothing is done and Aman says to ask again in chat.
 - Held items expire after 24 hours.
@@ -103,13 +103,13 @@ A schedule is a morning brief when its name is `morning-brief`, or when its task
 A reminder is for something that should happen at a set time. In any chat, ask with a time, such as "Remind me at 5 pm to call the pharmacy". A reminder can also repeat daily, on weekdays, or weekly on the days you choose.
 
 - Setting a reminder needs no card, because it only adds a note for you. It is written to the activity log.
-- When it is due, the reminder shows in the bell with the reason you got it. It also reaches you the way you chose in Settings, Reach me, such as a notice on your devices. Its line also appears at the end of the chat you set it in.
-- To mark a reminder urgent, say so when you ask, such as "Remind me at 5 pm to call the pharmacy, it's urgent". An urgent reminder can call you once phone calls are set up and you allow it.
+- When it is due, the reminder shows under the **For you** bell with the reason you got it. It also reaches you the way you chose in Settings, Reach me, such as a notice on your devices or, if you set them up, [texts](/text-messages). Its line also appears at the end of the chat you set it in.
+- To mark a reminder urgent, say so when you ask, such as "Remind me at 5 pm to call the pharmacy, it's urgent". An urgent reminder can call you once [phone calls](/phone-calls) are set up and you allow it.
 - If Aman is still answering in that chat, the line waits until the answer ends.
 - No model is called to deliver a reminder, so it costs nothing.
 - A reminder whose chat was deleted still shows in the bell.
-- Reminders don't show on the Schedules page. To see them all, click Reminders in the left panel. It lists what is coming up and what has already reminded you, with the persona that set each one. Click a reminder to open the chat you set it in; a reminder set outside a chat, or whose chat was deleted, has no link. To change or cancel one, ask in a chat, such as "What reminders do I have?"
-- Before Aman cancels one, a card shows the reminder and waits for your OK. A canceled reminder is gone for good.
+- Reminders don't show on the Schedules page. To see them all, click Reminders in the left panel. It lists what is coming up and what has already reminded you, with the persona that set each one. Each row shows the day, how far off it is, and whether it repeats or is paused. Click a reminder that says **Open chat** to go to the chat you set it in; a reminder set outside a chat, or whose chat was deleted, says **No chat to open**. To delete one, click the bin on its row and confirm. To change one, or to cancel one by asking, use a chat, such as "What reminders do I have?"
+- Before Aman cancels one, a card shows the reminder and waits for your OK. A canceled or deleted reminder is gone for good.
 
 ## Related
 

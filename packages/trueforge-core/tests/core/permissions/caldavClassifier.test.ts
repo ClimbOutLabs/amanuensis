@@ -1,4 +1,4 @@
-import type { CaldavEventReview } from '../../../src/core/calendar/caldav/eventReview';
+import { caldavEventReviewFrom, type CaldavEventReview } from '../../../src/core/calendar/caldav/eventReview';
 import { caldavResultNote } from '../../../src/core/permissions/caldavTier';
 import { classifyTier, type ClassifyContext, type SentinelAction } from '../../../src/core/permissions/classifier';
 import { defaultSentinelServices } from '../../../src/core/permissions/context';
@@ -73,8 +73,14 @@ describe('CalDAV respond_to_event', () => {
     );
     expect(decision.tier).toBe(3);
     expect(decision.card?.plain_what).toBe(
-      'Accept "Dentist", 22 Oct 2026, 14:00 (Europe/Berlin)? The organizer, Office Admin, will be told. This reply goes to the event organizer, so Aman always asks.',
+      'Accept "Dentist", 22 Oct 2026, 14:00 (Europe/Berlin)? The organizer, Office Admin, will be told.',
     );
+    expect(decision.card?.copy).toEqual({
+      headline: 'Accept "Dentist", 22 Oct 2026, 14:00 (Europe/Berlin)?',
+      consequence: "The organizer, Office Admin, will be told. The reply to the organizer can't be unsent.",
+      reason: 'This reply goes to the event organizer, so Aman always asks.',
+    });
+    expect(decision.card?.safe_choice).toBe(true);
     expect(decision.card?.cannot_be_undone).toBe("The reply to the organizer can't be unsent.");
     expect(decision.approval_token_id).toEqual(expect.any(String));
   });
@@ -100,7 +106,7 @@ describe('CalDAV respond_to_event', () => {
     expect(tentative.card?.plain_what).toMatch(/^Tentatively accept "Dentist"/);
   });
 
-  it('shows the event id and says the title could not be read when the lookup failed', async () => {
+  it('refuses to answer when the lookup failed, and never names the event by its id', async () => {
     const decision = await classifyTier(
       caldavAction(
         'respond_to_event',
@@ -109,9 +115,12 @@ describe('CalDAV respond_to_event', () => {
       ),
       makeCtx(),
     );
-    expect(decision.card?.plain_what).toBe(
-      'Accept the event with id ev1. Its title could not be read? The organizer will be told. Their name could not be read. This reply goes to the event organizer, so Aman always asks.',
+    expect(decision.card).toBeNull();
+    expect(decision.auto_deny).toBe('cannot_describe');
+    expect(decision.owner_message).toBe(
+      "I can't see which event this is, so I won't answer it. Open it in your calendar and tell me the title.",
     );
+    expect(decision.owner_message).not.toContain('ev1');
   });
 
   it('gives exactly one card across the two calls of one response', async () => {
@@ -146,9 +155,14 @@ describe('CalDAV changes', () => {
       makeCtx(),
     );
     expect(decision.tier).toBe(3);
-    expect(decision.card?.plain_what).toBe(
-      'Change "Dentist", 22 Oct 2026, 14:00 (Europe/Berlin)? Aman always asks before changing an event in this calendar, because it cannot check who else is on it.',
-    );
+    expect(decision.card?.plain_what).toBe('Change "Dentist", 22 Oct 2026, 14:00 (Europe/Berlin)?');
+    expect(decision.card?.copy).toEqual({
+      headline: 'Change "Dentist", 22 Oct 2026, 14:00 (Europe/Berlin)?',
+      consequence: null,
+      reason: 'Aman always asks before changing an event in this calendar, because it cannot check who else is on it.',
+    });
+    expect(decision.card?.safe_choice).toBe(true);
+    expect(decision.card?.destructive).toBe(false);
   });
 
   it('lists every field a create call writes in the outbound text, with the long description in full', async () => {
@@ -252,11 +266,12 @@ describe('CalDAV changes', () => {
       makeCtx(),
     );
     expect(decision.card?.plain_what).toBe(
-      'Change "Dentist", 22 Oct 2026, 14:00 (Europe/Berlin)? Changing this will email: Sam Lee, dana@example.com. Aman always asks before changing an event in this calendar, because it cannot check who else is on it.',
+      'Change "Dentist", 22 Oct 2026, 14:00 (Europe/Berlin)? Changing this will email: Sam Lee, dana@example.com.',
     );
+    expect(decision.card?.copy?.consequence).toBe('Changing this will email: Sam Lee, dana@example.com.');
   });
 
-  it('says anyone invited may be emailed when the guest list could not be read', async () => {
+  it('refuses a change when the guest list could not be read, even though the event is named', async () => {
     const decision = await classifyTier(
       caldavAction(
         'update_event',
@@ -265,7 +280,39 @@ describe('CalDAV changes', () => {
       ),
       makeCtx(),
     );
-    expect(decision.card?.plain_what).toContain('The guest list could not be read, so anyone invited may be emailed.');
+    expect(decision.card).toBeNull();
+    expect(decision.auto_deny).toBe('cannot_describe');
+    expect(decision.owner_message).toBe(
+      "I can't see who's on this event, so I won't change it. Open it in your calendar and tell me who's on it.",
+    );
+  });
+
+  it('refuses a delete when the guest list could not be read, even though the event is named', async () => {
+    const decision = await classifyTier(
+      caldavAction('delete_event', EVENT_ID, { caldav_event: { ...DENTIST, attendees: null } }),
+      makeCtx(),
+    );
+    expect(decision.card).toBeNull();
+    expect(decision.auto_deny).toBe('cannot_describe');
+    expect(decision.owner_message).toBe(
+      "I can't see who's on this event, so I won't delete it. Open it in your calendar and tell me who's on it.",
+    );
+  });
+
+  it('refuses a reply when the organizer could not be read', async () => {
+    const decision = await classifyTier(
+      caldavAction(
+        'respond_to_event',
+        { ...EVENT_ID, response: 'ACCEPTED', confirm_token: 'abc' },
+        { caldav_event: { ...DENTIST, organizer: null } },
+      ),
+      makeCtx(),
+    );
+    expect(decision.card).toBeNull();
+    expect(decision.auto_deny).toBe('cannot_describe');
+    expect(decision.owner_message).toBe(
+      "I can't see who this reply goes to, so I won't answer it. Open it in your calendar and tell me who sent the invitation.",
+    );
   });
 
   it('gives the generic card when a change would email more guests than the card can name', async () => {
@@ -283,8 +330,16 @@ describe('CalDAV changes', () => {
       makeCtx(),
     );
     expect(decision.card?.plain_what).toBe(
-      'Delete "Dentist", 22 Oct 2026, 14:00 (Europe/Berlin)? Deleting this will email: Sam Lee. Aman always asks before deleting an event in this calendar, because it cannot check who else is on it.',
+      'Delete "Dentist", 22 Oct 2026, 14:00 (Europe/Berlin)? Deleting this will email: Sam Lee.',
     );
+    expect(decision.card?.copy).toEqual({
+      headline: 'Delete "Dentist", 22 Oct 2026, 14:00 (Europe/Berlin)?',
+      consequence:
+        "Deleting this will email: Sam Lee. This removes the event from the calendar. It can't be restored from here. A cancellation sent to the guests can't be unsent.",
+      reason: 'Aman always asks before deleting an event in this calendar, because it cannot check who else is on it.',
+    });
+    expect(decision.card?.safe_choice).toBe(true);
+    expect(decision.card?.destructive).toBe(true);
     expect(decision.card?.cannot_be_undone).toBe(
       "This removes the event from the calendar. It can't be restored from here. A cancellation sent to the guests can't be unsent.",
     );
@@ -293,12 +348,57 @@ describe('CalDAV changes', () => {
   it('shows a delete card with a warning that it cannot be restored from here', async () => {
     const decision = await classifyTier(caldavAction('delete_event', EVENT_ID, { caldav_event: DENTIST }), makeCtx());
     expect(decision.tier).toBe(3);
-    expect(decision.card?.plain_what).toBe(
-      'Delete "Dentist", 22 Oct 2026, 14:00 (Europe/Berlin)? Aman always asks before deleting an event in this calendar, because it cannot check who else is on it.',
-    );
+    expect(decision.card?.plain_what).toBe('Delete "Dentist", 22 Oct 2026, 14:00 (Europe/Berlin)?');
     expect(decision.card?.cannot_be_undone).toBe(
       "This removes the event from the calendar. It can't be restored from here.",
     );
+  });
+
+  it('refuses a delete when the event lookup failed, with the one thing to do next', async () => {
+    const decision = await classifyTier(caldavAction('delete_event', EVENT_ID, { caldav_event: null }), makeCtx());
+    expect(decision.card).toBeNull();
+    expect(decision.auto_deny).toBe('cannot_describe');
+    expect(decision.owner_message).toBe(
+      "I can't see which event this is or who's on it, so I won't delete it. Open it in your calendar and tell me the title.",
+    );
+  });
+
+  it('refuses a change when the event lookup failed', async () => {
+    const decision = await classifyTier(
+      caldavAction('update_event', { ...EVENT_ID, summary: 'Moved' }, { caldav_event: null }),
+      makeCtx(),
+    );
+    expect(decision.card).toBeNull();
+    expect(decision.auto_deny).toBe('cannot_describe');
+    expect(decision.owner_message).toBe(
+      "I can't see which event this is or who's on it, so I won't change it. Open it in your calendar and tell me the title.",
+    );
+  });
+
+  it('refuses the delete from the failing example, replayed from the calendar tool output', async () => {
+    // The get_event answer for an event whose title cannot be read: no summary, no guest list.
+    // The review built from that answer is what the classifier sees for the delete.
+    const review = caldavEventReviewFrom({
+      id: 'invented-event-id-9f8e7d6c',
+      result: {
+        event: {
+          start: { value: '2026-11-07T15:00:00', tzid: 'America/New_York', all_day: false },
+        },
+      },
+    });
+    expect(review.title).toBeNull();
+    expect(review.attendees).toBeNull();
+    const decision = await classifyTier(
+      caldavAction('delete_event', { id: 'invented-event-id-9f8e7d6c' }, { caldav_event: review }),
+      makeCtx(),
+    );
+    expect(decision.card).toBeNull();
+    expect(decision.auto_deny).toBe('cannot_describe');
+    expect(decision.owner_message).toBe(
+      "I can't see which event this is or who's on it, so I won't delete it. Open it in your calendar and tell me the title.",
+    );
+    expect(decision.owner_message).not.toContain('invented-event-id-9f8e7d6c');
+    expect(decision.reason_detail).not.toContain('invented-event-id-9f8e7d6c');
   });
 
   it('escapes a title that carries hidden characters or quotes', async () => {

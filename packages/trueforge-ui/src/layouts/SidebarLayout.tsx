@@ -23,6 +23,7 @@ import {
 import { cn } from '../atoms/lib/cn.js';
 import { useIsMobile } from '../atoms/lib/useIsMobile.js';
 import { useLightDismiss } from '../atoms/lib/useLightDismiss.js';
+import { LightDarkToggleButton } from '../atoms/LightDarkToggleButton.js';
 import { NamedAgentHeaderLabel } from '../atoms/NamedAgentHeaderLabel.js';
 import { PageHeader } from '../atoms/PageHeader.js';
 import { DropdownMenu } from '../atoms/primitives/DropdownMenu.js';
@@ -336,7 +337,7 @@ export function SidebarLayout({ className }: { className?: string }) {
       {showAgentConfig ? (
         <aside
           role="dialog"
-          aria-label="Agent Config"
+          aria-label="Agent setup"
           className="absolute inset-y-0 left-0 z-20 w-full max-w-sm border-r border-border shadow-xl md:static md:z-auto md:max-w-140 md:flex-1 md:shadow-none 2xl:max-w-150"
         >
           <AgentConfigDrawerContainer showClose={isMobile} />
@@ -396,6 +397,7 @@ export function SidebarLayout({ className }: { className?: string }) {
           end={
             !overlayOpen ? (
               <>
+                <LightDarkToggleButton />
                 <AgentDetailsToggleButton />
                 <SaveAgentButton />
               </>

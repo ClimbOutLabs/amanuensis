@@ -28,9 +28,25 @@ function grantKey(input: {
   return JSON.stringify([input.tenant_id, input.created_by, input.session_id, [...input.hosts].sort()]);
 }
 
+/** Sites the person allowed once for one skill in one chat; they die with the chat's grant. */
+interface SessionSkillHosts {
+  tenant_id: string;
+  created_by: string;
+  session_id: string;
+  skill_name: string;
+  hosts: Set<string>;
+  expires_at_ms: number;
+}
+
 export class SkillNetworkTokenRegistry {
   readonly #byToken = new Map<string, SkillNetworkGrant>();
   readonly #byKey = new Map<string, string>();
+  /** Allow-once sites per chat and skill, keyed by session, skill. */
+  readonly #sessionHosts = new Map<string, SessionSkillHosts>();
+  /** Sites the gateway refused for a chat, waiting to be read by the runtime, keyed by session. */
+  readonly #refusals = new Map<string, { hosts: Set<string>; expires_at_ms: number }>();
+  /** First-use cards already handed to the runtime, keyed by session, skill, so one ask is raised once. */
+  readonly #cardsRaised = new Set<string>();
 
   /**
    * The token for a chat's approved sites, minting one when needed. A chat holds one grant at a
@@ -44,7 +60,13 @@ export class SkillNetworkTokenRegistry {
     if (existing !== undefined && this.resolve(existing) !== undefined) {
       return existing;
     }
-    this.revokeSession(input.session_id);
+    // Only the chat's earlier token goes: its allow-once sites, refusals and raised cards are
+    // what the new grant was built from, so dropping them here would undo an answer just given.
+    for (const grant of this.#byToken.values()) {
+      if (grant.session_id === input.session_id) {
+        this.#delete(grant);
+      }
+    }
     const now = Date.now();
     const token = randomBytes(16).toString('hex');
     const grant: SkillNetworkGrant = {
@@ -79,11 +101,127 @@ export class SkillNetworkTokenRegistry {
         this.#delete(grant);
       }
     }
+    for (const [key, entry] of this.#sessionHosts) {
+      if (entry.session_id === session_id) {
+        this.#sessionHosts.delete(key);
+      }
+    }
+    this.#refusals.delete(session_id);
+    for (const key of this.#cardsRaised) {
+      if (key.startsWith(`${session_id}\n`)) {
+        this.#cardsRaised.delete(key);
+      }
+    }
   }
 
   #delete(grant: SkillNetworkGrant): void {
     this.#byToken.delete(grant.token);
     this.#byKey.delete(grantKey(grant));
+  }
+
+  /**
+   * Adds sites the person allowed once for one skill in this chat. They join the chat's grant
+   * until the chat's grants are revoked or they age out with the same lifetime as a grant.
+   */
+  addSessionHosts(input: {
+    tenant_id: string;
+    created_by: string;
+    session_id: string;
+    skill_name: string;
+    hosts: readonly string[];
+  }): void {
+    if (input.hosts.length === 0) {
+      return;
+    }
+    const key = `${input.session_id}\n${input.skill_name}`;
+    const existing = this.#sessionHosts.get(key);
+    if (existing !== undefined && existing.expires_at_ms > Date.now()) {
+      for (const host of input.hosts) {
+        existing.hosts.add(host);
+      }
+      existing.expires_at_ms = Date.now() + GRANT_TTL_MS;
+      return;
+    }
+    this.#sessionHosts.set(key, {
+      tenant_id: input.tenant_id,
+      created_by: input.created_by,
+      session_id: input.session_id,
+      skill_name: input.skill_name,
+      hosts: new Set(input.hosts),
+      expires_at_ms: Date.now() + GRANT_TTL_MS,
+    });
+  }
+
+  /** The allow-once sites for one skill in one chat, or an empty list when there are none. */
+  sessionHosts(input: { session_id: string; skill_name: string }): readonly string[] {
+    const entry = this.#sessionHosts.get(`${input.session_id}\n${input.skill_name}`);
+    if (entry === undefined) {
+      return [];
+    }
+    if (entry.expires_at_ms <= Date.now()) {
+      this.#sessionHosts.delete(`${input.session_id}\n${input.skill_name}`);
+      return [];
+    }
+    return [...entry.hosts].sort();
+  }
+
+  /** Every live allow-once site for one skill, across the person's open chats; Settings shows these. */
+  sessionHostsForSkill(input: { tenant_id: string; created_by: string; skill_name: string }): readonly string[] {
+    const hosts = new Set<string>();
+    for (const entry of this.#sessionHosts.values()) {
+      if (
+        entry.tenant_id === input.tenant_id &&
+        entry.created_by === input.created_by &&
+        entry.skill_name === input.skill_name &&
+        entry.expires_at_ms > Date.now()
+      ) {
+        for (const host of entry.hosts) {
+          hosts.add(host);
+        }
+      }
+    }
+    return [...hosts].sort();
+  }
+
+  /** Notes a site the gateway refused for a chat, so the runtime can ask about it with a card. */
+  recordRefusal(input: { session_id: string; host: string }): void {
+    const existing = this.#refusals.get(input.session_id);
+    if (existing !== undefined && existing.expires_at_ms > Date.now()) {
+      existing.hosts.add(input.host);
+      existing.expires_at_ms = Date.now() + GRANT_TTL_MS;
+      return;
+    }
+    this.#refusals.set(input.session_id, {
+      hosts: new Set([input.host]),
+      expires_at_ms: Date.now() + GRANT_TTL_MS,
+    });
+  }
+
+  /** The refused sites waiting for one chat, cleared as they are read; each is handed out once. */
+  drainRefusals(input: { session_id: string }): readonly string[] {
+    const entry = this.#refusals.get(input.session_id);
+    if (entry === undefined) {
+      return [];
+    }
+    this.#refusals.delete(input.session_id);
+    if (entry.expires_at_ms <= Date.now()) {
+      return [];
+    }
+    return [...entry.hosts].sort();
+  }
+
+  /** True when a first-use card for this skill was already handed out in this chat and not yet answered. */
+  cardRaised(input: { session_id: string; skill_name: string }): boolean {
+    return this.#cardsRaised.has(`${input.session_id}\n${input.skill_name}`);
+  }
+
+  markCardRaised(input: { session_id: string; skill_name: string }): void {
+    this.#cardsRaised.add(`${input.session_id}\n${input.skill_name}`);
+  }
+
+  /** An answer landed for this skill in this chat, so a later change may raise a card again. */
+  clearCardRaised(input: { session_id: string; skill_name: string }): void {
+    this.#cardsRaised.delete(`${input.session_id}\n${input.skill_name}`);
   }
 }
 

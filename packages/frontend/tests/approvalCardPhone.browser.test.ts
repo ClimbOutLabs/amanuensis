@@ -65,6 +65,20 @@ test('both approval cards fit a 390 px phone with every choice in reach', { time
         const box = await choice.boundingBox();
         assert.ok(box !== null, `${name} has no box`);
         assert.ok(box.x >= 0 && box.x + box.width <= PHONE.width, `${name} runs off the screen`);
+        // 2.75rem: the smallest comfortable tap target, kept even though the card's text is small.
+        assert.ok(Math.round(box.height) >= 44, `${name} is ${String(box.height)} px tall, too short to tap`);
+      }
+      // Allow comes first, and every choice has the same outlined look, so none is pushed.
+      const looks = await card.locator('.aui-approval-card__actions button').evaluateAll(buttons =>
+        buttons.map(button => {
+          const style = getComputedStyle(button);
+          return { label: (button.textContent ?? '').trim(), background: style.backgroundColor, color: style.color };
+        }),
+      );
+      assert.equal(looks[0]?.label, 'Allow', `the first choice is ${String(looks[0]?.label)}, not Allow`);
+      for (const look of looks) {
+        assert.equal(look.background, looks[0]?.background, `"${look.label}" is filled differently from Allow`);
+        assert.equal(look.color, looks[0]?.color, `"${look.label}" has a different ink from Allow`);
       }
     }
 

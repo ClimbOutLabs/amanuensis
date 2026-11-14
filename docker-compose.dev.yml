@@ -45,13 +45,15 @@ services:
     build:
       context: ops/aman-stt
     image: amanuensis-aman-stt:latest
-    # Loopback-only: the sidecar has no authentication.
+    # Loopback-only, and every call must carry SPEECH_SECRET: set it in the shell that runs
+    # `pnpm dev:infra` and the same value in packages/trueforge/.env.
     ports:
       - '127.0.0.1:8001:8001'
     mem_limit: 2g
     environment:
       AMAN_STT_CPU_THREADS: '4'
       AMAN_STT_MODEL_DIR: /data/stt-cache
+      SPEECH_SECRET: ${SPEECH_SECRET:?set SPEECH_SECRET to a random value of 32 or more characters, for example from openssl rand -hex 32, and the same value in packages/trueforge/.env}
     volumes:
       # Project-scoped volume: this stack caches its own copy of the ~464 MB
       # model, separate from the smoke stack's.
@@ -66,13 +68,14 @@ services:
     build:
       context: ops/aman-tts
     image: amanuensis-aman-tts:latest
-    # Loopback-only: the sidecar has no authentication. Unlike docker-compose.yml it stays on the default network,
-    # because the server runs on the host here and an internal network cannot publish a port.
+    # Loopback-only, with the same SPEECH_SECRET handling as aman-stt above. Unlike docker-compose.yml it stays
+    # on the default network, because the server runs on the host here and an internal network cannot publish a port.
     ports:
       - '127.0.0.1:8002:8002'
     mem_limit: 1g
     environment:
       AMAN_TTS_CPU_THREADS: '4'
+      SPEECH_SECRET: ${SPEECH_SECRET:?set SPEECH_SECRET to a random value of 32 or more characters, for example from openssl rand -hex 32, and the same value in packages/trueforge/.env}
     restart: unless-stopped
 
 volumes:

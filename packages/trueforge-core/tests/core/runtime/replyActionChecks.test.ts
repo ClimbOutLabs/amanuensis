@@ -3,6 +3,7 @@ import type { TurnStepKind } from '../../../src/core/mcp/executeToolCalls';
 import {
   browserPageSeen,
   changesSeenBy,
+  countsTowardWriteCap,
   findUnbackedClaim,
   stepKindsOf,
 } from '../../../src/core/runtime/replyActionChecks';
@@ -171,6 +172,28 @@ function browserInfo(input: {
   };
 }
 
+describe('countsTowardWriteCap', () => {
+  const asked = { tier: 3 as const };
+
+  it("never counts a step of Aman's own browser, which asks on its own card", () => {
+    expect(
+      countsTowardWriteCap({ ...browserInfo({ tool: 'browser_click' }), ...asked }, { staysInWorkspace: false }),
+    ).toBe(false);
+    expect(
+      countsTowardWriteCap({ ...browserInfo({ tool: 'browser_type' }), ...asked }, { staysInWorkspace: false }),
+    ).toBe(false);
+  });
+
+  it('still counts the same action from a tool that only shares a browser tool name', () => {
+    expect(
+      countsTowardWriteCap(
+        { ...browserInfo({ tool: 'browser_click', server: 'web-tools', type: 'mcp' }), ...asked },
+        { staysInWorkspace: false },
+      ),
+    ).toBe(true);
+  });
+});
+
 describe('changesSeenBy', () => {
   const turn = { changesThisTurn: 5, browserPageChangesThisTurn: 2 };
 
@@ -188,11 +211,10 @@ describe('changesSeenBy', () => {
 });
 
 describe('browserPageSeen', () => {
-  it('digests the page a moving step or a read showed, and says which moved', () => {
+  it('digests the page a moving step or a read showed', () => {
     const scrolled = browserPageSeen({ info: browserInfo({ tool: 'browser_scroll' }), text: '# Page, screen 1' });
     const read = browserPageSeen({ info: browserInfo({ tool: 'browser_read' }), text: '# Page, screen 1' });
-    expect(scrolled?.moves).toBe(true);
-    expect(read?.moves).toBe(false);
+    expect(scrolled).toBeDefined();
     expect(read?.digest).toBe(scrolled?.digest);
     expect(
       browserPageSeen({ info: browserInfo({ tool: 'browser_scroll' }), text: '# Page, screen 2' })?.digest,

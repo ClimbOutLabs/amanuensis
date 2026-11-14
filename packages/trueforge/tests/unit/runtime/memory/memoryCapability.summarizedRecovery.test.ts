@@ -11,6 +11,7 @@ import * as os from 'os';
 import * as path from 'path';
 import winston from 'winston';
 import { discardedModelUsage } from '../../../fixtures/discardedModelUsage';
+import { inMemoryGlobalSettingsStore } from '../../../fixtures/inMemoryGlobalSettingsStore';
 import { uncappedTokenFactoryBudget } from '../../../fixtures/uncappedTokenFactoryBudget';
 
 jest.mock('../../../../src/config', () => {
@@ -27,26 +28,27 @@ jest.mock('../../../../src/runtime/memory/memorySummarize', () => {
 
 import type { IModelProviderStore } from '../../../../src/db/modelProviderStore';
 import { MarkdownMemoryClient } from '../../../../src/runtime/memory/markdownMemoryClient';
-import { hindsightMemoryCapability, type MemoryConfig } from '../../../../src/runtime/memory/memoryCapability';
-import { submitRetainWithVerification, type SummarizeTurnContext } from '../../../../src/runtime/memory/memoryRetain';
+import { memoryCapability, type MemoryConfig } from '../../../../src/runtime/memory/memoryCapability';
+import {
+  noteUnfinishedTurnOwesNoSummary,
+  submitRetainWithVerification,
+  type SummarizeTurnContext,
+} from '../../../../src/runtime/memory/memoryRetain';
 import { summarizeTurnContent } from '../../../../src/runtime/memory/memorySummarize';
 
 const mockSummarize = jest.mocked(summarizeTurnContent);
 
 const CONFIG: MemoryConfig = {
   recallMaxTokens: 2048,
-  recallEntityTokens: 512,
   recallTimeoutMs: 2500,
   recallQueryWindow: 5,
   recallMinScore: 0.5,
   recallMaxItems: 12,
-  recallMaxEntities: 8,
   preRecallGateEnabled: false,
   retainTimeoutMs: 10_000,
   sweepMaxPerTurn: 5,
   screen: { enabled: false, url: '', authToken: '', threshold: 0.5, timeoutMs: 1500, maxConcurrency: 8 },
-  curated: { enabled: false, maxModels: 3, maxTokens: 512 },
-  reflect: { enabled: false, budget: 'low', maxTokens: 512, timeoutMs: 8000 },
+  pages: { maxCount: 6, maxTokens: 1500 },
 };
 
 const TURN = { sessionId: 's1', turnId: 't1', completedAt: '2026-10-21T12:00:00.000Z' };
@@ -63,6 +65,7 @@ function summarizeContext(): SummarizeTurnContext {
     getProviderForUpdate: jest.fn(),
     createProvider: jest.fn(),
     upsertProvider: jest.fn(),
+    recordProviderCheck: jest.fn(async () => undefined),
     listModels: jest.fn(),
     deleteProvider: jest.fn(),
   };
@@ -71,6 +74,7 @@ function summarizeContext(): SummarizeTurnContext {
     modelProviderStore: store,
     summarizationModelFqn: 'openai/gpt-4o',
     tokenFactoryBudget: uncappedTokenFactoryBudget,
+    globalSettingsStore: inMemoryGlobalSettingsStore(),
     modelUsage: discardedModelUsage,
   };
 }
@@ -84,7 +88,7 @@ function secondTurnContext(): Readonly<AgentThreadExecutionContext> {
   return { threadId: 'main', currentContextUsage: { prompt_tokens: 0, completion_tokens: 0 }, context };
 }
 
-async function runSecondTurn(capability: ReturnType<typeof hindsightMemoryCapability>): Promise<void> {
+async function runSecondTurn(capability: ReturnType<typeof memoryCapability>): Promise<void> {
   const processor = capability.preLLMProcessors?.[0];
   if (!processor) {
     throw new Error('expected a preLLM processor');
@@ -102,7 +106,7 @@ function savedLogs(dir: string): string[] {
 }
 
 function capabilityFor(client: MarkdownMemoryClient, keepsFullExchange?: boolean) {
-  return hindsightMemoryCapability({
+  return memoryCapability({
     client,
     config: CONFIG,
     logger: makeLogger(),
@@ -128,6 +132,7 @@ describe('the turn after a turn that saved nothing, with summaries on', () => {
 
   function drainFirstTurn(): Promise<boolean> {
     return submitRetainWithVerification({
+      origin: 'user_stated',
       session: { is_incognito: false },
       ...TURN,
       client,
@@ -148,7 +153,7 @@ describe('the turn after a turn that saved nothing, with summaries on', () => {
     expect(savedLogs(dir)).toEqual([]);
     // The first turn's own answer stood: the summary model was not asked again.
     expect(mockSummarize).toHaveBeenCalledTimes(1);
-    expect(await client.summaryPending({ namespace: '' })).toBe(false);
+    expect(await client.summaryPendingSince({ namespace: '' })).toBeUndefined();
   });
 
   it('saves nothing, and marks the vault, when the first turn left no record at all', async () => {
@@ -157,7 +162,39 @@ describe('the turn after a turn that saved nothing, with summaries on', () => {
     expect(savedLogs(dir)).toEqual([]);
     // No blocking summary call in the person's turn.
     expect(mockSummarize).not.toHaveBeenCalled();
-    expect(await client.summaryPending({ namespace: '' })).toBe(true);
+    expect(await client.summaryPendingSince({ namespace: '' })).toEqual(expect.any(String));
+  });
+
+  it('does not mark the vault for a first turn that was stopped or ended in an error', async () => {
+    await noteUnfinishedTurnOwesNoSummary({
+      client,
+      session: { is_incognito: false },
+      sessionId: TURN.sessionId,
+      turnId: TURN.turnId,
+      summarize: summarizeContext(),
+      logger: makeLogger(),
+    });
+
+    await runSecondTurn(capabilityFor(client));
+
+    expect(savedLogs(dir)).toEqual([]);
+    expect(mockSummarize).not.toHaveBeenCalled();
+    expect(await client.summaryPendingSince({ namespace: '' })).toBeUndefined();
+  });
+
+  it('still rebuilds a stopped turn as its full exchange when summaries are off', async () => {
+    await noteUnfinishedTurnOwesNoSummary({
+      client,
+      session: { is_incognito: false },
+      sessionId: TURN.sessionId,
+      turnId: TURN.turnId,
+      summarize: undefined,
+      logger: makeLogger(),
+    });
+
+    await runSecondTurn(capabilityFor(client, true));
+
+    expect(savedLogs(dir)).toHaveLength(1);
   });
 
   it('saves no raw exchange when the next turn starts while the first summary is still running', async () => {
@@ -182,7 +219,7 @@ describe('the turn after a turn that saved nothing, with summaries on', () => {
     expect(logs).toHaveLength(1);
     expect(logs[0]).toContain('The person says thanks often.');
     expect(logs[0]).not.toContain('User:');
-    expect(await client.summaryPending({ namespace: '' })).toBe(false);
+    expect(await client.summaryPendingSince({ namespace: '' })).toBeUndefined();
   });
 
   it('still rebuilds a vanished turn as its full exchange when summaries are off', async () => {

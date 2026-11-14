@@ -6,6 +6,7 @@ import type {
   Tier3EmailSchema,
   Tier3PersonaSchema,
   Tier3ScheduleSchema,
+  Tier3SkillNetworkSchema,
   Tier3SkillSchema,
 } from '@truefoundry/trueforge-core/core/permissions/tier';
 import { SCHEDULE_AWAY_NOTE } from '@truefoundry/trueforge-core/core/schedules/scheduleCardCopy';
@@ -87,9 +88,13 @@ function mailboxLine(mailbox: { name: string; address: string }): string {
  * The card fields Telegram shows. A card that carries any other field is never sent with buttons,
  * so a field added to the card later cannot be approved from Telegram before it is shown here.
  * `outbound_plumbing_text` repeats lines of `outbound_text`, and `mail_draft` only names the button.
+ * `safe_choice` and `destructive` only choose the words of the app's no button.
  */
 export const TELEGRAM_SHOWN_CARD_FIELDS = [
   'plain_what',
+  'copy',
+  'safe_choice',
+  'destructive',
   'plain_why',
   'cannot_be_undone',
   'why_asked_again',
@@ -108,6 +113,7 @@ export const TELEGRAM_SHOWN_CARD_FIELDS = [
   'skill',
   'mail_new_recipients',
   'mail_draft',
+  'skill_network',
 ] as const satisfies readonly (keyof Tier3Card)[];
 
 /**
@@ -123,6 +129,7 @@ export const TELEGRAM_SHOWN_SECTION_FIELDS = {
     'bcc',
     'subject',
     'body',
+    'check_code',
     'replaces',
     'reply_in_thread',
     'reply_to',
@@ -166,6 +173,9 @@ export const TELEGRAM_SHOWN_SECTION_FIELDS = {
     'starter',
     'instructions',
   ] as const satisfies readonly (keyof z.infer<typeof Tier3SkillSchema>)[],
+  skill_network: ['skill_name', 'hosts', 'reason', 'code_pin'] as const satisfies readonly (keyof z.infer<
+    typeof Tier3SkillNetworkSchema
+  >)[],
 };
 
 /** True when the object carries a set field that is not in the shown list. */
@@ -187,6 +197,7 @@ function cardHasUnshownField(card: Tier3Card): boolean {
     { value: card.schedule, shown: TELEGRAM_SHOWN_SECTION_FIELDS.schedule },
     { value: card.persona, shown: TELEGRAM_SHOWN_SECTION_FIELDS.persona },
     { value: card.skill, shown: TELEGRAM_SHOWN_SECTION_FIELDS.skill },
+    { value: card.skill_network, shown: TELEGRAM_SHOWN_SECTION_FIELDS.skill_network },
   ];
   return sections.some(
     section =>
@@ -221,7 +232,12 @@ function cardIsCut(card: Tier3Card): boolean {
  * approving from Telegram decides on the same words as a person approving in the app.
  */
 function approvalCardLines(card: Tier3Card): string[] {
-  const lines: string[] = [card.plain_what];
+  // The headline and reason the app's card shows; a card saved before card copy existed has its own sentence.
+  const copy = card.copy ?? null;
+  const lines: string[] = [copy === null ? card.plain_what : copy.headline];
+  if (copy !== null && copy.reason !== null) {
+    lines.push(copy.reason);
+  }
   if (card.why_asked_again !== null) {
     lines.push(card.why_asked_again);
   }
@@ -258,6 +274,9 @@ function approvalCardLines(card: Tier3Card): string[] {
       lines.push(`Sent as: ${email.from_name}`);
     }
     lines.push(`Subject: ${email.subject === '' ? 'No subject' : email.subject}`);
+    if (email.check_code !== null) {
+      lines.push(`Check code: ${email.check_code}`);
+    }
     if (email.name_left_off === true) {
       lines.push('The name was left off an address because it looked like an address.');
     }
@@ -376,6 +395,19 @@ function approvalCardLines(card: Tier3Card): string[] {
       }
     }
   }
+  const network = card.skill_network ?? null;
+  if (network !== null) {
+    lines.push(`Skill: ${network.skill_name}`);
+    lines.push(`Sites it asks to reach: ${network.hosts.join(', ')}`);
+    lines.push(
+      network.reason === 'first_use'
+        ? 'This is the first time the skill asks to reach the internet.'
+        : 'The skill did not say it would reach these sites.',
+    );
+    if (network.code_pin !== null) {
+      lines.push(`Code version: ${network.code_pin}`);
+    }
+  }
   if (
     card.mail_new_recipients !== null &&
     card.mail_new_recipients !== undefined &&
@@ -390,8 +422,9 @@ function approvalCardLines(card: Tier3Card): string[] {
     }
     lines.push(card.outbound_text);
   }
-  if (card.cannot_be_undone !== null) {
-    lines.push(card.cannot_be_undone);
+  const consequence = copy === null ? card.cannot_be_undone : copy.consequence;
+  if (consequence !== null) {
+    lines.push(consequence);
   }
   if (card.plain_why !== null) {
     lines.push(`Why: ${card.plain_why}`);

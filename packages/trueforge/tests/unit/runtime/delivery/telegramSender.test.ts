@@ -36,26 +36,40 @@ function harness(paired: boolean) {
 describe('telegram delivery sender', () => {
   it('sends a nudge to the paired chat and records the attempt', async () => {
     const { client, sender } = harness(true);
-    const attempts = await sender.send({ delivery: delivery(), tenant_id: 'local', created_by: 'test-user' });
+    const attempts = await sender.send({
+      delivery: delivery(),
+      tenant_id: 'local',
+      created_by: 'test-user',
+      test: false,
+    });
     expect(client.sent).toEqual([{ chat_id: '777', text: 'Time for the evening pills.', inline_buttons: undefined }]);
     expect(attempts).toHaveLength(1);
     expect(attempts[0]).toMatchObject({ channel: 'telegram', outcome: 'sent', target: '777' });
   });
 
-  it('keeps a note in the app, like push does', async () => {
-    const { client, sender } = harness(true);
-    const attempts = await sender.send({
-      delivery: delivery({ level: 'note' }),
-      tenant_id: 'local',
-      created_by: 'test-user',
-    });
-    expect(attempts).toEqual([]);
-    expect(client.sent).toHaveLength(0);
-  });
+  it.each(['note', 'call'] as const)(
+    'sends nothing at %s level: a note stays in the app, and a call reaches Telegram only as its fallback nudge',
+    async level => {
+      const { client, sender } = harness(true);
+      const attempts = await sender.send({
+        delivery: delivery({ level }),
+        tenant_id: 'local',
+        created_by: 'test-user',
+        test: false,
+      });
+      expect(attempts).toEqual([]);
+      expect(client.sent).toHaveLength(0);
+    },
+  );
 
   it('makes no attempt while nobody is paired', async () => {
     const { client, sender } = harness(false);
-    const attempts = await sender.send({ delivery: delivery(), tenant_id: 'local', created_by: 'test-user' });
+    const attempts = await sender.send({
+      delivery: delivery(),
+      tenant_id: 'local',
+      created_by: 'test-user',
+      test: false,
+    });
     expect(attempts).toEqual([]);
     expect(client.sent).toHaveLength(0);
   });
@@ -63,7 +77,12 @@ describe('telegram delivery sender', () => {
   it('records a failed attempt when the send fails, and never throws', async () => {
     const { client, sender } = harness(true);
     client.failSend = true;
-    const attempts = await sender.send({ delivery: delivery(), tenant_id: 'local', created_by: 'test-user' });
+    const attempts = await sender.send({
+      delivery: delivery(),
+      tenant_id: 'local',
+      created_by: 'test-user',
+      test: false,
+    });
     expect(attempts).toHaveLength(1);
     expect(attempts[0]).toMatchObject({ channel: 'telegram', outcome: 'failed', target: '777' });
   });

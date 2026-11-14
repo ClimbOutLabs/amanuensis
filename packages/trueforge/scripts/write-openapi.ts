@@ -29,6 +29,7 @@ import { DeliveryStore } from '../src/db/deliveryStore';
 import { NoticingStore } from '../src/db/noticingStore';
 import { PushSubscriptionStore } from '../src/db/pushSubscriptionStore';
 import { ReachSettingsStore } from '../src/db/reachSettingsStore';
+import { RecallExclusionStore } from '../src/db/recallExclusionStore';
 import { SentinelAuditStore, type SentinelAuditDatabase } from '../src/db/sentinelAuditStore';
 import { SqliteAgentStore } from '../src/db/sqlite/agent-store/SqliteAgentStore';
 import { SqliteChatDeletionStore } from '../src/db/sqlite/chat-deletion-store/SqliteChatDeletionStore';
@@ -53,6 +54,7 @@ import { SqliteTokenFactoryUsageStore } from '../src/db/sqlite/token-factory-usa
 import { SqliteOAuthTokenStore } from '../src/db/sqlite/token-store/SqliteOAuthTokenStore';
 import { SqliteTurnArtifactStore } from '../src/db/sqlite/turn-artifact-store/SqliteTurnArtifactStore';
 import { TelegramStore } from '../src/db/telegramStore';
+import { TextContactStore } from '../src/db/textContactStore';
 import { ActiveTurnRegistry } from '../src/runtime/activeTurns';
 import { createChatImageService } from '../src/runtime/chatImages/chatImageService';
 import { createImageReencoder } from '../src/runtime/chatImages/reencodeInSandbox';
@@ -63,6 +65,7 @@ import { NO_PHONE_CHANNELS } from '../src/runtime/noticing/reachChannels';
 import { createReminderReach } from '../src/runtime/noticing/reminderReach';
 import { createTelegramSendQueue } from '../src/runtime/telegram/telegramSendQueue';
 import { createTelegramService } from '../src/runtime/telegram/telegramService';
+import { createTextNumberService } from '../src/runtime/texts/textNumber';
 import { createTokenFactoryBudget } from '../src/runtime/tokenFactoryBudget';
 import { TurnDrainRegistry } from '../src/runtime/turnDrains';
 
@@ -144,12 +147,14 @@ const app = createServerApp({
   chatDeletionStore,
   globalSettingsStore,
   tokenFactoryBudget: createTokenFactoryBudget({ store: new SqliteTokenFactoryUsageStore(db), cap: undefined }),
+  memoryTidy: { tidyNow: () => undefined, tidyState: () => ({ status: 'idle' }) },
   tokenStore,
   sessionStore,
   sessionMetricsStore: new SqliteSessionMetricsStore(db),
   sentinelAuditStore: new SentinelAuditStore(db as Kysely<SentinelAuditDatabase>),
   sentinelSettingsStore,
   briefItemStore: new BriefItemCompletionStore(db),
+  recallExclusionStore: new RecallExclusionStore(db),
   deliveryStore,
   pushSubscriptionStore: new PushSubscriptionStore(db),
   deliveryService: createDeliveryService({
@@ -169,6 +174,17 @@ const app = createServerApp({
     logger,
   }),
   reachChannels: () => NO_PHONE_CHANNELS,
+  isInstanceOwner: () => false,
+  textContactStore: new TextContactStore(db),
+  textNumbers: createTextNumberService({
+    store: new TextContactStore(db),
+    reachSettings: new ReachSettingsStore(db),
+    personalization: new SqlitePersonalizationStore(db),
+    provider: undefined,
+    audit: { record: () => Promise.resolve() },
+    logger,
+    codeKey: 'openapi',
+  }),
   webPushPublicKey: undefined,
   telegramStore,
   telegramService: createTelegramService({ store: telegramStore, publicBaseUrl: 'http://localhost' }),

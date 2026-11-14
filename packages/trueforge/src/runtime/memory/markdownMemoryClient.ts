@@ -11,8 +11,9 @@
  * the shared vault, and vaults shared with it; each vault ranks separately and the
  * results interleave. An unscoped client uses the shared vault only.
  *
- * `recall()` reads `MEMORY.md` plus recent daily logs and ranks entries by keyword
- * overlap with the query. When an `EmbeddingSubsystem` is attached, recall also
+ * `recall()` reads `MEMORY.md` plus every daily log and ranks entries by keyword
+ * overlap with the query, so how long ago something was saved never decides whether
+ * it can be found. When an `EmbeddingSubsystem` is attached, recall also
  * ranks by meaning: a local embedding model scores entries by semantic similarity
  * and the two rankings fuse (RRF). The vector leg only contributes when the model
  * is ready and the background backfill has indexed the history; otherwise recall
@@ -23,7 +24,7 @@
  */
 import { PromiseTimeoutError, withTimeout } from '@truefoundry/trueforge-core/core';
 import { randomUUID } from 'node:crypto';
-import { readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import {
   USER_FACING_STORAGE_UNAVAILABLE_MESSAGE,
@@ -33,37 +34,26 @@ import {
 import { stripAssistantAbilityNotes } from './assistantAbilityNotes';
 import type { EmbeddingSubsystemResolver, RankedMemory } from './embeddingRetrieval';
 import {
-  timeoutFailure,
-  type GetOperationOutcome,
-  type GetProfileOutcome,
-  type ListMentalModelsOutcome,
-  type RecallItem,
-  type RecallOutcome,
-  type ReflectBudget,
-  type ReflectOutcome,
-  type RetainItem,
-  type RetainOutcome,
-  type RetryOperationOutcome,
-} from './hindsightClient';
-import {
   DOCUMENT_ID_METADATA_KEY,
   REPLACE_DOCUMENT_METADATA_KEY,
   appendVaultTombstone,
   clearSummaryPending,
+  entryKeywordText,
   entryMetadata,
   entryOccurredAt,
   entryRecallText,
   estimateTokens,
   formatRetainEntry,
-  isFromSession,
   isLegacyDocumentCopy,
   latestTombstonesByEntry,
   markSummaryFailed,
   namespaceDirFor,
+  normalizedEntryBody,
   personaForVaultFilesystemNamespace,
   personaForVaultNamespace,
   readSummaryPending,
   readVaultTombstones,
+  recallExcludedIds,
   sanitizeNamespace,
   scanNamespaceEntries,
   scanVaultEntries,
@@ -72,19 +62,43 @@ import {
   vaultReadNamespaces,
   vaultWriteNamespace,
   withOriginalHiddenMarkers,
+  withoutHiddenMarkers,
+  withoutSourceLines,
   type NamespaceScan,
   type VaultScope,
+  type VaultTombstone,
 } from './markdownMemoryFiles';
+import { computeMeaningGate, type GateVault, type MeaningGate } from './meaningGate';
 import type {
   DeleteMemoryVaultEntryOutcome,
+  DeleteShownMemoryOutcome,
   ListMemoryVaultEntriesOutcome,
   MemoryClient,
   MemoryVaultEntry,
   MemoryVaultFailure,
+  PageLoadResult,
   SummaryOutcomeNote,
   UpdateMemoryVaultEntryOutcome,
 } from './memoryClient';
+import {
+  timeoutFailure,
+  type GetOperationOutcome,
+  type RecallItem,
+  type RecallOutcome,
+  type RetainItem,
+  type RetainOutcome,
+  type RetryOperationOutcome,
+} from './memoryClient';
+import { MISSING_ORIGIN_REASON, everyItemNamesOrigin } from './memoryOrigin';
+import { loadPagesForMessage } from './memoryPageLoader';
+import type { PageListing } from './memoryPages';
+import { ensureMemorySourceLines } from './memorySourceLines';
+import { forgetSortReport } from './pageSortReport';
+import { recallFactExcluded, shownFactText } from './recallExclusions';
 import { rankNamedPeopleFirst } from './recallNameBoost';
+import { pagesNearText, statementIndexFor } from './statementIndex';
+import { VaultEraseError, eraseMarkedEntries } from './vaultErase';
+import { VaultBusyError, VaultLockLostError, withVaultLock } from './vaultLock';
 
 export interface MarkdownMemoryClientConfig {
   /** Base directory for all memory files; each namespace gets a subdirectory. */
@@ -103,8 +117,11 @@ export interface MarkdownMemoryClientConfig {
   embeddings?: EmbeddingSubsystemResolver | undefined;
 }
 
-/** How many daily log files recall scans, newest first, before the token budget cuts it off. */
-const RECALL_MAX_DAILY_FILES = 14;
+/**
+ * Pending retains to each daily folder in this process. An entry's id is its position in the day's file,
+ * counted before the append, so two retains running together would give different entries the same id.
+ */
+const retainQueues = new Map<string, Promise<void>>();
 
 /** Pending writes to each operations file in this process, so concurrent recordings run one at a time. */
 const operationsFileQueues = new Map<string, Promise<void>>();
@@ -175,6 +192,9 @@ function failureReason(prefix: string, error: unknown): string {
   if (isDataDirConfigurationError(error)) {
     return USER_FACING_STORAGE_UNAVAILABLE_MESSAGE;
   }
+  if (error instanceof VaultEraseError || error instanceof VaultBusyError || error instanceof VaultLockLostError) {
+    return error.message;
+  }
   return `${prefix}: ${error instanceof Error ? error.message : String(error)}`;
 }
 
@@ -212,10 +232,9 @@ export class MarkdownMemoryClient implements MemoryClient {
   async recall(params: {
     query: string;
     maxTokens: number;
-    queryTimestamp: string;
-    entityTokens: number;
     timeoutMs: number;
     currentSessionId?: string | undefined;
+    gate?: MeaningGate | undefined;
   }): Promise<RecallOutcome> {
     try {
       const budget = Math.max(params.maxTokens, 0);
@@ -243,7 +262,8 @@ export class MarkdownMemoryClient implements MemoryClient {
           scan: await scanNamespaceEntries({
             baseDir: this.baseDir,
             namespace,
-            maxDailyFiles: RECALL_MAX_DAILY_FILES,
+            // Recall reads the whole log: a memory's age must never decide whether it can be found.
+            maxDailyFiles: Number.POSITIVE_INFINITY,
             // Vault deletes hide entries and vault edits replace their text: recall
             // must see the same effective entries the vault lists.
             resolveTombstones: true,
@@ -254,11 +274,23 @@ export class MarkdownMemoryClient implements MemoryClient {
       // Curated memory first: it is the model's own long-term store.
       for (const { namespace, scan } of vaults) {
         if (scan.curated !== undefined) {
-          take({ id: `md:${namespace}:MEMORY.md`, text: scan.curated });
+          // The file is read like any entry: it is the person's own only when it closes with the line that says so.
+          take({
+            id: `md:${namespace}:MEMORY.md`,
+            text: withoutSourceLines(scan.curated).trim(),
+            metadata: entryMetadata(scan.curated),
+          });
         }
       }
 
       // Each vault ranks on its own corpus and index; the lists then interleave.
+      const gate =
+        params.gate ??
+        (await computeMeaningGate({
+          message: params.query,
+          vaults: vaults.map(({ namespace, scan }) => this.gateVault({ namespace, scan })),
+          currentSessionId: params.currentSessionId,
+        }));
       const rankedLists = await Promise.all(
         vaults.map(({ namespace, scan }) =>
           this.rankVault({
@@ -267,46 +299,68 @@ export class MarkdownMemoryClient implements MemoryClient {
             query: params.query,
             timeoutMs: params.timeoutMs,
             currentSessionId: params.currentSessionId,
+            gate,
           }),
         ),
       );
+      // The same thing saved on several days is shown once, as its best-ranked copy.
+      const shown = new Set<string>();
       for (const item of interleaveRanked(rankedLists)) {
-        const metadata = entryMetadata(item.text);
+        const body = normalizedEntryBody(item.text);
+        if (shown.has(body)) {
+          continue;
+        }
+        shown.add(body);
         const occurredAt = entryOccurredAt(item);
         // The time and the chat id travel as fields: recall shows the date, and can skip notes from the current chat.
         const ok = take({
           id: item.id,
           text: entryRecallText(item.text),
           ...(occurredAt !== undefined && { occurred_start: occurredAt }),
-          ...(metadata && { metadata }),
+          metadata: entryMetadata(item.text),
         });
         if (!ok) {
           break;
         }
       }
 
-      return { ok: true, results, entities: [] };
+      return { ok: true, results };
     } catch (error) {
       return failure(failureReason('markdown recall failed', error));
     }
   }
 
-  /** One vault's entries best-first: keyword overlap, fused with its own meaning index when ready, then notes naming a person the query asks about moved to the front. The chat being answered is left out. */
+  /**
+   * One vault's entries best-first. When the meaning gate judged the message, only the notes it chose are
+   * shown, best standing first. Otherwise: keyword overlap, fused with the vault's own meaning index when
+   * ready. Either way notes naming a person the query asks about move to the front, and the chat being
+   * answered is left out.
+   */
   private async rankVault(input: {
     namespace: string;
     scan: NamespaceScan;
     query: string;
     timeoutMs: number;
     currentSessionId: string | undefined;
+    gate: MeaningGate;
   }): Promise<RankedMemory[]> {
-    const ownEntries = input.scan.entries.filter(entry =>
-      isFromSession({ metadata: entryMetadata(entry.text), sessionId: input.currentSessionId }),
-    );
-    const excludeIds = new Set(ownEntries.map(entry => entry.id));
+    const { gate } = input;
+    if (gate.state === 'judged' && gate.judgedNamespaces.has(input.namespace)) {
+      const texts = new Map(input.scan.entries.map(entry => [entry.id, entry.text]));
+      const chosen = gate.notes.flatMap(({ id }): RankedMemory[] => {
+        const text = texts.get(id);
+        return text === undefined ? [] : [{ id, text }];
+      });
+      return rankNamedPeopleFirst({ candidates: chosen, message: input.query });
+    }
+    const excludeIds = recallExcludedIds({
+      entries: input.scan.entries,
+      sessionId: input.currentSessionId,
+    });
     const entries = input.scan.entries.filter(entry => !excludeIds.has(entry.id));
     const words = queryWords(input.query);
     const scored = entries
-      .map(entry => ({ entry, score: scoreEntry(words, entry.text) }))
+      .map(entry => ({ entry, score: scoreEntry(words, entryKeywordText(entry.text)) }))
       .filter(candidate => candidate.score > 0)
       .sort((a, b) => b.score - a.score || b.entry.file.localeCompare(a.entry.file));
     const keywordRanked = scored.map(candidate => ({ id: candidate.entry.id, text: candidate.entry.text }));
@@ -333,9 +387,29 @@ export class MarkdownMemoryClient implements MemoryClient {
   }
 
   async retain(params: { items: RetainItem[]; operationId: string; timeoutMs: number }): Promise<RetainOutcome> {
+    const key = this.dailyDir();
+    const run = (retainQueues.get(key) ?? Promise.resolve()).then(() => this.retainOne(params));
+    retainQueues.set(
+      key,
+      run.then(
+        () => undefined,
+        () => undefined,
+      ),
+    );
+    return run;
+  }
+
+  private async retainOne(params: {
+    items: RetainItem[];
+    operationId: string;
+    timeoutMs: number;
+  }): Promise<RetainOutcome> {
     try {
       if (params.items.length === 0) {
         return { ok: true };
+      }
+      if (!everyItemNamesOrigin(params.items)) {
+        return failure(MISSING_ORIGIN_REASON);
       }
       // Ability notes about Aman never reach the log (see assistantAbilityNotes).
       const items = params.items
@@ -344,6 +418,8 @@ export class MarkdownMemoryClient implements MemoryClient {
       // Names MEMORY_MARKDOWN_DIR in the error instead of a bare EACCES; the
       // caller's catch converts it into a failed outcome, never a throw.
       await ensureWritableDataDir({ dir: this.dailyDir(), envVar: 'MEMORY_MARKDOWN_DIR' });
+      // Older notes are marked first, so a "From you" line on disk is always one a save wrote.
+      await ensureMemorySourceLines({ baseDir: this.baseDir });
 
       const seen = await this.readOperationIds();
       if (seen.has(params.operationId)) {
@@ -372,33 +448,38 @@ export class MarkdownMemoryClient implements MemoryClient {
       // copy that attempt wrote as well as the original: one entry remains.
       const replaced = await this.liveDocumentEntryIds(
         items.flatMap(item =>
-          item.metadata?.[REPLACE_DOCUMENT_METADATA_KEY] === 'true'
+          item.metadata[REPLACE_DOCUMENT_METADATA_KEY] === 'true'
             ? [{ documentId: item.document_id, context: item.context?.trim() }]
             : [],
         ),
       );
-      for (const [day, items] of byDay) {
-        const filePath = path.join(this.dailyDir(), `${day}.md`);
-        // Entry ids are positional; count what is already there before appending.
-        let existing = 0;
-        try {
-          existing = splitEntries(await readFile(filePath, 'utf8')).length;
-        } catch {
-          existing = 0;
+      // Counting what is there and appending are one step under the lock, so an erase rewriting the
+      // same day's file cannot drop the new entries or shift their positions.
+      await this.withWriteLock(this.writeNamespace, async () => {
+        await this.finishEarlierErases(this.writeNamespace);
+        for (const [day, items] of byDay) {
+          const filePath = path.join(this.dailyDir(), `${day}.md`);
+          // Entry ids are positional; count what is already there before appending.
+          let existing = 0;
+          try {
+            existing = splitEntries(await readFile(filePath, 'utf8')).length;
+          } catch {
+            existing = 0;
+          }
+          const blocks = items.map((item, offset) => {
+            const text = formatRetainEntry(item);
+            const id = `md:${this.writeNamespace}:${day}.md#${String(existing + offset)}`;
+            indexed.push({ id, text });
+            return text;
+          });
+          // Each block ends with a newline and blocks are blank-line separated,
+          // matching the historical append format exactly.
+          await writeFile(filePath, `${blocks.map(block => `${block}\n`).join('\n')}\n`, {
+            flag: 'a',
+            encoding: 'utf8',
+          });
         }
-        const blocks = items.map((item, offset) => {
-          const text = formatRetainEntry(item);
-          const id = `md:${this.writeNamespace}:${day}.md#${String(existing + offset)}`;
-          indexed.push({ id, text });
-          return text;
-        });
-        // Each block ends with a newline and blocks are blank-line separated,
-        // matching the historical append format exactly.
-        await writeFile(filePath, `${blocks.map(block => `${block}\n`).join('\n')}\n`, {
-          flag: 'a',
-          encoding: 'utf8',
-        });
-      }
+      });
 
       await this.hideEntries(replaced);
       await this.recordOperation(params.operationId);
@@ -409,7 +490,7 @@ export class MarkdownMemoryClient implements MemoryClient {
       const embeddings = this.embeddings?.(this.writeNamespace);
       embeddings?.ensureWarmed();
       embeddings?.indexNewEntries(indexed);
-      return { ok: true };
+      return { ok: true, written: indexed };
     } catch (error) {
       return { ok: false, reason: failureReason('markdown retain failed', error) };
     }
@@ -442,8 +523,7 @@ export class MarkdownMemoryClient implements MemoryClient {
     try {
       // Local reads are fast, but a stalled filesystem must not hold a turn open past its budget.
       const seen = await withTimeout(this.readOperationIds(), timeoutMs, `markdown getOperation ${id}`);
-      // A vanished operation reads the same as "nothing to wait for" so a sweep drops it,
-      // mirroring HindsightClient's 404 handling.
+      // A vanished operation reads the same as "nothing to wait for" so a sweep drops it.
       return { ok: true, status: seen.has(id) ? 'completed' : 'unknown' };
     } catch (error) {
       if (error instanceof PromiseTimeoutError) {
@@ -460,29 +540,6 @@ export class MarkdownMemoryClient implements MemoryClient {
       return await withTimeout(Promise.resolve({ ok: true }), timeoutMs, `markdown retryOperation ${id}`);
     } catch {
       return { ok: false };
-    }
-  }
-
-  async getProfile(timeoutMs: number): Promise<GetProfileOutcome> {
-    // Phase 1 has no bank profile concept; the curated MEMORY.md serves this purpose.
-    const outcome: GetProfileOutcome = {
-      ok: true,
-      profile: { name: undefined, mission: undefined, background: undefined },
-    };
-    try {
-      return await withTimeout(Promise.resolve(outcome), timeoutMs, 'markdown getProfile');
-    } catch {
-      return timeoutFailure(timeoutMs);
-    }
-  }
-
-  async listMentalModels(params: { limit: number; timeoutMs: number }): Promise<ListMentalModelsOutcome> {
-    // Phase 1 has no mental-model store; the curated MEMORY.md serves this purpose.
-    const outcome: ListMentalModelsOutcome = { ok: true, models: [] };
-    try {
-      return await withTimeout(Promise.resolve(outcome), params.timeoutMs, 'markdown listMentalModels');
-    } catch {
-      return timeoutFailure(params.timeoutMs);
     }
   }
 
@@ -508,6 +565,14 @@ export class MarkdownMemoryClient implements MemoryClient {
     // One budget for the whole lookup: the scan and the marker read share it.
     return withTimeout(
       (async (): Promise<{ filesystemNamespace: string; deleted: boolean; text: string } | undefined> => {
+        const tombstones = await readVaultTombstones({
+          baseDir: this.baseDir,
+          namespace: filesystemNamespace,
+        });
+        // A deleted entry's text is gone from its file, so the marker alone says it was there.
+        if (latestTombstonesByEntry(tombstones).get(entryId)?.action === 'deleted') {
+          return { filesystemNamespace, deleted: true, text: '' };
+        }
         const scan = await scanNamespaceEntries({
           baseDir: this.baseDir,
           namespace: filesystemNamespace,
@@ -517,16 +582,95 @@ export class MarkdownMemoryClient implements MemoryClient {
         if (original === undefined) {
           return undefined;
         }
-        const tombstones = await readVaultTombstones({
-          baseDir: this.baseDir,
-          namespace: filesystemNamespace,
-        });
-        const deleted = latestTombstonesByEntry(tombstones).get(entryId)?.action === 'deleted';
-        return { filesystemNamespace, deleted, text: original.text };
+        return { filesystemNamespace, deleted: false, text: original.text };
       })(),
       timeoutMs,
       `markdown vault lookup ${entryId}`,
     );
+  }
+
+  /** Every vault this client may read, own vault first; the same order recall uses. */
+  private async readVaults(): Promise<{ namespace: string; dir: string }[]> {
+    const readable = await vaultReadNamespaces({
+      baseDir: this.baseDir,
+      tenantNamespace: this.namespace,
+      scope: this.vaultScope,
+    });
+    return readable.map(namespace => ({ namespace, dir: namespaceDirFor(this.baseDir, namespace) }));
+  }
+
+  /** A vault as the meaning gate looks into it. Starts the model load when it has not run; the gate never waits for a download. */
+  private gateVault({ namespace, scan }: { namespace: string; scan: NamespaceScan }): GateVault {
+    const embeddings = this.embeddings?.(sanitizeNamespace(namespace));
+    embeddings?.ensureWarmed();
+    return { namespace: sanitizeNamespace(namespace), dir: namespaceDirFor(this.baseDir, namespace), scan, embeddings };
+  }
+
+  async meaningGate(params: { message: string; currentSessionId?: string | undefined }): Promise<MeaningGate> {
+    try {
+      const vaults = await Promise.all(
+        (await this.readVaults()).map(async ({ namespace }) => ({
+          namespace,
+          scan: await scanNamespaceEntries({
+            baseDir: this.baseDir,
+            namespace,
+            maxDailyFiles: Number.POSITIVE_INFINITY,
+            resolveTombstones: true,
+          }),
+        })),
+      );
+      return await computeMeaningGate({
+        message: params.message,
+        vaults: vaults.map(vault => this.gateVault(vault)),
+        currentSessionId: params.currentSessionId,
+      });
+    } catch {
+      return { state: 'unavailable' };
+    }
+  }
+
+  pagesWriteDir(): string {
+    return this.namespaceDir();
+  }
+
+  async pagesByMeaning({ text, limit }: { text: string; limit: number }): Promise<PageListing[]> {
+    try {
+      const model = this.embeddings?.(this.writeNamespace).embeddingModel;
+      if (model === undefined) {
+        return [];
+      }
+      const index = statementIndexFor({ vaultDir: this.namespaceDir(), model });
+      return await pagesNearText({ index, model, text, limit });
+    } catch {
+      return [];
+    }
+  }
+
+  async loadPages(params: {
+    message: string;
+    earlierMessages: readonly string[];
+    today: string;
+    maxPages: number;
+    maxTokens: number;
+    gate?: MeaningGate | undefined;
+  }): Promise<PageLoadResult> {
+    let vaults: { namespace: string; dir: string }[];
+    try {
+      vaults = await this.readVaults();
+    } catch {
+      return {
+        pages: [],
+        stats: { candidates: 0, loaded: 0, dropped_over_count: 0, dropped_over_budget: 0 },
+        skippedFiles: [],
+      };
+    }
+    const { gate, ...rest } = params;
+    return loadPagesForMessage({
+      vaultDirs: vaults.map(vault => vault.dir),
+      writeVaultDir: this.namespaceDir(),
+      gate: gate ?? (await this.meaningGate({ message: params.message })),
+      ...rest,
+    });
   }
 
   async listEntries(params: { namespace: string; timeoutMs: number }): Promise<ListMemoryVaultEntriesOutcome> {
@@ -603,14 +747,20 @@ export class MarkdownMemoryClient implements MemoryClient {
     }
   }
 
-  /** Whether the vault for a wire namespace is still owed a turn summary. Never throws. */
-  async summaryPending(params: { namespace: string }): Promise<boolean> {
+  /** When the summary the vault for a wire namespace is still owed failed, or undefined when none is owed. Never throws. */
+  async summaryPendingSince(params: { namespace: string }): Promise<string | undefined> {
     try {
       const filesystemNamespace = vaultFilesystemNamespace(this.namespace, params.namespace);
-      return (await readSummaryPending({ baseDir: this.baseDir, namespace: filesystemNamespace })) !== undefined;
+      return (await readSummaryPending({ baseDir: this.baseDir, namespace: filesystemNamespace }))?.failed_at;
     } catch {
-      return false;
+      return undefined;
     }
+  }
+
+  /** The person has read the failed-summary line for a wire namespace's vault and put it away. */
+  async dismissSummaryPending(params: { namespace: string }): Promise<void> {
+    const filesystemNamespace = vaultFilesystemNamespace(this.namespace, params.namespace);
+    await clearSummaryPending({ baseDir: this.baseDir, namespace: filesystemNamespace });
   }
 
   async updateEntry(params: {
@@ -636,8 +786,7 @@ export class MarkdownMemoryClient implements MemoryClient {
       }
       const timestamp = new Date().toISOString();
       await withTimeout(
-        appendVaultTombstone({
-          baseDir: this.baseDir,
+        this.markAndErase({
           namespace: target.filesystemNamespace,
           tombstone: { entryId: params.entryId, action: 'updated', text: clean, timestamp },
         }),
@@ -647,14 +796,14 @@ export class MarkdownMemoryClient implements MemoryClient {
       // The edit re-indexes in the vault that owns the entry, never in another vault's store.
       const embeddings = this.embeddings?.(target.filesystemNamespace);
       embeddings?.ensureWarmed();
-      embeddings?.indexNewEntries([
-        { id: params.entryId, text: withOriginalHiddenMarkers({ original: target.text, edited: clean }) },
-      ]);
+      const stored = withOriginalHiddenMarkers({ original: target.text, edited: clean });
+      embeddings?.indexNewEntries([{ id: params.entryId, text: stored }]);
       return {
         ok: true,
         entry: {
           id: params.entryId,
-          text: clean,
+          // The same text a listing shows: the edit, closed by the line that says where the entry came from.
+          text: withoutHiddenMarkers(stored),
           timestamp,
           persona: personaForVaultFilesystemNamespace(this.namespace, target.filesystemNamespace),
         },
@@ -673,22 +822,17 @@ export class MarkdownMemoryClient implements MemoryClient {
       if (target === undefined) {
         return vaultNotFound(params.entryId);
       }
-      if (!target.deleted) {
-        await withTimeout(
-          appendVaultTombstone({
-            baseDir: this.baseDir,
-            namespace: target.filesystemNamespace,
-            tombstone: {
-              entryId: params.entryId,
-              action: 'deleted',
-              text: undefined,
-              timestamp: new Date().toISOString(),
-            },
-          }),
-          params.timeoutMs,
-          `markdown vault mark ${params.entryId}`,
-        );
-      }
+      // An entry already marked deleted still gets its erase run again: that is how a failed one is retried.
+      await withTimeout(
+        this.markAndErase({
+          namespace: target.filesystemNamespace,
+          tombstone: target.deleted
+            ? undefined
+            : { entryId: params.entryId, action: 'deleted', text: undefined, timestamp: new Date().toISOString() },
+        }),
+        params.timeoutMs,
+        `markdown vault mark ${params.entryId}`,
+      );
       return { ok: true };
     } catch (error) {
       if (error instanceof PromiseTimeoutError) {
@@ -698,22 +842,59 @@ export class MarkdownMemoryClient implements MemoryClient {
     }
   }
 
-  async reflect(params: {
-    query: string;
-    budget: ReflectBudget;
-    maxTokens: number;
-    timeoutMs: number;
-  }): Promise<ReflectOutcome> {
-    const outcome: ReflectOutcome = {
-      ok: false,
-      code: 'request_failed',
-      reason: 'reflect is not supported by the markdown memory backend',
-    };
+  /**
+   * Deletes every memory, in any of this tenant's vaults, that recall shows in these words. The side panel
+   * of a chat only has the words, so the match is made here, with the same text recall builds its lines from.
+   */
+  async deleteEntriesShownAs(params: { shownText: string; timeoutMs: number }): Promise<DeleteShownMemoryOutcome> {
     try {
-      return await withTimeout(Promise.resolve(outcome), params.timeoutMs, 'markdown reflect');
-    } catch {
-      return timeoutFailure(params.timeoutMs);
+      const ids = await withTimeout(
+        this.entryIdsShownAs(params.shownText),
+        params.timeoutMs,
+        'markdown vault find shown memory',
+      );
+      for (const entryId of ids) {
+        const outcome = await this.deleteEntry({ entryId, timeoutMs: params.timeoutMs });
+        if (!outcome.ok) {
+          return outcome;
+        }
+      }
+      return { ok: true, deleted: ids.length };
+    } catch (error) {
+      if (error instanceof PromiseTimeoutError) {
+        return vaultTimeoutFailure(params.timeoutMs);
+      }
+      return { ok: false, code: 'request_failed', reason: failureReason('markdown vault delete failed', error) };
     }
+  }
+
+  /** Ids of the memories shown in these words. Words that were cut short must point at one memory only, else none is named. */
+  private async entryIdsShownAs(shownText: string): Promise<string[]> {
+    const shown = new Set([shownText]);
+    let folders: string[] = [];
+    try {
+      folders = (await readdir(this.baseDir, { withFileTypes: true }))
+        .filter(entry => entry.isDirectory() && this.vaultTenantScope(entry.name))
+        .map(entry => entry.name);
+    } catch {
+      // No memory folder yet means nothing is stored.
+    }
+    const matches: { id: string; text: string }[] = [];
+    for (const namespace of folders) {
+      const scan = await scanNamespaceEntries({
+        baseDir: this.baseDir,
+        namespace,
+        maxDailyFiles: Number.POSITIVE_INFINITY,
+        resolveTombstones: true,
+      });
+      for (const entry of scan.entries) {
+        const text = shownFactText(entryRecallText(entry.text));
+        if (recallFactExcluded({ exclusions: shown, shownText: text })) {
+          matches.push({ id: entry.id, text });
+        }
+      }
+    }
+    return new Set(matches.map(match => match.text)).size > 1 ? [] : matches.map(match => match.id);
   }
 
   private dayOf(timestamp: string): string {
@@ -748,7 +929,7 @@ export class MarkdownMemoryClient implements MemoryClient {
     );
     return scan.entries
       .filter(entry => {
-        const documentId = entryMetadata(entry.text)?.[DOCUMENT_ID_METADATA_KEY];
+        const documentId = entryMetadata(entry.text)[DOCUMENT_ID_METADATA_KEY];
         if (documentId !== undefined) {
           return documentIds.has(documentId);
         }
@@ -757,15 +938,55 @@ export class MarkdownMemoryClient implements MemoryClient {
       .map(entry => entry.id);
   }
 
-  /** Hides entries with the vault's delete marker. The log stays append-only: recall skips hidden entries. */
+  /** Hides entries with the vault's delete marker and erases their text from the dated files. */
   private async hideEntries(entryIds: readonly string[]): Promise<void> {
+    if (entryIds.length === 0) {
+      return;
+    }
     const timestamp = new Date().toISOString();
-    for (const entryId of entryIds) {
-      await appendVaultTombstone({
-        baseDir: this.baseDir,
-        namespace: this.writeNamespace,
-        tombstone: { entryId, action: 'deleted', text: undefined, timestamp },
-      });
+    await this.withWriteLock(this.writeNamespace, async () => {
+      for (const entryId of entryIds) {
+        await appendVaultTombstone({
+          baseDir: this.baseDir,
+          namespace: this.writeNamespace,
+          tombstone: { entryId, action: 'deleted', text: undefined, timestamp },
+        });
+      }
+      await eraseMarkedEntries({ baseDir: this.baseDir, namespace: this.writeNamespace });
+      await forgetSortReport({ vaultDir: this.namespaceDir(), noteIds: entryIds });
+    });
+  }
+
+  private async withWriteLock<T>(namespace: string, work: () => Promise<T>): Promise<T> {
+    return withVaultLock({ vaultDir: namespaceDirFor(this.baseDir, namespace) }, work);
+  }
+
+  /**
+   * Writes a marker, then erases from the dated files what it hides, in one hold of the vault lock. The marker
+   * goes first so the person's view changes at once; when the erase fails the marker stays, the person is told
+   * to try again, and the next write to the vault finishes the erase.
+   */
+  private async markAndErase(input: { namespace: string; tombstone: VaultTombstone | undefined }): Promise<void> {
+    await this.withWriteLock(input.namespace, async () => {
+      if (input.tombstone !== undefined) {
+        await appendVaultTombstone({ baseDir: this.baseDir, namespace: input.namespace, tombstone: input.tombstone });
+      }
+      await eraseMarkedEntries({ baseDir: this.baseDir, namespace: input.namespace });
+      if (input.tombstone !== undefined) {
+        await forgetSortReport({
+          vaultDir: namespaceDirFor(this.baseDir, input.namespace),
+          noteIds: [input.tombstone.entryId],
+        });
+      }
+    });
+  }
+
+  /** Finishes erases that markers asked for but an earlier failure or an older version left undone. Never blocks a save. */
+  private async finishEarlierErases(namespace: string): Promise<void> {
+    try {
+      await eraseMarkedEntries({ baseDir: this.baseDir, namespace, onlyIfNew: true });
+    } catch {
+      // The save goes ahead; the marker file still holds the work, so the next write tries again.
     }
   }
 
