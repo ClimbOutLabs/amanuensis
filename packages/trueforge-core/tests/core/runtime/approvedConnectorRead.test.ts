@@ -18,6 +18,7 @@ import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { textReplyStream } from '../../orchestration/helpers/helpers';
 import { makeSilentLogger } from '../harnessMocks';
 
+import { everyMailDraftApproved } from '../fixtures/approvedMailDrafts';
 const OWNER = { tenant_id: 't1', created_by: 'u1' };
 const ROOT_ID = 'thread_root';
 const CHILD_ID = 'thread_child';
@@ -88,7 +89,7 @@ function makeSource(input: { name: string; tools: string[]; reply: string; annot
 
 /** The same services serve every request of the chat, as on the server: approval tokens live in them. */
 function makeServices() {
-  return defaultSentinelServices({ pinned_path: '/usr/bin:/bin' });
+  return { ...defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }), mail_approved_drafts: everyMailDraftApproved };
 }
 
 type Services = ReturnType<typeof makeServices>;

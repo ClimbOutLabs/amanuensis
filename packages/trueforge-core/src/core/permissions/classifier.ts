@@ -36,6 +36,7 @@ import {
   MAIL_ACCOUNT_ARGUMENT,
   MAIL_CONNECTOR_NAME,
   MAIL_CONTENT_TOOL_NAME,
+  MAIL_FORWARD_TOOL_NAME,
 } from '../email/mailConnector/toolContract';
 import { GOOGLE_SETUP_SERVER_ID, GOOGLE_SETUP_STATUS_TOOL_NAME } from '../google/setupToolContract';
 import type { BrowserElementReview, DocumentScope, MapsHosts } from '../llm/LLMTypes';
@@ -71,6 +72,7 @@ import {
   SPACE_WRITE_REASON,
   spaceActivityLine,
 } from '../spaces/toolContract';
+import { isRecord } from '../util/records';
 import { absolutePatchTarget, applyPatchTargets } from './applyPatchTargets';
 import {
   actionIdFor,
@@ -92,6 +94,7 @@ import {
 } from './browserToolNames';
 import {
   FIRST_PARTY_TOOL_REASON,
+  MAIL_DRAFT_REASON,
   MAIL_MARK_AS_READ_REASON,
   MAIL_NEW_RECIPIENT_REASON,
   MAIL_READ_REASON,
@@ -108,6 +111,8 @@ import {
   extractCardFields,
   isCalendarChangeToolName,
   renderOutboundArguments,
+  SEND_VALUE_MAX_CHARS,
+  type ExtractedCardFields,
   type ExtractionResult,
 } from './extractorRegistry';
 import { DEFAULT_MAPS_TRAVEL_MODE, MapsTravelModeSchema } from './mapsRouteSchemas';
@@ -225,6 +230,8 @@ import {
 import type { CaldavEventReview } from '../calendar/caldav/eventReview';
 import { CALDAV_SERVER_NAME, isCaldavReadToolName } from '../calendar/caldav/toolContract';
 import { isSkillBlockedHost } from '../connectors/apiServices';
+import { MAIL_DRAFT_FIRST_DETAIL, mailDraftKey } from '../email/mailConnector/approvedDrafts';
+import { forwardedSubject, type MailForwardReview } from '../email/mailConnector/forwardReview';
 import {
   HOME_ASSISTANT_SERVER_NAME,
   homeAssistantTarget,
@@ -264,6 +271,8 @@ export interface SentinelAction {
   mcp_first_party?: boolean | undefined;
   /** The CalDAV event a change names, read once before classifying. Set only for the CalDAV connector. */
   caldav_event?: CaldavEventReview | null | undefined;
+  /** The message an Email forward sends on, read once before classifying. Set only for the Email connector. */
+  mail_forward?: MailForwardReview | null | undefined;
   /** The user designated this connector as their search provider. Set by the host from the connector record only. */
   mcp_search_provider?: boolean | undefined;
   /** The host's own list for the designated provider names this tool as a search tool. Never from tool metadata. */
@@ -2591,9 +2600,135 @@ async function mailCardFacts(input: { action: SentinelAction; ctx: ClassifyConte
   const listed = await ctx.services.mail_listed_addresses({ ...identity, account: from });
   return {
     from,
-    choices: [...routing.accounts],
+    // A forward sends on a message one account holds, so no other account can be picked for it.
+    choices: action.tool_name === MAIL_FORWARD_TOOL_NAME ? [] : [...routing.accounts],
     new_recipients: mailRecipientsNotListed({ listed, params: action.canonical_params }),
   };
+}
+
+/** The arguments of an Email send or draft that the card shows as the message itself, or as its From line. */
+const MAIL_MESSAGE_ARGUMENTS: ReadonlySet<string> = new Set([
+  'recipients',
+  'cc',
+  'bcc',
+  'subject',
+  'body',
+  MAIL_ACCOUNT_ARGUMENT,
+]);
+
+/** The arguments of an Email forward that the card shows as the note, the recipients or the message sent on. */
+const MAIL_FORWARD_ARGUMENTS: ReadonlySet<string> = new Set([
+  'recipients',
+  'cc',
+  'bcc',
+  'body',
+  'email_id',
+  'source_mailbox',
+  'include_attachments',
+  MAIL_ACCOUNT_ARGUMENT,
+]);
+
+/** The recipients one sending argument names, or null when an entry has no address the card could show. */
+function mailArgumentMailboxes(value: unknown): Tier3Mailbox[] | null {
+  const items = Array.isArray(value) ? value : value === undefined || value === null ? [] : [value];
+  const mailboxes: Tier3Mailbox[] = [];
+  for (const item of items) {
+    if (typeof item === 'string') {
+      mailboxes.push({ name: '', address: item });
+      continue;
+    }
+    if (!isRecord(item)) {
+      return null;
+    }
+    const address = typeof item['email'] === 'string' ? item['email'] : item['address'];
+    const name = item['name'] ?? '';
+    if (typeof address !== 'string' || typeof name !== 'string') {
+      return null;
+    }
+    mailboxes.push({ name, address });
+  }
+  return mailboxes;
+}
+
+/**
+ * The message an Email send, forward or draft writes, laid out as a draft for the card: who it goes to, the
+ * subject and the whole text. A forward also shows the message it sends on. `rest` is every other argument
+ * the call carries, so nothing sent is left off the card. Null when a part of the call cannot be shown as
+ * written, or when a forward's message could not be read; the card then lists the whole request instead.
+ */
+function hostMailMessage(input: { action: SentinelAction; draft: boolean }): {
+  email: Tier3Email;
+  rest: { text: string | null; truncated: boolean };
+} | null {
+  const { action, draft } = input;
+  if (!isHostMailDraft(action) && !isHostMailSend(action)) {
+    return null;
+  }
+  const forward = action.tool_name === MAIL_FORWARD_TOOL_NAME ? (action.mail_forward ?? null) : null;
+  if (action.tool_name === MAIL_FORWARD_TOOL_NAME && forward === null) {
+    return null;
+  }
+  const params = action.canonical_params;
+  const to = mailArgumentMailboxes(params['recipients']);
+  const cc = mailArgumentMailboxes(params['cc']);
+  const bcc = mailArgumentMailboxes(params['bcc']);
+  const subject = forward === null ? (params['subject'] ?? '') : forwardedSubject(forward.subject);
+  const body = forward === null ? params['body'] : (params['body'] ?? '');
+  const attached = params['include_attachments'] ?? true;
+  if (
+    to === null ||
+    cc === null ||
+    bcc === null ||
+    typeof subject !== 'string' ||
+    typeof body !== 'string' ||
+    typeof attached !== 'boolean'
+  ) {
+    return null;
+  }
+  const shown = forward === null ? MAIL_MESSAGE_ARGUMENTS : MAIL_FORWARD_ARGUMENTS;
+  return {
+    email: {
+      action: draft ? 'save' : 'send',
+      to: to.map(escapedMailbox),
+      cc: cc.map(escapedMailbox),
+      bcc: bcc.map(escapedMailbox),
+      subject: escapeDisplayText(subject),
+      body: escapeDisplayText(body, { keepNewlines: true }),
+      check_code: null,
+      replaces: null,
+      reply_in_thread: null,
+      reply_to: null,
+      from_name: null,
+      name_left_off: false,
+      forwards:
+        forward === null
+          ? null
+          : {
+              from: escapeDisplayText(forward.from),
+              subject: escapeDisplayText(forward.subject),
+              body: escapeDisplayText(forward.body, { keepNewlines: true }),
+              truncated: forward.truncated,
+              attachments: attached ? forward.attachments.map(name => escapeDisplayText(name)) : [],
+            },
+    },
+    rest: renderOutboundArguments(Object.fromEntries(Object.entries(params).filter(([key]) => !shown.has(key))), {
+      valueMaxChars: SEND_VALUE_MAX_CHARS,
+    }),
+  };
+}
+
+/**
+ * The message part of an Email card. With a draft to show, the card carries it and lists only the other
+ * arguments beside it; without one, it lists the whole request.
+ */
+function mailMessageCardFields(input: {
+  message: ReturnType<typeof hostMailMessage>;
+  fields: ExtractedCardFields;
+}): Pick<Tier3Card, 'outbound_text' | 'outbound_truncated'> & { email?: Tier3Email } {
+  const { message, fields } = input;
+  return message === null
+    ? { outbound_text: fields.outbound_text, outbound_truncated: fields.outbound_truncated }
+    : { outbound_text: message.rest.text, outbound_truncated: message.rest.truncated, email: message.email };
 }
 
 /**
@@ -3738,10 +3873,29 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
   // naming each new address. A draft naming a new address asks with the same card in draft words:
   // approving adds the addresses to this account's list and saves the draft, and nothing is sent.
   const mailFacts = await mailCardFacts({ action, ctx });
+  // A request already too long to show whole keeps its plain listing, which says what was cut.
+  // A message goes out in two steps, each with its own card: the draft first, then the send. A send
+  // that matches no draft the person approved is not a send yet. A new message is refused, because
+  // the draft tool saves it first; a forward has no draft tool, so its first card keeps it as a draft.
+  const draftApproved =
+    isHostMailSend(action) &&
+    (await ctx.services.mail_approved_drafts.has({
+      tenant_id: ctx.tenant_id,
+      created_by: ctx.created_by,
+      key: mailDraftKey({ tool_name: action.tool_name, params: action.canonical_params }),
+    }));
+  if (isHostMailSend(action) && !draftApproved && action.tool_name !== MAIL_FORWARD_TOOL_NAME) {
+    return autoDenyDecision({
+      reason: 'draft_first',
+      reason_detail: MAIL_DRAFT_FIRST_DETAIL,
+      sensitive_read: readsPrivateData,
+    });
+  }
+  const draft = isHostMailDraft(action) || (isHostMailSend(action) && !draftApproved);
+  const mailMessage = extraction.fields.outbound_truncated ? null : hostMailMessage({ action, draft });
   const newMailRecipients = mailFacts.new_recipients;
   if (newMailRecipients.length > 0) {
     const { fields } = extraction;
-    const draft = isHostMailDraft(action);
     const sentence = externalServiceWhat({
       tool_name: action.tool_name,
       destination: fields.destination,
@@ -3774,9 +3928,8 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
         recipient: fields.recipient,
         amount: fields.amount,
         parsed_command: null,
-        outbound_text: fields.outbound_text,
+        ...mailMessageCardFields({ message: mailMessage, fields }),
         destination_host: null,
-        outbound_truncated: fields.outbound_truncated,
         mail_new_recipients: newMailRecipients,
         mail_from: mailFacts.from,
         mail_from_choices: mailFacts.choices,
@@ -3788,6 +3941,41 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
       reason_detail: draft
         ? 'A mail draft to an address that is not on the Email list.'
         : 'A mail send to an address that is not on the Email list.',
+      sensitive_read: readsPrivateData,
+      approval_token_id: await mintPlainToken({
+        ctx,
+        tool_name: action.tool_name,
+        params: action.canonical_params,
+        connector: connectorBindingFor(action),
+      }),
+    });
+  }
+
+  // A draft through the host's own Email sidecar always asks, as a Gmail draft does: the draft the
+  // person approves here is the only message a later send may carry.
+  if (draft) {
+    const { fields } = extraction;
+    const plain_what = mailMessage === null ? (extraction.connector_what ?? 'Save this draft?') : 'Save this draft?';
+    return tier3Decision({
+      card: {
+        plain_what,
+        copy: { headline: plain_what, consequence: 'Nothing is sent. Sending it asks you again.', reason: null },
+        plain_why: plainWhy(ctx.agent_intent),
+        cannot_be_undone: null,
+        why_asked_again: null,
+        destination: fields.destination,
+        recipient: fields.recipient,
+        amount: fields.amount,
+        parsed_command: null,
+        ...mailMessageCardFields({ message: mailMessage, fields }),
+        destination_host: null,
+        mail_from: mailFacts.from,
+        mail_from_choices: mailFacts.choices,
+        mail_draft: true,
+      },
+      standing_grant_barred: true,
+      reason: MAIL_DRAFT_REASON,
+      reason_detail: 'A mail draft through the Email sidecar always asks.',
       sensitive_read: readsPrivateData,
       approval_token_id: await mintPlainToken({
         ctx,
@@ -3828,9 +4016,8 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
         recipient: fields.recipient,
         amount: fields.amount,
         parsed_command: null,
-        outbound_text: fields.outbound_text,
+        ...mailMessageCardFields({ message: mailMessage, fields }),
         destination_host: null,
-        outbound_truncated: fields.outbound_truncated,
         mail_from: mailFacts.from,
         mail_from_choices: mailFacts.choices,
       },

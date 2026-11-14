@@ -198,6 +198,13 @@ const NO_RECORD_SOURCE_NAME = 'no record';
 /** The closing line of an older note that has no record of where it came from. */
 const NO_RECORD_SOURCE_LINE = `${EXTERNAL_SOURCE_LINE_PREFIX}${NO_RECORD_SOURCE_NAME}`;
 
+/** Every closing line that names the assistant's own reply as the source, in this version and older ones. */
+const REPLY_SOURCE_LINES: readonly string[] = [
+  `${EXTERNAL_SOURCE_LINE_PREFIX}${NOTE_SOURCE_NAMES.assistant_response}`,
+  REPLY_READ_NOTHING_SOURCE_LINE,
+  '> Source: assistant reply',
+];
+
 function isExternalSourceLine(line: string): boolean {
   return line.startsWith(EXTERNAL_SOURCE_LINE_PREFIX) || LEGACY_EXTERNAL_SOURCE_LINES.includes(line);
 }
@@ -357,6 +364,11 @@ function splitEntryTrailers(text: string): EntryTrailers {
       metadata[NOTE_SOURCE_METADATA_KEY] === ASSISTANT_RESPONSE_SOURCE
     ) {
       metadata[REPLY_READ_NOTHING_METADATA_KEY] = 'true';
+    }
+    // A reply whose hidden note line is missing is still a reply: the source line alone says so. It is set after
+    // the check above, so the source line alone never says the chat had read nothing.
+    if (REPLY_SOURCE_LINES.includes(externalLine)) {
+      metadata[NOTE_SOURCE_METADATA_KEY] ??= ASSISTANT_RESPONSE_SOURCE;
     }
   } else if (fromYou) {
     metadata[MEMORY_ORIGIN_METADATA_KEY] = USER_STATED_ORIGIN;

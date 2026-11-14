@@ -193,8 +193,8 @@ describe("demo instance and the host Email connector's drafts", () => {
       hostMailCall('save_draft', { recipients: [LISTED], subject: 'Lease', body: 'Hi' }),
       demoCtx(),
     );
-    expect(decision).toMatchObject({ tier: 3, auto_deny: null, reason: 'connector_send' });
-    expect(decision.card?.plain_what).toContain('Save a message draft');
+    expect(decision).toMatchObject({ tier: 3, auto_deny: null, reason: 'mail_draft' });
+    expect(decision.card?.plain_what).toBe('Save this draft?');
   });
 
   it('raises the new-recipient card for a draft to a new address instead of the demo refusal', async () => {
@@ -250,6 +250,6 @@ describe("demo instance and the host Email connector's drafts", () => {
       hostMailCall('save_draft', { recipients: [LISTED], subject: 'Lease', body: 'Hi' }),
       outsideDemo,
     );
-    expect(decision).toMatchObject({ tier: 3, auto_deny: null, reason: 'connector_send' });
+    expect(decision).toMatchObject({ tier: 3, auto_deny: null, reason: 'mail_draft' });
   });
 });
