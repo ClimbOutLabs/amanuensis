@@ -1129,6 +1129,20 @@ describe('mcp-servers routers', () => {
     });
   });
 
+  /**
+   * Lists a fixture server's origin as the operator's own for the length of a test, and
+   * returns the restore. The address check does not second-guess the operator's own list,
+   * which is what lets a save dial a loopback fixture the way a person reaches a server on
+   * their own network.
+   */
+  function listAsOwnService(url: string): () => void {
+    const original = configuration.FIRST_PARTY_MCP_ORIGINS;
+    configuration.FIRST_PARTY_MCP_ORIGINS = [new URL(url).origin];
+    return () => {
+      configuration.FIRST_PARTY_MCP_ORIGINS = original;
+    };
+  }
+
   describe('the search declaration of the designated provider', () => {
     const PARALLEL_URL = 'https://search.parallel.ai/mcp';
 
@@ -1246,6 +1260,7 @@ describe('mcp-servers routers', () => {
     it('captures the declaration from the tool list of a self-hosted server nobody shipped a preset for', async () => {
       await save(providerManifest({}));
       const inert = await startInertMcpServer({ searchProvider: true });
+      const unlist = listAsOwnService(inert.url);
       try {
         const response = await settingsRouter.request(
           '/',
@@ -1270,12 +1285,14 @@ describe('mcp-servers routers', () => {
         expect(stored?.manifest.type === 'remote' ? stored.manifest.search_plumbing_fields : undefined).toBeUndefined();
         expect(stored?.manifest.type === 'remote' ? stored.manifest.search_in_process : undefined).toBeUndefined();
       } finally {
+        unlist();
         await inert.stop();
       }
     });
 
     it('stores no declaration for the same self-hosted server while it is not designated', async () => {
       const inert = await startInertMcpServer({ searchProvider: true });
+      const unlist = listAsOwnService(inert.url);
       try {
         const response = await settingsRouter.request(
           '/',
@@ -1293,12 +1310,14 @@ describe('mcp-servers routers', () => {
         expect(stored?.manifest.type === 'remote' ? stored.manifest.search_tools : undefined).toBeUndefined();
         expect(stored?.manifest.type === 'remote' ? stored.manifest.page_read_tools : undefined).toBeUndefined();
       } finally {
+        unlist();
         await inert.stop();
       }
     });
 
     it('captures the declaration when the tools of a designated server are read, if designation could not read them', async () => {
       const inert = await startInertMcpServer({ searchProvider: true });
+      const unlist = listAsOwnService(inert.url);
       try {
         // Seeded through the store, as a record designated while its server could not be
         // read: the designation stands and no declaration is stored yet.
@@ -1322,6 +1341,7 @@ describe('mcp-servers routers', () => {
           'web_fetch',
         ]);
       } finally {
+        unlist();
         await inert.stop();
       }
     });
@@ -1393,6 +1413,7 @@ describe('mcp-servers routers', () => {
 
     it('captures the declaration from the server’s own tool list when its connection is checked', async () => {
       const inert = await startInertMcpServer();
+      const unlist = listAsOwnService(inert.url);
       try {
         await mcpServerStore.upsertServer({
           tenant_id: TENANT_ID,
@@ -1405,6 +1426,7 @@ describe('mcp-servers routers', () => {
         // Of the fixture's tools only inert_write declares itself a change (readOnlyHint false).
         expect((await storedManifest('home-assistant'))?.declared_change_tools).toEqual(['inert_write']);
       } finally {
+        unlist();
         await inert.stop();
       }
     });
