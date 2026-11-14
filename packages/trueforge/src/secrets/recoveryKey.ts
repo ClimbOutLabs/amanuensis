@@ -89,6 +89,27 @@ export async function saveRecoveryCopy({
   await settings.setSetting({ key: RECOVERY_COPY_SETTING, value });
 }
 
+/**
+ * The master key held in a recovery copy, opened with the recovery key alone. The copy may come
+ * from a database or from the header of a sealed backup.
+ */
+export function openRecoveryCopy({ copy, recoveryKey }: { copy: string; recoveryKey: string }): Buffer {
+  const wrapping = wrappingKey(recoveryKey);
+  let masterKey: Buffer;
+  try {
+    masterKey = Buffer.from(decryptSecret({ key: wrapping, value: copy, context: RECOVERY_COPY_CONTEXT }), 'base64');
+  } catch (caught) {
+    if (caught instanceof SecretKeyMismatchError || caught instanceof SecretDecryptError) {
+      throw new RecoveryKeyRejectedError({ cause: caught });
+    }
+    throw caught;
+  }
+  if (masterKey.length !== MASTER_KEY_BYTES) {
+    throw new RecoveryKeyRejectedError();
+  }
+  return masterKey;
+}
+
 /** The master key, recovered from this database's copy with the recovery key alone. */
 export async function recoverMasterKey({
   settings,
@@ -97,24 +118,14 @@ export async function recoverMasterKey({
   settings: IGlobalSettingsStore;
   recoveryKey: string;
 }): Promise<Buffer> {
-  const wrapping = wrappingKey(recoveryKey);
+  // Checked first, so a mistyped key is reported as such whether or not a copy exists.
+  normalizeRecoveryKey(recoveryKey);
   const copy = await settings.getSetting({ key: RECOVERY_COPY_SETTING });
   if (copy === undefined) {
     throw new RecoveryCopyMissingError();
   }
-  let masterKey: Buffer;
-  try {
-    masterKey = Buffer.from(
-      decryptSecret({ key: wrapping, value: copy.value, context: RECOVERY_COPY_CONTEXT }),
-      'base64',
-    );
-  } catch (caught) {
-    if (caught instanceof SecretKeyMismatchError || caught instanceof SecretDecryptError) {
-      throw new RecoveryKeyRejectedError({ cause: caught });
-    }
-    throw caught;
-  }
-  if (masterKey.length !== MASTER_KEY_BYTES || (await checkMasterKey({ settings, key: masterKey })) !== 'match') {
+  const masterKey = openRecoveryCopy({ copy: copy.value, recoveryKey });
+  if ((await checkMasterKey({ settings, key: masterKey })) !== 'match') {
     throw new RecoveryKeyRejectedError();
   }
   return masterKey;
