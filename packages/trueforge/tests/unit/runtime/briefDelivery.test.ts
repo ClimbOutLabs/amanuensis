@@ -99,6 +99,18 @@ describe('a finished morning brief in the bell', () => {
     expect(await feed()).toEqual([]);
   });
 
+  it('never throws when the schedule has a time zone it cannot read', async () => {
+    const { dueRun, finish, feed } = await setup();
+    const due = await dueRun({ name: 'morning-brief', task: MORNING_BRIEF_PROMPT });
+    const item: ScheduleDispatchItem = {
+      ...due,
+      schedule: { ...due.schedule, manifest: { ...due.schedule.manifest, timezone: 'Not/A_Zone' } },
+    };
+
+    await expect(finish(item, BRIEF_ANSWER)).resolves.toBeUndefined();
+    expect(await feed()).toEqual([]);
+  });
+
   it('writes one item when the same run finishes twice', async () => {
     const { dueRun, finish, feed } = await setup();
     const item = await dueRun({ name: 'morning-brief', task: MORNING_BRIEF_PROMPT });

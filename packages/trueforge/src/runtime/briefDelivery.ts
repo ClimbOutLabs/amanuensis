@@ -34,8 +34,9 @@ export async function deliverBriefReady(params: {
     return;
   }
   const { schedule, run } = item;
-  const ran = formatRunTime({ at: new Date(run.scheduled_for), timezone: schedule.manifest.timezone });
   try {
+    // Inside the try: a bad schedule time zone must not throw out of the turn's follow-up.
+    const ran = formatRunTime({ at: new Date(run.scheduled_for), timezone: schedule.manifest.timezone });
     await params.deliveries.deliverOnce({
       tenant_id: schedule.tenant_id,
       created_by: schedule.created_by_subject.subject_id,
