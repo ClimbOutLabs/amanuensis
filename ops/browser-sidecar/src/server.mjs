@@ -591,7 +591,7 @@ async function setFrameGuards(tab, on) {
 }
 
 /** Live-view acts that press or type; a move or a wheel turn is not input the frame guards stop. */
-const GUARDED_LIVE_KINDS = new Set(['click', 'down', 'up', 'type', 'key']);
+const GUARDED_LIVE_KINDS = new Set(['click', 'down', 'up', 'type', 'paste', 'key']);
 
 /**
  * Runs the person's own live-view act with the frame guards off, so it reaches a frame they point at,
@@ -679,6 +679,11 @@ async function liveAct(tab, input) {
     case 'type':
       await page.keyboard.type(input.text);
       break;
+    case 'paste':
+      // Pasted text goes in as one insert, the way a real paste does: a line break in it is text,
+      // never a press of Enter that could send a half-filled form.
+      await page.keyboard.insertText(input.text);
+      break;
     case 'key':
       await page.keyboard.press(input.key);
       break;
@@ -687,6 +692,63 @@ async function liveAct(tab, input) {
       break;
   }
   return { status: 'ok' };
+}
+
+/** The most text one copy out of the live view hands back: a code, an address or a few paragraphs. */
+const MAX_LIVE_COPY_LENGTH = 100_000;
+
+/**
+ * What the person has selected in a frame: the selected part of the focused text field, or else the
+ * page's own selection. A password field's text is never read out, as the page itself never lets it
+ * be copied. Runs in the frame, so it must not name anything from this module.
+ */
+function selectedTextInFrame() {
+  const { document, HTMLInputElement, HTMLTextAreaElement } = globalThis;
+  let focused = document.activeElement;
+  while (focused?.shadowRoot?.activeElement) {
+    focused = focused.shadowRoot.activeElement;
+  }
+  const isField = focused instanceof HTMLInputElement || focused instanceof HTMLTextAreaElement;
+  if (isField && focused.type === 'password') {
+    return { focused: document.hasFocus(), password: true, text: '' };
+  }
+  if (isField && typeof focused.selectionStart === 'number' && typeof focused.selectionEnd === 'number') {
+    const text = focused.value.slice(focused.selectionStart, focused.selectionEnd);
+    if (text !== '') {
+      return { focused: document.hasFocus(), password: false, text };
+    }
+  }
+  return { focused: document.hasFocus(), password: false, text: String(globalThis.getSelection()?.toString() ?? '') };
+}
+
+/**
+ * The text the person has selected in the tab, for the live view's copy. The frame that has focus
+ * is asked first, so a selection in a sign-in frame wins over a leftover one in the page around it.
+ */
+async function selectedText(page) {
+  const answers = [];
+  for (const frame of page.frames()) {
+    const answer = await frame.evaluate(selectedTextInFrame).catch(() => undefined);
+    if (
+      typeof answer === 'object' &&
+      answer !== null &&
+      typeof answer.text === 'string' &&
+      typeof answer.focused === 'boolean' &&
+      typeof answer.password === 'boolean'
+    ) {
+      answers.push(answer);
+    }
+  }
+  const pick =
+    answers.find(answer => answer.focused && (answer.password || answer.text !== '')) ??
+    answers.find(answer => answer.text !== '');
+  if (pick === undefined) {
+    return { status: 'nothing_selected' };
+  }
+  if (pick.password) {
+    return { status: 'password' };
+  }
+  return { status: 'ok', text: pick.text.slice(0, MAX_LIVE_COPY_LENGTH) };
 }
 
 /**
@@ -1327,6 +1389,18 @@ export class BrowserSidecar {
   }
 
   /**
+   * The text the person selected in the chat's tab, for the live view's copy. It goes back only to
+   * the person's own live view; it is never kept, logged or shown to the model.
+   */
+  async liveCopy({ owner, tab: tabId }) {
+    const tab = await this.#tabFor({ owner, tab: tabId, create: false });
+    if (tab === undefined) {
+      return NO_TAB;
+    }
+    return inLiveOrder(tab, () => selectedText(tab.page));
+  }
+
+  /**
    * Puts a file the person chose in the live view into the page: into the file picker the page just
    * opened, or else the page's first file field. Nothing is uploaded until the page itself sends it.
    */
@@ -1435,8 +1509,8 @@ function parsePoint(body) {
 
 /**
  * A live-view input from the request body, or undefined when it is not one the page can be given:
- * a pointer act with its point (a click, or the takeover acts move, down and up), typed text, one
- * named key, or a scroll step.
+ * a pointer act with its point (a click, or the takeover acts move, down and up), typed or pasted
+ * text, one named key, or a scroll step.
  */
 function parseLiveInput(body) {
   switch (body.kind) {
@@ -1448,8 +1522,9 @@ function parseLiveInput(body) {
       return point === undefined ? undefined : { kind: body.kind, ...point };
     }
     case 'type':
+    case 'paste':
       return typeof body.text === 'string' && body.text !== '' && body.text.length <= MAX_LIVE_TEXT_LENGTH
-        ? { kind: 'type', text: body.text }
+        ? { kind: body.kind, text: body.text }
         : undefined;
     case 'key':
       return typeof body.key === 'string' && body.key !== '' && body.key.length <= 64
@@ -1489,6 +1564,7 @@ const ROUTES = {
     const input = parseLiveInput(body);
     return input === undefined ? { status: 'bad_input' } : sidecar.liveInput({ ...where, input });
   },
+  'POST /live/copy': (sidecar, where) => sidecar.liveCopy(where),
   'POST /live/takeover': (sidecar, where, body) =>
     typeof body.on === 'boolean' ? sidecar.liveTakeover({ ...where, on: body.on }) : { status: 'bad_input' },
 };

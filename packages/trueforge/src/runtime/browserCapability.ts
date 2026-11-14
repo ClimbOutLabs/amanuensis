@@ -124,6 +124,13 @@ export const LiveInputReplySchema = z.discriminatedUnion('status', [
   z.object({ status: z.literal('bad_input') }),
   ClosedReplySchema,
 ]);
+/** The text the person selected in the tab, or why there is none to copy. */
+export const LiveCopyReplySchema = z.discriminatedUnion('status', [
+  z.object({ status: z.literal('ok'), text: z.string() }),
+  z.object({ status: z.literal('nothing_selected') }),
+  z.object({ status: z.literal('password') }),
+  ClosedReplySchema,
+]);
 export const LiveTakeoverReplySchema = z.discriminatedUnion('status', [
   z.object({ status: z.literal('ok'), takeover: z.boolean() }),
   z.object({ status: z.literal('bad_input') }),
@@ -134,6 +141,7 @@ export type LiveTabsReply = z.infer<typeof LiveTabsReplySchema>;
 export type LiveFrameReply = z.infer<typeof LiveFrameReplySchema>;
 export type LiveInputReply = z.infer<typeof LiveInputReplySchema>;
 export type LiveTakeoverReply = z.infer<typeof LiveTakeoverReplySchema>;
+export type LiveCopyReply = z.infer<typeof LiveCopyReplySchema>;
 
 /** What the sidecar answered to a request, or why there is no usable answer. */
 export type SidecarResult<T> = { ok: true; body: T } | { ok: false; message: string };

@@ -390,6 +390,13 @@ async function withWorld(run) {
       <label for="q">Search</label>
       <input id="q" onkeydown="document.getElementById('side').focus()">
       <iframe id="side" src="http://site-b.test/tricky-widget" style="width: 12rem; height: 5rem"></iframe>`),
+    // A sign-in form for the live view's paste and copy: each change is reported, and so is a send.
+    '/paste-copy': html(`<form onsubmit="event.preventDefault(); fetch('/submitted', { method: 'POST' })">
+      <input id="name" autofocus oninput="fetch('/name?' + encodeURIComponent(this.value), { method: 'POST' })">
+      <input id="pw" type="password" value="hunter2">
+      <textarea id="note" oninput="fetch('/note?' + encodeURIComponent(this.value), { method: 'POST' })"></textarea>
+      <button>Sign in</button>
+    </form>`),
     // A page with another site's widget in a frame at its top corner, as a human check sits on a page.
     '/widget-frame': html(`<iframe src="http://site-b.test/widget"
       style="position: fixed; left: 0; top: 0; width: 12rem; height: 8rem; border: 0"></iframe>`),
@@ -1532,6 +1539,49 @@ test(
 );
 
 test(
+  'the live view pastes as one insert that never sends the form, and copies a selection but never a password',
+  { skip: !browsersAvailable },
+  async () => {
+    await withWorld(async ({ sidecar, siteA }) => {
+      const where = { owner: 'owner-1', tab: 'chat-1' };
+      await sidecar.open({ ...where, url: 'http://site-a.test/paste-copy' });
+      await settle();
+      assert.deepEqual(await sidecar.liveCopy(where), { status: 'nothing_selected' });
+
+      // A pasted line break in a one-line field is dropped, as a real paste drops it, and Enter is never pressed.
+      assert.deepEqual(await sidecar.liveInput({ ...where, input: { kind: 'paste', text: 'ada@example.test\n' } }), {
+        status: 'ok',
+      });
+      await settle();
+      const reported = siteA.hits.filter(hit => hit.method === 'POST').map(hit => hit.url);
+      assert.ok(reported.includes(`/name?${encodeURIComponent('ada@example.test')}`), reported.join(', '));
+      assert.ok(!reported.includes('/submitted'), 'the paste never sent the form');
+      // The paste went in as one change, not a key at a time.
+      assert.equal(reported.filter(url => url.startsWith('/name?')).length, 1);
+
+      // Select all, then copy: the field's own text comes back.
+      await sidecar.liveInput({ ...where, input: { kind: 'key', key: 'ControlOrMeta+A' } });
+      assert.deepEqual(await sidecar.liveCopy(where), { status: 'ok', text: 'ada@example.test' });
+
+      // A password field's text is never read out, even when all of it is selected.
+      await sidecar.liveInput({ ...where, input: { kind: 'key', key: 'Tab' } });
+      await sidecar.liveInput({ ...where, input: { kind: 'key', key: 'ControlOrMeta+A' } });
+      assert.deepEqual(await sidecar.liveCopy(where), { status: 'password' });
+
+      // In a box of many lines, the pasted lines stay lines.
+      await sidecar.liveInput({ ...where, input: { kind: 'key', key: 'Tab' } });
+      await sidecar.liveInput({ ...where, input: { kind: 'paste', text: 'one\ntwo' } });
+      await settle();
+      assert.ok(
+        siteA.hits.some(hit => hit.url === `/note?${encodeURIComponent('one\ntwo')}`),
+        'the box got both lines',
+      );
+      assert.ok(!siteA.hits.some(hit => hit.url === '/submitted'), 'nothing sent the form');
+    });
+  },
+);
+
+test(
   "a frame cannot find its guard's key, in the switch or on its way, so Aman's typing never reaches it",
   { skip: !browsersAvailable },
   async () => {
@@ -1803,6 +1853,9 @@ async function fakeSidecar() {
       press: async key => {
         acts.push({ key });
       },
+      insertText: async text => {
+        acts.push({ paste: text });
+      },
     },
     on: (event, handler) => {
       handlers[event] = handler;
@@ -1948,6 +2001,8 @@ test('the live view lists, frames and drives a tab through a stand-in page', asy
     assert.deepEqual(acts.at(-1), { type: '123456' });
     await sidecar.liveInput({ owner: 'owner-1', tab: 'chat-1', input: { kind: 'key', key: 'Enter' } });
     assert.deepEqual(acts.at(-1), { key: 'Enter' });
+    await sidecar.liveInput({ owner: 'owner-1', tab: 'chat-1', input: { kind: 'paste', text: 'a\nb' } });
+    assert.deepEqual(acts.at(-1), { paste: 'a\nb' });
     await sidecar.liveInput({ owner: 'owner-1', tab: 'chat-1', input: { kind: 'wheel', dy: 240 } });
     assert.deepEqual(acts.at(-1), { wheel: [0, 240] });
 
@@ -2100,6 +2155,13 @@ test('the live routes answer over HTTP, and listing them needs no tab', async ()
     const badInput = await post('/live/input', { owner: 'owner-1', tab: 'chat-1', kind: 'dance' });
     assert.equal(badInput.status, 200);
     assert.deepEqual(await badInput.json(), { status: 'bad_input' });
+
+    const badPaste = await post('/live/input', { owner: 'owner-1', tab: 'chat-1', kind: 'paste', text: '' });
+    assert.deepEqual(await badPaste.json(), { status: 'bad_input' });
+
+    const copyWithNoTab = await post('/live/copy', { owner: 'owner-1', tab: 'chat-1' });
+    assert.equal(copyWithNoTab.status, 200);
+    assert.deepEqual(await copyWithNoTab.json(), { status: 'closed' });
 
     const badTakeover = await post('/live/takeover', { owner: 'owner-1', tab: 'chat-1', on: 'yes' });
     assert.equal(badTakeover.status, 200);
