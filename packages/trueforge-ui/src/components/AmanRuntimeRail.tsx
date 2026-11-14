@@ -68,6 +68,11 @@ export type AmanRuntimeRailProps = {
    */
   onOpenAudits?: () => void;
   /**
+   * The address of the live browser page while the assistant has a web page open in this chat, so
+   * the person can watch it and take a step themselves. Left out when there is no page open.
+   */
+  liveBrowserHref?: string | undefined;
+  /**
    * The chat the person is looking at, or undefined on Home. The desk follows it: Home shows
    * the day, a chat shows what the assistant is using in that chat.
    */
@@ -204,6 +209,7 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
   deskApi,
   onOpenChat,
   onOpenMemorySettings,
+  liveBrowserHref,
 }) => {
   const profile = useOptionalPersonalization()?.profile;
   const assistantName = assistantDisplayName(profile?.assistant_name);
@@ -220,13 +226,6 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
   // The desk's Home read. A change in the waiting approvals is the rail's own sign that the
   // day changed, so it doubles as the read's refresh signal beside the two-minute poll.
   const today = useRailToday(sessionId === undefined ? deskApi : undefined, pendingApprovalIds.join(','));
-  // On Home the caption also says how much is being carried, once the day has been read.
-  const statusCaption =
-    statusLine === null
-      ? null
-      : sessionId === undefined && today !== null
-        ? `${statusLine} · Carrying ${String(today.carrying)}`
-        : statusLine;
   // Folded, the poster's tooltip is all that is left, so it still says a reply is running.
   const compactLabel = statusLine ?? WORKING_ON_IT_LABEL;
   const tone = statusToneOf({ status, activity, waitingOnPerson });
@@ -319,10 +318,10 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
           </section>
 
           <div className="aman-runtime-rail__status" data-tone={tone} aria-live="polite">
-            {statusCaption === null ? null : (
+            {statusLine === null ? null : (
               <>
                 <span className="aman-runtime-rail__status-dot" aria-hidden="true" />
-                <span>{statusCaption}</span>
+                <span>{statusLine}</span>
               </>
             )}
             {selfProbed && (status === 'offline' || status === 'degraded') && (
@@ -350,6 +349,27 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
               <div className="aman-runtime-rail__section-value" title={trimmedPersonaName}>
                 {trimmedPersonaName}
               </div>
+            </section>
+          )}
+
+          {/* A live page the person can jump to, opened beside the chat so the chat stays put. */}
+          {liveBrowserHref === undefined ? null : (
+            <section className="aman-runtime-rail__section" data-section="live-browser">
+              <a
+                className="aman-runtime-rail__live-browser"
+                href={liveBrowserHref}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <span className="aman-runtime-rail__live-dot" aria-hidden="true" />
+                <span className="aman-runtime-rail__live-text">
+                  <span className="aman-runtime-rail__live-title">Watch Live or Take Control</span>
+                  <span className="aman-runtime-rail__live-detail">
+                    {assistantName} has a page open. Watch it or take a step yourself.
+                  </span>
+                </span>
+                <Icon name="external-link" size={16} className="aman-runtime-rail__live-open" aria-hidden="true" />
+              </a>
             </section>
           )}
 

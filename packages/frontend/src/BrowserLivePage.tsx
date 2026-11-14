@@ -136,10 +136,13 @@ async function writeClipboard(text: Promise<string>): Promise<void> {
   await clipboard.writeText(await text);
 }
 
-/** The person's open tabs, or null when the live routes could not be reached. */
-async function loadTabs(): Promise<LiveTab[] | null> {
+/** The person's open tabs; 'off' when this server has no browser; null when the live routes could not be reached. */
+async function loadTabs(): Promise<LiveTab[] | 'off' | null> {
   try {
     const data = await liveCall('/api/browser/live/tabs');
+    if (isRecord(data) && data.browser_on === false) {
+      return 'off';
+    }
     return isRecord(data) && Array.isArray(data.tabs) ? data.tabs.filter(isLiveTab) : [];
   } catch {
     return null;
@@ -156,6 +159,8 @@ export function BrowserLivePage() {
   const [tabs, setTabs] = useState<LiveTab[]>([]);
   const [selected, setSelected] = useState<string | undefined>(undefined);
   const [frame, setFrame] = useState<string | undefined>(undefined);
+  // The shown picture's own size, so it can be fitted to the window without changing its shape.
+  const [frameShape, setFrameShape] = useState<{ width: number; height: number } | undefined>(undefined);
   const [note, setNote] = useState('Loading your tabs...');
   // Whether the shown tab answered closed; kept apart from `note` so a new frame never wipes an upload's answer.
   const [closed, setClosed] = useState(false);
@@ -191,13 +196,26 @@ export function BrowserLivePage() {
     takeoverRef.current = takeover;
   }, [takeover]);
 
-  const applyTabs = useCallback((list: LiveTab[] | null) => {
+  const applyTabs = useCallback((list: LiveTab[] | 'off' | null) => {
     if (list === null) {
       setNote('The live view could not be reached. Try again in a moment.');
       return;
     }
+    if (list === 'off') {
+      setTabs([]);
+      setSelected(undefined);
+      setNote("Aman's browser is not turned on here. Ask whoever runs Aman to turn it on.");
+      return;
+    }
     setTabs(list);
-    setSelected(current => (current !== undefined && list.some(tab => tab.tab === current) ? current : list[0]?.tab));
+    // A link from a chat names that chat's tab, so the page opens on it rather than on the newest one.
+    const asked = new URLSearchParams(window.location.search).get('tab');
+    setSelected(current => {
+      if (current !== undefined && list.some(tab => tab.tab === current)) {
+        return current;
+      }
+      return list.find(tab => tab.tab === asked)?.tab ?? list[0]?.tab;
+    });
     setNote(
       list.length === 0 ? 'Aman has no page open right now. Ask Aman to open the page first, then come back here.' : '',
     );
@@ -566,8 +584,13 @@ export function BrowserLivePage() {
   if (done) {
     return (
       <main className="browser-live">
+        <header className="browser-live-bar">
+          <div className="browser-live-brand">
+            <span className="browser-live-dot" aria-hidden="true" />
+            <h1 className="browser-live-title">Aman&apos;s browser, live</h1>
+          </div>
+        </header>
         <div className="browser-live-body">
-          <h1 className="browser-live-title">Aman&apos;s browser, live</h1>
           <p className="browser-live-note">
             Done. Go back to the chat and tell Aman you are finished. Everything you did stays in the page.
           </p>
@@ -576,21 +599,33 @@ export function BrowserLivePage() {
     );
   }
 
+  const live = frame !== undefined && !closed;
+  // The picture fits the window's height as well as its width, keeping the page's own shape, so the
+  // whole page shows without scrolling this one. Its shape comes from the picture itself once loaded.
+  const frameStyle =
+    frameShape === undefined
+      ? undefined
+      : { width: `min(100%, calc((100dvh - 9.5rem) * ${String(frameShape.width / frameShape.height)}))` };
+
   return (
     <main className="browser-live">
-      <div className="browser-live-body">
-        <h1 className="browser-live-title">Aman&apos;s browser, live</h1>
-        <p className="browser-live-text">
-          This is the page Aman has open. Click, scroll and type to use it yourself, for example to finish a sign-in.
-          When you are done, press Done, then go back to the chat and tell Aman.
-        </p>
-        <div className="browser-live-row" role="group" aria-label="Open tabs">
+      <header className="browser-live-bar">
+        <div className="browser-live-brand">
+          <span
+            className={live ? 'browser-live-dot browser-live-dot-on' : 'browser-live-dot'}
+            role="img"
+            aria-label={live ? 'Live' : 'Not live'}
+          />
+          <h1 className="browser-live-title">Aman&apos;s browser, live</h1>
+        </div>
+        <div className="browser-live-tabs" role="group" aria-label="Open tabs">
           {tabs.map(tab => (
             <button
               key={tab.tab}
               type="button"
-              className="browser-live-button"
+              className="browser-live-chip"
               aria-pressed={tab.tab === selected}
+              title={tab.title === '' ? tab.url : `${tab.title}\n${tab.url}`}
               onClick={() => {
                 // Leaving a taken-over tab for another one hands it back first.
                 if (tab.tab !== selected) {
@@ -608,10 +643,30 @@ export function BrowserLivePage() {
               {tab.title === '' ? tab.url : tab.title}
             </button>
           ))}
-          <button type="button" className="browser-live-button" onClick={refreshTabs}>
+          <button type="button" className="browser-live-chip browser-live-chip-quiet" onClick={refreshTabs}>
             Refresh tabs
           </button>
         </div>
+        <div className="browser-live-actions">
+          {selected !== undefined && !closed ? (
+            <button type="button" className="browser-live-button" aria-pressed={takeover} onClick={onTakeoverToggle}>
+              {takeover ? 'Hand back' : 'Take over'}
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className="browser-live-button browser-live-button-primary"
+            onClick={() => {
+              // Done leaves the live view, so a tab still in the person's hand is handed back.
+              handBackOnLeave();
+              setDone(true);
+            }}
+          >
+            Done
+          </button>
+        </div>
+      </header>
+      <div className="browser-live-body">
         {closed ? (
           <p className="browser-live-note" role="status">
             That page is closed now. Pick another tab, or ask Aman to open the page again.
@@ -622,24 +677,16 @@ export function BrowserLivePage() {
             {note}
           </p>
         ) : null}
-        {selected !== undefined && !closed ? (
-          <div className="browser-live-row">
-            <button type="button" className="browser-live-button" aria-pressed={takeover} onClick={onTakeoverToggle}>
-              {takeover ? 'Hand back' : 'Take over'}
-            </button>
-            {takeover ? (
-              <span className="browser-live-text">You are driving this page. Aman will not touch it.</span>
-            ) : null}
-          </div>
-        ) : null}
-        {takeover && challenge ? (
-          <p className="browser-live-note" role="status">
-            This site is asking for a human check. Takeover gives you your best chance at it.
+        {takeover ? (
+          <p className="browser-live-note browser-live-note-driving" role="status">
+            You are driving this page. Aman will not touch it.
+            {challenge ? ' This site is asking for a human check. Takeover gives you your best chance at it.' : ''}
           </p>
         ) : null}
         {frame !== undefined ? (
           <div
             className={takeover ? 'browser-live-frame browser-live-frame-takeover' : 'browser-live-frame'}
+            style={frameStyle}
             tabIndex={0}
             onKeyDown={onKeyDown}
             onPaste={onFramePaste}
@@ -651,6 +698,16 @@ export function BrowserLivePage() {
               src={`data:image/jpeg;base64,${frame}`}
               alt="The page Aman has open, as it looks now"
               draggable={takeover ? false : undefined}
+              onLoad={event => {
+                const { naturalWidth, naturalHeight } = event.currentTarget;
+                if (
+                  naturalWidth > 0 &&
+                  naturalHeight > 0 &&
+                  (frameShape?.width !== naturalWidth || frameShape.height !== naturalHeight)
+                ) {
+                  setFrameShape({ width: naturalWidth, height: naturalHeight });
+                }
+              }}
               onClick={onFrameClick}
               onPointerDown={onFramePointerDown}
               onPointerMove={onFramePointerMove}
@@ -659,13 +716,7 @@ export function BrowserLivePage() {
             />
           </div>
         ) : null}
-        <p className="browser-live-hint">
-          {takeover
-            ? 'Move and press on the picture to use the page, just as your hand does. Typing still works after you press the picture.'
-            : 'Click the picture, then type to fill in a field. Scrolling over the picture scrolls the page.'}{' '}
-          Paste into the page with Ctrl+V (Cmd+V on a Mac). To copy, select text in the page, then press Ctrl+C (Cmd+C).
-        </p>
-        <div className="browser-live-row">
+        <div className="browser-live-tools">
           <button
             type="button"
             className="browser-live-button"
@@ -682,110 +733,107 @@ export function BrowserLivePage() {
           >
             Copy from page
           </button>
+          <div className="browser-live-type">
+            <input
+              className="browser-live-input"
+              aria-label="Text to type into the page"
+              value={typeText}
+              onChange={event => {
+                setTypeText(event.target.value);
+              }}
+              onKeyDown={event => {
+                if (event.key === 'Enter') {
+                  onTypeSubmit();
+                }
+              }}
+              placeholder="Text or a code to type into the page"
+            />
+            <button type="button" className="browser-live-button" onClick={onTypeSubmit}>
+              Type it
+            </button>
+          </div>
+          <label className="browser-live-button browser-live-file">
+            Upload a file
+            <input
+              type="file"
+              aria-label="Upload a file into the page"
+              onChange={event => {
+                onUpload(event.target.files?.[0]);
+                event.target.value = '';
+              }}
+            />
+          </label>
         </div>
-        <div className="browser-live-row">
-          <input
-            className="browser-live-input"
-            aria-label="Text to type into the page"
-            value={typeText}
-            onChange={event => {
-              setTypeText(event.target.value);
-            }}
-            onKeyDown={event => {
-              if (event.key === 'Enter') {
-                onTypeSubmit();
-              }
-            }}
-            placeholder="Text or a code to type into the page"
-          />
-          <button type="button" className="browser-live-button" onClick={onTypeSubmit}>
-            Type it
-          </button>
-        </div>
+        <p className="browser-live-hint">
+          {takeover
+            ? 'Move and press on the picture to use the page, just as your hand does. Typing still works after you press the picture.'
+            : 'Click the picture, then type to fill in a field. Scrolling over the picture scrolls the page.'}{' '}
+          Paste with Ctrl+V (Cmd+V on a Mac). To copy, select text in the page, then press Ctrl+C (Cmd+C). When you are
+          done, press Done, then tell Aman in the chat.
+        </p>
         {/* These boxes sit on Aman's own address, so they ask the password manager not to offer or save
             Aman's own sign-in here: the person picks the outside site's login by hand. */}
-        <form
-          className="browser-live-sign-in"
-          aria-label="Sign in with your password manager"
-          onSubmit={event => {
-            // Nothing is sent anywhere by the form itself; each box has its own button.
-            event.preventDefault();
-          }}
-        >
-          <p className="browser-live-text">
-            Sign in with your password manager: click the site&apos;s name or password box in the picture, fill the
-            matching box below from your password manager, then press its Put in page button. Nothing you put here is
-            saved or shown to Aman.
-          </p>
-          <div className="browser-live-row">
-            <input
-              className="browser-live-input"
-              aria-label="Name or email for the page"
-              name="page-name"
-              autoComplete="off"
-              value={signInName}
-              onChange={event => {
-                setSignInName(event.target.value);
-              }}
-              onKeyDown={event => {
-                if (event.key === 'Enter') {
-                  event.preventDefault();
-                  onSignInNameSubmit();
-                }
-              }}
-              placeholder="Name or email"
-            />
-            <button type="button" className="browser-live-button" onClick={onSignInNameSubmit}>
-              Put name in page
-            </button>
-          </div>
-          <div className="browser-live-row">
-            <input
-              className="browser-live-input"
-              aria-label="Password for the page"
-              type="password"
-              name="page-password"
-              autoComplete="off"
-              value={signInPassword}
-              onChange={event => {
-                setSignInPassword(event.target.value);
-              }}
-              onKeyDown={event => {
-                if (event.key === 'Enter') {
-                  event.preventDefault();
-                  onSignInPasswordSubmit();
-                }
-              }}
-              placeholder="Password"
-            />
-            <button type="button" className="browser-live-button" onClick={onSignInPasswordSubmit}>
-              Put password in page
-            </button>
-          </div>
-        </form>
-        <label className="browser-live-text">
-          Upload a file into the page:{' '}
-          <input
-            type="file"
-            onChange={event => {
-              onUpload(event.target.files?.[0]);
-              event.target.value = '';
-            }}
-          />
-        </label>
-        <div className="browser-live-row">
-          <button
-            type="button"
-            className="browser-live-button browser-live-button-primary"
-            onClick={() => {
-              // Done leaves the live view, so a tab still in the person's hand is handed back.
-              handBackOnLeave();
-              setDone(true);
+        <details className="browser-live-panel">
+          <summary className="browser-live-panel-title">Sign in with your password manager</summary>
+          <form
+            className="browser-live-sign-in"
+            aria-label="Sign in with your password manager"
+            onSubmit={event => {
+              // Nothing is sent anywhere by the form itself; each box has its own button.
+              event.preventDefault();
             }}
           >
-            Done
-          </button>
-        </div>
+            <p className="browser-live-text">
+              Click the site&apos;s name or password box in the picture, fill the matching box below from your password
+              manager, then press its Put in page button. Nothing you put here is saved or shown to Aman.
+            </p>
+            <div className="browser-live-type">
+              <input
+                className="browser-live-input"
+                aria-label="Name or email for the page"
+                name="page-name"
+                autoComplete="off"
+                value={signInName}
+                onChange={event => {
+                  setSignInName(event.target.value);
+                }}
+                onKeyDown={event => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    onSignInNameSubmit();
+                  }
+                }}
+                placeholder="Name or email"
+              />
+              <button type="button" className="browser-live-button" onClick={onSignInNameSubmit}>
+                Put name in page
+              </button>
+            </div>
+            <div className="browser-live-type">
+              <input
+                className="browser-live-input"
+                aria-label="Password for the page"
+                type="password"
+                name="page-password"
+                autoComplete="off"
+                value={signInPassword}
+                onChange={event => {
+                  setSignInPassword(event.target.value);
+                }}
+                onKeyDown={event => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    onSignInPasswordSubmit();
+                  }
+                }}
+                placeholder="Password"
+              />
+              <button type="button" className="browser-live-button" onClick={onSignInPasswordSubmit}>
+                Put password in page
+              </button>
+            </div>
+          </form>
+        </details>
       </div>
     </main>
   );

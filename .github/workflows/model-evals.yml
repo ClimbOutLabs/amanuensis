@@ -4,6 +4,10 @@ name: Model evals
 # questions, graded by rule checks and a judge model. Each run adds to a score history kept as a
 # run artifact, and the run fails when a model scores clearly worse than its last run.
 #
+# Two more jobs check coding work in the real sandbox and co-browse in a real browser, both built from
+# this checkout, with no model. They run beside the model eval and get no environment, so they can
+# never read a model key.
+#
 # The model keys live only in the `model-evals` environment, which runs on main alone. This workflow
 # never runs for pull requests, so code from a pull request can never see a key.
 on:
@@ -154,3 +158,66 @@ jobs:
           path: ${{ runner.temp }}/history/history.json
           if-no-files-found: ignore
           retention-days: 90
+
+  sandbox-coding:
+    name: Coding in the sandbox
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The runner is thrown away after the job, so the per-slot disks are skipped and the soft disk
+      # limit is what the disk check fills.
+      - name: Build the sandbox from this checkout and start it
+        run: pnpm sandbox:slots --fix --yes --no-hard-disk-limit --instance main
+
+      - name: Run the coding checks
+        run: pnpm test:sandbox-coding-live --instance main
+
+      - name: Stop the sandbox
+        if: always()
+        run: pnpm sandbox:slots --down --purge --instance main
+
+  cobrowse:
+    name: Co-browse
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Made-up local pages only: the browser image serves its own test sites, and the live page test
+      # uses the runner's installed Chrome against a stand-in server.
+      - name: Run the co-browse checks
+        run: pnpm test:cobrowse

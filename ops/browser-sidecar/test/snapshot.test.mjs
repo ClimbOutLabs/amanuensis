@@ -116,3 +116,21 @@ test('says where the view is, and when it is at the end of the page', () => {
   assert.match(middle, /^# T\nhttps:\/\/example\.com\nIn view: 800 to 1600 of 4000 pixels down\nHello$/);
   assert.match(end, /In view: 3200 to 4000 of 4000 pixels down, the end of the page\n/);
 });
+
+test('says when pictures in view hold what the text cannot, and points to a screenshot', () => {
+  const nodes = [node({ id: 'a', role: 'text', name: 'Asset allocation' })];
+  const render = pictures =>
+    renderSnapshot({
+      title: 'T',
+      url: 'https://example.com',
+      nodes,
+      refs: new Map(),
+      view: { top: 0, bottom: 800, height: 800, pictures },
+    });
+  assert.match(
+    render(2),
+    /\nAlso in view: 2 pictures \(a chart, drawing, photo or video\) the text above can't show\. To see them, use browser_screenshot\.\nAsset allocation$/,
+  );
+  assert.match(render(1), /Also in view: 1 picture .* To see it, use browser_screenshot\./);
+  assert.doesNotMatch(render(0), /Also in view/);
+});

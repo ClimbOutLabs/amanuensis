@@ -6,7 +6,9 @@ import { z } from 'zod';
 import {
   MAX_BYTES_PER_DOCUMENT,
   MAX_CHARS_PER_DOCUMENT,
+  MAX_DOCUMENT_FILES,
   MAX_PAGES_PER_DOCUMENT,
+  MAX_TOTAL_DOCUMENT_BYTES,
   MAX_TOTAL_DOCUMENT_CHARS,
 } from '../../documents/documentExtraction';
 import { DocumentReadError } from '../../documents/documentReadError';
@@ -70,6 +72,7 @@ import {
 import type { SkillNetworkCardRequest } from '../permissions/skillNetworkCards';
 import type { Tier3Card } from '../permissions/tier';
 import type { AbnormalHandoffEvidence } from '../runtime/AbnormalHandoff';
+import { matchesStagedName, stagedNameDigest } from '../runtime/attachmentStaging';
 import {
   DEFERRED_TOOLS_SERVER_ID,
   GET_TOOL_INFO_NAME,
@@ -2140,6 +2143,14 @@ async function withWorkspaceMutationLock<T>(
     }
   }
 }
+/**
+ * What the model reads for a run. A program that ran and ended with an error says "exited", the word
+ * a shell command uses, so "ok" is never shown beside a failed program.
+ */
+export function runCodeResultText(result: RunCodeResult): string {
+  return JSON.stringify(result.status === 'ok' && result.exit_code !== 0 ? { ...result, status: 'exited' } : result);
+}
+
 function successfulExec(result: ExecResult): result is Extract<ExecResult, { success: true }> {
   return result.success && result.response.exitCode === 0;
 }
@@ -2256,6 +2267,8 @@ export class Sandbox extends LocalToolMCP {
    * model reads them by filename instead of re-uploading bytes via `files_in`.
    */
   private readonly runCodeIngressStaging = new Map<string, TurnAttachment>();
+  /** Staged names of uploads from earlier turns that are still in the workspace; listed once, on first need. */
+  private earlierUploadNames: readonly string[] | undefined;
 
   private tools = [
     defineTool({
@@ -5361,6 +5374,68 @@ export class Sandbox extends LocalToolMCP {
     );
   }
 
+  /**
+   * The files a run reads under /ingress. Uploads are remembered only for the turn that made them, but the
+   * model keeps their /ingress paths in the chat. So when the code names /ingress, uploads from earlier
+   * turns are read back from the workspace: the ones the code names, or all of them when it names none.
+   * Bytes that no longer match the digest in the name are left out.
+   */
+  private async runCodeAttachments(input: RunCodeInput): Promise<TurnAttachment[]> {
+    const staged = (): TurnAttachment[] => [...this.runCodeIngressStaging.values()];
+    if (this.existingSandboxInfo === undefined) {
+      return staged();
+    }
+    let code = input.code ?? '';
+    if (input.code === undefined && input.script_path !== undefined) {
+      try {
+        code = (await this.readRunCodeScript(input.script_path)).toString('utf8');
+      } catch {
+        // The run reports an unreadable script itself.
+        return staged();
+      }
+    }
+    if (!code.includes('/ingress')) {
+      return staged();
+    }
+    const sandboxId = this.providerSandboxId(this.existingSandboxInfo.sandbox_id);
+    const uploadsDir = this.provider.getFileUploadsDir(sandboxId).replace(/\/+$/u, '');
+    if (this.earlierUploadNames === undefined) {
+      const listing = await this.hostExec({ sandboxId, command: `ls -1t -- ${shellEscape(uploadsDir)}` });
+      this.earlierUploadNames = successfulExec(listing)
+        ? listing.response.result.split('\n').filter(name => stagedNameDigest(name) !== undefined)
+        : [];
+    }
+    const present = new Set(staged().map(attachment => attachment.name));
+    const missing = this.earlierUploadNames.filter(name => !present.has(name));
+    const named = missing.filter(name => code.includes(name));
+    let totalBytes = staged().reduce((total, attachment) => total + attachment.bytes.length, 0);
+    for (const name of named.length > 0 ? named : missing) {
+      if (this.runCodeIngressStaging.size >= MAX_DOCUMENT_FILES) {
+        break;
+      }
+      const filePath = `${uploadsDir}/${name}`;
+      try {
+        const bytes = await this.downloadUserFile(filePath);
+        if (
+          bytes.length > MAX_BYTES_PER_DOCUMENT ||
+          totalBytes + bytes.length > MAX_TOTAL_DOCUMENT_BYTES ||
+          !matchesStagedName({ stagedName: name, content: bytes })
+        ) {
+          this.logger.warn('An earlier upload was left out of /ingress', { name, size: bytes.length });
+          continue;
+        }
+        totalBytes += bytes.length;
+        this.runCodeIngressStaging.set(filePath, { name, bytes });
+      } catch (error) {
+        this.logger.warn('An earlier upload could not be read back for /ingress', {
+          name,
+          ...extractErrorLogFields(error),
+        });
+      }
+    }
+    return staged();
+  }
+
   /** The sandbox directory the file tools write to; script_path is resolved against it. */
   private runCodeWorkspaceDir(): string {
     return this.provider.getWorkspaceDir() ?? '/workspace';
@@ -5475,7 +5550,7 @@ export class Sandbox extends LocalToolMCP {
       result = await service.runCode(input, {
         signal: context?.signal,
         packageMirrorToken,
-        attachments: [...this.runCodeIngressStaging.values()],
+        attachments: await this.runCodeAttachments(input),
         readScript: scriptPath => this.readRunCodeScript(scriptPath),
         onProgress: (message: string) => {
           provisioningMessages.push(message);
@@ -5511,7 +5586,7 @@ export class Sandbox extends LocalToolMCP {
       result = { ...result, stderr: `${result.stderr}\n\n${note}` };
     }
     return toolResultResponse({
-      text: JSON.stringify(result),
+      text: runCodeResultText(result),
       isError: result.status === 'failed',
       ...(provisioningMessages.length > 0
         ? {

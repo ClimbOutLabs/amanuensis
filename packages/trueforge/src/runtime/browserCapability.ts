@@ -6,8 +6,9 @@
  * nothing (see browserTier.ts in trueforge-core). A click may or may not need the person's OK,
  * decided server-side from what the live page says about the clicked element, never from model
  * text. A page the browser reads comes from the person's signed-in browser, so it is recorded like
- * their mail (see provenance.ts). The model never sees a screenshot: it goes to the chat for the
- * person.
+ * their mail (see provenance.ts). A screenshot goes to the chat for the person, and a model that
+ * can read images sees its own labelled copy (see ScreenshotViewer). A read names the pictures in
+ * view, whose content its text cannot show, so the model knows when a screenshot would help.
  *
  * The browser itself runs in a private sidecar (ops/browser-sidecar): a real, headed Chromium with
  * one persistent profile per person and one tab per chat. This capability only calls its HTTP API.
