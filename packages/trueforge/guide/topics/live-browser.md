@@ -6,7 +6,7 @@ covers:
 
 Aman has a web browser of its own, separate from yours. It can open a site, read it and click through it for you. When a page needs something only you can do, such as signing in, you do that step yourself in the live browser while Aman waits.
 
-How to get there: while Aman has a page open in a chat, **Live browser** shows in the panel on the right with a blinking green dot. Click it to open the live browser on that chat's page, beside your chat. Aman also gives you a link to the live browser in the chat when it needs you. It is your Aman address followed by `/browser-live`. For example, if you open Aman at `https://my-computer:8443`, the live browser is at `https://my-computer:8443/browser-live`.
+How to get there: while Aman has a page open in a chat, **Watch Live or Take Control** shows in the panel on the right with a blinking green dot. Click it to open the live browser on that chat's page, beside your chat. Aman also gives you a link to the live browser in the chat when it needs you. It is your Aman address followed by `/browser-live`. For example, if you open Aman at `https://my-computer:8443`, the live browser is at `https://my-computer:8443/browser-live`.
 
 ## What Aman can do on a page
 

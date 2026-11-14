@@ -370,7 +370,7 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
               >
                 <span className="aman-runtime-rail__live-dot" aria-hidden="true" />
                 <span className="aman-runtime-rail__live-text">
-                  <span className="aman-runtime-rail__live-title">Live browser</span>
+                  <span className="aman-runtime-rail__live-title">Watch Live or Take Control</span>
                   <span className="aman-runtime-rail__live-detail">
                     {assistantName} has a page open. Watch it or take a step yourself.
                   </span>

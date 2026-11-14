@@ -107,7 +107,7 @@ test(
         assert.equal(await panel.locator('[data-section="memory"]').count(), 0, 'no Memory section');
 
         // While a page is open, the live browser link shows with a dot that pulses and can be seen.
-        const live = panel.getByRole('link', { name: /Live browser/ });
+        const live = panel.getByRole('link', { name: /Watch Live or Take Control/ });
         assert.equal(await live.getAttribute('href'), '/browser-live?tab=chat-1');
         const dot = await live.locator('.aman-runtime-rail__live-dot').evaluate(el => {
           const style = getComputedStyle(el);

@@ -54,7 +54,7 @@ describe('AmanRuntimeRail', () => {
         <AmanRuntimeRail liveBrowserHref="/browser-live?tab=chat-1" />
       </RuntimeHarness>,
     );
-    const link = screen.getByRole('link', { name: /Live browser/ });
+    const link = screen.getByRole('link', { name: /Watch Live or Take Control/ });
     expect(link).toHaveAttribute('href', '/browser-live?tab=chat-1');
     // It opens beside the chat, so the chat stays where it is.
     expect(link).toHaveAttribute('target', '_blank');
@@ -66,7 +66,7 @@ describe('AmanRuntimeRail', () => {
         <AmanRuntimeRail />
       </RuntimeHarness>,
     );
-    expect(screen.queryByRole('link', { name: /Live browser/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /Watch Live or Take Control/ })).not.toBeInTheDocument();
   });
 
   it('keeps the live dot still for a person who asks for less motion', () => {
