@@ -17,6 +17,7 @@ import { SqliteMcpToolGrantStore } from '../../../src/db/sqlite/mcp-tool-grant-s
 import { SqliteOAuthTokenStore } from '../../../src/db/sqlite/token-store/SqliteOAuthTokenStore';
 import { mcpOAuthCallbackUrl } from '../../../src/mcp/auth/mcpOAuthHelpers';
 import { RequestErrorResponseSchema } from '../../../src/schemas/errors';
+import { startInertMcpServer } from '../../fixtures/inertMcpServer';
 
 // Name resolution is stubbed for the whole suite: a name with 'unresolvable' in it does not
 // resolve, localhost resolves to loopback, and every other name resolves to a public address.
