@@ -96,6 +96,15 @@ export async function sendMessage({
   await turn.text();
 }
 
+/** A chat with one finished reply, made over the API. */
+export async function finishedSession({ api, text }: { api: ApprovalTestServer; text: string }): Promise<string> {
+  const session = await api.request('/api/v1/sessions', jsonInit({ agent: { spec: AGENT_SPEC } }));
+  assert.equal(session.status, 201);
+  const sessionId = ((await session.json()) as { data: { id: string } }).data.id;
+  await sendMessage({ api, sessionId, text });
+  return sessionId;
+}
+
 /**
  * A real paused turn: the scripted model asks to run the write tool, and the card waits.
  * `earlierMessages` are sent first as finished turns, so the chat has history before the card.
