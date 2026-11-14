@@ -62,7 +62,7 @@ function ThreadMessage({ isEditing }: { isEditing: boolean }) {
 }
 
 const AGENT_BUILDER_TEST_CHAT_HINT =
-  'Send it a message to see how it does the job with the setup on the left. Save it when you like how it works.';
+  'Send it a message to see how it does the job with the setup you chose. Save it when you like how it works.';
 
 export type ThreadContainerProps = {
   /** Composer for the empty-welcome and docked bottom areas. `<Thread />` passes `<ComposerContainer />`. */
