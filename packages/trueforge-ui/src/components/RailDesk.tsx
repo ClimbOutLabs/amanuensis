@@ -154,7 +154,8 @@ function parseBlockLine(line: string): RailRecallFact | undefined {
   return { text, shown: text, date, source: 'person', origin: `You said this${when}` };
 }
 
-const PAGE_HEADER = /^\[page: (.+?) — /;
+/** The title ends at the dash before the page's kind, so a title with a dash of its own stays whole. */
+const PAGE_HEADER = /^\[page: (.+) — (?:person|matter)[,;\]]/;
 const PAGE_LINE = /^- (.+) \(([^()]+)\)$/;
 /** The lines between these two are how to write to someone, not things remembered about them. */
 const DRAFTING_START = 'How the person writes to these contacts';

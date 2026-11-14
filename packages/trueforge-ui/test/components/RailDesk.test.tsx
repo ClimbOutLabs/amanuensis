@@ -121,7 +121,7 @@ describe('parseRecallFacts', () => {
     const turn = turnContext(
       't1',
       blockOf([
-        '[page: Sidd — person, name not confirmed by you]',
+        '[page: Sidd — home — person, name not confirmed by you; also called: S — D]',
         'Now:',
         '- Lives in Denver now, after moving from Austin. (read content, not confirmed, since 2025-09-09)',
         '- Drinks coffee black. (you said)',
@@ -137,8 +137,16 @@ describe('parseRecallFacts', () => {
       'Drinks coffee black.',
       'I live in Austin, in a rented flat near the river.',
     ]);
-    expect(facts[0]).toMatchObject({ page: 'Sidd', source: 'read', origin: 'From something read for you · page Sidd' });
-    expect(facts[1]).toMatchObject({ page: 'Sidd', source: 'person', origin: 'You said this · page Sidd' });
+    expect(facts[0]).toMatchObject({
+      page: 'Sidd — home',
+      source: 'read',
+      origin: 'From something read for you · page Sidd — home',
+    });
+    expect(facts[1]).toMatchObject({
+      page: 'Sidd — home',
+      source: 'person',
+      origin: 'You said this · page Sidd — home',
+    });
     expect(facts[2]?.page).toBeUndefined();
   });
 
