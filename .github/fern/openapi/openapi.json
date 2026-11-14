@@ -30516,7 +30516,7 @@
     },
     "/api/v1/voice/transcribe": {
       "post": {
-        "description": "Accepts 16 kHz mono 16-bit PCM WAV audio and returns the transcript produced by the local STT sidecar. Audio bodies over 30 MB are rejected.",
+        "description": "Accepts 16 kHz mono 16-bit PCM WAV audio and returns the transcript produced by the local STT sidecar. Audio bodies over 30 MB are rejected. Each person may make a limited number of voice requests per minute, shared with spoken replies.",
         "requestBody": {
           "content": {
             "audio/wav": {
@@ -30558,6 +30558,16 @@
               }
             },
             "description": "Audio body over the 30 MB limit."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Too many requests; wait for the Retry-After seconds."
           },
           "502": {
             "content": {
