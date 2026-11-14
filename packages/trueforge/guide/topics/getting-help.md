@@ -42,7 +42,7 @@ Some problems are outside the app, such as Docker or the sandbox. Check them on 
 
 === "Mac or Linux"
 
-    Open a terminal and type `aman doctor`. It checks each part of your install. For each problem, it prints a "Next:" line with the command that fixes it. The box at the end lists every problem again, so you don't have to scroll back up.
+    Open a terminal and type `aman doctor`. It checks each part of your install and shows each part in its own framed panel. For each problem, it prints a "Next:" line with the command that fixes it. The box at the end lists every problem again, so you don't have to scroll back up.
 
 === "Windows"
 
