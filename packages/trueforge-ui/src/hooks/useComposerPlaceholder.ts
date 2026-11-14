@@ -2,8 +2,12 @@ import { useAuiState } from '@assistant-ui/react';
 
 import { HELP_COMPOSER_PLACEHOLDER } from '../help/helpModel.js';
 import { useOptionalHelp } from '../help/HelpProvider.js';
+import { useOptionalShellMode } from '../server/ShellModeContext.js';
 
-/** The only composer placeholders. The assistant asks these itself, so they never carry its name. */
+/** The agent builder's chat is for trying the draft agent, so its box asks for a test task. */
+export const AGENT_BUILDER_COMPOSER_PLACEHOLDER = 'Give your agent a task to try.';
+
+/** The everyday composer placeholders. The assistant asks these itself, so they never carry its name. */
 export const COMPOSER_PLACEHOLDER_LINES: readonly string[] = [
   "What's on your mind?",
   'What can I take off your plate?',
@@ -44,7 +48,11 @@ export function resolveComposerPlaceholder({ chatId, random }: { chatId: string;
 export function useComposerPlaceholder(): string {
   const chatId = useAuiState(state => state.threadListItem.id);
   const help = useOptionalHelp();
+  const shell = useOptionalShellMode();
   // In the help chat the composer is the only place to type, so it carries the help hint.
   if (help !== null && help.isSessionFor(chatId)) return HELP_COMPOSER_PLACEHOLDER;
+  if (shell?.mode.status === 'active' && shell.mode.isMutable && shell.mode.isCreateAgent) {
+    return AGENT_BUILDER_COMPOSER_PLACEHOLDER;
+  }
   return resolveComposerPlaceholder({ chatId, random: Math.random });
 }
