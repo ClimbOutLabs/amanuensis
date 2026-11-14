@@ -284,6 +284,23 @@ describe('TruefoundrySettingsBuilder', () => {
     expect(parentKeyDown).not.toHaveBeenCalled();
   });
 
+  it('stays open on Escape while a window is open on top of it, so one press closes only that window', async () => {
+    render(<TestShell server={createServer()} />);
+    await openSettings();
+    const windowOnTop = document.createElement('dialog');
+    windowOnTop.setAttribute('open', '');
+    document.body.append(windowOnTop);
+    try {
+      fireEvent.keyDown(windowOnTop, { key: 'Escape' });
+      expect(screen.getByRole('heading', { name: 'Settings' })).toBeInTheDocument();
+    } finally {
+      windowOnTop.remove();
+    }
+
+    fireEvent.keyDown(screen.getByRole('heading', { name: 'Settings' }), { key: 'Escape' });
+    expect(screen.queryByRole('heading', { name: 'Settings' })).not.toBeInTheDocument();
+  });
+
   async function expectCatalogsRefreshOnClose(close: () => void) {
     const getModels = vi.fn(async () => []);
     const getSkills = vi.fn(async () => []);

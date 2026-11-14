@@ -139,9 +139,9 @@ upgrade_report() {
 }
 
 # Before the Email and Calendar connectors kept their account in their own volume, the installer kept the account
-# in a file in the instance folder, and nothing reads that file now. An instance that still has the file has an
-# account the upgrade did not carry over, so the output says how to connect it again. Said once per connector,
-# however many instances have the file.
+# in a file in the instance folder, and nothing reads that file now. The upgrade moves it in and deletes the file, so
+# an instance that still has one has an account that could not be moved, and the output says how to connect it
+# again. Said once per connector, however many instances have the file.
 upgrade_old_connector_notice() { # file, connector name
   local file=$1 connector=$2 name
   for name in $(reg_names); do
@@ -152,11 +152,12 @@ upgrade_old_connector_notice() { # file, connector name
   done
 }
 
-# A calendar account the older installer kept in the instance folder is moved into the connector's own storage. Only
-# one that could not be moved is reported, so the notice stops once the account is moved.
+# An email or calendar account the older installer kept in the instance folder is moved into the connector's own
+# storage. Only one that could not be moved is reported, so the notice stops once the account is moved.
 upgrade_old_account_notices() {
   local name
   for name in $(reg_names); do
+    email_migrate_old_file "$name" || true
     calendar_migrate_old_file "$name" || true
   done
   upgrade_old_connector_notice .env.mail-email Email

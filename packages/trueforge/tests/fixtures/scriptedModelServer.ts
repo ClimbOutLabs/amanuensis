@@ -112,6 +112,11 @@ export interface ScriptedModelServer {
    * Each is used once.
    */
   next: (step: { reply?: string; toolArguments?: unknown }) => void;
+  /**
+   * Sets how the model answers the host's own requests, the ones that offer no tools, such as sorting a note
+   * onto a memory page. The answer is used every time until it is cleared with `undefined`.
+   */
+  answerHostRequests: (answer: ((messages: readonly ChatMessage[]) => string | undefined) | undefined) => void;
   /** Thinking streams still open: a cancelled turn must hang up every one of them. */
   openThinkingStreams: () => number;
   close: () => Promise<void>;
@@ -519,6 +524,7 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
   const thinking = new Set<ServerResponse>();
   let callCounter = 0;
   let nextReply: string | undefined;
+  let hostAnswer: ((messages: readonly ChatMessage[]) => string | undefined) | undefined;
   let nextToolArgumentsJson: string | undefined;
 
   async function dispatch(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -637,6 +643,7 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
       ? '{"helpful":[]}'
       : ((quoteToolResult ? lastToolResultText(parsed.messages) : undefined) ??
         (isChatAnswer ? nextReply : undefined) ??
+        (parsed.tools.length === 0 ? hostAnswer?.(parsed.messages) : undefined) ??
         FINAL_TEXT);
     if (isChatAnswer) {
       nextReply = undefined;
@@ -718,6 +725,9 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
   return {
     baseUrl: `http://127.0.0.1:${String(address.port)}/v1`,
     requests: () => requests,
+    answerHostRequests: answer => {
+      hostAnswer = answer;
+    },
     next: step => {
       nextReply = step.reply ?? nextReply;
       nextToolArgumentsJson =

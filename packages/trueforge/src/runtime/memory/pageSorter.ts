@@ -24,7 +24,7 @@ import { commitPageChange, type PageChangeOptions } from './memoryPageWriter';
 import { extractReplyJson } from './memorySummarize';
 import { SortReplySchema, type SortDecision } from './pageSortDecisions';
 import type { PageSortMode, SortStopCause } from './pageSortMode';
-import { noteOriginOf, statementSourceOf, type NoteOrigin } from './pageSortOrigin';
+import { noteOriginOf, statementSourceOf, type SortableOrigin } from './pageSortOrigin';
 import { buildSortPrompt, type ShownStatement } from './pageSortPrompt';
 import { appendSortReport, type SortReportLine } from './pageSortReport';
 import { ruleDecisions, type PlannedDecision } from './pageSortRules';
@@ -127,7 +127,7 @@ async function applyPlanned({
 }: {
   vaultDir: string;
   planned: readonly PlannedDecision[];
-  origin: NoteOrigin;
+  origin: SortableOrigin;
   day: string;
   newId: () => string;
 }): Promise<void> {
@@ -307,8 +307,24 @@ export async function sortNote({
   };
 
   const origin = noteOriginOf(note.metadata);
-  // Only a note with a source carries a label. The prompt states the origin itself, so the label is not shown:
-  // a model reads the assistant's name in it as someone the note is about.
+  if (origin.kind === 'assistant_reply') {
+    // Decided here and not by the model: a reply is the assistant talking, and belongs on no page.
+    if (mode === 'report') {
+      await report({ mode, vaultDir, logger, line: { ...line, outcome: 'sorted', decisions: [] } });
+      return { status: 'sorted', written: false, outcome: 'none', decisions: [] };
+    }
+    try {
+      await appendHandledNote({ vaultDir, noteId: note.id, outcome: 'none' });
+    } catch (error) {
+      logger.warn('A reply note could not be recorded as needing no page.', {
+        noteId: note.id,
+        ...extractErrorLogFields(error),
+      });
+      return { status: 'failed', reason: reasonOf(error), cause: 'write_failed' };
+    }
+    return { status: 'sorted', written: true, outcome: 'none', decisions: [] };
+  }
+  // Only a note with a source carries a label. The prompt states the origin itself, so the label is not shown.
   const said = { ...note, text: origin.kind === 'own_words' ? note.text : noteTextWithoutLabel(note.text) };
   if (said.text.trim() === '') {
     return stop({ status: 'failed', reason: 'the note is empty', cause: 'note_empty' });

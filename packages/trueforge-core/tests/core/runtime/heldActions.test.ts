@@ -34,6 +34,7 @@ import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { runTurn, textReplyStream } from '../../orchestration/helpers/helpers';
 import { makeSilentLogger } from '../harnessMocks';
 
+import { everyMailDraftApproved } from '../fixtures/approvedMailDrafts';
 const ROOT_ID = 'thread_root';
 const OWNER = { tenant_id: 't1', created_by: 'u1' };
 const SEND_ARGS = JSON.stringify({ to: 'ana@example.com', body: 'Lunch at noon?' });
@@ -191,6 +192,7 @@ function makeHarness(
   const mailLoaded = jest.fn<Promise<'loaded' | 'not_loaded'>, unknown[]>(() => Promise.resolve('loaded'));
   const base: SentinelServices = {
     ...defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }),
+    mail_approved_drafts: everyMailDraftApproved,
     audit: {
       record: input => {
         audit.push(input);

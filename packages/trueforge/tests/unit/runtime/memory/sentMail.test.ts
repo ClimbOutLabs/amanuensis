@@ -244,7 +244,7 @@ describe('a sent message in memory', () => {
   async function entries() {
     const listed = await client.listEntries({ namespace: '', timeoutMs: 1_000 });
     if (!listed.ok) {
-      throw new Error('expected a listing');
+      throw new Error(`expected a listing: ${listed.code}, ${listed.reason}`);
     }
     return listed.entries;
   }
@@ -443,7 +443,7 @@ describe('saving sent messages safely', () => {
   async function entryTexts(): Promise<string[]> {
     const listed = await client.listEntries({ namespace: '', timeoutMs: 1_000 });
     if (!listed.ok) {
-      throw new Error('expected a listing');
+      throw new Error(`expected a listing: ${listed.code}, ${listed.reason}`);
     }
     return listed.entries.map(entry => entry.text);
   }

@@ -18,12 +18,6 @@ describe('whose words a note holds', () => {
       'read_content',
     ],
     [
-      'the assistant’s reply',
-      { origin: 'tool_ingested', note_source: 'assistant_response' },
-      { kind: 'read', source: 'inferred' },
-      'inferred',
-    ],
-    [
       'a fact from a turn that read outside text',
       { origin: 'tool_ingested' },
       { kind: 'read', source: 'read_content' },
@@ -42,8 +36,27 @@ describe('whose words a note holds', () => {
       { kind: 'read', source: 'read_content' },
       'read_content',
     ],
-  ])('reads %s', (_name, metadata, origin, source) => {
-    expect(noteOriginOf(metadata)).toEqual(origin);
-    expect(statementSourceOf(noteOriginOf(metadata))).toBe(source);
+  ])('reads %s', (_name, metadata, expected, source) => {
+    const origin = noteOriginOf(metadata);
+    expect(origin).toEqual(expected);
+    if (origin.kind === 'assistant_reply') {
+      throw new Error('This origin has no statement source.');
+    }
+    expect(statementSourceOf(origin)).toBe(source);
+  });
+
+  it.each([
+    ['a reply note', { origin: 'tool_ingested', note_source: 'assistant_response' }],
+    [
+      'a reply from a chat that had read nothing',
+      { origin: 'tool_ingested', note_source: 'assistant_response', reply_read_nothing: 'true' },
+    ],
+    ['a reply note with no origin at all', { note_source: 'assistant_response' }],
+  ])('reads %s as the assistant’s own reply, which has no place on a page', (_name, metadata) => {
+    expect(noteOriginOf(metadata)).toEqual({ kind: 'assistant_reply' });
+  });
+
+  it('never reads a note that carries the person’s origin as a reply, so their own words are still sorted', () => {
+    expect(noteOriginOf({ origin: 'user_stated' })).toEqual({ kind: 'own_words' });
   });
 });
