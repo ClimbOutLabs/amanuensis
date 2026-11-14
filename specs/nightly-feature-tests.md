@@ -24,6 +24,7 @@ One nightly run on `main` that tests every feature, proves that it does, and kee
 - **Folder names come from the map.** A test names a surface, and the map gives its feature set. A test cannot file pictures under a name that is not a feature set.
 - **Pictures are run artifacts, not commits.** Nightly pictures in git would grow a public repository without limit and could never be removed from its history.
 - **The journey uses the sign-in service Aman ships.** It runs the Dex image the compose file pins, with the one fixed person `pnpm dev:login` uses, so the sign-in pages and token checks are the real ones. Both read their Dex settings from `scripts/login-service-config.mjs`.
+- **Upgrade from the last release.** A second nightly job builds the newest release tag, fills it with one of each thing a person keeps, and starts the new code on the same data folder. Everything must read back and one more of each must save. Every other suite starts from empty tables, so only this job sees a database change that fails once a table has rows. It also runs on pull requests that change a migration.
 - **Not a required check.** The nightly run does not run on pull requests, so it cannot gate a merge. The coverage check and the tests themselves run on pull requests and can.
 - **The issue is found by title and author.** The report reuses an open issue with the nightly title opened by the workflow's own account, so no label has to exist first.
 

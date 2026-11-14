@@ -195,6 +195,7 @@ export const CHATS = {
   dinner: {
     title: 'Dinner with chickpeas and spinach',
     ask: 'What can I make tonight with chickpeas, spinach and rice?',
+    remembers: ['Sam has chickpeas, spinach and rice to cook with.'],
     reply: [
       'Try a quick chickpea and spinach curry over rice. It takes about 25 minutes.',
       '',
@@ -237,6 +238,8 @@ export const CHATS = {
           repeat: 'weekdays',
           time: '07:30',
           time_zone: TIME_ZONE,
+          connectors: [],
+          skills: [],
         },
       },
     ],
@@ -255,6 +258,8 @@ export const CHATS = {
           days: ['friday'],
           time: '17:00',
           time_zone: TIME_ZONE,
+          connectors: [],
+          skills: [],
         },
       },
     ],
@@ -273,6 +278,8 @@ export const CHATS = {
           days: ['sunday'],
           time: '10:00',
           time_zone: TIME_ZONE,
+          connectors: [],
+          skills: [],
         },
       },
     ],
@@ -336,7 +343,7 @@ export const CHATS = {
 export type ChatKey = keyof typeof CHATS;
 
 /** Chats the run makes before any shot, oldest first, with how many days ago each happened. */
-/** `decline` answers the chat's card with Not now, so the activity log shows a denied request. */
+/** `decline` answers the chat's card with its safe choice (Keep it on a delete), so the activity log shows a denied request. */
 export const SEEDED_CHATS: readonly { key: ChatKey; daysAgo: number; folder?: boolean; decline?: boolean }[] = [
   { key: 'sintra', daysAgo: 9, folder: true },
   { key: 'lisbon', daysAgo: 8, folder: true },

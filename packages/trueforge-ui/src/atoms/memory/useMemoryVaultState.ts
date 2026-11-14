@@ -21,6 +21,7 @@ import {
   type MemoryOwner,
 } from './memoryExplorer.js';
 import { useForgetWithUndo } from './useForgetWithUndo.js';
+import { useMemoryReview } from './useMemoryReview.js';
 
 const SHARED_NAMESPACE = '';
 const SEARCH_DEBOUNCE_MS = 150;
@@ -40,6 +41,9 @@ function hasMemoryVaultPort(server: object): server is { memoryVault: MemoryVaul
 }
 
 export type NamespaceOption = { value: string; label: string };
+
+/** A collection whose newest turn summary failed and is still owed, and when it failed if the server said. */
+export type SummaryPendingNote = { namespace: string; persona: string | null; failedAt: string | null };
 
 /** One place memories are kept, read on every refresh. */
 type Collection = { namespace: string; owner: MemoryOwner; persona: string | null };
@@ -89,7 +93,7 @@ export function useMemoryVaultState() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   // Collections whose newest turn summary failed and is still owed, from the last load.
-  const [summaryPending, setSummaryPending] = useState<{ namespace: string; persona: string | null }[]>([]);
+  const [summaryPending, setSummaryPending] = useState<SummaryPendingNote[]>([]);
   // Set when some collections loaded and others did not: the list is shown with this note.
   const [loadWarning, setLoadWarning] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -140,6 +144,7 @@ export function useMemoryVaultState() {
             owner: collection.owner,
           })),
           summaryPending: status?.summaryPending ?? false,
+          summaryFailedAt: status?.failedAt ?? null,
         };
       }),
     );
@@ -154,7 +159,11 @@ export function useMemoryVaultState() {
       setSummaryPending(
         loaded
           .filter(load => load.summaryPending)
-          .map(load => ({ namespace: load.collection.namespace, persona: load.collection.persona })),
+          .map(load => ({
+            namespace: load.collection.namespace,
+            persona: load.collection.persona,
+            failedAt: load.summaryFailedAt,
+          })),
       );
       setLoadWarning(failure === undefined ? null : 'Some memories could not be loaded. Try again.');
     }
@@ -175,6 +184,14 @@ export function useMemoryVaultState() {
       .then(value => setSharing(value))
       .catch(loadError => setSharingError(memoryVaultErrorMessage(loadError)));
   }, [vault]);
+
+  // Older notes with no record of their source are reviewed in the shared and persona collections.
+  const reviewNamespaces = useMemo(
+    () => collections.filter(collection => collection.owner !== 'shared').map(collection => collection.namespace),
+    [collections],
+  );
+  const review = useMemoryReview({ vault, namespaces: reviewNamespaces, onMarked: () => void refresh() });
+  const [reviewOpen, setReviewOpen] = useState(false);
 
   const [search, setSearch] = useState('');
   const [query, setQuery] = useState('');
@@ -272,6 +289,18 @@ export function useMemoryVaultState() {
     );
   }
 
+  /** Puts the failed-summary line for one collection away; on a failure the line stays and the page says why. */
+  async function dismissSummaryPending(pendingNamespace: string) {
+    if (vault === null) return;
+    setActionError(null);
+    try {
+      await vault.dismissSummaryStatus(pendingNamespace === SHARED_NAMESPACE ? undefined : pendingNamespace);
+      setSummaryPending(previous => previous.filter(pending => pending.namespace !== pendingNamespace));
+    } catch (caught) {
+      setActionError(memoryVaultErrorMessage(caught));
+    }
+  }
+
   function handleExport() {
     if (vault === null) return;
     vault
@@ -354,6 +383,7 @@ export function useMemoryVaultState() {
     error,
     loadWarning,
     summaryPending,
+    dismissSummaryPending,
     actionError,
     search,
     setSearch,
@@ -376,6 +406,10 @@ export function useMemoryVaultState() {
     forgetMemories,
     undoForget: forgetWithUndo.undo,
     heldCount: forgetWithUndo.heldCount,
+    review,
+    reviewOpen,
+    openReview: () => setReviewOpen(true),
+    closeReview: () => setReviewOpen(false),
     sharing,
     sharingError,
     fileInput,

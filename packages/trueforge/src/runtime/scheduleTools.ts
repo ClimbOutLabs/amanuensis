@@ -65,10 +65,7 @@ export function scheduleAgentChoices(input: {
         input.skillStore.listSkills({ tenant_id, names: undefined }),
       ]);
       return {
-        // The memory provider is host-owned and never offered as a choice.
-        connectors: servers
-          .filter(server => !(server.manifest.type === 'remote' && server.manifest.memory_provider === true))
-          .map(server => server.name),
+        connectors: servers.map(server => server.name),
         skills: skills.map(skill => skill.name),
       };
     },

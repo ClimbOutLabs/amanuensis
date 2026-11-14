@@ -144,7 +144,6 @@ function occurrences(text: string, needle: string): number {
 
 describe('persona memory vaults over the turn path', () => {
   const original = {
-    backend: configuration.MEMORY_BACKEND,
     directory: configuration.MEMORY_MARKDOWN_DIR,
     embeddings: configuration.MEMORY_EMBEDDINGS_ENABLED,
     summarize: configuration.MEMORY_SUMMARIZE,
@@ -161,7 +160,6 @@ describe('persona memory vaults over the turn path', () => {
 
   beforeAll(async () => {
     memoryDir = await mkdtemp(path.join(tmpdir(), 'persona-memory-'));
-    configuration.MEMORY_BACKEND = 'markdown';
     configuration.MEMORY_MARKDOWN_DIR = memoryDir;
     configuration.MEMORY_EMBEDDINGS_ENABLED = false;
     configuration.MEMORY_SUMMARIZE = false;
@@ -171,7 +169,6 @@ describe('persona memory vaults over the turn path', () => {
   }, TURN_TIMEOUT_MS);
 
   afterAll(async () => {
-    configuration.MEMORY_BACKEND = original.backend;
     configuration.MEMORY_MARKDOWN_DIR = original.directory;
     configuration.MEMORY_EMBEDDINGS_ENABLED = original.embeddings;
     configuration.MEMORY_SUMMARIZE = original.summarize;

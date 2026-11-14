@@ -18,10 +18,9 @@ type SummarizeState = {
   enabled: boolean;
   overridden: boolean;
   defaultEnabled: boolean;
-  effectiveEnabled: boolean;
 };
 
-const STORED_ON: SummarizeState = { enabled: true, overridden: true, defaultEnabled: false, effectiveEnabled: true };
+const STORED_ON: SummarizeState = { enabled: true, overridden: true, defaultEnabled: false };
 
 function memorySummarizeServer(overrides: {
   getMemorySummarize?: () => Promise<SummarizeState>;
@@ -83,7 +82,7 @@ describe('useMemorySummarizeSetting', () => {
     expect(result.current.saving).toBe(true);
 
     await act(async () => {
-      resolvePut({ enabled: false, overridden: true, defaultEnabled: false, effectiveEnabled: false });
+      resolvePut({ enabled: false, overridden: true, defaultEnabled: false });
       await write;
     });
     expect(writes).toEqual([false]);
@@ -114,7 +113,7 @@ describe('useMemorySummarizeSetting', () => {
     mocks.server = memorySummarizeServer({
       setMemorySummarizeEnabled: async enabled => {
         writes.push(enabled);
-        return { enabled: false, overridden: false, defaultEnabled: false, effectiveEnabled: false };
+        return { enabled: false, overridden: false, defaultEnabled: false };
       },
     });
     const { result } = renderHook(() => useMemorySummarizeSetting());
@@ -135,31 +134,12 @@ describe('useMemorySummarizeSetting', () => {
     expect(result.current).toMatchObject({ enabled: false, overridden: false });
   });
 
-  it('exposes the effective state the toggle shows, including the blocked case', async () => {
-    mocks.server = memorySummarizeServer({
-      getMemorySummarize: async () => ({
-        enabled: true,
-        overridden: true,
-        defaultEnabled: true,
-        effectiveEnabled: false,
-      }),
-    });
-    const { result } = renderHook(() => useMemorySummarizeSetting());
-
-    await waitFor(() => {
-      expect(result.current.enabled).toBe(true);
-    });
-    // Stored says on, but the server will not summarize: the toggle shows the truth.
-    expect(result.current.effectiveEnabled).toBe(false);
-  });
-
   it('starts from the server default when nothing is stored', async () => {
     mocks.server = memorySummarizeServer({
       getMemorySummarize: async () => ({
         enabled: false,
         overridden: false,
         defaultEnabled: false,
-        effectiveEnabled: false,
       }),
     });
     const { result } = renderHook(() => useMemorySummarizeSetting());

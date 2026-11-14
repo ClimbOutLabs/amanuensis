@@ -75,6 +75,7 @@ describe('emailCardCopy', () => {
     replaces: null,
     reply_in_thread: null,
     reply_to: null,
+    check_code: null,
   };
 
   it('names the first recipient on a send and says a send cannot be unsent', () => {

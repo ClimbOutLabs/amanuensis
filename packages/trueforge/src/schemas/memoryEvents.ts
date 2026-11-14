@@ -1,7 +1,7 @@
 /**
  * Wire schemas for the host-enforced memory recall passthrough event (`aman.memory.recall`).
  *
- * `injected_block` is byte-for-byte what {@link HindsightMemoryProcessor.processPreLLMEphemeral}
+ * `injected_block` is byte-for-byte what {@link MemoryProcessor.processPreLLMEphemeral}
  * inserted ahead of the model call (or `null` when nothing was injected), so that the UI can
  * render this event and every datum the model received stays user-visible (SPEC.md invariant I5).
  *
@@ -17,7 +17,6 @@ import { EventIdSchema } from '@truefoundry/trueforge-core/core/events/schema';
 export const MemoryRecallStatsSchema = z
   .object({
     items: z.number().int().nonnegative().describe('Recalled items included in the injected block.'),
-    entities: z.number().int().nonnegative().describe('Entity summaries included in the injected block.'),
     dropped_over_budget: z
       .number()
       .int()
@@ -27,7 +26,7 @@ export const MemoryRecallStatsSchema = z
       .number()
       .int()
       .nonnegative()
-      .describe('Recalled items and entity summaries dropped by the relevance gate (score below recall_min_score).'),
+      .describe('Recalled items dropped by the relevance gate (score below recall_min_score).'),
     estimated_tokens: z.number().int().nonnegative().describe('Estimated tokens of the included recalled items.'),
     recall_ms: z.number().int().nonnegative().describe('Wall-clock time spent on the recall call.'),
     outcome: z
@@ -35,74 +34,34 @@ export const MemoryRecallStatsSchema = z
       .describe(
         'ok: recall returned memory. empty: recall found none. timeout/error: recall failed; the turn ' +
           'proceeded anyway. skipped: recall was skipped (e.g., user disabled memory for this session, or for ' +
-          'sandbox sessions). The curated and reflect layers (see `layers`) can still put a block in front of ' +
-          'the model when recall itself found nothing.',
+          'sandbox sessions). Pages (see `layers`) can still put a block in front of the model when recall ' +
+          'itself found nothing.',
       ),
     reason: z.string().optional().describe('Failure detail when outcome is timeout or error.'),
     budget_reason: z
       .enum(['normal', 'post_compaction'])
       .describe(
         'normal: the full configured recall budget applied. post_compaction: a host-written compaction ' +
-          'summary was seen recently, so the token budget was halved and entity summaries were skipped for ' +
-          'this turn.',
+          'summary was seen recently, so the token budget was halved for this turn.',
       ),
   })
   .openapi('MemoryRecallStats');
 
-/**
- * The curated layer: the bank's profile and the mental models relevant to this turn's query,
- * fetched on every turn with the recall. Cheap reads with no model call behind them.
- */
-export const MemoryCuratedStatsSchema = z
+/** The pages layer: people and matter pages the message named, loaded in full before recall. */
+export const MemoryPagesStatsSchema = z
   .object({
-    profile: z
-      .boolean()
-      .describe('True when a bank profile line is in the injected block, after screening and budget.'),
-    mental_models: z
-      .number()
-      .int()
-      .nonnegative()
-      .describe('Mental models in the injected block, after screening and budget.'),
-    candidates: z.number().int().nonnegative().describe('Mental models the bank returned before relevance selection.'),
-    withheld: z.number().int().nonnegative().describe('Curated lines the recall screen kept out of the block.'),
-    dropped: z.number().int().nonnegative().describe('Curated lines dropped by the token budget.'),
-    outcome: z
-      .enum(['ok', 'empty', 'withheld', 'dropped', 'disabled', 'timeout', 'error'])
-      .describe(
-        'ok: at least one curated line injected. empty: nothing relevant. withheld/dropped: lines were ' +
-          'read but none survived the screen or the budget. disabled: layer off. timeout/error: the ' +
-          'worse of the profile and mental-model reads failed; lines from the other read are still injected.',
-      ),
-    reason: z.string().optional().describe('Failure detail when outcome is timeout or error.'),
+    candidates: z.number().int().nonnegative().describe('Pages the message named, across the vaults it may read.'),
+    loaded: z.number().int().nonnegative().describe('Pages in the injected block, after screening and budget.'),
+    dropped_over_count: z.number().int().nonnegative().describe('Pages left out by the page count cap.'),
+    dropped_over_budget: z.number().int().nonnegative().describe('Pages left out by the page token budget.'),
+    withheld: z.number().int().nonnegative().describe('Pages the recall screen kept out of the block.'),
   })
-  .openapi('MemoryRecallCurated');
-
-/**
- * The reflect layer: the provider's synthesized answer over its mental models, observations and
- * raw facts. It spends model calls, so it runs only when the newest user message is shaped like a
- * request for a conclusion (see runtime/memory/memoryRouting.ts) and the layer is enabled.
- */
-export const MemoryReflectStatsSchema = z
-  .object({
-    route: z.enum(['recall', 'reflect']).describe('The route the newest user message selected.'),
-    matched: z.string().optional().describe('Source of the synthesis pattern that selected reflect.'),
-    outcome: z
-      .enum(['ok', 'empty', 'withheld', 'dropped', 'skipped', 'disabled', 'timeout', 'error'])
-      .describe(
-        'ok: reflection injected. empty: reflect returned no text. withheld: the recall screen kept it ' +
-          'out. dropped: the token budget kept it out. skipped: route was recall. disabled: layer off. ' +
-          'timeout/error: reflect failed; the turn proceeded with the other layers.',
-      ),
-    reflect_ms: z.number().int().nonnegative().describe('Wall-clock time spent on the reflect call.'),
-    based_on: z.number().int().nonnegative().describe('Memories the provider reported the reflection drew on.'),
-    reason: z.string().optional().describe('Failure detail when outcome is timeout or error.'),
-  })
-  .openapi('MemoryRecallReflect');
+  .openapi('MemoryRecallPages');
 
 export const MemoryLayersStatsSchema = z
   .object({
-    curated: MemoryCuratedStatsSchema,
-    reflect: MemoryReflectStatsSchema,
+    // Optional so events written before pages existed stay valid.
+    pages: MemoryPagesStatsSchema.optional(),
   })
   .openapi('MemoryRecallLayers');
 
@@ -116,7 +75,7 @@ export const MemorySweepStatsSchema = z
   .openapi('MemoryRecallSweep');
 
 /**
- * One recall-screen decision worth surfacing: an item or entity summary withheld from the injected
+ * One recall-screen decision worth surfacing: an item or page withheld from the injected
  * block, or a user-stated item flagged malicious that was injected anyway (never withheld) and only
  * annotated. The audit payload is id + score + reason + origin, never the screened text, so a
  * withheld datum's content is not re-leaked through the event that records withholding it.
@@ -126,11 +85,9 @@ export const MemoryScreenRecordSchema = z
     id: z
       .string()
       .describe(
-        'Per-turn-unique, type-qualified record id: `item:#<index>` for a recalled item, ' +
-          '`entity:#<index>` for an entity summary, `curated:#<index>` for a profile or mental-model ' +
-          'line, `reflection:#0` for the reflect answer, where <index> is the datum position within ' +
-          "this turn. Not the provider's item id; correlate to the datum by its position in this " +
-          "turn's model-context snapshot.",
+        'Per-turn-unique, type-qualified record id: `item:#<index>` for a recalled item, `page:#<index>` ' +
+          'for a page, where <index> is the position within this turn. Not the stored item id; ' +
+          "correlate to the item by its position in this turn's model-context snapshot.",
       ),
     score: z.number().describe('Classifier score for the item; 0 when the screen result was unknown.'),
     reason: z
@@ -147,14 +104,18 @@ export const MemoryScreenRecordSchema = z
 
 /**
  * The recall screen's per-turn ground truth, present only when screening actually ran over at
- * least one recalled item. `withheld` is the count of items and entity summaries kept out of the
+ * least one recalled item or page. `withheld` is the count of items and pages kept out of the
  * injected block; `records` holds one entry per screen decision worth surfacing (every withheld
- * item or entity, plus any user-stated item flagged-but-injected). Absent when the screen is
+ * item or page, plus any user-stated item flagged-but-injected). Absent when the screen is
  * disabled, so a disabled screen leaves the event byte-for-byte as before.
  */
 export const MemoryScreenStatsSchema = z
   .object({
-    withheld: z.number().int().nonnegative().describe('Recalled items kept out of the injected block by the screen.'),
+    withheld: z
+      .number()
+      .int()
+      .nonnegative()
+      .describe('Recalled items and pages kept out of the injected block by the screen.'),
     records: z.array(MemoryScreenRecordSchema).describe('One entry per surfaced screen decision this turn.'),
   })
   .openapi('MemoryRecallScreen');
@@ -201,8 +162,7 @@ export type MemoryRecallStats = z.infer<typeof MemoryRecallStatsSchema>;
 export type MemorySweepStats = z.infer<typeof MemorySweepStatsSchema>;
 export type MemoryScreenRecord = z.infer<typeof MemoryScreenRecordSchema>;
 export type MemoryScreenStats = z.infer<typeof MemoryScreenStatsSchema>;
-export type MemoryCuratedStats = z.infer<typeof MemoryCuratedStatsSchema>;
-export type MemoryReflectStats = z.infer<typeof MemoryReflectStatsSchema>;
+export type MemoryPagesStats = z.infer<typeof MemoryPagesStatsSchema>;
 export type MemoryLayersStats = z.infer<typeof MemoryLayersStatsSchema>;
 export type MemoryRecallEvent = z.infer<typeof MemoryRecallEventSchema>;
 export type MemoryRecallPersistedEvent = z.infer<typeof MemoryRecallPersistedEventSchema>;

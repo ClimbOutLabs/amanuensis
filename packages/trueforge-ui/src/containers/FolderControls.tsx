@@ -308,8 +308,8 @@ function FolderManageDialog({
 
 /**
  * A collapsible folder with a settings button; the person's open or closed choice is remembered.
- * The folder row keeps the list's edge; its children sit one step in, under the folder icon, so
- * they read as belonging to the folder.
+ * The folder row keeps the list's edge; its children sit in far enough that a chat's title starts
+ * under the folder's name, so they read as belonging to the folder.
  */
 export function FolderSection({
   kind,
@@ -332,37 +332,62 @@ export function FolderSection({
   const [manageOpen, setManageOpen] = useState(false);
   return (
     <section aria-label={folder.name} className="mt-1">
-      <div className="group/folder flex items-center gap-1 px-1 py-0.5">
+      <div className="group/folder flex items-center gap-0.5">
         <button
           type="button"
           aria-expanded={expanded}
-          className="flex min-w-0 flex-1 items-center gap-1.5 rounded-[1.25rem] border-0 bg-transparent px-2.5 py-1 text-left text-xs font-semibold text-text-secondary hover:bg-ghost-button-hover hover:text-text-primary"
+          aria-label={`${folder.name}, ${String(count)} ${count === 1 ? KIND_WORDS[kind].one : KIND_WORDS[kind].many}`}
+          className="flex min-h-8 min-w-0 flex-1 items-center gap-1.5 rounded-[1.25rem] border-0 bg-transparent px-2.5 py-1 text-left text-sm font-medium text-text-primary hover:bg-ghost-button-hover focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus-ring"
           onClick={toggleExpanded}
         >
-          <Icon name="chevron-down" className={cn('size-3 transition-transform', !expanded && '-rotate-90')} />
-          <Icon name="folder" className="size-3.5" />
-          <span className="truncate">{folder.name}</span>
-          <span className="ml-auto tabular-nums text-text-secondary/70">{count}</span>
+          <Icon
+            name="chevron-down"
+            className={cn('size-3 shrink-0 text-text-secondary transition-transform', !expanded && '-rotate-90')}
+          />
+          <Icon name="folder" className="size-3.5 shrink-0 text-text-secondary" />
+          <span data-slot="aui_chat-group-label" className="truncate">
+            {folder.name}
+          </span>
         </button>
-        {operations !== null ? (
-          <button
-            type="button"
-            aria-label={`Manage ${folder.name}`}
-            className={auiButtonClass({
-              variant: 'ghost',
-              size: 'icon',
-              className:
-                'size-6 shrink-0 border-0 text-text-secondary opacity-0 group-hover/folder:opacity-100 focus-visible:opacity-100',
-            })}
-            onClick={() => setManageOpen(true)}
+        {/* The count and the settings button share one slot, as a chat's age and its menu do. */}
+        <div className="relative mr-1 flex size-7 shrink-0 items-center justify-center">
+          <span
+            aria-hidden
+            data-slot="aui_folder-count"
+            className={cn(
+              'pointer-events-none text-xs tabular-nums text-text-secondary transition-opacity',
+              operations !== null &&
+                'opacity-0 md:opacity-100 md:group-hover/folder:opacity-0 md:group-focus-within/folder:opacity-0',
+            )}
           >
-            <Icon name="ellipsis" className="size-3.5" />
-          </button>
-        ) : null}
+            {count}
+          </span>
+          {operations !== null ? (
+            <button
+              type="button"
+              aria-label={`Manage ${folder.name}`}
+              className={auiButtonClass({
+                variant: 'ghost',
+                size: 'icon',
+                className:
+                  'absolute inset-0 m-auto size-6 border-0 text-text-secondary md:opacity-0 md:group-hover/folder:opacity-100 md:group-focus-within/folder:opacity-100',
+              })}
+              onClick={() => setManageOpen(true)}
+            >
+              <Icon name="ellipsis" className="size-3.5" />
+            </button>
+          ) : null}
+        </div>
       </div>
       {expanded ? (
-        <div className="flex flex-col gap-0.5 pl-8">
-          {count === 0 ? <p className="px-2 py-1 text-xs text-text-secondary/70">Empty folder</p> : children}
+        <div className="flex flex-col gap-0.5 pl-[2.3125rem]">
+          {count === 0 ? (
+            <p data-slot="aui_chat-group-empty" className="px-[0.6875rem] py-1 text-sm text-text-secondary">
+              Empty folder
+            </p>
+          ) : (
+            children
+          )}
         </div>
       ) : null}
       {operations !== null ? (

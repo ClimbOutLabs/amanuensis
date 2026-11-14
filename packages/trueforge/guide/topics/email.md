@@ -34,10 +34,18 @@ Click **Answer the one that's waiting** on the new chat screen. Aman finds the o
 
 - **Allow** sends it.
 - **Save as draft** keeps it in your drafts without sending.
-- **Edit** asks Aman to change it first. Tell it what to change.
+- **Change it** asks Aman to change it first. Tell it what to change.
 - **Not now** stops it. Nothing is sent.
 
 When Aman only saves a draft, the card asks "Save this draft?" Saving a draft asks every time too.
+
+When you send from Gmail, the card also shows a short check code, such as A7F39C.
+
+- While the email goes out, the card says "Sending…".
+- Once Gmail accepts it, the card turns into a receipt. It shows the same people, subject, text and check code, with "Sent at 09:12, exactly as approved".
+- If the email did not go out, the card says why. It never shows a receipt then.
+- If the sent text doesn't match what you approved, the card says so. Check your Sent folder to see what went out.
+- If Gmail did not answer, the card says the email may have gone. Check your Sent folder before you try again.
 
 ## Sending to someone new
 

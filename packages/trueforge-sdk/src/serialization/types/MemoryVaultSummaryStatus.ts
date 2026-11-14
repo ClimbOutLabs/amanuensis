@@ -8,11 +8,13 @@ export const MemoryVaultSummaryStatus: core.serialization.ObjectSchema<
     serializers.MemoryVaultSummaryStatus.Raw,
     TrueForge.MemoryVaultSummaryStatus
 > = core.serialization.object({
+    failedAt: core.serialization.property("failed_at", core.serialization.date().nullable()),
     summaryPending: core.serialization.property("summary_pending", core.serialization.boolean()),
 });
 
 export declare namespace MemoryVaultSummaryStatus {
     export interface Raw {
+        failed_at?: string | null;
         summary_pending: boolean;
     }
 }

@@ -1,7 +1,14 @@
 # shellcheck shell=bash
 # Output, prompts, locking and small filesystem helpers shared by every command.
 
-say() { printf '%s\n' "$*"; }
+# Inside a step panel the line goes through the panel, so it keeps the panel's sides.
+say() {
+  if [ "${UI_PANEL:-0}" = 1 ] || [ "${UI_FRAMED:-0}" = 1 ]; then
+    ui_say "$*"
+  else
+    printf '%s\n' "$*"
+  fi
+}
 # Warnings and failures use the shared line style on stderr.
 warn() { UI_FD=2 ui_warn "$*"; }
 die() {
@@ -37,7 +44,7 @@ ask_valid() {
     ui_prompt "$__var" "$__label" "$__default" "$__shown_hint" || __eof=1
     __problem=$("$__check" "${!__var}")
     if [ -z "$__problem" ]; then return 0; fi
-    UI_FD=2 ui_fail "$__problem"
+    UI_IN_PROMPT=1 UI_FD=2 ui_fail "$__problem"
     if [ "$__eof" = 1 ]; then die "The input ended before a valid answer, so nothing was changed."; fi
     __shown_hint=
     __tries=$((__tries + 1))
@@ -55,6 +62,8 @@ consent_root() {
 
 # The rules shown above the password question, the way a sign-up form lists them under the field.
 password_rules() {
+  local UI_IN_PROMPT=1
+  ui_ask_begin
   UI_FD=2 ui_line "Your password needs:"
   UI_FD=2 ui_line "  - At least 8 characters"
   UI_FD=2 ui_line "  - At least one number (0-9)"
@@ -132,9 +141,9 @@ ask_password() {
     fi
     __problem=$(password_problem "$__first")
     if [ -n "$__problem" ]; then
-      UI_FD=2 ui_fail "$__problem"
+      UI_IN_PROMPT=1 UI_FD=2 ui_fail "$__problem"
     elif [ "$__first" != "$__second" ]; then
-      UI_FD=2 ui_fail "The passwords do not match. Type them again."
+      UI_IN_PROMPT=1 UI_FD=2 ui_fail "The passwords do not match. Type them again."
     else
       printf -v "$__var" '%s' "$__first"
       return 0

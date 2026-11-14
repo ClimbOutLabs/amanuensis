@@ -1,6 +1,10 @@
 import { HELP_AREA_IDS, type HelpAreaId } from '@truefoundry/trueforge-core/schemas/personalizationHelpAreas';
 import type { TrueForgeApi } from '@truefoundry/trueforge-sdk';
-import type { PersonalizationApi, PersonalizationProfile } from '@truefoundry/trueforge-ui';
+import {
+  PersonalizationConflictError,
+  type PersonalizationApi,
+  type PersonalizationProfile,
+} from '@truefoundry/trueforge-ui';
 
 const PROFILE_URL = '/api/v1/personalization/profile';
 interface ProfileResponse {
@@ -32,6 +36,7 @@ function parseProfile(data: unknown): PersonalizationProfile | null {
   // than read as off: the two are indistinguishable once a value is invented, and the write
   // request is strict, so sending an invented switch back would make every save fail.
   const learningEnabled = profile.learning_enabled;
+  const revision = profile.revision;
   if (
     !isNullableString(profile.assistant_name) ||
     !isNullableString(profile.assistant_identity) ||
@@ -41,6 +46,7 @@ function parseProfile(data: unknown): PersonalizationProfile | null {
     !isNullableString(profile.user_profile) ||
     !isNullableString(learnedProfile) ||
     (learningEnabled !== undefined && typeof learningEnabled !== 'boolean') ||
+    (revision !== undefined && typeof revision !== 'number') ||
     !Array.isArray(profile.pinned_preferences) ||
     !profile.pinned_preferences.every(item => typeof item === 'string') ||
     !Array.isArray(profile.help_areas) ||
@@ -60,6 +66,7 @@ function parseProfile(data: unknown): PersonalizationProfile | null {
     help_areas: profile.help_areas,
     learned_profile: learnedProfile,
     ...(learningEnabled === undefined ? {} : { learning_enabled: learningEnabled }),
+    ...(revision === undefined ? {} : { revision }),
   };
 }
 
@@ -122,14 +129,20 @@ export function createPersonalizationApi(fetcher: typeof fetch): Personalization
       }
       return await readProfile(response);
     },
-    async updateProfile(profile) {
+    async updateProfile({ revision, ...profile }) {
       const response = await fetcher(PROFILE_URL, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         // A switch the profile does not carry is a switch this server never sent, and it stays
-        // off the wire: the request object is strict and would reject the unknown key.
-        body: JSON.stringify({ profile }),
+        // off the wire: the request object is strict and would reject the unknown key. The
+        // revision travels beside the profile, so the server can refuse a save from an older copy.
+        // No revision means this page read no profile, and null says so: a profile created since
+        // is then a conflict too.
+        body: JSON.stringify({ profile, expected_revision: revision ?? null }),
       });
+      if (response.status === 409) {
+        throw new PersonalizationConflictError((await readError(response)).message);
+      }
       if (!response.ok) {
         throw await readError(response);
       }

@@ -10,7 +10,7 @@ test_dry_run_changes_nothing() {
   run_install --dry-run
   assert_rc 0
   assert_no_path "$AMAN_HOME"
-  assert_contains "$OUT" "The plan (3 of 6)"
+  assert_contains "$OUT" "[ 3 of 6 ]  The plan"
   assert_contains "$OUT" "Downloads: about"
   assert_contains "$OUT" "Full list of downloads and sources: --verbose"
   assert_not_contains "$OUT" "Whisper small speech model weights" "the long list waits for --verbose"

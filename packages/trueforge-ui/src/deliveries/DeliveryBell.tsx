@@ -20,7 +20,7 @@ const KIND_WORDS: Record<string, string> = {
   reminder: 'Reminder',
   note: 'Note',
   nudge: 'Heads up',
-  approval_waiting: 'Waiting for your ok',
+  approval_waiting: 'Waiting for your OK',
 };
 
 /** A kind added later still reads as plain words. */
@@ -63,45 +63,40 @@ function DeliveryRow({ item, now, onOpen }: { item: DeliveryItem; now: Date; onO
         data-role="delivery-item"
         data-unread={unread ? 'true' : 'false'}
         onClick={() => onOpen(item)}
-        className="hover:bg-ghost-button-hover flex w-full items-start gap-3 px-4 py-3 text-left"
+        className="hover:bg-ghost-button-hover flex w-full items-start gap-2.5 px-3.5 py-2 text-left"
       >
         <span
           aria-hidden
-          className="bg-secondary-bg text-text-secondary relative mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-lg"
+          className="bg-primary-bg text-text-secondary relative mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-md"
         >
-          <Icon name={KIND_ICONS[item.kind] ?? 'bell'} className="size-4" />
+          <Icon name={KIND_ICONS[item.kind] ?? 'bell'} className="size-3.5" />
           {unread ? (
-            <span className="bg-gold border-paper absolute -top-1 -right-1 size-2.5 rounded-full border" />
+            <span className="bg-gold border-card-bg absolute -top-1 -right-1 size-2 rounded-full border" />
           ) : null}
         </span>
         <span className="min-w-0 flex-1">
-          <span className="flex items-center gap-2 text-xs">
-            <span className="text-text-secondary font-semibold tracking-wide uppercase">{kindWords(item.kind)}</span>
-            {unread ? <span className="sr-only">Unread</span> : null}
-            {when === '' ? null : (
-              <span className="bg-secondary-bg text-text-secondary ml-auto shrink-0 rounded-full px-2 py-0.5 font-medium">
-                {when}
-              </span>
-            )}
-          </span>
           <span
             className={cn(
-              'text-text-primary mt-1 block text-[0.9375rem] leading-snug break-words',
-              unread ? 'font-semibold' : 'font-medium',
+              'text-text-primary block text-[0.8125rem] leading-5 break-words',
+              unread ? 'font-semibold' : 'font-normal',
             )}
           >
             {item.text}
           </span>
-          <span className="text-text-secondary mt-1 block text-xs break-words opacity-80">{item.reason}</span>
-          {item.link === null ? null : (
-            <span
-              data-role="delivery-link"
-              className="text-text-secondary mt-1.5 flex items-center gap-0.5 text-xs font-medium"
-            >
-              {linkWords(item.link)}
-              <Icon name="chevron-right" className="size-3.5 shrink-0" />
+          <span className="text-text-secondary block text-xs leading-5 break-words">{item.reason}</span>
+          <span className="text-text-secondary flex flex-wrap items-center gap-x-2 text-xs leading-5">
+            <span className="opacity-80">
+              {kindWords(item.kind)}
+              {unread ? <span className="sr-only">, unread</span> : null}
+              {when === '' ? null : ` · ${when}`}
             </span>
-          )}
+            {item.link === null ? null : (
+              <span data-role="delivery-link" className="ml-auto flex shrink-0 items-center gap-0.5 font-medium">
+                {linkWords(item.link)}
+                <Icon name="chevron-right" className="size-3 shrink-0" />
+              </span>
+            )}
+          </span>
         </span>
       </button>
     </li>
@@ -185,7 +180,7 @@ export function DeliveryBell({ onNavigate }: { onNavigate?: () => void }) {
         <div
           role="dialog"
           aria-label="For you"
-          className="border-border bg-paper absolute top-full left-0 z-50 mt-2 flex max-h-[28rem] w-[22rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl border shadow-xl"
+          className="border-border bg-card-bg absolute top-full left-0 z-50 mt-2 flex max-h-[28rem] w-[22rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl border shadow-xl"
         >
           <div className="border-border flex items-center justify-between border-b px-4 py-2.5">
             <h2 className="text-text-primary text-sm font-semibold">For you</h2>
@@ -203,7 +198,7 @@ export function DeliveryBell({ onNavigate }: { onNavigate?: () => void }) {
             <div className="flex flex-col items-center gap-2 px-6 py-8 text-center">
               <span
                 aria-hidden
-                className="bg-secondary-bg text-text-secondary flex size-10 items-center justify-center rounded-full"
+                className="bg-primary-bg text-text-secondary flex size-10 items-center justify-center rounded-full"
               >
                 <Icon name="bell" className="size-4" />
               </span>
