@@ -2474,8 +2474,10 @@ export class Sandbox extends LocalToolMCP {
       params.name === SANDBOX_RUN_REGISTERED_COMMAND_TOOL_NAME && registeredCommand === undefined;
     const invalidSkillScript =
       params.name === SANDBOX_RUN_SKILL_SCRIPT_TOOL_NAME && this.skillScriptRunFor(params.arguments)?.status !== 'ok';
-    const invalidRunCodeSkillFolder =
-      params.name === SANDBOX_RUN_CODE_TOOL_NAME && this.runCodeSkillFolderRefusal(params.arguments) !== undefined;
+    // Stamped as a refusal, not only a missing card, so the call is refused before dispatch even if the
+    // skill is turned off before the handler checks again.
+    const runCodeSkillFolderFailure =
+      params.name === SANDBOX_RUN_CODE_TOOL_NAME ? this.runCodeSkillFolderRefusal(params.arguments) : undefined;
     const planInput =
       params.name === SANDBOX_SUBMIT_IMPLEMENTATION_PLAN_TOOL_NAME
         ? sandboxImplementationPlanSchema.safeParse(params.arguments)
@@ -2690,7 +2692,7 @@ export class Sandbox extends LocalToolMCP {
       writeFileScopeFailure ||
       invalidRegisteredCommand ||
       invalidSkillScript ||
-      invalidRunCodeSkillFolder ||
+      runCodeSkillFolderFailure !== undefined ||
       invalidImplementationPlan ||
       structuredEditPreconditionFailure !== undefined;
     // Legacy approval when Sentinel is not configured: the pre-Sentinel
@@ -2772,11 +2774,13 @@ export class Sandbox extends LocalToolMCP {
           }),
       ...(hostGitPushFailure !== undefined
         ? { pre_dispatch_failure: { kind: 'policy_blocked' as const, message: hostGitPushFailure } }
-        : sentinelStamp?.pre_dispatch_failure === undefined
-          ? structuredEditPreDispatchFailure === undefined
-            ? {}
-            : { pre_dispatch_failure: structuredEditPreDispatchFailure }
-          : { pre_dispatch_failure: sentinelStamp.pre_dispatch_failure }),
+        : runCodeSkillFolderFailure !== undefined
+          ? { pre_dispatch_failure: { kind: 'policy_blocked' as const, message: runCodeSkillFolderFailure } }
+          : sentinelStamp?.pre_dispatch_failure === undefined
+            ? structuredEditPreDispatchFailure === undefined
+              ? {}
+              : { pre_dispatch_failure: structuredEditPreDispatchFailure }
+            : { pre_dispatch_failure: sentinelStamp.pre_dispatch_failure }),
       // The first explicit install in a scope always asks, even when the person lets sandbox
       // work run without asking: without the card the allowance is never recorded, and the
       // install would fail inside the sandbox with no explanation. A call the host already

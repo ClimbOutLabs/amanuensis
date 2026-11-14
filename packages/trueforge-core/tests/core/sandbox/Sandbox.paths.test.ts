@@ -4515,7 +4515,10 @@ describe('Sandbox skills without a network', () => {
           code: `import subprocess, sys\nsubprocess.run([sys.executable, "${join(skillsDir, 'alpha')}/scripts/fetch.py"])\n`,
         },
       };
-      expect((await sandbox.toolCallInfo(call)).is_approval_required).toBe(false);
+      const info = await sandbox.toolCallInfo(call);
+      expect(info.is_approval_required).toBe(false);
+      // A refusal stamped before dispatch, so turning the skill off later cannot let the code run unasked.
+      expect(info.pre_dispatch_failure?.kind).toBe('policy_blocked');
       const refused = await sandbox.callTool(call);
       expect(isCallToolResponseResult(refused) && refused.result.isError).toBe(true);
       expect(resultText(refused)).toContain(`cannot see the alpha skill's folder`);
