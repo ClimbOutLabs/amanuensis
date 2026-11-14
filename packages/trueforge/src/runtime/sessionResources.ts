@@ -35,7 +35,7 @@ import type { ITurnArtifactStore } from '../db/turnArtifactStore';
 import { isMcpAuthRequired, resolveMcpAuth } from '../mcp/auth/mcpDcr';
 import type { IOAuthTokenStore } from '../mcp/auth/types';
 import { connectorGrantBinding } from '../mcp/connectorGrantBinding';
-import { isFirstPartyOrigin, isReservedConnectorName } from '../mcp/firstParty';
+import { isFirstPartyOrigin } from '../mcp/firstParty';
 import { isHostOwnConnector } from '../mcp/hostConnectors';
 import { LocalSandboxProvider } from '../sandbox/local/provider/LocalSandboxProvider';
 import { getCachedLocalSandboxSupport, isLocalSandboxFallbackEnabled } from '../sandbox/localRuntime';
@@ -76,7 +76,7 @@ export class RemoteAddressRefusedError extends McpConnectionError {
 export interface McpConnection {
   url: string;
   headers: RemoteMcpHeaders;
-  /** The stored connector's trust marker, and only while the operator still lists its origin. */
+  /** True only for the host's own Email or Calendar connector, at the address the host was set up with. */
   first_party: boolean;
   /** Set when the user designated this connector as their search provider: the tools stored on its record, which the shipped catalog completes per turn. */
   search_provider: { tools: readonly string[] } | undefined;
@@ -546,14 +546,10 @@ export async function getMcpConnection({
   if (record === undefined) {
     return undefined;
   }
-  // The stored mark is what setup decided at save time. The names Email and Calendar belong to the host's own
-  // sidecars: they are first-party only at the address the host was set up with, whatever the stored mark says,
-  // so an old or imported record cannot hold the trust. Either way the origin must still be on the first-party
-  // list, so dropping an origin from the configuration takes effect on the next turn.
+  // Only the host's own Email and Calendar sidecars are first-party, and only at the address the host was set
+  // up with. The stored mark never decides, so an old or imported record cannot hold the trust.
   const firstParty =
-    (isReservedConnectorName(record.name)
-      ? isHostOwnConnector({ name: record.name, url: record.manifest.url })
-      : record.first_party) &&
+    isHostOwnConnector({ name: record.name, url: record.manifest.url }) &&
     isFirstPartyOrigin({ url: record.manifest.url, origins: configuration.FIRST_PARTY_MCP_ORIGINS });
   // The address check runs again here, on every connection resolution, not only at save time: a
   // name that resolved to a public address when the connector was saved can resolve inward

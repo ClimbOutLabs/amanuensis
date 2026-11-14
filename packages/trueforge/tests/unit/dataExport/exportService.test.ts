@@ -7,7 +7,7 @@ import { AgentSpecSchema, InMemorySessionStore } from '@truefoundry/trueforge-co
 import { z } from 'zod';
 import { makeCreateTurnInput, makeModelMessageEvent } from '../../../../trueforge-core/tests/agent-session/testHelpers';
 
-import { runDataExport, type DataExportDeps, type MemoryExportSource } from '../../../src/dataExport/exportService';
+import { runDataExport, type DataExportDeps } from '../../../src/dataExport/exportService';
 import { DeliveryStore } from '../../../src/db/deliveryStore';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
 import { ReachSettingsStore } from '../../../src/db/reachSettingsStore';
@@ -26,17 +26,10 @@ import { SqliteSpaceStore } from '../../../src/db/sqlite/space-store/SqliteSpace
 import { SqliteTurnArtifactStore } from '../../../src/db/sqlite/turn-artifact-store/SqliteTurnArtifactStore';
 import { TextContactStore } from '../../../src/db/textContactStore';
 import { personaVaultNamespace, vaultFilesystemNamespace } from '../../../src/runtime/memory/markdownMemoryFiles';
-import type { MemoryClient, MemoryVaultEntry } from '../../../src/runtime/memory/memoryClient';
 import { legacySessionsOf } from '../../fixtures/legacySessions';
 import { readZipEntries, zipEntryJson, zipEntryText } from '../../fixtures/zipReader';
 
 const TENANT_ID = 'default';
-
-const ManifestSchema = z.object({
-  tenant_id: z.string(),
-  redactions: z.number(),
-  memory: z.object({ backend: z.string(), status: z.string(), vaults: z.number(), note: z.string().optional() }),
-});
 
 class CollectingWritable extends Writable {
   readonly chunks: Buffer[] = [];
@@ -52,7 +45,7 @@ class CollectingWritable extends Writable {
 }
 
 async function makeDeps(
-  memorySource: MemoryExportSource,
+  memoryMarkdownDir: string,
   overrides?: { sessionStore?: DataExportDeps<never>['sessionStore']; personaKnowledgeDir?: string },
 ): Promise<{ deps: DataExportDeps<never>; modelProviderStore: SqliteModelProviderStore; close: () => Promise<void> }> {
   const dir = await mkdtemp(join(tmpdir(), 'tfy-export-service-'));
@@ -75,7 +68,7 @@ async function makeDeps(
     mcpServerStore: new SqliteMcpServerStore(db),
     modelProviderStore,
     listAgents: () => Promise.resolve([]),
-    memorySource,
+    memoryMarkdownDir,
     personaKnowledgeDir: overrides?.personaKnowledgeDir ?? join(dir, 'knowledge'),
   };
   return {
@@ -104,26 +97,6 @@ function exportRequest(options?: { includeUploads?: boolean; includeInstanceData
   };
 }
 
-function vaultEntry(text: string, timestamp: string): MemoryVaultEntry {
-  return { id: `id-${timestamp}`, text, timestamp, persona: null };
-}
-
-function listing(entriesByNamespace: Record<string, MemoryVaultEntry[]>): {
-  client: Pick<MemoryClient, 'listEntries'>;
-  asked: string[];
-} {
-  const asked: string[] = [];
-  return {
-    asked,
-    client: {
-      listEntries: ({ namespace }) => {
-        asked.push(namespace);
-        return Promise.resolve({ ok: true as const, entries: entriesByNamespace[namespace] ?? [] });
-      },
-    },
-  };
-}
-
 async function createPersona(deps: DataExportDeps<never>, input: { id: string; name: string; owner: string }) {
   await deps.personaStore.createPersona({
     tenant_id: TENANT_ID,
@@ -139,7 +112,7 @@ async function createPersona(deps: DataExportDeps<never>, input: { id: string; n
 
 describe('runDataExport space folders', () => {
   it('writes each space folder placement from the same read as the folder list', async () => {
-    const { deps, close } = await makeDeps({ kind: 'markdown', markdownDir: join(tmpdir(), 'unused-memory') });
+    const { deps, close } = await makeDeps(join(tmpdir(), 'unused-memory'));
     try {
       const owner = { tenant_id: TENANT_ID, created_by: 'alice' };
       await deps.spaceStore.createSpaceFolder({ ...owner, id: 'folder-1', name: 'Homes' });
@@ -177,103 +150,7 @@ describe('runDataExport space folders', () => {
   });
 });
 
-describe('runDataExport memory backends', () => {
-  it('renders a client (hindsight) backend into Markdown files in the vault layout', async () => {
-    const { client } = listing({
-      '': [
-        vaultEntry('newest fact', '2026-10-02T10:00:00.000Z'),
-        vaultEntry('oldest fact', '2026-10-01T10:00:00.000Z'),
-      ],
-      'persona:Researcher': [vaultEntry('persona fact', '2026-10-03T10:00:00.000Z')],
-    });
-    const { deps, close } = await makeDeps({ kind: 'client', backend: 'hindsight', client });
-    try {
-      await createPersona(deps, { id: 'persona-1', name: 'Researcher', owner: 'alice' });
-      const sink = new CollectingWritable();
-      await runDataExport(deps, exportRequest(), sink);
-      const entries = readZipEntries(sink.buffer());
-
-      const shared = zipEntryText(entries, `memory/${TENANT_ID}/memory/2026-10-16.md`);
-      expect(shared.indexOf('oldest fact')).toBeLessThan(shared.indexOf('newest fact'));
-      expect(shared).toContain('## 2026-10-01T10:00:00.000Z');
-
-      const personaNs = vaultFilesystemNamespace(TENANT_ID, 'persona:Researcher');
-      expect(zipEntryText(entries, `memory/${personaNs}/memory/2026-10-16.md`)).toContain('persona fact');
-      expect(ManifestSchema.parse(zipEntryJson(entries, 'manifest.json')).memory).toMatchObject({
-        backend: 'hindsight',
-        status: 'included',
-        vaults: 2,
-      });
-    } finally {
-      await close();
-    }
-  });
-
-  it('writes a retained entry with its internal id back as the closing line', async () => {
-    const { client } = listing({
-      '': [{ ...vaultEntry('Lives in Lisbon with a cat.', '2026-10-02T10:00:00.000Z'), context: 'maya:identity' }],
-    });
-    const { deps, close } = await makeDeps({ kind: 'client', backend: 'hindsight', client });
-    try {
-      const sink = new CollectingWritable();
-      await runDataExport(deps, exportRequest(), sink);
-      const shared = zipEntryText(readZipEntries(sink.buffer()), `memory/${TENANT_ID}/memory/2026-10-16.md`);
-      expect(shared).toBe('## 2026-10-02T10:00:00.000Z\n\nLives in Lisbon with a cat.\n\n> maya:identity\n');
-    } finally {
-      await close();
-    }
-  });
-
-  it("reads only the caller's own persona vaults unless instance data is included", async () => {
-    const { client, asked } = listing({ '': [vaultEntry('shared fact', '2026-10-02T10:00:00.000Z')] });
-    const { deps, close } = await makeDeps({ kind: 'client', backend: 'hindsight', client });
-    try {
-      await createPersona(deps, { id: 'persona-1', name: 'Researcher', owner: 'alice' });
-      await createPersona(deps, { id: 'persona-2', name: 'Other', owner: 'bob' });
-      const sink = new CollectingWritable();
-      await runDataExport(deps, exportRequest({ includeInstanceData: false }), sink);
-      expect(asked).toEqual(['persona:Researcher']);
-      expect(readZipEntries(sink.buffer()).some(entry => entry.name.startsWith('memory/'))).toBe(false);
-    } finally {
-      await close();
-    }
-  });
-
-  it('fails the export when a client backend namespace cannot be read', async () => {
-    const failing: Pick<MemoryClient, 'listEntries'> = {
-      listEntries: () =>
-        Promise.resolve({ ok: false as const, code: 'request_failed' as const, reason: 'backend down' }),
-    };
-    const { deps, close } = await makeDeps({ kind: 'client', backend: 'hindsight', client: failing });
-    try {
-      await expect(runDataExport(deps, exportRequest(), new CollectingWritable())).rejects.toThrow('backend down');
-    } finally {
-      await close();
-    }
-  });
-
-  it('skips memory with a manifest note when the backend is not set up', async () => {
-    const { deps, close } = await makeDeps({
-      kind: 'unavailable',
-      backend: 'hindsight',
-      reason: 'No memory provider is set up on this instance, so memory was not exported.',
-    });
-    try {
-      const sink = new CollectingWritable();
-      await runDataExport(deps, exportRequest(), sink);
-      const entries = readZipEntries(sink.buffer());
-      expect(ManifestSchema.parse(zipEntryJson(entries, 'manifest.json')).memory).toMatchObject({
-        backend: 'hindsight',
-        status: 'skipped',
-        vaults: 0,
-        note: 'No memory provider is set up on this instance, so memory was not exported.',
-      });
-      expect(entries.some(entry => entry.name.startsWith('memory/'))).toBe(false);
-    } finally {
-      await close();
-    }
-  });
-
+describe('runDataExport memory', () => {
   describe('markdown vaults', () => {
     let scratch: string;
     let memoryDir: string;
@@ -295,7 +172,7 @@ describe('runDataExport memory backends', () => {
     }
 
     async function exportedNames(options: { tenantId?: string; includeInstanceData?: boolean; owned?: string[] }) {
-      const { deps, close } = await makeDeps({ kind: 'markdown', markdownDir: memoryDir });
+      const { deps, close } = await makeDeps(memoryDir);
       try {
         for (const [index, name] of (options.owned ?? []).entries()) {
           await createPersona(deps, { id: `persona-${String(index)}`, name, owner: 'alice' });
@@ -346,6 +223,94 @@ describe('runDataExport memory backends', () => {
       expect(names.filter(name => name.startsWith('memory/'))).toEqual(['memory/acme_corp/MEMORY.md']);
     });
 
+    describe('pages', () => {
+      async function writePages(dir: string, files: Record<string, string>): Promise<void> {
+        for (const [name, text] of Object.entries(files)) {
+          await mkdir(join(memoryDir, dir, name.split('/').slice(0, -1).join('/')), { recursive: true });
+          await writeFile(join(memoryDir, dir, name), text);
+        }
+      }
+
+      it('takes each vault’s people and matters pages byte for byte, and never .memory-state or .memory-history', async () => {
+        const mine = vaultFilesystemNamespace(TENANT_ID, personaVaultNamespace('Researcher'));
+        await vault(TENANT_ID, { 'MEMORY.md': '# Shared\n' });
+        await vault(mine, {});
+        await writePages(TENANT_ID, {
+          'people/nora.md': '---\ntitle: Nora\n---\n',
+          'people/김민수.md': '---\ntitle: 김민수\n---\n',
+          'matters/lisbon-trip.md': '---\ntitle: Lisbon trip\n---\n',
+          '.memory-state/aliases.json': '{}',
+          '.memory-state/README': 'x',
+          '.memory-state/lock.1': '{}',
+          '.memory-history/HEAD': 'ref: refs/heads/main',
+          '.memory-history/info/exclude': '/*',
+          '.memory-history/people/nora.md': 'a copy kept by the history',
+        });
+        await writePages(mine, { 'people/sam.md': 'Sam\n' });
+        const { deps, close } = await makeDeps(memoryDir);
+        try {
+          await createPersona(deps, { id: 'persona-0', name: 'Researcher', owner: 'alice' });
+          const sink = new CollectingWritable();
+          await runDataExport(deps, exportRequest({}), sink);
+          const entries = readZipEntries(sink.buffer());
+          const names = entries.map(entry => entry.name).filter(name => name.startsWith('memory/'));
+          expect(names.sort()).toEqual(
+            [
+              `memory/${TENANT_ID}/MEMORY.md`,
+              `memory/${TENANT_ID}/people/nora.md`,
+              `memory/${TENANT_ID}/people/김민수.md`,
+              `memory/${TENANT_ID}/matters/lisbon-trip.md`,
+              `memory/${mine}/people/sam.md`,
+            ].sort(),
+          );
+          expect(zipEntryText(entries, `memory/${TENANT_ID}/people/김민수.md`)).toBe('---\ntitle: 김민수\n---\n');
+        } finally {
+          await close();
+        }
+      });
+
+      it('takes a page whose name is not a lowercase slug as it is, and leaves out files that are not .md pages', async () => {
+        await vault(TENANT_ID, {});
+        await writePages(TENANT_ID, {
+          'people/Nora.md': 'x',
+          'people/my notes.md': 'x',
+          'people/photo.png': 'x',
+          'people/.hidden.md': 'x',
+          'people/ok.md': 'ok',
+        });
+        const names = await exportedNames({});
+        expect(names.filter(name => name.startsWith('memory/')).sort()).toEqual(
+          [
+            `memory/${TENANT_ID}/people/Nora.md`,
+            `memory/${TENANT_ID}/people/my notes.md`,
+            `memory/${TENANT_ID}/people/ok.md`,
+          ].sort(),
+        );
+      });
+
+      it('never follows a link from a page folder or a page out of the vault', async () => {
+        await vault(TENANT_ID, {});
+        await mkdir(join(scratch, 'outside'), { recursive: true });
+        await writeFile(join(scratch, 'outside', 'secret.md'), 'outside the vault\n');
+        await symlink(join(scratch, 'outside'), join(memoryDir, TENANT_ID, 'people'));
+        await mkdir(join(memoryDir, TENANT_ID, 'matters'), { recursive: true });
+        await symlink(join(scratch, 'outside', 'secret.md'), join(memoryDir, TENANT_ID, 'matters', 'trip.md'));
+        const names = await exportedNames({});
+        expect(names.filter(name => name.startsWith('memory/'))).toEqual([]);
+      });
+
+      it('does not take another tenant’s or another person’s pages', async () => {
+        const theirs = vaultFilesystemNamespace(TENANT_ID, personaVaultNamespace('Bob Persona'));
+        await vault(TENANT_ID, {});
+        await vault('other-tenant', {});
+        await vault(theirs, {});
+        await writePages('other-tenant', { 'people/nora.md': 'x' });
+        await writePages(theirs, { 'people/nora.md': 'x' });
+        const names = await exportedNames({});
+        expect(names.filter(name => name.startsWith('memory/'))).toEqual([]);
+      });
+    });
+
     it('never follows a link out of the vault', async () => {
       await vault(TENANT_ID, {});
       await writeFile(join(scratch, 'outside.md'), 'outside the vault\n');
@@ -360,7 +325,7 @@ describe('runDataExport model providers', () => {
   const PLANTED_KEY = 'FAKE-KEY-planted-in-the-export-test';
 
   it('exports each provider setup without its key', async () => {
-    const { deps, modelProviderStore, close } = await makeDeps({ kind: 'markdown', markdownDir: '/nonexistent' });
+    const { deps, modelProviderStore, close } = await makeDeps('/nonexistent');
     try {
       await modelProviderStore.upsertProvider({
         tenant_id: TENANT_ID,
@@ -413,7 +378,7 @@ describe('runDataExport model providers', () => {
   });
 
   it('writes an empty providers section when no provider is set up', async () => {
-    const { deps, close } = await makeDeps({ kind: 'markdown', markdownDir: '/nonexistent' });
+    const { deps, close } = await makeDeps('/nonexistent');
     try {
       const sink = new CollectingWritable();
       await runDataExport(deps, exportRequest(), sink);
@@ -472,10 +437,7 @@ describe('runDataExport on a large instance', () => {
       });
     }
 
-    const { deps, close } = await makeDeps(
-      { kind: 'markdown', markdownDir: join(tmpdir(), 'tfy-export-none') },
-      { sessionStore },
-    );
+    const { deps, close } = await makeDeps(join(tmpdir(), 'tfy-export-none'), { sessionStore });
     try {
       const rssBefore = process.memoryUsage().rss;
       let peakRss = rssBefore;

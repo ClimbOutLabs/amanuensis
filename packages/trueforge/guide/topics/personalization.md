@@ -43,7 +43,7 @@ Aman can keep a short profile of you that it updates from your chats. This is of
 2. Click the **Learned profile** tab.
 3. Turn on **Learn from conversations**, then click **Save**.
 
-After a chat, Aman updates the profile, at most once an hour. The profile appears on the same tab. Click **Edit** to change it, or **Clear learned profile** to empty it. Then click **Save**.
+When you tell Aman something lasting about yourself, it adds a line to the profile. The profile appears on the same tab. Click **Edit** to change it, or **Clear learned profile** to empty it. Then click **Save**.
 
 **Clear all** on the Personalization page empties only that page's boxes. It keeps the learned profile and its switch.
 

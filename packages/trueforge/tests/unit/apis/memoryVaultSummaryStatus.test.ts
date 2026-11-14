@@ -25,14 +25,12 @@ const ALICE: RequestContext = {
 const SummaryStatusResponseSchema = z.object({ data: z.object({ summary_pending: z.boolean() }) });
 
 describe('memory vault summary status', () => {
-  const originalBackend = configuration.MEMORY_BACKEND;
   const originalDir = configuration.MEMORY_MARKDOWN_DIR;
   let baseDir: string;
   let app: OpenAPIHono;
 
   beforeEach(async () => {
     baseDir = await mkdtemp(join(tmpdir(), 'vault-summary-status-'));
-    configuration.MEMORY_BACKEND = 'markdown';
     configuration.MEMORY_MARKDOWN_DIR = baseDir;
     app = new OpenAPIHono();
     app.route(
@@ -45,7 +43,6 @@ describe('memory vault summary status', () => {
   });
 
   afterEach(async () => {
-    configuration.MEMORY_BACKEND = originalBackend;
     configuration.MEMORY_MARKDOWN_DIR = originalDir;
     await rm(baseDir, { recursive: true, force: true });
   });

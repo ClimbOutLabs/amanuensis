@@ -42,6 +42,22 @@ export const UpdateMemoryVaultEntryRequestSchema = z
 /** Delete is idempotent and returns an empty object. */
 export const DeleteMemoryVaultEntryResponseSchema = z.object({}).openapi('DeleteMemoryVaultEntryResponse');
 
+/** The words the chat's side panel showed for a memory. Every memory shown in exactly these words is deleted. */
+export const DeleteShownMemoryRequestSchema = z
+  .object({
+    shown_text: z.string().trim().min(1).max(2000).describe('The memory, in the plain words recall showed for it.'),
+  })
+  .strict()
+  .openapi('DeleteShownMemoryRequest');
+
+export const DeleteShownMemoryResultSchema = z
+  .object({ deleted: z.number().int().min(1).describe('How many stored copies were deleted.') })
+  .openapi('DeleteShownMemoryResult');
+
+export const DeleteShownMemoryResponseSchema = z
+  .object({ data: DeleteShownMemoryResultSchema })
+  .openapi('DeleteShownMemoryResponse');
+
 /** A vault export: the namespace, when it was taken, and every effective entry. */
 export const MemoryVaultExportSchema = z
   .object({
@@ -131,3 +147,48 @@ export const GetMemoryVaultSummaryStatusResponseSchema = z
     data: MemoryVaultSummaryStatusSchema,
   })
   .openapi('GetMemoryVaultSummaryStatusResponse');
+
+/** One older note the person may mark as their own words. */
+export const MemoryVaultReviewNoteSchema = z
+  .object({
+    entry_id: z.string().describe('Vault entry id; send it back to mark the note.'),
+    day: z.string().describe('Day the note was saved, `YYYY-MM-DD`.'),
+    text: z.string().describe('The note as the Memories page shows it.'),
+    chat_title: z.string().nullable().describe('Title of the chat the note came from, when the chat has one.'),
+  })
+  .openapi('MemoryVaultReviewNote');
+
+export const MemoryVaultReviewListSchema = z
+  .object({
+    notes: z.array(MemoryVaultReviewNoteSchema),
+    note_count: z.number().int().min(0).describe('Notes found in this request.'),
+    next_cursor: z
+      .string()
+      .nullable()
+      .describe('Send as `cursor` to look at the next older notes; null when every older note has been looked at.'),
+  })
+  .openapi('MemoryVaultReviewList');
+
+export const ListMemoryVaultReviewNotesResponseSchema = z
+  .object({ data: MemoryVaultReviewListSchema })
+  .openapi('ListMemoryVaultReviewNotesResponse');
+
+/** The ids the person ticked. Nothing is marked that is not named here. */
+export const MarkMemoryVaultReviewNotesRequestSchema = z
+  .object({
+    namespace: z.string().trim().max(128).optional().describe('Vault namespace: omit for the shared vault.'),
+    entry_ids: z.array(z.string().min(1).max(256)).min(1).max(200),
+  })
+  .openapi('MarkMemoryVaultReviewNotesRequest');
+
+export const MemoryVaultReviewResultSchema = z
+  .object({
+    marked_count: z.number().int().min(0),
+    marked_ids: z.array(z.string()),
+    refused: z.array(z.object({ entry_id: z.string(), reason: z.string().describe('Plain words saying why.') })),
+  })
+  .openapi('MemoryVaultReviewResult');
+
+export const MarkMemoryVaultReviewNotesResponseSchema = z
+  .object({ data: MemoryVaultReviewResultSchema })
+  .openapi('MarkMemoryVaultReviewNotesResponse');

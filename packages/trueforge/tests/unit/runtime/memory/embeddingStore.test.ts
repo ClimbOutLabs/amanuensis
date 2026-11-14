@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { EMBEDDING_DIMENSIONS, EMBEDDING_MODEL_REVISION } from '../../../../src/runtime/memory/embeddingModel';
-import { EmbeddingStore, hashEntryText } from '../../../../src/runtime/memory/embeddingStore';
+import { EmbeddingStore, hashEntryText, LOG_VECTORS_FILE } from '../../../../src/runtime/memory/embeddingStore';
 
 function vector(seed: number): number[] {
   const values = new Array(EMBEDDING_DIMENSIONS).fill(0);
@@ -25,13 +25,13 @@ describe('EmbeddingStore', () => {
   it('round-trips entries through save/load', async () => {
     const nsDir = await makeNamespaceDir();
     try {
-      const store = await EmbeddingStore.load({ namespaceDir: nsDir });
+      const store = await EmbeddingStore.load({ namespaceDir: nsDir, fileName: LOG_VECTORS_FILE });
       store.set({ id: 'id-1', text: 'hello world', vector: vector(3) });
       store.set({ id: 'id-2', text: 'hola mundo', vector: vector(7) });
       store.markBackfilled();
       await store.save();
 
-      const reloaded = await EmbeddingStore.load({ namespaceDir: nsDir });
+      const reloaded = await EmbeddingStore.load({ namespaceDir: nsDir, fileName: LOG_VECTORS_FILE });
       expect(reloaded.size).toBe(2);
       expect(reloaded.isBackfilled).toBe(true);
       const entry = reloaded.get('id-1');
@@ -57,10 +57,10 @@ describe('EmbeddingStore', () => {
     const nsDir = await makeNamespaceDir();
     try {
       await writeFile(path.join(nsDir, '.embeddings.json'), 'not json{{{', 'utf8');
-      const corrupt = await EmbeddingStore.load({ namespaceDir: nsDir });
+      const corrupt = await EmbeddingStore.load({ namespaceDir: nsDir, fileName: LOG_VECTORS_FILE });
       expect(corrupt.size).toBe(0);
 
-      const store = await EmbeddingStore.load({ namespaceDir: nsDir });
+      const store = await EmbeddingStore.load({ namespaceDir: nsDir, fileName: LOG_VECTORS_FILE });
       store.set({ id: 'id-1', text: 'x', vector: vector(1) });
       await store.save();
       const raw = await readFile(path.join(nsDir, '.embeddings.json'), 'utf8');
@@ -69,7 +69,7 @@ describe('EmbeddingStore', () => {
         raw.replace(EMBEDDING_MODEL_REVISION, '0'.repeat(40)),
         'utf8',
       );
-      const invalidated = await EmbeddingStore.load({ namespaceDir: nsDir });
+      const invalidated = await EmbeddingStore.load({ namespaceDir: nsDir, fileName: LOG_VECTORS_FILE });
       expect(invalidated.size).toBe(0);
       expect(invalidated.isBackfilled).toBe(false);
     } finally {
@@ -80,14 +80,14 @@ describe('EmbeddingStore', () => {
   it('reconcile drops deleted entries and reports whether anything changed', async () => {
     const nsDir = await makeNamespaceDir();
     try {
-      const store = await EmbeddingStore.load({ namespaceDir: nsDir });
+      const store = await EmbeddingStore.load({ namespaceDir: nsDir, fileName: LOG_VECTORS_FILE });
       store.set({ id: 'keep', text: 'a', vector: vector(1) });
       store.set({ id: 'drop', text: 'b', vector: vector(2) });
       expect(store.reconcile(new Set(['keep']))).toBe(true);
       expect(store.reconcile(new Set(['keep']))).toBe(false);
       expect(store.get('drop')).toBeUndefined();
       await store.save();
-      const reloaded = await EmbeddingStore.load({ namespaceDir: nsDir });
+      const reloaded = await EmbeddingStore.load({ namespaceDir: nsDir, fileName: LOG_VECTORS_FILE });
       expect(reloaded.get('drop')).toBeUndefined();
       expect(reloaded.get('keep')?.hash).toBe(hashEntryText('a'));
     } finally {
@@ -98,7 +98,7 @@ describe('EmbeddingStore', () => {
   it('ignores wrong-dimension vectors', async () => {
     const nsDir = await makeNamespaceDir();
     try {
-      const store = await EmbeddingStore.load({ namespaceDir: nsDir });
+      const store = await EmbeddingStore.load({ namespaceDir: nsDir, fileName: LOG_VECTORS_FILE });
       store.set({ id: 'bad', text: 'x', vector: [1, 2, 3] });
       expect(store.size).toBe(0);
     } finally {

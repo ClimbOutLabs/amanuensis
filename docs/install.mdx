@@ -266,7 +266,7 @@ Upgrade refuses to start unless doctor shows no failures, unless you pass `--for
 
 ### Exporting one person's data
 
-To move a person's chats, agents, personas, spaces, schedules, connectors (without credentials), settings and memory to another instance, export them from the old one. The command reads the database and memory files directly, so it needs no sign-in and works on an instance that was never installed with the installer. Run it inside the app image, with the same environment and data volumes as the running app:
+To move a person's chats, agents, personas, spaces, schedules, connectors (without credentials), settings and memory, including the people and matters pages in your memory folder, to another instance, export them from the old one. The command reads the database and memory files directly, so it needs no sign-in and works on an instance that was never installed with the installer. Run it inside the app image, with the same environment and data volumes as the running app:
 
 ```bash
 aman export-data --list-users                          # who owns sessions, and how many

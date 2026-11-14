@@ -17,6 +17,7 @@ import type { IPersonalizationStore } from '../db/personalizationStore';
 import type { ISandboxProviderStore } from '../db/sandboxProviderStore';
 import type { WithTransaction } from '../db/transaction';
 import type { IOAuthTokenStore } from '../mcp/auth/types';
+import type { NightlyMemoryJob } from '../runtime/memory/nightlyService';
 import type { CheckSavedModelProvider } from '../runtime/modelProviderCheck';
 import { getSharedRunCodeService } from '../runtime/sessionResources';
 import type { TokenFactoryBudget } from '../runtime/tokenFactoryBudget';
@@ -24,6 +25,8 @@ import { sandboxDisabledByInstaller } from '../sandbox/slotBackend';
 import { createFirstRunGuideRouter } from './firstRunGuide';
 import { createGitCommitIdentityRouter } from './gitCommitIdentity';
 import { createSettingsMcpServersRouter } from './mcpServers';
+import { createMemoryNightlyRouter } from './memoryNightly';
+import { createMemoryPageSortingRouter } from './memoryPageSorting';
 import { createMemoryRecallRouter } from './memoryRecall';
 import { createMemoryScreensRouter } from './memoryScreens';
 import { createMemorySummarizeRouter } from './memorySummarize';
@@ -45,6 +48,8 @@ export interface SettingsRouterDeps<TTransaction> {
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
   personalizationStore: Pick<IPersonalizationStore<TTransaction>, 'getProfile'>;
   tokenFactoryBudget: TokenFactoryBudget;
+  /** Runs the memory tidy-up now, and tells where one stands. */
+  memoryTidy: NightlyMemoryJob;
   /** Model providers the environment owns (see `envManagedModelProviderNames`). */
   envManagedModelProviderNames: ReadonlySet<string>;
   /** Runs the one test call for a just-saved model provider; its outcome is stored on the provider. */
@@ -139,6 +144,21 @@ export function createSettingsRouter<TTransaction>(deps: SettingsRouterDeps<TTra
     '/memory-summarize',
     createMemorySummarizeRouter({
       globalSettingsStore: deps.globalSettingsStore,
+      logger: deps.logger,
+    }),
+  );
+  router.route(
+    '/memory-page-sorting',
+    createMemoryPageSortingRouter({
+      globalSettingsStore: deps.globalSettingsStore,
+      logger: deps.logger,
+    }),
+  );
+  router.route(
+    '/memory-nightly',
+    createMemoryNightlyRouter({
+      globalSettingsStore: deps.globalSettingsStore,
+      memoryTidy: deps.memoryTidy,
       logger: deps.logger,
     }),
   );

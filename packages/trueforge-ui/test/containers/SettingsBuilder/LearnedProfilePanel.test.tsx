@@ -2,7 +2,11 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import { PersonalizationProvider, type PersonalizationProfile } from '@/components/PersonalizationContext.js';
+import {
+  PersonalizationConflictError,
+  PersonalizationProvider,
+  type PersonalizationProfile,
+} from '@/components/PersonalizationContext.js';
 import LearnedProfilePanel from '@/containers/SettingsBuilder/LearnedProfilePanel.js';
 
 const initialProfile: PersonalizationProfile = {
@@ -60,6 +64,34 @@ describe('LearnedProfilePanel', () => {
     );
   });
 
+  it("keeps the person's own edit to the learned text when it changed on both sides", async () => {
+    const opened: PersonalizationProfile = { ...initialProfile, learned_profile: '- Likes tea.', revision: 1 };
+    const getProfile = vi.fn<() => Promise<PersonalizationProfile>>();
+    getProfile
+      .mockResolvedValueOnce(opened)
+      .mockResolvedValue({ ...opened, learned_profile: '- Likes tea.\n- Likes hiking.', revision: 2 });
+    const updateProfile = vi.fn(async (profile: PersonalizationProfile) => {
+      if (profile.revision !== 2) {
+        throw new PersonalizationConflictError('Your profile changed while this page was open.');
+      }
+      return { ...profile, revision: 3 };
+    });
+    render(
+      <PersonalizationProvider api={{ getProfile, updateProfile, deleteProfile: async () => {} }}>
+        <LearnedProfilePanel />
+      </PersonalizationProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    fireEvent.change(screen.getByLabelText('Learned profile document'), { target: { value: '- Likes coffee.' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(await screen.findByText('Learned profile saved.')).toBeInTheDocument();
+    expect(updateProfile).toHaveBeenLastCalledWith(
+      expect.objectContaining({ learned_profile: '- Likes coffee.', revision: 2 }),
+    );
+  });
+
   it('reflects the stored learning switch and says what turning it on does', async () => {
     render(
       <PersonalizationProvider
@@ -75,8 +107,8 @@ describe('LearnedProfilePanel', () => {
 
     const toggle = await screen.findByRole('switch', { name: 'Learn from conversations' });
     await waitFor(() => expect(toggle).toHaveAttribute('aria-checked', 'true'));
-    expect(screen.getByText(/a local model updates this document/)).toBeInTheDocument();
-    expect(screen.getByText(/at most once an hour/)).toBeInTheDocument();
+    expect(screen.getByText(/it adds a line here/)).toBeInTheDocument();
+    expect(screen.getByText(/nothing is lost/)).toBeInTheDocument();
   });
 
   it('persists the learning switch through its own save flow', async () => {

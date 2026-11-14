@@ -487,7 +487,26 @@ export function hostPictureMessage(input: { note: string; imageUrl: string }): C
   };
 }
 
-function isHostWrittenUserContent(content: ChatCompletionMessageParam['content']): boolean {
+function isTextPart(part: unknown): part is { type: 'text'; text: string } {
+  return (
+    typeof part === 'object' &&
+    part !== null &&
+    'type' in part &&
+    part.type === 'text' &&
+    'text' in part &&
+    typeof part.text === 'string'
+  );
+}
+
+function isImagePart(part: unknown): boolean {
+  return typeof part === 'object' && part !== null && 'type' in part && part.type === 'image_url';
+}
+
+function isHostTextPart(part: unknown): boolean {
+  return isTextPart(part) && isHostWrappedText(part.text);
+}
+
+function isHostWrittenUserContent(content: unknown): boolean {
   if (typeof content === 'string') {
     return isHostWrappedText(content);
   }
@@ -496,11 +515,12 @@ function isHostWrittenUserContent(content: ChatCompletionMessageParam['content']
   }
   // A picture the host attached comes with its note first. A person's own picture never does: an
   // upload is announced by other host text, so a message of the person's keeps counting as theirs.
-  const [first, ...rest] = content;
-  if (first?.type === 'text' && first.text.startsWith(HOST_PICTURE_NOTE_START)) {
-    return rest.every(part => part.type === 'image_url' || (part.type === 'text' && isHostWrappedText(part.text)));
+  const parts: unknown[] = content;
+  const first = parts[0];
+  if (isTextPart(first) && first.text.startsWith(HOST_PICTURE_NOTE_START)) {
+    return parts.slice(1).every(part => isImagePart(part) || isHostTextPart(part));
   }
-  return content.every(part => part.type === 'text' && isHostWrappedText(part.text));
+  return content.every(isHostTextPart);
 }
 
 /**
@@ -508,7 +528,7 @@ function isHostWrittenUserContent(content: ChatCompletionMessageParam['content']
  * messages the host wrote: internal notes such as the empty-answer nudge, and extracted file text,
  * which follows the person's message. The one owner of "where is the person's message".
  */
-export function personMessageIndex(messages: readonly ChatCompletionMessageParam[]): number {
+export function personMessageIndex(messages: readonly { role: string; content?: unknown }[]): number {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const message = messages[i];
     if (message?.role === 'user' && !isHostWrittenUserContent(message.content)) {

@@ -126,6 +126,7 @@ async function createRouters(
       globalSettingsStore,
       personalizationStore: new SqlitePersonalizationStore(db),
       tokenFactoryBudget: uncappedTokenFactoryBudget,
+      memoryTidy: { tidyNow: () => undefined, tidyState: () => ({ status: 'idle' }) },
       envManagedModelProviderNames: options.envManagedNames ?? new Set(),
       // Saves in these suites carry no check outcome unless a suite wires its own checker.
       checkSavedProvider:
