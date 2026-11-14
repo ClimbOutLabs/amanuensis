@@ -69,7 +69,7 @@ The browser reads pages from anywhere, and some of them are hostile. So it share
 
 ## Screenshots
 
-A screenshot goes to the chat for you. With it, the browser makes a second copy for the model. In that copy, every password, card and one-time-code field is covered, and so is every frame a page embeds from elsewhere. Each control in view gets a red box and a short label. The copy is drawn outside the page, and is left out when it cannot be made safely.
+A page's text can't show what a chart, drawing, photo or video holds. So each read counts the pictures in view that are bigger than an icon, and tells the model to take a screenshot to see them. A screenshot goes to the chat for you. With it, the browser makes a second copy for the model. In that copy, every password, card and one-time-code field is covered, and so is every frame a page embeds from elsewhere. Each control in view gets a red box and a short label. The copy is drawn outside the page, and is left out when it cannot be made safely.
 
 ## The live browser
 

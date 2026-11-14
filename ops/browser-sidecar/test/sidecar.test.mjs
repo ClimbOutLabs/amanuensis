@@ -390,6 +390,10 @@ async function withWorld(run) {
       <label for="q">Search</label>
       <input id="q" onkeydown="document.getElementById('side').focus()">
       <iframe id="side" src="http://site-b.test/tricky-widget" style="width: 12rem; height: 5rem"></iframe>`),
+    // A chart drawn on a canvas beside a small icon button: only the chart counts as a picture.
+    '/chart': html(`<h1>Asset allocation</h1>
+      <canvas width="600" height="300" style="display:block"></canvas>
+      <button><svg width="16" height="16"><title>Settings</title></svg></button>`),
     // A sign-in form for the live view's paste and copy: each change is reported, and so is a send.
     '/paste-copy': html(`<form onsubmit="event.preventDefault(); fetch('/submitted', { method: 'POST' })">
       <input id="name" autofocus oninput="fetch('/name?' + encodeURIComponent(this.value), { method: 'POST' })">
@@ -1537,6 +1541,15 @@ test(
     });
   },
 );
+
+test('a read says how many pictures are in view, and leaves out icons', { skip: !browsersAvailable }, async () => {
+  await withWorld(async ({ sidecar }) => {
+    const opened = await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/chart' });
+    assert.match(opened.text, /Also in view: 1 picture .* use browser_screenshot\./);
+    const plain = await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/' });
+    assert.doesNotMatch(plain.text, /Also in view/);
+  });
+});
 
 test(
   'the live view pastes as one insert that never sends the form, and copies a selection but never a password',
