@@ -12,6 +12,8 @@ A skill is a folder in a git repository with a `SKILL.md` file at its top. You a
 
 Open **Settings → Skills**. Either enable a starter skill from the catalog, or click **Import from GitHub** and give the repository URL, the folder that holds `SKILL.md`, and the branch.
 
+For a skill from GitHub, click **Check skill** first. Aman reads the skill's files and lists the websites it sends requests to, or says it sends none. Nothing in the skill runs while it is read. When there are websites, the button says **Add skill and allow websites**: adding the skill allows exactly those websites, and nothing else. A starter skill that names websites shows the same list before it is added. If the skill's files change between the check and the add, nothing is added, and you check again.
+
 !!! tip
 
     For a setup you rely on, pin a tag or a commit instead of a moving branch, so the skill doesn't change under you.
@@ -62,7 +64,7 @@ While a turn runs:
 
 A skill has no internet access by default. A skill can list the sites it needs. Settings then asks the person to allow them, and once allowed, a chat using that skill can reach those sites and no others. Settings warns when one of the sites can send email.
 
-A skill added from a chat gets its list from what Aman found in its files, and allowing the card allows that list. A skill added in Settings names the sites it needs in its manifest (`network_hosts`). The sandbox has no network of its own, so a skill can reach only the sites you allow for it, and only while it is switched on for the chat.
+Aman finds a skill's list itself, by reading its files when the skill is added, whether from a chat or from Settings. A starter skill uses the list that comes with it. Adding the skill allows that list, all or nothing. The sandbox has no network of its own, so a skill can reach only the sites you allow for it, and only while it is switched on for the chat.
 
 The first time a skill with named sites runs in a chat, a card asks whether it may reach the sites it still needs: the ones you have not already allowed, and not the ones you turned down. The chat keeps working without the sites until you answer. If a skill tries a site it did not name, the connection is refused at once and a card asks about that one site. A card names the site and why it is asking.
 

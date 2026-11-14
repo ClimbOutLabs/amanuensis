@@ -15,5 +15,7 @@ import type * as TrueForge from "../../../../../../index.js";
  *     }
  */
 export interface UpdateSkillRequest {
+    /** The websites the person approved with this skill, exactly as the website check listed them. */
+    approvedWebsites?: string[];
     manifest: TrueForge.SkillManifest;
 }

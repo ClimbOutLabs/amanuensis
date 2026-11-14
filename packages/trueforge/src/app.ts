@@ -898,6 +898,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         tokenStore: deps.tokenStore,
         toolGrantStore: deps.mcpToolGrantStore,
         resolveSkillStore: deps.resolveSkillStore,
+        skillCatalog: deps.skillCatalog,
         resolveSandboxProviderStore: deps.resolveSandboxProviderStore,
         globalSettingsStore: deps.globalSettingsStore,
         personalizationStore: deps.personalizationStore,

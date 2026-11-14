@@ -8,6 +8,7 @@ import { SkillCatalog } from '../../../src/catalog/SkillCatalog';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqliteSkillStore } from '../../../src/db/sqlite/skill-store/SqliteSkillStore';
+import type { ReadSkillFiles } from '../../../src/runtime/skillWebsites';
 import { ListSkillsResponseSchema } from '../../../src/schemas/skill';
 import { TRUEFOUNDRY_MANAGED_MESSAGE, trueFoundryManaged } from '../../../src/truefoundry/errors';
 
@@ -18,6 +19,32 @@ const putBody = {
   path: 'skills/algorithmic-art',
   ref: 'main',
   description: 'Creating algorithmic art using p5.js with seeded randomness.',
+};
+
+const encode = (text: string) => new TextEncoder().encode(text);
+const FIXTURE_COMMIT = 'f'.repeat(40);
+
+/** Skill files by repository, as the host would read them; a repository missing here cannot be read. */
+const fixtureFiles = new Map<string, { path: string; text: string }[]>([
+  ['https://github.com/anthropics/skills', [{ path: 'SKILL.md', text: '---\nname: art\n---\nDraw.\n' }]],
+  [
+    'https://github.com/acme/news-skill',
+    [
+      { path: 'SKILL.md', text: '---\nname: news\n---\nRun scripts/fetch.py.\n' },
+      { path: 'scripts/fetch.py', text: 'requests.get("https://api.news-digest.info/latest")\n' },
+    ],
+  ],
+]);
+
+const readFixture: ReadSkillFiles = source => {
+  const files = fixtureFiles.get(source.url);
+  if (files === undefined) {
+    return Promise.reject(new Error('not found'));
+  }
+  return Promise.resolve({
+    objectId: FIXTURE_COMMIT,
+    files: files.map(file => ({ path: file.path, bytes: encode(file.text) })),
+  });
 };
 
 function wrapManifest(manifest: unknown) {
@@ -48,15 +75,19 @@ describe('skills routers', () => {
   let settingsRouter: ReturnType<typeof createSkillsRouter>;
   let catalogRouter: ReturnType<typeof createCatalogRouter>;
   let availableRouter: ReturnType<typeof createAvailableSkillsRouter>;
+  let skillStore: SqliteSkillStore;
+  let db: ReturnType<typeof createSqliteDb>;
 
   beforeAll(async () => {
-    const db = createSqliteDb(':memory:');
+    db = createSqliteDb(':memory:');
     await migrateSqliteToLatest(db);
-    const skillStore = new SqliteSkillStore(db);
+    skillStore = new SqliteSkillStore(db);
     settingsRouter = createSkillsRouter({
       resolveSkillStore: () => skillStore,
       withTransaction: callback => db.transaction().execute(callback),
       resolveRequestContext: () => STANDALONE_REQUEST_CONTEXT,
+      catalog: [],
+      readFiles: readFixture,
     });
     catalogRouter = createCatalogRouter({
       modelCatalog: ModelCatalog.load(),
@@ -205,6 +236,8 @@ describe('skills routers', () => {
       resolveSkillStore: () => managedStore,
       withTransaction: async callback => callback(undefined as never),
       resolveRequestContext: () => STANDALONE_REQUEST_CONTEXT,
+      catalog: [],
+      readFiles: readFixture,
     });
     const created = await router.request('/', postInit(wrapManifest(registryManifest)));
     expect(created.status).toBe(201);
@@ -247,6 +280,8 @@ describe('skills routers', () => {
       resolveSkillStore: () => managedStore,
       withTransaction: async callback => callback(undefined as never),
       resolveRequestContext: () => STANDALONE_REQUEST_CONTEXT,
+      catalog: [],
+      readFiles: readFixture,
     });
 
     const created = await router.request('/', postInit(wrapManifest(registryManifest)));
@@ -299,6 +334,85 @@ describe('skills routers', () => {
     });
   });
 
+  describe('adding a skill from Settings checks its websites first', () => {
+    const news = {
+      type: 'git' as const,
+      name: 'news',
+      url: 'https://github.com/acme/news-skill',
+      ref: 'main',
+      description: 'Reads the news.',
+    };
+
+    it('lists the websites the skill sends requests to, and saves nothing', async () => {
+      const response = await settingsRouter.request('/check-websites', postInit({ url: news.url, ref: news.ref }));
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({
+        data: {
+          commit: FIXTURE_COMMIT,
+          websites: ['api.news-digest.info'],
+          makes_up_addresses: false,
+          can_send: false,
+        },
+      });
+      expect(await skillStore.listSkills({ tenant_id: 'default', names: ['news'] })).toEqual([]);
+    });
+
+    it('says plainly when the files cannot be read', async () => {
+      const response = await settingsRouter.request(
+        '/check-websites',
+        postInit({ url: 'https://github.com/acme/missing', ref: 'main' }),
+      );
+      expect(response.status).toBe(422);
+      expect(await response.json()).toEqual({
+        error: { message: expect.stringContaining('Check the address, folder and branch, then try again.') },
+      });
+    });
+
+    it('adds nothing unless the websites found are approved with it', async () => {
+      const without = await settingsRouter.request('/', postInit(wrapManifest(news)));
+      expect(without.status).toBe(409);
+      const wrong = await settingsRouter.request(
+        '/',
+        postInit({ manifest: news, approved_websites: ['api.news-digest.info', 'extra.example.org'] }),
+      );
+      expect(wrong.status).toBe(409);
+      const viaPut = await settingsRouter.request('/', putInit(wrapManifest(news)));
+      expect(viaPut.status).toBe(409);
+      expect(await skillStore.listSkills({ tenant_id: 'default', names: ['news'] })).toEqual([]);
+    });
+
+    it('stores the websites it found, never a list sent with the skill, and approves them with it', async () => {
+      const created = await settingsRouter.request(
+        '/',
+        postInit({
+          manifest: { ...news, network_hosts: ['anything.example.org'] },
+          approved_websites: ['api.news-digest.info'],
+        }),
+      );
+      expect(created.status).toBe(201);
+      const [record] = await skillStore.listSkills({ tenant_id: 'default', names: ['news'] });
+      expect(record?.manifest).toMatchObject({ network_hosts: ['api.news-digest.info'] });
+      expect(record?.network_approval).toEqual(['api.news-digest.info']);
+      await settingsRouter.request('/news', { method: 'DELETE' });
+    });
+
+    it('adds a starter skill at its pinned version as shipped, without reading it', async () => {
+      const starterRouter = createSkillsRouter({
+        resolveSkillStore: () => skillStore,
+        withTransaction: callback => db.transaction().execute(callback),
+        resolveRequestContext: () => STANDALONE_REQUEST_CONTEXT,
+        catalog: [{ ...news, name: 'news-starter', ref: FIXTURE_COMMIT }],
+        readFiles: () => Promise.reject(new Error('a starter is never read')),
+      });
+      const created = await starterRouter.request(
+        '/',
+        postInit(wrapManifest({ ...news, name: 'news-starter', ref: FIXTURE_COMMIT })),
+      );
+      expect(created.status).toBe(201);
+      await settingsRouter.request('/news-starter', { method: 'DELETE' });
+    });
+  });
+
   describe('network approval', () => {
     const tenX = {
       type: 'git' as const,
@@ -309,9 +423,9 @@ describe('skills routers', () => {
       network_hosts: ['github.com', 'api.github.com'],
     };
 
+    // Seeded straight into the store: these tests are about the approval routes, not about adding.
     beforeAll(async () => {
-      const created = await settingsRouter.request('/', putInit(wrapManifest(tenX)));
-      expect(created.status).toBe(200);
+      await skillStore.createSkill({ tenant_id: 'default', name: tenX.name, manifest: tenX });
     });
 
     it('GET shows the declared sites, no approval yet, and no send line for GitHub', async () => {
@@ -405,8 +519,7 @@ describe('skills routers', () => {
         description: 'Reads mail.',
         network_hosts: ['gmail.googleapis.com'],
       };
-      const created = await settingsRouter.request('/', putInit(wrapManifest(mailSkill)));
-      expect(created.status).toBe(200);
+      await skillStore.createSkill({ tenant_id: 'default', name: mailSkill.name, manifest: mailSkill });
       const response = await settingsRouter.request('/mail-reader/network-approval');
       expect(await response.json()).toEqual({
         data: {
