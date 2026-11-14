@@ -180,6 +180,8 @@ import { matchReplaceText } from './replaceTextDiagnostics';
 import type { ISkillMounter } from './skills/ISkillMounter';
 import { detectSkillUsedEvents } from './skills/skillEvents';
 import {
+  missingPackageNextStep,
+  skillFolderNamedInRunCode,
   skillScriptRealPathOperands,
   skillScriptRun,
   skillScriptStaysInFolder,
@@ -1629,7 +1631,7 @@ export const SANDBOX_RUN_REGISTERED_COMMAND_DESCRIPTION =
   'Run one host-confirmed repository build, test, or verification command by its stable command ID. The host owns the exact command, repository cwd, purpose, and timeout. Do not restate the shell command.';
 
 export const SANDBOX_RUN_SKILL_SCRIPT_DESCRIPTION =
-  "Run a Python or JavaScript script that ships with a skill turned on in this chat, from that skill's folder. Name the skill, the script's path inside it, and its arguments.";
+  "Run a Python or JavaScript script that ships with a skill turned on in this chat, from that skill's folder. Name the skill, the script's path inside it, and its arguments. The sandbox's packages are already installed: skip a skill's install steps and run the script.";
 
 export const SANDBOX_SUBMIT_IMPLEMENTATION_PLAN_DESCRIPTION =
   'Submit a typed implementation plan before editing a bound repository. This tool never edits or executes.';
@@ -2505,6 +2507,10 @@ export class Sandbox extends LocalToolMCP {
       params.name === SANDBOX_RUN_REGISTERED_COMMAND_TOOL_NAME && registeredCommand === undefined;
     const invalidSkillScript =
       params.name === SANDBOX_RUN_SKILL_SCRIPT_TOOL_NAME && this.skillScriptRunFor(params.arguments)?.status !== 'ok';
+    // Stamped as a refusal, not only a missing card, so the call is refused before dispatch even if the
+    // skill is turned off before the handler checks again.
+    const runCodeSkillFolderFailure =
+      params.name === SANDBOX_RUN_CODE_TOOL_NAME ? this.runCodeSkillFolderRefusal(params.arguments) : undefined;
     const planInput =
       params.name === SANDBOX_SUBMIT_IMPLEMENTATION_PLAN_TOOL_NAME
         ? sandboxImplementationPlanSchema.safeParse(params.arguments)
@@ -2719,6 +2725,7 @@ export class Sandbox extends LocalToolMCP {
       writeFileScopeFailure ||
       invalidRegisteredCommand ||
       invalidSkillScript ||
+      runCodeSkillFolderFailure !== undefined ||
       invalidImplementationPlan ||
       structuredEditPreconditionFailure !== undefined;
     // Legacy approval when Sentinel is not configured: the pre-Sentinel
@@ -2800,11 +2807,13 @@ export class Sandbox extends LocalToolMCP {
           }),
       ...(hostGitPushFailure !== undefined
         ? { pre_dispatch_failure: { kind: 'policy_blocked' as const, message: hostGitPushFailure } }
-        : sentinelStamp?.pre_dispatch_failure === undefined
-          ? structuredEditPreDispatchFailure === undefined
-            ? {}
-            : { pre_dispatch_failure: structuredEditPreDispatchFailure }
-          : { pre_dispatch_failure: sentinelStamp.pre_dispatch_failure }),
+        : runCodeSkillFolderFailure !== undefined
+          ? { pre_dispatch_failure: { kind: 'policy_blocked' as const, message: runCodeSkillFolderFailure } }
+          : sentinelStamp?.pre_dispatch_failure === undefined
+            ? structuredEditPreDispatchFailure === undefined
+              ? {}
+              : { pre_dispatch_failure: structuredEditPreDispatchFailure }
+            : { pre_dispatch_failure: sentinelStamp.pre_dispatch_failure }),
       // The first explicit install in a scope always asks, even when the person lets sandbox
       // work run without asking: without the card the allowance is never recorded, and the
       // install would fail inside the sandbox with no explanation. A call the host already
@@ -3153,6 +3162,25 @@ export class Sandbox extends LocalToolMCP {
       script: parsed.data.script,
       args: parsed.data.args ?? [],
     });
+  }
+
+  /**
+   * The refusal for a run_code call that names a skill's folder. run_code cannot see that folder, so
+   * the call could only fail, after a card; the skill's own action runs the script where it is.
+   */
+  private runCodeSkillFolderRefusal(argumentsValue: unknown): string | undefined {
+    const text = [stringToolArgument(argumentsValue, 'code'), stringToolArgument(argumentsValue, 'script_path')]
+      .filter(part => part !== undefined)
+      .join('\n');
+    const skill = skillFolderNamedInRunCode({
+      skillsDir: this.provider.getSkillsDir(this.promptSandboxId()),
+      skillNames: this.skillMounter?.skillNames() ?? [],
+      text,
+    });
+    return skill === undefined
+      ? undefined
+      : `run_code runs in an empty folder and cannot see the ${skill} skill's folder, so this did not run. ` +
+          `Run the skill's script with ${SANDBOX_RUN_SKILL_SCRIPT_TOOL_NAME} instead, and skip any install step in the skill's instructions.`;
   }
 
   private buildMcpServersEnvelope(): Record<string, SandboxMcpServerConfig> {
@@ -5558,6 +5586,10 @@ export class Sandbox extends LocalToolMCP {
     approvalDecision?: ApprovalDecision,
     context?: ToolInvocationContext,
   ): Promise<CallToolResponse> {
+    const skillFolderRefusal = this.runCodeSkillFolderRefusal(input);
+    if (skillFolderRefusal !== undefined) {
+      return hostRefusalResponse(skillFolderRefusal);
+    }
     const service = this.runCodeService;
     if (service === undefined) {
       return hostRefusalResponse(
@@ -6256,9 +6288,18 @@ export class Sandbox extends LocalToolMCP {
       skillsDir,
       skillNames: this.skillMounter?.skillNames() ?? [],
     });
+    const serialized = await this.decorateExecResult(result, rawId, execInput);
+    // A script that stopped on a missing package gets a plain next step, so the package is not installed another way.
+    const nextStep =
+      result.success && result.response.exitCode !== 0 ? missingPackageNextStep(result.response.result) : undefined;
     return {
       result: {
-        content: [{ type: 'text', text: this.execResultText(await this.decorateExecResult(result, rawId, execInput)) }],
+        content: [
+          {
+            type: 'text',
+            text: this.execResultText(nextStep === undefined ? serialized : { ...serialized, next_step: nextStep }),
+          },
+        ],
         isError: !isExecResultOk(result),
       },
       wasInitialized: undefined,
