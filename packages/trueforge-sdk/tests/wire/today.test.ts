@@ -24,7 +24,6 @@ describe("TodayClient", () => {
                         title: "title",
                     },
                 ],
-                carrying: 1,
                 due: [{ due_at: "due_at", reminder_id: "reminder_id", session_id: null, title: "title" }],
                 free_after: "free_after",
                 needs_ok: [
@@ -52,7 +51,6 @@ describe("TodayClient", () => {
                         title: "title",
                     },
                 ],
-                carrying: 1,
                 due: [
                     {
                         dueAt: "due_at",

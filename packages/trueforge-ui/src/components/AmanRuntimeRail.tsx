@@ -220,13 +220,6 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
   // The desk's Home read. A change in the waiting approvals is the rail's own sign that the
   // day changed, so it doubles as the read's refresh signal beside the two-minute poll.
   const today = useRailToday(sessionId === undefined ? deskApi : undefined, pendingApprovalIds.join(','));
-  // On Home the caption also says how much is being carried, once the day has been read.
-  const statusCaption =
-    statusLine === null
-      ? null
-      : sessionId === undefined && today !== null
-        ? `${statusLine} · Carrying ${String(today.carrying)}`
-        : statusLine;
   // Folded, the poster's tooltip is all that is left, so it still says a reply is running.
   const compactLabel = statusLine ?? WORKING_ON_IT_LABEL;
   const tone = statusToneOf({ status, activity, waitingOnPerson });
@@ -319,10 +312,10 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
           </section>
 
           <div className="aman-runtime-rail__status" data-tone={tone} aria-live="polite">
-            {statusCaption === null ? null : (
+            {statusLine === null ? null : (
               <>
                 <span className="aman-runtime-rail__status-dot" aria-hidden="true" />
-                <span>{statusCaption}</span>
+                <span>{statusLine}</span>
               </>
             )}
             {selfProbed && (status === 'offline' || status === 'degraded') && (

@@ -13674,11 +13674,6 @@
               "null"
             ]
           },
-          "carrying": {
-            "description": "How many schedules are switched on for the person.",
-            "minimum": 0,
-            "type": "integer"
-          },
           "due": {
             "description": "Reminders due today or overdue, earliest first.",
             "items": {
@@ -13711,7 +13706,6 @@
           "due",
           "needs_ok",
           "needs_ok_more",
-          "carrying",
           "as_of"
         ],
         "type": "object"

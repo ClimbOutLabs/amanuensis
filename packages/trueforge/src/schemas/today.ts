@@ -67,7 +67,6 @@ export const TodaySchema = z
       .describe(
         'True when more actions are waiting than the list shows: the scan has caps, and it says so when one cuts.',
       ),
-    carrying: z.number().int().nonnegative().describe('How many schedules are switched on for the person.'),
     as_of: z.string().describe('The server time this view was read at, as an ISO 8601 instant.'),
   })
   .openapi('Today');
