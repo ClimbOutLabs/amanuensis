@@ -78,6 +78,7 @@ These are the same pages Aman's **Help, I'm stuck** answers from.
 - [Reach me](../packages/trueforge/guide/topics/reach-me.md): Choose how Aman gets your attention.
 - [Text messages](../packages/trueforge/guide/topics/text-messages.md): Get a text when something needs you.
 - [Phone calls](../packages/trueforge/guide/topics/phone-calls.md): Let Aman phone you about urgent things.
+- [Telegram](../packages/trueforge/guide/topics/telegram.md): Talk to Aman from Telegram, and get its messages there.
 
 **Stay in control**
 
