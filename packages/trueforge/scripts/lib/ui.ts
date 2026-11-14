@@ -53,6 +53,8 @@ interface Symbols {
 interface UiState {
   /** A step panel is open; its lines get the panel's sides. */
   panel: boolean;
+  /** The stream the panel was opened on, so it closes and opens again there even when a question writes to stderr. */
+  panelTarget: Target;
   /** Questions closed the panel; the next other line opens it again. */
   panelResume: boolean;
   /** A blank line inside a panel waits for the next line, so a panel never ends on an empty row. */
@@ -243,6 +245,7 @@ export class Ui {
       inPrompt: false,
       summaryCode: COLOR.bold,
       panel: false,
+      panelTarget: 'out',
       panelResume: false,
       pendingBlank: false,
     };
@@ -259,6 +262,11 @@ export class Ui {
 
   get width(): number {
     return this.state.panel || this.framed ? this.fullWidth - 4 : this.fullWidth;
+  }
+
+  /** The same helpers writing to TARGET. */
+  private view(target: Target): Ui {
+    return target === this.target ? this : new Ui(this.options, target, this.state);
   }
 
   /** The same helpers writing to stderr, for errors and warnings. */
@@ -288,8 +296,9 @@ export class Ui {
       state.asking = false;
       if (state.panelResume) {
         state.panelResume = false;
-        this.gap();
-        this.panelOpen({ left: '', right: '' });
+        const home = this.view(state.panelTarget);
+        home.gap();
+        home.panelOpen({ left: '', right: '' });
       }
     }
     if (state.panel || this.framed) {
@@ -343,6 +352,7 @@ export class Ui {
     }
     this.raw(`${head}${this.style({ code: COLOR.dim, text: box.h.repeat(Math.max(0, fill)) })}${tail}`);
     this.state.panel = true;
+    this.state.panelTarget = this.target;
     this.state.lastBlank = true;
     this.state.pendingBlank = false;
   }
@@ -357,7 +367,8 @@ export class Ui {
     state.panel = false;
     state.pendingBlank = false;
     const { box } = this.symbols;
-    this.raw(this.style({ code: COLOR.dim, text: `${box.bl}${box.h.repeat(this.fullWidth - 2)}${box.br}` }));
+    const home = this.view(state.panelTarget);
+    home.raw(home.style({ code: COLOR.dim, text: `${box.bl}${box.h.repeat(this.fullWidth - 2)}${box.br}` }));
     state.lastBlank = false;
   }
 

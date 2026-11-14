@@ -24,6 +24,8 @@ UI_SUMMARY_CODE=1
 # UI_FULL is the width of the screen block; UI_WIDTH is what text may take, 4 columns less inside a panel.
 UI_FULL=72
 UI_PANEL=0
+# The stream the panel was opened on, so it closes and opens again there even when a question writes to stderr.
+UI_PANEL_FD=1
 UI_PANEL_RESUME=0
 UI_PENDING_BLANK=0
 # Set in a command this run starts while a panel is open (the doctor's summary, the sandbox setup), so its lines join
@@ -110,8 +112,8 @@ _ui_out() {
     UI_ASKING=0
     if [ "$UI_PANEL_RESUME" = 1 ]; then
       UI_PANEL_RESUME=0
-      _ui_gap
-      _ui_panel_open ""
+      UI_FD=$UI_PANEL_FD _ui_gap
+      UI_FD=$UI_PANEL_FD _ui_panel_open ""
     fi
   fi
   if [ "$UI_PANEL" = 1 ] || [ "$UI_FRAMED" = 1 ]; then
@@ -157,6 +159,7 @@ _ui_panel_open() { # left [right]
   if [ "$fill" -lt 0 ]; then fill=0; fi
   _ui_raw "$head$(_ui_s 2 "$(_ui_repeat "$S_H" "$fill")")$tail"
   UI_PANEL=1
+  UI_PANEL_FD=$UI_FD
   UI_WIDTH=$((UI_FULL - 4))
   UI_LAST_BLANK=1
   UI_PENDING_BLANK=0
@@ -171,7 +174,7 @@ _ui_panel_close() {
   UI_PENDING_BLANK=0
   UI_WIDTH=$UI_FULL
   unset AMAN_UI_FRAMED
-  _ui_raw "$(_ui_s 2 "$S_BL$(_ui_repeat "$S_H" $((UI_FULL - 2)))$S_BR")"
+  UI_FD=$UI_PANEL_FD _ui_raw "$(UI_FD=$UI_PANEL_FD _ui_s 2 "$S_BL$(_ui_repeat "$S_H" $((UI_FULL - 2)))$S_BR")"
   UI_LAST_BLANK=0
 }
 
