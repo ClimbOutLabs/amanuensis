@@ -1,12 +1,12 @@
 'use client';
 
-import type { FC } from 'react';
-
 import {
   SKILL_SITES_DATA_WARNING,
   SKILL_SITES_SEND_WARNING,
-  type SkillWebsiteCheck,
-} from '../../server/skillNetworkApproval.js';
+} from '@truefoundry/trueforge-core/core/permissions/skillSitesCopy';
+import type { FC } from 'react';
+
+import type { SkillWebsiteCheck } from '../../server/skillNetworkApproval.js';
 
 /**
  * The websites a skill sends requests to, shown before it is added. Adding it allows exactly
