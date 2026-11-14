@@ -3,56 +3,171 @@
 .browser-live {
   min-height: 100dvh;
   box-sizing: border-box;
-  padding: 1rem;
   background: var(--primary-bg);
   color: var(--text-primary);
   font-family: var(--font-agent-ui, ui-sans-serif, system-ui, sans-serif);
 }
 
-.browser-live-body {
-  max-width: 60rem;
-  margin: 0 auto;
+/* One compact bar on top, so the page itself gets the room. */
+.browser-live-bar {
+  position: sticky;
+  top: 0;
+  z-index: 1;
   display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  padding: 0.5rem 1rem;
+  border-bottom: 0.0625rem solid var(--border);
+  background: var(--card-bg);
+}
+
+.browser-live-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: none;
 }
 
 .browser-live-title {
   margin: 0;
-  font-size: 1.375rem;
-  font-weight: 500;
+  font-size: var(--text-base, 0.9375rem);
+  font-weight: 600;
   line-height: 1.3;
+  white-space: nowrap;
+}
+
+.browser-live-dot {
+  width: 0.625rem;
+  height: 0.625rem;
+  border-radius: 50%;
+  background: var(--text-muted);
+  flex: none;
+}
+
+.browser-live-dot-on {
+  background: var(--success-bg);
+  animation: browser-live-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes browser-live-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .browser-live-dot-on {
+    animation: none;
+  }
+}
+
+/* The open tabs scroll sideways in one line rather than pushing the page down. */
+.browser-live-tabs {
+  display: flex;
+  gap: 0.375rem;
+  flex: 1 1 12rem;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.browser-live-chip {
+  flex: none;
+  max-width: 16rem;
+  min-height: 2rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: 0.0625rem solid var(--border);
+  border-radius: 999rem;
+  padding: 0 0.875rem;
+  background: var(--secondary-button-bg);
+  color: var(--secondary-button-text);
+  font: inherit;
+  font-size: var(--text-sm, 0.8125rem);
+  cursor: pointer;
+}
+
+.browser-live-chip:hover {
+  background: var(--secondary-button-hover);
+}
+
+.browser-live-chip[aria-pressed='true'] {
+  border-color: var(--text-primary);
+  background: var(--surface-elevated, var(--card-bg));
+  font-weight: 600;
+}
+
+.browser-live-chip-quiet {
+  border-style: dashed;
+  color: var(--text-secondary);
+}
+
+.browser-live-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-left: auto;
+  flex: none;
+}
+
+.browser-live-body {
+  max-width: 100rem;
+  margin: 0 auto;
+  padding: 0.75rem 1rem 1.5rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.625rem;
+}
+
+.browser-live-body > * {
+  width: 100%;
+  max-width: 64rem;
+  box-sizing: border-box;
 }
 
 .browser-live-text {
   margin: 0;
-  font-size: 0.9375rem;
+  font-size: var(--text-sm, 0.8125rem);
   line-height: 1.5;
   color: var(--text-secondary);
 }
 
 .browser-live-note {
   margin: 0;
-  font-size: 0.9375rem;
+  border-radius: var(--radius, 0.65rem);
+  padding: 0.5rem 0.75rem;
+  background: var(--card-bg);
+  border: 0.0625rem solid var(--border);
+  font-size: var(--text-sm, 0.8125rem);
   line-height: 1.5;
 }
 
-.browser-live-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  align-items: center;
+.browser-live-note-driving {
+  border-color: var(--gold-line);
+  background: var(--gold-soft);
+  color: var(--gold-ink);
 }
 
 .browser-live-button {
-  min-height: 2.5rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.25rem;
+  box-sizing: border-box;
   border: 0.0625rem solid var(--border);
   border-radius: 0.625rem;
-  padding: 0 1rem;
+  padding: 0 0.875rem;
   background: var(--secondary-button-bg);
   color: var(--secondary-button-text);
   font: inherit;
-  font-size: 0.9375rem;
+  font-size: var(--text-sm, 0.8125rem);
+  white-space: nowrap;
   cursor: pointer;
 }
 
@@ -62,36 +177,55 @@
 
 .browser-live-button[aria-pressed='true'] {
   font-weight: 600;
-  border-color: var(--text-primary);
+  border-color: var(--gold-line);
+  background: var(--gold-soft);
+  color: var(--gold-ink);
 }
 
 .browser-live-button-primary {
   border-color: transparent;
   background: var(--primary-button-bg);
   color: var(--primary-button-text);
+  font-weight: 600;
 }
 
 .browser-live-button-primary:hover {
   background: var(--primary-button-hover);
 }
 
+.browser-live-button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
 .browser-live-button:focus-visible,
+.browser-live-chip:focus-visible,
 .browser-live-frame:focus-visible,
-.browser-live-input:focus-visible {
+.browser-live-input:focus-visible,
+.browser-live-file:focus-within,
+.browser-live-panel-title:focus-visible {
   outline: 0.125rem solid var(--focus-ring);
   outline-offset: 0.125rem;
 }
 
+/* The picture keeps the page's own shape; its width is set from the window's height too (see the page). */
 .browser-live-frame {
   display: block;
-  border-radius: 0.375rem;
+  border-radius: var(--radius, 0.65rem);
+  box-shadow: var(--shadow-raise, none);
+}
+
+.browser-live-body > .browser-live-frame {
+  max-width: 100%;
 }
 
 .browser-live-frame img {
   display: block;
   width: 100%;
+  height: auto;
+  box-sizing: border-box;
   border: 0.0625rem solid var(--border);
-  border-radius: 0.375rem;
+  border-radius: var(--radius, 0.65rem);
   cursor: pointer;
 }
 
@@ -99,12 +233,27 @@
 .browser-live-frame-takeover img {
   touch-action: none;
   user-select: none;
+  border-color: var(--gold-line);
+}
+
+.browser-live-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.browser-live-type {
+  display: flex;
+  gap: 0.5rem;
+  flex: 1 1 16rem;
+  min-width: 0;
 }
 
 .browser-live-input {
   flex: 1;
   min-width: 0;
-  min-height: 2.5rem;
+  min-height: 2.25rem;
   box-sizing: border-box;
   border: 0.0625rem solid var(--input-border);
   border-radius: 0.625rem;
@@ -115,20 +264,55 @@
   font-size: 1rem;
 }
 
+/* The file picker is the whole button; the browser's own picker control stays out of sight. */
+.browser-live-file {
+  position: relative;
+  overflow: hidden;
+}
+
+.browser-live-file input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
 .browser-live-hint {
   margin: 0;
-  font-size: 0.8125rem;
+  font-size: var(--text-xs, 0.75rem);
+  line-height: 1.5;
   color: var(--text-secondary);
+}
+
+.browser-live-panel {
+  border: 0.0625rem solid var(--border);
+  border-radius: var(--radius, 0.65rem);
+  background: var(--card-bg);
+}
+
+.browser-live-panel-title {
+  padding: 0.625rem 0.875rem;
+  font-size: var(--text-sm, 0.8125rem);
+  font-weight: 600;
+  cursor: pointer;
 }
 
 .browser-live-sign-in {
   margin: 0;
+  padding: 0 0.875rem 0.875rem;
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
 }
 
-.browser-live-button:disabled {
-  cursor: default;
-  opacity: 0.6;
+/* On a phone the bar stacks: name and actions on one line, the tabs on the next. */
+@media (max-width: 40rem) {
+  .browser-live-tabs {
+    order: 3;
+    flex-basis: 100%;
+  }
+
+  .browser-live-type {
+    flex-basis: 100%;
+  }
 }
