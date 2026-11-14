@@ -30,7 +30,14 @@ function servicesWithAllowlist(binDir: string): SentinelServices {
   const shell_allowlist: ShellAllowlistConfig = {
     pinned_path: binDir,
     commands: {
-      ls: { args: ['-l'], operands: 'workspace_relative', offline_ok: true, script: null, subcommands: null },
+      ls: {
+        args: ['-l'],
+        operands: 'workspace_relative',
+        offline_ok: true,
+        script: null,
+        count_flag: false,
+        subcommands: null,
+      },
     },
   };
   const services = defaultSentinelServices({ pinned_path: binDir });
