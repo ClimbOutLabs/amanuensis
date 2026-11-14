@@ -75,7 +75,9 @@ You can also point at the chat in the list, click the three dots next to it, the
 
 The **Move to folder** box can also make a new folder on the spot. To take a chat out of its folder, choose **No folder**.
 
-To rename or remove a folder, point at it and click its three dots. Change the name and click **Rename**, or click **Delete folder**. Deleting a folder keeps every chat that was in it.
+To rename or remove a folder, point at it and click its three dots. On a phone the three dots always show. Change the name and click **Rename**, or click **Delete folder**. Deleting a folder keeps every chat that was in it.
+
+On a computer, the number next to a folder is how many chats are in it.
 
 ## Delete a chat
 
