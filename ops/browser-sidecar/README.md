@@ -184,3 +184,11 @@ inside it, with the same sandbox settings Compose uses: the URL safety rules, th
 snapshot text builder, and fixture pages in a real browser that go through the real egress proxy, with
 only DNS and the final TCP connect stood in for. `npm test` here runs the same tests, and skips the
 browser ones where no Chromium for this Playwright release is installed.
+
+`pnpm test:cobrowse` runs the whole live-view check in one go, with made-up local sites only. It runs:
+
+- the sidecar tests above, which need Docker
+- the live browser page in a real Chromium against a stand-in server
+- the reply loop tests that keep browser steps from being skipped as already done
+
+It exits 0 only when every part passes.
