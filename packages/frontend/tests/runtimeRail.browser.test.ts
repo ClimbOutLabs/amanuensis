@@ -49,7 +49,10 @@ test(
       await server.listen();
       const address = server.httpServer?.address();
       if (address == null || typeof address === 'string') throw new Error('Vite did not bind a TCP port');
-      browser = await chromium.launch({ executablePath: findChromiumExecutable(), headless: true });
+      browser = await chromium.launch({
+        executablePath: findChromiumExecutable(chromium.executablePath()),
+        headless: true,
+      });
       for (const theme of ['light', 'dark'] as const) {
         const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
         await page.goto(`http://127.0.0.1:${address.port}/tests/fixtures/runtime-rail.fixture.html?theme=${theme}`, {
@@ -102,6 +105,33 @@ test(
           `Activity comes before Rules: ${folds.join(', ')}`,
         );
         assert.equal(await panel.locator('[data-section="memory"]').count(), 0, 'no Memory section');
+
+        // While a page is open, the live browser link shows with a dot that pulses and can be seen.
+        const live = panel.getByRole('link', { name: /Watch Live or Take Control/ });
+        assert.equal(await live.getAttribute('href'), '/browser-live?tab=chat-1');
+        const dot = await live.locator('.aman-runtime-rail__live-dot').evaluate(el => {
+          const style = getComputedStyle(el);
+          const box = el.getBoundingClientRect();
+          return { animation: style.animationName, colour: style.backgroundColor, width: box.width };
+        });
+        assert.notEqual(dot.animation, 'none', 'the live dot pulses');
+        assert.ok(dot.width >= 6, `the live dot can be seen (${String(dot.width)}px wide)`);
+        assert.notEqual(dot.colour, 'rgba(0, 0, 0, 0)', 'the live dot has a colour');
+        // The card looks clickable: it is raised, lifts further under the pointer, and carries an open arrow.
+        const restingShadow = await live.evaluate(el => getComputedStyle(el).boxShadow);
+        assert.notEqual(restingShadow, 'none', 'the live card has a shadow');
+        assert.equal(await live.locator('.aman-runtime-rail__live-open').count(), 1, 'the live card has an open arrow');
+        await live.hover();
+        await page.waitForTimeout(250);
+        await page.screenshot({
+          path: await featureShotPath({ surface: 'screen:chat-layout', step: `status-panel-live-hover-${theme}` }),
+        });
+        assert.notEqual(
+          await live.evaluate(el => getComputedStyle(el).boxShadow),
+          restingShadow,
+          'the live card lifts under the pointer',
+        );
+        await page.mouse.move(0, 0);
         assert.equal(await panel.locator('[data-section="activity"] li').count(), 5, 'at most five actions');
         assert.equal(await panel.getByText(/·\s*\d/).count(), 0, 'no counts after an action');
 

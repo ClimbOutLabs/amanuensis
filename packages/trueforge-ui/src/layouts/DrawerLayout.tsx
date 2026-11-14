@@ -5,6 +5,7 @@ import { lazy, Suspense, useRef } from 'react';
 import { useAui } from '../assistant-ui.js';
 import { AgentDetailsToggleButton } from '../atoms/AgentDetailsToggleButton.js';
 import { ChatHeaderMenu } from '../atoms/ChatHeaderMenu.js';
+import { LightDarkToggleButton } from '../atoms/LightDarkToggleButton.js';
 import { NamedAgentHeaderLabel } from '../atoms/NamedAgentHeaderLabel.js';
 import { PageHeader } from '../atoms/PageHeader.js';
 import { ShellActions } from '../atoms/ShellActions.js';
@@ -75,7 +76,7 @@ export function DrawerLayout({ className }: { className?: string }) {
       {showAgentConfig ? (
         <aside
           role="dialog"
-          aria-label="Agent Config"
+          aria-label="Agent setup"
           className="absolute inset-y-0 left-0 z-20 w-full max-w-sm border-r border-border shadow-xl md:static md:z-auto md:w-88 md:max-w-none md:shrink-0 md:shadow-none"
         >
           <AgentConfigDrawerContainer showClose={isMobile} />
@@ -110,6 +111,7 @@ export function DrawerLayout({ className }: { className?: string }) {
             <>
               {!overlayOpen ? (
                 <>
+                  <LightDarkToggleButton />
                   <AgentDetailsToggleButton />
                   <SaveAgentButton />
                 </>

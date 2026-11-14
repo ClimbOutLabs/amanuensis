@@ -6,9 +6,12 @@ import {
   type NoticingKind,
   type PushDevice,
   type ReachApi,
+  type ReachChannelState,
   type ReachSender,
   type ReachSettings,
   type ReachView,
+  type TextsApi,
+  type TextStatus,
 } from '@truefoundry/trueforge-ui';
 
 import { apiPath, UI_BASE_PATH } from './publicPath';
@@ -103,9 +106,15 @@ const isNumber = (value: unknown): value is number => typeof value === 'number';
 const isBoolean = (value: unknown): value is boolean => typeof value === 'boolean';
 const isArray = (value: unknown): value is unknown[] => Array.isArray(value);
 
-function parseChannel(value: unknown): { available: boolean; note: string } {
+const isStringOrNull = (value: unknown): value is string | null => value === null || typeof value === 'string';
+
+function parseChannel(value: unknown): ReachChannelState {
   const channel = required(value, isRecord);
-  return { available: required(channel.available, isBoolean), note: required(channel.note, isString) };
+  return {
+    available: required(channel.available, isBoolean),
+    note: required(channel.note, isString),
+    problem: required(channel.problem, isStringOrNull),
+  };
 }
 
 const isSenderSource = (value: unknown): value is ReachSender['source'] => value === 'settings' || value === 'memory';
@@ -228,6 +237,57 @@ function settingsBody(settings: ReachSettings): unknown {
   };
 }
 
+function parseTextStatus(body: unknown): TextStatus {
+  const data = isRecord(body) ? body.data : undefined;
+  if (!isRecord(data)) {
+    throw new Error('Your number for texts could not be read. Reload the page.');
+  }
+  return {
+    phone: typeof data.phone === 'string' ? data.phone : null,
+    confirmed: data.confirmed === true,
+    mode: data.mode === 'full' ? 'full' : 'private',
+    optedOut: data.opted_out === true,
+    codePending: data.code_pending === true,
+    pendingPhone: typeof data.pending_phone === 'string' ? data.pending_phone : null,
+    privatePreview: typeof data.private_preview === 'string' ? data.private_preview : '',
+    words: Array.isArray(data.words) ? data.words.filter((word): word is string => typeof word === 'string') : [],
+  };
+}
+
+function createTextsApi(fetcher: typeof fetch): TextsApi {
+  const url = () => apiPath(`${REACH_URL}/texts`);
+  return {
+    async status() {
+      return parseTextStatus(await readBody(await fetcher(url())));
+    },
+    async sendCode(phone) {
+      return parseTextStatus(await readBody(await fetcher(`${url()}/code`, json({ phone }))));
+    },
+    async confirm(code) {
+      return parseTextStatus(await readBody(await fetcher(`${url()}/confirm`, json({ code }))));
+    },
+    async setMode(mode) {
+      const response = await fetcher(url(), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode }),
+      });
+      return parseTextStatus(await readBody(response));
+    },
+    async addWord(word) {
+      return parseTextStatus(await readBody(await fetcher(`${url()}/words`, json({ word }))));
+    },
+    async removeWord(word) {
+      return parseTextStatus(
+        await readBody(await fetcher(`${url()}/words/${encodeURIComponent(word)}`, json({}, 'DELETE'))),
+      );
+    },
+    async remove() {
+      await readBody(await fetcher(url(), json({}, 'DELETE')));
+    },
+  };
+}
+
 function createReachApi(fetcher: typeof fetch): ReachApi {
   return {
     async get() {
@@ -257,6 +317,7 @@ function createReachApi(fetcher: typeof fetch): ReachApi {
       const data = isRecord(body) ? body.data : undefined;
       return { devicesReached: isRecord(data) && typeof data.devices_reached === 'number' ? data.devices_reached : 0 };
     },
+    texts: createTextsApi(fetcher),
   };
 }
 

@@ -14,6 +14,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import winston from 'winston';
 import { discardedModelUsage } from '../../../fixtures/discardedModelUsage';
+import { inMemoryGlobalSettingsStore } from '../../../fixtures/inMemoryGlobalSettingsStore';
 import { uncappedTokenFactoryBudget } from '../../../fixtures/uncappedTokenFactoryBudget';
 
 jest.mock('../../../../src/runtime/memory/memorySummarize', () => {
@@ -24,10 +25,10 @@ jest.mock('../../../../src/runtime/memory/memorySummarize', () => {
 });
 
 import type { IModelProviderStore } from '../../../../src/db/modelProviderStore';
-import { HindsightClient } from '../../../../src/runtime/memory/hindsightClient';
 import { MarkdownMemoryClient } from '../../../../src/runtime/memory/markdownMemoryClient';
 import { submitRetain } from '../../../../src/runtime/memory/memoryRetain';
 import { summarizeTurnContent } from '../../../../src/runtime/memory/memorySummarize';
+import { QuietMemoryClient } from '../../../fixtures/memory/quietMemoryClient';
 
 const mockSummarize = jest.mocked(summarizeTurnContent);
 
@@ -38,11 +39,13 @@ function makeLogger() {
 /** Minimal fake; the mocked summarizeTurnContent never dereferences the store. */
 function fakeModelProviderStore(): IModelProviderStore {
   return {
+    managedElsewhere: false,
     listProviders: jest.fn(),
     getProvider: jest.fn(),
     getProviderForUpdate: jest.fn(),
     createProvider: jest.fn(),
     upsertProvider: jest.fn(),
+    recordProviderCheck: jest.fn(async () => undefined),
     listModels: jest.fn(),
     deleteProvider: jest.fn(),
   };
@@ -54,6 +57,7 @@ function summarizeContext() {
     modelProviderStore: fakeModelProviderStore(),
     summarizationModelFqn: 'local/slow-model',
     tokenFactoryBudget: uncappedTokenFactoryBudget,
+    globalSettingsStore: inMemoryGlobalSettingsStore(),
     modelUsage: discardedModelUsage,
   };
 }
@@ -89,6 +93,7 @@ describe('submitRetain summary-pending marker', () => {
       session: { is_incognito: false },
       client: zaraClient,
       sessionId: 's1',
+      origin: 'user_stated',
       turnId: 't1',
       userText: 'Please remember that my test robot is named Bleep-Bloop.',
       assistantText: 'Got it, Bleep-Bloop.',
@@ -102,8 +107,8 @@ describe('submitRetain summary-pending marker', () => {
     expect(afterFailure.ok && afterFailure.entries).toEqual([]);
     // The failure is not silent: Zara's vault is marked as owed a summary, and no
     // other vault is marked.
-    expect(await reader.summaryPending({ namespace: 'persona:Zara' })).toBe(true);
-    expect(await reader.summaryPending({ namespace: '' })).toBe(false);
+    expect(await reader.summaryPendingSince({ namespace: 'persona:Zara' })).toEqual(expect.any(String));
+    expect(await reader.summaryPendingSince({ namespace: '' })).toBeUndefined();
 
     // The next chat with Zara runs the summary job again; this time it succeeds, the
     // summary is stored, and the mark clears.
@@ -112,6 +117,7 @@ describe('submitRetain summary-pending marker', () => {
       session: { is_incognito: false },
       client: zaraClient,
       sessionId: 's1',
+      origin: 'user_stated',
       turnId: 't2',
       userText: 'Please remember that my test robot is named Bleep-Bloop.',
       assistantText: 'Got it, Bleep-Bloop.',
@@ -126,7 +132,7 @@ describe('submitRetain summary-pending marker', () => {
     if (afterRetry.ok) {
       expect(afterRetry.entries.some(entry => entry.text.includes('The test robot is named Bleep-Bloop.'))).toBe(true);
     }
-    expect(await reader.summaryPending({ namespace: 'persona:Zara' })).toBe(false);
+    expect(await reader.summaryPendingSince({ namespace: 'persona:Zara' })).toBeUndefined();
   });
 
   it('marks the vault when no summary model is set, because the turn could not be saved', async () => {
@@ -136,6 +142,7 @@ describe('submitRetain summary-pending marker', () => {
       session: { is_incognito: false },
       client: zaraClient,
       sessionId: 's1',
+      origin: 'user_stated',
       turnId: 't1',
       userText: 'Please remember that my robot is named Bleep-Bloop.',
       assistantText: 'Got it.',
@@ -144,7 +151,7 @@ describe('submitRetain summary-pending marker', () => {
       summarize: summarizeContext(),
     });
 
-    expect(await reader.summaryPending({ namespace: 'persona:Zara' })).toBe(true);
+    expect(await reader.summaryPendingSince({ namespace: 'persona:Zara' })).toEqual(expect.any(String));
     const listed = await reader.listEntries({ namespace: 'persona:Zara', timeoutMs: 5_000 });
     expect(listed.ok && listed.entries).toEqual([]);
   });
@@ -156,6 +163,7 @@ describe('submitRetain summary-pending marker', () => {
       session: { is_incognito: false },
       client: zaraClient,
       sessionId: 's1',
+      origin: 'user_stated',
       turnId: 't1',
       userText: 'A very long story.',
       assistantText: 'A very long answer.',
@@ -164,16 +172,11 @@ describe('submitRetain summary-pending marker', () => {
       summarize: summarizeContext(),
     });
 
-    expect(await reader.summaryPending({ namespace: 'persona:Zara' })).toBe(false);
+    expect(await reader.summaryPendingSince({ namespace: 'persona:Zara' })).toBeUndefined();
   });
 
   it('stores nothing, and does not fail, on a client without summary tracking when a summary fails', async () => {
-    const client = new HindsightClient({
-      apiBase: 'https://hindsight.test.example',
-      bank: 'aman',
-      headers: {},
-      fetchImpl: () => Promise.reject(new Error('summary pending tests must not reach the network')),
-    });
+    const client = new QuietMemoryClient();
     const retain = jest.spyOn(client, 'retain').mockResolvedValue({ ok: true });
     mockSummarize.mockResolvedValue({ status: 'failed', reason: 'boom', fallback: 'model_failed' });
 
@@ -181,6 +184,7 @@ describe('submitRetain summary-pending marker', () => {
       session: { is_incognito: false },
       client,
       sessionId: 's1',
+      origin: 'user_stated',
       turnId: 't1',
       userText: 'Please remember that my test robot is named Bleep-Bloop.',
       assistantText: 'Got it, Bleep-Bloop.',

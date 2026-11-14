@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 /**
- * Guards the B2 ticket, row and reward classes in styles.css. Colours there
+ * Guards the B2 approval card, row and reward classes in styles.css. Colours there
  * are hex-then-oklch pairs, and the new section sizes everything in rem.
  */
 describe('B2 look styles', () => {
@@ -12,13 +12,13 @@ describe('B2 look styles', () => {
   const css = readFileSync(stylesPath, 'utf8');
   const b2Section = css.slice(css.indexOf('B2 look: time-of-day paper'));
 
-  it('defines every ticket, row and brief card class', () => {
+  it('defines every approval card, row and brief card class', () => {
     for (const selector of [
-      '.aui-ticket {',
-      '.aui-ticket--stub {',
-      '.aui-ticket--punch::before {',
-      '.aui-ticket--selected {',
-      '.aui-ticket__stub {',
+      '.aui-approval-card {',
+      '.aui-approval-card--selected {',
+      '.aui-approval-card--answered {',
+      '.aui-approval-card__facts {',
+      '.aui-approval-card__actions {',
       '.aui-row {',
       '.aui-row--2 {',
       '.aui-brief-card {',
@@ -32,7 +32,7 @@ describe('B2 look styles', () => {
   });
 
   it('defines the motion keyframes and a reduced-motion block', () => {
-    for (const name of ['aui-settle', 'aui-press', 'aui-pulse', 'aui-tear', 'aui-fleck']) {
+    for (const name of ['aui-settle', 'aui-press', 'aui-pulse', 'aui-fleck']) {
       expect(b2Section).toContain(`@keyframes ${name}`);
     }
     expect(b2Section).toContain('@media (prefers-reduced-motion: reduce)');

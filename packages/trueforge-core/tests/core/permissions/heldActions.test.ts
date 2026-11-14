@@ -1,6 +1,11 @@
 import type { InternalEnrichedAssistantMessage, InternalToolCallInfo } from '../../../src/core/llm/LLMTypes';
 import { InMemoryApprovalTokenStore } from '../../../src/core/permissions/approvalTokens';
-import { checkHeldReplay, HELD_ACTION_CAP, holdApprovalCalls } from '../../../src/core/permissions/heldActions';
+import {
+  checkHeldReplay,
+  CLICK_AFTER_HELD_EDIT_MESSAGE,
+  HELD_ACTION_CAP,
+  holdApprovalCalls,
+} from '../../../src/core/permissions/heldActions';
 import type { Tier3Card } from '../../../src/core/permissions/tier';
 
 const SCOPE = { tenant_id: 't1', created_by: 'u1' };
@@ -33,6 +38,7 @@ function message(infos: InternalToolCallInfo[]): InternalEnrichedAssistantMessag
 function card(overrides: Partial<Tier3Card> = {}): Tier3Card {
   return {
     plain_what: 'Send a note to Ana.',
+    copy: null,
     plain_why: null,
     cannot_be_undone: null,
     why_asked_again: null,
@@ -52,6 +58,7 @@ describe('holdApprovalCalls', () => {
     const { message: held, refused } = holdApprovalCalls({
       message: message([info()]),
       alreadyHeld: 0,
+      browserEditWaiting: false,
       isSubAgent: false,
     });
     const [call] = held.tool_calls ?? [];
@@ -67,13 +74,20 @@ describe('holdApprovalCalls', () => {
       info({ is_thread_creation: true }),
       info({ is_approval_required: false, pre_dispatch_failure: { kind: 'policy_blocked', message: 'Auto-denied.' } }),
     ]);
-    expect(holdApprovalCalls({ message: original, alreadyHeld: 0, isSubAgent: false }).message).toBe(original);
+    expect(
+      holdApprovalCalls({ message: original, alreadyHeld: 0, browserEditWaiting: false, isSubAgent: false }).message,
+    ).toBe(original);
   });
 
   it('refuses what it cannot hold past the cap, counting what the chat already holds, and says so', () => {
     const asks = Array.from({ length: 3 }, (_, index) => info({ original_tool_name: `tool_${String(index)}` }));
     const calls = message(asks);
-    const result = holdApprovalCalls({ message: calls, alreadyHeld: HELD_ACTION_CAP - 1, isSubAgent: false });
+    const result = holdApprovalCalls({
+      message: calls,
+      alreadyHeld: HELD_ACTION_CAP - 1,
+      browserEditWaiting: false,
+      isSubAgent: false,
+    });
     const infos = (result.message.tool_calls ?? []).map(call => call.tool_info);
     expect(infos.filter(candidate => candidate.held_for_owner !== undefined)).toHaveLength(1);
     expect(infos.filter(candidate => candidate.pre_dispatch_failure?.kind === 'policy_blocked')).toHaveLength(2);
@@ -83,7 +97,12 @@ describe('holdApprovalCalls', () => {
   });
 
   it('refuses a helper agent call because the main chat cannot replay it', () => {
-    const result = holdApprovalCalls({ message: message([info()]), alreadyHeld: 0, isSubAgent: true });
+    const result = holdApprovalCalls({
+      message: message([info()]),
+      alreadyHeld: 0,
+      browserEditWaiting: false,
+      isSubAgent: true,
+    });
     const [call] = result.message.tool_calls ?? [];
     expect(call?.tool_info.held_for_owner).toBeUndefined();
     expect(call?.tool_info.pre_dispatch_failure?.message).toContain('helper agent');
@@ -94,6 +113,7 @@ describe('holdApprovalCalls', () => {
     const result = holdApprovalCalls({
       message: message([info(), info()]),
       alreadyHeld: HELD_ACTION_CAP - 1,
+      browserEditWaiting: false,
       isSubAgent: false,
     });
     const [first, second] = (result.message.tool_calls ?? []).map(call => call.tool_info);
@@ -101,6 +121,37 @@ describe('holdApprovalCalls', () => {
     expect(second?.held_for_owner?.duplicate).toBe(true);
     expect(second?.pre_dispatch_failure).toBeUndefined();
     expect(result.refused).toEqual([]);
+  });
+
+  it('does not save a click after held typing, and tells the model to click again once it is approved', () => {
+    const typing = info({ original_tool_name: 'browser_type' });
+    const click = info({ original_tool_name: 'browser_click' });
+    for (const [infos, waiting] of [
+      [[typing, click], false],
+      [[click], true],
+    ] as const) {
+      const result = holdApprovalCalls({
+        message: message([...infos]),
+        alreadyHeld: 0,
+        browserEditWaiting: waiting,
+        isSubAgent: false,
+      });
+      const last = result.message.tool_calls?.at(-1)?.tool_info;
+      expect(last?.held_for_owner).toBeUndefined();
+      expect(last?.is_approval_required).toBe(false);
+      expect(last?.pre_dispatch_failure?.message).toBe(CLICK_AFTER_HELD_EDIT_MESSAGE);
+      expect(result.refused).toEqual([]);
+    }
+  });
+
+  it('still saves a click when no browser typing is waiting', () => {
+    const result = holdApprovalCalls({
+      message: message([info({ original_tool_name: 'browser_click' })]),
+      alreadyHeld: 0,
+      browserEditWaiting: false,
+      isSubAgent: false,
+    });
+    expect(result.message.tool_calls?.[0]?.tool_info.held_for_owner).toBeDefined();
   });
 });
 
@@ -138,6 +189,54 @@ describe('checkHeldReplay', () => {
     await expect(checkHeldReplay({ held: heldInfo, fresh, tokens, scope: SCOPE })).resolves.toEqual({
       ok: true,
       approval_token_id: heldToken.token_id,
+    });
+  });
+
+  describe('the page element a held browser action was shown with', () => {
+    const element = (accessible_name: string) => ({
+      site: 'stream.example',
+      accessible_name,
+      role: 'button',
+      is_form_submit: false,
+      form_values: {},
+      link_url: null,
+    });
+
+    it('runs when the element reads the same as when it was held', async () => {
+      const { tokens, heldToken, freshToken, heldInfo } = await held();
+      const fresh = info({
+        approval_token_id: freshToken.token_id,
+        tier3_card: card(),
+        browser_element: element('Keep my plan'),
+      });
+      await expect(
+        checkHeldReplay({
+          held: { ...heldInfo, browser_element: element('Keep my plan') },
+          fresh,
+          tokens,
+          scope: SCOPE,
+        }),
+      ).resolves.toEqual({ ok: true, approval_token_id: heldToken.token_id });
+    });
+
+    it.each([
+      ['now carries another label', element('Cancel membership')],
+      ['can no longer be read', undefined],
+    ])('refuses the replay when the element %s', async (_name, now) => {
+      const { tokens, freshToken, heldInfo } = await held();
+      const fresh = info({
+        approval_token_id: freshToken.token_id,
+        tier3_card: card(),
+        ...(now === undefined ? {} : { browser_element: now }),
+      });
+      await expect(
+        checkHeldReplay({
+          held: { ...heldInfo, browser_element: element('Keep my plan') },
+          fresh,
+          tokens,
+          scope: SCOPE,
+        }),
+      ).resolves.toEqual({ ok: false, reason: 'changed' });
     });
   });
 
@@ -276,6 +375,7 @@ describe('checkHeldReplay', () => {
     bcc: [],
     subject: 'Lunch on Friday',
     body: 'Are you free at one?',
+    check_code: null,
     replaces: null,
     reply_in_thread: null,
     reply_to: null,

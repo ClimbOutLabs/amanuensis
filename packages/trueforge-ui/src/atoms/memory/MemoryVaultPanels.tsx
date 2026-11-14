@@ -8,6 +8,7 @@ import { Spinner } from '@/atoms/primitives/Spinner.js';
 import { Icon } from '@/icons/Icon.js';
 import { useAssistantDisplayName } from '../../components/PersonalizationContext.js';
 import { MemoryExplorerFilters } from './MemoryExplorerFilters.js';
+import { MemoryReviewNotice, MemoryReviewPanel } from './MemoryReviewPanel.js';
 import { MemorySharing } from './MemorySharing.js';
 import { MemoryVaultEntryRow } from './MemoryVaultEntry.js';
 import {
@@ -26,6 +27,14 @@ export function summaryPendingLine(persona: string | null): string {
   return persona === null
     ? "Couldn't make a summary of the latest chat, so nothing from it was saved. In your next chat, ask to remember anything important again."
     : `Couldn't make a summary of the latest chat with ${persona}, so nothing from it was saved. In your next chat with ${persona}, ask to remember anything important again.`;
+}
+
+/** The day a summary failed, in words, or null when the server did not say or the day cannot be read. */
+function summaryFailedDay(failedAt: string | null): string | null {
+  const time = failedAt === null ? Number.NaN : Date.parse(failedAt);
+  return Number.isNaN(time)
+    ? null
+    : new Date(time).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 /** The undo bar: forgotten memories wait here for the undo window before the server call. */
@@ -170,16 +179,46 @@ function FirstRunNote({ onOpenSettings }: { onOpenSettings?: () => void }) {
 }
 
 /**
+ * Export, import, and topics as their own panel, for surfaces that give them a place of
+ * their own (Settings > Memory's Import and export sub-tab) instead of below the list.
+ * A failed export or import reports through the same error line the list uses, so it
+ * shows here beside the controls that caused it.
+ */
+export function MemoryVaultImportExportPanel({ state }: { state: MemoryVaultState }) {
+  return (
+    <div className="flex min-h-0 flex-1 flex-col gap-3">
+      {state.error !== null ? (
+        <div className="rounded-xl border border-border bg-card-bg p-4" role="alert">
+          <p className="text-sm text-error-text">{state.error}</p>
+          <button
+            type="button"
+            onClick={() => void state.refresh()}
+            className={cn(auiButtonClass({ variant: 'secondary', size: 'small' }), 'mt-2')}
+          >
+            Try again
+          </button>
+        </div>
+      ) : null}
+      <ManageCollections state={state} />
+    </div>
+  );
+}
+
+/**
  * The memory explorer: one newest-first list grouped by day, with search, filters, selection,
- * edit, copy, and forget with undo. Export and import sit below the list.
+ * edit, copy, and forget with undo. Export and import sit below the list unless the surface
+ * gives them a panel of their own.
  */
 export function MemoryVaultFactsPanel({
   state,
   onOpenSettings,
+  showManageCollections = true,
 }: {
   state: MemoryVaultState;
   /** Opens the Settings sub-tab where memory is turned on and tuned. Omitted where no such tab exists. */
   onOpenSettings?: () => void;
+  /** False when the surface shows export, import, and topics in their own panel instead. */
+  showManageCollections?: boolean;
 }) {
   const assistant = useAssistantDisplayName();
   const shownCount = state.shownGroups.reduce((total, group) => total + group.memories.length, 0);
@@ -252,9 +291,13 @@ export function MemoryVaultFactsPanel({
         ) : (
           <div className="flex flex-col gap-4">
             {state.shownGroups.map(group => (
-              <section key={group.label} aria-label={group.label} className="flex flex-col gap-2">
-                <h3 className="text-xs font-semibold text-text-secondary">{group.label}</h3>
-                <ul className="m-0 flex list-none flex-col gap-2 p-0">
+              <section
+                key={group.label}
+                aria-label={group.label}
+                className="flex flex-col rounded-xl border border-border bg-card-bg"
+              >
+                <h3 className="px-3 pt-3 text-sm font-medium text-text-primary">{group.label}</h3>
+                <ul className="m-0 list-none divide-y divide-border p-0">
                   {group.memories.map(memory => (
                     <MemoryVaultEntryRow
                       key={memory.id}
@@ -306,13 +349,37 @@ export function MemoryVaultFactsPanel({
       ) : null}
       {state.error === null && !state.loading
         ? state.summaryPending.map(pending => (
-            <div key={pending.namespace} className="rounded-xl border border-border bg-card-bg p-4">
-              <p className="text-sm text-text-primary">{summaryPendingLine(pending.persona)}</p>
+            <div
+              key={pending.namespace}
+              className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-border bg-card-bg p-4"
+            >
+              <div className="flex min-w-0 flex-1 basis-64 flex-col gap-1">
+                <p className="text-sm text-text-primary">{summaryPendingLine(pending.persona)}</p>
+                {summaryFailedDay(pending.failedAt) === null ? null : (
+                  <p className="text-xs text-text-secondary">This happened on {summaryFailedDay(pending.failedAt)}.</p>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  void state.dismissSummaryPending(pending.namespace);
+                }}
+                className={auiButtonClass({ variant: 'secondary', size: 'small' })}
+              >
+                Dismiss
+              </button>
             </div>
           ))
         : null}
-      {body}
-      <ManageCollections state={state} />
+      {state.reviewOpen ? (
+        <MemoryReviewPanel review={state.review} onClose={state.closeReview} />
+      ) : (
+        <>
+          {state.review.notes.length > 0 ? <MemoryReviewNotice onReview={state.openReview} /> : null}
+          {body}
+        </>
+      )}
+      {showManageCollections ? <ManageCollections state={state} /> : null}
     </div>
   );
 }

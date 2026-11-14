@@ -120,7 +120,7 @@ async function grantDriveWrite(services: SentinelServices, tool_name: string): P
     created_by: 'u1',
     mcp_server_name: 'google_drive',
     tool_name,
-    mcp_server_host: null,
+    connector_binding: null,
   });
 }
 
@@ -140,6 +140,7 @@ describe('Drive write classification', () => {
     expect(decision.card?.plain_what).toContain('Create a Google Doc named');
     expect(decision.card?.plain_what).toContain('Trip plan');
     expect(decision.card?.outbound_text).toBe('Fly out Friday.');
+    expect(decision.own_drive_write).toBe(true);
     expect(decision.approval_token_id).not.toBeNull();
   });
 
@@ -180,7 +181,7 @@ describe('Drive write classification', () => {
       created_by: 'u1',
       mcp_server_name: 'google_drive',
       tool_name: 'create_doc',
-      mcp_server_host: null,
+      connector_binding: null,
     });
     const decision = await classifyTier(writeAction('create_doc', CREATE_REVIEW), makeCtx(services));
     expect(decision).toMatchObject({ tier: 1, reason: 'mcp_tool_grant', auto_deny: null, card: null });
@@ -193,7 +194,7 @@ describe('Drive write classification', () => {
       created_by: 'u1',
       mcp_server_name: 'google_drive',
       tool_name: 'create_doc',
-      mcp_server_host: null,
+      connector_binding: null,
     });
     const decision = await classifyTier(writeAction('append_rows', APPEND_REVIEW), makeCtx(services));
     expect(decision).toMatchObject({ tier: 3, reason: 'google_drive_write' });

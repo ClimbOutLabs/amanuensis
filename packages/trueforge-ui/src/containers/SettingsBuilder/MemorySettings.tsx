@@ -6,7 +6,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 
 import { cn } from '@/atoms/lib/cn.js';
 import { Switch } from '@/atoms/primitives/Switch.js';
-import { readMemoryBackend } from '@/plugins/trueforge-agent-server-adapter/lists.js';
+import { memoryStatusReported } from '@/plugins/trueforge-agent-server-adapter/lists.js';
 import {
   useOptionalRefreshServerCapabilities,
   useServerCapabilities,
@@ -14,6 +14,7 @@ import {
 } from '@/server/ServerContext.js';
 import { useAssistantDisplayName } from '../../components/PersonalizationContext.js';
 import { useToasterOptional } from '../ToasterContainer.js';
+import { MemoryHelpersCard } from './MemoryHelpersCard.js';
 import { useChatSearchSetting } from './chatSearchSetting.js';
 import { readMemoryEmbeddingsStatus, type MemoryEmbeddingsStatus } from './memoryEmbeddingsCapability.js';
 import { useMemoryRecallSetting } from './memoryRecallSetting.js';
@@ -274,19 +275,14 @@ function MemoryScreenToggle(props: { status: TrueForgeApi.MemoryScreenCapability
 function MemorySummarizeToggle({ setting }: { setting: MemorySummarizeSettingState }) {
   const toaster = useToasterOptional();
 
-  // The switch shows the effective state — what the server will actually do — never
-  // the stored wish. On the markdown backend the two are the same; on any other
-  // backend the gate blocks and the switch stays off and disabled.
-  const blocked = setting.enabled === true && setting.effectiveEnabled === false;
-  const checked = setting.effectiveEnabled ?? false;
-  const disabled = setting.saving || setting.effectiveEnabled === null || blocked;
+  const checked = setting.enabled ?? false;
+  const disabled = setting.saving || setting.enabled === null;
   /**
    * The reset link stays disabled while there is no stored override to clear; unlike
    * screening there is no unconfigured state that neuters the stored value, so the
-   * switch always reflects the stored setting. Hidden entirely while the backend
-   * gate blocks, where a stored override changes nothing.
+   * switch always reflects the stored setting.
    */
-  const showReset = setting.overridden === true && !blocked;
+  const showReset = setting.overridden === true;
   const resetDisabled = setting.saving || setting.enabled === null;
   const defaultLabel =
     setting.defaultEnabled === null
@@ -303,14 +299,7 @@ function MemorySummarizeToggle({ setting }: { setting: MemorySummarizeSettingSta
         <label htmlFor="memory-summarize-toggle" className="text-sm font-medium text-text-primary">
           Summarize turns before saving
         </label>
-        {blocked ? (
-          <p className="mt-0.5 text-xs text-text-secondary">
-            Turn summaries need Markdown memory. This server&rsquo;s memory setup saves the full transcript, so the
-            switch stays off.
-          </p>
-        ) : (
-          <p className="mt-0.5 text-xs text-text-secondary">{stateCopy}</p>
-        )}
+        <p className="mt-0.5 text-xs text-text-secondary">{stateCopy}</p>
         {showReset ? (
           <button
             type="button"
@@ -380,32 +369,26 @@ const MEMORY_NOTES_MARKDOWN = [
   'Every recalled block is visible byte-for-byte in that turn\u2019s events as aman.memory.recall.',
 ];
 
-/** The memory backend the server confirmed, or undefined while loading / when unknown. */
-type ConfirmedBackend = ReturnType<typeof readMemoryBackend>;
-
-/** Header tagline: Markdown-native wording only once the Markdown backend is confirmed. */
+/** Header tagline: says how memories are kept only once the server reported its memory status. */
 function headerCopy({
   settled,
-  backend,
+  reported,
   assistant,
 }: {
   settled: boolean;
-  backend: ConfirmedBackend;
+  reported: boolean;
   assistant: string;
 }): string {
   if (!settled) {
     return `${assistant} remembers what matters on its own. Checking with the server how memories are kept.`;
   }
-  if (backend === 'markdown') {
+  if (reported) {
     return `${assistant} saves memories as notes on this computer and brings back the ones that matter on its own.`;
   }
-  if (backend === 'hindsight') {
-    return `${assistant} remembers what matters on its own. This setup uses the experimental Hindsight memory instead of note files.`;
-  }
-  return `${assistant} remembers what matters on its own. It could not tell which kind of memory this setup uses, so the details below may not match.`;
+  return `${assistant} remembers what matters on its own. The server did not say how memory is set up, so the details below may not match.`;
 }
 
-/** The status pill tones: green dot for a confirmed-on backend, neutral otherwise. */
+/** The status pill tones: green dot for memory confirmed on, neutral otherwise. */
 function StatusPill({ tone, text }: { tone: 'on' | 'neutral'; text: string }) {
   return (
     <span
@@ -507,33 +490,24 @@ function ChatSearchToggle() {
   );
 }
 
-/** Names the memory backend only after capabilities settle: checking while loading,
- * unavailable on a missing or malformed backend — never a guess. */
+/** Says memory is on only after capabilities settle: checking while loading, unavailable when the
+ * server did not report its memory status. Never a guess. */
 function MemoryStatusCard() {
   const capabilities = useServerCapabilities();
   const settled = useServerCapabilitiesSettled();
-  const backend = readMemoryBackend(capabilities);
+  const reported = settled && memoryStatusReported(capabilities);
 
-  const pill =
-    !settled || backend === undefined ? (
-      <StatusPill tone="neutral" text={!settled ? 'Checking memory status…' : 'Memory status unavailable'} />
-    ) : (
-      <StatusPill tone="on" text="Memory is on" />
-    );
-  const heading = !settled
-    ? 'Memory'
-    : backend === 'markdown'
-      ? 'Markdown (local files)'
-      : backend === 'hindsight'
-        ? 'Hindsight (experimental)'
-        : 'Memory';
+  const pill = reported ? (
+    <StatusPill tone="on" text="Memory is on" />
+  ) : (
+    <StatusPill tone="neutral" text={settled ? 'Memory status unavailable' : 'Checking memory status…'} />
+  );
+  const heading = reported ? 'Markdown (local files)' : 'Memory';
   const body = !settled
-    ? 'Asking the server which memory backend is running — this takes a moment.'
-    : backend === 'markdown'
+    ? 'Asking the server how memory is set up. This takes a moment.'
+    : reported
       ? 'The host recalls relevant memories before every reply and saves each finished exchange automatically.'
-      : backend === 'hindsight'
-        ? 'This server runs the experimental Hindsight memory backend. Markdown file memory — the storage line and explainer below — does not apply here.'
-        : 'The server did not report which memory backend is running — on or off cannot be confirmed here.';
+      : 'The server did not report its memory status, so on or off cannot be confirmed here. Reload the page to ask again.';
 
   return (
     <section aria-labelledby="memory-status-heading" className="rounded-xl border border-border bg-card-bg p-4">
@@ -547,12 +521,13 @@ function MemoryStatusCard() {
         </div>
       </div>
 
-      {settled && backend === 'markdown' ? <MemoryStorageLine /> : null}
-
-      {settled && backend !== undefined ? (
-        <div className="mt-4 border-t border-border pt-4">
-          <MemoryRecallToggle />
-        </div>
+      {reported ? (
+        <>
+          <MemoryStorageLine />
+          <div className="mt-4 border-t border-border pt-4">
+            <MemoryRecallToggle />
+          </div>
+        </>
       ) : null}
 
       <div className="mt-4 border-t border-border pt-4">
@@ -562,32 +537,32 @@ function MemoryStatusCard() {
   );
 }
 
-/** Settings > Memory: the host's memory surface, honest about which backend is running.
+/** Settings > Memory: the host's memory surface.
  *
- * The backend is named only once the capabilities confirm it — "Checking memory status…"
- * while loading, "Memory status unavailable" when the settled capability is malformed or
- * missing. The storage line, "How memory works", and the header tagline are Markdown-native
- * and render only on a confirmed Markdown backend.
+ * Memory is shown as on only once the capabilities confirm it: "Checking memory status…" while
+ * loading, "Memory status unavailable" when the settled capability is malformed or missing. The
+ * storage line and "How memory works" render only once it is confirmed.
  */
 const MemorySettings = () => {
   const assistant = useAssistantDisplayName();
   const capabilities = useServerCapabilities();
   const settled = useServerCapabilitiesSettled();
-  const backend = readMemoryBackend(capabilities);
+  const reported = settled && memoryStatusReported(capabilities);
   const toolOutputScreen = readToolOutputScreenStatus(capabilities);
   const memoryScreen = readMemoryScreenStatus(capabilities);
-  const confirmedMarkdown = settled && backend === 'markdown';
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-5 overflow-y-auto pb-1">
       <header>
         <h3 className="text-base font-semibold text-text-primary">Memory</h3>
-        <p className="mt-1 text-sm text-text-secondary">{headerCopy({ settled, backend, assistant })}</p>
+        <p className="mt-1 text-sm text-text-secondary">{headerCopy({ settled, reported, assistant })}</p>
       </header>
 
       <MemoryStatusCard />
 
       <MemorySummarizeCard />
+
+      <MemoryHelpersCard />
 
       <MemoryEmbeddingsCard />
 
@@ -627,7 +602,7 @@ const MemorySettings = () => {
         />
       </div>
 
-      {confirmedMarkdown ? (
+      {reported ? (
         <section aria-labelledby="memory-notes-heading" className="rounded-xl border border-border bg-card-bg p-4">
           <h5 id="memory-notes-heading" className="text-sm font-medium text-text-primary">
             How memory works

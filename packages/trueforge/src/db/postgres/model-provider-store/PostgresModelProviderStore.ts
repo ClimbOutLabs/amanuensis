@@ -9,6 +9,7 @@ import {
   type IModelProviderStore,
   type ListModelProvidersInput,
   type ModelProviderRecord,
+  type RecordModelProviderCheckInput,
   type UpsertModelProviderInput,
 } from '../../modelProviderStore';
 import { isUniqueViolation } from '../client';
@@ -20,12 +21,15 @@ function toRecord(row: Selectable<ModelProviderTable>): ModelProviderRecord {
     tenant_id: row.tenant_id,
     name: row.name,
     manifest: row.manifest,
+    last_check: row.last_check,
     created_at: row.created_at.toISOString(),
     updated_at: row.updated_at.toISOString(),
   };
 }
 
 export class PostgresModelProviderStore implements IModelProviderStore<Transaction<Database>> {
+  readonly managedElsewhere = false;
+
   readonly #db: Kysely<Database>;
 
   constructor(db: Kysely<Database>) {
@@ -87,6 +91,7 @@ export class PostgresModelProviderStore implements IModelProviderStore<Transacti
           tenant_id: input.tenant_id,
           name: input.name,
           manifest: json(input.manifest),
+          last_check: null,
           created_at: now(),
           updated_at: now(),
         })
@@ -112,6 +117,7 @@ export class PostgresModelProviderStore implements IModelProviderStore<Transacti
         tenant_id: input.tenant_id,
         name: input.name,
         manifest: json(input.manifest),
+        last_check: null,
         created_at: now(),
         updated_at: now(),
       })
@@ -124,6 +130,21 @@ export class PostgresModelProviderStore implements IModelProviderStore<Transacti
       .returningAll()
       .executeTakeFirstOrThrow();
     return toRecord(row);
+  }
+
+  async recordProviderCheck(
+    input: RecordModelProviderCheckInput,
+    transaction?: Transaction<Database>,
+  ): Promise<ModelProviderRecord | undefined> {
+    const db = transaction ?? this.#db;
+    const row = await db
+      .updateTable('model_provider')
+      .set({ last_check: json(input.check) })
+      .where('tenant_id', '=', input.tenant_id)
+      .where('name', '=', input.name)
+      .returningAll()
+      .executeTakeFirst();
+    return row === undefined ? undefined : toRecord(row);
   }
 
   async listModels(input: ListModelProvidersInput, transaction?: Transaction<Database>): Promise<AvailableModel[]> {

@@ -60,6 +60,14 @@ export type UpdateSessionInput<TSessionCustom extends object = Record<string, ne
   metadata: SessionRecord<TSessionCustom>['metadata'] | undefined;
 };
 
+/** One metadata key to set on an existing session, merged atomically by the store. */
+export interface MergeSessionMetadataInput {
+  tenant_id: string;
+  session_id: string;
+  key: string;
+  value: string;
+}
+
 /** Input for {@link ISessionStore.replaceSessionTitleIfCurrent}. */
 export interface ReplaceSessionTitleIfCurrentInput {
   tenant_id: string;
@@ -677,6 +685,15 @@ export interface ISessionStore<
    * Bumps `last_activity_timestamp_ms` (= now) in the same update.
    */
   updateSession(input: UpdateSessionInput<TSessionCustom>): Promise<void>;
+
+  /**
+   * Sets one metadata key atomically, leaving every other key as it is: the merge
+   * happens inside the store's update, never as a caller read-modify-write, so a
+   * concurrent session update cannot be clobbered or silently lose keys.
+   * Throws `SessionNotFoundError` when the session is absent.
+   * Bumps `last_activity_timestamp_ms` (= now) in the same update, like `updateSession`.
+   */
+  mergeSessionMetadata(input: MergeSessionMetadataInput): Promise<void>;
 
   /**
    * Atomically replaces the session title only when the stored title still equals

@@ -17,6 +17,7 @@ import type { IToolSet } from '../../../src/core/mcp/IMCPServer';
 import { toolResultResponse } from '../../../src/core/mcp/IMCPServer';
 import { createToolCallMemoState, executeToolCalls } from '../../../src/core/mcp/executeToolCalls';
 import { actionIdFor, toJsonSafeParams } from '../../../src/core/permissions/approvalTokens';
+import { SANDBOX_FILE_WRITE_TOOLS } from '../../../src/core/sandbox/Sandbox';
 import type { AuditRecordInput } from '../../../src/core/permissions/audit';
 import { defaultSentinelServices, type SentinelServices } from '../../../src/core/permissions/context';
 import { TEST_TOKEN_SCOPE, testApprovalOwner } from '../permissions/approvalTokenFixtures';
@@ -32,6 +33,8 @@ function mockToolSet(): { toolSet: IToolSet; callTool: jest.Mock } {
     listTools: jest.fn(),
     toolCallInfo: jest.fn(),
     callTool,
+    // Stands in for the sandbox set: its file-write tools are the ones the sandbox registrations declare.
+    isFileWriteTool: (name: string) => SANDBOX_FILE_WRITE_TOOLS.has(name),
   };
   return { toolSet, callTool };
 }
@@ -335,6 +338,7 @@ function servicesWithAudit(): { services: SentinelServices; records: AuditRecord
 
 const TIER2_CARD = {
   plain_what: 'Change `notes.md` in your workspace?',
+  copy: null,
   plain_why: null,
   cannot_be_undone: null,
   why_asked_again: null,

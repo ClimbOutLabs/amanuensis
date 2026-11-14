@@ -22,6 +22,7 @@ import type { IAgentStore } from '../../src/db/agentStore';
 import type { IDeliveryStore } from '../../src/db/deliveryStore';
 import type { IGlobalSettingsStore } from '../../src/db/globalSettingsStore';
 import type { IMcpServerStore } from '../../src/db/mcpServerStore';
+import type { IModelProviderStore } from '../../src/db/modelProviderStore';
 import type { IPersonaStore } from '../../src/db/personaStore';
 import type { IPersonalizationStore } from '../../src/db/personalizationStore';
 import type { IReachSettingsStore } from '../../src/db/reachSettingsStore';
@@ -30,6 +31,7 @@ import type { ISentinelAuditStore } from '../../src/db/sentinelAuditStore';
 import type { ISentinelSettingsStore } from '../../src/db/sentinelSettingsStore';
 import type { SessionCustom, TurnCustom } from '../../src/db/sessionCustom';
 import type { ISpaceStore } from '../../src/db/spaceStore';
+import type { ITextContactStore } from '../../src/db/textContactStore';
 import type { ITurnArtifactStore } from '../../src/db/turnArtifactStore';
 import { personaKnowledgeLocation } from '../../src/personaKnowledge/knowledgePaths';
 import { openPersonaKnowledgeRepository } from '../../src/personaKnowledge/sqliteKnowledgeRepository';
@@ -165,8 +167,10 @@ export interface DataTransferSeedStores<TTransaction> {
   auditStore: ISentinelAuditStore;
   deliveryStore: IDeliveryStore;
   reachSettingsStore: IReachSettingsStore;
+  textContactStore: ITextContactStore;
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
   mcpServerStore: IMcpServerStore<TTransaction>;
+  modelProviderStore: IModelProviderStore<TTransaction>;
 }
 
 export interface SeedRichInstanceInput<TTransaction> {
@@ -520,10 +524,30 @@ export async function seedRichInstance<TTransaction>(input: SeedRichInstanceInpu
     created_by: userId,
     settings: {
       ...defaultReachSettings('Europe/Paris'),
-      channels: { texts: false, calls: true },
+      channels: { texts: true, calls: true },
       call_kinds: ['travel'],
       max_nudges_per_day: 3,
     },
+  });
+
+  // A confirmed number with a code to a new number still pending: none of the code or the new number is exported.
+  const seededCode = {
+    hash: 'a'.repeat(64),
+    salt: 'b'.repeat(32),
+    key_id: 'c'.repeat(8),
+    expires_at: '2026-11-05T09:10:00.000Z',
+  };
+  const owner = { tenant_id: tenantId, created_by: userId };
+  const at = new Date('2026-11-05T09:00:00.000Z');
+  await stores.textContactStore.startCode({ ...owner, phone: '+15550111', as: 'number', code: seededCode, now: at });
+  await stores.textContactStore.confirmCode({ ...owner, code_hash: seededCode.hash, now: at });
+  await stores.textContactStore.setMode({ ...owner, mode: 'full', now: at });
+  await stores.textContactStore.startCode({
+    ...owner,
+    phone: '+15550122',
+    as: 'new_number',
+    code: seededCode,
+    now: at,
   });
 
   const knowledgeDbPath = personaKnowledgeLocation({
@@ -658,6 +682,8 @@ export async function seedRichInstance<TTransaction>(input: SeedRichInstanceInpu
 
   await stores.globalSettingsStore.setSetting({ key: 'default_chat_model', value: SEED_DEFAULT_CHAT_MODEL });
   await stores.globalSettingsStore.setSetting({ key: 'memory_summarize_enabled', value: 'true' });
+  await stores.globalSettingsStore.setSetting({ key: 'memory_page_sorting_mode', value: 'report' });
+  await stores.globalSettingsStore.setSetting({ key: 'memory_nightly_job_enabled', value: 'true' });
   await stores.globalSettingsStore.setSetting({ key: 'tool_output_screen_enabled', value: 'true' });
   await stores.globalSettingsStore.setSetting({ key: 'memory_screen_enabled', value: 'false' });
   await stores.sentinelSettingsStore.patch({

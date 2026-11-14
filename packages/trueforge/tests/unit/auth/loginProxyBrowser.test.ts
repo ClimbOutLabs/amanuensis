@@ -7,6 +7,7 @@ import { createLoginProxy } from '../../../src/auth/loginProxy';
 import { createRequestGuardMiddleware } from '../../../src/auth/requestGuard';
 
 const PASSWORD = 'correct horse';
+const BROWSER_START_MS = 90_000;
 const FORM_HTML = (note: string) =>
   `<html><body><p id="note">${note}</p><form method="post" action="/dex/auth/local/login?state=s">` +
   '<input name="login" value="owner@example.com"><input name="password" type="password"><button>Sign in</button></form></body></html>';
@@ -57,7 +58,13 @@ describe('signing in through the proxied page in a real browser', () => {
   let passwordPosts: string[];
 
   beforeAll(async () => {
-    browser = await chromium.launch({ executablePath: findChromiumExecutable(chromium.executablePath()) });
+    // The browser starts beside every other suite of the run, so on a busy machine it can need
+    // far longer than on its own. Its limit stays under the hook's, so a browser that never
+    // starts fails with its own log (what it was waiting on) instead of a bare hook timeout.
+    browser = await chromium.launch({
+      executablePath: findChromiumExecutable(chromium.executablePath()),
+      timeout: BROWSER_START_MS,
+    });
     passwordPosts = [];
     upstream = signInService(passwordPosts);
     const upstreamPort = await listen(upstream);
@@ -79,7 +86,7 @@ describe('signing in through the proxied page in a real browser', () => {
       createLoginProxy({ issuerUrl: `http://127.0.0.1:${String(upstreamPort)}/dex`, allowedOrigins: [origin] }),
     );
     appServer = serve({ fetch: app.fetch, port: appPort, hostname: '127.0.0.1' });
-  });
+  }, BROWSER_START_MS + 30_000);
 
   afterAll(async () => {
     await browser?.close();

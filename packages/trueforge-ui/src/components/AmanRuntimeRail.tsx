@@ -15,6 +15,8 @@ import {
   useOptionalPersonalization,
   type PersonalizationApi,
 } from './PersonalizationContext.js';
+import { RailChatDesk, RailHomeDesk, useRailToday, type RailDeskApi } from './RailDesk.js';
+import { RailFoldedRow } from './RailFoldedRow.js';
 
 export type AmanRuntimeRailStatus = 'ready' | 'connecting' | 'offline' | 'degraded';
 
@@ -66,6 +68,31 @@ export type AmanRuntimeRailProps = {
    * this over, and clicking it calls it.
    */
   onOpenAudits?: () => void;
+  /**
+   * The address of the live browser page while the assistant has a web page open in this chat, so
+   * the person can watch it and take a step themselves. Left out when there is no page open.
+   */
+  liveBrowserHref?: string | undefined;
+  /**
+   * The chat the person is looking at, or undefined on Home. The desk follows it: Home shows
+   * the day, a chat shows what the assistant is using in that chat.
+   */
+  sessionId?: string | undefined;
+  /**
+   * The desk's reads (and its one small write, the per-chat recall exclusion). Without it the
+   * rail shows no desk sections at all.
+   */
+  deskApi?: RailDeskApi;
+  /**
+   * The host's way to open a chat by id, for desk rows that point at one (a reminder's chat,
+   * a held action's chat). Rows that need it render as plain rows without it.
+   */
+  onOpenChat?: (sessionId: string) => void;
+  /**
+   * The host's way to open the memory settings, for "Manage memory" under the recalled memories.
+   * The control shows only when the host hands this over.
+   */
+  onOpenMemorySettings?: () => void;
 };
 
 /** Same `aui-` prefixed style as the left rail's `aui-history-collapsed` preference. */
@@ -140,17 +167,6 @@ function statusToneOf({
 
 type RuntimeRailContentProps = Omit<AmanRuntimeRailProps, 'personalizationApi'>;
 
-/** One folded row of the panel: a label with its chevron on the left, closed by default. */
-const FoldedRow: FC<{ section: string; title: string; children: ReactNode }> = ({ section, title, children }) => (
-  <details className="aman-runtime-rail__details" data-section={section}>
-    <summary className="aman-runtime-rail__details-summary">
-      <Icon name="chevron-right" size={12} className="aman-runtime-rail__fold-chevron" aria-hidden="true" />
-      <span>{title}</span>
-    </summary>
-    <div className="aman-runtime-rail__details-body">{children}</div>
-  </details>
-);
-
 /** The Rules fold's sentences, one per rule; none until the settings have loaded. */
 function ruleSentences({
   settings,
@@ -179,6 +195,11 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
   privateChat = false,
   auditFeed,
   onOpenAudits,
+  sessionId,
+  deskApi,
+  onOpenChat,
+  onOpenMemorySettings,
+  liveBrowserHref,
 }) => {
   const profile = useOptionalPersonalization()?.profile;
   const assistantName = assistantDisplayName(profile?.assistant_name);
@@ -192,6 +213,9 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
   const status = statusOverride ?? connectivity.status;
   const waitingOnPerson = pendingApprovalIds.length > 0;
   const statusLine = privateChat && status === 'ready' ? null : statusLineLabel({ status, activity, waitingOnPerson });
+  // The desk's Home read. A change in the waiting approvals is the rail's own sign that the
+  // day changed, so it doubles as the read's refresh signal beside the two-minute poll.
+  const today = useRailToday(sessionId === undefined ? deskApi : undefined, pendingApprovalIds.join(','));
   // Folded, the poster's tooltip is all that is left, so it still says a reply is running.
   const compactLabel = statusLine ?? WORKING_ON_IT_LABEL;
   const tone = statusToneOf({ status, activity, waitingOnPerson });
@@ -318,7 +342,43 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
             </section>
           )}
 
-          <FoldedRow section="activity" title="Activity">
+          {/* A live page the person can jump to, opened beside the chat so the chat stays put. */}
+          {liveBrowserHref === undefined ? null : (
+            <section className="aman-runtime-rail__section" data-section="live-browser">
+              <a
+                className="aman-runtime-rail__live-browser"
+                href={liveBrowserHref}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <span className="aman-runtime-rail__live-dot" aria-hidden="true" />
+                <span className="aman-runtime-rail__live-text">
+                  <span className="aman-runtime-rail__live-title">Watch Live or Take Control</span>
+                  <span className="aman-runtime-rail__live-detail">
+                    {assistantName} has a page open. Watch it or take a step yourself.
+                  </span>
+                </span>
+                <Icon name="external-link" size={16} className="aman-runtime-rail__live-open" aria-hidden="true" />
+              </a>
+            </section>
+          )}
+
+          {sessionId === undefined && deskApi !== undefined && today !== null ? (
+            <RailHomeDesk today={today} onOpenChat={onOpenChat} />
+          ) : null}
+
+          {/* A private chat's desk stays shut: what the assistant is using in it is exactly
+              what the rail must not describe for a chat that keeps nothing. */}
+          {sessionId !== undefined && deskApi !== undefined && !privateChat ? (
+            <RailChatDesk
+              sessionId={sessionId}
+              deskApi={deskApi}
+              refreshSignal={avatarActivity}
+              onOpenMemorySettings={onOpenMemorySettings}
+            />
+          ) : null}
+
+          <RailFoldedRow section="activity" title="Activity">
             {/* The wait line comes straight from the chat, not the receipt: a carded action is
             written to the history only after it is answered, so while it waits the history
             holds nothing about it, and this line is the sign of it here. */}
@@ -341,9 +401,9 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
                 Audits
               </button>
             )}
-          </FoldedRow>
+          </RailFoldedRow>
 
-          <FoldedRow section="rules" title="Rules">
+          <RailFoldedRow section="rules" title="Rules">
             {rules.length === 0 ? (
               <p className="aman-runtime-rail__row-text">No rules to show yet.</p>
             ) : (
@@ -353,7 +413,7 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
                 ))}
               </ul>
             )}
-          </FoldedRow>
+          </RailFoldedRow>
         </>
       )}
     </aside>

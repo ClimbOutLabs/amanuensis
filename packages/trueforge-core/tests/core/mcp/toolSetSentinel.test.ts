@@ -1,3 +1,4 @@
+import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { createLogger } from 'winston';
 import {
   RemoteMCP,
@@ -6,6 +7,7 @@ import {
   defaultSentinelServices,
   type ToolSource,
 } from '../../../src/core';
+import { CALDAV_UNKNOWN_ID_NOTE } from '../../../src/core/calendar/caldav/toolResults';
 import { allowsChatApproval, allowsToolGrant } from '../../../src/core/mcp/approvalGrant';
 import { createToolCallMemoState, executeToolCalls } from '../../../src/core/mcp/executeToolCalls';
 import { toolResultResponse, type ToolSchema } from '../../../src/core/mcp/IMCPServer';
@@ -26,6 +28,8 @@ jest.mock('../../../src/core/mcp/remoteMcpClient', () => {
 const mockConnect = jest.mocked(connectRemoteMcp);
 const noopLogger = createLogger({ silent: true });
 const SERVER_NAME = 'notes';
+/** What the test connector's grants bind to, as the host would set it from the connector record. */
+const GRANT_BINDING = 'binding-of-the-notes-connector';
 
 function makeToolSet(params: {
   tools: ToolSchema[];
@@ -33,13 +37,15 @@ function makeToolSet(params: {
   requireApprovalForTools?: string[];
   firstParty?: boolean;
   serverName?: string;
+  answer?: CallToolResult;
 }): ToolSet {
   mockConnect.mockImplementation(() =>
     Promise.resolve({
       transportType: 'streamable-http' as const,
       sessionId: null,
       listTools: () => Promise.resolve({ tools: params.tools }),
-      callTool: callParams => Promise.resolve({ content: [{ type: 'text', text: `called ${callParams.name}` }] }),
+      callTool: callParams =>
+        Promise.resolve(params.answer ?? { content: [{ type: 'text', text: `called ${callParams.name}` }] }),
       close: () => Promise.resolve(),
     }),
   );
@@ -47,6 +53,7 @@ function makeToolSet(params: {
     name: params.serverName ?? SERVER_NAME,
     id: params.serverName ?? SERVER_NAME,
     url: 'https://mcp.example.com/mcp',
+    grantBinding: GRANT_BINDING,
     headers: {},
     logger: noopLogger,
     tracing: NOOP_AGENT_TRACING,
@@ -103,7 +110,7 @@ function servicesWithGrants(toolNames: string[]): SentinelServices {
       created_by: 'u1',
       mcp_server_name: SERVER_NAME,
       tool_name,
-      mcp_server_host: 'mcp.example.com',
+      connector_binding: GRANT_BINDING,
     });
   }
   return services;
@@ -640,6 +647,29 @@ describe("the operator's own Email sidecar, with the annotations the mail server
     expect(info).toMatchObject({ tier: 1, tier_reason: 'caldav_private_read', is_approval_required: false });
   });
 
+  it('answers a made-up calendar id with the one thing to do next', async () => {
+    const getEvent: ToolSchema = {
+      name: 'get_event',
+      description: 'Reads one event.',
+      inputSchema: schema,
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    };
+    const calendar = makeToolSet({
+      tools: [getEvent],
+      services: servicesWithGrants([]),
+      firstParty: true,
+      serverName: 'Calendar',
+      answer: {
+        isError: true,
+        content: [{ type: 'text', text: 'caldav-mcp: "guess@caldav-mcp" is not an id this server issued.' }],
+      },
+    });
+    const response = await calendar.callTool({ name: 'get_event', arguments: { id: 'guess@caldav-mcp' } });
+    expect(response).toMatchObject({
+      result: { isError: true, content: [{ type: 'text', text: CALDAV_UNKNOWN_ID_NOTE }] },
+    });
+  });
+
   it('still asks before sending, and no answer covers a send', async () => {
     const email = makeToolSet({
       tools: [sendTool],
@@ -676,7 +706,7 @@ describe("the operator's own Calendar sidecar, under a standing grant the person
         created_by: 'u1',
         mcp_server_name: 'Calendar',
         tool_name,
-        mcp_server_host: 'mcp.example.com',
+        connector_binding: GRANT_BINDING,
       });
     }
     return services;
@@ -696,14 +726,16 @@ describe("the operator's own Calendar sidecar, under a standing grant the person
     expect(info).toMatchObject({ tier: 3, tier_reason: 'caldav_calendar_change', is_approval_required: true });
   });
 
-  it('still asks for a destructive calendar call, granted or not', async () => {
+  it('refuses a destructive calendar call whose event cannot be read, granted or not', async () => {
     const calendar = makeToolSet({
       tools: [deleteEvent],
       services: calendarServices(['delete_event']),
       firstParty: true,
       serverName: 'Calendar',
     });
+    // The fake calendar answers get_event with no event, so the delete cannot be described:
+    // it is refused outright rather than carded, and no grant is consulted first.
     const info = await calendar.toolCallInfo({ name: 'delete_event', arguments: { id: 'evt-1' } });
-    expect(info).toMatchObject({ tier: 3, is_approval_required: true });
+    expect(info).toMatchObject({ tier: 3, is_approval_required: false });
   });
 });

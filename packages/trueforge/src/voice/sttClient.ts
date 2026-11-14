@@ -5,6 +5,7 @@
  */
 import { VoiceTranscriptionSchema } from '../schemas/voice';
 import { wavFromSamples } from './audio';
+import { speechSecretHeaders } from './speechSecret';
 import { sttBaseUrl } from './sttAvailability';
 import type { SpeechToText } from './transport';
 
@@ -48,7 +49,7 @@ export async function forwardToSidecar(audio: Uint8Array, signal?: AbortSignal):
   for (let attempt = 1; ; attempt += 1) {
     const upstream = await fetch(url, {
       method: 'POST',
-      headers: { 'content-type': 'audio/wav', 'content-length': String(audio.byteLength) },
+      headers: { 'content-type': 'audio/wav', 'content-length': String(audio.byteLength), ...speechSecretHeaders() },
       body: audio,
       signal: AbortSignal.any([
         AbortSignal.timeout(STT_TRANSCRIBE_TIMEOUT_MS),

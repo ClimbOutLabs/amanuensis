@@ -54,6 +54,7 @@ import type {
   ListSessionsInput,
   ListTurnEventsInput,
   ListTurnsInput,
+  MergeSessionMetadataInput,
   NewThreadInit,
   OverwriteThreadContextInput,
   PatchMCPServersInput,
@@ -746,6 +747,19 @@ export class InMemorySessionStore<
     if (input.metadata !== undefined) {
       stored.record.metadata = deepCopy(input.metadata);
     }
+    const now = Date.now();
+    stored.record.updated_at = new Date(now);
+    stored.record.last_activity_timestamp_ms = now;
+    return;
+  }
+
+  async mergeSessionMetadata(input: MergeSessionMetadataInput): Promise<void> {
+    const key = sessionKey(input.session_id);
+    const stored = this.sessions.get(key);
+    if (stored?.record.tenant_id !== input.tenant_id) {
+      throw new SessionNotFoundError(input.session_id);
+    }
+    stored.record.metadata = { ...stored.record.metadata, [input.key]: input.value };
     const now = Date.now();
     stored.record.updated_at = new Date(now);
     stored.record.last_activity_timestamp_ms = now;

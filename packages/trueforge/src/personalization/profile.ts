@@ -7,7 +7,7 @@ import { BACKGROUND_NOT_WORK_SENTENCE } from './backgroundFraming';
 
 export const PERSONALIZATION_CONTEXT_VERSION = 'personalization-context/v1';
 export const PERSONALIZATION_MAX_CONTEXT_CHARACTERS = 6_000;
-/** Hard bound on the learned document; the learning pass drops oversized rewrites whole. */
+/** Hard bound on the learned document; a full one makes room by moving its oldest lines into memory. */
 export const LEARNED_PROFILE_MAX_CHARACTERS = 4_000;
 
 export interface PersonalizationProfileContent {

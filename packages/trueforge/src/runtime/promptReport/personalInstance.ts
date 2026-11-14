@@ -78,18 +78,15 @@ export type GoogleAccess = 'read' | 'read_and_write';
 
 const MEMORY_CONFIG: MemoryConfig = {
   recallMaxTokens: 600,
-  recallEntityTokens: 512,
   recallTimeoutMs: 2500,
   recallQueryWindow: 5,
   recallMinScore: 0.5,
   recallMaxItems: 12,
-  recallMaxEntities: 8,
   preRecallGateEnabled: false,
   retainTimeoutMs: 10_000,
   sweepMaxPerTurn: 5,
   screen: { enabled: false, url: '', authToken: '', threshold: 0.5, timeoutMs: 1500, maxConcurrency: 8 },
-  curated: { enabled: false, maxModels: 3, maxTokens: 512 },
-  reflect: { enabled: false, budget: 'low', maxTokens: 512, timeoutMs: 8000 },
+  pages: { maxCount: 6, maxTokens: 1500 },
 };
 
 const TOOL_OUTPUT_SCREEN: ToolOutputScreenConfig = {
@@ -182,6 +179,7 @@ function unusedScheduleStore(): IScheduleStore<unknown> {
     getRun: () => unused('getRun'),
     getRunById: () => unused('getRunById'),
     getScheduledRunFor: () => unused('getScheduledRunFor'),
+    getScheduledRunsFor: () => unused('getScheduledRunsFor'),
     createRun: () => unused('createRun'),
     updateRunStatus: () => unused('updateRunStatus'),
     listScheduledRuns: () => unused('listScheduledRuns'),
@@ -197,6 +195,7 @@ function scheduleContext(logger: Logger): NonNullable<SpaceTurnContext['schedule
     persona_id: null,
     approval_key: 'prompt-report',
     agent: () => unused('agent'),
+    ownAgent: null,
   };
   return {
     store: unusedScheduleStore(),
@@ -289,7 +288,6 @@ export async function buildPersonalInstance(input: {
     sessionId: SESSION_ID,
     previousTurnId: null,
     summarize: undefined,
-    providerServerName: undefined,
     keepsNothing: false,
   };
   const space: SpaceTurnContext = {

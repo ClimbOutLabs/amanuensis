@@ -172,7 +172,7 @@ sandbox_drop() {
 
 # A tiny git checkout standing in for the repository: the build contexts and the slots compose file the doctor looks for.
 fixture_repo() {
-  mkdir -p "$1/ops/aman-stt" "$1/ops/aman-tts" "$1/ops/calendar-sidecar" "$1/ops/browser-sidecar" "$1/ops/compose/mail-email"
+  mkdir -p "$1/ops/aman-stt" "$1/ops/aman-tts" "$1/ops/calendar-sidecar" "$1/ops/browser-sidecar" "$1/ops/compose/mail-email" "$1/ops/compose/local-model"
   printf 'FROM scratch\n' >"$1/Dockerfile.dev"
   printf 'name: slots\n' >"$1/docker-compose.slots.yml"
   printf 'FROM scratch\n' >"$1/ops/aman-stt/Dockerfile"
@@ -184,6 +184,7 @@ fixture_repo() {
   printf '#!/bin/sh\n' >"$1/ops/compose/mail-email/entrypoint.sh"
   printf '# account agent fixture\n' >"$1/ops/compose/mail-email/account_agent.py"
   printf '# sign-in check fixture\n' >"$1/ops/compose/mail-email/email_check.py"
+  printf '// local model bridge fixture\n' >"$1/ops/compose/local-model/bridge.mjs"
   (
     cd "$1"
     git -c init.defaultBranch=main init -q .
@@ -192,7 +193,9 @@ fixture_repo() {
   )
 }
 
+# A newer version of the code: it changes the app's and the speech-to-text service's sources, so both ids change.
 repo_commit_change() {
+  printf '# %s\n' "$1" >>"$REPO/Dockerfile.dev"
   printf '%s\n' "$1" >>"$REPO/ops/aman-stt/Dockerfile"
   (
     cd "$REPO"
@@ -221,7 +224,7 @@ build_run_env() {
     STUB_EXPORT_FAIL="${STUB_EXPORT_FAIL:-}" STUB_EXPORT_LIST_FAIL="${STUB_EXPORT_LIST_FAIL:-}" STUB_PGDUMP_FAIL="${STUB_PGDUMP_FAIL:-}" STUB_OLD_PG_STOPPED="${STUB_OLD_PG_STOPPED:-}" STUB_COPY_SIGNAL="${STUB_COPY_SIGNAL:-}" AMAN_IMPORT_POLL_SECONDS=0 STUB_FAIL_ON="${STUB_FAIL_ON:-}"
     STUB_UP_FAIL_ONCE="${STUB_UP_FAIL_ONCE:-}" STUB_RESTORE_FAIL="${STUB_RESTORE_FAIL:-}"
     STUB_DOCTOR_EXIT="${STUB_DOCTOR_EXIT:-}" STUB_DOCTOR_JSON="${STUB_DOCTOR_JSON:-}" STUB_DOCKER_ROOT="${STUB_DOCKER_ROOT:-}" STUB_DOCKER_ROOT_KB="${STUB_DOCKER_ROOT_KB:-}"
-    STUB_CALENDAR_REFUSES="${STUB_CALENDAR_REFUSES:-}" STUB_CALENDAR_CHECK="${STUB_CALENDAR_CHECK:-}"
+    STUB_CALENDAR_REFUSES="${STUB_CALENDAR_REFUSES:-}" STUB_CALENDAR_CHECK="${STUB_CALENDAR_CHECK:-}" STUB_OLD_APP_IMAGE="${STUB_OLD_APP_IMAGE:-}"
     STUB_UI_SH="$INSTALLER_DIR/lib/ui.sh" STUB_REAL_NODE="$STUB_REAL_NODE" STUB_PKI_FAIL="${STUB_PKI_FAIL:-}" STUB_PUSH_KEYS_FAIL="${STUB_PUSH_KEYS_FAIL:-}"
     AMAN_CADDY_ETC="$SB/etc-caddy" AMAN_SYS_NET="$SB/sysnet" AMAN_EDGE_WAIT_TRIES=1 ${RUN_ENV_EXTRA[@]+"${RUN_ENV_EXTRA[@]}"}
     ${AMAN_PASSWORD+AMAN_PASSWORD="$AMAN_PASSWORD"})
@@ -321,8 +324,12 @@ assert_contains() {
   case "$1" in *"$2"*) t_pass ;; *) t_fail "${3:-missing text}: expected to find [$2] in [$(printf '%s' "$1" | head -c 600)]" ;; esac
 }
 
-# The text with every run of whitespace collapsed to one space, so a sentence the plan wrapped still matches.
-flat() { printf '%s' "$1" | tr '\n' ' ' | tr -s ' '; }
+# The text with every run of whitespace collapsed to one space, so a sentence the plan wrapped still matches. The sides
+# of a step panel are dropped first, since a person reads the words between them.
+flat() { printf '%s\n' "$1" | unframe | tr '\n' ' ' | tr -s ' ' | sed 's/ $//'; }
+
+# Lines without the sides of the step panels they sit in.
+unframe() { sed -E 's/^(│|\|) (.*[^ ])? *(│|\|)$/\2/; s/^(│|\|) //'; }
 
 assert_flat_contains() {
   assert_contains "$(flat "$1")" "$2" "${3:-}"

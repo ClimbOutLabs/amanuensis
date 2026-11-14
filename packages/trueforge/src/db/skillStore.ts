@@ -21,6 +21,16 @@ export interface SkillRecord {
    * editing the skill must not silently grant or widen access.
    */
   network_approval: readonly string[] | null;
+  /**
+   * Sites the person allowed one by one for this skill, from a network card or Settings. Each
+   * site stands on its own: allowing one never changes the declared list or its approval.
+   */
+  network_allowed_hosts: readonly string[];
+  /**
+   * Sites the person turned down for this skill, from a network card or Settings. A denied site
+   * is never granted and raises no further card until the person clears it in Settings.
+   */
+  network_denied_hosts: readonly string[];
   /** ISO-8601 UTC instant. */
   created_at: string;
   /** ISO-8601 UTC instant. */
@@ -52,6 +62,18 @@ export interface SetSkillNetworkApprovalInput {
   name: string;
   /** The approved site list, or null to remove the approval. */
   hosts: readonly string[] | null;
+}
+
+export interface SetSkillNetworkHostDecisionInput {
+  tenant_id: string;
+  name: string;
+  /** The one site the decision is about. */
+  host: string;
+  /**
+   * `allowed` allows the site on its own, `denied` turns it down, and `none` clears either
+   * earlier decision. A site holds one decision at a time: a new one replaces the old.
+   */
+  decision: 'allowed' | 'denied' | 'none';
 }
 
 /** AgentSpec `skills` refs for validate and resolve. */
@@ -87,6 +109,14 @@ export interface ISkillStore<TTransaction = never> {
    */
   setSkillNetworkApproval(
     input: SetSkillNetworkApprovalInput,
+    transaction?: TTransaction,
+  ): Promise<SkillRecord | undefined>;
+  /**
+   * Stores or clears the person's decision on one site for one skill. Returns the updated
+   * record, or undefined when no skill with that name exists.
+   */
+  setSkillNetworkHostDecision(
+    input: SetSkillNetworkHostDecisionInput,
     transaction?: TTransaction,
   ): Promise<SkillRecord | undefined>;
   listSkillVersions(input: { name: string }): Promise<SkillVersion[]>;
