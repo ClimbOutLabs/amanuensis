@@ -3,39 +3,37 @@ import { BlockList, isIP } from 'node:net';
 import { networkInterfaces } from 'node:os';
 
 /**
- * The address check every address the person supplies for something the server connects to has
- * to pass: remote MCP servers and model base URLs, checked when the address is saved and again
- * when a connection is made. It is the calendar connector's rule (ops/calendar-sidecar's
- * account.mjs), ported here so the app and the sidecar refuse the same addresses: the host is
- * resolved, and the address is refused when any address it resolves to is loopback, link-local,
- * a cloud metadata address, another always-refused range, or one of this instance's own
- * addresses. Everything else is allowed, home-network addresses included.
+ * The address check for everything the server connects to at an address: remote MCP servers,
+ * model base URLs, and the addresses those servers hand back (redirects, sign-in endpoints). The
+ * host is resolved, and every address it resolves to is judged; a host that answers with even one
+ * refused address is refused.
  *
- * A host that does not resolve is reported as 'unresolved', apart from the refused classes.
- * Saving leaves it to the connection attempt, which fails on its own, and the host is judged
- * again on the next check if the name starts resolving. Using refuses it: a name that cannot
- * be resolved cannot be checked, and the answers a name gives can change between a check that
- * failed to resolve it and the dial that follows. (The calendar agent refuses an unresolvable
- * address at save time because its save is an unattended installer step; the app's saves are
- * interactive and report the failed connection at use.)
+ * Who chose the address decides how strict the check is:
+ * - An address a remote server chose (a redirect, an address a sign-in service names) is refused
+ *   when it is on this computer (loopback or one of this machine's own addresses), on Aman's own
+ *   container networks, or a protected address (link-local, cloud metadata and the other
+ *   always-refused ranges). A remote server must never steer Aman inward.
+ * - An address the instance's owner chose (a connector or model saved in Settings, or set by the
+ *   operator) may be on this computer when Aman runs directly on it: that computer is the owner's,
+ *   and so are its services. Protected addresses stay refused. When Aman runs in a container,
+ *   loopback and the container's own addresses are Aman itself, and the container networks hold
+ *   Aman's own parts, so those stay refused too; a service on the owner's computer is reached at
+ *   host.docker.internal, which is neither. A demo instance is used by visitors, not its owner,
+ *   so it judges every address the strict way.
  *
- * Two deliberate differences from the sidecar. An IPv4-mapped IPv6 address (::ffff:127.0.0.1) is
- * judged by the IPv4 address inside it, the same unwrapping the maps address rule does, so the
- * mapped spelling cannot slip a refused IPv4 address past the IPv6 list. And the sidecar, which
- * always runs in a container, refuses every address on its own networks from the addresses of
- * its own interfaces, while the app learns its container networks from a setting instead: the
- * installer writes the ranges Docker gave the instance's networks into
- * `CONTAINER_NETWORK_RANGES` (see config.ts), and main.ts hands them to this check through
- * configureRemoteAddressCheck. A container install therefore refuses its whole container
- * networks, whose other members are the app's own parts (its connectors among them), exactly
- * as the sidecar does. An app run directly on the host has no such setting and refuses only
- * its own addresses: the network it sits on is the person's home network, whose other
- * addresses are theirs to use.
+ * The installer writes the ranges Docker gave a container instance's networks into
+ * `CONTAINER_NETWORK_RANGES` (see config.ts), and main.ts hands them here through
+ * configureRemoteAddressCheck; a direct run names none. An IPv4-mapped IPv6 address
+ * (::ffff:127.0.0.1) is judged by the IPv4 address inside it, so the mapped spelling cannot slip
+ * past the IPv4 lists. The calendar sidecar's account agent applies the strict rule to the
+ * addresses it is given.
  *
- * The check judges the addresses a host resolves to at the moment it runs. It does not pin the
- * connection that follows to those addresses; the MCP transports and the model client own their
- * sockets and take no pinning hook, so a name whose answers change between the check and the
- * connect is caught on the next check, not mid-flight.
+ * A host that does not resolve is reported as 'unresolved'. Saving leaves it to the connection
+ * attempt, and the host is judged again on the next check; using refuses it, because a name that
+ * cannot be resolved cannot be checked. The check judges the addresses a host resolves to when it
+ * runs and does not pin the connection that follows: the MCP transports and the model client own
+ * their sockets, so a name whose answers change between the check and the connect is caught on
+ * the next check, not mid-flight.
  */
 
 export type ResolveAddresses = (hostname: string) => Promise<string[]>;
@@ -43,57 +41,80 @@ export type ResolveAddresses = (hostname: string) => Promise<string[]>;
 export interface RemoteAddressDeps {
   /** Resolves a host name to every address it answers with. Tests inject a fake. */
   resolveAddresses?: ResolveAddresses | undefined;
-  /**
-   * This instance's own addresses, the address of each of its network interfaces. Tests inject
-   * a fake set; the default reads the machine's own network interfaces.
-   */
+  /** This machine's own addresses. Tests inject a fake set; the default reads the network interfaces. */
   ownAddresses?: readonly string[] | undefined;
   /**
-   * CIDR ranges of this instance's own container networks, refused as well as its own
-   * addresses. Tests inject a fake set; the default is the set main.ts configured from the
-   * `CONTAINER_NETWORK_RANGES` setting, which the installer writes for a container install and
-   * a host run leaves empty.
+   * CIDR ranges of the instance's container networks. Tests inject a fake set; the default is
+   * what main.ts configured from `CONTAINER_NETWORK_RANGES`, empty when Aman runs directly.
    */
   ownNetworkRanges?: readonly string[] | undefined;
+  /** Whether this is a demo instance. Tests inject it; the default is what main.ts configured. */
+  demo?: boolean | undefined;
 }
 
-/** The container network ranges main.ts configured from the server settings, if any. */
+/** Who chose an address, which decides how strictly it is judged (see the module comment). */
+export type AddressChooser = 'owner' | 'remote';
+
 let configuredOwnNetworkRanges: readonly string[] = [];
+let configuredDemo = false;
 
-/** Hands the check the container network ranges from the server settings (see config.ts). */
-export function configureRemoteAddressCheck(config: { ownNetworkRanges: readonly string[] }): void {
+/** Hands the check the server settings it depends on (see config.ts). */
+export function configureRemoteAddressCheck(config: { ownNetworkRanges: readonly string[]; demo: boolean }): void {
   configuredOwnNetworkRanges = config.ownNetworkRanges;
+  configuredDemo = config.demo;
 }
 
-const ALWAYS_BLOCKED = ((): BlockList => {
-  const blocked = new BlockList();
-  for (const [network, prefix] of [
+function subnetList({
+  ipv4,
+  ipv6,
+}: {
+  ipv4: readonly (readonly [string, number])[];
+  ipv6: readonly (readonly [string, number])[];
+}): BlockList {
+  const list = new BlockList();
+  for (const [network, prefix] of ipv4) {
+    list.addSubnet(network, prefix, 'ipv4');
+  }
+  for (const [network, prefix] of ipv6) {
+    list.addSubnet(network, prefix, 'ipv6');
+  }
+  return list;
+}
+
+/** Addresses that reach this computer itself whatever its network addresses are. */
+const LOOPBACK = subnetList({
+  ipv4: [
     ['0.0.0.0', 8], // "this network": 0.0.0.1 reaches loopback services on Linux
-    ['127.0.0.0', 8], // loopback
+    ['127.0.0.0', 8],
+  ],
+  ipv6: [
+    ['::', 128], // the unspecified address, which connects to this computer
+    ['::1', 128],
+  ],
+});
+
+/** Addresses no one may point Aman at: cloud metadata, link-local and other special ranges. */
+const PROTECTED = subnetList({
+  ipv4: [
     ['169.254.0.0', 16], // link-local, including the cloud metadata address
     ['192.0.0.0', 24], // IETF special registry, benchmarking and documentation ranges aside
     ['224.0.0.0', 4], // multicast
     ['240.0.0.0', 4], // reserved, including the limited broadcast
     ['100.100.100.200', 32], // Alibaba Cloud metadata, inside the shared range the RFC allows
     ['168.63.129.16', 32], // Azure's virtualized host address
-  ] as const) {
-    blocked.addSubnet(network, prefix, 'ipv4');
-  }
-  for (const [network, prefix] of [
-    ['::', 96], // the IPv4-compatible space, ::1 loopback included
+  ],
+  ipv6: [
+    ['::', 96], // the IPv4-compatible space (loopback and unspecified are judged first)
     ['64:ff9b::', 96], // NAT64 well-known prefix: the IPv4 space through a translator
     ['100::', 64], // discard-only
     ['fe80::', 10], // link-local
     ['ff00::', 8], // multicast
     ['fd00:ec2::254', 128], // the EC2 IPv6 metadata address
-  ] as const) {
-    blocked.addSubnet(network, prefix, 'ipv6');
-  }
-  return blocked;
-})();
+  ],
+});
 
-/** The address of every network interface on this machine: this instance's own addresses. */
-export function ownInterfaceAddresses(): string[] {
+/** The address of every network interface on this machine. */
+function ownInterfaceAddresses(): string[] {
   const addresses: string[] = [];
   for (const entries of Object.values(networkInterfaces())) {
     for (const entry of entries ?? []) {
@@ -103,21 +124,24 @@ export function ownInterfaceAddresses(): string[] {
   return addresses;
 }
 
-/**
- * The addresses this check refuses because they are this instance's own: its own addresses,
- * plus every address in one of its container network ranges when ranges are in force. A range
- * that does not parse is skipped here; the settings parser refuses it at startup, so a range
- * that reaches this list has already been judged there.
- */
-function ownAddressList(deps: RemoteAddressDeps): BlockList {
-  const own = new BlockList();
-  for (const address of deps.ownAddresses ?? ownInterfaceAddresses()) {
+function addressList(addresses: readonly string[]): BlockList {
+  const list = new BlockList();
+  for (const address of addresses) {
     const family = isIP(address);
     if (family !== 0) {
-      own.addAddress(address, family === 6 ? 'ipv6' : 'ipv4');
+      list.addAddress(address, family === 6 ? 'ipv6' : 'ipv4');
     }
   }
-  for (const range of deps.ownNetworkRanges ?? configuredOwnNetworkRanges) {
+  return list;
+}
+
+/**
+ * The container network ranges as one list. A range that does not parse is skipped here; the
+ * settings parser refuses it at startup, so a range that reaches this list was judged there.
+ */
+function rangeList(ranges: readonly string[]): BlockList {
+  const list = new BlockList();
+  for (const range of ranges) {
     const slash = range.lastIndexOf('/');
     if (slash < 1) {
       continue;
@@ -126,10 +150,10 @@ function ownAddressList(deps: RemoteAddressDeps): BlockList {
     const family = isIP(network);
     const prefix = Number(range.slice(slash + 1));
     if (family !== 0 && Number.isInteger(prefix)) {
-      own.addSubnet(network, prefix, family === 6 ? 'ipv6' : 'ipv4');
+      list.addSubnet(network, prefix, family === 6 ? 'ipv6' : 'ipv4');
     }
   }
-  return own;
+  return list;
 }
 
 /** The IPv4 address inside an IPv4-mapped IPv6 address, or undefined when the address is not one. */
@@ -156,20 +180,46 @@ function ipv4OfMapped(address: string): string | undefined {
   return undefined;
 }
 
-function addressAllowed(address: string, own: BlockList): boolean {
-  const family = isIP(address);
+/** Why an address is refused: a protected address, or one inside Aman itself. */
+export type RefusedAddress = 'protected' | 'internal';
+
+interface AddressRule {
+  own: BlockList;
+  ranges: BlockList;
+  /** Whether an address on this computer may be used: owner-chosen, run directly, not a demo. */
+  thisComputerAllowed: boolean;
+}
+
+function addressRule({ chosenBy, deps }: { chosenBy: AddressChooser; deps: RemoteAddressDeps }): AddressRule {
+  const ranges = deps.ownNetworkRanges ?? configuredOwnNetworkRanges;
+  const demo = deps.demo ?? configuredDemo;
+  return {
+    own: addressList(deps.ownAddresses ?? ownInterfaceAddresses()),
+    ranges: rangeList(ranges),
+    thisComputerAllowed: chosenBy === 'owner' && ranges.length === 0 && !demo,
+  };
+}
+
+/** Why the rule refuses an address, or null when it may be used. Something that is not an address is protected. */
+function refusedAddress({ address, rule }: { address: string; rule: AddressRule }): RefusedAddress | null {
+  const mapped = ipv4OfMapped(address);
+  const judged = mapped ?? address;
+  const family = isIP(judged);
   if (family === 0) {
-    return false;
+    return 'protected';
   }
   const kind = family === 6 ? 'ipv6' : 'ipv4';
-  if (ALWAYS_BLOCKED.check(address, kind) || own.check(address, kind)) {
-    return false;
+  const thisComputer = LOOPBACK.check(judged, kind);
+  if (!thisComputer && PROTECTED.check(judged, kind)) {
+    return 'protected';
   }
-  const mapped = ipv4OfMapped(address);
-  if (mapped !== undefined && (ALWAYS_BLOCKED.check(mapped, 'ipv4') || own.check(mapped, 'ipv4'))) {
-    return false;
+  if (rule.ranges.check(judged, kind)) {
+    return 'internal';
   }
-  return true;
+  if (thisComputer || rule.own.check(judged, kind)) {
+    return rule.thisComputerAllowed ? null : 'internal';
+  }
+  return null;
 }
 
 async function defaultResolveAddresses(hostname: string): Promise<string[]> {
@@ -177,40 +227,49 @@ async function defaultResolveAddresses(hostname: string): Promise<string[]> {
   return records.map(record => record.address);
 }
 
-export type RemoteAddressVerdict = { ok: true; addresses: string[] } | { ok: false; reason: 'blocked' | 'unresolved' };
+export type RemoteAddressVerdict =
+  { ok: true; addresses: string[] } | { ok: false; reason: RefusedAddress | 'unresolved' };
 
 /**
- * Judge one host the way the calendar connector's save does: an address literal is judged as it
- * stands, a name by every address it resolves to. Blocked wins over unresolved, because a host
- * that answers with even one refused address is refused outright.
+ * Judge one host: an address literal as it stands, a name by every address it resolves to. A
+ * refused address wins over unresolved, and protected over internal, because a host that answers
+ * with even one refused address is refused outright.
  */
 export async function allowedRemoteAddresses({
   host,
+  chosenBy,
   deps = {},
 }: {
   host: string;
+  chosenBy: AddressChooser;
   deps?: RemoteAddressDeps | undefined;
 }): Promise<RemoteAddressVerdict> {
-  const own = ownAddressList(deps);
-  if (isIP(host) !== 0) {
-    return addressAllowed(host, own) ? { ok: true, addresses: [host] } : { ok: false, reason: 'blocked' };
-  }
-  const resolve = deps.resolveAddresses ?? defaultResolveAddresses;
+  const rule = addressRule({ chosenBy, deps });
   let addresses: string[];
-  try {
-    addresses = await resolve(host);
-  } catch {
-    addresses = [];
+  if (isIP(host) !== 0) {
+    addresses = [host];
+  } else {
+    const resolve = deps.resolveAddresses ?? defaultResolveAddresses;
+    try {
+      addresses = await resolve(host);
+    } catch {
+      addresses = [];
+    }
   }
   if (addresses.length === 0) {
     return { ok: false, reason: 'unresolved' };
   }
-  return addresses.every(address => addressAllowed(address, own))
-    ? { ok: true, addresses }
-    : { ok: false, reason: 'blocked' };
+  const refusals = addresses.map(address => refusedAddress({ address, rule }));
+  if (refusals.includes('protected')) {
+    return { ok: false, reason: 'protected' };
+  }
+  if (refusals.includes('internal')) {
+    return { ok: false, reason: 'internal' };
+  }
+  return { ok: true, addresses };
 }
 
-export type RemoteUrlProblem = 'blocked' | 'unresolved' | 'invalid';
+export type RemoteUrlProblem = RefusedAddress | 'unresolved' | 'invalid';
 
 /**
  * The problem with a full URL whose host must pass the address check, or null when the URL may
@@ -220,9 +279,11 @@ export type RemoteUrlProblem = 'blocked' | 'unresolved' | 'invalid';
  */
 export async function remoteUrlProblem({
   url,
+  chosenBy,
   deps = {},
 }: {
   url: string;
+  chosenBy: AddressChooser;
   deps?: RemoteAddressDeps | undefined;
 }): Promise<RemoteUrlProblem | null> {
   let parsed: URL;
@@ -241,7 +302,7 @@ export async function remoteUrlProblem({
   if (host === '') {
     return 'invalid';
   }
-  const verdict = await allowedRemoteAddresses({ host, deps });
+  const verdict = await allowedRemoteAddresses({ host, chosenBy, deps });
   return verdict.ok ? null : verdict.reason;
 }
 
@@ -282,14 +343,16 @@ export function isNamedLocalModelEndpoint({ url, endpoints }: { url: string; end
 export async function modelUrlProblem({
   url,
   endpoints,
+  chosenBy,
   deps = {},
 }: {
   url: string;
   endpoints: readonly string[];
+  chosenBy: AddressChooser;
   deps?: RemoteAddressDeps | undefined;
 }): Promise<RemoteUrlProblem | null> {
   if (isNamedLocalModelEndpoint({ url, endpoints })) {
     return null;
   }
-  return remoteUrlProblem({ url, deps });
+  return remoteUrlProblem({ url, chosenBy, deps });
 }

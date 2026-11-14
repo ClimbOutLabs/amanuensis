@@ -16,6 +16,7 @@ import { SqliteMcpServerStore } from '../../../src/db/sqlite/mcp-server-store/Sq
 import { SqliteMcpToolGrantStore } from '../../../src/db/sqlite/mcp-tool-grant-store/SqliteMcpToolGrantStore';
 import { SqliteOAuthTokenStore } from '../../../src/db/sqlite/token-store/SqliteOAuthTokenStore';
 import { mcpOAuthCallbackUrl } from '../../../src/mcp/auth/mcpOAuthHelpers';
+import { configureRemoteAddressCheck } from '../../../src/runtime/remoteAddress';
 import { RequestErrorResponseSchema } from '../../../src/schemas/errors';
 import {
   INERT_ASK_MEMORY_TOOL,
@@ -2002,16 +2003,14 @@ describe('mcp-servers routers', () => {
       return RequestErrorResponseSchema.parse(await response.json()).error.message;
     }
 
-    it('refuses to create a server at a loopback address, and saves nothing', async () => {
+    it('creates a server at a loopback address when Aman runs directly on the computer', async () => {
       const response = await settingsRouter.request(
         '/',
-        postInit(wrapManifest(remoteBody('loopback-create', 'http://127.0.0.1:9999/mcp'))),
+        postInit(wrapManifest(remoteBody('direct-loopback-create', 'http://127.0.0.1:9999/mcp'))),
       );
 
-      expect(response.status).toBe(400);
-      expect(await errorMessage(response)).toContain('home network or the internet');
-      const missing = await settingsRouter.request('/loopback-create');
-      expect(missing.status).toBe(404);
+      expect(response.status).toBe(201);
+      await settingsRouter.request('/direct-loopback-create', { method: 'DELETE' });
     });
 
     it('refuses to replace a server with the cloud metadata address', async () => {
@@ -2021,9 +2020,7 @@ describe('mcp-servers routers', () => {
       );
 
       expect(response.status).toBe(400);
-      expect(await errorMessage(response)).toContain(
-        'That address is on this computer, so the server cannot connect to it',
-      );
+      expect(await errorMessage(response)).toContain('protected network address, so Aman will not connect to it');
     });
 
     it('refuses an address carrying a name and password', async () => {
@@ -2062,42 +2059,61 @@ describe('mcp-servers routers', () => {
       }
     });
 
-    it('refuses the tools listing for a stored server at a loopback address', async () => {
-      await mcpServerStore.upsertServer({
-        tenant_id: TENANT_ID,
-        name: 'loopback-tools',
-        manifest: remoteBody('loopback-tools', 'http://127.0.0.1:9999/mcp'),
-        first_party: false,
+    describe('when Aman runs in a container', () => {
+      beforeAll(() => {
+        configureRemoteAddressCheck({ ownNetworkRanges: ['172.30.0.0/16'], demo: false });
       });
-      try {
-        const response = await mcpServersRouter.request('/loopback-tools/tools');
-
-        expect(response.status).toBe(422);
-        expect(await errorMessage(response)).toContain(
-          'has an address on this computer, so the server cannot connect to it',
-        );
-      } finally {
-        await mcpServerStore.deleteServer({ tenant_id: TENANT_ID, name: 'loopback-tools' });
-      }
-    });
-
-    it('refuses to start sign-in for a stored server at a loopback address', async () => {
-      await mcpServerStore.upsertServer({
-        tenant_id: TENANT_ID,
-        name: 'loopback-authorize',
-        manifest: remoteBody('loopback-authorize', 'http://127.0.0.1:9999/mcp'),
-        first_party: false,
+      afterAll(() => {
+        configureRemoteAddressCheck({ ownNetworkRanges: [], demo: false });
       });
-      try {
-        const response = await mcpServersRouter.request('/loopback-authorize/authorize?return_to=/settings');
 
-        expect(response.status).toBe(422);
-        expect(await errorMessage(response)).toContain(
-          'That address is on this computer, so the server cannot connect to it',
+      it('refuses to create a server at a loopback address, and saves nothing', async () => {
+        const response = await settingsRouter.request(
+          '/',
+          postInit(wrapManifest(remoteBody('loopback-create', 'http://127.0.0.1:9999/mcp'))),
         );
-      } finally {
-        await mcpServerStore.deleteServer({ tenant_id: TENANT_ID, name: 'loopback-authorize' });
-      }
+
+        expect(response.status).toBe(400);
+        expect(await errorMessage(response)).toContain('enter host.docker.internal');
+        const missing = await settingsRouter.request('/loopback-create');
+        expect(missing.status).toBe(404);
+      });
+
+      it('refuses the tools listing for a stored server at a loopback address', async () => {
+        await mcpServerStore.upsertServer({
+          tenant_id: TENANT_ID,
+          name: 'loopback-tools',
+          manifest: remoteBody('loopback-tools', 'http://127.0.0.1:9999/mcp'),
+          first_party: false,
+        });
+        try {
+          const response = await mcpServersRouter.request('/loopback-tools/tools');
+
+          expect(response.status).toBe(422);
+          expect(await errorMessage(response)).toContain(
+            'has an address inside Aman itself, so Aman will not connect to it',
+          );
+        } finally {
+          await mcpServerStore.deleteServer({ tenant_id: TENANT_ID, name: 'loopback-tools' });
+        }
+      });
+
+      it('refuses to start sign-in for a stored server at a loopback address', async () => {
+        await mcpServerStore.upsertServer({
+          tenant_id: TENANT_ID,
+          name: 'loopback-authorize',
+          manifest: remoteBody('loopback-authorize', 'http://127.0.0.1:9999/mcp'),
+          first_party: false,
+        });
+        try {
+          const response = await mcpServersRouter.request('/loopback-authorize/authorize?return_to=/settings');
+
+          expect(response.status).toBe(422);
+          expect(await errorMessage(response)).toContain('enter host.docker.internal');
+        } finally {
+          await mcpServerStore.deleteServer({ tenant_id: TENANT_ID, name: 'loopback-authorize' });
+        }
+      });
     });
   });
 });

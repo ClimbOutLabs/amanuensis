@@ -544,8 +544,8 @@ describe('approval gate over an inert connector', () => {
       'keeps trust on another bank of the same origin, and refuses a move to an origin the operator did not list',
       async () => {
         // Answers the memory provider check like any server, but the operator never listed its
-        // origin, and it listens on this computer, so the address check refuses the move at
-        // save time and the connector stays where it was.
+        // origin: the move is saved, as any connector on this computer may be, and the connector
+        // loses its trust, so its tool asks before it runs.
         const elsewhere = await startInertMcpServer();
         try {
           await saveMemoryConnector({ server, url: `${server.mcp.url}/other`, memoryProvider: true });
@@ -554,20 +554,15 @@ describe('approval gate over an inert connector', () => {
           expect(requiredActions(ran)).toEqual([]);
           expect(server.mcp.askMemoryInvocations()).toBe(1);
 
-          const refused = await saveMemoryConnectorResponse({
+          await saveMemoryConnector({ server, url: elsewhere.memoryProviderUrl, memoryProvider: true });
+          const moved = await createSession(server, firstPartyAgentSpec());
+          const paused = await runTurn({
             server,
-            url: elsewhere.memoryProviderUrl,
-            memoryProvider: true,
-          });
-          expect(refused.status).toBe(400);
-          const unmoved = await createSession(server, firstPartyAgentSpec());
-          const stillRan = await runTurn({
-            server,
-            sessionId: unmoved,
+            sessionId: moved,
             input: userMessage(INERT_ASK_MEMORY_TOOL),
           });
-          expect(requiredActions(stillRan)).toEqual([]);
-          expect(server.mcp.askMemoryInvocations()).toBe(2);
+          expect(requiredActions(paused)).not.toEqual([]);
+          expect(server.mcp.askMemoryInvocations()).toBe(1);
           expect(elsewhere.askMemoryInvocations()).toBe(0);
         } finally {
           await saveMemoryConnector({ server, url: server.mcp.memoryProviderUrl, memoryProvider: true });
@@ -577,7 +572,7 @@ describe('approval gate over an inert connector', () => {
         const restored = await createSession(server, firstPartyAgentSpec());
         const again = await runTurn({ server, sessionId: restored, input: userMessage(INERT_ASK_MEMORY_TOOL) });
         expect(requiredActions(again)).toEqual([]);
-        expect(server.mcp.askMemoryInvocations()).toBe(3);
+        expect(server.mcp.askMemoryInvocations()).toBe(2);
       },
       TURN_TIMEOUT_MS,
     );
@@ -1134,35 +1129,16 @@ describe('memory provider on an origin the operator did not list', () => {
   });
 
   it(
-    'refuses a hostile memory provider the operator did not list, so nothing is saved and its tool never runs',
+    'does not trust a memory provider the operator did not list, so its tool asks before it runs',
     async () => {
       // The server answers the setup check and declares ask_memory read-only and closed-world,
-      // which is everything a hostile server needs to say. It also listens on this computer,
-      // and its origin is not listed, so the address check refuses the save itself.
-      const refused = await saveMemoryConnectorResponse({
-        server,
-        url: server.mcp.memoryProviderUrl,
-        memoryProvider: true,
-      });
-      expect(refused.status).toBe(400);
-      const missing = await server.request(`/api/v1/settings/mcp-servers/${INERT_MEMORY_SERVER_NAME}`);
-      expect(missing.status).toBe(404);
+      // which is everything a hostile server needs to say. It listens on this computer, so the
+      // save goes through, but its origin is not listed, so it is not trusted.
+      await saveMemoryConnector({ server, url: server.mcp.memoryProviderUrl, memoryProvider: true });
+      const sessionId = await createSession(server, firstPartyAgentSpec());
+      const turn = await runTurn({ server, sessionId, input: userMessage(INERT_ASK_MEMORY_TOOL) });
 
-      // The refusal is about the address, not the memory flag: the same address under a
-      // plain connector name is refused too.
-      const plain = await server.request('/api/v1/settings/mcp-servers', {
-        method: 'PUT',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          manifest: {
-            type: 'remote',
-            name: 'hostile-plain',
-            url: server.mcp.memoryProviderUrl,
-            description: 'The same address, saved as an ordinary connector.',
-          },
-        }),
-      });
-      expect(plain.status).toBe(400);
+      expect(requiredActions(turn)).not.toEqual([]);
       expect(server.mcp.askMemoryInvocations()).toBe(0);
     },
     TURN_TIMEOUT_MS,
@@ -1171,14 +1147,6 @@ describe('memory provider on an origin the operator did not list', () => {
   it(
     'trusts it once the operator lists the origin and the provider is saved, and stops connecting when the origin is removed',
     async () => {
-      // Unlisted, the save is refused before anything is stored.
-      const refused = await saveMemoryConnectorResponse({
-        server,
-        url: server.mcp.memoryProviderUrl,
-        memoryProvider: true,
-      });
-      expect(refused.status).toBe(400);
-
       // Once the operator lists the origin, the save goes through, re-runs the setup check
       // and marks the provider, so its tool runs without asking.
       server.setFirstPartyOrigins([server.mcp.origin]);
@@ -1188,14 +1156,12 @@ describe('memory provider on an origin the operator did not list', () => {
       expect(requiredActions(ran)).toEqual([]);
       expect(server.mcp.askMemoryInvocations()).toBe(1);
 
-      // Removing the origin takes effect on the next turn, with no save: resolving the
-      // connector is refused at use time, the turn stops with the refusal as its reason,
-      // and the tool does not run.
+      // Removing the origin takes effect on the next turn, with no save: the stored mark is
+      // checked against the list when the connector is loaded, so the tool asks again.
       server.setFirstPartyOrigins([]);
       const afterRemoval = await createSession(server, firstPartyAgentSpec());
-      await expect(
-        runTurn({ server, sessionId: afterRemoval, input: userMessage(INERT_ASK_MEMORY_TOOL) }),
-      ).rejects.toThrow('has an address on this computer');
+      const paused = await runTurn({ server, sessionId: afterRemoval, input: userMessage(INERT_ASK_MEMORY_TOOL) });
+      expect(requiredActions(paused)).not.toEqual([]);
       expect(server.mcp.askMemoryInvocations()).toBe(1);
     },
     TURN_TIMEOUT_MS,

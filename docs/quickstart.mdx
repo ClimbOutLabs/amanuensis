@@ -91,7 +91,7 @@ The app does not ship with a model configured — a fresh checkout has no defaul
     - Under **Models**, **Model ID** — `qwen2.5:0.5b` (or whatever you pulled), matching the name exactly. **Model name** here is actually a machine slug, not a display label: lowercase letters, digits, and hyphens only, starting with a letter — `qwen2-5-0-5b` works.
     - Under **Advanced**, set **Context length** and **Max output tokens** — check the model's page on [ollama.com/library](https://ollama.com/library) for its real limits; `32000` and `4096` are safe placeholders for small models.
 
-    One setting comes first: Aman does not connect to a model on its own computer until that model's exact address is named in the server's `LOCAL_MODEL_ENDPOINTS` setting. Start the app with `LOCAL_MODEL_ENDPOINTS=localhost:11434` in its environment (or add that line to `packages/trueforge/.env`), restart it, and then click **Add provider**. See [Setup Models](/models#adding-a-custom-provider).
+    Then click **Add provider**. Aman runs directly on your computer here, so it can reach a model on the same computer. See [Setup Models](/models#adding-a-custom-provider).
   </Tab>
 </Tabs>
 
