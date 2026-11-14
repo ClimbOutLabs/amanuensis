@@ -105,7 +105,7 @@ describe('the Email connector on the real tool route', () => {
       });
     }
     const send = await email.toolCallInfo(
-      { name: 'send_email', arguments: { to: ['dana@example.org'], subject: 'Friday', body: 'See you then.' } },
+      { name: 'send_email', arguments: { recipients: ['dana@example.org'], subject: 'Friday', body: 'See you then.' } },
       true,
     );
     expect(send.is_approval_required).toBe(true);
