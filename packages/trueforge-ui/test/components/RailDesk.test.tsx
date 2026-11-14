@@ -334,6 +334,34 @@ describe('the rail desk in a chat', () => {
     expect(screen.getByText(/A line from a page is changed on its page\./)).toBeInTheDocument();
   });
 
+  it('keeps the memory row and says so when the last message used nothing from memory', async () => {
+    const quietApi: MemoryRecallApi = {
+      listMemoryTurnContext: async () => [
+        turnContext('t1', blockOf(['[2026-08-14] The gate code is 4417'])),
+        turnContext('t2', null),
+      ],
+    };
+    render(
+      <MemoryRecallProvider api={quietApi}>
+        <AmanRuntimeRail status="ready" sessionId="chat-1" deskApi={deskApi(TODAY)} />
+      </MemoryRecallProvider>,
+    );
+    expect(await screen.findByText('From memory (0)')).toBeInTheDocument();
+    expect(screen.getByText(/Nothing from memory was used for your last message\./)).toBeInTheDocument();
+    expect(screen.queryByText('The gate code is 4417')).not.toBeInTheDocument();
+  });
+
+  it('shows no memory row in a chat where memory was never looked up', async () => {
+    const offApi: MemoryRecallApi = { listMemoryTurnContext: async () => [{ turnId: 't1' }] };
+    render(
+      <MemoryRecallProvider api={offApi}>
+        <AmanRuntimeRail status="ready" sessionId="chat-1" deskApi={deskApi(TODAY)} />
+      </MemoryRecallProvider>,
+    );
+    expect(await screen.findByText('Activity')).toBeInTheDocument();
+    expect(screen.queryByText(/From memory/)).not.toBeInTheDocument();
+  });
+
   it('deletes a memory only after a yes, and keeps it when the person says keep', async () => {
     const api = deskApi(TODAY);
     renderDesk(api);

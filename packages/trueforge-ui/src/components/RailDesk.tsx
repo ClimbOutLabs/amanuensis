@@ -531,6 +531,8 @@ export const RailChatDesk: FC<{
   }, [sessionId, memoryApi, deskApi, sentinelApi, refreshSignal]);
 
   const facts = useMemo(() => parseRecallFacts(turns).filter(fact => !pulled.has(fact.text)), [turns, pulled]);
+  // The row stays once memory has been looked up in this chat, so a message that used none does not hide it.
+  const memoryLookedUp = turns.some(turn => turn.recall !== undefined);
 
   const pullOut = (fact: RailRecallFact): void => {
     setPulled(previous => new Set(previous).add(fact.text));
@@ -570,7 +572,7 @@ export const RailChatDesk: FC<{
 
   return (
     <>
-      {facts.length > 0 && (
+      {memoryLookedUp && (
         <RailFoldedRow section="memory" title={`${MEMORY_FOLD_TITLE} (${String(facts.length)})`}>
           <ul className="aman-runtime-rail__desk-list">
             {facts.map(fact => (
@@ -644,7 +646,9 @@ export const RailChatDesk: FC<{
             ))}
           </ul>
           <p className="aman-runtime-rail__desk-note aman-runtime-rail__desk-hint">
-            Used for your last message. The × leaves a memory out of this chat only. Delete removes it everywhere.
+            {facts.length === 0
+              ? 'Nothing from memory was used for your last message.'
+              : 'Used for your last message. The × leaves a memory out of this chat only. Delete removes it everywhere.'}
             {facts.some(fact => fact.page !== undefined) && ' A line from a page is changed on its page.'}
             {onOpenMemorySettings !== undefined && (
               <>
