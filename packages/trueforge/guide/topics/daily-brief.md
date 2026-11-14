@@ -69,7 +69,7 @@ A done item stays out of your briefs for the next seven days. Items under **Chec
 3. A card shows when it runs and what it does each time. Check it.
 4. Click **Allow**.
 
-Each morning the brief arrives as a new chat. Open it when you are ready: a scheduled brief sends no notice.
+Each morning the brief arrives as a new chat. When it is ready, its first sentence also shows under the **For you** bell, with **Open chat** to take you to it. If that sentence can't be shown, the bell says "Your morning brief is ready." instead. It is a quiet note: it sends no notice to your devices, no text, and doesn't count toward your daily nudges. A brief that fails adds nothing to the bell.
 
 Once you have a brief schedule, a **Run my daily brief** card shows on the new chat screen. Click it to run your brief right now, with the same instructions your schedule uses.
 
