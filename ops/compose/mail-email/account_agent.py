@@ -913,6 +913,13 @@ def write_account_stdin():
     return 0
 
 
+def has_account_cli():
+    """The installer's look before it moves an older account in: one fixed word, never the account itself."""
+    accounts, _ = read_accounts()
+    sys.stdout.write("saved\n" if accounts else "none\n")
+    return 0
+
+
 def remove_account_cli(address):
     """The installer's remove path: one account by address, or every account with no address."""
     try:
@@ -929,6 +936,8 @@ def main():
         sys.exit(print_config())
     if len(sys.argv) > 1 and sys.argv[1] == "--write-stdin":
         sys.exit(write_account_stdin())
+    if len(sys.argv) > 1 and sys.argv[1] == "--has-account":
+        sys.exit(has_account_cli())
     if len(sys.argv) > 1 and sys.argv[1] == "--remove":
         sys.exit(remove_account_cli(sys.argv[2] if len(sys.argv) > 2 else None))
     if not secret_is_usable(SECRET):

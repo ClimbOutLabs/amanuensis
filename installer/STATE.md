@@ -45,6 +45,11 @@ Paths below are relative to the home.
 | `bin/aman-sandbox.mjs`                    | The sandbox setup copy the doctor runs.                                                                              |
 | `runtime/`                                | What the installer downloads to run itself, including `runtime/node/` (the pinned Node).                             |
 
+An instance set up by an older installer may also have `instances/<name>/.env.mail-email` or
+`instances/<name>/.env.calendar`, where the email or calendar app password used to be kept. Nothing reads
+them now. An upgrade moves the account into the connector's own storage and deletes the file, and
+`aman doctor` warns while one is still there.
+
 Texts through Twilio are set up by the owner in the `.env`, below the managed block:
 `REACH_SMS_PROVIDER=twilio`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`,
 `TWILIO_FROM_NUMBER` and `TWILIO_WEBHOOK_PUBLIC_URL`, with `TWILIO_WEBHOOK_PORT`

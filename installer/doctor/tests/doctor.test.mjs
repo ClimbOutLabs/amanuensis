@@ -734,9 +734,15 @@ describe('instance settings file', () => {
         '',
       ].join('\n');
 
-    function setUp({ allowed, envText, hashes = [], registered = true, records = '', dex = '' }) {
+    function setUp({ allowed, envText, hashes = [], registered = true, records = '', dex = '', oldFile = '' }) {
       world?.dispose();
       make();
+      if (oldFile) {
+        mkdirSync(world.instanceDir('main'), { recursive: true });
+        writeFileSync(path.join(world.instanceDir('main'), oldFile), 'PASSWORD=SENTINEL-old-app-password\n', {
+          mode: 0o600,
+        });
+      }
       const file = path.join(world.instanceDir('main'), 'dex.env');
       writeFileSync(file, ["DEX_USER_PASSWORD_HASH='SENTINEL-owner-hash'", ...hashes, ''].join('\n'));
       chmodSync(file, 0o600);
@@ -873,6 +879,16 @@ describe('instance settings file', () => {
         assert.equal(check.state, 'warn');
         assert.equal(check.detail, 'More than the owner can sign in: late@x.invalid.');
         assert.equal(check.fix, fixCommand);
+      });
+    }
+
+    for (const file of ['.env.mail-email', '.env.calendar']) {
+      it(`warns about an old ${file} left in the instance folder, and never shows what it holds`, () => {
+        const check = setUp({ allowed: OWNER, oldFile: file });
+        assert.equal(check.state, 'warn');
+        assert.equal(check.detail, `An old file, ${file}, still holds an app password that Aman no longer uses.`);
+        assert.equal(check.fix, 'Run aman upgrade to move it into the connector and delete it');
+        assert.doesNotMatch(world.json().stdout, /SENTINEL/);
       });
     }
 
