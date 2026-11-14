@@ -60,7 +60,10 @@ export interface SentinelServices {
   /**
    * Records the owner's answer to a skill network card: allow once for this chat, always allow
    * for the skill, or deny. The default records nothing, so a host without skill wiring never
-   * grants a site by answering.
+   * grants a site by answering. An implementation that binds the answer to the skill's code
+   * version may refuse it, recording nothing, by rejecting with an error named
+   * SkillCodePinRefusedError whose message is written for the person: the send carrying the
+   * answer is refused with that message and the card stays undecided.
    */
   skill_network_record_answer: (input: {
     tenant_id: string;

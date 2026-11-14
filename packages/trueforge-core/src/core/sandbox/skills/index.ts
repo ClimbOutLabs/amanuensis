@@ -11,3 +11,4 @@ export {
 export type { SkillUsedEvent, SkillUsedEventEnvelope, SkillUsedKind } from './skillEvents';
 export { SkillMounter } from './SkillMounter';
 export type { GitSkill, Skill, SkillMounterOptions } from './SkillMounter';
+export { resolveGitSkillObjectId } from './slotSkillCopy';

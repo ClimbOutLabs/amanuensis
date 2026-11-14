@@ -2676,7 +2676,7 @@ export class AgentThread {
           skill_name: request.skill_name,
           hosts: [...request.hosts],
           reason: request.reason,
-          code_pin: null,
+          code_pin: request.code_pin,
         };
         const key = skillNetworkQuestionKey(question);
         if (alreadyAsked.has(key)) {
@@ -2721,9 +2721,12 @@ export class AgentThread {
 
   /**
    * Records the owner's answers to skill network cards before any replay runs, so a re-run
-   * command reads the grant with the answer already in it. A failed record is logged and the
-   * answer still stands: the gateway refuses whatever was not recorded, and a card can be
-   * raised again, so nothing is granted by the failure.
+   * command reads the grant with the answer already in it. Another failed record is logged
+   * and the answer still stands: the gateway refuses whatever was not recorded, and a card
+   * can be raised again, so nothing is granted by the failure. A refusal is different: the
+   * recorder read the skill's code version, could not, and recorded nothing on purpose, so
+   * the send is refused with the recorder's sentence and the card stays undecided, ready
+   * to be answered again once the skill's address is fixed.
    */
   private async prepareSkillNetworkAnswers(input: {
     approvals: readonly UserToolApprovalMessage[];
@@ -2752,6 +2755,9 @@ export class AgentThread {
           }),
         });
       } catch (error) {
+        if (error instanceof Error && error.name === 'SkillCodePinRefusedError') {
+          throw new InvalidAgentSendInputError(error.message, { cause: error });
+        }
         this.logger.warn('Could not record the answer to a skill network card', {
           skill_name: question.skill_name,
           error: error instanceof Error ? error.message : String(error),
