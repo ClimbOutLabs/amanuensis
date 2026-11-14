@@ -78,6 +78,8 @@ export type SentinelApprovalEmail = {
   from_name?: string | null;
   /** True when a name was left off an address because it looked like an address; absent on an older card. */
   name_left_off?: boolean;
+  /** The message a forward sends on, below the note in `body`; null or absent when the message is not a forward. */
+  forwards?: { from: string; subject: string; body: string; truncated: boolean; attachments: string[] } | null;
 };
 
 export type SentinelNotSentReason = NotSentReason;
@@ -593,6 +595,23 @@ function parseEmail(value: unknown): SentinelApprovalEmail | null {
       ? null
       : (optionalString(value, 'from_name') ?? optionalString(value, 'fromName'));
   const nameLeftOff = optionalBoolean(value, 'name_left_off') ?? optionalBoolean(value, 'nameLeftOff');
+  const forwarded = value.forwards;
+  const forwardedFrom = isRecord(forwarded) ? optionalString(forwarded, 'from') : undefined;
+  const forwardedSubject = isRecord(forwarded) ? optionalString(forwarded, 'subject') : undefined;
+  const forwardedBody = isRecord(forwarded) ? optionalString(forwarded, 'body') : undefined;
+  const forwardedFiles = isRecord(forwarded) ? stringList(forwarded.attachments) : undefined;
+  // A forward whose message cannot be read is no email card at all, so it is never shown as a plain message.
+  if (
+    forwarded !== undefined &&
+    forwarded !== null &&
+    (!isRecord(forwarded) ||
+      forwardedFrom === undefined ||
+      forwardedSubject === undefined ||
+      forwardedBody === undefined ||
+      forwardedFiles === undefined)
+  ) {
+    return null;
+  }
   return {
     action,
     to,
@@ -608,6 +627,21 @@ function parseEmail(value: unknown): SentinelApprovalEmail | null {
     reply_to: replyTo,
     ...(fromName === undefined ? {} : { from_name: fromName }),
     ...(nameLeftOff === undefined ? {} : { name_left_off: nameLeftOff }),
+    ...(isRecord(forwarded) &&
+    forwardedFrom !== undefined &&
+    forwardedSubject !== undefined &&
+    forwardedBody !== undefined &&
+    forwardedFiles !== undefined
+      ? {
+          forwards: {
+            from: forwardedFrom,
+            subject: forwardedSubject,
+            body: forwardedBody,
+            truncated: optionalBoolean(forwarded, 'truncated') ?? false,
+            attachments: forwardedFiles,
+          },
+        }
+      : {}),
   };
 }
 

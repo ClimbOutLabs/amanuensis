@@ -898,6 +898,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     mcpServers: mcpOAuthStore,
     tokens: tokenStore,
     googleConnections: googleConnectionStore,
+    telegram: telegramStore,
   });
   const telegramQueue = createTelegramSendQueue();
   const telegramService = createTelegramService({ store: telegramStore, publicBaseUrl: getPublicBaseUrl(), logger });

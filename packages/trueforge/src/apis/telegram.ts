@@ -30,7 +30,6 @@ import {
   removeTelegramRoute,
   telegramWebhookRoute,
 } from '../routes/telegramRoutes';
-import { chatAssistantAgentName, getOrCreateChatAssistantAgent } from '../runtime/chatAssistant';
 import { resolveDefaultChatModel } from '../runtime/defaultChatModel';
 import { createMemoryClient } from '../runtime/memory/createMemoryClient';
 import {
@@ -77,9 +76,10 @@ function ownerOf(connection: TelegramConnection): { tenant_id: string; created_b
 }
 
 /**
- * The Telegram chat for this owner: made on the first message and reused after, bound to the
- * owner's own assistant agent (the one a plain chat's schedules run as), built from the default
- * model. The chat is titled Telegram and marked, so the app shows it as its own chat.
+ * The Telegram chat for this owner: made on the first message and reused after. It is a plain chat,
+ * like one started here, set up from the default model, so the app shows it under the person's own
+ * assistant (not under an agent name) and its model, persona and connectors can be changed from the
+ * app like any chat's. The chat is titled Telegram and marked, so the app shows it as its own chat.
  */
 async function telegramSession<TTransaction>(params: {
   c: Context;
@@ -103,23 +103,16 @@ async function telegramSession<TTransaction>(params: {
     tenant_id,
     logger: deps.logger,
   });
-  // The owner's plain-chat assistant agent, the same one a chat here with the default model runs as.
+  // Only a new chat starts from this; an existing one keeps whatever setup the person gave it.
   const spec = AgentSpecSchema.parse({
     model: { name: modelName },
     config: { sandbox: { enabled: sandboxAvailable } },
-  });
-  const agent = await getOrCreateChatAssistantAgent({
-    tenant_id,
-    owner,
-    name: chatAssistantAgentName({ owner, spec }),
-    spec,
-    agentStore: deps.agentStore,
   });
   const { session, created } = await deps.sessions.getOrCreateByExternalId({
     tenant_id,
     external_id: telegramExternalId(owner.subject_id),
     created_by_subject: owner,
-    agent: { type: 'reference', id: agent.id, name: agent.name },
+    agent: { type: 'inline', spec },
     metadata: { [TELEGRAM_METADATA_KEY]: 'true' },
   });
   if (created || session.record.title === null) {

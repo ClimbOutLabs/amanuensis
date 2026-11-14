@@ -8,6 +8,7 @@
  * in-memory (offline off, nothing relaxed, so Tier 2 asks) so core works
  * without server wiring.
  */
+import { inMemoryApprovedMailDrafts, type ApprovedMailDrafts } from '../email/mailConnector/approvedDrafts';
 import { InMemoryApprovalTokenStore, type ApprovalTokenStore } from './approvalTokens';
 import type { AuditLogWriter } from './audit';
 import { seedShellAllowlist, type ShellAllowlistConfig } from './shellAllowlist';
@@ -73,6 +74,11 @@ export interface SentinelServices {
    */
   mail_list_loaded: (input: { tenant_id: string; created_by: string }) => Promise<MailListLoadedResult>;
   /**
+   * The Email drafts the person approved and has not sent yet. A send or a forward through the Email
+   * connector goes out only when it matches one. The default keeps them in memory.
+   */
+  mail_approved_drafts: ApprovedMailDrafts;
+  /**
    * Records the owner's answer to a skill network card: allow once for this chat, always allow
    * for the skill, or deny. The default records nothing, so a host without skill wiring never
    * grants a site by answering. An implementation that binds the answer to the skill's code
@@ -137,6 +143,7 @@ export function defaultSentinelServices(input: { pinned_path: string }): Sentine
     mail_add_recipients: () => Promise.resolve('not_loaded'),
     mail_accounts: () => Promise.resolve({ accounts: [], default_account: null }),
     mail_list_loaded: () => Promise.resolve('not_loaded'),
+    mail_approved_drafts: inMemoryApprovedMailDrafts(),
     skill_network_record_answer: () => Promise.resolve(),
   };
 }
