@@ -151,7 +151,7 @@ None of these are required to chat with a model. Each is one sentence plus where
     docker compose up --build
     ```
 
-    The `export` lines make random secrets that the app shares with the calendar, email and speech containers, so only the app can use their account ports. Compose stops with a message if one is missing. Set them again in each new terminal, and run `docker compose down` and `up` with the same values; `pnpm smoke` makes them for you.
+    The `export` lines make random secrets that the app shares with the calendar, email and speech containers, so only the app can use them. Compose stops with a message if one is missing. Set them again in each new terminal, and run `docker compose down` and `up` with the same values; `pnpm smoke` makes them for you.
 
     The first build takes a few minutes (it compiles the app from source). `docker compose up` stays in the foreground
     and streams every container's log; the stack is ready when the `server` line `Agent server listening on http://0.0.0.0:8790`
