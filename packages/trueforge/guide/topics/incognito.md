@@ -47,7 +47,7 @@ For anything you want kept, ask in a normal chat.
 
 ## End an incognito chat
 
-1. Click **Close and delete** above the message box.
+1. Click **Close and delete** above the message box. On a small phone the button sits under the line about the chat.
 2. Click **Delete for good** to confirm, or **Keep** to go back to the chat.
 
 Aman opens a new chat.

@@ -167,10 +167,10 @@ export const AuditLogSettings: FC = () => {
       </div>
 
       <div className="flex flex-wrap items-end gap-3">
-        <label className="flex items-center gap-2 text-sm text-text-secondary">
+        <label className="flex max-w-full min-w-0 items-center gap-2 text-sm text-text-secondary">
           Show
           <select
-            className="rounded-md border border-border bg-primary-bg px-2 py-1 text-sm text-text-primary"
+            className="max-w-full min-w-0 rounded-md border border-border bg-primary-bg px-2 py-1 text-sm text-text-primary"
             value={outcome ?? ''}
             onChange={event => setOutcome(parseOutcomeFilter(event.target.value))}
           >
