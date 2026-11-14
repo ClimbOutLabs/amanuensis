@@ -666,10 +666,34 @@
   background: var(--card-bg);
   color: var(--text-primary);
   text-decoration: none;
+  /* A raised card with an open arrow reads as something to click, unlike the flat folds around it. */
+  box-shadow: 0 0.0625rem 0.25rem color-mix(in srgb, var(--shadow-color) 12%, transparent);
+  transition:
+    box-shadow 150ms ease,
+    transform 150ms ease,
+    border-color 150ms ease;
 }
 
 .aman-runtime-rail__live-browser:hover {
   border-color: var(--gold-line);
+  box-shadow: 0 0.25rem 0.75rem color-mix(in srgb, var(--shadow-color) 20%, transparent);
+  transform: translateY(-0.0625rem);
+}
+
+.aman-runtime-rail__live-browser:active {
+  box-shadow: 0 0.0625rem 0.125rem color-mix(in srgb, var(--shadow-color) 12%, transparent);
+  transform: none;
+}
+
+.aman-runtime-rail__live-open {
+  flex: none;
+  margin-top: 0.125rem;
+  margin-left: auto;
+  color: var(--text-secondary);
+}
+
+.aman-runtime-rail__live-browser:hover .aman-runtime-rail__live-open {
+  color: var(--text-primary);
 }
 
 .aman-runtime-rail__live-browser:focus-visible {
@@ -700,6 +724,12 @@
 @media (prefers-reduced-motion: reduce) {
   .aman-runtime-rail__live-dot {
     animation: none;
+  }
+
+  .aman-runtime-rail__live-browser,
+  .aman-runtime-rail__live-browser:hover {
+    transform: none;
+    transition: none;
   }
 }
 

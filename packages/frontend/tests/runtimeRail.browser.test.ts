@@ -117,6 +117,21 @@ test(
         assert.notEqual(dot.animation, 'none', 'the live dot pulses');
         assert.ok(dot.width >= 6, `the live dot can be seen (${String(dot.width)}px wide)`);
         assert.notEqual(dot.colour, 'rgba(0, 0, 0, 0)', 'the live dot has a colour');
+        // The card looks clickable: it is raised, lifts further under the pointer, and carries an open arrow.
+        const restingShadow = await live.evaluate(el => getComputedStyle(el).boxShadow);
+        assert.notEqual(restingShadow, 'none', 'the live card has a shadow');
+        assert.equal(await live.locator('.aman-runtime-rail__live-open').count(), 1, 'the live card has an open arrow');
+        await live.hover();
+        await page.waitForTimeout(250);
+        await page.screenshot({
+          path: await featureShotPath({ surface: 'screen:chat-layout', step: `status-panel-live-hover-${theme}` }),
+        });
+        assert.notEqual(
+          await live.evaluate(el => getComputedStyle(el).boxShadow),
+          restingShadow,
+          'the live card lifts under the pointer',
+        );
+        await page.mouse.move(0, 0);
         assert.equal(await panel.locator('[data-section="activity"] li').count(), 5, 'at most five actions');
         assert.equal(await panel.getByText(/·\s*\d/).count(), 0, 'no counts after an action');
 

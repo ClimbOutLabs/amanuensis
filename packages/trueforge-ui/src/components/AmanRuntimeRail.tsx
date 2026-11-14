@@ -375,6 +375,7 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
                     {assistantName} has a page open. Watch it or take a step yourself.
                   </span>
                 </span>
+                <Icon name="external-link" size={16} className="aman-runtime-rail__live-open" aria-hidden="true" />
               </a>
             </section>
           )}
