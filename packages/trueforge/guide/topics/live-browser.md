@@ -55,7 +55,7 @@ Your password manager can't fill the picture of the page, because the picture ha
 3. In the picture, click the site's password box.
 4. In **Password**, fill your password from your password manager, then click **Put password in page**.
 
-Your password manager may not suggest the right login by itself, because it sees Aman's address, not the site's. Pick the login yourself. In Chrome, right-click the box and choose **Passwords**. In LastPass, click its icon in the box and search for the site.
+Your password manager won't suggest a login in these boxes by itself, because it sees Aman's address, not the site's. Pick the site's login yourself. In Chrome, right-click the box and choose Passwords. In LastPass, click its icon in the box and search for the site. Never pick your Aman login here.
 
 What you put in these boxes goes only into the page. It is not saved, not written to any log, and never shown to Aman. Each box empties once you use it.
 

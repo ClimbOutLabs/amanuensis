@@ -1806,12 +1806,18 @@ async function fakeSidecar() {
   let shotsToFail = 0;
   let pageTitle = 'Account';
   let frameUrls = ['https://site-a.test/account'];
+  let framesHang = false;
   const mainFrame = { name: 'main' };
   const page = {
     mainFrame: () => mainFrame,
     url: () => 'https://site-a.test/account',
     title: async () => pageTitle,
-    frames: () => frameUrls.map(url => ({ url: () => url, evaluate: async () => undefined })),
+    // A hung frame never answers a script, as a page stuck in its own code does.
+    frames: () =>
+      frameUrls.map(url => ({
+        url: () => url,
+        evaluate: () => (framesHang ? new Promise(() => undefined) : Promise.resolve(undefined)),
+      })),
     goto: async () => undefined,
     exposeBinding: async () => undefined,
     addInitScript: async () => undefined,
@@ -1948,6 +1954,10 @@ async function fakeSidecar() {
     failShots: count => {
       shotsToFail = count;
     },
+    /** Every frame stops answering scripts. */
+    hangFrames: () => {
+      framesHang = true;
+    },
     /** A human check appears on the page: its widget frame, served from the check's own host. */
     showChallenge: () => {
       frameUrls = [...frameUrls, 'https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/g/widget'];
@@ -2012,6 +2022,25 @@ test('the live view lists, frames and drives a tab through a stand-in page', asy
       await sidecar.liveInput({ owner: 'owner-1', tab: 'chat-9', input: { kind: 'key', key: 'Enter' } }),
       { status: 'closed' },
     );
+  } finally {
+    gateway.close();
+    await sidecar.close();
+  }
+});
+
+test('a copy from a page that never answers gives up, and the tab keeps taking acts', async () => {
+  if (BrowserSidecar === undefined) {
+    return;
+  }
+  const { sidecar, gateway, hangFrames, acts } = await fakeSidecar();
+  try {
+    await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'https://site-a.test/account' });
+    hangFrames();
+    const started = Date.now();
+    assert.deepEqual(await sidecar.liveCopy({ owner: 'owner-1', tab: 'chat-1' }), { status: 'nothing_selected' });
+    assert.ok(Date.now() - started < 5000, 'the copy gave up on the hung frame');
+    await sidecar.liveInput({ owner: 'owner-1', tab: 'chat-1', input: { kind: 'key', key: 'Enter' } });
+    assert.deepEqual(acts.at(-1), { key: 'Enter' });
   } finally {
     gateway.close();
     await sidecar.close();

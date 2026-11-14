@@ -321,15 +321,12 @@ async function checkLivePage(page: Page, calls: LiveCall[], label: string) {
   // A password filled in its own box goes in as a paste, and the box is emptied once it is used.
   const password = page.getByLabel('Password for the page');
   assert.equal(await password.getAttribute('type'), 'password', `${label}: the password is hidden`);
-  assert.equal(
-    await password.getAttribute('autocomplete'),
-    'current-password',
-    `${label}: a password manager fills it`,
-  );
+  // Both boxes sit on Aman's own address, so a password manager must not offer or save Aman's own sign-in there.
+  assert.equal(await password.getAttribute('autocomplete'), 'off', `${label}: no autofill of Aman's own password`);
   assert.equal(
     await page.getByLabel('Name or email for the page').getAttribute('autocomplete'),
-    'username',
-    `${label}: a password manager fills the name`,
+    'off',
+    `${label}: no autofill of Aman's own name`,
   );
   await password.fill('hunter2');
   await page.getByRole('button', { name: 'Put password in page' }).click();

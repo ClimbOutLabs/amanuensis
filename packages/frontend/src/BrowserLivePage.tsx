@@ -702,6 +702,8 @@ export function BrowserLivePage() {
             Type it
           </button>
         </div>
+        {/* These boxes sit on Aman's own address, so they ask the password manager not to offer or save
+            Aman's own sign-in here: the person picks the outside site's login by hand. */}
         <form
           className="browser-live-sign-in"
           aria-label="Sign in with your password manager"
@@ -719,8 +721,8 @@ export function BrowserLivePage() {
             <input
               className="browser-live-input"
               aria-label="Name or email for the page"
-              name="username"
-              autoComplete="username"
+              name="page-name"
+              autoComplete="off"
               value={signInName}
               onChange={event => {
                 setSignInName(event.target.value);
@@ -742,8 +744,8 @@ export function BrowserLivePage() {
               className="browser-live-input"
               aria-label="Password for the page"
               type="password"
-              name="password"
-              autoComplete="current-password"
+              name="page-password"
+              autoComplete="off"
               value={signInPassword}
               onChange={event => {
                 setSignInPassword(event.target.value);

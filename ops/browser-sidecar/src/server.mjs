@@ -697,6 +697,9 @@ async function liveAct(tab, input) {
 /** The most text one copy out of the live view hands back: a code, an address or a few paragraphs. */
 const MAX_LIVE_COPY_LENGTH = 100_000;
 
+/** How long one frame may take to say what is selected, so a page that never answers can't hold the tab. */
+const COPY_FRAME_TIMEOUT_MS = 2000;
+
 /**
  * What the person has selected in a frame: the selected part of the focused text field, or else the
  * page's own selection. A password field's text is never read out, as the page itself never lets it
@@ -728,7 +731,14 @@ function selectedTextInFrame() {
 async function selectedText(page) {
   const answers = [];
   for (const frame of page.frames()) {
-    const answer = await frame.evaluate(selectedTextInFrame).catch(() => undefined);
+    let timer;
+    const answer = await Promise.race([
+      frame.evaluate(selectedTextInFrame).catch(() => undefined),
+      new Promise(resolve => {
+        timer = setTimeout(resolve, COPY_FRAME_TIMEOUT_MS);
+      }),
+    ]);
+    clearTimeout(timer);
     if (
       typeof answer === 'object' &&
       answer !== null &&
