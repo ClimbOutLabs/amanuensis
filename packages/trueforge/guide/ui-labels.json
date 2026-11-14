@@ -376,5 +376,8 @@
   "Today": "packages/trueforge-ui/src/components/RailDesk.tsx",
   "Due": "packages/trueforge-ui/src/components/RailDesk.tsx",
   "From memory": "packages/trueforge-ui/src/components/RailDesk.tsx",
-  "Manage memory": "packages/trueforge-ui/src/components/RailDesk.tsx"
+  "Manage memory": "packages/trueforge-ui/src/components/RailDesk.tsx",
+  "Check skill": "packages/trueforge-ui/src/containers/SettingsBuilder/ImportGithubSkillForm.tsx",
+  "Add skill and allow websites": "packages/trueforge-ui/src/containers/SettingsBuilder/SkillWebsitesReview.tsx",
+  "Add skill": "packages/trueforge-ui/src/containers/SettingsBuilder/SkillWebsitesReview.tsx"
 }
