@@ -194,7 +194,7 @@ const AddMcpServerForm = ({
     }
   };
 
-  const resolvedTitle = title ?? (editing ? 'Edit MCP server' : 'Add MCP server');
+  const resolvedTitle = title ?? (editing ? 'Edit connector' : 'Add a connector by its address');
   const resolvedDescription =
     modalDescription ??
     (editing

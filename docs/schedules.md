@@ -57,7 +57,7 @@ The one thing of yours it changes by itself is a space. It can make and change a
 ### Spaces
 
 - Every change keeps a version you can ask Aman to bring back.
-- Each change a run saves is also one line in the activity log, under **Settings**, **Audit**.
+- Each change a run saves is also one line in the activity log, under **Settings**, **Activity log**.
 - Aman can't delete a space.
 - A space only keeps a clickable link that you gave or that a search returned. A link that only an email or a web page supplied is kept as plain text.
 
