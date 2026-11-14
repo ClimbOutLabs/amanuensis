@@ -96,6 +96,7 @@
     "lint:installer": "shellcheck installer/install.sh installer/doctor/aman installer/lib/*.sh installer/setup-image/*.sh installer/tests/*.sh installer/tests/lib/*.sh installer/tests/stubs/*",
     "test:trueforge-core": "pnpm --filter @truefoundry/trueforge-core test",
     "test:trueforge": "pnpm --filter @truefoundry/trueforge test",
+    "test:twilio-live": "pnpm --filter @truefoundry/trueforge test:twilio-live",
     "test:local-sandbox:contract": "pnpm --filter @truefoundry/trueforge test:local-sandbox:contract",
     "test:private-data": "node scripts/check-no-private-data.mjs",
     "check:repo-rules": "node scripts/check-repo-rules.mjs",
