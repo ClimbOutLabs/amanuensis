@@ -102,7 +102,12 @@ export async function startPackedApp({ tarballPath, dataDir, port }) {
     env: {
       ...env,
       HOST: host,
+      // Everything the app keeps goes under the data folder, so a later start on the same
+      // folder finds the files as well as the database.
       SQLITE_PATH: path.join(dataDir, 'db.sqlite'),
+      APP_DATA_DIR: dataDir,
+      MEMORY_MARKDOWN_DIR: path.join(dataDir, 'memory'),
+      PERSONA_KNOWLEDGE_DIR: path.join(dataDir, 'persona-knowledge'),
       NODE_ENV: 'production',
       // npx keeps an install under the tarball's file name, so a second tarball with the same
       // name would run the first one's code. Each start gets a cache of its own.

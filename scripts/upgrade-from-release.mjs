@@ -179,6 +179,15 @@ async function fill({ api, tag }) {
   });
   keep({ what: 'the folder of chats', pathname: '/api/v1/session-folders', words: `Work ${tag}` });
 
+  await save({
+    api,
+    what: 'a memory',
+    method: 'POST',
+    pathname: '/api/v1/memory/vault/import',
+    body: { entries: [{ text: `Prefers the window seat ${tag}.` }] },
+  });
+  keep({ what: 'the memory', pathname: '/api/v1/memory/vault', words: `Prefers the window seat ${tag}.` });
+
   const chat = await save({
     api,
     what: 'a chat',
@@ -253,7 +262,6 @@ const OTHER_PAGES = [
   '/api/v1/user/audit-log',
   '/api/v1/user/reach',
   '/api/v1/settings/mcp-servers',
-  '/api/v1/memory/vault',
   '/api/v1/capabilities',
 ];
 
@@ -311,9 +319,12 @@ try {
   await checkKept({ api: after, kept: [...kept, ...added], when: 'After saving more' });
   console.log(`Upgrade OK: all ${String(kept.length)} things kept, and ${String(added.length)} more saved.`);
 } finally {
-  await app?.stop();
-  if (releaseCheckedOut) {
-    run({ command: 'git', args: ['worktree', 'remove', '--force', releaseDir], cwd: rootDir });
+  try {
+    await app?.stop();
+  } finally {
+    if (releaseCheckedOut) {
+      run({ command: 'git', args: ['worktree', 'remove', '--force', releaseDir], cwd: rootDir });
+    }
+    await rm(workDir, { recursive: true, force: true });
   }
-  await rm(workDir, { recursive: true, force: true });
 }
