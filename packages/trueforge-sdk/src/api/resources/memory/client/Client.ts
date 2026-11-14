@@ -2,6 +2,7 @@
 
 import type { BaseClientOptions } from "../../../../BaseClient.js";
 import { type NormalizedClientOptionsWithAuth, normalizeClientOptionsWithAuth } from "../../../../BaseClient.js";
+import { PagesClient } from "../resources/pages/client/Client.js";
 import { VaultClient } from "../resources/vault/client/Client.js";
 
 export declare namespace MemoryClient {
@@ -10,10 +11,15 @@ export declare namespace MemoryClient {
 
 export class MemoryClient {
     protected readonly _options: NormalizedClientOptionsWithAuth<MemoryClient.Options>;
+    protected _pages: PagesClient | undefined;
     protected _vault: VaultClient | undefined;
 
     constructor(options: MemoryClient.Options) {
         this._options = normalizeClientOptionsWithAuth(options);
+    }
+
+    public get pages(): PagesClient {
+        return (this._pages ??= new PagesClient(this._options));
     }
 
     public get vault(): VaultClient {

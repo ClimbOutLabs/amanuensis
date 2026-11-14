@@ -87,7 +87,6 @@ import { validateManifest } from '../runtime/cron';
 import type { DeliveryService } from '../runtime/delivery/deliveryService';
 import type { EventSubscriptionRegistry } from '../runtime/event-subscription';
 import { createMemoryClient } from '../runtime/memory/createMemoryClient';
-import { resolveMemoryProvider } from '../runtime/memory/memoryProvider';
 import type { ReminderReach } from '../runtime/noticing/reminderReach';
 import { deliverReminder } from '../runtime/reminderDelivery';
 import { scheduleToolsOf, specWithTools } from '../runtime/scheduleTools';
@@ -261,30 +260,13 @@ export async function startScheduleRunOnRequest<TTransaction>(params: {
   });
   // Memory wiring mirrors the chat route: without a client the turn retains nothing, so
   // a scheduled agent's turns are never summarized and never reach the Memories page.
-  // The markdown backend needs no provider lookup; hindsight resolves one like chat does.
-  const memoryProvider =
-    configuration.MEMORY_BACKEND === 'hindsight'
-      ? await resolveMemoryProvider({
-          mcpServerStore: deps.resolveMcpServerStore(c, prepared.agent),
-          tokenStore: deps.tokenStore,
-          tenantId: item.schedule.tenant_id,
-          clientName: configuration.MCP_DCR_OAUTH_CLIENT_NAME,
-          userRef: prepared.userRef,
-          logger: deps.logger,
-        })
-      : undefined;
   const memoryClient = createMemoryClient({
-    backend: configuration.MEMORY_BACKEND,
     markdownDir: configuration.MEMORY_MARKDOWN_DIR,
     namespace: item.schedule.tenant_id,
     vaultScope:
       prepared.persona === undefined
         ? undefined
         : { personaName: prepared.persona.display_name, personaId: prepared.persona.id },
-    hindsight:
-      memoryProvider === undefined
-        ? undefined
-        : { apiBase: memoryProvider.apiBase, bank: memoryProvider.bank, headers: memoryProvider.headers },
     // Same meaning-based recall wiring as the chat route: one subsystem singleton per
     // vault, degrading to keyword-only until the model is ready.
     embeddings: configuration.MEMORY_EMBEDDINGS_ENABLED
@@ -330,8 +312,6 @@ export async function startScheduleRunOnRequest<TTransaction>(params: {
       personalizationProfile,
       personaContext: prepared.persona === undefined ? undefined : buildPersonaContext(prepared.persona),
       memoryClient,
-      memoryProviderServerName: memoryProvider?.serverName,
-      memorySettings: memoryProvider?.settings,
       logger: deps.logger,
       // A scheduled run has no browser, so its day and times follow the schedule's own time zone.
       clientTimezone: item.schedule.manifest.timezone,

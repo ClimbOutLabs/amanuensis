@@ -195,6 +195,7 @@ export const CHATS = {
   dinner: {
     title: 'Dinner with chickpeas and spinach',
     ask: 'What can I make tonight with chickpeas, spinach and rice?',
+    remembers: ['Sam has chickpeas, spinach and rice to cook with.'],
     reply: [
       'Try a quick chickpea and spinach curry over rice. It takes about 25 minutes.',
       '',

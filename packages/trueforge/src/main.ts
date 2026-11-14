@@ -169,6 +169,8 @@ import { instanceOwnerSubjectId } from './runtime/instanceOwner';
 import { registerMailConnectorFromSavedAccountInBackground } from './runtime/mailAccount';
 import { prepareMailPolicyAtBoot, registerMailConnectorAtBoot } from './runtime/mailConnector';
 import { warmEmbeddingsAtBoot } from './runtime/memory/embeddingRetrieval';
+import { ensureMemorySourceLines } from './runtime/memory/memorySourceLines';
+import { startNightlyMemoryJob } from './runtime/memory/nightlyService';
 import { startNotesFolderIndexing } from './runtime/notesFolder/notesFolderRuntime';
 import { sessionApprovalSource } from './runtime/noticing/approvalSource';
 import { createGoogleNoticingSources, googleCalendarTimezoneFor } from './runtime/noticing/googleSources';
@@ -1162,8 +1164,18 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     personaStore,
     logger,
   });
+  // Once a day per vault, from the hour the person chose: ended lines move to Earlier, missed notes are sorted,
+  // and lines that disagree are listed. Best effort: a failure is logged and never reaches a turn.
+  const nightlyMemoryJob = startNightlyMemoryJob({
+    personaStore,
+    modelProviderStore,
+    globalSettingsStore,
+    tokenFactoryBudget,
+    logger,
+  });
   const callRoutes = phoneCallRoutes({ calls: phoneCalls });
   const app = createServerApp({
+    memoryTidy: nightlyMemoryJob,
     chatSearchIndexer,
     modelCatalog,
     mcpCatalog,
@@ -1306,10 +1318,15 @@ try {
     dir: configuration.PERSONA_KNOWLEDGE_DIR,
     envVar: 'PERSONA_KNOWLEDGE_DIR',
   });
-  if (configuration.MEMORY_BACKEND === 'markdown') {
-    await ensureWritableDataDir({
-      dir: configuration.MEMORY_MARKDOWN_DIR,
-      envVar: 'MEMORY_MARKDOWN_DIR',
+  await ensureWritableDataDir({
+    dir: configuration.MEMORY_MARKDOWN_DIR,
+    envVar: 'MEMORY_MARKDOWN_DIR',
+  });
+  const marked = await ensureMemorySourceLines({ baseDir: configuration.MEMORY_MARKDOWN_DIR });
+  if (marked !== undefined && marked.notesMarked > 0) {
+    logger.info('Older memory notes were marked as having no record of where they came from', {
+      files_changed: marked.filesChanged,
+      notes_marked: marked.notesMarked,
     });
   }
 
@@ -1538,7 +1555,7 @@ try {
   // on its own before the first chat turn. Fire-and-forget: startup never waits, a
   // failure degrades to keyword search with the usual cooldown retry, and other
   // tenants warm on first use reusing the shared download.
-  if (configuration.MEMORY_EMBEDDINGS_ENABLED && configuration.MEMORY_BACKEND === 'markdown') {
+  if (configuration.MEMORY_EMBEDDINGS_ENABLED) {
     warmEmbeddingsAtBoot({
       baseDir: configuration.MEMORY_MARKDOWN_DIR,
       namespace: TENANT_ID,

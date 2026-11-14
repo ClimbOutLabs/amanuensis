@@ -139,6 +139,7 @@ type SharedDeps = Pick<
   | 'skillCatalog'
   | 'sandboxCatalog'
   | 'tokenFactoryBudget'
+  | 'memoryTidy'
   | 'activeTurns'
   | 'turnDrains'
   | 'requestReplyRouter'
@@ -157,6 +158,7 @@ function sharedDeps(): SharedDeps {
     skillCatalog: SkillCatalog.load(),
     sandboxCatalog: SandboxCatalog.load(),
     tokenFactoryBudget: uncappedTokenFactoryBudget,
+    memoryTidy: { tidyNow: () => undefined, tidyState: () => ({ status: 'idle' }) },
     activeTurns: new ActiveTurnRegistry(),
     turnDrains: new TurnDrainRegistry(),
     requestReplyRouter: new RequestReplyRouter(),

@@ -55,9 +55,8 @@ describe('20261010_000007_mcp_server_first_party migration', () => {
     const manifest = {
       type: 'remote',
       name: 'legacy',
-      url: 'https://hindsight.example.com/mcp/aman',
+      url: 'https://first-party.example.com/mcp/aman',
       description: 'Stored before the marker existed.',
-      memory_provider: true,
     };
     const timestamp = new Date().toISOString();
     await sql`

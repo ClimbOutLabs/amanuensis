@@ -190,7 +190,6 @@ describe('scheduled brief: search and map after reading the mail', () => {
   let tavily: ReturnType<typeof installRecordedTavily>;
   let mail: ReturnType<typeof installRecordedMail>;
   let agent: { id: string; name: string };
-  const originalBackend = configuration.MEMORY_BACKEND;
   const originalDir = configuration.MEMORY_MARKDOWN_DIR;
   const originalEmbeddings = configuration.MEMORY_EMBEDDINGS_ENABLED;
   const originalSummarize = configuration.MEMORY_SUMMARIZE;
@@ -199,7 +198,6 @@ describe('scheduled brief: search and map after reading the mail', () => {
   beforeAll(async () => {
     // Scheduled runs save to the memory vault, so a later run could recall an earlier one.
     memoryDir = await mkdtemp(join(tmpdir(), 'scheduled-brief-memory-'));
-    configuration.MEMORY_BACKEND = 'markdown';
     configuration.MEMORY_MARKDOWN_DIR = memoryDir;
     configuration.MEMORY_EMBEDDINGS_ENABLED = false;
     configuration.MEMORY_SUMMARIZE = false;
@@ -258,7 +256,6 @@ describe('scheduled brief: search and map after reading the mail', () => {
     mail.restore();
     tavily.restore();
     await server.close();
-    configuration.MEMORY_BACKEND = originalBackend;
     configuration.MEMORY_MARKDOWN_DIR = originalDir;
     configuration.MEMORY_EMBEDDINGS_ENABLED = originalEmbeddings;
     configuration.MEMORY_SUMMARIZE = originalSummarize;

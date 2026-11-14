@@ -130,8 +130,8 @@ test_check_reports_without_changing() {
   repo_commit_change "speech update"
   run_install upgrade --check
   assert_rc 0
-  assert_contains "$OUT" "speech  aman-stt:"
-  assert_contains "$OUT" "sandbox PDF and image reading (builds the sandbox again)"
+  assert_contains "$OUT" "speech    aman-stt:"
+  assert_contains "$OUT" "sandbox   PDF and image reading (builds the sandbox again)"
   assert_eq "$(log_count "docker build")" "$builds"
   assert_eq "$(app_tag "$AMAN_HOME/release/release.json")" "$old"
   assert_no_path "$AMAN_HOME/backups"
@@ -304,7 +304,7 @@ test_upgrade_turns_the_browser_on_for_an_install_from_before_it() {
   sed -i '/BROWSER\|browser/d' "$compose"
   run_install upgrade --check
   assert_rc 0
-  assert_contains "$OUT" "browser (new) -> aman-browser:"
+  assert_contains "$OUT" "browser   (new) -> aman-browser:"
   run_install upgrade
   assert_rc 0
   assert_contains "$(cat "$release")" '"browser_image": "aman-browser:'
@@ -526,7 +526,7 @@ test_install_rerun_of_an_instance_that_never_started_is_a_fresh_build() {
   run_install --yes
   assert_rc 0
   assert_flat_contains "$OUT" "This copy of Aman is newer than the installed one, so it will be updated."
-  assert_not_contains "$OUT$ERR" "Backing up instance"
+  assert_not_contains "$OUT$ERR" "Backed up instance"
   assert_no_path "$AMAN_HOME/backups"
   assert_eq "$(compose_image main)" "$(app_tag "$AMAN_HOME/release/release.json")"
   assert_eq "$(sed -n 's/^healthy=//p' "$AMAN_HOME/state/instances/main.conf")" 1 "now it is healthy and counts as having data"
@@ -639,7 +639,7 @@ run_printed_command() {
 
 # The command line the behind message told the person to run, without the words before it.
 printed_command() {
-  printf '%s\n' "$OUT" | sed -n 's/^To get the newer version, run: //p'
+  printf '%s\n' "$OUT" | sed -n '/To get the newer version, run:$/{n;s/^ *//;p;}'
 }
 
 # The data volume exists (Docker made it when the app first started) but holds no database.
@@ -887,7 +887,7 @@ test_upgrade_from_a_release_without_the_voice_adds_it() {
   : >"$SB_STATE/network_aliases"
   run_install upgrade --check
   assert_rc 0
-  assert_contains "$OUT" "voice   (not installed) -> aman-tts:"
+  assert_contains "$OUT" "voice     (not installed) -> aman-tts:"
   run_install upgrade
   assert_rc 0
   assert_contains "$(cat "$release")" '"tts_image": "aman-tts:'

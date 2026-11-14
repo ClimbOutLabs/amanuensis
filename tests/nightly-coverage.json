@@ -36,6 +36,7 @@
     "screen:first-run": "Home on a fresh install, with the first-run guide.",
     "screen:help-chat": "The chat that \"Help, I'm stuck\" opens.",
     "screen:home": "The Home screen and its More menu.",
+    "screen:memory-review": "The list where older notes with no record of their source are ticked as the person's own.",
     "screen:memory-sharing": "The grid that sets which personas share which memories.",
     "screen:notifications-panel": "The notifications panel opens from the bell in the left panel and stays fully on screen, on a phone and on a computer.",
     "screen:phone-width": "Home, a chat and every Settings tab at phone widths, with nothing cut off at the side.",
@@ -106,7 +107,7 @@
     },
     "command:doctor": {
       "set": "install",
-      "tests": []
+      "tests": ["installer/tests/lib/look.test.sh"]
     },
     "command:import": {
       "set": "install",
@@ -114,7 +115,7 @@
     },
     "command:install": {
       "set": "install",
-      "tests": []
+      "tests": ["installer/tests/lib/look.test.sh"]
     },
     "command:local-model": {
       "set": "install",
@@ -154,7 +155,7 @@
     },
     "command:upgrade": {
       "set": "install",
-      "tests": []
+      "tests": ["installer/tests/lib/look.test.sh"]
     },
     "command:verify": {
       "set": "install",
@@ -306,6 +307,18 @@
     },
     "route:mcpServer": {
       "set": "connectors",
+      "tests": []
+    },
+    "route:memoryNightly": {
+      "set": "memory",
+      "tests": []
+    },
+    "route:memoryPageSorting": {
+      "set": "memory",
+      "tests": []
+    },
+    "route:memoryPages": {
+      "set": "memory",
       "tests": []
     },
     "route:memoryRecall": {
@@ -501,6 +514,10 @@
         "packages/frontend/tests/homeCards.browser.test.ts",
         "packages/frontend/tests/homeRailPhone.browser.test.ts"
       ]
+    },
+    "screen:memory-review": {
+      "set": "memory",
+      "tests": []
     },
     "screen:memory-sharing": {
       "set": "memory",
@@ -764,9 +781,7 @@
     "command:adopt",
     "command:backup",
     "command:backups",
-    "command:doctor",
     "command:import",
-    "command:install",
     "command:local-model",
     "command:migrate",
     "command:network",
@@ -776,7 +791,6 @@
     "command:setup",
     "command:status",
     "command:uninstall",
-    "command:upgrade",
     "command:verify",
     "command:version",
     "email-preset:aol",
@@ -807,6 +821,9 @@
     "route:help",
     "route:mcpOAuth",
     "route:mcpServer",
+    "route:memoryNightly",
+    "route:memoryPageSorting",
+    "route:memoryPages",
     "route:memoryRecall",
     "route:memoryScreen",
     "route:memorySummarize",
@@ -836,6 +853,7 @@
     "route:tokenFactoryUsage",
     "route:toolOutputScreen",
     "route:voice",
+    "screen:memory-review",
     "settings:account",
     "tour:company",
     "tour:explain",

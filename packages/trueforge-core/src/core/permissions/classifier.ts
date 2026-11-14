@@ -38,6 +38,7 @@ import {
 } from '../email/mailConnector/toolContract';
 import { GOOGLE_SETUP_SERVER_ID, GOOGLE_SETUP_STATUS_TOOL_NAME } from '../google/setupToolContract';
 import type { BrowserElementReview, DocumentScope, MapsHosts } from '../llm/LLMTypes';
+import { isMemoryPagesReadToolName, isMemoryPagesToolName, MEMORY_PAGES_SERVER_ID } from '../memory/pagesToolContract';
 import {
   APPEND_TO_INBOX_TOOL_NAME,
   isNotesFolderReadToolName,
@@ -3403,6 +3404,30 @@ async function classifyReminderTool(action: SentinelAction, ctx: ClassifyContext
 }
 
 /**
+ * Memory page tools are the host's own, named by server. Three write the person's own words from this chat to
+ * their own pages and leave a commit that undoes the write, so they run without asking; the tools themselves
+ * refuse in a chat that has read outside text. Two only read the person's own pages, and run without asking
+ * too. Any other name fails closed.
+ */
+function classifyMemoryPagesTool(action: SentinelAction): TierDecision {
+  if (!isMemoryPagesToolName(action.tool_name)) {
+    return failClosedDecision({ reason_detail: 'Unknown memory tool.' });
+  }
+  if (isMemoryPagesReadToolName(action.tool_name)) {
+    return tier1Decision({
+      reason: 'memory_page_read',
+      reason_detail: 'Look at your pages.',
+      sensitive_read: false,
+    });
+  }
+  return tier1Decision({
+    reason: 'memory_page_write',
+    reason_detail: 'Keep what you said on a page.',
+    sensitive_read: false,
+  });
+}
+
+/**
  * Space tools are the host's own, named by server. Reading or writing one runs without asking: a space
  * is the person's own page on their own machine, nothing leaves it, and every write keeps a revision
  * that revert_space can restore. Any other name fails closed.
@@ -4260,7 +4285,7 @@ function incognitoRefusal(): TierDecision {
 
 /**
  * A call on one of the assistant's own lasting things that is not a known read of it: a schedule, a reminder, a
- * persona, a skill, a space or the notes folder. Switching this chat's persona changes only the chat.
+ * persona, a skill, a space, the notes folder or a memory page. Switching this chat's persona changes only the chat.
  */
 function changesOwnLastingThing(action: SentinelAction): boolean {
   if (action.tool_type !== 'truefoundry-system') {
@@ -4278,6 +4303,8 @@ function changesOwnLastingThing(action: SentinelAction): boolean {
       return !isSpaceReadToolName(name);
     case NOTES_FOLDER_SERVER_ID:
       return !isNotesFolderReadToolName(name);
+    case MEMORY_PAGES_SERVER_ID:
+      return !isMemoryPagesReadToolName(name);
     default:
       return false;
   }
@@ -4317,6 +4344,9 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
   }
   if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === SPACE_SERVER_ID) {
     return classifySpaceTool(action);
+  }
+  if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === MEMORY_PAGES_SERVER_ID) {
+    return classifyMemoryPagesTool(action);
   }
   if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === NOTES_FOLDER_SERVER_ID) {
     return classifyNotesFolderToolCall(action, ctx);
