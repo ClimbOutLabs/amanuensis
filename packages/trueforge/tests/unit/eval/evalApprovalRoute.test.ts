@@ -60,14 +60,20 @@ describe('approval cards on an eval instance', () => {
     return GetTurnResponseSchema.parse(await turn.json()).data;
   }
 
-  /** Asks for the tool, then allows the one card it raises. */
-  async function askAndAllow(tool: string): Promise<void> {
+  /** Starts a chat and asks for the tool once. */
+  async function ask(tool: string): Promise<{ sessionId: string; turn: Turn }> {
     const created = await server.request('/api/v1/sessions', jsonInit({ agent: { spec: AGENT_SPEC } }));
     const sessionId = z.object({ data: z.object({ id: z.string() }) }).parse(await created.json()).data.id;
-    const paused = await runTurn({
+    const turn = await runTurn({
       sessionId,
       input: [{ type: 'user.message', content: `${RUN_DIRECTIVE_PREFIX}${tool} please` }],
     });
+    return { sessionId, turn };
+  }
+
+  /** Asks for the tool, then allows the one card it raises. */
+  async function askAndAllow(tool: string): Promise<void> {
+    const { sessionId, turn: paused } = await ask(tool);
     const actions = paused.state.status === 'done' ? (paused.state.required_actions ?? []) : [];
     const action = actions.find(item => item.type === 'tool.approval_required');
     const call = action?.type === 'tool.approval_required' ? action.tool_calls[0] : undefined;
@@ -88,7 +94,7 @@ describe('approval cards on an eval instance', () => {
   }
 
   it(
-    'saves an allowed draft and an allowed event',
+    'saves an allowed draft, and an event with nobody else on it without a card',
     async () => {
       const { gmail, calendar } = server.evalSources();
       const day = SCRIPTED_EVENT.start.slice(0, 10);
@@ -110,7 +116,8 @@ describe('approval cards on an eval instance', () => {
       await askAndAllow('draft_email');
       expect(await drafts()).toBe(draftsBefore + 1);
 
-      await askAndAllow('create_event');
+      const { turn } = await ask('create_event');
+      expect(turn.state.status === 'done' ? (turn.state.required_actions ?? []) : []).toEqual([]);
       expect(await eventsThatDay()).toBe(eventsBefore + 1);
     },
     TURN_TIMEOUT_MS,

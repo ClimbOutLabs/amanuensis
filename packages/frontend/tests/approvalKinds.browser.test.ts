@@ -20,6 +20,8 @@ import { findChromiumExecutable } from './support/findChromiumExecutable.ts';
 import { FIRST_LOAD_TIMEOUT_MS } from './support/firstLoad.ts';
 import { privateViteCache } from './support/viteCache.ts';
 
+/** A made-up guest, so the event card shows; an event with nobody else on it needs no card. */
+const EVENT_GUEST = 'lin.park@harbour.example';
 const RENDER_TIMEOUT_MS = 45_000;
 
 function composer(page: Page) {
@@ -203,6 +205,8 @@ test('each kind of approval card shows what will happen, and Allow does it', { t
 
     current = 'approval:calendar_event';
     assert.equal(await savedEventCount(api), 0, 'the event is not in the calendar before the card is allowed');
+    // An event with nobody else on it is added without a card, so the card shown here invites one guest.
+    api.model.next({ toolArguments: { ...SCRIPTED_EVENT, attendees: [EVENT_GUEST], send_updates: 'none' } });
     await askFromHome({ page, origin, ask: 'run:create_event please' });
     const eventCard = page.locator('main');
     // The headline is the server's copy, which names the calendar and the day.
@@ -211,6 +215,7 @@ test('each kind of approval card shows what will happen, and Allow does it', { t
       .first()
       .waitFor({ timeout: RENDER_TIMEOUT_MS });
     await eventCard.getByText(SCRIPTED_EVENT.location).first().waitFor({ timeout: RENDER_TIMEOUT_MS });
+    await eventCard.getByText(EVENT_GUEST).first().waitFor({ timeout: RENDER_TIMEOUT_MS });
     await page.screenshot({ path: await featureShotPath({ surface: current, step: '1-card' }) });
     assert.equal(await savedEventCount(api), 0, 'nothing is saved while the card waits');
     await allow(page);

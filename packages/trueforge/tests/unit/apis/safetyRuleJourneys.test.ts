@@ -914,36 +914,59 @@ describe("an event on the person's own calendar", () => {
     await server.close();
   });
 
+  /** The chat's activity log rows for adding events. */
+  async function eventRows(chatId: string) {
+    const response = await server.request(`/api/v1/sessions/${chatId}/audit-log`);
+    expect(response.status).toBe(200);
+    return z
+      .object({
+        entries: z.array(
+          z.object({ tier: z.number(), tool_name: z.string(), outcome: z.string(), description: z.string() }).loose(),
+        ),
+      })
+      .parse(await response.json())
+      .entries.filter(entry => entry.tool_name === 'create_event');
+  }
+
   it(
-    'with no guests offers "Always allow in this chat" and never "Always allow everywhere", and the answer covers the next one in that chat only',
+    'with no guests is added without a card and shows in the activity log',
     async () => {
       const before = await savedEvents();
       const chatId = await createChat(server);
-      const card = onlyCard(await runTurn({ server, chatId, input: ask('create_event') }));
-      expect(card.can_chat_allow).toBe(true);
-      expect(card.can_always_allow).toBe(false);
-      const everywhere = await sendTurn({ server, chatId, input: answer({ card, scope: 'always' }) });
-      expect(everywhere.status).toBe(422);
-      expect(await savedEvents()).toBe(before);
-
-      await runTurn({ server, chatId, input: answer({ card, scope: 'chat' }) });
       expect(cards(await runTurn({ server, chatId, input: ask('create_event') }))).toEqual([]);
-      expect(await savedEvents()).toBe(before + 2);
-
-      const otherChatId = await createChat(server);
-      onlyCard(await runTurn({ server, chatId: otherChatId, input: ask('create_event') }));
-      expect(await savedEvents()).toBe(before + 2);
+      expect(await savedEvents()).toBe(before + 1);
+      expect(await eventRows(chatId)).toEqual([
+        expect.objectContaining({
+          tier: 1,
+          outcome: 'ran',
+          description: expect.stringContaining(
+            `Added to Google Calendar without asking, because nobody else is on the event: "${SCRIPTED_EVENT.title}"`,
+          ),
+        }),
+      ]);
     },
     TURN_TIMEOUT_MS,
   );
 
   it(
-    'with a guest asks every time, also after a chat-wide answer for events without guests',
+    'asks before adding the same event a second time in one chat, and offers no answer for every chat',
     async () => {
       const before = await savedEvents();
       const chatId = await createChat(server);
-      const plain = onlyCard(await runTurn({ server, chatId, input: ask('create_event') }));
-      await runTurn({ server, chatId, input: answer({ card: plain, scope: 'chat' }) });
+      expect(cards(await runTurn({ server, chatId, input: ask('create_event') }))).toEqual([]);
+      const again = onlyCard(await runTurn({ server, chatId, input: ask('create_event') }));
+      expect(again.can_always_allow).toBe(false);
+      expect(await savedEvents()).toBe(before + 1);
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
+    'with a guest asks every time and offers no answer for the chat, even after events without guests ran',
+    async () => {
+      const before = await savedEvents();
+      const chatId = await createChat(server);
+      expect(cards(await runTurn({ server, chatId, input: ask('create_event') }))).toEqual([]);
 
       server.model.next({ toolArguments: { ...SCRIPTED_EVENT, attendees: [GUEST], send_updates: 'none' } });
       const withGuest = onlyCard(
@@ -954,6 +977,7 @@ describe("an event on the person's own calendar", () => {
         }),
       );
       expect(withGuest.can_chat_allow).toBe(false);
+      expect(withGuest.can_always_allow).toBe(false);
       const refused = await sendTurn({ server, chatId, input: answer({ card: withGuest, scope: 'chat' }) });
       expect(refused.status).toBe(422);
       expect(await savedEvents()).toBe(before + 1);

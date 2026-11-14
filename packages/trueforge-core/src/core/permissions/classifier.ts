@@ -15,7 +15,7 @@ import { realpathSync } from 'fs';
 import os from 'os';
 import path from 'path';
 import { DOCUMENTS_SERVER_ID, EXTRACT_DOCUMENT_TEXT_TOOL_NAME } from '../../documents/toolContract';
-import type { CalendarWriteReview } from '../calendar/eventWrite';
+import { staysOnOwnCalendar, type CalendarWriteReview } from '../calendar/eventWrite';
 import { CALENDAR_SERVER_ID, isCalendarReadToolName, isCalendarWriteToolName } from '../calendar/toolContract';
 import { DRIVE_SERVER_ID, isDriveReadToolName, isDriveWriteToolName } from '../drive/toolContract';
 import type { DriveWriteReview } from '../drive/writeReview';
@@ -172,6 +172,7 @@ import {
   CONNECTOR_READ_GUARD_REASON,
   CONTENT_STEERED_REASON,
   failClosedDecision,
+  OWN_CALENDAR_WRITE_REASON,
   REMINDER_CANCEL_REASON,
   SANDBOX_COMMAND_REASON,
   SANDBOX_FILE_WRITE_REASON,
@@ -2889,8 +2890,9 @@ function homeAssistantSteered(input: { action: SentinelAction; ctx: ClassifyCont
 
 /**
  * Calendar tools are the host's own, named by server. A read is silent but flagged as sensitive (so a session that
- * read the calendar can no longer search silently). A write always asks with the event in full; in a scheduled run
- * that ask is held for the owner's OK instead of running. Any other name fails closed.
+ * read the calendar can no longer search silently). A write that stays on the owner's own calendar with nobody else
+ * on the event runs without a card and is logged; any other write asks with the event in full. In a scheduled run
+ * every write is held for the owner's OK instead of running. Any other name fails closed.
  */
 async function classifyCalendarTool(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
   if (await ctx.services.isOffline({ tenant_id: ctx.tenant_id, created_by: ctx.created_by })) {
@@ -2938,6 +2940,18 @@ async function classifyCalendarTool(action: SentinelAction, ctx: ClassifyContext
           sensitive_read: false,
         });
       }
+    }
+    // Adding or changing an event that nobody else is on runs without a card, in a chat the owner is in. A scheduled
+    // run still holds it for the owner's OK, because nobody is there to see it happen.
+    if (!ctx.services.unattended && staysOnOwnCalendar(review)) {
+      return tier1Decision({
+        reason: OWN_CALENDAR_WRITE_REASON,
+        reason_detail:
+          review.action === 'create'
+            ? 'Added an event to your own calendar with no guests, without asking.'
+            : 'Changed an event on your own calendar with no guests, without asking.',
+        sensitive_read: false,
+      });
     }
     const reachesGuests = review.attendees.length > 0;
     return tier3Decision({
