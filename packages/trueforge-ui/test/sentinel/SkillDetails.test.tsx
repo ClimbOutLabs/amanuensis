@@ -31,6 +31,8 @@ const RELEASE_NOTES_CARD = {
     version: COMMIT,
     starter: false,
     instructions: '# Steps\n\nRead the log.',
+    websites: ['api.release-feed.info'],
+    makes_up_addresses: false,
   },
 } satisfies SentinelApprovalCard;
 
@@ -67,6 +69,27 @@ describe('the skill approval card', () => {
     expect(instructions).toHaveTextContent('Read the log.');
   });
 
+  it('lists the websites the skill sends requests to, and says approving allows only those', () => {
+    renderCard(RELEASE_NOTES_CARD);
+    const websites = document.querySelector('[data-role="skill-websites"]');
+    expect(websites).toHaveTextContent('It sends requests to these websites:');
+    expect(screen.getByRole('listitem')).toHaveTextContent('api.release-feed.info');
+    expect(websites).toHaveTextContent('Adding it lets the skill reach these websites and no others.');
+    expect(websites).not.toHaveTextContent('makes up web addresses');
+  });
+
+  it('says when the skill sends no requests, and warns about addresses it makes up while it runs', () => {
+    renderCard({
+      ...RELEASE_NOTES_CARD,
+      skill: { ...RELEASE_NOTES_CARD.skill, websites: [], makes_up_addresses: true },
+    });
+    const websites = document.querySelector('[data-role="skill-websites"]');
+    expect(websites).toHaveTextContent("It doesn't send requests to any website.");
+    expect(websites).toHaveTextContent(
+      "Aman also found code that makes up web addresses while it runs. Those websites stay blocked, and you'll be asked about each one.",
+    );
+  });
+
   it('says a starter skill comes with the app, and shows no empty Details', () => {
     renderCard({ ...RELEASE_NOTES_CARD, skill: { ...RELEASE_NOTES_CARD.skill, starter: true, instructions: null } });
     expect(document.querySelector('[data-role="skill"]')).toHaveTextContent(
@@ -95,5 +118,13 @@ describe('the skill approval card', () => {
     const { name, description, source } = RELEASE_NOTES_CARD.skill;
     const [partial] = extractSentinelFromEvent(event({ name, description, source }));
     expect(partial?.card.skill).toBeNull();
+
+    const [badWebsites] = extractSentinelFromEvent(event({ ...RELEASE_NOTES_CARD.skill, websites: [42] }));
+    expect(badWebsites?.card.skill).toBeNull();
+
+    // A card saved before websites were shown has neither field, and shows none.
+    const { websites: _w, makes_up_addresses: _m, ...older } = RELEASE_NOTES_CARD.skill;
+    const [old] = extractSentinelFromEvent(event(older));
+    expect(old?.card.skill).toMatchObject({ websites: [], makes_up_addresses: false });
   });
 });

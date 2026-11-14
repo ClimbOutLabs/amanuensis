@@ -86,7 +86,7 @@ For a short overview, see [Your privacy](../packages/trueforge/guide/topics/priv
 
 ??? note "To GitHub, when you ask Aman in a chat to add a skill"
 
-    The address of that skill and a request to read it. Nothing about you is in it. GitHub also sees this computer's internet address.
+    The address of that skill and a request to read it, then a download of the skill's files at that version so Aman can check which websites the skill uses. Nothing about you is in it. GitHub also sees this computer's internet address.
 
 ??? note "To package sources, when a skill you approved installs packages"
 

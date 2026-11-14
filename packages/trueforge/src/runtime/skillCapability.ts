@@ -9,7 +9,10 @@ import {
   classifyHostToolCall,
   defineTool,
   LocalToolMCP,
+  scanSkillSites,
   toolResultResponse,
+  type GitSkillSource,
+  type SkillFile,
   type ToolDefinition,
 } from '@truefoundry/trueforge-core/core';
 import type { ApprovalDecision } from '@truefoundry/trueforge-core/core/events/schema';
@@ -28,6 +31,7 @@ import {
   SkillGitPathSchema,
   SkillGitRefSchema,
   SkillManifestSchema,
+  SkillNetworkHostsSchema,
   type GitSkill,
 } from '../schemas/skill';
 import type { CatalogSkill } from '../schemas/skillCatalog';
@@ -65,7 +69,7 @@ export type InstallSkillToolInput = z.infer<typeof InstallSkillToolSchema>;
 
 /** What a skill tool needs from the host for one chat turn. */
 export interface SkillTurnContext {
-  store: Pick<ISkillStore, 'listSkills' | 'createSkill'>;
+  store: Pick<ISkillStore, 'listSkills' | 'createSkill' | 'deleteSkill' | 'setSkillNetworkApproval'>;
   tenant_id: string;
   /** The starter skills that come with the app. One of these is added as shipped, at its own fixed version. */
   catalog: readonly CatalogSkill[];
@@ -73,6 +77,8 @@ export interface SkillTurnContext {
   sandboxReady: boolean;
   /** How a skill is read from GitHub; a test passes its own. */
   lookup: SkillLookupDeps;
+  /** Reads every file of a skill at one exact commit, so the host can see which websites it sends requests to. */
+  readFiles: (source: GitSkillSource) => Promise<{ objectId: string; files: SkillFile[] }>;
 }
 
 interface SkillToolSetOptions extends SkillTurnContext {
@@ -90,7 +96,14 @@ interface PreparedInstall {
   starter: boolean;
   /** The skill's own instruction file, when the host read it. */
   instructions: string | null;
+  /** True when the skill builds web addresses while it runs, which the host could not read ahead of time. */
+  makesUpAddresses: boolean;
 }
+
+const UNREADABLE_FILES =
+  "Nothing was added because the skill's files could not be read to check which websites it sends requests to. Try again in a minute.";
+const TOO_MANY_WEBSITES =
+  'Nothing was added because this skill sends requests to more websites than can be approved at once. Tell the user this skill cannot be added.';
 
 const NOT_APPROVED = 'Nothing was added because the user has not approved it. Ask again if they still want it.';
 
@@ -144,7 +157,7 @@ function addedMessage({ skill, sandboxReady }: { skill: GitSkill; sandboxReady: 
   }
   const sites =
     skill.network_hosts !== undefined && skill.network_hosts.length > 0
-      ? ' This skill asks to reach some sites. It cannot reach them until the user allows that in Settings, under Skills.'
+      ? ` It can reach only the websites the user approved on the card: ${skill.network_hosts.join(', ')}.`
       : '';
   return `The skill ${skill.name} is added. Tell the user in one plain line: "Added the skill ${skill.name}." It is ready from the next message in this chat. If it is not, tell the user to turn it on for the chat, or to look in Settings, under Skills.${sites}`;
 }
@@ -208,7 +221,7 @@ export class SkillToolSet extends LocalToolMCP {
       // Not a permission wall: the model can fix the call or ask the user.
       return { ...info, pre_dispatch_failure: { kind: 'pre_dispatch_failed', message: prepared.message } };
     }
-    const { approved, manifest, starter, instructions } = prepared.value;
+    const { approved, manifest, starter, instructions, makesUpAddresses } = prepared.value;
     const decision = await classifyHostToolCall({
       sentinel: this.#options.sentinel,
       repository_id: null,
@@ -230,6 +243,8 @@ export class SkillToolSet extends LocalToolMCP {
           version: manifest.ref,
           starter,
           instructions,
+          websites: [...(manifest.network_hosts ?? [])],
+          makes_up_addresses: makesUpAddresses,
         },
       },
     });
@@ -283,6 +298,8 @@ export class SkillToolSet extends LocalToolMCP {
           ref: manifest.ref,
           name: manifest.name,
           description: manifest.description,
+          // The approval covers exactly these websites: a different list at dispatch needs a new card.
+          network_hosts: [...(manifest.network_hosts ?? [])],
         },
       },
     };
@@ -298,7 +315,7 @@ export class SkillToolSet extends LocalToolMCP {
         (address.ref === undefined || address.ref === entry.ref),
     );
     if (starter !== undefined) {
-      return this.#manifest({ fields: starter, starter: true, instructions: null });
+      return this.#manifest({ fields: starter, starter: true, instructions: null, makesUpAddresses: false });
     }
     let published: Awaited<ReturnType<typeof readPublishedSkill>>;
     try {
@@ -325,6 +342,11 @@ export class SkillToolSet extends LocalToolMCP {
           'Nothing was added because the description this skill gives itself is too long. Tell the user to add it in Settings, under Skills, where they can write a shorter one.',
       };
     }
+    const scanned = await this.#scan({ url, path: address.path ?? '', ref: published.commit });
+    if (!scanned.ok) {
+      return scanned;
+    }
+    const { hosts, makesUpAddresses } = scanned.value;
     return this.#manifest({
       fields: {
         name,
@@ -332,10 +354,33 @@ export class SkillToolSet extends LocalToolMCP {
         ...(address.path === undefined ? {} : { path: address.path }),
         ref: published.commit,
         description: published.description,
+        ...(hosts.length === 0 ? {} : { network_hosts: hosts }),
       },
       starter: false,
       instructions: published.instructions,
+      makesUpAddresses,
     });
+  }
+
+  /**
+   * Marketplace skills do not say which websites they use, so the host reads every file of the
+   * skill at the commit being added and finds them itself. Nothing in the skill runs.
+   */
+  async #scan(source: GitSkillSource): Promise<Prepared<{ hosts: string[]; makesUpAddresses: boolean }>> {
+    let read: Awaited<ReturnType<SkillTurnContext['readFiles']>>;
+    try {
+      read = await this.#options.readFiles(source);
+    } catch {
+      return { ok: false, message: UNREADABLE_FILES };
+    }
+    if (read.objectId !== source.ref) {
+      return { ok: false, message: UNREADABLE_FILES };
+    }
+    const scan = scanSkillSites(read.files);
+    if (!SkillNetworkHostsSchema.safeParse(scan.hosts).success) {
+      return { ok: false, message: TOO_MANY_WEBSITES };
+    }
+    return { ok: true, value: { hosts: scan.hosts, makesUpAddresses: scan.unknown.length > 0 } };
   }
 
   /** Checks the skill against the same rules the Settings page saves under. */
@@ -343,6 +388,7 @@ export class SkillToolSet extends LocalToolMCP {
     fields: Omit<GitSkill, 'type'>;
     starter: boolean;
     instructions: string | null;
+    makesUpAddresses: boolean;
   }): Prepared<Omit<PreparedInstall, 'approved'>> {
     const valid = SkillManifestSchema.safeParse({ ...input.fields, type: 'git' });
     const manifest = valid.success ? parseGitSkill(valid.data) : undefined;
@@ -350,7 +396,15 @@ export class SkillToolSet extends LocalToolMCP {
       const issues = valid.success ? '' : ` ${plainIssues(valid.error)}`;
       return { ok: false, message: `Nothing was added.${issues} Check the address with the user and try again.` };
     }
-    return { ok: true, value: { manifest, starter: input.starter, instructions: input.instructions } };
+    return {
+      ok: true,
+      value: {
+        manifest,
+        starter: input.starter,
+        instructions: input.instructions,
+        makesUpAddresses: input.makesUpAddresses,
+      },
+    };
   }
 
   #installed(): Promise<SkillRecord[]> {
@@ -419,6 +473,23 @@ export class SkillToolSet extends LocalToolMCP {
         );
       }
       throw error;
+    }
+    const hosts = manifest.network_hosts ?? [];
+    if (hosts.length > 0) {
+      // All or nothing: the card approved the skill and its websites together, so a skill whose
+      // websites could not be allowed is taken out again rather than left half added.
+      try {
+        await this.#options.store.setSkillNetworkApproval({
+          tenant_id: this.#options.tenant_id,
+          name: manifest.name,
+          hosts,
+        });
+      } catch (error) {
+        await this.#options.store.deleteSkill({ tenant_id: this.#options.tenant_id, name: manifest.name });
+        throw new Error('the skill was added but its websites could not be allowed, so it was removed again', {
+          cause: error,
+        });
+      }
     }
     return jsonResult({
       added: { name: manifest.name, description: manifest.description },

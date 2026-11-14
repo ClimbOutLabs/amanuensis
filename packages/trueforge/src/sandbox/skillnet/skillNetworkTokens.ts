@@ -165,6 +165,18 @@ export class SkillNetworkTokenRegistry {
     return [...entry.hosts].sort();
   }
 
+  /**
+   * Drops every allow-once site kept for a skill that was removed, in every chat, so a skill
+   * added again later under the same name starts with none of them.
+   */
+  forgetSkill(input: { tenant_id: string; skill_name: string }): void {
+    for (const [key, entry] of this.#sessionHosts) {
+      if (entry.tenant_id === input.tenant_id && entry.skill_name === input.skill_name) {
+        this.#sessionHosts.delete(key);
+      }
+    }
+  }
+
   /** Every live allow-once site for one skill, across the person's open chats; Settings shows these. */
   sessionHostsForSkill(input: { tenant_id: string; created_by: string; skill_name: string }): readonly string[] {
     const hosts = new Set<string>();

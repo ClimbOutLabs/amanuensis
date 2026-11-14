@@ -44,9 +44,22 @@ describe('Skill tool classification', () => {
   it('always asks before adding a skill, with the skill as the host read it', async () => {
     const decision = await classifyTier(skillAction('install_skill', { skill_install: REVIEW }), makeCtx());
     expect(decision).toMatchObject({ tier: 3, reason: 'skill_install', auto_deny: null });
-    expect(decision.card?.skill).toEqual(REVIEW);
+    expect(decision.card?.skill).toEqual({ ...REVIEW, websites: [], makes_up_addresses: false });
     expect(decision.card?.plain_what).toContain('Add the skill "release-notes"?');
     expect(decision.standing_grant_barred).toBe(true);
+  });
+
+  it('names the websites the skill sends requests to, which approving allows', async () => {
+    const decision = await classifyTier(
+      skillAction('install_skill', {
+        skill_install: { ...REVIEW, websites: ['api.release-feed.info'], makes_up_addresses: true },
+      }),
+      makeCtx(),
+    );
+    expect(decision.card?.skill).toMatchObject({ websites: ['api.release-feed.info'], makes_up_addresses: true });
+    expect(decision.card?.plain_what).toContain(
+      'It sends requests to api.release-feed.info. Adding it lets the skill reach these websites and no others.',
+    );
   });
 
   it('shows text from the skill as plain text, so it cannot dress the card up', async () => {

@@ -274,6 +274,10 @@ export type SentinelApprovalSkill = {
   starter: boolean;
   /** The skill's own instruction file, or null for a starter skill. */
   instructions: string | null;
+  /** The websites the skill sends requests to. Approving the card allows exactly these. */
+  websites: string[];
+  /** True when the skill also builds web addresses while it runs, which could not be read ahead of time. */
+  makes_up_addresses: boolean;
 };
 
 /** What the server says about an action a scheduled run held for its owner instead of asking. */
@@ -728,7 +732,13 @@ function parseSkill(value: unknown): SentinelApprovalSkill | null {
   const source = optionalString(value, 'source');
   const version = optionalString(value, 'version');
   const { starter, instructions } = value;
+  // A card saved before websites were shown has neither field; its approval cannot add websites.
+  const websites = value.websites ?? [];
+  const makesUpAddresses = value.makes_up_addresses ?? false;
   if (
+    !Array.isArray(websites) ||
+    !websites.every((site): site is string => typeof site === 'string') ||
+    typeof makesUpAddresses !== 'boolean' ||
     name === undefined ||
     description === undefined ||
     source === undefined ||
@@ -738,7 +748,7 @@ function parseSkill(value: unknown): SentinelApprovalSkill | null {
   ) {
     return null;
   }
-  return { name, description, source, version, starter, instructions };
+  return { name, description, source, version, starter, instructions, websites, makes_up_addresses: makesUpAddresses };
 }
 
 /** A card missing any field is not shown as a schedule, so a partial schedule is never approved as if it were whole. */

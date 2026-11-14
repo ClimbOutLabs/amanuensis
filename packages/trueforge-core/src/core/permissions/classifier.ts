@@ -3174,11 +3174,18 @@ async function classifyPersonaTool(action: SentinelAction, ctx: ClassifyContext)
   });
 }
 
+/** Approving an install also allows the websites the skill sends requests to, so the card says so. */
+function skillWebsitesSentence(websites: readonly string[]): string {
+  return websites.length === 0
+    ? ''
+    : ` It sends requests to ${websites.map(site => escapeDisplayText(site)).join(', ')}. Adding it lets the skill reach these websites and no others.`;
+}
+
 function skillInstallCard(input: { review: Tier3Skill; assistant: string; agent_intent: string | null }): Tier3Card {
   const { review } = input;
   const show = (text: string) => escapeDisplayText(text);
   return {
-    plain_what: `Add the skill ${cardSubject(review.name)}? ${input.assistant} will follow its instructions when a task calls for it.`,
+    plain_what: `Add the skill ${cardSubject(review.name)}? ${input.assistant} will follow its instructions when a task calls for it.${skillWebsitesSentence(review.websites ?? [])}`,
     copy: simpleCardCopy({ headline: `Add the skill ${cardSubject(review.name)}?`, undo: null, reason: null }),
     plain_why: plainWhy(input.agent_intent),
     cannot_be_undone: null,
@@ -3198,6 +3205,8 @@ function skillInstallCard(input: { review: Tier3Skill; assistant: string; agent_
       starter: review.starter,
       instructions:
         review.instructions === null ? null : escapeDisplayText(review.instructions, { keepNewlines: true }),
+      websites: (review.websites ?? []).map(show),
+      makes_up_addresses: review.makes_up_addresses ?? false,
     },
   };
 }

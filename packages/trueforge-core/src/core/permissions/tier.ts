@@ -233,6 +233,16 @@ export const Tier3SkillSchema = z
       .string()
       .nullable()
       .describe("The skill's own instruction file as the host read it, or null for a starter skill."),
+    websites: z
+      .array(z.string())
+      .optional()
+      .describe(
+        'The websites the skill sends requests to, as the host found them in its files. Approving allows these.',
+      ),
+    makes_up_addresses: z
+      .boolean()
+      .optional()
+      .describe('True when the skill also builds web addresses while it runs, which cannot be read ahead of time.'),
   })
   .describe('The skill a chat call adds, shown in full.')
   .openapi('Tier3Skill');

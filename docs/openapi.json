@@ -14106,6 +14106,10 @@
               "null"
             ]
           },
+          "makes_up_addresses": {
+            "description": "True when the skill also builds web addresses while it runs, which cannot be read ahead of time.",
+            "type": "boolean"
+          },
           "name": {
             "description": "Skill name.",
             "type": "string"
@@ -14121,6 +14125,13 @@
           "version": {
             "description": "The exact commit that is added. A later change to the repository is not picked up.",
             "type": "string"
+          },
+          "websites": {
+            "description": "The websites the skill sends requests to, as the host found them in its files. Approving allows these.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           }
         },
         "required": [

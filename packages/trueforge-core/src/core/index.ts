@@ -455,9 +455,20 @@ export {
   SkillMounter,
   SkillPromptModeSchema,
   getSkillPath,
+  readGitSkillFiles,
   renderSkillPromptBody,
+  scanSkillSites,
 } from './sandbox/skills';
-export type { GitSkill, ISkillMounter, Skill, SkillMounterOptions, SkillPromptMode } from './sandbox/skills';
+export type {
+  GitSkill,
+  GitSkillSource,
+  ISkillMounter,
+  Skill,
+  SkillFile,
+  SkillMounterOptions,
+  SkillPromptMode,
+  SkillSiteScan,
+} from './sandbox/skills';
 
 // Host tool-call policy: lets the host review model-authored tool calls before dispatch
 export { applyHostToolCallPolicy } from './runtime/HostToolCallPolicy';

@@ -11,3 +11,14 @@ export {
 export type { SkillUsedEvent, SkillUsedEventEnvelope, SkillUsedKind } from './skillEvents';
 export { SkillMounter } from './SkillMounter';
 export type { GitSkill, Skill, SkillMounterOptions } from './SkillMounter';
+export { scanSkillSites } from './skillSiteScan';
+export type {
+  SkillFile,
+  SkillSiteFinding,
+  SkillSiteScan,
+  SkillSiteSource,
+  SkillSiteUnknown,
+  SkillSiteUnknownKind,
+} from './skillSiteScan';
+export { readGitSkillFiles } from './slotSkillCopy';
+export type { GitSkillSource } from './slotSkillCopy';

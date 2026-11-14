@@ -1,10 +1,11 @@
 import { mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, posix, sep } from 'node:path';
+import { join, posix, relative, sep } from 'node:path';
 import type { SandboxInitUpload } from '../provider/Provider';
 import { shellEscape } from '../provider/Provider';
 import { execFileRunner, type HostCommandRunner } from '../slots/git/hostCommand';
 import type { GitSkill, Skill } from './SkillMounter';
+import type { SkillFile } from './skillSiteScan';
 
 // A sandbox with no network cannot fetch skills, so the host fetches and checks them. Each skill
 // becomes one tar archive, uploaded to the sandbox's transfer folder and unpacked by its own step.
@@ -226,10 +227,10 @@ async function assertSafeArchive(input: {
 }
 
 /**
- * Checks the skill folder: every entry resolves inside the checkout, no link is followed, and there
- * is at least one file. Any link inside the skill fails the whole skill.
+ * Checks the skill folder and returns its files: every entry resolves inside the checkout, no link
+ * is followed, and there is at least one file. Any link inside the skill fails the whole skill.
  */
-async function checkSkillFolder(input: { skillDir: string; repo: string; expectedDir: string }): Promise<void> {
+async function checkSkillFolder(input: { skillDir: string; repo: string; expectedDir: string }): Promise<SkillFile[]> {
   const repoReal = await realpath(input.repo);
   let dirReal: string;
   try {
@@ -243,7 +244,7 @@ async function checkSkillFolder(input: { skillDir: string; repo: string; expecte
   if (dirReal !== input.expectedDir || !isInside({ path: dirReal, root: repoReal })) {
     throw new Error('skill folder is a link or leaves the repository');
   }
-  let count = 0;
+  const files: SkillFile[] = [];
   let bytes = 0;
   const walk = async (dir: string): Promise<void> => {
     for (const entry of await readdir(dir, { withFileTypes: true })) {
@@ -265,17 +266,19 @@ async function checkSkillFolder(input: { skillDir: string; repo: string; expecte
       if (!isInside({ path: real, root: repoReal })) {
         throw new Error('skill file leaves the repository');
       }
-      count += 1;
-      bytes += (await readFile(real)).byteLength;
-      if (bytes > MAX_SKILL_BYTES || count > MAX_SKILL_FILES) {
+      const content = await readFile(real);
+      files.push({ path: relative(dirReal, real).split(sep).join('/'), bytes: content });
+      bytes += content.byteLength;
+      if (bytes > MAX_SKILL_BYTES || files.length > MAX_SKILL_FILES) {
         throw new SkillTooLargeError('skill is too large');
       }
     }
   };
   await walk(dirReal);
-  if (count === 0) {
+  if (files.length === 0) {
     throw new SkillNoFilesError('skill folder has no files');
   }
+  return files;
 }
 
 function objectIdForRef(input: { lsRemoteStdout: string; ref: string }): string {
@@ -291,56 +294,94 @@ function objectIdForRef(input: { lsRemoteStdout: string; ref: string }): string 
   throw new SkillMissingVersionError('ref not found in the repository');
 }
 
+/** Where a git skill is: the repository, the folder in it ('' for the top), and a branch, tag or commit. */
+export type GitSkillSource = Pick<GitSkill, 'url' | 'path' | 'ref'>;
+
+/** Sparse-clones the skill folder at a pinned commit into `work`, checks it, and returns where it is and its files. */
+async function checkoutGitSkill(input: {
+  skill: GitSkillSource;
+  host: HostCommandRunner;
+  signal: AbortSignal;
+  work: string;
+}): Promise<{ objectId: string; skillDir: string; files: SkillFile[] }> {
+  const { skill, host, signal, work } = input;
+  if (!isSafeSubdir(skill.path) || !isSafeRef(skill.ref) || skill.url.startsWith('-')) {
+    throw new Error('git skill has an unsafe url, ref or path');
+  }
+  // Hooks, global config and terminal prompts stay off, so a repository cannot run code on the host.
+  const env = {
+    ...HOST_PATH_ENV,
+    HOME: work,
+    GIT_TERMINAL_PROMPT: '0',
+    GIT_CONFIG_NOSYSTEM: '1',
+    GIT_CONFIG_GLOBAL: '/dev/null',
+    GIT_ALLOW_PROTOCOL: 'https',
+  };
+  const run = async (args: readonly string[], cwd: string): Promise<string> => {
+    const result = await host.run({
+      argv: ['git', '-c', 'core.hooksPath=/dev/null', ...args],
+      env,
+      cwd,
+      timeoutMs: GIT_TIMEOUT_MS,
+      signal,
+      maxStdoutBytes: MAX_TOOL_OUTPUT_BYTES,
+      limits: HOST_TOOL_LIMITS,
+    });
+    if (result.exitCode !== 0) {
+      throw new SkillDownloadError(`git ${args[0] ?? ''} exited with ${String(result.exitCode)}`);
+    }
+    return result.stdout.toString('utf-8');
+  };
+  const objectId = OBJECT_ID.test(skill.ref)
+    ? skill.ref
+    : objectIdForRef({ lsRemoteStdout: await run(['ls-remote', skill.url, skill.ref], work), ref: skill.ref });
+  const repo = join(work, 'repo');
+  await mkdir(repo);
+  await run(['init', '-q', repo], work);
+  await run(['-C', repo, 'fetch', '-q', '--depth', '1', '--filter=blob:none', skill.url, objectId], work);
+  if (skill.path !== '') {
+    await run(['-C', repo, 'sparse-checkout', 'set', '--cone', '--', skill.path], work);
+  }
+  await run(['-C', repo, 'checkout', '-q', 'FETCH_HEAD'], work);
+  const repoReal = await realpath(repo);
+  const skillDir = skill.path === '' ? repoReal : join(repoReal, skill.path);
+  const files = await checkSkillFolder({ skillDir: join(repo, skill.path), repo, expectedDir: skillDir });
+  return { objectId, skillDir, files };
+}
+
+/**
+ * Reads every file of a git skill at one exact commit, on the host, with the same checks the copy
+ * into the sandbox uses. Nothing in the skill runs. Used to look a skill over before it is added.
+ */
+export async function readGitSkillFiles(input: {
+  skill: GitSkillSource;
+  host?: HostCommandRunner | undefined;
+  signal?: AbortSignal | undefined;
+}): Promise<{ objectId: string; files: SkillFile[] }> {
+  const work = await mkdtemp(join(tmpdir(), 'tfy-skill-'));
+  try {
+    const { objectId, files } = await checkoutGitSkill({
+      skill: input.skill,
+      host: input.host ?? execFileRunner,
+      signal: input.signal ?? new AbortController().signal,
+      work,
+    });
+    return { objectId, files };
+  } finally {
+    await rm(work, { recursive: true, force: true });
+  }
+}
+
 /** Sparse-clones the skill folder at a pinned commit, checks it, and packs it into a tar archive. */
 async function fetchGitSkill(input: {
   skill: GitSkill;
   host: HostCommandRunner;
   signal: AbortSignal;
 }): Promise<{ objectId: string; archive: Buffer }> {
-  const { skill, host, signal } = input;
-  if (!isSafeSubdir(skill.path) || !isSafeRef(skill.ref) || skill.url.startsWith('-')) {
-    throw new Error('git skill has an unsafe url, ref or path');
-  }
+  const { host, signal } = input;
   const work = await mkdtemp(join(tmpdir(), 'tfy-skill-'));
   try {
-    // Hooks, global config and terminal prompts stay off, so a repository cannot run code on the host.
-    const env = {
-      ...HOST_PATH_ENV,
-      HOME: work,
-      GIT_TERMINAL_PROMPT: '0',
-      GIT_CONFIG_NOSYSTEM: '1',
-      GIT_CONFIG_GLOBAL: '/dev/null',
-      GIT_ALLOW_PROTOCOL: 'https',
-    };
-    const run = async (args: readonly string[], cwd: string): Promise<string> => {
-      const result = await host.run({
-        argv: ['git', '-c', 'core.hooksPath=/dev/null', ...args],
-        env,
-        cwd,
-        timeoutMs: GIT_TIMEOUT_MS,
-        signal,
-        maxStdoutBytes: MAX_TOOL_OUTPUT_BYTES,
-        limits: HOST_TOOL_LIMITS,
-      });
-      if (result.exitCode !== 0) {
-        throw new SkillDownloadError(`git ${args[0] ?? ''} exited with ${String(result.exitCode)}`);
-      }
-      return result.stdout.toString('utf-8');
-    };
-    const objectId = OBJECT_ID.test(skill.ref)
-      ? skill.ref
-      : objectIdForRef({ lsRemoteStdout: await run(['ls-remote', skill.url, skill.ref], work), ref: skill.ref });
-    const repo = join(work, 'repo');
-    await mkdir(repo);
-    await run(['init', '-q', repo], work);
-    await run(['-C', repo, 'fetch', '-q', '--depth', '1', '--filter=blob:none', skill.url, objectId], work);
-    if (skill.path !== '') {
-      await run(['-C', repo, 'sparse-checkout', 'set', '--cone', '--', skill.path], work);
-    }
-    await run(['-C', repo, 'checkout', '-q', 'FETCH_HEAD'], work);
-    const repoReal = await realpath(repo);
-    const expectedDir = skill.path === '' ? repoReal : join(repoReal, skill.path);
-    await checkSkillFolder({ skillDir: join(repo, skill.path), repo, expectedDir });
+    const { objectId, skillDir: expectedDir } = await checkoutGitSkill({ skill: input.skill, host, signal, work });
     const tarPath = join(work, 'skill.tar');
     const packed = await host.run({
       argv: [TAR_BINARY, '--exclude=.git', '-cf', tarPath, '-C', expectedDir, '.'],
