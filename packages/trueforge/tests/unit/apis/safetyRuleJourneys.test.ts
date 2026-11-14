@@ -348,10 +348,10 @@ describe('something Aman read that the person asks it to save', () => {
     await server.close();
   });
 
-  /** The saved page for Pippa, once it is on disk. */
-  async function pippaPage(): Promise<string | undefined> {
+  /** The saved page for one person, once it is on disk. */
+  async function personPage(name: string): Promise<string | undefined> {
     const files = await readdir(configuration.MEMORY_MARKDOWN_DIR, { recursive: true });
-    const file = files.find(name => name.endsWith(join('people', 'pippa.md')));
+    const file = files.find(found => found.endsWith(join('people', `${name}.md`)));
     return file === undefined ? undefined : readFile(join(configuration.MEMORY_MARKDOWN_DIR, file), 'utf8');
   }
 
@@ -371,7 +371,7 @@ describe('something Aman read that the person asks it to save', () => {
         input: [{ type: 'user.message', content: `${RUN_DIRECTIVE_PREFIX}remember_fact Save that.` }],
       });
       expect(cards(saved)).toEqual([]);
-      const page = await pippaPage();
+      const page = await personPage('pippa');
       expect(page).toMatch(/- Moved to Portland\. New address is \S+ <!-- fact: id=\S+ src=read_content since=\S+ -->/);
       expect(page).not.toContain('you_said');
 
@@ -388,6 +388,44 @@ describe('something Aman read that the person asks it to save', () => {
         `This goes to ${ADDRESS}, whose address Aman read earlier and saved to memory.`,
       );
       expect(card.can_chat_allow).toBe(false);
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
+    'is not treated as read when the person typed it themselves: it is saved as their own words, and a later chat that sends to its address shows the plain card',
+    async () => {
+      const ownAddress = 'omar.haddad@lisbon.example';
+      const chatId = await createChat(server);
+      server.model.next({
+        toolArguments: { about: 'Omar', text: `Lives in Lisbon. Address is ${ownAddress}.`, kind: 'person' },
+      });
+      const saved = await runTurn({
+        server,
+        chatId,
+        input: [
+          {
+            type: 'user.message',
+            content: `${RUN_DIRECTIVE_PREFIX}remember_fact Remember that Omar lives in Lisbon and his address is ${ownAddress}.`,
+          },
+        ],
+      });
+      expect(cards(saved)).toEqual([]);
+      const page = await personPage('omar');
+      expect(page).toMatch(/- Lives in Lisbon\. Address is \S+ <!-- fact: id=\S+ src=you_said since=\S+ -->/);
+      expect(page).not.toContain('read_content');
+
+      const laterChat = await createChat(server);
+      server.model.next({ toolArguments: { to: [ownAddress], subject: 'Hello', body: 'Hi Omar, how is Lisbon?' } });
+      const card = onlyCard(
+        await runTurn({
+          server,
+          chatId: laterChat,
+          input: [{ type: 'user.message', content: `${RUN_DIRECTIVE_PREFIX}draft_email to Omar please` }],
+        }),
+      );
+      expect(card.tier3_card?.plain_what).toContain(ownAddress);
+      expect(card.tier3_card?.plain_what).not.toContain('whose address Aman read earlier');
     },
     TURN_TIMEOUT_MS,
   );

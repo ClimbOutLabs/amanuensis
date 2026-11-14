@@ -300,6 +300,7 @@
   "Import": "packages/trueforge-ui/src/atoms/memory/MemoryVaultPanels.tsx",
   "Add topic": "packages/trueforge-ui/src/atoms/memory/MemoryVaultPanels.tsx",
   "Can also read notes from": "packages/trueforge-ui/src/atoms/memory/MemorySharing.tsx",
+  "Select": "packages/trueforge-ui/src/atoms/memory/MemorySharing.tsx",
   "Search chats": "packages/trueforge-ui/src/containers/ThreadListContainer.tsx",
   "In messages": "packages/trueforge-ui/src/containers/ChatMessageMatches.tsx",
   "Use memories in replies": "packages/trueforge-ui/src/containers/SettingsBuilder/MemorySettings.tsx",
