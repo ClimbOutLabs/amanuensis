@@ -108,7 +108,7 @@
     },
     "command:doctor": {
       "set": "install",
-      "tests": []
+      "tests": ["installer/tests/lib/look.test.sh"]
     },
     "command:import": {
       "set": "install",
@@ -116,7 +116,7 @@
     },
     "command:install": {
       "set": "install",
-      "tests": []
+      "tests": ["installer/tests/lib/look.test.sh"]
     },
     "command:migrate": {
       "set": "install",
@@ -152,7 +152,7 @@
     },
     "command:upgrade": {
       "set": "install",
-      "tests": []
+      "tests": ["installer/tests/lib/look.test.sh"]
     },
     "command:verify": {
       "set": "install",
@@ -782,9 +782,7 @@
     "command:adopt",
     "command:backup",
     "command:backups",
-    "command:doctor",
     "command:import",
-    "command:install",
     "command:migrate",
     "command:network",
     "command:open",
@@ -793,7 +791,6 @@
     "command:setup",
     "command:status",
     "command:uninstall",
-    "command:upgrade",
     "command:verify",
     "command:version",
     "email-preset:aol",
