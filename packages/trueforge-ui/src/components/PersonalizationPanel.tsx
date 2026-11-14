@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type FC, type FormEvent } from 'react';
 
 import { auiSettingsInputClass } from '../atoms/lib/inputClasses.js';
+import { MemoryTabs } from '../atoms/memory/MemoryTabs.js';
 import { Button } from '../atoms/primitives/Button.js';
 import { assistantDisplayName } from '../utils/assistantName.js';
 import {
@@ -13,6 +14,13 @@ import {
   type PersonalizationApi,
   type PersonalizationProfile,
 } from './PersonalizationContext.js';
+
+type PersonalizationTab = 'yours' | 'assistant';
+
+const PERSONALIZATION_TABS: ReadonlyArray<{ id: PersonalizationTab; label: string }> = [
+  { id: 'yours', label: 'Your profile' },
+  { id: 'assistant', label: 'Assistant profile' },
+];
 
 export type PersonalizationPanelProps = {
   /** Optional for standalone use; Settings inherits the host provider. */
@@ -25,6 +33,7 @@ const PersonalizationPanelContent: FC<Pick<PersonalizationPanelProps, 'onProfile
   const { profile, loading, loadError, updateProfile, deleteProfile } = usePersonalization();
   const [draft, setDraft] = useState<PersonalizationProfile>(profile ?? EMPTY_PERSONALIZATION_PROFILE);
   const [saving, setSaving] = useState(false);
+  const [tab, setTab] = useState<PersonalizationTab>('yours');
   const [feedback, setFeedback] = useState<{ tone: 'error' | 'success'; message: string } | null>(null);
 
   // Pinned preferences are plain strings on the wire, with no id of their own. React needs a key
@@ -128,6 +137,16 @@ const PersonalizationPanelContent: FC<Pick<PersonalizationPanelProps, 'onProfile
         </p>
       ) : null}
 
+      {/* The tab strip stays put above the scrolling form, as on the other Settings pages with sub-tabs. */}
+      <div className="mt-4">
+        <MemoryTabs
+          ariaLabel="Personalization sections"
+          tabs={PERSONALIZATION_TABS}
+          activeTab={tab}
+          onTabChange={setTab}
+        />
+      </div>
+
       <div className="mt-4 flex-1 overflow-y-auto pb-4">
         {loading ? (
           <p className="text-sm text-text-secondary" role="status">
@@ -135,182 +154,194 @@ const PersonalizationPanelContent: FC<Pick<PersonalizationPanelProps, 'onProfile
           </p>
         ) : (
           <form className="space-y-4" onSubmit={save}>
-            <section className="rounded-xl border border-border bg-card-bg p-4" aria-labelledby="user-context-heading">
-              <h4 id="user-context-heading" className="text-sm font-semibold text-text-primary">
-                About you
-              </h4>
-              <p className="mt-1 text-sm text-text-secondary">
-                {assistant} greets you by name and addresses you the way you ask. Everything here stays on this
-                computer.
-              </p>
+            {tab === 'yours' ? (
+              <section
+                className="rounded-xl border border-border bg-card-bg p-4"
+                aria-labelledby="user-context-heading"
+              >
+                <h4 id="user-context-heading" className="text-sm font-semibold text-text-primary">
+                  About you
+                </h4>
+                <p className="mt-1 text-sm text-text-secondary">
+                  {assistant} greets you by name and addresses you the way you ask. Everything here stays on this
+                  computer.
+                </p>
 
-              <div className="mt-4 grid gap-4 md:grid-cols-2">
-                <div>
+                <div className="mt-4 grid gap-4 md:grid-cols-2">
+                  <div>
+                    <label
+                      htmlFor="personalization-user-name"
+                      className="mb-1.5 block text-sm font-medium text-text-primary"
+                    >
+                      Your name
+                    </label>
+                    <input
+                      id="personalization-user-name"
+                      className={auiSettingsInputClass()}
+                      autoComplete="name"
+                      value={draft.user_name ?? ''}
+                      onChange={event => updateDraft('user_name', event.target.value)}
+                      placeholder="For example, Sam Rivera"
+                    />
+                    <p className="mt-1.5 text-xs leading-snug text-text-secondary">
+                      The name {assistant} knows you by.
+                    </p>
+                  </div>
+                  <div>
+                    <label
+                      htmlFor="personalization-address-as"
+                      className="mb-1.5 block text-sm font-medium text-text-primary"
+                    >
+                      How {assistant} should address you
+                    </label>
+                    <input
+                      id="personalization-address-as"
+                      className={auiSettingsInputClass()}
+                      value={draft.address_as ?? ''}
+                      onChange={event => updateDraft('address_as', event.target.value)}
+                      placeholder="For example, Sam, or Dr. Rivera"
+                    />
+                    <p className="mt-1.5 text-xs leading-snug text-text-secondary">
+                      A first name, a title, or your pronouns. Leave it empty to be called by your name.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-4">
                   <label
-                    htmlFor="personalization-user-name"
+                    htmlFor="personalization-user-profile"
                     className="mb-1.5 block text-sm font-medium text-text-primary"
                   >
-                    Your name
+                    More about you
                   </label>
-                  <input
-                    id="personalization-user-name"
-                    className={auiSettingsInputClass()}
-                    autoComplete="name"
-                    value={draft.user_name ?? ''}
-                    onChange={event => updateDraft('user_name', event.target.value)}
-                    placeholder="For example, Sam Rivera"
+                  <textarea
+                    id="personalization-user-profile"
+                    className={auiSettingsInputClass('min-h-24 resize-y')}
+                    value={draft.user_profile ?? ''}
+                    onChange={event => updateDraft('user_profile', event.target.value)}
+                    placeholder="Where you live, what you work on, what you care about"
                   />
-                  <p className="mt-1.5 text-xs leading-snug text-text-secondary">The name {assistant} knows you by.</p>
                 </div>
-                <div>
+
+                <fieldset className="mt-4 min-w-0 border-0 p-0">
+                  <legend className="text-sm font-medium text-text-primary">Pinned preferences</legend>
+                  <p className="mt-1 text-sm text-text-secondary">Key preferences, kept visible and easy to edit.</p>
+                  <div className="mt-3 space-y-2">
+                    {draft.pinned_preferences.map((preference, index) => (
+                      <div className="flex flex-col gap-2 sm:flex-row" key={preferenceIds[index] ?? index}>
+                        <input
+                          className={auiSettingsInputClass()}
+                          aria-label={`Pinned preference ${index + 1}`}
+                          value={preference}
+                          onChange={event => {
+                            const nextValue = event.target.value;
+                            setDraft(current => ({
+                              ...current,
+                              pinned_preferences: current.pinned_preferences.map((item, itemIndex) =>
+                                itemIndex === index ? nextValue : item,
+                              ),
+                            }));
+                          }}
+                        />
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          className="sm:self-center"
+                          aria-label={`Remove pinned preference ${index + 1}`}
+                          onClick={() => {
+                            setDraft(current => ({
+                              ...current,
+                              pinned_preferences: current.pinned_preferences.filter(
+                                (_, itemIndex) => itemIndex !== index,
+                              ),
+                            }));
+                            setPreferenceIds(current => current.filter((_, itemIndex) => itemIndex !== index));
+                          }}
+                        >
+                          Remove
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="small"
+                    className="mt-3"
+                    disabled={draft.pinned_preferences.length >= 12}
+                    onClick={() => {
+                      setDraft(current => ({ ...current, pinned_preferences: [...current.pinned_preferences, ''] }));
+                      setPreferenceIds(current => [...current, nextPreferenceId.current++]);
+                    }}
+                  >
+                    + Add preference
+                  </Button>
+                </fieldset>
+              </section>
+            ) : null}
+
+            {tab === 'assistant' ? (
+              <section
+                className="rounded-xl border border-border bg-card-bg p-4"
+                aria-labelledby="assistant-profile-heading"
+              >
+                <h4 id="assistant-profile-heading" className="text-sm font-semibold text-text-primary">
+                  Assistant profile
+                </h4>
+                <p className="mt-1 text-sm text-text-secondary">
+                  Choose how {assistant} sees itself and speaks with you.
+                </p>
+
+                <div className="mt-4 grid gap-4 md:grid-cols-2">
+                  <div>
+                    <label
+                      htmlFor="personalization-assistant-name"
+                      className="mb-1.5 block text-sm font-medium text-text-primary"
+                    >
+                      Name
+                    </label>
+                    <input
+                      id="personalization-assistant-name"
+                      className={auiSettingsInputClass()}
+                      value={draft.assistant_name ?? ''}
+                      onChange={event => updateDraft('assistant_name', event.target.value)}
+                      placeholder={assistantDisplayName(null)}
+                    />
+                  </div>
+                  <div>
+                    <label
+                      htmlFor="personalization-voice"
+                      className="mb-1.5 block text-sm font-medium text-text-primary"
+                    >
+                      Voice guidance
+                    </label>
+                    <input
+                      id="personalization-voice"
+                      className={auiSettingsInputClass()}
+                      value={draft.voice_guidance ?? ''}
+                      onChange={event => updateDraft('voice_guidance', event.target.value)}
+                      placeholder="Warm, direct, concise…"
+                    />
+                  </div>
+                </div>
+
+                <div className="mt-4">
                   <label
-                    htmlFor="personalization-address-as"
+                    htmlFor="personalization-identity"
                     className="mb-1.5 block text-sm font-medium text-text-primary"
                   >
-                    How {assistant} should address you
+                    Identity
                   </label>
-                  <input
-                    id="personalization-address-as"
-                    className={auiSettingsInputClass()}
-                    value={draft.address_as ?? ''}
-                    onChange={event => updateDraft('address_as', event.target.value)}
-                    placeholder="For example, Sam, or Dr. Rivera"
-                  />
-                  <p className="mt-1.5 text-xs leading-snug text-text-secondary">
-                    A first name, a title, or your pronouns. Leave it empty to be called by your name.
-                  </p>
-                </div>
-              </div>
-
-              <div className="mt-4">
-                <label
-                  htmlFor="personalization-user-profile"
-                  className="mb-1.5 block text-sm font-medium text-text-primary"
-                >
-                  More about you
-                </label>
-                <textarea
-                  id="personalization-user-profile"
-                  className={auiSettingsInputClass('min-h-24 resize-y')}
-                  value={draft.user_profile ?? ''}
-                  onChange={event => updateDraft('user_profile', event.target.value)}
-                  placeholder="Where you live, what you work on, what you care about"
-                />
-              </div>
-
-              <fieldset className="mt-4 min-w-0 border-0 p-0">
-                <legend className="text-sm font-medium text-text-primary">Pinned preferences</legend>
-                <p className="mt-1 text-sm text-text-secondary">Key preferences, kept visible and easy to edit.</p>
-                <div className="mt-3 space-y-2">
-                  {draft.pinned_preferences.map((preference, index) => (
-                    <div className="flex flex-col gap-2 sm:flex-row" key={preferenceIds[index] ?? index}>
-                      <input
-                        className={auiSettingsInputClass()}
-                        aria-label={`Pinned preference ${index + 1}`}
-                        value={preference}
-                        onChange={event => {
-                          const nextValue = event.target.value;
-                          setDraft(current => ({
-                            ...current,
-                            pinned_preferences: current.pinned_preferences.map((item, itemIndex) =>
-                              itemIndex === index ? nextValue : item,
-                            ),
-                          }));
-                        }}
-                      />
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        className="sm:self-center"
-                        aria-label={`Remove pinned preference ${index + 1}`}
-                        onClick={() => {
-                          setDraft(current => ({
-                            ...current,
-                            pinned_preferences: current.pinned_preferences.filter(
-                              (_, itemIndex) => itemIndex !== index,
-                            ),
-                          }));
-                          setPreferenceIds(current => current.filter((_, itemIndex) => itemIndex !== index));
-                        }}
-                      >
-                        Remove
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="small"
-                  className="mt-3"
-                  disabled={draft.pinned_preferences.length >= 12}
-                  onClick={() => {
-                    setDraft(current => ({ ...current, pinned_preferences: [...current.pinned_preferences, ''] }));
-                    setPreferenceIds(current => [...current, nextPreferenceId.current++]);
-                  }}
-                >
-                  + Add preference
-                </Button>
-              </fieldset>
-            </section>
-
-            <section
-              className="rounded-xl border border-border bg-card-bg p-4"
-              aria-labelledby="assistant-profile-heading"
-            >
-              <h4 id="assistant-profile-heading" className="text-sm font-semibold text-text-primary">
-                Assistant profile
-              </h4>
-              <p className="mt-1 text-sm text-text-secondary">
-                Choose how {assistant} sees itself and speaks with you.
-              </p>
-
-              <div className="mt-4 grid gap-4 md:grid-cols-2">
-                <div>
-                  <label
-                    htmlFor="personalization-assistant-name"
-                    className="mb-1.5 block text-sm font-medium text-text-primary"
-                  >
-                    Name
-                  </label>
-                  <input
-                    id="personalization-assistant-name"
-                    className={auiSettingsInputClass()}
-                    value={draft.assistant_name ?? ''}
-                    onChange={event => updateDraft('assistant_name', event.target.value)}
-                    placeholder={assistantDisplayName(null)}
+                  <textarea
+                    id="personalization-identity"
+                    className={auiSettingsInputClass('min-h-24 resize-y')}
+                    value={draft.assistant_identity ?? ''}
+                    onChange={event => updateDraft('assistant_identity', event.target.value)}
+                    placeholder="How should it understand its role?"
                   />
                 </div>
-                <div>
-                  <label htmlFor="personalization-voice" className="mb-1.5 block text-sm font-medium text-text-primary">
-                    Voice guidance
-                  </label>
-                  <input
-                    id="personalization-voice"
-                    className={auiSettingsInputClass()}
-                    value={draft.voice_guidance ?? ''}
-                    onChange={event => updateDraft('voice_guidance', event.target.value)}
-                    placeholder="Warm, direct, concise…"
-                  />
-                </div>
-              </div>
-
-              <div className="mt-4">
-                <label
-                  htmlFor="personalization-identity"
-                  className="mb-1.5 block text-sm font-medium text-text-primary"
-                >
-                  Identity
-                </label>
-                <textarea
-                  id="personalization-identity"
-                  className={auiSettingsInputClass('min-h-24 resize-y')}
-                  value={draft.assistant_identity ?? ''}
-                  onChange={event => updateDraft('assistant_identity', event.target.value)}
-                  placeholder="How should it understand its role?"
-                />
-              </div>
-            </section>
+              </section>
+            ) : null}
 
             {feedback ? (
               <p
