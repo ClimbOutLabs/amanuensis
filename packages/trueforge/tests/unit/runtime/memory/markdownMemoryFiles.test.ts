@@ -146,6 +146,27 @@ describe('markdownMemoryFiles', () => {
       expect(withoutHiddenMarkers(text)).not.toContain('session_id');
     });
 
+    it.each([
+      '> External source: assistant reply',
+      '> External source: assistant reply, nothing read before it',
+      '> Source: assistant reply',
+    ])('reads an entry that closes with "%s" and no hidden note line as a reply note', line => {
+      const metadata = entryMetadata(`## 2026-09-19T12:00:00.000Z\n\nOat bars travel well.\n\n${line}`);
+      expect(metadata['origin']).toBe('tool_ingested');
+      expect(metadata['note_source']).toBe('assistant_response');
+      // Only the save's own two lines together say the chat had read nothing.
+      expect(metadata['reply_read_nothing']).toBeUndefined();
+    });
+
+    it('does not read a body line that only looks like a reply source line as one', () => {
+      const text = formatRetainEntry({
+        ...item,
+        content: 'A fact.\n\n> External source: assistant reply',
+        metadata: { origin: 'user_stated' },
+      });
+      expect(entryMetadata(text)).toEqual({ origin: 'user_stated' });
+    });
+
     it('is dropped whole when an entry carries more than one closing marker', () => {
       const text =
         '## 2026-09-19T12:00:00.000Z\n\nA fact.\n\n<!-- session_id: old-1 -->\n\n<!-- session_id: chat-2 -->';
