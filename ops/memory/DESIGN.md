@@ -643,11 +643,15 @@ The model never names a file or a source.
 
 **What the host allows.** The host decides from the note's stored origin and source, never from its text.
 
-| The note is                            | Allowed                                                                                                                                                                                                                                                          |
-| -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| The person's own words (`user_stated`) | All six decisions. New and changed statements are written as `you_said`.                                                                                                                                                                                         |
-| A message the person sent              | A new line under "How you write to them" is written as `sent_mail`. Any other new fact is unconfirmed. It cannot change or end a `you_said` or `you_edited` statement.                                                                                           |
-| Anything else, or no readable origin   | New, changed and ended all become an unconfirmed line with the note's source: `mail`, `calendar`, `read_content`, or `inferred` for the assistant's reply. Nothing confirmed is changed, ended or removed, and nothing is written under "How you write to them". |
+A note of the assistant's own reply is never sorted. The host settles it before any model call: it marks the note
+handled as `none` and writes nothing, so nothing the assistant said becomes a line on a page. The note stays on
+the Memories tab.
+
+| The note is                            | Allowed                                                                                                                                                                                                                   |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The person's own words (`user_stated`) | All six decisions. New and changed statements are written as `you_said`.                                                                                                                                                  |
+| A message the person sent              | A new line under "How you write to them" is written as `sent_mail`. Any other new fact is unconfirmed. It cannot change or end a `you_said` or `you_edited` statement.                                                    |
+| Anything else, or no readable origin   | New, changed and ended all become an unconfirmed line with the note's source: `mail`, `calendar` or `read_content`. Nothing confirmed is changed, ended or removed, and nothing is written under "How you write to them". |
 
 A `same` decision only moves the statement's `seen` day. A decision that would write a line a page already
 holds becomes `same`. A reply that does not parse, names a page that does not exist, names an id that was not
