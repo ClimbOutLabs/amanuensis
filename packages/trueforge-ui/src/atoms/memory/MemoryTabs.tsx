@@ -6,8 +6,8 @@ import { cn } from '@/atoms/lib/cn.js';
 import { tablistTargetIndex } from '@/atoms/lib/tablistKeys.js';
 
 /**
- * The memory sub-tab pattern: an underlined tablist shared by the standalone memory page
- * and the Settings Memory section, so both surfaces navigate the same way. Arrow keys move
+ * The settings sub-tab pattern: an underlined tablist shared by the standalone memory page
+ * and the Settings sections that split into sub-tabs, so they navigate the same way. Arrow keys move
  * between tabs (focus follows the selection), Home and End jump to the ends, and only the
  * selected tab is in the tab order. When the tabs are wider than the space they get, the
  * strip scrolls sideways rather than squeezing the labels. The strip keeps its height when the
