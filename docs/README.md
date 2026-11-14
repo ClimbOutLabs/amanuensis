@@ -157,6 +157,7 @@ These are the same pages Aman's **Help, I'm stuck** answers from.
 - [Benchmarking](benchmarking.mdx): How the harness compares, and how to rerun it.
 - [Token eval](evals/token-eval.md): Token and step use on a fixed prompt set.
 - [Space eval](evals/space-eval.md): How reliably Aman builds spaces.
+- [Model eval](evals/model-eval.md): Compare models on everyday tasks, safety traps and memory, graded by machine, every week.
 - [Memory design](../ops/memory/DESIGN.md) and [runbook](../ops/memory/RUNBOOK.md): How memory is stored and looked after.
 
 ## Reference
