@@ -88,6 +88,7 @@ function mailboxLine(mailbox: { name: string; address: string }): string {
  * The card fields Telegram shows. A card that carries any other field is never sent with buttons,
  * so a field added to the card later cannot be approved from Telegram before it is shown here.
  * `outbound_plumbing_text` repeats lines of `outbound_text`, and `mail_draft` only names the button.
+ * `mail_from_choices` shows as one line that says another account is picked in the app.
  * `safe_choice` and `destructive` only choose the words of the app's no button.
  */
 export const TELEGRAM_SHOWN_CARD_FIELDS = [
@@ -113,6 +114,8 @@ export const TELEGRAM_SHOWN_CARD_FIELDS = [
   'skill',
   'mail_new_recipients',
   'mail_draft',
+  'mail_from',
+  'mail_from_choices',
   'skill_network',
 ] as const satisfies readonly (keyof Tier3Card)[];
 
@@ -225,6 +228,21 @@ function cardIsCut(card: Tier3Card): boolean {
 }
 
 /**
+ * The account an email goes from. Approve in Telegram sends from this account, because Telegram's
+ * buttons cannot pick another one.
+ */
+function mailFromLines(card: Tier3Card): string[] {
+  const lines: string[] = [];
+  if (card.mail_from !== null && card.mail_from !== undefined && card.mail_from !== '') {
+    lines.push(`From: ${card.mail_from}`);
+  }
+  if ((card.mail_from_choices ?? []).length > 1) {
+    lines.push('To send from a different account, answer in the app.');
+  }
+  return lines;
+}
+
+/**
  * Every line of one approval card, in the order the app's card shows them: what will happen,
  * the exact details (the whole email, the whole calendar event, a schedule's whole task, a
  * persona's whole instructions, a skill's source, version and instructions, the shell command,
@@ -256,13 +274,17 @@ function approvalCardLines(card: Tier3Card): string[] {
   if (card.parsed_command !== null) {
     lines.push(`Command: ${card.parsed_command}`);
   }
+  const fromLines = mailFromLines(card);
   const email = card.email ?? null;
-  if (email !== null) {
+  if (email === null) {
+    lines.push(...fromLines);
+  } else {
     lines.push(email.action === 'send' ? 'What will be sent:' : 'What will be saved:');
     if (email.reply_in_thread !== null) {
       lines.push(`Reply in the thread of the message from ${email.reply_in_thread.from}.`);
       lines.push(`Thread subject: ${email.reply_in_thread.subject}`);
     }
+    lines.push(...fromLines);
     lines.push(`To: ${email.to.map(mailboxLine).join(', ')}`);
     if (email.cc.length > 0) {
       lines.push(`Copy: ${email.cc.map(mailboxLine).join(', ')}`);
