@@ -445,6 +445,7 @@ export class DocumentTools extends LocalToolMCP {
   private readonly allTools: ToolDefinition[] = [
     defineTool({
       name: EXTRACT_DOCUMENT_TEXT_TOOL_NAME,
+      requiresNetwork: false,
       description:
         'Extract page- and line-addressable text from attachments: PDF, images, Word (.docx, .doc), Excel (.xlsx, .xls), CSV, PowerPoint (.pptx), OpenDocument, RTF, HTML, e-mails (.eml, .msg) and text files. Native PDF text first, local OCR fallback. Returns per-file issues and SHA-256 provenance; never infers unreadable content. For long files, page with page_start/page_end; each result names the exact next range.',
       schema: extractDocumentTextSchema,
@@ -452,6 +453,7 @@ export class DocumentTools extends LocalToolMCP {
     }),
     defineTool({
       name: CREATE_DOCUMENT_REPORT_TOOL_NAME,
+      requiresNetwork: false,
       description:
         `Render a downloadable DOCX report; it does not interpret contents or calculate totals. ` +
         `compact (default) caps at ${String(DOCUMENT_REPORT_MAX_SECTIONS)} sections, ` +
@@ -462,6 +464,7 @@ export class DocumentTools extends LocalToolMCP {
     }),
     defineTool({
       name: SUMMARIZE_NET_WORTH_TOOL_NAME,
+      requiresNetwork: false,
       description:
         'Net-worth DOCX from supplied files: checks each cited source span, keeps conflicts and uncertain claims, and computes asset and liability totals deterministically.',
       schema: netWorthSchema,

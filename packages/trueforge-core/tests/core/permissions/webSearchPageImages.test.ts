@@ -60,23 +60,23 @@ describe('pagePicturesNote', () => {
   const PAGE = `# Dogs\n<img src="https://cdn.dogs.example/one.jpg" alt="Beagle">\n<img src="http://cdn.dogs.example/plain.jpg" alt="Plain">\n<img src="https://cdn.dogs.example/two.jpg">`;
 
   it('lists the https pictures of a page read, with their words, and leaves http ones out', () => {
-    expect(pagePicturesNote({ tool_name: 'web_fetch', text: PAGE })).toBe(
+    expect(pagePicturesNote({ page_reader: true, text: PAGE })).toBe(
       `${PAGE_PICTURES_LABEL}:\n- https://cdn.dogs.example/one.jpg (Beagle)\n- https://cdn.dogs.example/two.jpg`,
     );
   });
 
   it('is absent for a page with no pictures and for a tool that is not a page reader', () => {
-    expect(pagePicturesNote({ tool_name: 'web_fetch', text: '# Dogs\nNo pictures here.' })).toBeUndefined();
-    expect(pagePicturesNote({ tool_name: 'web_search', text: PAGE })).toBeUndefined();
-    expect(pagePicturesNote({ tool_name: 'some_tool', text: PAGE })).toBeUndefined();
+    expect(pagePicturesNote({ page_reader: true, text: '# Dogs\nNo pictures here.' })).toBeUndefined();
+    expect(pagePicturesNote({ page_reader: false, text: PAGE })).toBeUndefined();
+    expect(pagePicturesNote({ page_reader: false, text: PAGE })).toBeUndefined();
   });
 
-  it('works for a prefixed connector name and shows at most eight pictures, trimming long words', () => {
+  it('works whatever the connector prefix, since the stamp carries the role, and shows at most eight pictures, trimming long words', () => {
     const many = Array.from(
       { length: 12 },
       (_, i) => `<img src="https://cdn.dogs.example/${String(i)}.jpg" alt="${'word '.repeat(60)}">`,
     ).join('\n');
-    const note = pagePicturesNote({ tool_name: 'parallel__web_fetch', text: many });
+    const note = pagePicturesNote({ page_reader: true, text: many });
     expect(note).toBeDefined();
     const lines = note?.split('\n').slice(1) ?? [];
     expect(lines).toHaveLength(8);
@@ -123,7 +123,7 @@ describe('pictures a search result lists', () => {
     recordToolResultProvenance({
       state,
       tool_name: 'web_search',
-      stamp: hostToolStamp({ type: 'mcp', search_provider_call: true }),
+      stamp: hostToolStamp({ type: 'mcp', search_provider_call: true, search_result_call: true }),
       argument_values: ['portuguese water dog pictures'],
       texts: [
         JSON.stringify({
@@ -186,7 +186,7 @@ describe('a page picture is a picture, not a trusted link', () => {
     recordToolResultProvenance({
       state,
       tool_name: 'web_fetch',
-      stamp: hostToolStamp({ type: 'mcp', search_provider_call: true }),
+      stamp: hostToolStamp({ type: 'mcp', search_provider_call: true, page_read_call: true }),
       argument_values: [COMMONS_PAGE],
       texts: [`# A page\n![x](${PLANTED})\n<img src="${FOX_IMAGE}" alt="Fox">`],
     });

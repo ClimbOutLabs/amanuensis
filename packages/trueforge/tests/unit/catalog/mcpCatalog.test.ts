@@ -54,34 +54,45 @@ describe('shipped MCP catalog', () => {
     expect(catalog.list().filter(server => server.search_provider === true && server.auth === undefined)).toHaveLength(
       1,
     );
-    expect(catalog.searchProviderGrant({ url: 'https://mcp.tavily.com/mcp', storedTools: [] })).toEqual({
-      tools: ['tavily_search', 'tavily_extract'],
+    expect(catalog.searchProviderGrant({ manifest: { url: 'https://mcp.tavily.com/mcp', search_tools: [] } })).toEqual({
+      tools: ['tavily_search'],
+      page_read_tools: ['tavily_extract'],
       plumbing_fields: [],
+      served_in_process: true,
     });
   });
 
-  it('lists the real search tools of Parallel, Tavily and Exa, and none for a server that cannot search', () => {
+  it('lists the real search and page-read tools of Parallel, Tavily and Exa, and none for a server that cannot search', () => {
     const catalog = McpCatalog.loadShipped();
     const searchTools = (name: string) => catalog.list().find(server => server.name === name)?.search_tools;
-    expect(searchTools('parallel-web')).toEqual(['web_search', 'web_fetch']);
+    const pageReadTools = (name: string) => catalog.list().find(server => server.name === name)?.page_read_tools;
+    expect(searchTools('parallel-web')).toEqual(['web_search']);
+    expect(pageReadTools('parallel-web')).toEqual(['web_fetch']);
     // Tavily's crawl, map, research and feedback tools are left out: they walk sites or write back.
-    expect(searchTools('tavily')).toEqual(['tavily_search', 'tavily_extract']);
-    expect(searchTools('exa')).toEqual(['web_search_exa', 'web_fetch_exa', 'web_search_advanced_exa']);
+    expect(searchTools('tavily')).toEqual(['tavily_search']);
+    expect(pageReadTools('tavily')).toEqual(['tavily_extract']);
+    expect(searchTools('exa')).toEqual(['web_search_exa', 'web_search_advanced_exa']);
+    expect(pageReadTools('exa')).toEqual(['web_fetch_exa']);
     expect(searchTools('github')).toBeUndefined();
     expect(searchTools('stripe')).toBeUndefined();
   });
 
-  it('looks up the search tools by endpoint, ignoring a key in the query string or a trailing slash', () => {
+  it('reads the search declaration by endpoint, ignoring a key in the query string or a trailing slash', () => {
     const catalog = McpCatalog.loadShipped();
-    expect(catalog.searchToolsForUrl('https://mcp.tavily.com/mcp')).toEqual(['tavily_search', 'tavily_extract']);
-    expect(catalog.searchToolsForUrl('https://mcp.tavily.com/mcp/?tavilyApiKey=synthetic')).toEqual([
-      'tavily_search',
-      'tavily_extract',
-    ]);
-    expect(catalog.searchToolsForUrl('https://MCP.TAVILY.COM/mcp#frag')).toEqual(['tavily_search', 'tavily_extract']);
+    const tavilyDeclaration = {
+      search_tools: ['tavily_search'],
+      page_read_tools: ['tavily_extract'],
+      plumbing_fields: [],
+      in_process: true,
+    };
+    expect(catalog.searchDeclarationForUrl('https://mcp.tavily.com/mcp')).toEqual(tavilyDeclaration);
+    expect(catalog.searchDeclarationForUrl('https://mcp.tavily.com/mcp/?tavilyApiKey=synthetic')).toEqual(
+      tavilyDeclaration,
+    );
+    expect(catalog.searchDeclarationForUrl('https://MCP.TAVILY.COM/mcp#frag')).toEqual(tavilyDeclaration);
   });
 
-  it('gives no search tools to another host, another path, another scheme, or something that is not a URL', () => {
+  it('gives no search declaration to another host, another path, another scheme, or something that is not a URL', () => {
     const catalog = McpCatalog.loadShipped();
     for (const url of [
       'https://mcp.tavily.com.evil.test/mcp',
@@ -91,7 +102,7 @@ describe('shipped MCP catalog', () => {
       'https://api.githubcopilot.com/mcp/',
       'not a url',
     ]) {
-      expect(catalog.searchToolsForUrl(url)).toEqual([]);
+      expect(catalog.searchDeclarationForUrl(url)).toBeUndefined();
     }
   });
 
@@ -104,38 +115,78 @@ describe('shipped MCP catalog', () => {
     expect(catalog.presetForUrl('https://mcp.tavily.com/mcp')?.search_plumbing_fields).toBeUndefined();
   });
 
-  it('keeps the plumbing arguments out of the public catalog list', () => {
+  it('keeps the plumbing arguments and the in-process mark out of the public catalog list', () => {
     const parallel = McpCatalog.loadShipped()
       .list()
       .find(entry => entry.name === 'parallel-web');
     expect(parallel).toBeDefined();
     expect(Object.keys(parallel ?? {})).not.toContain('search_plumbing_fields');
+    expect(Object.keys(parallel ?? {})).not.toContain('search_in_process');
   });
 
-  it('grants the stored search tools as they are, with the preset’s plumbing arguments', () => {
+  it('grants the stored declaration as it is, with the record’s plumbing fields', () => {
     const grant = McpCatalog.loadShipped().searchProviderGrant({
-      url: 'https://search.parallel.ai/mcp',
-      storedTools: ['stored_tool'],
+      manifest: {
+        url: 'https://search.parallel.ai/mcp',
+        search_tools: ['stored_tool'],
+        page_read_tools: ['stored_fetch'],
+        search_plumbing_fields: ['session_id', 'model_name'],
+      },
     });
-    expect(grant).toEqual({ tools: ['stored_tool'], plumbing_fields: ['session_id', 'model_name'] });
+    expect(grant).toEqual({
+      tools: ['stored_tool'],
+      page_read_tools: ['stored_fetch'],
+      plumbing_fields: ['session_id', 'model_name'],
+      served_in_process: false,
+    });
   });
 
-  it('falls back to the preset’s search tools for a designated connector saved without any', () => {
+  it('falls back to the preset’s declaration for a designated connector saved without any list', () => {
     const catalog = McpCatalog.loadShipped();
     for (const url of ['https://search.parallel.ai/mcp', 'https://search.parallel.ai/mcp/?key=invented']) {
-      expect(catalog.searchProviderGrant({ url, storedTools: [] })).toEqual({
-        tools: ['web_search', 'web_fetch'],
+      expect(catalog.searchProviderGrant({ manifest: { url, search_tools: [] } })).toEqual({
+        tools: ['web_search'],
+        page_read_tools: ['web_fetch'],
         plumbing_fields: ['session_id', 'model_name'],
+        served_in_process: false,
       });
     }
   });
 
+  it('splits the one mixed list of a record written before the split, by its preset’s declaration', () => {
+    const grant = McpCatalog.loadShipped().searchProviderGrant({
+      manifest: { url: 'https://search.parallel.ai/mcp', search_tools: ['web_search', 'web_fetch'] },
+    });
+    expect(grant).toEqual({
+      tools: ['web_search'],
+      page_read_tools: ['web_fetch'],
+      plumbing_fields: ['session_id', 'model_name'],
+      served_in_process: false,
+    });
+  });
+
+  it('keeps the whole stored list of an older record at an address no preset knows, as search tools', () => {
+    const grant = McpCatalog.loadShipped().searchProviderGrant({
+      manifest: { url: 'https://search.invented.example/mcp', search_tools: ['moon_search', 'moon_fetch'] },
+    });
+    expect(grant).toEqual({
+      tools: ['moon_search', 'moon_fetch'],
+      page_read_tools: [],
+      plumbing_fields: [],
+      served_in_process: false,
+    });
+  });
+
   it('grants nothing from the catalog to a designated connector that is no known preset', () => {
     expect(
-      McpCatalog.loadShipped().searchProviderGrant({ url: 'https://search.invented.example/mcp', storedTools: [] }),
+      McpCatalog.loadShipped().searchProviderGrant({
+        manifest: { url: 'https://search.invented.example/mcp', search_tools: [] },
+      }),
     ).toEqual({
       tools: [],
+      page_read_tools: [],
       plumbing_fields: [],
+      served_in_process: false,
     });
   });
 

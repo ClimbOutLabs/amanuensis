@@ -58,7 +58,7 @@ function makeResolver(searchProviders: Readonly<Record<string, readonly string[]
       Promise.resolve({
         url: `https://${name}.example.com/mcp`,
         search_provider:
-          name in searchProviders ? { tools: searchProviders[name] ?? [], plumbing_fields: [] } : undefined,
+          name in searchProviders ? { tools: searchProviders[name] ?? [], page_read_tools: [], plumbing_fields: [], served_in_process: false } : undefined,
       }),
     mcpRequestTimeoutMs: 1_000,
     mcpConnectTimeoutMs: 1_000,

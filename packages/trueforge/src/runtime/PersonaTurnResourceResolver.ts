@@ -186,8 +186,8 @@ export class PersonaTurnResourceResolver extends PersonalizationTurnResourceReso
     const knowledgeCapability =
       this.#personaKnowledgeBlock === undefined ? [] : [personaKnowledgeCapability(this.#personaKnowledgeBlock)];
     const isGuide = isAmanGuidePersona({ id: persona.persona_id, created_by: input.created_by });
-    // The guide's one live tool, and only when this turn may have it: Tavily is the
-    // configured provider and offline mode is off. The builder returns undefined in
+    // The guide's one live tool, and only when this turn may have it: the designated
+    // provider is the one the host serves in process and offline mode is off. The builder returns undefined in
     // every other case, and the guide then answers from its built-in help alone.
     const guideSearchToolSet =
       isGuide && this.#guideSearch !== undefined

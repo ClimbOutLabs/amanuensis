@@ -44,13 +44,23 @@ const NAMED_PERSONA: Persona = {
 const TAVILY_CONNECTION = {
   url: `https://${TAVILY_CONNECTOR_HOST}/mcp/?tavilyApiKey=YOUR_TAVILY_API_KEY`,
   headers: {},
-  search_provider: { tools: ['tavily_search', 'tavily_extract'], plumbing_fields: [] },
+  search_provider: {
+    tools: ['tavily_search'],
+    page_read_tools: ['tavily_extract'],
+    plumbing_fields: [],
+    served_in_process: true,
+  },
 };
 
 const PARALLEL_CONNECTION = {
   url: 'https://search.parallel.example/mcp',
   headers: {},
-  search_provider: { tools: ['web_search'], plumbing_fields: [] },
+  search_provider: {
+    tools: ['web_search'],
+    page_read_tools: ['web_fetch'],
+    plumbing_fields: [],
+    served_in_process: false,
+  },
 };
 
 function makeResolver(input: {

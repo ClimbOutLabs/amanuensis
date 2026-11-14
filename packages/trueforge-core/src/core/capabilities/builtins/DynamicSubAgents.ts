@@ -88,6 +88,7 @@ export class DynamicSubAgents extends LocalToolMCP {
     if (modelKeys.length > 0) {
       return defineTool({
         name: SUB_AGENT_TOOL_NAME,
+        requiresNetwork: false,
         description: this.getCreateSubAgentDescription(modelSetConfig),
         schema: z.object({
           name: z.string().min(1),
@@ -113,6 +114,7 @@ export class DynamicSubAgents extends LocalToolMCP {
     }
     return defineTool({
       name: SUB_AGENT_TOOL_NAME,
+      requiresNetwork: false,
       description: this.getCreateSubAgentDescription(modelSetConfig),
       schema: z.object({
         name: z.string().min(1),

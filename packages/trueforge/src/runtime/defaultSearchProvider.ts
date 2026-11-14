@@ -97,13 +97,17 @@ export async function designateTavilyAtBoot({
   if (preset === undefined) {
     throw new Error('The connector catalog has no Tavily entry, so Tavily cannot be the search provider.');
   }
+  const declaration = catalog.searchDeclarationForUrl(preset.url);
   const manifest: RemoteMcpServerManifest = {
     type: 'remote',
     name: preset.name,
     url: preset.url,
     description: preset.description,
     search_provider: true,
-    search_tools: [...catalog.searchToolsForUrl(preset.url)],
+    search_tools: [...(declaration?.search_tools ?? [])],
+    page_read_tools: [...(declaration?.page_read_tools ?? [])],
+    search_plumbing_fields: [...(declaration?.plumbing_fields ?? [])],
+    ...(declaration?.in_process === true ? { search_in_process: true } : {}),
     auth: { type: 'header', headers: { Authorization: `Bearer ${tavilyApiKey}` } },
   };
   await mcpServerStore.upsertServer({ tenant_id, name: preset.name, manifest, first_party: false });

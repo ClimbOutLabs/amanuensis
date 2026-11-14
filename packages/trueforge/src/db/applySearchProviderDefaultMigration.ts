@@ -101,8 +101,23 @@ export async function applySearchProviderDefaultMigration<TDatabase>({
 
   let designated = 0;
   for (const [presetName, ids] of idsByPreset) {
-    const tools = catalog.list().find(entry => entry.name === presetName)?.search_tools ?? [];
-    const patch = { search_provider: true, ...(tools.length > 0 ? { search_tools: tools } : {}) };
+    const preset = catalog.list().find(entry => entry.name === presetName);
+    const declaration = preset === undefined ? undefined : catalog.searchDeclarationForUrl(preset.url);
+    const patch: Record<string, unknown> = { search_provider: true };
+    if (declaration !== undefined) {
+      if (declaration.search_tools.length > 0) {
+        patch['search_tools'] = declaration.search_tools;
+      }
+      if (declaration.page_read_tools.length > 0) {
+        patch['page_read_tools'] = declaration.page_read_tools;
+      }
+      if (declaration.plumbing_fields.length > 0) {
+        patch['search_plumbing_fields'] = declaration.plumbing_fields;
+      }
+      if (declaration.in_process) {
+        patch['search_in_process'] = true;
+      }
+    }
     await sql`
       UPDATE mcp_server
       SET manifest = ${dialect.mergeIntoManifest(patch)}, updated_at = ${dialect.touchUpdatedAt()}

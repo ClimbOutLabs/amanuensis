@@ -961,6 +961,7 @@ async function verifySentinelPreDispatch(input: {
       connector,
       tool_name: mintToolName,
       tool_type: info.type,
+      requires_network: info.requires_network,
       canonical_params: canonicalParams,
       tier: info.tier,
       approval_token_id: info.approval_token_id ?? null,

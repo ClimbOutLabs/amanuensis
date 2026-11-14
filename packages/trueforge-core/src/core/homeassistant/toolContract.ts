@@ -49,23 +49,39 @@ export function isHomeAssistantCallActionTool(tool_name: string): boolean {
   return homeAssistantToolBase(tool_name) === 'call_action';
 }
 
-/** The change tools Aman knows by name: the intent tools whose cards it can word. */
-export const HOME_ASSISTANT_KNOWN_CHANGE_TOOL_NAMES = [
-  'HassTurnOn',
-  'HassTurnOff',
-  'HassClimateSetTemperature',
-  'HassLightSet',
-  'HassSetPosition',
-] as const;
+/**
+ * The change tools the server itself declares, from its own tool list: the bare names of the
+ * tools whose metadata says they change things (readOnlyHint set to false on the tool). The
+ * host captures this at connect time and stores it on the connector record; grant eligibility
+ * reads the stored declaration, never a list Aman ships. A tool the server does not declare
+ * this way is not in the set, so it asks every time and no standing grant covers it.
+ */
+export function homeAssistantDeclaredChangeTools(
+  tools: readonly { name: string; annotations?: { readOnlyHint?: boolean | undefined } | undefined }[],
+): string[] {
+  const declared: string[] = [];
+  for (const tool of tools) {
+    if (tool.annotations?.readOnlyHint !== false) {
+      continue;
+    }
+    const base = homeAssistantToolBase(tool.name);
+    if (!declared.includes(base)) {
+      declared.push(base);
+    }
+  }
+  return declared;
+}
 
 /**
- * Whether a change tool is one Aman knows: a named intent, or one of the media set, which the
- * server names the same way. A write tool outside this set asks every time and no standing
- * grant covers it, because Aman cannot say in advance what it does.
+ * Whether a change tool is one the server declared at connect time, so a standing grant may
+ * cover it. A write tool outside the stored declaration asks every time and no standing grant
+ * covers it, because Aman cannot say in advance what it does.
  */
-export function isHomeAssistantKnownChangeTool(tool_name: string): boolean {
-  const base = homeAssistantToolBase(tool_name);
-  return (HOME_ASSISTANT_KNOWN_CHANGE_TOOL_NAMES as readonly string[]).includes(base) || base.startsWith('HassMedia');
+export function isHomeAssistantDeclaredChangeTool(input: {
+  tool_name: string;
+  declared_change_tools: readonly string[];
+}): boolean {
+  return input.declared_change_tools.includes(homeAssistantToolBase(input.tool_name));
 }
 
 /**

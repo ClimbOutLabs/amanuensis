@@ -124,12 +124,12 @@ export function resolveMailAccountSave(
   if (isMicrosoftMailAddress(request.address)) {
     return { ok: false, message: MICROSOFT_MAIL_MESSAGE };
   }
-  const password = cleanMailPassword({ provider_key: request.provider_key, password: request.password });
+  const preset = request.provider_key === 'other' ? undefined : emailProviderPreset(request.provider_key);
+  const password = cleanMailPassword({ preset, password: request.password });
   const passwordProblem = mailPasswordProblem(password);
   if (passwordProblem !== null) {
     return { ok: false, message: passwordProblem };
   }
-  const preset = request.provider_key === 'other' ? undefined : emailProviderPreset(request.provider_key);
   if (request.provider_key !== 'other' && preset === undefined) {
     return { ok: false, message: 'That email provider is not on the list. Pick one and try again.' };
   }

@@ -31,6 +31,7 @@ class MapLikeTools extends LocalToolMCP {
   private readonly tools: ToolDefinition[] = [
     defineTool({
       name: 'render_map',
+      requiresNetwork: false,
       description: 'Renders a map for a place.',
       schema: z.object({ place_name: z.string() }).strict(),
       handler,

@@ -20,6 +20,7 @@ export function defaultSearchConnector(catalog: McpCatalog): DefaultSearchConnec
   if (preset === undefined) {
     return undefined;
   }
+  const declaration = catalog.searchDeclarationForUrl(preset.url);
   return {
     name: preset.name,
     manifest: {
@@ -28,7 +29,10 @@ export function defaultSearchConnector(catalog: McpCatalog): DefaultSearchConnec
       url: preset.url,
       description: preset.description,
       search_provider: true,
-      search_tools: [...catalog.searchToolsForUrl(preset.url)],
+      search_tools: [...(declaration?.search_tools ?? [])],
+      page_read_tools: [...(declaration?.page_read_tools ?? [])],
+      search_plumbing_fields: [...(declaration?.plumbing_fields ?? [])],
+      ...(declaration?.in_process === true ? { search_in_process: true } : {}),
     },
   };
 }

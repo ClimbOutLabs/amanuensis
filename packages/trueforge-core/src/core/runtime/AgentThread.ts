@@ -1591,6 +1591,7 @@ export async function classifyUnstampedToolCall(input: {
       tool_name: info.original_tool_name,
       canonical_params: effectiveParams,
       tool_type: info.type,
+      requires_network: info.requires_network,
       // A built-in's server name routes it to its own rules; without it a space write reads as an unknown connector tool.
       ...(info.mcp_server_name === '' ? {} : { mcp_server_name: info.mcp_server_name }),
       ...(connector === undefined
@@ -3422,10 +3423,7 @@ export class AgentThread {
       if (info === undefined) {
         return true;
       }
-      return !requiresNetwork({
-        tool_name: info.originalToolName,
-        provenance: this.tfyManagedServerNames.has(info.toolSet.name) ? 'first-party' : 'third-party',
-      });
+      return !requiresNetwork({ declared: info.requires_network });
     });
   }
 

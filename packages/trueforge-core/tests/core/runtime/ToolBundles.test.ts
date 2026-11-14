@@ -28,6 +28,7 @@ class Tools extends LocalToolMCP {
     this.tools = input.tools.map(tool =>
       defineTool({
         name: tool,
+        requiresNetwork: false,
         description: `${tool} does one thing.`,
         schema: z.object({ text: z.string() }).strict(),
         annotations: { readOnlyHint: true, openWorldHint: false },

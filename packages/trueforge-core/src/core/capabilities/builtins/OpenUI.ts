@@ -304,6 +304,7 @@ export class OpenUIInstructions extends LocalToolMCP {
   private tools: ToolDefinition[] = [
     defineTool({
       name: GET_OPENUI_INSTRUCTIONS_TOOL_NAME,
+      requiresNetwork: false,
       description: [
         'Load the full OpenUI generative-UI authoring instructions (syntax, components, builtins, examples, rules).',
         'Call this before emitting any ```openui fenced block. Pass an empty object as arguments: {}.',

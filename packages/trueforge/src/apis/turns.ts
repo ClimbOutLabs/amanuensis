@@ -651,7 +651,7 @@ function createTurnResolver(deps: {
           search_provider:
             connection.search_provider === undefined
               ? undefined
-              : mcpCatalog.searchProviderGrant({ url: connection.url, storedTools: connection.search_provider.tools }),
+              : mcpCatalog.searchProviderGrant({ manifest: connection.search_provider }),
         };
       },
       setUpConnectorNames: async () =>

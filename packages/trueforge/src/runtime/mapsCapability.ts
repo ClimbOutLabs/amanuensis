@@ -7,8 +7,8 @@
  * only through the same-origin tile proxy (`/api/maps/tiles/{z}/{x}/{y}.png`);
  * the tool results carry coordinates and metadata, never tile URLs.
  *
- * Every call is Tier 3 (see the maps branch in the Sentinel classifier). The
- * tools are registered in FIRST_PARTY_REQUIRES_NETWORK, so offline mode filters
+ * Every call is Tier 3 (see the maps branch in the Sentinel classifier). Each
+ * tool declares at its registration that it needs the network, so offline mode filters
  * them from the model's tool list and auto-denies stale calls.
  */
 import type { AgentCapability, AgentTracing, ConnectorBinding } from '@truefoundry/trueforge-core/core';
@@ -946,6 +946,7 @@ class MapsTool extends LocalToolMCP {
   private readonly tools: ToolDefinition[] = [
     defineTool({
       name: RENDER_MAP_TOOL_NAME,
+      requiresNetwork: true,
       annotations: MAPS_TOOL_ANNOTATIONS,
       description:
         "Render an interactive map with a pin for a named place. Pass the place name as the user gave it (e.g. 'Paris', 'Eiffel Tower'); never pass coordinates. The tool geocodes the name and returns an inline map card; the user is asked to approve each call. Use only for a place or address the user typed themselves. A place that came from a web page goes through render_places instead, never this tool. Use when the user explicitly asks to see a place on a map, asks where a place is, or asks for a kind of place near a named place.",
@@ -954,6 +955,7 @@ class MapsTool extends LocalToolMCP {
     }),
     defineTool({
       name: RENDER_ROUTE_TOOL_NAME,
+      requiresNetwork: true,
       annotations: MAPS_TOOL_ANNOTATIONS,
       description:
         "Render a route map between two named places by walking, cycling, driving or transit. Pass both place names as the user gave them; never pass coordinates. Pick mode from the user's words; if unstated, walk short city trips and take transit for longer ones, and mention the other modes. For transit, depart_at or arrive_by (local time like 2026-10-19T09:20) answers 'I need to be there at 9:20'; omit both to leave now. Returns an inline map card; transit lists steps. If no transit route is found, say so and offer walking. The user approves each call. Use only when the user named both origin and destination; there is no current-location mode.",
@@ -962,6 +964,7 @@ class MapsTool extends LocalToolMCP {
     }),
     defineTool({
       name: RENDER_PLACES_TOOL_NAME,
+      requiresNetwork: true,
       annotations: MAPS_TOOL_ANNOTATIONS,
       description:
         "Pin places on one map card, each with details from the page it came from. Call after a page reading tool (tavily_extract, web_fetch or another fetch tool) has read the pages. Copy each name, address, language, hours, price and phone word for word from the page; leave out what the page does not state. Short forms such as St are fine. Pass the page's own link as source_url. A refused place comes back with its name and reason; fix that detail and call again, once. If a place is refused again in the same answer, stop using the map and answer in text with the places and their links. Calendar locations go in calendar_locations. The tool drops any detail it cannot find on the page; the user approves each call.",

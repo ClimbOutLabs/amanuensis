@@ -32,8 +32,9 @@ mcp_servers:
     description: Search the web, fetch page contents, and find similar pages.
     search_tools:
       - web_search_exa
-      - web_fetch_exa
       - web_search_advanced_exa
+    page_read_tools:
+      - web_fetch_exa
   - type: remote
     name: parallel-web
     url: https://search.parallel.ai/mcp
@@ -41,6 +42,7 @@ mcp_servers:
     search_provider: true
     search_tools:
       - web_search
+    page_read_tools:
       - web_fetch
     search_plumbing_fields:
       - session_id
@@ -63,7 +65,9 @@ mcp_servers:
     search_provider: true
     search_tools:
       - tavily_search
+    page_read_tools:
       - tavily_extract
+    search_in_process: true
     auth:
       type: header
       headers:

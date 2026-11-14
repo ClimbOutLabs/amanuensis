@@ -63,7 +63,7 @@ function toolSet(input: { source: ToolSource; searchProvider: boolean }): ToolSe
     preload: true,
     searchCallTimeoutMs: SEARCH_DEADLINE_MS,
     logger: createLogger({ silent: true }),
-    ...(input.searchProvider ? { searchProvider: { tools: ['web_search'], plumbing_fields: [] } } : {}),
+    ...(input.searchProvider ? { searchProvider: { tools: ['web_search'], page_read_tools: [], plumbing_fields: [], served_in_process: false } } : {}),
   });
 }
 

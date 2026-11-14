@@ -27,7 +27,7 @@ import type { ToolBundleName } from '../core/runtime/toolBundleCatalog';
 import type { BoundRepository, Sandbox, SandboxInfo } from '../core/sandbox/Sandbox';
 import { fetchedPages, type FetchedPageScope } from '../core/search/fetchedPages';
 import type { PageFixtureSource } from '../core/search/pageFixtures';
-import { isTavilyConnectorUrl, tavilyAuthFromHeader, TavilyClient } from '../core/search/TavilyClient';
+import { tavilyAuthFromHeader, TavilyClient } from '../core/search/TavilyClient';
 import { TavilySource } from '../core/search/TavilySource';
 import type { AgentTracing } from '../core/tracing/AgentTracing';
 import { NOOP_AGENT_TRACING } from '../core/tracing/NoopAgentTracing';
@@ -132,6 +132,8 @@ export class TurnResourceResolver<
   readonly #firstPartyServers = new Set<string>();
   /** MCP servers the user designated as their search provider, with the host's list of their search tools and the argument names that are provider plumbing. */
   readonly #searchProviderServers = new Map<string, SearchProviderGrant>();
+  /** Bare names of the tools each MCP server itself declared as changing things, from the host's record of the connector. */
+  readonly #declaredChangeTools = new Map<string, readonly string[]>();
   readonly webSearchTurn = createWebSearchTurnState();
   readonly #models = new Map<string, Promise<ResolvedModel>>();
   #sandbox?: Sandbox | undefined;
@@ -166,6 +168,8 @@ export class TurnResourceResolver<
         headers?: RemoteMcpHeaders;
         first_party?: boolean;
         search_provider?: SearchProviderGrant | undefined;
+        /** Bare names of the tools this server itself declared as changing things, from the host's record of the connector. */
+        declared_change_tools?: readonly string[] | undefined;
         /** What an "Always allow" grant on this connector binds to, from the host's record of it; see `ToolGrantKey`. */
         grant_binding?: string | undefined;
       }>;
@@ -467,14 +471,18 @@ export class TurnResourceResolver<
         const source = await this.getOrCreateToolSource({
           id: entry.name,
           create: async () => {
-            const { url, headers, first_party, search_provider, grant_binding } = await this.deps.mcp(entry.name);
+            const { url, headers, first_party, search_provider, declared_change_tools, grant_binding } =
+              await this.deps.mcp(entry.name);
             if (first_party === true) {
               this.#firstPartyServers.add(entry.name);
             }
             if (search_provider !== undefined) {
               this.#searchProviderServers.set(entry.name, search_provider);
             }
-            if (search_provider !== undefined && isTavilyConnectorUrl(url)) {
+            if (declared_change_tools !== undefined && declared_change_tools.length > 0) {
+              this.#declaredChangeTools.set(entry.name, declared_change_tools);
+            }
+            if (search_provider !== undefined && search_provider.served_in_process) {
               return new TavilySource({
                 id: entry.name,
                 name: entry.name,
@@ -529,6 +537,7 @@ export class TurnResourceResolver<
           sentinel,
           firstParty: this.#firstPartyServers.has(entry.name),
           searchProvider: this.#searchProviderServers.get(entry.name),
+          declaredChangeTools: this.#declaredChangeTools.get(entry.name),
           bundle: connectorBundle({
             name: entry.name,
             firstParty: this.#firstPartyServers.has(entry.name),

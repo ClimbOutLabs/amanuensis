@@ -1209,7 +1209,7 @@ describe('mcp-servers routers', () => {
       return {
         type: 'remote' as const,
         name,
-        url: `https://${name}.example.com/mcp`,
+        url: 'https://search.parallel.ai/mcp',
         description: `Search connector "${name}".`,
         ...extra,
       };
@@ -1271,7 +1271,7 @@ describe('mcp-servers routers', () => {
     });
   });
 
-  describe('search tools of the search provider come from the shipped catalog', () => {
+  describe('the search declaration of the designated provider', () => {
     const PARALLEL_URL = 'https://search.parallel.ai/mcp';
 
     function providerManifest(extra: Record<string, unknown>) {
@@ -1305,46 +1305,214 @@ describe('mcp-servers routers', () => {
       }
     });
 
-    it('fills the list for a connector at a known provider’s address once it is designated', async () => {
+    it('fills the declaration for a connector at a known provider’s address once it is designated', async () => {
       const stored = await save(providerManifest({ search_provider: true }));
-      expect(stored?.search_tools).toEqual(['web_search', 'web_fetch']);
+      expect(stored?.search_tools).toEqual(['web_search']);
+      expect(stored?.page_read_tools).toEqual(['web_fetch']);
+      expect(stored?.search_plumbing_fields).toEqual(['session_id', 'model_name']);
+      expect(stored?.search_in_process).toBeUndefined();
       const read = await settingsRouter.request('/catalog-search');
-      expect(await read.json()).toMatchObject({ data: { manifest: { search_tools: ['web_search', 'web_fetch'] } } });
+      expect(await read.json()).toMatchObject({
+        data: { manifest: { search_tools: ['web_search'], page_read_tools: ['web_fetch'] } },
+      });
     });
 
-    it('replaces a list the request carried, so a client cannot widen what runs without asking', async () => {
-      const stored = await save(providerManifest({ search_provider: true, search_tools: ['delete_everything'] }));
-      expect(stored?.search_tools).toEqual(['web_search', 'web_fetch']);
-    });
-
-    it('gives a designated connector at an unknown address no list, whatever the request carried', async () => {
+    it('replaces a declaration the request carried, so a client cannot widen what runs without asking', async () => {
       const stored = await save(
         providerManifest({
-          url: 'https://api.githubcopilot.com/mcp/',
           search_provider: true,
-          search_tools: ['create_issue', 'delete_file'],
+          search_tools: ['delete_everything'],
+          page_read_tools: ['delete_everything'],
+          search_in_process: true,
         }),
       );
-      expect(stored?.search_provider).toBe(true);
-      expect(stored?.search_tools).toBeUndefined();
+      expect(stored?.search_tools).toEqual(['web_search']);
+      expect(stored?.page_read_tools).toEqual(['web_fetch']);
+      expect(stored?.search_in_process).toBeUndefined();
     });
 
-    it('drops the list when the role is turned off or the address moves off the preset', async () => {
+    it('refuses a designated connector whose tools cannot be read, whatever the request carried', async () => {
+      const response = await settingsRouter.request(
+        '/',
+        putInit(
+          wrapManifest(
+            providerManifest({
+              url: 'https://search.unknown.example.com/mcp',
+              search_provider: true,
+              search_tools: ['create_issue', 'delete_file'],
+            }),
+          ),
+        ),
+      );
+      expect(response.status).toBe(422);
+      const stored = await mcpServerStore.getServer({ tenant_id: TENANT_ID, name: 'catalog-search' });
+      expect(stored?.manifest.type === 'remote' ? stored.manifest.url : undefined).toBe(PARALLEL_URL);
+    });
+
+    it('drops the declaration when the role is turned off', async () => {
       await save(providerManifest({ search_provider: true }));
       const roleOff = await save(providerManifest({ search_tools: ['web_search'] }));
       expect(roleOff?.search_provider).toBeUndefined();
       expect(roleOff?.search_tools).toBeUndefined();
+      expect(roleOff?.page_read_tools).toBeUndefined();
+    });
 
+    it('refuses to move a designated connector to an address whose tools cannot be read', async () => {
       await save(providerManifest({ search_provider: true }));
-      const moved = await save(providerManifest({ search_provider: true, url: 'https://other.example.com/mcp' }));
-      expect(moved?.search_tools).toBeUndefined();
+      const response = await settingsRouter.request(
+        '/',
+        putInit(wrapManifest(providerManifest({ search_provider: true, url: 'https://other.example.com/mcp' }))),
+      );
+      expect(response.status).toBe(422);
+      const stored = await mcpServerStore.getServer({ tenant_id: TENANT_ID, name: 'catalog-search' });
+      expect(stored?.manifest.type === 'remote' ? stored.manifest.url : undefined).toBe(PARALLEL_URL);
+      expect(stored?.manifest.type === 'remote' ? stored.manifest.search_tools : undefined).toEqual(['web_search']);
     });
 
     it('matches the address the way the catalog does, so a key in the query string still counts', async () => {
       const stored = await save(
         providerManifest({ search_provider: true, url: 'https://mcp.tavily.com/mcp/?tavilyApiKey=synthetic' }),
       );
-      expect(stored?.search_tools).toEqual(['tavily_search', 'tavily_extract']);
+      expect(stored?.search_tools).toEqual(['tavily_search']);
+      expect(stored?.page_read_tools).toEqual(['tavily_extract']);
+      expect(stored?.search_in_process).toBe(true);
+    });
+
+    it('captures the declaration from the tool list of a self-hosted server nobody shipped a preset for', async () => {
+      await save(providerManifest({}));
+      const inert = await startInertMcpServer({ searchProvider: true });
+      try {
+        const response = await settingsRouter.request(
+          '/',
+          putInit(
+            wrapManifest({
+              type: 'remote',
+              name: 'home-search',
+              url: inert.url,
+              description: 'A search server run at home.',
+              search_provider: true,
+            }),
+          ),
+        );
+        expect(response.status).toBe(200);
+        const stored = await mcpServerStore.getServer({ tenant_id: TENANT_ID, name: 'home-search' });
+        // The fixture's own web_search takes queries and its web_fetch takes page addresses,
+        // both declared read-only by the server itself, and no preset names either.
+        expect(stored?.manifest.type === 'remote' ? stored.manifest.search_tools : undefined).toEqual(['web_search']);
+        expect(stored?.manifest.type === 'remote' ? stored.manifest.page_read_tools : undefined).toEqual([
+          'web_fetch',
+        ]);
+        expect(stored?.manifest.type === 'remote' ? stored.manifest.search_plumbing_fields : undefined).toBeUndefined();
+        expect(stored?.manifest.type === 'remote' ? stored.manifest.search_in_process : undefined).toBeUndefined();
+      } finally {
+        await inert.stop();
+      }
+    });
+
+    it('stores no declaration for the same self-hosted server while it is not designated', async () => {
+      const inert = await startInertMcpServer({ searchProvider: true });
+      try {
+        const response = await settingsRouter.request(
+          '/',
+          putInit(
+            wrapManifest({
+              type: 'remote',
+              name: 'home-search',
+              url: inert.url,
+              description: 'A search server run at home.',
+            }),
+          ),
+        );
+        expect(response.status).toBe(200);
+        const stored = await mcpServerStore.getServer({ tenant_id: TENANT_ID, name: 'home-search' });
+        expect(stored?.manifest.type === 'remote' ? stored.manifest.search_tools : undefined).toBeUndefined();
+        expect(stored?.manifest.type === 'remote' ? stored.manifest.page_read_tools : undefined).toBeUndefined();
+      } finally {
+        await inert.stop();
+      }
+    });
+  });
+
+  describe('the Home Assistant change declaration on the connector record', () => {
+    const HA_URL = 'http://homeassistant.local:8123/mcp_server/sse';
+
+    function storedManifest(name: string) {
+      return mcpServerStore
+        .getServer({ tenant_id: TENANT_ID, name })
+        .then(record => (record?.manifest.type === 'remote' ? record.manifest : undefined));
+    }
+
+    it('replaces a change declaration the request carried, so a client cannot widen what runs without asking', async () => {
+      const response = await settingsRouter.request(
+        '/',
+        putInit(
+          wrapManifest({
+            type: 'remote',
+            name: 'home-assistant',
+            url: HA_URL,
+            description: 'The house.',
+            declared_change_tools: ['HassEverything'],
+          }),
+        ),
+      );
+      expect(response.status).toBe(200);
+      expect((await storedManifest('home-assistant'))?.declared_change_tools).toBeUndefined();
+    });
+
+
+    it('keeps the stored declaration across a re-save at the same address, and drops it at a new one', async () => {
+      await mcpServerStore.upsertServer({
+        tenant_id: TENANT_ID,
+        name: 'home-assistant',
+        manifest: {
+          type: 'remote',
+          name: 'home-assistant',
+          url: HA_URL,
+          description: 'The house.',
+          declared_change_tools: ['inert_write'],
+        },
+        first_party: false,
+      });
+      const sameAddress = await settingsRouter.request(
+        '/',
+        putInit(
+          wrapManifest({ type: 'remote', name: 'home-assistant', url: HA_URL, description: 'The house, renamed.' }),
+        ),
+      );
+      expect(sameAddress.status).toBe(200);
+      expect((await storedManifest('home-assistant'))?.declared_change_tools).toEqual(['inert_write']);
+
+      const newAddress = await settingsRouter.request(
+        '/',
+        putInit(
+          wrapManifest({
+            type: 'remote',
+            name: 'home-assistant',
+            url: 'http://other-house.local:8123/mcp_server/sse',
+            description: 'Another house.',
+          }),
+        ),
+      );
+      expect(newAddress.status).toBe(200);
+      expect((await storedManifest('home-assistant'))?.declared_change_tools).toBeUndefined();
+    });
+
+    it('captures the declaration from the server’s own tool list when its connection is checked', async () => {
+      const inert = await startInertMcpServer();
+      try {
+        await mcpServerStore.upsertServer({
+          tenant_id: TENANT_ID,
+          name: 'home-assistant',
+          manifest: { type: 'remote', name: 'home-assistant', url: inert.url, description: 'The house.' },
+          first_party: false,
+        });
+        const response = await mcpServersRouter.request('/home-assistant/home-assistant-check', { method: 'POST' });
+        expect(response.status).toBe(200);
+        // Of the fixture's tools only inert_write declares itself a change (readOnlyHint false).
+        expect((await storedManifest('home-assistant'))?.declared_change_tools).toEqual(['inert_write']);
+      } finally {
+        await inert.stop();
+      }
     });
   });
 

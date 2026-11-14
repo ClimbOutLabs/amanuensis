@@ -28,14 +28,6 @@ const BEARER_PREFIX = /^Bearer\s+/i;
 
 export type TavilyAuth = { kind: 'key'; key: string } | { kind: 'keyless' };
 
-export function isTavilyConnectorUrl(url: string): boolean {
-  try {
-    return new URL(url).hostname === TAVILY_CONNECTOR_HOST;
-  } catch {
-    return false;
-  }
-}
-
 /** A missing or untouched key means keyless, which Tavily allows for search and extract only. */
 export function tavilyAuthFromHeader(header: string | undefined): TavilyAuth {
   const key = header === undefined ? '' : header.replace(BEARER_PREFIX, '').trim();

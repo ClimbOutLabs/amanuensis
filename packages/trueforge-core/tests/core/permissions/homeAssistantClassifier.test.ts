@@ -18,6 +18,20 @@ function makeCtx(): ClassifyContext {
   };
 }
 
+/**
+ * The change tools this test's server declared in its own tool list at connect time, as the
+ * host stored them on the connector record. A fixture of the server's declaration, not a list
+ * the classifier keeps: eligibility follows whatever is stored here.
+ */
+const DECLARED_CHANGE_TOOLS = [
+  'HassTurnOn',
+  'HassTurnOff',
+  'HassClimateSetTemperature',
+  'HassLightSet',
+  'HassSetPosition',
+  'HassMediaPlay',
+];
+
 function haAction(
   tool_name: string,
   canonical_params: Record<string, unknown> = {},
@@ -29,6 +43,7 @@ function haAction(
     tool_type: 'mcp',
     mcp_server_name: 'home-assistant',
     mcp_first_party: false,
+    mcp_declared_change_tools: DECLARED_CHANGE_TOOLS,
     mcp_hints: { read_only_hint: false, open_world_hint: false },
     ...extra,
   };
@@ -311,6 +326,29 @@ describe('Home Assistant standing grants', () => {
     expect(decision.auto_deny).toBeNull();
     expect(decision.reason).toBe('home_assistant_change');
     expect(decision.card).not.toBeNull();
+    expect(decision.grant_tool_name).toBeNull();
+  });
+
+  it('runs an invented change tool under a grant when the server declared it at connect time', async () => {
+    const ctx = makeCtx();
+    await recordGrant(ctx, 'ha:domain:switch');
+    const decision = await classifyTier(
+      haAction('HassBrewCoffee', { entity_id: 'switch.coffee_machine' }, { mcp_declared_change_tools: ['HassBrewCoffee'] }),
+      ctx,
+    );
+    expect(decision).toMatchObject({ tier: 1, reason: TOOL_GRANT_REASON, card: null });
+  });
+
+  it('asks for a familiar change tool when the stored record holds no declaration for it', async () => {
+    const ctx = makeCtx();
+    await recordGrant(ctx, 'ha:domain:light');
+    const decision = await classifyTier(
+      haAction('HassTurnOn', { entity_id: 'light.kitchen' }, { mcp_declared_change_tools: [] }),
+      ctx,
+    );
+    expect(decision.tier).toBe(3);
+    expect(decision.auto_deny).toBeNull();
+    expect(decision.reason).toBe('home_assistant_change');
     expect(decision.grant_tool_name).toBeNull();
   });
 

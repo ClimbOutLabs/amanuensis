@@ -439,6 +439,7 @@ class BrowserTool extends LocalToolMCP {
   private readonly tools: ToolDefinition[] = [
     defineTool({
       name: 'browser_open',
+      requiresNetwork: true,
       annotations: BROWSER_READ_ANNOTATIONS,
       description: `Open a web page in Aman's own browser (not the user's browser) and read it back as text. Only http and https addresses; never a file, app or local-network address. Use when the user asks to find something on a site or open a specific page. When a page needs a step only the person can do, such as signing in, a code sent to their phone, a picture check or a cookie banner you cannot clear: ${liveViewHint()}`,
       schema: OPEN_INPUT_SCHEMA,
@@ -449,6 +450,7 @@ class BrowserTool extends LocalToolMCP {
     }),
     defineTool({
       name: 'browser_read',
+      requiresNetwork: true,
       annotations: BROWSER_READ_ANNOTATIONS,
       description:
         'Read the page currently open in the browser: its title, address, headings, links, buttons and fields, each actionable one with a short ref. A password or payment field never shows its value.',
@@ -457,6 +459,7 @@ class BrowserTool extends LocalToolMCP {
     }),
     defineTool({
       name: 'browser_scroll',
+      requiresNetwork: true,
       annotations: BROWSER_READ_ANNOTATIONS,
       description: 'Scroll the open page up or down, then read it again.',
       schema: SCROLL_INPUT_SCHEMA,
@@ -464,6 +467,7 @@ class BrowserTool extends LocalToolMCP {
     }),
     defineTool({
       name: 'browser_back',
+      requiresNetwork: true,
       annotations: BROWSER_READ_ANNOTATIONS,
       description: 'Go back to the previous page in the browser, then read it.',
       schema: EMPTY_INPUT_SCHEMA,
@@ -471,6 +475,7 @@ class BrowserTool extends LocalToolMCP {
     }),
     defineTool({
       name: 'browser_screenshot',
+      requiresNetwork: true,
       annotations: BROWSER_READ_ANNOTATIONS,
       description:
         'Take a picture of the open page and show it to the person in the chat. If you can read images, you see it too, with each control boxed and labelled with its ref. Use it when the page text is not enough, for example for a layout, a chart or a picture check.',
@@ -510,6 +515,7 @@ class BrowserTool extends LocalToolMCP {
     }),
     defineTool({
       name: 'browser_type',
+      requiresNetwork: true,
       annotations: BROWSER_PREPARE_ANNOTATIONS,
       description: `Type text into a field on the open page, by its ref from browser_read. Refused for a password, card or one-time-code field: ${liveViewHint()} The person sees the exact text on an approval card first, because a page can send what is typed as soon as it is typed. Refused for a field that is read-only or covered by something else. A one-line field refuses text with a line break or tab; only a multi-line field takes them.`,
       schema: TYPE_INPUT_SCHEMA,
@@ -518,6 +524,7 @@ class BrowserTool extends LocalToolMCP {
     }),
     defineTool({
       name: 'browser_select',
+      requiresNetwork: true,
       annotations: BROWSER_PREPARE_ANNOTATIONS,
       description:
         'Pick an option on a dropdown field, by its ref from browser_read and the option text. The person sees the option on an approval card first, because a page can send a choice as soon as it is made.',
@@ -527,6 +534,7 @@ class BrowserTool extends LocalToolMCP {
     }),
     defineTool({
       name: BROWSER_CLICK_TOOL_NAME,
+      requiresNetwork: true,
       annotations: BROWSER_CLICK_ANNOTATIONS,
       description:
         'Click a link, button, tab or other element on the open page, by its ref from browser_read. A plain link to another page opens right away. A button, tab, menu or any other control shows the person an approval card first, and so does a link whose label is a word like pay, buy, send, delete or cancel a membership. If the page changed since it was read, the click is refused: read the page again, then click. A disabled or covered element is refused.',

@@ -6,6 +6,7 @@ describe('defineTool inputSchema', () => {
   it('omits defaulted fields from required (input-oriented JSON Schema)', () => {
     const tool = defineTool({
       name: 'call_tool',
+      requiresNetwork: false,
       description: 'Call a deferred tool',
       schema: z.object({
         mcp_server: z.string(),
@@ -23,6 +24,7 @@ describe('defineTool inputSchema', () => {
   it('keeps truly required fields in required', () => {
     const tool = defineTool({
       name: 'echo',
+      requiresNetwork: false,
       description: 'Echo',
       schema: z.object({
         message: z.string(),

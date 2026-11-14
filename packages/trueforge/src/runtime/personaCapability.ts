@@ -169,6 +169,7 @@ export class PersonaToolSet extends LocalToolMCP {
     this.#tools = [
       defineTool({
         name: CREATE_PERSONA_TOOL_NAME,
+        requiresNetwork: false,
         description:
           'Add a lasting persona for the user: a short name, a one-line description, and instructions for what it focuses on and how it talks. Call list_personas first, and use use_persona instead when a persona already fits. The user approves a card before anything is saved. On success this chat switches to the persona. It cannot change or delete an existing persona.',
         schema: CreatePersonaToolSchema,
@@ -177,6 +178,7 @@ export class PersonaToolSet extends LocalToolMCP {
       }),
       defineTool({
         name: LIST_PERSONAS_TOOL_NAME,
+        requiresNetwork: false,
         description:
           "List the user's personas: each name, its aliases, and its one-line description. Call this before create_persona to see whether one already fits.",
         schema: z.object({}).strict(),
@@ -185,6 +187,7 @@ export class PersonaToolSet extends LocalToolMCP {
       }),
       defineTool({
         name: USE_PERSONA_TOOL_NAME,
+        requiresNetwork: false,
         description:
           "Switch this chat to one of the user's existing personas by name, or back to the main assistant by its name. Works from any persona too. Use it instead of create_persona when a persona already fits. Nothing is saved or changed. Say a switch happened only after this call succeeds.",
         schema: UsePersonaToolSchema,
@@ -229,6 +232,7 @@ export class PersonaToolSet extends LocalToolMCP {
         tool_name: params.name,
         canonical_params: approved,
         tool_type: 'truefoundry-system',
+        requires_network: info.requires_network,
         mcp_server_name: PERSONA_SERVER_ID,
         mcp_hints: {
           read_only_hint: info.read_only_hint,

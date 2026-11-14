@@ -37,6 +37,7 @@ export class TaskStateToolSet extends LocalToolMCP {
     return [
       defineTool({
         name: TASK_STATE_TOOL_NAME,
+        requiresNetwork: false,
         description: [
           'Bank one finding in your durable task scratchpad.',
           'Use this for every useful result you gather: the scratchpad is re-injected fresh before each of your steps and survives context compaction, unlike conversation messages. Compose your final answer from the banked findings.',

@@ -1,19 +1,23 @@
 import { OpenAPIHono, type RouteHandler } from '@hono/zod-openapi';
 import {
+  declaredSearchProviderTools,
   extractErrorLogFields,
   isAuthRequired,
   McpConnectionError,
   RemoteMCP,
   type RemoteMcpHeaders,
 } from '@truefoundry/trueforge-core/core';
-import { HOME_ASSISTANT_SERVER_NAME } from '@truefoundry/trueforge-core/core/homeassistant/toolContract';
+import {
+  HOME_ASSISTANT_SERVER_NAME,
+  homeAssistantDeclaredChangeTools,
+} from '@truefoundry/trueforge-core/core/homeassistant/toolContract';
 import type { Context } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import { createHash } from 'node:crypto';
 import type { Logger } from 'winston';
 import type { ResolveRequestContext } from '../auth/identity';
 import { safeReturnTo } from '../auth/safeReturnTo';
-import type { McpCatalog } from '../catalog/McpCatalog';
+import type { McpCatalog, SearchDeclaration } from '../catalog/McpCatalog';
 import configuration from '../config';
 import {
   McpServerNameConflictError,
@@ -369,21 +373,103 @@ async function resolveAvailableMcpServer<TTransaction>(params: {
 
 /** Admin/settings MCP CRUD (mounted at /api/v1/settings/mcp-servers). */
 /**
- * `search_tools` is the shipped catalog's say alone: whatever the request carried is replaced, so a
- * client cannot widen what runs without asking. Only the web search provider carries the list.
+ * The search declaration is captured when the person designates the provider, from the
+ * server's own tool list or from the declaration its shipped preset carries: whatever the
+ * request carried is replaced, so a client cannot widen what runs without asking. Only the
+ * web search provider carries a declaration. Both tool lists are stored even when empty, so
+ * a record that carries the split is told apart from one written before the split existed.
  */
-function withCatalogSearchTools({
+function withSearchDeclaration({
   manifest,
-  mcpCatalog,
+  declaration,
 }: {
   manifest: McpServerManifest;
-  mcpCatalog: McpCatalog;
+  declaration: SearchDeclaration | undefined;
 }): McpServerManifest {
   if (manifest.type !== 'remote') {
     return manifest;
   }
-  const tools = manifest.search_provider === true ? mcpCatalog.searchToolsForUrl(manifest.url) : [];
-  return { ...manifest, search_tools: tools.length > 0 ? [...tools] : undefined };
+  if (manifest.search_provider !== true || declaration === undefined) {
+    return {
+      ...manifest,
+      search_tools: undefined,
+      page_read_tools: undefined,
+      search_plumbing_fields: undefined,
+      search_in_process: undefined,
+    };
+  }
+  return {
+    ...manifest,
+    search_tools: [...declaration.search_tools],
+    page_read_tools: [...declaration.page_read_tools],
+    search_plumbing_fields: declaration.plumbing_fields.length > 0 ? [...declaration.plumbing_fields] : undefined,
+    search_in_process: declaration.in_process ? true : undefined,
+  };
+}
+
+/** The declaration a stored record already carries, when it was designated and holds the split. */
+function storedSearchDeclaration(manifest: McpServerManifest | undefined): SearchDeclaration | undefined {
+  if (manifest === undefined || manifest.type !== 'remote' || manifest.search_provider !== true) {
+    return undefined;
+  }
+  if (manifest.page_read_tools === undefined) {
+    return undefined;
+  }
+  return {
+    search_tools: manifest.search_tools ?? [],
+    page_read_tools: manifest.page_read_tools,
+    plumbing_fields: manifest.search_plumbing_fields ?? [],
+    in_process: manifest.search_in_process === true,
+  };
+}
+
+/**
+ * The declaration a save can settle without dialing: the stored one, when this save keeps the
+ * same designated connector at the same address, or the one the shipped preset at the address
+ * carries. Undefined when neither speaks, and the caller must read the server's own tool list.
+ */
+function settledSearchDeclaration({
+  manifest,
+  stored,
+  mcpCatalog,
+}: {
+  manifest: McpServerManifest;
+  stored: McpServerManifest | undefined;
+  mcpCatalog: McpCatalog;
+}): SearchDeclaration | undefined {
+  if (manifest.type !== 'remote' || manifest.search_provider !== true) {
+    return undefined;
+  }
+  if (stored !== undefined && stored.type === 'remote' && stored.url === manifest.url) {
+    const carried = storedSearchDeclaration(stored);
+    if (carried !== undefined) {
+      return carried;
+    }
+  }
+  return mcpCatalog.searchDeclarationForUrl(manifest.url);
+}
+
+/**
+ * `declared_change_tools` is the server's own declaration, captured at connect time from its
+ * tool list: whatever the request carried is replaced. An update of the same connector at the
+ * same address keeps the stored declaration; any other write starts with none, until the next
+ * connect check captures the server's list again.
+ */
+function withStoredDeclaredChangeTools({
+  manifest,
+  existing,
+}: {
+  manifest: McpServerManifest;
+  existing: McpServerManifest | undefined;
+}): McpServerManifest {
+  if (manifest.type !== 'remote') {
+    return manifest;
+  }
+  const kept =
+    existing !== undefined && existing.type === 'remote' && existing.url === manifest.url
+      ? existing.declared_change_tools
+      : undefined;
+  return { ...manifest, declared_change_tools: kept };
 }
 
 export function createSettingsMcpServersRouter<TTransaction>(
@@ -424,6 +510,77 @@ export function createSettingsMcpServersRouter<TTransaction>(
       ...(outcome.httpStatus === undefined ? {} : { httpStatus: outcome.httpStatus }),
     });
     return `memory provider check failed: ${outcome.reason}`;
+  }
+
+  /**
+   * The search declaration for a save that designates this connector, dialing the server when
+   * neither the stored record nor a shipped preset settles it. The dial reads the server's own
+   * tool list with the credential the row carries or will carry, and the declaration is read
+   * from that list alone. A server that cannot be read rejects the write: a designation whose
+   * tools were never captured would look accepted in Settings and silently do nothing, which
+   * is the failure this capture exists to end. Runs outside the write transaction, like the
+   * memory provider check, so its network I/O never holds a lock.
+   */
+  async function searchDeclarationForWrite({
+    manifest,
+    stored,
+    mcpServerStore,
+    tenant_id,
+    userRef,
+    signal,
+  }: {
+    manifest: McpServerManifest;
+    stored: McpServerRecord | undefined;
+    mcpServerStore: IMcpServerStore<TTransaction>;
+    tenant_id: string;
+    userRef: string;
+    signal: AbortSignal;
+  }): Promise<{ declaration: SearchDeclaration | undefined } | { rejection: string }> {
+    if (manifest.type !== 'remote' || manifest.search_provider !== true) {
+      return { declaration: undefined };
+    }
+    const settled = settledSearchDeclaration({ manifest, stored: stored?.manifest, mcpCatalog: deps.mcpCatalog });
+    if (settled !== undefined) {
+      return { declaration: settled };
+    }
+    let headers: RemoteMcpHeaders;
+    if (stored !== undefined && stored.manifest.type === 'remote' && stored.manifest.url === manifest.url) {
+      const connection = await getMcpConnection({ tenant_id, name: stored.name, store: mcpServerStore, userRef });
+      headers = connection?.headers ?? resolveManifestRequestHeaders(manifest);
+    } else {
+      headers = resolveManifestRequestHeaders(manifest);
+    }
+    const remote = new RemoteMCP({
+      id: manifest.name,
+      name: manifest.name,
+      url: manifest.url,
+      headers,
+      requestTimeoutMs: configuration.MCP_REQUEST_TIMEOUT_MS,
+      connectTimeoutMs: configuration.MCP_CONNECT_TIMEOUT_MS,
+      maxResponseBytes: configuration.MCP_TOOL_CALL_MAX_RESPONSE_BYTES,
+      refuseRedirects: true,
+      logger: deps.logger,
+      signal,
+    });
+    try {
+      const response = await remote.listTools();
+      if (isAuthRequired(response)) {
+        return {
+          rejection:
+            'That server needs sign-in before Aman can read its tools. Connect it first, then make it the search provider.',
+        };
+      }
+      const declaration = declaredSearchProviderTools(response.result.tools);
+      return { declaration: { ...declaration, plumbing_fields: [], in_process: false } };
+    } catch (error) {
+      deps.logger.warn(`Search provider tool capture failed for "${manifest.name}"; rejecting write`, {
+        ...extractErrorLogFields(error),
+      });
+      return {
+        rejection:
+          'Aman could not read that server’s tools, so it cannot be the search provider yet. Check the address, then try again.',
+      };
+    }
   }
 
   const listHandler: RouteHandler<typeof listMcpServersRoute> = async c => {
@@ -518,12 +675,12 @@ export function createSettingsMcpServersRouter<TTransaction>(
 
     let manifest: McpServerManifest;
     try {
-      manifest = withCatalogSearchTools({
+      manifest = withStoredDeclaredChangeTools({
         manifest: resolveMcpServerManifestForWrite({
           incoming: incomingManifest,
           existing: undefined,
         }),
-        mcpCatalog: deps.mcpCatalog,
+        existing: undefined,
       });
     } catch (error) {
       if (error instanceof MissingStoredSecretError) {
@@ -558,6 +715,23 @@ export function createSettingsMcpServersRouter<TTransaction>(
         return c.json({ error: { message: rejection } }, 422);
       }
       memoryProviderChecked = true;
+    }
+
+    // The search declaration is captured here, after secret resolution and before the write,
+    // so the row is never committed carrying a designation whose tools were never read.
+    if (manifest.type === 'remote' && manifest.search_provider === true) {
+      const captured = await searchDeclarationForWrite({
+        manifest,
+        stored: undefined,
+        mcpServerStore: deps.resolveMcpServerStore(c),
+        tenant_id: requestContext.tenant_id,
+        userRef: requestContext.subject.id,
+        signal: c.req.raw.signal,
+      });
+      if ('rejection' in captured) {
+        return c.json({ error: { message: captured.rejection } }, 422);
+      }
+      manifest = withSearchDeclaration({ manifest, declaration: captured.declaration });
     }
 
     try {
@@ -660,6 +834,33 @@ export function createSettingsMcpServersRouter<TTransaction>(
         probedDigest = memoryProviderProbeDigest({ manifest: probed, stored });
       }
 
+      // The search declaration is captured in this unlocked pass too, for the same reason:
+      // its dial must never run inside the write lock, and a designation whose tools were
+      // never read is never committed. The capture is keyed to the address it read, and the
+      // transaction below applies it only to a manifest still at that address.
+      let searchCapture: { url: string; declaration: SearchDeclaration | undefined } | undefined;
+      if (incomingManifest.type === 'remote' && incomingManifest.search_provider === true) {
+        const stored = await deps
+          .resolveMcpServerStore(c)
+          .getServer({ tenant_id: requestContext.tenant_id, name: incomingManifest.name });
+        const resolved = resolveMcpServerManifestForWrite({ incoming: incomingManifest, existing: stored?.manifest });
+        const captured = await searchDeclarationForWrite({
+          manifest: resolved,
+          stored,
+          mcpServerStore: deps.resolveMcpServerStore(c),
+          tenant_id: requestContext.tenant_id,
+          userRef,
+          signal: c.req.raw.signal,
+        });
+        if ('rejection' in captured) {
+          return c.json({ error: { message: captured.rejection } }, 422);
+        }
+        searchCapture = {
+          url: resolved.type === 'remote' ? resolved.url : '',
+          declaration: captured.declaration,
+        };
+      }
+
       // Lock → resolve secrets → DCR (if needed) → upsert + saveClient in one txn.
       // Exception: MCP put may run `createMcpOAuthClient` inside the write txn that persists
       // `oauth_server`/`oauth_client` so a failed registration rolls back the server write.
@@ -669,12 +870,17 @@ export function createSettingsMcpServersRouter<TTransaction>(
         const existing = await deps
           .resolveMcpServerStore(c)
           .getServerForUpdate({ tenant_id: requestContext.tenant_id, name: incomingManifest.name }, transaction);
-        const manifest = withCatalogSearchTools({
-          manifest: resolveMcpServerManifestForWrite({
-            incoming: incomingManifest,
-            existing: existing?.manifest,
-          }),
-          mcpCatalog: deps.mcpCatalog,
+        const resolved = resolveMcpServerManifestForWrite({
+          incoming: incomingManifest,
+          existing: existing?.manifest,
+        });
+        const declaration =
+          searchCapture !== undefined && resolved.type === 'remote' && searchCapture.url === resolved.url
+            ? searchCapture.declaration
+            : settledSearchDeclaration({ manifest: resolved, stored: existing?.manifest, mcpCatalog: deps.mcpCatalog });
+        const manifest = withStoredDeclaredChangeTools({
+          manifest: withSearchDeclaration({ manifest: resolved, declaration }),
+          existing: existing?.manifest,
         });
         // A concurrent update between the unlocked check above and this lock could otherwise
         // commit a URL and credential pair the provider never answered for.
@@ -948,10 +1154,16 @@ export function createMcpServersRouter<TTransaction>(deps: McpServersRouterDeps<
       logger: deps.logger,
       signal: c.req.raw.signal,
     });
+    let listedTools: readonly { name: string; annotations?: { readOnlyHint?: boolean | undefined } | undefined }[] =
+      [];
     const probe: HomeAssistantProbeClient = {
       listTools: async () => {
         const response = await remote.listTools();
-        return isAuthRequired(response) ? { authRequired: true } : { tools: response.result.tools };
+        if (isAuthRequired(response)) {
+          return { authRequired: true };
+        }
+        listedTools = response.result.tools;
+        return { tools: response.result.tools };
       },
       callTool: async ({ name: toolName, arguments: args }) => {
         const response = await remote.callTool({ name: toolName, arguments: args });
@@ -966,6 +1178,28 @@ export function createMcpServersRouter<TTransaction>(deps: McpServersRouterDeps<
     if (data.status === 'failed') {
       // The code and the plain reason only: never the headers the check dialed with.
       deps.logger.warn(`Home Assistant check failed for "${name}"`, { code: data.code, reason: data.reason });
+    } else {
+      // The check is the connect moment: capture the change tools the server itself declares
+      // in its own tool list and store them on the connector record, where standing-grant
+      // eligibility reads them. A failed capture leaves the stored declaration as it was.
+      try {
+        const store = deps.resolveMcpServerStore(c);
+        const record = await store.getServer({ tenant_id: requestContext.tenant_id, name });
+        if (record !== undefined && record.manifest.type === 'remote') {
+          const declared = homeAssistantDeclaredChangeTools(listedTools);
+          const stored = record.manifest.declared_change_tools ?? [];
+          if (JSON.stringify(declared) !== JSON.stringify(stored)) {
+            await store.upsertServer({
+              tenant_id: requestContext.tenant_id,
+              name: record.name,
+              manifest: { ...record.manifest, declared_change_tools: declared },
+              first_party: record.first_party,
+            });
+          }
+        }
+      } catch (error) {
+        deps.logger.warn(`Home Assistant change tools could not be stored for "${name}"`, extractErrorLogFields(error));
+      }
     }
     return c.json({ data }, 200);
   };

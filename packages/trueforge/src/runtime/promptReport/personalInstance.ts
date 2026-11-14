@@ -238,7 +238,12 @@ function webSearchConnector(): { url: string; headers: Record<string, string>; s
   return {
     url: WEB_SEARCH_URL,
     headers: { Authorization: 'Bearer prompt-report' },
-    search_provider: { tools: ['tavily_search', 'tavily_extract'], plumbing_fields: [] },
+    search_provider: {
+      tools: ['tavily_search'],
+      page_read_tools: ['tavily_extract'],
+      plumbing_fields: [],
+      served_in_process: true,
+    },
   };
 }
 

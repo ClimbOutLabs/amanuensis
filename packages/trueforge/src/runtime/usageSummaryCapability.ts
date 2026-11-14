@@ -250,6 +250,7 @@ class UsageSummaryTool extends LocalToolMCP {
   private readonly tools: ToolDefinition[] = [
     defineTool({
       name: USAGE_SUMMARY_TOOL_NAME,
+      requiresNetwork: false,
       description: USAGE_SUMMARY_DESCRIPTION,
       schema: USAGE_SUMMARY_INPUT_SCHEMA,
       annotations: { readOnlyHint: true, openWorldHint: false },

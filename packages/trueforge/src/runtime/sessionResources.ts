@@ -24,6 +24,7 @@ import {
 import { HTTPException } from 'hono/http-exception';
 import { join } from 'node:path';
 import type { Logger } from 'winston';
+import type { StoredSearchDeclaration } from '../catalog/McpCatalog';
 import configuration, { type TokenFactoryMode } from '../config';
 import type { IMcpServerStore, IMcpServerWithAuthStore, McpServerRecord } from '../db/mcpServerStore';
 import type { IModelProviderStore } from '../db/modelProviderStore';
@@ -56,8 +57,10 @@ export interface McpConnection {
   headers: RemoteMcpHeaders;
   /** The stored connector's trust marker, and only while the operator still lists its origin. */
   first_party: boolean;
-  /** Set when the user designated this connector as their search provider: the tools stored on its record, which the shipped catalog completes per turn. */
-  search_provider: { tools: readonly string[] } | undefined;
+  /** Set when the user designated this connector as their search provider: the declaration stored on its record, from which the turn builds the provider's grant. */
+  search_provider: StoredSearchDeclaration | undefined;
+  /** Bare names of the tools this server itself declared as changing things, stored on its record at connect time. Empty when none were captured. */
+  declared_change_tools: readonly string[];
   /** What an "Always allow" grant on this connector binds to: its setup digest from `connectorGrantBinding`. */
   grant_binding: string;
 }
@@ -507,10 +510,17 @@ export async function getMcpConnection({
       ? isHostOwnConnector({ name: record.name, url: record.manifest.url })
       : record.first_party) &&
     isFirstPartyOrigin({ url: record.manifest.url, origins: configuration.FIRST_PARTY_MCP_ORIGINS });
-  const searchProvider =
+  const searchProvider: StoredSearchDeclaration | undefined =
     record.manifest.type === 'remote' && record.manifest.search_provider === true
-      ? { tools: record.manifest.search_tools ?? [] }
+      ? {
+          url: record.manifest.url,
+          search_tools: record.manifest.search_tools,
+          page_read_tools: record.manifest.page_read_tools,
+          search_plumbing_fields: record.manifest.search_plumbing_fields,
+          search_in_process: record.manifest.search_in_process,
+        }
       : undefined;
+  const declaredChangeTools = record.manifest.type === 'remote' ? (record.manifest.declared_change_tools ?? []) : [];
   const grantBinding = connectorGrantBinding(record);
   const needsLiveAuth = record.manifest.auth?.type === 'dcr' || record.manifest.auth?.type === 'oauth_client';
   // Only the live-auth case delegates: a with-auth store's `resolveInvokeHeaders` may be
@@ -524,6 +534,7 @@ export async function getMcpConnection({
       headers: store.resolveInvokeHeaders({ record, userRef }),
       first_party: firstParty,
       search_provider: searchProvider,
+      declared_change_tools: declaredChangeTools,
       grant_binding: grantBinding,
     };
   }
@@ -539,6 +550,7 @@ export async function getMcpConnection({
       }),
       first_party: firstParty,
       search_provider: searchProvider,
+      declared_change_tools: declaredChangeTools,
       grant_binding: grantBinding,
     };
   }
@@ -547,6 +559,7 @@ export async function getMcpConnection({
     headers: resolveManifestRequestHeaders(record.manifest),
     first_party: firstParty,
     search_provider: searchProvider,
+    declared_change_tools: declaredChangeTools,
     grant_binding: grantBinding,
   };
 }
