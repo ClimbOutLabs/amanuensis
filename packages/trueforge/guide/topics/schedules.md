@@ -6,7 +6,7 @@ covers: approval:schedule, route:schedule
 
 A schedule asks Aman to do the same job again and again, such as "Every weekday at 7:30, send me my morning brief". Each run is saved as a chat, so you can open it and see what Aman found. The chat is named for the schedule and the day it ran, such as "Morning brief · Thursday, November 13".
 
-How to get there: Click **Schedules** in the left bar.
+How to get there: Click **Schedules** in the left bar. On a phone, tap the menu button at the top left first.
 
 === "Computer"
 
