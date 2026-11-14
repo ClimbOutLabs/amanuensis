@@ -99,6 +99,9 @@ const REVIEW: CalendarWriteReview = {
   incomplete_reason: null,
 };
 
+/** The same event with someone else invited, which always asks. */
+const GUEST_REVIEW: CalendarWriteReview = { ...REVIEW, attendees: ['lin@example.com'] };
+
 function writeAction(review: CalendarWriteReview | undefined): SentinelAction {
   return {
     ...calendarAction('create_event'),
@@ -109,17 +112,25 @@ function writeAction(review: CalendarWriteReview | undefined): SentinelAction {
 }
 
 describe('Calendar write classification', () => {
-  it('always asks, with the event card and a token bound to the approved call', async () => {
+  it('asks for an event with a guest, with the event card and a token bound to the approved call', async () => {
     const ctx = makeCtx();
-    const decision = await classifyTier(writeAction(REVIEW), ctx);
-    expect(decision).toMatchObject({ tier: 3, reason: 'calendar_write', auto_deny: null, sensitive_read: false });
+    const decision = await classifyTier(writeAction(GUEST_REVIEW), ctx);
+    expect(decision).toMatchObject({
+      tier: 3,
+      reason: 'calendar_write_guests',
+      auto_deny: null,
+      sensitive_read: false,
+      standing_grant_barred: true,
+      own_calendar_change: false,
+    });
     expect(decision.card?.calendar_event?.title).toBe('Dentist');
     expect(decision.approval_token_id).not.toBeNull();
   });
 
   it('puts no warning in the card sentence that the event shape does not carry', async () => {
     for (const changes of [{}, { already_created: true }, { span_days: 3 }, { already_created: true, span_days: 2 }]) {
-      const decision = await classifyTier(writeAction({ ...REVIEW, ...changes }), makeCtx());
+      const decision = await classifyTier(writeAction({ ...GUEST_REVIEW, ...changes }), makeCtx());
+      expect(decision.card).not.toBeNull();
       const what = decision.card?.plain_what ?? '';
       const event = decision.card?.calendar_event;
       expect(what.includes('You already have this event')).toBe(event?.already_created === true);
@@ -128,11 +139,14 @@ describe('Calendar write classification', () => {
   });
 
   it('carries a duplicate and a multi-day warning in the event itself, so they can be read back', async () => {
-    const decision = await classifyTier(writeAction({ ...REVIEW, already_created: true, span_days: 3 }), makeCtx());
+    const decision = await classifyTier(
+      writeAction({ ...GUEST_REVIEW, already_created: true, span_days: 3 }),
+      makeCtx(),
+    );
     expect(decision.card?.calendar_event).toMatchObject({ already_created: true, span_days: 3 });
   });
 
-  it('asks in a scheduled run too, so the run holds it for the owner instead of dropping it', async () => {
+  it('asks in a scheduled run too, even with no guests, so the run holds it for the owner instead of dropping it', async () => {
     const decision = await classifyTier(
       writeAction(REVIEW),
       makeCtx(forUnattendedRun(defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }))),
@@ -179,5 +193,41 @@ describe('Calendar write classification', () => {
     expect(
       (await classifyTier(writeAction({ ...leaking, guests_emailed: false }), makeCtx(services))).auto_deny,
     ).toBeNull();
+  });
+});
+
+describe("an event on the owner's own calendar with nobody else on it", () => {
+  it.each(['create', 'change'] as const)('runs a %s without a card, and without asking for a grant', async action => {
+    const decision = await classifyTier(writeAction({ ...REVIEW, action }), makeCtx());
+    expect(decision).toMatchObject({
+      tier: 1,
+      reason: 'own_calendar_write',
+      card: null,
+      auto_deny: null,
+      approval_token_id: null,
+      sensitive_read: false,
+    });
+  });
+
+  it.each([
+    ['a guest on a new event', { attendees: ['lin@example.com'] }],
+    ['a guest on a changed event', { action: 'change', attendees: ['lin@example.com'] }],
+    ['a guest with no address', { action: 'change', attendees: ['a guest with no address'] }],
+    ['guests who would be emailed', { attendees: ['lin@example.com'], guests_emailed: true }],
+    ['a copy of an event this chat just added', { already_created: true }],
+  ] satisfies [string, Partial<CalendarWriteReview>][])('still asks for %s', async (_label, changes) => {
+    const decision = await classifyTier(writeAction({ ...REVIEW, ...changes }), makeCtx());
+    expect(decision.tier).toBe(3);
+    expect(decision.card).not.toBeNull();
+    expect(decision.reason).not.toBe('own_calendar_write');
+  });
+
+  it('gives a calendar connector with the same tool name no such pass', async () => {
+    const decision = await classifyTier(
+      { ...writeAction(REVIEW), tool_type: 'mcp', mcp_server_name: 'some_calendar_connector' },
+      makeCtx(),
+    );
+    expect(decision.tier).toBe(3);
+    expect(decision.reason).not.toBe('own_calendar_write');
   });
 });

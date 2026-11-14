@@ -20,6 +20,9 @@ const WRITE = ['gmail_read', 'calendar_read', 'calendar_write'] as const;
 
 const DENTIST = { title: 'Dentist', start: '2026-10-19T09:00', end: '2026-10-19T10:00', location: '12 Main St' };
 
+/** The same event with someone else invited and not emailed: it always asks, so it shows the card. */
+const INVITE = { ...DENTIST, attendees: ['lin@example.com'], send_updates: 'none' as const };
+
 const STANDUP = {
   id: 'ev1',
   etag: '"e1"',
@@ -30,6 +33,9 @@ const STANDUP = {
   organizer: { email: 'ada@example.com', self: true },
   attendees: [{ email: 'ada@example.com', self: true }, { email: 'lin@example.com' }],
 };
+
+/** An event the owner organizes that nobody else is on. */
+const SOLO = { ...STANDUP, summary: 'Focus time', attendees: undefined };
 
 const insertRoute: Route = (url, init) =>
   init?.method === 'POST' && url.pathname === EVENTS_PATH ? json({ id: 'new1', status: 'confirmed' }) : undefined;
@@ -58,11 +64,14 @@ async function approveThenDispatch(input: {
   beforeDispatch?: () => void;
   /** The call's info as the host stamped it, when it was not classified here (a held call being replayed). */
   infoOverride?: InternalToolCallInfo;
+  /** False for a call that runs without a card: it is dispatched with no answer at all. */
+  asks?: boolean;
 }) {
   const { tools, sentinel } = input.built;
+  const asks = input.asks ?? true;
   const info = input.infoOverride ?? (await tools.toolCallInfo({ name: input.name, arguments: input.shown }));
   expect(info.pre_dispatch_failure).toBeUndefined();
-  expect(info.tier).toBe(3);
+  expect(info.tier).toBe(asks ? 3 : 1);
   input.beforeDispatch?.();
   const message: InternalEnrichedAssistantMessage = {
     role: 'assistant',
@@ -80,7 +89,7 @@ async function approveThenDispatch(input: {
     assistantMessage: message,
     toolMapping: new Map([[input.name, { toolSet: tools, originalToolName: input.name }]]),
     threadId: 'main',
-    approvalDecisions: new Map<string, ApprovalDecision>([['call-1', { status: 'allow' }]]),
+    approvalDecisions: new Map<string, ApprovalDecision>(asks ? [['call-1', { status: 'allow' }]] : []),
     memoState: createToolCallMemoState(),
     sentinel: {
       services: sentinel.services,
@@ -105,6 +114,11 @@ async function approveThenDispatch(input: {
 async function cardFor(built: Built, call: CallToolRequest['params']): Promise<InternalToolCallInfo> {
   return await built.tools.toolCallInfo(call);
 }
+
+// The recent-create registry is shared by the whole process; a leftover entry would make a later event a duplicate.
+beforeEach(() => {
+  clearRecentCalendarCreates();
+});
 
 describe('Calendar write tools', () => {
   it('are offered only when adding events was allowed, and the read tools then do not send people to Settings', async () => {
@@ -215,7 +229,7 @@ describe('time zones', () => {
       features: [...WRITE],
       timeZone: undefined,
     });
-    const info = await cardFor(built, { name: 'create_event', arguments: DENTIST });
+    const info = await cardFor(built, { name: 'create_event', arguments: INVITE });
     expect(info.tier3_card?.calendar_event?.time_zone).toBe('Europe/Lisbon');
   });
 
@@ -232,7 +246,7 @@ describe('time zones', () => {
 
   it('uses a zone the call names over the device zone', async () => {
     const built = await build({ routes: [], features: [...WRITE], timeZone: 'America/New_York' });
-    const info = await cardFor(built, { name: 'create_event', arguments: { ...DENTIST, time_zone: 'Asia/Tokyo' } });
+    const info = await cardFor(built, { name: 'create_event', arguments: { ...INVITE, time_zone: 'Asia/Tokyo' } });
     expect(info.tier3_card?.calendar_event?.time_zone).toBe('Asia/Tokyo');
   });
 });
@@ -240,7 +254,7 @@ describe('time zones', () => {
 describe('an approved write at dispatch', () => {
   it('sends exactly the event on the card, once, with the email choice explicit', async () => {
     const built = await build({ routes: [insertRoute], features: [...WRITE], timeZone: 'America/New_York' });
-    const outcome = await approveThenDispatch({ built, name: 'create_event', shown: DENTIST });
+    const outcome = await approveThenDispatch({ built, name: 'create_event', shown: INVITE });
     expect(outcome.failure).toBe(false);
     expect(writes(built.google.urls)).toEqual([`POST ${EVENTS_PATH}?sendUpdates=none`]);
     expect(built.google.bodies).toEqual([
@@ -249,6 +263,7 @@ describe('an approved write at dispatch', () => {
         start: { dateTime: '2026-10-19T09:00:00-04:00', timeZone: 'America/New_York' },
         end: { dateTime: '2026-10-19T10:00:00-04:00', timeZone: 'America/New_York' },
         location: '12 Main St',
+        attendees: [{ email: 'lin@example.com' }],
       },
     ]);
     expect(JSON.parse(outcome.rawContent)).toMatchObject({ event_id: 'new1', status: 'created' });
@@ -270,7 +285,7 @@ describe('an approved write at dispatch', () => {
     const outcome = await approveThenDispatch({
       built,
       name: 'create_event',
-      shown: DENTIST,
+      shown: INVITE,
       sent: { ...DENTIST, attendees: ['someone@example.com'], send_updates: 'all' },
     });
     expect(outcome.failure).toBe(true);
@@ -325,9 +340,9 @@ describe('an approved write at dispatch', () => {
 describe('the write tool itself', () => {
   it('writes nothing when its arguments are not the ones approved, whatever route the call took', async () => {
     const built = await build({ routes: [insertRoute], features: [...WRITE], timeZone: 'America/New_York' });
-    const info = await built.tools.toolCallInfo({ name: 'create_event', arguments: DENTIST });
+    const info = await built.tools.toolCallInfo({ name: 'create_event', arguments: INVITE });
     const response = await built.tools.callTool(
-      { name: 'create_event', arguments: { ...DENTIST, title: 'Dentist and lunch' } },
+      { name: 'create_event', arguments: { ...INVITE, title: 'Dentist and lunch' } },
       { status: 'allow' },
       {
         admission_provenance: { source: 'user_approval', decision: 'allow' },
@@ -337,10 +352,10 @@ describe('the write tool itself', () => {
     expect(text(response)).toContain('changed after you approved them');
     expect(writes(built.google.urls)).toEqual([]);
   });
-  it('writes nothing for the exact approved call when no answer to that call came with it', async () => {
+  it('writes nothing for the exact call with a guest when no answer to that call came with it', async () => {
     const built = await build({ routes: [insertRoute], features: [...WRITE], timeZone: 'America/New_York' });
-    const info = await built.tools.toolCallInfo({ name: 'create_event', arguments: DENTIST });
-    const response = await built.tools.callTool({ name: 'create_event', arguments: DENTIST }, undefined, {
+    const info = await built.tools.toolCallInfo({ name: 'create_event', arguments: INVITE });
+    const response = await built.tools.callTool({ name: 'create_event', arguments: INVITE }, undefined, {
       admission_provenance: { source: 'user_approval', decision: 'allow' },
       approved_params: info.mint_canonical_params,
     });
@@ -409,7 +424,7 @@ describe('a write Google may have acted on', () => {
       features: [...WRITE],
       timeZone: 'America/New_York',
     });
-    const outcome = await approveThenDispatch({ built, name: 'create_event', shown: DENTIST });
+    const outcome = await approveThenDispatch({ built, name: 'create_event', shown: INVITE });
     expect(outcome.rawContent).toContain('may or may not have been saved');
     expect(writes(built.google.urls)).toHaveLength(1);
   });
@@ -447,7 +462,7 @@ describe('the permissions log', () => {
       services,
       logger,
     });
-    const outcome = await approveThenDispatch({ built, name: 'create_event', shown: DENTIST });
+    const outcome = await approveThenDispatch({ built, name: 'create_event', shown: INVITE });
     expect(outcome.failure).toBe(false);
     expect(JSON.parse(outcome.rawContent)).toMatchObject({ event_id: 'new1', status: 'created' });
     expect(writes(built.google.urls)).toHaveLength(1);
@@ -457,7 +472,7 @@ describe('the permissions log', () => {
   it('records the write once Google saved it, with what was saved', async () => {
     const { services, rows } = recordingServices();
     const built = await build({ routes: [insertRoute], features: [...WRITE], timeZone: 'America/New_York', services });
-    await approveThenDispatch({ built, name: 'create_event', shown: DENTIST });
+    await approveThenDispatch({ built, name: 'create_event', shown: INVITE });
     expect(rows.filter(row => row.outcome === 'ran')).toEqual([
       expect.objectContaining({
         tool_name: 'create_event',
@@ -478,7 +493,7 @@ describe('the permissions log', () => {
       timeZone: 'America/New_York',
       services,
     });
-    await approveThenDispatch({ built, name: 'create_event', shown: DENTIST });
+    await approveThenDispatch({ built, name: 'create_event', shown: INVITE });
     expect(rows.some(row => row.outcome === 'ran')).toBe(false);
     expect(rows.filter(row => row.outcome === 'denied').map(row => row.description)).toEqual([
       expect.stringContaining('Google Calendar did not confirm saving "Dentist"'),
@@ -498,8 +513,9 @@ describe('durable approvals', () => {
     expect(allowsToolGrant(info)).toBe(false);
   });
 
-  it('offers the answer for this chat, and not the one for every chat, for a new event with no guests', async () => {
-    const built = await build({ routes: [], features: [...WRITE], timeZone: 'America/New_York' });
+  it('offers the answer for this chat, and not the one for every chat, for a copy of an event with no guests', async () => {
+    const built = await build({ routes: [insertRoute], features: [...WRITE], timeZone: 'America/New_York' });
+    await approveThenDispatch({ built, name: 'create_event', shown: DENTIST, asks: false });
     const info = await built.tools.toolCallInfo({ name: 'create_event', arguments: { ...DENTIST } });
     expect(info).toMatchObject({ tier: 3, tier_reason: 'calendar_write', is_approval_required: true });
     expect(allowsChatApproval(info)).toBe(true);
@@ -508,7 +524,7 @@ describe('durable approvals', () => {
 });
 
 describe('a held event the owner approves later', () => {
-  const args = { ...DENTIST, time_zone: 'America/New_York' };
+  const args = { ...INVITE, time_zone: 'America/New_York' };
 
   async function holdThenAnswer(input: { expired: boolean }) {
     const services = defaultSentinelServices({ pinned_path: '/usr/bin:/bin' });
@@ -606,13 +622,17 @@ describe('on a demo instance', () => {
     expect(writes(built.google.urls)).toEqual([]);
   });
 
-  it('asks as usual for guests on the send list, and for an event with no guests', async () => {
+  it('asks as usual for guests on the send list, and runs an event with no guests without a card', async () => {
     const built = await demoBuild();
-    for (const args of [{ ...DENTIST, attendees: [ALLOWED.toUpperCase()], send_updates: 'all' }, DENTIST]) {
-      const info = await built.tools.toolCallInfo({ name: 'create_event', arguments: args });
-      expect(info).toMatchObject({ tier: 3, is_approval_required: true });
-      expect(info.pre_dispatch_failure).toBeUndefined();
-    }
+    const guests = await built.tools.toolCallInfo({
+      name: 'create_event',
+      arguments: { ...DENTIST, attendees: [ALLOWED.toUpperCase()], send_updates: 'all' },
+    });
+    expect(guests).toMatchObject({ tier: 3, is_approval_required: true });
+    expect(guests.pre_dispatch_failure).toBeUndefined();
+    const alone = await built.tools.toolCallInfo({ name: 'create_event', arguments: DENTIST });
+    expect(alone).toMatchObject({ tier: 1, tier_reason: 'own_calendar_write' });
+    expect(alone.pre_dispatch_failure).toBeUndefined();
   });
 
   it('cannot add a guest through a change: update_event takes no attendees', async () => {
@@ -678,7 +698,7 @@ describe('hidden text', () => {
     const built = await build({ routes: [insertRoute], features: [...WRITE], timeZone: 'America/New_York' });
     const atLimit = await built.tools.toolCallInfo({
       name: 'create_event',
-      arguments: { ...DENTIST, ...spread(MAX_IDEOGRAPHIC_SELECTORS) },
+      arguments: { ...INVITE, ...spread(MAX_IDEOGRAPHIC_SELECTORS) },
     });
     expect(atLimit.pre_dispatch_failure).toBeUndefined();
     expect(atLimit.tier).toBe(3);
@@ -725,7 +745,7 @@ describe('card date wording and duplicate creates', () => {
     const built = await build({ routes: [], features: [...WRITE], timeZone: 'America/New_York' });
     const info = await cardFor(built, {
       name: 'create_event',
-      arguments: { title: 'Retreat', start: '2026-10-27T14:30', end: '2026-10-28T15:00' },
+      arguments: { ...INVITE, title: 'Retreat', start: '2026-10-27T14:30', end: '2026-10-28T15:00' },
     });
     expect(info.tier3_card?.calendar_event?.when).toBe('Tue Oct 27, 2:30 pm to Wed Oct 28, 3:00 pm');
     expect(info.tier3_card?.plain_what).toContain('This event runs over 2 days. Is that right?');
@@ -733,7 +753,7 @@ describe('card date wording and duplicate creates', () => {
 
   it('shows a same-day event in the short form, with no warning', async () => {
     const built = await build({ routes: [], features: [...WRITE], timeZone: 'America/New_York' });
-    const info = await cardFor(built, { name: 'create_event', arguments: CHECKUP });
+    const info = await cardFor(built, { name: 'create_event', arguments: { ...INVITE, ...CHECKUP } });
     expect(info.tier3_card?.calendar_event?.when).toBe('Tue Oct 27, 2:30 to 3:00 pm');
     expect(info.tier3_card?.plain_what).not.toContain('runs over');
     expect(info.tier3_card?.plain_what).not.toContain('You already have this event');
@@ -741,7 +761,8 @@ describe('card date wording and duplicate creates', () => {
 
   it('asks before adding the same event twice in one chat', async () => {
     const built = await build({ routes: [insertRoute], features: [...WRITE], timeZone: 'America/New_York' });
-    const outcome = await approveThenDispatch({ built, name: 'create_event', shown: CHECKUP });
+    // The first one has nobody else on it, so it runs without a card.
+    const outcome = await approveThenDispatch({ built, name: 'create_event', shown: CHECKUP, asks: false });
     expect(outcome.disposition).toBe('executed_ok');
 
     const again = await cardFor(built, { name: 'create_event', arguments: CHECKUP });
@@ -754,7 +775,7 @@ describe('card date wording and duplicate creates', () => {
       name: 'create_event',
       arguments: { ...CHECKUP, start: '2026-10-28T14:30', end: '2026-10-28T15:00' },
     });
-    expect(different.tier3_card?.plain_what).not.toContain('You already have this event');
+    expect(different).toMatchObject({ tier: 1, tier_reason: 'own_calendar_write' });
   });
 
   it('says an event the owner already removed was already removed, not an error', async () => {
@@ -774,7 +795,7 @@ describe('card date wording and duplicate creates', () => {
 });
 
 describe('the write tool under a standing grant', () => {
-  it('asks for an event with no guests under an Always grant, and writes nothing with no answer to that call', async () => {
+  it('runs an event with no guests without a card under an Always grant too, the same as without one', async () => {
     const services = defaultSentinelServices({ pinned_path: '/usr/bin:/bin' });
     const built = await build({ routes: [insertRoute], features: [...WRITE], timeZone: 'America/New_York', services });
     await services.tool_grants.recordToolGrant({
@@ -785,17 +806,18 @@ describe('the write tool under a standing grant', () => {
       connector_binding: null,
     });
     const info = await built.tools.toolCallInfo({ name: 'create_event', arguments: DENTIST });
-    expect(info).toMatchObject({ tier: 3, tier_reason: 'calendar_write', is_approval_required: true });
+    expect(info).toMatchObject({ tier: 1, tier_reason: 'own_calendar_write' });
     const response = await built.tools.callTool({ name: 'create_event', arguments: DENTIST }, undefined, {
       admission_provenance: { source: 'automatic' },
       approved_params: info.mint_canonical_params,
     });
-    expect(text(response)).toContain('not approved');
-    expect(writes(built.google.urls)).toEqual([]);
+    expect(text(response)).not.toContain('not approved');
+    expect(writes(built.google.urls)).toHaveLength(1);
   });
 
-  it('writes an event with no guests on an answer given for the whole chat', async () => {
+  it('writes a copy of an event with no guests on an answer given for the whole chat', async () => {
     const built = await build({ routes: [insertRoute], features: [...WRITE], timeZone: 'America/New_York' });
+    await approveThenDispatch({ built, name: 'create_event', shown: DENTIST, asks: false });
     const info = await built.tools.toolCallInfo({ name: 'create_event', arguments: DENTIST });
     expect(info).toMatchObject({ tier: 3, tier_reason: 'calendar_write' });
     const response = await built.tools.callTool(
@@ -807,7 +829,7 @@ describe('the write tool under a standing grant', () => {
       },
     );
     expect(text(response)).not.toContain('not approved');
-    expect(writes(built.google.urls)).toHaveLength(1);
+    expect(writes(built.google.urls)).toHaveLength(2);
   });
 
   it('writes nothing for an event with guests under an Always grant, when no answer came with it', async () => {
@@ -828,6 +850,133 @@ describe('the write tool under a standing grant', () => {
       approved_params: info.mint_canonical_params,
     });
     expect(text(response)).toContain('not approved');
+    expect(writes(built.google.urls)).toEqual([]);
+  });
+});
+
+describe("an event on the owner's own calendar with nobody else on it", () => {
+  it('is added without a card, exactly as asked, and logged once Google saved it', async () => {
+    const { services, rows } = recordingServices();
+    const built = await build({ routes: [insertRoute], features: [...WRITE], timeZone: 'America/New_York', services });
+    const outcome = await approveThenDispatch({ built, name: 'create_event', shown: DENTIST, asks: false });
+    expect(outcome.failure).toBe(false);
+    expect(writes(built.google.urls)).toEqual([`POST ${EVENTS_PATH}?sendUpdates=none`]);
+    expect(built.google.bodies).toEqual([
+      {
+        summary: 'Dentist',
+        start: { dateTime: '2026-10-19T09:00:00-04:00', timeZone: 'America/New_York' },
+        end: { dateTime: '2026-10-19T10:00:00-04:00', timeZone: 'America/New_York' },
+        location: '12 Main St',
+      },
+    ]);
+    expect(rows.filter(row => row.outcome === 'ran')).toEqual([
+      expect.objectContaining({
+        tool_name: 'create_event',
+        tier: 1,
+        description:
+          'Added to Google Calendar without asking, because nobody else is on the event: "Dentist" on Monday, October 19, 2026, 9:00 am to 10:00 am (America/New_York)',
+      }),
+    ]);
+  });
+
+  it('is changed without a card, and logged once Google saved it', async () => {
+    const { services, rows } = recordingServices();
+    const built = await build({
+      routes: [eventRoutes(() => SOLO)],
+      features: [...WRITE],
+      timeZone: 'America/New_York',
+      services,
+    });
+    const outcome = await approveThenDispatch({
+      built,
+      name: 'update_event',
+      shown: { event_id: 'ev1', title: 'Deep work' },
+      asks: false,
+    });
+    expect(outcome.failure).toBe(false);
+    expect(writes(built.google.urls)).toEqual([`PATCH ${EVENTS_PATH}/ev1?sendUpdates=none`]);
+    expect(rows.filter(row => row.outcome === 'ran')).toEqual([
+      expect.objectContaining({
+        tool_name: 'update_event',
+        tier: 1,
+        description: expect.stringContaining('Changed in Google Calendar without asking'),
+      }),
+    ]);
+  });
+
+  it('still asks for a change to an event someone else is on', async () => {
+    const built = await build({
+      routes: [eventRoutes(() => STANDUP)],
+      features: [...WRITE],
+      timeZone: 'America/New_York',
+    });
+    const info = await cardFor(built, {
+      name: 'update_event',
+      arguments: { event_id: 'ev1', title: 'Team sync (online)', send_updates: 'none' },
+    });
+    expect(info).toMatchObject({ tier: 3, tier_reason: 'calendar_write_guests', is_approval_required: true });
+  });
+
+  it('writes nothing when a guest joined the event after it was checked', async () => {
+    let live: Record<string, unknown> = SOLO;
+    const built = await build({
+      routes: [eventRoutes(() => live)],
+      features: [...WRITE],
+      timeZone: 'America/New_York',
+    });
+    const call = { event_id: 'ev1', title: 'Deep work' };
+    const info = await built.tools.toolCallInfo({ name: 'update_event', arguments: call });
+    expect(info).toMatchObject({ tier: 1, tier_reason: 'own_calendar_write' });
+    live = {
+      ...SOLO,
+      etag: '"e2"',
+      attendees: [{ email: 'ada@example.com', self: true }, { email: 'lin@example.com' }],
+    };
+    const response = await built.tools.callTool({ name: 'update_event', arguments: call }, undefined, {
+      admission_provenance: { source: 'automatic' },
+      approved_params: info.mint_canonical_params,
+    });
+    expect(text(response)).toContain('Nothing was saved');
+    expect(writes(built.google.urls)).toEqual([]);
+  });
+
+  it('writes nothing when the call reaching the tool has a guest the checked call did not', async () => {
+    const built = await build({ routes: [insertRoute], features: [...WRITE], timeZone: 'America/New_York' });
+    const info = await built.tools.toolCallInfo({ name: 'create_event', arguments: DENTIST });
+    expect(info.tier).toBe(1);
+    const response = await built.tools.callTool({ name: 'create_event', arguments: INVITE }, undefined, {
+      admission_provenance: { source: 'automatic' },
+      approved_params: info.mint_canonical_params,
+    });
+    expect(text(response)).toContain('nothing was saved');
+    expect(writes(built.google.urls)).toEqual([]);
+  });
+
+  it('writes nothing for a copy of an event this chat just added when no answer came with it', async () => {
+    const built = await build({ routes: [insertRoute], features: [...WRITE], timeZone: 'America/New_York' });
+    const first = await built.tools.toolCallInfo({ name: 'create_event', arguments: DENTIST });
+    await approveThenDispatch({ built, name: 'create_event', shown: DENTIST, asks: false });
+    // A second call carrying the first call's checked details still finds the copy at the tool, and stops.
+    const response = await built.tools.callTool({ name: 'create_event', arguments: DENTIST }, undefined, {
+      admission_provenance: { source: 'automatic' },
+      approved_params: first.mint_canonical_params,
+    });
+    expect(text(response)).toContain('not approved');
+    expect(writes(built.google.urls)).toHaveLength(1);
+  });
+
+  it('writes nothing when the owner said no to a card', async () => {
+    const built = await build({ routes: [insertRoute], features: [...WRITE], timeZone: 'America/New_York' });
+    const info = await built.tools.toolCallInfo({ name: 'create_event', arguments: DENTIST });
+    const response = await built.tools.callTool(
+      { name: 'create_event', arguments: DENTIST },
+      { status: 'deny' },
+      {
+        admission_provenance: { source: 'user_approval', decision: 'deny' },
+        approved_params: info.mint_canonical_params,
+      },
+    );
+    expect(text(response)).toContain('The person said no');
     expect(writes(built.google.urls)).toEqual([]);
   });
 });

@@ -72,7 +72,14 @@ Deletes and other actions with real effects also offer **Always allow in this ch
 
 A card that names no such place offers only a yes or a no, because there's nothing to tie a lasting answer to. Making a schedule or a persona asks every time for the same reason. Adding a skill asks every time too.
 
-A change to your own calendar that reaches no guests also offers **Always allow in this chat**. That answer covers every later change to your own calendar in that chat. It's the only lasting answer on a calendar card, so a calendar change asks again in every new chat.
+Adding or changing an event on your own Google Calendar doesn't ask when nobody else is on the event. Aman saves it and writes one line in the activity log, under **Settings**, **Activity log**, saying what it saved. These still ask:
+
+- An event with a guest, whether or not Google emails them.
+- Adding the same event a second time in one chat.
+- Any event a scheduled run wants to add or change.
+- Any change to a calendar connected with an app password, because Aman can't tell which of its calendars other people share.
+
+A calendar change that still asks and reaches no guests also offers **Always allow in this chat**. That answer covers every later change like it in that chat. It's the only lasting answer on a calendar card, so such a change asks again in every new chat.
 
 **Always allow everywhere** covers every chat. It's never offered for sends, deletes, installs, outside services or a calendar change. A maps card is the one exception: its **Always allow everywhere** turns on the **Maps** switch, described under Maps below. The connector tools you always allow are listed in that connector's page under **Settings**, **Connectors**, where **Revoke** turns each one off.
 

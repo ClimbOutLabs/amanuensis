@@ -4,7 +4,7 @@ title: Calendar
 covers: approval:calendar_event
 ---
 
-Aman can read your calendar and keep it up to date. Ask what is coming up, or ask it to add or move an event. Before anything is saved, a card shows you exactly what will change.
+Aman can read your calendar and keep it up to date. Ask what is coming up, or ask it to add or move an event. An event only you are on is saved right away. When someone else is on the event, a card shows you exactly what will change before anything is saved.
 
 How to get there: Click **Chats** in the left bar, then **New chat**, and ask about your calendar.
 
@@ -29,8 +29,8 @@ Reading your calendar runs without asking.
 ## Add or change an event
 
 1. Ask, such as "Add lunch with Sam on Friday at 12:30 for an hour".
-2. A card asks "Add "Lunch with Sam" to your calendar?" and shows exactly what will be saved: the calendar, title, time, time zone, length, place and guests.
-3. For a change, the card shows the event as it is now, and how it will look after the change.
+2. If only you are on the event, Aman saves it on your Google Calendar right away and tells you. The activity log gets a line saying what was saved.
+3. If someone else is on the event, a card asks "Add "Lunch with Sam" to your calendar?" and shows exactly what will be saved: the calendar, title, time, time zone, length, place and guests. For a change, the card shows the event as it is now, and how it will look after the change.
 4. Click **Allow** to save it. Click **Change it** to ask Aman to fix something first. Click **Not now** to leave your calendar as it is.
 
 === "Computer"
@@ -53,7 +53,8 @@ With a calendar connected with an app password, Aman can also answer an invitati
 - With Google Calendar, changing one event of a repeating series changes only that one event.
 - Aman doesn't clear an event's place or description. It can only replace them with new text.
 - With a calendar connected with an app password, Aman can also delete an event. Deleting, and changing an event that already exists, always ask, because Aman can't check who else is on it.
-- A change to your own calendar with no guests offers **Always allow in this chat**. That covers later changes like it in the same chat only. A new chat asks again.
+- On Google Calendar, adding an event with no guests, or changing one you made that has no guests, doesn't ask. Aman saves it and writes a line in the [Activity log](activity-log.md).
+- Adding the same event twice in one chat asks the second time. A card for a change with no guests offers **Always allow in this chat**. That covers later changes like it in the same chat only. A new chat asks again.
 - See [Approval cards](approvals.md) for every button on a card.
 
 ## Related

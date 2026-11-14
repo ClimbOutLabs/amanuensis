@@ -22,6 +22,7 @@ import {
   hashEventWrite,
   resolveCreate,
   resolveUpdate,
+  staysOnOwnCalendar,
   type CalendarWriteReview,
   type EventWriteRequest,
   type ResolvedEventWrite,
@@ -156,7 +157,7 @@ export class CalendarToolSet extends LocalToolMCP {
             defineTool({
               name: CREATE_EVENT_TOOL_NAME,
               description:
-                "Add an event to the user's primary Google Calendar. Use this, not a calendar file, when the user wants an event saved. Times are local wall-clock times (2026-10-19T09:00) in time_zone, or the user's own zone when it is left out; two dates make an all-day event. With attendees, send_updates must say whether Google emails them. The user sees the whole event and is asked first.",
+                "Add an event to the user's primary Google Calendar. Use this, not a calendar file, when the user wants an event saved. Times are local wall-clock times (2026-10-19T09:00) in time_zone, or the user's own zone when it is left out; two dates make an all-day event. With attendees, send_updates must say whether Google emails them. An event with no guests is saved without asking; with guests the user sees the whole event and is asked first.",
               schema: CreateEventSchema,
               annotations: CALENDAR_WRITE_ANNOTATIONS,
               handler: (input, approval, context) => this.#createEvent({ input, approval, context }),
@@ -164,7 +165,7 @@ export class CalendarToolSet extends LocalToolMCP {
             defineTool({
               name: UPDATE_EVENT_TOOL_NAME,
               description:
-                'Move or rename an event the user organizes, by event_id from list_events. Set only what changes; a new start alone keeps the length. If the event has guests, send_updates must say whether Google emails them. Guests cannot be changed and events cannot be deleted. The user sees before and after and is asked first.',
+                'Move or rename an event the user organizes, by event_id from list_events. Set only what changes; a new start alone keeps the length. If the event has guests, send_updates must say whether Google emails them. Guests cannot be changed and events cannot be deleted. An event with no guests is changed without asking; with guests the user sees before and after and is asked first.',
               schema: UpdateEventSchema,
               annotations: CALENDAR_WRITE_ANNOTATIONS,
               handler: (input, approval, context) => this.#updateEvent({ input, approval, context }),
@@ -337,15 +338,17 @@ export class CalendarToolSet extends LocalToolMCP {
   }
 
   /**
-   * The zone and hash the user approved this exact call under. A call that arrives without them, or with arguments
-   * other than the approved ones, writes nothing; so does any call in a scheduled run, where nobody approved it.
+   * The zone and hash this exact call was classified under. A call that arrives without them, or with arguments
+   * other than the classified ones, writes nothing; so does any call in a scheduled run, where nobody approved it.
+   * A call that reached here without a card (`asked` false) runs only if the write proves to stay on the owner's own
+   * calendar, which the write checks again against the event as it is now.
    */
   #approvedWrite<T>(input: {
     call: T;
     schema: z.ZodType<T>;
     approval: ApprovalDecision | undefined;
     context: ToolInvocationContext | undefined;
-  }): { zone: string; hash: string } | { refusal: string } {
+  }): { zone: string; hash: string; asked: boolean } | { refusal: string } {
     if (this.#options.sentinel.services.unattended) {
       return { refusal: "Scheduled runs never change the calendar. This waits for the owner's OK." };
     }
@@ -354,29 +357,31 @@ export class CalendarToolSet extends LocalToolMCP {
       [REVIEW_HASH_KEY]: hash,
       ...approvedArgs
     } = input.context?.approved_params ?? {};
-    // The approved params are settled when the call is classified, before anyone answers, so only the person's
-    // answer lets it write: to this very call, or one given earlier for the whole chat.
-    if (input.approval?.status !== 'allow') {
+    // The approved params are settled when the call is classified, before anyone answers, so a card's answer must
+    // be yes: to this very call, or one given earlier for the whole chat. No answer at all means no card was shown.
+    if (input.approval !== undefined && input.approval.status !== 'allow') {
       return { refusal: NOT_APPROVED };
     }
     if (typeof zone !== 'string' || typeof hash !== 'string') {
       return { refusal: NOT_APPROVED };
     }
+    const asked = input.approval !== undefined;
     const approved = input.schema.safeParse(approvedArgs);
     if (!approved.success || stableStringify(approved.data) !== stableStringify(input.call)) {
       return {
-        refusal:
-          'The event details changed after you approved them, so nothing was saved. Ask again to review the new details.',
+        refusal: asked
+          ? 'The event details changed after you approved them, so nothing was saved. Ask again to review the new details.'
+          : 'The event details changed after they were checked, so nothing was saved. Ask again.',
       };
     }
-    return { zone, hash };
+    return { zone, hash, asked };
   }
 
   /**
    * The permissions log row for what an approved write did once it reached Google, so the log shows writes and not
    * only approvals. An approval that never reached this point (expired, refused at dispatch) has no such row.
    */
-  async #audit(input: { tool_name: string; outcome: 'ran' | 'denied'; description: string }) {
+  async #audit(input: { tool_name: string; outcome: 'ran' | 'denied'; description: string; tier: 1 | 3 }) {
     const { services, tenant_id, created_by, conversation_id } = this.#options.sentinel;
     // A log row that cannot be written must not turn an event Google saved into a reported failure, which a retry
     // would answer with a second event.
@@ -385,7 +390,7 @@ export class CalendarToolSet extends LocalToolMCP {
         tenant_id,
         created_by,
         conversation_id,
-        tier: 3,
+        tier: input.tier,
         tool_name: input.tool_name,
         description: input.description,
         outcome: input.outcome,
@@ -400,16 +405,20 @@ export class CalendarToolSet extends LocalToolMCP {
     }
   }
 
-  /** Runs one approved write, only if what it would send now still hashes to what the card showed. */
+  /**
+   * Runs one write, only if what it would send now still hashes to what was classified. A write that ran without a
+   * card must still stay on the owner's own calendar now; anything else needed the card and is refused.
+   */
   async #write(input: {
     tool_name: string;
-    approved: { zone: string; hash: string };
+    approved: { zone: string; hash: string; asked: boolean };
     resolve: (zone: string) => Promise<ResolvedEventWrite>;
     send: (request: EventWriteRequest) => Promise<{ id: string }>;
     status: 'created' | 'updated';
   }) {
+    const tier = input.approved.asked ? 3 : 1;
     const refuse = async (reason: string) => {
-      await this.#audit({ tool_name: input.tool_name, outcome: 'denied', description: `Not saved: ${reason}` });
+      await this.#audit({ tool_name: input.tool_name, outcome: 'denied', description: `Not saved: ${reason}`, tier });
       return errorResult(reason);
     };
     let resolved: ResolvedEventWrite;
@@ -420,6 +429,7 @@ export class CalendarToolSet extends LocalToolMCP {
         tool_name: input.tool_name,
         outcome: 'denied',
         description: 'Not saved: the event could not be read.',
+        tier,
       });
       return failureResult(error);
     }
@@ -428,10 +438,26 @@ export class CalendarToolSet extends LocalToolMCP {
     }
     if (hashEventWrite(resolved.request) !== input.approved.hash) {
       return await refuse(
-        'The event changed after you approved this, so nothing was saved. Ask again to see it as it is now.',
+        input.approved.asked
+          ? 'The event changed after you approved this, so nothing was saved. Ask again to see it as it is now.'
+          : 'The event changed after it was checked, so nothing was saved. Ask again.',
       );
     }
     const { review } = resolved;
+    if (!input.approved.asked) {
+      const start = resolved.request.body.start;
+      review.already_created =
+        review.action === 'create' &&
+        start !== undefined &&
+        wasRecentlyCreated({
+          conversationId: this.#options.sentinel.conversation_id,
+          title: review.title,
+          startKey: createStartKey({ date: start.date, dateTime: start.dateTime }),
+        });
+      if (!staysOnOwnCalendar(review)) {
+        return await refuse(NOT_APPROVED);
+      }
+    }
     // Checked again here so the demo send list holds even for a write approved before it was set.
     if (
       review.attendees.length > 0 &&
@@ -448,13 +474,18 @@ export class CalendarToolSet extends LocalToolMCP {
         tool_name: input.tool_name,
         outcome: 'denied',
         description: `Google Calendar did not confirm saving ${what}`,
+        tier,
       });
       return failureResult(error);
     }
+    const done = input.status === 'created' ? 'Added to' : 'Changed in';
     await this.#audit({
       tool_name: input.tool_name,
       outcome: 'ran',
-      description: `${input.status === 'created' ? 'Added to' : 'Changed in'} Google Calendar after the owner approved it: ${what}`,
+      description: input.approved.asked
+        ? `${done} Google Calendar after the owner approved it: ${what}`
+        : `${done} Google Calendar without asking, because nobody else is on the event: ${what}`,
+      tier,
     });
     const createdStart = resolved.request.body.start;
     if (input.status === 'created' && createdStart !== undefined) {

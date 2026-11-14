@@ -93,6 +93,21 @@ export interface CalendarWriteReview {
 export type ResolvedEventWrite =
   { ok: true; request: EventWriteRequest; review: CalendarWriteReview } | { ok: false; error: string };
 
+/**
+ * Whether a write stays on the owner's own main calendar and reaches nobody else, so it runs without a card and is
+ * only logged. Every write targets the owner's main calendar, and a change is only allowed on an event the owner
+ * organizes, so what is left to check is that no other person is on the event. A copy of an event this chat just
+ * added still asks, so a repeated call cannot pile up duplicates unseen.
+ */
+export function staysOnOwnCalendar(review: CalendarWriteReview): boolean {
+  return (
+    review.attendees.length === 0 &&
+    !review.guests_emailed &&
+    review.incomplete_reason === null &&
+    !(review.action === 'create' && review.already_created)
+  );
+}
+
 /** Hash of everything a write sends, and of the event version a change was shown against. */
 export function hashEventWrite(request: EventWriteRequest): string {
   return createHash('sha256').update(stableStringify(request)).digest('hex');

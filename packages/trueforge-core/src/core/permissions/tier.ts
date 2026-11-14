@@ -24,6 +24,12 @@ export const SANDBOX_SILENT_REASONS: ReadonlySet<string> = new Set([
   SANDBOX_RUN_CODE_REASON,
 ]);
 
+/**
+ * Tier 1 reason code for adding or changing an event on the owner's own Google Calendar with nobody else on it. It runs
+ * without a card; the calendar tool writes the activity row once Google confirms the change.
+ */
+export const OWN_CALENDAR_WRITE_REASON = 'own_calendar_write';
+
 /** Tier 3 reason codes for cancelling a reminder and for pausing or resuming a schedule. Each asks every time. */
 export const REMINDER_CANCEL_REASON = 'reminder_cancel';
 export const SCHEDULE_STATUS_REASON = 'schedule_status';

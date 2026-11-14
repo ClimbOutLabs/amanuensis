@@ -51,7 +51,8 @@ Some cards offer a lasting answer, so you don't have to click **Allow** every ti
 
 A few things to know about these answers:
 
-- On a change to your own calendar that invites no guests, **Always allow in this chat** covers every later change to your calendar in that chat. A calendar card has no other lasting answer, so Aman asks again in a new chat.
+- Adding or changing an event on your own Google Calendar with no guests doesn't show a card. It is written to the activity log.
+- On a calendar card that invites no guests, **Always allow in this chat** covers every later change like it in that chat. A calendar card has no other lasting answer, so Aman asks again in a new chat.
 - Saving a mail draft asks every time. So does making a schedule or a persona.
 - Even a tool you always allow asks first when a call would send something that looks like a password, a key or a card number, or a lot of text.
 

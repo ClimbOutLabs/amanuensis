@@ -93,30 +93,22 @@ const CREATE_ARGS = { calendar_id: 'primary', summary: 'Dentist', start: '2026-1
 const UPDATE_ARGS = { id: 'ev1', summary: 'Dentist moved' };
 
 describe('Google Calendar changes and standing grants', () => {
-  it('asks for a new event with no guests, also when an Always grant is stored for the tool', async () => {
-    const asks = await classifyTier(googleAction('create_event', review({})), await ctxWithGrants([]));
-    expect(asks).toMatchObject({ tier: 3, reason: 'calendar_write' });
-
-    const granted = await classifyTier(
-      googleAction('create_event', review({})),
-      await ctxWithGrants([[GOOGLE, 'create_event']]),
-    );
-    expect(granted).toMatchObject({ tier: 3, reason: 'calendar_write' });
-    expect(granted.card).not.toBeNull();
+  it('runs a new event with no guests without a card, with or without an Always grant', async () => {
+    for (const grants of [[], [[GOOGLE, 'create_event']]] satisfies [string, string][][]) {
+      const decision = await classifyTier(googleAction('create_event', review({})), await ctxWithGrants(grants));
+      expect(decision).toMatchObject({ tier: 1, reason: 'own_calendar_write', card: null });
+    }
   });
 
-  it('asks for a change to an event with no guests, also when an Always grant is stored for the tool', async () => {
+  it('runs a change to an event with no guests without a card, with or without an Always grant', async () => {
     const change = review({
       action: 'change',
       before: { title: 'Dentist', when: 'x', short_when: 'x', duration: '1 hour', location: '' },
     });
-    expect(await classifyTier(googleAction('update_event', change), await ctxWithGrants([]))).toMatchObject({
-      tier: 3,
-      reason: 'calendar_write',
-    });
-    expect(
-      await classifyTier(googleAction('update_event', change), await ctxWithGrants([[GOOGLE, 'update_event']])),
-    ).toMatchObject({ tier: 3, reason: 'calendar_write' });
+    for (const grants of [[], [[GOOGLE, 'update_event']]] satisfies [string, string][][]) {
+      const decision = await classifyTier(googleAction('update_event', change), await ctxWithGrants(grants));
+      expect(decision).toMatchObject({ tier: 1, reason: 'own_calendar_write', card: null });
+    }
   });
 
   it('shows a card for a new event with guests even with an Always grant, and says why in plain words', async () => {

@@ -1,7 +1,8 @@
 /**
  * The list of every tool Aman can call, and what each one may do without the person. A tool that acts
- * outside Aman never runs on its own: it asks on a card or is refused. A tool that reads the person's
- * accounts or the web leaves a line in the activity log. A tool that is not on the list fails this test,
+ * outside Aman never runs on its own: it asks on a card or is refused. The one exception is a short
+ * list below, for an event on the person's own calendar that has no guests. A tool that reads the
+ * person's accounts or the web leaves a line in the activity log. A tool that is not on the list fails this test,
  * so a new tool cannot ship before someone decides which kind it is.
  */
 import { AgentSpecSchema } from '@truefoundry/trueforge-core/agent-session';
@@ -80,6 +81,60 @@ const TOOL_KINDS: Record<string, Kind> = {
   'openui/get_openui_instructions': 'inside',
 };
 
+/**
+ * The only tools that act outside Aman and may run without a card, each with the one reason that lets
+ * it. Adding a line here is a decision for the person who owns the instance, not for a code change.
+ */
+const MAY_RUN_WITHOUT_A_CARD: Record<string, string> = {
+  'google_calendar/create_event': 'own_calendar_write',
+  'google_calendar/update_event': 'own_calendar_write',
+};
+
+const GUEST = 'nora@harbour.example';
+
+/** Arguments for an event with nobody else on it. */
+const OWN_EVENT_ARGS: Record<string, Record<string, unknown>> = {
+  'google_calendar/create_event': { title: 'Dentist', start: '2026-12-02T09:00', end: '2026-12-02T10:00' },
+  'google_calendar/update_event': { event_id: 'evt-1', title: 'Dentist, moved' },
+};
+
+/** The same calls for an event that has a guest. */
+const GUEST_EVENT_ARGS: Record<string, Record<string, unknown>> = {
+  'google_calendar/create_event': {
+    ...OWN_EVENT_ARGS['google_calendar/create_event'],
+    attendees: [GUEST],
+    send_updates: 'none',
+  },
+  'google_calendar/update_event': { ...OWN_EVENT_ARGS['google_calendar/update_event'], send_updates: 'none' },
+};
+
+/** Answers the calendar's requests the way Google would, with one saved event the person organizes. */
+function standInForGoogle(input: { guests: readonly string[] }): void {
+  jest.spyOn(globalThis, 'fetch').mockImplementation(request => {
+    const url = typeof request === 'string' ? request : request instanceof URL ? request.href : request.url;
+    if (url.includes('/token')) {
+      return Promise.resolve(Response.json({ access_token: 'stand-in', expires_in: 3600, token_type: 'Bearer' }));
+    }
+    return Promise.resolve(
+      Response.json({
+        id: 'evt-1',
+        status: 'confirmed',
+        summary: 'Dentist',
+        timeZone: 'Europe/Lisbon',
+        organizer: { self: true },
+        start: { dateTime: '2026-12-02T09:00:00Z' },
+        end: { dateTime: '2026-12-02T10:00:00Z' },
+        attendees: input.guests.map(email => ({ email })),
+        items: [],
+      }),
+    );
+  });
+}
+
+function ranWithoutACard(entry: Judged): boolean {
+  return entry.decision.is_approval_required !== true && entry.decision.pre_dispatch_failure === undefined;
+}
+
 function keyOf(row: ToolRow): string {
   return `${row.server}/${row.name}`;
 }
@@ -115,10 +170,7 @@ describe('every tool Aman can call', () => {
 
   it('never runs on its own when it acts outside Aman: it asks on a card or is refused', () => {
     const acting = ofKind('acts');
-    const ranAlone = acting.filter(
-      ({ judged: entry }) =>
-        entry.decision.is_approval_required !== true && entry.decision.pre_dispatch_failure === undefined,
-    );
+    const ranAlone = acting.filter(({ judged: entry }) => ranWithoutACard(entry));
     expect(ranAlone.map(entry => entry.tool)).toEqual([]);
     // The table holds both ways of stopping, so the check above is not passing by refusing everything.
     expect(acting.some(({ judged: entry }) => entry.decision.tier3_card != null)).toBe(true);
@@ -147,4 +199,56 @@ describe('every tool Aman can call', () => {
     });
     expect(spec.mcp_servers?.[0]?.require_approval_for_tools).toEqual(['@write', '@destructive', '@unclassified']);
   });
+});
+
+describe("an event on the person's own calendar", () => {
+  let table: ToolRow[] = [];
+  let withNoGuests = new Map<string, Judged>();
+
+  async function judgeAll(args: Record<string, Record<string, unknown>>): Promise<Map<string, Judged>> {
+    const judged = new Map<string, Judged>();
+    for (const row of table) {
+      const key = keyOf(row);
+      const outcome = await judge({ mode: 'online', row: { ...row, args: args[key] ?? row.args }, loading: 'direct' });
+      judged.set(key, outcome.judged);
+    }
+    return judged;
+  }
+
+  beforeAll(async () => {
+    jest.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('No network in tests.'));
+    table = (await toolTable()).filter(row => TOOL_KINDS[keyOf(row)] === 'acts');
+    // Judged once: adding the same event a second time in one chat asks, which is a different rule.
+    standInForGoogle({ guests: [] });
+    withNoGuests = await judgeAll(OWN_EVENT_ARGS);
+  }, 900_000);
+
+  afterAll(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('is added or changed without a card when nobody else is on it, and no other tool that acts runs that way', () => {
+    const ranAlone = [...withNoGuests].filter(([, entry]) => ranWithoutACard(entry));
+    expect(Object.fromEntries(ranAlone.map(([tool, entry]) => [tool, entry.decision.tier_reason]))).toEqual(
+      MAY_RUN_WITHOUT_A_CARD,
+    );
+  });
+
+  it('leaves a line in the activity log when it is added or changed without a card', () => {
+    for (const tool of Object.keys(MAY_RUN_WITHOUT_A_CARD)) {
+      const log = withNoGuests.get(tool)?.audit ?? [];
+      expect({ tool, log: log.map(row => row.outcome) }).toEqual({ tool, log: ['ran'] });
+      expect(log[0]?.description).toContain('without asking, because nobody else is on the event');
+    }
+  });
+
+  it('asks on a card first when the event has a guest', async () => {
+    standInForGoogle({ guests: [GUEST] });
+    const judged = await judgeAll(GUEST_EVENT_ARGS);
+    expect([...judged].filter(([, entry]) => ranWithoutACard(entry)).map(([tool]) => tool)).toEqual([]);
+    for (const tool of Object.keys(MAY_RUN_WITHOUT_A_CARD)) {
+      expect({ tool, asks: judged.get(tool)?.decision.is_approval_required }).toEqual({ tool, asks: true });
+      expect(judged.get(tool)?.decision.tier3_card).not.toBeNull();
+    }
+  }, 900_000);
 });
