@@ -14,7 +14,7 @@ import { privateViteCache } from './support/viteCache.ts';
 const RENDER_TIMEOUT_MS = 45_000;
 const PHONE = { width: 390, height: 844 };
 const DESKTOP = { width: 1100, height: 900 };
-const CARDS = ['search', 'calendar', 'email', 'email-new-recipient', 'command', 'held'] as const;
+const CARDS = ['search', 'calendar', 'email', 'email-new-recipient', 'command', 'held', 'skill-network'] as const;
 
 /**
  * The one fixed slot of every choice a card can show, from left to right. A card shows only some of them,
@@ -23,7 +23,7 @@ const CARDS = ['search', 'calendar', 'email', 'email-new-recipient', 'command', 
 const SLOTS: readonly (readonly string[])[] = [
   ['Allow', 'Add and send', 'Add and save draft'],
   ['Always allow in this chat'],
-  ['Always allow everywhere'],
+  ['Always allow everywhere', 'Always allow for this skill'],
   ['Allow all', 'Allow all (3)'],
   ['Change it'],
   ['Save as draft'],

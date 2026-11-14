@@ -5,8 +5,8 @@ import {
   reportPointing,
   smsFailureWords,
   type PointNumberResult,
-  type TwilioFetch,
 } from '../../../../src/runtime/texts/smsProvider';
+import type { TwilioFetch } from '../../../../src/runtime/twilio/rest';
 
 const settings = { accountSid: `AC${'1'.repeat(32)}`, authToken: 'secret-token-for-tests', fromNumber: '+15550100' };
 

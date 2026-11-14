@@ -12,6 +12,7 @@ import {
   testReachChannelRoute,
   updateReachRoute,
 } from '../routes/reachRoutes';
+import { callFailureWords } from '../runtime/calls/twilioCalls';
 import { TEST_WORDS } from '../runtime/delivery/deliveryChannel';
 import type { DeliveryService } from '../runtime/delivery/deliveryService';
 import { KIND_MAX_LEVEL } from '../runtime/noticing/levels';
@@ -131,8 +132,24 @@ export function createReachRouter(deps: ReachRouterDeps) {
         );
       }
     }
-    if (settings.channels.calls && !channels.calls.available) {
-      return c.json({ error: { message: `${channels.calls.note} Leave calls off for now.` } }, 400);
+    // Calls already on stay on while the voice parts are briefly down; only switching them on needs them now.
+    const callsWereOn = (await deps.reachStore.get(owner))?.channels.calls === true;
+    if (settings.channels.calls && !channels.calls.available && !callsWereOn) {
+      return c.json({ error: { message: channels.calls.note } }, 400);
+    }
+    if (settings.channels.calls) {
+      const contact = await deps.textContacts.get(owner);
+      if (!canText(contact)) {
+        return c.json(
+          {
+            error: {
+              message:
+                'Calls ring the number you confirm under Texts. Confirm your number first, then switch calls on.',
+            },
+          },
+          400,
+        );
+      }
     }
     const blocked = settings.call_kinds.find(kind => KIND_MAX_LEVEL[kind] !== 'call');
     if (blocked !== undefined) {
@@ -208,7 +225,43 @@ export function createReachRouter(deps: ReachRouterDeps) {
       return c.json({ data: { delivery_id: delivery.id, devices_reached: 0 } }, 201);
     }
     if (channel === 'call') {
-      return c.json({ error: { message: `${channels.calls.note} Try the app or push notices for now.` } }, 409);
+      if (!channels.calls.available) {
+        return c.json({ error: { message: channels.calls.note } }, 409);
+      }
+      const notOn = 'Confirm your number and switch calls on first, then try again.';
+      const settings = await deps.reachStore.get(owner);
+      if (settings?.channels.calls !== true || !canText(await deps.textContacts.get(owner))) {
+        return c.json({ error: { message: notOn } }, 409);
+      }
+      // The call sender claims the button's own limits once the call can ring, so a refused test counts nowhere. A
+      // note in the feed, so a test never counts toward the time between calls, and a test call never texts.
+      const delivery = await deps.deliveryService.deliver({
+        ...owner,
+        kind: 'note',
+        level: 'nudge',
+        text: 'This is a test call. If you can hear this, calls work.',
+        reason: 'You pressed Try it in Reach me settings.',
+        link: null,
+        test: 'call',
+      });
+      const rang = delivery.attempts.find(attempt => attempt.channel === 'call');
+      if (rang === undefined) {
+        return c.json({ error: { message: notOn } }, 409);
+      }
+      if (rang.outcome === 'skipped') {
+        // With calls on and a confirmed number, only the button's limits or the voice parts going down skip a call.
+        const stillOn = deps.channels().calls.available && canText(await deps.textContacts.get(owner));
+        return stillOn
+          ? c.json({ error: { message: rang.detail ?? 'No call was made. Try again later.' } }, 429)
+          : c.json({ error: { message: rang.detail ?? notOn } }, 409);
+      }
+      if (rang.outcome !== 'sent') {
+        return c.json(
+          { error: { message: rang.detail ?? callFailureWords({ failure: 'unreachable', test: true }) } },
+          502,
+        );
+      }
+      return c.json({ data: { delivery_id: delivery.id, devices_reached: 0 } }, 201);
     }
     // A test is a note in the feed, so a push test never uses up one of the day's nudges, and it reaches only the
     // person's devices, so it never sends a paid text.

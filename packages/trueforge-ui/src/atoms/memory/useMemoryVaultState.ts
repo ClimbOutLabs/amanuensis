@@ -21,6 +21,7 @@ import {
   type MemoryOwner,
 } from './memoryExplorer.js';
 import { useForgetWithUndo } from './useForgetWithUndo.js';
+import { useMemoryReview } from './useMemoryReview.js';
 
 const SHARED_NAMESPACE = '';
 const SEARCH_DEBOUNCE_MS = 150;
@@ -175,6 +176,14 @@ export function useMemoryVaultState() {
       .then(value => setSharing(value))
       .catch(loadError => setSharingError(memoryVaultErrorMessage(loadError)));
   }, [vault]);
+
+  // Older notes with no record of their source are reviewed in the shared and persona collections.
+  const reviewNamespaces = useMemo(
+    () => collections.filter(collection => collection.owner !== 'shared').map(collection => collection.namespace),
+    [collections],
+  );
+  const review = useMemoryReview({ vault, namespaces: reviewNamespaces, onMarked: () => void refresh() });
+  const [reviewOpen, setReviewOpen] = useState(false);
 
   const [search, setSearch] = useState('');
   const [query, setQuery] = useState('');
@@ -376,6 +385,10 @@ export function useMemoryVaultState() {
     forgetMemories,
     undoForget: forgetWithUndo.undo,
     heldCount: forgetWithUndo.heldCount,
+    review,
+    reviewOpen,
+    openReview: () => setReviewOpen(true),
+    closeReview: () => setReviewOpen(false),
     sharing,
     sharingError,
     fileInput,

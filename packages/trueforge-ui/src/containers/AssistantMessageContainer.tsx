@@ -24,6 +24,7 @@ import { ChatImageScope, ChatTurnWithoutImages, useChatImagesPort } from '../cha
 import { AmanBrief } from '../components/AmanBrief.js';
 import { useSpeakingKey, useSpokenReply } from '../components/SpokenReplyContext.js';
 import { ReminderNotificationPrompt } from '../reminders/ReminderNotificationPrompt.js';
+import { useOptionalSentinelState } from '../sentinel/SentinelStateProvider.js';
 import { useAgentDetailsVisibility } from '../server/AgentDetailsPreferenceContext.js';
 import { useSlot } from '../theme/SlotsProvider.js';
 import { computeAgentStepsSplit, type AgentStepsRun } from '../utils/computeAgentStepsSplit.js';
@@ -193,7 +194,12 @@ export function AssistantMessageContainer() {
   const unreadableText = answersBrief && readBrief === null && settled ? unreadableBriefText(answerText) : null;
   const briefHidesText = briefWriting || unreadableText !== null;
 
-  const { runs, hasFinal, interimTextIndices } = computeAgentStepsSplit(parts);
+  // A send receipt is the proof the person came for, so it stays in view instead of folding into agent details.
+  const sentinel = useOptionalSentinelState();
+  const { runs, hasFinal, interimTextIndices } = computeAgentStepsSplit(parts, {
+    keepVisible: part =>
+      part.type === 'tool-call' && part.toolCallId !== undefined && sentinel?.receiptFor(part.toolCallId) !== undefined,
+  });
 
   // With agent details off the person sees their answer and what needs them, nothing of the work.
   // In-between lines hide; a settled reply with no text after its last step keeps its last line as

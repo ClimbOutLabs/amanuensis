@@ -134,6 +134,10 @@ export function stampSentinelDecision(input: {
   | 'grant_tool_name'
   | 'secret_path_read'
   | 'mail_send'
+  | 'standing_grant_barred'
+  | 'chat_grantable_consequence'
+  | 'own_calendar_change'
+  | 'own_drive_write'
 > {
   const decision = input.decision;
   return {
@@ -150,6 +154,10 @@ export function stampSentinelDecision(input: {
     ...(decision.grant_tool_name === null ? {} : { grant_tool_name: decision.grant_tool_name }),
     ...(decision.secret_path_read ? { secret_path_read: true as const } : {}),
     ...(decision.mail_send ? { mail_send: true as const } : {}),
+    standing_grant_barred: decision.standing_grant_barred,
+    chat_grantable_consequence: decision.chat_grantable_consequence,
+    own_calendar_change: decision.own_calendar_change,
+    own_drive_write: decision.own_drive_write,
     ...(decision.silent_search_query === null ? {} : { silent_search_query: decision.silent_search_query }),
     ...(decision.audit_description === null ? {} : { audit_description: decision.audit_description }),
     is_approval_required:

@@ -277,6 +277,7 @@ export type {
 } from './components/PersonaContext.js';
 export {
   EMPTY_PERSONALIZATION_PROFILE,
+  PersonalizationConflictError,
   PersonalizationProvider,
   useOptionalPersonalization,
   usePersonalization,
@@ -284,6 +285,16 @@ export {
 export type { PersonalizationApi, PersonalizationProfile } from './components/PersonalizationContext.js';
 export { PersonalizationPanel } from './components/PersonalizationPanel.js';
 export type { PersonalizationPanelProps } from './components/PersonalizationPanel.js';
+export type {
+  RailAttachment,
+  RailDeskApi,
+  RailRecallFact,
+  RailRecallFactSource,
+  RailToday,
+  RailTodayDueReminder,
+  RailTodayEvent,
+  RailTodayNeedsOkItem,
+} from './components/RailDesk.js';
 export {
   RepositoryWorkProvider,
   useOptionalRepositoryWork,
@@ -505,7 +516,6 @@ export type {
   ConnectorChecks,
   ConnectorConnectionFailureKind,
   ConnectorConnectionTest,
-  MemoryProviderCheck,
 } from './server/connectorChecks.js';
 export { createTrueFoundryServer } from './server/createTrueFoundryServer.js';
 export type { CreateTrueFoundryServerOptions, TrueFoundryServer } from './server/createTrueFoundryServer.js';
@@ -540,6 +550,7 @@ export {
 } from './server/ShellModeContext.js';
 export type {
   AgentConfig,
+  OpenSessionRequest,
   SelectLibraryAgentRequest,
   SettingsOpenRequest,
   ShellMode,

@@ -33,11 +33,11 @@ Mail is checked every 10 minutes, the calendar every 30 minutes, and approvals e
 
 ## How loudly
 
-Everything lands under the bell with the reason you got it. The bell is at the top of the left panel. On a phone it is inside the menu, and the menu button shows how many items you have not seen.
+Everything lands under the bell with the reason you got it. The bell is labeled **For you** and sits at the top of the left panel. On a phone it is inside the menu, and the menu button shows how many items you have not seen.
 
 - **Note:** a quiet item under the bell. It never makes a sound. Most things are notes.
 - **Nudge:** a notice on the devices where you turned notices on, and a text if you set up texts and switched them on. See [Text messages](/text-messages).
-- **Call:** a phone call. Calls are not set up yet. Until they are, nothing calls you.
+- **Call:** a phone call, if the owner set up Twilio, the voice parts of Aman are running, and you switched calls on. Until then, something that would call you comes as a nudge. See [Phone calls](/phone-calls).
 
 A model reads a short description of each new thing and suggests how loudly to tell you. It can only suggest. Your settings decide. A waiting approval can nudge you but never call. A bill can nudge you only when it came from someone you marked always important and your mail server confirmed the sender, and it never calls. Words in a message, such as "urgent", can never make it louder than a note.
 
@@ -45,15 +45,15 @@ The model also suggests the words of the item. Those words show only under the b
 
 ## Your settings
 
-- **Ways to reach you.** In the app is always on. Notices are turned on per device. Texts work once the owner sets up Twilio, and you confirm your number. Until then they show what to do to set them up. Phone calls show "not set up yet" until they exist.
+- **Ways to reach you.** In the app is always on. Notices are turned on per device. Texts work once the owner sets up Twilio, and you confirm your number. Until then they show what to do to set them up. Phone calls ring the number you confirmed for texts. Until Twilio is set up, they say what to do to set them up. While the voice parts of Aman are not running, they say to start them.
 - **Mail that always matters.** Add the people whose mail you always want to hear about. Aman may suggest people it found in what it remembers. Nothing is added until you say so.
 - **How often and how early.** The most nudges in one day (5 to start with). After that, things wait as notes. Reminders you set never count toward this limit. Your time zone decides when your day starts. You also choose how early to hear about leaving, and how long an approval may wait.
 
-Settings that only matter for calls appear once phone calls are set up. Those are which kinds of event may call you, quiet hours, the fewest hours between two calls, and calls for reminders you mark urgent.
+Settings that only matter for calls appear once the owner sets up phone calls. Those are which kinds of event may call you, quiet hours, the fewest hours between two calls, and calls for reminders you mark urgent.
 
 ## Try it
 
-Each way to reach you has a **Try it** button. It sends a test item under the bell. For notices, it also says how many devices the notice reached. A test never counts toward your daily nudges. Each test text costs money, so Try it sends at most 3 test texts an hour, and they count toward the 30 texts a day each person can get.
+Each way to reach you has a **Try it** button. It sends a test item under the bell. For notices, it also says how many devices the notice reached. For calls, it rings your phone. A test never counts toward your daily nudges, and a test call never counts toward the time between calls. Each test text costs money, so Try it sends at most 3 test texts an hour, and they count toward the 30 texts a day each person can get. Each test call costs money too, so Try it rings at most once every 2 minutes and 5 times a day.
 
 ## When something goes wrong
 

@@ -48,6 +48,7 @@ describe('toolWords', () => {
     expect(toolDoneWords('delivery.created')).toBe('Sent you a notice');
     expect(toolDoneWords('delivery.web_push')).toBe('Sent a notice to your device');
     expect(toolDoneWords('delivery.sms')).toBe('Sent you a text');
+    expect(toolDoneWords('delivery.call')).toBe('Called you');
     expect(toolDoneWords('delivery.sms_stop')).toBe('Turned texts off after a STOP');
     expect(toolDoneWords('delivery.sms_new_number_stopped')).toBe('Dropped a new number after a STOP');
   });

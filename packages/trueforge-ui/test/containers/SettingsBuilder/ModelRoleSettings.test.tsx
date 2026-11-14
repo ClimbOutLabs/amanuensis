@@ -23,9 +23,50 @@ const models: ModelSelection[] = [
   { id: 'haiku', name: 'anthropic/haiku', provider: { name: 'Anthropic' }, properties: {} },
 ];
 
-function renderPage() {
+let helperModel: string | null;
+const helperWrites: Array<string | null> = [];
+const QUIET_TIDY = {
+  status: 'idle' as const,
+  movedToEarlier: 0,
+  notesAsked: 0,
+  notesSorted: 0,
+  pairsListed: 0,
+  sorting: 'off' as const,
+  modelMissing: false,
+  unsortedReasons: [],
+};
+
+/** The app's own server keeps the background model; a server without this port does not offer the role. */
+function nightlyPort() {
+  const stored = () => ({
+    enabled: false,
+    overridden: false,
+    defaultEnabled: false,
+    hour: 0,
+    modelWaitMinutes: 10,
+    helperModel,
+  });
+  return {
+    getMemoryNightly: async () => stored(),
+    setMemoryNightly: async (change: { helperModel?: string | null }) => {
+      if (change.helperModel !== undefined) {
+        helperWrites.push(change.helperModel);
+        helperModel = change.helperModel;
+      }
+      return stored();
+    },
+    tidyMemoryNow: async () => QUIET_TIDY,
+    getMemoryTidyState: async () => QUIET_TIDY,
+  };
+}
+
+function renderPage({ ownServer = true }: { ownServer?: boolean } = {}) {
+  const server = {
+    ...createMockAgentUIServer({ getModels: async () => models }),
+    ...(ownServer ? { memoryNightly: nightlyPort() } : {}),
+  };
   return render(
-    <ServerProvider server={createMockAgentUIServer({ getModels: async () => models })}>
+    <ServerProvider server={server}>
       <DraftCatalogProvider>
         <ModelRoleSettings />
       </DraftCatalogProvider>
@@ -38,6 +79,8 @@ describe('ModelRoleSettings', () => {
     updateAgentSpec.mockReset();
     agentSpec = { model: { name: 'openai/gpt-4.1' } };
     specError = null;
+    helperModel = null;
+    helperWrites.length = 0;
   });
 
   it('names the four roles that have a real model call behind them', async () => {
@@ -47,7 +90,47 @@ describe('ModelRoleSettings', () => {
     expect(screen.getByRole('heading', { name: 'Main chat model' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Coding / subagent model' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Compaction model' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Summarization model' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Background model' })).toBeInTheDocument();
+  });
+
+  it('keeps the background model on the server, not in the chat being set up', async () => {
+    renderPage();
+
+    fireEvent.click(await screen.findByTitle('Select Background model'));
+    fireEvent.click(await screen.findByRole('option', { name: /haiku/ }));
+
+    await waitFor(() => expect(helperWrites).toEqual(['anthropic/haiku']));
+    expect(updateAgentSpec).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.getByTitle('Select Background model')).toHaveTextContent('haiku'));
+  });
+
+  it('goes back to the main model when Default is chosen for the helper', async () => {
+    helperModel = 'anthropic/haiku';
+    renderPage();
+
+    await waitFor(() => expect(screen.getByTitle('Select Background model')).toHaveTextContent('haiku'));
+    fireEvent.click(screen.getByTitle('Select Background model'));
+    fireEvent.click(await screen.findByRole('option', { name: /^Default/ }));
+
+    await waitFor(() => expect(helperWrites).toEqual([null]));
+  });
+
+  it('says so when the stored background model is no longer listed', async () => {
+    helperModel = 'mystery/gone-model';
+    renderPage();
+
+    const row = (await screen.findByRole('heading', { name: 'Background model' })).closest('article');
+    expect(row).not.toBeNull();
+    await waitFor(() =>
+      expect(within(row ?? document.body).getByText('Not in the current model catalog')).toBeInTheDocument(),
+    );
+  });
+
+  it('offers no background model on a server that does not keep one', async () => {
+    renderPage({ ownServer: false });
+
+    expect(await screen.findByRole('heading', { name: 'Compaction model' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Background model' })).not.toBeInTheDocument();
   });
 
   it('shows no sub-tab strip when the host has no personas', async () => {

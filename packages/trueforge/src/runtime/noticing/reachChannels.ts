@@ -1,5 +1,7 @@
 import type { TwilioSettings } from '../../config';
 import type { ReachAvailability } from '../../schemas/reach';
+import { callVoiceProblem, type CallVoice } from '../calls/callVoiceReady';
+import { CALLS_NOT_SET_UP } from '../calls/phoneCalls';
 import type { PointNumberFailure } from '../texts/smsProvider';
 import { TEXTS_NOT_SET_UP } from '../texts/textWords';
 
@@ -27,25 +29,31 @@ function numberProblemWords({ failure, viewer }: { failure: PointNumberFailure; 
 
 /**
  * Which of the person's phone channels can be used on this server. Each channel reports itself here when it is set
- * up, and nothing else about noticing changes. Until phone calls exist, a call that survives the rules is delivered
- * as a nudge.
+ * up, and nothing else about noticing changes. While calls are not set up, a call that survives the rules is
+ * delivered as a nudge.
  */
 export const NO_PHONE_CHANNELS: ReachAvailability = {
   texts: { available: false, note: TEXTS_NOT_SET_UP, problem: null },
-  calls: { available: false, note: 'Phone calls are not set up yet.', problem: null },
+  calls: { available: false, note: CALLS_NOT_SET_UP, problem: null },
 };
 
+/** Shown beside Calls in Reach me settings, word for word. */
+const CALLS_PRIVACY_NOTE =
+  "Calls and texts travel through Twilio and the phone company. The assistant's voice and the transcript are made on your computer.";
+
 /**
- * The channels this server offers: texts when Twilio is set up, and no calls until they exist. When the Twilio number
- * could not be pointed at this server, texts still go out, and the problem says, in words for the viewer, that STOP
- * replies do not reach Aman yet.
+ * The channels this server offers: texts once Twilio is set up, and calls once the parts that listen and speak are
+ * running too. Calls ring the number confirmed for texts. When the Twilio number could not be pointed at this server,
+ * texts still go out, and the problem says, in words for the viewer, that STOP replies do not reach Aman yet.
  */
 export function reachChannelsFor({
   twilio,
+  voice,
   numberProblem,
   viewer,
 }: {
   twilio: Pick<TwilioSettings, 'accountSid'> | undefined;
+  voice: CallVoice;
   numberProblem: PointNumberFailure | undefined;
   viewer: ChannelViewer;
 }): ReachAvailability {
@@ -53,11 +61,14 @@ export function reachChannelsFor({
     return NO_PHONE_CHANNELS;
   }
   return {
-    ...NO_PHONE_CHANNELS,
     texts: {
       available: true,
       note: 'Texts travel through Twilio and the phone company.',
       problem: numberProblem === undefined ? null : numberProblemWords({ failure: numberProblem, viewer }),
     },
+    calls:
+      voice === 'ready'
+        ? { available: true, note: CALLS_PRIVACY_NOTE, problem: null }
+        : { available: false, note: callVoiceProblem(voice), problem: null },
   };
 }

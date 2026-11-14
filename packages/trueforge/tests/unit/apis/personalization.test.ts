@@ -1,12 +1,15 @@
+import winston from 'winston';
 import { createPersonalizationRouter } from '../../../src/apis/personalization';
 import type { RequestContext } from '../../../src/auth/identity';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqlitePersonalizationStore } from '../../../src/db/sqlite/personalization-store/SqlitePersonalizationStore';
+import { PROFILE_LEARNING_ACTOR } from '../../../src/runtime/profileLearning';
 import {
   GetPersonalizationContextResponseSchema,
   GetPersonalizationProfileResponseSchema,
 } from '../../../src/schemas/personalization';
+import { QuietMemoryClient } from '../../fixtures/memory/quietMemoryClient';
 
 const userA: RequestContext = {
   tenant_id: 'default',
@@ -26,12 +29,125 @@ function jsonInit(method: string, body: unknown): RequestInit {
 }
 
 describe('personalization router', () => {
+  it('refuses a save made from an older revision, so a stale page cannot put back replaced learned text', async () => {
+    const db = createSqliteDb(':memory:');
+    await migrateSqliteToLatest(db);
+    const store = new SqlitePersonalizationStore(db);
+    const router = createPersonalizationRouter({
+      personalizationStore: store,
+      resolveRequestContext: () => userA,
+      resolveMemoryClient: () => new QuietMemoryClient(),
+      logger: winston.createLogger({ silent: true }),
+    });
+    const page = {
+      assistant_name: null,
+      assistant_identity: null,
+      voice_guidance: null,
+      user_profile: 'Plain English.',
+      pinned_preferences: [],
+      learned_profile: '- Likes tea.',
+      learning_enabled: true,
+    };
+    const created = GetPersonalizationProfileResponseSchema.parse(
+      await (await router.request('/profile', jsonInit('PUT', { profile: page }))).json(),
+    );
+    expect(created.data?.revision).toBe(1);
+
+    // The learning pass writes while the Settings page is still open at revision 1.
+    await store.upsertProfile({
+      tenant_id: 'default',
+      created_by: 'user-a',
+      updated_by: PROFILE_LEARNING_ACTOR,
+      ...page,
+      user_name: null,
+      address_as: null,
+      help_areas: [],
+      learned_profile: '- Likes tea.\n- Likes hiking.',
+      expected_revision: 1,
+    });
+
+    const stale = await router.request(
+      '/profile',
+      jsonInit('PUT', { profile: { ...page, user_profile: 'Short replies.' }, expected_revision: 1 }),
+    );
+    expect(stale.status).toBe(409);
+    const staleBody: unknown = await stale.json();
+    expect(staleBody).toMatchObject({ error: { message: expect.stringContaining('Reload the page') } });
+    const kept = GetPersonalizationProfileResponseSchema.parse(await (await router.request('/profile')).json());
+    expect(kept.data).toMatchObject({ learned_profile: '- Likes tea.\n- Likes hiking.', revision: 2 });
+
+    const current = await router.request(
+      '/profile',
+      jsonInit('PUT', {
+        profile: { ...page, learned_profile: '- Likes tea.\n- Likes hiking.', user_profile: 'Short replies.' },
+        expected_revision: 2,
+      }),
+    );
+    expect(current.status).toBe(200);
+    expect(GetPersonalizationProfileResponseSchema.parse(await current.json()).data).toMatchObject({
+      user_profile: 'Short replies.',
+      learned_profile: '- Likes tea.\n- Likes hiking.',
+      revision: 3,
+    });
+  });
+
+  it('refuses a save from a page that read no profile once learning has created one', async () => {
+    const db = createSqliteDb(':memory:');
+    await migrateSqliteToLatest(db);
+    const store = new SqlitePersonalizationStore(db);
+    const router = createPersonalizationRouter({
+      personalizationStore: store,
+      resolveRequestContext: () => userA,
+      resolveMemoryClient: () => new QuietMemoryClient(),
+      logger: winston.createLogger({ silent: true }),
+    });
+    const empty = {
+      assistant_name: null,
+      assistant_identity: null,
+      voice_guidance: null,
+      user_name: null,
+      address_as: null,
+      user_profile: null,
+      pinned_preferences: [],
+      help_areas: [],
+    };
+
+    // The page opened before any profile existed; the learning pass then wrote the first one.
+    await store.upsertProfile({
+      tenant_id: 'default',
+      created_by: 'user-a',
+      updated_by: PROFILE_LEARNING_ACTOR,
+      ...empty,
+      learned_profile: '- Likes hiking.',
+      learning_enabled: true,
+      expected_revision: null,
+    });
+
+    const stale = await router.request(
+      '/profile',
+      jsonInit('PUT', { profile: { ...empty, user_profile: 'Short replies.' }, expected_revision: null }),
+    );
+    expect(stale.status).toBe(409);
+    const kept = GetPersonalizationProfileResponseSchema.parse(await (await router.request('/profile')).json());
+    expect(kept.data).toMatchObject({ learned_profile: '- Likes hiking.', revision: 1 });
+
+    await router.request('/profile', { method: 'DELETE' });
+    const first = await router.request(
+      '/profile',
+      jsonInit('PUT', { profile: { ...empty, user_profile: 'Short replies.' }, expected_revision: null }),
+    );
+    expect(first.status).toBe(200);
+    await db.destroy();
+  });
+
   it('stores the user name and form of address, and reads them as unset when a client omits them', async () => {
     const db = createSqliteDb(':memory:');
     await migrateSqliteToLatest(db);
     const router = createPersonalizationRouter({
       personalizationStore: new SqlitePersonalizationStore(db),
       resolveRequestContext: () => userA,
+      resolveMemoryClient: () => new QuietMemoryClient(),
+      logger: winston.createLogger({ silent: true }),
     });
     const base = {
       assistant_name: null,
@@ -70,6 +186,8 @@ describe('personalization router', () => {
     const router = createPersonalizationRouter({
       personalizationStore: new SqlitePersonalizationStore(db),
       resolveRequestContext: () => user,
+      resolveMemoryClient: () => new QuietMemoryClient(),
+      logger: winston.createLogger({ silent: true }),
     });
     const request = {
       profile: {
@@ -108,6 +226,8 @@ describe('personalization router', () => {
     const router = createPersonalizationRouter({
       personalizationStore: new SqlitePersonalizationStore(db),
       resolveRequestContext: () => userA,
+      resolveMemoryClient: () => new QuietMemoryClient(),
+      logger: winston.createLogger({ silent: true }),
     });
     const profileFields = {
       assistant_name: 'Aman',
@@ -158,6 +278,8 @@ describe('personalization router', () => {
     const router = createPersonalizationRouter({
       personalizationStore: new SqlitePersonalizationStore(db),
       resolveRequestContext: () => userA,
+      resolveMemoryClient: () => new QuietMemoryClient(),
+      logger: winston.createLogger({ silent: true }),
     });
     const profileFields = {
       assistant_name: 'Aman',
@@ -197,6 +319,8 @@ describe('personalization router', () => {
     const router = createPersonalizationRouter({
       personalizationStore: new SqlitePersonalizationStore(db),
       resolveRequestContext: () => userA,
+      resolveMemoryClient: () => new QuietMemoryClient(),
+      logger: winston.createLogger({ silent: true }),
     });
     const profileFields = {
       assistant_name: null,
@@ -238,6 +362,8 @@ describe('personalization router', () => {
     const router = createPersonalizationRouter({
       personalizationStore: new SqlitePersonalizationStore(db),
       resolveRequestContext: () => userA,
+      resolveMemoryClient: () => new QuietMemoryClient(),
+      logger: winston.createLogger({ silent: true }),
     });
     const emptyContent = {
       assistant_name: null,

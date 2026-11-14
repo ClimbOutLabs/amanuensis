@@ -4,7 +4,11 @@ import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { AmanRuntimeRail } from '@/components/AmanRuntimeRail.js';
-import { PersonalizationProvider, type PersonalizationProfile } from '@/components/PersonalizationContext.js';
+import {
+  PersonalizationConflictError,
+  PersonalizationProvider,
+  type PersonalizationProfile,
+} from '@/components/PersonalizationContext.js';
 import { PersonalizationPanel } from '@/components/PersonalizationPanel.js';
 
 const initialProfile: PersonalizationProfile = {
@@ -21,6 +25,40 @@ const initialProfile: PersonalizationProfile = {
 };
 
 describe('PersonalizationPanel', () => {
+  it('keeps text learned while the page was open when the person saves another field', async () => {
+    const opened: PersonalizationProfile = { ...initialProfile, learned_profile: '- Likes tea.', revision: 1 };
+    const learnedSince: PersonalizationProfile = {
+      ...opened,
+      learned_profile: '- Likes tea.\n- Likes hiking.',
+      revision: 2,
+    };
+    const getProfile = vi.fn<() => Promise<PersonalizationProfile>>();
+    getProfile.mockResolvedValueOnce(opened).mockResolvedValue(learnedSince);
+    const updateProfile = vi.fn(async (profile: PersonalizationProfile) => {
+      if (profile.revision !== 2) {
+        throw new PersonalizationConflictError('Your profile changed while this page was open.');
+      }
+      return { ...profile, revision: 3 };
+    });
+    render(
+      <PersonalizationProvider api={{ getProfile, updateProfile, deleteProfile: async () => {} }}>
+        <PersonalizationPanel />
+      </PersonalizationProvider>,
+    );
+
+    fireEvent.change(await screen.findByLabelText('Your name'), { target: { value: 'Sam Rivera' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save personalization' }));
+
+    expect(await screen.findByText('Personalization saved.')).toBeInTheDocument();
+    expect(updateProfile).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        user_name: 'Sam Rivera',
+        learned_profile: '- Likes tea.\n- Likes hiking.',
+        revision: 2,
+      }),
+    );
+  });
+
   it('asks for the name and form of address first and saves them', async () => {
     const updateProfile = vi.fn(async profile => ({ ...profile }));
     render(

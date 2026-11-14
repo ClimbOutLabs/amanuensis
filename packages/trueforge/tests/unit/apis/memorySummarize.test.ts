@@ -68,16 +68,13 @@ function putInit(enabled: boolean | null): RequestInit {
 
 describe('memorySummarize router', () => {
   const originalDefault = configuration.MEMORY_SUMMARIZE;
-  const originalBackend = configuration.MEMORY_BACKEND;
 
   beforeEach(() => {
     configuration.MEMORY_SUMMARIZE = false;
-    configuration.MEMORY_BACKEND = 'markdown';
   });
 
   afterEach(() => {
     configuration.MEMORY_SUMMARIZE = originalDefault;
-    configuration.MEMORY_BACKEND = originalBackend;
   });
 
   it('GET reports the env default when no override is stored', async () => {
@@ -85,7 +82,7 @@ describe('memorySummarize router', () => {
     const response = await router.request('/');
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
-      data: { enabled: false, overridden: false, default_enabled: false, effective_enabled: false },
+      data: { enabled: false, overridden: false, default_enabled: false },
     });
   });
 
@@ -95,20 +92,20 @@ describe('memorySummarize router', () => {
     const putTrue = await router.request('/', putInit(true));
     expect(putTrue.status).toBe(200);
     expect(await putTrue.json()).toEqual({
-      data: { enabled: true, overridden: true, default_enabled: false, effective_enabled: true },
+      data: { enabled: true, overridden: true, default_enabled: false },
     });
     expect((await globalSettingsStore.getSetting({ key: KEY }))?.value).toBe('true');
 
     const putFalse = await router.request('/', putInit(false));
     expect(putFalse.status).toBe(200);
     expect(await putFalse.json()).toEqual({
-      data: { enabled: false, overridden: true, default_enabled: false, effective_enabled: false },
+      data: { enabled: false, overridden: true, default_enabled: false },
     });
     expect((await globalSettingsStore.getSetting({ key: KEY }))?.value).toBe('false');
 
     const get = await router.request('/');
     expect(await get.json()).toEqual({
-      data: { enabled: false, overridden: true, default_enabled: false, effective_enabled: false },
+      data: { enabled: false, overridden: true, default_enabled: false },
     });
   });
 
@@ -119,7 +116,7 @@ describe('memorySummarize router', () => {
     const cleared = await router.request('/', putInit(null));
     expect(cleared.status).toBe(200);
     expect(await cleared.json()).toEqual({
-      data: { enabled: false, overridden: false, default_enabled: false, effective_enabled: false },
+      data: { enabled: false, overridden: false, default_enabled: false },
     });
     expect(await globalSettingsStore.getSetting({ key: KEY })).toBeUndefined();
   });
@@ -132,18 +129,6 @@ describe('memorySummarize router', () => {
       body: JSON.stringify({ enabled: 'yes' }),
     });
     expect(response.status).toBe(400);
-  });
-
-  it('reports effective false on a non-markdown backend even when the stored setting is on', async () => {
-    configuration.MEMORY_BACKEND = 'hindsight';
-    const { router } = await createRouter();
-    await router.request('/', putInit(true));
-
-    const response = await router.request('/');
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({
-      data: { enabled: true, overridden: true, default_enabled: false, effective_enabled: false },
-    });
   });
 
   it('PUT reports the written state instead of fabricating it when the read-back fails', async () => {
@@ -160,14 +145,14 @@ describe('memorySummarize router', () => {
     const putFalse = await router.request('/', putInit(false));
     expect(putFalse.status).toBe(200);
     expect(await putFalse.json()).toEqual({
-      data: { enabled: false, overridden: true, default_enabled: true, effective_enabled: false },
+      data: { enabled: false, overridden: true, default_enabled: true },
     });
 
     // Clearing the override reports the env default as the effective state.
     const cleared = await router.request('/', putInit(null));
     expect(cleared.status).toBe(200);
     expect(await cleared.json()).toEqual({
-      data: { enabled: true, overridden: false, default_enabled: true, effective_enabled: true },
+      data: { enabled: true, overridden: false, default_enabled: true },
     });
   });
 });

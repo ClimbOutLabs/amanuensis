@@ -1,10 +1,11 @@
 import type { AuditLogWriter } from '@truefoundry/trueforge-core/core';
 import { chmod, mkdir, unlink } from 'node:fs/promises';
 import { createServer, type Server } from 'node:http';
-import { connect as netConnect, type Socket } from 'node:net';
+import { isIP, connect as netConnect, type Socket } from 'node:net';
 import path from 'node:path';
 import type { Duplex } from 'node:stream';
 import type { Logger } from 'winston';
+import { isSkillNetworkHostName } from '../../schemas/skill';
 import { guardedLookup } from '../mirrors/packageMirrorGateway';
 import type { SkillNetworkGrant, SkillNetworkTokenRegistry } from './skillNetworkTokens';
 
@@ -119,6 +120,20 @@ export class SkillNetworkGateway {
     const tokenHeader = input.headers[SKILL_NETWORK_TOKEN_HEADER];
     const token = Array.isArray(tokenHeader) ? tokenHeader[0] : tokenHeader;
     const grant = token === undefined ? undefined : this.#registry.resolve(token);
+    // Only named sites can ever be approved, so a target that is not a site name (a bare
+    // address, say) is refused here, before it can be recorded as a refusal a card would ask
+    // about or dialled: a card answer must never be able to open a private address.
+    if (!isSkillNetworkHostName(target.host)) {
+      this.#refuse({
+        socket,
+        status: 403,
+        message: `${target.host} is not a named site. Connections are only made to named sites, never to bare addresses.`,
+        host: target.host,
+        grant,
+        auditDescription: `A connection to ${target.host} was refused because it is not a named site.`,
+      });
+      return;
+    }
     if (target.port !== 443) {
       this.#refuse({
         socket,
@@ -126,7 +141,7 @@ export class SkillNetworkGateway {
         message: 'Only secure (HTTPS) connections are carried. Connect to port 443.',
         host: target.host,
         grant,
-        auditDescription: `A skill tried to reach ${target.host} without a secure connection, and it was refused.`,
+        auditDescription: `A connection to ${target.host} was refused because it did not use a secure connection.`,
       });
       return;
     }
@@ -143,13 +158,16 @@ export class SkillNetworkGateway {
       return;
     }
     if (!grant.hosts.includes(target.host)) {
+      // The refusal stands as it is; the site is also noted on the chat so the runtime can ask
+      // the person about it with a card instead of the attempt ending at this message.
+      this.#registry.recordRefusal({ session_id: grant.session_id, host: target.host });
       this.#refuse({
         socket,
         status: 403,
-        message: `${target.host} is not one of the sites approved for the skills in this chat. To allow it, the skill must name it and the new list must be approved in Settings, then Skills.`,
+        message: `${target.host} is not one of the sites approved for the skills in this chat. The connection was refused, and the person is being asked in this chat whether to allow it.`,
         host: target.host,
         grant,
-        auditDescription: `A skill tried to reach ${target.host}, which is not one of its approved sites, and the connection was refused.`,
+        auditDescription: `A connection to ${target.host} was refused because the site is not one of the sites approved for the skills in this chat.`,
       });
       return;
     }
@@ -247,7 +265,12 @@ export class SkillNetworkGateway {
   }
 }
 
-/** Splits a CONNECT authority (`host:port`) into its parts, or undefined when it is not one. */
+/**
+ * Splits a CONNECT authority (`host:port`) into its parts, or undefined when it is not one.
+ * The name is normalised to the one form a grant holds: lowercase, with any credentials in
+ * front of it (user@host) and one trailing dot taken off, since both dressings name the same
+ * site and the bare name is what gets matched, recorded and shown.
+ */
 function parseConnectTarget(authority: string | undefined): { host: string; port: number } | undefined {
   if (authority === undefined) {
     return undefined;
@@ -256,7 +279,14 @@ function parseConnectTarget(authority: string | undefined): { host: string; port
   if (mark <= 0) {
     return undefined;
   }
-  const host = authority.slice(0, mark).toLowerCase();
+  let host = authority.slice(0, mark).toLowerCase();
+  const userMark = host.lastIndexOf('@');
+  if (userMark >= 0) {
+    host = host.slice(userMark + 1);
+  }
+  if (host.endsWith('.')) {
+    host = host.slice(0, -1);
+  }
   const port = Number(authority.slice(mark + 1));
   if (host.length === 0 || host.includes('/') || !Number.isInteger(port) || port < 1 || port > 65535) {
     return undefined;
@@ -266,6 +296,11 @@ function parseConnectTarget(authority: string | undefined): { host: string; port
 
 /** Opens a TCP connection to a public address of the host, resolved and pinned by the guarded lookup. */
 function dialPublicHost(input: { host: string; port: number }): Promise<Socket> {
+  // Node skips the lookup for a host that is already an address, which would skip the public
+  // address check with it, so a bare address is refused here as well as at the door.
+  if (isIP(input.host) !== 0) {
+    return Promise.reject(new Error(`${input.host} is not a named site.`));
+  }
   return new Promise((resolve, reject) => {
     const socket = netConnect({
       host: input.host,

@@ -15,6 +15,7 @@ function email(overrides: Partial<SentinelApprovalEmail> = {}): SentinelApproval
     bcc: [],
     subject: 'Lease',
     body: 'Thursday works.\n\nBest,\nAda',
+    check_code: null,
     replaces: null,
     reply_in_thread: null,
     reply_to: null,
@@ -246,11 +247,12 @@ describe('EmailApprovalCard body', () => {
 });
 
 describe('EmailApprovalCard actions', () => {
-  it('sends once, then shows Sent with the time and no buttons', () => {
+  it('sends once, then says Sending with no buttons, and never claims Sent before the server does', () => {
     const { onApprove } = renderEmail();
     fireEvent.click(screen.getByRole('button', { name: 'Allow' }));
     expect(onApprove).toHaveBeenCalledTimes(1);
-    expect(screen.getByText(/^Sent · /)).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('Sending…');
+    expect(screen.queryByText(/^Sent/)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Allow' })).not.toBeInTheDocument();
   });
 
@@ -277,6 +279,24 @@ describe('EmailApprovalCard actions', () => {
     fireEvent.click(screen.getByRole('button', { name: "Don't send" }));
     expect(onDeny).toHaveBeenCalledTimes(1);
     expect(onApprove).not.toHaveBeenCalled();
+  });
+
+  it('shows the check code of a send, which its receipt repeats', () => {
+    render(
+      <EmailApprovalCard
+        approvalId="approval-1"
+        card={cardWith({ check_code: 'A7F39C' })}
+        onApprove={vi.fn()}
+        onDeny={vi.fn()}
+      />,
+    );
+    expect(screen.getByText('Check code')).toBeInTheDocument();
+    expect(screen.getByText('A7F39C')).toBeInTheDocument();
+  });
+
+  it('shows no check code on a card that has none', () => {
+    render(<EmailApprovalCard approvalId="approval-1" card={cardWith()} onApprove={vi.fn()} onDeny={vi.fn()} />);
+    expect(screen.queryByText('Check code')).not.toBeInTheDocument();
   });
 
   it('calls onDeny from Not now', () => {

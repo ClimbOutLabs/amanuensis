@@ -35,7 +35,7 @@ The rest of this page, up to the Windows section, is for Mac, Linux and WSL.
 aman doctor
 ```
 
-It checks this computer and every instance, then prints one **Next:** line for each problem, with the command that fixes it. It changes nothing. An instance is one person's own copy of Aman.
+It checks this computer and every instance, then prints one **Next:** line for each problem, with the command that fixes it. The box at the end lists every problem again. It changes nothing. An instance is one person's own copy of Aman.
 
 | Command                       | What it does                                                                       |
 | ----------------------------- | ---------------------------------------------------------------------------------- |
@@ -65,6 +65,13 @@ Each of these checks one area. Add `--fix` to repair what it finds. A fix asks b
 | `aman doctor sandbox`  | The sandbox where Aman runs code passes its safety checks, then makes a real call through the app | Rebuilds the sandbox image, reloads its safety profile, recreates missing disks and restarts it |
 
 `aman doctor instance`, `aman doctor network` and `aman doctor sandbox` also take `--instance NAME`. `aman doctor sandbox` takes `--disk-gb N` to set the size of each sandbox disk, and `--no-hard-disk-limit` where the computer can't make fixed-size disks.
+
+To give the sandbox more tools, add them with `aman doctor sandbox`. Aman then rebuilds the sandbox. The sandbox already has common Python packages, such as requests, pyyaml, httpx and beautifulsoup4.
+
+- `aman doctor sandbox --add go` adds Go. Use `rust` or `java` the same way, or several at once, such as `--add go,rust`. `--remove go` takes one out again.
+- `aman doctor sandbox --add-python feedparser,arxiv` adds your own Python packages. `--remove-python feedparser` takes one out again. Your list stays through upgrades.
+
+Only add Python packages you trust, because code that runs in the sandbox can use them. See [Sandbox setup](sandbox.mdx) for the details.
 
 ## Back up and restore your data
 
@@ -236,3 +243,13 @@ The [Windows guide](install-windows.md) walks through Aman Setup.
 ## When a command fails
 
 Every command says what went wrong and the one thing to do next. If that doesn't help, see [Troubleshooting](troubleshooting.md).
+
+## Colors and plain text
+
+In a terminal, the installer, `aman upgrade` and `aman doctor` use color, numbered steps and boxes. The colors come from your terminal's own theme, so they work on light and dark backgrounds. To turn color off, set `NO_COLOR=1`:
+
+```bash
+NO_COLOR=1 aman doctor
+```
+
+When the output goes to a file or another program, it is plain text with no color. Without a UTF-8 language setting, the lines and boxes use plain ASCII characters.

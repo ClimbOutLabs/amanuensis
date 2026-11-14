@@ -16,7 +16,6 @@ import { StandaloneAuthenticator } from '../../../src/auth/standaloneAuthenticat
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqliteGlobalSettingsStore } from '../../../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
-import { SqliteMcpServerStore } from '../../../src/db/sqlite/mcp-server-store/SqliteMcpServerStore';
 import { SqliteSandboxProviderStore } from '../../../src/db/sqlite/sandbox-provider-store/SqliteSandboxProviderStore';
 import { slotSandboxBuildStatus } from '../../../src/sandbox/slotBackend';
 
@@ -58,7 +57,6 @@ async function capabilities(
     '/',
     createCapabilitiesRouter({
       resolveSandboxProviderStore: () => new SqliteSandboxProviderStore(db),
-      mcpServerStore: new SqliteMcpServerStore(db),
       globalSettingsStore: new SqliteGlobalSettingsStore(db),
       withTransaction: callback => db.transaction().execute(callback),
       logger: createLogger({ silent: true }),

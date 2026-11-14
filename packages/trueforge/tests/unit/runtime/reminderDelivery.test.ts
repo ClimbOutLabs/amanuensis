@@ -313,6 +313,7 @@ async function setup(channels: ReachAvailability = NO_PHONE_CHANNELS) {
     collectorSession,
     reachSettings,
     noticingStore,
+    db,
   };
 }
 

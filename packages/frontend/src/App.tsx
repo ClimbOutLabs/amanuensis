@@ -31,6 +31,7 @@ import {
   type AmanAvatarMotionSources,
   type CurrentUser,
   type FirstRunGuideState,
+  type OpenSessionRequest,
   type RoutesConfig,
   type SettingsOpenRequest,
   type SlotOverrides,
@@ -67,12 +68,14 @@ import { createModelUsageApi } from './modelUsageApi';
 import { createPersonaApi } from './personaApi';
 import { createPersonalizationApi } from './personalizationApi';
 import { API_BASE_URL, apiPath, uiRouterBasename } from './publicPath';
+import { createRailDeskApi } from './railDeskApi';
 import { createRemindersApi } from './remindersApi';
 import { createRepositoryWorkApi } from './repositoryWorkApi';
 import { createRunCodeStatusApi } from './runCodeStatusApi';
 import { createSentinelApi, readAllSessionEvents } from './sentinelApi';
 import { isSetupComplete, mergeSetupRead, SETUP_REFRESH_MS, type SetupSnapshot } from './setupStatus';
 import { createSpaceStore } from './spaceStore';
+import { useLiveBrowserHref } from './useLiveBrowserHref';
 import { createServerVoiceApi, createVoiceInputApi } from './voiceInputApi';
 
 /** Shared cookie/OIDC fetch for boot helpers and `<TrueForgeUI server />`. */
@@ -155,6 +158,7 @@ const AmanChatSurface = memo(function AmanChatSurface({
   defaultAgentSpec,
   openSettings,
   settingsOpenRequest,
+  openSessionRequest,
   displayName,
   overrides,
   onAgentActivity,
@@ -165,6 +169,7 @@ const AmanChatSurface = memo(function AmanChatSurface({
   defaultAgentSpec: HarnessAgentSpec;
   openSettings: boolean;
   settingsOpenRequest: SettingsOpenRequest | undefined;
+  openSessionRequest: OpenSessionRequest | undefined;
   displayName: string;
   overrides: SlotOverrides;
   onAgentActivity: (activity: AmanAvatarActivity) => void;
@@ -190,6 +195,7 @@ const AmanChatSurface = memo(function AmanChatSurface({
         agentConfig={agentConfig}
         initialSettingsOpen={openSettings}
         {...(settingsOpenRequest ? { settingsOpenRequest } : {})}
+        {...(openSessionRequest ? { openSessionRequest } : {})}
         currentUser={currentUser}
         onAgentActivity={onAgentActivity}
         onActiveSessionChange={onActiveSessionChange}
@@ -215,6 +221,7 @@ function AmanShell({
   modelName,
   version,
   buildRef,
+  railDeskApi,
 }: {
   defaultAgentSpec: HarnessAgentSpec;
   openSettings: boolean;
@@ -223,6 +230,7 @@ function AmanShell({
   modelName: string;
   version: string | undefined;
   buildRef: string | undefined;
+  railDeskApi: ReturnType<typeof createRailDeskApi>;
 }) {
   // Raw agent activity driving the living avatar in the runtime rail. The rail's motion
   // component applies the display policy (debounce, dwell, error auto-clear); this stays
@@ -239,18 +247,30 @@ function AmanShell({
   const openAudits = () => {
     setSettingsOpenRequest(previous => ({ section: 'audit', nonce: (previous?.nonce ?? 0) + 1 }));
   };
+  // Chat-open requests from the rail's desk rows (a reminder's chat, a held action's chat).
+  // Like the Settings requests above, each ask raises the nonce so asking again asks again.
+  const [openSessionRequest, setOpenSessionRequest] = useState<OpenSessionRequest | undefined>(undefined);
+  const openChat = (sessionId: string) => {
+    setOpenSessionRequest(previous => ({ sessionId, nonce: (previous?.nonce ?? 0) + 1 }));
+  };
+  // "Manage memory" under the recalled memories opens the place where memory is edited.
+  const openMemorySettings = () => {
+    setSettingsOpenRequest(previous => ({ section: 'memory', nonce: (previous?.nonce ?? 0) + 1 }));
+  };
   // Whether Settings chrome exists, reported by the shell that owns the gate. The rail is
   // handed its Audits link only while this holds, so the link can never outlive the
   // Settings it opens. It starts shown, like the Settings button itself, which also
   // shows until capabilities say otherwise.
   const [settingsChromeEnabled, setSettingsChromeEnabled] = useState(true);
   const activeChatIsPrivate = useIsPrivateChat(activeSessionId);
+  const liveBrowserHref = useLiveBrowserHref({ sessionId: activeSessionId, privateChat: activeChatIsPrivate });
   return (
     <div className="aman-shell">
       <AmanChatSurface
         defaultAgentSpec={defaultAgentSpec}
         openSettings={openSettings}
         settingsOpenRequest={settingsOpenRequest}
+        openSessionRequest={openSessionRequest}
         displayName={displayName}
         overrides={overrides}
         onAgentActivity={setAvatarActivity}
@@ -269,6 +289,11 @@ function AmanShell({
         privateChat={activeChatIsPrivate}
         auditFeed={activeSessionId === undefined ? undefined : <SentinelAuditFeed sessionId={activeSessionId} />}
         {...(settingsChromeEnabled ? { onOpenAudits: openAudits } : {})}
+        sessionId={activeSessionId}
+        deskApi={railDeskApi}
+        onOpenChat={openChat}
+        onOpenMemorySettings={openMemorySettings}
+        liveBrowserHref={liveBrowserHref}
       />
     </div>
   );
@@ -477,6 +502,7 @@ export function App() {
   const voiceInputApi = useMemo(() => createVoiceInputApi(authAwareFetch), []);
   const serverVoiceApi = useMemo(() => createServerVoiceApi(authAwareFetch), []);
   const memoryRecallApi = useMemo(() => createMemoryRecallApi(bootClient), []);
+  const railDeskApi = useMemo(() => createRailDeskApi({ fetcher: authAwareFetch, client: bootClient }), []);
   const modelUsageApi = useMemo(() => createModelUsageApi(bootClient), []);
   // Raw persisted session events for Sentinel's durable read (approval cards and Tier 2
   // notices rebuilt after a reload). Paginates the whole event history; the parser in
@@ -581,6 +607,7 @@ export function App() {
                                                 openSettings={boot.openSettings}
                                                 displayName={session.displayName}
                                                 overrides={overrides}
+                                                railDeskApi={railDeskApi}
                                                 modelName={
                                                   setup?.modelName ??
                                                   (boot.defaultAgentSpec.model.name || 'Choose a model')

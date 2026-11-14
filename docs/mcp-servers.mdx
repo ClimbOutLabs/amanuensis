@@ -91,6 +91,8 @@ Slack's tools read and post as you. Connecting Slack doesn't make Slack a way to
 
 Use this for a service that isn't on the list. The service gives you its address, which often ends in `/mcp`.
 
+The address can be on the internet or on your home network. A service on the same computer as Aman can't be added here. See [Which addresses a connector may use](#which-addresses-a-connector-may-use) below.
+
 1. Click **Add MCP Server**.
 2. Type a **Name** and a short **Description**.
 3. Paste the address in **URL**.
@@ -127,13 +129,11 @@ Choose which connectors a chat uses from the message box. In a new chat, your ch
 
 Every tool on a connector you add asks for your OK before it runs, whatever the connector says about itself. When a card asks, you can click **Allow** for this one time, or **Always allow everywhere** to stop being asked for that tool.
 
-??? note "Advanced: the two exceptions"
+??? note "Advanced: the one exception"
 
-    A tool that says it is read-only or closed-world can only make a call ask, never skip asking. There are two exceptions.
+    A tool that says it is read-only or closed-world can only make a call ask, never skip asking. There is one exception.
 
-    **Your own memory provider.** When you save a connector as the memory provider and its address is on an origin listed in the server's `FIRST_PARTY_MCP_ORIGINS` setting (see `packages/trueforge/.env.example`), the server treats it as first-party. A tool on it that declares both `readOnlyHint: true` and `openWorldHint: false` then runs without a card, and each run is recorded in the audit log. Everything else on it still asks. A first-party connector doesn't follow redirects, so give the address that serves MCP directly. Only whoever runs the server can list an origin: nothing in Settings, the API or a chat can make a connector first-party. An empty list, which is the default, means none is.
-
-    **The Email and Calendar connectors.** They are first-party only at the exact address the server was set up with for that connector. The server adds that address's origin to the first-party list itself, so there's nothing to list. A mark stored on the record neither grants nor removes this, and if the server isn't set up with an address, neither connector is first-party. Reading mail and looking at the calendar then run without a card. Sending mail and changing the calendar still ask, and **Always allow everywhere** never covers a send or a calendar change. An import leaves out an Email or Calendar connector that isn't at the address this server was set up with, and lists it in the import summary. Set those up from Settings. A connector that only has one of those names, at any other address, asks like any other.
+    **The Email and Calendar connectors.** They are first-party only at the exact address the server was set up with for that connector. The server adds that address's origin to the first-party list itself, so there's nothing to set. Nothing in Settings, the API or a chat can make another connector first-party. A first-party connector doesn't follow redirects, and each run without a card is recorded in the audit log. A mark stored on the record neither grants nor removes this, and if the server isn't set up with an address, neither connector is first-party. Reading mail and looking at the calendar then run without a card. Sending mail and changing the calendar still ask, and **Always allow everywhere** never covers a send or a calendar change. An import leaves out an Email or Calendar connector that isn't at the address this server was set up with, and lists it in the import summary. Set those up from Settings. A connector that only has one of those names, at any other address, asks like any other.
 
 ## Your web search provider
 
@@ -193,6 +193,21 @@ Placing the pins is its own step and always asks, because the addresses are sent
     - **OAuth (manual):** the same, with a client you registered with the service yourself.
 
     Keys and sign-ins are stored with the connector, never in an agent. Agents attach connectors by name.
+
+??? note "Which addresses a connector may use"
+
+    Aman checks a connector's address when you save it, and again each time the connector connects.
+
+    - An address on the internet or on your home network works.
+    - These are refused: an address of the computer Aman runs on, a link-local or cloud metadata address, and an address with a name and password in it.
+    - When Aman runs in a container, every address on the container networks it sits on is refused too. The other members of those networks are Aman's own parts.
+    - The check looks at the addresses a name points to, not just the name. A name that points to a refused address is refused.
+    - A name that can't be looked up when the connector connects is refused, because it can't be checked.
+    - For OAuth sign-in, the addresses the service names for sign-in are checked the same way before Aman connects to them. That includes every address a sign-in answer redirects to.
+
+    Whoever runs Aman can still allow one exact service on the same computer. List its origin in the `FIRST_PARTY_MCP_ORIGINS` setting (see `packages/trueforge/.env.example`). That marks it as the operator's own service, and the check doesn't second-guess it. It gives the service no other trust: its tools still ask before they run, like any connector you add.
+
+    The Email and Calendar connectors' own addresses are on that list already, because Aman adds them itself. A connector saved at one of those addresses is not refused.
 
 ??? note "Where the list of connectors comes from"
 

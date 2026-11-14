@@ -47,5 +47,7 @@ export * from "./spaceFolders/client/requests/index.js";
 export * as spaceFolders from "./spaceFolders/index.js";
 export * from "./spaces/client/requests/index.js";
 export * as spaces from "./spaces/index.js";
+export * from "./today/client/requests/index.js";
+export * as today from "./today/index.js";
 export * from "./voice/client/requests/index.js";
 export * as voice from "./voice/index.js";

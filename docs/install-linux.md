@@ -27,33 +27,17 @@ sudo apt update && sudo apt install -y curl git
 
 Aman is always installed from its latest release, never from the code that is still being worked on.
 
-1. Run these lines one at a time. They ask GitHub which release is the newest, and print it.
+1. Copy all of these lines and paste them into the terminal, then press ++enter++. They ask GitHub which release is the newest, download that version of Aman into a folder named `amanuensis`, and go into that folder.
 
    ```bash
    VERSION=$(curl -fsSL -o /dev/null -w '%{url_effective}' https://github.com/ClimbOutLabs/amanuensis/releases/latest)
-   ```
-
-   ```bash
    VERSION=${VERSION##*/}
-   ```
-
-   ```bash
    echo "Installing Aman $VERSION"
-   ```
-
-   It prints the version, such as `Installing Aman v0.2.0`.
-
-2. Get that version of the code:
-
-   ```bash
    git clone --branch "$VERSION" https://github.com/ClimbOutLabs/amanuensis
-   ```
-
-3. Go into the folder it made:
-
-   ```bash
    cd amanuensis
    ```
+
+   It prints the version first, such as `Installing Aman v0.2.0`.
 
 !!! warning "If it prints `Installing Aman releases`"
 
@@ -71,7 +55,7 @@ Aman is always installed from its latest release, never from the code that is st
    ./installer/install.sh
    ```
 
-2. It checks your computer first. Then it asks a few questions. Answer each one and press ++enter++:
+2. It checks your computer first. Then it prints a line that says **Your answer is needed** and asks a few questions. Answer each one and press ++enter++:
 
    | The installer asks                           | What to do                                                                         |
    | -------------------------------------------- | ---------------------------------------------------------------------------------- |
@@ -88,14 +72,14 @@ Aman is always installed from its latest release, never from the code that is st
 
    Your password needs at least 8 characters, with a number and a symbol such as @ or #.
 
-4. Wait while it works on its own for 20 to 40 minutes. You see one line per step, with the time it has taken. "Building the Aman app" is the longest step, and 15 minutes is normal.
+4. Wait while it works on its own for 20 to 40 minutes. Each step has a number, such as **4 of 6**, and a bar on the right that fills up as the install goes on. Each finished part gets a ✓ and the time it took. "Building the Aman app" is the longest step, and 15 minutes is normal.
 
 5. Near the end, it asks one or two more questions. Type `y` each time, then your computer password when it asks:
 
    - `Set up the sandbox now? [y/N]` Type `y`. This gives Aman a safe place to run code. If you press ++enter++ here, the install stops. Run the installer again and type `y`.
    - `Make Docker start with this computer? [y/N]` It asks this only if Docker doesn't start on its own yet. Type `y`.
 
-When it is done, it prints a box that starts with **Ready. Instance main is running.** The box lists the addresses to open.
+When it is done, it prints a green box that says **Ready. Instance main is running.** The addresses to open are listed under it.
 
 !!! note "If it stops with a red line"
 
@@ -129,19 +113,14 @@ To use Aman from your phone or another computer at home, see [Set up Aman](../pa
 
 This removes Aman and everything it keeps, including your chats and memory.
 
-1. Open a terminal and go to the folder you installed from. Here it is `~/amanuensis`; use your own folder.
+1. Open a terminal. Run these lines, which go to the folder you installed from and start the removal. Here the folder is `~/amanuensis`; use your own folder.
 
    ```bash
    cd ~/amanuensis
-   ```
-
-2. Run:
-
-   ```bash
    ./installer/install.sh instance remove main --purge-data
    ```
 
-3. It asks you to type `main` to confirm.
+2. It asks you to type `main` to confirm.
 
 !!! warning
 

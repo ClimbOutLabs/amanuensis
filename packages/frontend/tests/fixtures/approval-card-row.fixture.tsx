@@ -71,6 +71,7 @@ const mail = {
   bcc: [],
   subject: 'Picnic plans',
   body: 'Saturday still works for us.\n\nBest,\nAda',
+  check_code: 'A7F39C',
   replaces: null,
   reply_in_thread: null,
   reply_to: null,
@@ -116,6 +117,23 @@ const heldCard: SentinelApprovalCard = {
   },
   safe_choice: true,
   destructive: true,
+};
+
+const skillNetworkCard: SentinelApprovalCard = {
+  ...blank,
+  plain_what: 'Let the Trail Weather skill reach api.weather.example.test?',
+  plain_why: 'This skill names these sites as the ones it needs. It cannot reach any of them until you say yes.',
+  copy: {
+    headline: 'Let the Trail Weather skill reach api.weather.example.test?',
+    consequence: null,
+    reason: null,
+  },
+  skill_network: {
+    skill_name: 'Trail Weather',
+    hosts: ['api.weather.example.test'],
+    reason: 'first_use',
+    code_pin: null,
+  },
 };
 
 const noop = () => undefined;
@@ -188,6 +206,16 @@ createRoot(rootElement).render(
           onApprove={noop}
           onAlwaysAllow={noop}
           onChangeRequest={noop}
+          onDeny={noop}
+        />
+      </ul>
+      <ul data-row-card="skill-network" className="m-0 p-0">
+        <HeldActionCard
+          card={skillNetworkCard}
+          status={{ kind: 'waiting' }}
+          alwaysAllowOffered
+          onApprove={noop}
+          onAlwaysAllow={noop}
           onDeny={noop}
         />
       </ul>

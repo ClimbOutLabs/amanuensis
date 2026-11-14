@@ -14,6 +14,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import winston from 'winston';
 import { discardedModelUsage } from '../../../fixtures/discardedModelUsage';
+import { inMemoryGlobalSettingsStore } from '../../../fixtures/inMemoryGlobalSettingsStore';
 import { uncappedTokenFactoryBudget } from '../../../fixtures/uncappedTokenFactoryBudget';
 
 jest.mock('../../../../src/runtime/memory/memorySummarize', () => {
@@ -24,10 +25,10 @@ jest.mock('../../../../src/runtime/memory/memorySummarize', () => {
 });
 
 import type { IModelProviderStore } from '../../../../src/db/modelProviderStore';
-import { HindsightClient } from '../../../../src/runtime/memory/hindsightClient';
 import { MarkdownMemoryClient } from '../../../../src/runtime/memory/markdownMemoryClient';
 import { submitRetain } from '../../../../src/runtime/memory/memoryRetain';
 import { summarizeTurnContent } from '../../../../src/runtime/memory/memorySummarize';
+import { QuietMemoryClient } from '../../../fixtures/memory/quietMemoryClient';
 
 const mockSummarize = jest.mocked(summarizeTurnContent);
 
@@ -44,6 +45,7 @@ function fakeModelProviderStore(): IModelProviderStore {
     getProviderForUpdate: jest.fn(),
     createProvider: jest.fn(),
     upsertProvider: jest.fn(),
+    recordProviderCheck: jest.fn(async () => undefined),
     listModels: jest.fn(),
     deleteProvider: jest.fn(),
   };
@@ -55,6 +57,7 @@ function summarizeContext() {
     modelProviderStore: fakeModelProviderStore(),
     summarizationModelFqn: 'local/slow-model',
     tokenFactoryBudget: uncappedTokenFactoryBudget,
+    globalSettingsStore: inMemoryGlobalSettingsStore(),
     modelUsage: discardedModelUsage,
   };
 }
@@ -90,6 +93,7 @@ describe('submitRetain summary-pending marker', () => {
       session: { is_incognito: false },
       client: zaraClient,
       sessionId: 's1',
+      origin: 'user_stated',
       turnId: 't1',
       userText: 'Please remember that my test robot is named Bleep-Bloop.',
       assistantText: 'Got it, Bleep-Bloop.',
@@ -113,6 +117,7 @@ describe('submitRetain summary-pending marker', () => {
       session: { is_incognito: false },
       client: zaraClient,
       sessionId: 's1',
+      origin: 'user_stated',
       turnId: 't2',
       userText: 'Please remember that my test robot is named Bleep-Bloop.',
       assistantText: 'Got it, Bleep-Bloop.',
@@ -137,6 +142,7 @@ describe('submitRetain summary-pending marker', () => {
       session: { is_incognito: false },
       client: zaraClient,
       sessionId: 's1',
+      origin: 'user_stated',
       turnId: 't1',
       userText: 'Please remember that my robot is named Bleep-Bloop.',
       assistantText: 'Got it.',
@@ -157,6 +163,7 @@ describe('submitRetain summary-pending marker', () => {
       session: { is_incognito: false },
       client: zaraClient,
       sessionId: 's1',
+      origin: 'user_stated',
       turnId: 't1',
       userText: 'A very long story.',
       assistantText: 'A very long answer.',
@@ -169,12 +176,7 @@ describe('submitRetain summary-pending marker', () => {
   });
 
   it('stores nothing, and does not fail, on a client without summary tracking when a summary fails', async () => {
-    const client = new HindsightClient({
-      apiBase: 'https://hindsight.test.example',
-      bank: 'aman',
-      headers: {},
-      fetchImpl: () => Promise.reject(new Error('summary pending tests must not reach the network')),
-    });
+    const client = new QuietMemoryClient();
     const retain = jest.spyOn(client, 'retain').mockResolvedValue({ ok: true });
     mockSummarize.mockResolvedValue({ status: 'failed', reason: 'boom', fallback: 'model_failed' });
 
@@ -182,6 +184,7 @@ describe('submitRetain summary-pending marker', () => {
       session: { is_incognito: false },
       client,
       sessionId: 's1',
+      origin: 'user_stated',
       turnId: 't1',
       userText: 'Please remember that my test robot is named Bleep-Bloop.',
       assistantText: 'Got it, Bleep-Bloop.',

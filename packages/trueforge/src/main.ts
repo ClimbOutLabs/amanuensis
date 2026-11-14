@@ -13,6 +13,7 @@ import { configureOutboundFetches, extractErrorLogFields } from '@truefoundry/tr
 import type { Context } from 'hono';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
+import { configureRemoteAddressCheck, modelUrlProblem } from './runtime/remoteAddress';
 import {
   ensureLocalSandboxRootParent,
   prepareCodeModeSocketParent,
@@ -50,6 +51,10 @@ try {
   process.exit(1);
 }
 
+// The address check refuses this instance's container networks as well as its own addresses
+// when the installer named them; a host run names none, so its home network stays usable.
+configureRemoteAddressCheck({ ownNetworkRanges: configuration.CONTAINER_NETWORK_RANGES });
+
 configureOutboundFetches({
   model: {
     connectTimeoutMs: configuration.MODEL_HTTP_CONNECT_TIMEOUT_MS,
@@ -57,6 +62,10 @@ configureOutboundFetches({
     bodyTimeoutMs: configuration.MODEL_HTTP_BODY_TIMEOUT_MS,
     maxRetries: configuration.MODEL_HTTP_MAX_RETRIES,
   },
+  // A model provider's base address passes the address check when it is resolved for use; a
+  // redirect the provider answers with is judged by the same rule before it is followed.
+  modelRedirectCheck: async url =>
+    (await modelUrlProblem({ url, endpoints: configuration.LOCAL_MODEL_ENDPOINTS })) === null,
   mcp: {
     connectTimeoutMs: configuration.MCP_HTTP_CONNECT_TIMEOUT_MS,
     headersTimeoutMs: configuration.MCP_HTTP_HEADERS_TIMEOUT_MS,
@@ -82,7 +91,12 @@ import { sweepExpiredPrivateChats } from './apis/privateChats';
 import { createServerApp } from './app';
 import { TrueForgeAuthorizer, type Authorizer } from './auth/authorizer';
 import { createAuthenticator } from './auth/createAuthenticator';
-import { resolveRequestContext, STANDALONE_REQUEST_CONTEXT, type RequestContext } from './auth/identity';
+import {
+  requestContextFromCreatedBySubject,
+  resolveRequestContext,
+  STANDALONE_REQUEST_CONTEXT,
+  type RequestContext,
+} from './auth/identity';
 import { startOidcDiscovery } from './auth/oidc';
 import { McpCatalog } from './catalog/McpCatalog';
 import { ModelCatalog } from './catalog/ModelCatalog';
@@ -107,10 +121,12 @@ import { NoticingStore, type INoticingStore } from './db/noticingStore';
 import type { IPersonalizationStore } from './db/personalizationStore';
 import type { IPersonaStore } from './db/personaStore';
 import type { PersonOwner } from './db/personOwner';
+import { PhoneCallStore, type IPhoneCallStore } from './db/phoneCallStore';
 import type { PostgresAgentStore } from './db/postgres/agent-store/PostgresAgentStore';
 import type { Database as PostgresDatabase } from './db/postgres/types';
 import { PushSubscriptionStore, type IPushSubscriptionStore } from './db/pushSubscriptionStore';
 import { ReachSettingsStore, type IReachSettingsStore } from './db/reachSettingsStore';
+import { RecallExclusionStore, type IRecallExclusionStore } from './db/recallExclusionStore';
 import type { IRepositoryStore } from './db/repositoryStore';
 import type { ISandboxProviderStore } from './db/sandboxProviderStore';
 import type { IScheduleStore } from './db/scheduleStore';
@@ -133,6 +149,12 @@ import { PACKAGE_VERSION } from './packageVersion';
 import { closePersonaKnowledgeIndexers } from './personaKnowledge/knowledgeIndexer';
 import { ActiveTurnRegistry } from './runtime/activeTurns';
 import { registerCalendarConnectorForBoot } from './runtime/calendarAccount';
+import { createCallAnswerer } from './runtime/calls/callAnswerer';
+import { createCallChats } from './runtime/calls/callChats';
+import { callSpeaking } from './runtime/calls/callSpeaking';
+import { callVoiceReady, createCallReadiness } from './runtime/calls/callVoiceReady';
+import { createPhoneCallService } from './runtime/calls/phoneCalls';
+import { createTwilioCallProvider } from './runtime/calls/twilioCalls';
 import { assistantNameFor } from './runtime/chatAssistant';
 import { createChatImageService } from './runtime/chatImages/chatImageService';
 import { CHAT_IMAGE_RETENTION_DAYS } from './runtime/chatImages/limits';
@@ -140,13 +162,15 @@ import { createImageReencoder } from './runtime/chatImages/reencodeInSandbox';
 import { ChatSearchIndexer } from './runtime/chatSearchIndexing';
 import { recoverAbandonedCommandExecutions } from './runtime/commandExecutionRecovery';
 import { designateTavilyAtBoot, seedDefaultSearchProviderAtBoot } from './runtime/defaultSearchProvider';
-import { createDeliveryService } from './runtime/delivery/deliveryService';
+import { createDeliveryService, type DeliveryService } from './runtime/delivery/deliveryService';
 import { createWebPushSender } from './runtime/delivery/webPushSender';
 import { EventSubscriptionRegistry } from './runtime/event-subscription';
 import { instanceOwnerSubjectId } from './runtime/instanceOwner';
 import { registerMailConnectorFromSavedAccountInBackground } from './runtime/mailAccount';
 import { prepareMailPolicyAtBoot, registerMailConnectorAtBoot } from './runtime/mailConnector';
 import { warmEmbeddingsAtBoot } from './runtime/memory/embeddingRetrieval';
+import { ensureMemorySourceLines } from './runtime/memory/memorySourceLines';
+import { startNightlyMemoryJob } from './runtime/memory/nightlyService';
 import { startNotesFolderIndexing } from './runtime/notesFolder/notesFolderRuntime';
 import { sessionApprovalSource } from './runtime/noticing/approvalSource';
 import { createGoogleNoticingSources, googleCalendarTimezoneFor } from './runtime/noticing/googleSources';
@@ -189,9 +213,13 @@ import { TrueFoundryServiceFoundryServerClient } from './truefoundry/TrueFoundry
 import { TrueFoundrySkillStore } from './truefoundry/TrueFoundrySkillStore';
 import { INBOUND_SMS_PATH, inboundSmsRoute } from './twilioWebhook/inboundSms';
 import { twilioListenerFor } from './twilioWebhook/listener';
+import { phoneCallRoutes } from './twilioWebhook/voiceCall';
 import { ensureWritableDataDir } from './utils/dataDir';
-import { startSttAvailabilityWatcher } from './voice/sttAvailability';
-import { attachVoiceSocket } from './voice/voiceSocket';
+import { isVoiceAvailable, startSttAvailabilityWatcher } from './voice/sttAvailability';
+import { SidecarSpeechToText } from './voice/sttClient';
+import { readTtsHealth } from './voice/ttsClient';
+import { SileroSpeechProbability } from './voice/vad/sileroVad';
+import { attachVoiceSocket, readyVadModel } from './voice/voiceSocket';
 
 /** Persistence + optional Redis wired for the selected topology. */
 interface ServerPersistence<TTransaction> {
@@ -238,9 +266,11 @@ interface ServerPersistence<TTransaction> {
   sentinelAuditStore: ISentinelAuditStore;
   sentinelSettingsStore: ISentinelSettingsStore<TTransaction>;
   briefItemStore: IBriefItemCompletionStore;
+  recallExclusionStore: IRecallExclusionStore;
   deliveryStore: IDeliveryStore;
   reachSettingsStore: IReachSettingsStore;
   textContactStore: ITextContactStore;
+  phoneCallStore: IPhoneCallStore;
   noticingStore: INoticingStore;
   pushSubscriptionStore: IPushSubscriptionStore;
   approvalTokenStore: ApprovalTokenStore;
@@ -484,9 +514,11 @@ async function createStandalonePersistence(options: {
     sentinelAuditStore: new SentinelAuditStore(db as Kysely<SentinelAuditDatabase>),
     sentinelSettingsStore: new SqliteSentinelSettingsStore(db),
     briefItemStore: new BriefItemCompletionStore(db),
+    recallExclusionStore: new RecallExclusionStore(db),
     deliveryStore: new DeliveryStore(db),
     reachSettingsStore: new ReachSettingsStore(db),
     textContactStore: new TextContactStore(db),
+    phoneCallStore: new PhoneCallStore(db),
     noticingStore: new NoticingStore(db),
     pushSubscriptionStore: new PushSubscriptionStore(db),
     approvalTokenStore: new SqliteApprovalTokenStore(db),
@@ -674,9 +706,11 @@ async function createDistributedPersistence(options: {
     sentinelAuditStore: new SentinelAuditStore(db as Kysely<SentinelAuditDatabase>),
     sentinelSettingsStore: new PostgresSentinelSettingsStore(db),
     briefItemStore: new BriefItemCompletionStore(db),
+    recallExclusionStore: new RecallExclusionStore(db),
     deliveryStore: new DeliveryStore(db),
     reachSettingsStore: new ReachSettingsStore(db),
     textContactStore: new TextContactStore(db),
+    phoneCallStore: new PhoneCallStore(db),
     noticingStore: new NoticingStore(db),
     pushSubscriptionStore: new PushSubscriptionStore(db),
     approvalTokenStore: new PostgresApprovalTokenStore(db),
@@ -725,6 +759,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     deliveryStore,
     reachSettingsStore,
     textContactStore,
+    phoneCallStore,
     noticingStore,
     pushSubscriptionStore,
     approvalTokenStore,
@@ -795,6 +830,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
   if (configuration.MAIL_EMAIL_MCP_URL === undefined) {
     registerMailConnectorFromSavedAccountInBackground({
       accountUrl: configuration.MAIL_EMAIL_ACCOUNT_URL,
+      secret: configuration.MAIL_EMAIL_ACCOUNT_SECRET,
       mcpUrl: configuration.MAIL_SIDECAR_MCP_URL,
       policyPath: configuration.MAIL_POLICY_FILE,
       fetchImpl: undefined,
@@ -871,13 +907,98 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
       : { number_key: configuration.TWILIO.authToken, max_texts_per_day: configuration.TWILIO.maxTextsPerDay };
   // Set when the Twilio number could not be pointed at this server at boot, so Settings can say what to do.
   const twilioNumber: { problem: PointNumberFailure | undefined } = { problem: undefined };
+  // Whether a call can listen and speak is checked in one place: placing a call checks again, and Reach me, Noticing
+  // and Try it read the last answer, so none of them offers a call that would ring deaf or silent.
+  const callReadiness = createCallReadiness(() =>
+    callVoiceReady({
+      sttReady: isVoiceAvailable,
+      tts: readTtsHealth,
+      vadModel: readyVadModel,
+    }),
+  );
+  if (configuration.TWILIO !== undefined) {
+    void callReadiness.check();
+    const callReadinessTimer = setInterval(() => {
+      void callReadiness.check();
+    }, 30_000);
+    callReadinessTimer.unref();
+  }
   const reachChannels = (input?: { viewer: ChannelViewer }) =>
     reachChannelsFor({
       twilio: configuration.TWILIO,
+      voice: callReadiness.current(),
       numberProblem: twilioNumber.problem,
       viewer: input?.viewer ?? 'person',
     });
-  const deliveryService = createDeliveryService({
+  // Made below; the call channel reaches them only once a call is under way.
+  const callDeps: {
+    deliveries?: DeliveryService;
+    sessions?: Sessions<SessionCustom, TurnCustom>;
+  } = {};
+  const ownerContext = (owner: { tenant_id: string; created_by: string }) =>
+    requestContextFromCreatedBySubject({
+      tenant_id: owner.tenant_id,
+      created_by_subject: {
+        subject_id: owner.created_by,
+        subject_type: 'user',
+        // Only the id decides which model a call answers with; no name is needed.
+        subject_display_name: '',
+      },
+    });
+  const phoneCalls = createPhoneCallService({
+    store: phoneCallStore,
+    deliveryStore,
+    contacts: textContactStore,
+    reachSettings: reachSettingsStore,
+    personalization: personalizationStore,
+    twilio:
+      configuration.TWILIO === undefined
+        ? undefined
+        : {
+            provider: createTwilioCallProvider({ settings: configuration.TWILIO }),
+            accountSid: configuration.TWILIO.accountSid,
+            publicUrl: configuration.TWILIO.webhookPublicUrl,
+          },
+    voice: callReadiness.check,
+    deliveries: () => {
+      if (callDeps.deliveries === undefined) {
+        throw new Error('The delivery service is not ready yet.');
+      }
+      return callDeps.deliveries;
+    },
+    chats: createCallChats({
+      sessionStore,
+      sessions: () => {
+        if (callDeps.sessions === undefined) {
+          throw new Error('Chats are not ready yet.');
+        }
+        return callDeps.sessions;
+      },
+      answerer: owner =>
+        createCallAnswerer({
+          tenantId: owner.tenant_id,
+          modelProviderStore: persistence.resolveModelProviderStore(ownerContext(owner)),
+          globalSettingsStore,
+          tokenFactoryBudget,
+          logger,
+        }),
+    }),
+    speaking: callSpeaking,
+    listening: async () => ({
+      vad: await SileroSpeechProbability.load({ model: await readyVadModel() }),
+      stt: new SidecarSpeechToText(),
+    }),
+    logger,
+  });
+
+  // A call cut off when the server stopped is still written down, and its text and push still go out.
+  const phoneCallSweepTimer = setInterval(() => {
+    phoneCalls.sweep().catch((error: unknown) => {
+      logger.warn('Phone call sweep failed', extractErrorLogFields(error));
+    });
+  }, 60_000);
+  phoneCallSweepTimer.unref();
+  const deliveries = createDeliveryService({
     store: deliveryStore,
     senders: [
       createWebPushSender({ subscriptions: pushSubscriptionStore, settings: configuration.WEB_PUSH }),
@@ -889,10 +1010,12 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
         limits: textLimits,
         textNumbers,
       }),
+      phoneCalls.sender,
     ],
     audit: sentinelAuditStore,
     logger,
   });
+  callDeps.deliveries = deliveries;
   const noticingOwnerId = instanceOwnerSubjectId({
     signInOff: getTrueForgeAuthMode(configuration) === TrueForgeAuthMode.Standalone,
     defaultSubjectId: STANDALONE_REQUEST_CONTEXT.subject.id,
@@ -903,7 +1026,11 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
   const noticingService = createNoticingService({
     sources: createSidecarNoticingSources({
       mailUrl: configuration.MAIL_SIDECAR_MCP_URL,
-      mailAgentUrl: configuration.MAIL_EMAIL_ACCOUNT_URL,
+      // The account agent answers no caller without its secret, so without one the shared mailbox is not watched.
+      mailAgent:
+        configuration.MAIL_EMAIL_ACCOUNT_URL === undefined || configuration.MAIL_EMAIL_ACCOUNT_SECRET === undefined
+          ? undefined
+          : { url: configuration.MAIL_EMAIL_ACCOUNT_URL, secret: configuration.MAIL_EMAIL_ACCOUNT_SECRET },
       calendarUrl: configuration.CALENDAR_SIDECAR_MCP_URL,
       primary: createGoogleNoticingSources({ connections: googleConnectionStore, fetchImpl: undefined, logger }),
       instanceOwner: noticingInstanceOwner,
@@ -912,7 +1039,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     approvals: sessionApprovalSource({ sessionStore, tenant_id: TENANT_ID }),
     reachSettings: reachSettingsStore,
     store: noticingStore,
-    deliveries: deliveryService,
+    deliveries,
     history: deliveryStore,
     judgeFor: createNoticingJudgeResolver({
       resolveModelProviderStore: context => persistence.resolveModelProviderStore(context),
@@ -940,8 +1067,10 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     outboundSecrets,
     mailPolicyPath: configuration.MAIL_POLICY_FILE,
     mailPolicyStatusPath: configuration.MAIL_POLICY_STATUS_FILE,
+    skillStore,
   });
   const sessions = new Sessions({ sessionStore, sentinelServices });
+  callDeps.sessions = sessions;
   const chatImages = createChatImageService({
     store: chatImageStore,
     sessionStore,
@@ -1035,7 +1164,18 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     personaStore,
     logger,
   });
+  // Once a day per vault, from the hour the person chose: ended lines move to Earlier, missed notes are sorted,
+  // and lines that disagree are listed. Best effort: a failure is logged and never reaches a turn.
+  const nightlyMemoryJob = startNightlyMemoryJob({
+    personaStore,
+    modelProviderStore,
+    globalSettingsStore,
+    tokenFactoryBudget,
+    logger,
+  });
+  const callRoutes = phoneCallRoutes({ calls: phoneCalls });
   const app = createServerApp({
+    memoryTidy: nightlyMemoryJob,
     chatSearchIndexer,
     modelCatalog,
     mcpCatalog,
@@ -1062,6 +1202,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     repositoryStore,
     turnArtifactStore,
     chatDeletionStore,
+    recallExclusionStore: persistence.recallExclusionStore,
     globalSettingsStore,
     tokenFactoryBudget,
     sessionStore,
@@ -1071,7 +1212,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     briefItemStore,
     deliveryStore,
     pushSubscriptionStore,
-    deliveryService,
+    deliveryService: deliveries,
     reachSettingsStore,
     noticingStore,
     noticingService,
@@ -1148,7 +1289,8 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     twilioWebhookRoutes:
       configuration.TWILIO === undefined
         ? []
-        : [inboundSmsRoute({ settings: configuration.TWILIO, textNumbers, logger })],
+        : [inboundSmsRoute({ settings: configuration.TWILIO, textNumbers, logger }), ...callRoutes.routes],
+    twilioSocketRoutes: configuration.TWILIO === undefined ? [] : callRoutes.sockets,
   };
 }
 
@@ -1176,10 +1318,15 @@ try {
     dir: configuration.PERSONA_KNOWLEDGE_DIR,
     envVar: 'PERSONA_KNOWLEDGE_DIR',
   });
-  if (configuration.MEMORY_BACKEND === 'markdown') {
-    await ensureWritableDataDir({
-      dir: configuration.MEMORY_MARKDOWN_DIR,
-      envVar: 'MEMORY_MARKDOWN_DIR',
+  await ensureWritableDataDir({
+    dir: configuration.MEMORY_MARKDOWN_DIR,
+    envVar: 'MEMORY_MARKDOWN_DIR',
+  });
+  const marked = await ensureMemorySourceLines({ baseDir: configuration.MEMORY_MARKDOWN_DIR });
+  if (marked !== undefined && marked.notesMarked > 0) {
+    logger.info('Older memory notes were marked as having no record of where they came from', {
+      files_changed: marked.filesChanged,
+      notes_marked: marked.notesMarked,
     });
   }
 
@@ -1230,6 +1377,7 @@ try {
     chatSearchIndexer,
     packageMirrorAllowanceHolds,
     twilioWebhookRoutes,
+    twilioSocketRoutes,
     smsProvider,
     twilioNumber,
   } = configuration.STANDALONE
@@ -1407,7 +1555,7 @@ try {
   // on its own before the first chat turn. Fire-and-forget: startup never waits, a
   // failure degrades to keyword search with the usual cooldown retry, and other
   // tenants warm on first use reusing the shared download.
-  if (configuration.MEMORY_EMBEDDINGS_ENABLED && configuration.MEMORY_BACKEND === 'markdown') {
+  if (configuration.MEMORY_EMBEDDINGS_ENABLED) {
     warmEmbeddingsAtBoot({
       baseDir: configuration.MEMORY_MARKDOWN_DIR,
       namespace: TENANT_ID,
@@ -1464,6 +1612,7 @@ try {
     twilio: configuration.TWILIO,
     hostname: configuration.HOST,
     routes: twilioWebhookRoutes,
+    sockets: twilioSocketRoutes,
     logger,
   }).catch((error: unknown) => {
     console.error(error instanceof Error ? error.message : error);

@@ -3,20 +3,17 @@
 import type * as TrueForge from "../../api/index.js";
 import * as core from "../../core/index.js";
 import type * as serializers from "../index.js";
-import { MemoryRecallCurated } from "./MemoryRecallCurated.js";
-import { MemoryRecallReflect } from "./MemoryRecallReflect.js";
+import { MemoryRecallPages } from "./MemoryRecallPages.js";
 
 export const MemoryRecallLayers: core.serialization.ObjectSchema<
     serializers.MemoryRecallLayers.Raw,
     TrueForge.MemoryRecallLayers
 > = core.serialization.object({
-    curated: MemoryRecallCurated,
-    reflect: MemoryRecallReflect,
+    pages: MemoryRecallPages.optional(),
 });
 
 export declare namespace MemoryRecallLayers {
     export interface Raw {
-        curated: MemoryRecallCurated.Raw;
-        reflect: MemoryRecallReflect.Raw;
+        pages?: MemoryRecallPages.Raw | null;
     }
 }

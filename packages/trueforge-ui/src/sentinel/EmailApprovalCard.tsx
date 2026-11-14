@@ -40,8 +40,23 @@ export type EmailApprovalCardProps = {
   onSaveDraft?: (() => void) | undefined;
 };
 
-function mailboxListText(mailboxes: readonly SentinelApprovalMailbox[]): string {
+export function mailboxListText(mailboxes: readonly SentinelApprovalMailbox[]): string {
   return mailboxes.map(mailbox => mailboxText(mailbox, { escape: text => text })).join(', ');
+}
+
+/**
+ * The short code a send card shows and its receipt repeats, so a person can see the message that went is the one
+ * they approved. It sits in the card's field list.
+ */
+export function CheckCodeRow({ code }: { code: string }) {
+  return (
+    <>
+      <dt className="text-text-secondary">Check code</dt>
+      <dd data-role="check-code" className="font-mono font-semibold text-text-primary">
+        {code}
+      </dd>
+    </>
+  );
 }
 
 /** Lines of a message shown before it folds: nine lines at 1.5rem each. */
@@ -51,7 +66,7 @@ const COLLAPSED_HEIGHT_CLASS = 'max-h-[13.5rem] overflow-hidden';
  * The message as the recipient sees it. Line breaks are kept, fenced code reads in mono, and a long
  * message folds to about nine lines. The word count is the whole message, not the visible part.
  */
-function EmailBody({ body }: { body: string }) {
+export function EmailBody({ body }: { body: string }) {
   const [expanded, setExpanded] = useState(false);
   const [clipped, setClipped] = useState(false);
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -129,13 +144,15 @@ export const EmailApprovalCard: FC<EmailApprovalCardProps> = ({
 }) => {
   const assistant = useAssistantDisplayName();
   const [changing, setChanging] = useState(false);
-  const [sentAt, setSentAt] = useState<string | null>(null);
+  // When the person answered. A send says "Sending" until the server's receipt replaces this card, because
+  // only the send gate knows whether the message went out.
+  const [answeredAt, setAnsweredAt] = useState<string | null>(null);
   const email: SentinelApprovalEmail | null = card.email;
   if (email === null) return null;
 
   const sending = email.action === 'send';
   const sendNow = () => {
-    setSentAt(approvalTime(new Date()));
+    setAnsweredAt(approvalTime(new Date()));
     onApprove();
   };
   const facts: ApprovalFact[] = [
@@ -153,6 +170,7 @@ export const EmailApprovalCard: FC<EmailApprovalCardProps> = ({
       : [{ label: 'Sent as', value: email.from_name }]),
     ...(email.reply_to === null ? [] : [{ label: 'Replies go to', value: email.reply_to }]),
     { label: 'Subject', value: email.subject === '' ? 'No subject' : email.subject },
+    ...(email.check_code === null ? [] : [{ label: 'Check code', value: email.check_code, mono: true }]),
   ];
   // A send reaches other people and cannot be unsent, so the server marks its card safe-first: the no then
   // says "Don't send" and takes keyboard focus. Allow still leads the row and no choice is filled.
@@ -168,7 +186,9 @@ export const EmailApprovalCard: FC<EmailApprovalCardProps> = ({
       question={cardHeadline(card)}
       reason={cardReason(card)}
       status={
-        sentAt === null ? { kind: 'waiting' } : { kind: 'answered', text: `${sending ? 'Sent' : 'Saved'} · ${sentAt}` }
+        answeredAt === null
+          ? { kind: 'waiting' }
+          : { kind: 'answered', text: sending ? 'Sending…' : `Saved · ${answeredAt}` }
       }
     >
       {/* For a new address the server's sentence says that approving adds it; the fields do not. */}

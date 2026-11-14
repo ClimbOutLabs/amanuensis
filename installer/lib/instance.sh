@@ -56,6 +56,8 @@ machine_render() { # stt image, tts image (may be empty)
   if [ ! -f "$MACHINE_DIR/.env" ]; then
     render_template "$TEMPLATES_DIR/machine/env.tpl" "VOICE_THREADS=$(voice_threads)" | write_if_changed "$MACHINE_DIR/.env" 600 || true
   fi
+  # The secret the speech services check on every call; the instances get copies of the same value.
+  env_secret_backfill_in "$MACHINE_DIR/.env" SPEECH_SECRET
 }
 
 # up -d is a no-op when nothing changed. The speech models load in the background, so this does not wait on them.
@@ -157,6 +159,7 @@ instance_render() {
   instance_tailscale_https_move "$name" "$app_image"
   owner_name_backfill "$name"
   web_push_backfill "$name" "$app_image"
+  speech_secret_backfill "$name"
   app_port=$(reg_get "$name" app_port)
   login_port=$(reg_get "$name" login_port)
   public_url=$(reg_get "$name" public_url)
@@ -227,7 +230,10 @@ instance_render() {
   # The email connector is part of the compose file only once its image is known. Its wrapper script is copied beside the
   # compose file, because the compose file mounts it from this folder.
   local email_on=0
-  [ -n "${REL_MAIL_EMAIL_IMAGE:-}" ] && email_on=1
+  if [ -n "${REL_MAIL_EMAIL_IMAGE:-}" ]; then
+    email_on=1
+    env_secret_backfill "$name" MAIL_EMAIL_ACCOUNT_SECRET
+  fi
   ensure_private_dir "$dir"
   if [ "$email_on" = 1 ]; then
     write_if_changed "$dir/mail-email-entrypoint.sh" 644 <"$REPO_ROOT/ops/compose/mail-email/entrypoint.sh" || true
@@ -375,14 +381,25 @@ owner_name_backfill() { # name
 # as its last line. A missing file gets nothing: the instance has no settings to run from, and the instance commands
 # say so.
 env_secret_backfill() { # name key
-  local env key=$2 value
-  env="$(instance_dir "$1")/.env"
+  env_secret_backfill_in "$(instance_dir "$1")/.env" "$2"
+}
+
+# The same backfill for a settings file named directly, such as the machine's own file.
+env_secret_backfill_in() { # env key
+  local env=$1 key=$2 value
   [ -f "$env" ] || return 0
   value=$(sed -n "s/^$key=//p" "$env" | tail -n 1)
   if [ "${#value}" -lt 32 ]; then
     value=$(sed -n "s/^$key=\(.\{32,\}\)\$/\1/p" "$env" | tail -n 1)
     [ -n "$value" ] || value=$(rand_hex 32)
   fi
+  env_secret_write "$env" "$key" "$value"
+}
+
+# Writes one secret value into a settings file: inside the installer's managed part when the file has
+# one (dropping any line for the key outside it), otherwise as the file's last line for that key.
+env_secret_write() { # env key value
+  local env=$1 key=$2 value=$3
   if grep -q '^# >>> managed by the installer' "$env"; then
     env_managed_set "$env" "$key" "$value"
     env_drop_outside_block "$env" "$key"
@@ -392,6 +409,19 @@ env_secret_backfill() { # name key
     grep -v "^$key=" "$env" || true
     printf '%s=%s\n' "$key" "$value"
   } | write_if_changed "$env" 600 || true
+}
+
+# The speech services are shared by every instance on the machine, so one secret guards them: the
+# machine's. Each instance's settings carry a copy of that value, so its app can present it. The
+# machine value is made once and never changed, so the copies never go stale.
+speech_secret_backfill() { # name
+  local value
+  [ -f "$MACHINE_DIR/.env" ] || return 0
+  env_secret_backfill_in "$MACHINE_DIR/.env" SPEECH_SECRET
+  value=$(sed -n "s/^SPEECH_SECRET=//p" "$MACHINE_DIR/.env" | tail -n 1)
+  [ "${#value}" -ge 32 ] || return 0
+  [ -f "$(instance_dir "$1")/.env" ] || return 0
+  env_secret_write "$(instance_dir "$1")/.env" SPEECH_SECRET "$value"
 }
 
 # Makes one push key pair with the app image's Node.js, so the computer needs no key tools of its own. Prints the
@@ -482,6 +512,7 @@ instance_up() {
   if reg_exists "$name"; then reg_set "$name" healthy 1; fi
   step_ok "Instance $name is running and answering"
   proxy_trust_sync "$name"
+  container_networks_sync "$name"
 }
 
 # A reverse proxy on this computer reaches an instance with a public address through a published port, so the app sees
@@ -496,6 +527,32 @@ proxy_trust_sync() { # name
   valid_ipv4 "$gateway" || return 0
   [ "$(env_get "$env" TRUSTED_PROXY_ADDRESSES)" != "$gateway" ] || return 0
   env_managed_set "$env" TRUSTED_PROXY_ADDRESSES "$gateway"
+  dc "$name" up -d --force-recreate --no-deps --wait --wait-timeout 120 app >"$STEP_LOG" 2>&1 || warn "The app of instance $name did not start again. Run: aman doctor instance --fix"
+}
+
+# The app refuses every address on the networks its own containers sit on, so a model or connector address a
+# chat is steered to cannot reach a neighbouring container (the calendar account agent, for one). The Email and
+# Calendar connectors' own endpoints stay usable, because the app lists them as its own services. Docker chooses
+# those networks' ranges when the instance starts, so they are learned here and written to the settings
+# file; the app restarts once when they are learned or change. An instance whose networks cannot be read
+# keeps the ranges it already has.
+container_networks_sync() { # name
+  local name=$1 env ranges network subnet
+  reg_exists "$name" || return 0
+  env="$(instance_dir "$name")/.env"
+  [ -f "$env" ] || return 0
+  ranges=""
+  for network in "aman-${name}_default" "aman-${name}_link" "aman-${name}_calendar" "aman-${name}_browser-control"; do
+    for subnet in $(D network inspect "$network" --format '{{range .IPAM.Config}}{{.Subnet}} {{end}}' 2>/dev/null || true); do
+      case "$subnet" in
+        */*) ranges="${ranges:+$ranges,}$subnet" ;;
+      esac
+    done
+  done
+  [ -n "$ranges" ] || return 0
+  ranges=$(printf '%s' "$ranges" | tr ',' '\n' | sort -u | tr '\n' ',' | sed 's/,$//')
+  [ "$(env_get "$env" CONTAINER_NETWORK_RANGES)" != "$ranges" ] || return 0
+  env_managed_set "$env" CONTAINER_NETWORK_RANGES "$ranges"
   dc "$name" up -d --force-recreate --no-deps --wait --wait-timeout 120 app >"$STEP_LOG" 2>&1 || warn "The app of instance $name did not start again. Run: aman doctor instance --fix"
 }
 
@@ -1014,12 +1071,18 @@ print_instance_summary() {
 # How a device comes to trust this computer: one short link over plain http, the same link as a code for a phone, and the
 # step an iPhone needs after installing.
 print_trust_lines() { # name
-  local link
+  local link fp
   link=$(tls_trust_link "$1")
+  ui_heading "Let each device trust this computer"
   ui_line "On each device, the browser will first warn that the page is not private. Do not click past the warning."
   ui_line "Instead, open this page once on that device and follow its steps: $link"
   ui_line "On an iPhone: open it in Safari, install the profile, then turn it on in Settings, General, About, Certificate Trust Settings."
-  ui_line "Your device will show a long code called a fingerprint. It must be $(tls_fingerprint). If it differs, stop."
+  fp=$(tls_fingerprint)
+  ui_line "Your device will show a long code called a fingerprint. It must be this one:"
+  # Two lines of 16 pairs, so the code fits a narrow terminal and is easy to compare half by half.
+  ui_line "$(_ui_s 1 "${fp:0:48}")"
+  if [ -n "${fp:48}" ]; then ui_line "$(_ui_s 1 "${fp:48}")"; fi
+  ui_line "If it differs, stop."
   if [ "$TLS_AUTHORITY_REPLACED" = 1 ]; then
     ui_line "This computer's root certificate was made again, so each device must trust it again."
   fi
@@ -1051,6 +1114,7 @@ print_backups_row() {
 
 # The last lines of a finished run: how to reach the aman command from this terminal, and how to update later.
 print_closing_lines() {
+  ui_gap
   case ":$PATH:" in
     *":$AMAN_HOME/bin:"*) ;;
     *) ui_line "Open a new terminal window to use the aman command." ;;

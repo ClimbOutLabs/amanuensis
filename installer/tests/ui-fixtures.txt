@@ -13,11 +13,13 @@ call ui_skip "Run code and attachments: not in this version"
 call ui_hint "Enter keeps the value in brackets."
 call ui_phase "Plain header"
 -- color
-\e[1mSetting up a private assistant on this computer\e[0m
+\e[36m╭──────────────────────────────────────────────────────────────────────╮\e[0m
+\e[36m│\e[0m \e[1;36mAMAN\e[0m  Setting up a private assistant on this computer                \e[36m│\e[0m
+\e[36m╰──────────────────────────────────────────────────────────────────────╯\e[0m
 
-\e[1mChecking this computer\e[0m \e[2m(1 of 6)\e[0m
+\e[7;36m 1 of 6 \e[0m  \e[1mChecking this computer\e[0m                            \e[32m━━\e[0m\e[2m━━━━━━━━━━\e[0m
   \e[32m✓\e[0m Linux on arm64
-  \e[32m✓\e[0m Built the app image  \e[2m12m 40s\e[0m
+  \e[32m✓\e[0m Built the app image                                          \e[2m12m 40s\e[0m
   \e[33m!\e[0m 7.4 GB free for Docker data, 10 GB is recommended
     Next: aman doctor disk --fix
   \e[31m✗\e[0m Docker Compose is missing
@@ -26,13 +28,15 @@ call ui_phase "Plain header"
   · \e[2mRun code and attachments: not in this version\e[0m
   \e[2mEnter keeps the value in brackets.\e[0m
 
-\e[1mPlain header\e[0m
+\e[7;36m Plain header \e[0m
 -- nocolor
-Setting up a private assistant on this computer
+╭──────────────────────────────────────────────────────────────────────╮
+│ AMAN  Setting up a private assistant on this computer                │
+╰──────────────────────────────────────────────────────────────────────╯
 
-Checking this computer (1 of 6)
+[ 1 of 6 ]  Checking this computer                          ━━──────────
   ✓ Linux on arm64
-  ✓ Built the app image  12m 40s
+  ✓ Built the app image                                          12m 40s
   ! 7.4 GB free for Docker data, 10 GB is recommended
     Next: aman doctor disk --fix
   ✗ Docker Compose is missing
@@ -41,13 +45,15 @@ Checking this computer (1 of 6)
   · Run code and attachments: not in this version
   Enter keeps the value in brackets.
 
-Plain header
+[ Plain header ]
 -- plain
-Setting up a private assistant on this computer
+╭──────────────────────────────────────────────────────────────────────╮
+│ AMAN  Setting up a private assistant on this computer                │
+╰──────────────────────────────────────────────────────────────────────╯
 
-Checking this computer (1 of 6)
+[ 1 of 6 ]  Checking this computer                          ━━──────────
   ✓ Linux on arm64
-  ✓ Built the app image  12m 40s
+  ✓ Built the app image                                          12m 40s
   ! 7.4 GB free for Docker data, 10 GB is recommended
     Next: aman doctor disk --fix
   ✗ Docker Compose is missing
@@ -56,13 +62,15 @@ Checking this computer (1 of 6)
   · Run code and attachments: not in this version
   Enter keeps the value in brackets.
 
-Plain header
+[ Plain header ]
 -- ascii
-Setting up a private assistant on this computer
++----------------------------------------------------------------------+
+| AMAN  Setting up a private assistant on this computer                |
++----------------------------------------------------------------------+
 
-Checking this computer (1 of 6)
+[ 1 of 6 ]  Checking this computer                          ##----------
   + Linux on arm64
-  + Built the app image  12m 40s
+  + Built the app image                                          12m 40s
   ! 7.4 GB free for Docker data, 10 GB is recommended
     Next: aman doctor disk --fix
   x Docker Compose is missing
@@ -71,7 +79,7 @@ Checking this computer (1 of 6)
   - Run code and attachments: not in this version
   Enter keeps the value in brackets.
 
-Plain header
+[ Plain header ]
 
 == details-with-verbose
 set verbose 1
@@ -142,8 +150,7 @@ call ui_admin "Set up the sandbox on this computer"
 call ui_detail "Install the AppArmor profile and load it, create 4 slot disk files of 16 GB under /var/lib/aman-slots, add 4 lines to /etc/fstab and mount them"
 call ui_todo "Create instance main for you@example.com at http://127.0.0.1:8791 (port 8791 on this computer), sign-in service on port 5556"
 -- color
-
-\e[1mThe plan\e[0m \e[2m(3 of 6)\e[0m
+\e[7;36m 3 of 6 \e[0m  \e[1mThe plan\e[0m                                          \e[32m━━━━━━\e[0m\e[2m━━━━━━\e[0m
   \e[32m✓\e[0m \e[32mdone\e[0m         Docker is reachable
   \e[36m›\e[0m \e[36mto do\e[0m        Create the state directory ~/.amanuensis
   \e[33m!\e[0m \e[33mneeds admin\e[0m  Set up the sandbox on this computer
@@ -154,8 +161,7 @@ call ui_todo "Create instance main for you@example.com at http://127.0.0.1:8791 
                  http://127.0.0.1:8791 (port 8791 on this computer),
                  sign-in service on port 5556
 -- nocolor
-
-The plan (3 of 6)
+[ 3 of 6 ]  The plan                                        ━━━━━━──────
   ✓ done         Docker is reachable
   › to do        Create the state directory ~/.amanuensis
   ! needs admin  Set up the sandbox on this computer
@@ -166,8 +172,7 @@ The plan (3 of 6)
                  http://127.0.0.1:8791 (port 8791 on this computer),
                  sign-in service on port 5556
 -- plain
-
-The plan (3 of 6)
+[ 3 of 6 ]  The plan                                        ━━━━━━──────
   ✓ done         Docker is reachable
   › to do        Create the state directory ~/.amanuensis
   ! needs admin  Set up the sandbox on this computer
@@ -178,8 +183,7 @@ The plan (3 of 6)
                  http://127.0.0.1:8791 (port 8791 on this computer),
                  sign-in service on port 5556
 -- ascii
-
-The plan (3 of 6)
+[ 3 of 6 ]  The plan                                        ######------
   + done         Docker is reachable
   > to do        Create the state directory ~/.amanuensis
   ! needs admin  Set up the sandbox on this computer
@@ -213,8 +217,9 @@ call ui_summary_end "16m 03s"
   \e[33m!\e[0m Docker has 7.0 GB of memory
     Next: Raise it in Docker Desktop under Settings, Resources, Memory
 
-\e[2m────────────────────────────────────────────────────────────────────────\e[0m
-\e[1;32mReady. Instance main is running.\e[0m
+\e[32m╭──────────────────────────────────────────────────────────────────────╮\e[0m
+\e[32m│\e[0m \e[1;32m✓ Ready. Instance main is running.\e[0m                                   \e[32m│\e[0m
+\e[32m╰──────────────────────────────────────────────────────────────────────╯\e[0m
 
   Open      http://127.0.0.1:8791
   Sign in   you@example.com, with the password you chose
@@ -223,17 +228,17 @@ call ui_summary_end "16m 03s"
   Open http://127.0.0.1:8791 in your browser. Use 127.0.0.1, not
   localhost.
 
-\e[1mWarnings\e[0m
+\e[1;33mWarnings\e[0m
   \e[33m!\e[0m Docker has 7.0 GB of memory
 
-\e[2mDone in 16m 03s\e[0m
-\e[2m────────────────────────────────────────────────────────────────────────\e[0m
+\e[32m─────────────────────────────────────────────────────\e[0m\e[2m Done in 16m 03s \e[0m\e[32m──\e[0m
 -- nocolor
   ! Docker has 7.0 GB of memory
     Next: Raise it in Docker Desktop under Settings, Resources, Memory
 
-────────────────────────────────────────────────────────────────────────
-Ready. Instance main is running.
+╭──────────────────────────────────────────────────────────────────────╮
+│ ✓ Ready. Instance main is running.                                   │
+╰──────────────────────────────────────────────────────────────────────╯
 
   Open      http://127.0.0.1:8791
   Sign in   you@example.com, with the password you chose
@@ -245,14 +250,14 @@ Next
 Warnings
   ! Docker has 7.0 GB of memory
 
-Done in 16m 03s
-────────────────────────────────────────────────────────────────────────
+───────────────────────────────────────────────────── Done in 16m 03s ──
 -- plain
   ! Docker has 7.0 GB of memory
     Next: Raise it in Docker Desktop under Settings, Resources, Memory
 
-────────────────────────────────────────────────────────────────────────
-Ready. Instance main is running.
+╭──────────────────────────────────────────────────────────────────────╮
+│ ✓ Ready. Instance main is running.                                   │
+╰──────────────────────────────────────────────────────────────────────╯
 
   Open      http://127.0.0.1:8791
   Sign in   you@example.com, with the password you chose
@@ -264,14 +269,14 @@ Next
 Warnings
   ! Docker has 7.0 GB of memory
 
-Done in 16m 03s
-────────────────────────────────────────────────────────────────────────
+───────────────────────────────────────────────────── Done in 16m 03s ──
 -- ascii
   ! Docker has 7.0 GB of memory
     Next: Raise it in Docker Desktop under Settings, Resources, Memory
 
-------------------------------------------------------------------------
-Ready. Instance main is running.
++----------------------------------------------------------------------+
+| + Ready. Instance main is running.                                   |
++----------------------------------------------------------------------+
 
   Open      http://127.0.0.1:8791
   Sign in   you@example.com, with the password you chose
@@ -283,44 +288,47 @@ Next
 Warnings
   ! Docker has 7.0 GB of memory
 
-Done in 16m 03s
-------------------------------------------------------------------------
+----------------------------------------------------- Done in 16m 03s --
 
 == summary-failed
 call ui_summary fail "Stopped before changing anything."
 call ui_line "Fix the item above, then run install.sh again. It picks up where it left off."
 call ui_summary_end
 -- color
-
-\e[2m────────────────────────────────────────────────────────────────────────\e[0m
-\e[1;31mStopped before changing anything.\e[0m
+\e[31m╭──────────────────────────────────────────────────────────────────────╮\e[0m
+\e[31m│\e[0m \e[1;31m✗ Stopped before changing anything.\e[0m                                  \e[31m│\e[0m
+\e[31m╰──────────────────────────────────────────────────────────────────────╯\e[0m
 
   Fix the item above, then run install.sh again. It picks up where it
   left off.
-\e[2m────────────────────────────────────────────────────────────────────────\e[0m
+
+\e[31m────────────────────────────────────────────────────────────────────────\e[0m
 -- nocolor
-
-────────────────────────────────────────────────────────────────────────
-Stopped before changing anything.
+╭──────────────────────────────────────────────────────────────────────╮
+│ ✗ Stopped before changing anything.                                  │
+╰──────────────────────────────────────────────────────────────────────╯
 
   Fix the item above, then run install.sh again. It picks up where it
   left off.
+
 ────────────────────────────────────────────────────────────────────────
 -- plain
-
-────────────────────────────────────────────────────────────────────────
-Stopped before changing anything.
+╭──────────────────────────────────────────────────────────────────────╮
+│ ✗ Stopped before changing anything.                                  │
+╰──────────────────────────────────────────────────────────────────────╯
 
   Fix the item above, then run install.sh again. It picks up where it
   left off.
+
 ────────────────────────────────────────────────────────────────────────
 -- ascii
-
-------------------------------------------------------------------------
-Stopped before changing anything.
++----------------------------------------------------------------------+
+| x Stopped before changing anything.                                  |
++----------------------------------------------------------------------+
 
   Fix the item above, then run install.sh again. It picks up where it
   left off.
+
 ------------------------------------------------------------------------
 
 == prompts
@@ -346,15 +354,19 @@ set assume_yes 1
 call ui_confirm "Go ahead?" y
 call ui_confirm "Create the slot disks?" n
 -- color
+\e[1;36m› Your answer is needed\e[0m \e[2m────────────────────────────────────────────────\e[0m
   \e[1m›\e[0m Go ahead? [Y/n] yes (--yes)
   \e[1m›\e[0m Create the slot disks? [y/N] no (--yes)
 -- nocolor
+› Your answer is needed ────────────────────────────────────────────────
   › Go ahead? [Y/n] yes (--yes)
   › Create the slot disks? [y/N] no (--yes)
 -- plain
+› Your answer is needed ────────────────────────────────────────────────
   › Go ahead? [Y/n] yes (--yes)
   › Create the slot disks? [y/N] no (--yes)
 -- ascii
+> Your answer is needed ------------------------------------------------
   > Go ahead? [Y/n] yes (--yes)
   > Create the slot disks? [y/N] no (--yes)
 

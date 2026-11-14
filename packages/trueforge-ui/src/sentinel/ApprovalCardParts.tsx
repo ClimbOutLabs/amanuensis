@@ -79,6 +79,7 @@ export function ApprovalCardShell({
           <p
             className="aui-approval-card__status flex min-w-0 items-center gap-1.5 text-text-secondary"
             data-role="approval-status"
+            role="status"
           >
             {status.tick}
             <span className="min-w-0">{status.text}</span>

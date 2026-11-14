@@ -25,13 +25,14 @@ If that page lists no release, Aman Setup is not out yet. Check again later.
     You can check the file against the signed list on the release page before you run it.
 
     1. From the same release page, download `manifest.json` and `manifest.json.minisig` into the folder that holds `Aman-Setup.exe`.
-    2. Check the list's signature with [minisign](https://github.com/jedisct1/minisign), using the release key from [SECURITY.md](../SECURITY.md#checking-a-download). It must say the signature is verified:
+    2. Open PowerShell in that folder and paste these two lines. The first checks the list's signature with [minisign](https://github.com/jedisct1/minisign), using the Aman release key from [SECURITY.md](../SECURITY.md#checking-a-download). The second prints the hash of the file:
 
-        ```
-        minisign -Vm manifest.json -P <release key>
+        ```powershell
+        minisign -Vm manifest.json -P RWR8aR0vofffsH8dRDfeCxHcPAo2hBKQp6W9krptCFjneeXPDr+ZB0wr
+        Get-FileHash .\Aman-Setup.exe
         ```
 
-    3. In PowerShell, in that folder, run `Get-FileHash .\Aman-Setup.exe`. The hash it prints must match the one next to `Aman-Setup.exe` in `manifest.json`.
+    3. The first must say the signature is verified. The hash the second prints must match the one next to `Aman-Setup.exe` in `manifest.json`.
 
     Every release page also prints the release key and these steps. `SHA256SUMS` on the release page lists the same hashes. On its own, it only shows that the file was not damaged on the way, not who made it.
 

@@ -250,15 +250,22 @@ upgrade_moved() { # name
 }
 
 cmd_upgrade() {
-  local name rc movers
+  local name rc movers UPGRADE_T0=$SECONDS UPGRADE_PROBLEMS=0
   require_installed
   release_load "$RELEASE_DIR/release.json" || die "The record of the installed version cannot be read. Run install.sh again."
   docker_attach
   release_resolve
+  if [ "$OPT_CHECK" = 1 ]; then
+    ui_title "Checking for a newer version of Aman"
+  else
+    ui_title "Upgrading Aman on this computer"
+  fi
   if upgrade_checkout_behind; then
-    say "A newer version of Aman is available."
-    say "This copy of the code is behind the copy on GitHub, so upgrading now would only rebuild the older code."
-    say "To get the newer version, run: git -C $(upgrade_quoted_path "$REPO_ROOT") pull$UPGRADE_PULL_ARGS && aman upgrade"
+    ui_summary warn "A newer version of Aman is available."
+    ui_line "This copy of the code is behind the copy on GitHub, so upgrading now would only rebuild the older code."
+    ui_line "To get the newer version, run:"
+    ui_command "git -C $(upgrade_quoted_path "$REPO_ROOT") pull$UPGRADE_PULL_ARGS && aman upgrade"
+    ui_summary_end
     return 0
   fi
   # The aman command and its helper files come from this checkout too, so an upgrade brings them along.
@@ -267,35 +274,41 @@ cmd_upgrade() {
     if docker_image_exists "$REL_APP_TAG" && docker_image_exists "$REL_STT_TAG" && docker_image_exists "$REL_TTS_TAG" && docker_image_exists "$REL_CALENDAR_TAG" && docker_image_exists "$REL_BROWSER_TAG" && docker_image_exists "$REL_BROWSER_GATEWAY_TAG" && docker_image_exists "$REL_DEX_IMAGE"; then
       movers=$(upgrade_http_instances)
       if [ -z "$movers" ]; then
-        say "Already up to date ($REL_APP_TAG). Nothing to do."
+        ui_summary ok "Already up to date ($REL_APP_TAG). Nothing to do."
         upgrade_old_account_notices
         upgrade_report
+        ui_summary_end
         return 0
       fi
       if [ "$OPT_CHECK" = 1 ] || [ "$DRY_RUN" = 1 ]; then
-        say "Aman is up to date ($REL_APP_TAG)."
+        ui_summary ok "Aman is up to date ($REL_APP_TAG)."
         for name in $movers; do
-          say "  Instance $name would move to https (it is open on your network over plain http)."
+          ui_line "Instance $name would move to https (it is open on your network over plain http)."
         done
+        ui_summary_end
         return 0
       fi
       lock_acquire
-      say "Aman is up to date ($REL_APP_TAG). One change is still needed:"
+      ui_line "Aman is up to date ($REL_APP_TAG)."
+      ui_phase "One change is still needed"
       for name in $movers; do
         upgrade_move_to_https "$name"
         instance_up "$name" recreate || exit 1
       done
       upgrade_old_account_notices
       upgrade_report
+      ui_summary ok "Done. Aman is up to date ($REL_APP_TAG)."
+      ui_summary_end "$(_ui_elapsed_since "$UPGRADE_T0")"
       return 0
     fi
     if [ "$OPT_CHECK" = 1 ] || [ "$DRY_RUN" = 1 ]; then
-      say "Aman is up to date, but part of it is missing. An upgrade would build it again."
+      ui_summary warn "Aman is up to date, but part of it is missing. An upgrade would build it again."
+      ui_summary_end
       return 0
     fi
     lock_acquire
     upgrade_ports_ready
-    say "Building the missing parts again"
+    ui_phase "Building the missing parts again"
     images_ensure
     machine_up "$REL_STT_TAG" "$REL_TTS_TAG"
     for name in $(upgrade_http_instances); do
@@ -310,47 +323,65 @@ cmd_upgrade() {
     done
     upgrade_old_account_notices
     upgrade_report
+    ui_summary ok "Done. The missing parts are back."
+    ui_summary_end "$(_ui_elapsed_since "$UPGRADE_T0")"
     return 0
   fi
   if [ "$OPT_CHECK" = 1 ] || [ "$DRY_RUN" = 1 ]; then
-    say "An upgrade would change:"
+    ui_phase "What an upgrade would change"
   else
-    say "Upgrading these parts of the installed version:"
+    ui_phase "What this upgrade changes" 1 4
   fi
-  [ "$CUR_APP_TAG" = "$REL_APP_TAG" ] || say "  app     $CUR_APP_TAG -> $REL_APP_TAG"
-  [ "$CUR_STT_TAG" = "$REL_STT_TAG" ] || say "  speech  $CUR_STT_TAG -> $REL_STT_TAG"
-  [ "$CUR_TTS_TAG" = "$REL_TTS_TAG" ] || say "  voice   ${CUR_TTS_TAG:-(not installed)} -> $REL_TTS_TAG"
-  [ "$CUR_CALENDAR_TAG" = "$REL_CALENDAR_TAG" ] || say "  calendar $CUR_CALENDAR_TAG -> $REL_CALENDAR_TAG"
-  [ "$CUR_BROWSER_TAG" = "$REL_BROWSER_TAG" ] || say "  browser ${CUR_BROWSER_TAG:-(new)} -> $REL_BROWSER_TAG"
-  [ "$CUR_DEX_IMAGE" = "$REL_DEX_IMAGE" ] || say "  login   $CUR_DEX_IMAGE -> $REL_DEX_IMAGE"
-  if upgrade_any_sandbox; then say "  sandbox PDF and image reading (builds the sandbox again)"; fi
+  [ "$CUR_APP_TAG" = "$REL_APP_TAG" ] || upgrade_change_row app "$CUR_APP_TAG" "$REL_APP_TAG"
+  [ "$CUR_STT_TAG" = "$REL_STT_TAG" ] || upgrade_change_row speech "$CUR_STT_TAG" "$REL_STT_TAG"
+  [ "$CUR_TTS_TAG" = "$REL_TTS_TAG" ] || upgrade_change_row voice "${CUR_TTS_TAG:-(not installed)}" "$REL_TTS_TAG"
+  [ "$CUR_CALENDAR_TAG" = "$REL_CALENDAR_TAG" ] || upgrade_change_row calendar "$CUR_CALENDAR_TAG" "$REL_CALENDAR_TAG"
+  [ "$CUR_BROWSER_TAG" = "$REL_BROWSER_TAG" ] || upgrade_change_row browser "${CUR_BROWSER_TAG:-(new)}" "$REL_BROWSER_TAG"
+  [ "$CUR_DEX_IMAGE" = "$REL_DEX_IMAGE" ] || upgrade_change_row login "$CUR_DEX_IMAGE" "$REL_DEX_IMAGE"
+  if upgrade_any_sandbox; then ui_row sandbox "PDF and image reading (builds the sandbox again)"; fi
   for name in $(upgrade_http_instances); do
-    say "  Instance $name moves to https (it is open on your network over plain http)."
+    ui_line "Instance $name moves to https (it is open on your network over plain http)."
   done
   if [ "$OPT_CHECK" = 1 ]; then
+    ui_hint "To upgrade, run: aman upgrade"
     return 0
   fi
   if [ "$DRY_RUN" = 1 ]; then
-    say "Dry run: nothing was changed."
+    ui_summary ok "Dry run: nothing was changed."
+    ui_summary_end
     return 0
   fi
   lock_acquire
-  say "Steps: check each instance, back up every instance, build the new version, restart the instances, check again."
-  say "If anything fails, the old version and the backup are put back."
+  ui_hint "Steps: check each instance, back up every instance, build the new version, restart the instances, check again."
+  ui_hint "If anything fails, the old version and the backup are put back."
+  ui_phase "Checking and backing up" 2 4
   upgrade_health_gate
   upgrade_ports_ready
   upgrade_prepare
   for name in $(upgrade_http_instances); do
     upgrade_move_to_https "$name"
   done
+  ui_phase "Restarting with the new version" 3 4
   upgrade_switch
-  if [ -n "$UPGRADE_BACKUP" ]; then
-    say "Upgraded to $REL_APP_TAG. The backup from before the upgrade is at $UPGRADE_BACKUP."
-  else
-    say "Upgraded to $REL_APP_TAG. No backup was needed, since no instance had data yet."
-  fi
   upgrade_old_account_notices
+  ui_phase "Checking the result" 4 4
   if [ -x "$(doctor_shim)" ]; then
-    AMAN_REPORT_COMMAND=upgrade DOCTOR_TIMEOUT=180 run_doctor || warn "The checks after the upgrade found a problem, listed above."
+    AMAN_REPORT_COMMAND=upgrade DOCTOR_TIMEOUT=180 run_doctor --summary || UPGRADE_PROBLEMS=1
   fi
+  if [ "${UPGRADE_PROBLEMS:-0}" = 1 ]; then
+    ui_summary warn "Upgraded to $REL_APP_TAG, but the checks found a problem (listed above)."
+  else
+    ui_summary ok "Upgraded to $REL_APP_TAG."
+  fi
+  if [ -n "$UPGRADE_BACKUP" ]; then
+    ui_line "The backup from before the upgrade is at $(ui_path "$UPGRADE_BACKUP")."
+  else
+    ui_line "No backup was needed, since no instance had data yet."
+  fi
+  ui_summary_end "$(_ui_elapsed_since "$UPGRADE_T0")"
+}
+
+# One line of what an upgrade changes: the part, then the old version and the new one.
+upgrade_change_row() { # part old new
+  ui_row "$1" "$2 $S_ARROW $3"
 }
