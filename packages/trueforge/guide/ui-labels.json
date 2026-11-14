@@ -275,6 +275,7 @@
   "Your name": "packages/trueforge-ui/src/components/PersonalizationPanel.tsx",
   "Save personalization": "packages/trueforge-ui/src/components/PersonalizationPanel.tsx",
   "Refresh tabs": "packages/frontend/src/BrowserLivePage.tsx",
+  "End session": "packages/frontend/src/BrowserLivePage.tsx",
   "Watch Live or Take Control": "packages/trueforge-ui/src/components/AmanRuntimeRail.tsx",
   "Type it": "packages/frontend/src/BrowserLivePage.tsx",
   "Paste into page": "packages/frontend/src/BrowserLivePage.tsx",
