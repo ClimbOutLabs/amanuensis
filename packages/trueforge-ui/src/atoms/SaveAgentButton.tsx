@@ -189,6 +189,11 @@ function SaveAgentButtonContent({
                 {intent === 'create' && savedName !== '' && savedName !== name.trim() ? (
                   <span className="text-text-secondary mt-1 block text-xs">It will be saved as {savedName}.</span>
                 ) : null}
+                {intent === 'create' && savedName === '' && name.trim() !== '' ? (
+                  <span role="alert" className="text-failure-bg mt-1 block text-xs">
+                    Use at least one letter from a to z in the name.
+                  </span>
+                ) : null}
               </label>
 
               <label className="mb-3 block">

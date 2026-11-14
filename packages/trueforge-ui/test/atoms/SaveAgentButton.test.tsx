@@ -480,6 +480,20 @@ describe('SaveAgentButton', () => {
     expect(within(dialog).getByRole('button', { name: 'Save agent' })).toBeEnabled();
   });
 
+  it('says what to change when a name has no letter from a to z', async () => {
+    renderButton();
+    fireEvent.click(screen.getByRole('button', { name: 'Save Agent' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Save agent' });
+    const nameInput = within(dialog).getByRole('textbox', { name: /^Name/ });
+    fireEvent.change(within(dialog).getByLabelText("What it's for"), { target: { value: 'Writes reports.' } });
+    fireEvent.change(nameInput, { target: { value: '日報' } });
+    expect(within(dialog).getByText('Use at least one letter from a to z in the name.')).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Save agent' })).toBeDisabled();
+    fireEvent.change(nameInput, { target: { value: '日報 daily' } });
+    expect(within(dialog).queryByText('Use at least one letter from a to z in the name.')).not.toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Save agent' })).toBeEnabled();
+  });
+
   it('saves a typed name with spaces and capitals in the form agent names take', async () => {
     const saveAgent = vi.fn(async (): Promise<SaveAgentResult> => ({ agentId: 'morning-email-helper' }));
     renderButton({ saveAgent });
