@@ -159,7 +159,7 @@ export const AuditLogSettings: FC = () => {
   return (
     <div className="flex min-h-0 flex-col gap-4">
       <div>
-        <h2 className="text-base font-semibold text-text-primary">Audit</h2>
+        <h2 className="text-base font-semibold text-text-primary">Activity log</h2>
         <p className="mt-1 text-sm text-text-secondary">
           Everything the assistant asked to do on your behalf and what happened, across all your chats. Entries stay
           here even after you delete a chat.

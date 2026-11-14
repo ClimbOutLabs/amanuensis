@@ -346,6 +346,43 @@ describe('SidebarLayout rail highlight', () => {
     fireEvent.click(within(nav).getByRole('button', { name: 'Chats' }));
     await waitFor(() => expect(highlighted()).toEqual(['Chats']));
   });
+
+  it('keeps the Navigation button on pages that fill the screen, so a phone can leave them', async () => {
+    render(
+      <SlotsProvider>
+        <ServerProvider
+          server={createMockAgentUIServer({ catalog: createMockCatalog(), schedules: createMockScheduleServer() })}
+        >
+          <ShellModeProvider agentConfig={{ mode: 'AgentLibraryWithComposer' }}>
+            <SpaceProvider store={mockSpaceStore()}>
+              <AgentConfigInstructionsProvider>
+                <RuntimeHarness messages={[]}>
+                  <div className="h-96">
+                    <SidebarLayout />
+                  </div>
+                </RuntimeHarness>
+              </AgentConfigInstructionsProvider>
+            </SpaceProvider>
+          </ShellModeProvider>
+        </ServerProvider>
+      </SlotsProvider>,
+    );
+    const nav = screen.getByRole('navigation', { name: 'Sidebar' });
+
+    fireEvent.click(within(nav).getByRole('button', { name: 'Schedules' }));
+    const schedulesHeader = (await screen.findByRole('heading', { name: 'Scheduled Agents' })).closest('header');
+    expect(schedulesHeader).not.toBeNull();
+    if (schedulesHeader === null) return;
+    fireEvent.click(within(schedulesHeader).getByRole('button', { name: 'Navigation' }));
+    const drawer = await screen.findByRole('dialog', { name: 'Navigation' });
+
+    fireEvent.click(within(drawer).getByRole('button', { name: 'More' }));
+    fireEvent.click(within(screen.getByRole('menu')).getByRole('button', { name: 'Agents' }));
+    const agentsHeader = (await screen.findByRole('heading', { name: 'Agents' })).closest('header');
+    expect(agentsHeader).not.toBeNull();
+    if (agentsHeader === null) return;
+    expect(within(agentsHeader).getByRole('button', { name: 'Navigation' })).toBeInTheDocument();
+  });
 });
 
 describe('SidebarLayout More menu', () => {

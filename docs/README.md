@@ -20,6 +20,7 @@ Aman is a private assistant that runs on your own computer. Start with the secti
 - [Install on Windows](install-windows.md): Install with Aman Setup, one download.
 - [Set up Aman](../packages/trueforge/guide/topics/first-steps.md): Sign in, add a model and have your first chat.
 - [Models and providers](models.mdx): Add a model provider or your own model server.
+- [A model on this computer](../packages/trueforge/guide/topics/local-model.md): Use Ollama or another model you run yourself.
 - [Ideas to try](../packages/trueforge/guide/topics/ideas.md): Ready-made requests to get you going.
 
 ## Features

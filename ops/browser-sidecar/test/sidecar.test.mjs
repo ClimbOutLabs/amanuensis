@@ -1892,7 +1892,9 @@ async function fakeSidecar() {
         }),
       };
     },
-    close: async () => undefined,
+    close: async () => {
+      acts.push({ closed: true });
+    },
   };
   // Reads run in the sidecar's own world in the page; this page has nothing on it to read.
   const cdp = {
@@ -2201,6 +2203,10 @@ test('the live routes answer over HTTP, and listing them needs no tab', async ()
     const badPaste = await post('/live/input', { owner: 'owner-1', tab: 'chat-1', kind: 'paste', text: '' });
     assert.deepEqual(await badPaste.json(), { status: 'bad_input' });
 
+    const closeWithNoTab = await post('/live/close', { owner: 'owner-1', tab: 'chat-1' });
+    assert.equal(closeWithNoTab.status, 200);
+    assert.deepEqual(await closeWithNoTab.json(), { status: 'closed' });
+
     const copyWithNoTab = await post('/live/copy', { owner: 'owner-1', tab: 'chat-1' });
     assert.equal(copyWithNoTab.status, 200);
     assert.deepEqual(await copyWithNoTab.json(), { status: 'closed' });
@@ -2252,6 +2258,29 @@ test('the live view puts a file into the picker the page opened, else its file f
 
     const tooBig = Buffer.alloc(10 * 1024 * 1024 + 1).toString('base64');
     assert.deepEqual(await sidecar.liveUpload({ ...file, data: tooBig }), { status: 'bad_input' });
+  } finally {
+    gateway.close();
+    await sidecar.close();
+  }
+});
+
+test("the person ends the session from the live view, which closes the chat's tab", async () => {
+  if (BrowserSidecar === undefined) {
+    return;
+  }
+  const { sidecar, acts, gateway } = await fakeSidecar();
+  const where = { owner: 'owner-1', tab: 'chat-1' };
+  try {
+    assert.deepEqual(await sidecar.liveClose(where), { status: 'closed' });
+    await sidecar.open({ ...where, url: 'https://site-a.test/account' });
+    assert.equal((await sidecar.liveTabs({ owner: 'owner-1' })).tabs.length, 1);
+
+    assert.deepEqual(await sidecar.liveClose(where), { status: 'ok' });
+    assert.deepEqual(acts.at(-1), { closed: true });
+    // The chat has no page now: the list is empty, and every step on it answers closed until a new open.
+    assert.deepEqual((await sidecar.liveTabs({ owner: 'owner-1' })).tabs, []);
+    assert.deepEqual(await sidecar.liveCopy(where), { status: 'closed' });
+    assert.deepEqual(await sidecar.liveClose(where), { status: 'closed' });
   } finally {
     gateway.close();
     await sidecar.close();

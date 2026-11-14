@@ -69,7 +69,8 @@ describe('parseRecallFacts', () => {
     const facts = parseRecallFacts([turn]);
     expect(facts).toHaveLength(4);
     expect(facts[0]).toMatchObject({ source: 'person', origin: 'You said this · Aug 14, 2026' });
-    expect(facts[1]).toMatchObject({ source: 'read' });
+    // No source is known for it, so it is not called something that was read.
+    expect(facts[1]).toMatchObject({ source: 'read', origin: 'Noted by your assistant, not confirmed · Aug 20, 2026' });
     expect(facts[2]).toMatchObject({ source: 'finding' });
     expect(facts[3]).toMatchObject({ source: 'assistant' });
   });
@@ -96,7 +97,11 @@ describe('parseRecallFacts', () => {
       'See you at the ferry',
     ]);
     expect(facts[0]).toMatchObject({ source: 'person', origin: 'You said this · 2 years ago' });
-    expect(facts[1]).toMatchObject({ source: 'read', date: '2026-11-12' });
+    expect(facts[1]).toMatchObject({
+      source: 'read',
+      date: '2026-11-12',
+      origin: 'Noted by your assistant, not confirmed · yesterday',
+    });
     expect(facts[2]).toMatchObject({ source: 'finding' });
     expect(facts[3]).toMatchObject({ source: 'assistant' });
     expect(facts[4]).toMatchObject({ source: 'person', origin: 'You said this' });

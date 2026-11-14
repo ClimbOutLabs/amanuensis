@@ -399,7 +399,7 @@ export class ScheduleToolSet extends LocalToolMCP {
       defineTool({
         name: SET_REMINDER_TOOL_NAME,
         description:
-          'Set a reminder for the user. It only reaches them and needs no approval. For work you should do, use create_schedule.',
+          'Set a reminder the user asked for. Not asked: offer it, then wait for a yes. Needs no approval. For work you should do, use create_schedule.',
         schema: SetReminderToolSchema,
         annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
         handler: input => this.#setReminder(input),

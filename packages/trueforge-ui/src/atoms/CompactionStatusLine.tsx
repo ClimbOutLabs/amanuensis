@@ -6,9 +6,10 @@ import { formatTokenCount } from '../utils/sessionDisplayFormat.js';
 import { cn } from './lib/cn.js';
 import { formatRelativeTime } from './schedules/cadence.js';
 
-const MEMORY_HINT = "How much of the model's memory this chat uses. When it fills up, older messages are shortened.";
+const MEMORY_HINT =
+  'How much this chat has used of what the model can hold at once. When it fills up, older messages are shortened.';
 
-/** How much of the model's memory the chat uses, or null when the chat's size is not known yet. */
+/** How much the chat has used of what the model can hold, or null when the chat's size is not known yet. */
 export function memoryUseText({
   contextLimit,
   liveTokens,
@@ -18,10 +19,9 @@ export function memoryUseText({
 }): string | null {
   if (liveTokens == null) return null;
   if (contextLimit == null || contextLimit <= 0) {
-    return `This chat uses ${formatTokenCount(liveTokens)} tokens of the model's memory.`;
+    return `This chat has used ${formatTokenCount(liveTokens)} tokens so far.`;
   }
-  const percent = Math.round((liveTokens / contextLimit) * 100);
-  return `This chat uses ${String(percent)}% of the model's memory (${formatTokenCount(liveTokens)} of ${formatTokenCount(contextLimit)} tokens).`;
+  return `This chat has used ${formatTokenCount(liveTokens)} of ${formatTokenCount(contextLimit)} the model can hold.`;
 }
 
 /** The last time older messages were shortened, or null when it never ran or the person stopped it. */
@@ -34,7 +34,7 @@ function shortenedText(lastCompaction: LastCompactionStatus | null): string | nu
   return `Older messages could not be shortened ${when}.`;
 }
 
-/** One small muted line under the composer: how much of the model's memory this chat uses. */
+/** One small muted line under the composer: how much the chat has used of what the model can hold. */
 export function CompactionStatusLine({ className }: { className?: string }) {
   const { contextLimit, liveTokens, lastCompaction, loading } = useCompactionStatus();
 

@@ -30,7 +30,14 @@ function servicesWithAllowlist(binDir: string): SentinelServices {
   const shell_allowlist: ShellAllowlistConfig = {
     pinned_path: binDir,
     commands: {
-      ls: { args: ['-l'], operands: 'workspace_relative', offline_ok: true, script: null, subcommands: null },
+      ls: {
+        args: ['-l'],
+        operands: 'workspace_relative',
+        offline_ok: true,
+        script: null,
+        count_flag: false,
+        subcommands: null,
+      },
     },
   };
   const services = defaultSentinelServices({ pinned_path: binDir });
@@ -269,6 +276,7 @@ describe('approvals bind to the normalized path', () => {
       tool_type: 'truefoundry-system' as const,
       canonical_params: params,
       tier: 2 as const,
+      sandbox_file_write: true,
       approval_token_id: tokenId,
       approval_binding: null,
       shell_binding: null,

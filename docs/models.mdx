@@ -59,7 +59,7 @@ Use a custom provider for vLLM, Ollama, a company gateway, or any other OpenAI-c
 
 ### A model on the same computer as Aman
 
-Aman checks a provider's base URL when you save it, and again each time the model is used. An address on the internet or on your home network works as it stands. An address of the computer Aman runs on is refused, and so is a link-local or cloud metadata address.
+Aman checks a provider's base URL when you save it, and again each time the model is used. An address on the internet or on your home network works as it stands. An address of the computer Aman runs on is refused, and so is a link-local or cloud metadata address. When Aman runs in Docker, as the installer sets it up, that means the container's own addresses, such as `localhost`. Your computer's home network or Tailscale address is not refused.
 
 A model you run yourself on that computer, such as Ollama, is the one exception. Whoever runs Aman names the model's exact address, host and port, in the `LOCAL_MODEL_ENDPOINTS` setting. For a local Ollama that is:
 

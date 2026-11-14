@@ -381,23 +381,3 @@ function cardWith({
     outbound_truncated: false,
   };
 }
-
-/**
- * What the person is told after a reply goes through. The server says whether the calendar sent
- * the reply itself. When it does not, the organizer was not told, and the result must say so.
- */
-export function caldavResultNote({
-  tool_name,
-  structured,
-}: {
-  tool_name: string;
-  structured: unknown;
-}): string | undefined {
-  if (tool_name !== 'respond_to_event' || typeof structured !== 'object' || structured === null) {
-    return undefined;
-  }
-  if (!('scheduling' in structured) || structured.scheduling !== false) {
-    return undefined;
-  }
-  return 'Your answer is saved in the calendar. Your calendar does not send replies itself, so the organizer was not told.';
-}

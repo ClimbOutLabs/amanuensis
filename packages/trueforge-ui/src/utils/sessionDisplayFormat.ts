@@ -48,7 +48,7 @@ export function formatSessionListMetrics(metrics: {
   totalDurationMs: number;
 }): string {
   return [
-    `${metrics.totalTurns} turns`,
+    `${metrics.totalTurns} ${metrics.totalTurns === 1 ? 'turn' : 'turns'}`,
     ...(metrics.totalCostInUsd == null ? [] : [formatCostUsd(metrics.totalCostInUsd)]),
     formatReadableDurationMs(metrics.totalDurationMs),
   ].join(' | ');

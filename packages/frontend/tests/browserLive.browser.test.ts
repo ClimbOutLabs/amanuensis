@@ -53,6 +53,8 @@ async function answerLiveRoutes(
   // Whose hand holds the tab, as the sidecar would report it; while the person holds it, the page
   // is showing a human check, which is the moment takeover exists for.
   let takeoverOn = false;
+  // Tabs the person ended the session on; the tab list leaves them out from then on.
+  const closedTabs = new Set<string>();
   await page.route('**/api/browser/live/**', async (route: Route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
@@ -75,12 +77,18 @@ async function answerLiveRoutes(
       });
       return;
     }
+    if (path === '/api/browser/live/close') {
+      closedTabs.add(String(bodyOf(call)['tab']));
+    }
     if (path === '/api/browser/live/takeover') {
       takeoverOn = bodyOf(call)['on'] === true;
     }
     const data =
       path === '/api/browser/live/tabs'
-        ? { tabs: options.tabs, browser_on: options.browserOff !== true }
+        ? {
+            tabs: options.tabs.filter(tab => !(isRecord(tab) && closedTabs.has(String(tab['tab'])))),
+            browser_on: options.browserOff !== true,
+          }
         : path === '/api/browser/live/frame'
           ? {
               status: 'ok',
@@ -347,6 +355,14 @@ async function checkLivePage(page: Page, calls: LiveCall[], label: string) {
     'off',
     `${label}: no autofill of Aman's own name`,
   );
+  // Each box is one normal line with its button beside it, so the panel never pushes the picture away.
+  for (const box of [password, page.getByLabel('Name or email for the page')]) {
+    const height = (await box.boundingBox())?.height ?? 0;
+    assert.ok(height > 0 && height <= 48, `${label}: a sign-in box is one line tall (${String(height)}px)`);
+  }
+  await page.locator('details.browser-live-panel').screenshot({
+    path: await featureShotPath({ surface: 'screen:browser-live', step: `sign-in-${shotName(label)}` }),
+  });
   await password.fill('hunter2');
   await page.getByRole('button', { name: 'Put password in page' }).click();
   await waitForCall(calls, call => isInput(call, 'paste') && hasText(call, 'hunter2'));
@@ -417,6 +433,26 @@ async function checkLivePage(page: Page, calls: LiveCall[], label: string) {
     `${label}: the page does not scroll sideways`,
   );
 
+  // End session asks once, then closes the shown tab, which leaves the tab list.
+  await page.getByRole('button', { name: 'End session' }).click();
+  await page.getByText('Ending the session closes this page', { exact: false }).waitFor({ timeout: RENDER_TIMEOUT_MS });
+  assert.equal(
+    calls.filter(call => call.path === '/api/browser/live/close').length,
+    0,
+    `${label}: the first press only asks`,
+  );
+  await page.getByRole('button', { name: 'Press again to end' }).click();
+  await waitForCall(calls, call => call.path === '/api/browser/live/close' && hasTab(call, 'chat-2'));
+  await page.getByText('Session ended.', { exact: false }).waitFor({ timeout: RENDER_TIMEOUT_MS });
+  await page.screenshot({
+    path: await featureShotPath({ surface: 'screen:browser-live', step: `session-ended-${shotName(label)}` }),
+  });
+  assert.equal(
+    await tabs.getByRole('button', { name: 'https://example.test/upload' }).count(),
+    0,
+    `${label}: the ended tab leaves the list`,
+  );
+
   // Done stops asking for frames and sends the person back to the chat to tell Aman.
   await page.getByRole('button', { name: 'Done' }).click();
   await page.getByText('Go back to the chat and tell Aman', { exact: false }).waitFor({ timeout: RENDER_TIMEOUT_MS });
@@ -431,6 +467,15 @@ async function checkLivePage(page: Page, calls: LiveCall[], label: string) {
 
 function frameSize() {
   return { image_width: FRAME.width, image_height: FRAME.height };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+/** A picture name from a viewport and theme label, such as 1280px-dark. */
+function shotName(label: string): string {
+  return label.toLowerCase().replace(/[^a-z0-9]+/g, '-');
 }
 
 function bodyOf(call: LiveCall): Record<string, unknown> {

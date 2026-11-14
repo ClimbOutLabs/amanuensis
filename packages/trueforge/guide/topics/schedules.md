@@ -6,7 +6,7 @@ covers: approval:schedule, route:schedule
 
 A schedule asks Aman to do the same job again and again, such as "Every weekday at 7:30, send me my morning brief". Each run is saved as a chat, so you can open it and see what Aman found. The chat is named for the schedule and the day it ran, such as "Morning brief · Thursday, November 13".
 
-How to get there: Click **Schedules** in the left bar.
+How to get there: Click **Schedules** in the left bar. On a phone, tap the menu button at the top left first.
 
 === "Computer"
 
@@ -67,7 +67,7 @@ A scheduled run happens while you are away, so it never sends or changes anythin
 
 Held items expire after 24 hours.
 
-A space is the one exception. A run can make and change any space without asking, so a list it keeps for you stays up to date. Every change keeps a version you can ask Aman to bring back. Each change is also one line under **Settings**, **Audit**. Aman can't delete a space.
+A space is the one exception. A run can make and change any space without asking, so a list it keeps for you stays up to date. Every change keeps a version you can ask Aman to bring back. Each change is also one line under **Settings**, **Activity log**. Aman can't delete a space.
 
 ## Good to know
 
