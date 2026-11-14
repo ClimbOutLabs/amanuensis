@@ -67,7 +67,7 @@ A scheduled run happens while you are away, so it never sends or changes anythin
 
 Held items expire after 24 hours.
 
-A space is the one exception. A run can make and change any space without asking, so a list it keeps for you stays up to date. Every change keeps a version you can ask Aman to bring back. Each change is also one line under **Settings**, **Audit**. Aman can't delete a space.
+A space is the one exception. A run can make and change any space without asking, so a list it keeps for you stays up to date. Every change keeps a version you can ask Aman to bring back. Each change is also one line under **Settings**, **Activity log**. Aman can't delete a space.
 
 ## Good to know
 

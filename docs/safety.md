@@ -183,7 +183,7 @@ A scheduled run has nobody watching it, so it never sends anything by itself. Th
 ??? note "Every rule for scheduled runs"
 
     - It can read and search, the same as a chat.
-    - It can make and change any space without asking, so a list it keeps for you stays up to date. Every change keeps a version you can ask Aman to bring back. Each change a run saves is also one line in the activity log, under **Settings**, **Audit**.
+    - It can make and change any space without asking, so a list it keeps for you stays up to date. Every change keeps a version you can ask Aman to bring back. Each change a run saves is also one line in the activity log, under **Settings**, **Activity log**.
     - Aman can't delete a space.
     - A space only keeps a clickable link that you gave or that a search returned. A link that only an email or a web page supplied is kept as plain text.
     - Any action that would show a card in a chat is held instead. It doesn't run, and the model is told it was saved for you.
