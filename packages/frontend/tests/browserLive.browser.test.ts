@@ -319,6 +319,8 @@ async function checkLivePage(page: Page, calls: LiveCall[], label: string) {
   await waitForCall(calls, call => isInput(call, 'paste') && hasText(call, 'from the button'));
 
   // A password filled in its own box goes in as a paste, and the box is emptied once it is used.
+  // The sign-in boxes sit folded away under the picture until the person opens them.
+  await page.getByText('Sign in with your password manager', { exact: true }).click();
   const password = page.getByLabel('Password for the page');
   assert.equal(await password.getAttribute('type'), 'password', `${label}: the password is hidden`);
   // Both boxes sit on Aman's own address, so a password manager must not offer or save Aman's own sign-in there.
@@ -365,6 +367,8 @@ async function checkLivePage(page: Page, calls: LiveCall[], label: string) {
   await waitForCall(calls, call => call.path === '/api/browser/live/takeover' && bodyOf(call)['on'] === true);
   await page.getByText('asking for a human check', { exact: false }).waitFor({ timeout: RENDER_TIMEOUT_MS });
   const clicksBefore = calls.filter(call => isInput(call, 'click')).length;
+  // The sign-in boxes above may have scrolled the picture away; the press needs it on screen.
+  await picture.scrollIntoViewIfNeeded();
   const box = await picture.boundingBox();
   assert.ok(box !== null, `${label}: the picture has a box to press`);
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
