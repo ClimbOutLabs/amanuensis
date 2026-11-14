@@ -35,7 +35,7 @@ When a skill is on for a chat, Aman reads its instructions when the job comes up
 
 Some skills come with their own scripts. Aman runs them in the sandbox, from the skill's folder. A skill's own script runs without asking, because you installed the skill. It asks first when the sandbox can reach the internet, or when Aman edited one of the skill's files in that chat.
 
-A skill script that needs a website or an extra package can't get it on its own. When that happens, Aman tells you instead of trying workarounds.
+A skill script that needs a website or an extra package can't get it on its own. Aman skips a skill's own install steps and uses the packages the sandbox already has. When a package is missing, Aman tells you which one instead of trying workarounds. On an installed Aman, you can add a Python package with `aman doctor sandbox --add-python` and the package's name.
 
 ## Add your own skill from GitHub
 
@@ -85,6 +85,8 @@ The first time a skill that names sites runs in a chat, a card asks if it may re
 - **Deny** turns them down. Aman does not ask about them again for that skill.
 
 If a skill tries a site it did not name, the connection is stopped and a card asks about that one site.
+
+An approval covers the skill's code as it is when you say yes. If the skill's code changes later, the approval ends and a card asks again.
 
 Some site names use letters from other alphabets. The card then shows the name in brackets as it is really written, for example `pаypal.com (xn--pypal-4ve.com)`. Check that name before you answer, because such letters can make a site look like a familiar one.
 

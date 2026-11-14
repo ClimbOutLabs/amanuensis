@@ -10,7 +10,7 @@ How to get there: Click **More** in the left bar, then **Settings**, then **Reac
 
 ## Where Aman's messages go
 
-- The **For you** bell. Everything Aman sends you waits under the bell labeled **For you**, at the top of the left panel. On a phone, tap the menu button to see it. A number on the bell shows how many you haven't seen. Each item says what it is, when it came and why you got it.
+- The **For you** bell. Everything Aman sends you waits under the bell labeled **For you**, at the top of the left panel. On a phone, tap the menu button to see it. A number on the bell shows how many you haven't seen. Each item says what it is, when it came and why you got it. An item that came from a chat shows **Open chat**, which takes you to that chat. If you deleted the chat, the item stays under the bell without it.
 - Notices on your devices. When you turn notices on for a device, it shows a notice even when Aman is closed. The notice says only that something is there. The details open in Aman.
 - Texts. Once texts are set up and you turn them on, Aman can text your phone when something needs you. See [Text messages from Aman](text-messages.md).
 - Phone calls. Once texts are set up, you can also let Aman phone you when something urgent needs you. Calls are off until you turn them on. See [Phone calls from Aman](phone-calls.md).

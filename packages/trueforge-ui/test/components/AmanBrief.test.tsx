@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vite
 
 import { AmanBrief } from '@/components/AmanBrief.js';
 import { SentinelApiProvider } from '@/sentinel/SentinelApiContext.js';
-import type { SentinelApi } from '@/sentinel/types.js';
+import type { SentinelApi, SentinelAuditEntry } from '@/sentinel/types.js';
 
 const { composer } = vi.hoisted(() => ({ composer: { setText: vi.fn(), send: vi.fn() } }));
 
@@ -64,14 +64,28 @@ const UNUSED = async (): Promise<never> => {
   throw new Error('not used by the brief');
 };
 
+function readEntries(count: number): SentinelAuditEntry[] {
+  return Array.from({ length: count }, (_, index) => ({
+    id: `entry-${String(index)}`,
+    session_id: 'chat-1',
+    created_at: '2026-01-05T08:00:00.000Z',
+    tier: 1,
+    action_type: 'mail.read',
+    description: 'Read the inbox',
+    outcome: 'logged',
+  }));
+}
+
 /** A Sentinel API whose brief methods are spies; the rest of the surface is never called here. */
 function fakeApi(
-  brief: Partial<Pick<SentinelApi, 'listBriefItemCompletions' | 'markBriefItemDone' | 'unmarkBriefItemDone'>> = {},
+  brief: Partial<
+    Pick<SentinelApi, 'listAuditEntries' | 'listBriefItemCompletions' | 'markBriefItemDone' | 'unmarkBriefItemDone'>
+  > = {},
 ): SentinelApi & { markBriefItemDone: Mock; unmarkBriefItemDone: Mock } {
   const markBriefItemDone = vi.fn(brief.markBriefItemDone ?? (async () => undefined));
   const unmarkBriefItemDone = vi.fn(brief.unmarkBriefItemDone ?? (async () => undefined));
   return {
-    listAuditEntries: async () => [],
+    listAuditEntries: brief.listAuditEntries ?? (async () => []),
     listUserAuditEntries: async () => ({ entries: [] }),
     getUserSettings: UNUSED,
     updateUserSettings: UNUSED,
@@ -292,5 +306,20 @@ describe('AmanBrief', () => {
     renderBrief(BRIEF, api);
     await waitFor(() => expect(screen.getAllByTestId('brief-row')).toHaveLength(3));
     expect(screen.queryByRole('listitem', { name: 'Reply to Ines' })).toBeNull();
+  });
+
+  it('asks for no more audit entries than one read gives, and shows the counts under the brief', async () => {
+    const listAuditEntries = vi.fn(async () => readEntries(3));
+    renderBrief(BRIEF, fakeApi({ listAuditEntries }));
+    expect(await screen.findByText('3 things read, allowed by your settings. Nothing was sent.')).toBeInTheDocument();
+    expect(listAuditEntries).toHaveBeenCalledWith({ sessionId: 'chat-1', limit: 100 });
+  });
+
+  it('shows no counts when the read came back full, since more entries may exist', async () => {
+    const listAuditEntries = vi.fn(async () => readEntries(100));
+    renderBrief(BRIEF, fakeApi({ listAuditEntries }));
+    await waitFor(() => expect(listAuditEntries).toHaveBeenCalled());
+    await act(async () => {});
+    expect(screen.queryByText(/Nothing was sent/)).toBeNull();
   });
 });

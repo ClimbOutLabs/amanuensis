@@ -294,6 +294,78 @@ function objectIdForRef(input: { lsRemoteStdout: string; ref: string }): string 
   throw new SkillMissingVersionError('ref not found in the repository');
 }
 
+/**
+ * The hardened git environment every host git run uses: hooks, global config and terminal
+ * prompts stay off and only https is allowed, so a repository cannot run code on the host.
+ */
+function gitEnv(home: string): Record<string, string> {
+  return {
+    ...HOST_PATH_ENV,
+    HOME: home,
+    GIT_TERMINAL_PROMPT: '0',
+    GIT_CONFIG_NOSYSTEM: '1',
+    GIT_CONFIG_GLOBAL: '/dev/null',
+    GIT_ALLOW_PROTOCOL: 'https',
+  };
+}
+
+/** One host git run; a non-zero exit is a download failure, as the copy path has always read it. */
+async function runGit(input: {
+  host: HostCommandRunner;
+  signal: AbortSignal;
+  env: Record<string, string>;
+  args: readonly string[];
+  cwd: string;
+}): Promise<string> {
+  const result = await input.host.run({
+    argv: ['git', '-c', 'core.hooksPath=/dev/null', ...input.args],
+    env: input.env,
+    cwd: input.cwd,
+    timeoutMs: GIT_TIMEOUT_MS,
+    signal: input.signal,
+    maxStdoutBytes: MAX_TOOL_OUTPUT_BYTES,
+    limits: HOST_TOOL_LIMITS,
+  });
+  if (result.exitCode !== 0) {
+    throw new SkillDownloadError(`git ${input.args[0] ?? ''} exited with ${String(result.exitCode)}`);
+  }
+  return result.stdout.toString('utf-8');
+}
+
+/**
+ * The commit a git skill's ref names today, resolved on the host with the same hardened git
+ * the copy path runs: this is the one ref resolver, and the copy path fetches through it too.
+ * A ref that is already a commit id names itself. Throws SkillMissingVersionError when the
+ * repository has no such ref, and SkillDownloadError when git cannot reach it.
+ */
+export async function resolveGitSkillObjectId(input: {
+  skill: Pick<GitSkill, 'url' | 'ref'>;
+  deps: SkillCopyDeps;
+}): Promise<string> {
+  const { skill } = input;
+  if (!isSafeRef(skill.ref) || skill.url.startsWith('-')) {
+    throw new Error('git skill has an unsafe url or ref');
+  }
+  if (OBJECT_ID.test(skill.ref)) {
+    return skill.ref;
+  }
+  const host = input.deps.host ?? execFileRunner;
+  const signal = input.deps.signal ?? new AbortController().signal;
+  const work = await mkdtemp(join(tmpdir(), 'tfy-skill-ref-'));
+  try {
+    const lsRemoteStdout = await runGit({
+      host,
+      signal,
+      env: gitEnv(work),
+      args: ['ls-remote', skill.url, skill.ref],
+      cwd: work,
+    });
+    return objectIdForRef({ lsRemoteStdout, ref: skill.ref });
+  } finally {
+    await rm(work, { recursive: true, force: true });
+  }
+}
+
 /** Where a git skill is: the repository, the folder in it ('' for the top), and a branch, tag or commit. */
 export type GitSkillSource = Pick<GitSkill, 'url' | 'path' | 'ref'>;
 
@@ -305,36 +377,12 @@ async function checkoutGitSkill(input: {
   work: string;
 }): Promise<{ objectId: string; skillDir: string; files: SkillFile[] }> {
   const { skill, host, signal, work } = input;
-  if (!isSafeSubdir(skill.path) || !isSafeRef(skill.ref) || skill.url.startsWith('-')) {
+  if (!isSafeSubdir(skill.path)) {
     throw new Error('git skill has an unsafe url, ref or path');
   }
-  // Hooks, global config and terminal prompts stay off, so a repository cannot run code on the host.
-  const env = {
-    ...HOST_PATH_ENV,
-    HOME: work,
-    GIT_TERMINAL_PROMPT: '0',
-    GIT_CONFIG_NOSYSTEM: '1',
-    GIT_CONFIG_GLOBAL: '/dev/null',
-    GIT_ALLOW_PROTOCOL: 'https',
-  };
-  const run = async (args: readonly string[], cwd: string): Promise<string> => {
-    const result = await host.run({
-      argv: ['git', '-c', 'core.hooksPath=/dev/null', ...args],
-      env,
-      cwd,
-      timeoutMs: GIT_TIMEOUT_MS,
-      signal,
-      maxStdoutBytes: MAX_TOOL_OUTPUT_BYTES,
-      limits: HOST_TOOL_LIMITS,
-    });
-    if (result.exitCode !== 0) {
-      throw new SkillDownloadError(`git ${args[0] ?? ''} exited with ${String(result.exitCode)}`);
-    }
-    return result.stdout.toString('utf-8');
-  };
-  const objectId = OBJECT_ID.test(skill.ref)
-    ? skill.ref
-    : objectIdForRef({ lsRemoteStdout: await run(['ls-remote', skill.url, skill.ref], work), ref: skill.ref });
+  const env = gitEnv(work);
+  const run = (args: readonly string[], cwd: string): Promise<string> => runGit({ host, signal, env, args, cwd });
+  const objectId = await resolveGitSkillObjectId({ skill, deps: { host, signal } });
   const repo = join(work, 'repo');
   await mkdir(repo);
   await run(['init', '-q', repo], work);

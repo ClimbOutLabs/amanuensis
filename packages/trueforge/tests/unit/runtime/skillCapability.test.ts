@@ -196,6 +196,8 @@ describe('install_skill', () => {
     expect(saved).toMatchObject({
       name: 'release-notes',
       network_approval: ['api.release-feed.info'],
+      // The approval is pinned to the same commit that was read and added.
+      network_approval_code_sha: COMMIT,
       manifest: {
         type: 'git',
         name: 'release-notes',

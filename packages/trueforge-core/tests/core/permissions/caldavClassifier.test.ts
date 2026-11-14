@@ -1,5 +1,4 @@
 import { caldavEventReviewFrom, type CaldavEventReview } from '../../../src/core/calendar/caldav/eventReview';
-import { caldavResultNote } from '../../../src/core/permissions/caldavTier';
 import { classifyTier, type ClassifyContext, type SentinelAction } from '../../../src/core/permissions/classifier';
 import { defaultSentinelServices } from '../../../src/core/permissions/context';
 import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
@@ -427,23 +426,5 @@ describe('CalDAV fail-closed cases', () => {
   it('does not give the rules to a server with another name', async () => {
     const decision = await classifyTier(caldavAction('list_events', EVENT_ID, { mcp_server_name: 'other' }), makeCtx());
     expect(decision.tier).toBe(3);
-  });
-});
-
-describe('caldavResultNote', () => {
-  it('says the organizer was not told when the calendar sends no replies itself', () => {
-    expect(
-      caldavResultNote({ tool_name: 'respond_to_event', structured: { responded: true, scheduling: false } }),
-    ).toBe(
-      'Your answer is saved in the calendar. Your calendar does not send replies itself, so the organizer was not told.',
-    );
-  });
-
-  it('adds nothing when the calendar sent the reply', () => {
-    expect(caldavResultNote({ tool_name: 'respond_to_event', structured: { scheduling: true } })).toBeUndefined();
-  });
-
-  it('adds nothing to other tools', () => {
-    expect(caldavResultNote({ tool_name: 'list_events', structured: { scheduling: false } })).toBeUndefined();
   });
 });

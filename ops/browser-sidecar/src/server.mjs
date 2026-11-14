@@ -1411,6 +1411,26 @@ export class BrowserSidecar {
   }
 
   /**
+   * Closes the chat's tab when the person ends the session from the live view. Aman then has no page
+   * in that chat, so using the browser again takes a new open, which asks the person as any open does.
+   */
+  async liveClose({ owner, tab: tabId }) {
+    const tab = await this.#tabFor({ owner, tab: tabId, create: false });
+    if (tab === undefined) {
+      return NO_TAB;
+    }
+    const profile = await this.profileFor(owner);
+    return inLiveOrder(tab, async () => {
+      if (profile.tabs.get(tabId) === tab) {
+        profile.tabs.delete(tabId);
+      }
+      profile.tabsByPage.delete(tab.page);
+      await tab.page.close().catch(() => undefined);
+      return { status: 'ok' };
+    });
+  }
+
+  /**
    * Puts a file the person chose in the live view into the page: into the file picker the page just
    * opened, or else the page's first file field. Nothing is uploaded until the page itself sends it.
    */
@@ -1575,6 +1595,7 @@ const ROUTES = {
     return input === undefined ? { status: 'bad_input' } : sidecar.liveInput({ ...where, input });
   },
   'POST /live/copy': (sidecar, where) => sidecar.liveCopy(where),
+  'POST /live/close': (sidecar, where) => sidecar.liveClose(where),
   'POST /live/takeover': (sidecar, where, body) =>
     typeof body.on === 'boolean' ? sidecar.liveTakeover({ ...where, on: body.on }) : { status: 'bad_input' },
 };

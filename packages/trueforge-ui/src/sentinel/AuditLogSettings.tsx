@@ -159,7 +159,7 @@ export const AuditLogSettings: FC = () => {
   return (
     <div className="flex min-h-0 flex-col gap-4">
       <div>
-        <h2 className="text-base font-semibold text-text-primary">Audit</h2>
+        <h2 className="text-base font-semibold text-text-primary">Activity log</h2>
         <p className="mt-1 text-sm text-text-secondary">
           Everything the assistant asked to do on your behalf and what happened, across all your chats. Entries stay
           here even after you delete a chat.
@@ -167,10 +167,10 @@ export const AuditLogSettings: FC = () => {
       </div>
 
       <div className="flex flex-wrap items-end gap-3">
-        <label className="flex items-center gap-2 text-sm text-text-secondary">
+        <label className="flex max-w-full min-w-0 items-center gap-2 text-sm text-text-secondary">
           Show
           <select
-            className="rounded-md border border-border bg-primary-bg px-2 py-1 text-sm text-text-primary"
+            className="max-w-full min-w-0 rounded-md border border-border bg-primary-bg px-2 py-1 text-sm text-text-primary"
             value={outcome ?? ''}
             onChange={event => setOutcome(parseOutcomeFilter(event.target.value))}
           >
