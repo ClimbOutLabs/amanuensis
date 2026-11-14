@@ -308,6 +308,11 @@ export class DeferredTool extends LocalToolMCP {
     });
   }
 
+  /** Whether any wrapped server's registered tool by that name declares that it writes files, as that set reports it. */
+  isFileWriteTool(name: string): boolean {
+    return [...this.serverMap.values()].some(server => server.isFileWriteTool?.(name) === true);
+  }
+
   /** The id and display name of the connector a `call_tool` wrapper names, or undefined when it names none. */
   resolvedServer(name: string): { id: string; name: string } | undefined {
     const server = this.resolveServer(name);
