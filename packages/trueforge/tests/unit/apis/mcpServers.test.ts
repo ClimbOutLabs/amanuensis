@@ -1331,7 +1331,7 @@ describe('mcp-servers routers', () => {
       expect(stored?.search_in_process).toBeUndefined();
     });
 
-    it('refuses a designated connector whose tools cannot be read, whatever the request carried', async () => {
+    it('saves the designation with no declaration when the tools cannot be read, whatever the request carried', async () => {
       const response = await settingsRouter.request(
         '/',
         putInit(
@@ -1344,9 +1344,15 @@ describe('mcp-servers routers', () => {
           ),
         ),
       );
-      expect(response.status).toBe(422);
+      expect(response.status).toBe(200);
       const stored = await mcpServerStore.getServer({ tenant_id: TENANT_ID, name: 'catalog-search' });
-      expect(stored?.manifest.type === 'remote' ? stored.manifest.url : undefined).toBe(PARALLEL_URL);
+      expect(stored?.manifest.type === 'remote' ? stored.manifest.url : undefined).toBe(
+        'https://search.unknown.example.com/mcp',
+      );
+      // The names the request carried are never stored: a declaration is read off the server
+      // itself or not at all, and this server could not be read.
+      expect(stored?.manifest.type === 'remote' ? stored.manifest.search_tools : undefined).toBeUndefined();
+      expect(stored?.manifest.type === 'remote' ? stored.manifest.page_read_tools : undefined).toBeUndefined();
     });
 
     it('drops the declaration when the role is turned off', async () => {
@@ -1357,16 +1363,17 @@ describe('mcp-servers routers', () => {
       expect(roleOff?.page_read_tools).toBeUndefined();
     });
 
-    it('refuses to move a designated connector to an address whose tools cannot be read', async () => {
+    it('moving a designated connector to an address whose tools cannot be read drops the declaration until they are read there', async () => {
       await save(providerManifest({ search_provider: true }));
       const response = await settingsRouter.request(
         '/',
         putInit(wrapManifest(providerManifest({ search_provider: true, url: 'https://other.example.com/mcp' }))),
       );
-      expect(response.status).toBe(422);
+      expect(response.status).toBe(200);
       const stored = await mcpServerStore.getServer({ tenant_id: TENANT_ID, name: 'catalog-search' });
-      expect(stored?.manifest.type === 'remote' ? stored.manifest.url : undefined).toBe(PARALLEL_URL);
-      expect(stored?.manifest.type === 'remote' ? stored.manifest.search_tools : undefined).toEqual(['web_search']);
+      expect(stored?.manifest.type === 'remote' ? stored.manifest.url : undefined).toBe('https://other.example.com/mcp');
+      expect(stored?.manifest.type === 'remote' ? stored.manifest.search_tools : undefined).toBeUndefined();
+      expect(stored?.manifest.type === 'remote' ? stored.manifest.page_read_tools : undefined).toBeUndefined();
     });
 
     it('matches the address the way the catalog does, so a key in the query string still counts', async () => {
@@ -1427,6 +1434,35 @@ describe('mcp-servers routers', () => {
         const stored = await mcpServerStore.getServer({ tenant_id: TENANT_ID, name: 'home-search' });
         expect(stored?.manifest.type === 'remote' ? stored.manifest.search_tools : undefined).toBeUndefined();
         expect(stored?.manifest.type === 'remote' ? stored.manifest.page_read_tools : undefined).toBeUndefined();
+      } finally {
+        await inert.stop();
+      }
+    });
+
+    it('captures the declaration when the tools of a designated server are read, if designation could not read them', async () => {
+      const inert = await startInertMcpServer({ searchProvider: true });
+      try {
+        // Seeded through the store, as a record designated while its server could not be
+        // read: the designation stands and no declaration is stored yet.
+        await mcpServerStore.upsertServer({
+          tenant_id: TENANT_ID,
+          name: 'home-search',
+          manifest: {
+            type: 'remote',
+            name: 'home-search',
+            url: inert.url,
+            description: 'A search server run at home.',
+            search_provider: true,
+          },
+          first_party: false,
+        });
+        const response = await mcpServersRouter.request('/home-search/tools');
+        expect(response.status).toBe(200);
+        const stored = await mcpServerStore.getServer({ tenant_id: TENANT_ID, name: 'home-search' });
+        expect(stored?.manifest.type === 'remote' ? stored.manifest.search_tools : undefined).toEqual(['web_search']);
+        expect(stored?.manifest.type === 'remote' ? stored.manifest.page_read_tools : undefined).toEqual([
+          'web_fetch',
+        ]);
       } finally {
         await inert.stop();
       }

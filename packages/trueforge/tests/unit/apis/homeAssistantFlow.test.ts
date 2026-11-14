@@ -159,6 +159,7 @@ describe('Home Assistant demo world', () => {
   let server: ApprovalTestServer;
   let stub: HomeAssistantStub;
   let sessionId: string;
+  let liveContextAfterSetup = 0;
 
   beforeAll(async () => {
     server = await startApprovalTestServer();
@@ -178,6 +179,17 @@ describe('Home Assistant demo world', () => {
     if (created.status !== 201) {
       throw new Error(`connector create failed (${String(created.status)}): ${JSON.stringify(await created.json())}`);
     }
+    // Setting the connector up runs its connection check, as the connector page does: the
+    // check is the moment the server's own change declarations are captured onto the record,
+    // and standing grants read them from there. The check also reads the live context once,
+    // so the turn tests count from this baseline.
+    const checked = await server.request('/api/v1/mcp-servers/home-assistant/home-assistant-check', {
+      method: 'POST',
+    });
+    if (checked.status !== 200) {
+      throw new Error(`connector check failed (${String(checked.status)}): ${JSON.stringify(await checked.json())}`);
+    }
+    liveContextAfterSetup = stub.liveContextInvocations();
     sessionId = await createSession(server, HA_AGENT_SPEC);
   }, TURN_TIMEOUT_MS);
 
@@ -195,7 +207,7 @@ describe('Home Assistant demo world', () => {
         input: userMessage(`${RUN_DIRECTIVE_PREFIX}GetLiveContext please`),
       });
       expect(pendingApproval(turn)).toBeUndefined();
-      expect(stub.liveContextInvocations()).toBe(1);
+      expect(stub.liveContextInvocations()).toBe(liveContextAfterSetup + 1);
       const responses = await toolResponses(server, sessionId);
       expect(responses.some(content => content.includes('Hallway thermostat: heating, set to 22 degrees'))).toBe(true);
     },

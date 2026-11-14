@@ -123,12 +123,17 @@ describe('renderWebFetchResultMarkdown', () => {
   });
 });
 
-function toolCallInfoFor(originalToolName: string, type: 'mcp' | 'truefoundry-system' = 'mcp'): InternalToolCallInfo {
+function toolCallInfoFor(
+  originalToolName: string,
+  type: 'mcp' | 'truefoundry-system' = 'mcp',
+  stamps: Pick<InternalToolCallInfo, 'search_provider_call' | 'page_read_call'> = {},
+): InternalToolCallInfo {
   return {
     type,
     mcp_server_id: type === 'mcp' ? 'parallel-web' : '',
     mcp_server_name: type === 'mcp' ? 'parallel-web' : '',
     original_tool_name: originalToolName,
+    ...stamps,
   };
 }
 
@@ -138,15 +143,17 @@ function makeToolResult(params: {
   dispatchedFunctionName: string;
   /** The underlying MCP tool name the host resolved, e.g. `web_search`. */
   underlyingToolName: string;
+  /** The result came from a page-read tool of the connector the person chose as the search provider, as the host stamps it. */
+  pageRead?: boolean;
   failure?: boolean;
 }): ToolCallResult {
-  const { rawContent, dispatchedFunctionName, underlyingToolName, failure = false } = params;
+  const { rawContent, dispatchedFunctionName, underlyingToolName, pageRead = false, failure = false } = params;
   const toolSet = makeMockIMCPServer({ name: 'deferred-tools', preload: true });
   return {
     message: { role: 'tool', tool_call_id: 'call-1', content: rawContent },
     images: [],
     rawContent,
-    toolCallInfo: toolCallInfoFor(underlyingToolName),
+    toolCallInfo: toolCallInfoFor(underlyingToolName, 'mcp', pageRead ? { search_provider_call: true, page_read_call: true } : {}),
     screen: undefined,
     // `info` reflects the function the model actually called (the dispatcher's own name when
     // reached through `call_tool`), which is why matching against it — the pre-fix bug — never
@@ -384,6 +391,7 @@ describe('pictures the model is shown', () => {
       rawContent: rawJson,
       dispatchedFunctionName: 'web_fetch',
       underlyingToolName: 'web_fetch',
+      pageRead: true,
     });
 
     await new WebSearchRenderingProcessor().process([result]);
@@ -405,6 +413,7 @@ describe('pictures the model is shown', () => {
       rawContent: fetchEnvelope('Just words about dogs.'),
       dispatchedFunctionName: 'web_fetch',
       underlyingToolName: 'web_fetch',
+      pageRead: true,
     });
     await new WebSearchRenderingProcessor().process([result]);
     expect(result.message.content).toContain('Just words about dogs.');
@@ -417,6 +426,7 @@ describe('pictures the model is shown', () => {
       rawContent: rawJson,
       dispatchedFunctionName: 'tavily_extract',
       underlyingToolName: 'tavily_extract',
+      pageRead: true,
     });
     await new WebSearchRenderingProcessor().process([result]);
     expect(result.message.content.startsWith(rawJson)).toBe(true);

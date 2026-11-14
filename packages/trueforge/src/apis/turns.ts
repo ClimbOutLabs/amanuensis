@@ -657,6 +657,7 @@ function createTurnResolver(deps: {
           }),
           first_party: connection.first_party,
           grant_binding: connection.grant_binding,
+          declared_change_tools: connection.declared_change_tools,
           search_provider:
             connection.search_provider === undefined
               ? undefined

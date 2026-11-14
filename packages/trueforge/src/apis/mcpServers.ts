@@ -516,10 +516,12 @@ export function createSettingsMcpServersRouter<TTransaction>(
    * The search declaration for a save that designates this connector, dialing the server when
    * neither the stored record nor a shipped preset settles it. The dial reads the server's own
    * tool list with the credential the row carries or will carry, and the declaration is read
-   * from that list alone. A server that cannot be read rejects the write: a designation whose
-   * tools were never captured would look accepted in Settings and silently do nothing, which
-   * is the failure this capture exists to end. Runs outside the write transaction, like the
-   * memory provider check, so its network I/O never holds a lock.
+   * from that list alone. A server whose tools cannot be read right now, or that asks for
+   * sign-in first, is saved with no declaration at all: the designation stands, nothing runs
+   * silently for it, and the declaration is captured the next time its tool list is read. The
+   * one refusal is a shipped preset at the address carrying no search declaration, where the
+   * catalog itself says the server is not a search provider. Runs outside the write
+   * transaction, like the memory provider check, so its network I/O never holds a lock.
    */
   async function searchDeclarationForWrite({
     manifest,
@@ -543,6 +545,13 @@ export function createSettingsMcpServersRouter<TTransaction>(
     if (settled !== undefined) {
       return { declaration: settled };
     }
+    if (deps.mcpCatalog.presetForUrl(manifest.url) !== undefined) {
+      // A shipped preset stands at this address and carries no search declaration, so the
+      // catalog itself says this server is not a search provider.
+      return {
+        rejection: 'That server does not offer search tools, so it cannot be the search provider.',
+      };
+    }
     let headers: RemoteMcpHeaders;
     if (stored !== undefined && stored.manifest.type === 'remote' && stored.manifest.url === manifest.url) {
       const connection = await getMcpConnection({ tenant_id, name: stored.name, store: mcpServerStore, userRef });
@@ -565,21 +574,20 @@ export function createSettingsMcpServersRouter<TTransaction>(
     try {
       const response = await remote.listTools();
       if (isAuthRequired(response)) {
-        return {
-          rejection:
-            'That server needs sign-in before Aman can read its tools. Connect it first, then make it the search provider.',
-        };
+        // The designation is saved with no declaration: the server's tools are captured when
+        // they are next read, after the person has connected it.
+        deps.logger.warn(`Search provider tool capture needs sign-in for "${manifest.name}"; saving without a declaration`);
+        return { declaration: undefined };
       }
       const declaration = declaredSearchProviderTools(response.result.tools);
       return { declaration: { ...declaration, plumbing_fields: [], in_process: false } };
     } catch (error) {
-      deps.logger.warn(`Search provider tool capture failed for "${manifest.name}"; rejecting write`, {
+      // Same shape: the designation stands, no declaration is stored, and nothing runs
+      // silently for this provider until a later read of its tool list captures one.
+      deps.logger.warn(`Search provider tool capture failed for "${manifest.name}"; saving without a declaration`, {
         ...extractErrorLogFields(error),
       });
-      return {
-        rejection:
-          'Aman could not read that server’s tools, so it cannot be the search provider yet. Check the address, then try again.',
-      };
+      return { declaration: undefined };
     }
   }
 
@@ -717,8 +725,9 @@ export function createSettingsMcpServersRouter<TTransaction>(
       memoryProviderChecked = true;
     }
 
-    // The search declaration is captured here, after secret resolution and before the write,
-    // so the row is never committed carrying a designation whose tools were never read.
+    // The search declaration is settled here, after secret resolution and before the write:
+    // captured from the server's own tool list when it can be read now, and left empty when
+    // it cannot, so the stored designation never carries tool names nobody read off the server.
     if (manifest.type === 'remote' && manifest.search_provider === true) {
       const captured = await searchDeclarationForWrite({
         manifest,
@@ -1085,6 +1094,33 @@ export function createMcpServersRouter<TTransaction>(deps: McpServersRouterDeps<
       const response = await remote.listTools();
       if (isAuthRequired(response)) {
         return c.json({ error: { message: `MCP server "${name}" requires authentication` } }, 422);
+      }
+      // Reading the tool list is a connect moment: a designated search provider whose record
+      // carries no declaration yet, because its tools could not be read when it was
+      // designated, gains the declaration from this very list, read off the server itself.
+      try {
+        const store = deps.resolveMcpServerStore(c);
+        const record = await store.getServer({ tenant_id: requestContext.tenant_id, name });
+        if (
+          record !== undefined &&
+          record.manifest.type === 'remote' &&
+          record.manifest.search_provider === true &&
+          record.manifest.page_read_tools === undefined &&
+          record.manifest.url === connection.url
+        ) {
+          const declaration = declaredSearchProviderTools(response.result.tools);
+          await store.upsertServer({
+            tenant_id: requestContext.tenant_id,
+            name: record.name,
+            manifest: withSearchDeclaration({
+              manifest: record.manifest,
+              declaration: { ...declaration, plumbing_fields: [], in_process: false },
+            }),
+            first_party: record.first_party,
+          });
+        }
+      } catch (error) {
+        deps.logger.warn(`Search declaration could not be stored for "${name}"`, extractErrorLogFields(error));
       }
       const data = response.result.tools.map(tool => omitUndefinedEntries({ ...tool }));
       return c.json({ data }, 200);
