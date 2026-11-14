@@ -21,6 +21,7 @@ import { createMcpOAuthClient } from '../mcp/auth/mcpDcr';
 import { mcpOAuthRedirectUris } from '../mcp/auth/mcpOAuthHelpers';
 import type { IOAuthTokenStore, OAuthClientRecord } from '../mcp/auth/types';
 import { connectorGrantBinding } from '../mcp/connectorGrantBinding';
+import { isFirstPartyOrigin } from '../mcp/firstParty';
 import { checkHomeAssistant, homeAssistantUrlProblem, type HomeAssistantProbeClient } from '../mcp/homeAssistant';
 import {
   authorizeMcpServerRoute,
@@ -37,7 +38,8 @@ import {
   listMcpToolGrantsRoute,
   putMcpServerRoute,
 } from '../routes/mcpServerRoutes';
-import { getMcpConnection } from '../runtime/sessionResources';
+import { remoteUrlProblem } from '../runtime/remoteAddress';
+import { getMcpConnection, RemoteAddressRefusedError } from '../runtime/sessionResources';
 import type {
   AvailableMcpServer,
   ConfiguredMcpServer,
@@ -235,6 +237,31 @@ function withCatalogSearchTools({
   return { ...manifest, search_tools: tools.length > 0 ? [...tools] : undefined };
 }
 
+/**
+ * The reason a remote connector address may not be used, or undefined when it may. An origin on
+ * the operator's own list is the operator's own service and is not second-guessed; every other
+ * remote address is resolved and judged by the address check (see runtime/remoteAddress) before
+ * anything dials it or writes it. A host that does not resolve is not refused here: it connects
+ * nowhere, the connection attempt reports its own failure, and the address is judged again on
+ * the next check if the name starts resolving. The wording is the same wherever the refusal is
+ * served, so the person hears one explanation.
+ */
+async function remoteAddressRefusal({ url }: { url: string }): Promise<string | undefined> {
+  if (isFirstPartyOrigin({ url, origins: configuration.FIRST_PARTY_MCP_ORIGINS })) {
+    return undefined;
+  }
+  const problem = await remoteUrlProblem({ url });
+  switch (problem) {
+    case null:
+    case 'unresolved':
+      return undefined;
+    case 'blocked':
+      return 'That address is on this computer, so the server cannot connect to it. Enter an address on your home network or the internet instead.';
+    case 'invalid':
+      return 'That address is not one the server can connect to. Enter the full address, starting with http:// or https://, without a name and password in it.';
+  }
+}
+
 export function createSettingsMcpServersRouter<TTransaction>(
   deps: McpServersRouterDeps<TTransaction> & { mcpCatalog: McpCatalog },
 ) {
@@ -293,6 +320,15 @@ export function createSettingsMcpServersRouter<TTransaction>(
       });
       if (conflict !== undefined) {
         return c.json({ error: { message: `search provider already set on ${conflict.name}; disable it first` } }, 409);
+      }
+    }
+
+    // The address check comes before DCR and before the write: registration dials the address,
+    // so a refused address is neither dialed nor saved.
+    if (incomingManifest.type === 'remote') {
+      const refusal = await remoteAddressRefusal({ url: incomingManifest.url });
+      if (refusal !== undefined) {
+        return c.json({ error: { message: refusal } }, 400);
       }
     }
 
@@ -397,6 +433,14 @@ export function createSettingsMcpServersRouter<TTransaction>(
       });
       if (conflict !== undefined) {
         return c.json({ error: { message: `search provider already set on ${conflict.name}; disable it first` } }, 409);
+      }
+    }
+
+    // The address check comes before the write, so a refused address is never saved.
+    if (incomingManifest.type === 'remote') {
+      const refusal = await remoteAddressRefusal({ url: incomingManifest.url });
+      if (refusal !== undefined) {
+        return c.json({ error: { message: refusal } }, 400);
       }
     }
 
@@ -537,6 +581,17 @@ export function createMcpServersRouter<TTransaction>(deps: McpServersRouterDeps<
       return c.json({ error: { message: 'Invalid return_to: must be a same-origin relative path' } }, 400);
     }
 
+    // The authorize flow dials the stored address for discovery, so the address check gates it
+    // like any other connection. A missing record falls through to the store, which answers
+    // with its own not-found error.
+    const record = await deps.resolveMcpServerStore(c).getServer({ tenant_id: requestContext.tenant_id, name });
+    if (record?.manifest.type === 'remote') {
+      const refusal = await remoteAddressRefusal({ url: record.manifest.url });
+      if (refusal !== undefined) {
+        return c.json({ error: { message: refusal } }, 422);
+      }
+    }
+
     try {
       // The store owns the whole authorize flow, `dcr` and `oauth_client` (fork-only; see
       // DIVERGENCE.md) alike: header/no-auth resolve to a static status, dcr/oauth_client reuse a
@@ -580,12 +635,22 @@ export function createMcpServersRouter<TTransaction>(deps: McpServersRouterDeps<
     const requestContext = deps.resolveRequestContext(c);
     const userRef = requestContext.subject.id;
     // Same url + header resolution as turn execution (store Bearer, DCR, or static headers).
-    const connection = await getMcpConnection({
-      tenant_id: requestContext.tenant_id,
-      name,
-      store: deps.resolveMcpServerStore(c),
-      userRef,
-    });
+    // The address check inside getMcpConnection refuses a stored address that resolves inward;
+    // serve that refusal as the client's answer instead of letting it escape as a 500.
+    let connection: Awaited<ReturnType<typeof getMcpConnection>>;
+    try {
+      connection = await getMcpConnection({
+        tenant_id: requestContext.tenant_id,
+        name,
+        store: deps.resolveMcpServerStore(c),
+        userRef,
+      });
+    } catch (error) {
+      if (error instanceof RemoteAddressRefusedError) {
+        return c.json({ error: { message: error.message } }, 422);
+      }
+      throw error;
+    }
     if (connection === undefined) {
       return c.json({ error: { message: `MCP server not found: ${name}` } }, 404);
     }

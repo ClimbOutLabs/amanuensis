@@ -792,6 +792,14 @@ button.aman-runtime-rail__desk-row:hover .aman-runtime-rail__desk-row-title {
   text-underline-offset: 0.125rem;
 }
 
+/* The small print under the recalled memories: how the row controls work. */
+.aman-runtime-rail__desk-hint,
+.aman-runtime-rail__desk-hint .aman-runtime-rail__desk-forget {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
 .aman-runtime-rail__desk-delete {
   margin-left: auto;
   color: var(--text-muted);

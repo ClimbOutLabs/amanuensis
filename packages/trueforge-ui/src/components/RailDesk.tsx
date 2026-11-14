@@ -644,7 +644,7 @@ export const RailChatDesk: FC<{
               </li>
             ))}
           </ul>
-          <p className="aman-runtime-rail__desk-note">
+          <p className="aman-runtime-rail__desk-note aman-runtime-rail__desk-hint">
             Used for your last message. The × leaves a memory out of this chat only. Delete removes it everywhere.
             {facts.some(fact => fact.page !== undefined) && ' A line from a page is changed on its page.'}
             {onOpenMemorySettings !== undefined && (

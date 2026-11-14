@@ -10920,6 +10920,128 @@ await client.settings.firstRunGuide.createOrUpdate({
 </dl>
 </details>
 
+## Settings GitCommitIdentity
+<details><summary><code>client.settings.gitCommitIdentity.<a href="/src/api/resources/settings/resources/gitCommitIdentity/client/Client.ts">get</a>() -> TrueForge.GetGitCommitIdentityResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+The name and email written on Git commits made in the sandbox. A `null` part means the person chose none and the default shown beside it is used.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.gitCommitIdentity.get();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**requestOptions:** `GitCommitIdentityClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.settings.gitCommitIdentity.<a href="/src/api/resources/settings/resources/gitCommitIdentity/client/Client.ts">createOrUpdate</a>({ ...params }) -> TrueForge.GetGitCommitIdentityResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Sets the name and email written on Git commits made in the sandbox. `null` for a part goes back to its default. New commits use the change from the next message.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.gitCommitIdentity.createOrUpdate({
+    email: null,
+    name: "Sam Rivera"
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.settings.UpdateGitCommitIdentityRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `GitCommitIdentityClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
 ## Settings McpServers
 <details><summary><code>client.settings.mcpServers.<a href="/src/api/resources/settings/resources/mcpServers/client/Client.ts">list</a>() -> TrueForge.ListMcpServersResponse</code></summary>
 <dl>

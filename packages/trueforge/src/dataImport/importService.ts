@@ -52,6 +52,7 @@ import { personaKnowledgeLocation } from '../personaKnowledge/knowledgePaths';
 import { amanGuidePersonaId, isAmanGuidePersona, isAnyAmanGuideId } from '../personas/amanGuide/identity';
 import { PERSISTED_ARTIFACT_MIME } from '../runtime/artifacts/persistTurnArtifacts';
 import { requestChatSearchBackfill } from '../runtime/chatSearchIndexing';
+import { GIT_COMMIT_IDENTITY_SETTING_KEY } from '../runtime/gitCommitIdentitySettings';
 import { HANDLED_NOTES_FILE } from '../runtime/memory/handledNotes';
 import {
   applyVaultTombstones,
@@ -256,6 +257,7 @@ function leftOutName(name: string): string {
 /** Instance-wide settings an import may fill in; the permission settings in the archive are never applied. */
 const IMPORTABLE_GLOBAL_SETTING_KEYS: ReadonlySet<string> = new Set<string>([
   DEFAULT_CHAT_MODEL_SETTING_KEY,
+  GIT_COMMIT_IDENTITY_SETTING_KEY,
   MEMORY_RECALL_ENABLED_SETTING_KEY,
   MEMORY_HELPER_MODEL_SETTING_KEY,
   MEMORY_HELPER_WAIT_SETTING_KEY,

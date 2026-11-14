@@ -3,20 +3,28 @@
  * model. Set AMAN_SLOTS_TEST_DIR as for the other live slot tests; without it every case returns early.
  * `pnpm test:sandbox-coding-live` runs these against an installed instance's slots, with no setup.
  */
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { CallToolResponse } from '../../../../src/core/mcp/IMCPServer';
 import { createSentinelHostContext, defaultSentinelServices } from '../../../../src/core/permissions/context';
+import { stageAttachment } from '../../../../src/core/runtime/attachmentStaging';
+import { RunCodeService } from '../../../../src/core/sandbox/driver/RunCodeService';
+import type { GitCommitIdentity } from '../../../../src/core/sandbox/gitCommitIdentity';
 import { gitProbeRunner, observeGitRemotes } from '../../../../src/core/sandbox/gitRemoteObservation';
 import { planHostAuthenticatedGit } from '../../../../src/core/sandbox/hostAuthenticatedGit';
 import type { ExecResult } from '../../../../src/core/sandbox/provider/Provider';
 import { Sandbox } from '../../../../src/core/sandbox/Sandbox';
 import { SLOT_AGENT_SOCKET_NAME, SLOT_MIRROR_GUEST_PORT } from '../../../../src/core/sandbox/slots/slotContract';
+import { SlotDriver } from '../../../../src/core/sandbox/slots/SlotDriver';
 import { SlotSandboxProvider } from '../../../../src/core/sandbox/slots/SlotSandboxProvider';
 import { NOOP_AGENT_TRACING } from '../../../../src/core/tracing/NoopAgentTracing';
 import { makeSilentLogger } from '../../harnessMocks';
 
 const SLOTS_DIR = process.env['AMAN_SLOTS_TEST_DIR'];
 const WORKSPACE = '/workspace';
+const ONE_PIXEL_PNG =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
 
 function slotProvider(input: { diskMb: number; defaultTimeoutSeconds: number }): SlotSandboxProvider {
   return new SlotSandboxProvider({
@@ -31,7 +39,13 @@ function slotProvider(input: { diskMb: number; defaultTimeoutSeconds: number }):
 }
 
 /** The Sandbox tools on a real slot, as a chat has them. `switchOn` is the owner's Sandbox switch. */
-function slotSandbox(input: { provider: SlotSandboxProvider; switchOn: boolean }): Sandbox {
+function slotSandbox(input: {
+  provider: SlotSandboxProvider;
+  switchOn: boolean;
+  gitCommitIdentity?: GitCommitIdentity;
+  runCodeService?: RunCodeService;
+  existingSandboxId?: string | undefined;
+}): Sandbox {
   const services = defaultSentinelServices({ pinned_path: '/usr/bin:/bin' });
   services.sandboxWithoutAsking = () => Promise.resolve(input.switchOn);
   return new Sandbox({
@@ -42,6 +56,9 @@ function slotSandbox(input: { provider: SlotSandboxProvider; switchOn: boolean }
     mcpConnectTimeoutMs: 5_000,
     logger: makeSilentLogger(),
     tracing: NOOP_AGENT_TRACING,
+    gitCommitIdentity: input.gitCommitIdentity,
+    runCodeService: input.runCodeService,
+    existingSandboxId: input.existingSandboxId,
     sentinel: createSentinelHostContext({
       tenant_id: 'live',
       created_by: 'live',
@@ -250,4 +267,80 @@ describe('coding in the sandbox (live agents)', () => {
     expect(textOf(made)).toContain('venv=0');
     expect(textOf(made)).toContain(`${WORKSPACE}/.venv`);
   }, 180_000);
+
+  test('a plain commit works and carries the name the person chose', async () => {
+    if (SLOTS_DIR === undefined) {
+      return;
+    }
+    const sandbox = slotSandbox({
+      provider: slotProvider({ diskMb: 100, defaultTimeoutSeconds: 30 }),
+      switchOn: false,
+      gitCommitIdentity: { name: 'Sam Rivera', email: 'sam@example.com' },
+    });
+    await allowed(sandbox, {
+      name: 'write_file',
+      arguments: { intent: 'live check', path: 'notes/a.txt', content: 'one\n' },
+    });
+    const committed = await allowed(
+      sandbox,
+      shell('git init -q . && git add a.txt && git commit -q -m first && git log -1 --format="%an <%ae> / %cn <%ce>"', {
+        cwd: `${WORKSPACE}/notes`,
+      }),
+    );
+    expect(committed).toContain('Sam Rivera <sam@example.com> / Sam Rivera <sam@example.com>');
+  }, 120_000);
+
+  test('an image attached in an earlier message can still be opened by code run later', async () => {
+    if (SLOTS_DIR === undefined) {
+      return;
+    }
+    const dataDir = await mkdtemp(join(tmpdir(), 'coding-live-'));
+    try {
+      const runCodeService = new RunCodeService({
+        driver: new SlotDriver({
+          socketPaths: [join(SLOTS_DIR, '1', SLOT_AGENT_SOCKET_NAME)],
+          logger: makeSilentLogger(),
+          now: undefined,
+          sleepMs: undefined,
+        }),
+        dataDir,
+        defaultTimeoutSeconds: 30,
+        maxTimeoutSeconds: 120,
+        memoryMb: 2048,
+        diskMb: 200,
+        outputCapKb: 256,
+        maxConcurrentRuns: 4,
+        imagePullTimeoutSeconds: 10,
+        harvestGraceMs: 0,
+        logger: makeSilentLogger(),
+        now: undefined,
+        sleepMs: undefined,
+      });
+      const provider = slotProvider({ diskMb: 100, defaultTimeoutSeconds: 30 });
+      const firstMessage = slotSandbox({ provider, switchOn: false, runCodeService });
+      const staged = await stageAttachment({
+        sandbox: firstMessage,
+        filename: 'image.png',
+        bytes: Buffer.from(ONE_PIXEL_PNG, 'base64'),
+        mime: 'image/png',
+        ordinal: 1,
+      });
+      const laterMessage = slotSandbox({
+        provider,
+        switchOn: false,
+        runCodeService,
+        existingSandboxId: staged.sandboxCreated?.sandbox_id,
+      });
+      const opened = await allowed(laterMessage, {
+        name: 'run_code',
+        arguments: {
+          language: 'python',
+          code: `from PIL import Image\nprint('size', Image.open('/ingress/${staged.stagedName}').size)`,
+        },
+      });
+      expect(opened).toContain('size (1, 1)');
+    } finally {
+      await rm(dataDir, { recursive: true, force: true });
+    }
+  }, 120_000);
 });

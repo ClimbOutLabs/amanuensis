@@ -301,7 +301,12 @@ export {
   DEFAULT_MODEL_HTTP_HEADERS_TIMEOUT_MS,
   DEFAULT_MODEL_HTTP_MAX_RETRIES,
   MCP_HTTP_HEADERS_TIMEOUT_MARGIN_MS,
+  OutboundRedirectRefusedError,
   configureOutboundFetches,
+  withCheckedRedirects,
+  withoutCrossOriginCredentials,
+  type OutboundRedirectCheck,
+  type OutboundRedirectRefusalKind,
 } from './util/outboundFetch';
 export { PromiseTimeoutError, withTimeout } from './util/promiseUtils';
 export { isRedirectStatus, redirectTargetOrigin } from './util/redirects';
@@ -345,6 +350,8 @@ export type {
 } from './sandbox/driver/RunCodeService';
 export { runCodeStatusFromReadiness } from './sandbox/driver/runCodeStatus';
 export { DisabledDriver } from './sandbox/driver/sandboxDisabled';
+export { DEFAULT_GIT_COMMIT_IDENTITY, GitCommitIdentitySchema } from './sandbox/gitCommitIdentity';
+export type { GitCommitIdentity } from './sandbox/gitCommitIdentity';
 export { GIT_NETWORK_ENV_NAMES, pickGitNetworkEnv } from './sandbox/hostAuthenticatedGit';
 export {
   PACKAGE_GIT_DEPENDENCY_MESSAGE,

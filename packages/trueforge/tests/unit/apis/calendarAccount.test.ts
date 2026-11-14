@@ -648,7 +648,7 @@ describe('the calendar settings endpoints', () => {
     // Attached by default, which is what makes the chat's password rule apply.
     expect(setUpConnectorNamesOf([{ name: 'Calendar', manifest: { url: row.manifest.url } }])).toEqual(['Calendar']);
     // The origin is trusted, so the read-only calendar tools run without a card.
-    const origins = firstPartyOriginsFor({ calendarUrl: configuration.CALENDAR_SIDECAR_MCP_URL });
+    const origins = firstPartyOriginsFor({ raw: undefined, calendarUrl: configuration.CALENDAR_SIDECAR_MCP_URL });
     expect(isFirstPartyOrigin({ url: row.manifest.url, origins })).toBe(true);
   });
 

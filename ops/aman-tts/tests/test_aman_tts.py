@@ -16,6 +16,12 @@ from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# The service does not start without a shared secret, so every test runs with this one and its
+# clients present it, as the app does.
+TEST_SECRET = "test-secret-value-with-more-than-32-chars"
+os.environ["SPEECH_SECRET"] = TEST_SECRET
+SECRET_HEADERS = {"x-speech-secret": TEST_SECRET}
+
 import numpy as np  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
@@ -99,7 +105,7 @@ class BrokenSynthesizer:
 
 
 def client_for(factory, **settings) -> TestClient:
-    return TestClient(create_app(Settings(**settings), synthesizer_factory=factory))
+    return TestClient(create_app(Settings(**settings), synthesizer_factory=factory), headers=SECRET_HEADERS)
 
 
 class SpokenWordsTest(unittest.TestCase):
@@ -434,6 +440,48 @@ class HealthTest(unittest.TestCase):
         self.assertIn("zz_missing", body["model_error"])
 
 
+class SharedSecretTest(unittest.TestCase):
+    SECRET = TEST_SECRET
+
+    def test_speak_without_the_secret_is_refused(self):
+        with TestClient(create_app(Settings(shared_secret=self.SECRET), synthesizer_factory=FakeSynthesizer)) as client:
+            response = client.post("/v1/speak", json={"text": "hello"})
+        self.assertEqual(response.status_code, 401)
+
+    def test_speak_with_a_wrong_secret_is_refused(self):
+        with client_for(FakeSynthesizer, shared_secret=self.SECRET) as client:
+            response = client.post(
+                "/v1/speak",
+                json={"text": "hello"},
+                headers={"x-speech-secret": "a-different-secret-that-is-long-enough"},
+            )
+        self.assertEqual(response.status_code, 401)
+
+    def test_speak_with_the_secret_works(self):
+        with client_for(FakeSynthesizer, shared_secret=self.SECRET) as client:
+            response = client.post(
+                "/v1/speak",
+                json={"text": "hello"},
+                headers={"x-speech-secret": self.SECRET},
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["content-type"], "audio/wav")
+
+    def test_healthz_stays_open_without_the_secret(self):
+        with client_for(FakeSynthesizer, shared_secret=self.SECRET) as client:
+            response = client.get("/healthz")
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["model_loaded"])
+
+    def test_a_short_secret_refuses_to_start(self):
+        with self.assertRaises(ValueError):
+            create_app(Settings(shared_secret="too-short"), synthesizer_factory=FakeSynthesizer)
+
+    def test_no_secret_refuses_to_start(self):
+        with self.assertRaises(ValueError):
+            create_app(Settings(shared_secret=None), synthesizer_factory=FakeSynthesizer)
+
+
 class SpeakTest(unittest.TestCase):
     def test_returns_wav(self):
         with client_for(FakeSynthesizer) as client:
@@ -722,7 +770,11 @@ def asgi_post(app, body: dict):
         "path": "/v1/speak",
         "raw_path": b"/v1/speak",
         "query_string": b"",
-        "headers": [(b"content-type", b"application/json"), (b"content-length", str(len(raw)).encode())],
+        "headers": [
+            (b"content-type", b"application/json"),
+            (b"content-length", str(len(raw)).encode()),
+            (b"x-speech-secret", TEST_SECRET.encode()),
+        ],
         "client": ("test", 1),
         "server": ("test", 80),
         "scheme": "http",

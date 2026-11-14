@@ -52,6 +52,8 @@ export async function callsHarness({
   tts = new FakeTts(),
   speaking,
   redeemGate,
+  smsProvider: wireTexts,
+  callProvider: wireCalls,
   startSilence,
 }: {
   chat?: CallChat;
@@ -66,6 +68,9 @@ export async function callsHarness({
   speaking?: (owner: { tenant_id: string; created_by: string }) => SpeechSynthesizer;
   /** Holds each media key's redeem until it settles, so a test can drop the line meanwhile. */
   redeemGate?: { reached: () => void; open: Promise<void> };
+  /** Providers to send through instead of the recording ones, such as the real ones over a fake Twilio. */
+  smsProvider?: SmsProvider;
+  callProvider?: CallProvider;
   /** Replaces the wait for an answer, so a test decides when it runs out instead of racing a clock. */
   startSilence?: (fire: () => void, ms: number) => () => void;
 } = {}) {
@@ -101,7 +106,7 @@ export async function callsHarness({
   });
   const clock = { now: new Date('2026-11-06T15:00:00.000Z') };
   const texts: { to: string; body: string }[] = [];
-  const smsProvider: SmsProvider = {
+  const smsProvider: SmsProvider = wireTexts ?? {
     send: input => {
       texts.push(input);
       return Promise.resolve({ outcome: 'sent' });
@@ -122,7 +127,7 @@ export async function callsHarness({
   };
   const placed: { to: string; call_id: string }[] = [];
   const nextCall: { result: PlaceCallResult } = { result: { outcome: 'started', call_sid: CALL_SID } };
-  const provider: CallProvider = {
+  const provider: CallProvider = wireCalls ?? {
     place: ({ to, call_id }) => {
       placed.push({ to, call_id });
       return Promise.resolve(nextCall.result);

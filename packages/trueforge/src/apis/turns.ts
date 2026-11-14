@@ -106,6 +106,7 @@ import {
   type ChatTitleDrainMember,
 } from '../runtime/chatTitle';
 import { StreamGoneError, type EventSubscription, type EventSubscriptionRegistry } from '../runtime/event-subscription';
+import { effectiveGitCommitIdentity, readStoredGitCommitIdentity } from '../runtime/gitCommitIdentitySettings';
 import { buildInternalSourceToolPolicy, type InternalSourceState } from '../runtime/internalSourceGuard';
 import { stampLatestAnswer, type LatestAnswerSessionStore } from '../runtime/latestAnswer';
 import { mailAccountDirectory } from '../runtime/mailConnector';
@@ -157,6 +158,7 @@ import {
   isGithubConnectorAttached,
   isWebConnectorAttached,
   modelRequestGate,
+  RemoteAddressRefusedError,
   RepositoryBindingResolutionError,
   resolveBoundRepository,
   resolveGithubGitToken,
@@ -635,14 +637,25 @@ function createTurnResolver(deps: {
         };
       },
       mcp: async name => {
-        const connection = await getMcpConnection({
-          tenant_id,
-          name,
-          store: mcpServerStore,
-          tokenStore,
-          clientName: configuration.MCP_DCR_OAUTH_CLIENT_NAME,
-          userRef,
-        });
+        let connection: Awaited<ReturnType<typeof getMcpConnection>>;
+        try {
+          connection = await getMcpConnection({
+            tenant_id,
+            name,
+            store: mcpServerStore,
+            tokenStore,
+            clientName: configuration.MCP_DCR_OAUTH_CLIENT_NAME,
+            userRef,
+          });
+        } catch (error) {
+          // An address refusal is the person's to fix, so it surfaces with its reason, the
+          // same treatment as a named server that is not configured; other connection
+          // failures keep their own handling.
+          if (error instanceof RemoteAddressRefusedError) {
+            throw new HTTPException(422, { message: error.message, cause: error });
+          }
+          throw error;
+        }
         if (connection === undefined) {
           throw new HTTPException(422, {
             message: `Unknown MCP server "${name}" - not configured`,
@@ -711,11 +724,19 @@ function createTurnResolver(deps: {
           spec,
           store: mcpServerStore,
         });
+        const gitCommitIdentity = effectiveGitCommitIdentity({
+          stored:
+            deps.globalSettingsStore === undefined
+              ? { name: null, email: null }
+              : await readStoredGitCommitIdentity({ globalSettingsStore: deps.globalSettingsStore, logger }),
+          personName: personalizationProfile?.user_name,
+        });
         return buildTurnSandbox({
           provider,
           logger,
           gitSkills,
           githubGitToken,
+          gitCommitIdentity,
           githubConnectorAttached: isGithubConnectorAttached(spec),
           webConnectorAttached: isWebConnectorAttached(spec),
           fileDownloadEnabled: spec.config.sandbox.file_downloads,

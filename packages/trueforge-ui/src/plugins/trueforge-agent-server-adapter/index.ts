@@ -9,6 +9,7 @@ import { createHarnessBuilderServer } from './builderServer.js';
 import { createChatImagesCatalog } from './catalogs/chatImagesCatalog.js';
 import { createChatSearchCatalog } from './catalogs/chatSearchCatalog.js';
 import { createConnectorCatalog } from './catalogs/connectorCatalog.js';
+import { createGitCommitIdentityCatalog } from './catalogs/gitCommitIdentityCatalog.js';
 import { createMemoryNightlyCatalog, createMemoryPageSortingCatalog } from './catalogs/memoryHelpersCatalog.js';
 import { createMemoryPagesCatalog } from './catalogs/memoryPagesCatalog.js';
 import { createMemoryRecallCatalog } from './catalogs/memoryRecallCatalog.js';
@@ -135,6 +136,7 @@ export function createTrueForgeAgentUIServer(options: CreateTrueForgeAgentUIServ
     chatImages: createChatImagesCatalog(clientOptions),
     memoryScreen: createMemoryScreenCatalog(clientOptions),
     memoryRecall: createMemoryRecallCatalog(clientOptions),
+    gitCommitIdentity: createGitCommitIdentityCatalog(clientOptions),
     chatSearch: createChatSearchCatalog(clientOptions),
     memorySummarize: createMemorySummarizeCatalog(clientOptions),
     memoryPageSorting: createMemoryPageSortingCatalog(clientOptions),

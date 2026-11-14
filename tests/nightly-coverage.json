@@ -285,6 +285,10 @@
       "set": "home",
       "tests": []
     },
+    "route:gitCommitIdentity": {
+      "set": "code",
+      "tests": []
+    },
     "route:google": {
       "set": "connectors",
       "tests": []
@@ -810,6 +814,7 @@
     "route:delivery",
     "route:emailAccount",
     "route:firstRunGuide",
+    "route:gitCommitIdentity",
     "route:google",
     "route:help",
     "route:mcpOAuth",

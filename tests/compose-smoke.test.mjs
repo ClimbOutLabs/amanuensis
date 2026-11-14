@@ -6,8 +6,13 @@ import { URL } from 'node:url';
 import { SMOKE_SECRETS, smokeComposeEnv } from '../scripts/compose-smoke.mjs';
 
 describe('the smoke stack secrets', () => {
-  it('covers the calendar, mail and browser secrets', () => {
-    assert.deepEqual(SMOKE_SECRETS, ['CALENDAR_ACCOUNT_SECRET', 'MAIL_EMAIL_ACCOUNT_SECRET', 'BROWSER_SECRET']);
+  it('covers the calendar, mail, browser and speech secrets', () => {
+    assert.deepEqual(SMOKE_SECRETS, [
+      'CALENDAR_ACCOUNT_SECRET',
+      'MAIL_EMAIL_ACCOUNT_SECRET',
+      'BROWSER_SECRET',
+      'SPEECH_SECRET',
+    ]);
   });
 
   it('makes a random secret of 32 or more characters for each one not set, and leaves the rest alone', () => {
@@ -32,12 +37,13 @@ describe('the smoke stack secrets', () => {
       CALENDAR_ACCOUNT_SECRET: 'already-set-secret-0123456789abcdef0123',
       MAIL_EMAIL_ACCOUNT_SECRET: 'already-set-mail-secret-0123456789abcdef0123',
       BROWSER_SECRET: 'already-set-browser-0123456789abcdef0123',
+      SPEECH_SECRET: 'already-set-speech-0123456789abcdef01234',
     };
     assert.deepEqual(smokeComposeEnv({ env }), env);
   });
 
   it('treats a blank value as not set', () => {
-    const env = smokeComposeEnv({ env: { CALENDAR_ACCOUNT_SECRET: '  ', BROWSER_SECRET: '' } });
+    const env = smokeComposeEnv({ env: { CALENDAR_ACCOUNT_SECRET: '  ', BROWSER_SECRET: '', SPEECH_SECRET: ' ' } });
     for (const name of SMOKE_SECRETS) {
       assert.ok(env[name].trim().length >= 32, name);
     }
@@ -52,10 +58,16 @@ describe('the smoke stack secrets', () => {
     assert.equal(calendar.length, 2);
     const browser = compose.split('\n').filter(line => line.includes('BROWSER_SECRET:'));
     assert.equal(browser.length, 2);
+    const speech = compose.split('\n').filter(line => line.includes('SPEECH_SECRET:'));
+    assert.equal(speech.length, 3);
     const mail = compose.split('\n').filter(line => line.includes('${MAIL_EMAIL_ACCOUNT_SECRET:'));
     assert.equal(mail.length, 2);
-    for (const line of [...calendar, ...browser, ...mail]) {
-      assert.match(line, /\$\{(CALENDAR_ACCOUNT_SECRET|MAIL_EMAIL_ACCOUNT_SECRET|BROWSER_SECRET):\?/, line);
+    for (const line of [...calendar, ...browser, ...mail, ...speech]) {
+      assert.match(
+        line,
+        /\$\{(CALENDAR_ACCOUNT_SECRET|MAIL_EMAIL_ACCOUNT_SECRET|BROWSER_SECRET|SPEECH_SECRET):\?/,
+        line,
+      );
       assert.ok(!line.includes(':-'), line);
     }
   });
