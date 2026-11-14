@@ -47,7 +47,7 @@ const EVAL_APPROVABLE_TOOL_NAMES: readonly string[] = [
 ];
 
 export const EVAL_DECLINE_REASON =
-  'Declined: an eval instance approves only its own mail, calendar, map and search tools.';
+  'Declined: an eval instance approves only its own mail, calendar, map and search tools, and making a schedule.';
 
 const ModelMessageSchema = z.object({
   type: z.literal(EventType.MODEL_MESSAGE),

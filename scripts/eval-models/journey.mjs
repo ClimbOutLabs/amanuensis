@@ -41,7 +41,11 @@ export function readBrief(reply) {
   }
 }
 
-/** What exists before a case, so only what the case made is checked and removed. */
+/**
+ * What exists before a case, so only what the case made is checked and removed. Lists read one page (25 schedules,
+ * 100 agents), which an eval instance never exceeds; anything past it is only ever left alone, since the clean-up
+ * reads the same first page.
+ */
 export async function snapshotJourney({ client }) {
   const [schedules, agents] = await Promise.all([client.listSchedules(), client.listAgents()]);
   return { scheduleIds: new Set(schedules.map(item => item.id)), agentIds: new Set(agents.map(item => item.id)) };
