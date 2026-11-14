@@ -176,6 +176,8 @@ describe('an email the person asks for in Telegram', () => {
       service: createTelegramService({ store, publicBaseUrl: 'http://localhost', createClient: () => bot }),
       queue: immediateQueue,
       sessionStore: server.sessionStore(),
+      // The test server is reached only at localhost, so no message carries a link to the app.
+      appAddress: undefined,
       logger: createLogger({ silent: true }),
     });
     return bot.sent;
