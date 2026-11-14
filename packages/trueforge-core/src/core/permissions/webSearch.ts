@@ -15,7 +15,6 @@ import {
 } from '../memory/pagesToolContract';
 import { DEFAULT_ASSISTANT_NAME } from '../personas/assistantName';
 import { REPLACE_TASK_CHECKLIST_TOOL_NAME, TASK_STATE_TOOL_NAME } from '../runtime/taskState';
-import { TAVILY_EXTRACT_TOOL_NAME, TAVILY_SEARCH_TOOL_NAME } from '../search/TavilyClient';
 import { BROWSER_OPEN_SILENT_REASON, BROWSER_OPEN_TOOL_NAME, isBrowserToolName } from './browserToolNames';
 import {
   type ChatProvenance,
@@ -314,32 +313,13 @@ export function toolReturnsOutsideContent(input: { tool_name: string; stamp: Hos
   return !(input.stamp.host_tool && hostOnly);
 }
 
-/**
- * The names of the search and page-read tools Aman itself serves. They settle one thing only:
- * the label for where a result's text is spoken of as read, because a search or page-read
- * result is web content whatever connector served it. Trust never reads these names: whether
- * a result counts as the person's to open comes from the provider stamps alone, and which of
- * a designated provider's tools run silently comes from its stored declaration.
- */
-const SEARCH_RESULT_TOOL_NAMES: ReadonlySet<string> = new Set([
-  TAVILY_SEARCH_TOOL_NAME,
-  'web_search',
-  'web_search_exa',
-  'web_search_advanced_exa',
-]);
-const PAGE_READER_TOOL_NAMES: ReadonlySet<string> = new Set(['web_fetch', TAVILY_EXTRACT_TOOL_NAME]);
-
 /** The kind of content a tool's result is, so a card or a memory note can say where something was read. */
 export function readSourceOf(toolName: string, stamp: HostToolStamp): ReadSource {
   const baseName = baseToolName(toolName);
   if (isBrowserToolName(baseName)) {
     return 'browser_page';
   }
-  if (
-    SEARCH_RESULT_TOOL_NAMES.has(baseName) ||
-    PAGE_READER_TOOL_NAMES.has(baseName) ||
-    (stamp.search_provider && (stamp.search_result || stamp.page_reader))
-  ) {
+  if (stamp.search_provider && (stamp.search_result || stamp.page_reader)) {
     return 'page';
   }
   if (isGmailReadToolName(baseName) || isMailReadToolName(baseName)) {

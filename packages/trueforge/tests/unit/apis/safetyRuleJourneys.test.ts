@@ -1435,7 +1435,7 @@ describe('a connector tool named like a search tool', () => {
       const chatId = await chatThatSearchedTheConnector();
       server.model.next({ toolArguments: DRAFT });
       const card = onlyCard(await runTurn({ server, chatId, input: ask('draft_email') }));
-      expect(card.tier3_card?.plain_what).toContain(`This goes to ${ADDRESS}, whose address was in a page Aman read.`);
+      expect(card.tier3_card?.plain_what).toContain(`This goes to ${ADDRESS}, whose address was in a tool result Aman read.`);
     },
     TURN_TIMEOUT_MS,
   );
