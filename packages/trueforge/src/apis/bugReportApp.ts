@@ -9,7 +9,6 @@ import type { ResolveRequestContext } from '../auth/identity';
 import { hasAdminRole } from '../auth/identity';
 import configuration from '../config';
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
-import type { IMcpServerStore } from '../db/mcpServerStore';
 import type { ISandboxProviderStore } from '../db/sandboxProviderStore';
 import { PACKAGE_VERSION } from '../packageVersion';
 import { createAppBugReportRoute, getBugReportHandoffRoute } from '../routes/bugReportRoutes';
@@ -18,7 +17,6 @@ import { readLocalCapabilitiesData, toBuildIdentity } from './capabilities';
 
 export interface AppBugReportRouterDeps<TTransaction> {
   sandboxProviderStore: ISandboxProviderStore<TTransaction>;
-  mcpServerStore: IMcpServerStore<TTransaction>;
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
   resolveRequestContext: ResolveRequestContext;
   logger: Logger;
@@ -35,7 +33,6 @@ export function createAppBugReportRouter<TTransaction>(deps: AppBugReportRouterD
     // readLocalCapabilitiesData performs no outbound I/O.
     const capabilities = await readLocalCapabilitiesData({
       sandboxProviderStore: deps.sandboxProviderStore,
-      mcpServerStore: deps.mcpServerStore,
       globalSettingsStore: deps.globalSettingsStore,
       logger: deps.logger,
       isAdmin: hasAdminRole(requestContext),

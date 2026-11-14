@@ -11,6 +11,7 @@ import * as os from 'os';
 import * as path from 'path';
 import winston from 'winston';
 import { discardedModelUsage } from '../../../fixtures/discardedModelUsage';
+import { inMemoryGlobalSettingsStore } from '../../../fixtures/inMemoryGlobalSettingsStore';
 import { uncappedTokenFactoryBudget } from '../../../fixtures/uncappedTokenFactoryBudget';
 
 jest.mock('../../../../src/config', () => {
@@ -27,7 +28,7 @@ jest.mock('../../../../src/runtime/memory/memorySummarize', () => {
 
 import type { IModelProviderStore } from '../../../../src/db/modelProviderStore';
 import { MarkdownMemoryClient } from '../../../../src/runtime/memory/markdownMemoryClient';
-import { hindsightMemoryCapability, type MemoryConfig } from '../../../../src/runtime/memory/memoryCapability';
+import { memoryCapability, type MemoryConfig } from '../../../../src/runtime/memory/memoryCapability';
 import { submitRetainWithVerification, type SummarizeTurnContext } from '../../../../src/runtime/memory/memoryRetain';
 import { summarizeTurnContent } from '../../../../src/runtime/memory/memorySummarize';
 
@@ -35,18 +36,15 @@ const mockSummarize = jest.mocked(summarizeTurnContent);
 
 const CONFIG: MemoryConfig = {
   recallMaxTokens: 2048,
-  recallEntityTokens: 512,
   recallTimeoutMs: 2500,
   recallQueryWindow: 5,
   recallMinScore: 0.5,
   recallMaxItems: 12,
-  recallMaxEntities: 8,
   preRecallGateEnabled: false,
   retainTimeoutMs: 10_000,
   sweepMaxPerTurn: 5,
   screen: { enabled: false, url: '', authToken: '', threshold: 0.5, timeoutMs: 1500, maxConcurrency: 8 },
-  curated: { enabled: false, maxModels: 3, maxTokens: 512 },
-  reflect: { enabled: false, budget: 'low', maxTokens: 512, timeoutMs: 8000 },
+  pages: { maxCount: 6, maxTokens: 1500 },
 };
 
 const TURN = { sessionId: 's1', turnId: 't1', completedAt: '2026-10-21T12:00:00.000Z' };
@@ -72,6 +70,7 @@ function summarizeContext(): SummarizeTurnContext {
     modelProviderStore: store,
     summarizationModelFqn: 'openai/gpt-4o',
     tokenFactoryBudget: uncappedTokenFactoryBudget,
+    globalSettingsStore: inMemoryGlobalSettingsStore(),
     modelUsage: discardedModelUsage,
   };
 }
@@ -85,7 +84,7 @@ function secondTurnContext(): Readonly<AgentThreadExecutionContext> {
   return { threadId: 'main', currentContextUsage: { prompt_tokens: 0, completion_tokens: 0 }, context };
 }
 
-async function runSecondTurn(capability: ReturnType<typeof hindsightMemoryCapability>): Promise<void> {
+async function runSecondTurn(capability: ReturnType<typeof memoryCapability>): Promise<void> {
   const processor = capability.preLLMProcessors?.[0];
   if (!processor) {
     throw new Error('expected a preLLM processor');
@@ -103,7 +102,7 @@ function savedLogs(dir: string): string[] {
 }
 
 function capabilityFor(client: MarkdownMemoryClient, keepsFullExchange?: boolean) {
-  return hindsightMemoryCapability({
+  return memoryCapability({
     client,
     config: CONFIG,
     logger: makeLogger(),
@@ -129,6 +128,7 @@ describe('the turn after a turn that saved nothing, with summaries on', () => {
 
   function drainFirstTurn(): Promise<boolean> {
     return submitRetainWithVerification({
+      origin: 'user_stated',
       session: { is_incognito: false },
       ...TURN,
       client,

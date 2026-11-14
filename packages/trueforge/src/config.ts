@@ -34,10 +34,7 @@ import {
   TOKEN_FACTORY_DEFAULT_BASE_URL,
   validateRunCodeStartupConfig,
 } from '@truefoundry/trueforge-core/core';
-import {
-  MEMORY_PROVIDER_MAX_TIMEOUT_MS,
-  MEMORY_SETTINGS_LIMITS,
-} from '@truefoundry/trueforge-core/core/memory/memorySettingsLimits';
+import { MEMORY_MAX_TIMEOUT_MS } from '@truefoundry/trueforge-core/core/memory/memorySettingsLimits';
 
 import { appDataDirFromEnv, voiceModelDirFromEnv } from './appDataDir';
 import { ARCHIVE_DEFAULT_MAX_BYTES } from './dataExport/archiveLimits';
@@ -45,7 +42,7 @@ import { ZIP_MAX_ARCHIVE_BYTES } from './dataExport/zipStreamWriter';
 import { normalizedOrigin } from './mcp/firstParty';
 import { PACKAGE_VERSION } from './packageVersion';
 import { defaultEmbeddingModelDir } from './runtime/memory/embeddingRetrieval';
-import type { ReflectBudget } from './runtime/memory/hindsightClient';
+import { PageSortModeSchema, type PageSortMode } from './runtime/memory/pageSortMode';
 import { parseModelPrices, type ModelPrices } from './runtime/modelPricing';
 import { DEFAULT_TOKEN_FACTORY_MODEL } from './runtime/tokenFactoryDefaults';
 import { MAX_CODE_MODE_SOCKET_PARENT_BYTES } from './sandbox/local/core/CodeModeUdsTransport';
@@ -190,10 +187,11 @@ export function parseOidcAllowedEmails(raw: string | undefined): string[] {
 
 /**
  * Parses `FIRST_PARTY_MCP_ORIGINS`: comma-separated exact origins (scheme, host and optional
- * port, no path) of the operator's own memory provider. Unset / blank → none, so no connector is
- * first-party. Each entry is normalized the way a connector URL's origin is, then matched exactly.
- * Anything else fails the boot: a silently dropped typo would read as "nothing is trusted", and a
- * path or wildcard would suggest a prefix or suffix match the list never does.
+ * port, no path) of services the operator runs on this computer and names as their own, so the
+ * address check does not refuse them. Unset / blank → none. Each entry is normalized the way a
+ * connector URL's origin is, then matched exactly. Anything else fails the boot: a silently dropped
+ * typo would read as "nothing is listed", and a path or wildcard would suggest a prefix or suffix
+ * match the list never does.
  */
 export function parseFirstPartyMcpOrigins(raw: string | undefined): string[] {
   if (raw === undefined || raw.trim() === '') {
@@ -213,6 +211,126 @@ export function parseFirstPartyMcpOrigins(raw: string | undefined): string[] {
     origins.add(origin);
   }
   return [...origins];
+}
+
+/**
+ * Parses `LOCAL_MODEL_ENDPOINTS`: comma-separated exact `host:port` endpoints of model servers
+ * running on this computer that the operator names as allowed. A model base
+ * URL normally has to resolve to an address the server may connect to (see runtime/remoteAddress),
+ * which refuses this computer's own addresses; a base URL that names one of these exact
+ * endpoints is the one exception. Unset / blank → none, so no local model endpoint is allowed
+ * until the operator names it. Each entry is normalized (host lowercased, IPv6 hosts bracketed,
+ * the port written without leading zeros) and matched exactly, port included. Anything that is
+ * not an exact host and port fails the boot: a silently dropped typo would read as "no local
+ * model is allowed", and a bare host would suggest a match wider than the one the list makes.
+ */
+export function parseLocalModelEndpoints(raw: string | undefined): string[] {
+  if (raw === undefined || raw.trim() === '') {
+    return [];
+  }
+  const endpoints = new Set<string>();
+  for (const entry of raw
+    .split(',')
+    .map(part => part.trim())
+    .filter(part => part.length > 0)) {
+    const endpoint = normalizedLocalModelEndpoint(entry);
+    if (endpoint === undefined) {
+      throw new Error(
+        `LOCAL_MODEL_ENDPOINTS entries must be exact host:port endpoints such as localhost:11434 or [::1]:11434, got: ${entry}`,
+      );
+    }
+    endpoints.add(endpoint);
+  }
+  return [...endpoints];
+}
+
+function normalizedLocalModelEndpoint(entry: string): string | undefined {
+  let host: string;
+  let rawPort: string;
+  if (entry.startsWith('[')) {
+    const close = entry.indexOf(']');
+    if (close < 0 || entry.charAt(close + 1) !== ':') {
+      return undefined;
+    }
+    const inside = entry.slice(1, close);
+    if (isIP(inside) !== 6) {
+      return undefined;
+    }
+    host = `[${inside.toLowerCase()}]`;
+    rawPort = entry.slice(close + 2);
+  } else {
+    const colon = entry.lastIndexOf(':');
+    if (colon < 1) {
+      return undefined;
+    }
+    const rawHost = entry.slice(0, colon);
+    if (!/^[a-z0-9._-]+$/i.test(rawHost) || rawHost.includes('*')) {
+      return undefined;
+    }
+    host = rawHost.toLowerCase();
+    rawPort = entry.slice(colon + 1);
+  }
+  if (!/^\d+$/.test(rawPort)) {
+    return undefined;
+  }
+  const port = Number(rawPort);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    return undefined;
+  }
+  return `${host}:${String(port)}`;
+}
+
+/**
+ * Parses `CONTAINER_NETWORK_RANGES`: comma-separated CIDR ranges of the container networks this
+ * instance sits on, which the remote address check refuses as well as this instance's own
+ * addresses (see runtime/remoteAddress). The installer writes the setting once it has started an
+ * instance and learned the ranges Docker gave its networks, so a container install refuses its
+ * neighbours (the app's own connectors among them). Unset / blank → none: an app run directly on
+ * the host names no ranges, and only its own addresses are refused, so its home network stays
+ * usable. Each entry is normalized (the address lowercased, the prefix written without leading
+ * zeros) and matched as a range. Anything that is not an exact address and prefix fails the
+ * boot, naming the entry: a silently dropped typo would read as "no range is refused".
+ */
+export function parseContainerNetworkRanges(raw: string | undefined): string[] {
+  if (raw === undefined || raw.trim() === '') {
+    return [];
+  }
+  const ranges = new Set<string>();
+  for (const entry of raw
+    .split(',')
+    .map(part => part.trim())
+    .filter(part => part.length > 0)) {
+    const range = normalizedContainerNetworkRange(entry);
+    if (range === undefined) {
+      throw new Error(
+        `CONTAINER_NETWORK_RANGES entries must be exact CIDR ranges such as 172.30.0.0/16 or fd00:1234::/64, got: ${entry}`,
+      );
+    }
+    ranges.add(range);
+  }
+  return [...ranges];
+}
+
+function normalizedContainerNetworkRange(entry: string): string | undefined {
+  const slash = entry.lastIndexOf('/');
+  if (slash < 1) {
+    return undefined;
+  }
+  const address = entry.slice(0, slash);
+  const family = isIP(address);
+  if (family === 0) {
+    return undefined;
+  }
+  const rawPrefix = entry.slice(slash + 1);
+  if (!/^\d+$/.test(rawPrefix)) {
+    return undefined;
+  }
+  const prefix = Number(rawPrefix);
+  const maxPrefix = family === 6 ? 128 : 32;
+  if (!Number.isInteger(prefix) || prefix < 0 || prefix > maxPrefix) {
+    return undefined;
+  }
+  return `${address.toLowerCase()}/${String(prefix)}`;
 }
 
 /**
@@ -656,9 +774,7 @@ export function parseSpeechUrl({
   return value;
 }
 
-/**
- * The first-party origins: the operator's list, plus the Calendar connector's origin when one is configured.
- */
+/** The listed origins before mail is added: the operator's list, plus the Calendar connector's origin when one is configured. */
 export function firstPartyOriginsFor({
   raw,
   calendarUrl,
@@ -668,10 +784,7 @@ export function firstPartyOriginsFor({
 }): string[] {
   const origins = parseFirstPartyMcpOrigins(raw);
   const calendarOrigin = calendarUrl === undefined ? undefined : normalizedOrigin(calendarUrl);
-  if (calendarOrigin !== undefined && !origins.includes(calendarOrigin)) {
-    origins.push(calendarOrigin);
-  }
-  return origins;
+  return calendarOrigin === undefined || origins.includes(calendarOrigin) ? origins : [...origins, calendarOrigin];
 }
 
 /**
@@ -706,11 +819,9 @@ function parseHandoffUrl(raw: string | undefined): string | null {
 
 /**
  * Parses a bounded-integer env var, falling back to `defaultValue` when unset/blank. Defaults to
- * requiring a positive value (`minValue: 1`); pass `minValue: 0` for a setting whose shared
- * limit accepts zero as a valid "disable" value (e.g. {@link MEMORY_SETTINGS_LIMITS}'s
- * `recallMaxEntities`), so the env-var parser stays synchronized with that limit instead of
- * rejecting the value the schema and UI both allow. An optional `maxValue` fails fast at startup
- * instead of letting an oversized value surface later.
+ * requiring a positive value (`minValue: 1`); pass `minValue: 0` for a setting where zero means
+ * "disabled". An optional `maxValue` fails fast at startup instead of letting an oversized value
+ * surface later.
  */
 export function parsePositiveInt(options: {
   envKey: string;
@@ -754,21 +865,6 @@ function parseUnitInterval(options: { envKey: string; raw: string | undefined; d
   return value;
 }
 
-/** Parses a boolean env var; anything but `true`/`false` throws instead of reading as `false`. */
-function parseReflectBudget(options: {
-  envKey: string;
-  raw: string | undefined;
-  defaultValue: ReflectBudget;
-}): ReflectBudget {
-  if (options.raw === undefined || options.raw === '') {
-    return options.defaultValue;
-  }
-  if (options.raw === 'low' || options.raw === 'mid' || options.raw === 'high') {
-    return options.raw;
-  }
-  throw new Error(`${options.envKey} must be one of low, mid, high; got ${JSON.stringify(options.raw)}`);
-}
-
 /** Which process-isolation backend runs `run_code` executions. */
 export type SandboxIsolationDriver = 'docker' | 'firecracker';
 
@@ -808,26 +904,20 @@ function parseSandboxBackend(options: { envKey: string; raw: string | undefined 
 /** Most slot services the compose files define. */
 export const SANDBOX_MAX_SLOTS = 2;
 
-/** Which long-term memory backend Aman uses. */
-export type MemoryBackend = 'markdown' | 'hindsight';
-
-/**
- * Parses `MEMORY_BACKEND`. Unset/blank → default. `hindsight` is experimental
- * (rollback only); the parser accepts it but callers must treat it as unsupported.
- */
-function parseMemoryBackend(options: {
+/** Parses `MEMORY_PAGE_SORTING`. Unset/blank → default. */
+export function parsePageSortMode(options: {
   envKey: string;
   raw: string | undefined;
-  defaultValue: MemoryBackend;
-}): MemoryBackend {
+  defaultValue: PageSortMode;
+}): PageSortMode {
   if (options.raw === undefined || options.raw.trim() === '') {
     return options.defaultValue;
   }
-  const value = options.raw.trim().toLowerCase();
-  if (value === 'markdown' || value === 'hindsight') {
-    return value;
+  const parsed = PageSortModeSchema.safeParse(options.raw.trim().toLowerCase());
+  if (parsed.success) {
+    return parsed.data;
   }
-  throw new Error(`${options.envKey} must be one of markdown, hindsight; got ${JSON.stringify(options.raw)}`);
+  throw new Error(`${options.envKey} must be one of off, report, on; got ${JSON.stringify(options.raw)}`);
 }
 
 /** How turns may route to Nebius Token Factory. */
@@ -1571,12 +1661,30 @@ export interface SharedServerConfiguration {
    */
   MCP_HTTP_MAX_RETRIES: number;
   /**
-   * Origins of the operator's own memory provider, as normalized `scheme://host[:port]` strings.
-   * A connector saved as the memory provider on one of these origins is first-party: its tools that
-   * declare `readOnlyHint` true and `openWorldHint` false run without an approval card. Empty means
-   * no connector is first-party. Env: `FIRST_PARTY_MCP_ORIGINS` (comma-separated). Default empty.
+   * Origins the address check does not refuse, as normalized `scheme://host[:port]` strings: the host's own
+   * Email and Calendar sidecars, plus services the operator names as their own. Being listed gives a
+   * connector no trust: only the host's own Email or Calendar connector, at the address the host set up, has
+   * its read-only closed-world tools run without an approval card. Env: `FIRST_PARTY_MCP_ORIGINS`
+   * (comma-separated). Default: the sidecars only.
    */
   FIRST_PARTY_MCP_ORIGINS: string[];
+  /**
+   * Exact `host:port` endpoints of model servers on this computer that the
+   * operator named as allowed, as normalized strings. A model base URL that names one of these
+   * endpoints may be saved and used even though its address is one the address check otherwise
+   * refuses. Empty means no local model endpoint is allowed. Env: `LOCAL_MODEL_ENDPOINTS`
+   * (comma-separated). Default empty.
+   */
+  LOCAL_MODEL_ENDPOINTS: string[];
+  /**
+   * CIDR ranges of the container networks this instance sits on, which the remote address check
+   * refuses as well as this instance's own addresses, so a steered address cannot reach a
+   * neighbouring container. The installer writes them for a container install once it learns the
+   * ranges Docker gave the instance's networks. Empty means no ranges are named: an app run
+   * directly on the host refuses only its own addresses, and its home network stays usable.
+   * Env: `CONTAINER_NETWORK_RANGES` (comma-separated). Default empty.
+   */
+  CONTAINER_NETWORK_RANGES: string[];
   /**
    * MCP endpoint of the mail sidecar. When set, the Email connector is registered at boot; when unset, the
    * sidecar is not configured and nothing mail-related is offered. Env: `MAIL_EMAIL_MCP_URL`. Default unset.
@@ -1991,15 +2099,10 @@ export interface SharedServerConfiguration {
    */
   TRUSTED_PROXY_ADDRESSES: string[];
   /**
-   * Max tokens requested from the memory provider's recall endpoint.
+   * Max tokens asked for in one recall.
    * Env: `MEMORY_RECALL_MAX_TOKENS`. Default 600. Recall runs once per reply, so this bounds the block every step sends.
    */
   MEMORY_RECALL_MAX_TOKENS: number;
-  /**
-   * Max tokens requested for the recall response's entity summaries.
-   * Env: `MEMORY_RECALL_ENTITY_TOKENS`. Default 512.
-   */
-  MEMORY_RECALL_ENTITY_TOKENS: number;
   /**
    * Max milliseconds to wait for a memory recall before the turn proceeds without it. Capped at
    * the shared memory deadline maximum (120000); a larger value fails fast at startup.
@@ -2014,49 +2117,40 @@ export interface SharedServerConfiguration {
    */
   MEMORY_RECALL_QUERY_WINDOW: number;
   /**
-   * Relevance floor for a recalled item or entity summary that carries a provider score:
-   * anything scored below this is dropped before it reaches the model. Ignored for a response
-   * with no scores at all, where `MEMORY_RECALL_MAX_ITEMS` / `MEMORY_RECALL_MAX_ENTITIES` apply
-   * instead. Env: `MEMORY_RECALL_MIN_SCORE`. Default 0.5.
+   * Relevance floor for a recalled item that carries a score: anything scored below this is
+   * dropped before it reaches the model. Ignored for a response with no scores at all, where
+   * `MEMORY_RECALL_MAX_ITEMS` applies instead. Env: `MEMORY_RECALL_MIN_SCORE`. Default 0.5.
    */
   MEMORY_RECALL_MIN_SCORE: number;
   /**
-   * Most recalled items kept, by provider rank, when the response carries no per-item score.
+   * Most recalled items kept, by rank, when the response carries no per-item score.
    * Env: `MEMORY_RECALL_MAX_ITEMS`. Default 12.
    */
   MEMORY_RECALL_MAX_ITEMS: number;
   /**
-   * Most entity summaries kept, by provider rank, when the response carries no per-entity score.
-   * Env: `MEMORY_RECALL_MAX_ENTITIES`. Default 8.
+   * Most people and matter pages loaded in full before a turn, by priority.
+   * Env: `MEMORY_PAGES_MAX_COUNT`. Default 6.
    */
-  MEMORY_RECALL_MAX_ENTITIES: number;
+  MEMORY_PAGES_MAX_COUNT: number;
+  /**
+   * Token budget for the loaded pages, on top of `MEMORY_RECALL_MAX_TOKENS`. A page that would
+   * overflow it, and every page after, is left out.
+   * Env: `MEMORY_PAGES_MAX_TOKENS`. Default 1500.
+   */
+  MEMORY_PAGES_MAX_TOKENS: number;
   /**
    * Max milliseconds for a memory retain (or operation-status) call.
    * Env: `MEMORY_RETAIN_TIMEOUT_MS`. Default 10000.
    */
   MEMORY_RETAIN_TIMEOUT_MS: number;
   /**
-   * Max bytes read from a memory provider HTTP response body.
-   * Env: `MEMORY_MAX_RESPONSE_BYTES`. Default 524288 (512 KiB).
-   */
-  MEMORY_MAX_RESPONSE_BYTES: number;
-  /**
    * Max pending retain operations swept (status-checked) per turn.
    * Env: `MEMORY_SWEEP_MAX_PER_TURN`. Default 5.
    */
   MEMORY_SWEEP_MAX_PER_TURN: number;
   /**
-   * Max milliseconds for the memory-provider connection check run on save and on demand.
-   * Longer than the recall timeout: a check waits on a cold provider rather than rejecting
-   * a correct configuration, while a turn degrades fast.
-   * Capped at the shared memory deadline maximum (120000); a larger value fails fast at startup.
-   * Env: `MEMORY_CHECK_TIMEOUT_MS`. Default 5000.
-   */
-  MEMORY_CHECK_TIMEOUT_MS: number;
-  /**
    * Memory recall screen: master switch for the prompt-injection screen applied to recalled
-   * memories at the moment they would be injected into the model's context. This is a separate
-   * subsystem from the memory provider (Hindsight): the provider stores and recalls, this screen
+   * memories at the moment they would be injected into the model's context. This screen
    * decides which recalled items are allowed to reach the model this turn. Off by default, so
    * until an operator deploys the screen sidecar and turns this on, recall is lossless and
    * unscreened exactly as before. Env: `MEMORY_SCREEN_ENABLED`. Default false.
@@ -2064,7 +2158,7 @@ export interface SharedServerConfiguration {
   MEMORY_SCREEN_ENABLED: boolean;
   /**
    * Base URL of the `aman-content-screen` classifier the recall screen calls (`POST {url}/classify`).
-   * Distinct from the memory provider URL. Only consulted when `MEMORY_SCREEN_ENABLED` is true;
+   * Only consulted when `MEMORY_SCREEN_ENABLED` is true;
    * empty or unreachable degrades to an "unknown" screen result, never a thrown turn.
    * Env: `MEMORY_SCREEN_URL`. Default empty.
    */
@@ -2144,7 +2238,7 @@ export interface SharedServerConfiguration {
    */
   MAPS_USER_AGENT: string;
   /**
-   * Bearer token for the memory recall screen classifier. Distinct from any memory-provider
+   * Bearer token for the memory recall screen classifier. Distinct from any connector
    * credential. Env: `MEMORY_SCREEN_AUTH_TOKEN`. Default empty.
    */
   MEMORY_SCREEN_AUTH_TOKEN: string;
@@ -2161,8 +2255,8 @@ export interface SharedServerConfiguration {
    */
   MEMORY_SCREEN_TIMEOUT_MS: number;
   /**
-   * Max recall-screen classify calls in flight at once across a turn's items and entities. Bounds
-   * outbound fan-out so a provider response with many entities cannot spawn one simultaneous request
+   * Max recall-screen classify calls in flight at once across a turn's items and pages. Bounds
+   * outbound fan-out so a recall with many items cannot spawn one simultaneous request
    * per datum and exhaust sockets or overload the classifier sidecar.
    * Env: `MEMORY_SCREEN_MAX_CONCURRENCY`. Default 8.
    */
@@ -2201,48 +2295,14 @@ export interface SharedServerConfiguration {
    */
   SCREEN_CLASSIFY_CACHE_MAX_ENTRIES: number;
   /**
-   * Whether the pre-recall gate may skip the memory provider reads on high-confidence trivial
+   * Whether the pre-recall gate may skip the memory reads on high-confidence trivial
    * turns (short greetings, bare acknowledgements). Off by default; a bank can override it in
    * Settings > Memory. Env: `MEMORY_PRERECALL_GATE_ENABLED`. Default false.
    */
   MEMORY_PRERECALL_GATE_ENABLED: boolean;
   /**
-   * Whether every turn also injects the memory bank's curated layer: its profile and the mental
-   * models relevant to the recall query. Cheap reads with no model call behind them.
-   * Env: `MEMORY_CURATED_ENABLED`. Default true.
-   */
-  MEMORY_CURATED_ENABLED: boolean;
-  /**
-   * Most mental models injected on one turn. Env: `MEMORY_CURATED_MAX_MODELS`. Default 3.
-   */
-  MEMORY_CURATED_MAX_MODELS: number;
-  /**
-   * Token budget for the injected mental-model lines, taken out of `MEMORY_RECALL_MAX_TOKENS`.
-   * Env: `MEMORY_CURATED_MAX_TOKENS`. Default 512.
-   */
-  MEMORY_CURATED_MAX_TOKENS: number;
-  /**
-   * Whether a synthesis-shaped user message (summarize, brief me, recommend, compare, what should I
-   * do) also asks the memory provider to reflect and injects its answer. Reflect spends model calls
-   * on the local inference server; factual questions never take this route.
-   * Env: `MEMORY_REFLECT_ENABLED`. Default true.
-   */
-  MEMORY_REFLECT_ENABLED: boolean;
-  /**
-   * Reflect effort: `low` (one pass), `mid`, or `high`. Env: `MEMORY_REFLECT_BUDGET`. Default low.
-   */
-  MEMORY_REFLECT_BUDGET: ReflectBudget;
-  /**
-   * Which long-term memory backend Aman uses. `markdown` (the default) stores memories as
-   * local Markdown files (OpenClaw-style, no server required) and is the stable, supported
-   * path. `hindsight` uses the Hindsight REST API via the MCP server flagged as the memory
-   * provider; it is EXPERIMENTAL and retained for rollback only, not supported.
-   * Env: `MEMORY_BACKEND`. Default `markdown`.
-   */
-  MEMORY_BACKEND: MemoryBackend;
-  /**
    * Base directory for the markdown memory backend. Each tenant gets a sanitized
-   * subdirectory. Only consulted when `MEMORY_BACKEND` is `markdown`.
+   * subdirectory.
    * Env: `MEMORY_MARKDOWN_DIR`. Default `./data/memory` (relative to the process cwd).
    */
   MEMORY_MARKDOWN_DIR: string;
@@ -2250,10 +2310,26 @@ export interface SharedServerConfiguration {
    * When true, the markdown memory backend summarizes each turn via the LLM before writing
    * it to the daily log, instead of appending the verbatim User:/Assistant: transcript.
    * Summarization failures fall back to the verbatim transcript so a memory is never lost.
-   * Only consulted when `MEMORY_BACKEND` is `markdown`.
+   *
    * Env: `MEMORY_SUMMARIZE`. Default `true`.
    */
   MEMORY_SUMMARIZE: boolean;
+  /**
+   * Whether each note saved to the daily log is sorted onto the people and matter pages: `off` does nothing,
+   * `report` asks the model and only records what it would have done in the vault's `.sorter-report.jsonl`,
+   * `on` writes the pages.
+   * Settings can store an override that wins over this default, so a change needs no restart.
+   * Env: `MEMORY_PAGE_SORTING`. Default `on`.
+   */
+  MEMORY_PAGE_SORTING: PageSortMode;
+  /**
+   * Whether the nightly job tidies pages once a day for each vault, in the server's quiet hours: it moves ended
+   * lines to Earlier, sorts notes the sorter missed (as `MEMORY_PAGE_SORTING` allows) and lists lines that
+   * disagree. It never edits a line's words.
+   * Settings can store an override that wins over this default, so a change needs no restart.
+   * Env: `MEMORY_NIGHTLY_JOB`. Default `true`.
+   */
+  MEMORY_NIGHTLY_JOB: boolean;
   /**
    * Nebius Token Factory API key. Populated from the Secure Vault into the deployment
    * environment; never committed or logged. With a key set, startup also writes a read-only
@@ -2355,28 +2431,6 @@ export interface SharedServerConfiguration {
    * Env: `MEMORY_EMBEDDINGS_BACKFILL_BATCH_SIZE`. Default 8.
    */
   MEMORY_EMBEDDINGS_BACKFILL_BATCH_SIZE: number;
-  /**
-   * Max tokens the provider may spend on a reflect answer. Env: `MEMORY_REFLECT_MAX_TOKENS`.
-   * Default 512.
-   */
-  MEMORY_REFLECT_MAX_TOKENS: number;
-  /**
-   * Max milliseconds to wait for a reflect answer before the turn proceeds without it. Capped at
-   * the shared memory deadline maximum (120000); a larger value fails fast at startup.
-   * Env: `MEMORY_REFLECT_TIMEOUT_MS`. Default 8000.
-   */
-  MEMORY_REFLECT_TIMEOUT_MS: number;
-  /**
-   * Model FQN (`provider/model`) for the distillation pass. Empty means the
-   * turn's own model. Env: `PROFILE_LEARNING_MODEL`. Default empty.
-   * Whether the pass runs at all is the user's, on the personalization profile.
-   */
-  PROFILE_LEARNING_MODEL: string;
-  /**
-   * Min milliseconds between host-written learned-profile updates.
-   * Env: `PROFILE_LEARNING_MIN_INTERVAL_MS`. Default 3600000 (1 hour).
-   */
-  PROFILE_LEARNING_MIN_INTERVAL_MS: number;
   /**
    * Space-separated Tesseract language codes OCR falls back to when a page's script cannot be detected; a page
    * whose script is detected is read with that script's languages instead. Languages the sandbox image lacks are
@@ -2702,6 +2756,8 @@ const shared: SharedServerConfiguration = {
     }),
     mailUrl: mailSidecarMcpUrl,
   }),
+  LOCAL_MODEL_ENDPOINTS: parseLocalModelEndpoints(getEnv('LOCAL_MODEL_ENDPOINTS')),
+  CONTAINER_NETWORK_RANGES: parseContainerNetworkRanges(getEnv('CONTAINER_NETWORK_RANGES')),
   MAIL_EMAIL_MCP_URL: mailEmailMcpUrl,
   MAIL_SIDECAR_MCP_URL: mailSidecarMcpUrl,
   MAIL_EMAIL_ACCOUNT_URL: mailEmailAccountUrl,
@@ -2960,16 +3016,11 @@ const shared: SharedServerConfiguration = {
     raw: getEnv('MEMORY_RECALL_MAX_TOKENS'),
     defaultValue: 600,
   }),
-  MEMORY_RECALL_ENTITY_TOKENS: parsePositiveInt({
-    envKey: 'MEMORY_RECALL_ENTITY_TOKENS',
-    raw: getEnv('MEMORY_RECALL_ENTITY_TOKENS'),
-    defaultValue: 512,
-  }),
   MEMORY_RECALL_TIMEOUT_MS: parsePositiveInt({
     envKey: 'MEMORY_RECALL_TIMEOUT_MS',
     raw: getEnv('MEMORY_RECALL_TIMEOUT_MS'),
     defaultValue: 2500,
-    maxValue: MEMORY_PROVIDER_MAX_TIMEOUT_MS,
+    maxValue: MEMORY_MAX_TIMEOUT_MS,
   }),
   MEMORY_RECALL_QUERY_WINDOW: parsePositiveInt({
     envKey: 'MEMORY_RECALL_QUERY_WINDOW',
@@ -2986,33 +3037,25 @@ const shared: SharedServerConfiguration = {
     raw: getEnv('MEMORY_RECALL_MAX_ITEMS'),
     defaultValue: 12,
   }),
-  MEMORY_RECALL_MAX_ENTITIES: parsePositiveInt({
-    envKey: 'MEMORY_RECALL_MAX_ENTITIES',
-    raw: getEnv('MEMORY_RECALL_MAX_ENTITIES'),
-    defaultValue: 8,
-    minValue: MEMORY_SETTINGS_LIMITS.recallMaxEntities.min,
-    maxValue: MEMORY_SETTINGS_LIMITS.recallMaxEntities.max,
+  MEMORY_PAGES_MAX_COUNT: parsePositiveInt({
+    envKey: 'MEMORY_PAGES_MAX_COUNT',
+    raw: getEnv('MEMORY_PAGES_MAX_COUNT'),
+    defaultValue: 6,
+  }),
+  MEMORY_PAGES_MAX_TOKENS: parsePositiveInt({
+    envKey: 'MEMORY_PAGES_MAX_TOKENS',
+    raw: getEnv('MEMORY_PAGES_MAX_TOKENS'),
+    defaultValue: 1500,
   }),
   MEMORY_RETAIN_TIMEOUT_MS: parsePositiveInt({
     envKey: 'MEMORY_RETAIN_TIMEOUT_MS',
     raw: getEnv('MEMORY_RETAIN_TIMEOUT_MS'),
     defaultValue: 10_000,
   }),
-  MEMORY_MAX_RESPONSE_BYTES: parsePositiveInt({
-    envKey: 'MEMORY_MAX_RESPONSE_BYTES',
-    raw: getEnv('MEMORY_MAX_RESPONSE_BYTES'),
-    defaultValue: 524_288,
-  }),
   MEMORY_SWEEP_MAX_PER_TURN: parsePositiveInt({
     envKey: 'MEMORY_SWEEP_MAX_PER_TURN',
     raw: getEnv('MEMORY_SWEEP_MAX_PER_TURN'),
     defaultValue: 5,
-  }),
-  MEMORY_CHECK_TIMEOUT_MS: parsePositiveInt({
-    envKey: 'MEMORY_CHECK_TIMEOUT_MS',
-    raw: getEnv('MEMORY_CHECK_TIMEOUT_MS'),
-    defaultValue: 5000,
-    maxValue: MEMORY_PROVIDER_MAX_TIMEOUT_MS,
   }),
   MEMORY_SCREEN_ENABLED: parseBoolean({
     envKey: 'MEMORY_SCREEN_ENABLED',
@@ -3106,40 +3149,20 @@ const shared: SharedServerConfiguration = {
     raw: getEnv('MEMORY_PRERECALL_GATE_ENABLED'),
     defaultValue: false,
   }),
-  MEMORY_CURATED_ENABLED: parseBoolean({
-    envKey: 'MEMORY_CURATED_ENABLED',
-    raw: getEnv('MEMORY_CURATED_ENABLED'),
-    defaultValue: true,
-  }),
-  MEMORY_CURATED_MAX_MODELS: parsePositiveInt({
-    envKey: 'MEMORY_CURATED_MAX_MODELS',
-    raw: getEnv('MEMORY_CURATED_MAX_MODELS'),
-    defaultValue: 3,
-  }),
-  MEMORY_CURATED_MAX_TOKENS: parsePositiveInt({
-    envKey: 'MEMORY_CURATED_MAX_TOKENS',
-    raw: getEnv('MEMORY_CURATED_MAX_TOKENS'),
-    defaultValue: 512,
-  }),
-  MEMORY_REFLECT_ENABLED: parseBoolean({
-    envKey: 'MEMORY_REFLECT_ENABLED',
-    raw: getEnv('MEMORY_REFLECT_ENABLED'),
-    defaultValue: true,
-  }),
-  MEMORY_REFLECT_BUDGET: parseReflectBudget({
-    envKey: 'MEMORY_REFLECT_BUDGET',
-    raw: getEnv('MEMORY_REFLECT_BUDGET'),
-    defaultValue: 'low',
-  }),
-  MEMORY_BACKEND: parseMemoryBackend({
-    envKey: 'MEMORY_BACKEND',
-    raw: getEnv('MEMORY_BACKEND'),
-    defaultValue: 'markdown',
-  }),
   MEMORY_MARKDOWN_DIR: getEnv('MEMORY_MARKDOWN_DIR', { defaultValue: './data/memory' }) ?? './data/memory',
   MEMORY_SUMMARIZE: parseBoolean({
     envKey: 'MEMORY_SUMMARIZE',
     raw: getEnv('MEMORY_SUMMARIZE'),
+    defaultValue: true,
+  }),
+  MEMORY_PAGE_SORTING: parsePageSortMode({
+    envKey: 'MEMORY_PAGE_SORTING',
+    raw: getEnv('MEMORY_PAGE_SORTING'),
+    defaultValue: 'on',
+  }),
+  MEMORY_NIGHTLY_JOB: parseBoolean({
+    envKey: 'MEMORY_NIGHTLY_JOB',
+    raw: getEnv('MEMORY_NIGHTLY_JOB'),
     defaultValue: true,
   }),
   NEBIUS_API_KEY: getEnv('NEBIUS_API_KEY'),
@@ -3179,23 +3202,6 @@ const shared: SharedServerConfiguration = {
   }),
   PERSONA_KNOWLEDGE_DIR:
     getEnv('PERSONA_KNOWLEDGE_DIR', { defaultValue: './data/persona-knowledge' }) ?? './data/persona-knowledge',
-  MEMORY_REFLECT_MAX_TOKENS: parsePositiveInt({
-    envKey: 'MEMORY_REFLECT_MAX_TOKENS',
-    raw: getEnv('MEMORY_REFLECT_MAX_TOKENS'),
-    defaultValue: 512,
-  }),
-  MEMORY_REFLECT_TIMEOUT_MS: parsePositiveInt({
-    envKey: 'MEMORY_REFLECT_TIMEOUT_MS',
-    raw: getEnv('MEMORY_REFLECT_TIMEOUT_MS'),
-    defaultValue: 8000,
-    maxValue: MEMORY_PROVIDER_MAX_TIMEOUT_MS,
-  }),
-  PROFILE_LEARNING_MODEL: getEnv('PROFILE_LEARNING_MODEL', { defaultValue: '' }) ?? '',
-  PROFILE_LEARNING_MIN_INTERVAL_MS: parsePositiveInt({
-    envKey: 'PROFILE_LEARNING_MIN_INTERVAL_MS',
-    raw: getEnv('PROFILE_LEARNING_MIN_INTERVAL_MS'),
-    defaultValue: 3_600_000,
-  }),
   DOCUMENT_OCR_LANGUAGES:
     getEnv('DOCUMENT_OCR_LANGUAGES', { defaultValue: DEFAULT_OCR_LANGUAGES }) ?? DEFAULT_OCR_LANGUAGES,
   PUBLIC_BASE_URL: parsePublicBaseUrl(getEnv('PUBLIC_BASE_URL', { defaultValue: '' }), { allowPath: !standalone }),

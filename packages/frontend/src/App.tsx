@@ -75,6 +75,7 @@ import { createRunCodeStatusApi } from './runCodeStatusApi';
 import { createSentinelApi, readAllSessionEvents } from './sentinelApi';
 import { isSetupComplete, mergeSetupRead, SETUP_REFRESH_MS, type SetupSnapshot } from './setupStatus';
 import { createSpaceStore } from './spaceStore';
+import { useLiveBrowserHref } from './useLiveBrowserHref';
 import { createServerVoiceApi, createVoiceInputApi } from './voiceInputApi';
 
 /** Shared cookie/OIDC fetch for boot helpers and `<TrueForgeUI server />`. */
@@ -252,7 +253,7 @@ function AmanShell({
   const openChat = (sessionId: string) => {
     setOpenSessionRequest(previous => ({ sessionId, nonce: (previous?.nonce ?? 0) + 1 }));
   };
-  // "Forget everywhere" on a memory fact opens the memory editing path; the rail never edits.
+  // "Manage memory" under the recalled memories opens the place where memory is edited.
   const openMemorySettings = () => {
     setSettingsOpenRequest(previous => ({ section: 'memory', nonce: (previous?.nonce ?? 0) + 1 }));
   };
@@ -262,6 +263,7 @@ function AmanShell({
   // shows until capabilities say otherwise.
   const [settingsChromeEnabled, setSettingsChromeEnabled] = useState(true);
   const activeChatIsPrivate = useIsPrivateChat(activeSessionId);
+  const liveBrowserHref = useLiveBrowserHref({ sessionId: activeSessionId, privateChat: activeChatIsPrivate });
   return (
     <div className="aman-shell">
       <AmanChatSurface
@@ -291,6 +293,7 @@ function AmanShell({
         deskApi={railDeskApi}
         onOpenChat={openChat}
         onOpenMemorySettings={openMemorySettings}
+        liveBrowserHref={liveBrowserHref}
       />
     </div>
   );

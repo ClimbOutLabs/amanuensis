@@ -512,6 +512,7 @@ instance_up() {
   if reg_exists "$name"; then reg_set "$name" healthy 1; fi
   step_ok "Instance $name is running and answering"
   proxy_trust_sync "$name"
+  container_networks_sync "$name"
 }
 
 # A reverse proxy on this computer reaches an instance with a public address through a published port, so the app sees
@@ -526,6 +527,32 @@ proxy_trust_sync() { # name
   valid_ipv4 "$gateway" || return 0
   [ "$(env_get "$env" TRUSTED_PROXY_ADDRESSES)" != "$gateway" ] || return 0
   env_managed_set "$env" TRUSTED_PROXY_ADDRESSES "$gateway"
+  dc "$name" up -d --force-recreate --no-deps --wait --wait-timeout 120 app >"$STEP_LOG" 2>&1 || warn "The app of instance $name did not start again. Run: aman doctor instance --fix"
+}
+
+# The app refuses every address on the networks its own containers sit on, so a model or connector address a
+# chat is steered to cannot reach a neighbouring container (the calendar account agent, for one). The Email and
+# Calendar connectors' own endpoints stay usable, because the app lists them as its own services. Docker chooses
+# those networks' ranges when the instance starts, so they are learned here and written to the settings
+# file; the app restarts once when they are learned or change. An instance whose networks cannot be read
+# keeps the ranges it already has.
+container_networks_sync() { # name
+  local name=$1 env ranges network subnet
+  reg_exists "$name" || return 0
+  env="$(instance_dir "$name")/.env"
+  [ -f "$env" ] || return 0
+  ranges=""
+  for network in "aman-${name}_default" "aman-${name}_link" "aman-${name}_calendar" "aman-${name}_browser-control"; do
+    for subnet in $(D network inspect "$network" --format '{{range .IPAM.Config}}{{.Subnet}} {{end}}' 2>/dev/null || true); do
+      case "$subnet" in
+        */*) ranges="${ranges:+$ranges,}$subnet" ;;
+      esac
+    done
+  done
+  [ -n "$ranges" ] || return 0
+  ranges=$(printf '%s' "$ranges" | tr ',' '\n' | sort -u | tr '\n' ',' | sed 's/,$//')
+  [ "$(env_get "$env" CONTAINER_NETWORK_RANGES)" != "$ranges" ] || return 0
+  env_managed_set "$env" CONTAINER_NETWORK_RANGES "$ranges"
   dc "$name" up -d --force-recreate --no-deps --wait --wait-timeout 120 app >"$STEP_LOG" 2>&1 || warn "The app of instance $name did not start again. Run: aman doctor instance --fix"
 }
 
@@ -1044,12 +1071,18 @@ print_instance_summary() {
 # How a device comes to trust this computer: one short link over plain http, the same link as a code for a phone, and the
 # step an iPhone needs after installing.
 print_trust_lines() { # name
-  local link
+  local link fp
   link=$(tls_trust_link "$1")
+  ui_heading "Let each device trust this computer"
   ui_line "On each device, the browser will first warn that the page is not private. Do not click past the warning."
   ui_line "Instead, open this page once on that device and follow its steps: $link"
   ui_line "On an iPhone: open it in Safari, install the profile, then turn it on in Settings, General, About, Certificate Trust Settings."
-  ui_line "Your device will show a long code called a fingerprint. It must be $(tls_fingerprint). If it differs, stop."
+  fp=$(tls_fingerprint)
+  ui_line "Your device will show a long code called a fingerprint. It must be this one:"
+  # Two lines of 16 pairs, so the code fits a narrow terminal and is easy to compare half by half.
+  ui_line "$(_ui_s 1 "${fp:0:48}")"
+  if [ -n "${fp:48}" ]; then ui_line "$(_ui_s 1 "${fp:48}")"; fi
+  ui_line "If it differs, stop."
   if [ "$TLS_AUTHORITY_REPLACED" = 1 ]; then
     ui_line "This computer's root certificate was made again, so each device must trust it again."
   fi
@@ -1081,6 +1114,7 @@ print_backups_row() {
 
 # The last lines of a finished run: how to reach the aman command from this terminal, and how to update later.
 print_closing_lines() {
+  ui_gap
   case ":$PATH:" in
     *":$AMAN_HOME/bin:"*) ;;
     *) ui_line "Open a new terminal window to use the aman command." ;;

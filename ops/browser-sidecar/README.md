@@ -79,6 +79,7 @@ The live view, where the person drives their own tab by hand from the app's `/br
   human check: the check's own frame is on the page, or the page is the full-page check).
 - `POST /live/input { owner, tab, kind, ... }`: one act: `click` (x, y and the frame size it was read
   from), the takeover pointer acts `move`, `down` and `up` (a point, like a click), `type` (text),
+  `paste` (text put in as one insert, as a real paste is, so a line break never presses Enter),
   `key` (one named key) or `wheel` (dy). A click uses the real mouse, so the same
   rules keep the tab on its site. Acts on one tab run one at a time, in the order they arrived.
 - `POST /live/takeover { owner, tab, on }`: hands the tab to the person, or back to the model. The
@@ -86,6 +87,10 @@ The live view, where the person drives their own tab by hand from the app's `/br
   model's own steps on it (`/open`, `/scroll`, `/back`, `/click`, `/type`, `/select`) answer
   `refused` with reason `takeover`, and a streamed `move` is applied in steps from where the
   pointer last was, so the page sees a hand travelling rather than a pointer appearing.
+- `POST /live/copy { owner, tab }`: the text the person selected in the tab, for copying to their
+  own clipboard: the selected part of the focused field, or else the page's selection, from the
+  focused frame first. Answers `nothing_selected`, or `password` for a password field, whose text is
+  never read out. The text is never logged or kept.
 - `POST /live/upload { owner, tab, name, mime, data }` — a file, base64, at most 10 MB, put into the
   file picker the page opened (dropped once the page moves on), or else its first file field. The
   page itself sends it.
@@ -179,3 +184,11 @@ inside it, with the same sandbox settings Compose uses: the URL safety rules, th
 snapshot text builder, and fixture pages in a real browser that go through the real egress proxy, with
 only DNS and the final TCP connect stood in for. `npm test` here runs the same tests, and skips the
 browser ones where no Chromium for this Playwright release is installed.
+
+`pnpm test:cobrowse` runs the whole live-view check in one go, with made-up local sites only. It runs:
+
+- the sidecar tests above, which need Docker
+- the live browser page in a real Chromium against a stand-in server
+- the reply loop tests that keep browser steps from being skipped as already done
+
+It exits 0 only when every part passes.

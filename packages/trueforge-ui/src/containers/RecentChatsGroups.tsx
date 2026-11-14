@@ -30,7 +30,7 @@ function LimitedChatRows<T extends RecentChat>({
       {visible.length < chats.length ? (
         <button
           type="button"
-          className="w-full rounded-[1.25rem] border-0 bg-transparent px-2.5 py-1.5 text-left text-sm font-normal text-text-secondary hover:text-text-primary"
+          className="w-full rounded-[1.25rem] border-0 bg-transparent px-[0.6875rem] py-1.5 text-left text-sm font-normal text-text-secondary hover:text-text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus-ring"
           onClick={() => setLimit(current => current + RECENT_CHATS_PAGE_SIZE)}
         >
           Show more
@@ -62,13 +62,18 @@ export function FoldedChatGroup<T extends RecentChat>({
       <button
         type="button"
         aria-expanded={expanded}
-        className="flex w-full items-center gap-1 border-0 bg-transparent px-2.5 pt-2 pb-1 text-left text-xs font-normal text-text-secondary hover:text-text-primary"
+        className="flex w-full items-center gap-1.5 rounded-[1.25rem] border-0 bg-transparent px-2.5 pt-2 pb-1 text-left text-xs font-normal text-text-secondary hover:text-text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus-ring"
         onClick={toggle}
       >
         <Icon name="chevron-down" className={cn('size-3 shrink-0 transition-transform', !expanded && '-rotate-90')} />
-        {label}
+        <span data-slot="aui_chat-group-label">{label}</span>
       </button>
-      {expanded ? <LimitedChatRows chats={chats} openKey={openKey} renderRow={renderRow} /> : null}
+      {/* Set in so a chat's title starts under the heading's word, not under its arrow. */}
+      {expanded ? (
+        <div className="flex flex-col gap-0.5 pl-[1.0625rem]">
+          <LimitedChatRows chats={chats} openKey={openKey} renderRow={renderRow} />
+        </div>
+      ) : null}
     </section>
   );
 }

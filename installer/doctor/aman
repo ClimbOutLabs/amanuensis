@@ -1189,6 +1189,32 @@ plural() { # count word
   if [ "$1" = 1 ]; then printf '1 %s' "$2"; else printf '%s %ss' "$1" "$2"; fi
 }
 
+# What a part of the report found, for the right end of its heading: "4 ok, 1 problem, 2 skipped".
+section_counts() { # scope
+  local parts=''
+  count_checks "$1"
+  if [ "$N_OK" -gt 0 ]; then parts="$(_ui_s 32 "$N_OK ok")"; fi
+  if [ "$N_FAIL" -gt 0 ]; then parts="${parts:+$parts, }$(_ui_s 31 "$(plural "$N_FAIL" problem)")"; fi
+  if [ "$N_WARN" -gt 0 ]; then parts="${parts:+$parts, }$(_ui_s 33 "$(plural "$N_WARN" warning)")"; fi
+  if [ "$N_OFF" -gt 0 ]; then parts="${parts:+$parts, }$(_ui_s 2 "$N_OFF skipped")"; fi
+  printf '%s' "$parts"
+}
+
+# Every problem, then every warning, each with the one thing to do next, so the end of a long report says it all.
+list_problems() {
+  local want scope id state detail fix label
+  for want in fail warn; do
+    for scope in machine "${INSTANCES[@]+"${INSTANCES[@]}"}"; do
+      while IFS=$'\t' read -r scope id state detail fix; do
+        [ "$state" = "$want" ] || continue
+        label=$detail
+        if [ "$scope" != machine ]; then label="Instance $scope: $detail"; fi
+        if [ "$want" = fail ]; then ui_fail "$label" "$fix"; else ui_warn_again "$label" "$fix"; fi
+      done < <(visible_records "$scope")
+    done
+  done
+}
+
 # The closing block: how many problems and warnings there are, or that all is well.
 print_verdict() {
   local scope fails=0 warns=0 parts=""
@@ -1199,12 +1225,13 @@ print_verdict() {
   done
   if [ "$fails" -gt 0 ]; then parts="$(plural "$fails" problem)"; fi
   if [ "$warns" -gt 0 ]; then parts="${parts:+$parts, }$(plural "$warns" warning)"; fi
-  if [ "$fails" -gt 0 ]; then
-    ui_summary fail "$parts."
-    ui_line "Run the Next command for each, then run aman doctor again."
-  elif [ "$warns" -gt 0 ]; then
-    ui_summary warn "$parts."
-    ui_line "Run the Next command for each, then run aman doctor again."
+  if [ "$fails" -gt 0 ] || [ "$warns" -gt 0 ]; then
+    if [ "$fails" -gt 0 ]; then ui_summary fail "$parts"; else ui_summary warn "$parts"; fi
+    list_problems
+    # Listed just above with what to do, so the closing block does not repeat them.
+    UI_WARNS=
+    ui_gap
+    ui_line "Do the Next step of each, then run aman doctor again."
   else
     ui_summary ok "All checks passed."
   fi
@@ -1232,10 +1259,11 @@ print_text() {
     print_summary
     return
   fi
-  ui_phase "Checking this computer"
+  ui_title "Checks this computer and each instance." "AMAN DOCTOR"
+  ui_section "Checking this computer" "$(section_counts machine)"
   text_checks machine
   for name in "${INSTANCES[@]+"${INSTANCES[@]}"}"; do
-    ui_phase "Checking instance $name"
+    ui_section "Checking instance $name" "$(section_counts "$name")"
     text_checks "$name"
   done
   print_verdict

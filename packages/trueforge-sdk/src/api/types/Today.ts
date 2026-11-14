@@ -7,8 +7,6 @@ export interface Today {
     asOf: string;
     /** The local day's events from every connected calendar account. Once every timed event on the day has finished, the next morning's first event is added, marked as tomorrow's. Null, not an empty list, when no calendar is connected. */
     calendar: TrueForge.TodayCalendarEvent[] | null;
-    /** How many schedules are switched on for the person. */
-    carrying: number;
     /** Reminders due today or overdue, earliest first. */
     due: TrueForge.TodayDueReminder[];
     /** The first time after now with no event until the end of the day, or null when the day stays busy. */

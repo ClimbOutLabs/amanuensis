@@ -37,7 +37,9 @@ import { createHelpRouter } from './apis/help';
 import { createMapsRouter } from './apis/maps';
 import { createMcpOAuthRouter } from './apis/mcpOAuth';
 import { createMcpServersRouter } from './apis/mcpServers';
+import { createMemoryPagesRouter } from './apis/memoryPages';
 import { createMemoryVaultRouter } from './apis/memoryVault';
+import { createMemoryVaultReviewRouter } from './apis/memoryVaultReview';
 import { createModelsRouter } from './apis/models';
 import { createNotesFolderRouter, NOTES_FOLDER_SETTINGS_BASE_PATH } from './apis/notesFolder';
 import { createNoticingRouter } from './apis/noticing';
@@ -139,6 +141,8 @@ import type { ChatSearchIndexer } from './runtime/chatSearchIndexing';
 import { resolveDefaultChatModel } from './runtime/defaultChatModel';
 import type { DeliveryService } from './runtime/delivery/deliveryService';
 import type { EventSubscriptionRegistry } from './runtime/event-subscription';
+import { createMemoryClient } from './runtime/memory/createMemoryClient';
+import type { NightlyMemoryJob } from './runtime/memory/nightlyService';
 import { createVaultClient } from './runtime/memory/vaultClient';
 import { createModelProviderChecker } from './runtime/modelProviderCheck';
 import type { NoticingService } from './runtime/noticing/noticingService';
@@ -358,6 +362,8 @@ export interface ServerDeps<TTransaction> {
   schedulerStatus: () => SchedulerProbe;
   /** Per-instance daily Token Factory token cap, enforced when a turn starts on Token Factory. */
   tokenFactoryBudget: TokenFactoryBudget;
+  /** Runs the memory tidy-up now, and tells where one stands. */
+  memoryTidy: NightlyMemoryJob;
   /** Post-completion passthrough appends ride the same store (see db/completedTurnEvents.ts). */
   sessionStore: ISessionStore<SessionCustom, TurnCustom> & ICompletedTurnEventStore;
   sessions: Sessions<SessionCustom, TurnCustom>;
@@ -656,7 +662,6 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     withAuth(
       createCapabilitiesRouter({
         resolveSandboxProviderStore: deps.resolveSandboxProviderStore,
-        mcpServerStore: deps.resolveMcpServerStore(),
         globalSettingsStore: deps.globalSettingsStore,
         withTransaction: deps.withTransaction,
         logger: deps.logger,
@@ -801,7 +806,28 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
   app.route(
     '/api/v1/memory/vault',
     withAuth(
+      createMemoryVaultReviewRouter({
+        resolveRequestContext,
+        logger: deps.logger,
+        sessionStore: deps.sessionStore,
+      }),
+      authMiddleware,
+    ),
+  );
+  app.route(
+    '/api/v1/memory/vault',
+    withAuth(
       createMemoryVaultRouter({
+        resolveRequestContext,
+        logger: deps.logger,
+      }),
+      authMiddleware,
+    ),
+  );
+  app.route(
+    '/api/v1/memory/pages',
+    withAuth(
+      createMemoryPagesRouter({
         resolveRequestContext,
         logger: deps.logger,
       }),
@@ -876,6 +902,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         globalSettingsStore: deps.globalSettingsStore,
         personalizationStore: deps.personalizationStore,
         tokenFactoryBudget: deps.tokenFactoryBudget,
+        memoryTidy: deps.memoryTidy,
         envManagedModelProviderNames: envManagedProviders,
         checkSavedProvider: createModelProviderChecker({ logger: deps.logger }),
         withTransaction: deps.withTransaction,
@@ -943,6 +970,9 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       createPersonalizationRouter({
         personalizationStore: deps.personalizationStore,
         resolveRequestContext,
+        logger: deps.logger,
+        resolveMemoryClient: ({ tenantId }) =>
+          createMemoryClient({ markdownDir: configuration.MEMORY_MARKDOWN_DIR, namespace: tenantId }),
       }),
       authMiddleware,
     ),
@@ -972,11 +1002,11 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         channels: deps.reachChannels,
         isInstanceOwner: deps.isInstanceOwner,
         memories: async ({ tenant_id }) => {
-          const outcome = await createVaultClient({ logger: deps.logger, tenantId: tenant_id })?.listEntries({
+          const outcome = await createVaultClient({ logger: deps.logger, tenantId: tenant_id }).listEntries({
             namespace: '',
             timeoutMs: 10_000,
           });
-          return outcome?.ok === true ? outcome.entries.map(entry => entry.text) : [];
+          return outcome.ok ? outcome.entries.map(entry => entry.text) : [];
         },
         resolveRequestContext,
         logger: deps.logger,
@@ -1326,7 +1356,6 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         sessions: deps.sessions,
         agentStore: deps.agentStore,
         sandboxProviderStore: deps.sandboxProviderStore,
-        mcpServerStore: deps.resolveMcpServerStore(),
         globalSettingsStore: deps.globalSettingsStore,
         resolveRequestContext,
         logger: deps.logger,
@@ -1339,7 +1368,6 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     withAuth(
       createAppBugReportRouter({
         sandboxProviderStore: deps.sandboxProviderStore,
-        mcpServerStore: deps.resolveMcpServerStore(),
         globalSettingsStore: deps.globalSettingsStore,
         resolveRequestContext,
         logger: deps.logger,

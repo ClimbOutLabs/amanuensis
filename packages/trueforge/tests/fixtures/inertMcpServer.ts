@@ -24,11 +24,6 @@
  * connector offline and bring it back on the same port (a refused connection,
  * simulating the server process being down), distinct from `sever`/`restore`
  * (which keeps listening but answers every request with a 503).
- *
- * The same server doubles as a Hindsight-shaped memory provider: `memoryProviderUrl`
- * has the `{apiBase}/mcp/{bank}` shape the memory-provider setup requires, and the fixture answers the
- * REST recall route behind it, so the setup's connection check passes and a connector registered
- * through the real setup flow is first-party.
  */
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -109,10 +104,6 @@ export const INERT_CALENDAR_EVENT_RESULT: InertCalendarEventResult = {
   },
 };
 
-/** Bank in `memoryProviderUrl`; the fixture answers a recall for any bank, so a URL can move between them. */
-const INERT_MEMORY_BANK = 'aman';
-const MEMORY_RECALL_PATH = /^\/v1\/default\/banks\/[^/]+\/memories\/recall$/;
-
 /**
  * LKOS's `AskMemoryResponse` shape: empty means empty context plus empty claim groups.
  * The index signature is what makes this assignable to the MCP SDK's `structuredContent`
@@ -158,9 +149,7 @@ export interface InertRedirect {
 export interface InertMcpServer {
   /** Streamable HTTP endpoint to register as the connector `url`. Stable across `stop`/`start`. */
   url: string;
-  /** The same endpoint as a single-bank memory provider URL; the setup's recall check is answered. */
-  memoryProviderUrl: string;
-  /** Origin of {@link InertMcpServer.url}: what an operator lists in `FIRST_PARTY_MCP_ORIGINS` to vouch for this server. */
+  /** Origin of {@link InertMcpServer.url}: what a test puts on the first-party origin list to vouch for this server. */
   origin: string;
   /** Times the gated write tool actually started executing. */
   writeInvocations: () => number;
@@ -689,14 +678,6 @@ export async function startInertMcpServer(options?: {
       res.end(JSON.stringify({ error: 'inert MCP fixture is severed' }));
       return;
     }
-    if (req.method === 'POST' && req.url !== undefined && MEMORY_RECALL_PATH.test(req.url)) {
-      // The memory-provider setup check: an authenticated, empty recall.
-      req.resume();
-      const body = JSON.stringify({ results: [], entities: {} });
-      res.writeHead(200, { 'content-type': 'application/json', 'content-length': String(Buffer.byteLength(body)) });
-      res.end(body);
-      return;
-    }
     const sessionHeader = req.headers['mcp-session-id'];
     const sessionId = typeof sessionHeader === 'string' ? sessionHeader : undefined;
     const existing = sessionId === undefined ? undefined : transports.get(sessionId);
@@ -801,7 +782,6 @@ export async function startInertMcpServer(options?: {
   return {
     url,
     origin,
-    memoryProviderUrl: `${url}/${INERT_MEMORY_BANK}`,
     writeInvocations: () => counters.write,
     echoInvocations: () => counters.echo,
     readInvocations: () => counters.read,

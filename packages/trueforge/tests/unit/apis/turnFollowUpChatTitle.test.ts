@@ -109,7 +109,9 @@ async function createChat(options?: { incognito?: boolean }) {
     name: 'test-provider',
     manifest: {
       type: 'openai',
-      base_url: 'https://models.test.example/v1',
+      // A public IP address, not a name: the provider is judged by the address check when a
+      // model is resolved, and a fixture name's resolution depends on the machine's DNS.
+      base_url: 'https://93.184.216.34/v1',
       auth: { api_key: 'sk-test' },
       models: [{ model_id: 'test-model', name: 'test-model', properties: { context_length: 8000 } }],
     },

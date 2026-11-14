@@ -11,12 +11,52 @@ import {
   type Dialect,
   type Driver,
   type QueryCompiler,
+  type SqliteDatabase,
   type TransactionSettings,
 } from 'kysely';
 import { chmodSync, existsSync, lstatSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 
 import type { Database as Schema } from './types';
+
+const STATEMENT_CACHE_SIZE = 200;
+
+/**
+ * Kysely's SqliteDriver prepares a new statement for every query. Each statement holds native
+ * SQLite memory that is freed only when V8 collects its small JS wrapper, so a busy run (an
+ * import, a burst of requests) piles up hundreds of MB before a GC. Reusing one statement per
+ * SQL text keeps that flat. A statement still being iterated is busy, so that caller gets a
+ * fresh one instead of sharing it.
+ */
+export function cacheStatements({
+  database,
+  maxSize,
+}: {
+  database: Database.Database;
+  maxSize: number;
+}): SqliteDatabase {
+  const cache = new Map<string, Database.Statement>();
+  const prepare = (sql: string): Database.Statement => {
+    const cached = cache.get(sql);
+    if (cached !== undefined) {
+      cache.delete(sql);
+      if (!cached.busy) {
+        cache.set(sql, cached);
+        return cached;
+      }
+    }
+    const statement = database.prepare(sql);
+    cache.set(sql, statement);
+    if (cache.size > maxSize) {
+      const oldest = cache.keys().next();
+      if (oldest.done !== true) {
+        cache.delete(oldest.value);
+      }
+    }
+    return statement;
+  };
+  return { close: () => database.close(), prepare };
+}
 
 /**
  * Wraps SqliteDriver and maps Kysely access mode onto SQLite begin kinds:
@@ -29,7 +69,7 @@ class ImmediateSqliteDriver implements Driver {
   readonly #inner: SqliteDriver;
 
   constructor(database: Database.Database) {
-    this.#inner = new SqliteDriver({ database });
+    this.#inner = new SqliteDriver({ database: cacheStatements({ database, maxSize: STATEMENT_CACHE_SIZE }) });
   }
 
   init(): Promise<void> {

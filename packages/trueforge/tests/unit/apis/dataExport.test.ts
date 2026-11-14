@@ -444,6 +444,8 @@ describe('Data export route', () => {
     // Settings: an exported toggle, and one that must stay behind.
     const globalSettings = new SqliteGlobalSettingsStore(db);
     await globalSettings.setSetting({ key: 'tool_output_screen_enabled', value: 'true' });
+    await globalSettings.setSetting({ key: 'memory_page_sorting_mode', value: 'report' });
+    await globalSettings.setSetting({ key: 'memory_nightly_job_enabled', value: 'true' });
     await globalSettings.setSetting({ key: 'export_test_unlisted_setting', value: 'enabled' });
     await new SqliteSentinelSettingsStore(db).patch({
       tenant_id: TENANT_ID,
@@ -673,7 +675,11 @@ describe('Data export route', () => {
         permission_settings: z.object({ offline_mode: z.boolean() }),
       })
       .parse(zipEntryJson(entries, 'settings.json'));
-    expect(settings.instance).toEqual([{ key: 'tool_output_screen_enabled', value: 'true' }]);
+    expect(settings.instance).toEqual([
+      { key: 'memory_nightly_job_enabled', value: 'true' },
+      { key: 'memory_page_sorting_mode', value: 'report' },
+      { key: 'tool_output_screen_enabled', value: 'true' },
+    ]);
     expect(settings.permission_settings.offline_mode).toBe(true);
 
     // No uploaded file bytes without the tick.

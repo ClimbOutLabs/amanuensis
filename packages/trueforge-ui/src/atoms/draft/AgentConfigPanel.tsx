@@ -8,6 +8,7 @@ import { useSlot } from '../../theme/SlotsProvider.js';
 import { auiButtonClass } from '../lib/buttonClasses.js';
 import { cn } from '../lib/cn.js';
 import { ResponsiveDropdownMenu } from '../primitives/ResponsiveDropdownMenu.js';
+import { Switch } from '../primitives/Switch.js';
 import { Tooltip } from '../primitives/Tooltip.js';
 import type { AgentConfigEditor } from './AgentConfigEditors.js';
 import { initialUserMessagesFromSpec } from './agentConfigMessages.js';
@@ -23,8 +24,7 @@ import { modelParamSummary } from './modelParamsSummary.js';
 import { runtimeConfigSummary, runtimeConfigValueClassName } from './runtimeConfigSummary.js';
 import { skillFamilyId, skillVersion } from './SkillVersionSelector.js';
 
-const DEFAULT_INSTRUCTIONS =
-  'Enter detailed instructions for your agent. E.g. You are a helpful assistant that helps users plan trips. Always ask clarifying questions before making suggestions...';
+const DEFAULT_INSTRUCTIONS = 'For example: Each morning, read my new email and tell me which messages need a reply.';
 
 export type AgentConfigPanelProps = {
   spec: AgentSpec;
@@ -34,6 +34,7 @@ export type AgentConfigPanelProps = {
   modelsError: string | null;
   skills?: AgentSkill[];
   skillsAvailable: boolean;
+  sandboxAvailable: boolean;
   instructions: string;
   onOpenEditor: (editor: AgentConfigEditor) => void;
   onChange?: (spec: AgentSpec) => void;
@@ -208,6 +209,7 @@ export function AgentConfigSection({
   icon,
   actionIcon = 'pencil',
   actionLabel,
+  showActionLabel = false,
   onEdit,
   children,
 }: {
@@ -216,6 +218,8 @@ export function AgentConfigSection({
   icon?: string;
   actionIcon?: string;
   actionLabel?: string;
+  /** Shows the action as a labelled button that is always on screen, not an icon that appears on hover. */
+  showActionLabel?: boolean;
   onEdit?: () => void;
   children?: ReactNode;
 }) {
@@ -249,7 +253,19 @@ export function AgentConfigSection({
               {description ? <p className="text-text-secondary mt-0.5 text-xs">{description}</p> : null}
             </div>
           </div>
-          {onEdit ? (
+          {onEdit && showActionLabel ? (
+            <button
+              type="button"
+              className={auiButtonClass({ variant: 'secondary', size: 'small', className: 'shrink-0' })}
+              onClick={event => {
+                event.stopPropagation();
+                onEdit();
+              }}
+            >
+              <Icon name={actionIcon} className="size-3.5" />
+              {action}
+            </button>
+          ) : onEdit ? (
             <button
               type="button"
               aria-label={action}
@@ -282,6 +298,7 @@ export function AgentConfigPanel({
   modelsError,
   skills: catalogSkills = [],
   skillsAvailable,
+  sandboxAvailable,
   instructions,
   onOpenEditor,
   onChange,
@@ -293,9 +310,12 @@ export function AgentConfigPanel({
   const AgentModelSettingsContent = useSlot('AgentModelSettingsContent');
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [modelSettingsMenuOpen, setModelSettingsMenuOpen] = useState(false);
+  // The model and run settings are rarely changed, so they start folded away.
+  const [moreOpen, setMoreOpen] = useState(false);
   const [modelQuery, setModelQuery] = useState('');
   const mcp = editableMountsFromSpec(spec.mcpServers);
   const skillMounts = editableMountsFromSpec(spec.skills);
+  const sandboxEnabled = spec.config?.sandbox?.enabled ?? false;
   const modelParams = modelParamSummary(spec.model.params);
   const runtimeConfig = runtimeConfigSummary(spec.config);
   const instructionPreview = instructions.trim();
@@ -318,12 +338,12 @@ export function AgentConfigPanel({
     <div className="bg-card-bg text-text-primary flex h-full min-h-0 flex-col">
       <header className="flex min-h-14 shrink-0 items-center gap-1 border-b border-border bg-topbar-bg px-3 py-1.5">
         <Icon name="sliders" className="size-4" />
-        <h2 className="text-sm font-semibold">Agent Config</h2>
+        <h2 className="text-sm font-semibold">Set up your agent</h2>
         <span className="min-w-0 flex-1" />
         {onClose ? (
           <button
             type="button"
-            aria-label="Close agent config"
+            aria-label="Close agent setup"
             className={auiButtonClass({ variant: 'ghost', size: 'icon', className: 'size-8' })}
             onClick={onClose}
           >
@@ -332,112 +352,7 @@ export function AgentConfigPanel({
         ) : null}
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <Section>
-          <div className="flex w-full items-center gap-1">
-            <ResponsiveDropdownMenu
-              open={modelMenuOpen}
-              onOpenChange={open => {
-                setModelMenuOpen(open);
-                if (!open) setModelQuery('');
-              }}
-              closeOnClick={false}
-              align="start"
-              sheetLabel="Select model"
-              containerClassName="flex min-w-0 flex-1"
-              className="w-[min(44rem,calc(100vw-2rem))] overflow-hidden p-0"
-              trigger={
-                <button
-                  type="button"
-                  aria-label="Edit Model"
-                  title="Edit Model"
-                  disabled={disabled}
-                  className="flex w-full cursor-pointer items-center gap-2 rounded-md py-1 text-left transition-colors"
-                >
-                  <ProviderMark
-                    logo={model?.provider.logo}
-                    label={model?.provider.name ?? spec.model.name}
-                    className="size-4 text-[0.5rem]"
-                  />
-                  <span className="min-w-0 flex-1 truncate text-sm font-medium">
-                    {displayModelLabel(spec.model.name)}
-                  </span>
-                  {modelInfo.length ? (
-                    <span
-                      title={modelInfoTitle}
-                      className="text-text-secondary shrink-0 whitespace-nowrap text-[0.6875rem]"
-                    >
-                      {modelInfo.join(' · ')}
-                    </span>
-                  ) : null}
-                  <Icon name="chevrons-up-down" className="text-text-secondary size-3.5 shrink-0" />
-                </button>
-              }
-            >
-              <AgentModelEditorContent
-                spec={spec}
-                models={models}
-                loading={modelsLoading}
-                error={modelsError}
-                query={modelQuery}
-                onQueryChange={setModelQuery}
-                onChange={next => {
-                  onChange?.(next);
-                  setModelMenuOpen(false);
-                  setModelQuery('');
-                }}
-              />
-            </ResponsiveDropdownMenu>
-            <ResponsiveDropdownMenu
-              open={modelSettingsMenuOpen}
-              onOpenChange={setModelSettingsMenuOpen}
-              closeOnClick={false}
-              align="start"
-              sheetLabel="Model settings"
-              className="w-[min(36rem,calc(100vw-2rem))] overflow-hidden p-0"
-              trigger={
-                <button
-                  type="button"
-                  aria-label="Model settings"
-                  title="Model settings"
-                  disabled={disabled}
-                  className={auiButtonClass({
-                    variant: 'ghost',
-                    size: 'icon',
-                    className: 'size-7 shrink-0',
-                  })}
-                >
-                  <Icon name="sliders" className="size-3.5" />
-                </button>
-              }
-            >
-              <AgentModelSettingsContent spec={spec} model={model} onChange={next => onChange?.(next)} />
-            </ResponsiveDropdownMenu>
-          </div>
-          <button
-            type="button"
-            disabled={disabled}
-            aria-label="Edit model settings"
-            // DropdownMenu dismisses on document mousedown; stop it so click can toggle closed without reopen.
-            onMouseDown={event => event.stopPropagation()}
-            onClick={() => setModelSettingsMenuOpen(open => !open)}
-            className="mt-2 flex w-full cursor-pointer flex-col text-left disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <span className="text-text-secondary flex min-w-0 flex-wrap gap-x-3 gap-y-1 text-xs">
-              {modelParams.length ? (
-                modelParams.map(entry => (
-                  <span key={entry.label} className="flex gap-1">
-                    <span>{entry.label}:</span>
-                    <span className="text-text-primary font-medium">{entry.value}</span>
-                  </span>
-                ))
-              ) : (
-                <span>model settings: defaults</span>
-              )}
-            </span>
-          </button>
-        </Section>
-
-        <Section title="Instructions" description="Define the agent's role, goals, and behavior.">
+        <Section title="What should it do?" description="Describe the job in your own words, as you would to a helper.">
           <button
             type="button"
             aria-label="Edit Instructions"
@@ -465,26 +380,11 @@ export function AgentConfigPanel({
         </Section>
 
         <Section
-          title="Run settings"
-          description="Control how the agent runs and uses context."
-          actionIcon="sliders"
-          onEdit={disabled ? undefined : () => onOpenEditor('runtime')}
-        >
-          <dl className="text-text-secondary flex flex-wrap gap-x-3 gap-y-1 text-xs leading-relaxed">
-            {runtimeConfig.map(entry => (
-              <div key={entry.label} className="flex gap-1">
-                <dt>{entry.label}:</dt>
-                <dd className={runtimeConfigValueClassName(entry.value)}>{entry.value}</dd>
-              </div>
-            ))}
-          </dl>
-        </Section>
-
-        <Section
-          title="MCP Servers"
-          icon="mcp-server"
+          title="Connectors"
+          description="The apps and services it can use, like your email or calendar."
           actionIcon="plus"
-          actionLabel="Add MCP server"
+          actionLabel="Add a connector"
+          showActionLabel
           onEdit={disabled ? undefined : () => onOpenEditor('mcp')}
         >
           {mcp.length ? (
@@ -518,17 +418,48 @@ export function AgentConfigPanel({
                 />
               ))}
             </div>
-          ) : null}
+          ) : (
+            <p className="text-text-secondary text-xs">None yet.</p>
+          )}
+        </Section>
+
+        <Section
+          title="Sandbox"
+          description="A separate, safe space where it can run code and work with files. Skills need it."
+        >
+          <div className="flex items-center justify-between gap-4">
+            <p className="text-text-secondary text-xs">
+              {!sandboxAvailable
+                ? 'The sandbox is not set up yet. Turn it on in Settings, under Sandbox.'
+                : skillMounts.length > 0
+                  ? 'Stays on while it has skills.'
+                  : sandboxEnabled
+                    ? 'On.'
+                    : 'Off.'}
+            </p>
+            <Switch
+              checked={sandboxEnabled}
+              aria-label="Sandbox"
+              disabled={disabled || !sandboxAvailable || skillMounts.length > 0 || onChange === undefined}
+              onCheckedChange={enabled =>
+                onChange?.({ ...spec, config: { ...spec.config, sandbox: { ...spec.config?.sandbox, enabled } } })
+              }
+            />
+          </div>
         </Section>
 
         <Section
           title="Skills"
+          description="Extra know-how it can follow, like writing in your style."
           actionIcon="plus"
-          actionLabel="Add skill"
+          actionLabel="Add a skill"
+          showActionLabel
           onEdit={disabled ? undefined : () => onOpenEditor('skills')}
         >
           {!skillsAvailable ? (
-            <p className="text-text-secondary text-xs">Skills require an available sandbox.</p>
+            <p className="text-text-secondary text-xs">
+              Skills need the sandbox. Turn it on in Settings, under Sandbox.
+            </p>
           ) : skillMounts.length ? (
             <div className="flex flex-wrap gap-1.5">
               {skillMounts.map(item => {
@@ -567,9 +498,153 @@ export function AgentConfigPanel({
               })}
             </div>
           ) : (
-            <p className="text-text-secondary text-xs">No skills selected.</p>
+            <p className="text-text-secondary text-xs">None yet.</p>
           )}
         </Section>
+        <section className="border-b border-border">
+          <button
+            type="button"
+            aria-expanded={moreOpen}
+            className="hover:bg-ghost-button-hover flex w-full items-center gap-2 px-4 py-4 text-left transition-colors"
+            onClick={() => setMoreOpen(open => !open)}
+          >
+            <Icon
+              name="chevron-right"
+              className={cn('text-text-secondary size-4 shrink-0 transition-transform', moreOpen ? 'rotate-90' : null)}
+            />
+            <span className="min-w-0 flex-1">
+              <span className="text-text-primary block text-sm font-semibold">More settings</span>
+              <span className="text-text-secondary mt-0.5 block text-xs">
+                The model it uses and how it runs. The usual choices work for most agents.
+              </span>
+            </span>
+          </button>
+        </section>
+
+        {moreOpen ? (
+          <>
+            <Section title="Model" description="The AI that does the thinking.">
+              <div className="flex w-full items-center gap-1">
+                <ResponsiveDropdownMenu
+                  open={modelMenuOpen}
+                  onOpenChange={open => {
+                    setModelMenuOpen(open);
+                    if (!open) setModelQuery('');
+                  }}
+                  closeOnClick={false}
+                  align="start"
+                  sheetLabel="Select model"
+                  containerClassName="flex min-w-0 flex-1"
+                  className="w-[min(44rem,calc(100vw-2rem))] overflow-hidden p-0"
+                  trigger={
+                    <button
+                      type="button"
+                      aria-label="Edit Model"
+                      title="Edit Model"
+                      disabled={disabled}
+                      className="flex w-full cursor-pointer items-center gap-2 rounded-md py-1 text-left transition-colors"
+                    >
+                      <ProviderMark
+                        logo={model?.provider.logo}
+                        label={model?.provider.name ?? spec.model.name}
+                        className="size-4 text-[0.5rem]"
+                      />
+                      <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                        {displayModelLabel(spec.model.name)}
+                      </span>
+                      {modelInfo.length ? (
+                        <span
+                          title={modelInfoTitle}
+                          className="text-text-secondary shrink-0 whitespace-nowrap text-[0.6875rem]"
+                        >
+                          {modelInfo.join(' · ')}
+                        </span>
+                      ) : null}
+                      <Icon name="chevrons-up-down" className="text-text-secondary size-3.5 shrink-0" />
+                    </button>
+                  }
+                >
+                  <AgentModelEditorContent
+                    spec={spec}
+                    models={models}
+                    loading={modelsLoading}
+                    error={modelsError}
+                    query={modelQuery}
+                    onQueryChange={setModelQuery}
+                    onChange={next => {
+                      onChange?.(next);
+                      setModelMenuOpen(false);
+                      setModelQuery('');
+                    }}
+                  />
+                </ResponsiveDropdownMenu>
+                <ResponsiveDropdownMenu
+                  open={modelSettingsMenuOpen}
+                  onOpenChange={setModelSettingsMenuOpen}
+                  closeOnClick={false}
+                  align="start"
+                  sheetLabel="Model settings"
+                  className="w-[min(36rem,calc(100vw-2rem))] overflow-hidden p-0"
+                  trigger={
+                    <button
+                      type="button"
+                      aria-label="Model settings"
+                      title="Model settings"
+                      disabled={disabled}
+                      className={auiButtonClass({
+                        variant: 'ghost',
+                        size: 'icon',
+                        className: 'size-7 shrink-0',
+                      })}
+                    >
+                      <Icon name="sliders" className="size-3.5" />
+                    </button>
+                  }
+                >
+                  <AgentModelSettingsContent spec={spec} model={model} onChange={next => onChange?.(next)} />
+                </ResponsiveDropdownMenu>
+              </div>
+              <button
+                type="button"
+                disabled={disabled}
+                aria-label="Edit model settings"
+                // DropdownMenu dismisses on document mousedown; stop it so click can toggle closed without reopen.
+                onMouseDown={event => event.stopPropagation()}
+                onClick={() => setModelSettingsMenuOpen(open => !open)}
+                className="mt-2 flex w-full cursor-pointer flex-col text-left disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <span className="text-text-secondary flex min-w-0 flex-wrap gap-x-3 gap-y-1 text-xs">
+                  {modelParams.length ? (
+                    modelParams.map(entry => (
+                      <span key={entry.label} className="flex gap-1">
+                        <span>{entry.label}:</span>
+                        <span className="text-text-primary font-medium">{entry.value}</span>
+                      </span>
+                    ))
+                  ) : (
+                    <span>model settings: defaults</span>
+                  )}
+                </span>
+              </button>
+            </Section>
+
+            <Section
+              title="Run settings"
+              description="Control how the agent runs and uses context."
+              actionIcon="sliders"
+              onEdit={disabled ? undefined : () => onOpenEditor('runtime')}
+            >
+              <dl className="text-text-secondary flex flex-wrap gap-x-3 gap-y-1 text-xs leading-relaxed">
+                {runtimeConfig.map(entry => (
+                  <div key={entry.label} className="flex gap-1">
+                    <dt>{entry.label}:</dt>
+                    <dd className={runtimeConfigValueClassName(entry.value)}>{entry.value}</dd>
+                  </div>
+                ))}
+              </dl>
+            </Section>
+          </>
+        ) : null}
       </div>
     </div>
   );

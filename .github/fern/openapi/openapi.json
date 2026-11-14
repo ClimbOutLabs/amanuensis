@@ -1160,7 +1160,7 @@
               "minimum": 0,
               "type": "integer"
             },
-            "description": "Named counts for a countable event (e.g. memory recall items/entities), never the recalled content.",
+            "description": "Named counts for a countable event (e.g. memory recall items), never the recalled content.",
             "type": "object"
           },
           "duration_ms": {
@@ -2081,6 +2081,21 @@
         ],
         "type": "object"
       },
+      "ConfirmMemoryPageLineRequest": {
+        "properties": {
+          "section": {
+            "description": "Where the line goes. Defaults to Now.",
+            "enum": [
+              "How you write to them",
+              "Now",
+              "Decided",
+              "Open"
+            ],
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "ConfirmTextCodeRequest": {
         "properties": {
           "code": {
@@ -2792,6 +2807,10 @@
         "properties": {},
         "type": "object"
       },
+      "DeleteMemoryPageResponse": {
+        "properties": {},
+        "type": "object"
+      },
       "DeleteMemoryVaultEntryResponse": {
         "properties": {},
         "type": "object"
@@ -2836,6 +2855,45 @@
       },
       "DeleteSessionRepositoryBindingResponse": {
         "properties": {},
+        "type": "object"
+      },
+      "DeleteShownMemoryRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "shown_text": {
+            "description": "The memory, in the plain words recall showed for it.",
+            "maxLength": 2000,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "shown_text"
+        ],
+        "type": "object"
+      },
+      "DeleteShownMemoryResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/DeleteShownMemoryResult"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "DeleteShownMemoryResult": {
+        "properties": {
+          "deleted": {
+            "description": "How many stored copies were deleted.",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "deleted"
+        ],
         "type": "object"
       },
       "DeleteSkillNetworkApprovalResponse": {
@@ -3663,6 +3721,39 @@
           "id",
           "type",
           "display_name"
+        ],
+        "type": "object"
+      },
+      "GetMemoryNightlyResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/MemoryNightly"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "GetMemoryPageResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/MemoryPage"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "GetMemoryPageSortingResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/MemoryPageSorting"
+          }
+        },
+        "required": [
+          "data"
         ],
         "type": "object"
       },
@@ -5940,6 +6031,28 @@
         ],
         "type": "object"
       },
+      "ListMemoryPageChangesResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/MemoryPageChanges"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "ListMemoryPagesResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/MemoryPageListing"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "ListMemoryVaultEntriesResponse": {
         "properties": {
           "data": {
@@ -5947,6 +6060,17 @@
               "$ref": "#/components/schemas/MemoryVaultEntry"
             },
             "type": "array"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "ListMemoryVaultReviewNotesResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/MemoryVaultReviewList"
           }
         },
         "required": [
@@ -6986,6 +7110,40 @@
         ],
         "type": "object"
       },
+      "MarkMemoryVaultReviewNotesRequest": {
+        "properties": {
+          "entry_ids": {
+            "items": {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 200,
+            "minItems": 1,
+            "type": "array"
+          },
+          "namespace": {
+            "description": "Vault namespace: omit for the shared vault.",
+            "maxLength": 128,
+            "type": "string"
+          }
+        },
+        "required": [
+          "entry_ids"
+        ],
+        "type": "object"
+      },
+      "MarkMemoryVaultReviewNotesResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/MemoryVaultReviewResult"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "Me": {
         "properties": {
           "roles": {
@@ -7038,26 +7196,6 @@
       },
       "MemoryDefaultsCapability": {
         "properties": {
-          "backend": {
-            "description": "`MEMORY_BACKEND` as resolved.",
-            "enum": [
-              "markdown",
-              "hindsight"
-            ],
-            "type": "string"
-          },
-          "curated_enabled": {
-            "description": "`MEMORY_CURATED_ENABLED` as resolved.",
-            "type": "boolean"
-          },
-          "curated_max_models": {
-            "description": "`MEMORY_CURATED_MAX_MODELS` as resolved.",
-            "type": "integer"
-          },
-          "curated_max_tokens": {
-            "description": "`MEMORY_CURATED_MAX_TOKENS` as resolved.",
-            "type": "integer"
-          },
           "markdown_dir": {
             "description": "`MEMORY_MARKDOWN_DIR` as resolved. Only present for admin callers; a host filesystem path is not disclosed to non-admin authenticated users.",
             "type": "string"
@@ -7065,10 +7203,6 @@
           "prerecall_gate_enabled": {
             "description": "`MEMORY_PRERECALL_GATE_ENABLED` as resolved.",
             "type": "boolean"
-          },
-          "recall_max_entities": {
-            "description": "`MEMORY_RECALL_MAX_ENTITIES` as resolved.",
-            "type": "integer"
           },
           "recall_max_items": {
             "description": "`MEMORY_RECALL_MAX_ITEMS` as resolved.",
@@ -7085,44 +7219,14 @@
           "recall_timeout_ms": {
             "description": "`MEMORY_RECALL_TIMEOUT_MS` as resolved.",
             "type": "integer"
-          },
-          "reflect_budget": {
-            "description": "`MEMORY_REFLECT_BUDGET` as resolved.",
-            "enum": [
-              "low",
-              "mid",
-              "high"
-            ],
-            "type": "string"
-          },
-          "reflect_enabled": {
-            "description": "`MEMORY_REFLECT_ENABLED` as resolved.",
-            "type": "boolean"
-          },
-          "reflect_max_tokens": {
-            "description": "`MEMORY_REFLECT_MAX_TOKENS` as resolved.",
-            "type": "integer"
-          },
-          "reflect_timeout_ms": {
-            "description": "`MEMORY_REFLECT_TIMEOUT_MS` as resolved.",
-            "type": "integer"
           }
         },
         "required": [
-          "backend",
           "recall_timeout_ms",
           "recall_query_window",
           "recall_min_score",
           "recall_max_items",
-          "recall_max_entities",
-          "prerecall_gate_enabled",
-          "curated_enabled",
-          "curated_max_models",
-          "curated_max_tokens",
-          "reflect_enabled",
-          "reflect_budget",
-          "reflect_max_tokens",
-          "reflect_timeout_ms"
+          "prerecall_gate_enabled"
         ],
         "type": "object"
       },
@@ -7160,168 +7264,451 @@
         ],
         "type": "object"
       },
-      "MemoryProviderCheckResponse": {
+      "MemoryNightly": {
         "properties": {
-          "data": {
-            "$ref": "#/components/schemas/MemoryProviderCheckResult"
+          "default_enabled": {
+            "description": "The `MEMORY_NIGHTLY_JOB` env default used when no override is stored.",
+            "type": "boolean"
+          },
+          "enabled": {
+            "description": "The stored setting: the persisted override when set, else the `MEMORY_NIGHTLY_JOB` env default.",
+            "type": "boolean"
+          },
+          "helper_model": {
+            "description": "The model chosen for background work after a chat. `null` means each chat uses its own model.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "hour": {
+            "description": "The hour of the server's day the tidy-up starts at. `0` is midnight, the default.",
+            "maximum": 23,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "model_wait_minutes": {
+            "description": "How many minutes one sorting or tidying question may wait for the model. `10` is the default.",
+            "maximum": 20,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "overridden": {
+            "description": "Whether a persisted override is currently stored.",
+            "type": "boolean"
           }
         },
         "required": [
-          "data"
+          "enabled",
+          "overridden",
+          "default_enabled",
+          "hour",
+          "model_wait_minutes",
+          "helper_model"
         ],
         "type": "object"
       },
-      "MemoryProviderCheckResult": {
-        "description": "Outcome of one live recall against the memory provider REST API.",
-        "oneOf": [
-          {
-            "additionalProperties": false,
-            "properties": {
-              "status": {
-                "description": "The provider answered a real recall request over its REST API.",
-                "enum": [
-                  "ok"
-                ],
-                "type": "string"
-              }
-            },
-            "required": [
-              "status"
-            ],
-            "type": "object"
-          },
-          {
-            "additionalProperties": false,
-            "properties": {
-              "code": {
-                "$ref": "#/components/schemas/MemoryProviderFailureCode"
-              },
-              "detail": {
-                "description": "The provider's own error message, when it sent one.",
-                "type": "string"
-              },
-              "http_status": {
-                "description": "Status the provider answered with, when it answered at all.",
-                "type": "integer"
-              },
-              "reason": {
-                "description": "Human-readable failure line, including the upstream detail when there is one.",
-                "type": "string"
-              },
-              "status": {
-                "description": "The provider did not answer a real recall request.",
-                "enum": [
-                  "failed"
-                ],
-                "type": "string"
-              }
-            },
-            "required": [
-              "status",
-              "code",
-              "reason"
-            ],
-            "type": "object"
-          }
-        ]
-      },
-      "MemoryProviderFailureCode": {
-        "description": "Why the memory provider could not be reached: `invalid_url` (not an `{apiBase}/mcp/{bank}` URL), `auth_required` (the connector still needs authorization), `header_resolution_failed` (a `${env:}` / `${file:}` header reference did not resolve), `timeout`, `request_failed` (the host could not reach it), `http_error` (it answered with a non-2xx status), or `invalid_response` (its answer was unreadable).",
-        "enum": [
-          "invalid_url",
-          "auth_required",
-          "header_resolution_failed",
-          "timeout",
-          "request_failed",
-          "http_error",
-          "invalid_response"
-        ],
-        "type": "string"
-      },
-      "MemoryProviderSettings": {
-        "additionalProperties": false,
-        "description": "Per-bank memory tuning; each field present overrides the matching server-wide MEMORY_* setting for this provider.",
+      "MemoryPage": {
         "properties": {
-          "curated_enabled": {
-            "description": "Inject the bank profile and matching mental models on every turn. Default MEMORY_CURATED_ENABLED.",
-            "type": "boolean"
+          "confirmable_sections": {
+            "description": "The sections an unconfirmed line on this page can move to.",
+            "items": {
+              "enum": [
+                "How you write to them",
+                "Now",
+                "Decided",
+                "Open"
+              ],
+              "type": "string"
+            },
+            "type": "array"
           },
-          "curated_max_models": {
-            "description": "Most mental models injected on one turn. Default MEMORY_CURATED_MAX_MODELS.",
-            "maximum": 20,
-            "minimum": 1,
-            "type": "integer"
+          "disagreements": {
+            "description": "Pairs of lines that disagree and are not dismissed.",
+            "items": {
+              "$ref": "#/components/schemas/MemoryPageDisagreement"
+            },
+            "type": "array"
           },
-          "curated_max_tokens": {
-            "description": "Token budget for the injected mental-model lines. Default MEMORY_CURATED_MAX_TOKENS.",
-            "maximum": 8192,
-            "minimum": 64,
-            "type": "integer"
-          },
-          "prerecall_gate_enabled": {
-            "description": "Skip the memory provider reads on high-confidence trivial turns (short greetings, bare acknowledgements). Default MEMORY_PRERECALL_GATE_ENABLED.",
-            "type": "boolean"
-          },
-          "recall_max_entities": {
-            "description": "Most entity summaries kept, by provider rank, when the response carries no per-entity score. Default MEMORY_RECALL_MAX_ENTITIES.",
-            "maximum": 200,
-            "minimum": 0,
-            "type": "integer"
-          },
-          "recall_max_items": {
-            "description": "Most recalled items kept, by provider rank, when the response carries no per-item score. Default MEMORY_RECALL_MAX_ITEMS.",
-            "maximum": 200,
-            "minimum": 1,
-            "type": "integer"
-          },
-          "recall_min_score": {
-            "description": "Relevance floor for a recalled item or entity summary that carries a provider score; anything scored lower is dropped. Ignored for a response with no scores. Default MEMORY_RECALL_MIN_SCORE.",
-            "maximum": 1,
-            "minimum": 0,
-            "type": "number"
-          },
-          "recall_query_window": {
-            "description": "How many recent user messages form the recall query. Default MEMORY_RECALL_QUERY_WINDOW.",
-            "maximum": 20,
-            "minimum": 1,
-            "type": "integer"
-          },
-          "recall_timeout_ms": {
-            "description": "How long a turn waits for recalled memory before continuing without it. Default MEMORY_RECALL_TIMEOUT_MS.",
-            "maximum": 120000,
-            "minimum": 500,
-            "type": "integer"
-          },
-          "reflect_budget": {
-            "description": "Reflect effort. Default MEMORY_REFLECT_BUDGET.",
+          "kind": {
             "enum": [
-              "low",
-              "mid",
-              "high"
+              "person",
+              "matter"
             ],
             "type": "string"
           },
-          "reflect_enabled": {
-            "description": "Ask the bank to reflect on synthesis-shaped asks. Default MEMORY_REFLECT_ENABLED.",
+          "other_names": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "sections": {
+            "items": {
+              "$ref": "#/components/schemas/MemoryPageSection"
+            },
+            "type": "array"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "summary": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "text": {
+            "description": "The page as a person edits it: its name, headings and lines, without settings or hidden notes.",
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "version": {
+            "description": "Send this back with an edit. It says which text the edit started from.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "slug",
+          "title",
+          "other_names",
+          "summary",
+          "sections",
+          "text",
+          "confirmable_sections",
+          "version",
+          "disagreements"
+        ],
+        "type": "object"
+      },
+      "MemoryPageChange": {
+        "properties": {
+          "changed_at": {
+            "type": "string"
+          },
+          "id": {
+            "pattern": "^[0-9a-f]{40}$",
+            "type": "string"
+          },
+          "is_undo": {
+            "description": "Whether this entry undid an earlier change.",
             "type": "boolean"
           },
-          "reflect_max_tokens": {
-            "description": "Max tokens the bank may spend on a reflect answer. Default MEMORY_REFLECT_MAX_TOKENS.",
-            "maximum": 8192,
-            "minimum": 64,
-            "type": "integer"
+          "message": {
+            "description": "What changed, in plain words.",
+            "type": "string"
           },
-          "reflect_timeout_ms": {
-            "description": "How long a turn waits for a reflection before continuing without it. Default MEMORY_REFLECT_TIMEOUT_MS.",
-            "maximum": 120000,
-            "minimum": 500,
-            "type": "integer"
+          "pages": {
+            "items": {
+              "$ref": "#/components/schemas/MemoryPageRef"
+            },
+            "type": "array"
           },
-          "screen_enabled": {
-            "description": "Screen recalled items and entity summaries with the Prompt Guard classifier before they reach the model. Has no effect when no classifier service is configured (`MEMORY_SCREEN_URL`). Default MEMORY_SCREEN_ENABLED.",
+          "undo_blocked_by": {
+            "description": "The message of a later change to the same pages that must be undone first, or null.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "changed_at",
+          "message",
+          "pages",
+          "undo_blocked_by",
+          "is_undo"
+        ],
+        "type": "object"
+      },
+      "MemoryPageChanges": {
+        "properties": {
+          "available": {
+            "description": "False when the server keeps no page history.",
+            "type": "boolean"
+          },
+          "changes": {
+            "items": {
+              "$ref": "#/components/schemas/MemoryPageChange"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "available",
+          "changes"
+        ],
+        "type": "object"
+      },
+      "MemoryPageDisagreement": {
+        "properties": {
+          "first": {
+            "$ref": "#/components/schemas/MemoryPageDisagreementLine"
+          },
+          "found_on": {
+            "description": "The day the pair was found, as `YYYY-MM-DD`.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Name the pair with this id when dismissing it.",
+            "type": "string"
+          },
+          "reason": {
+            "description": "Why they disagree, in one short line.",
+            "type": "string"
+          },
+          "second": {
+            "$ref": "#/components/schemas/MemoryPageDisagreementLine"
+          }
+        },
+        "required": [
+          "id",
+          "first",
+          "second",
+          "reason",
+          "found_on"
+        ],
+        "type": "object"
+      },
+      "MemoryPageDisagreementLine": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "text"
+        ],
+        "type": "object"
+      },
+      "MemoryPageLine": {
+        "properties": {
+          "id": {
+            "description": "The line id, or null for a line typed by hand that has none yet.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "own": {
+            "description": "True when the line is the person’s own words.",
+            "type": "boolean"
+          },
+          "seen": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "since": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "source": {
+            "enum": [
+              "you_said",
+              "you_edited",
+              "sent_mail",
+              "mail",
+              "calendar",
+              "read_content",
+              "inferred",
+              "unreadable"
+            ],
+            "type": "string"
+          },
+          "source_label": {
+            "description": "Where the line came from, in plain words.",
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "until": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "text",
+          "source",
+          "source_label",
+          "own",
+          "since",
+          "until",
+          "seen"
+        ],
+        "type": "object"
+      },
+      "MemoryPageListing": {
+        "properties": {
+          "pages": {
+            "items": {
+              "$ref": "#/components/schemas/MemoryPageSummary"
+            },
+            "type": "array"
+          },
+          "skipped_files": {
+            "description": "Files in the page folders whose names are not page names.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "pages",
+          "skipped_files"
+        ],
+        "type": "object"
+      },
+      "MemoryPageRef": {
+        "properties": {
+          "kind": {
+            "enum": [
+              "person",
+              "matter"
+            ],
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "slug"
+        ],
+        "type": "object"
+      },
+      "MemoryPageSection": {
+        "properties": {
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/MemoryPageLine"
+            },
+            "type": "array"
+          },
+          "name": {
+            "description": "The section heading as written.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "lines"
+        ],
+        "type": "object"
+      },
+      "MemoryPageSorting": {
+        "properties": {
+          "default_mode": {
+            "description": "The `MEMORY_PAGE_SORTING` env default used when no override is stored.",
+            "enum": [
+              "off",
+              "report",
+              "on"
+            ],
+            "type": "string"
+          },
+          "mode": {
+            "description": "The stored setting: the persisted override when set, else the env default.",
+            "enum": [
+              "off",
+              "report",
+              "on"
+            ],
+            "type": "string"
+          },
+          "overridden": {
+            "description": "Whether a persisted override is currently stored.",
             "type": "boolean"
           }
         },
+        "required": [
+          "mode",
+          "overridden",
+          "default_mode"
+        ],
+        "type": "object"
+      },
+      "MemoryPageSummary": {
+        "properties": {
+          "changed_on": {
+            "description": "The day the page file last changed, as `YYYY-MM-DD` in UTC.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "disagreement_count": {
+            "description": "Pairs of lines the nightly check found that disagree.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "kind": {
+            "enum": [
+              "person",
+              "matter"
+            ],
+            "type": "string"
+          },
+          "other_names": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "summary": {
+            "description": "The line under the title, or null when the page has none.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "slug",
+          "title",
+          "other_names",
+          "summary",
+          "changed_on",
+          "disagreement_count"
+        ],
+        "type": "object"
+      },
+      "MemoryPageUndoResult": {
+        "properties": {
+          "pages": {
+            "items": {
+              "$ref": "#/components/schemas/MemoryPageRef"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "pages"
+        ],
         "type": "object"
       },
       "MemoryRecall": {
@@ -7339,72 +7726,48 @@
         ],
         "type": "object"
       },
-      "MemoryRecallCurated": {
-        "properties": {
-          "candidates": {
-            "description": "Mental models the bank returned before relevance selection.",
-            "minimum": 0,
-            "type": "integer"
-          },
-          "dropped": {
-            "description": "Curated lines dropped by the token budget.",
-            "minimum": 0,
-            "type": "integer"
-          },
-          "mental_models": {
-            "description": "Mental models in the injected block, after screening and budget.",
-            "minimum": 0,
-            "type": "integer"
-          },
-          "outcome": {
-            "description": "ok: at least one curated line injected. empty: nothing relevant. withheld/dropped: lines were read but none survived the screen or the budget. disabled: layer off. timeout/error: the worse of the profile and mental-model reads failed; lines from the other read are still injected.",
-            "enum": [
-              "ok",
-              "empty",
-              "withheld",
-              "dropped",
-              "disabled",
-              "timeout",
-              "error"
-            ],
-            "type": "string"
-          },
-          "profile": {
-            "description": "True when a bank profile line is in the injected block, after screening and budget.",
-            "type": "boolean"
-          },
-          "reason": {
-            "description": "Failure detail when outcome is timeout or error.",
-            "type": "string"
-          },
-          "withheld": {
-            "description": "Curated lines the recall screen kept out of the block.",
-            "minimum": 0,
-            "type": "integer"
-          }
-        },
-        "required": [
-          "profile",
-          "mental_models",
-          "candidates",
-          "withheld",
-          "dropped",
-          "outcome"
-        ],
-        "type": "object"
-      },
       "MemoryRecallLayers": {
         "properties": {
-          "curated": {
-            "$ref": "#/components/schemas/MemoryRecallCurated"
+          "pages": {
+            "$ref": "#/components/schemas/MemoryRecallPages"
+          }
+        },
+        "type": "object"
+      },
+      "MemoryRecallPages": {
+        "properties": {
+          "candidates": {
+            "description": "Pages the message named, across the vaults it may read.",
+            "minimum": 0,
+            "type": "integer"
           },
-          "reflect": {
-            "$ref": "#/components/schemas/MemoryRecallReflect"
+          "dropped_over_budget": {
+            "description": "Pages left out by the page token budget.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "dropped_over_count": {
+            "description": "Pages left out by the page count cap.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "loaded": {
+            "description": "Pages in the injected block, after screening and budget.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "withheld": {
+            "description": "Pages the recall screen kept out of the block.",
+            "minimum": 0,
+            "type": "integer"
           }
         },
         "required": [
-          "curated",
-          "reflect"
+          "candidates",
+          "loaded",
+          "dropped_over_count",
+          "dropped_over_budget",
+          "withheld"
         ],
         "type": "object"
       },
@@ -7453,57 +7816,6 @@
         ],
         "type": "object"
       },
-      "MemoryRecallReflect": {
-        "properties": {
-          "based_on": {
-            "description": "Memories the provider reported the reflection drew on.",
-            "minimum": 0,
-            "type": "integer"
-          },
-          "matched": {
-            "description": "Source of the synthesis pattern that selected reflect.",
-            "type": "string"
-          },
-          "outcome": {
-            "description": "ok: reflection injected. empty: reflect returned no text. withheld: the recall screen kept it out. dropped: the token budget kept it out. skipped: route was recall. disabled: layer off. timeout/error: reflect failed; the turn proceeded with the other layers.",
-            "enum": [
-              "ok",
-              "empty",
-              "withheld",
-              "dropped",
-              "skipped",
-              "disabled",
-              "timeout",
-              "error"
-            ],
-            "type": "string"
-          },
-          "reason": {
-            "description": "Failure detail when outcome is timeout or error.",
-            "type": "string"
-          },
-          "reflect_ms": {
-            "description": "Wall-clock time spent on the reflect call.",
-            "minimum": 0,
-            "type": "integer"
-          },
-          "route": {
-            "description": "The route the newest user message selected.",
-            "enum": [
-              "recall",
-              "reflect"
-            ],
-            "type": "string"
-          }
-        },
-        "required": [
-          "route",
-          "outcome",
-          "reflect_ms",
-          "based_on"
-        ],
-        "type": "object"
-      },
       "MemoryRecallScreen": {
         "properties": {
           "records": {
@@ -7514,7 +7826,7 @@
             "type": "array"
           },
           "withheld": {
-            "description": "Recalled items kept out of the injected block by the screen.",
+            "description": "Recalled items and pages kept out of the injected block by the screen.",
             "minimum": 0,
             "type": "integer"
           }
@@ -7528,7 +7840,7 @@
       "MemoryRecallStats": {
         "properties": {
           "budget_reason": {
-            "description": "normal: the full configured recall budget applied. post_compaction: a host-written compaction summary was seen recently, so the token budget was halved and entity summaries were skipped for this turn.",
+            "description": "normal: the full configured recall budget applied. post_compaction: a host-written compaction summary was seen recently, so the token budget was halved for this turn.",
             "enum": [
               "normal",
               "post_compaction"
@@ -7536,17 +7848,12 @@
             "type": "string"
           },
           "dropped_below_threshold": {
-            "description": "Recalled items and entity summaries dropped by the relevance gate (score below recall_min_score).",
+            "description": "Recalled items dropped by the relevance gate (score below recall_min_score).",
             "minimum": 0,
             "type": "integer"
           },
           "dropped_over_budget": {
             "description": "Recalled items dropped by the client-side token re-clamp.",
-            "minimum": 0,
-            "type": "integer"
-          },
-          "entities": {
-            "description": "Entity summaries included in the injected block.",
             "minimum": 0,
             "type": "integer"
           },
@@ -7561,7 +7868,7 @@
             "type": "integer"
           },
           "outcome": {
-            "description": "ok: recall returned memory. empty: recall found none. timeout/error: recall failed; the turn proceeded anyway. skipped: recall was skipped (e.g., user disabled memory for this session, or for sandbox sessions). The curated and reflect layers (see `layers`) can still put a block in front of the model when recall itself found nothing.",
+            "description": "ok: recall returned memory. empty: recall found none. timeout/error: recall failed; the turn proceeded anyway. skipped: recall was skipped (e.g., user disabled memory for this session, or for sandbox sessions). Pages (see `layers`) can still put a block in front of the model when recall itself found nothing.",
             "enum": [
               "ok",
               "empty",
@@ -7583,7 +7890,6 @@
         },
         "required": [
           "items",
-          "entities",
           "dropped_over_budget",
           "dropped_below_threshold",
           "estimated_tokens",
@@ -7674,7 +7980,7 @@
       "MemoryScreenRecord": {
         "properties": {
           "id": {
-            "description": "Per-turn-unique, type-qualified record id: `item:#<index>` for a recalled item, `entity:#<index>` for an entity summary, `curated:#<index>` for a profile or mental-model line, `reflection:#0` for the reflect answer, where <index> is the datum position within this turn. Not the provider's item id; correlate to the datum by its position in this turn's model-context snapshot.",
+            "description": "Per-turn-unique, type-qualified record id: `item:#<index>` for a recalled item, `page:#<index>` for a page, where <index> is the position within this turn. Not the stored item id; correlate to the item by its position in this turn's model-context snapshot.",
             "type": "string"
           },
           "origin": {
@@ -7714,10 +8020,6 @@
             "description": "The `MEMORY_SUMMARIZE` env default used when no override is stored.",
             "type": "boolean"
           },
-          "effective_enabled": {
-            "description": "What the server will actually do: the stored setting with the markdown-only gate applied. The Settings toggle shows this value.",
-            "type": "boolean"
-          },
           "enabled": {
             "description": "The stored setting: the persisted override when set, else the `MEMORY_SUMMARIZE` env default.",
             "type": "boolean"
@@ -7730,8 +8032,84 @@
         "required": [
           "enabled",
           "overridden",
-          "default_enabled",
-          "effective_enabled"
+          "default_enabled"
+        ],
+        "type": "object"
+      },
+      "MemoryTidyRun": {
+        "properties": {
+          "model_missing": {
+            "description": "True when sorting was not off but no model was found, so the steps that ask a model were skipped.",
+            "type": "boolean"
+          },
+          "moved_to_earlier": {
+            "description": "Lines that had ended and were moved to Earlier.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "notes_asked": {
+            "description": "Missed notes the model was asked about.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "notes_sorted": {
+            "description": "Missed notes whose answer was understood: sorted onto pages, or only noted in trial mode.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "pairs_listed": {
+            "description": "Pairs of lines newly listed as disagreeing.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "sorting": {
+            "description": "The sorting choice the run followed; with `off` it only moved ended lines. `off` unless the status is `ran`.",
+            "enum": [
+              "off",
+              "report",
+              "on"
+            ],
+            "type": "string"
+          },
+          "status": {
+            "description": "`busy`: a tidy-up is running. `ran`: the last one finished. `failed`: the last one stopped on an error. `idle`: none is running and none ended lately.",
+            "enum": [
+              "ran",
+              "failed",
+              "busy",
+              "idle"
+            ],
+            "type": "string"
+          },
+          "unsorted_reasons": {
+            "description": "Why notes were left unsorted in this run, each different cause once. Empty when none were.",
+            "items": {
+              "enum": [
+                "model_slow",
+                "model_error",
+                "reply_empty",
+                "reply_cut_short",
+                "reply_too_long",
+                "reply_wrong_form",
+                "reply_broke_rule",
+                "note_empty",
+                "pages_unreadable",
+                "write_failed"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "status",
+          "moved_to_earlier",
+          "notes_asked",
+          "notes_sorted",
+          "pairs_listed",
+          "sorting",
+          "model_missing",
+          "unsorted_reasons"
         ],
         "type": "object"
       },
@@ -7812,6 +8190,103 @@
         "required": [
           "namespace",
           "imported"
+        ],
+        "type": "object"
+      },
+      "MemoryVaultReviewList": {
+        "properties": {
+          "next_cursor": {
+            "description": "Send as `cursor` to look at the next older notes; null when every older note has been looked at.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "note_count": {
+            "description": "Notes found in this request.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "notes": {
+            "items": {
+              "$ref": "#/components/schemas/MemoryVaultReviewNote"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "notes",
+          "note_count",
+          "next_cursor"
+        ],
+        "type": "object"
+      },
+      "MemoryVaultReviewNote": {
+        "properties": {
+          "chat_title": {
+            "description": "Title of the chat the note came from, when the chat has one.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "day": {
+            "description": "Day the note was saved, `YYYY-MM-DD`.",
+            "type": "string"
+          },
+          "entry_id": {
+            "description": "Vault entry id; send it back to mark the note.",
+            "type": "string"
+          },
+          "text": {
+            "description": "The note as the Memories page shows it.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entry_id",
+          "day",
+          "text",
+          "chat_title"
+        ],
+        "type": "object"
+      },
+      "MemoryVaultReviewResult": {
+        "properties": {
+          "marked_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "marked_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "refused": {
+            "items": {
+              "properties": {
+                "entry_id": {
+                  "type": "string"
+                },
+                "reason": {
+                  "description": "Plain words saying why.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "entry_id",
+                "reason"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "marked_count",
+          "marked_ids",
+          "refused"
         ],
         "type": "object"
       },
@@ -10012,13 +10487,6 @@
             "minLength": 1,
             "type": "string"
           },
-          "memory_provider": {
-            "description": "When true, this connector is the long-term memory provider: the host recalls from it before every model call and retains every completed turn. Its URL must be a single-bank Hindsight MCP URL.",
-            "type": "boolean"
-          },
-          "memory_settings": {
-            "$ref": "#/components/schemas/MemoryProviderSettings"
-          },
           "name": {
             "$ref": "#/components/schemas/ResourceName"
           },
@@ -10380,6 +10848,17 @@
           "string",
           "null"
         ]
+      },
+      "RunMemoryNightlyResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/MemoryTidyRun"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
       },
       "RunNoticingRequest": {
         "properties": {
@@ -13674,11 +14153,6 @@
               "null"
             ]
           },
-          "carrying": {
-            "description": "How many schedules are switched on for the person.",
-            "minimum": 0,
-            "type": "integer"
-          },
           "due": {
             "description": "Reminders due today or overdue, earliest first.",
             "items": {
@@ -13711,7 +14185,6 @@
           "due",
           "needs_ok",
           "needs_ok_more",
-          "carrying",
           "as_of"
         ],
         "type": "object"
@@ -15805,6 +16278,17 @@
           }
         ]
       },
+      "UndoMemoryPageChangeResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/MemoryPageUndoResult"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "UpdateAgentRequest": {
         "additionalProperties": false,
         "properties": {
@@ -15880,6 +16364,87 @@
         },
         "required": [
           "manifest"
+        ],
+        "type": "object"
+      },
+      "UpdateMemoryNightlyRequest": {
+        "example": {
+          "enabled": true,
+          "hour": 0
+        },
+        "properties": {
+          "enabled": {
+            "description": "Persisted override: `true` or `false`. `null` clears the override back to the env default. Left out, it stays as it is.",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "helper_model": {
+            "description": "The model for background work after a chat. `null` goes back to each chat using its own model. Left out, it stays as it is.",
+            "maxLength": 300,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "hour": {
+            "description": "The hour of the server's day the tidy-up starts at, `0` to `23`. Left out, it stays as it is.",
+            "maximum": 23,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "model_wait_minutes": {
+            "description": "Minutes one sorting or tidying question may wait for the model, `1` to `20`. Left out, it stays as it is.",
+            "maximum": 20,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "UpdateMemoryPageRequest": {
+        "properties": {
+          "text": {
+            "description": "The edited page text. The first line names the page. A line left as it was keeps its source.",
+            "maxLength": 60000,
+            "minLength": 1,
+            "type": "string"
+          },
+          "version": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "text",
+          "version"
+        ],
+        "type": "object"
+      },
+      "UpdateMemoryPageSortingRequest": {
+        "example": {
+          "mode": "report"
+        },
+        "properties": {
+          "mode": {
+            "description": "Persisted override. Send `off`, `report` or `on`. `null` clears the override back to the env default.",
+            "enum": [
+              "off",
+              "report",
+              "on",
+              null
+            ],
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "mode"
         ],
         "type": "object"
       },
@@ -16012,6 +16577,14 @@
           }
         },
         "properties": {
+          "expected_revision": {
+            "description": "The profile revision this save was made from, or null when no profile existed yet. A save made from an older state is refused with 409.",
+            "exclusiveMinimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "profile": {
             "$ref": "#/components/schemas/PersonalizationProfileContent"
           }
@@ -18511,7 +19084,7 @@
                 }
               }
             },
-            "description": "MCP servers attachable to a chat (chat projection). Excludes the memory provider."
+            "description": "MCP servers attachable to a chat (chat projection)."
           },
           "401": {
             "content": {
@@ -18886,54 +19459,6 @@
         "x-fern-sdk-method-name": "home_assistant_check"
       }
     },
-    "/api/v1/mcp-servers/{name}/memory-check": {
-      "post": {
-        "description": "Runs one live recall against the Hindsight REST API behind this connector, the surface host-enforced memory actually calls. That is not the MCP endpoint `auth_status` reflects, and it may validate a different credential. Read-only: the connector is never modified, and a failed check is a 200 carrying the reason. The same check runs on every create or replace that sets `manifest.memory_provider: true`.",
-        "parameters": [
-          {
-            "description": "MCP server name.",
-            "in": "path",
-            "name": "name",
-            "required": true,
-            "schema": {
-              "description": "MCP server name.",
-              "minLength": 1,
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MemoryProviderCheckResponse"
-                }
-              }
-            },
-            "description": "The check ran; the result says whether the provider answered and why not."
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RequestErrorResponse"
-                }
-              }
-            },
-            "description": "MCP server not found."
-          }
-        },
-        "summary": "Check an MCP server as a memory provider",
-        "tags": [
-          "MCP Servers"
-        ],
-        "x-fern-sdk-group-name": [
-          "mcpServers"
-        ],
-        "x-fern-sdk-method-name": "memory_check"
-      }
-    },
     "/api/v1/mcp-servers/{name}/tool-grants": {
       "get": {
         "description": "Tools on this MCP server the caller chose Always allow for. Their calls run without an approval prompt unless a safety rule asks again.",
@@ -19139,6 +19664,994 @@
         "x-fern-sdk-method-name": "list_tools"
       }
     },
+    "/api/v1/memory/pages": {
+      "get": {
+        "description": "List the pages for people and matters, with the files that could not be read as pages.",
+        "parameters": [
+          {
+            "description": "Vault namespace: omit for the shared vault, `persona:<name>` for a persona vault.",
+            "in": "query",
+            "name": "namespace",
+            "required": false,
+            "schema": {
+              "description": "Vault namespace: omit for the shared vault, `persona:<name>` for a persona vault.",
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListMemoryPagesResponse"
+                }
+              }
+            },
+            "description": "The pages."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The request cannot be done as asked. The message says what to change."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "No such page, line or change."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The page changed after it was opened, a later change must be undone first, or no history is kept."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The page operation failed."
+          }
+        },
+        "summary": "List memory pages",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "memory",
+          "pages"
+        ],
+        "x-fern-sdk-method-name": "list"
+      }
+    },
+    "/api/v1/memory/pages/changes": {
+      "get": {
+        "description": "List the last changes to pages, newest first, and whether each can be undone.",
+        "parameters": [
+          {
+            "description": "Vault namespace: omit for the shared vault, `persona:<name>` for a persona vault.",
+            "in": "query",
+            "name": "namespace",
+            "required": false,
+            "schema": {
+              "description": "Vault namespace: omit for the shared vault, `persona:<name>` for a persona vault.",
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListMemoryPageChangesResponse"
+                }
+              }
+            },
+            "description": "The recent changes."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The request cannot be done as asked. The message says what to change."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "No such page, line or change."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The page changed after it was opened, a later change must be undone first, or no history is kept."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The page operation failed."
+          }
+        },
+        "summary": "List recent page changes",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "memory",
+          "pages"
+        ],
+        "x-fern-sdk-method-name": "list_changes"
+      }
+    },
+    "/api/v1/memory/pages/changes/{change_id}/undo": {
+      "post": {
+        "description": "Put the pages a change touched back as they were before it, as a new change. Refused while a later change left those pages different.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "change_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9a-f]{40}$",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Vault namespace: omit for the shared vault, `persona:<name>` for a persona vault.",
+            "in": "query",
+            "name": "namespace",
+            "required": false,
+            "schema": {
+              "description": "Vault namespace: omit for the shared vault, `persona:<name>` for a persona vault.",
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UndoMemoryPageChangeResponse"
+                }
+              }
+            },
+            "description": "The change was undone."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The request cannot be done as asked. The message says what to change."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "No such page, line or change."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The page changed after it was opened, a later change must be undone first, or no history is kept."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The page operation failed."
+          }
+        },
+        "summary": "Undo a page change",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "memory",
+          "pages"
+        ],
+        "x-fern-sdk-method-name": "undo_change"
+      }
+    },
+    "/api/v1/memory/pages/{kind}/{slug}": {
+      "delete": {
+        "description": "Delete a page file. The history keeps it, so the delete can be undone.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "kind",
+            "required": true,
+            "schema": {
+              "enum": [
+                "person",
+                "matter"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Vault namespace: omit for the shared vault, `persona:<name>` for a persona vault.",
+            "in": "query",
+            "name": "namespace",
+            "required": false,
+            "schema": {
+              "description": "Vault namespace: omit for the shared vault, `persona:<name>` for a persona vault.",
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteMemoryPageResponse"
+                }
+              }
+            },
+            "description": "Page deleted."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The request cannot be done as asked. The message says what to change."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "No such page, line or change."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The page changed after it was opened, a later change must be undone first, or no history is kept."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The page operation failed."
+          }
+        },
+        "summary": "Delete a memory page",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "memory",
+          "pages"
+        ],
+        "x-fern-sdk-method-name": "delete"
+      },
+      "get": {
+        "description": "Get one page: its sections in order, where each line came from, and its Markdown text.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "kind",
+            "required": true,
+            "schema": {
+              "enum": [
+                "person",
+                "matter"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Vault namespace: omit for the shared vault, `persona:<name>` for a persona vault.",
+            "in": "query",
+            "name": "namespace",
+            "required": false,
+            "schema": {
+              "description": "Vault namespace: omit for the shared vault, `persona:<name>` for a persona vault.",
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetMemoryPageResponse"
+                }
+              }
+            },
+            "description": "The page."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The request cannot be done as asked. The message says what to change."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "No such page, line or change."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The page changed after it was opened, a later change must be undone first, or no history is kept."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The page operation failed."
+          }
+        },
+        "summary": "Get a memory page",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "memory",
+          "pages"
+        ],
+        "x-fern-sdk-method-name": "get"
+      },
+      "put": {
+        "description": "Replace a page with the person’s Markdown. New or changed lines become their own. Refused when the page changed since the version sent, or the text is not a page.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "kind",
+            "required": true,
+            "schema": {
+              "enum": [
+                "person",
+                "matter"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Vault namespace: omit for the shared vault, `persona:<name>` for a persona vault.",
+            "in": "query",
+            "name": "namespace",
+            "required": false,
+            "schema": {
+              "description": "Vault namespace: omit for the shared vault, `persona:<name>` for a persona vault.",
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateMemoryPageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetMemoryPageResponse"
+                }
+              }
+            },
+            "description": "The saved page."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The request cannot be done as asked. The message says what to change."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "No such page, line or change."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The page changed after it was opened, a later change must be undone first, or no history is kept."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The page operation failed."
+          }
+        },
+        "summary": "Save a page edit",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "memory",
+          "pages"
+        ],
+        "x-fern-sdk-method-name": "update"
+      }
+    },
+    "/api/v1/memory/pages/{kind}/{slug}/disagreements/{disagreement_id}/dismiss": {
+      "post": {
+        "description": "Mark a pair as not a problem. The same two lines are not listed again. No line on the page changes.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "kind",
+            "required": true,
+            "schema": {
+              "enum": [
+                "person",
+                "matter"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "disagreement_id",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Vault namespace: omit for the shared vault, `persona:<name>` for a persona vault.",
+            "in": "query",
+            "name": "namespace",
+            "required": false,
+            "schema": {
+              "description": "Vault namespace: omit for the shared vault, `persona:<name>` for a persona vault.",
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetMemoryPageResponse"
+                }
+              }
+            },
+            "description": "The page without the dismissed pair."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The request cannot be done as asked. The message says what to change."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "No such page, line or change."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The page changed after it was opened, a later change must be undone first, or no history is kept."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The page operation failed."
+          }
+        },
+        "summary": "Dismiss a pair of lines that disagree",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "memory",
+          "pages"
+        ],
+        "x-fern-sdk-method-name": "dismiss_disagreement"
+      }
+    },
+    "/api/v1/memory/pages/{kind}/{slug}/lines/{fact_id}/confirm": {
+      "post": {
+        "description": "Move a line from Unconfirmed to a section of the page as the person’s own words.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "kind",
+            "required": true,
+            "schema": {
+              "enum": [
+                "person",
+                "matter"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "fact_id",
+            "required": true,
+            "schema": {
+              "maxLength": 32,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Vault namespace: omit for the shared vault, `persona:<name>` for a persona vault.",
+            "in": "query",
+            "name": "namespace",
+            "required": false,
+            "schema": {
+              "description": "Vault namespace: omit for the shared vault, `persona:<name>` for a persona vault.",
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmMemoryPageLineRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetMemoryPageResponse"
+                }
+              }
+            },
+            "description": "The page after the line moved."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The request cannot be done as asked. The message says what to change."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "No such page, line or change."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The page changed after it was opened, a later change must be undone first, or no history is kept."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The page operation failed."
+          }
+        },
+        "summary": "Confirm an unconfirmed line",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "memory",
+          "pages"
+        ],
+        "x-fern-sdk-method-name": "confirm_line"
+      }
+    },
+    "/api/v1/memory/pages/{kind}/{slug}/lines/{fact_id}/dismiss": {
+      "post": {
+        "description": "Remove a line from Unconfirmed.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "kind",
+            "required": true,
+            "schema": {
+              "enum": [
+                "person",
+                "matter"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "fact_id",
+            "required": true,
+            "schema": {
+              "maxLength": 32,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Vault namespace: omit for the shared vault, `persona:<name>` for a persona vault.",
+            "in": "query",
+            "name": "namespace",
+            "required": false,
+            "schema": {
+              "description": "Vault namespace: omit for the shared vault, `persona:<name>` for a persona vault.",
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetMemoryPageResponse"
+                }
+              }
+            },
+            "description": "The page after the line was removed."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The request cannot be done as asked. The message says what to change."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "No such page, line or change."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The page changed after it was opened, a later change must be undone first, or no history is kept."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The page operation failed."
+          }
+        },
+        "summary": "Dismiss an unconfirmed line",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "memory",
+          "pages"
+        ],
+        "x-fern-sdk-method-name": "dismiss_line"
+      }
+    },
     "/api/v1/memory/vault": {
       "get": {
         "description": "List the effective entries of one vault namespace. Vault edits and deletes are applied.",
@@ -19195,16 +20708,6 @@
               }
             },
             "description": "The vault operation failed."
-          },
-          "501": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RequestErrorResponse"
-                }
-              }
-            },
-            "description": "The server does not run the markdown memory backend."
           }
         },
         "summary": "List memory vault entries",
@@ -19216,6 +20719,82 @@
           "vault"
         ],
         "x-fern-sdk-method-name": "list"
+      }
+    },
+    "/api/v1/memory/vault/delete-shown": {
+      "post": {
+        "description": "Delete every memory that recall shows in exactly these words, in any collection. Answers 404 and deletes nothing when no memory, or more than one different memory, fits the words.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteShownMemoryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteShownMemoryResponse"
+                }
+              }
+            },
+            "description": "The memory was deleted."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "No single memory fits these words."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The vault operation failed."
+          }
+        },
+        "summary": "Delete a memory by the words a chat showed",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "memory",
+          "vault"
+        ],
+        "x-fern-sdk-method-name": "delete_shown"
       }
     },
     "/api/v1/memory/vault/export": {
@@ -19274,16 +20853,6 @@
               }
             },
             "description": "The vault operation failed."
-          },
-          "501": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RequestErrorResponse"
-                }
-              }
-            },
-            "description": "The server does not run the markdown memory backend."
           }
         },
         "summary": "Export a memory vault",
@@ -19350,16 +20919,6 @@
               }
             },
             "description": "The vault operation failed."
-          },
-          "501": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RequestErrorResponse"
-                }
-              }
-            },
-            "description": "The server does not run the markdown memory backend."
           }
         },
         "summary": "Import into a memory vault",
@@ -19371,6 +20930,150 @@
           "vault"
         ],
         "x-fern-sdk-method-name": "import_entries"
+      }
+    },
+    "/api/v1/memory/vault/review": {
+      "get": {
+        "description": "List older notes with no record of their source that were saved in a chat where Aman read nothing from outside. Nothing changes. Each request looks at a limited number of notes; send `next_cursor` to continue.",
+        "parameters": [
+          {
+            "description": "Vault namespace: omit for the shared vault.",
+            "in": "query",
+            "name": "namespace",
+            "required": false,
+            "schema": {
+              "description": "Vault namespace: omit for the shared vault.",
+              "maxLength": 128,
+              "type": "string"
+            }
+          },
+          {
+            "description": "`next_cursor` of the previous answer.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "description": "`next_cursor` of the previous answer.",
+              "pattern": "^\\d{1,6}$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListMemoryVaultReviewNotesResponse"
+                }
+              }
+            },
+            "description": "Older notes that may be marked as the person's own."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid namespace or cursor."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The vault operation failed."
+          }
+        },
+        "summary": "List older notes to review",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "memory",
+          "vault"
+        ],
+        "x-fern-sdk-method-name": "list_review_notes"
+      },
+      "post": {
+        "description": "Mark the named older notes as the person's own words. Each is checked again and refused unless it still qualifies. At most 200 ids per call.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MarkMemoryVaultReviewNotesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarkMemoryVaultReviewNotesResponse"
+                }
+              }
+            },
+            "description": "How many notes were marked, and which were refused and why."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The vault operation failed."
+          }
+        },
+        "summary": "Mark older notes as from you",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "memory",
+          "vault"
+        ],
+        "x-fern-sdk-method-name": "mark_review_notes"
       }
     },
     "/api/v1/memory/vault/sharing": {
@@ -19406,16 +21109,6 @@
               }
             },
             "description": "The vault operation failed."
-          },
-          "501": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RequestErrorResponse"
-                }
-              }
-            },
-            "description": "The server does not run the markdown memory backend."
           }
         },
         "summary": "Get memory vault sharing",
@@ -19480,16 +21173,6 @@
               }
             },
             "description": "The vault operation failed."
-          },
-          "501": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RequestErrorResponse"
-                }
-              }
-            },
-            "description": "The server does not run the markdown memory backend."
           }
         },
         "summary": "Replace memory vault sharing",
@@ -19559,16 +21242,6 @@
               }
             },
             "description": "The vault operation failed."
-          },
-          "501": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RequestErrorResponse"
-                }
-              }
-            },
-            "description": "The server does not run the markdown memory backend."
           }
         },
         "summary": "Get memory vault summary status",
@@ -19649,16 +21322,6 @@
               }
             },
             "description": "The vault operation failed."
-          },
-          "501": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RequestErrorResponse"
-                }
-              }
-            },
-            "description": "The server does not run the markdown memory backend."
           }
         },
         "summary": "Delete a memory vault entry",
@@ -19747,16 +21410,6 @@
               }
             },
             "description": "The vault operation failed."
-          },
-          "501": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RequestErrorResponse"
-                }
-              }
-            },
-            "description": "The server does not run the markdown memory backend."
           }
         },
         "summary": "Update a memory vault entry",
@@ -19949,6 +21602,16 @@
               }
             },
             "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The profile changed since the revision this save was made from."
           }
         },
         "summary": "Create or update personalization profile",
@@ -25300,7 +26963,7 @@
                 }
               }
             },
-            "description": "An MCP server with this name already exists, or `manifest.memory_provider` or `manifest.search_provider` is set to true while another server already holds it."
+            "description": "An MCP server with this name already exists, or `manifest.search_provider` is set to true while another server already holds it."
           },
           "422": {
             "content": {
@@ -25310,7 +26973,7 @@
                 }
               }
             },
-            "description": "The server cannot satisfy `auth.type: dcr` (e.g. it advertises no registration_endpoint), or `manifest.memory_provider: true` is set and the memory-provider connection check failed. The message carries the upstream reason."
+            "description": "The server cannot satisfy `auth.type: dcr` (e.g. it advertises no registration_endpoint). The message carries the upstream reason."
           },
           "424": {
             "content": {
@@ -25374,7 +27037,7 @@
                 }
               }
             },
-            "description": "`manifest.memory_provider` or `manifest.search_provider` is set to true while another server already holds it, or the connector changed while its memory-provider connection check was running, so the save must be retried."
+            "description": "`manifest.search_provider` is set to true while another server already holds it."
           },
           "422": {
             "content": {
@@ -25384,7 +27047,7 @@
                 }
               }
             },
-            "description": "The server cannot satisfy `auth.type: dcr` (e.g. it advertises no registration_endpoint), or `manifest.memory_provider: true` is set and the memory-provider connection check failed. The message carries the upstream reason."
+            "description": "The server cannot satisfy `auth.type: dcr` (e.g. it advertises no registration_endpoint). The message carries the upstream reason."
           },
           "424": {
             "content": {
@@ -25502,6 +27165,316 @@
           "mcpServers"
         ],
         "x-fern-sdk-method-name": "get"
+      }
+    },
+    "/api/v1/settings/memory-nightly": {
+      "get": {
+        "description": "Whether the nightly tidy-up runs and at which hour: the stored override, or the `MEMORY_NIGHTLY_JOB` env default when none is stored.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetMemoryNightlyResponse"
+                }
+              }
+            },
+            "description": "The stored nightly tidy-up setting."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Admin access required."
+          }
+        },
+        "summary": "Get the nightly tidy-up setting",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "memoryNightly"
+        ],
+        "x-fern-sdk-method-name": "get"
+      },
+      "put": {
+        "description": "Persists the nightly tidy-up override and its hour: `true` or `false` turns it on or off; `null` clears it back to the `MEMORY_NIGHTLY_JOB` env default. A field left out stays as it is.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateMemoryNightlyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetMemoryNightlyResponse"
+                }
+              }
+            },
+            "description": "The stored nightly tidy-up setting after the update."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request body."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Admin access required."
+          }
+        },
+        "summary": "Create, replace, or clear the nightly tidy-up override",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "memoryNightly"
+        ],
+        "x-fern-sdk-method-name": "create_or_update"
+      }
+    },
+    "/api/v1/settings/memory-nightly/run": {
+      "get": {
+        "description": "Tells whether a tidy-up is running now (`busy`), what one that finished in the last hour did (`ran`), that it stopped on an error (`failed`), or that there is none (`idle`). It starts nothing.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunMemoryNightlyResponse"
+                }
+              }
+            },
+            "description": "Where a tidy-up stands."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Admin access required."
+          }
+        },
+        "summary": "See where a tidy-up stands",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "memoryNightly"
+        ],
+        "x-fern-sdk-method-name": "get_run"
+      },
+      "post": {
+        "description": "Starts tidying the memory pages, whatever the hour and whether or not the daily tidy-up is on. It answers at once with `busy` and does not wait for the end. With a tidy-up already running, it starts nothing. Read the same path to see what it did.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunMemoryNightlyResponse"
+                }
+              }
+            },
+            "description": "A tidy-up is running."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Admin access required."
+          }
+        },
+        "summary": "Start the tidy-up now",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "memoryNightly"
+        ],
+        "x-fern-sdk-method-name": "run"
+      }
+    },
+    "/api/v1/settings/memory-page-sorting": {
+      "get": {
+        "description": "How saved notes are sorted onto pages: the stored override, or the `MEMORY_PAGE_SORTING` env default when none is stored.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetMemoryPageSortingResponse"
+                }
+              }
+            },
+            "description": "The stored page-sorting setting."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Admin access required."
+          }
+        },
+        "summary": "Get the page-sorting setting",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "memoryPageSorting"
+        ],
+        "x-fern-sdk-method-name": "get"
+      },
+      "put": {
+        "description": "Persists the page-sorting override: `off`, `report` (only note what it would do) or `on`; `null` clears it back to the `MEMORY_PAGE_SORTING` env default.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateMemoryPageSortingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetMemoryPageSortingResponse"
+                }
+              }
+            },
+            "description": "The stored page-sorting setting after the update."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request body."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Admin access required."
+          }
+        },
+        "summary": "Create, replace, or clear the page-sorting override",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "memoryPageSorting"
+        ],
+        "x-fern-sdk-method-name": "create_or_update"
       }
     },
     "/api/v1/settings/memory-recalls": {
@@ -25736,7 +27709,7 @@
     },
     "/api/v1/settings/memory-summarize": {
       "get": {
-        "description": "The stored override for turn summarization, or the `MEMORY_SUMMARIZE` env default when none is stored, plus the effective state with the markdown-only gate applied.",
+        "description": "The stored override for turn summarization, or the `MEMORY_SUMMARIZE` env default when none is stored.",
         "responses": {
           "200": {
             "content": {
@@ -25780,7 +27753,7 @@
         "x-fern-sdk-method-name": "get"
       },
       "put": {
-        "description": "Persists the turn-summarization override: `true`/`false` turns summarization on/off; `null` clears the override back to the `MEMORY_SUMMARIZE` env default. The response carries the effective state.",
+        "description": "Persists the turn-summarization override: `true`/`false` turns summarization on/off; `null` clears the override back to the `MEMORY_SUMMARIZE` env default.",
         "requestBody": {
           "content": {
             "application/json": {
