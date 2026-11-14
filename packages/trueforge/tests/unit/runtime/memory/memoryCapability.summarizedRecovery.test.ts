@@ -29,7 +29,11 @@ jest.mock('../../../../src/runtime/memory/memorySummarize', () => {
 import type { IModelProviderStore } from '../../../../src/db/modelProviderStore';
 import { MarkdownMemoryClient } from '../../../../src/runtime/memory/markdownMemoryClient';
 import { memoryCapability, type MemoryConfig } from '../../../../src/runtime/memory/memoryCapability';
-import { submitRetainWithVerification, type SummarizeTurnContext } from '../../../../src/runtime/memory/memoryRetain';
+import {
+  noteUnfinishedTurnOwesNoSummary,
+  submitRetainWithVerification,
+  type SummarizeTurnContext,
+} from '../../../../src/runtime/memory/memoryRetain';
 import { summarizeTurnContent } from '../../../../src/runtime/memory/memorySummarize';
 
 const mockSummarize = jest.mocked(summarizeTurnContent);
@@ -159,6 +163,38 @@ describe('the turn after a turn that saved nothing, with summaries on', () => {
     // No blocking summary call in the person's turn.
     expect(mockSummarize).not.toHaveBeenCalled();
     expect(await client.summaryPending({ namespace: '' })).toBe(true);
+  });
+
+  it('does not mark the vault for a first turn that was stopped or ended in an error', async () => {
+    await noteUnfinishedTurnOwesNoSummary({
+      client,
+      session: { is_incognito: false },
+      sessionId: TURN.sessionId,
+      turnId: TURN.turnId,
+      summarize: summarizeContext(),
+      logger: makeLogger(),
+    });
+
+    await runSecondTurn(capabilityFor(client));
+
+    expect(savedLogs(dir)).toEqual([]);
+    expect(mockSummarize).not.toHaveBeenCalled();
+    expect(await client.summaryPending({ namespace: '' })).toBe(false);
+  });
+
+  it('still rebuilds a stopped turn as its full exchange when summaries are off', async () => {
+    await noteUnfinishedTurnOwesNoSummary({
+      client,
+      session: { is_incognito: false },
+      sessionId: TURN.sessionId,
+      turnId: TURN.turnId,
+      summarize: undefined,
+      logger: makeLogger(),
+    });
+
+    await runSecondTurn(capabilityFor(client, true));
+
+    expect(savedLogs(dir)).toHaveLength(1);
   });
 
   it('saves no raw exchange when the next turn starts while the first summary is still running', async () => {

@@ -114,6 +114,7 @@ import { createMemoryClient } from '../runtime/memory/createMemoryClient';
 import type { MemoryClient } from '../runtime/memory/memoryClient';
 import type { TurnToolResult } from '../runtime/memory/memoryNotesSummarize';
 import {
+  noteUnfinishedTurnOwesNoSummary,
   submitRetainWithVerification,
   type RetainOutcomeLog,
   type SummarizeTurnContext,
@@ -1507,6 +1508,15 @@ async function runTurnEventDrain(params: {
           ingestedToolOutput: outsideInput.ingested,
           toolResults,
           markArtifactsCaptured,
+        });
+      } else if (event.type === EventType.TURN_DONE && memory !== undefined) {
+        await noteUnfinishedTurnOwesNoSummary({
+          client: memory.client,
+          session: memory.session,
+          sessionId,
+          turnId,
+          summarize: memory.summarize,
+          logger,
         });
       }
     }
