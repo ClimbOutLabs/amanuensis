@@ -649,7 +649,7 @@ run_doctor() {
   fi
   # Same Docker access as the rest of the run (direct, sg or sudo), so a fresh docker group member
   # does not get a failing report for a problem the run itself worked around.
-  as_docker_user env "AMANUENSIS_HOME=$AMAN_HOME" "HOME=$HOME" ${bound[@]+"${bound[@]}"} "$(doctor_shim)" doctor "$@"
+  as_docker_user env "AMANUENSIS_HOME=$AMAN_HOME" "HOME=$HOME" ${AMAN_UI_FRAMED:+"AMAN_UI_FRAMED=$AMAN_UI_FRAMED"} ${bound[@]+"${bound[@]}"} "$(doctor_shim)" doctor "$@"
 }
 
 doctor_status() {

@@ -36,6 +36,15 @@ let world;
 const make = options => (world = createWorld(options));
 afterEach(() => world?.dispose());
 
+/** The report as one line of words: the sides of its panels dropped and wrapped lines joined. */
+function flatText(text) {
+  return text
+    .split('\n')
+    .map(line => line.replace(/^[|│] (.*?) *[|│]$/, '$1'))
+    .join(' ')
+    .replace(/\s+/g, ' ');
+}
+
 function machine(result, id) {
   return find(result.doc.machine, id);
 }
@@ -126,10 +135,10 @@ describe('document and exit codes', () => {
     world.df(1 * GIB_KB);
     const result = world.run();
     assert.equal(result.code, 1);
-    assert.match(result.stdout, /\n\[ Checking this computer \] +\d+ ok, 1 problem\n/);
+    assert.match(result.stdout, /\n\+- \[ Checking this computer \] -+ \d+ ok, 1 problem -\+\n/);
     assert.match(result.stdout, / x Only 1\.0 GB is free for Docker data/);
     assert.match(result.stdout, /Next: Run aman doctor disk --fix/);
-    assert.match(result.stdout, /\n\[ Checking instance main \]/);
+    assert.match(result.stdout, /\n\+- \[ Checking instance main \]/);
     assert.match(result.stdout, /\| x 1 problem +\|/);
     assert.match(result.stdout, /\| x 1 problem +\|[\s\S]* x Only 1\.0 GB is free for Docker data[\s\S]*Next: Run aman doctor disk --fix/, 'the closing block lists the problem with its next step');
     assert.match(result.stdout, /Do the Next step of each, then run aman doctor again\./);
@@ -140,7 +149,7 @@ describe('document and exit codes', () => {
     world.set('info', { out: '', rc: 1, err: 'Cannot connect to the Docker daemon' });
     const result = world.run();
     assert.equal(result.code, 1);
-    const flat = result.stdout.replace(/\s+/g, ' ');
+    const flat = flatText(result.stdout);
     assert.match(flat, /Skipped: Docker is not reachable\. \(images, disk, docker_memory, clock\)/);
     assert.equal(flat.split('Skipped: Docker is not reachable.').length - 1, 2, 'two lines for five skipped checks');
   });
@@ -152,7 +161,7 @@ describe('document and exit codes', () => {
     assert.match(plain.stdout, /All checks passed\./);
     assert.doesNotMatch(plain.stdout, /\(docker\)/);
     const verbose = world.run(['--verbose']);
-    assert.match(verbose.stdout, /Docker 28\.0\.1 is running and Compose 2\.29\.1 is available\. \(docker\)/);
+    assert.match(flatText(verbose.stdout), /Docker 28\.0\.1 is running and Compose 2\.29\.1 is available\. \(docker\)/);
   });
 
   it('--summary is one line when everything passed, with the number of checks and nothing else', () => {

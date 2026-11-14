@@ -7,7 +7,7 @@ set -euo pipefail
 
 # From the doctor's phase on, with this run's paths replaced and the elapsed time (which varies) dropped.
 ending() {
-  printf '%s\n' "$OUT" | sed -n '/^\[ 6 of 6 \]  Checking the result/,$p' |
+  printf '%s\n' "$OUT" | sed -n '/^+- \[ 6 of 6 \]  Checking the result/,$p' |
     sed "s|$SB_INSTALLER|<checkout>/installer|g; s|$AMAN_HOME|<home>|g" |
     sed -E 's/([0-9A-F]{2}:){31}[0-9A-F]{2}/<fingerprint>/g; s/^  ([0-9A-F]{2}:){16}$/  <fingerprint, first half>/; s/^  ([0-9A-F]{2}:){15}[0-9A-F]{2}$/  <fingerprint, second half>/' |
     awk '/^$/ { held = 1; next } /^Done in / { held = 0; next } { if (held) print ""; held = 0; print }'
@@ -22,8 +22,9 @@ test_fresh_install_without_a_model() {
   fixture_hostname host
   install_machine
   assert_eq "$(ending)" "$(cat <<'SNAP'
-[ 6 of 6 ]  Checking the result                             ############
-  + All 16 checks passed
++- [ 6 of 6 ]  Checking the result --------------------- ############ -+
+|   + All 16 checks passed                                             |
++----------------------------------------------------------------------+
 
 +----------------------------------------------------------------------+
 | + Ready. Instance main is running.                                   |
@@ -69,8 +70,9 @@ test_fresh_install_without_a_model_on_a_computer_with_no_network() {
   sandbox_new
   install_machine
   assert_eq "$(ending)" "$(cat <<'SNAP'
-[ 6 of 6 ]  Checking the result                             ############
-  + All 16 checks passed
++- [ 6 of 6 ]  Checking the result --------------------- ############ -+
+|   + All 16 checks passed                                             |
++----------------------------------------------------------------------+
 
 +----------------------------------------------------------------------+
 | + Ready. Instance main is running.                                   |
@@ -104,8 +106,9 @@ $TF_KEY
   clear_input
   assert_rc 0
   assert_eq "$(ending)" "$(cat <<'SNAP'
-[ 6 of 6 ]  Checking the result                             ############
-  + All 16 checks passed
++- [ 6 of 6 ]  Checking the result --------------------- ############ -+
+|   + All 16 checks passed                                             |
++----------------------------------------------------------------------+
 
 +----------------------------------------------------------------------+
 | + Ready. Instance main is running.                                   |
@@ -138,11 +141,12 @@ test_install_with_a_problem() {
   run_install --yes --password-stdin --email owner@example.invalid --local-only
   clear_input
   assert_eq "$(ending)" "$(cat <<'SNAP'
-[ 6 of 6 ]  Checking the result                             ############
-  Instance main
-  x Port 5556 is already in use by another program.
-    Next: Run aman doctor instance --fix
-  15 other checks passed. Full report: aman doctor
++- [ 6 of 6 ]  Checking the result --------------------- ############ -+
+|   Instance main                                                      |
+|   x Port 5556 is already in use by another program.                  |
+|     Next: Run aman doctor instance --fix                             |
+|   15 other checks passed. Full report: aman doctor                   |
++----------------------------------------------------------------------+
 
 +----------------------------------------------------------------------+
 | ! Running, but the checks found a problem (listed above).            |

@@ -171,12 +171,12 @@ test_upgrade_notes_an_old_email_account_file() {
   repo_commit_change "app change"
   run_install upgrade
   assert_rc 0
-  assert_contains "$OUT" "Email was set up the old way. Connect it again in Settings, then Connectors, then Email."
+  assert_flat_contains "$OUT$ERR" "Email was set up the old way, so its account was not carried over. Next: Connect it again in Settings, then Connectors, then Email."
   assert_file "$AMAN_HOME/instances/main/.env.mail-email"
   run_install upgrade
   assert_rc 0
   assert_contains "$OUT" "Already up to date"
-  assert_contains "$OUT" "Email was set up the old way. Connect it again in Settings, then Connectors, then Email."
+  assert_flat_contains "$OUT$ERR" "Email was set up the old way, so its account was not carried over. Next: Connect it again in Settings, then Connectors, then Email."
   sandbox_drop
 }
 
@@ -187,7 +187,7 @@ test_upgrade_without_an_old_email_account_file_stays_quiet() {
   repo_commit_change "app change"
   run_install upgrade
   assert_rc 0
-  assert_not_contains "$OUT" "Email was set up the old way"
+  assert_not_contains "$OUT$ERR" "Email was set up the old way"
   sandbox_drop
 }
 
@@ -200,13 +200,13 @@ test_upgrade_notes_an_old_calendar_account_file() {
   repo_commit_change "app change"
   run_install upgrade
   assert_rc 0
-  assert_contains "$OUT" "Calendar was set up the old way. Connect it again in Settings, then Connectors, then Calendar."
-  assert_not_contains "$OUT" "Email was set up the old way"
+  assert_flat_contains "$OUT$ERR" "Calendar was set up the old way, so its account was not carried over. Next: Connect it again in Settings, then Connectors, then Calendar."
+  assert_not_contains "$OUT$ERR" "Email was set up the old way"
   assert_file "$AMAN_HOME/instances/main/.env.calendar"
   run_install upgrade
   assert_rc 0
   assert_contains "$OUT" "Already up to date"
-  assert_contains "$OUT" "Calendar was set up the old way. Connect it again in Settings, then Connectors, then Calendar."
+  assert_flat_contains "$OUT$ERR" "Calendar was set up the old way, so its account was not carried over. Next: Connect it again in Settings, then Connectors, then Calendar."
   sandbox_drop
 }
 
@@ -221,14 +221,14 @@ test_upgrade_moves_a_complete_old_calendar_account() {
   repo_commit_change "app change"
   run_install upgrade
   assert_rc 0
-  assert_not_contains "$OUT" "Calendar was set up the old way"
+  assert_not_contains "$OUT$ERR" "Calendar was set up the old way"
   assert_no_path "$dir/.env.calendar"
   assert_eq "$(grep -c '^CALENDAR_CONNECTOR_URL=' "$dir/.env" || true)" 0 "the old connector line is gone"
   assert_contains "$(cat "$STUB_STATE/calendar-account-aman-main")" "CALDAV_PASSWORD=old-sentinel-91c2"
   assert_not_contains "$OUT$ERR" "old-sentinel-91c2"
   run_install upgrade
   assert_rc 0
-  assert_not_contains "$OUT" "Calendar was set up the old way"
+  assert_not_contains "$OUT$ERR" "Calendar was set up the old way"
   sandbox_drop
 }
 
@@ -247,7 +247,7 @@ test_upgrade_keeps_a_calendar_account_connected_again() {
   assert_no_path "$dir/.env.calendar"
   assert_contains "$(cat "$STUB_STATE/calendar-account-aman-main")" "CALDAV_PASSWORD=new-sentinel"
   assert_not_contains "$(cat "$STUB_STATE/calendar-account-aman-main")" "old-sentinel"
-  assert_not_contains "$OUT" "Calendar was set up the old way"
+  assert_not_contains "$OUT$ERR" "Calendar was set up the old way"
   sandbox_drop
 }
 
@@ -264,7 +264,7 @@ test_upgrade_keeps_the_old_calendar_file_when_the_check_says_nothing() {
   STUB_CALENDAR_CHECK=silent run_install upgrade
   assert_rc 0
   assert_file "$dir/.env.calendar"
-  assert_contains "$OUT" "Calendar was set up the old way. Connect it again in Settings, then Connectors, then Calendar."
+  assert_flat_contains "$OUT$ERR" "Calendar was set up the old way, so its account was not carried over. Next: Connect it again in Settings, then Connectors, then Calendar."
   assert_contains "$(cat "$STUB_STATE/calendar-account-aman-main")" "CALDAV_PASSWORD=new-sentinel"
   sandbox_drop
 }
@@ -276,7 +276,7 @@ test_upgrade_without_an_old_calendar_account_file_stays_quiet() {
   repo_commit_change "app change"
   run_install upgrade
   assert_rc 0
-  assert_not_contains "$OUT" "Calendar was set up the old way"
+  assert_not_contains "$OUT$ERR" "Calendar was set up the old way"
   sandbox_drop
 }
 

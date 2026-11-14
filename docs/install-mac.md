@@ -73,7 +73,7 @@ Aman is always installed from its latest release, never from the code that is st
 
    Your password needs at least 8 characters, with a number and a symbol such as @ or #.
 
-4. Wait while it works on its own for 20 to 40 minutes. Each step has a number, such as **4 of 6**, and a bar on the right that fills up as the install goes on. Each finished part gets a ✓ and the time it took. "Building the Aman app" is the longest step, and 15 minutes is normal.
+4. Wait while it works on its own for 20 to 40 minutes. Each step sits in a framed panel. Its top line has a number, such as **4 of 6**, and a bar that fills up as the install goes on. When the installer needs an answer, it closes the panel and shows **Your answer is needed** above the question. Each finished part gets a ✓ and the time it took. "Building the Aman app" is the longest step, and 15 minutes is normal.
 
 When it is done, it prints a green box that says **Ready. Instance main is running.** The addresses to open are listed under it.
 

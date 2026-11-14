@@ -323,8 +323,12 @@ assert_contains() {
   case "$1" in *"$2"*) t_pass ;; *) t_fail "${3:-missing text}: expected to find [$2] in [$(printf '%s' "$1" | head -c 600)]" ;; esac
 }
 
-# The text with every run of whitespace collapsed to one space, so a sentence the plan wrapped still matches.
-flat() { printf '%s' "$1" | tr '\n' ' ' | tr -s ' '; }
+# The text with every run of whitespace collapsed to one space, so a sentence the plan wrapped still matches. The sides
+# of a step panel are dropped first, since a person reads the words between them.
+flat() { printf '%s\n' "$1" | unframe | tr '\n' ' ' | tr -s ' ' | sed 's/ $//'; }
+
+# Lines without the sides of the step panels they sit in.
+unframe() { sed -E 's/^(│|\|) (.*[^ ])? *(│|\|)$/\2/; s/^(│|\|) //'; }
 
 assert_flat_contains() {
   assert_contains "$(flat "$1")" "$2" "${3:-}"

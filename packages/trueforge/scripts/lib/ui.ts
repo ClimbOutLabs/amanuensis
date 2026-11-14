@@ -51,6 +51,12 @@ interface Symbols {
 
 /** What both streams share: the warnings to repeat, whether a question block is open, and the verdict's color. */
 interface UiState {
+  /** A step panel is open; its lines get the panel's sides. */
+  panel: boolean;
+  /** Questions closed the panel; the next other line opens it again. */
+  panelResume: boolean;
+  /** A blank line inside a panel waits for the next line, so a panel never ends on an empty row. */
+  pendingBlank: boolean;
   warnings: string[];
   lastBlank: boolean;
   asking: boolean;
@@ -169,9 +175,11 @@ export class UiStep {
         if (line.length >= ui.width) {
           line = `${line.slice(0, ui.width - 4)}${ui.symbols.ellipsis}`;
         }
-        ui.writeProgress(`\r${' '.repeat(this.shown)}\r${line}`);
-        this.shown = line.length;
+        ui.writeProgress(`\r${' '.repeat(this.shown)}\r${side}${line}`);
+        this.shown = line.length + (side === '' ? 0 : 2);
       };
+      // Inside a panel the progress line has the panel's left side.
+      const side = ui.progressSide();
       draw();
       this.timer = setInterval(draw, FRAME_MS);
     } else {
@@ -205,7 +213,7 @@ export class UiStep {
       clearInterval(this.timer);
       this.timer = undefined;
       if (this.ui.animated) {
-        this.ui.writeProgress(`\r${' '.repeat(this.ui.width)}\r`);
+        this.ui.writeProgress(`\r${' '.repeat(this.ui.fullWidth)}\r`);
       }
     }
   }
@@ -213,7 +221,10 @@ export class UiStep {
 
 export class Ui {
   readonly symbols: Symbols;
-  readonly width: number;
+  /** The width of the screen block; `width` is what text may take, 4 columns less inside a panel. */
+  readonly fullWidth: number;
+  /** Started by a command while its panel is open, so these lines join that panel instead of opening their own. */
+  private readonly framed: boolean;
   readonly animated: boolean;
   private readonly colorOut: boolean;
   private readonly colorErr: boolean;
@@ -225,7 +236,17 @@ export class Ui {
     state?: UiState,
   ) {
     const { env, out, err } = options;
-    this.state = state ?? { warnings: [], lastBlank: true, asking: false, inPrompt: false, summaryCode: COLOR.bold };
+    this.state = state ?? {
+      warnings: [],
+      lastBlank: true,
+      asking: false,
+      inPrompt: false,
+      summaryCode: COLOR.bold,
+      panel: false,
+      panelResume: false,
+      pendingBlank: false,
+    };
+    this.framed = env['AMAN_UI_FRAMED'] === '1';
     this.symbols = isUtf8(env) ? UTF8_SYMBOLS : ASCII_SYMBOLS;
     const colorAllowed = (env['NO_COLOR'] ?? '') === '' && env['TERM'] !== 'dumb';
     const forced = env['CLICOLOR_FORCE'] === '1';
@@ -233,7 +254,11 @@ export class Ui {
     this.colorErr = colorAllowed && (forced || err.isTTY);
     this.animated = err.isTTY && env['TERM'] !== 'dumb';
     const columns = err.isTTY ? (err.columns ?? MAX_WIDTH) : MAX_WIDTH;
-    this.width = err.isTTY ? Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, columns)) : MAX_WIDTH;
+    this.fullWidth = err.isTTY ? Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, columns)) : MAX_WIDTH;
+  }
+
+  get width(): number {
+    return this.state.panel || this.framed ? this.fullWidth - 4 : this.fullWidth;
   }
 
   /** The same helpers writing to stderr, for errors and warnings. */
@@ -253,13 +278,105 @@ export class Ui {
     return this.colorOn ? `\u001b[${code}m${text}\u001b[0m` : text;
   }
 
-  /** Any line that is not part of a question ends the question block, so the next question gets its separator. */
+  /**
+   * Any line that is not part of a question ends the question block, so the next question gets its separator, and
+   * reopens the panel the questions closed. Inside a panel a line gets the panel's sides.
+   */
   private emit(line: string): void {
-    if (!this.state.inPrompt) {
-      this.state.asking = false;
+    const { state } = this;
+    if (!state.inPrompt) {
+      state.asking = false;
+      if (state.panelResume) {
+        state.panelResume = false;
+        this.gap();
+        this.panelOpen({ left: '', right: '' });
+      }
     }
-    this.state.lastBlank = line === '';
+    if (state.panel || this.framed) {
+      state.lastBlank = true;
+      if (line === '') {
+        state.pendingBlank = true;
+        return;
+      }
+      if (state.pendingBlank) {
+        this.raw(this.framedLine(''));
+      }
+      state.pendingBlank = false;
+      state.lastBlank = false;
+      this.raw(this.framedLine(line));
+      return;
+    }
+    state.lastBlank = line === '';
+    this.raw(line);
+  }
+
+  private raw(line: string): void {
     (this.target === 'err' ? this.options.err : this.options.out).write(`${line}\n`);
+  }
+
+  /**
+   * A line between the two sides of a panel. A line too long for it (a word that cannot break, such as a fingerprint)
+   * keeps only the left side, so the word stays whole for copying.
+   */
+  private framedLine(line: string): string {
+    const side = this.style({ code: COLOR.dim, text: this.symbols.box.v });
+    const pad = this.fullWidth - 4 - visibleWidth(line);
+    return pad < 0 ? `${side} ${line}` : `${side} ${line}${' '.repeat(pad)} ${side}`;
+  }
+
+  /** Opens a panel: a top line with LEFT after the corner and RIGHT before the other corner. */
+  private panelOpen({ left, right }: { left: string; right: string }): void {
+    const { box } = this.symbols;
+    this.panelClose();
+    const head =
+      left === ''
+        ? this.style({ code: COLOR.dim, text: box.tl })
+        : `${this.style({ code: COLOR.dim, text: `${box.tl}${box.h}` })} ${left} `;
+    let tail =
+      right === ''
+        ? this.style({ code: COLOR.dim, text: box.tr })
+        : ` ${right} ${this.style({ code: COLOR.dim, text: `${box.h}${box.tr}` })}`;
+    let fill = this.fullWidth - visibleWidth(head) - visibleWidth(tail);
+    if (fill < 1 && right !== '') {
+      tail = this.style({ code: COLOR.dim, text: box.tr });
+      fill = this.fullWidth - visibleWidth(head) - 1;
+    }
+    this.raw(`${head}${this.style({ code: COLOR.dim, text: box.h.repeat(Math.max(0, fill)) })}${tail}`);
+    this.state.panel = true;
+    this.state.lastBlank = true;
+    this.state.pendingBlank = false;
+  }
+
+  /** Closes the open panel with its bottom line; does nothing when none is open. */
+  private panelClose(): void {
+    const { state } = this;
+    state.panelResume = false;
+    if (!state.panel) {
+      return;
+    }
+    state.panel = false;
+    state.pendingBlank = false;
+    const { box } = this.symbols;
+    this.raw(this.style({ code: COLOR.dim, text: `${box.bl}${box.h.repeat(this.fullWidth - 2)}${box.br}` }));
+    state.lastBlank = false;
+  }
+
+  /** Ends the step panel, for a run that stops without its closing block. */
+  panelEnd(): void {
+    this.panelClose();
+  }
+
+  /** The left side a progress line starts with inside a panel; a blank row waiting above it is printed first. */
+  progressSide(): string {
+    if (!this.state.panel && !this.framed) {
+      return '';
+    }
+    const view = this.stderr();
+    if (this.state.pendingBlank) {
+      view.raw(view.framedLine(''));
+      this.state.pendingBlank = false;
+    }
+    return `${view.style({ code: COLOR.dim, text: this.symbols.box.v })} `;
   }
 
   /** One blank line between blocks, never two. */
@@ -283,10 +400,10 @@ export class Ui {
   /** A box around short lines of text, as wide as the screen. CODE colors the frame; the lines keep their own styles. */
   private box({ code, lines }: { code: string; lines: readonly string[] }): void {
     const { box } = this.symbols;
-    const edge = box.h.repeat(this.width - 2);
+    const edge = box.h.repeat(this.fullWidth - 2);
     this.emit(this.style({ code, text: `${box.tl}${edge}${box.tr}` }));
     for (const line of lines) {
-      const pad = ' '.repeat(Math.max(0, this.width - 4 - visibleWidth(line)));
+      const pad = ' '.repeat(Math.max(0, this.fullWidth - 4 - visibleWidth(line)));
       this.emit(`${this.style({ code, text: box.v })} ${line}${pad} ${this.style({ code, text: box.v })}`);
     }
     this.emit(this.style({ code, text: `${box.bl}${edge}${box.br}` }));
@@ -325,7 +442,8 @@ export class Ui {
   /** The banner at the top of a run: the name in bold color, then what the run does, in a box. */
   title(text: string): void {
     const name = 'AMAN';
-    const lines = wrapWords({ text, width: this.width - 6 - name.length }).map((line, index) =>
+    this.panelClose();
+    const lines = wrapWords({ text, width: this.fullWidth - 6 - name.length }).map((line, index) =>
       index === 0
         ? `${this.style({ code: `1;${COLOR.cyan}`, text: name })}  ${line}`
         : `${' '.repeat(name.length + 2)}${line}`,
@@ -333,11 +451,13 @@ export class Ui {
     this.box({ code: COLOR.cyan, lines });
   }
 
-  /** A step of a run: "1 of 6" as a badge, the step in bold, and how far the run has come as a bar on the right. */
+  /**
+   * A step of a run, in a panel of its own: "1 of 6" as a badge and the step in bold in the panel's top line, and how
+   * far the run has come as a bar at its right end.
+   */
   phase({ text, n, total }: { text: string; n?: number | undefined; total?: number | undefined }): void {
-    this.gap();
     if (n === undefined) {
-      this.emit(this.badge(text));
+      this.openPart({ left: this.badge(text), right: '' });
       return;
     }
     const of = total ?? n;
@@ -348,7 +468,19 @@ export class Ui {
       code: COLOR.dim,
       text: off.repeat(2 * (of - n)),
     })}`;
-    this.emit(this.spread({ left: line, right: bar }));
+    this.openPart({ left: line, right: bar });
+  }
+
+  /** A panel for a step; inside another command's panel, a heading line, since panels do not nest. */
+  private openPart({ left, right }: { left: string; right: string }): void {
+    if (this.framed) {
+      this.gap();
+      this.emit(this.spread({ left, right }));
+      return;
+    }
+    this.panelClose();
+    this.gap();
+    this.panelOpen({ left, right });
   }
 
   /** The elapsed time sits at the right edge when the line has room, so the times of a step line up. */
@@ -479,7 +611,8 @@ export class Ui {
       fail: { code: COLOR.red, marker: this.symbols.fail },
     }[status];
     this.state.summaryCode = code;
-    const lines = wrapWords({ text: verdict, width: this.width - 6 }).map((line, index) =>
+    this.panelClose();
+    const lines = wrapWords({ text: verdict, width: this.fullWidth - 6 }).map((line, index) =>
       index === 0
         ? this.style({ code: VERDICT_COLOR[status], text: `${marker} ${line}` })
         : `  ${this.style({ code: VERDICT_COLOR[status], text: line })}`,
@@ -493,6 +626,7 @@ export class Ui {
   summaryEnd(total?: string): void {
     const { rule } = this.symbols;
     const code = this.state.summaryCode;
+    this.panelClose();
     if (this.state.warnings.length > 0) {
       this.gap();
       this.emit(this.style({ code: VERDICT_COLOR.warn, text: 'Warnings' }));
@@ -502,12 +636,12 @@ export class Ui {
     }
     this.gap();
     if (total === undefined || total === '') {
-      this.emit(this.style({ code, text: rule.repeat(this.width) }));
+      this.emit(this.style({ code, text: rule.repeat(this.fullWidth) }));
       return;
     }
     const end = ` Done in ${total} `;
     this.emit(
-      `${this.style({ code, text: rule.repeat(this.width - end.length - 2) })}${this.style({ code: COLOR.dim, text: end })}${this.style({ code, text: rule.repeat(2) })}`,
+      `${this.style({ code, text: rule.repeat(this.fullWidth - end.length - 2) })}${this.style({ code: COLOR.dim, text: end })}${this.style({ code, text: rule.repeat(2) })}`,
     );
   }
 
@@ -515,13 +649,18 @@ export class Ui {
 
   /**
    * A separator line before a question, so the moment the run waits for a person stands out. Questions in a row share
-   * one; any other line in between ends the group, and the next question gets its own separator.
+   * one; any other line in between ends the group, and the next question gets its own separator. Questions stand
+   * outside the step's panel, which reopens after them.
    */
   askBegin(): void {
     if (this.state.asking) {
       return;
     }
     const view = this.stderr();
+    if (this.state.panel) {
+      view.panelClose();
+      this.state.panelResume = true;
+    }
     view.gap();
     view.emit(
       `${view.style({ code: `1;${COLOR.cyan}`, text: `${this.symbols.prompt} ${ASK_LABEL}` })} ${view.style({

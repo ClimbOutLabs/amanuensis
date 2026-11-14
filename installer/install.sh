@@ -453,6 +453,7 @@ on_exit() {
   migrate_on_exit
   restore_on_exit
   if [ "$rc" != 0 ]; then instance_pending_notice; fi
+  ui_panel_end
   lock_release
   exit "$rc"
 }
