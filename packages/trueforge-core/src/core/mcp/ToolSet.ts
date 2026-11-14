@@ -130,10 +130,14 @@ export function stampSentinelDecision(input: {
   | 'silent_search_query'
   | 'audit_description'
   | 'effect'
-  | 'grant_host'
+  | 'grant_binding'
   | 'grant_tool_name'
   | 'secret_path_read'
   | 'mail_send'
+  | 'standing_grant_barred'
+  | 'chat_grantable_consequence'
+  | 'own_calendar_change'
+  | 'own_drive_write'
 > {
   const decision = input.decision;
   return {
@@ -146,10 +150,14 @@ export function stampSentinelDecision(input: {
     shell_binding: decision.shell_binding,
     // A connector read is inspection per call: its arguments decide it, not the tool's annotations.
     ...(decision.inspection ? { effect: 'inspect' as const } : {}),
-    ...(decision.grant_host === null ? {} : { grant_host: decision.grant_host }),
+    ...(decision.grant_binding === null ? {} : { grant_binding: decision.grant_binding }),
     ...(decision.grant_tool_name === null ? {} : { grant_tool_name: decision.grant_tool_name }),
     ...(decision.secret_path_read ? { secret_path_read: true as const } : {}),
     ...(decision.mail_send ? { mail_send: true as const } : {}),
+    standing_grant_barred: decision.standing_grant_barred,
+    chat_grantable_consequence: decision.chat_grantable_consequence,
+    own_calendar_change: decision.own_calendar_change,
+    own_drive_write: decision.own_drive_write,
     ...(decision.silent_search_query === null ? {} : { silent_search_query: decision.silent_search_query }),
     ...(decision.audit_description === null ? {} : { audit_description: decision.audit_description }),
     is_approval_required:
@@ -549,6 +557,10 @@ export class ToolSet implements IToolSet {
     return { server_id: this.id, destination_host: this.source.serverHost ?? null };
   }
 
+  resolveGrantBinding(): string | undefined {
+    return this.source.grantBinding;
+  }
+
   async toolCallInfo(
     params: CallToolRequest['params'],
     resolveUnderlyingTool?: boolean,
@@ -578,7 +590,8 @@ export class ToolSet implements IToolSet {
 
   /**
    * The event a CalDAV change names, read once before it is classified so the card can say what it
-   * changes. Null when that read fails, and the card then says the title could not be read.
+   * changes. Null when that read fails, and the change is then refused instead of carded, because a
+   * card cannot name an event it could not read.
    */
   private async caldavEventFor(params: CallToolRequest['params']): Promise<CaldavEventReview | null | undefined> {
     if (!this.firstParty || this.name !== CALDAV_SERVER_NAME) {
@@ -670,6 +683,7 @@ export class ToolSet implements IToolSet {
         mcp_server_name: info.mcp_server_name,
         mcp_server_id: info.mcp_server_id,
         mcp_server_host: this.source.serverHost,
+        mcp_grant_binding: this.source.grantBinding,
         mcp_first_party: this.firstParty,
         mcp_search_provider: this.searchProvider,
         mcp_search_tool: this.searchTools.has(params.name),

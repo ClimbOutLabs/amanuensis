@@ -194,6 +194,18 @@ export interface GetScheduledRunForInput {
   schedule_id: string;
 }
 
+export interface GetScheduledRunsForInput {
+  tenant_id: string;
+  schedule_ids: readonly string[];
+}
+
+export interface ListLatestRunsInput {
+  tenant_id: string;
+  schedule_ids: readonly string[];
+  /** Runs kept per schedule, newest `scheduled_for` first. */
+  per_schedule: number;
+}
+
 export interface UpdateScheduleRunStatusInput {
   tenant_id: string;
   id: string;
@@ -283,6 +295,8 @@ export interface IScheduleStore<TTransaction = never> {
     input: GetScheduledRunForInput,
     transaction?: TTransaction,
   ): Promise<ScheduleRunRecord | undefined>;
+  /** The pending (`scheduled`) runs of many schedules in one lookup; at most one run per schedule. */
+  getScheduledRunsFor(input: GetScheduledRunsForInput, transaction?: TTransaction): Promise<ScheduleRunRecord[]>;
   /** Inserts a run. Throws {@link ScheduleRunConflictError} on either unique index. */
   createRun(input: CreateScheduleRunInput, transaction?: TTransaction): Promise<ScheduleRunRecord>;
   /**
@@ -305,4 +319,9 @@ export interface IScheduleStore<TTransaction = never> {
     input: ListRunsInput,
     transaction?: TTransaction,
   ): Promise<{ data: ScheduleRunRecord[]; pagination: TokenPagination }>;
+  /**
+   * The newest `per_schedule` runs (any status) of each schedule in `schedule_ids`, in one read.
+   * Each schedule's runs come newest `scheduled_for` first. Empty `schedule_ids` → `[]`.
+   */
+  listLatestRuns(input: ListLatestRunsInput, transaction?: TTransaction): Promise<ScheduleRunRecord[]>;
 }

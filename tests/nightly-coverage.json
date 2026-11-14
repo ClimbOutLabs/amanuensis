@@ -37,6 +37,7 @@
     "screen:help-chat": "The chat that \"Help, I'm stuck\" opens.",
     "screen:home": "The Home screen and its More menu.",
     "screen:memory-sharing": "The grid that sets which personas share which memories.",
+    "screen:notifications-panel": "The notifications panel opens from the bell in the left panel and stays fully on screen, on a phone and on a computer.",
     "screen:phone-width": "Home, a chat and every Settings tab at phone widths, with nothing cut off at the side.",
     "screen:settings-tabs": "The strip of Settings tabs.",
     "screen:signed-in-journey": "Signing in on the built app, adding a model, chatting and signing out.",
@@ -60,6 +61,10 @@
       "tests": ["packages/frontend/tests/approvalKinds.browser.test.ts"]
     },
     "approval:schedule": {
+      "set": "approvals",
+      "tests": ["packages/frontend/tests/approvalKinds.browser.test.ts"]
+    },
+    "approval:skill": {
       "set": "approvals",
       "tests": ["packages/frontend/tests/approvalKinds.browser.test.ts"]
     },
@@ -283,6 +288,10 @@
       "set": "home",
       "tests": []
     },
+    "route:gitCommitIdentity": {
+      "set": "code",
+      "tests": []
+    },
     "route:google": {
       "set": "connectors",
       "tests": []
@@ -351,6 +360,14 @@
       "set": "reach",
       "tests": []
     },
+    "route:recallExclusion": {
+      "set": "memory",
+      "tests": []
+    },
+    "route:reminder": {
+      "set": "reminders",
+      "tests": []
+    },
     "route:repository": {
       "set": "code",
       "tests": []
@@ -396,6 +413,14 @@
     },
     "route:spaceFolder": {
       "set": "spaces",
+      "tests": []
+    },
+    "route:text": {
+      "set": "reach",
+      "tests": []
+    },
+    "route:today": {
+      "set": "home",
       "tests": []
     },
     "route:tokenFactoryUsage": {
@@ -473,12 +498,17 @@
       "tests": [
         "packages/frontend/tests/homeAndMenu.browser.test.ts",
         "packages/frontend/tests/homeColumn.browser.test.ts",
-        "packages/frontend/tests/homeCards.browser.test.ts"
+        "packages/frontend/tests/homeCards.browser.test.ts",
+        "packages/frontend/tests/homeRailPhone.browser.test.ts"
       ]
     },
     "screen:memory-sharing": {
       "set": "memory",
       "tests": ["packages/frontend/tests/memorySharing.browser.test.ts"]
+    },
+    "screen:notifications-panel": {
+      "set": "reach",
+      "tests": ["packages/frontend/tests/deliveryBellPanel.browser.test.ts"]
     },
     "screen:phone-width": {
       "set": "chat",
@@ -772,6 +802,7 @@
     "route:delivery",
     "route:emailAccount",
     "route:firstRunGuide",
+    "route:gitCommitIdentity",
     "route:google",
     "route:help",
     "route:mcpOAuth",
@@ -788,6 +819,8 @@
     "route:personalization",
     "route:privateChat",
     "route:reach",
+    "route:recallExclusion",
+    "route:reminder",
     "route:repository",
     "route:runCode",
     "route:sandboxProvider",
@@ -798,6 +831,8 @@
     "route:skill",
     "route:space",
     "route:spaceFolder",
+    "route:text",
+    "route:today",
     "route:tokenFactoryUsage",
     "route:toolOutputScreen",
     "route:voice",

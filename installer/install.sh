@@ -93,6 +93,7 @@ PASSWORD_FROM_STDIN=0
 OPT_INSTALL_DOCKER=0
 OPT_ADD_DOCKER_GROUP=0
 OPT_NO_SANDBOX=0
+OPT_BUILD_FROM_SOURCE=0
 OPT_HOST_NODE=0
 OPT_SANDBOX_ROOT=0
 OPT_TLS_ROOT=0
@@ -196,6 +197,7 @@ Options
   --tls-root            let the installer do the --tls caddy steps that need admin rights without asking
   --no-sandbox          install without the sandbox (the assistant then cannot run code or read attachments)
   --use-host-node       set up the sandbox with the Node.js on this computer (22.14 or newer) instead of a downloaded copy
+  --build-from-source   build every Aman image on this computer, even where a release published it
   --verbose             show technical details and the full list of downloads
   --dry-run             show the plan and stop; with instance import, check the file and say what it would bring
                         (an instance that has never started is started once first, so the file can be checked)
@@ -281,6 +283,7 @@ parse_args() {
       --add-docker-group) OPT_ADD_DOCKER_GROUP=1 ;;
       --sandbox-root) OPT_SANDBOX_ROOT=1 ;;
       --no-sandbox) OPT_NO_SANDBOX=1 ;;
+      --build-from-source) OPT_BUILD_FROM_SOURCE=1 ;;
       --use-host-node) OPT_HOST_NODE=1 ;;
       --print-root-steps) PRINT_ROOT_STEPS=1 ;;
       --print-network) PRINT_NETWORK=1 ;;

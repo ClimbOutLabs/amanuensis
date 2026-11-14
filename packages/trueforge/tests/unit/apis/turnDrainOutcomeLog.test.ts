@@ -31,11 +31,13 @@ const abilityNoteSummary = "I can't read email right now.";
 /** Summarization context that is only ever read by the mocked summarizer. */
 function summarizeContext() {
   const modelProviderStore: IModelProviderStore = {
+    managedElsewhere: false,
     listProviders: jest.fn(),
     getProvider: jest.fn(),
     getProviderForUpdate: jest.fn(),
     createProvider: jest.fn(),
     upsertProvider: jest.fn(),
+    recordProviderCheck: jest.fn(async () => undefined),
     listModels: jest.fn(),
     deleteProvider: jest.fn(),
   };

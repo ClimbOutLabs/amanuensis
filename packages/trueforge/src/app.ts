@@ -47,6 +47,8 @@ import { createPersonalizationRouter } from './apis/personalization';
 import { createPersonasRouter, createSessionPersonasRouter } from './apis/personas';
 import { createChatPrivacyRouter, createPrivateChatSweepRouter } from './apis/privateChats';
 import { createReachRouter } from './apis/reach';
+import { createRecallExclusionsRouter } from './apis/recallExclusions';
+import { createRemindersRouter } from './apis/reminders';
 import { createRepositoriesRouter, createSessionRepositoryRouter } from './apis/repositories';
 import { createScheduleExecutionRouter, createSchedulesRouter } from './apis/schedules';
 import { createSentinelSettingsRouter } from './apis/sentinelSettings';
@@ -58,6 +60,8 @@ import { createAvailableSkillsRouter, type ResolveSkillStore } from './apis/skil
 import { createSpaceFolderAssignmentsRouter, createSpaceFoldersRouter } from './apis/spaceFolders';
 import { createSpacePicturesRouter } from './apis/spacePictures';
 import { createSpacesRouter } from './apis/spaces';
+import { createTextNumberRouter } from './apis/textNumber';
+import { createTodayRouter } from './apis/today';
 import { createTurnsRouter } from './apis/turns';
 import { createVoiceRouter } from './apis/voice';
 import type { Authenticator } from './auth/authenticator';
@@ -101,8 +105,10 @@ import type { IModelProviderStore } from './db/modelProviderStore';
 import type { INoticingStore } from './db/noticingStore';
 import type { IPersonalizationStore } from './db/personalizationStore';
 import type { IPersonaStore } from './db/personaStore';
+import type { PersonOwner } from './db/personOwner';
 import type { IPushSubscriptionStore } from './db/pushSubscriptionStore';
 import type { IReachSettingsStore } from './db/reachSettingsStore';
+import type { IRecallExclusionStore } from './db/recallExclusionStore';
 import type { IRepositoryStore } from './db/repositoryStore';
 import type { ISandboxProviderStore } from './db/sandboxProviderStore';
 import type { IScheduleStore } from './db/scheduleStore';
@@ -112,6 +118,7 @@ import type { SessionCustom, TurnCustom } from './db/sessionCustom';
 import type { ISessionMetricsStore } from './db/sessionMetricsStore';
 import type { ISkillStore } from './db/skillStore';
 import type { ISpaceStore } from './db/spaceStore';
+import type { ITextContactStore } from './db/textContactStore';
 import type { WithTransaction } from './db/transaction';
 import type { ITurnArtifactStore } from './db/turnArtifactStore';
 import type { SchedulerProbe } from './help/healthCheck';
@@ -134,10 +141,13 @@ import type { DeliveryService } from './runtime/delivery/deliveryService';
 import type { EventSubscriptionRegistry } from './runtime/event-subscription';
 import { localModelsFromConfig } from './runtime/localModels';
 import { createVaultClient } from './runtime/memory/vaultClient';
+import { createModelProviderChecker } from './runtime/modelProviderCheck';
 import type { NoticingService } from './runtime/noticing/noticingService';
+import type { ChannelViewer } from './runtime/noticing/reachChannels';
 import type { ReminderReach } from './runtime/noticing/reminderReach';
 import { resolveSandboxProvider } from './runtime/sessionResources';
 import { createSpacePictureService } from './runtime/spacePictures/spacePictureService';
+import type { TextNumberService } from './runtime/texts/textNumber';
 import { TokenFactoryDailyCapError, type TokenFactoryBudget } from './runtime/tokenFactoryBudget';
 import { envManagedModelProviderNames } from './runtime/tokenFactoryProvider';
 import type { TurnDrainRegistry } from './runtime/turnDrains';
@@ -319,6 +329,8 @@ export interface ServerDeps<TTransaction> {
   /** Keeps the past-chat search index for people who turned the search on. */
   chatSearchIndexer: ChatSearchIndexer;
   briefItemStore: IBriefItemCompletionStore;
+  /** Facts pulled out of a chat's recall, stored with the chat. */
+  recallExclusionStore: IRecallExclusionStore;
   deliveryStore: IDeliveryStore;
   pushSubscriptionStore: IPushSubscriptionStore;
   /** The one door into the feed; due reminders go through it. */
@@ -329,8 +341,13 @@ export interface ServerDeps<TTransaction> {
   noticingService: NoticingService;
   /** Settles how loud a due reminder is. */
   reminderReach: ReminderReach;
-  /** Which phone channels this server can use. Texts and calls are set up by later parts. */
-  reachChannels: () => ReachAvailability;
+  /** Which phone channels this server can use. */
+  reachChannels: (input?: { viewer: ChannelViewer }) => ReachAvailability;
+  /** Whether this person runs Aman, so a problem with the server's setup is worded for them. */
+  isInstanceOwner: (owner: PersonOwner) => boolean;
+  /** The person's number for texts and its confirming. */
+  textNumbers: TextNumberService;
+  textContactStore: ITextContactStore;
   /** The public key a browser needs to turn push on; undefined while push is off. */
   webPushPublicKey: string | undefined;
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
@@ -806,9 +823,11 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         sentinelAuditStore: deps.sentinelAuditStore,
         deliveryStore: deps.deliveryStore,
         reachSettingsStore: deps.reachSettingsStore,
+        textContactStore: deps.textContactStore,
         turnArtifactStore: deps.turnArtifactStore,
         tokenStore: deps.tokenStore,
         resolveMcpServerStore: deps.resolveMcpServerStore,
+        resolveModelProviderStore: deps.resolveModelProviderStore,
         resolveAgentStore: deps.resolveAgentStore,
         authorizer: deps.authorizer,
         outboundSecrets: deps.outboundSecrets,
@@ -831,10 +850,12 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       sentinelAuditStore: deps.sentinelAuditStore,
       deliveryStore: deps.deliveryStore,
       reachSettingsStore: deps.reachSettingsStore,
+      textContactStore: deps.textContactStore,
       turnArtifactStore: deps.turnArtifactStore,
       chatSearchIndexer: deps.chatSearchIndexer,
       tokenStore: deps.tokenStore,
       resolveMcpServerStore: deps.resolveMcpServerStore,
+      resolveModelProviderStore: deps.resolveModelProviderStore,
       resolveAgentStore: deps.resolveAgentStore,
       mcpCatalog: deps.mcpCatalog,
       withTransaction: deps.withTransaction,
@@ -854,9 +875,11 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         resolveSkillStore: deps.resolveSkillStore,
         resolveSandboxProviderStore: deps.resolveSandboxProviderStore,
         globalSettingsStore: deps.globalSettingsStore,
+        personalizationStore: deps.personalizationStore,
         tokenFactoryBudget: deps.tokenFactoryBudget,
         envManagedModelProviderNames: envManagedProviders,
         localModels: localModelsFromConfig(),
+        checkSavedProvider: createModelProviderChecker({ logger: deps.logger }),
         withTransaction: deps.withTransaction,
         logger: deps.logger,
         resolveRequestContext,
@@ -945,9 +968,11 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     withAuth(
       createReachRouter({
         reachStore: deps.reachSettingsStore,
+        textContacts: deps.textContactStore,
         noticingStore: deps.noticingStore,
         deliveryService: deps.deliveryService,
         channels: deps.reachChannels,
+        isInstanceOwner: deps.isInstanceOwner,
         memories: async ({ tenant_id }) => {
           const outcome = await createVaultClient({ logger: deps.logger, tenantId: tenant_id })?.listEntries({
             namespace: '',
@@ -957,6 +982,31 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         },
         resolveRequestContext,
         logger: deps.logger,
+      }),
+      authMiddleware,
+    ),
+  );
+  app.route(
+    '/api/v1/user/reach/texts',
+    withAuth(
+      createTextNumberRouter({
+        textNumbers: deps.textNumbers,
+        available: () => deps.reachChannels().texts.available,
+        resolveRequestContext,
+      }),
+      authMiddleware,
+    ),
+  );
+  app.route(
+    '/api/v1/user/reminders',
+    withAuth(
+      createRemindersRouter({
+        scheduleStore: deps.scheduleStore,
+        sessionStore: deps.sessionStore,
+        agentStore: deps.agentStore,
+        personaStore: deps.personaStore,
+        personalizationStore: deps.personalizationStore,
+        resolveRequestContext,
       }),
       authMiddleware,
     ),
@@ -992,6 +1042,26 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         sentinelSettingsStore: deps.sentinelSettingsStore,
         resolveRequestContext,
         logger: deps.logger,
+      }),
+      authMiddleware,
+    ),
+  );
+  // The right rail's Home view: the day read from stored state, never from a model turn.
+  app.route(
+    '/api/v1/today',
+    withAuth(
+      createTodayRouter({
+        googleConnectionStore: deps.googleConnectionStore,
+        mcpServerStore: deps.resolveMcpServerStore(),
+        scheduleStore: deps.scheduleStore,
+        sessionStore: deps.sessionStore,
+        sessions: deps.sessions,
+        calendarAccountUrl: configuration.CALENDAR_ACCOUNT_URL,
+        calendarAccountKey: configuration.CALENDAR_ACCOUNT_SECRET,
+        fetchImpl: undefined,
+        resolveRequestContext,
+        logger: deps.logger,
+        now: () => new Date(),
       }),
       authMiddleware,
     ),
@@ -1243,6 +1313,17 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
   app.route(
     '/api/v1/sessions',
     withAuth(
+      createRecallExclusionsRouter({
+        sessionStore: deps.sessionStore,
+        recallExclusionStore: deps.recallExclusionStore,
+        resolveRequestContext,
+      }),
+      authMiddleware,
+    ),
+  );
+  app.route(
+    '/api/v1/sessions',
+    withAuth(
       createBugReportRouter({
         sessions: deps.sessions,
         agentStore: deps.agentStore,
@@ -1353,6 +1434,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     withAuth(
       createTurnsRouter({
         mcpCatalog: deps.mcpCatalog,
+        skillCatalog: deps.skillCatalog,
         sessions: deps.sessions,
         sessionStore: deps.sessionStore,
         activeTurns: deps.activeTurns,
@@ -1373,6 +1455,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         chatSearchIndexer: deps.chatSearchIndexer,
         tokenFactoryBudget: deps.tokenFactoryBudget,
         chatDeletionStore: deps.chatDeletionStore,
+        recallExclusionStore: deps.recallExclusionStore,
         eventSubscriptions: deps.eventSubscriptions,
         resolveSandboxProviderStore: deps.resolveSandboxProviderStore,
         sandboxProviderResolver: deps.sandboxProviderResolver,

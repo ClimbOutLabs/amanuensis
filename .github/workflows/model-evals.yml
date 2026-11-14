@@ -1,0 +1,156 @@
+name: Model evals
+
+# Runs real models against a throwaway eval-mode Aman: everyday tasks, safety traps and memory
+# questions, graded by rule checks and a judge model. Each run adds to a score history kept as a
+# run artifact, and the run fails when a model scores clearly worse than its last run.
+#
+# The model keys live only in the `model-evals` environment, which runs on main alone. This workflow
+# never runs for pull requests, so code from a pull request can never see a key.
+on:
+  schedule:
+    # Mondays 10:41 UTC, off the hour, when scheduled runs start late.
+    - cron: '41 10 * * 1'
+  workflow_dispatch:
+    inputs:
+      models:
+        description: 'Models to compare, comma separated, as provider/model, e.g. meta/muse-spark-1-1. Empty uses the weekly list.'
+        required: false
+        default: ''
+      extra_token_factory_model:
+        description: 'Optional extra Token Factory model id (needs the Token Factory key), e.g. deepseek-ai/DeepSeek-V3.2. Name it in models as tokenfactory/<its short name>.'
+        required: false
+        default: ''
+      runs:
+        description: 'Times to run each case (1 to 5).'
+        required: false
+        default: '1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: model-evals
+  cancel-in-progress: false
+
+env:
+  # The weekly models. Change this line to change which models run every Monday. Models come from
+  # packages/trueforge/evals/eval-providers.json, and Token Factory models from its own key.
+  WEEKLY_MODELS: 'meta/muse-spark-1-1'
+  # One fixed judge, so scores stay comparable from week to week.
+  JUDGE_MODEL: 'meta/muse-spark-1-1'
+
+jobs:
+  model-evals:
+    name: Compare models
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    environment: model-evals
+    permissions:
+      contents: read
+      actions: read
+
+    steps:
+      - name: Check that a model key is set
+        env:
+          HAS_KEY: ${{ secrets.MODEL_EVAL_META_API_KEY != '' || secrets.MODEL_EVAL_NEBIUS_API_KEY != '' }}
+        run: |
+          if [ "$HAS_KEY" != 'true' ]; then
+            echo '::error::The model eval needs a model key. Add MODEL_EVAL_META_API_KEY to the model-evals environment, then run this workflow again.'
+            exit 1
+          fi
+
+      - name: Check out repository code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The newest history from an earlier run, if one is still kept. Without one, this run starts it.
+      - name: Fetch the score history
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/history"
+          for run_id in $(gh run list --repo "$GITHUB_REPOSITORY" --workflow model-evals.yml --branch main --limit 20 --json databaseId,status --jq '.[] | select(.status == "completed") | .databaseId'); do
+            if gh run download "$run_id" --repo "$GITHUB_REPOSITORY" --name model-eval-history --dir "$RUNNER_TEMP/history" 2>/dev/null; then
+              echo "Using the score history from run $run_id."
+              break
+            fi
+          done
+
+      - name: Run the model eval
+        env:
+          META_API_KEY: ${{ secrets.MODEL_EVAL_META_API_KEY }}
+          NEBIUS_API_KEY: ${{ secrets.MODEL_EVAL_NEBIUS_API_KEY }}
+          TOKEN_FACTORY_MODEL: ${{ inputs.extra_token_factory_model }}
+          MODELS: ${{ inputs.models || env.WEEKLY_MODELS }}
+          RUNS: ${{ inputs.runs || '1' }}
+          LABEL: ${{ github.event_name == 'schedule' && 'weekly' || 'on-demand' }}
+        run: |
+          for name in META_API_KEY NEBIUS_API_KEY TOKEN_FACTORY_MODEL; do
+            if [ -z "${!name}" ]; then unset "$name"; fi
+          done
+          pnpm eval:models:fresh -- \
+            --models "$MODELS" \
+            --judge "$JUDGE_MODEL" \
+            --runs "$RUNS" \
+            --label "$LABEL" \
+            --history "$RUNNER_TEMP/history/history.json" \
+            --out "$RUNNER_TEMP/results"
+
+      # Nothing the run keeps may hold a key. If one ever does, the files are deleted and the run fails.
+      - name: Check that no output holds a model key
+        if: always()
+        env:
+          META_API_KEY: ${{ secrets.MODEL_EVAL_META_API_KEY }}
+          NEBIUS_API_KEY: ${{ secrets.MODEL_EVAL_NEBIUS_API_KEY }}
+        run: |
+          found=0
+          for name in META_API_KEY NEBIUS_API_KEY; do
+            key="${!name}"
+            if [ -z "$key" ]; then continue; fi
+            for dir in "$RUNNER_TEMP/results" "$RUNNER_TEMP/history"; do
+              if [ -d "$dir" ] && grep -rqF -- "$key" "$dir"; then
+                rm -rf "$dir"
+                found=1
+              fi
+            done
+          done
+          if [ "$found" = 1 ]; then
+            echo '::error::An output file held a model key, so the results were deleted and not kept. Do not rerun until the cause is fixed.'
+            exit 1
+          fi
+
+      - name: Show the scores on the run page
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/results/summary.md" ]; then
+            cat "$RUNNER_TEMP/results/summary.md" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Keep the results
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: model-eval-results
+          path: ${{ runner.temp }}/results/
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Keep the score history
+        if: always() && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: model-eval-history
+          path: ${{ runner.temp }}/history/history.json
+          if-no-files-found: ignore
+          retention-days: 90

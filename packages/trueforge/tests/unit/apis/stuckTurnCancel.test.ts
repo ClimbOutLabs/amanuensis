@@ -16,6 +16,20 @@ import {
   STALL_MID_ANSWER_DIRECTIVE,
 } from '../../fixtures/scriptedModelServer';
 
+// Name resolution is stubbed for the whole suite: localhost resolves to loopback and every other
+// name to a public address. The address check judges a connector by what its name resolves to,
+// so the suite's answer cannot depend on the DNS of the machine running it.
+jest.mock('node:dns/promises', () => {
+  const actual = jest.requireActual<typeof import('node:dns/promises')>('node:dns/promises');
+  return {
+    ...actual,
+    lookup: async (hostname: string, options?: { all?: boolean | undefined }) => {
+      const entry = { address: hostname === 'localhost' ? '127.0.0.1' : '93.184.216.34', family: 4 };
+      return options?.all === true ? [entry] : entry;
+    },
+  };
+});
+
 const CANCEL_BUDGET_MS = 5_000;
 const TAVILY_SERVER_NAME = 'tavily';
 

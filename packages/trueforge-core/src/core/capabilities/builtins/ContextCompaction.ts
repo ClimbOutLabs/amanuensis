@@ -5,7 +5,7 @@ import { EventType, newEventId } from '../../events/schema';
 import type { ILLM, LLMCreateParams } from '../../llm/ILLM';
 import { getEmptyUsage, type CompletionUsage, type FinishReason, type RawAssistantMessage } from '../../llm/LLMTypes';
 import { resolveMaxOutputTokens } from '../../llm/maxOutputTokens';
-import { estimateTokensForString } from '../../llm/usage';
+import { estimateTokensForString, PICTURE_TOKEN_ESTIMATE } from '../../llm/usage';
 import type { AgentDefinition, ModelParams } from '../../runtime/AgentDefinition';
 import { InternalEventType, type ContextMessage } from '../../runtime/AgentThread.types';
 import {
@@ -13,7 +13,9 @@ import {
   internalSystemMessage,
   isInternalSystemMessage,
   isLLMContextMessage,
+  pictureCount,
   userAuthoredText,
+  withoutEarlierThinking,
 } from '../../runtime/contextUtils';
 import {
   boundRepositoryContextFromBinding,
@@ -21,6 +23,7 @@ import {
   SANDBOX_EXEC_TOOL_NAME,
   SANDBOX_REPLACE_TEXT_TOOL_NAME,
   SANDBOX_RUN_REGISTERED_COMMAND_TOOL_NAME,
+  SANDBOX_RUN_SKILL_SCRIPT_TOOL_NAME,
   SANDBOX_SUBMIT_IMPLEMENTATION_PLAN_TOOL_NAME,
   SANDBOX_WRITE_FILE_TOOL_NAME,
   type BoundRepository,
@@ -36,9 +39,12 @@ import type {
 } from '../AgentContextProcessor';
 import { formatBoundRepositoryContext } from './RepositoryBindingContext';
 import { TaskChecklistRequestState, type TaskChecklistAccess } from './TaskChecklist';
-import { TOKEN_BUDGET_SAFETY_MARGIN } from './tokenBudgetConstants';
+import {
+  DEFAULT_CONTEXT_COMPACTION_RATIO,
+  DEFAULT_CONTEXT_COMPACTION_THRESHOLD_TOKENS,
+  TOKEN_BUDGET_SAFETY_MARGIN,
+} from './tokenBudgetConstants';
 
-export const DEFAULT_CONTEXT_COMPACTION_THRESHOLD_TOKENS = 50 * 1000;
 export const MAX_COMPACTION_TOUCHED_PATHS = 200;
 export const COMPACTION_TOUCHED_PATHS_STATE_KEY = 'tfy.context_compaction.touched_paths';
 /** Fraction of the threshold to keep verbatim as a recent tail after compaction. */
@@ -53,7 +59,6 @@ export const MAX_REJECTED_OUTPUT_PREVIEW_CHARS = 2_000;
 export const MAX_CONSECUTIVE_COMPACTION_SKIPS = 3;
 /** Unused: retained for API compatibility. The truncation fallback supersedes the skip circuit breaker. */
 export const COMPACTION_BACKOFF_TOKEN_DELTA = 10_000;
-export const DEFAULT_CONTEXT_COMPACTION_RATIO = 0.8;
 
 /** A separately configured summarizing model; its own context length bounds the summarization request. */
 export interface CompactionModel {
@@ -204,12 +209,13 @@ const SANDBOX_TOOL_NAMES: ReadonlySet<string> = new Set([
   SANDBOX_REPLACE_TEXT_TOOL_NAME,
   SANDBOX_WRITE_FILE_TOOL_NAME,
   SANDBOX_RUN_REGISTERED_COMMAND_TOOL_NAME,
+  SANDBOX_RUN_SKILL_SCRIPT_TOOL_NAME,
   SANDBOX_SUBMIT_IMPLEMENTATION_PLAN_TOOL_NAME,
 ]);
 
 /**
  * True when `context` contains at least one assistant tool call naming a sandbox tool
- * (exec, apply_patch, replace_text, write_file, run_registered_command, or
+ * (exec, apply_patch, replace_text, write_file, run_registered_command, run_skill_script, or
  * submit_implementation_plan). A sandbox being attached to the thread is not by itself evidence
  * of engineering work: Amanuensis attaches a sandbox to ordinary assistant chats too, so mode
  * selection looks for actual use, not attachment. See CompactionSessionMode.
@@ -704,10 +710,16 @@ function touchedPathsFromSuccessfulToolResults(context: ContextMessage[]): strin
   return [...paths].sort();
 }
 
-function splitContextForCompaction(
-  context: readonly ContextMessage[],
-  tailTokenBudget: number,
-): { older: ContextMessage[]; tail: ContextMessage[] } {
+function splitContextForCompaction({
+  context,
+  tailTokenBudget,
+  countPictures,
+}: {
+  context: readonly ContextMessage[];
+  tailTokenBudget: number;
+  /** Size each picture as the request size check does, so the kept tail still fits afterwards. */
+  countPictures: boolean;
+}): { older: ContextMessage[]; tail: ContextMessage[] } {
   if (context.length === 0) {
     return { older: [], tail: [] };
   }
@@ -723,7 +735,9 @@ function splitContextForCompaction(
     if (message === undefined) {
       break;
     }
-    const messageTokens = estimateTokensForContextMessages([message]).prompt_tokens;
+    const pictureTokens =
+      countPictures && isLLMContextMessage(message) ? pictureCount(message.content) * PICTURE_TOKEN_ESTIMATE : 0;
+    const messageTokens = estimateTokensForContextMessages([message]).prompt_tokens + pictureTokens;
     if (tailTokens + messageTokens > realTailBudget) {
       tailStartIndex = i + 1;
       break;
@@ -1194,6 +1208,7 @@ export class ContextCompaction implements PreLLMAgentContextProcessor {
   private modelParams: ModelParams | undefined;
   private compactionThresholdTokens: number;
   private readonly modelContextLength: number | undefined;
+  private readonly modelSupportsVision: boolean;
   private readonly summarizerContextLength: number | undefined;
   private readonly checklist: TaskChecklistAccess | undefined;
   private readonly checklistState: TaskChecklistRequestState | undefined;
@@ -1208,6 +1223,8 @@ export class ContextCompaction implements PreLLMAgentContextProcessor {
     compactionThresholdTokens: number;
     /** The thread model's context length; sizes the retained tail. */
     modelContextLength?: number | undefined;
+    /** Whether the thread's model reads pictures; the kept tail then counts each one. */
+    modelSupportsVision?: boolean | undefined;
     /** The summarizing model's context length; bounds its request. Unknown falls back to the larger of the threshold and the default. */
     summarizerContextLength?: number | undefined;
     checklist?: TaskChecklistAccess | undefined;
@@ -1219,6 +1236,7 @@ export class ContextCompaction implements PreLLMAgentContextProcessor {
     this.modelParams = input.modelParams;
     this.compactionThresholdTokens = input.compactionThresholdTokens;
     this.modelContextLength = input.modelContextLength;
+    this.modelSupportsVision = input.modelSupportsVision === true;
     this.summarizerContextLength = input.summarizerContextLength;
     this.checklist = input.checklist;
     this.checklistState = input.checklistState;
@@ -1465,13 +1483,20 @@ export class ContextCompaction implements PreLLMAgentContextProcessor {
     const activeRequestChars = Math.max(tailTokenBudget, 100) * CHARS_PER_TOKEN;
     // A last message larger than the tail budget leaves the tail empty: it is then summarized from
     // the transcript (cut there if oversized) and the summary's last_request carries it forward.
-    const { older: olderContext, tail: recentTail } = splitContextForCompaction(execution.context, tailTokenBudget);
+    // Measured and kept as it is sent: thinking before the person's latest message is never sent
+    // again, so it neither counts toward the kept tail nor survives in the shortened context.
+    const sentContext = withoutEarlierThinking(execution.context);
+    const { older: olderContext, tail: recentTail } = splitContextForCompaction({
+      context: sentContext,
+      tailTokenBudget,
+      countPictures: this.modelSupportsVision,
+    });
 
     let systemContent: string;
     let repository: BoundRepositoryContext | undefined;
     let commands: BoundRepository['commands'] | undefined;
     const entries = transcriptEntries(olderContext);
-    const userText = userAuthoredText(execution.context);
+    const userText = userAuthoredText(sentContext);
     if (mode === 'coding') {
       // Fetch the durable checklist for the host-supplied state; the checklist is only needed
       // in coding mode where it is included in the handoff message.
@@ -1506,7 +1531,7 @@ export class ContextCompaction implements PreLLMAgentContextProcessor {
       this.logger?.warn(`Compaction request cannot fit the model context (mode: ${mode}); falling back to truncation`);
       yield* this.truncationFallback({
         mode,
-        context: execution.context,
+        context: sentContext,
         recentTail,
         activeRequestChars,
         contextTokens,
@@ -1517,7 +1542,7 @@ export class ContextCompaction implements PreLLMAgentContextProcessor {
     }
     const requiredSections = mode === 'coding' ? REQUIRED_SUMMARY_SECTIONS : CONVERSATION_REQUIRED_SUMMARY_SECTIONS;
     // A partial summary replaces the whole context, so it must not drop an earlier summary's content.
-    const earlierSummary = latestCompactionSummaryMessage(execution.context);
+    const earlierSummary = latestCompactionSummaryMessage(sentContext);
     const earlierSummaryAtRisk = earlierSummary !== undefined && !recentTail.includes(earlierSummary);
     const essentialSections = earlierSummaryAtRisk ? requiredSections : ESSENTIAL_SUMMARY_SECTIONS[mode];
     // What the summarizer saw that nobody at the host wrote; a reply repeating it is not a summary.
@@ -1573,7 +1598,7 @@ export class ContextCompaction implements PreLLMAgentContextProcessor {
       );
       yield* this.truncationFallback({
         mode,
-        context: execution.context,
+        context: sentContext,
         recentTail,
         activeRequestChars,
         contextTokens,
@@ -1633,7 +1658,7 @@ export class ContextCompaction implements PreLLMAgentContextProcessor {
       );
       yield* this.truncationFallback({
         mode,
-        context: execution.context,
+        context: sentContext,
         recentTail,
         activeRequestChars,
         contextTokens,
@@ -1653,7 +1678,7 @@ export class ContextCompaction implements PreLLMAgentContextProcessor {
     // truncation fallback does; a complete one carries it in last_request / user_request.
     const activeRequest = missingSections.some(name => REQUEST_SECTIONS.includes(name))
       ? activeRequestMessages({
-          context: execution.context,
+          context: sentContext,
           tail: new Set(recentTail),
           maxChars: activeRequestChars,
         })
@@ -1714,6 +1739,7 @@ export function contextCompaction(options: {
     modelParams: options.compactionModel?.modelParams ?? options.definition.modelParams,
     compactionThresholdTokens: threshold,
     modelContextLength: options.definition.modelProperties?.contextLength,
+    modelSupportsVision: options.definition.modelSupportsVision,
     summarizerContextLength: (options.compactionModel ?? options.definition).modelProperties?.contextLength,
     checklist: options.checklist,
     checklistState: options.checklistState,

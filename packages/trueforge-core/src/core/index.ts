@@ -205,6 +205,8 @@ export {
   TOKEN_FACTORY_DEFAULT_BASE_URL,
   VERCEL_AI_PROVIDER_NAMES,
   VercelAILLM,
+  classifyProviderCallError,
+  describeAuthRefusal,
 } from './llm/VercelAILLM';
 export type { StreamTimeout, VercelAILLMConfig, VercelAIProviderConfig, VercelAIProviderName } from './llm/VercelAILLM';
 
@@ -301,7 +303,12 @@ export {
   DEFAULT_MODEL_HTTP_HEADERS_TIMEOUT_MS,
   DEFAULT_MODEL_HTTP_MAX_RETRIES,
   MCP_HTTP_HEADERS_TIMEOUT_MARGIN_MS,
+  OutboundRedirectRefusedError,
   configureOutboundFetches,
+  withCheckedRedirects,
+  withoutCrossOriginCredentials,
+  type OutboundRedirectCheck,
+  type OutboundRedirectRefusalKind,
 } from './util/outboundFetch';
 export { PromiseTimeoutError, withTimeout } from './util/promiseUtils';
 export { isRedirectStatus, redirectTargetOrigin } from './util/redirects';
@@ -345,6 +352,8 @@ export type {
 } from './sandbox/driver/RunCodeService';
 export { runCodeStatusFromReadiness } from './sandbox/driver/runCodeStatus';
 export { DisabledDriver } from './sandbox/driver/sandboxDisabled';
+export { DEFAULT_GIT_COMMIT_IDENTITY, GitCommitIdentitySchema } from './sandbox/gitCommitIdentity';
+export type { GitCommitIdentity } from './sandbox/gitCommitIdentity';
 export { GIT_NETWORK_ENV_NAMES, pickGitNetworkEnv } from './sandbox/hostAuthenticatedGit';
 export {
   PACKAGE_GIT_DEPENDENCY_MESSAGE,
@@ -361,6 +370,7 @@ export {
   ensureExecSuccess,
   executeVerifiedWorkspaceCommit,
   shellEscape,
+  withArgvAsCommandLine,
   withTrustedPath,
   workspaceTerminationCommand,
 } from './sandbox/provider/Provider';
@@ -385,6 +395,7 @@ export type {
 export { TFYSandboxProvider } from './sandbox/provider/TFYSandboxProvider';
 export {
   SANDBOX_RUN_REGISTERED_COMMAND_TOOL_NAME,
+  SANDBOX_RUN_SKILL_SCRIPT_TOOL_NAME,
   SANDBOX_WRITE_FILE_TOOL_NAME,
   SKILL_DOWNLOAD_TIMEOUT_SECONDS,
   Sandbox,
@@ -547,6 +558,7 @@ export {
   searchResultUrls,
 } from './permissions/provenance';
 export type { ChatProvenance, ReadSource, SearchResultUrls } from './permissions/provenance';
+export type { SkillNetworkCardRequest } from './permissions/skillNetworkCards';
 export {
   AUTO_DENY_REASONS,
   TIER2_ACTION_KINDS,
@@ -565,6 +577,8 @@ export type {
   Tier3Card,
   Tier3Persona,
   Tier3Schedule,
+  Tier3ScheduleTools,
+  Tier3Skill,
   TierDecision,
   TrackedExecutionBinding,
 } from './permissions/tier';

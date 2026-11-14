@@ -1,19 +1,19 @@
 ---
-title: 'TrueForge UI SDK'
+title: 'Aman UI SDK'
 sidebarTitle: 'Overview'
-description: 'Use the bundled TrueForge chat experience — or embed the same UI in your app with the React UI SDK.'
+description: 'Use the bundled Aman chat experience — or embed the same UI in your app with the React UI SDK.'
 ---
 
-`@truefoundry/trueforge-ui` provides a production-ready agent chat experience as a single, reusable React component. TrueForge ships this full chat UI with the server — browse agents, stream responses, approve tools, connect MCP OAuth, and manage Settings — and publishes the same experience as `@truefoundry/trueforge-ui` so you can embed it in your own React app.
+`@truefoundry/trueforge-ui` provides a production-ready agent chat experience as a single, reusable React component. Aman ships this full chat UI with the server — browse agents, stream responses, approve tools, connect MCP OAuth, and manage Settings — and publishes the same experience as `@truefoundry/trueforge-ui` so you can embed it in your own React app.
 
 Key Features:
 
 - **Agent Modes** - Chat with a single agent, browse an agent library, or allow users to create and compose new agents.
 - **Chat** - Supports streaming responses, session history, tool calls with approval workflows, and file attachments.
-- **Themes** - Includes built-in themes for Claude, ChatGPT, Gemini, and TrueFoundry, with support for creating custom themes.
+- **Themes** - Includes built-in themes (Paper, Forest, Midnight and High contrast), with support for creating custom themes.
 - **Layouts** - Supports full-screen layouts with a sidebar or drawer, as well as embedded layouts with side-docked or floating widgets.
 - **Integration Settings** - Configure models, MCP servers, skills, and sandbox environments.
-- **Server Configuration** - Choose between TrueForge, a fully custom server, or TrueFoundry.
+- **Server Configuration** - Choose between Aman, a fully custom server, or TrueFoundry.
 
 ## Chat history and organization
 
@@ -21,13 +21,43 @@ The sidebar's chat history list supports renaming chats, filing them into folder
 
 **Rename a chat**: open a chat's **···** menu (the desktop dropdown, or the sheet on mobile/compact layouts) and choose **Rename**. Type the new title and press Enter, or click **Rename**, to save; Escape cancels without saving, and an empty title is rejected. Renaming updates the sidebar row immediately and persists to the session.
 
+**Chat titles**: a new chat is titled from the subject of its first exchange, in a few words, once the first reply finishes. While that first reply is being written, the chat carries the start of your first message as its title. A title you set by renaming is yours: Aman never replaces it. A scheduled run's chat is titled with its schedule's name and the day it ran, such as "Morning brief · Thursday, November 13".
+
 **Folders**: click **New folder** next to the chat history header to create a folder. Move an existing chat into one from its **···** menu (**Move to folder**), which also lets you create a folder on the spot. Folders render as collapsible sections above the unfiled chats; each folder's own **···** button opens a dialog to rename or delete it, deleting a folder keeps its chats, just unfiled.
+
+**Unseen answers**: a chat whose latest answer you have not opened yet shows a dot and a bold title in the list, the same mark a chat gets when a reminder lands in it. The mark clears when you open the chat. Aman stamps each chat with the time its latest answer landed, and your browser remembers when you last opened each chat, so the mark is kept per browser: reading a chat on your phone does not clear its mark on your laptop.
 
 **Agent details**: while a chat is open, the **Agent details** switch in the header turns the agent's internal steps on or off for that chat. On a phone narrower than 360px it is labelled **Details**. The switch shows whether they are on. With them on, each answer shows its steps, tool calls, sub-agents, the lines the model wrote between steps, and the model and cost line. With them off, you see only your message, the answer, and anything that needs you: approval cards, notices written for you, and one progress line while Aman works. If a step failed or was blocked, one plain line under the answer says so. A reply that could not finish says so in one plain line. The switch only appears once the chat has a persisted session, and is hidden while the chat is idle or on a fresh, unsaved chat.
 
 A chat's **···** menu itself only appears when at least one of Rename, Delete, or Move to folder is actually available for it.
 
 **Incognito chats**: on a new chat, press **Start incognito chat** beside the persona button before you send the first message. Hover over the button for a short reminder of what it does. The message box then gets a frame in the text color instead of the accent color, and a line above it says that nothing from the chat is kept and whether the words leave this machine. Aman can still read its memories, spaces and reminders in an incognito chat, but saves nothing from it: it cannot make spaces, reminders, schedules or personas there, and the web browser is off. The line above the message box is checked again after each reply and when you switch persona. While the chat is open, it shows in the history list with an **Incognito** label, in that browser tab only. It never shows in search, and it cannot be moved to a folder. Press **Close and delete** above the message box, then **Delete for good** to confirm; the chat is deleted for good and the app opens a new chat. An incognito chat left open is deleted 24 hours after its last reply. See [Privacy](/privacy#incognito-chats) for what is kept on purpose.
+
+## The right rail: the assistant's desk
+
+The panel on the right is the assistant's desk: what it is holding for you, right now, in this context. It only ever reads records the app already keeps, so it is always current and it never starts a model turn, reads email, or costs anything to look at.
+
+On Home it shows the day: your calendar events with the time you become free, today's reminders that have not gone off yet, and the actions waiting for your OK. When a reminder goes off it leaves the rail and shows under the **For you** bell instead. The **Reminders** page in the left panel stays the place to see every reminder and delete one. A calendar row opens the event's details where it sits; a reminder or an action opens the chat it belongs to, which is where the action is answered. Once every timed event on the day has finished, the list also shows the next morning's first event, marked as tomorrow's. When more actions are waiting than the list can show, the list says so. In a chat it shows what the assistant is using there: the memory facts recalled for that chat, the files attached to it, and that chat's waiting actions. A fact that came from something read or found carries a Check tag, because it has not been confirmed. The × on a fact takes it out of that chat's memory for the rest of the chat only; your memory itself is not changed. **Forget everywhere** opens the memory settings, which is where memory is edited.
+
+On a phone, or in a narrow window, the rail is a strip at the bottom. Open, it shows the assistant's name and the same lists under it, in a short area you can scroll. Folded, it shows only the assistant's picture.
+
+## Approval cards
+
+When Aman wants to do something that needs your OK, such as opening a page, typing into a form, running a command, adding a calendar event or sending an email, the chat shows an approval card. Every card has the same layout:
+
+- A status line at the top. It says **Waiting for you** until you answer.
+- A short question, such as "Send this email to Rui?".
+- One quiet line on why Aman is checking with you, when there is a reason.
+- A line on what follows from saying yes, when something does. For example: "Once this is sent, it can't be unsent."
+- The facts, each shown once: the full address, who it goes to, an amount, or the exact command. A site the question already names is not listed again.
+- One row of buttons, all with the same outlined look, so none is pushed on you. **Allow** always comes first, then **Always allow in this chat**, **Change it** and **Not now**. When the action cannot be undone or reaches other people, the last button uses safe words instead of **Not now**, such as **Don't send** or **Keep it**. On a phone the buttons share the row and wrap.
+- **Details**, only when there is more to see, such as the full request a click or a form sends, or **Always allow everywhere**.
+
+An email card also shows the message exactly as it will be sent, and keeps its buttons in view while you scroll a long message. A calendar card shows the whole event.
+
+The card is set a little smaller than the chat, so it never shouts. The question is the one line at the chat's text size, in bold. Everything else is a size smaller, and the status line is the smallest. An email's message stays at the chat's text size, because it is the thing you are approving.
+
+After you answer, the card shrinks to one line, such as "Allowed · 09:14" above the question. Actions a scheduled run held for you use the same card under **Needs your OK**.
 
 ## Spaces and folders
 
@@ -61,13 +91,12 @@ A picture from another site outside a chat answer is not loaded until you choose
 {/* 
 ## Bundled UI
 
-When you run TrueForge ([Quickstart](/quickstart)), open the app URL (for example `http://localhost:8790`). You get:
+When you run Aman ([Quickstart](/quickstart)), open the app URL (for example `http://localhost:8790`). You get:
 
 - Agent composer and [Agent Library](/agent-library)
 - Streaming chat with tool calls, approvals, and ask-user-questions
 - Settings for [models](/models), [connectors](/mcp-servers), [skills](/skills), and [sandbox](/sandbox)
 - [Generative UI](/create-agent/overview#whats-in-an-agent) rendering out of the box
-
 
 ## What you can customize
 
@@ -75,8 +104,8 @@ When you run TrueForge ([Quickstart](/quickstart)), open the app URL (for exampl
 | --- | --- |
 | **Agent modes** | Chat with one agent, browse the library, or let users compose agents |
 | **Layouts** | `sidebar` (default), `drawer`, `dock`, `widget` |
-| **Themes** | Built-in Claude, ChatGPT, Gemini, TrueFoundry — or your own theme |
+| **Themes** | Built-in Paper, Forest, Midnight, High contrast — or your own theme |
 | **Slots** | Override individual UI regions without forking the whole app |
-| **Server** | TrueForge server, TrueFoundry-backed, or a custom server that implements the contract |
+| **Server** | Aman server, TrueFoundry-backed, or a custom server that implements the contract |
 
 */}

@@ -23,6 +23,8 @@ import type {
   GetSessionInput,
   ListExpiredPrivateSessionsInput,
   ListSessionsInput,
+  MergeSessionMetadataInput,
+  ReplaceSessionTitleIfCurrentInput,
   SetPrivateExpiryInput,
   StampImportedSessionInput,
   UpdateSessionInput,
@@ -344,6 +346,41 @@ export async function updateSession(db: Kysely<Database>, input: UpdateSessionIn
   if (numUpdatedRows === 0) {
     throw new SessionNotFoundError(input.session_id);
   }
+}
+
+export async function mergeSessionMetadata(db: Kysely<Database>, input: MergeSessionMetadataInput): Promise<void> {
+  const result = await db
+    .updateTable('session')
+    .set({
+      updated_at: sql<Date>`now()`,
+      last_activity_timestamp_ms: Date.now(),
+      metadata: sql<SessionMetadata>`metadata || ${json({ [input.key]: input.value })}`,
+    })
+    .where('tenant_id', '=', input.tenant_id)
+    .where('session_id', '=', input.session_id)
+    .executeTakeFirst();
+
+  const numUpdatedRows = Number(result.numUpdatedRows);
+  if (numUpdatedRows === 0) {
+    throw new SessionNotFoundError(input.session_id);
+  }
+}
+
+export async function replaceSessionTitleIfCurrent(
+  db: Kysely<Database>,
+  input: ReplaceSessionTitleIfCurrentInput,
+): Promise<boolean> {
+  const result = await db
+    .updateTable('session')
+    .set({
+      title: input.title,
+      updated_at: sql<Date>`now()`,
+    })
+    .where('tenant_id', '=', input.tenant_id)
+    .where('session_id', '=', input.session_id)
+    .where('title', '=', input.current_title)
+    .executeTakeFirst();
+  return Number(result.numUpdatedRows) > 0;
 }
 
 export async function listSessions(

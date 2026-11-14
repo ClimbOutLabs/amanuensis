@@ -3,7 +3,7 @@
 # http://aman-local-model:PORT, instead of at one of this computer's network addresses. Those addresses can stop
 # answering the instance's containers after a network change, such as an update to Tailscale, and a model that listens
 # only on 127.0.0.1 never answers at them at all. The owner names each port with aman local-model; the instance carries
-# only those ports. Needs lib/network.sh, lib/registry.sh and lib/tls.sh.
+# only those ports. Needs lib/network.sh, lib/registry.sh, lib/shared.sh and lib/tls.sh.
 
 # The ports an instance's bridge carries, comma-separated, in the order they were added.
 local_model_ports() { reg_get "$1" local_models; }
@@ -81,6 +81,39 @@ local_model_files() { # instance dir
   write_if_changed "$1/local-model-bridge.mjs" 644 <"$REPO_ROOT/ops/compose/local-model/bridge.mjs" || true
 }
 
+# The app refuses every address on the instance's own networks, the bridge's among them, unless its exact host:port is
+# in LOCAL_MODEL_ENDPOINTS. That line is the owner's, below the managed block, so the bridge's entry is added to it or
+# taken out of it and every other entry stays as it was. Only the last line Compose reads for the key changes, in
+# place; with none outside the managed block, a line is added at the end. A list left empty drops the line.
+local_model_endpoints_update() { # env file, port, add|remove
+  local env=$1 mode=$3 entry=aman-local-model:$2 old part parts=() list='' lower
+  [ -f "$env" ] || die "The settings file $env is missing. Run: aman doctor instance --fix"
+  old=$(env_get "$env" LOCAL_MODEL_ENDPOINTS)
+  [ -z "$old" ] || IFS=, read -r -a parts <<<"$old"
+  for part in ${parts[@]+"${parts[@]}"}; do
+    part=${part#"${part%%[![:space:]]*}"}
+    part=${part%"${part##*[![:space:]]}"}
+    [ -n "$part" ] || continue
+    lower=$(lowercase "$part")
+    [ "$lower" != "$entry" ] || continue
+    list=${list:+$list,}$part
+  done
+  if [ "$mode" = add ]; then list=${list:+$list,}$entry; fi
+  [ "$list" != "$old" ] || return 0
+  LC_ALL=C awk -v re="$(env_key_line_re LOCAL_MODEL_ENDPOINTS)" -v list="$list" '
+    { lines[NR] = $0 }
+    /^# >>> managed by the installer/ { inblock = 1 }
+    $0 ~ re { last = inblock ? 0 : NR }
+    /^# <<< end of managed block/ { inblock = 0 }
+    END {
+      for (i = 1; i <= NR; i++) {
+        if (i != last) print lines[i]
+        else if (list != "") print "LOCAL_MODEL_ENDPOINTS=" list
+      }
+      if (last == 0 && list != "") print "LOCAL_MODEL_ENDPOINTS=" list
+    }' "$env" | write_if_changed "$env" 600 || true
+}
+
 # aman local-model PORT [--remove]: adds a port of this computer to an instance's bridge, or takes it away, then starts
 # the instance again with it.
 cmd_instance_local_model() {
@@ -109,14 +142,17 @@ cmd_instance_local_model() {
       [ "$p" = "$port" ] || list=${list:+$list,}$p
     done
     if [ -n "$list" ]; then reg_set "$name" local_models "$list"; else reg_unset "$name" local_models; fi
+    local_model_endpoints_update "$(instance_dir "$name")/.env" "$port" remove
   else
     case ",$ports," in
       *",$port,"*) ;;
       *) reg_set "$name" local_models "${ports:+$ports,}$port" ;;
     esac
+    local_model_endpoints_update "$(instance_dir "$name")/.env" "$port" add
   fi
   instance_render "$name" "$REL_APP_TAG" "$REL_DEX_IMAGE"
   instance_up "$name" recreate
+  say "Aman started again, so the change is in use now."
   if [ "$OPT_REMOVE" = 1 ]; then
     ui_ok "Instance $name no longer carries port $port of this computer."
   else

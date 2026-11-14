@@ -65,11 +65,13 @@ function scriptedLlm(reply: string): { llm: ILLM; calls: () => number; lastPromp
 }
 
 const unusedStore: IModelProviderStore = {
+  managedElsewhere: false,
   listProviders: jest.fn(),
   getProvider: jest.fn(),
   getProviderForUpdate: jest.fn(),
   createProvider: jest.fn(),
   upsertProvider: jest.fn(),
+  recordProviderCheck: jest.fn(async () => undefined),
   listModels: jest.fn(),
   deleteProvider: jest.fn(),
 };

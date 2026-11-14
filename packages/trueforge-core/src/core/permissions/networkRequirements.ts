@@ -24,6 +24,7 @@ const FIRST_PARTY_REQUIRES_NETWORK: Record<string, boolean> = {
   replace_text: false,
   write_file: false,
   run_registered_command: false,
+  run_skill_script: false,
   run_workflow: false,
   submit_implementation_plan: false,
   // Local builtins.
@@ -36,8 +37,11 @@ const FIRST_PARTY_REQUIRES_NETWORK: Record<string, boolean> = {
   get_openui_instructions: false,
   replace_task_checklist: false,
   load_bundle: false,
+  list_skills: false,
   // Networked builtins.
   web_search: true,
+  // Adding a skill reads it from the site it comes from.
+  install_skill: true,
   // Embedded maps: geocoding, routing, and tiles all leave the machine.
   render_map: true,
   render_route: true,

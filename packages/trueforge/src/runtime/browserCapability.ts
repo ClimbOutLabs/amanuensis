@@ -23,14 +23,17 @@ import type {
 } from '@truefoundry/trueforge-core/core';
 import {
   BROWSER_CLICK_TOOL_NAME,
+  BROWSER_SELECT_TOOL_NAME,
   BROWSER_SERVER_ID,
+  BROWSER_TYPE_TOOL_NAME,
   defineTool,
   hostPictureMessage,
   LocalToolMCP,
   toolResultResponse,
   type ToolDefinition,
 } from '@truefoundry/trueforge-core/core';
-import type { BrowserClickReview, InternalToolCallInfo } from '@truefoundry/trueforge-core/core/llm/LLMTypes';
+import { BrowserElementReviewSchema, type InternalToolCallInfo } from '@truefoundry/trueforge-core/core/llm/LLMTypes';
+import type { ToolInvocationContext } from '@truefoundry/trueforge-core/core/mcp/IMCPServer';
 import type { ToolBundleName } from '@truefoundry/trueforge-core/core/runtime/toolBundleCatalog';
 import { randomUUID } from 'node:crypto';
 import type { Logger } from 'winston';
@@ -39,8 +42,8 @@ import configuration, { getPublicUiBasePath } from '../config';
 
 /** Browser tools read a page and move around it; nothing here submits anything. */
 const BROWSER_READ_ANNOTATIONS = { readOnlyHint: true, openWorldHint: true } as const;
-/** Typing and selecting change a field on the page, but nothing has left the computer yet. */
-const BROWSER_PREPARE_ANNOTATIONS = { readOnlyHint: false, openWorldHint: false } as const;
+/** Typing and selecting change a field, and the page may send it at once; the real tier comes from browserTier.ts. */
+const BROWSER_PREPARE_ANNOTATIONS = { readOnlyHint: false, openWorldHint: true } as const;
 /** A click may submit something; the real tier comes from browserTier.ts, never from these hints. */
 const BROWSER_CLICK_ANNOTATIONS = { readOnlyHint: false, openWorldHint: true } as const;
 
@@ -82,15 +85,9 @@ const ScreenshotReplySchema = z.discriminatedUnion('status', [
   ClosedReplySchema,
 ]);
 
-/** The sidecar's dry-run read of one element, for the click classifier: the element's context, or a refusal. */
-const ClickInfoReplySchema = z.discriminatedUnion('status', [
-  z.object({
-    status: z.literal('ok'),
-    site: z.string(),
-    accessible_name: z.string(),
-    is_form_submit: z.boolean(),
-    form_values: z.record(z.string(), z.string()),
-  }),
+/** The sidecar's dry-run read of one element, for the classifier and the check before acting: the read, or a refusal. */
+const ElementInfoReplySchema = z.discriminatedUnion('status', [
+  BrowserElementReviewSchema.extend({ status: z.literal('ok') }),
   RefusedReplySchema,
   MovedReplySchema,
   ClosedReplySchema,
@@ -127,6 +124,13 @@ export const LiveInputReplySchema = z.discriminatedUnion('status', [
   z.object({ status: z.literal('bad_input') }),
   ClosedReplySchema,
 ]);
+/** The text the person selected in the tab, or why there is none to copy. */
+export const LiveCopyReplySchema = z.discriminatedUnion('status', [
+  z.object({ status: z.literal('ok'), text: z.string() }),
+  z.object({ status: z.literal('nothing_selected') }),
+  z.object({ status: z.literal('password') }),
+  ClosedReplySchema,
+]);
 export const LiveTakeoverReplySchema = z.discriminatedUnion('status', [
   z.object({ status: z.literal('ok'), takeover: z.boolean() }),
   z.object({ status: z.literal('bad_input') }),
@@ -137,6 +141,7 @@ export type LiveTabsReply = z.infer<typeof LiveTabsReplySchema>;
 export type LiveFrameReply = z.infer<typeof LiveFrameReplySchema>;
 export type LiveInputReply = z.infer<typeof LiveInputReplySchema>;
 export type LiveTakeoverReply = z.infer<typeof LiveTakeoverReplySchema>;
+export type LiveCopyReply = z.infer<typeof LiveCopyReplySchema>;
 
 /** What the sidecar answered to a request, or why there is no usable answer. */
 export type SidecarResult<T> = { ok: true; body: T } | { ok: false; message: string };
@@ -169,6 +174,20 @@ const REFUSAL_MESSAGES: Record<string, string> = {
   unknown_ref: 'That part of the page is gone. Read the page again to get a fresh ref, then try again.',
   stale_ref: 'That part of the page is gone. Read the page again to get a fresh ref, then try again.',
   no_such_option: 'That option is not on the list. Read the page again to see the choices, then try again.',
+  changed:
+    'That part of the page changed after Aman checked it, so it was not touched. Read the page again, then try again.',
+  unchecked:
+    'Aman could not check that part of the page first, so it was not touched. Read the page again, then try again.',
+  not_a_field: 'That is not a field Aman can type into. Read the page again to find the right field, then try again.',
+  disabled:
+    'That part of the page is switched off right now, so it was not touched. Read the page again, then try again.',
+  read_only: 'That field cannot be changed, so nothing was typed. Read the page again to find the right field.',
+  covered:
+    'Something else on the page is covering that part, so it was not touched. Read the page again, then try again.',
+  line_break:
+    'That field holds one line, and the text has a line break or tab, which would press Enter or Tab. Nothing was typed. Type it as one line.',
+  control_character:
+    'The text has a character that is not plain text, so nothing was typed. Type it again without that character.',
   takeover:
     'The person has taken over this page in the live browser and is driving it themselves. Tell the person to press Hand back in the live view. Once they have, read the page again.',
 };
@@ -177,8 +196,15 @@ function refusalMessage(reason: string): string {
   return REFUSAL_MESSAGES[reason] ?? 'Aman will not do that.';
 }
 
-/** The `ref` argument of a browser_click call, or undefined when it is missing or not a string. */
-function clickRef(params: CallToolRequest['params']): string | undefined {
+/** The browser tools that act on one element, each checked against a read of that element first. */
+const ELEMENT_TOOL_NAMES: ReadonlySet<string> = new Set([
+  BROWSER_CLICK_TOOL_NAME,
+  BROWSER_TYPE_TOOL_NAME,
+  BROWSER_SELECT_TOOL_NAME,
+]);
+
+/** The `ref` argument of a call that acts on one element, or undefined when it is missing or not a string. */
+function elementRef(params: CallToolRequest['params']): string | undefined {
   const ref = params.arguments?.['ref'];
   return typeof ref === 'string' && ref !== '' ? ref : undefined;
 }
@@ -363,38 +389,51 @@ class BrowserTool extends LocalToolMCP {
   }
 
   /**
-   * Stamps `browser_click` with what the live page says about the clicked element, read without
-   * clicking it, so the classifier decides the tier from the page itself, never from model text.
-   * Left unset (and so classified fail-closed) when the sidecar cannot be reached or the ref is gone.
+   * Stamps `browser_element` with what the live page says about the element a click, type or select
+   * acts on, read without touching it, so the classifier decides from the page itself, never from
+   * model text, and the browser later acts only while the element still reads that way. Left unset
+   * (and so refused before any card) when the sidecar cannot be reached or the ref is gone.
    */
   override async toolCallInfo(
     params: Parameters<LocalToolMCP['toolCallInfo']>[0],
     resolveUnderlyingTool?: boolean,
   ): Promise<InternalToolCallInfo> {
     const info = await super.toolCallInfo(params, resolveUnderlyingTool);
-    if (params.name !== BROWSER_CLICK_TOOL_NAME || resolveUnderlyingTool === false) {
+    if (!ELEMENT_TOOL_NAMES.has(params.name) || resolveUnderlyingTool === false) {
       return info;
     }
-    const ref = clickRef(params);
+    const ref = elementRef(params);
     if (ref === undefined) {
       return info;
     }
     const result = await callBrowserSidecar({
-      path: '/click-info',
+      path: '/element-info',
       tab: this.tab,
-      schema: ClickInfoReplySchema,
+      schema: ElementInfoReplySchema,
       body: { ref },
     });
     if (!result.ok || result.body.status !== 'ok') {
       return info;
     }
-    const review: BrowserClickReview = {
-      site: result.body.site,
-      accessible_name: result.body.accessible_name,
-      is_form_submit: result.body.is_form_submit,
-      form_values: result.body.form_values,
-    };
-    return { ...info, browser_click: review };
+    const { status, ...review } = result.body;
+    void status;
+    return { ...info, browser_element: review };
+  }
+
+  /**
+   * Calls an action on one element with the read it was classified from, so the browser acts only
+   * while the element still reads that way: an earlier action in the same reply may have changed the page.
+   */
+  private async act(input: {
+    path: string;
+    body: Record<string, unknown>;
+    context: ToolInvocationContext | undefined;
+  }): Promise<ReturnType<typeof toolResultResponse>> {
+    const expect = input.context?.browser_element_precondition;
+    if (expect === undefined) {
+      return errorResponse(refusalMessage('unchecked'));
+    }
+    return this.page(input.path, { ...input.body, expect });
   }
 
   private async page(path: string, body?: Record<string, unknown>): Promise<ReturnType<typeof toolResultResponse>> {
@@ -480,24 +519,28 @@ class BrowserTool extends LocalToolMCP {
     defineTool({
       name: 'browser_type',
       annotations: BROWSER_PREPARE_ANNOTATIONS,
-      description: `Type text into a field on the open page, by its ref from browser_read. Refused for a password, card or one-time-code field: ${liveViewHint()} Nothing is submitted; read the page again to see what was typed.`,
+      description: `Type text into a field on the open page, by its ref from browser_read. Refused for a password, card or one-time-code field: ${liveViewHint()} The person sees the exact text on an approval card first, because a page can send what is typed as soon as it is typed. Refused for a field that is read-only or covered by something else. A one-line field refuses text with a line break or tab; only a multi-line field takes them.`,
       schema: TYPE_INPUT_SCHEMA,
-      handler: async (input: BrowserTypeInput) => this.page('/type', input),
+      handler: async (input: BrowserTypeInput, _approval, context) =>
+        this.act({ path: '/type', body: { ref: input.ref, text: input.text }, context }),
     }),
     defineTool({
       name: 'browser_select',
       annotations: BROWSER_PREPARE_ANNOTATIONS,
-      description: 'Pick an option on a dropdown field, by its ref from browser_read and the option text.',
+      description:
+        'Pick an option on a dropdown field, by its ref from browser_read and the option text. The person sees the option on an approval card first, because a page can send a choice as soon as it is made.',
       schema: SELECT_INPUT_SCHEMA,
-      handler: async (input: BrowserSelectInput) => this.page('/select', input),
+      handler: async (input: BrowserSelectInput, _approval, context) =>
+        this.act({ path: '/select', body: { ref: input.ref, option: input.option }, context }),
     }),
     defineTool({
       name: BROWSER_CLICK_TOOL_NAME,
       annotations: BROWSER_CLICK_ANNOTATIONS,
       description:
-        'Click a link, button, tab or other element on the open page, by its ref from browser_read. A click that submits a form, or whose label is a word like pay, buy, send, delete, cancel a membership and similar, shows the person an approval card first; everything else runs right away.',
+        'Click a link, button, tab or other element on the open page, by its ref from browser_read. A plain link to another page opens right away. A button, tab, menu or any other control shows the person an approval card first, and so does a link whose label is a word like pay, buy, send, delete or cancel a membership. If the page changed since it was read, the click is refused: read the page again, then click. A disabled or covered element is refused.',
       schema: CLICK_INPUT_SCHEMA,
-      handler: async (input: BrowserClickInput) => this.page('/click', input),
+      handler: async (input: BrowserClickInput, _approval, context) =>
+        this.act({ path: '/click', body: { ref: input.ref }, context }),
     }),
   ];
 

@@ -42,6 +42,7 @@ async function canChatAllow(
     effect: 'inspect',
     tier: 3,
     tier_reason: tierReason,
+    standing_grant_barred: false,
     ...extra,
   });
   const modelClient: ILLM = { create: jest.fn(() => toolCallStream()), createNonStream: jest.fn() };
@@ -75,6 +76,7 @@ async function canChatAllow(
 function cardTo(destination: string | null): Tier3Card {
   return {
     plain_what: 'Post this note?',
+    copy: null,
     plain_why: null,
     cannot_be_undone: null,
     why_asked_again: null,
@@ -91,25 +93,30 @@ function cardTo(destination: string | null): Tier3Card {
 describe('the approval event says whether chat scope is offered', () => {
   it('offers it for a plain read and for an action whose card names where it goes, and withholds it for a steered call', async () => {
     expect(await canChatAllow('unrecognized_tool')).toBe(true);
-    expect(await canChatAllow('connector_outbound', { tier3_card: cardTo('Team notes') })).toBe(true);
-    expect(await canChatAllow('content_steered')).toBe(false);
+    expect(
+      await canChatAllow('connector_outbound', { tier3_card: cardTo('Team notes'), chat_grantable_consequence: true }),
+    ).toBe(true);
+    expect(await canChatAllow('content_steered', { standing_grant_barred: true })).toBe(false);
   });
 
   it.each(['connector_outbound', 'destructive_action', 'mcp_destructive_hint', 'mcp_open_world_hint'])(
     'withholds it for a %s action whose card names no target',
     async reason => {
-      expect(await canChatAllow(reason, { tier3_card: cardTo(null) })).toBe(false);
-      expect(await canChatAllow(reason)).toBe(false);
+      const policy = { standing_grant_barred: reason !== 'connector_outbound', chat_grantable_consequence: true };
+      expect(await canChatAllow(reason, { tier3_card: cardTo(null), ...policy })).toBe(false);
+      expect(await canChatAllow(reason, { ...policy })).toBe(false);
     },
   );
 
-  it.each(['schedule_write', 'persona_write'])('withholds it for a %s card', async reason => {
-    expect(await canChatAllow(reason, { tier3_card: cardTo(null) })).toBe(false);
+  it.each(['schedule_write', 'persona_write', 'skill_install'])('withholds it for a %s card', async reason => {
+    expect(await canChatAllow(reason, { tier3_card: cardTo(null), standing_grant_barred: true })).toBe(false);
   });
 
   it('withholds it from a mail draft, whoever the draft is addressed to', async () => {
-    expect(await canChatAllow('gmail_draft', { tier3_card: cardTo('dana@example.org') })).toBe(false);
-    expect(await canChatAllow('gmail_draft')).toBe(false);
+    expect(
+      await canChatAllow('gmail_draft', { tier3_card: cardTo('dana@example.org'), standing_grant_barred: true }),
+    ).toBe(false);
+    expect(await canChatAllow('gmail_draft', { standing_grant_barred: true })).toBe(false);
   });
 
   it('withholds it from every send and every change that invites or emails guests', async () => {
@@ -123,7 +130,10 @@ describe('the approval event says whether chat scope is offered', () => {
       'caldav_invitation_reply',
       'connector_calendar_write',
     ]) {
-      expect({ reason, offered: await canChatAllow(reason) }).toEqual({ reason, offered: false });
+      expect({ reason, offered: await canChatAllow(reason, { standing_grant_barred: true }) }).toEqual({
+        reason,
+        offered: false,
+      });
     }
   });
 
@@ -140,6 +150,6 @@ describe('the approval event says whether chat scope is offered', () => {
   });
 
   it('withholds the chat choice from a send that reads a key file', async () => {
-    expect(await canChatAllow('connector_send', { secret_path_read: true })).toBe(false);
+    expect(await canChatAllow('connector_send', { secret_path_read: true, standing_grant_barred: true })).toBe(false);
   });
 });

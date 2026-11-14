@@ -45,6 +45,7 @@ jobs:
       installer: ${{ inputs.all_packages || steps.filter.outputs.installer }}
       screenshot_folder: ${{ steps.stamp.outputs.folder }}
       dependencies: ${{ inputs.all_packages || steps.filter.outputs.dependencies }}
+      arm64-images: ${{ steps.packages.outputs.arm64_images }}
 
     steps:
       - name: Check out repository code
@@ -196,6 +197,27 @@ jobs:
               - 'installer/**'
               - 'package.json'
               - '.github/workflows/ci.yml'
+            # Images the installer builds or pulls, checked on arm64 below. The app image (and the sandbox
+            # slot image its runtime check builds) is checked on every change, since it is built from the whole tree.
+            aman-stt-image:
+              - 'ops/aman-stt/**'
+              - 'installer/lib/release.sh'
+              - '.github/workflows/ci.yml'
+            aman-tts-image:
+              - 'ops/aman-tts/**'
+              - 'installer/lib/release.sh'
+              - '.github/workflows/ci.yml'
+            calendar-image:
+              - 'ops/calendar-sidecar/**'
+              - 'installer/lib/release.sh'
+              - '.github/workflows/ci.yml'
+            browser-image:
+              - 'ops/browser-sidecar/**'
+              - 'installer/lib/release.sh'
+              - '.github/workflows/ci.yml'
+            pinned-images:
+              - 'installer/release.json'
+              - '.github/workflows/ci.yml'
             chart:
               - 'charts/trueforge/**'
               - 'Dockerfile'
@@ -224,6 +246,11 @@ jobs:
           CALENDAR_SIDECAR: ${{ steps.filter.outputs['calendar-sidecar'] }}
           GMAIL_MCP: ${{ steps.filter.outputs['gmail-mcp'] }}
           PROMPT_GUARD: ${{ steps.filter.outputs['prompt-guard'] }}
+          AMAN_STT_IMAGE: ${{ steps.filter.outputs['aman-stt-image'] }}
+          AMAN_TTS_IMAGE: ${{ steps.filter.outputs['aman-tts-image'] }}
+          CALENDAR_IMAGE: ${{ steps.filter.outputs['calendar-image'] }}
+          BROWSER_IMAGE: ${{ steps.filter.outputs['browser-image'] }}
+          PINNED_IMAGES: ${{ steps.filter.outputs['pinned-images'] }}
         run: |
           node <<'EOF' >> "$GITHUB_OUTPUT"
           const changedPackages = [];
@@ -241,6 +268,13 @@ jobs:
           if (changed('GMAIL_MCP')) changedPackages.push('gmail-mcp');
           if (changed('PROMPT_GUARD')) changedPackages.push('prompt-guard');
           console.log(`list=${JSON.stringify(changedPackages)}`);
+          const arm64Images = [];
+          if (changed('AMAN_STT_IMAGE')) arm64Images.push('aman-stt');
+          if (changed('AMAN_TTS_IMAGE')) arm64Images.push('aman-tts');
+          if (changed('CALENDAR_IMAGE')) arm64Images.push('calendar');
+          if (changed('BROWSER_IMAGE')) arm64Images.push('browser');
+          if (changed('PINNED_IMAGES')) arm64Images.push('pinned');
+          console.log(`arm64_images=${JSON.stringify(arm64Images)}`);
           EOF
 
   # Always-on: format + lint cover the whole tree (incl. roots outside packages/*);
@@ -353,16 +387,19 @@ jobs:
         run: pnpm smoke:npx:amanuensis
 
   # Path-gated tests only — format/lint are covered by the global job above.
+  # Each package also runs on arm64 (Apple silicon, Linux arm servers): native modules, Python wheels,
+  # Go builds and the browser image all differ by architecture.
   package-checks:
-    name: Package (${{ matrix.package }})
+    name: Package (${{ matrix.package }}${{ matrix.arch == 'arm64' && ', arm64' || '' }})
     needs: detect-changes
     if: needs.detect-changes.outputs.packages != '[]'
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         package: ${{ fromJSON(needs.detect-changes.outputs.packages) }}
+        arch: [x64, arm64]
 
     steps:
       - name: Check out repository code
@@ -417,14 +454,31 @@ jobs:
           python -m pip install --require-hashes --requirement ops/aman-tts/requirements.txt
           python -m pip install httpx==0.28.1
 
+      # Browser tests use an installed Chrome on x64. Google Chrome has no Linux arm64 build, so arm64
+      # installs the Chromium build of the package's pinned playwright-core, where the tests look next.
+      - name: Install Chromium for browser tests
+        if: matrix.arch == 'arm64' && (matrix.package == 'frontend' || matrix.package == 'trueforge')
+        working-directory: packages/${{ matrix.package }}
+        run: pnpm exec playwright-core install --with-deps chromium
+
+      # These suites compile every dependency they load, which takes longer than the tests themselves on a cold run.
+      - name: Cache compiled test files
+        if: matrix.package == 'trueforge' || matrix.package == 'trueforge-core'
+        uses: actions/cache@v6.1.0
+        with:
+          path: packages/${{ matrix.package }}/node_modules/.cache/jest
+          key: jest-${{ matrix.package }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: jest-${{ matrix.package }}-${{ runner.os }}-${{ runner.arch }}-
+
       - name: Test
         env:
           AMAN_SCREENSHOT_DIR: ${{ runner.temp }}/screenshots/${{ needs.detect-changes.outputs.screenshot_folder }}
         run: pnpm "test:${{ matrix.package }}"
 
-      # The browser tests save a picture at each named step, in one folder per feature set.
+      # The browser tests save a picture at each named step, in one folder per feature set. The x64 run's
+      # pictures are kept; the arm64 run takes the same pictures under the same names.
       - name: Keep the browser test screenshots
-        if: always() && matrix.package == 'frontend'
+        if: always() && matrix.package == 'frontend' && matrix.arch == 'x64'
         uses: actions/upload-artifact@v7
         with:
           name: screenshots-frontend
@@ -489,7 +543,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        # macos-latest is Apple silicon; ubuntu-24.04-arm is Linux on arm64.
+        os: [ubuntu-latest, ubuntu-24.04-arm, windows-latest, macos-latest]
 
     steps:
       - name: Check out repository code
@@ -743,6 +798,7 @@ jobs:
         run: |
           pnpm test:eval-tokens
           pnpm test:eval-spaces
+          pnpm test:eval-models
 
   # AGENTS.md forbids `as T` and `x!`. Older ones are still being removed, so this reads only the
   # lines a pull request adds; a merge queue, manual or nightly run has no base to compare with.
@@ -924,6 +980,133 @@ jobs:
       - name: The amanuensis package lists what it ships
         run: pnpm check:amanuensis-deps
 
+  # The format, lint and contract checks above read source only, so they run once. Install, typecheck and
+  # build run again on arm64, where native dependencies install from different prebuilt binaries.
+  arm64-build:
+    name: Typecheck and Build (arm64)
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Build
+        run: pnpm build
+
+  # Aman runs in Docker, and on Apple silicon and arm servers the installer builds every image for arm64.
+  # Each image is built natively on an arm64 runner the way installer/lib/release.sh builds it. The app
+  # image is built and started in the arm64 compose smoke job below, so it is not built a second time here.
+  arm64-images:
+    name: Image (${{ matrix.image }}, arm64)
+    needs: detect-changes
+    if: needs.detect-changes.outputs.arm64-images != '[]'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ${{ fromJSON(needs.detect-changes.outputs.arm64-images) }}
+
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v7
+
+      - name: Build the speech-to-text image
+        if: matrix.image == 'aman-stt'
+        run: docker build -t aman-stt:arm64-check ops/aman-stt
+
+      - name: Build the voice image
+        if: matrix.image == 'aman-tts'
+        run: docker build -t aman-tts:arm64-check ops/aman-tts
+
+      - name: Build the calendar image
+        if: matrix.image == 'calendar'
+        run: docker build -t aman-calendar:arm64-check ops/calendar-sidecar
+
+      - name: Build the browser and gateway images
+        if: matrix.image == 'browser'
+        run: |
+          docker build -t aman-browser:arm64-check ops/browser-sidecar
+          docker build -f ops/browser-sidecar/Dockerfile.gateway -t aman-browser-gateway:arm64-check ops/browser-sidecar
+
+      # The installer pulls these by digest; each must have an arm64 image behind it. Every non-empty
+      # `*_image` key is checked, so a newly pinned image is covered without editing this list.
+      - name: Pull the pinned images for arm64
+        if: matrix.image == 'pinned'
+        run: |
+          pins=$(jq -r 'to_entries[] | select((.key | endswith("_image")) and .value != "") | "\(.key) \(.value)"' installer/release.json)
+          [ -n "$pins" ] || { echo "installer/release.json has no pinned images. Check the file." >&2; exit 1; }
+          printf '%s\n' "$pins" | while read -r key image; do
+            echo "Pulling $key: $image"
+            docker pull --platform linux/arm64 "$image"
+            arch=$(docker image inspect -f '{{.Architecture}}' "$image")
+            [ "$arch" = arm64 ] || { echo "$key resolved to $arch, not arm64" >&2; exit 1; }
+          done
+
+  # `docker compose up` from source, the documented way to run the full stack, on both architectures:
+  # every image must build and every service must report healthy. On arm64 the app image this job built
+  # is then started the way an instance starts it, which builds the sandbox slot image too.
+  compose-smoke:
+    name: Compose smoke (${{ matrix.arch }})
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x64, arm64]
+
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: '.nvmrc'
+
+      - name: No core pins in the checked-in compose files
+        run: pnpm test:default-compose
+
+      - name: Use the example settings
+        run: cp packages/trueforge/.env.example packages/trueforge/.env
+
+      - name: Start the stack and check it answers
+        run: pnpm smoke
+
+      - name: Show the stack's logs
+        if: failure()
+        run: pnpm smoke:logs --tail 100
+
+      - name: Stop the stack
+        if: always()
+        run: pnpm smoke:down -v
+
+      # Reuses the image the stack built, after the stack is gone so the two do not share the runner's memory.
+      - name: Start the app image the way an instance does
+        if: matrix.arch == 'arm64'
+        env:
+          AMAN_TEST_IMAGE: truefoundry-server:latest
+        run: pnpm test:installer-image
+
   # https://github.com/marketplace/actions/alls-green#why
   check:
     if: always()
@@ -947,6 +1130,9 @@ jobs:
       - help-guide
       - feature-coverage
       - generated-contract-drift
+      - arm64-build
+      - arm64-images
+      - compose-smoke
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -971,9 +1157,12 @@ jobs:
           HELP_GUIDE: ${{ needs.help-guide.result }}
           FEATURE_COVERAGE: ${{ needs.feature-coverage.result }}
           GENERATED_CONTRACT_DRIFT: ${{ needs.generated-contract-drift.result }}
+          ARM64_BUILD: ${{ needs.arm64-build.result }}
+          ARM64_IMAGES: ${{ needs.arm64-images.result }}
+          COMPOSE_SMOKE: ${{ needs.compose-smoke.result }}
         run: |
           ok() { [ "$1" = success ] || [ "$1" = skipped ]; }
-          echo "detect-changes=$DETECT_CHANGES migration-order=$MIGRATION_ORDER typecheck-and-build=$TYPECHECK_AND_BUILD npx-smoke=$NPX_SMOKE package-checks=$PACKAGE_CHECKS screenshots=$SCREENSHOTS installer-shell=$INSTALLER_SHELL chart-checks=$CHART_CHECKS store-tests=$STORE_TESTS local-sandbox-contract=$LOCAL_SANDBOX_CONTRACT root-script-tests=$ROOT_SCRIPT_TESTS new-assertions=$NEW_ASSERTIONS repo-rules=$REPO_RULES dependency-licenses=$DEPENDENCY_LICENSES private-data-scan=$PRIVATE_DATA_SCAN help-guide=$HELP_GUIDE feature-coverage=$FEATURE_COVERAGE generated-contract-drift=$GENERATED_CONTRACT_DRIFT"
+          echo "detect-changes=$DETECT_CHANGES migration-order=$MIGRATION_ORDER typecheck-and-build=$TYPECHECK_AND_BUILD npx-smoke=$NPX_SMOKE package-checks=$PACKAGE_CHECKS screenshots=$SCREENSHOTS installer-shell=$INSTALLER_SHELL chart-checks=$CHART_CHECKS store-tests=$STORE_TESTS local-sandbox-contract=$LOCAL_SANDBOX_CONTRACT root-script-tests=$ROOT_SCRIPT_TESTS new-assertions=$NEW_ASSERTIONS repo-rules=$REPO_RULES dependency-licenses=$DEPENDENCY_LICENSES private-data-scan=$PRIVATE_DATA_SCAN help-guide=$HELP_GUIDE feature-coverage=$FEATURE_COVERAGE generated-contract-drift=$GENERATED_CONTRACT_DRIFT arm64-build=$ARM64_BUILD arm64-images=$ARM64_IMAGES compose-smoke=$COMPOSE_SMOKE"
           [ "$DETECT_CHANGES" = success ] || exit 1
           [ "$MIGRATION_ORDER" = success ] || exit 1
           [ "$TYPECHECK_AND_BUILD" = success ] || exit 1
@@ -993,3 +1182,6 @@ jobs:
           [ "$HELP_GUIDE" = success ] || exit 1
           [ "$FEATURE_COVERAGE" = success ] || exit 1
           [ "$GENERATED_CONTRACT_DRIFT" = success ] || exit 1
+          [ "$ARM64_BUILD" = success ] || exit 1
+          ok "$ARM64_IMAGES" || exit 1
+          [ "$COMPOSE_SMOKE" = success ] || exit 1

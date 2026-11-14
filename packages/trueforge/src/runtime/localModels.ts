@@ -2,6 +2,7 @@ import type { ModelAddressPlace, PlaceOfModelHost } from '@truefoundry/trueforge
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
 import configuration from '../config';
+import type { ResolveAddresses } from './remoteAddress';
 
 /** The name the app reaches the local model bridge at, on a network only the app and the bridge share. */
 export const LOCAL_MODEL_BRIDGE_HOST = 'aman-local-model';
@@ -24,8 +25,6 @@ export function localModelsFromConfig(): LocalModels {
     ports: configuration.LOCAL_MODEL_PORTS,
   };
 }
-
-export type ResolveHostAddresses = (hostname: string) => Promise<string[]>;
 
 /** Name lookups wait this long at most, so a name that never answers cannot hold a Settings save. */
 const LOOKUP_TIMEOUT_MS = 2_000;
@@ -90,7 +89,7 @@ export async function isThisComputerModelUrl({
 }: {
   baseUrl: string;
   local: LocalModels;
-  resolveHostAddresses?: ResolveHostAddresses;
+  resolveHostAddresses?: ResolveAddresses;
 }): Promise<boolean> {
   if (local.thisComputer.size === 0) {
     return false;
@@ -122,6 +121,32 @@ export async function isThisComputerModelUrl({
 /** The address of a model on this computer through the local model bridge. */
 export function localModelBridgeUrl(port: number | string): string {
   return `http://${LOCAL_MODEL_BRIDGE_HOST}:${String(port)}/v1`;
+}
+
+/**
+ * What to do when the address check refuses an address of the local model bridge: the bridge's
+ * port is not in the endpoint list, which aman local-model writes. Undefined for any other address.
+ */
+export function localModelBridgePortMessage(baseUrl: string): string | undefined {
+  let url: URL;
+  try {
+    url = new URL(baseUrl);
+  } catch {
+    return undefined;
+  }
+  if (normalHostname(url.hostname) !== LOCAL_MODEL_BRIDGE_HOST) {
+    return undefined;
+  }
+  if (url.port === '') {
+    return (
+      "This address has no port, and Aman's local link only carries the ports you add. " +
+      "Add your model server's port to the address, for example http://aman-local-model:11434/v1."
+    );
+  }
+  return (
+    `Aman's local link does not carry port ${url.port} yet. ` +
+    `On the computer Aman runs on, run aman local-model ${url.port}. Then try again.`
+  );
 }
 
 /** Why Settings did not save a model address that is this computer, and the one thing to do instead. */

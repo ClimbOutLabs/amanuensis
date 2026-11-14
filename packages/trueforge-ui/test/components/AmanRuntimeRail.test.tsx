@@ -282,11 +282,34 @@ describe('AmanRuntimeRail', () => {
     expect(summaryRule).toMatch(/font-weight: 500;/);
     expect(ruleOf('.aman-runtime-rail__details-body')).toMatch(/font-size: var\(--text-sm\);/);
     expect(ruleOf('.aman-runtime-rail__waiting')).toMatch(/font-size: var\(--text-sm\);/);
+    // The desk's own lines, such as "Free after 6:00 PM.", match the rows they sit under.
+    expect(ruleOf('.aman-runtime-rail__desk-row-detail')).toMatch(/font-size: var\(--text-sm\);/);
+    expect(ruleOf('.aman-runtime-rail__desk-note')).toMatch(/font-size: var\(--text-sm\);/);
     // The Activity row's receipt list (SentinelAuditFeed) must not fall back to the stray
     // 0.875rem the base .aui-receipt rule used before the rail stepped it onto the scale.
     const railReceiptRule = ruleOf('.aman-runtime-rail .aui-receipt');
     expect(railReceiptRule).toMatch(/font-size: var\(--text-sm\);/);
     expect(railReceiptRule).not.toMatch(/0\.875rem/);
+  });
+
+  it('sizes the avatar-fallback initial, the persona name, the role, the status and the retry button on the scale', () => {
+    const stylesheet = readFileSync(findStylesheet(), 'utf8');
+    const ruleOf = (selector: string): string => {
+      const start = stylesheet.indexOf(`${selector} {`);
+      expect(start, selector).toBeGreaterThanOrEqual(0);
+      return stylesheet.slice(start, stylesheet.indexOf('}', start) + 1);
+    };
+    // The avatar-fallback initial and the persona name (serif) both read --text-lg.
+    expect(ruleOf('.aman-runtime-rail__avatar-fallback')).toMatch(/font-size: var\(--text-lg\);/);
+    const identityH2Rule = ruleOf('.aman-runtime-rail__identity h2');
+    expect(identityH2Rule).toMatch(/font-size: var\(--text-lg\);/);
+    expect(identityH2Rule).toMatch(/font-family: var\(--font-serif\);/);
+    // The role, the status line and the retry button all read --text-sm.
+    expect(ruleOf('.aui-panda__role')).toMatch(/font-size: var\(--text-sm\);/);
+    expect(ruleOf('.aman-runtime-rail__status')).toMatch(/font-size: var\(--text-sm\);/);
+    expect(ruleOf('.aman-runtime-rail__retry')).toMatch(/font-size: var\(--text-sm\);/);
+    // The section label (over its value) also reads --text-sm.
+    expect(ruleOf('.aman-runtime-rail__section-label')).toMatch(/font-size: var\(--text-sm\);/);
   });
 
   it('shows no release line, no Details disclosure, and no pixel lengths in the rail', () => {
@@ -834,7 +857,7 @@ describe('AmanRuntimeRail recent actions, rules and Needs you', () => {
     );
     expect(container.querySelector('[data-section="needs-you"]')).toBeNull();
     expect(screen.queryByText(/Needs you/)).not.toBeInTheDocument();
-    expect(container.querySelectorAll('.aui-ticket--selected')).toHaveLength(0);
+    expect(container.querySelectorAll('.aui-approval-card--selected')).toHaveLength(0);
     expect(container.querySelector('.aman-runtime-rail__status')).toHaveTextContent('Waiting for you');
   });
 

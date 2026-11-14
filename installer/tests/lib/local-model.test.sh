@@ -8,6 +8,9 @@ set -euo pipefail
 compose_file() { printf '%s' "$AMAN_HOME/instances/main/compose.yaml"; }
 # The lines of one service in the compose file.
 service_block() { awk -v svc="  $1:" '$0==svc{f=1;next} /^  [a-z]/{f=0} f' "$(compose_file)"; }
+env_file() { printf '%s' "$AMAN_HOME/instances/main/.env"; }
+# Every LOCAL_MODEL_ENDPOINTS line of the instance's settings file, values only.
+endpoint_lines() { sed -n 's/^LOCAL_MODEL_ENDPOINTS=//p' "$(env_file)"; }
 
 test_no_port_named_means_no_bridge() {
   t_begin "an instance with no port named has no bridge, but the app still gets this computer's addresses"
@@ -109,10 +112,65 @@ test_an_app_image_from_before_the_bridge_is_refused() {
   sandbox_drop
 }
 
+test_the_bridge_endpoint_is_listed_for_the_app() {
+  t_begin "aman local-model adds the bridge's endpoint to the owner's LOCAL_MODEL_ENDPOINTS and --remove takes it out"
+  sandbox_new
+  install_machine
+  printf '%s\n' "# my own model" "LOCAL_MODEL_ENDPOINTS=localhost:11434" "OTHER_SETTING=kept" >>"$(env_file)"
+  run_install instance local-model main 30031
+  assert_rc 0
+  assert_flat_contains "$OUT" "Aman started again, so the change is in use now."
+  assert_eq "$(endpoint_lines)" "localhost:11434,aman-local-model:30031" "the entry is added beside the owner's own"
+  assert_contains "$(cat "$(env_file)")" "OTHER_SETTING=kept"
+  run_install instance local-model main 30031
+  assert_rc 0
+  assert_eq "$(endpoint_lines)" "localhost:11434,aman-local-model:30031" "a port named twice is listed once"
+  run_install instance local-model main 11434
+  assert_rc 0
+  assert_eq "$(endpoint_lines)" "localhost:11434,aman-local-model:30031,aman-local-model:11434" "a second port is added"
+  run_install instance local-model main 30031 --remove
+  assert_rc 0
+  assert_flat_contains "$OUT" "Aman started again, so the change is in use now."
+  assert_eq "$(endpoint_lines)" "localhost:11434,aman-local-model:11434" "only that port's entry is taken out"
+  run_install instance local-model main 11434 --remove
+  assert_rc 0
+  assert_eq "$(endpoint_lines)" "localhost:11434" "the owner's own entry stays"
+  assert_eq "$(stat -c %a "$(env_file)" 2>/dev/null || stat -f %Lp "$(env_file)")" 600 "the settings file stays private"
+  sandbox_drop
+}
+
+test_the_endpoint_line_is_added_and_dropped_when_the_owner_has_none() {
+  t_begin "with no LOCAL_MODEL_ENDPOINTS line, one is added below the managed block and dropped when its list empties"
+  sandbox_new
+  install_machine
+  run_install instance local-model main 30031
+  assert_rc 0
+  assert_eq "$(endpoint_lines)" "aman-local-model:30031"
+  assert_eq "$(awk '/^# <<< end of managed block/{e=NR} /^LOCAL_MODEL_ENDPOINTS=/{l=NR} END{print (l>e)}' "$(env_file)")" 1 "the line sits below the managed block"
+  run_install instance local-model main 30031 --remove
+  assert_rc 0
+  assert_eq "$(endpoint_lines)" "" "an empty list leaves no line"
+  sandbox_drop
+}
+
+test_the_bridge_network_is_one_of_the_instance_networks() {
+  t_begin "the bridge's network is learned into CONTAINER_NETWORK_RANGES, so only a listed endpoint on it is reached"
+  sandbox_new
+  install_machine
+  printf '%s\n' "aman-main_default 172.30.0.0/16" "aman-main_local-model 172.33.0.0/16" >"$SB_STATE/network_subnets"
+  run_install instance local-model main 30031
+  assert_rc 0
+  assert_contains ",$(sed -n 's/^CONTAINER_NETWORK_RANGES=//p' "$(env_file)" | head -n 1)," ",172.33.0.0/16,"
+  sandbox_drop
+}
+
 test_no_port_named_means_no_bridge
 test_an_app_image_from_before_the_bridge_is_refused
 test_naming_a_port_starts_the_bridge
 test_docker_desktop_dials_the_host_name
 test_removing_the_last_port_takes_the_bridge_away
 test_only_a_port_of_this_computer_is_taken
+test_the_bridge_endpoint_is_listed_for_the_app
+test_the_endpoint_line_is_added_and_dropped_when_the_owner_has_none
+test_the_bridge_network_is_one_of_the_instance_networks
 tests_finish

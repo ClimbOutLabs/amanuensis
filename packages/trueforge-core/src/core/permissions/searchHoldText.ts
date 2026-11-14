@@ -90,13 +90,15 @@ export function steeredDestinationSay(input: {
   destinations: readonly { who: string; kind: 'address' | 'link'; source: ReadSource }[];
 }): string {
   const { assistant } = input;
+  // The card already shows every link it sends to, so one link is not named again; several are, to say which.
+  const oneLink = input.destinations.filter(({ kind }) => kind === 'link').length === 1;
   const sentences = input.destinations.map(({ who, kind, source }) => {
     if (source === 'reply') {
       const what = kind === 'link' ? 'which' : 'whose address';
       return `This goes to ${who}, ${what} was only in an earlier reply from ${assistant}, not in your own words.`;
     }
     if (kind === 'link') {
-      return `This goes to ${who}, which was in ${READ_PLACE[source]} ${assistant} read.`;
+      return `${assistant} found ${oneLink ? 'this link' : who} in ${READ_PLACE[source]} it read, not from you.`;
     }
     return source === 'email_sender'
       ? `This goes to ${who}, who sent the email ${assistant} just read.`
@@ -130,12 +132,17 @@ export function withHoldSay(text: string, say: string): string {
   return `${text}${/[.!?]$/.test(text) ? '' : '.'} ${say}`;
 }
 
+/** The question a held lookup's card leads with, before its reason joins it; the summary is already masked where it must be. A page read says it opens a page. */
+export function searchHoldQuestion({ summary, page }: { summary: string; page: boolean }): string {
+  if (page) {
+    return summary === '' ? 'Open this web page?' : `Open ${summary}?`;
+  }
+  return summary === '' ? 'Search the web?' : `Search the web for ${summary}?`;
+}
+
 /** Card question for a held lookup; the summary is already masked where it must be. A page read says it opens a page. */
 export function searchHoldCardText({ summary, say, page }: { summary: string; say: string; page: boolean }): string {
-  if (page) {
-    return withHoldSay(summary === '' ? 'Open this web page?' : `Open ${summary}?`, say);
-  }
-  return withHoldSay(summary === '' ? 'Search the web?' : `Search the web for ${summary}?`, say);
+  return withHoldSay(searchHoldQuestion({ summary, page }), say);
 }
 
 /** Audit row text for a held lookup: the rule that fired, never the query. */

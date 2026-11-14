@@ -22,6 +22,7 @@ function baseCard(): SentinelApprovalCard {
     calendar_event: null,
     schedule: null,
     persona: null,
+    skill: null,
   };
 }
 
@@ -43,7 +44,7 @@ function renderCard(overrides: Partial<SentinelApprovalCard> = {}, props: Partia
 }
 
 describe('PermissionApprovalCard', () => {
-  it('renders the server-supplied what, why, and details', () => {
+  it('renders the why and details of a card saved before copy existed, under the generic headline', () => {
     renderCard({
       destination: 'acme-corp',
       recipient: 'Acme Corp',
@@ -51,11 +52,11 @@ describe('PermissionApprovalCard', () => {
       cannot_be_undone: "Once this is sent, it can't be unsent.",
       why_asked_again: 'the earlier approval expired',
     });
-    expect(screen.getByText('Send $250 to Acme Corp')).toBeInTheDocument();
-    expect(screen.getByText('Why: You asked the assistant to pay the invoice.')).toBeInTheDocument();
-    expect(screen.getByText('Destination')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Needs your OK' })).toBeInTheDocument();
+    expect(screen.getByText(/says: You asked the assistant to pay the invoice\.$/)).toBeInTheDocument();
+    expect(screen.getByText('Where')).toBeInTheDocument();
     expect(screen.getAllByText('acme-corp')[0]).toBeInTheDocument();
-    expect(screen.getByText('Recipient')).toBeInTheDocument();
+    expect(screen.getByText('To')).toBeInTheDocument();
     expect(screen.getByText('Acme Corp')).toBeInTheDocument();
     expect(screen.getByText('Amount')).toBeInTheDocument();
     expect(screen.getByText('$250')).toBeInTheDocument();
@@ -124,7 +125,7 @@ describe('PermissionApprovalCard', () => {
   it('shows no reason line when the server sent none', () => {
     renderCard({ plain_why: null });
     expect(screen.queryByText(/did not state a reason/i)).not.toBeInTheDocument();
-    expect(screen.getByText('Send $250 to Acme Corp')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Needs your OK' })).toBeInTheDocument();
   });
 
   it('shows the cannot-be-undone note as a calm line with no warning box or prefix', () => {
@@ -137,15 +138,91 @@ describe('PermissionApprovalCard', () => {
 
   it('renders a card with a null cannot-be-undone note without an empty row or the word null', () => {
     renderCard({ cannot_be_undone: null });
-    expect(screen.getByText('Send $250 to Acme Corp')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Needs your OK' })).toBeInTheDocument();
     expect(screen.queryByText(/null/i)).not.toBeInTheDocument();
     expect(document.querySelector('p:empty')).toBeNull();
     expect(document.querySelectorAll('p > svg')).toHaveLength(0);
   });
 
+  it('puts Allow first and the safe choice last, all alike, on a destructive card, with the reason under the question', () => {
+    const { onApprove, onDeny } = renderCard({
+      copy: {
+        headline: 'Delete "Dentist", Fri 7 Nov, 3:00 PM?',
+        consequence: "This removes the event from the calendar. It can't be restored from here.",
+        reason: 'Aman always asks before deleting an event in this calendar.',
+      },
+      safe_choice: true,
+      destructive: true,
+    });
+    expect(screen.getByRole('heading', { name: 'Delete "Dentist", Fri 7 Nov, 3:00 PM?' })).toBeInTheDocument();
+    expect(
+      screen.getByText("This removes the event from the calendar. It can't be restored from here."),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Aman always asks before deleting an event in this calendar.')).toBeInTheDocument();
+
+    const buttons = screen
+      .getAllByRole('button')
+      .filter(button => ['Keep it', 'Allow'].includes(button.textContent ?? ''));
+    expect(buttons.map(button => button.textContent)).toEqual(['Allow', 'Keep it']);
+    for (const button of buttons) {
+      expect(button.className).toMatch(/bg-secondary-button-bg/);
+      expect(button.className).not.toMatch(/bg-primary-button-bg|text-failure-bg/);
+    }
+    // Keyboard focus still lands on the safe choice, so Enter after jumping to the card does not delete.
+    expect(buttons[0]?.hasAttribute('data-approval-primary')).toBe(false);
+    expect(buttons[1]?.hasAttribute('data-approval-primary')).toBe(true);
+    expect(screen.queryByRole('button', { name: 'Not now' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Keep it' }));
+    expect(onDeny).toHaveBeenCalledTimes(1);
+    expect(onApprove).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Allow' }));
+    expect(onApprove).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows the new-recipient line from the copy on a send to someone new', () => {
+    renderCard({
+      plain_what: 'Send an email to stranger@example.com?',
+      recipient: 'stranger@example.com',
+      cannot_be_undone: "Once this is sent, it can't be unsent.",
+      copy: {
+        headline: 'Send an email to stranger@example.com?',
+        consequence:
+          "New recipient. You have never emailed stranger@example.com. Approving adds them to your send list and sends. Once this is sent, it can't be unsent.",
+        reason: null,
+      },
+      safe_choice: true,
+      destructive: true,
+    });
+    expect(screen.getByRole('heading', { name: 'Send an email to stranger@example.com?' })).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "New recipient. You have never emailed stranger@example.com. Approving adds them to your send list and sends. Once this is sent, it can't be unsent.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it('puts Allow first and fills no choice on a reversible card', () => {
+    renderCard({
+      copy: {
+        headline: 'Write the summary into notes.md?',
+        consequence: null,
+        reason: 'This kind of write always asks.',
+      },
+    });
+    const allow = screen.getByRole('button', { name: 'Allow' });
+    expect(allow.hasAttribute('data-approval-primary')).toBe(true);
+    const labels = screen.getAllByRole('button').map(button => button.textContent);
+    expect(labels.indexOf('Allow')).toBe(0);
+    expect(labels.indexOf('Not now')).toBeGreaterThan(0);
+    expect(allow.className).toMatch(/bg-secondary-button-bg/);
+    expect(allow.className).not.toMatch(/bg-primary-button-bg/);
+    expect(screen.getByText('This kind of write always asks.')).toBeInTheDocument();
+  });
+
   it("labels the reason as the agent's own words", () => {
     renderCard({ plain_why: 'Looking up a listing.' });
-    expect(screen.getByText('Why: Looking up a listing.')).toBeInTheDocument();
+    expect(screen.getByText(/says: Looking up a listing\.$/)).toBeInTheDocument();
   });
 
   it('shows one plain line above the payload when part of it is cut', () => {
@@ -182,12 +259,22 @@ describe('PermissionApprovalCard', () => {
     expect(folded.textContent).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
   });
 
-  it('asks its question as the heading, with no approval label, lock or tier word', () => {
+  it('shows the generic headline as the heading on a card with no copy and no fields, with no approval label, lock or tier word', () => {
     renderCard();
-    expect(screen.getByRole('heading', { name: 'Send $250 to Acme Corp' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Needs your OK' })).toBeInTheDocument();
     expect(screen.getAllByText('Waiting for you')).toHaveLength(1);
     expect(screen.queryByText('Approval needed')).not.toBeInTheDocument();
-    expect(screen.queryByText(/Needs your OK|Review carefully|Tier \d/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Review carefully|Tier \d/)).not.toBeInTheDocument();
+  });
+
+  it('never shows an id saved in an old card anywhere on the card', () => {
+    // A card saved by the old calendar path: its stored sentence names the event by its id.
+    const idToken = ['ev1', 'L2NhbGVu', 'ZGFyL2Rh', 'dGlvbi05', 'ZjhlN2Q2', 'YzViNGE'].join('.');
+    renderCard({
+      plain_what: `Delete the event with id ${idToken}? Its title could not be read.`,
+    });
+    expect(screen.getByRole('heading', { name: 'Needs your OK' })).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain(idToken);
   });
 
   it('calls the safe verb', () => {
@@ -204,15 +291,15 @@ describe('PermissionApprovalCard', () => {
     expect(onApprove).not.toHaveBeenCalled();
   });
 
-  it('offers Approve all only when the container passes a batch handler', () => {
+  it('offers Allow all only when the container passes a batch handler', () => {
     renderCard();
-    expect(screen.queryByRole('button', { name: /Approve all/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Allow all/ })).not.toBeInTheDocument();
   });
 
-  it('calls the batch handler from Approve all and shows how many calls it covers', () => {
+  it('calls the batch handler from Allow all and shows how many calls it covers', () => {
     const onApproveAll = vi.fn();
     const { onApprove } = renderCard({}, { onApproveAll, batchSize: 3 });
-    fireEvent.click(screen.getByRole('button', { name: 'Approve all (3)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Allow all (3)' }));
     expect(onApproveAll).toHaveBeenCalledTimes(1);
     expect(onApprove).not.toHaveBeenCalled();
   });
@@ -346,7 +433,7 @@ describe('PermissionApprovalCard always allow this tool', () => {
 });
 
 describe('PermissionApprovalCard "Change it"', () => {
-  // A new persona is a card the person may change; a mail card has its own Edit button.
+  // A new persona is a card the person may change; a mail card has its own Change it button.
   const changeableCard: SentinelApprovalCard = {
     ...baseCard(),
     persona: { name: 'Tax helper', description: 'Files receipts', instructions: 'Keep receipts.', model_name: 'm' },
@@ -368,7 +455,7 @@ describe('PermissionApprovalCard "Change it"', () => {
     return handlers;
   }
 
-  it('shows Change it between Approve and Deny when the container passes a handler', () => {
+  it('shows Change it between Allow and Deny when the container passes a handler', () => {
     renderChangeable();
     const labels = screen.getAllByRole('button').map(button => button.textContent);
     expect(labels).toEqual(['Allow', 'Change it', 'Not now']);

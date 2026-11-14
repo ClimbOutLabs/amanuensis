@@ -1180,6 +1180,81 @@ export function providerStatusCode(raw: unknown): number | undefined {
   return undefined;
 }
 
+/** The first definite provider status down the cause chain, when any level carries one. */
+function providerStatusInChain(raw: unknown): number | undefined {
+  let current: unknown = raw;
+  for (let depth = 0; depth < 5 && current !== undefined && current !== null; depth++) {
+    const status = providerStatusCode(current);
+    if (status !== undefined) {
+      return status;
+    }
+    current = typeof current === 'object' && 'cause' in current ? current.cause : undefined;
+  }
+  return undefined;
+}
+
+/** The first API call error down the cause chain, when the server's own words are needed. */
+function apiCallErrorInChain(raw: unknown): APICallError | undefined {
+  let current: unknown = raw;
+  for (let depth = 0; depth < 5 && current !== undefined && current !== null; depth++) {
+    if (APICallError.isInstance(current)) {
+      return current;
+    }
+    current = typeof current === 'object' && 'cause' in current ? current.cause : undefined;
+  }
+  return undefined;
+}
+
+/**
+ * Aman's own words for a provider refusing a call's key (401 or 403), or undefined when the
+ * failure is anything else. The headline names the provider and the one step that fixes it,
+ * and reads the same whether or not the server explained itself. The server's own text rides
+ * along after the headline when the server sent any. The key itself never appears.
+ */
+export function describeAuthRefusal(raw: unknown, providerName: string): string | undefined {
+  const status = providerStatusInChain(raw);
+  if (status !== 401 && status !== 403) {
+    return undefined;
+  }
+  const headline = `The model server refused the API key for ${providerName}. Check the key for this provider in Settings and try again.`;
+  const serverText = apiCallErrorInChain(raw)?.message.trim();
+  return serverText === undefined || serverText === '' ? headline : `${headline} The server said: ${serverText}`;
+}
+
+/** The error a failed model call surfaces: the auth wording for a refused key, else the error as it was. */
+function modelCallError(raw: unknown, providerName: string): Error {
+  const authRefusal = describeAuthRefusal(raw, providerName);
+  return authRefusal === undefined ? toStreamError(raw) : new Error(authRefusal, { cause: raw });
+}
+
+/** How a failed model call is reported to a person: what kind of failure it was. */
+export type ProviderCallFailure = 'key_refused' | 'unreachable' | 'server_error';
+
+/**
+ * Buckets a failed model call for person-facing reporting: the server refused the key
+ * (401 or 403), the server answered with some other error, or no answer came back at all
+ * (the call never got a response, or the probe ran out of time). Walks the cause chain,
+ * since stream handling wraps the provider's error.
+ */
+export function classifyProviderCallError(raw: unknown): ProviderCallFailure {
+  let current: unknown = raw;
+  let sawStreamFault = false;
+  for (let depth = 0; depth < 5 && current !== undefined && current !== null; depth++) {
+    const status = providerStatusCode(current);
+    if (status !== undefined) {
+      return status === 401 || status === 403 ? 'key_refused' : 'server_error';
+    }
+    if (APICallError.isInstance(current)) {
+      return 'unreachable';
+    }
+    if (current instanceof ModelStreamFault) {
+      sawStreamFault = true;
+    }
+    current = typeof current === 'object' && 'cause' in current ? current.cause : undefined;
+  }
+  return sawStreamFault ? 'server_error' : 'unreachable';
+}
+
 /**
  * True when the provider answered that the same request may work if sent again later: the
  * service is overloaded, down, or rate limiting (HTTP 408, 409, 429, 5xx), or no answer came
@@ -2399,7 +2474,7 @@ export class VercelAILLM implements ILLM {
       } else {
         this.logger.error('Error creating streaming chat completion', extractErrorLogFields(error));
       }
-      throw toStreamError(error);
+      throw modelCallError(error, provider.name);
     }
 
     // Detached: warnings resolve at stream start, and a pending or rejected promise must never
@@ -2458,7 +2533,7 @@ export class VercelAILLM implements ILLM {
       // own `onAbort` callback races the stream's rejection instead of preceding it. The caller's
       // own signal is authoritative and synchronously known the moment it aborts, so prefer its
       // reason over the callback when the caller (not a host-owned deadline) is what aborted.
-      throw toStreamError(this.signal?.aborted ? this.signal.reason : (providerAbortReason ?? error));
+      throw modelCallError(this.signal?.aborted ? this.signal.reason : (providerAbortReason ?? error), provider.name);
     }
   }
 

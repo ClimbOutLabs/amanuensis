@@ -119,6 +119,11 @@ case "$cmd" in
     echo "$1" >>"$S/images"
     exit 0
     ;;
+  tag)
+    grep -Fxq "$1" "$S/images" || { echo "Error response from daemon: No such image: $1" >&2; exit 1; }
+    echo "$2" >>"$S/images"
+    exit 0
+    ;;
   logs)
     printf '%s\n' "${STUB_UP_FAIL_LOG:-}"
     exit 0
@@ -175,6 +180,11 @@ case "$cmd" in
           *--format*Containers*)
             grep -Fxq "$1" "$S/networks" || { echo "network $1 not found" >&2; exit 1; }
             awk -v n="$1" '$1 == n { printf "%s ", $2 }' "$S/network_links"
+            echo
+            exit 0
+            ;;
+          *--format*Subnet*) # The subnets of a network: lines "name subnet" in $S/network_subnets.
+            [ -f "$S/network_subnets" ] && awk -v n="$1" '$1 == n { printf "%s ", $2 }' "$S/network_subnets"
             echo
             exit 0
             ;;
@@ -527,6 +537,10 @@ case "$cmd" in
           exit 130
         fi
         if [ -n "${STUB_IMPORT_FAIL:-}" ]; then
+          if [ "$STUB_IMPORT_FAIL" = killed ]; then
+            # How a container ends when the machine kills it for memory: it just stops, exit 137.
+            exit 137
+          fi
           # The CLI's JSON log lines come first; its error is the last plain line.
           echo '{"level":"warn","message":"Data import rejected an export section"}' >&2
           if [ "$STUB_IMPORT_FAIL" = heap ]; then

@@ -16,14 +16,18 @@ import { SqliteGlobalSettingsStore } from '../../../src/db/sqlite/global-setting
 import { SqliteMcpServerStore } from '../../../src/db/sqlite/mcp-server-store/SqliteMcpServerStore';
 import { SqliteMcpToolGrantStore } from '../../../src/db/sqlite/mcp-tool-grant-store/SqliteMcpToolGrantStore';
 import { SqliteModelProviderStore } from '../../../src/db/sqlite/model-provider-store/SqliteModelProviderStore';
+import { SqlitePersonalizationStore } from '../../../src/db/sqlite/personalization-store/SqlitePersonalizationStore';
 import { SqliteSandboxProviderStore } from '../../../src/db/sqlite/sandbox-provider-store/SqliteSandboxProviderStore';
 import { SqliteSkillStore } from '../../../src/db/sqlite/skill-store/SqliteSkillStore';
 import { SqliteOAuthTokenStore } from '../../../src/db/sqlite/token-store/SqliteOAuthTokenStore';
-import type { LocalModels, ResolveHostAddresses } from '../../../src/runtime/localModels';
+import type { LocalModels } from '../../../src/runtime/localModels';
+import type { CheckSavedModelProvider } from '../../../src/runtime/modelProviderCheck';
+import { configureRemoteAddressCheck, type ResolveAddresses } from '../../../src/runtime/remoteAddress';
 import { RequestErrorResponseSchema } from '../../../src/schemas/errors';
 import {
   ListAvailableModelsResponseSchema,
   ListModelProvidersResponseSchema,
+  type ModelProviderCheck,
 } from '../../../src/schemas/modelProvider';
 import { SECRET_REDACTION } from '../../../src/utils/secretRedaction';
 import { uncappedTokenFactoryBudget } from '../../fixtures/uncappedTokenFactoryBudget';
@@ -97,7 +101,7 @@ function withRedactedApiKey<T extends { auth: { api_key: string } }>(provider: T
 const NO_LOCAL_MODELS: LocalModels = { thisComputer: new Set(), ports: [] };
 
 /** Name lookups answer from a fixed table, so no test depends on the DNS of the machine running it. */
-function fixedLookups(table: Record<string, string[]>): ResolveHostAddresses {
+function fixedLookups(table: Record<string, string[]>): ResolveAddresses {
   return hostname => Promise.resolve(table[hostname] ?? []);
 }
 
@@ -105,7 +109,8 @@ async function createRouters(
   options: {
     envManagedNames?: ReadonlySet<string>;
     localModels?: LocalModels;
-    resolveHostAddresses?: ResolveHostAddresses;
+    resolveHostAddresses?: ResolveAddresses;
+    checkSavedProvider?: CheckSavedModelProvider;
   } = {},
 ): Promise<{
   settingsRouter: ReturnType<typeof createSettingsRouter>;
@@ -134,10 +139,17 @@ async function createRouters(
       resolveSkillStore: () => new SqliteSkillStore(db),
       resolveSandboxProviderStore: () => new SqliteSandboxProviderStore(db),
       globalSettingsStore,
+      personalizationStore: new SqlitePersonalizationStore(db),
       tokenFactoryBudget: uncappedTokenFactoryBudget,
       envManagedModelProviderNames: options.envManagedNames ?? new Set(),
       localModels: options.localModels ?? NO_LOCAL_MODELS,
       resolveHostAddresses: options.resolveHostAddresses ?? fixedLookups({}),
+      // Saves in these suites carry no check outcome unless a suite wires its own checker.
+      checkSavedProvider:
+        options.checkSavedProvider ??
+        (async () => {
+          throw new Error('connection check not wired in this test');
+        }),
       withTransaction: callback => db.transaction().execute(callback),
       logger: winston.createLogger({ silent: true }),
       resolveRequestContext: () => STANDALONE_REQUEST_CONTEXT,
@@ -244,6 +256,19 @@ describe('settings model-providers and models routers', () => {
 });
 
 describe('custom providers may omit auth', () => {
+  const originalLocalModelEndpoints = configuration.LOCAL_MODEL_ENDPOINTS;
+
+  beforeEach(() => {
+    // These providers live at the Ollama address on this computer; the operator names that
+    // exact endpoint, as the local model endpoint list requires, so the saves below are
+    // judged on their auth alone.
+    configuration.LOCAL_MODEL_ENDPOINTS = ['localhost:11434'];
+  });
+
+  afterEach(() => {
+    configuration.LOCAL_MODEL_ENDPOINTS = originalLocalModelEndpoints;
+  });
+
   const model = {
     model_id: 'llama',
     name: 'llama',
@@ -378,7 +403,9 @@ describe('model-provider secret redaction and strict PUT', () => {
       }),
     );
     expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({ error: { message: 'API key is required' } });
+    expect(await response.json()).toEqual({
+      error: { message: 'API key is required. Add an API key for this provider, then save again.' },
+    });
   });
 
   it('POST create with a redacted api_key returns 400', async () => {
@@ -391,13 +418,57 @@ describe('model-provider secret redaction and strict PUT', () => {
       }),
     );
     expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({ error: { message: 'API key is required' } });
+    expect(await response.json()).toEqual({
+      error: { message: 'API key is required. Add an API key for this provider, then save again.' },
+    });
   });
 
   it('PUT rejects a missing api_key at the Zod layer', async () => {
     const { settingsRouter } = await createRouters();
     const response = await settingsRouter.request('/model-providers', putInit({ ...anthropicBody, auth: {} }));
     expect(response.status).toBe(400);
+  });
+
+  it('POST create without a key returns 400 for a provider that needs one', async () => {
+    const { settingsRouter } = await createRouters();
+    const { auth: _auth, ...keyless } = anthropicBody;
+    const response = await settingsRouter.request('/model-providers', postInit(keyless));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: { message: 'API key is required. Add an API key for this provider, then save again.' },
+    });
+  });
+
+  it('PUT create without a key returns 400 for a provider that needs one', async () => {
+    const { settingsRouter } = await createRouters();
+    const { auth: _auth, ...keyless } = anthropicBody;
+    const response = await settingsRouter.request('/model-providers', putInit(keyless));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: { message: 'API key is required. Add an API key for this provider, then save again.' },
+    });
+  });
+
+  it('PUT without a key keeps the stored key', async () => {
+    const { settingsRouter, modelProviderStore } = await createRouters();
+    expect((await settingsRouter.request('/model-providers', putInit(anthropicBody))).status).toBe(200);
+
+    const { auth: _auth, ...keyless } = anthropicBody;
+    const update = await settingsRouter.request(
+      '/model-providers',
+      putInit({
+        ...keyless,
+        models: [model, { model_id: 'claude-opus-4', name: 'claude-opus-4', properties: model.properties }],
+      }),
+    );
+    expect(update.status).toBe(200);
+    const stored = await modelProviderStore.getProvider({
+      tenant_id: 'default',
+      name: 'anthropic',
+      model_name: 'claude-sonnet-4-6',
+    });
+    expect(stored?.manifest.auth?.api_key).toBe('sk-ant-secret');
+    expect(stored?.manifest.models).toHaveLength(2);
   });
 
   it('PUT with a redacted api_key keeps the stored secret', async () => {
@@ -631,6 +702,75 @@ describe('environment-managed Token Factory provider', () => {
   });
 });
 
+describe('save-time connection check', () => {
+  const answeredCheck: ModelProviderCheck = {
+    kind: 'answered',
+    message: 'The model server answered the test call.',
+    checked_at: '2026-11-09T12:00:00.000Z',
+  };
+  const refusedCheck: ModelProviderCheck = {
+    kind: 'key_refused',
+    message: 'The model server refused the API key. Check the key for this provider and save again.',
+    checked_at: '2026-11-09T12:00:00.000Z',
+  };
+
+  it('POST returns the check outcome and the list shows it afterwards', async () => {
+    const seen: string[] = [];
+    const { settingsRouter } = await createRouters({
+      checkSavedProvider: async ({ record }) => {
+        seen.push(record.name);
+        return answeredCheck;
+      },
+    });
+
+    const created = await settingsRouter.request('/model-providers', postInit(customBody));
+    expect(created.status).toBe(201);
+    expect(await created.json()).toEqual({
+      data: { ...configured('internal', customBodyWire), last_check: answeredCheck },
+    });
+    expect(seen).toEqual(['internal']);
+
+    const list = await settingsRouter.request('/model-providers');
+    expect(await list.json()).toEqual({
+      data: [{ ...configured('internal', customBodyWire), last_check: answeredCheck }],
+    });
+  });
+
+  it('PUT still saves when the check finds the key refused, and records the outcome', async () => {
+    const { settingsRouter, modelProviderStore } = await createRouters({
+      checkSavedProvider: async () => refusedCheck,
+    });
+
+    const response = await settingsRouter.request('/model-providers', putInit(customBody));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      data: { ...configured('internal', customBodyWire), last_check: refusedCheck },
+    });
+
+    const stored = await modelProviderStore.getProvider({
+      tenant_id: 'default',
+      name: 'internal',
+      model_name: 'claude-sonnet-4-6',
+    });
+    expect(stored?.last_check).toEqual(refusedCheck);
+  });
+
+  it('a checker that throws still saves, with no outcome shown', async () => {
+    const { settingsRouter } = await createRouters({
+      checkSavedProvider: async () => {
+        throw new Error('checker blew up');
+      },
+    });
+
+    const response = await settingsRouter.request('/model-providers', putInit(customBody));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ data: configured('internal', customBodyWire) });
+
+    const list = await settingsRouter.request('/model-providers');
+    expect(await list.json()).toEqual({ data: [configured('internal', customBodyWire)] });
+  });
+});
+
 describe('GET /models default chat model', () => {
   it('lists the stored default chat model first and keeps the rest in order', async () => {
     const { settingsRouter, modelsRouter, globalSettingsStore } = await createRouters();
@@ -669,6 +809,7 @@ describe('a model address that is this computer', () => {
     ports: [30031],
   };
   const lookups = fixedLookups({
+    localhost: ['127.0.0.1'],
     'spark.example.ts.net': ['100.101.102.103'],
     spark: ['192.168.1.20'],
     'gpu.example.ts.net': ['100.101.102.200'],
@@ -737,9 +878,153 @@ describe('a model address that is this computer', () => {
     expect(response.status).toBe(200);
   });
 
-  it('steers nothing outside an installer instance', async () => {
+  it('leaves an address on this computer to the address check outside an installer instance', async () => {
     const { settingsRouter } = await createRouters({ resolveHostAddresses: lookups });
     const response = await settingsRouter.request('/model-providers', putInit(localBody('http://localhost:11434/v1')));
+    expect(response.status).toBe(400);
+    const body = RequestErrorResponseSchema.parse(await response.json());
+    expect(body.error.code).toBeUndefined();
+    expect(body.error.message).toContain('LOCAL_MODEL_ENDPOINTS');
+  });
+});
+
+describe("the local model bridge's address on an instance network", () => {
+  // The bridge answers on a network the app's containers share, so the address check refuses it
+  // unless aman local-model has listed its endpoint.
+  const spark: LocalModels = { thisComputer: new Set(['127.0.0.1', 'localhost']), ports: [30031] };
+  const lookups = fixedLookups({ 'aman-local-model': ['172.30.5.2'] });
+  const bridgeBody = { ...customBody, name: 'bridged', base_url: 'http://aman-local-model:30031/v1' };
+  const originalEndpoints = configuration.LOCAL_MODEL_ENDPOINTS;
+
+  beforeEach(() => {
+    configureRemoteAddressCheck({ ownNetworkRanges: ['172.30.0.0/16'] });
+  });
+
+  afterEach(() => {
+    configureRemoteAddressCheck({ ownNetworkRanges: [] });
+    configuration.LOCAL_MODEL_ENDPOINTS = originalEndpoints;
+  });
+
+  it('is refused, with the command that adds its port, while its endpoint is not listed', async () => {
+    configuration.LOCAL_MODEL_ENDPOINTS = ['aman-local-model:11434'];
+    const { settingsRouter, modelProviderStore } = await createRouters({
+      localModels: spark,
+      resolveHostAddresses: lookups,
+    });
+
+    for (const init of [postInit(bridgeBody), putInit(bridgeBody)]) {
+      const response = await settingsRouter.request('/model-providers', init);
+      expect(response.status).toBe(400);
+      const body = RequestErrorResponseSchema.parse(await response.json());
+      expect(body.error.message).toContain('run aman local-model 30031');
+    }
+    expect(await modelProviderStore.listProviders({ tenant_id: STANDALONE_REQUEST_CONTEXT.tenant_id })).toEqual([]);
+  });
+
+  it('is saved once its endpoint is listed', async () => {
+    configuration.LOCAL_MODEL_ENDPOINTS = ['localhost:11434', 'aman-local-model:30031'];
+    const { settingsRouter } = await createRouters({ localModels: spark, resolveHostAddresses: lookups });
+
+    expect((await settingsRouter.request('/model-providers', postInit(bridgeBody))).status).toBe(201);
+    expect((await settingsRouter.request('/model-providers', putInit(bridgeBody))).status).toBe(200);
+  });
+});
+
+describe('the address check on model providers', () => {
+  function customAt(name: string, baseUrl: string) {
+    return { type: 'custom' as const, name, base_url: baseUrl, auth: { api_key: 'sk-custom' }, models: [model] };
+  }
+
+  async function errorMessage(response: Response): Promise<string> {
+    return RequestErrorResponseSchema.parse(await response.json()).error.message;
+  }
+
+  it('refuses a provider at a loopback address, naming the setting that allows a local model', async () => {
+    const { settingsRouter } = await createRouters();
+
+    const response = await settingsRouter.request(
+      '/model-providers',
+      putInit(customAt('local-refused', 'http://127.0.0.1:11434/v1')),
+    );
+
+    expect(response.status).toBe(400);
+    expect(await errorMessage(response)).toContain('LOCAL_MODEL_ENDPOINTS');
+    const list = await settingsRouter.request('/model-providers');
+    expect(await list.json()).toEqual({ data: [] });
+  });
+
+  it('refuses a provider at the cloud metadata address', async () => {
+    const { settingsRouter } = await createRouters();
+
+    const response = await settingsRouter.request(
+      '/model-providers',
+      postInit(customAt('metadata-refused', 'http://169.254.169.254/v1')),
+    );
+
+    expect(response.status).toBe(400);
+    const message = await errorMessage(response);
+    expect(message).toContain('That address is on this computer, so the server cannot use it for a model');
+    expect(message).toContain('~/.amanuensis/instances/<name>/.env');
+    expect(message).toContain('Restart the instance after changing it');
+  });
+
+  it('refuses an address carrying a name and password', async () => {
+    const { settingsRouter } = await createRouters();
+
+    const response = await settingsRouter.request(
+      '/model-providers',
+      putInit(customAt('credentialed-refused', 'https://user:secret@8.8.8.8/v1')),
+    );
+
+    expect(response.status).toBe(400);
+    expect(await errorMessage(response)).toContain('without a name and password in it');
+  });
+
+  it('saves a provider at a public address', async () => {
+    const { settingsRouter } = await createRouters();
+
+    const response = await settingsRouter.request(
+      '/model-providers',
+      putInit(customAt('public-allowed', 'https://8.8.8.8/v1')),
+    );
+
     expect(response.status).toBe(200);
+  });
+
+  it('saves a provider at a loopback address once the operator names its exact endpoint', async () => {
+    const { settingsRouter } = await createRouters();
+    const originalEndpoints = configuration.LOCAL_MODEL_ENDPOINTS;
+    configuration.LOCAL_MODEL_ENDPOINTS = ['127.0.0.1:11434', 'localhost:11434'];
+    try {
+      const byLiteral = await settingsRouter.request(
+        '/model-providers',
+        putInit(customAt('local-allowed', 'http://127.0.0.1:11434/v1')),
+      );
+      expect(byLiteral.status).toBe(200);
+
+      const byName = await settingsRouter.request(
+        '/model-providers',
+        putInit(customAt('local-named', 'http://localhost:11434/v1')),
+      );
+      expect(byName.status).toBe(200);
+    } finally {
+      configuration.LOCAL_MODEL_ENDPOINTS = originalEndpoints;
+    }
+  });
+
+  it('a named endpoint does not cover a different port on the same host', async () => {
+    const { settingsRouter } = await createRouters();
+    const originalEndpoints = configuration.LOCAL_MODEL_ENDPOINTS;
+    configuration.LOCAL_MODEL_ENDPOINTS = ['127.0.0.1:11434'];
+    try {
+      const response = await settingsRouter.request(
+        '/model-providers',
+        putInit(customAt('local-wrong-port', 'http://127.0.0.1:9999/v1')),
+      );
+
+      expect(response.status).toBe(400);
+    } finally {
+      configuration.LOCAL_MODEL_ENDPOINTS = originalEndpoints;
+    }
   });
 });

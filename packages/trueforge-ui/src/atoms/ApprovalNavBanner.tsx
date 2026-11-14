@@ -8,7 +8,7 @@ export type ApprovalNavBannerProps = {
   assistantName: string;
   /** Title of the first pending card, e.g. "Send this reply?". */
   title?: string;
-  /** Scroll the thread to the first pending card and focus its main button. */
+  /** Scroll the thread to the first pending card and focus its first choice (the no on a risky card). */
   onFocusCurrent: () => void;
   className?: string;
 };

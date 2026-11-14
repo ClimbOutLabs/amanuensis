@@ -42,6 +42,7 @@ import { toJsonSafeParams } from '../permissions/approvalTokens';
 import { heldCallAuditText, recordNotPreparedRefusals, recordUnattendedSpaceChange } from '../permissions/audit';
 import type { SentinelDispatchContext } from '../permissions/context';
 import { HELD_REASON_CODE, HELD_RESULT_TEXT } from '../permissions/heldActions';
+import type { SkillNetworkCardRequest } from '../permissions/skillNetworkCards';
 import { isMapsCardReason } from '../permissions/mapsToolNames';
 import { collectOutboundStrings } from '../permissions/outboundGuard';
 import {
@@ -53,6 +54,7 @@ import {
 } from '../permissions/webSearch';
 import { identicalCallNudgeMessage } from '../runtime/contextUtils';
 import { CALL_TOOL_NAME, tryParseCallToolWrapper } from '../runtime/DeferredTool';
+import { REPLY_CALL_NOT_RUN_OWNER_MESSAGE } from '../runtime/modelReplyGuard';
 import { connectorUnreachableText, type ToolResultKind, type UnfinishedKind } from '../runtime/replyBudget';
 import type { SandboxInfo, WorkspaceVerificationReceiptCandidate } from '../sandbox/Sandbox';
 import { SPACE_WRITE_REASON } from '../spaces/toolContract';
@@ -100,6 +102,8 @@ export interface ToolCallResult {
   blockedPrivateFallback: boolean;
   repeatedSideEffect: boolean;
   verificationReceiptCandidate: WorkspaceVerificationReceiptCandidate | undefined;
+  /** Skill network cards this result's command asked for, carried from the sandbox; absent when it asked for none. */
+  skillNetworkCards?: readonly SkillNetworkCardRequest[] | undefined;
   disposition: ToolResultDisposition;
   remediation: ToolResultRemediation | undefined;
   /** Set by a response processor that changed the result text; absent when the model saw it as returned. */
@@ -1721,13 +1725,30 @@ export async function executeToolCalls({
           });
         }
       }
+      let wireArguments: Record<string, unknown> | undefined;
+      try {
+        wireArguments = parseToolArguments(toolCall.function.arguments);
+      } catch {
+        wireArguments = undefined;
+      }
+      // The tool set may say in the chat why the action did not happen (a send's receipt reads "Not sent").
+      const refusedEvents =
+        wireArguments === undefined
+          ? []
+          : (toolInfo.toolSet.refusedAtDispatchEvents?.({
+              params: { name: toolInfo.originalToolName, arguments: wireArguments },
+              tool_call_id: toolCall.id,
+            }) ?? []);
       return {
         toolCall,
         toolInfo,
-        response: toolResultResponse({
-          text: JSON.stringify({ error: sentinelVerificationError }),
-          isError: true,
-        }),
+        response: {
+          ...toolResultResponse({
+            text: JSON.stringify({ error: sentinelVerificationError }),
+            isError: true,
+          }),
+          ...(refusedEvents.length > 0 ? { events: refusedEvents } : {}),
+        },
         failure: true,
         completedAt: new Date().toISOString(),
         memoized: false,
@@ -1837,7 +1858,15 @@ export async function executeToolCalls({
       // describe a world that no longer exists, so only an entry stamped
       // with the current mutation epoch may be replayed. A stale entry
       // falls through to a fresh dispatch, whose result replaces it below.
-      const previous = completedEntry?.mutationEpoch === memoState.workspaceMutationEpoch ? completedEntry : undefined;
+      // An approved replay is never served from the memo either: the owner just answered for
+      // this call, so handing back its stored result would defeat the answer (a skill network
+      // card's command must run again under the grant the answer recorded).
+      const previous =
+        approvalDecision?.status === 'allow'
+          ? undefined
+          : completedEntry?.mutationEpoch === memoState.workspaceMutationEpoch
+            ? completedEntry
+            : undefined;
       if (previous !== undefined) {
         previous.count += 1;
         return {
@@ -2002,6 +2031,7 @@ export async function executeToolCalls({
           {
             admission_provenance: admission,
             dispatch_id: dispatchId,
+            tool_call_id: toolCall.id,
             // the turn's abort signal reaches tools that do bounded
             // multi-phase work (run_code provisioning observes it).
             signal,
@@ -2014,6 +2044,9 @@ export async function executeToolCalls({
             ...(toolCall.tool_info.git_remote_precondition === undefined
               ? {}
               : { git_remote_precondition: toolCall.tool_info.git_remote_precondition }),
+            ...(toolCall.tool_info.browser_element === undefined
+              ? {}
+              : { browser_element_precondition: toolCall.tool_info.browser_element }),
           },
         );
       };
@@ -2340,7 +2373,7 @@ export async function executeToolCalls({
               {
                 toolName: toolCall.tool_info.original_tool_name,
                 tier: toolCall.tool_info.tier,
-                message: failure.owner_message ?? failure.message,
+                message: failure.owner_message ?? REPLY_CALL_NOT_RUN_OWNER_MESSAGE,
               },
             ];
       }),
@@ -2562,6 +2595,7 @@ export async function executeToolCalls({
       blockedPrivateFallback,
       repeatedSideEffect,
       verificationReceiptCandidate: response.verificationReceiptCandidate,
+      ...(response.skillNetworkCards === undefined ? {} : { skillNetworkCards: response.skillNetworkCards }),
       disposition,
       remediation: resultRemediation,
       admissionProvenance: resultAdmissionProvenance,

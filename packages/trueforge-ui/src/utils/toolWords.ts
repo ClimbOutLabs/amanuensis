@@ -95,6 +95,9 @@ const TOOL_WORDS: ReadonlyMap<string, ToolWords> = new Map([
     'run_registered_command',
   ]),
   ...words({ doing: 'Running code', done: 'Ran code', thing: 'Some code' }, ['run_code']),
+  ...words({ doing: "Running a skill's script", done: "Ran a skill's script", thing: "A skill's script" }, [
+    'run_skill_script',
+  ]),
   ...words({ doing: 'Reading', done: 'Read files', thing: 'Some files' }, ['read_file', 'read', 'open_file', 'cat']),
   ...words({ doing: 'Editing files', done: 'Changed files', thing: 'A file change' }, [
     'write_file',
@@ -129,6 +132,26 @@ const TOOL_WORDS: ReadonlyMap<string, ToolWords> = new Map([
     },
     ['delivery.web_push'],
   ),
+  ...words({ doing: 'Sending you a text', done: 'Sent you a text', thing: 'A text for you' }, ['delivery.sms']),
+  ...words({ doing: 'Calling you', done: 'Called you', thing: 'A phone call to you' }, ['delivery.call']),
+  ...words({ doing: 'Turning texts off', done: 'Turned texts off after a STOP', thing: 'A STOP reply' }, [
+    'delivery.sms_stop',
+  ]),
+  ...words(
+    {
+      doing: 'Dropping a new number',
+      done: 'Dropped a new number after a STOP',
+      thing: 'A STOP from a new number',
+    },
+    ['delivery.sms_new_number_stopped'],
+  ),
+  ...words(
+    { doing: 'Confirming your number', done: 'Confirmed your number for texts', thing: 'Your number for texts' },
+    ['delivery.sms_confirmed'],
+  ),
+  ...words({ doing: 'Removing your number', done: 'Removed your number for texts', thing: 'Your number for texts' }, [
+    'delivery.sms_removed',
+  ]),
   ...words({ doing: 'Checking your reminders', done: 'Checked your reminders', thing: 'Your reminders' }, [
     'list_reminders',
   ]),
@@ -155,6 +178,11 @@ const TOOL_WORDS: ReadonlyMap<string, ToolWords> = new Map([
     'persona_switch',
   ]),
   ...words({ doing: 'Making a persona', done: 'Made a persona', thing: 'A new persona' }, ['create_persona']),
+  ...words({ doing: 'Checking the skills', done: 'Checked the skills', thing: 'The skills' }, [
+    'list_skills',
+    'skill_read',
+  ]),
+  ...words({ doing: 'Adding a skill', done: 'Added a skill', thing: 'A new skill' }, ['install_skill']),
   ...words({ doing: 'Showing a picture', done: 'Showed a picture', thing: 'A picture' }, ['show_image']),
   ...words({ doing: 'Making a report', done: 'Made a report', thing: 'A report' }, ['create_document_report']),
   ...words({ doing: 'Making a plan', done: 'Made a plan', thing: 'A plan' }, ['submit_implementation_plan']),

@@ -5,6 +5,7 @@ import { lazy, Suspense, useRef } from 'react';
 import { useAui } from '../assistant-ui.js';
 import { AgentDetailsToggleButton } from '../atoms/AgentDetailsToggleButton.js';
 import { ChatHeaderMenu } from '../atoms/ChatHeaderMenu.js';
+import { LightDarkToggleButton } from '../atoms/LightDarkToggleButton.js';
 import { NamedAgentHeaderLabel } from '../atoms/NamedAgentHeaderLabel.js';
 import { PageHeader } from '../atoms/PageHeader.js';
 import { ShellActions } from '../atoms/ShellActions.js';
@@ -23,6 +24,9 @@ const TruefoundrySettingsBuilder = lazy(() => import('../containers/SettingsBuil
 const SchedulesPage = lazy(() =>
   import('../atoms/schedules/SchedulesPage.js').then(m => ({ default: m.SchedulesPage })),
 );
+const RemindersPage = lazy(() =>
+  import('../atoms/reminders/RemindersPage.js').then(m => ({ default: m.RemindersPage })),
+);
 
 export function DrawerLayout({ className }: { className?: string }) {
   const aui = useAui();
@@ -40,7 +44,8 @@ export function DrawerLayout({ className }: { className?: string }) {
   const libraryOpen = shell?.libraryOpen === true;
   const sessionsOpen = shell?.sessionsOpen === true;
   const schedulesOpen = shell?.schedulesOpen === true;
-  const overlayOpen = settingsOpen || libraryOpen || sessionsOpen || schedulesOpen;
+  const remindersOpen = shell?.remindersOpen === true;
+  const overlayOpen = settingsOpen || libraryOpen || sessionsOpen || schedulesOpen || remindersOpen;
   const showAgentConfig =
     shell != null && shellIsMutable(shell.mode) && !overlayOpen && (!isMobile || shell.agentConfigOpen);
   const showNewActions = shell?.isNewChatEnabled !== false;
@@ -87,13 +92,14 @@ export function DrawerLayout({ className }: { className?: string }) {
           title={
             !overlayOpen ? (
               <NamedAgentHeaderLabel />
-            ) : libraryOpen || schedulesOpen ? (
+            ) : libraryOpen || schedulesOpen || remindersOpen ? (
               <button
                 type="button"
                 className={auiButtonClass({ variant: 'ghost', size: 'small' })}
                 onClick={() => {
                   shell?.setLibraryOpen(false);
                   shell?.setSchedulesOpen(false);
+                  shell?.setRemindersOpen(false);
                 }}
               >
                 <Icon name="arrow-left" />
@@ -105,6 +111,7 @@ export function DrawerLayout({ className }: { className?: string }) {
             <>
               {!overlayOpen ? (
                 <>
+                  <LightDarkToggleButton />
                   <AgentDetailsToggleButton />
                   <SaveAgentButton />
                 </>
@@ -178,6 +185,22 @@ export function DrawerLayout({ className }: { className?: string }) {
               }
             >
               <SchedulesPage />
+            </Suspense>
+          ) : remindersOpen ? (
+            <Suspense
+              fallback={
+                <div
+                  className="flex h-full items-center justify-center"
+                  role="status"
+                  aria-live="polite"
+                  aria-busy="true"
+                >
+                  <Spinner size={28} className="text-text-primary" />
+                  <span className="sr-only">Loading</span>
+                </div>
+              }
+            >
+              <RemindersPage />
             </Suspense>
           ) : isIdle ? (
             <SelectAgentEmptyState />

@@ -193,7 +193,9 @@ fixture_repo() {
   )
 }
 
+# A newer version of the code: it changes the app's and the speech-to-text service's sources, so both ids change.
 repo_commit_change() {
+  printf '# %s\n' "$1" >>"$REPO/Dockerfile.dev"
   printf '%s\n' "$1" >>"$REPO/ops/aman-stt/Dockerfile"
   (
     cd "$REPO"

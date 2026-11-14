@@ -59,6 +59,7 @@ jest.mock('../../../../src/runtime/memory/memoryNotesSummarize', () => {
 });
 
 const unusedStore: IModelProviderStore = {
+  managedElsewhere: false,
   listProviders: jest.fn(),
   getProvider: jest.fn(),
   getProviderForUpdate: jest.fn(),
@@ -66,6 +67,7 @@ const unusedStore: IModelProviderStore = {
   upsertProvider: jest.fn(),
   listModels: jest.fn(),
   deleteProvider: jest.fn(),
+  recordProviderCheck: jest.fn(),
 };
 
 const CLAIMED_ADDRESS = 'recovery@elsewhere.example';

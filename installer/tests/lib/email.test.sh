@@ -61,6 +61,183 @@ assert_no_mail_account() {
   fi
 }
 
+# Runs the real wrapper (the file the installer copies beside an instance) against a mail server
+# stand-in that binds its port late, and an account agent stand-in. The wrapper must not record the
+# send list as loaded until the server answers, and must clear the record while a restart comes up.
+test_entrypoint_records_the_list_once_the_server_answers() {
+  t_begin "the mail wrapper records the send list only once the server answers, and clears the record at a restart"
+  sandbox_new
+  local wrap=$SB/wrap
+  mkdir -p "$wrap/bin" "$wrap/status"
+  cat >"$wrap/agent.py" <<'PYEOF'
+import sys
+import time
+
+if "--print-child-env" in sys.argv:
+    print("")
+else:
+    time.sleep(3600)
+PYEOF
+  cat >"$wrap/bin/mcp-email-server" <<'SHEOF'
+#!/bin/sh
+sleep "$(cat "$WRAP_DELAY")"
+exec python3 -c '
+import socket, time
+sock = socket.socket()
+sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+sock.bind(("0.0.0.0", 9557))
+sock.listen(1)
+time.sleep(3600)
+'
+SHEOF
+  chmod 755 "$wrap/bin/mcp-email-server"
+  printf '4\n' >"$wrap/delay"
+  printf 'db_location = "/data/db.sqlite3"\nallowed_recipients = []\n' >"$wrap/policy.toml"
+  printf 'account one\n' >"$wrap/account.toml"
+  local hash
+  hash=$(sha256sum "$wrap/policy.toml" | cut -d' ' -f1)
+  WRAP_DELAY="$wrap/delay" PATH="$wrap/bin:$SB_BIN" \
+    MCP_EMAIL_SERVER_CONFIG_PATH="$wrap/policy.toml" \
+    AMAN_MAIL_STATUS_FILE="$wrap/status/loaded.sha256" \
+    AMAN_MAIL_ACCOUNT_FILE="$wrap/account.toml" \
+    AMAN_MAIL_ACCOUNT_AGENT="$wrap/agent.py" \
+    sh "$INSTALLER_DIR/../ops/compose/mail-email/entrypoint.sh" streamable-http --host 0.0.0.0 --port 9557 >"$wrap/log" 2>&1 &
+  local ep=$!
+  # The stand-in binds at 4 seconds; at 2 seconds the record must not yet name the list.
+  sleep 2
+  assert_eq "$(cat "$wrap/status/loaded.sha256" 2>/dev/null || true)" "" "no loaded record before the server answers"
+  local tries=0
+  while [ "$(cat "$wrap/status/loaded.sha256" 2>/dev/null || true)" != "$hash" ] && [ "$tries" -lt 100 ]; do
+    sleep 0.2
+    tries=$((tries + 1))
+  done
+  assert_eq "$(cat "$wrap/status/loaded.sha256" 2>/dev/null || true)" "$hash" "loaded record names the list once the server answers"
+  # An account change restarts the server on the same list: the record clears while it comes up.
+  printf 'account two\n' >"$wrap/account.toml"
+  tries=0
+  while [ -f "$wrap/status/loaded.sha256" ] && [ "$tries" -lt 100 ]; do
+    sleep 0.2
+    tries=$((tries + 1))
+  done
+  assert_no_path "$wrap/status/loaded.sha256"
+  tries=0
+  while [ "$(cat "$wrap/status/loaded.sha256" 2>/dev/null || true)" != "$hash" ] && [ "$tries" -lt 100 ]; do
+    sleep 0.2
+    tries=$((tries + 1))
+  done
+  assert_eq "$(cat "$wrap/status/loaded.sha256" 2>/dev/null || true)" "$hash" "loaded record names the same list again after the restart"
+  kill -TERM "$ep" 2>/dev/null || true
+  wait "$ep" 2>/dev/null || true
+  sandbox_drop
+}
+
+# The wrapper probes the address the server is started with, not a fixed one: a server started on
+# another port must still get its loaded record once it answers there.
+test_entrypoint_probes_the_port_the_server_is_given() {
+  t_begin "the mail wrapper waits on the port the mail server is started with"
+  sandbox_new
+  local wrap=$SB/wrap
+  mkdir -p "$wrap/bin" "$wrap/status"
+  cat >"$wrap/agent.py" <<'PYEOF'
+import sys
+import time
+
+if "--print-child-env" in sys.argv:
+    print("")
+else:
+    time.sleep(3600)
+PYEOF
+  cat >"$wrap/bin/mcp-email-server" <<'SHEOF'
+#!/bin/sh
+exec python3 -c '
+import socket, sys, time
+port = int(sys.argv[sys.argv.index("--port") + 1])
+sock = socket.socket()
+sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+sock.bind(("127.0.0.1", port))
+sock.listen(1)
+time.sleep(3600)
+' "$@"
+SHEOF
+  chmod 755 "$wrap/bin/mcp-email-server"
+  printf 'db_location = "/data/db.sqlite3"\nallowed_recipients = []\n' >"$wrap/policy.toml"
+  printf 'account one\n' >"$wrap/account.toml"
+  local hash
+  hash=$(sha256sum "$wrap/policy.toml" | cut -d' ' -f1)
+  PATH="$wrap/bin:$SB_BIN" \
+    MCP_EMAIL_SERVER_CONFIG_PATH="$wrap/policy.toml" \
+    AMAN_MAIL_STATUS_FILE="$wrap/status/loaded.sha256" \
+    AMAN_MAIL_ACCOUNT_FILE="$wrap/account.toml" \
+    AMAN_MAIL_ACCOUNT_AGENT="$wrap/agent.py" \
+    sh "$INSTALLER_DIR/../ops/compose/mail-email/entrypoint.sh" streamable-http --host 0.0.0.0 --port 19557 >"$wrap/log" 2>&1 &
+  local ep=$!
+  local tries=0
+  while [ "$(cat "$wrap/status/loaded.sha256" 2>/dev/null || true)" != "$hash" ] && [ "$tries" -lt 100 ]; do
+    sleep 0.2
+    tries=$((tries + 1))
+  done
+  assert_eq "$(cat "$wrap/status/loaded.sha256" 2>/dev/null || true)" "$hash" "loaded record names the list once the server answers on its own port"
+  kill -TERM "$ep" 2>/dev/null || true
+  wait "$ep" 2>/dev/null || true
+  sandbox_drop
+}
+
+# A server that answers only after the start's answer wait has run out must still get its loaded
+# record: the wrapper's watch loop records it once it answers, or every send would be refused until
+# the next restart. The wait is shortened here so the test does not take 20 seconds.
+test_entrypoint_records_a_server_that_answers_after_the_wait() {
+  t_begin "the mail wrapper records the send list when the server answers only after the start's wait"
+  sandbox_new
+  local wrap=$SB/wrap
+  mkdir -p "$wrap/bin" "$wrap/status"
+  cat >"$wrap/agent.py" <<'PYEOF'
+import sys
+import time
+
+if "--print-child-env" in sys.argv:
+    print("")
+else:
+    time.sleep(3600)
+PYEOF
+  cat >"$wrap/bin/mcp-email-server" <<'SHEOF'
+#!/bin/sh
+sleep 5
+exec python3 -c '
+import socket, time
+sock = socket.socket()
+sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+sock.bind(("127.0.0.1", 19558))
+sock.listen(1)
+time.sleep(3600)
+'
+SHEOF
+  chmod 755 "$wrap/bin/mcp-email-server"
+  printf 'db_location = "/data/db.sqlite3"\nallowed_recipients = []\n' >"$wrap/policy.toml"
+  printf 'account one\n' >"$wrap/account.toml"
+  local hash
+  hash=$(sha256sum "$wrap/policy.toml" | cut -d' ' -f1)
+  AMAN_MAIL_ANSWER_WAIT_SECONDS=2 PATH="$wrap/bin:$SB_BIN" \
+    MCP_EMAIL_SERVER_CONFIG_PATH="$wrap/policy.toml" \
+    AMAN_MAIL_STATUS_FILE="$wrap/status/loaded.sha256" \
+    AMAN_MAIL_ACCOUNT_FILE="$wrap/account.toml" \
+    AMAN_MAIL_ACCOUNT_AGENT="$wrap/agent.py" \
+    sh "$INSTALLER_DIR/../ops/compose/mail-email/entrypoint.sh" streamable-http --host 0.0.0.0 --port 19558 >"$wrap/log" 2>&1 &
+  local ep=$!
+  # The start's wait ends at 2 seconds; the server answers at 5.
+  sleep 4
+  assert_eq "$(cat "$wrap/status/loaded.sha256" 2>/dev/null || true)" "" "no loaded record while the server does not answer"
+  local tries=0
+  while [ "$(cat "$wrap/status/loaded.sha256" 2>/dev/null || true)" != "$hash" ] && [ "$tries" -lt 100 ]; do
+    sleep 0.2
+    tries=$((tries + 1))
+  done
+  assert_eq "$(cat "$wrap/status/loaded.sha256" 2>/dev/null || true)" "$hash" "loaded record names the list once the late server answers"
+  assert_eq "$(grep -c 'starting it again\|restarting the mail server' "$wrap/log")" "0" "the late server is not restarted"
+  kill -TERM "$ep" 2>/dev/null || true
+  wait "$ep" 2>/dev/null || true
+  sandbox_drop
+}
+
 test_presets_write_their_servers() {
   t_begin "each preset writes its servers, encryption and certificate check"
   sandbox_new
@@ -379,6 +556,40 @@ test_instance_commands_keep_the_connector() {
   sandbox_drop
 }
 
+test_agent_secret() {
+  t_begin "the app and the email connector share one secret through the settings file, and the connector has a network of its own"
+  sandbox_new
+  install_with_gmail
+  local env=$AMAN_HOME/instances/main/.env compose=$AMAN_HOME/instances/main/compose.yaml first
+  first=$(sed -n 's/^MAIL_EMAIL_ACCOUNT_SECRET=//p' "$env")
+  assert_eq "${#first}" 64 "a random secret of 64 characters is made"
+  assert_not_contains "$(cat "$compose")" "$first" "the compose file never holds the secret"
+  assert_contains "$(cat "$compose")" "AMAN_MAIL_ACCOUNT_SECRET: \${MAIL_EMAIL_ACCOUNT_SECRET:?missing from .env}" "the compose file points the connector at the shared secret"
+  assert_eq "$(awk '/^  mail-email:/{f=1;next} /^  [a-z]/{f=0} f && /^    networks:/{n=1;next} f && n && /^      - /{print $2} f && n && !/^      - /{n=0}' "$compose" | tr '\n' ' ')" "mail " "the connector joins only its own network"
+  assert_contains "$(awk '/^  loopback:/{f=1;next} /^  [a-z]/{f=0} f' "$compose")" "- mail" "the app's network holder joins it"
+  assert_eq "$(awk '/^  [a-z]/{svc=$1} svc != "mail-email:" && svc != "loopback:" && /^      - mail$/{print svc}' "$compose")" "" "no other service joins the mail network"
+  run_install instance email main --remove
+  assert_rc 0
+  assert_eq "$(sed -n 's/^MAIL_EMAIL_ACCOUNT_SECRET=//p' "$env")" "$first" "the same secret is still there"
+  sandbox_drop
+}
+
+test_an_older_instance_gets_a_mail_secret() {
+  t_begin "an instance whose settings file has no mail secret gets one on the next email command"
+  sandbox_new
+  install_with_gmail
+  local env=$AMAN_HOME/instances/main/.env made
+  grep -v '^MAIL_EMAIL_ACCOUNT_SECRET=' "$env" >"$env.new"
+  mv "$env.new" "$env"
+  chmod 600 "$env"
+  run_install instance email main --remove
+  assert_rc 0
+  made=$(sed -n 's/^MAIL_EMAIL_ACCOUNT_SECRET=//p' "$env")
+  assert_eq "${#made}" 64 "a secret of 64 characters is made"
+  assert_mode "$env" 600
+  sandbox_drop
+}
+
 test_instance_email_needs_the_connector_installed() {
   t_begin "instance email on a version without the email connector says to upgrade and changes nothing"
   sandbox_new
@@ -394,7 +605,12 @@ test_instance_email_needs_the_connector_installed() {
   sandbox_drop
 }
 
+test_entrypoint_records_the_list_once_the_server_answers
+test_entrypoint_probes_the_port_the_server_is_given
+test_entrypoint_records_a_server_that_answers_after_the_wait
 test_presets_write_their_servers
+test_agent_secret
+test_an_older_instance_gets_a_mail_secret
 test_instance_commands_keep_the_connector
 test_instance_email_needs_the_connector_installed
 test_sign_in_check_against_a_local_server

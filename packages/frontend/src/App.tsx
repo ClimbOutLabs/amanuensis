@@ -3,6 +3,7 @@ import {
   AmanSetupProvider,
   AmanWelcome,
   BugReportProvider,
+  ChatAnswerMarksProvider,
   ComposerDraftScopeProvider,
   DEFAULT_AGENT_SPEC_SKILLS,
   DeliveriesProvider,
@@ -14,6 +15,7 @@ import {
   ModelUsageProvider,
   PersonalizationProvider,
   PersonaProvider,
+  ReminderListProvider,
   RepositoryWorkProvider,
   RunCodeStatusProvider,
   SentinelApiProvider,
@@ -29,6 +31,7 @@ import {
   type AmanAvatarMotionSources,
   type CurrentUser,
   type FirstRunGuideState,
+  type OpenSessionRequest,
   type RoutesConfig,
   type SettingsOpenRequest,
   type SlotOverrides,
@@ -51,6 +54,7 @@ import { parseAuthErrorReason, shouldShowAuthErrorScreen, stripAuthErrorSearch }
 import { BrowserLivePage } from './BrowserLivePage';
 import { isBrowserLivePath } from './browserLivePath';
 import { createBugReportApi } from './bugReportApi';
+import { createChatAnswerMarksApi } from './chatAnswerMarksApi';
 import { createChatFolderStore } from './chatFolderStore';
 import { createDeliveriesApi } from './deliveriesApi';
 import { createFirstRunGuideApi } from './firstRunGuideApi';
@@ -64,6 +68,8 @@ import { createModelUsageApi } from './modelUsageApi';
 import { createPersonaApi } from './personaApi';
 import { createPersonalizationApi } from './personalizationApi';
 import { API_BASE_URL, apiPath, uiRouterBasename } from './publicPath';
+import { createRailDeskApi } from './railDeskApi';
+import { createRemindersApi } from './remindersApi';
 import { createRepositoryWorkApi } from './repositoryWorkApi';
 import { createRunCodeStatusApi } from './runCodeStatusApi';
 import { createSentinelApi, readAllSessionEvents } from './sentinelApi';
@@ -151,6 +157,7 @@ const AmanChatSurface = memo(function AmanChatSurface({
   defaultAgentSpec,
   openSettings,
   settingsOpenRequest,
+  openSessionRequest,
   displayName,
   overrides,
   onAgentActivity,
@@ -161,6 +168,7 @@ const AmanChatSurface = memo(function AmanChatSurface({
   defaultAgentSpec: HarnessAgentSpec;
   openSettings: boolean;
   settingsOpenRequest: SettingsOpenRequest | undefined;
+  openSessionRequest: OpenSessionRequest | undefined;
   displayName: string;
   overrides: SlotOverrides;
   onAgentActivity: (activity: AmanAvatarActivity) => void;
@@ -186,6 +194,7 @@ const AmanChatSurface = memo(function AmanChatSurface({
         agentConfig={agentConfig}
         initialSettingsOpen={openSettings}
         {...(settingsOpenRequest ? { settingsOpenRequest } : {})}
+        {...(openSessionRequest ? { openSessionRequest } : {})}
         currentUser={currentUser}
         onAgentActivity={onAgentActivity}
         onActiveSessionChange={onActiveSessionChange}
@@ -211,6 +220,7 @@ function AmanShell({
   modelName,
   version,
   buildRef,
+  railDeskApi,
 }: {
   defaultAgentSpec: HarnessAgentSpec;
   openSettings: boolean;
@@ -219,6 +229,7 @@ function AmanShell({
   modelName: string;
   version: string | undefined;
   buildRef: string | undefined;
+  railDeskApi: ReturnType<typeof createRailDeskApi>;
 }) {
   // Raw agent activity driving the living avatar in the runtime rail. The rail's motion
   // component applies the display policy (debounce, dwell, error auto-clear); this stays
@@ -235,6 +246,16 @@ function AmanShell({
   const openAudits = () => {
     setSettingsOpenRequest(previous => ({ section: 'audit', nonce: (previous?.nonce ?? 0) + 1 }));
   };
+  // Chat-open requests from the rail's desk rows (a reminder's chat, a held action's chat).
+  // Like the Settings requests above, each ask raises the nonce so asking again asks again.
+  const [openSessionRequest, setOpenSessionRequest] = useState<OpenSessionRequest | undefined>(undefined);
+  const openChat = (sessionId: string) => {
+    setOpenSessionRequest(previous => ({ sessionId, nonce: (previous?.nonce ?? 0) + 1 }));
+  };
+  // "Forget everywhere" on a memory fact opens the memory editing path; the rail never edits.
+  const openMemorySettings = () => {
+    setSettingsOpenRequest(previous => ({ section: 'memory', nonce: (previous?.nonce ?? 0) + 1 }));
+  };
   // Whether Settings chrome exists, reported by the shell that owns the gate. The rail is
   // handed its Audits link only while this holds, so the link can never outlive the
   // Settings it opens. It starts shown, like the Settings button itself, which also
@@ -247,6 +268,7 @@ function AmanShell({
         defaultAgentSpec={defaultAgentSpec}
         openSettings={openSettings}
         settingsOpenRequest={settingsOpenRequest}
+        openSessionRequest={openSessionRequest}
         displayName={displayName}
         overrides={overrides}
         onAgentActivity={setAvatarActivity}
@@ -265,6 +287,10 @@ function AmanShell({
         privateChat={activeChatIsPrivate}
         auditFeed={activeSessionId === undefined ? undefined : <SentinelAuditFeed sessionId={activeSessionId} />}
         {...(settingsChromeEnabled ? { onOpenAudits: openAudits } : {})}
+        sessionId={activeSessionId}
+        deskApi={railDeskApi}
+        onOpenChat={openChat}
+        onOpenMemorySettings={openMemorySettings}
       />
     </div>
   );
@@ -460,6 +486,8 @@ export function App() {
   const localAccountApi = useMemo(() => createLocalAccountApi(authAwareFetch), []);
   const personaApi = useMemo(() => createPersonaApi(authAwareFetch), []);
   const deliveriesApi = useMemo(() => createDeliveriesApi(authAwareFetch), []);
+  const chatAnswerMarksApi = useMemo(() => createChatAnswerMarksApi(authAwareFetch), []);
+  const remindersApi = useMemo(() => createRemindersApi(authAwareFetch), []);
   const helpApi = useMemo(
     () => createHelpApi({ fetcher: authAwareFetch, listPersonas: () => personaApi.listPersonas() }),
     [personaApi],
@@ -471,6 +499,7 @@ export function App() {
   const voiceInputApi = useMemo(() => createVoiceInputApi(authAwareFetch), []);
   const serverVoiceApi = useMemo(() => createServerVoiceApi(authAwareFetch), []);
   const memoryRecallApi = useMemo(() => createMemoryRecallApi(bootClient), []);
+  const railDeskApi = useMemo(() => createRailDeskApi({ fetcher: authAwareFetch, client: bootClient }), []);
   const modelUsageApi = useMemo(() => createModelUsageApi(bootClient), []);
   // Raw persisted session events for Sentinel's durable read (approval cards and Tier 2
   // notices rebuilt after a reload). Paginates the whole event history; the parser in
@@ -547,52 +576,58 @@ export function App() {
         <SentinelApiProvider api={sentinelApi}>
           <DeliveriesProvider api={deliveriesApi}>
             <LocalAccountProvider api={localAccountApi}>
-              <PersonalizationProvider api={personalizationApi}>
-                <ImplementationPlanGrantProvider api={implementationPlanGrantApi}>
-                  <RepositoryWorkProvider api={repositoryWorkApi}>
-                    <BugReportProvider api={bugReportApi}>
-                      <VoiceInputProvider api={voiceInputApi}>
-                        <SpokenReplyProvider serverVoice={serverVoiceApi}>
-                          <RunCodeStatusProvider api={runCodeStatusApi}>
-                            <MemoryRecallProvider api={memoryRecallApi}>
-                              <ModelUsageProvider api={modelUsageApi}>
-                                <PersonaProvider api={personaApi}>
-                                  <HelpProvider api={helpApi}>
-                                    <AmanSetupProvider
-                                      value={{
-                                        modelName: setup?.modelName ?? (boot.defaultAgentSpec.model.name || null),
-                                        hasChatted: setup === null ? boot.hasChatted : setup.hasChatted,
-                                        firstRunGuide,
-                                        settingsHref: '/settings',
-                                      }}
-                                    >
-                                      <ComposerDraftScopeProvider scope={draftScope}>
-                                        <SignOutConfirmProvider>
-                                          <AmanShell
-                                            defaultAgentSpec={boot.defaultAgentSpec}
-                                            openSettings={boot.openSettings}
-                                            displayName={session.displayName}
-                                            overrides={overrides}
-                                            modelName={
-                                              setup?.modelName ?? (boot.defaultAgentSpec.model.name || 'Choose a model')
-                                            }
-                                            version={boot.build?.version}
-                                            buildRef={boot.build?.ref}
-                                          />
-                                        </SignOutConfirmProvider>
-                                      </ComposerDraftScopeProvider>
-                                    </AmanSetupProvider>
-                                  </HelpProvider>
-                                </PersonaProvider>
-                              </ModelUsageProvider>
-                            </MemoryRecallProvider>
-                          </RunCodeStatusProvider>
-                        </SpokenReplyProvider>
-                      </VoiceInputProvider>
-                    </BugReportProvider>
-                  </RepositoryWorkProvider>
-                </ImplementationPlanGrantProvider>
-              </PersonalizationProvider>
+              <ChatAnswerMarksProvider api={chatAnswerMarksApi}>
+                <ReminderListProvider api={remindersApi}>
+                  <PersonalizationProvider api={personalizationApi}>
+                    <ImplementationPlanGrantProvider api={implementationPlanGrantApi}>
+                      <RepositoryWorkProvider api={repositoryWorkApi}>
+                        <BugReportProvider api={bugReportApi}>
+                          <VoiceInputProvider api={voiceInputApi}>
+                            <SpokenReplyProvider serverVoice={serverVoiceApi}>
+                              <RunCodeStatusProvider api={runCodeStatusApi}>
+                                <MemoryRecallProvider api={memoryRecallApi}>
+                                  <ModelUsageProvider api={modelUsageApi}>
+                                    <PersonaProvider api={personaApi}>
+                                      <HelpProvider api={helpApi}>
+                                        <AmanSetupProvider
+                                          value={{
+                                            modelName: setup?.modelName ?? (boot.defaultAgentSpec.model.name || null),
+                                            hasChatted: setup === null ? boot.hasChatted : setup.hasChatted,
+                                            firstRunGuide,
+                                            settingsHref: '/settings',
+                                          }}
+                                        >
+                                          <ComposerDraftScopeProvider scope={draftScope}>
+                                            <SignOutConfirmProvider>
+                                              <AmanShell
+                                                defaultAgentSpec={boot.defaultAgentSpec}
+                                                openSettings={boot.openSettings}
+                                                displayName={session.displayName}
+                                                overrides={overrides}
+                                                railDeskApi={railDeskApi}
+                                                modelName={
+                                                  setup?.modelName ??
+                                                  (boot.defaultAgentSpec.model.name || 'Choose a model')
+                                                }
+                                                version={boot.build?.version}
+                                                buildRef={boot.build?.ref}
+                                              />
+                                            </SignOutConfirmProvider>
+                                          </ComposerDraftScopeProvider>
+                                        </AmanSetupProvider>
+                                      </HelpProvider>
+                                    </PersonaProvider>
+                                  </ModelUsageProvider>
+                                </MemoryRecallProvider>
+                              </RunCodeStatusProvider>
+                            </SpokenReplyProvider>
+                          </VoiceInputProvider>
+                        </BugReportProvider>
+                      </RepositoryWorkProvider>
+                    </ImplementationPlanGrantProvider>
+                  </PersonalizationProvider>
+                </ReminderListProvider>
+              </ChatAnswerMarksProvider>
             </LocalAccountProvider>
           </DeliveriesProvider>
         </SentinelApiProvider>

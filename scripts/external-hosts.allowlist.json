@@ -43,7 +43,7 @@
     {
       "host": "api.github.com",
       "category": "connector",
-      "reason": "GitHub API, for repositories the person connects."
+      "reason": "GitHub API, for repositories the person connects and skills they ask Aman to add."
     },
     {
       "host": "api.githubcopilot.com",
@@ -54,6 +54,11 @@
       "host": "api.transitous.org",
       "category": "connector",
       "reason": "Default public transit routes for the maps card (Transitous); can be changed in settings."
+    },
+    {
+      "host": "api.twilio.com",
+      "category": "connector",
+      "reason": "Twilio REST for texts, used only when the owner sets REACH_SMS_PROVIDER=twilio; fixed host, SID-checked paths."
     },
     {
       "host": "caldav.calendar.yahoo.com",

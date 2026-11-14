@@ -1,34 +1,49 @@
 ---
 id: privacy
-title: Where your data lives and privacy
-covers: route:privateChat
+title: Your privacy
+covers:
 ---
 
-Aman runs on your computer. Your chats, your personas, your agents and your settings are kept in a database file on the same computer. Your memory is plain Markdown files on the same computer.
+Aman runs on your own computer, so your things stay with you. Only a few things leave your computer, and only when Aman needs them to help you.
 
-Some things leave your computer, and only when needed:
+## What stays on your computer
 
-- The model you chose. Each chat goes to that model. A local model keeps everything on your computer.
-- The web search service. The search words and the pages Aman opens.
-- The map service. Places and routes. With the **Maps** switch off in Settings, only after you approve the card.
-- Google. What a connected email or calendar action sends, after you approve it.
-- The model a new chat starts on, when Aman notices something new for you, such as a calendar clash. It gets a short description of that one thing, to suggest how loudly to tell you. Nothing is sent when nothing is new.
-- Your browser's push service, only for devices where you turned notices on. It gets an item number and a short title such as "Reminder", never the text.
+- Your chats, personas, agents and settings. They are kept in a database file on your computer.
+- Your memory. It's a set of plain text files on your computer.
+- Voice input and voice mode. Your speech turns into text on your computer.
+- Memory search. Aman finds related memories on your computer.
+- Backups. Aman writes them to a folder on your computer.
 
-Voice input and voice mode run on your computer. Voice mode ends by itself after 2 minutes of quiet, so the microphone is not left open. Memory search runs on your computer too.
+Voice mode ends by itself after 2 minutes of quiet, so the microphone isn't left on.
 
-Backups are written to a folder on your computer.
+## What leaves your computer
 
-## Incognito chats
+Some things go out, and only when needed:
 
-An incognito chat is a chat Aman forgets. To start one, open a new chat and press **Start incognito chat** before your first message.
+- To your model: Each chat goes to the model you chose, with what Aman knows about you and anything it read for you. A local model keeps all of this on your computer.
+- To the web search service: The search words, and the pages Aman opens from the results.
+- To Twilio and the phone company, only if you set up texts or calls: Your phone number, each text, and the sound of each call. The voice and the transcript of a call are made on your computer.
+- To the map service: The places and routes Aman looks up. With the **Maps** switch off, only after you approve the card.
+- To the model a new chat starts on, when Aman notices something new for you, such as a calendar clash: a short description of that one thing, so the model can suggest how loudly to tell you. Nothing is sent when nothing is new. See [Reach me](reach-me.md).
+- To your browser's push service, only for devices where you turned notices on: an item number and a short title such as "Reminder", never the text.
+- To Google or your mail provider: What a connected email or calendar action sends, after you approve the card.
 
-Aman can still read what it already knows. It writes nothing new to memory, your persona notes or the daily brief. The chat is left out of your chat list search and of past chat search.
+!!! tip "Keep your chats on your computer"
 
-Aman cannot make anything of its own that would outlive the chat. It cannot make or change spaces, reminders, schedules, personas or notes there, and the web browser is off. It can still read your spaces, reminders and notes, and switch to a persona you already have. Through a connector you added, Aman can only look things up there. Your own email and calendar still ask first, as in any chat. For anything you want kept, ask in a normal chat.
+    Use a model that runs on your computer. Then your chats never leave it. Web searches, maps and connectors still reach their own services.
 
-The line above the message box says where your words go. With a hosted model, they still go to that model's company. With a local model, they never leave your computer. The line is checked again after each reply and when you switch persona.
+## Chat without leaving a trace
 
-To end it, press **Close and delete**, then **Delete for good**. Every message, picture and file in the chat is gone, and it cannot be brought back. An incognito chat you leave open is deleted on its own a day after its last message.
+An incognito chat is a chat Aman forgets when you close it. [Incognito chat](incognito.md) explains how to start one and what Aman keeps on purpose.
 
-Some things are kept on purpose. If you approve an action, such as sending an email, the record of that approval stays. The email itself was really sent. The activity log keeps a short line about each action, which can repeat its words.
+## Good to know
+
+- You decide what goes out. Aman shows a card before it sends anything for you. See [Approval cards](approvals.md).
+- Offline mode stops Aman's tools from reaching the internet. See [Permissions and offline mode](permissions.md).
+- [Privacy in detail](../../../../docs/privacy.md) lists every service Aman talks to, and exactly what each one sees.
+
+## Related
+
+- [Incognito chat](incognito.md)
+- [Approval cards](approvals.md)
+- [Privacy in detail](../../../../docs/privacy.md)
