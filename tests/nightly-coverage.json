@@ -31,6 +31,7 @@
     "screen:approval-ended": "An approval card whose request has ended can be cleared but never run.",
     "screen:browser-live": "The live view of the browser Aman is using.",
     "screen:chat-images": "Pictures in a chat.",
+    "screen:chat-list": "The list of chats in the left panel, with folders and the Today and Earlier groups.",
     "screen:chat-layout": "The chat screen with its side panels, on a computer and a phone.",
     "screen:chat-return": "Coming back to a chat while its reply is still running.",
     "screen:first-run": "Home on a fresh install, with the first-run guide.",
@@ -483,6 +484,10 @@
         "packages/frontend/tests/runtimeRail.browser.test.ts",
         "packages/frontend/tests/composerMobile.browser.test.ts"
       ]
+    },
+    "screen:chat-list": {
+      "set": "chat",
+      "tests": ["packages/frontend/tests/chatList.browser.test.ts"]
     },
     "screen:chat-return": {
       "set": "chat",
