@@ -6,12 +6,12 @@ import {
 import { EventType } from '../../../src/core/events/schema';
 import type { IToolSet } from '../../../src/core/mcp/IMCPServer';
 import { ToolSet } from '../../../src/core/mcp/ToolSet';
-import { SANDBOX_FILE_WRITE_TOOLS } from '../../../src/core/permissions/dispatch';
 import { AgentThread } from '../../../src/core/runtime/AgentThread';
 import { AgentThreadOrchestrator } from '../../../src/core/runtime/AgentThreadOrchestrator';
 import {
   SANDBOX_APPLY_PATCH_TOOL_NAME,
   SANDBOX_EXEC_TOOL_NAME,
+  SANDBOX_FILE_WRITE_TOOLS,
   SANDBOX_REPLACE_TEXT_TOOL_NAME,
   SANDBOX_RUN_CODE_TOOL_NAME,
   type Sandbox,

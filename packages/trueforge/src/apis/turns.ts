@@ -117,6 +117,7 @@ import { createMemoryClient } from '../runtime/memory/createMemoryClient';
 import type { MemoryClient } from '../runtime/memory/memoryClient';
 import type { TurnToolResult } from '../runtime/memory/memoryNotesSummarize';
 import {
+  markRetainUnderWay,
   noteUnfinishedTurnOwesNoSummary,
   submitRetainWithVerification,
   type RetainOutcomeLog,
@@ -1633,6 +1634,9 @@ async function runTurnFollowUp(params: {
     answerMark,
     chatTitle,
   } = input;
+  // Before the first step: the next turn may start as soon as the files below are saved, and must not take
+  // this turn's memory save for lost while the steps before it still run.
+  const memorySaveEnded = memory === undefined ? undefined : markRetainUnderWay({ sessionId, turnId });
   try {
     // First, and never behind a model call: the chat's next turn reuses the sandbox and waits
     // on this step, so its tools cannot change a file before this turn has saved it.
@@ -1725,6 +1729,8 @@ async function runTurnFollowUp(params: {
     await flushUsage();
   } catch (error) {
     logger.error('Turn follow-up work failed', { sessionId, turnId, ...extractErrorLogFields(error) });
+  } finally {
+    memorySaveEnded?.();
   }
   if (chatSearch !== undefined) {
     // Outside the steps above, so a failure there never keeps the turn out of the search. It never throws.

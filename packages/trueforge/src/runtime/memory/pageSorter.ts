@@ -6,7 +6,7 @@ import { extractErrorLogFields } from '@truefoundry/trueforge-core/core';
 import type { Logger } from 'winston';
 
 import { appendHandledNote, type HandledOutcome } from './handledNotes';
-import { commitPageChange, type PageChangeOptions } from './memoryPageWriter';
+import { noteTextWithoutLabel } from './memoryNotes';
 import type { PageListing } from './memoryPages';
 import {
   addFact,
@@ -20,6 +20,7 @@ import {
   type MemoryPage,
   type PageKind,
 } from './memoryPages';
+import { commitPageChange, type PageChangeOptions } from './memoryPageWriter';
 import { extractReplyJson } from './memorySummarize';
 import { SortReplySchema, type SortDecision } from './pageSortDecisions';
 import type { PageSortMode, SortStopCause } from './pageSortMode';
@@ -305,13 +306,16 @@ export async function sortNote({
     return result;
   };
 
-  if (note.text.trim() === '') {
+  const origin = noteOriginOf(note.metadata);
+  // Only a note with a source carries a label. The prompt states the origin itself, so the label is not shown:
+  // a model reads the assistant's name in it as someone the note is about.
+  const said = { ...note, text: origin.kind === 'own_words' ? note.text : noteTextWithoutLabel(note.text) };
+  if (said.text.trim() === '') {
     return stop({ status: 'failed', reason: 'the note is empty', cause: 'note_empty' });
   }
-  const origin = noteOriginOf(note.metadata);
   let prompt: Awaited<ReturnType<typeof buildSortPrompt>>;
   try {
-    prompt = await buildSortPrompt({ vaultDir, note, origin, similarPages });
+    prompt = await buildSortPrompt({ vaultDir, note: said, origin, similarPages });
   } catch (error) {
     return stop({
       status: 'failed',
@@ -338,7 +342,7 @@ export async function sortNote({
   const ruled = ruleDecisions({
     decisions: parsed.data.decisions,
     origin,
-    noteText: note.text,
+    noteText: said.text,
     day: note.day,
     shown: prompt.shown,
     known: prompt.known,

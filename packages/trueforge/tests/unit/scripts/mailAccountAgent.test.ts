@@ -386,7 +386,7 @@ describe('the mail account agent with no usable secret', () => {
       output += chunk.toString();
     });
     const exited = new Promise<number | null>(resolvePromise => {
-      child.on('exit', code => {
+      child.on('close', code => {
         resolvePromise(code);
       });
     });
