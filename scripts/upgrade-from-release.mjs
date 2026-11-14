@@ -20,6 +20,9 @@ import { check, formPost, sessionCookie, shell, startPackedApp } from './packed-
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const EMAIL = 'owner@example.com';
+// A public address written as numbers: the app refuses a model address whose name does not resolve,
+// and this check never calls the model.
+const MODEL_HOST = '93.184.216.34';
 const PASSWORD = 'a long enough password';
 const MODEL_NAME = 'openai/small';
 const port = 18_791;
@@ -212,7 +215,7 @@ async function fillOnce({ api }) {
     body: {
       manifest: {
         type: 'openai',
-        base_url: 'https://models.example.com/v1',
+        base_url: `https://${MODEL_HOST}/v1`,
         auth: { api_key: 'stand-in-key-for-the-upgrade-check' },
         models: [{ model_id: 'small', name: 'small', properties: {} }],
       },
@@ -241,7 +244,7 @@ async function fillOnce({ api }) {
     body: { sandbox_without_asking: true },
   });
   return [
-    { what: 'the model provider', pathname: '/api/v1/settings/model-providers', words: 'models.example.com' },
+    { what: 'the model provider', pathname: '/api/v1/settings/model-providers', words: MODEL_HOST },
     { what: 'the profile', pathname: '/api/v1/personalization/profile', words: 'Use metric units.' },
     { what: 'the safety settings', pathname: '/api/v1/user/settings/sentinel', words: '"sandbox_without_asking":true' },
   ];
