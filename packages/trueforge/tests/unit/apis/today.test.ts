@@ -283,7 +283,6 @@ describe('GET /api/v1/today', () => {
     ]);
     expect(today.needs_ok).toEqual([]);
     expect(today.needs_ok_more).toBe(false);
-    expect(today.carrying).toBe(2);
     expect(today.as_of).toBe(NOW.toISOString());
   });
 
@@ -334,7 +333,6 @@ describe('GET /api/v1/today', () => {
     expect(today.calendar).toBeNull();
     expect(today.free_after).toBeNull();
     expect(today.due).toHaveLength(1);
-    expect(today.carrying).toBe(2);
   });
 
   it("adds tomorrow's first event, marked as tomorrow's, once the day's timed events have all finished", async () => {

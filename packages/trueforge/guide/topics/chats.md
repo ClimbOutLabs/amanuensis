@@ -104,7 +104,7 @@ If a step failed, one plain line under the answer says so, even with the switch 
 
 On a computer, a panel on the right shows how Aman is doing, and what is coming up or waiting for you.
 
-- The line under Aman's picture says "Ready", "Waiting for you" when a card needs your answer, or that the connection has a problem. When the connection drops, click **Retry**.
+- The line under Aman's picture says only how Aman is doing: "Ready", "Waiting for you" when a card needs your answer, or that the connection has a problem. When the connection drops, click **Retry**.
 - "Answering" shows the persona that answers this chat, when it is not Aman.
 - On the new chat screen, **Today** lists your calendar for the day and when you are free. **Due** lists today's reminders that have not gone off yet. **Needs your OK** lists actions that wait for your answer. Click a reminder or an action to open its chat.
 - In a chat, **Using** lists what Aman remembered for this chat. The × takes a fact out of this chat only. **Forget everywhere** opens your memory settings.

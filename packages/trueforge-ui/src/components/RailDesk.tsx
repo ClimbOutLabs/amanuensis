@@ -45,7 +45,6 @@ export type RailToday = {
   needs_ok: RailTodayNeedsOkItem[];
   /** True when more actions are waiting than the Needs your OK list shows. */
   needs_ok_more: boolean;
-  carrying: number;
   as_of: string;
 };
 

@@ -27,18 +27,18 @@ export interface TodayRouterDeps {
   now: () => Date;
 }
 
-/** Most schedules read for the due list and the carrying count. */
+/** Most schedules read for the due list. */
 const SCHEDULE_SCAN_LIMIT = 200;
 
 /**
- * The reminders due today or overdue, and how many schedules are on. A reminder is due when
+ * The reminders due today or overdue, earliest first. A reminder is due when
  * its pending run falls at or before the end of the person's local day. Once it goes off it
  * has no pending run, so it leaves this list and the bell carries it instead.
  */
-async function readDueAndCarrying(
+async function readDue(
   deps: TodayRouterDeps,
   input: { tenant_id: string; created_by: string; timeZone: string | undefined; now: Date },
-): Promise<{ due: TodayDueReminder[]; carrying: number }> {
+): Promise<TodayDueReminder[]> {
   const { data: schedules } = await deps.scheduleStore.listSchedules({
     tenant_id: input.tenant_id,
     limit: SCHEDULE_SCAN_LIMIT,
@@ -76,7 +76,7 @@ async function readDueAndCarrying(
     });
   }
   due.sort((left, right) => left.due_at.localeCompare(right.due_at));
-  return { due, carrying: active.length };
+  return due;
 }
 
 /**
@@ -102,9 +102,9 @@ export function createTodayRouter(deps: TodayRouterDeps) {
       logger: deps.logger,
       now: deps.now,
     };
-    const [calendar, dueAndCarrying, needsOk] = await Promise.all([
+    const [calendar, due, needsOk] = await Promise.all([
       readTodayCalendar(calendarDeps, { owner, timeZone: query.client_timezone }),
-      readDueAndCarrying(deps, { ...owner, timeZone: query.client_timezone, now }),
+      readDue(deps, { ...owner, timeZone: query.client_timezone, now }),
       listWaitingNeedsOk(
         {
           sessions: deps.sessions,
@@ -118,10 +118,9 @@ export function createTodayRouter(deps: TodayRouterDeps) {
     const data: Today = {
       calendar: calendar.calendar,
       free_after: calendar.free_after,
-      due: dueAndCarrying.due,
+      due,
       needs_ok: needsOk.items,
       needs_ok_more: needsOk.more,
-      carrying: dueAndCarrying.carrying,
       as_of: now.toISOString(),
     };
     return c.json({ data }, 200);
