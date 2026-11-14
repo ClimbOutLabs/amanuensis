@@ -431,7 +431,7 @@
     },
     "route:telegram": {
       "set": "reach",
-      "tests": []
+      "tests": ["packages/frontend/tests/settingsPanels.browser.test.ts"]
     },
     "route:text": {
       "set": "reach",
@@ -857,7 +857,6 @@
     "route:skill",
     "route:space",
     "route:spaceFolder",
-    "route:telegram",
     "route:text",
     "route:today",
     "route:tokenFactoryUsage",
