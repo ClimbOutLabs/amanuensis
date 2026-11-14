@@ -34,8 +34,8 @@ export function SessionsBrowserButton({ className, compact = false, row = false 
     <div className={cn('relative min-w-0', compact ? 'flex justify-center' : 'w-full', className)}>
       <button
         type="button"
-        aria-label={compact ? 'Sessions' : undefined}
-        title={compact ? 'Sessions' : undefined}
+        aria-label={compact ? 'Chat stats' : undefined}
+        title={compact ? 'Chat stats' : undefined}
         aria-current={sessionsOpen ? 'page' : undefined}
         className={auiButtonClass({
           variant: 'ghost',
@@ -64,10 +64,10 @@ export function SessionsBrowserButton({ className, compact = false, row = false 
       >
         <Icon name="clock-rotate-left" size={compact || row ? 14 : undefined} />
         {compact ? (
-          <span className="text-center">Sessions</span>
+          <span className="text-center">Chat stats</span>
         ) : (
           <>
-            <span className="truncate">Sessions</span>
+            <span className="truncate">Chat stats</span>
             <Icon name="chevron-right" className="ml-auto size-3.5 shrink-0 opacity-60" />
           </>
         )}

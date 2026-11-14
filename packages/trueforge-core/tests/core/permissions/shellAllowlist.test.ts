@@ -31,7 +31,14 @@ function tempConfig(): { config: ShellAllowlistConfig; cleanup: () => void } {
   const config: ShellAllowlistConfig = {
     pinned_path: dir,
     commands: {
-      mycmd: { args: ['-l'], operands: 'workspace_relative', offline_ok: true, script: null, subcommands: null },
+      mycmd: {
+        args: ['-l'],
+        operands: 'workspace_relative',
+        offline_ok: true,
+        script: null,
+        count_flag: false,
+        subcommands: null,
+      },
     },
   };
   return { config, cleanup };
@@ -515,10 +522,34 @@ describe('reads the safe list adds: sed print ranges, grep and head', () => {
     expect(matches('grep -f patterns.txt src')).toBe(false);
   });
 
-  test('allows head with a count', () => {
+  test('allows head and tail with a count of any size, but never tail -f, which never ends', () => {
     expect(matches('head -n 20 README.md')).toBe(true);
     expect(matches('head -20 README.md')).toBe(true);
-    expect(matches('head -7 README.md')).toBe(false);
+    expect(matches('head -7 README.md')).toBe(true);
+    expect(matches('tail -60 README.md')).toBe(true);
+    expect(matches('tail -n +5 README.md')).toBe(true);
+    expect(matches('tail -f README.md')).toBe(false);
+    expect(matches('grep -60 TODO README.md')).toBe(false);
+  });
+
+  test('allows listed one-letter flags written together, and nothing a group could hide', () => {
+    expect(matches('grep -oiE "ferry|train" notes.txt')).toBe(true);
+    expect(matches('ls -lah')).toBe(true);
+    expect(matches('sort -rn notes.txt')).toBe(true);
+    expect(matches('wc -lw notes.txt')).toBe(true);
+    expect(matches('grep -oR TODO src')).toBe(false);
+    expect(matches('grep -if patterns.txt src')).toBe(false);
+    expect(matches('sort -no out.txt notes.txt')).toBe(false);
+    expect(matches('grep -o- TODO src')).toBe(false);
+  });
+
+  test('allows sort, uniq and wc, but never a flag or operand that writes a file', () => {
+    expect(matches('sort -t , -k 2 notes.txt')).toBe(true);
+    expect(matches('uniq -c')).toBe(true);
+    expect(matches('wc -l notes.txt')).toBe(true);
+    expect(matches('sort -o out.txt notes.txt')).toBe(false);
+    expect(matches('sort --compress-program=sh notes.txt')).toBe(false);
+    expect(matches('uniq notes.txt out.txt')).toBe(false);
   });
 
   test('keeps the offline subset in step with the list', () => {

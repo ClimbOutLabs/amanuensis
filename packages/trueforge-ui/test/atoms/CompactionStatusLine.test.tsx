@@ -27,24 +27,24 @@ describe('CompactionStatusLine', () => {
     stubStatus({ contextLimit: 128_000, liveTokens: 12_500 });
     render(<CompactionStatusLine />);
 
-    const line = screen.getByText("This chat uses 10% of the model's memory (13K of 128K tokens).");
+    const line = screen.getByText('This chat has used 13K of 128K the model can hold.');
     expect(line).toHaveAttribute('data-slot', 'aui_compaction-status');
     expect(line).toHaveClass('text-text-muted', 'text-xs', 'font-normal');
-    expect(line).toHaveAttribute('title', expect.stringContaining("model's memory"));
+    expect(line).toHaveAttribute('title', expect.stringContaining('what the model can hold'));
   });
 
   it('shows the line however little the chat uses', () => {
     stubStatus({ contextLimit: 200_000, liveTokens: 900 });
     render(<CompactionStatusLine />);
 
-    expect(screen.getByText("This chat uses 0% of the model's memory (900 of 200K tokens).")).toBeInTheDocument();
+    expect(screen.getByText('This chat has used 900 of 200K the model can hold.')).toBeInTheDocument();
   });
 
   it('gives the size alone when the model limit is unknown', () => {
     stubStatus({ liveTokens: 4_000 });
     render(<CompactionStatusLine />);
 
-    expect(screen.getByText("This chat uses 4K tokens of the model's memory.")).toBeInTheDocument();
+    expect(screen.getByText('This chat has used 4K so far.')).toBeInTheDocument();
   });
 
   it('adds when older messages were last shortened', () => {
@@ -56,7 +56,7 @@ describe('CompactionStatusLine', () => {
     render(<CompactionStatusLine />);
 
     expect(
-      screen.getByText(/50% of the model's memory .* Older messages were shortened just now\./),
+      screen.getByText('This chat has used 50K of 100K the model can hold. Older messages were shortened just now.'),
     ).toBeInTheDocument();
   });
 

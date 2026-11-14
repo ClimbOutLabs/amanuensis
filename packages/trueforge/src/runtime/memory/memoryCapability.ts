@@ -75,7 +75,7 @@ import {
   sanitizeMemoryLine,
   sanitizeMemoryText,
 } from './memoryPageLoader';
-import { retainOperationId, submitRetain } from './memoryRetain';
+import { retainIsUnderWay, retainOperationId, submitRetain } from './memoryRetain';
 import { recallFactExcluded, shownFactText } from './recallExclusions';
 import { rankNamedPeopleFirst } from './recallNameBoost';
 import { ScreenClient, type ScreenClassifyResult } from './screenClient';
@@ -1781,6 +1781,11 @@ export class MemoryProcessor implements PreLLMProcessor, PreLLMEphemeralAgentCon
         // Transient failure reading status: leave the entry untouched for the next sweep.
         unreachable += 1;
         unreachable_code = result.code;
+        next.push(entry);
+        continue;
+      }
+      if (result.status === 'unknown' && retainIsUnderWay(entry.op)) {
+        // The turn's save is still being written here, so there is no record of it yet. Look again next turn.
         next.push(entry);
         continue;
       }

@@ -7,6 +7,22 @@ import { askInNewChat, composer, type OwnerApi } from './seed.ts';
 
 export const STEP_TIMEOUT_MS = 45_000;
 
+/** How long the screen must stay still before it is pictured. */
+const SETTLE_MS = 600;
+
+/** Waits until nothing is loading: no spinner, no busy region, fonts ready and animations done. */
+export async function settle(page: Page): Promise<void> {
+  await page.waitForLoadState('networkidle', { timeout: STEP_TIMEOUT_MS }).catch(() => undefined);
+  await page.waitForFunction(
+    () =>
+      document.fonts.status === 'loaded' &&
+      document.querySelector('[aria-busy="true"], [role="progressbar"], .animate-spin') === null,
+    undefined,
+    { timeout: STEP_TIMEOUT_MS },
+  );
+  await page.waitForTimeout(SETTLE_MS);
+}
+
 export interface StepContext {
   page: Page;
   origin: string;

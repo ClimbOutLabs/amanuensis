@@ -149,7 +149,7 @@
   "Take over": "packages/frontend/src/BrowserLivePage.tsx",
   "Hand back": "packages/frontend/src/BrowserLivePage.tsx",
   "Done": "packages/frontend/src/BrowserLivePage.tsx",
-  "Audit": "packages/trueforge-ui/src/containers/SettingsBuilder/index.tsx",
+  "Activity log": "packages/trueforge-ui/src/containers/SettingsBuilder/index.tsx",
   "Show": "packages/trueforge-ui/src/sentinel/AuditLogSettings.tsx",
   "From": "packages/trueforge-ui/src/sentinel/AuditLogSettings.tsx",
   "To": "packages/trueforge-ui/src/sentinel/AuditLogSettings.tsx",
@@ -275,6 +275,7 @@
   "Your name": "packages/trueforge-ui/src/components/PersonalizationPanel.tsx",
   "Save personalization": "packages/trueforge-ui/src/components/PersonalizationPanel.tsx",
   "Refresh tabs": "packages/frontend/src/BrowserLivePage.tsx",
+  "End session": "packages/frontend/src/BrowserLivePage.tsx",
   "Watch Live or Take Control": "packages/trueforge-ui/src/components/AmanRuntimeRail.tsx",
   "Type it": "packages/frontend/src/BrowserLivePage.tsx",
   "Paste into page": "packages/frontend/src/BrowserLivePage.tsx",
@@ -376,5 +377,6 @@
   "Today": "packages/trueforge-ui/src/components/RailDesk.tsx",
   "Due": "packages/trueforge-ui/src/components/RailDesk.tsx",
   "From memory": "packages/trueforge-ui/src/components/RailDesk.tsx",
-  "Manage memory": "packages/trueforge-ui/src/components/RailDesk.tsx"
+  "Manage memory": "packages/trueforge-ui/src/components/RailDesk.tsx",
+  "Chat stats": "packages/trueforge-ui/src/atoms/SessionsBrowserButton.tsx"
 }

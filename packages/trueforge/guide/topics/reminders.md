@@ -84,7 +84,7 @@ A deleted or canceled reminder is gone for good. A repeating one will not remind
 - An incognito chat can't set or cancel a reminder. Ask in a normal chat.
 - A scheduled run can't set a reminder by itself. It holds the reminder for your OK.
 - A reminder costs nothing when it fires. Aman doesn't use a model to deliver it.
-- Each reminder that is set or fires is one line under **Settings**, **Audit**.
+- Each reminder that is set or fires is one line under **Settings**, **Activity log**.
 
 ## Related
 

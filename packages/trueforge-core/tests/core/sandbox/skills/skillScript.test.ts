@@ -1,4 +1,6 @@
 import {
+  missingPackageNextStep,
+  skillFolderNamedInRunCode,
   skillScriptRealPathOperands,
   skillScriptRun,
   skillScriptStaysInFolder,
@@ -91,5 +93,53 @@ describe('skillScriptStaysInFolder', () => {
   test('a relative skills folder is judged by the real paths alone', () => {
     expect(check('/root/s1/skills\n/root/s1/skills/ai-news\n/root/s1/skills/ai-news/x.py\n', 'skills')).toBe(true);
     expect(check('/root/s1/skills\n/root/other\n/root/other/x.py\n', 'skills')).toBe(false);
+  });
+});
+
+describe('skillFolderNamedInRunCode', () => {
+  const skills = { skillsDir: '/workspace/.aman/skills', skillNames: ['ai-news', 'ai-news-digest'] };
+
+  it('names the skill whose folder the code uses', () => {
+    expect(
+      skillFolderNamedInRunCode({ ...skills, text: 'root = "/workspace/.aman/skills/ai-news-digest"\nrun(root)' }),
+    ).toBe('ai-news-digest');
+    expect(skillFolderNamedInRunCode({ ...skills, text: "open('/workspace/.aman/skills/ai-news/data.csv')" })).toBe(
+      'ai-news',
+    );
+  });
+
+  it('works for a skills folder given relative to the sandbox root', () => {
+    expect(
+      skillFolderNamedInRunCode({ skillsDir: 'skills', skillNames: ['ai-news'], text: 'path = "skills/ai-news/x.py"' }),
+    ).toBe('ai-news');
+  });
+
+  it('leaves code alone that names no turned-on skill', () => {
+    expect(skillFolderNamedInRunCode({ ...skills, text: 'print("/workspace/.aman/skills/other/x.py")' })).toBe(
+      undefined,
+    );
+    expect(skillFolderNamedInRunCode({ ...skills, text: 'print(1 + 1)' })).toBe(undefined);
+  });
+});
+
+describe('missingPackageNextStep', () => {
+  it('names the top Python module a script could not import', () => {
+    const step = missingPackageNextStep(
+      "Traceback (most recent call last):\nModuleNotFoundError: No module named 'madeup_feeds.parser'\n",
+    );
+    expect(step).toContain("Python module 'madeup_feeds'");
+    expect(step).toContain('aman doctor sandbox --add-python');
+  });
+
+  it('names a Node package a script could not load', () => {
+    expect(
+      missingPackageNextStep("Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'madeup-feed' imported"),
+    ).toContain("Node package 'madeup-feed'");
+    expect(missingPackageNextStep("Error: Cannot find module 'madeup-feed'")).toContain("Node package 'madeup-feed'");
+  });
+
+  it('says nothing for a missing local file or another failure', () => {
+    expect(missingPackageNextStep("Error: Cannot find module './lib/helpers'")).toBe(undefined);
+    expect(missingPackageNextStep('ValueError: bad date')).toBe(undefined);
   });
 });

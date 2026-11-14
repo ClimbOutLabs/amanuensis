@@ -259,6 +259,34 @@ describe('browser live routes', () => {
     expect(sent).toEqual([]);
   });
 
+  it("ends the session by closing the caller's own tab, and treats a tab already closed as ended", async () => {
+    for (const status of ['ok', 'closed'] as const) {
+      const { app, sent } = buildApp(() => ({ json: { status } }));
+      const response = await call(app, { method: 'POST', path: '/api/browser/live/close', body: { tab: 'chat-1' } });
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({ data: { status: 'ok' } });
+      expect(sent).toEqual([
+        {
+          url: 'http://browser-relay:8792/live/close',
+          headers: expect.objectContaining({ 'x-browser-secret': SECRET }),
+          body: { owner: 'default:user-a', tab: 'chat-1' },
+        },
+      ]);
+      jest.restoreAllMocks();
+    }
+  });
+
+  it('refuses a close request that names the profile, without calling the sidecar', async () => {
+    const { app, sent } = buildApp(() => ({ json: { status: 'ok' } }));
+    const response = await call(app, {
+      method: 'POST',
+      path: '/api/browser/live/close',
+      body: { tab: 'chat-1', owner: 'default:someone-else' },
+    });
+    expect(response.status).toBe(400);
+    expect(sent).toEqual([]);
+  });
+
   it('forwards a pointer move, a press and a release from takeover', async () => {
     const { app, sent } = buildApp(() => ({ json: { status: 'ok' } }));
     for (const body of [
@@ -390,6 +418,7 @@ describe('browser live routes', () => {
       '/api/browser/live/input',
       '/api/browser/live/frame',
       '/api/browser/live/copy',
+      '/api/browser/live/close',
       '/api/browser/live/upload',
       '/api/browser/live/takeover',
     ]) {

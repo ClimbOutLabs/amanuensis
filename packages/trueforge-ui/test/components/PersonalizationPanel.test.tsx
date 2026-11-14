@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -46,7 +46,10 @@ describe('PersonalizationPanel', () => {
       </PersonalizationProvider>,
     );
 
-    fireEvent.change(await screen.findByLabelText('Your name'), { target: { value: 'Sam Rivera' } });
+    const name = await screen.findByLabelText('Your name');
+    // Lets the loaded profile finish filling the form, so it cannot land on top of the typed name.
+    await act(async () => {});
+    fireEvent.change(name, { target: { value: 'Sam Rivera' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save personalization' }));
 
     expect(await screen.findByText('Personalization saved.')).toBeInTheDocument();
