@@ -136,10 +136,13 @@ async function writeClipboard(text: Promise<string>): Promise<void> {
   await clipboard.writeText(await text);
 }
 
-/** The person's open tabs, or null when the live routes could not be reached. */
-async function loadTabs(): Promise<LiveTab[] | null> {
+/** The person's open tabs; 'off' when this server has no browser; null when the live routes could not be reached. */
+async function loadTabs(): Promise<LiveTab[] | 'off' | null> {
   try {
     const data = await liveCall('/api/browser/live/tabs');
+    if (isRecord(data) && data.browser_on === false) {
+      return 'off';
+    }
     return isRecord(data) && Array.isArray(data.tabs) ? data.tabs.filter(isLiveTab) : [];
   } catch {
     return null;
@@ -191,9 +194,15 @@ export function BrowserLivePage() {
     takeoverRef.current = takeover;
   }, [takeover]);
 
-  const applyTabs = useCallback((list: LiveTab[] | null) => {
+  const applyTabs = useCallback((list: LiveTab[] | 'off' | null) => {
     if (list === null) {
       setNote('The live view could not be reached. Try again in a moment.');
+      return;
+    }
+    if (list === 'off') {
+      setTabs([]);
+      setSelected(undefined);
+      setNote("Aman's browser is not turned on here. Ask whoever runs Aman to turn it on.");
       return;
     }
     setTabs(list);

@@ -13,8 +13,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
-/** The person's open browser tabs, by chat id, or undefined when the list could not be read. */
-async function openTabIds(): Promise<string[] | undefined> {
+/**
+ * The person's open browser tabs, by chat id; 'off' when this server has no browser; undefined when
+ * the list could not be read.
+ */
+async function openTabIds(): Promise<string[] | 'off' | undefined> {
   // A plain fetch: a lapsed sign-in must not send the person to the sign-in page from a background check.
   const response = await fetch(apiPath('/api/browser/live/tabs'), { credentials: 'same-origin' }).catch(
     () => undefined,
@@ -23,7 +26,11 @@ async function openTabIds(): Promise<string[] | undefined> {
     return undefined;
   }
   const json: unknown = await response.json().catch(() => undefined);
-  const tabs = isRecord(json) && isRecord(json.data) && Array.isArray(json.data.tabs) ? json.data.tabs : undefined;
+  const data = isRecord(json) && isRecord(json.data) ? json.data : undefined;
+  if (data?.browser_on === false) {
+    return 'off';
+  }
+  const tabs = Array.isArray(data?.tabs) ? data.tabs : undefined;
   return tabs?.flatMap(tab => (isRecord(tab) && typeof tab.tab === 'string' ? [tab.tab] : []));
 }
 
@@ -51,6 +58,7 @@ export function useLiveBrowserHref({
       return;
     }
     let cancelled = false;
+    let stopped = false;
     let timer: number | undefined;
     const look = async () => {
       if (document.visibilityState !== 'visible') {
@@ -61,11 +69,17 @@ export function useLiveBrowserHref({
       if (cancelled) {
         return;
       }
+      // A server without a browser stays that way until it restarts, so there is nothing more to look for.
+      if (ids === 'off') {
+        stopped = true;
+        setOpenFor(undefined);
+        return;
+      }
       setOpenFor(ids?.includes(sessionId) === true ? sessionId : undefined);
       timer = window.setTimeout(() => void look(), ids === undefined ? LOOK_AGAIN_AFTER_FAILURE_MS : LOOK_EVERY_MS);
     };
     const onVisible = () => {
-      if (document.visibilityState === 'visible') {
+      if (document.visibilityState === 'visible' && !stopped) {
         window.clearTimeout(timer);
         void look();
       }

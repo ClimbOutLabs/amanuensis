@@ -4,6 +4,7 @@ import type { Logger } from 'winston';
 import { z } from 'zod';
 
 import type { ResolveRequestContext } from '../auth/identity';
+import configuration from '../config';
 import {
   callBrowserSidecar,
   callBrowserSidecarForOwner,
@@ -100,7 +101,12 @@ export function createBrowserLiveRouter(deps: BrowserLiveRouterDeps) {
     return { tenant_id: requestContext.tenant_id, created_by: requestContext.subject.id };
   }
 
+  // With the browser off there is nothing to list, so the app's background look for an open page gets a
+  // plain answer instead of an error the server would log on every look.
   app.get('/tabs', async c => {
+    if (!configuration.BROWSER_ENABLED) {
+      return c.json({ data: { tabs: [], browser_on: false } }, 200);
+    }
     const result = await callBrowserSidecarForOwner({
       path: '/live/tabs',
       profile: profileOf(c),
@@ -110,7 +116,7 @@ export function createBrowserLiveRouter(deps: BrowserLiveRouterDeps) {
       deps.logger.warn('browser live tab list failed', { message: result.message });
       return c.json({ error: { message: result.message } }, 502);
     }
-    return c.json({ data: { tabs: result.body.tabs } }, 200);
+    return c.json({ data: { tabs: result.body.tabs, browser_on: true } }, 200);
   });
 
   // Every act below drives the person's own tab, so a form posted from another site must not reach it.

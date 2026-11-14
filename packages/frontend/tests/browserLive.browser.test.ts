@@ -44,7 +44,10 @@ async function makeFrame(browser: Browser): Promise<string> {
 }
 
 /** Answers the page's live calls the way the app server does, and records each one. */
-async function answerLiveRoutes(page: Page, options: { frame: string; tabs: unknown[] }): Promise<LiveCall[]> {
+async function answerLiveRoutes(
+  page: Page,
+  options: { frame: string; tabs: unknown[]; browserOff?: boolean },
+): Promise<LiveCall[]> {
   const calls: LiveCall[] = [];
   let inputsInFlight = 0;
   // Whose hand holds the tab, as the sidecar would report it; while the person holds it, the page
@@ -77,7 +80,7 @@ async function answerLiveRoutes(page: Page, options: { frame: string; tabs: unkn
     }
     const data =
       path === '/api/browser/live/tabs'
-        ? { tabs: options.tabs }
+        ? { tabs: options.tabs, browser_on: options.browserOff !== true }
         : path === '/api/browser/live/frame'
           ? {
               status: 'ok',
@@ -158,6 +161,20 @@ test('the live browser page shows the tab and sends clicks, typing and files to 
       'no tabs: only the tab list is asked for',
     );
     await context.close();
+
+    // On a server without a browser, the person is told so rather than asked to open a page.
+    const offContext = await browser.newContext({ viewport: VIEWPORTS[0], deviceScaleFactor: 1 });
+    const offPage = await offContext.newPage();
+    const offCalls = await answerLiveRoutes(offPage, { frame, tabs: [], browserOff: true });
+    await offPage.goto(fixtureUrl, { waitUntil: 'domcontentloaded', timeout: FIRST_LOAD_TIMEOUT_MS });
+    await offPage
+      .getByText("Aman's browser is not turned on here", { exact: false })
+      .waitFor({ timeout: RENDER_TIMEOUT_MS });
+    assert.ok(
+      offCalls.every(call => call.path === '/api/browser/live/tabs'),
+      'browser off: only the tab list is asked for',
+    );
+    await offContext.close();
   } catch (error) {
     await saveFailureShots({ browser, surface: 'screen:browser-live' });
     throw error;
