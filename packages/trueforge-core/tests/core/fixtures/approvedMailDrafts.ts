@@ -4,5 +4,5 @@ import type { ApprovedMailDrafts } from '../../../src/core/email/mailConnector/a
 export const everyMailDraftApproved: ApprovedMailDrafts = {
   has: () => Promise.resolve(true),
   add: () => Promise.resolve(),
-  remove: () => Promise.resolve(),
+  take: () => Promise.resolve(true),
 };

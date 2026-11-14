@@ -3,7 +3,11 @@ import type { Logger } from 'winston';
 import { caldavEventReviewFrom, type CaldavEventReview } from '../calendar/caldav/eventReview';
 import { CALDAV_SERVER_NAME } from '../calendar/caldav/toolContract';
 import { caldavResultForModel } from '../calendar/caldav/toolResults';
-import { mailDraftKey, type ApprovedMailDraft } from '../email/mailConnector/approvedDrafts';
+import {
+  MAIL_DRAFT_FIRST_DETAIL,
+  mailDraftKey,
+  type ApprovedMailDraft,
+} from '../email/mailConnector/approvedDrafts';
 import {
   mailForwardReadArguments,
   mailForwardReviewFrom,
@@ -428,8 +432,23 @@ export class ToolSet implements IToolSet {
       await mailDraft.drafts.add(mailDraft.draft);
       return toolResultResponse({ text: FORWARD_KEPT_AS_DRAFT });
     }
+    // A send takes its draft before it goes, so two approvals of the same message cannot both send it.
+    if (mailDraft?.step === 'send' && !(await mailDraft.drafts.take(mailDraft.draft))) {
+      return toolResultResponse({
+        text: JSON.stringify({ error: `Not sent: ${MAIL_DRAFT_FIRST_DETAIL}` }),
+        isError: true,
+      });
+    }
 
-    const response = await this.dispatchShaped({ params, decision, context });
+    let response: CallToolResponse;
+    try {
+      response = await this.dispatchShaped({ params, decision, context });
+    } catch (error) {
+      if (mailDraft?.step === 'send') {
+        await mailDraft.drafts.add(mailDraft.draft);
+      }
+      throw error;
+    }
     await this.recordMailDraft({ mailDraft, response });
     return this.withPagesRecorded({ params, response, wasInitialized: listed.wasInitialized });
   }
@@ -719,22 +738,33 @@ export class ToolSet implements IToolSet {
     if (!send) {
       return { step: 'save', draft, drafts };
     }
-    return { step: (await drafts.has(draft)) ? 'send' : 'keep', draft, drafts };
+    // Only a forward has no draft tool, so only a forward with no draft on file is kept as one.
+    const keep = params.name === MAIL_FORWARD_TOOL_NAME && !(await drafts.has(draft));
+    return { step: keep ? 'keep' : 'send', draft, drafts };
   }
 
-  /** A saved draft becomes one that may be sent; a draft that went out may not be sent a second time. */
+  /** A saved draft becomes one that may be sent. A send that did not go out gives its draft back. */
   private async recordMailDraft(input: {
     mailDraft: Awaited<ReturnType<ToolSet['mailDraftFor']>>;
     response: CallToolResponse;
   }): Promise<void> {
     const { mailDraft, response } = input;
-    if (mailDraft === undefined || !isCallToolResponseResult(response) || response.result.isError === true) {
+    if (mailDraft === undefined) {
       return;
     }
+    const failed = !isCallToolResponseResult(response) || response.result.isError === true;
     if (mailDraft.step === 'save') {
+      if (!failed) {
+        await mailDraft.drafts.add(mailDraft.draft);
+      }
+      return;
+    }
+    const wentOut =
+      isCallToolResponseResult(response) &&
+      !failed &&
+      resultTexts(response.result).some(text => mailSendOutcome(text) === 'sent');
+    if (!wentOut) {
       await mailDraft.drafts.add(mailDraft.draft);
-    } else if (resultTexts(response.result).some(text => mailSendOutcome(text) === 'sent')) {
-      await mailDraft.drafts.remove(mailDraft.draft);
     }
   }
 

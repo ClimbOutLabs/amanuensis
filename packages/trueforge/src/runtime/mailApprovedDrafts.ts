@@ -94,12 +94,14 @@ export function fileApprovedMailDrafts({
         entries.set(entryId(input), now());
         await writeEntries({ path, entries });
       }),
-    remove: input =>
+    take: input =>
       inTurn(async () => {
         const entries = await current();
-        if (entries.delete(entryId(input))) {
+        const held = entries.delete(entryId(input));
+        if (held) {
           await writeEntries({ path, entries });
         }
+        return held;
       }),
   };
 }

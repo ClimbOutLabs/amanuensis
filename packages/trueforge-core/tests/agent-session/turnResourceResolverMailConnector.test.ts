@@ -833,6 +833,27 @@ describe('an Email message is a draft the person approved before it is sent', ()
     expect(sent(sidecar)).toHaveLength(1);
   });
 
+  it('sends once when the same send is approved twice at the same moment, and tells the other to save a draft', async () => {
+    const sidecar = scriptedSidecar({ accountList: oneAccount });
+    const toolSet = await toolSetWithDrafts();
+    await toolSet.callTool({ name: 'save_draft', arguments: MESSAGE }, APPROVED);
+
+    const both = await Promise.all([
+      toolSet.callTool({ name: 'send_email', arguments: MESSAGE }, APPROVED),
+      toolSet.callTool({ name: 'send_email', arguments: MESSAGE }, APPROVED),
+    ]);
+
+    expect(sent(sidecar)).toHaveLength(1);
+    const refused = both.map(resultText).filter(result => result.isError);
+    expect(refused).toHaveLength(1);
+    expect(refused[0]?.text).toContain('save_draft');
+    expect(refused[0]?.text).not.toContain('kept as a draft');
+    // The refused send put nothing back: the message still needs a new draft.
+    const again = resultText(await toolSet.callTool({ name: 'send_email', arguments: MESSAGE }, APPROVED));
+    expect(again.isError).toBe(true);
+    expect(sent(sidecar)).toHaveLength(1);
+  });
+
   it('refuses a send whose text differs from the approved draft, and sends nothing', async () => {
     const sidecar = scriptedSidecar({ accountList: oneAccount });
     const toolSet = await toolSetWithDrafts();

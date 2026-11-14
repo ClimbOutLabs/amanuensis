@@ -33,10 +33,10 @@ describe('approved Email drafts kept in a file', () => {
     expect(await drafts.has({ ...DRAFT, tenant_id: 't2' })).toBe(false);
   });
 
-  it('forgets a draft once it is removed', async () => {
+  it('gives a draft to one taker only, and forgets it', async () => {
     const drafts = fileApprovedMailDrafts({ path });
     await drafts.add(DRAFT);
-    await drafts.remove(DRAFT);
+    expect(await Promise.all([drafts.take(DRAFT), drafts.take(DRAFT)])).toEqual([true, false]);
     expect(await drafts.has(DRAFT)).toBe(false);
   });
 

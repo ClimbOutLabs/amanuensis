@@ -10,8 +10,13 @@ import { MAIL_ACCOUNT_ARGUMENT, MAIL_FORWARD_TOOL_NAME } from './toolContract';
 export interface ApprovedMailDrafts {
   has: (input: ApprovedMailDraft) => Promise<boolean>;
   add: (input: ApprovedMailDraft) => Promise<void>;
-  remove: (input: ApprovedMailDraft) => Promise<void>;
+  /** Removes the draft and says whether it was there, in one step, so one draft can back one send only. */
+  take: (input: ApprovedMailDraft) => Promise<boolean>;
 }
+
+/** What the model is told when it sends a new message that matches no draft the person approved. */
+export const MAIL_DRAFT_FIRST_DETAIL =
+  'An email is saved as a draft and approved by the person before it can be sent. Save this message with save_draft first. Once the person approves the draft and asks for it to be sent, call send_email with exactly the same recipients, subject and body.';
 
 export interface ApprovedMailDraft {
   tenant_id: string;
@@ -30,10 +35,7 @@ export function inMemoryApprovedMailDrafts(): ApprovedMailDrafts {
       kept.add(id(input));
       return Promise.resolve();
     },
-    remove: input => {
-      kept.delete(id(input));
-      return Promise.resolve();
-    },
+    take: input => Promise.resolve(kept.delete(id(input))),
   };
 }
 

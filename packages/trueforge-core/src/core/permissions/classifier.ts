@@ -229,7 +229,7 @@ import {
 
 import type { CaldavEventReview } from '../calendar/caldav/eventReview';
 import { CALDAV_SERVER_NAME, isCaldavReadToolName } from '../calendar/caldav/toolContract';
-import { mailDraftKey } from '../email/mailConnector/approvedDrafts';
+import { MAIL_DRAFT_FIRST_DETAIL, mailDraftKey } from '../email/mailConnector/approvedDrafts';
 import { forwardedSubject, type MailForwardReview } from '../email/mailConnector/forwardReview';
 import {
   HOME_ASSISTANT_SERVER_NAME,
@@ -3869,8 +3869,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
   if (isHostMailSend(action) && !draftApproved && action.tool_name !== MAIL_FORWARD_TOOL_NAME) {
     return autoDenyDecision({
       reason: 'draft_first',
-      reason_detail:
-        'An email is saved as a draft and approved by the person before it can be sent. Save this message with save_draft first. Once the person approves the draft and asks for it to be sent, call send_email with exactly the same recipients, subject and body.',
+      reason_detail: MAIL_DRAFT_FIRST_DETAIL,
       sensitive_read: readsPrivateData,
     });
   }
