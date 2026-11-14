@@ -24,7 +24,8 @@
     "test": "cross-env NODE_OPTIONS=--conditions=trueforge-dev tsx --test \"tests/**/*.test.ts\"",
     "test:browser-live": "cross-env NODE_OPTIONS=--conditions=trueforge-dev tsx --test tests/browserLive.browser.test.ts",
     "test:journey": "cross-env NODE_OPTIONS=--conditions=trueforge-dev tsx --test tests/journeys/signedIn.journey.ts",
-    "docs:screenshots": "pnpm run ui:build && pnpm --filter @truefoundry/trueforge build:gen && cross-env NODE_OPTIONS=--conditions=trueforge-dev tsx scripts/docsScreenshots.ts"
+    "docs:screenshots": "pnpm run ui:build && pnpm --filter @truefoundry/trueforge build:gen && cross-env NODE_OPTIONS=--conditions=trueforge-dev tsx scripts/docsScreenshots.ts",
+    "ui:sweep": "pnpm run ui:build && pnpm --filter @truefoundry/trueforge build:gen && cross-env NODE_OPTIONS=--conditions=trueforge-dev tsx scripts/uiSweep.ts"
   },
   "dependencies": {
     "@assistant-ui/core": "0.2.22",
