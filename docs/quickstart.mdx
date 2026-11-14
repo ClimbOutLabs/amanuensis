@@ -351,10 +351,12 @@ With the app open in your browser and a model connected (above), this walkthroug
       </Step>
 
   <Step title="Save it as an agent">
-    Happy with the setup? Click **Save Agent**, then in **Save agent** give it a name and instructions and click **Save changes** — this captures the model, connectors, skills, and prompt together as a reusable agent. For this example:
+    Happy with the setup? Click **Save Agent**. In **Save agent**, type a **Name** and say **What it's for**, then click **Save agent**. This captures the model, connectors, skills, and instructions together as a reusable agent. The name is saved in lowercase with hyphens. For this example:
 
     - **Name** — `web-research-brief`
-    - **Instructions** —
+    - **What it's for** — Researches a topic on the web and writes a one-page brief with sources.
+
+    To give the agent standing instructions, build it from **More**, then **Build agent**, and write them under **What should it do?** in the **Set up your agent** panel. See [Agents](/agent-library). For this example:
 
     ```text wrap
     You are a web research assistant. Given a topic or question, use Exa to search the web and pull content from the most relevant, recent sources. When the request compares several items, research each one in parallel, then synthesize the findings into a clear one-page brief.
