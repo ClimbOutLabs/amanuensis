@@ -35,6 +35,7 @@ import { createCalendarSetupApi } from './calendarSetup.js';
 import { createEmailSetupApi } from './emailSetup.js';
 import { createGoogleSetupApi } from './googleSetup.js';
 import { createNotesFolderSetupApi } from './notesFolderSetup.js';
+import { createTelegramSetupApi } from './telegramSetup.js';
 
 export type UiConnectorAuth = ConnectorAuth;
 export type UiConnectorAuthPublic = ConnectorAuthPublic;
@@ -336,6 +337,7 @@ export function createConnectorCatalog(
     ...createGoogleSetupApi(client),
     ...createEmailSetupApi(clientOptions),
     ...createCalendarSetupApi(clientOptions),
+    ...createTelegramSetupApi(clientOptions),
     ...createNotesFolderSetupApi(clientOptions),
     getConnectorCatalog: async () => {
       const body = await client.catalogs.mcpServers.list();

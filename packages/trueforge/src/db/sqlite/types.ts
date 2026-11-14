@@ -52,6 +52,11 @@ import type { PhoneCallTable } from '../phoneCallStore';
 import type { PushSubscriptionTable } from '../pushSubscriptionStore';
 import type { ReachSettingsTable } from '../reachSettingsStore';
 import type { RecallExclusionTable } from '../recallExclusionStore';
+import type {
+  TelegramConnectionTable,
+  TelegramPendingApprovalTable,
+  TelegramPendingReplyTable,
+} from '../telegramStore';
 import type { TextContactTable, TextSendCountTable, TextWordTable } from '../textContactStore';
 
 /**
@@ -850,6 +855,9 @@ export interface Database {
   reach_lease: ReachLeaseTable;
   push_subscription: PushSubscriptionTable;
   local_user: LocalUserTable;
+  telegram_connection: TelegramConnectionTable;
+  telegram_pending_reply: TelegramPendingReplyTable;
+  telegram_pending_approval: TelegramPendingApprovalTable;
   approval_token: ApprovalTokenTable;
   sentinel_user_settings: SentinelUserSettingsTable;
   implementation_plan_grant: ImplementationPlanGrantTable;

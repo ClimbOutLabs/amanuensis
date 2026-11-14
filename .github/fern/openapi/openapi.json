@@ -1457,6 +1457,17 @@
         "properties": {},
         "type": "object"
       },
+      "CancelTelegramPairingResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/TelegramAccountStatus"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "CapabilitiesData": {
         "properties": {
           "build": {
@@ -2096,6 +2107,29 @@
         },
         "type": "object"
       },
+      "ConfirmTelegramPairingRequest": {
+        "properties": {
+          "code": {
+            "description": "The six-digit code the bot sent in Telegram after /start, typed to confirm the pairing.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "type": "object"
+      },
+      "ConfirmTelegramPairingResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/TelegramAccountStatus"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "ConfirmTextCodeRequest": {
         "properties": {
           "code": {
@@ -2132,6 +2166,30 @@
         "required": [
           "command_id",
           "timeout_ms"
+        ],
+        "type": "object"
+      },
+      "ConnectTelegramRequest": {
+        "properties": {
+          "token": {
+            "description": "The bot token from BotFather. Write-only: it is checked with Telegram, saved with the connection, and never returned.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "type": "object"
+      },
+      "ConnectTelegramResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/TelegramAccountStatus"
+          }
+        },
+        "required": [
+          "data"
         ],
         "type": "object"
       },
@@ -3032,7 +3090,8 @@
           "in_app",
           "web_push",
           "sms",
-          "call"
+          "call",
+          "telegram"
         ],
         "type": "string"
       },
@@ -4212,6 +4271,17 @@
         "properties": {
           "data": {
             "$ref": "#/components/schemas/Space"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "GetTelegramAccountResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/TelegramAccountStatus"
           }
         },
         "required": [
@@ -9831,6 +9901,23 @@
         "default": "auto",
         "description": "Defaults to 'auto' (chain to session last turn). Use 'none' for a new root turn."
       },
+      "ProcessTelegramUpdateRequest": {
+        "properties": {
+          "connection_id": {
+            "description": "The connection the update was polled for.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "update": {
+            "$ref": "#/components/schemas/TelegramUpdate"
+          }
+        },
+        "required": [
+          "connection_id",
+          "update"
+        ],
+        "type": "object"
+      },
       "ProfileLearnedPersistedEvent": {
         "properties": {
           "created_at": {
@@ -10563,6 +10650,17 @@
         "properties": {
           "data": {
             "$ref": "#/components/schemas/NotesFolderStatus"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "RemoveTelegramResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/TelegramAccountStatus"
           }
         },
         "required": [
@@ -13224,6 +13322,301 @@
             "type": "integer"
           }
         },
+        "type": "object"
+      },
+      "TelegramAccountStatus": {
+        "properties": {
+          "available": {
+            "description": "Whether this instance offers Telegram at all; when false, no card is shown.",
+            "type": "boolean"
+          },
+          "bot_name": {
+            "description": "The bot name Telegram shows; null when no bot is connected.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "bot_username": {
+            "description": "The bot username, without the @; null when no bot is connected.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "pairing_name": {
+            "description": "The name Telegram shows for the person waiting to pair, so they can be checked before pairing; null when nobody waits. The pairing code itself is never returned: the bot shows it only in Telegram.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "state": {
+            "$ref": "#/components/schemas/TelegramConnectionState"
+          }
+        },
+        "required": [
+          "available",
+          "state",
+          "bot_name",
+          "bot_username",
+          "pairing_name"
+        ],
+        "type": "object"
+      },
+      "TelegramCallbackQuery": {
+        "description": "A button tap, when this update is one.",
+        "properties": {
+          "data": {
+            "description": "The button payload the bot set.",
+            "type": "string"
+          },
+          "from": {
+            "$ref": "#/components/schemas/TelegramUser"
+          },
+          "id": {
+            "description": "Callback id, answered once so Telegram stops showing a spinner.",
+            "type": "string"
+          },
+          "message": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TelegramMessage"
+              },
+              {
+                "description": "The message the button belongs to, when Telegram sends it."
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "from"
+        ],
+        "type": "object"
+      },
+      "TelegramChat": {
+        "properties": {
+          "id": {
+            "description": "Telegram chat id.",
+            "type": "integer"
+          },
+          "type": {
+            "description": "private, group, supergroup or channel.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "type"
+        ],
+        "type": "object"
+      },
+      "TelegramConnectionState": {
+        "enum": [
+          "not_connected",
+          "awaiting_pairing",
+          "connected"
+        ],
+        "type": "string"
+      },
+      "TelegramDocument": {
+        "description": "The attached file, when the message carries one.",
+        "properties": {
+          "file_id": {
+            "description": "File id to fetch the document with.",
+            "type": "string"
+          },
+          "file_name": {
+            "description": "The name the sender gave the file.",
+            "type": "string"
+          },
+          "file_size": {
+            "description": "Size in bytes, when Telegram says.",
+            "type": "integer"
+          },
+          "file_unique_id": {
+            "description": "Stable file id across bots.",
+            "type": "string"
+          },
+          "mime_type": {
+            "description": "The file type, when Telegram says.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file_id"
+        ],
+        "type": "object"
+      },
+      "TelegramMessage": {
+        "description": "A new message, when this update is one.",
+        "properties": {
+          "caption": {
+            "description": "The caption on a photo or document, when there is one.",
+            "type": "string"
+          },
+          "caption_entities": {
+            "description": "Marked spans in the caption.",
+            "items": {
+              "$ref": "#/components/schemas/TelegramMessageEntity"
+            },
+            "type": "array"
+          },
+          "chat": {
+            "$ref": "#/components/schemas/TelegramChat"
+          },
+          "date": {
+            "description": "When it was sent, as a Unix time in seconds.",
+            "type": "integer"
+          },
+          "document": {
+            "$ref": "#/components/schemas/TelegramDocument"
+          },
+          "entities": {
+            "description": "Marked spans in the text.",
+            "items": {
+              "$ref": "#/components/schemas/TelegramMessageEntity"
+            },
+            "type": "array"
+          },
+          "forward_origin": {
+            "description": "Set when the message was forwarded from somewhere else; its presence marks the content untrusted."
+          },
+          "from": {
+            "$ref": "#/components/schemas/TelegramUser"
+          },
+          "message_id": {
+            "description": "Message id inside its chat.",
+            "type": "integer"
+          },
+          "photo": {
+            "description": "Photo sizes, smallest first, when the message is a photo.",
+            "items": {
+              "$ref": "#/components/schemas/TelegramPhotoSize"
+            },
+            "type": "array"
+          },
+          "text": {
+            "description": "The message text, when the message is text.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message_id",
+          "chat",
+          "date"
+        ],
+        "type": "object"
+      },
+      "TelegramMessageEntity": {
+        "properties": {
+          "length": {
+            "description": "How long the span is.",
+            "type": "integer"
+          },
+          "offset": {
+            "description": "Where the span starts in the text.",
+            "type": "integer"
+          },
+          "type": {
+            "description": "url, text_link, bot_command, mention, and the rest of Telegram’s kinds.",
+            "type": "string"
+          },
+          "url": {
+            "description": "The address a text_link points at, when Telegram sends it.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "offset",
+          "length"
+        ],
+        "type": "object"
+      },
+      "TelegramPhotoSize": {
+        "properties": {
+          "file_id": {
+            "description": "File id to fetch the photo with.",
+            "type": "string"
+          },
+          "file_size": {
+            "description": "Size in bytes, when Telegram says.",
+            "type": "integer"
+          },
+          "file_unique_id": {
+            "description": "Stable file id across bots.",
+            "type": "string"
+          },
+          "height": {
+            "description": "Height in pixels.",
+            "type": "integer"
+          },
+          "width": {
+            "description": "Width in pixels.",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "file_id"
+        ],
+        "type": "object"
+      },
+      "TelegramUpdate": {
+        "properties": {
+          "callback_query": {
+            "$ref": "#/components/schemas/TelegramCallbackQuery"
+          },
+          "message": {
+            "$ref": "#/components/schemas/TelegramMessage"
+          },
+          "update_id": {
+            "description": "Update id; the poll offset is the last one handled plus one.",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "update_id"
+        ],
+        "type": "object"
+      },
+      "TelegramUser": {
+        "description": "Who sent it; absent for channel posts.",
+        "properties": {
+          "first_name": {
+            "description": "First name, when Telegram sends one.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Telegram user id.",
+            "type": "integer"
+          },
+          "is_bot": {
+            "description": "True when the account is a bot.",
+            "type": "boolean"
+          },
+          "username": {
+            "description": "Username without the @, when the person has one.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "type": "object"
+      },
+      "TelegramWebhookUpdate": {
+        "additionalProperties": {},
+        "properties": {
+          "update_id": {
+            "description": "Update id; the rest of the update is checked by the handler.",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "update_id"
+        ],
         "type": "object"
       },
       "TestGoogleConnectionResponse": {
@@ -18095,6 +18488,93 @@
           "sessions"
         ],
         "x-fern-sdk-method-name": "get_or_create_by_external_id"
+      }
+    },
+    "/api/internal/telegram/updates": {
+      "post": {
+        "description": "Handles one update the controller polled for a connection: a message becomes a turn, a button tap answers an approval. Called only with the service credential.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProcessTelegramUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "The update was handled, or there was nothing in it to handle."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid service credential."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The connection is not there."
+          }
+        },
+        "summary": "Process one Telegram update",
+        "tags": [
+          "Internal"
+        ],
+        "x-fern-sdk-group-name": [
+          "internal",
+          "telegram"
+        ],
+        "x-fern-sdk-method-name": "process_update"
+      }
+    },
+    "/api/telegram/webhook": {
+      "post": {
+        "description": "The address Telegram posts updates to when a public https address is configured. The secret Telegram was given at setup must ride the call, or it is refused. An update in a shape this build cannot read is dropped with the same success answer, so Telegram does not keep retrying it.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TelegramWebhookUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "The update was handled, dropped as unreadable, or there was nothing in it to handle."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The call did not carry the webhook secret."
+          }
+        },
+        "summary": "Receive one Telegram webhook update",
+        "tags": [
+          "Internal"
+        ],
+        "x-fern-sdk-group-name": [
+          "telegram"
+        ],
+        "x-fern-sdk-method-name": "webhook"
       }
     },
     "/api/v1/agents": {
@@ -32546,6 +33026,294 @@
           "personalization"
         ],
         "x-fern-sdk-method-name": "update_sentinel_settings"
+      }
+    },
+    "/api/v1/user/settings/telegram": {
+      "delete": {
+        "description": "Removes the bot, its token and its pairing for good. Messages to the bot are no longer answered.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RemoveTelegramResponse"
+                }
+              }
+            },
+            "description": "The bot is disconnected."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The caller is not an admin, or the request did not come from this app, so nothing was done."
+          }
+        },
+        "summary": "Disconnect the Telegram bot",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "telegram"
+        ],
+        "x-fern-sdk-method-name": "remove"
+      },
+      "post": {
+        "description": "Checks the bot token with Telegram first and saves the connection only when it passes. The token is stored with the connection and never returned.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConnectTelegramRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectTelegramResponse"
+                }
+              }
+            },
+            "description": "The bot is connected and waiting to be paired."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Telegram refused the token."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The caller is not an admin, or the request did not come from this app, so nothing was done."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Telegram could not be reached."
+          }
+        },
+        "summary": "Connect a Telegram bot",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "telegram"
+        ],
+        "x-fern-sdk-method-name": "connect"
+      }
+    },
+    "/api/v1/user/settings/telegram/cancel-pairing": {
+      "post": {
+        "description": "Drops the pairing that is waiting, without pairing anyone, so a /start from someone else can be refused. The person can send /start again to start over.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CancelTelegramPairingResponse"
+                }
+              }
+            },
+            "description": "No pairing is waiting now."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "No bot is connected."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The caller is not an admin, or the request did not come from this app, so nothing was done."
+          }
+        },
+        "summary": "Cancel a waiting Telegram pairing",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "telegram"
+        ],
+        "x-fern-sdk-method-name": "cancel_pairing"
+      }
+    },
+    "/api/v1/user/settings/telegram/confirm": {
+      "post": {
+        "description": "Pairs the person who sent /start to the bot, when the code they type matches the code the bot sent them in Telegram. Only that person can then talk to the bot.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmTelegramPairingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfirmTelegramPairingResponse"
+                }
+              }
+            },
+            "description": "The pairing is confirmed."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "No code is waiting, it has expired, or the code does not match."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The caller is not an admin, or the request did not come from this app, so nothing was done."
+          }
+        },
+        "summary": "Confirm a Telegram pairing",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "telegram"
+        ],
+        "x-fern-sdk-method-name": "confirm_pairing"
+      }
+    },
+    "/api/v1/user/settings/telegram/status": {
+      "get": {
+        "description": "Returns whether a bot is connected, its name, where pairing stands, and the name of the person waiting to pair while one waits. The bot token and the pairing code are never returned: the code is shown only in Telegram.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetTelegramAccountResponse"
+                }
+              }
+            },
+            "description": "The Telegram status."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The caller is not an admin, or the request did not come from this app, so nothing was done."
+          }
+        },
+        "summary": "Get the Telegram bot status",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "telegram"
+        ],
+        "x-fern-sdk-method-name": "get_status"
       }
     },
     "/api/v1/voice/connect": {
