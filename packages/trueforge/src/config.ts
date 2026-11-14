@@ -1558,7 +1558,8 @@ export interface SharedServerConfiguration {
   ACCESS_LOGS: boolean;
   /**
    * Token eval instance: Gmail and Calendar answer from the eval fixtures, and only approvals for the
-   * fixture-backed tools and maps and search are allowed through. Env: `AMAN_EVAL_MODE`. Default false.
+   * fixture-backed tools, maps, search and making a schedule are allowed through. Env: `AMAN_EVAL_MODE`.
+   * Default false.
    */
   AMAN_EVAL_MODE: boolean;
   /** Folder holding the eval fixtures (inbox, calendar). Set by the package layout, not by an env var. */

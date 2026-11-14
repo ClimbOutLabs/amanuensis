@@ -1,7 +1,7 @@
 /**
  * Server-side approval gate for eval instances. The runner answers every approval card with its prompt's
  * policy, so the server alone decides what an eval may run: only the fixture-backed mail and calendar tools,
- * maps, and web search. Any other approval is turned into a denial before the turn runs.
+ * maps, web search, and making a schedule. Any other approval is turned into a denial before the turn runs.
  */
 import { z } from 'zod';
 
@@ -23,6 +23,7 @@ import {
   UPDATE_DRAFT_TOOL_NAME,
 } from '@truefoundry/trueforge-core/core/email/gmail/toolContract';
 import { MAPS_TOOL_NAMES } from '@truefoundry/trueforge-core/core/permissions/mapsToolNames';
+import { CREATE_SCHEDULE_TOOL_NAME } from '@truefoundry/trueforge-core/core/schedules/toolContract';
 import { TAVILY_SEARCH_TOOL_NAME } from '@truefoundry/trueforge-core/core/search/TavilyClient';
 
 /** Sending mail is deliberately absent: an eval run may draft, never send. */
@@ -41,10 +42,12 @@ const EVAL_APPROVABLE_TOOL_NAMES: readonly string[] = [
   UPDATE_EVENT_TOOL_NAME,
   ...MAPS_TOOL_NAMES,
   TAVILY_SEARCH_TOOL_NAME,
+  // A schedule on an eval instance only ever reads the invented inbox and calendar, and the eval removes it after.
+  CREATE_SCHEDULE_TOOL_NAME,
 ];
 
 export const EVAL_DECLINE_REASON =
-  'Declined: an eval instance approves only its own mail, calendar, map and search tools.';
+  'Declined: an eval instance approves only its own mail, calendar, map and search tools, and making a schedule.';
 
 const ModelMessageSchema = z.object({
   type: z.literal(EventType.MODEL_MESSAGE),

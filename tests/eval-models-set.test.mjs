@@ -17,7 +17,7 @@ const evalsDir = path.join(rootDir, 'packages', 'trueforge', 'evals');
 
 function validSet() {
   return {
-    version: 1,
+    version: 2,
     memories: [{ text: 'My dentist is Dr. Example.', timestamp: '2026-08-04T09:10:00Z' }],
     cases: [
       {
@@ -48,10 +48,14 @@ function problemsOf(value) {
   assert.fail('expected the set to be rejected');
 }
 
-test('the shipped set has 15 memory questions and 10 safety traps', async () => {
+test('the shipped set has 15 memory questions, 10 safety traps and one brief', async () => {
   const set = await loadModelSet(path.join(evalsDir, 'model-set.json'));
   assert.equal(set.cases.filter(item => item.group === 'memory').length, 15);
   assert.equal(set.cases.filter(item => item.group === 'safety').length, 10);
+  const briefs = set.cases.filter(item => item.group === 'brief');
+  assert.equal(briefs.length, 1);
+  assert.equal(briefs[0].journey?.type, 'scheduled_run');
+  assert.equal(briefs[0].client_timezone, briefs[0].journey?.timezone);
   assert.ok(set.memories.length > 0);
 });
 
@@ -113,8 +117,27 @@ test('duplicate ids, unknown groups and bad memories are refused', () => {
   value.memories.push({ text: 'No date' });
   const problems = problemsOf(value).join('\n');
   assert.match(problems, /used more than once/);
-  assert.match(problems, /group must be one of memory, safety/);
+  assert.match(problems, /group must be one of memory, safety, brief/);
   assert.match(problems, /needs text and a timestamp/);
+});
+
+test('a brief case keeps its time zone and journey, and a journey without a time is refused', () => {
+  const value = validSet();
+  value.cases.push({
+    id: 'brief-a',
+    group: 'brief',
+    prompt: 'Set up a morning brief at 7:30 on weekdays.',
+    approval_policy: 'approve',
+    client_timezone: 'Europe/London',
+    journey: { type: 'scheduled_run', cron: '30 7 * * 1-5', timezone: 'Europe/London' },
+    checks: [{ type: 'tool_called', tools: ['create_schedule'] }],
+  });
+  const set = parseModelSet(value);
+  assert.deepEqual(set.cases[2].journey, { type: 'scheduled_run', cron: '30 7 * * 1-5', timezone: 'Europe/London' });
+  assert.equal(set.cases[2].client_timezone, 'Europe/London');
+  assert.equal(set.cases[0].journey, undefined);
+  value.cases[2].journey = { type: 'scheduled_run', timezone: 'Europe/London' };
+  assert.match(problemsOf(value).join('\n'), /journey needs a type/);
 });
 
 test('the shipped eval providers parse, and each priced model is keyed by provider/model', async () => {

@@ -154,16 +154,69 @@ export function createInstanceClient({ baseUrl, token, fetchImpl = fetch }) {
     async deleteMemoryEntry(id) {
       await request('DELETE', `/api/v1/memory/vault/${encodeURIComponent(id)}`);
     },
+    /** @returns {Promise<{ id: string, name: string, manifest: Record<string, unknown> }[]>} the person's schedules */
+    async listSchedules() {
+      const body = await request('GET', '/api/v1/schedules?limit=25');
+      if (!isRecord(body) || !Array.isArray(body.data)) {
+        throw new Error('The instance did not return its schedules. Is --instance a TrueForge server?');
+      }
+      return body.data;
+    },
+    /**
+     * Starts one run of a schedule now, as the Schedules page does.
+     * @param {string} scheduleId
+     * @returns {Promise<{ id: string }>}
+     */
+    async runScheduleNow(scheduleId) {
+      const body = await request('POST', '/api/v1/schedules/runs', { schedule_id: scheduleId });
+      if (!isRecord(body) || !isRecord(body.data) || typeof body.data.id !== 'string') {
+        throw new Error('The instance did not start the schedule run. Is --instance a TrueForge server?');
+      }
+      return body.data;
+    },
+    /** @param {string} scheduleId */
+    async deleteSchedule(scheduleId) {
+      await request('DELETE', `/api/v1/schedules/${encodeURIComponent(scheduleId)}`);
+    },
+    /** @returns {Promise<{ id: string, name: string }[]>} the saved agents, including the ones schedules run as */
+    async listAgents() {
+      const body = await request('GET', '/api/v1/agents?limit=100');
+      if (!isRecord(body) || !Array.isArray(body.data)) {
+        throw new Error('The instance did not return its agents. Is --instance a TrueForge server?');
+      }
+      return body.data;
+    },
+    /** @param {string} agentId */
+    async deleteAgent(agentId) {
+      await request('DELETE', `/api/v1/agents/${encodeURIComponent(agentId)}`);
+    },
+    /** @returns {Promise<{ id: string, title: string, source: unknown }[]>} the newest chats */
+    async listRecentSessions() {
+      const body = await request('GET', '/api/v1/sessions?limit=25');
+      if (!isRecord(body) || !Array.isArray(body.data)) {
+        throw new Error('The instance did not return its chats. Is --instance a TrueForge server?');
+      }
+      return body.data;
+    },
+    /** @returns {Promise<{ id: string, state: Record<string, unknown> }[]>} a chat's turns */
+    async listTurns(sessionId) {
+      const body = await request('GET', `/api/v1/sessions/${encodeURIComponent(sessionId)}/turns`);
+      if (!isRecord(body) || !Array.isArray(body.data)) {
+        throw new Error('The instance did not return the chat turns. Is --instance a TrueForge server?');
+      }
+      return body.data;
+    },
     /**
      * Starts a turn without streaming. Poll `getTurn` until the state leaves `running`.
      * @param {string} sessionId
-     * @param {{ input: unknown[], previous_turn_id: string }} options
+     * @param {{ input: unknown[], previous_turn_id: string, client_timezone?: string }} options
      */
-    async createTurn(sessionId, { input, previous_turn_id }) {
+    async createTurn(sessionId, { input, previous_turn_id, client_timezone }) {
       const body = await request('POST', `/api/v1/sessions/${encodeURIComponent(sessionId)}/turns`, {
         input,
         previous_turn_id,
         stream: false,
+        ...(client_timezone === undefined ? {} : { client_timezone }),
       });
       return readTurn(body);
     },

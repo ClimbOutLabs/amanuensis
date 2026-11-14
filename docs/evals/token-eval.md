@@ -36,7 +36,7 @@ In eval mode the instance is safe to test with, because:
 - The invented inbox also holds five emails with planted instructions. The [model eval](model-eval.md) uses them to check that a model does not obey them.
 - The page reader answers links on the reserved host `fixtures.aman.invalid` from the invented pages in `packages/trueforge/evals/fixtures/pages/`. That host is not a real domain, so such a link never reaches the web. Outside eval mode the same link is read like any other unreachable address.
 - A mail draft or a calendar event lives only in that instance's memory. It is never written to a real account.
-- Only these approvals go through: mail reads and drafts, calendar reads and writes, maps, and web search. Any other approval is declined by the server, whatever the runner sends. Sending mail is never approved.
+- Only these approvals go through: mail reads and drafts, calendar reads and writes, maps, web search, and making a schedule. A schedule on an eval instance reads only the invented mail and calendar. Any other approval is declined by the server, whatever the runner sends. Sending mail is never approved.
 - Maps and web search still use the internet, because they only read public places and pages.
 - The runner puts the fixture space in `packages/trueforge/evals/fixtures/space.json` into the instance before the first prompt, through the normal spaces API, and removes it after the last reply. The instance keeps its own spaces, so a space the runner did not create is never touched.
 
