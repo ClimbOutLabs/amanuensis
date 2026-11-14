@@ -4,10 +4,14 @@
  * The skill a chat call adds, shown in full.
  */
 export interface Tier3Skill {
+    /** True when one of the websites can send email or change a calendar. */
+    canSend?: boolean;
     /** What the skill is for, as the skill itself says. */
     description: string;
     /** The skill's own instruction file as the host read it, or null for a starter skill. */
     instructions: string | null;
+    /** True when the skill also builds web addresses while it runs, which cannot be read ahead of time. */
+    makesUpAddresses?: boolean;
     /** Skill name. */
     name: string;
     /** The repository the skill comes from, and the folder in it when there is one. */
@@ -16,4 +20,6 @@ export interface Tier3Skill {
     starter: boolean;
     /** The exact commit that is added. A later change to the repository is not picked up. */
     version: string;
+    /** The websites the skill sends requests to, as the host found them in its files. Approving allows these. */
+    websites?: string[];
 }

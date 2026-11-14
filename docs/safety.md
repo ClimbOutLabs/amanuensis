@@ -96,7 +96,7 @@ Aman always shows a card first. Aman itself reads the skill on GitHub, so the na
 
 What you approve is what is added. The skill is saved at the exact version on the card, so a later change to the repository isn't picked up. If the repository changes between the card and your answer, nothing is added and Aman asks again.
 
-Adding a skill gives it nothing else. Its scripts run only in the sandbox. **Commands in the sandbox** below says when they ask first. A skill that wants to reach sites still needs your OK in Settings, under Skills. From a chat, Aman can only add a skill. It can't change or remove one.
+Skills from a marketplace don't say which websites they use, so Aman reads all of the skill's files first and lists the websites it found on the card. If the skill makes up web addresses while it runs, the card says so, and those websites stay blocked until you allow each one. Approving is all or nothing: **Allow** adds the skill and lets it reach exactly the websites on the card, and nothing else. Its scripts run only in the sandbox. **Commands in the sandbox** below says when they ask first. From a chat, Aman can only add a skill. It can't change or remove one.
 
 An incognito chat can't add a skill. A scheduled run can't add one either, because the tool isn't there.
 

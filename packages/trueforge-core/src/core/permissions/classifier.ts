@@ -3174,11 +3174,27 @@ async function classifyPersonaTool(action: SentinelAction, ctx: ClassifyContext)
   });
 }
 
+/**
+ * Approving an install also allows the websites the skill sends requests to, so the card says so,
+ * with the same warnings the Settings network approval gives.
+ */
+function skillWebsitesSentence(review: Tier3Skill): string {
+  const websites = review.websites ?? [];
+  if (websites.length === 0) {
+    return '';
+  }
+  const send =
+    review.can_send === true
+      ? ' One of these sites can send email. This skill will be able to send email as you, without asking each time.'
+      : '';
+  return ` It sends requests to ${websites.map(site => escapeDisplayText(site)).join(', ')}. Adding it lets the skill reach these websites and no others. The skill can send any of your data to them, so only allow this for a skill you trust.${send}`;
+}
+
 function skillInstallCard(input: { review: Tier3Skill; assistant: string; agent_intent: string | null }): Tier3Card {
   const { review } = input;
   const show = (text: string) => escapeDisplayText(text);
   return {
-    plain_what: `Add the skill ${cardSubject(review.name)}? ${input.assistant} will follow its instructions when a task calls for it.`,
+    plain_what: `Add the skill ${cardSubject(review.name)}? ${input.assistant} will follow its instructions when a task calls for it.${skillWebsitesSentence(review)}`,
     copy: simpleCardCopy({ headline: `Add the skill ${cardSubject(review.name)}?`, undo: null, reason: null }),
     plain_why: plainWhy(input.agent_intent),
     cannot_be_undone: null,
@@ -3198,6 +3214,9 @@ function skillInstallCard(input: { review: Tier3Skill; assistant: string; agent_
       starter: review.starter,
       instructions:
         review.instructions === null ? null : escapeDisplayText(review.instructions, { keepNewlines: true }),
+      websites: (review.websites ?? []).map(show),
+      makes_up_addresses: review.makes_up_addresses ?? false,
+      can_send: review.can_send ?? false,
     },
   };
 }

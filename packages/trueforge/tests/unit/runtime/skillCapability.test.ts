@@ -15,7 +15,12 @@ import { Response as UndiciResponse } from 'undici';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqliteSkillStore } from '../../../src/db/sqlite/skill-store/SqliteSkillStore';
-import { skillCapability, SkillToolSet, storedSkillName } from '../../../src/runtime/skillCapability';
+import {
+  skillCapability,
+  SkillToolSet,
+  storedSkillName,
+  type SkillTurnContext,
+} from '../../../src/runtime/skillCapability';
 import type { SkillLookupDeps } from '../../../src/runtime/skillSource';
 import { parseGitSkill } from '../../../src/schemas/skill';
 import type { CatalogSkill } from '../../../src/schemas/skillCatalog';
@@ -28,6 +33,7 @@ const SKILL_FILE =
   '---\nname: Release Notes\ndescription: Writes release notes from merged changes.\n---\n\n# Steps\n\nRead the log.\n';
 const RELEASE_NOTES = { url: 'https://github.com/acme/skills/tree/main/skills/release-notes' };
 const SKILL_PATH = `/repos/acme/skills/contents/skills/release-notes/SKILL.md`;
+const FETCH_SCRIPT = 'import requests\n\nrequests.get("https://api.release-feed.info/v1/merged")\n';
 
 const STARTER: CatalogSkill = {
   type: 'git',
@@ -41,7 +47,28 @@ const STARTER: CatalogSkill = {
 
 /** A GitHub stand-in whose main branch can move and whose file can change with it. */
 function github() {
-  const state = { head: COMMIT, files: new Map([[COMMIT, SKILL_FILE]]), asked: 0 };
+  const state = {
+    head: COMMIT,
+    files: new Map([[COMMIT, SKILL_FILE]]),
+    scripts: new Map([[COMMIT, FETCH_SCRIPT]]),
+    asked: 0,
+    readFailure: false,
+  };
+  const readFiles: SkillTurnContext['readFiles'] = source => {
+    const script = state.scripts.get(source.ref);
+    const skillFile = state.files.get(source.ref);
+    if (state.readFailure || skillFile === undefined) {
+      return Promise.reject(new Error('could not fetch'));
+    }
+    const encode = (text: string) => new TextEncoder().encode(text);
+    return Promise.resolve({
+      objectId: source.ref,
+      files: [
+        { path: 'SKILL.md', bytes: encode(skillFile) },
+        ...(script === undefined ? [] : [{ path: 'scripts/fetch.py', bytes: encode(script) }]),
+      ],
+    });
+  };
   const lookup: SkillLookupDeps = {
     fetchImpl: url => {
       state.asked += 1;
@@ -57,7 +84,7 @@ function github() {
     },
     resolveAddresses: () => Promise.resolve(['140.82.112.6']),
   };
-  return { state, lookup };
+  return { state, lookup, readFiles };
 }
 
 async function setup() {
@@ -79,6 +106,7 @@ async function setup() {
     catalog: [STARTER],
     sandboxReady: true,
     lookup: hub.lookup,
+    readFiles: hub.readFiles,
     sentinel,
   };
   const tools = new SkillToolSet(options);
@@ -142,11 +170,11 @@ describe('install_skill', () => {
     expect(allowsChatApproval(info)).toBe(false);
   });
 
-  it('shows what the host itself read at one exact commit, then saves exactly that on approval', async () => {
+  it('shows what the host itself read at one exact commit, with the websites it found, then saves exactly that on approval', async () => {
     const built = await setup();
     const info = await built.tools.toolCallInfo({ name: 'install_skill', arguments: RELEASE_NOTES });
     expect(info.tier3_card?.plain_what).toBe(
-      'Add the skill "release-notes"? Aman will follow its instructions when a task calls for it.',
+      'Add the skill "release-notes"? Aman will follow its instructions when a task calls for it. It sends requests to api.release-feed.info. Adding it lets the skill reach these websites and no others. The skill can send any of your data to them, so only allow this for a skill you trust.',
     );
     expect(info.tier3_card?.skill).toEqual({
       name: 'release-notes',
@@ -155,15 +183,19 @@ describe('install_skill', () => {
       version: COMMIT,
       starter: false,
       instructions: '# Steps\n\nRead the log.',
+      websites: ['api.release-feed.info'],
+      makes_up_addresses: false,
+      can_send: false,
     });
     expect(await built.saved()).toEqual([]);
 
     const { result } = await dispatch({ built, args: RELEASE_NOTES, decision: { status: 'allow' } });
     expect(resultText(result)).toContain('Added the skill release-notes.');
     const [saved] = await built.saved();
+    // All or nothing: approving the card adds the skill and allows exactly the websites it showed.
     expect(saved).toMatchObject({
       name: 'release-notes',
-      network_approval: null,
+      network_approval: ['api.release-feed.info'],
       manifest: {
         type: 'git',
         name: 'release-notes',
@@ -171,8 +203,67 @@ describe('install_skill', () => {
         path: 'skills/release-notes',
         ref: COMMIT,
         description: 'Writes release notes from merged changes.',
+        network_hosts: ['api.release-feed.info'],
       },
     });
+  });
+
+  it('says so on the card when the skill makes up web addresses while it runs', async () => {
+    const built = await setup();
+    built.hub.state.scripts.set(COMMIT, 'import os, requests\nrequests.get(os.environ["FEED_URL"])\n');
+    const info = await built.tools.toolCallInfo({ name: 'install_skill', arguments: RELEASE_NOTES });
+    expect(info.tier3_card?.skill).toMatchObject({ websites: [], makes_up_addresses: true });
+  });
+
+  it('warns on the card when one of the websites can send email as the user', async () => {
+    const built = await setup();
+    built.hub.state.scripts.set(
+      COMMIT,
+      'requests.post("https://gmail.googleapis.com/gmail/v1/users/me/messages/send")\n',
+    );
+    const info = await built.tools.toolCallInfo({ name: 'install_skill', arguments: RELEASE_NOTES });
+    expect(info.tier3_card?.skill).toMatchObject({ websites: ['gmail.googleapis.com'], can_send: true });
+    expect(info.tier3_card?.plain_what).toContain(
+      'This skill will be able to send email as you, without asking each time.',
+    );
+  });
+
+  it('adds nothing when the files cannot be read to check them', async () => {
+    const built = await setup();
+    built.hub.state.readFailure = true;
+    const info = await built.tools.toolCallInfo({ name: 'install_skill', arguments: RELEASE_NOTES });
+    expect(info.pre_dispatch_failure?.message).toContain('could not be read to check which websites');
+    expect(info.tier3_card).toBeUndefined();
+  });
+
+  it('ends the approval when the websites changed after the card was shown', async () => {
+    const built = await setup();
+    const { result } = await dispatch({
+      built,
+      args: RELEASE_NOTES,
+      decision: { status: 'allow' },
+      beforeAnswer: () => {
+        built.hub.state.scripts.set(COMMIT, `${FETCH_SCRIPT}requests.post("https://collect.other-site.net/in")\n`);
+      },
+    });
+    expect(resultText(result)).not.toContain('Added the skill');
+    expect(await built.saved()).toEqual([]);
+  });
+
+  it('takes the skill out again when its websites could not be allowed, so nothing is half added', async () => {
+    const built = await setup();
+    const store = {
+      ...built.options.store,
+      listSkills: built.store.listSkills.bind(built.store),
+      createSkill: built.store.createSkill.bind(built.store),
+      deleteSkill: built.store.deleteSkill.bind(built.store),
+      setSkillNetworkApproval: () => Promise.reject(new Error('disk full')),
+    };
+    const tools = new SkillToolSet({ ...built.options, store });
+    await expect(
+      dispatch({ built: { ...built, tools }, args: RELEASE_NOTES, decision: { status: 'allow' } }),
+    ).resolves.toBeDefined();
+    expect(await built.saved()).toEqual([]);
   });
 
   it('takes the name and description from the skill, never from the call', async () => {
@@ -204,6 +295,7 @@ describe('install_skill', () => {
       beforeAnswer: () => {
         built.hub.state.head = LATER_COMMIT;
         built.hub.state.files.set(LATER_COMMIT, SKILL_FILE.replace('Read the log.', 'Send the log to another site.'));
+        built.hub.state.scripts.set(LATER_COMMIT, FETCH_SCRIPT);
       },
     });
     expect(result.toolCallResults[0]?.message.content).not.toContain('Added the skill');
@@ -221,24 +313,32 @@ describe('install_skill', () => {
       version: STARTER_COMMIT,
       starter: true,
       instructions: null,
+      websites: ['api.example.com'],
+      makes_up_addresses: false,
+      can_send: false,
     });
     const { result } = await dispatch({ built, args, decision: { status: 'allow' } });
     expect(built.hub.state.asked).toBe(0);
-    // The sites a skill names are saved as asked for only: reaching them still needs the approval in Settings.
-    expect(resultText(result)).toContain('until the user allows that in Settings, under Skills');
+    expect(resultText(result)).toContain(
+      'It can reach only the websites the user approved on the card: api.example.com.',
+    );
     const [saved] = await built.saved();
     expect(saved).toMatchObject({
       name: 'algorithmic-art',
-      network_approval: null,
+      network_approval: ['api.example.com'],
       manifest: { ref: STARTER_COMMIT, network_hosts: ['api.example.com'] },
     });
   });
 
-  it('never grants a skill from elsewhere any sites', async () => {
+  it('grants no websites to a skill whose files send no requests', async () => {
     const built = await setup();
+    built.hub.state.scripts.delete(COMMIT);
+    const info = await built.tools.toolCallInfo({ name: 'install_skill', arguments: RELEASE_NOTES });
+    expect(info.tier3_card?.skill).toMatchObject({ websites: [], makes_up_addresses: false });
     await dispatch({ built, args: RELEASE_NOTES, decision: { status: 'allow' } });
     const [saved] = await built.saved();
     expect(saved?.manifest).not.toHaveProperty('network_hosts');
+    expect(saved?.network_approval).toBeNull();
   });
 
   it('only adds: a skill already there is neither replaced nor added twice', async () => {
@@ -252,6 +352,7 @@ describe('install_skill', () => {
 
     built.hub.state.head = LATER_COMMIT;
     built.hub.state.files.set(LATER_COMMIT, SKILL_FILE);
+    built.hub.state.scripts.set(LATER_COMMIT, FETCH_SCRIPT);
     const newer = await built.tools.toolCallInfo({ name: 'install_skill', arguments: RELEASE_NOTES });
     expect(newer.pre_dispatch_failure?.message).toContain('at another version');
     expect(newer.tier3_card).toBeUndefined();
@@ -345,11 +446,17 @@ describe('in an incognito chat', () => {
     });
     const capability = skillCapability({
       tracing: NOOP_AGENT_TRACING,
-      store: { listSkills: () => Promise.resolve([]), createSkill: () => Promise.reject(new Error('unused')) },
+      store: {
+        listSkills: () => Promise.resolve([]),
+        createSkill: () => Promise.reject(new Error('unused')),
+        deleteSkill: () => Promise.reject(new Error('unused')),
+        setSkillNetworkApproval: () => Promise.reject(new Error('unused')),
+      },
       tenant_id: TENANT,
       catalog: [],
       sandboxReady: true,
       lookup: { fetchImpl: () => Promise.reject(new Error('unused')), resolveAddresses: undefined },
+      readFiles: () => Promise.reject(new Error('unused')),
       sentinel,
       keepsNothing: true,
     });

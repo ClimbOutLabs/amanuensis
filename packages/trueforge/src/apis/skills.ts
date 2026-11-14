@@ -160,6 +160,8 @@ export function createSkillsRouter<TTransaction>(deps: SkillsRouterDeps<TTransac
     if (!deleted) {
       return c.json({ error: { message: `No skill with this name: ${name}` } }, 404);
     }
+    // The skill's own websites went with its record; its allow-once answers in open chats go too.
+    skillNetworkTokens.forgetSkill({ tenant_id: requestContext.tenant_id, skill_name: name });
     return c.json({}, 200);
   };
 

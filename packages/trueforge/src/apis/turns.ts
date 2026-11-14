@@ -39,6 +39,7 @@ import {
   newEventId,
   PromiseTimeoutError,
   rawSandboxId,
+  readGitSkillFiles,
   redisKey,
   SandboxError,
   SandboxFileNotFoundError,
@@ -2952,6 +2953,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
               catalog: deps.skillCatalog.list(),
               sandboxReady: serverSandboxAvailable,
               lookup: { fetchImpl: undefined, resolveAddresses: undefined },
+              readFiles: source => readGitSkillFiles({ skill: source }),
             },
       schedules:
         deps.schedules === undefined || chatRunner === undefined

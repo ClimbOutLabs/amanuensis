@@ -8,6 +8,7 @@ import type { Skill } from '../../../../src/core/sandbox/skills/SkillMounter';
 import {
   copySkillsIntoSandbox,
   fetchRegistryArchive,
+  readGitSkillFiles,
   skillCopyFailedNotice,
   SkillDownloadError,
   SkillTooLargeError,
@@ -377,6 +378,22 @@ describe('copySkillsIntoSandbox for git skills', () => {
     expect(archiveText(archive, 'SKILL.md')).toBe('# echo\n');
     expect(archiveNames(archive)).not.toContain('NOTES.md');
     expect(await readFile(join(repo, 'skills', 'echo', 'SKILL.md'), 'utf-8')).toBe('# echo\n');
+  });
+
+  test('reads every file of the skill folder at the pinned commit, and nothing outside it', async () => {
+    mkdirSync(join(repo, 'skills', 'echo', 'scripts'));
+    writeFileSync(join(repo, 'skills', 'echo', 'scripts', 'run.py'), 'print(1)\n');
+    commitAll('script');
+    const read = await readGitSkillFiles({
+      skill: { url: `file://${repo}`, path: 'skills/echo', ref: 'main' },
+      host: fileGit,
+    });
+
+    expect(read.objectId).toBe(commit);
+    expect(read.files.map(file => [file.path, Buffer.from(file.bytes).toString('utf-8')]).sort()).toEqual([
+      ['SKILL.md', '# echo\n'],
+      ['scripts/run.py', 'print(1)\n'],
+    ]);
   });
 
   test('uses a full commit id as the ref without asking the remote', async () => {

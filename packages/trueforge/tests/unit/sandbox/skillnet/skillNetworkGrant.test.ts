@@ -156,6 +156,53 @@ describe('resolveSkillNetworkGrant', () => {
     ).resolves.toBeUndefined();
   });
 
+  it('removing a skill takes away its websites, but keeps one another installed skill also uses', async () => {
+    const registry = new SkillNetworkTokenRegistry();
+    const news = record({
+      manifest: gitManifest({ name: 'news', network_hosts: ['api.news-digest.info', 'shared-cdn.example.com'] }),
+      network_approval: ['api.news-digest.info', 'shared-cdn.example.com'],
+    });
+    const charts = record({
+      manifest: gitManifest({ name: 'charts', network_hosts: ['shared-cdn.example.com'] }),
+      network_approval: ['shared-cdn.example.com'],
+    });
+    const before = await resolveSkillNetworkGrant({
+      store: storeWith([news, charts]),
+      registry,
+      ...CALL,
+      skillNames: ['news', 'charts'],
+    });
+    expect(before?.hosts).toEqual(['api.news-digest.info', 'shared-cdn.example.com']);
+
+    // The chat still names the removed skill; its record is gone, so nothing of it is granted.
+    const after = await resolveSkillNetworkGrant({
+      store: storeWith([charts]),
+      registry,
+      ...CALL,
+      skillNames: ['news', 'charts'],
+    });
+    expect(after?.hosts).toEqual(['shared-cdn.example.com']);
+
+    const none = await resolveSkillNetworkGrant({ store: storeWith([]), registry, ...CALL, skillNames: ['news'] });
+    expect(none).toBeUndefined();
+  });
+
+  it('a skill added again under the same name keeps none of the allow-once answers of the removed one', async () => {
+    const registry = new SkillNetworkTokenRegistry();
+    registry.addSessionHosts({
+      tenant_id: 'default',
+      created_by: CALL.created_by,
+      session_id: CALL.session_id,
+      skill_name: 'news',
+      hosts: ['api.news-digest.info'],
+    });
+    registry.forgetSkill({ tenant_id: 'default', skill_name: 'news' });
+    const again = record({ manifest: gitManifest({ name: 'news' }), network_approval: null });
+    await expect(
+      resolveSkillNetworkGrant({ store: storeWith([again]), registry, ...CALL, skillNames: ['news'] }),
+    ).resolves.toBeUndefined();
+  });
+
   it('a removed approval ends the grant on the next read and revokes the session tokens', async () => {
     const registry = new SkillNetworkTokenRegistry();
     const approved = storeWith([

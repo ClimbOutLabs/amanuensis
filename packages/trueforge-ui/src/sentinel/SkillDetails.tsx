@@ -2,6 +2,7 @@
 
 import type { FC } from 'react';
 
+import { SKILL_SITES_DATA_WARNING, SKILL_SITES_SEND_WARNING } from '../server/skillNetworkApproval.js';
 import type { SentinelApprovalSkill } from './types.js';
 
 function Line({ label, value }: { label: string; value: string }) {
@@ -31,6 +32,32 @@ export const SkillDetails: FC<{ skill: SentinelApprovalSkill }> = ({ skill }) =>
         : 'This skill was written by someone else. Add it only if you trust where it comes from.'}{' '}
       It may bring files and scripts along. Running code still asks you first, as always.
     </p>
+    <div data-role="skill-websites">
+      {skill.websites.length === 0 ? (
+        <p className="text-text-primary">It doesn&apos;t send requests to any website.</p>
+      ) : (
+        <>
+          <p className="text-text-primary">It sends requests to these websites:</p>
+          <ul className="list-disc pl-5 text-text-primary">
+            {skill.websites.map(site => (
+              <li key={site} className="break-words">
+                {site}
+              </li>
+            ))}
+          </ul>
+          <p className="text-text-primary">
+            Adding it lets the skill reach these websites and no others. {SKILL_SITES_DATA_WARNING}
+          </p>
+          {skill.can_send && <p className="mt-2 font-semibold text-text-primary">{SKILL_SITES_SEND_WARNING}</p>}
+        </>
+      )}
+      {skill.makes_up_addresses && (
+        <p className="mt-2 text-text-secondary">
+          Aman also found code that makes up web addresses while it runs. Those websites stay blocked, and you&apos;ll
+          be asked about each one.
+        </p>
+      )}
+    </div>
     {skill.instructions !== null && (
       <details>
         <summary className="cursor-pointer text-text-secondary">Details</summary>
