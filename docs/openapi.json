@@ -2024,6 +2024,9 @@
             "description": "True when the server derives this provider from its environment; it is read-only here.",
             "type": "boolean"
           },
+          "last_check": {
+            "$ref": "#/components/schemas/ModelProviderCheck"
+          },
           "manifest": {
             "$ref": "#/components/schemas/ModelProviderManifest"
           },
@@ -2408,6 +2411,32 @@
         "required": [
           "endpoint",
           "keys"
+        ],
+        "type": "object"
+      },
+      "CreateRecallExclusionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "fact_text": {
+            "description": "The fact to stop recalling in this chat, in the plain words the recall showed for it.",
+            "maxLength": 2000,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "fact_text"
+        ],
+        "type": "object"
+      },
+      "CreateRecallExclusionResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/RecallExclusion"
+          }
+        },
+        "required": [
+          "data"
         ],
         "type": "object"
       },
@@ -2810,6 +2839,10 @@
         "type": "object"
       },
       "DeleteSkillNetworkApprovalResponse": {
+        "properties": {},
+        "type": "object"
+      },
+      "DeleteSkillNetworkHostResponse": {
         "properties": {},
         "type": "object"
       },
@@ -3508,6 +3541,17 @@
         ],
         "type": "object"
       },
+      "GetGitCommitIdentityResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/GitCommitIdentitySetting"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "GetGithubRepositoryDetailsResponse": {
         "additionalProperties": false,
         "properties": {
@@ -4091,6 +4135,17 @@
         ],
         "type": "object"
       },
+      "GetTodayResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/Today"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "GetTokenFactoryUsageResponse": {
         "properties": {
           "data": {
@@ -4133,6 +4188,39 @@
         },
         "required": [
           "data"
+        ],
+        "type": "object"
+      },
+      "GitCommitIdentitySetting": {
+        "properties": {
+          "default_email": {
+            "description": "The email used while `email` is `null`.",
+            "type": "string"
+          },
+          "default_name": {
+            "description": "The name used while `name` is `null`.",
+            "type": "string"
+          },
+          "email": {
+            "description": "The email the person chose for commits. `null` when they chose none.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "description": "The name the person chose for commits. `null` when they chose none.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "email",
+          "default_name",
+          "default_email"
         ],
         "type": "object"
       },
@@ -8086,6 +8174,40 @@
         ],
         "type": "object"
       },
+      "ModelProviderCheck": {
+        "additionalProperties": false,
+        "description": "Outcome of the connection check run when this provider was last saved. Absent when no check has run.",
+        "properties": {
+          "checked_at": {
+            "description": "ISO-8601 UTC instant the check ran.",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ModelProviderCheckKind"
+          },
+          "message": {
+            "description": "The outcome in plain words, including the one step to take when something went wrong.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "message",
+          "checked_at"
+        ],
+        "type": "object"
+      },
+      "ModelProviderCheckKind": {
+        "enum": [
+          "answered",
+          "key_refused",
+          "unreachable",
+          "timed_out",
+          "server_error"
+        ],
+        "type": "string"
+      },
       "ModelProviderManifest": {
         "discriminator": {
           "mapping": {
@@ -8317,6 +8439,20 @@
           "type"
         ],
         "type": "object"
+      },
+      "NotSentReason": {
+        "description": "Why nothing was sent. unconfirmed: Gmail did not answer, so the message may have gone through; the Sent folder says.",
+        "enum": [
+          "draft_changed",
+          "needs_ok_again",
+          "cannot_send",
+          "gmail_refused",
+          "reconnect_google",
+          "rate_limited",
+          "demo_limited",
+          "unconfirmed"
+        ],
+        "type": "string"
       },
       "NoteDelivery": {
         "properties": {
@@ -9656,6 +9792,23 @@
         ],
         "type": "string"
       },
+      "RecallExclusion": {
+        "properties": {
+          "fact_text": {
+            "description": "The fact, in the plain words the recall showed for it.",
+            "type": "string"
+          },
+          "session_id": {
+            "description": "The chat the fact is pulled out of.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "fact_text"
+        ],
+        "type": "object"
+      },
       "RegisteredCommandExecution": {
         "description": "Host-resolved registered-command execution metadata; absent for every other tool.",
         "properties": {
@@ -10930,6 +11083,157 @@
         ],
         "type": "object"
       },
+      "SendReceiptMessage": {
+        "properties": {
+          "bcc": {
+            "description": "Hidden copy recipients.",
+            "items": {
+              "$ref": "#/components/schemas/Tier3Mailbox"
+            },
+            "type": "array"
+          },
+          "body": {
+            "description": "The message text that was sent.",
+            "type": "string"
+          },
+          "cc": {
+            "description": "Copied recipients.",
+            "items": {
+              "$ref": "#/components/schemas/Tier3Mailbox"
+            },
+            "type": "array"
+          },
+          "reply_to": {
+            "description": "The address replies go to when it is not the sender, or null.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "subject": {
+            "description": "Subject line.",
+            "type": "string"
+          },
+          "to": {
+            "description": "Recipients, as the card showed them.",
+            "items": {
+              "$ref": "#/components/schemas/Tier3Mailbox"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "to",
+          "cc",
+          "bcc",
+          "subject",
+          "body",
+          "reply_to"
+        ],
+        "type": "object"
+      },
+      "SendReceiptNotSent": {
+        "properties": {
+          "outcome": {
+            "enum": [
+              "not_sent"
+            ],
+            "type": "string"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/NotSentReason"
+          }
+        },
+        "required": [
+          "outcome",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "SendReceiptPersistedEvent": {
+        "properties": {
+          "created_at": {
+            "description": "ISO 8601 event timestamp.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Unique identifier for the event (monotonic ULID).",
+            "type": "string"
+          },
+          "result": {
+            "$ref": "#/components/schemas/SendReceiptResult"
+          },
+          "tool_call_id": {
+            "description": "The send tool call whose approval card this answers.",
+            "type": "string"
+          },
+          "type": {
+            "description": "Emitted when a send ends, sent or not.",
+            "enum": [
+              "aman.email.send_receipt"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "tool_call_id",
+          "result",
+          "id",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "SendReceiptResult": {
+        "discriminator": {
+          "mapping": {
+            "not_sent": "#/components/schemas/SendReceiptNotSent",
+            "sent": "#/components/schemas/SendReceiptSent"
+          },
+          "propertyName": "outcome"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/SendReceiptSent"
+          },
+          {
+            "$ref": "#/components/schemas/SendReceiptNotSent"
+          }
+        ]
+      },
+      "SendReceiptSent": {
+        "properties": {
+          "check_code": {
+            "description": "The code the approval card showed.",
+            "type": "string"
+          },
+          "message": {
+            "$ref": "#/components/schemas/SendReceiptMessage"
+          },
+          "outcome": {
+            "enum": [
+              "sent"
+            ],
+            "type": "string"
+          },
+          "sent_at": {
+            "description": "ISO 8601 time Gmail accepted the send.",
+            "type": "string"
+          },
+          "sent_message_id": {
+            "description": "Id of the message Gmail sent.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "outcome",
+          "sent_at",
+          "sent_message_id",
+          "check_code",
+          "message"
+        ],
+        "type": "object"
+      },
       "SendTextCodeRequest": {
         "properties": {
           "phone": {
@@ -11417,6 +11721,9 @@
             "$ref": "#/components/schemas/SkillUsedPersistedEvent"
           },
           {
+            "$ref": "#/components/schemas/SendReceiptPersistedEvent"
+          },
+          {
             "$ref": "#/components/schemas/ProvisioningPersistedEvent"
           },
           {
@@ -11464,6 +11771,7 @@
           "aman.memory.recall",
           "aman.profile.learned",
           "aman.skill.used",
+          "aman.email.send_receipt",
           "aman.sandbox.provisioning",
           "aman.model.waiting"
         ],
@@ -11990,6 +12298,15 @@
       "SkillNetworkApproval": {
         "additionalProperties": false,
         "properties": {
+          "allowed_hosts": {
+            "items": {
+              "description": "One exact site name the skill needs to reach.",
+              "maxLength": 253,
+              "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$",
+              "type": "string"
+            },
+            "type": "array"
+          },
           "approved_hosts": {
             "items": {
               "description": "One exact site name the skill needs to reach.",
@@ -12013,14 +12330,35 @@
             "maxItems": 20,
             "type": "array"
           },
+          "denied_hosts": {
+            "items": {
+              "description": "One exact site name the skill needs to reach.",
+              "maxLength": 253,
+              "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$",
+              "type": "string"
+            },
+            "type": "array"
+          },
           "send_capable": {
             "description": "True when a declared site can send mail or change a calendar.",
             "type": "boolean"
+          },
+          "session_hosts": {
+            "items": {
+              "description": "One exact site name the skill needs to reach.",
+              "maxLength": 253,
+              "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$",
+              "type": "string"
+            },
+            "type": "array"
           }
         },
         "required": [
           "declared_hosts",
           "approved_hosts",
+          "allowed_hosts",
+          "denied_hosts",
+          "session_hosts",
           "send_capable"
         ],
         "type": "object"
@@ -12831,7 +13169,7 @@
             ]
           },
           "destructive": {
-            "description": "True when the action destroys or sends something for good, so its button wears the destructive ink.",
+            "description": "True when the action destroys or sends something for good, so the no choice says Keep it.",
             "type": "boolean"
           },
           "email": {
@@ -12898,7 +13236,7 @@
             ]
           },
           "safe_choice": {
-            "description": "True when the safe choice is the primary button: the action is irreversible or reaches other people.",
+            "description": "True when the action is irreversible or reaches other people, so the no choice uses safe words such as Keep it or Don't send.",
             "type": "boolean"
           },
           "schedule": {
@@ -12906,6 +13244,42 @@
           },
           "skill": {
             "$ref": "#/components/schemas/Tier3Skill"
+          },
+          "skill_network": {
+            "description": "For a skill network card: the skill, the sites it asks for, and why. Otherwise null.",
+            "properties": {
+              "code_pin": {
+                "description": "The code version the approval is pinned to, or null when no pin is in force.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "hosts": {
+                "description": "The sites the skill asks to reach.",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "reason": {
+                "$ref": "#/components/schemas/Tier3SkillNetworkReason"
+              },
+              "skill_name": {
+                "description": "Name of the skill asking for network access.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "skill_name",
+              "hosts",
+              "reason",
+              "code_pin"
+            ],
+            "type": [
+              "object",
+              "null"
+            ]
           },
           "why_asked_again": {
             "description": "Actual cause of re-escalation, or null on first ask.",
@@ -12960,6 +13334,14 @@
               "$ref": "#/components/schemas/Tier3Mailbox"
             },
             "type": "array"
+          },
+          "check_code": {
+            "default": null,
+            "description": "Short code for a send, repeated on its receipt; null for a draft.",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "from_name": {
             "description": "The display name the message is sent as, or null when none is set.",
@@ -13262,11 +13644,189 @@
           "null"
         ]
       },
+      "Tier3SkillNetworkReason": {
+        "description": "Why the card is asked: the skill’s first use, or a site it did not declare.",
+        "enum": [
+          "first_use",
+          "undeclared_host"
+        ],
+        "type": "string"
+      },
       "Timezone": {
         "default": "UTC",
         "description": "IANA time zone the cron expression is evaluated in.",
         "minLength": 1,
         "type": "string"
+      },
+      "Today": {
+        "properties": {
+          "as_of": {
+            "description": "The server time this view was read at, as an ISO 8601 instant.",
+            "type": "string"
+          },
+          "calendar": {
+            "description": "The local day's events from every connected calendar account. Once every timed event on the day has finished, the next morning's first event is added, marked as tomorrow's. Null, not an empty list, when no calendar is connected.",
+            "items": {
+              "$ref": "#/components/schemas/TodayCalendarEvent"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "due": {
+            "description": "Reminders due today or overdue, earliest first.",
+            "items": {
+              "$ref": "#/components/schemas/TodayDueReminder"
+            },
+            "type": "array"
+          },
+          "free_after": {
+            "description": "The first time after now with no event until the end of the day, or null when the day stays busy.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "needs_ok": {
+            "description": "Actions waiting for the person, oldest first.",
+            "items": {
+              "$ref": "#/components/schemas/TodayNeedsOkItem"
+            },
+            "type": "array"
+          },
+          "needs_ok_more": {
+            "description": "True when more actions are waiting than the list shows: the scan has caps, and it says so when one cuts.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "calendar",
+          "free_after",
+          "due",
+          "needs_ok",
+          "needs_ok_more",
+          "as_of"
+        ],
+        "type": "object"
+      },
+      "TodayCalendarEvent": {
+        "properties": {
+          "all_day": {
+            "description": "True when the event runs all day rather than at a set time.",
+            "type": "boolean"
+          },
+          "calendar_account_id": {
+            "description": "The account the event came from: its sign-in address.",
+            "type": "string"
+          },
+          "day": {
+            "description": "Which day the event falls on: the person's local day, or the next morning's first event.",
+            "enum": [
+              "today",
+              "tomorrow"
+            ],
+            "type": "string"
+          },
+          "end_at": {
+            "description": "When the event ends, in the same form as `start_at`; null when the source gives no end.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "location": {
+            "description": "Where the event happens, or null when the event names no place.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "source": {
+            "description": "Which kind of calendar account the event came from.",
+            "enum": [
+              "google",
+              "caldav"
+            ],
+            "type": "string"
+          },
+          "start_at": {
+            "description": "When the event starts: an ISO 8601 instant, or a plain date for an all-day event.",
+            "type": "string"
+          },
+          "title": {
+            "description": "The event title as the calendar holds it.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "day",
+          "start_at",
+          "end_at",
+          "title",
+          "location",
+          "all_day",
+          "source",
+          "calendar_account_id"
+        ],
+        "type": "object"
+      },
+      "TodayDueReminder": {
+        "properties": {
+          "due_at": {
+            "description": "When the reminder was due, as an ISO 8601 instant.",
+            "type": "string"
+          },
+          "reminder_id": {
+            "description": "The reminder schedule id.",
+            "type": "string"
+          },
+          "session_id": {
+            "description": "The Reminders chat the reminder lands in, or null when that chat does not exist yet.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "title": {
+            "description": "What the reminder says.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reminder_id",
+          "title",
+          "due_at",
+          "session_id"
+        ],
+        "type": "object"
+      },
+      "TodayNeedsOkItem": {
+        "properties": {
+          "held_action_id": {
+            "description": "The waiting tool call id.",
+            "type": "string"
+          },
+          "origin": {
+            "description": "Where the action came from: the chat title, or the schedule name for a run.",
+            "type": "string"
+          },
+          "session_id": {
+            "description": "The chat that holds the action, where it is answered.",
+            "type": "string"
+          },
+          "title": {
+            "description": "What the action would do, in the plain words of its card.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "held_action_id",
+          "title",
+          "origin",
+          "session_id"
+        ],
+        "type": "object"
       },
       "TogetherAIModelProvider": {
         "additionalProperties": false,
@@ -15139,6 +15699,7 @@
           "mapping": {
             "agent.context.compaction": "#/components/schemas/ContextCompactionEvent",
             "agent.context.compaction_started": "#/components/schemas/ContextCompactionStartedEvent",
+            "aman.email.send_receipt": "#/components/schemas/SendReceiptPersistedEvent",
             "aman.memory.recall": "#/components/schemas/MemoryRecallPersistedEvent",
             "aman.model.usage": "#/components/schemas/ModelUsagePersistedEvent",
             "aman.model.waiting": "#/components/schemas/ModelWaitingPersistedEvent",
@@ -15216,6 +15777,9 @@
             "$ref": "#/components/schemas/SkillUsedPersistedEvent"
           },
           {
+            "$ref": "#/components/schemas/SendReceiptPersistedEvent"
+          },
+          {
             "$ref": "#/components/schemas/ProvisioningPersistedEvent"
           },
           {
@@ -15265,6 +15829,39 @@
         },
         "required": [
           "dismissed"
+        ],
+        "type": "object"
+      },
+      "UpdateGitCommitIdentityRequest": {
+        "example": {
+          "email": null,
+          "name": "Sam Rivera"
+        },
+        "properties": {
+          "email": {
+            "description": "Email to put on commits. `null` goes back to the default.",
+            "maxLength": 254,
+            "minLength": 3,
+            "pattern": "^[^\\s\\p{Cc}<>@]+@[^\\s\\p{Cc}<>@]+$/u",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "description": "Name to put on commits, up to 100 characters. `null` goes back to the default.",
+            "maxLength": 100,
+            "minLength": 1,
+            "pattern": "^[^\\p{Cc}<>]*$/u",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "email"
         ],
         "type": "object"
       },
@@ -15597,6 +16194,32 @@
         ],
         "type": "object"
       },
+      "UpdateSkillNetworkHostRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "host": {
+            "description": "One exact site name the skill needs to reach.",
+            "maxLength": 253,
+            "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "host"
+        ],
+        "type": "object"
+      },
+      "UpdateSkillNetworkHostResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/SkillNetworkApproval"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "UpdateSkillRequest": {
         "additionalProperties": false,
         "properties": {
@@ -15751,6 +16374,13 @@
             ],
             "type": "string"
           },
+          "session_title": {
+            "description": "Title of the chat the entry came from; null when the chat is deleted or has no title yet.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "tier": {
             "maximum": 3,
             "minimum": 1,
@@ -15769,7 +16399,8 @@
           "outcome",
           "auto_deny_reason",
           "created_at",
-          "chat_exists"
+          "chat_exists",
+          "session_title"
         ],
         "type": "object"
       },
@@ -22331,7 +22962,7 @@
               "items": {
                 "$ref": "#/components/schemas/SessionEventType"
               },
-              "maxItems": 21,
+              "maxItems": 22,
               "minItems": 1,
               "type": "array"
             }
@@ -22952,6 +23583,96 @@
           "sessions"
         ],
         "x-fern-sdk-method-name": "get_privacy"
+      }
+    },
+    "/api/v1/sessions/{session_id}/recall-exclusions": {
+      "post": {
+        "description": "Stops one recalled fact from being recalled again in this chat. The memory itself is not changed or deleted, and other chats still recall it.",
+        "parameters": [
+          {
+            "description": "Session identifier.",
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "description": "Session identifier.",
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateRecallExclusionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateRecallExclusionResponse"
+                }
+              }
+            },
+            "description": "The exclusion as recorded."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request body, or the chat is private and keeps nothing."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Caller is not the session creator."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Session not found."
+          }
+        },
+        "summary": "Pull a fact out of one chat's memory recall",
+        "tags": [
+          "Agent Sessions"
+        ],
+        "x-fern-sdk-group-name": [
+          "sessions",
+          "recallExclusions"
+        ],
+        "x-fern-sdk-method-name": "create"
       }
     },
     "/api/v1/sessions/{session_id}/repository": {
@@ -24373,6 +25094,116 @@
         "x-fern-sdk-group-name": [
           "settings",
           "firstRunGuide"
+        ],
+        "x-fern-sdk-method-name": "create_or_update"
+      }
+    },
+    "/api/v1/settings/git-commit-identity": {
+      "get": {
+        "description": "The name and email written on Git commits made in the sandbox. A `null` part means the person chose none and the default shown beside it is used.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetGitCommitIdentityResponse"
+                }
+              }
+            },
+            "description": "The chosen name and email, with the defaults."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Admin access required."
+          }
+        },
+        "summary": "Get the name on Git commits",
+        "tags": [
+          "Sandboxes"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "gitCommitIdentity"
+        ],
+        "x-fern-sdk-method-name": "get"
+      },
+      "put": {
+        "description": "Sets the name and email written on Git commits made in the sandbox. `null` for a part goes back to its default. New commits use the change from the next message.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateGitCommitIdentityRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetGitCommitIdentityResponse"
+                }
+              }
+            },
+            "description": "The chosen name and email after the update, with the defaults."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request body."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Admin access required."
+          }
+        },
+        "summary": "Set or clear the name on Git commits",
+        "tags": [
+          "Sandboxes"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "gitCommitIdentity"
         ],
         "x-fern-sdk-method-name": "create_or_update"
       }
@@ -25824,6 +26655,290 @@
         "x-fern-sdk-method-name": "create_or_update_network_approval"
       }
     },
+    "/api/v1/settings/skills/{name}/network-approval/allowed-host": {
+      "delete": {
+        "description": "Clears the one-site allowance. The skill cannot reach the site from the next run on.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ResourceName"
+            }
+          },
+          {
+            "description": "One exact site name the skill needs to reach.",
+            "in": "query",
+            "name": "host",
+            "required": true,
+            "schema": {
+              "description": "One exact site name the skill needs to reach.",
+              "maxLength": 253,
+              "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteSkillNetworkHostResponse"
+                }
+              }
+            },
+            "description": "Allowance removed."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "No skill with this name"
+          },
+          "424": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Unsupported because skills are managed by an external system."
+          }
+        },
+        "summary": "Remove one allowed site for a skill",
+        "tags": [
+          "Skills"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "skills"
+        ],
+        "x-fern-sdk-method-name": "delete_network_allowed_host"
+      },
+      "put": {
+        "description": "Allows one site for the skill on its own, apart from the declared list approval.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ResourceName"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSkillNetworkHostRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateSkillNetworkHostResponse"
+                }
+              }
+            },
+            "description": "The stored approval state."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request body."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "No skill with this name"
+          },
+          "424": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Unsupported because skills are managed by an external system."
+          }
+        },
+        "summary": "Allow one site for a skill",
+        "tags": [
+          "Skills"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "skills"
+        ],
+        "x-fern-sdk-method-name": "create_or_update_network_allowed_host"
+      }
+    },
+    "/api/v1/settings/skills/{name}/network-approval/denied-host": {
+      "delete": {
+        "description": "Clears the site being turned down, so a card can ask about it again.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ResourceName"
+            }
+          },
+          {
+            "description": "One exact site name the skill needs to reach.",
+            "in": "query",
+            "name": "host",
+            "required": true,
+            "schema": {
+              "description": "One exact site name the skill needs to reach.",
+              "maxLength": 253,
+              "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteSkillNetworkHostResponse"
+                }
+              }
+            },
+            "description": "Decision cleared."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "No skill with this name"
+          },
+          "424": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Unsupported because skills are managed by an external system."
+          }
+        },
+        "summary": "Clear one turned-down site for a skill",
+        "tags": [
+          "Skills"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "skills"
+        ],
+        "x-fern-sdk-method-name": "delete_network_denied_host"
+      },
+      "put": {
+        "description": "Stores the site as turned down for the skill, so it is not granted and raises no card.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ResourceName"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSkillNetworkHostRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateSkillNetworkHostResponse"
+                }
+              }
+            },
+            "description": "The stored approval state."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request body."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "No skill with this name"
+          },
+          "424": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Unsupported because skills are managed by an external system."
+          }
+        },
+        "summary": "Turn down one site for a skill",
+        "tags": [
+          "Skills"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "skills"
+        ],
+        "x-fern-sdk-method-name": "create_or_update_network_denied_host"
+      }
+    },
     "/api/v1/settings/token-factory-usage": {
       "get": {
         "description": "Tokens and cost per model counted today (UTC), and the daily cap with what is left under it. Counts come from the usage the provider reported.",
@@ -26815,6 +27930,53 @@
           "spaces"
         ],
         "x-fern-sdk-method-name": "revert"
+      }
+    },
+    "/api/v1/today": {
+      "get": {
+        "description": "The person's day read from stored state: calendar events, free time, due reminders, held actions and how many schedules are on. Nothing here asks the assistant anything, and no model is called.",
+        "parameters": [
+          {
+            "description": "The person's IANA time zone, which sets the local day. Read as UTC when absent or unknown.",
+            "in": "query",
+            "name": "client_timezone",
+            "required": false,
+            "schema": {
+              "description": "The person's IANA time zone, which sets the local day. Read as UTC when absent or unknown.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetTodayResponse"
+                }
+              }
+            },
+            "description": "The day, as the person's own records give it."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          }
+        },
+        "summary": "Get the day for the right rail's Home view",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "today"
+        ],
+        "x-fern-sdk-method-name": "get"
       }
     },
     "/api/v1/user/audit-log": {
@@ -29535,7 +30697,7 @@
     },
     "/api/v1/voice/transcribe": {
       "post": {
-        "description": "Accepts 16 kHz mono 16-bit PCM WAV audio and returns the transcript produced by the local STT sidecar. Audio bodies over 30 MB are rejected.",
+        "description": "Accepts 16 kHz mono 16-bit PCM WAV audio and returns the transcript produced by the local STT sidecar. Audio bodies over 30 MB are rejected. Each person may make a limited number of voice requests per minute, shared with spoken replies.",
         "requestBody": {
           "content": {
             "audio/wav": {
@@ -29577,6 +30739,16 @@
               }
             },
             "description": "Audio body over the 30 MB limit."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Too many requests; wait for the Retry-After seconds."
           },
           "502": {
             "content": {

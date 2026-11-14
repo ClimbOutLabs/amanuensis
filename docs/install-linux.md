@@ -27,33 +27,17 @@ sudo apt update && sudo apt install -y curl git
 
 Aman is always installed from its latest release, never from the code that is still being worked on.
 
-1. Run these lines one at a time. They ask GitHub which release is the newest, and print it.
+1. Copy all of these lines and paste them into the terminal, then press ++enter++. They ask GitHub which release is the newest, download that version of Aman into a folder named `amanuensis`, and go into that folder.
 
    ```bash
    VERSION=$(curl -fsSL -o /dev/null -w '%{url_effective}' https://github.com/ClimbOutLabs/amanuensis/releases/latest)
-   ```
-
-   ```bash
    VERSION=${VERSION##*/}
-   ```
-
-   ```bash
    echo "Installing Aman $VERSION"
-   ```
-
-   It prints the version, such as `Installing Aman v0.2.0`.
-
-2. Get that version of the code:
-
-   ```bash
    git clone --branch "$VERSION" https://github.com/ClimbOutLabs/amanuensis
-   ```
-
-3. Go into the folder it made:
-
-   ```bash
    cd amanuensis
    ```
+
+   It prints the version first, such as `Installing Aman v0.2.0`.
 
 !!! warning "If it prints `Installing Aman releases`"
 
@@ -129,19 +113,14 @@ To use Aman from your phone or another computer at home, see [Set up Aman](../pa
 
 This removes Aman and everything it keeps, including your chats and memory.
 
-1. Open a terminal and go to the folder you installed from. Here it is `~/amanuensis`; use your own folder.
+1. Open a terminal. Run these lines, which go to the folder you installed from and start the removal. Here the folder is `~/amanuensis`; use your own folder.
 
    ```bash
    cd ~/amanuensis
-   ```
-
-2. Run:
-
-   ```bash
    ./installer/install.sh instance remove main --purge-data
    ```
 
-3. It asks you to type `main` to confirm.
+2. It asks you to type `main` to confirm.
 
 !!! warning
 

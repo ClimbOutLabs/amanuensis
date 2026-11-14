@@ -10,6 +10,7 @@ import {
   type ISkillStore,
   type ListSkillsInput,
   type SetSkillNetworkApprovalInput,
+  type SetSkillNetworkHostDecisionInput,
   type SkillRecord,
   type UpsertSkillInput,
 } from '../../skillStore';
@@ -24,6 +25,8 @@ function recordColumns(eb: ExpressionBuilder<Database, 'skill'>) {
     'name' as const,
     jsonText<SkillManifest>(eb.ref('manifest')).as('manifest'),
     jsonText<readonly string[] | null>(eb.ref('network_approval')).as('network_approval'),
+    jsonText<readonly string[]>(eb.ref('network_allowed_hosts')).as('network_allowed_hosts'),
+    jsonText<readonly string[]>(eb.ref('network_denied_hosts')).as('network_denied_hosts'),
     'created_at' as const,
     'updated_at' as const,
   ];
@@ -59,6 +62,8 @@ export class SqliteSkillStore implements ISkillStore<Transaction<Database>> {
           name: input.name,
           manifest: jsonbBind(input.manifest),
           network_approval: null,
+          network_allowed_hosts: jsonbBind([]),
+          network_denied_hosts: jsonbBind([]),
           created_at: timestamp,
           updated_at: timestamp,
         })
@@ -82,6 +87,8 @@ export class SqliteSkillStore implements ISkillStore<Transaction<Database>> {
         name: input.name,
         manifest: jsonbBind(input.manifest),
         network_approval: null,
+        network_allowed_hosts: jsonbBind([]),
+        network_denied_hosts: jsonbBind([]),
         created_at: timestamp,
         updated_at: timestamp,
       })
@@ -104,6 +111,45 @@ export class SqliteSkillStore implements ISkillStore<Transaction<Database>> {
       .updateTable('skill')
       .set({
         network_approval: input.hosts === null ? null : jsonbBind([...input.hosts]),
+        updated_at: nowIso(),
+      })
+      .where('tenant_id', '=', input.tenant_id)
+      .where('name', '=', input.name)
+      .returning(recordColumns)
+      .executeTakeFirst();
+  }
+
+  async setSkillNetworkHostDecision(
+    input: SetSkillNetworkHostDecisionInput,
+    transaction?: Transaction<Database>,
+  ): Promise<SkillRecord | undefined> {
+    const db = transaction ?? this.#db;
+    const current = await db
+      .selectFrom('skill')
+      .select(recordColumns)
+      .where('tenant_id', '=', input.tenant_id)
+      .where('name', '=', input.name)
+      .executeTakeFirst();
+    if (current === undefined) {
+      return undefined;
+    }
+    const allowed = new Set(current.network_allowed_hosts);
+    const denied = new Set(current.network_denied_hosts);
+    if (input.decision === 'allowed') {
+      allowed.add(input.host);
+      denied.delete(input.host);
+    } else if (input.decision === 'denied') {
+      denied.add(input.host);
+      allowed.delete(input.host);
+    } else {
+      allowed.delete(input.host);
+      denied.delete(input.host);
+    }
+    return await db
+      .updateTable('skill')
+      .set({
+        network_allowed_hosts: jsonbBind([...allowed].sort()),
+        network_denied_hosts: jsonbBind([...denied].sort()),
         updated_at: nowIso(),
       })
       .where('tenant_id', '=', input.tenant_id)

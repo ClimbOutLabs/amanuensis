@@ -1,3 +1,4 @@
+import configuration from '../../../src/config';
 import { SpeechRateLimiter } from '../../../src/voice/speechRateLimit';
 import { UncheckedSpeechError, WouldChangeTextError } from '../../../src/voice/transport';
 import { probeTtsHealth, readTtsHealth, SidecarSpeechSynthesizer, WholeSamples } from '../../../src/voice/ttsClient';
@@ -118,6 +119,25 @@ describe('SidecarSpeechSynthesizer with exact', () => {
       text: 'Total is 100. + 500 fee.',
       exact: true,
     });
+  });
+
+  it.each([
+    ['a plain reading', false],
+    ['an exact read-back', true],
+  ])('presents the shared speech secret on %s', async (_name, exact) => {
+    const original = configuration.SPEECH_SECRET;
+    configuration.SPEECH_SECRET = 'synthetic-speech-secret-with-32-plus-chars';
+    try {
+      const fetchSpy = jest
+        .spyOn(globalThis, 'fetch')
+        .mockResolvedValue(exact ? checkedStream(Uint8Array.of(1, 2)) : streamOf(Uint8Array.of(1, 2)));
+      await collect(new SidecarSpeechSynthesizer().stream({ text: 'Hi.', format: 'pcm16', signal: never, exact }));
+      expect(fetchSpy.mock.calls[0]?.[1]?.headers).toMatchObject({
+        'x-speech-secret': 'synthetic-speech-secret-with-32-plus-chars',
+      });
+    } finally {
+      configuration.SPEECH_SECRET = original;
+    }
   });
 
   it('does not ask for exact unless told to', async () => {

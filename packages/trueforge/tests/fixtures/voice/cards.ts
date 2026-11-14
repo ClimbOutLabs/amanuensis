@@ -28,6 +28,7 @@ export function sendReplyCard(body = 'Thursday at three works for me. See you th
       bcc: [],
       subject: 'Re: Thursday',
       body,
+      check_code: 'A7F39C',
       replaces: null,
       reply_in_thread: { subject: 'Thursday', from: 'Victor' },
       reply_to: null,

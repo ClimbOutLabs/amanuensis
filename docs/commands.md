@@ -66,6 +66,13 @@ Each of these checks one area. Add `--fix` to repair what it finds. A fix asks b
 
 `aman doctor instance`, `aman doctor network` and `aman doctor sandbox` also take `--instance NAME`. `aman doctor sandbox` takes `--disk-gb N` to set the size of each sandbox disk, and `--no-hard-disk-limit` where the computer can't make fixed-size disks.
 
+To give the sandbox more tools, add them with `aman doctor sandbox`. Aman then rebuilds the sandbox. The sandbox already has common Python packages, such as requests, pyyaml, httpx and beautifulsoup4.
+
+- `aman doctor sandbox --add go` adds Go. Use `rust` or `java` the same way, or several at once, such as `--add go,rust`. `--remove go` takes one out again.
+- `aman doctor sandbox --add-python feedparser,arxiv` adds your own Python packages. `--remove-python feedparser` takes one out again. Your list stays through upgrades.
+
+Only add Python packages you trust, because code that runs in the sandbox can use them. See [Sandbox setup](sandbox.mdx) for the details.
+
 ## Back up and restore your data
 
 | Command                 | What it does                                                                                     |

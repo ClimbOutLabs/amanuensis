@@ -1,7 +1,8 @@
 /**
- * Per-person limits on the voice service. One sidecar serves every person on the instance and
- * synthesizes one reply at a time, so each person gets a bounded share: a number of requests per
- * rolling minute and a cap on requests in flight. The read-aloud route and voice conversations share
+ * Per-person limits on the voice services. One sidecar serves every person on the instance and does
+ * one piece of speech work at a time, so each person gets a bounded share: a number of requests per
+ * rolling minute and a cap on requests in flight. Reading aloud and transcribing a recording share
+ * one budget. The read-aloud route and voice conversations share
  * the in-flight cap. Connecting a conversation uses a limiter of its own with a per-minute count only.
  * State is in memory and lost on restart.
  */

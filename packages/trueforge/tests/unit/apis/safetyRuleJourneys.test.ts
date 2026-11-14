@@ -4,8 +4,15 @@
  */
 import { z } from '@hono/zod-openapi';
 import type { Turn, TurnInputItem } from '@truefoundry/trueforge-core/agent-session';
+import { mkdtempSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
+import { connect, createServer as createTcpServer, type Socket, type Server as TcpServer } from 'node:net';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { createLogger, transports } from 'winston';
 import configuration from '../../../src/config';
+import { SkillNetworkGateway } from '../../../src/sandbox/skillnet/skillNetworkGateway';
+import { skillNetworkTokens } from '../../../src/sandbox/skillnet/skillNetworkTokens';
 import { TurnStreamingEventSchema } from '../../../src/schemas/events';
 import { GetTurnResponseSchema } from '../../../src/schemas/turn';
 import { MODEL_FQN, startApprovalTestServer, type ApprovalTestServer } from '../../fixtures/approvalTestServer';
@@ -34,6 +41,7 @@ import {
   SCRIPTED_SCHEDULE,
   SCRIPTED_SKILL,
 } from '../../fixtures/scriptedModelServer';
+import { SKILL_FETCH_COMMAND, SkillSiteSandbox } from '../../fixtures/skillSiteSandbox';
 import { StandInSandbox } from '../../fixtures/standInSandbox';
 
 const TURN_TIMEOUT_MS = 60_000;
@@ -988,6 +996,9 @@ describe('the Home Assistant connector', () => {
   beforeAll(async () => {
     server = await startApprovalTestServer();
     home = await startHomeAssistantStub({ token: TOKEN, newerTools: true });
+    // The stub runs on this computer, which the address check refuses; the operator vouches for it
+    // by listing its origin, as FIRST_PARTY_MCP_ORIGINS does for a service of their own.
+    server.setFirstPartyOrigins([server.mcp.origin, new URL(home.url).origin]);
     const created = await server.request(
       '/api/v1/settings/mcp-servers',
       jsonInit({
@@ -1220,6 +1231,9 @@ describe('a notes connector the person adds by its address', () => {
     server = await startApprovalTestServer();
     // Stands in for a notes app's connector running on the same computer, outside Aman.
     notes = await startInertMcpServer({ notes: true });
+    // A connector on this computer is refused unless its origin is listed as the operator's own. The fixture
+    // restores the list on close.
+    server.setFirstPartyOrigins([server.mcp.origin, notes.origin]);
     const added = await server.request(
       '/api/v1/settings/mcp-servers',
       jsonInit({ manifest: { type: 'remote', name: NOTES, url: notes.url, description: 'My notes folder.' } }),
@@ -1259,6 +1273,212 @@ describe('a notes connector the person adds by its address', () => {
 
       expect((await searchNotes('beans')).cards).toEqual([]);
       expect(notes.searchNotesInvocations()).toBe(2);
+    },
+    TURN_TIMEOUT_MS,
+  );
+});
+
+const SKILL_NAME = 'daily-notes';
+const SKILL_SITE = 'notes.example.com';
+
+const HeldCardsSchema = z.object({
+  data: z.array(
+    z.object({
+      event: z
+        .object({
+          type: z.string(),
+          tool_calls: z
+            .array(
+              z
+                .object({
+                  id: z.string(),
+                  held: z.boolean().optional(),
+                  tier3_card: z.object({ plain_what: z.string() }).loose().nullish(),
+                })
+                .loose(),
+            )
+            .optional(),
+        })
+        .loose(),
+    }),
+  ),
+});
+
+describe('a skill that reaches a site on the internet', () => {
+  let server: ApprovalTestServer;
+  let sandbox: SkillSiteSandbox;
+  let gateway: SkillNetworkGateway;
+  let site: TcpServer;
+
+  beforeAll(async () => {
+    // Every site the gateway lets through lands on this stand-in, whatever name was asked for.
+    site = createTcpServer(socket => {
+      socket.on('data', () => {
+        socket.write('Notes for today\n');
+      });
+    });
+    await new Promise<void>(resolve => site.listen(0, '127.0.0.1', resolve));
+    const address = site.address();
+    if (address === null || typeof address === 'string') {
+      throw new Error('the stand-in site has no port');
+    }
+    const gatewaySocketPath = join(mkdtempSync(join(tmpdir(), 'skill-site-')), 'gateway.sock');
+    gateway = new SkillNetworkGateway({
+      registry: skillNetworkTokens,
+      logger: createLogger({ transports: [new transports.Console({ silent: true })] }),
+      connectUpstream: () =>
+        new Promise<Socket>((resolve, reject) => {
+          const upstream = connect(address.port, '127.0.0.1');
+          upstream.once('connect', () => resolve(upstream));
+          upstream.once('error', reject);
+        }),
+    });
+    await gateway.listenOnSockets([gatewaySocketPath]);
+    sandbox = new SkillSiteSandbox(gatewaySocketPath);
+    server = await startApprovalTestServer({ sandboxProvider: sandbox });
+    const added = await server.request('/api/v1/settings/skills', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        manifest: {
+          type: 'git',
+          name: SKILL_NAME,
+          url: 'https://github.com/example/daily-notes',
+          ref: 'main',
+          description: 'Fetches the notes for today.',
+          network_hosts: [SKILL_SITE],
+        },
+      }),
+    });
+    expect(added.status).toBe(200);
+  });
+
+  afterAll(async () => {
+    await server.close();
+    await gateway.close();
+    await new Promise<void>(resolve => site.close(() => resolve()));
+  });
+
+  async function startChat(): Promise<string> {
+    return createChat(server, { ...SANDBOX_AGENT_SPEC, skills: [{ name: SKILL_NAME }] });
+  }
+
+  /** The skill network cards a chat is holding, newest last. */
+  async function heldCards(chatId: string): Promise<{ id: string; thread_id: string; what: string }[]> {
+    const response = await server.request(`/api/v1/sessions/${chatId}/events`);
+    expect(response.status).toBe(200);
+    return HeldCardsSchema.parse(await response.json()).data.flatMap(({ event }) =>
+      event.type === 'tool.approval_required'
+        ? (event.tool_calls ?? [])
+            .filter(call => call.held === true)
+            .map(call => ({ id: call.id, thread_id: 'main', what: call.tier3_card?.plain_what ?? '' }))
+        : [],
+    );
+  }
+
+  /**
+   * Has the skill fetch from one site, answering the command's own card, and returns what the
+   * fetch printed and the questions about sites it raised.
+   */
+  async function fetchFrom({ chatId, host }: { chatId: string; host: string }) {
+    const before = new Set((await heldCards(chatId)).map(card => card.id));
+    server.model.next({
+      toolArguments: { command: `${SKILL_FETCH_COMMAND} ${host}`, purpose: 'inspect', intent: 'Fetch the notes.' },
+    });
+    const turn = await runTurn({ server, chatId, input: ask('exec') });
+    await runTurn({ server, chatId, input: answer({ card: onlyCard(turn), scope: 'once' }) });
+    const fetched = sandbox.fetches.at(-1);
+    expect(fetched?.site).toBe(host);
+    return {
+      printed: fetched?.output,
+      asked: (await heldCards(chatId)).filter(card => !before.has(card.id)),
+    };
+  }
+
+  /** Answers one question about a site. The command it was raised on is asked about again on its own card. */
+  async function answerSite({
+    chatId,
+    card,
+    scope,
+  }: {
+    chatId: string;
+    card: { id: string; thread_id: string };
+    scope: 'once' | 'always';
+  }): Promise<void> {
+    await (await sendTurn({ server, chatId, input: answer({ card, scope }) })).text();
+  }
+
+  it(
+    'asks before the skill reaches its site for the first time, and reaches nothing until then',
+    async () => {
+      const chatId = await startChat();
+      const first = await fetchFrom({ chatId, host: SKILL_SITE });
+      expect(first.printed).toBe('This sandbox has no network.');
+      expect(first.asked.map(card => card.what)).toEqual([`Let the ${SKILL_NAME} skill reach ${SKILL_SITE}?`]);
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
+    '"Allow" lets the skill reach its site for the rest of this chat only',
+    async () => {
+      const chatId = await startChat();
+      const [card] = (await fetchFrom({ chatId, host: SKILL_SITE })).asked;
+      if (card === undefined) {
+        throw new Error('the first fetch raised no question');
+      }
+      await answerSite({ chatId, card, scope: 'once' });
+      expect((await fetchFrom({ chatId, host: SKILL_SITE })).printed).toBe('200 Notes for today');
+      expect((await fetchFrom({ chatId, host: SKILL_SITE })).printed).toBe('200 Notes for today');
+
+      const otherChat = await startChat();
+      const elsewhere = await fetchFrom({ chatId: otherChat, host: SKILL_SITE });
+      expect(elsewhere.printed).toBe('This sandbox has no network.');
+      expect(elsewhere.asked.map(each => each.what)).toEqual([`Let the ${SKILL_NAME} skill reach ${SKILL_SITE}?`]);
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
+    'refuses a site the skill never named, and asks about it',
+    async () => {
+      const chatId = await startChat();
+      const [card] = (await fetchFrom({ chatId, host: SKILL_SITE })).asked;
+      if (card === undefined) {
+        throw new Error('the first fetch raised no question');
+      }
+      await answerSite({ chatId, card, scope: 'once' });
+      const undeclared = await fetchFrom({ chatId, host: 'uploads.example.com' });
+      expect(undeclared.printed).toMatch(/^403 /);
+      expect(undeclared.printed).not.toContain('Notes for today');
+      expect(undeclared.asked.map(each => each.what)).toEqual([
+        'Allow a connection to uploads.example.com in this chat?',
+      ]);
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
+    '"Always allow for this skill" lets the skill reach that site in every chat',
+    async () => {
+      const host = 'archive.example.com';
+      const chatId = await startChat();
+      const [first] = (await fetchFrom({ chatId, host: SKILL_SITE })).asked;
+      if (first === undefined) {
+        throw new Error('the first fetch raised no question');
+      }
+      await answerSite({ chatId, card: first, scope: 'once' });
+      const [card] = (await fetchFrom({ chatId, host })).asked;
+      if (card === undefined) {
+        throw new Error('the undeclared site raised no question');
+      }
+      await answerSite({ chatId, card, scope: 'always' });
+
+      const otherChat = await startChat();
+      await fetchFrom({ chatId: otherChat, host: SKILL_SITE });
+      expect((await fetchFrom({ chatId: otherChat, host })).printed).toBe('200 Notes for today');
+      const saved = await server.request(`/api/v1/settings/skills/${SKILL_NAME}/network-approval`);
+      expect(await saved.text()).toContain(host);
     },
     TURN_TIMEOUT_MS,
   );
