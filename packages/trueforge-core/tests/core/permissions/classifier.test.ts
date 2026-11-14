@@ -1077,6 +1077,7 @@ describe('verifyPreDispatch', () => {
           tool_type: 'truefoundry-system',
           canonical_params: params,
           tier: 2,
+          sandbox_file_write: true,
           approval_token_id: token.token_id,
           approval_binding: null,
           shell_binding: null,
