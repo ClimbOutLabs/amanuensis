@@ -13,19 +13,12 @@ env_file() { printf '%s' "$AMAN_HOME/instances/main/.env"; }
 endpoint_lines() { sed -n 's/^LOCAL_MODEL_ENDPOINTS=//p' "$(env_file)"; }
 
 test_no_port_named_means_no_bridge() {
-  t_begin "an instance with no port named has no bridge, but the app still gets this computer's addresses"
+  t_begin "an instance with no port named has no bridge"
   sandbox_new
-  fixture_network 192.168.1.20
-  fixture_tailscale 100.101.102.103 spark.example.ts.net
   install_machine
   assert_not_contains "$(cat "$(compose_file)")" "local-model-host:"
   assert_not_contains "$(cat "$(compose_file)")" "local-model-link:"
-  assert_contains "$(cat "$(compose_file)")" "LOCAL_MODEL_PORTS: ''"
-  local addresses
-  addresses=$(sed -n "s/^ *THIS_COMPUTER_ADDRESSES: '\(.*\)'\$/\1/p" "$(compose_file)")
-  for host in 127.0.0.1 localhost host.docker.internal 192.168.1.20 100.101.102.103 spark.example.ts.net; do
-    assert_contains ",$addresses," ",$host," "this computer's addresses name $host"
-  done
+  assert_not_contains "$(cat "$(compose_file)")" "LOCAL_MODEL_PORTS"
   sandbox_drop
 }
 

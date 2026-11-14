@@ -43,7 +43,8 @@ import type { ReasoningEffort } from '../../../src/schemas/modelProvider';
 
 // Name resolution is stubbed for the whole suite: a name with 'unresolvable' in it does not
 // resolve, localhost resolves to loopback, the local model bridge resolves to an address on an
-// instance network, and every other name resolves to a public address.
+// instance network, host.docker.internal and spark.example.ts.net resolve to Docker's gateway and
+// a Tailscale address of the computer, and every other name resolves to a public address.
 // The address check at use time judges names by what they resolve to, so the suite's answer
 // cannot depend on the DNS of the machine running it.
 jest.mock('node:dns/promises', () => {
@@ -56,7 +57,12 @@ jest.mock('node:dns/promises', () => {
         Reflect.set(error, 'code', 'ENOTFOUND');
         throw error;
       }
-      const addresses: Record<string, string> = { localhost: '127.0.0.1', 'aman-local-model': '172.30.5.2' };
+      const addresses: Record<string, string> = {
+        localhost: '127.0.0.1',
+        'aman-local-model': '172.30.5.2',
+        'host.docker.internal': '172.17.0.1',
+        'spark.example.ts.net': '100.101.102.103',
+      };
       const entry = { address: addresses[hostname] ?? '93.184.216.34', family: 4 };
       return options?.all === true ? [entry] : entry;
     },
@@ -890,6 +896,24 @@ describe('getModelDetails: the address check at use time', () => {
     } finally {
       configureRemoteAddressCheck({ ownNetworkRanges: [] });
       configuration.LOCAL_MODEL_ENDPOINTS = originalEndpoints;
+    }
+  });
+
+  it.each([
+    'http://100.101.102.103:30031/v1',
+    'https://spark.example.ts.net:8443/v1',
+    'http://192.168.1.20:11434/v1',
+    'http://host.docker.internal:11434/v1',
+  ])('resolves a model on the computer an installed Aman runs on, at %s', async baseUrl => {
+    // The app's containers sit on networks of their own, so this computer's addresses are not the app's.
+    const store = await setupWithBaseUrl(baseUrl);
+    configureRemoteAddressCheck({ ownNetworkRanges: ['172.18.0.0/16', '172.30.0.0/16'] });
+    try {
+      await expect(
+        getModelDetails({ tenant_id: 'default', name: 'local-provider/local-model', store }),
+      ).resolves.toMatchObject({ providerConfig: { baseUrl } });
+    } finally {
+      configureRemoteAddressCheck({ ownNetworkRanges: [] });
     }
   });
 

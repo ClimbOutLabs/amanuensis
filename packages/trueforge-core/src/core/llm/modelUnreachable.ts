@@ -2,9 +2,9 @@ import { APICallError } from 'ai';
 
 /**
  * Where a model's address points, as the host app knows it. `local_link` is the host's own bridge to a model on the
- * same computer; `this_computer` is one of that computer's own network addresses; `elsewhere` is anything else.
+ * same computer; `elsewhere` is any other address.
  */
-export type ModelAddressPlace = 'local_link' | 'this_computer' | 'elsewhere';
+export type ModelAddressPlace = 'local_link' | 'elsewhere';
 
 /** Tells the place of a model address from its host name; the host app supplies it, since only it knows its computer. */
 export type PlaceOfModelHost = (hostname: string) => ModelAddressPlace;
@@ -73,13 +73,6 @@ export function modelUnreachableMessage({ url, place }: { url: string; place: Mo
         'Aman could not connect to the model on this computer, so no reply was started. ' +
         `Nothing answered at port ${port === '' ? 'the port Aman uses' : port} on this computer. ` +
         'Start the model server on this computer, then send your message again.'
-      );
-    case 'this_computer':
-      return (
-        `Aman could not connect to the model on this computer at ${host}, so no reply was started. ` +
-        'This computer did not accept the connection at that address. ' +
-        'That can happen after a network change on this computer, such as a software update, even while the model is running. ' +
-        'Open Settings, then Models, and save this model again. Aman then shows the local link address to change it to.'
       );
     case 'elsewhere':
       return (

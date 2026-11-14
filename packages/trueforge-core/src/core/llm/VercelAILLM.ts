@@ -149,8 +149,8 @@ export interface VercelAILLMConfig {
   /** Called, before any output, each time a request actually fell over to the fallback provider. */
   onFallback?: (() => void) | undefined;
   /**
-   * Host-owned: where a model address points (Aman's local link, one of this computer's own addresses, or
-   * elsewhere), so a connection that never started is described in words that fit. Undefined means elsewhere.
+   * Host-owned: where a model address points (Aman's local link or elsewhere), so a connection that never started
+   * is described in words that fit. Undefined means elsewhere.
    */
   placeOfModelHost?: PlaceOfModelHost | undefined;
 }

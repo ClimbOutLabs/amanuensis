@@ -83,10 +83,6 @@ services:
 @@IF_BROWSER@@      # Aman's own browser, reached only through its gateway's relay. BROWSER_SECRET comes from .env.
 @@IF_BROWSER@@      BROWSER_ENABLED: 'true'
 @@IF_BROWSER@@      BROWSER_URL: http://browser-relay:8792
-@@IF_LOCAL_BRIDGE@@      # This computer's own addresses and names, so Settings can tell when a model address is this computer and offer
-@@IF_LOCAL_BRIDGE@@      # the local model bridge instead. The ports are the ones the bridge carries, at http://aman-local-model:PORT.
-@@IF_LOCAL_BRIDGE@@      THIS_COMPUTER_ADDRESSES: '@@THIS_COMPUTER_ADDRESSES@@'
-@@IF_LOCAL_BRIDGE@@      LOCAL_MODEL_PORTS: '@@LOCAL_MODEL_PORTS@@'
     volumes:
       - data:/data
 @@IF_SANDBOX@@      # Read-only views of each slot's control socket. No Docker socket, no workspace volume.

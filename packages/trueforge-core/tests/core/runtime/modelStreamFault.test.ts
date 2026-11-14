@@ -418,7 +418,6 @@ describe('ModelStreamFault retry', () => {
   });
 
   it.each([
-    ['this computer', 'this_computer' as const, 'This computer did not accept the connection at that address.'],
     ['the local link', 'local_link' as const, 'Nothing answered at port 30031 on this computer.'],
     ['another machine', 'elsewhere' as const, 'Check that the model server is running and can be reached'],
   ])(
@@ -522,7 +521,7 @@ describe('ModelStreamFault retry', () => {
       mapStreamToChunks({
         stream: cutParts(),
         chunkMeta: { id: 'test-id', created: 0, model: 'test-model' },
-        placeOfModelHost: () => 'this_computer',
+        placeOfModelHost: () => 'local_link',
       }),
     );
     const modelClient: ILLM = { create, createNonStream: jest.fn() };

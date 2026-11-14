@@ -139,7 +139,6 @@ import type { ChatSearchIndexer } from './runtime/chatSearchIndexing';
 import { resolveDefaultChatModel } from './runtime/defaultChatModel';
 import type { DeliveryService } from './runtime/delivery/deliveryService';
 import type { EventSubscriptionRegistry } from './runtime/event-subscription';
-import { localModelsFromConfig } from './runtime/localModels';
 import { createVaultClient } from './runtime/memory/vaultClient';
 import { createModelProviderChecker } from './runtime/modelProviderCheck';
 import type { NoticingService } from './runtime/noticing/noticingService';
@@ -878,7 +877,6 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         personalizationStore: deps.personalizationStore,
         tokenFactoryBudget: deps.tokenFactoryBudget,
         envManagedModelProviderNames: envManagedProviders,
-        localModels: localModelsFromConfig(),
         checkSavedProvider: createModelProviderChecker({ logger: deps.logger }),
         withTransaction: deps.withTransaction,
         logger: deps.logger,

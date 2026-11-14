@@ -77,14 +77,6 @@ describe('modelUnreachableMessage', () => {
     expect(message).not.toMatch(forbidden);
   });
 
-  it('says a refusal at one of this computer’s own addresses is local, and how to move to the local link', () => {
-    const message = modelUnreachableMessage({ url: MODEL_URL, place: 'this_computer' });
-    expect(message).toContain('the model on this computer at spark.example.ts.net');
-    expect(message).toContain('This computer did not accept the connection at that address.');
-    expect(message).toContain('Aman then shows the local link address to change it to.');
-    expect(message).not.toMatch(forbidden);
-  });
-
   it('says nothing answered at the local link’s port, and to start the model server', () => {
     const message = modelUnreachableMessage({
       url: 'http://aman-local-model:30031/v1/chat/completions',
@@ -103,12 +95,12 @@ describe('modelUnreachableErrorOf', () => {
       raw: connectFailure({ code: 'ECONNREFUSED' }),
       placeOfModelHost: hostname => {
         asked.push(hostname);
-        return 'this_computer';
+        return 'local_link';
       },
     });
     expect(asked).toEqual(['spark.example.ts.net']);
     expect(error).toBeInstanceOf(ModelUnreachableError);
-    expect(error?.place).toBe('this_computer');
+    expect(error?.place).toBe('local_link');
     expect(error?.url).toBe(MODEL_URL);
   });
 

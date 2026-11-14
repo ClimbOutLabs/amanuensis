@@ -245,8 +245,7 @@ instance_render() {
   if [ "$browser_on" = 1 ]; then
     write_if_changed "$dir/browser-seccomp.json" 644 <"$REPO_ROOT/ops/browser-sidecar/seccomp_profile.json" || true
   fi
-  # The local model bridge, when the owner named a port of this computer for it, and the list of this computer's own
-  # addresses the app uses to offer it.
+  # The local model bridge, when the owner named a port of this computer for it.
   local local_model_args=()
   mapfile -t local_model_args < <(local_model_render_args "$name")
   if [ -n "$(local_model_ports "$name")" ]; then local_model_files "$dir"; fi

@@ -17,7 +17,6 @@ import type { IPersonalizationStore } from '../db/personalizationStore';
 import type { ISandboxProviderStore } from '../db/sandboxProviderStore';
 import type { WithTransaction } from '../db/transaction';
 import type { IOAuthTokenStore } from '../mcp/auth/types';
-import type { LocalModels } from '../runtime/localModels';
 import type { CheckSavedModelProvider } from '../runtime/modelProviderCheck';
 import type { ResolveAddresses } from '../runtime/remoteAddress';
 import { getSharedRunCodeService } from '../runtime/sessionResources';
@@ -49,9 +48,7 @@ export interface SettingsRouterDeps<TTransaction> {
   tokenFactoryBudget: TokenFactoryBudget;
   /** Model providers the environment owns (see `envManagedModelProviderNames`). */
   envManagedModelProviderNames: ReadonlySet<string>;
-  /** This computer and the local model bridge (see `localModelsFromConfig`). */
-  localModels: LocalModels;
-  /** Name lookups for the this-computer check on model addresses; tests replace it. */
+  /** Name lookups for the checks on model addresses; tests replace it. */
   resolveHostAddresses?: ResolveAddresses;
   /** Runs the one test call for a just-saved model provider; its outcome is stored on the provider. */
   checkSavedProvider: CheckSavedModelProvider;
@@ -69,7 +66,6 @@ export function createSettingsRouter<TTransaction>(deps: SettingsRouterDeps<TTra
       withTransaction: deps.withTransaction,
       resolveRequestContext: deps.resolveRequestContext,
       envManagedNames: deps.envManagedModelProviderNames,
-      localModels: deps.localModels,
       ...(deps.resolveHostAddresses === undefined ? {} : { resolveHostAddresses: deps.resolveHostAddresses }),
       checkSavedProvider: deps.checkSavedProvider,
       logger: deps.logger,

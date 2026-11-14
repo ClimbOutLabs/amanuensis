@@ -20,7 +20,6 @@ import { SqlitePersonalizationStore } from '../../../src/db/sqlite/personalizati
 import { SqliteSandboxProviderStore } from '../../../src/db/sqlite/sandbox-provider-store/SqliteSandboxProviderStore';
 import { SqliteSkillStore } from '../../../src/db/sqlite/skill-store/SqliteSkillStore';
 import { SqliteOAuthTokenStore } from '../../../src/db/sqlite/token-store/SqliteOAuthTokenStore';
-import type { LocalModels } from '../../../src/runtime/localModels';
 import type { CheckSavedModelProvider } from '../../../src/runtime/modelProviderCheck';
 import { configureRemoteAddressCheck, type ResolveAddresses } from '../../../src/runtime/remoteAddress';
 import { RequestErrorResponseSchema } from '../../../src/schemas/errors';
@@ -97,9 +96,6 @@ function withRedactedApiKey<T extends { auth: { api_key: string } }>(provider: T
   };
 }
 
-/** No installer around: no address is this computer's, and the bridge carries nothing. */
-const NO_LOCAL_MODELS: LocalModels = { thisComputer: new Set(), ports: [] };
-
 /** Name lookups answer from a fixed table, so no test depends on the DNS of the machine running it. */
 function fixedLookups(table: Record<string, string[]>): ResolveAddresses {
   return hostname => Promise.resolve(table[hostname] ?? []);
@@ -108,7 +104,6 @@ function fixedLookups(table: Record<string, string[]>): ResolveAddresses {
 async function createRouters(
   options: {
     envManagedNames?: ReadonlySet<string>;
-    localModels?: LocalModels;
     resolveHostAddresses?: ResolveAddresses;
     checkSavedProvider?: CheckSavedModelProvider;
   } = {},
@@ -142,7 +137,6 @@ async function createRouters(
       personalizationStore: new SqlitePersonalizationStore(db),
       tokenFactoryBudget: uncappedTokenFactoryBudget,
       envManagedModelProviderNames: options.envManagedNames ?? new Set(),
-      localModels: options.localModels ?? NO_LOCAL_MODELS,
       resolveHostAddresses: options.resolveHostAddresses ?? fixedLookups({}),
       // Saves in these suites carry no check outcome unless a suite wires its own checker.
       checkSavedProvider:
@@ -795,103 +789,43 @@ describe('GET /models default chat model', () => {
   });
 });
 
-describe('a model address that is this computer', () => {
-  // An installer instance on a computer with a home network address and Tailscale.
-  const spark: LocalModels = {
-    thisComputer: new Set([
-      '127.0.0.1',
-      'localhost',
-      'host.docker.internal',
-      '192.168.1.20',
-      '100.101.102.103',
-      'spark.example.ts.net',
-    ]),
-    ports: [30031],
-  };
+describe('a model on the same computer as an installed Aman', () => {
+  // The app runs in containers on networks of their own, so this computer's home network address, its Tailscale
+  // address and name, and host.docker.internal (Docker's gateway to this computer) are not the app's own addresses.
   const lookups = fixedLookups({
-    localhost: ['127.0.0.1'],
     'spark.example.ts.net': ['100.101.102.103'],
     spark: ['192.168.1.20'],
-    'gpu.example.ts.net': ['100.101.102.200'],
+    'host.docker.internal': ['172.17.0.1'],
   });
   const localBody = (base_url: string) => ({ ...customBody, name: 'spark', base_url });
+
+  beforeEach(() => {
+    configureRemoteAddressCheck({ ownNetworkRanges: ['172.18.0.0/16', '172.19.0.0/16'] });
+  });
+
+  afterEach(() => {
+    configureRemoteAddressCheck({ ownNetworkRanges: [] });
+  });
 
   it.each([
     ['its Tailscale name', 'https://spark.example.ts.net:8443/v1'],
     ['its Tailscale address', 'http://100.101.102.103:30031/v1'],
     ['its home network address', 'http://192.168.1.20:30031/v1'],
     ['a short name that resolves to it', 'http://spark:30031/v1'],
-    ['localhost', 'http://localhost:11434/v1'],
-  ])('is steered to the local link, not saved, when given by %s', async (_label, baseUrl) => {
-    const { settingsRouter, modelProviderStore } = await createRouters({
-      localModels: spark,
-      resolveHostAddresses: lookups,
-    });
+    ['host.docker.internal', 'http://host.docker.internal:11434/v1'],
+  ])('is saved when given by %s', async (_label, baseUrl) => {
+    const { settingsRouter, modelProviderStore } = await createRouters({ resolveHostAddresses: lookups });
 
-    for (const init of [postInit(localBody(baseUrl)), putInit(localBody(baseUrl))]) {
-      const response = await settingsRouter.request('/model-providers', init);
-      expect(response.status).toBe(400);
-      const body = RequestErrorResponseSchema.parse(await response.json());
-      expect(body.error.code).toBe('model_on_this_computer');
-      expect(body.error.param).toBe('manifest.base_url');
-      expect(body.error.message).toContain('is this computer.');
-      expect(body.error.message).toContain('use the address http://aman-local-model:30031/v1 instead');
-      expect(body.error.message).not.toMatch(/—|;/);
-    }
-    expect(await modelProviderStore.listProviders({ tenant_id: STANDALONE_REQUEST_CONTEXT.tenant_id })).toEqual([]);
-  });
-
-  it('tells how to set up the local link when it carries no port yet', async () => {
-    const { settingsRouter } = await createRouters({
-      localModels: { ...spark, ports: [] },
-      resolveHostAddresses: lookups,
-    });
-    const response = await settingsRouter.request(
-      '/model-providers',
-      postInit(localBody('https://spark.example.ts.net/v1')),
-    );
-    expect(response.status).toBe(400);
-    const body = RequestErrorResponseSchema.parse(await response.json());
-    expect(body.error.message).toContain('run aman local-model with the port your model server listens on');
-  });
-
-  it('saves the local link address itself', async () => {
-    const { settingsRouter } = await createRouters({ localModels: spark, resolveHostAddresses: lookups });
-    const response = await settingsRouter.request(
-      '/model-providers',
-      postInit(localBody('http://aman-local-model:30031/v1')),
-    );
-    expect(response.status).toBe(201);
-  });
-
-  it('saves a model on another machine reached by its Tailscale address, unchanged', async () => {
-    const { settingsRouter } = await createRouters({ localModels: spark, resolveHostAddresses: lookups });
-    for (const baseUrl of ['https://gpu.example.ts.net/v1', 'http://100.101.102.200:8000/v1']) {
-      const response = await settingsRouter.request('/model-providers', putInit(localBody(baseUrl)));
-      expect(response.status).toBe(200);
-    }
-  });
-
-  it('saves a cloud provider unchanged', async () => {
-    const { settingsRouter } = await createRouters({ localModels: spark, resolveHostAddresses: lookups });
-    const response = await settingsRouter.request('/model-providers', putInit(anthropicBody));
-    expect(response.status).toBe(200);
-  });
-
-  it('leaves an address on this computer to the address check outside an installer instance', async () => {
-    const { settingsRouter } = await createRouters({ resolveHostAddresses: lookups });
-    const response = await settingsRouter.request('/model-providers', putInit(localBody('http://localhost:11434/v1')));
-    expect(response.status).toBe(400);
-    const body = RequestErrorResponseSchema.parse(await response.json());
-    expect(body.error.code).toBeUndefined();
-    expect(body.error.message).toContain('LOCAL_MODEL_ENDPOINTS');
+    expect((await settingsRouter.request('/model-providers', postInit(localBody(baseUrl)))).status).toBe(201);
+    expect((await settingsRouter.request('/model-providers', putInit(localBody(baseUrl)))).status).toBe(200);
+    const saved = await modelProviderStore.listProviders({ tenant_id: STANDALONE_REQUEST_CONTEXT.tenant_id });
+    expect(saved.map(record => record.manifest.base_url)).toEqual([baseUrl]);
   });
 });
 
 describe("the local model bridge's address on an instance network", () => {
   // The bridge answers on a network the app's containers share, so the address check refuses it
   // unless aman local-model has listed its endpoint.
-  const spark: LocalModels = { thisComputer: new Set(['127.0.0.1', 'localhost']), ports: [30031] };
   const lookups = fixedLookups({ 'aman-local-model': ['172.30.5.2'] });
   const bridgeBody = { ...customBody, name: 'bridged', base_url: 'http://aman-local-model:30031/v1' };
   const originalEndpoints = configuration.LOCAL_MODEL_ENDPOINTS;
@@ -907,10 +841,7 @@ describe("the local model bridge's address on an instance network", () => {
 
   it('is refused, with the command that adds its port, while its endpoint is not listed', async () => {
     configuration.LOCAL_MODEL_ENDPOINTS = ['aman-local-model:11434'];
-    const { settingsRouter, modelProviderStore } = await createRouters({
-      localModels: spark,
-      resolveHostAddresses: lookups,
-    });
+    const { settingsRouter, modelProviderStore } = await createRouters({ resolveHostAddresses: lookups });
 
     for (const init of [postInit(bridgeBody), putInit(bridgeBody)]) {
       const response = await settingsRouter.request('/model-providers', init);
@@ -923,7 +854,7 @@ describe("the local model bridge's address on an instance network", () => {
 
   it('is saved once its endpoint is listed', async () => {
     configuration.LOCAL_MODEL_ENDPOINTS = ['localhost:11434', 'aman-local-model:30031'];
-    const { settingsRouter } = await createRouters({ localModels: spark, resolveHostAddresses: lookups });
+    const { settingsRouter } = await createRouters({ resolveHostAddresses: lookups });
 
     expect((await settingsRouter.request('/model-providers', postInit(bridgeBody))).status).toBe(201);
     expect((await settingsRouter.request('/model-providers', putInit(bridgeBody))).status).toBe(200);

@@ -47,7 +47,7 @@ describe('a model server that refuses the connection', () => {
       },
       placeOfModelHost: hostname => {
         asked.push(hostname);
-        return 'this_computer';
+        return 'elsewhere';
       },
     });
 
@@ -58,8 +58,8 @@ describe('a model server that refuses the connection', () => {
     if (!(error instanceof ModelUnreachableError)) {
       throw new Error('expected ModelUnreachableError');
     }
-    expect(error.place).toBe('this_computer');
-    expect(error.message).toContain(`the model on this computer at 127.0.0.1:${port}`);
+    expect(error.place).toBe('elsewhere');
+    expect(error.message).toContain(`the model at 127.0.0.1:${port}`);
     expect(error.message).not.toContain('broke off');
   });
 

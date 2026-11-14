@@ -189,47 +189,6 @@ export function parseOidcAllowedEmails(raw: string | undefined): string[] {
 }
 
 /**
- * Parses `THIS_COMPUTER_ADDRESSES`: comma-separated addresses and names of the computer an installer instance runs on,
- * lowercase. Unset / blank → none, so no model address is taken for this computer.
- */
-export function parseThisComputerAddresses(raw: string | undefined): string[] {
-  if (raw === undefined) {
-    return [];
-  }
-  return [
-    ...new Set(
-      raw
-        .split(',')
-        .map(part => part.trim().toLowerCase())
-        .filter(part => part.length > 0),
-    ),
-  ];
-}
-
-/**
- * Parses `LOCAL_MODEL_PORTS`: comma-separated ports of this computer that the local model bridge carries, each from
- * 1024 to 65535. Unset / blank → none. Anything else fails the boot with the entry named, since a dropped entry would
- * leave a model the owner set up unreachable for no stated reason.
- */
-export function parseLocalModelPorts(raw: string | undefined): number[] {
-  if (raw === undefined || raw.trim() === '') {
-    return [];
-  }
-  const ports = new Set<number>();
-  for (const entry of raw
-    .split(',')
-    .map(part => part.trim())
-    .filter(part => part.length > 0)) {
-    const port = Number(entry);
-    if (!/^[1-9][0-9]{3,4}$/.test(entry) || port < 1024 || port > 65535) {
-      throw new Error(`LOCAL_MODEL_PORTS entries must be ports from 1024 to 65535, got: ${entry}`);
-    }
-    ports.add(port);
-  }
-  return [...ports];
-}
-
-/**
  * Parses `FIRST_PARTY_MCP_ORIGINS`: comma-separated exact origins (scheme, host and optional
  * port, no path) of the operator's own memory provider. Unset / blank → none, so no connector is
  * first-party. Each entry is normalized the way a connector URL's origin is, then matched exactly.
@@ -1912,17 +1871,6 @@ export interface SharedServerConfiguration {
   SANDBOX_BACKEND: SandboxBackend;
   /** Name of the installer instance this server runs as; empty outside the installer. Env: `INSTALLER_INSTANCE`. */
   INSTALLER_INSTANCE: string;
-  /**
-   * Addresses and names of the computer this instance runs on, lowercase, so Settings can tell a model address that is
-   * this computer and offer the local model bridge instead. The installer sets it where the bridge is available.
-   * Env: `THIS_COMPUTER_ADDRESSES` (comma-separated). Default empty.
-   */
-  THIS_COMPUTER_ADDRESSES: string[];
-  /**
-   * Ports of this computer the local model bridge carries, reached at `http://aman-local-model:PORT`. The installer
-   * sets them from the ports the owner named. Env: `LOCAL_MODEL_PORTS` (comma-separated). Default empty.
-   */
-  LOCAL_MODEL_PORTS: number[];
   /** Number of slot agents to use, 1 to 2. Env: `SANDBOX_SLOTS`. Default 2. */
   SANDBOX_SLOTS: number;
   /**
@@ -2982,8 +2930,6 @@ const shared: SharedServerConfiguration = {
   }),
   SANDBOX_BACKEND: parseSandboxBackend({ envKey: 'SANDBOX_BACKEND', raw: getEnv('SANDBOX_BACKEND') }),
   INSTALLER_INSTANCE: getEnv('INSTALLER_INSTANCE', { defaultValue: '' })?.trim() ?? '',
-  THIS_COMPUTER_ADDRESSES: parseThisComputerAddresses(getEnv('THIS_COMPUTER_ADDRESSES')),
-  LOCAL_MODEL_PORTS: parseLocalModelPorts(getEnv('LOCAL_MODEL_PORTS')),
   SANDBOX_SLOTS: parsePositiveInt({
     envKey: 'SANDBOX_SLOTS',
     raw: getEnv('SANDBOX_SLOTS'),

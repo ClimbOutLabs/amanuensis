@@ -16,13 +16,7 @@ import {
   listModelProvidersRoute,
   putModelProviderRoute,
 } from '../routes/modelProviderRoutes';
-import {
-  isThisComputerModelUrl,
-  localModelBridgePortMessage,
-  MODEL_ON_THIS_COMPUTER_CODE,
-  modelOnThisComputerMessage,
-  type LocalModels,
-} from '../runtime/localModels';
+import { localModelBridgePortMessage } from '../runtime/localModels';
 import type { CheckSavedModelProvider } from '../runtime/modelProviderCheck';
 import { modelUrlProblem, type ResolveAddresses } from '../runtime/remoteAddress';
 import {
@@ -40,8 +34,6 @@ export interface ModelProvidersRouterDeps<TTransaction> {
   resolveRequestContext: ResolveRequestContext;
   /** Providers whose record the environment rewrites at startup; the API keeps them read-only. */
   envManagedNames: ReadonlySet<string>;
-  /** This computer and the local model bridge, so a model address that is this computer is steered to the bridge. */
-  localModels: LocalModels;
   /** Name lookups for the checks on model addresses; tests replace it so no lookup leaves the machine. */
   resolveHostAddresses?: ResolveAddresses;
   /** Runs the one test call for a just-saved provider; its outcome is stored on the provider. */
@@ -147,60 +139,6 @@ function resolveModelProviderManifestForWrite({
   };
 }
 
-/**
- * The refusal for a model address that is this computer, or undefined when the address is fine to save. A model on
- * this computer reached by one of its network addresses fails without warning when that address stops answering the
- * app's containers, so it is never stored. The bridge is offered instead.
- */
-async function modelOnThisComputerRefusal({
-  manifest,
-  localModels,
-  resolveHostAddresses,
-}: {
-  manifest: ModelProviderManifest;
-  localModels: LocalModels;
-  resolveHostAddresses: ResolveAddresses | undefined;
-}) {
-  const onThisComputer = await isThisComputerModelUrl({
-    baseUrl: manifest.base_url,
-    local: localModels,
-    ...(resolveHostAddresses === undefined ? {} : { resolveHostAddresses }),
-  });
-  if (!onThisComputer) {
-    return undefined;
-  }
-  return {
-    error: {
-      message: modelOnThisComputerMessage({ baseUrl: manifest.base_url, local: localModels }),
-      type: 'invalid_request',
-      code: MODEL_ON_THIS_COMPUTER_CODE,
-      param: 'manifest.base_url',
-    },
-  };
-}
-
-/**
- * Why a model base address may not be saved, as the error body, or undefined when it may. An
- * address that is the computer an installed Aman runs on is steered to the local model bridge
- * first, since the address check below would only point at a setting that cannot help there.
- */
-async function modelBaseUrlRefusal({
-  manifest,
-  localModels,
-  resolveHostAddresses,
-}: {
-  manifest: ModelProviderManifest;
-  localModels: LocalModels;
-  resolveHostAddresses: ResolveAddresses | undefined;
-}) {
-  const onThisComputer = await modelOnThisComputerRefusal({ manifest, localModels, resolveHostAddresses });
-  if (onThisComputer !== undefined) {
-    return onThisComputer;
-  }
-  const refusal = await modelAddressRefusal({ baseUrl: manifest.base_url, resolveAddresses: resolveHostAddresses });
-  return refusal === undefined ? undefined : { error: { message: refusal } };
-}
-
 function toWireProvider({
   record,
   envManagedNames,
@@ -261,13 +199,12 @@ export function createModelProvidersRouter<TTransaction>(deps: ModelProvidersRou
     if (deps.envManagedNames.has(name)) {
       return c.json(envManagedConflict(name), 409);
     }
-    const refusal = await modelBaseUrlRefusal({
-      manifest: provider,
-      localModels: deps.localModels,
-      resolveHostAddresses: deps.resolveHostAddresses,
+    const refusal = await modelAddressRefusal({
+      baseUrl: provider.base_url,
+      resolveAddresses: deps.resolveHostAddresses,
     });
     if (refusal !== undefined) {
-      return c.json(refusal, 400);
+      return c.json({ error: { message: refusal } }, 400);
     }
     try {
       // Create has no prior row; redacted keep resolves to MissingStoredSecretError → 400.
@@ -300,15 +237,14 @@ export function createModelProvidersRouter<TTransaction>(deps: ModelProvidersRou
     if (deps.envManagedNames.has(name)) {
       return c.json(envManagedConflict(name), 409);
     }
-    // Before the transaction: the checks resolve the address, and remote I/O stays out of the
+    // Before the transaction: the check resolves the address, and remote I/O stays out of the
     // write transaction.
-    const refusal = await modelBaseUrlRefusal({
-      manifest: provider,
-      localModels: deps.localModels,
-      resolveHostAddresses: deps.resolveHostAddresses,
+    const refusal = await modelAddressRefusal({
+      baseUrl: provider.base_url,
+      resolveAddresses: deps.resolveHostAddresses,
     });
     if (refusal !== undefined) {
-      return c.json(refusal, 400);
+      return c.json({ error: { message: refusal } }, 400);
     }
     try {
       // Lock → resolve secret from that snapshot → upsert, all in one txn so concurrent keep

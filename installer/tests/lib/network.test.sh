@@ -79,7 +79,7 @@ test_cloud_server_stays_on_this_computer() {
   assert_flat_contains "$OUT$ERR" "This looks like a cloud server"
   assert_flat_contains "$OUT$ERR" "--home-network"
   assert_eq "$(reg_value main origins)" ""
-  assert_not_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "'192.168.1.20:"
+  assert_not_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "192.168.1.20"
   sandbox_drop
   sandbox_new_open
   fixture_full_machine
@@ -146,7 +146,7 @@ test_public_addresses_are_not_used_over_http() {
   assert_rc 0
   assert_eq "$(env_value main ALLOWED_ORIGINS)" "http://127.0.0.1:8791,http://localhost:8791,https://192.168.1.20:8443"
   assert_not_contains "$(cat "$AMAN_HOME/instances/main/dex.yaml")" "203.0.113.9"
-  assert_not_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "'203.0.113.9:" "a public address is never published on"
+  assert_not_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "203.0.113.9" "a public address is never published on"
   assert_not_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "- '8791:8790'"
   sandbox_drop
 }
@@ -297,7 +297,7 @@ test_carrier_grade_nat_is_public_without_tailscale() {
   assert_flat_contains "$OUT" "--tls caddy"
   install_machine
   assert_eq "$(env_value main ALLOWED_ORIGINS)" "http://127.0.0.1:8791,http://localhost:8791,https://192.168.1.20:8443"
-  assert_not_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "'100.64.5.5:"
+  assert_not_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "100.64.5.5"
   sandbox_drop
   sandbox_new_open
   fixture_network 192.168.1.20 tailscale0:100.64.5.5
@@ -315,7 +315,7 @@ test_a_name_only_address_is_not_published_on() {
   INSTALL_EXTRA=(--address 10.9.8.7 --address 192.168.1.20)
   install_machine
   assert_contains "$(env_value main ALLOWED_ORIGINS)" "https://10.9.8.7:8443"
-  assert_not_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "'10.9.8.7:"
+  assert_not_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "10.9.8.7"
   assert_eq "$(env_value main ALLOWED_ORIGINS | tr ',' '\n' | grep -c '192.168.1.20')" 1 "a repeated address is listed once"
   sandbox_drop
 }
@@ -505,7 +505,7 @@ test_local_only_on_a_rerun_puts_an_instance_back() {
   assert_eq "$(env_value main ALLOWED_ORIGINS)" ""
   assert_eq "$(reg_value main origins)" ""
   assert_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "- '127.0.0.1:8791:8790'"
-  assert_not_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "'192.168.1.20:"
+  assert_not_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "192.168.1.20"
   assert_eq "$(printf '%s\n' "$(cat "$AMAN_HOME/instances/main/dex.yaml")" | grep -c 'api/v1/auth/callback')" 1
   run_install --yes
   assert_flat_contains "$OUT" "Nothing to do." "a plain re-run does not open it again"
@@ -579,7 +579,7 @@ test_a_rerun_on_a_cloud_server_keeps_the_recorded_reach() {
   assert_flat_contains "$OUT$ERR" "This looks like a cloud server"
   assert_eq "$(reg_value main origins)" "" "an instance with no recorded reach is not opened on a cloud server"
   assert_eq "$(grep -c '^origins=' "$AMAN_HOME/state/instances/main.conf")" 1 "the choice is recorded"
-  assert_not_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "'192.168.1.20:"
+  assert_not_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "192.168.1.20"
   unset AMAN_DMI_DIR
   sandbox_drop
 }

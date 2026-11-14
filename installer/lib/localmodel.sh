@@ -1,9 +1,10 @@
 # shellcheck shell=bash
-# The local model bridge: a model server on this computer that an instance reaches over plumbing of its own, at
-# http://aman-local-model:PORT, instead of at one of this computer's network addresses. Those addresses can stop
-# answering the instance's containers after a network change, such as an update to Tailscale, and a model that listens
-# only on 127.0.0.1 never answers at them at all. The owner names each port with aman local-model; the instance carries
-# only those ports. Needs lib/network.sh, lib/registry.sh, lib/shared.sh and lib/tls.sh.
+# The local model bridge, an optional way to reach a model server on this computer: an instance reaches it over
+# plumbing of its own, at http://aman-local-model:PORT, instead of at one of this computer's network addresses. Those
+# addresses still work for a model, but they can stop answering the instance's containers after a network change, such
+# as an update to Tailscale, and a model that listens only on 127.0.0.1 never answers at them at all. The owner names
+# each port with aman local-model; the instance carries only those ports. Needs lib/registry.sh, lib/shared.sh and
+# lib/tls.sh.
 
 # The ports an instance's bridge carries, comma-separated, in the order they were added.
 local_model_ports() { reg_get "$1" local_models; }
@@ -36,43 +37,21 @@ local_model_host_network() {
   return 0
 }
 
-# This computer's own addresses and names, comma-separated: its loopback names, every address it has on a network
-# (Tailscale's included), its names and its Tailscale name. The app uses the list only to tell that a model address is
-# this computer. The hosts given with --address are left out, since one may name another machine that forwards here.
-this_computer_addresses() {
-  local host list=''
-  for host in 127.0.0.1 localhost host.docker.internal $(network_ipv4_addresses) $(network_tailscale_ip) $(network_hostname) \
-    $(network_tailscale_name); do
-    host=$(lowercase "$host")
-    case ",$list," in *",$host,"*) continue ;; esac
-    list=${list:+$list,}$host
-  done
-  if [ -n "$(network_hostname)" ]; then
-    host="$(network_hostname).local"
-    case ",$list," in *",$host,"*) ;; *) list="$list,$host" ;; esac
-  fi
-  printf '%s' "$list"
-}
-
 # The template values for an instance's compose file, as KEY=value arguments for render_template.
 local_model_render_args() { # name
-  local name=$1 ports available=0 on=0 hostnet=0 desktop=0 target='' addresses=''
+  local name=$1 ports on=0 hostnet=0 desktop=0 target=''
   ports=$(local_model_ports "$name")
-  if local_model_bridge_available; then
-    available=1
-    addresses=$(this_computer_addresses)
-    if [ -n "$ports" ]; then
-      on=1
-      if local_model_host_network; then
-        hostnet=1
-        target=127.0.0.1
-      else
-        desktop=1
-        target=host.docker.internal
-      fi
+  if local_model_bridge_available && [ -n "$ports" ]; then
+    on=1
+    if local_model_host_network; then
+      hostnet=1
+      target=127.0.0.1
+    else
+      desktop=1
+      target=host.docker.internal
     fi
   fi
-  printf '%s\n' "IF_LOCAL_BRIDGE=$available" "THIS_COMPUTER_ADDRESSES=$addresses" "IF_LOCAL_MODEL=$on" "LOCAL_MODEL_PORTS=$ports" \
+  printf '%s\n' "IF_LOCAL_MODEL=$on" "LOCAL_MODEL_PORTS=$ports" \
     "IF_LOCAL_MODEL_HOSTNET=$hostnet" "IF_LOCAL_MODEL_DESKTOP=$desktop" "LOCAL_MODEL_TARGET=$target"
 }
 

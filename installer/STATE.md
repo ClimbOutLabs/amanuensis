@@ -76,9 +76,10 @@ for it, and a `.env` without the provider line opens nothing. See
 
 `LOCAL_MODEL_ENDPOINTS` is the owner's line below the managed block too: the
 exact `host:port` model addresses the app may reach although they are on this
-computer or on the instance's own networks. `aman local-model PORT` adds
-`aman-local-model:PORT` to it, since the local model bridge sits on a network of
-the instance, and `--remove` takes that one entry out. The command rewrites only
+computer or on the instance's own networks. `aman local-model PORT`, which sets
+up the optional local model bridge, adds `aman-local-model:PORT` to it, since
+the bridge sits on a network of the instance, and `--remove` takes that one
+entry out. The command rewrites only
 the last line Compose reads for the key, in place, or adds one at the end of the
 file when there is none. It keeps every other entry and never adds one twice,
 and drops the line when its list ends up empty. The instance starts again
