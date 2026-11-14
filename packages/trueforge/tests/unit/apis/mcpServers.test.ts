@@ -16,15 +16,27 @@ import { SqliteMcpServerStore } from '../../../src/db/sqlite/mcp-server-store/Sq
 import { SqliteMcpToolGrantStore } from '../../../src/db/sqlite/mcp-tool-grant-store/SqliteMcpToolGrantStore';
 import { SqliteOAuthTokenStore } from '../../../src/db/sqlite/token-store/SqliteOAuthTokenStore';
 import { mcpOAuthCallbackUrl } from '../../../src/mcp/auth/mcpOAuthHelpers';
-import {
-  INERT_ASK_MEMORY_TOOL,
-  INERT_ECHO_TOOL,
-  INERT_READ_TOOL,
-  INERT_SEARCH_MEMORY_TOOL,
-  INERT_UNANNOTATED_TOOL,
-  INERT_WRITE_TOOL,
-  startInertMcpServer,
-} from '../../fixtures/inertMcpServer';
+import { RequestErrorResponseSchema } from '../../../src/schemas/errors';
+
+// Name resolution is stubbed for the whole suite: a name with 'unresolvable' in it does not
+// resolve, localhost resolves to loopback, and every other name resolves to a public address.
+// The address checks judge names by what they resolve to, so the suite's answer cannot depend
+// on the DNS of the machine running it.
+jest.mock('node:dns/promises', () => {
+  const actual = jest.requireActual<typeof import('node:dns/promises')>('node:dns/promises');
+  return {
+    ...actual,
+    lookup: async (hostname: string, options?: { all?: boolean | undefined }) => {
+      if (hostname.includes('unresolvable')) {
+        const error = new Error(`getaddrinfo ENOTFOUND ${hostname}`);
+        Reflect.set(error, 'code', 'ENOTFOUND');
+        throw error;
+      }
+      const entry = { address: hostname === 'localhost' ? '127.0.0.1' : '93.184.216.34', family: 4 };
+      return options?.all === true ? [entry] : entry;
+    },
+  };
+});
 
 const putBody = {
   type: 'remote' as const,
@@ -63,30 +75,6 @@ const putBodyWithHeaderAuthWire = {
     headers: { Authorization: HEADER_TOKEN_REDACTED },
   },
 };
-
-/** Seeded and removed inside one test: the memory-provider flag is exclusive across this suite. */
-const PROVIDER_TOOLS_LISTING_NAME = 'tools-listing-memory-provider-mcp';
-
-const HINDSIGHT_MCP_URL = 'https://hindsight.example.com/mcp/aman/';
-/** REST endpoint the memory-provider check dials for HINDSIGHT_MCP_URL (never the MCP surface). */
-const HINDSIGHT_RECALL_URL = 'https://hindsight.example.com/v1/default/banks/aman/memories/recall';
-
-function memoryRecallResponse(body: unknown = { results: [], entities: {} }, status = 200): Response {
-  const text = JSON.stringify(body);
-  return new Response(text, {
-    status,
-    headers: { 'content-length': String(Buffer.byteLength(text, 'utf8')), 'content-type': 'application/json' },
-  });
-}
-
-/**
- * Recall answers for the save-time check; a test overrides this to script a provider failure, or
- * to land a concurrent write in the window the check holds open.
- */
-let hindsightRecall: () => Response | Promise<Response> = () => memoryRecallResponse();
-const hindsightRecallCalls: string[] = [];
-/** The request options each save-time check was dialed with, in order. */
-const hindsightRecallInits: (RequestInit | undefined)[] = [];
 
 function wrapManifest(manifest: unknown) {
   return { manifest };
@@ -129,16 +117,10 @@ describe('mcp-servers routers', () => {
 
   beforeAll(async () => {
     // Eager DCR dials the authorization server. Fail that outbound call fast so hermetic tests
-    // without an OAuth mock hit the "DCR before write" path and must not create rows. Two
-    // exceptions: the memory provider's REST recall endpoint, which the save-time check dials,
-    // and loopback, where this suite's own MCP fixture listens.
+    // without an OAuth mock hit the "DCR before write" path and must not create rows. The one
+    // exception is loopback, where this suite's own MCP fixture listens.
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-      if (url === HINDSIGHT_RECALL_URL) {
-        hindsightRecallCalls.push(url);
-        hindsightRecallInits.push(init);
-        return await hindsightRecall();
-      }
       if (new URL(url).hostname === '127.0.0.1') {
         return await originalFetch(input, init);
       }
@@ -209,55 +191,6 @@ describe('mcp-servers routers', () => {
     globalThis.fetch = originalFetch;
   });
 
-  it('GET /{name}/tools shows a memory provider full surface, including the tools the model is not given', async () => {
-    // The turn resolver narrows the memory provider's mount to `@read-only` because the host
-    // does the retaining. This endpoint is a different path: it dials the connector directly, so
-    // the user's own settings view must keep showing everything the connector actually offers.
-    const inert = await startInertMcpServer();
-    try {
-      const name = PROVIDER_TOOLS_LISTING_NAME;
-      await mcpServerStore.upsertServer({
-        tenant_id: TENANT_ID,
-        name,
-        manifest: {
-          type: 'remote',
-          name,
-          // Seeded through the store, not the settings router: the save-time provider check dials
-          // a Hindsight REST API this MCP-only fixture does not serve.
-          url: `${inert.url}/aman`,
-          description: 'Memory provider whose tools listing must stay complete.',
-          memory_provider: true,
-        },
-        first_party: false,
-      });
-
-      const response = await mcpServersRouter.request(`/${name}/tools`);
-
-      expect(response.status).toBe(200);
-      const body = (await response.json()) as { data: { name: string }[] };
-      const listed = body.data.map(tool => tool.name).sort((a, b) => a.localeCompare(b));
-      expect(listed).toEqual(
-        [
-          INERT_ASK_MEMORY_TOOL,
-          INERT_ECHO_TOOL,
-          INERT_READ_TOOL,
-          INERT_SEARCH_MEMORY_TOOL,
-          INERT_UNANNOTATED_TOOL,
-          INERT_WRITE_TOOL,
-        ].sort((a, b) => a.localeCompare(b)),
-      );
-      // Named on their own: these two are precisely what the resolver withholds from the model,
-      // so a future change that hides them here would be hiding them from the user as well.
-      expect(listed).toContain(INERT_WRITE_TOOL);
-      expect(listed).toContain(INERT_UNANNOTATED_TOOL);
-    } finally {
-      // The store is shared across this suite, and only one connector may hold the memory-provider
-      // flag: leaving this row behind would 409 every later test that enables the flag elsewhere.
-      await mcpServerStore.deleteServer({ tenant_id: TENANT_ID, name: PROVIDER_TOOLS_LISTING_NAME });
-      await inert.close();
-    }
-  });
-
   it('GET /catalogs/mcp-servers returns the shipped catalog verbatim', async () => {
     const response = await catalogRouter.request('/mcp-servers');
     expect(response.status).toBe(200);
@@ -281,44 +214,6 @@ describe('mcp-servers routers', () => {
     expect(await list.json()).toEqual({
       data: [configured(putBody, 'not_required')],
     });
-  });
-
-  it('rejects memory tuning outside its bounds or with an unknown field', async () => {
-    const bad = [
-      { recall_timeout_ms: 499 },
-      { recall_timeout_ms: 120_001 },
-      { recall_query_window: 0 },
-      { reflect_budget: 'ultra' },
-      { curated_enabled: 'yes' },
-      { unknown_knob: 1 },
-    ];
-    for (const memory_settings of bad) {
-      const response = await settingsRouter.request(
-        '/',
-        putInit(wrapManifest({ ...putBody, name: 'memory-tuning-bad', memory_settings })),
-      );
-      expect(response.status).toBe(400);
-    }
-  });
-
-  it('persists memory tuning on the manifest and returns it', async () => {
-    const memory_settings = {
-      recall_timeout_ms: 6000,
-      recall_query_window: 5,
-      curated_enabled: true,
-      curated_max_models: 3,
-      curated_max_tokens: 512,
-      reflect_enabled: false,
-      reflect_budget: 'low',
-      reflect_max_tokens: 512,
-      reflect_timeout_ms: 8000,
-    };
-    const name = 'memory-tuning';
-    const response = await settingsRouter.request('/', putInit(wrapManifest({ ...putBody, name, memory_settings })));
-    expect(response.status).toBe(200);
-    const stored = await mcpServerStore.getServer({ tenant_id: TENANT_ID, name });
-    expect(stored?.manifest.type === 'remote' ? stored.manifest.memory_settings : undefined).toEqual(memory_settings);
-    await settingsRouter.request(`/${name}`, { method: 'DELETE' });
   });
 
   it('POST creates a server and returns 409 on name clash', async () => {
@@ -832,44 +727,6 @@ describe('mcp-servers routers', () => {
     });
   });
 
-  it('GET / omits the memory provider from the chat list while settings still shows it', async () => {
-    // The host owns recall and retention for this connector, so attaching it to a chat has no
-    // upside; it is filtered out of the chat projection rather than left for a user to avoid.
-    const name = 'chat-hidden-memory-provider-mcp';
-    try {
-      await mcpServerStore.upsertServer({
-        tenant_id: TENANT_ID,
-        name,
-        manifest: {
-          type: 'remote',
-          name,
-          url: 'https://hindsight.example.com/mcp/hidden/',
-          description: 'Memory provider that must not be offered in chats.',
-          memory_provider: true,
-        },
-        first_party: false,
-      });
-
-      const chat = await mcpServersRouter.request('/');
-      expect(chat.status).toBe(200);
-      const chatBody = (await chat.json()) as { data: { name: string }[] };
-      const chatNames = chatBody.data.map(server => server.name);
-      expect(chatNames).not.toContain(name);
-      // A connector without the flag is untouched by the filter, so the picker still has content.
-      expect(chatNames).toContain(putBody.name);
-      expect(chatNames).toContain(putBodyWithDcr.name);
-
-      const settings = await settingsRouter.request('/');
-      expect(settings.status).toBe(200);
-      const settingsBody = (await settings.json()) as { data: { name: string }[] };
-      // Still fully present where it is configured, flagged, tested, and its tools are listed.
-      expect(settingsBody.data.map(server => server.name)).toContain(name);
-    } finally {
-      // Shared store, exclusive flag: leaving this row behind would 409 later enable-elsewhere tests.
-      await mcpServerStore.deleteServer({ tenant_id: TENANT_ID, name });
-    }
-  });
-
   it('GET /{name} on the chat router returns the slim projection with live auth_status', async () => {
     const missing = await mcpServersRouter.request('/missing-server');
     expect(missing.status).toBe(404);
@@ -1348,433 +1205,6 @@ describe('mcp-servers routers', () => {
     });
   });
 
-  describe('memory provider single-flag enforcement', () => {
-    const hindsightUrl = HINDSIGHT_MCP_URL;
-
-    function hindsightManifest(name: string, extra: Record<string, unknown> = {}) {
-      return {
-        type: 'remote' as const,
-        name,
-        url: hindsightUrl,
-        description: `Hindsight connector "${name}".`,
-        ...extra,
-      };
-    }
-
-    afterEach(() => {
-      hindsightRecall = () => memoryRecallResponse();
-    });
-
-    it('PUT creates the first memory provider without conflict', async () => {
-      const response = await settingsRouter.request(
-        '/',
-        putInit(wrapManifest(hindsightManifest('hindsight-primary', { memory_provider: true }))),
-      );
-      expect(response.status).toBe(200);
-      expect(await response.json()).toEqual({
-        data: configured(hindsightManifest('hindsight-primary', { memory_provider: true }), 'not_required'),
-      });
-    });
-
-    it('POST create rejects a second memory provider with 409 naming the existing one', async () => {
-      const response = await settingsRouter.request(
-        '/',
-        postInit(wrapManifest(hindsightManifest('hindsight-secondary', { memory_provider: true }))),
-      );
-      expect(response.status).toBe(409);
-      expect(await response.json()).toEqual({
-        error: { message: 'memory provider already set on hindsight-primary; disable it first' },
-      });
-      expect(await mcpServerStore.getServer({ tenant_id: TENANT_ID, name: 'hindsight-secondary' })).toBeUndefined();
-    });
-
-    it('PUT rejects flagging a second, already-existing server as memory provider with 409', async () => {
-      // hindsight-secondary exists without the flag so this exercises the update path.
-      const created = await settingsRouter.request(
-        '/',
-        putInit(wrapManifest(hindsightManifest('hindsight-secondary'))),
-      );
-      expect(created.status).toBe(200);
-
-      const response = await settingsRouter.request(
-        '/',
-        putInit(wrapManifest(hindsightManifest('hindsight-secondary', { memory_provider: true }))),
-      );
-      expect(response.status).toBe(409);
-      expect(await response.json()).toEqual({
-        error: { message: 'memory provider already set on hindsight-primary; disable it first' },
-      });
-
-      const stored = await mcpServerStore.getServer({ tenant_id: TENANT_ID, name: 'hindsight-secondary' });
-      expect(stored?.manifest.type === 'remote' ? stored.manifest.memory_provider : undefined).toBeUndefined();
-    });
-
-    it('PUT re-saving the server that already holds the flag is not a conflict with itself', async () => {
-      const response = await settingsRouter.request(
-        '/',
-        putInit(
-          wrapManifest(
-            hindsightManifest('hindsight-primary', { memory_provider: true, description: 'Updated description.' }),
-          ),
-        ),
-      );
-      expect(response.status).toBe(200);
-      expect(await response.json()).toMatchObject({
-        data: { name: 'hindsight-primary', manifest: { memory_provider: true } },
-      });
-    });
-
-    it('supports the two-step UI flow: disable on the holder, then enable on another connector', async () => {
-      const disable = await settingsRouter.request(
-        '/',
-        putInit(wrapManifest(hindsightManifest('hindsight-primary', { description: 'Updated description.' }))),
-      );
-      expect(disable.status).toBe(200);
-      const disableBody = (await disable.json()) as { data: { manifest: { memory_provider?: boolean } } };
-      expect(disableBody.data.manifest.memory_provider).toBeUndefined();
-
-      const enable = await settingsRouter.request(
-        '/',
-        putInit(wrapManifest(hindsightManifest('hindsight-secondary', { memory_provider: true }))),
-      );
-      expect(enable.status).toBe(200);
-      expect(await enable.json()).toMatchObject({
-        data: { name: 'hindsight-secondary', manifest: { memory_provider: true } },
-      });
-    });
-  });
-
-  describe('memory provider connection check', () => {
-    const REST_401_DETAIL = 'Authentication failed: Invalid API key';
-
-    function hindsightManifest(name: string, extra: Record<string, unknown> = {}) {
-      return {
-        type: 'remote' as const,
-        name,
-        url: HINDSIGHT_MCP_URL,
-        description: `Hindsight connector "${name}".`,
-        ...extra,
-      };
-    }
-
-    function rejectRestWith401(): void {
-      hindsightRecall = () => memoryRecallResponse({ detail: REST_401_DETAIL }, 401);
-    }
-
-    beforeAll(async () => {
-      // Neutralize whichever connector still holds the flag from the suite above, so these
-      // tests' own flagged connectors are checked rather than rejected as a duplicate provider.
-      const existing = await mcpServerStore.listServers({ tenant_id: TENANT_ID, names: undefined });
-      for (const holder of existing.filter(
-        (server): server is typeof server & { manifest: { type: 'remote'; memory_provider: true } } =>
-          server.manifest.type === 'remote' && server.manifest.memory_provider === true,
-      )) {
-        const { memory_provider: _flag, ...withoutFlag } = holder.manifest;
-        await mcpServerStore.upsertServer({
-          tenant_id: TENANT_ID,
-          name: holder.name,
-          manifest: withoutFlag,
-          first_party: false,
-        });
-      }
-    });
-
-    afterEach(() => {
-      hindsightRecall = () => memoryRecallResponse();
-    });
-
-    it('rejects a PUT that flags a provider whose REST API refuses the credential, and writes nothing', async () => {
-      rejectRestWith401();
-
-      const response = await settingsRouter.request(
-        '/',
-        putInit(wrapManifest(hindsightManifest('hindsight-rest-401', { memory_provider: true }))),
-      );
-
-      expect(response.status).toBe(422);
-      expect(await response.json()).toEqual({
-        error: { message: `memory provider check failed: recall returned HTTP 401: ${REST_401_DETAIL}` },
-      });
-      expect(await mcpServerStore.getServer({ tenant_id: TENANT_ID, name: 'hindsight-rest-401' })).toBeUndefined();
-    });
-
-    it('rejects a create the same way, naming the upstream reason', async () => {
-      rejectRestWith401();
-
-      const response = await settingsRouter.request(
-        '/',
-        postInit(wrapManifest(hindsightManifest('hindsight-create-401', { memory_provider: true }))),
-      );
-
-      expect(response.status).toBe(422);
-      expect(await response.json()).toEqual({
-        error: { message: `memory provider check failed: recall returned HTTP 401: ${REST_401_DETAIL}` },
-      });
-      expect(await mcpServerStore.getServer({ tenant_id: TENANT_ID, name: 'hindsight-create-401' })).toBeUndefined();
-    });
-
-    it.each([
-      ['PUT', putInit],
-      ['POST', postInit],
-    ])(
-      'rejects a %s whose provider answers the check with a redirect, and does not follow it',
-      async (method, init) => {
-        hindsightRecall = () =>
-          new Response(null, {
-            status: 308,
-            headers: { location: 'https://other.example.com/v1/default/banks/aman/memories/recall?key=hunter2' },
-          });
-        const name = `hindsight-redirect-${method.toLowerCase()}`;
-        const dialed = hindsightRecallInits.length;
-
-        const response = await settingsRouter.request(
-          '/',
-          init(wrapManifest(hindsightManifest(name, { memory_provider: true }))),
-        );
-
-        expect(response.status).toBe(422);
-        expect(await response.json()).toEqual({
-          error: {
-            message:
-              'memory provider check failed: recall returned HTTP 308, a redirect to https://other.example.com; redirects are not followed',
-          },
-        });
-        expect(await mcpServerStore.getServer({ tenant_id: TENANT_ID, name })).toBeUndefined();
-        expect(hindsightRecallInits.slice(dialed)).toEqual([expect.objectContaining({ redirect: 'manual' })]);
-      },
-    );
-
-    it('leaves an existing provider untouched when a later edit fails the check', async () => {
-      const enable = await settingsRouter.request(
-        '/',
-        putInit(wrapManifest(hindsightManifest('hindsight-edit', { memory_provider: true }))),
-      );
-      expect(enable.status).toBe(200);
-
-      rejectRestWith401();
-      const rotate = await settingsRouter.request(
-        '/',
-        putInit(
-          wrapManifest(
-            hindsightManifest('hindsight-edit', {
-              memory_provider: true,
-              auth: { type: 'header', headers: { Authorization: 'Bearer rotated-and-wrong' } },
-            }),
-          ),
-        ),
-      );
-
-      expect(rotate.status).toBe(422);
-      const stored = await mcpServerStore.getServer({ tenant_id: TENANT_ID, name: 'hindsight-edit' });
-      expect(stored?.manifest.auth).toBeUndefined();
-
-      await settingsRouter.request(`/hindsight-edit`, { method: 'DELETE' });
-    });
-
-    it('never dials the provider for a connector that is not the memory provider', async () => {
-      const before = hindsightRecallCalls.length;
-
-      const response = await settingsRouter.request('/', putInit(wrapManifest(hindsightManifest('hindsight-plain'))));
-
-      expect(response.status).toBe(200);
-      expect(hindsightRecallCalls.length).toBe(before);
-
-      await settingsRouter.request(`/hindsight-plain`, { method: 'DELETE' });
-    });
-
-    it('POST /{name}/memory-check reports the structured result without touching the row', async () => {
-      const created = await settingsRouter.request(
-        '/',
-        putInit(wrapManifest(hindsightManifest('hindsight-checkable', { memory_provider: true }))),
-      );
-      expect(created.status).toBe(200);
-      const before = await mcpServerStore.getServer({ tenant_id: TENANT_ID, name: 'hindsight-checkable' });
-
-      const healthy = await mcpServersRouter.request('/hindsight-checkable/memory-check', { method: 'POST' });
-      expect(healthy.status).toBe(200);
-      expect(await healthy.json()).toEqual({ data: { status: 'ok' } });
-
-      rejectRestWith401();
-      const failed = await mcpServersRouter.request('/hindsight-checkable/memory-check', { method: 'POST' });
-      expect(failed.status).toBe(200);
-      expect(await failed.json()).toEqual({
-        data: {
-          status: 'failed',
-          code: 'http_error',
-          http_status: 401,
-          detail: REST_401_DETAIL,
-          reason: `recall returned HTTP 401: ${REST_401_DETAIL}`,
-        },
-      });
-
-      const after = await mcpServerStore.getServer({ tenant_id: TENANT_ID, name: 'hindsight-checkable' });
-      expect(after?.manifest).toEqual(before?.manifest);
-
-      await settingsRouter.request(`/hindsight-checkable`, { method: 'DELETE' });
-    });
-
-    it('POST /{name}/memory-check reports a URL memory could never use, and 404s an unknown name', async () => {
-      const created = await settingsRouter.request(
-        '/',
-        putInit(
-          wrapManifest({
-            type: 'remote' as const,
-            name: 'hindsight-bad-url',
-            url: 'https://hindsight.example.com/sse',
-            description: 'Connector whose URL is not a single-bank Hindsight MCP URL.',
-          }),
-        ),
-      );
-      expect(created.status).toBe(200);
-
-      const response = await mcpServersRouter.request('/hindsight-bad-url/memory-check', { method: 'POST' });
-      expect(response.status).toBe(200);
-      expect(await response.json()).toMatchObject({ data: { status: 'failed', code: 'invalid_url' } });
-
-      const missing = await mcpServersRouter.request('/nope/memory-check', { method: 'POST' });
-      expect(missing.status).toBe(404);
-
-      await settingsRouter.request(`/hindsight-bad-url`, { method: 'DELETE' });
-    });
-
-    it('rejects a header connector switched to DCR rather than passing on the header it replaces', async () => {
-      const headerAuth = { type: 'header' as const, headers: { Authorization: 'Bearer accepted-by-rest' } };
-      const created = await settingsRouter.request(
-        '/',
-        putInit(
-          wrapManifest(hindsightManifest('hindsight-header-to-dcr', { memory_provider: true, auth: headerAuth })),
-        ),
-      );
-      expect(created.status).toBe(200);
-
-      const before = hindsightRecallCalls.length;
-      const response = await settingsRouter.request(
-        '/',
-        putInit(
-          wrapManifest(hindsightManifest('hindsight-header-to-dcr', { memory_provider: true, auth: { type: 'dcr' } })),
-        ),
-      );
-
-      expect(response.status).toBe(422);
-      expect(await response.json()).toEqual({
-        error: {
-          message:
-            'memory provider check failed: connector "hindsight-header-to-dcr" must be saved and authorized before it can be checked',
-        },
-      });
-      // The header the write was about to drop is never dialed on the DCR manifest's behalf.
-      expect(hindsightRecallCalls.length).toBe(before);
-      const stored = await mcpServerStore.getServer({ tenant_id: TENANT_ID, name: 'hindsight-header-to-dcr' });
-      expect(stored?.manifest.auth).toEqual(headerAuth);
-
-      await settingsRouter.request('/hindsight-header-to-dcr', { method: 'DELETE' });
-    });
-
-    it('rejects a DCR URL change rather than passing on the token the write would delete', async () => {
-      const dcrProvider = {
-        type: 'remote' as const,
-        name: 'hindsight-dcr-url',
-        url: HINDSIGHT_MCP_URL,
-        description: 'Authorized Hindsight DCR connector.',
-        auth: { type: 'dcr' as const },
-        memory_provider: true,
-      };
-      const record = await mcpServerStore.upsertServer({
-        tenant_id: TENANT_ID,
-        name: dcrProvider.name,
-        manifest: dcrProvider,
-        first_party: false,
-      });
-      await mcpServerStore.saveClient({
-        id: record.id,
-        record: {
-          server: {
-            authorizationEndpoint: 'https://auth.example.com/authorize',
-            tokenEndpoint: 'https://auth.example.com/token',
-            codeChallengeMethodsSupported: ['S256'],
-          },
-          client: { clientId: 'seed-client', clientSecret: 'seed-secret' },
-        },
-      });
-      await tokenStore.saveToken({
-        id: record.id,
-        userRef: STANDALONE_REQUEST_CONTEXT.subject.id,
-        token: {
-          accessToken: 'access-for-the-old-url',
-          refreshToken: 'refresh-1',
-          expiresAt: '2099-01-01T00:00:00.000Z',
-          scope: null,
-        },
-      });
-
-      const before = hindsightRecallCalls.length;
-      const response = await settingsRouter.request(
-        '/',
-        putInit(wrapManifest({ ...dcrProvider, url: 'https://hindsight.example.com/mcp/moved/' })),
-      );
-
-      expect(response.status).toBe(422);
-      expect(await response.json()).toEqual({
-        error: {
-          message:
-            'memory provider check failed: changing the URL of "hindsight-dcr-url" clears its authorization, so it must be authorized again before it can serve memory',
-        },
-      });
-      // A URL change deletes every token for the row, so the stored one must not vouch for it.
-      expect(hindsightRecallCalls.length).toBe(before);
-      const stored = await mcpServerStore.getServer({ tenant_id: TENANT_ID, name: dcrProvider.name });
-      expect(stored?.manifest.url).toBe(HINDSIGHT_MCP_URL);
-
-      await settingsRouter.request(`/${dcrProvider.name}`, { method: 'DELETE' });
-    });
-
-    it('refuses to commit a save whose stored credential changed while the check was running', async () => {
-      const name = 'hindsight-raced';
-      const original = {
-        type: 'remote' as const,
-        name,
-        url: HINDSIGHT_MCP_URL,
-        description: 'Hindsight connector checked under a race.',
-        memory_provider: true,
-        auth: { type: 'header' as const, headers: { Authorization: 'Bearer the-probed-value' } },
-      };
-      const created = await settingsRouter.request('/', putInit(wrapManifest(original)));
-      expect(created.status).toBe(200);
-
-      const raced = {
-        ...original,
-        description: 'Rotated by a concurrent save.',
-        auth: { type: 'header' as const, headers: { Authorization: 'Bearer rotated-concurrently' } },
-      };
-      hindsightRecall = async () => {
-        // Lands after the unlocked read the check resolved from, before the write txn locks.
-        await mcpServerStore.upsertServer({ tenant_id: TENANT_ID, name, manifest: raced, first_party: false });
-        return memoryRecallResponse();
-      };
-
-      const response = await settingsRouter.request(
-        '/',
-        putInit(
-          wrapManifest({
-            ...original,
-            description: 'Saved by the request that raced.',
-            auth: { type: 'header' as const, headers: { Authorization: HEADER_TOKEN_REDACTED } },
-          }),
-        ),
-      );
-
-      expect(response.status).toBe(409);
-      expect(await response.json()).toEqual({
-        error: { message: `connector "${name}" changed while its memory provider check was running; retry the save` },
-      });
-      // Nothing of the racing save landed: the credential it probed is no longer the stored one.
-      const stored = await mcpServerStore.getServer({ tenant_id: TENANT_ID, name });
-      expect(stored?.manifest).toEqual(raced);
-
-      await settingsRouter.request(`/${name}`, { method: 'DELETE' });
-    });
-  });
-
   describe('DELETE /{name}', () => {
     it('deletes a server; a subsequent GET 404s', async () => {
       const body = {
@@ -1836,36 +1266,6 @@ describe('mcp-servers routers', () => {
 
       const get = await settingsRouter.request(`/${dcrBody.name}`);
       expect(get.status).toBe(404);
-    });
-
-    it('deleting the flagged memory provider leaves no provider configured', async () => {
-      // Neutralize whichever connector still holds the flag from the suite above, so creating
-      // this test's own flagged connector does not 409.
-      const existing = await mcpServerStore.listServers({ tenant_id: TENANT_ID, names: undefined });
-      const holder = existing.find(
-        server => server.manifest.type === 'remote' && server.manifest.memory_provider === true,
-      );
-      if (holder !== undefined && holder.manifest.type === 'remote') {
-        const { memory_provider: _flag, ...withoutFlag } = holder.manifest;
-        await settingsRouter.request('/', putInit(wrapManifest(withoutFlag)));
-      }
-
-      const memoryProviderBody = {
-        type: 'remote' as const,
-        name: 'delete-target-memory-provider-mcp',
-        url: 'https://hindsight.example.com/mcp/aman/',
-        description: 'Memory provider created only to be deleted.',
-        memory_provider: true,
-      };
-      const put = await settingsRouter.request('/', putInit(wrapManifest(memoryProviderBody)));
-      expect(put.status).toBe(200);
-
-      const response = await settingsRouter.request(`/${memoryProviderBody.name}`, { method: 'DELETE' });
-      expect(response.status).toBe(200);
-
-      const list = await settingsRouter.request('/');
-      const listBody = (await list.json()) as { data: { name: string }[] };
-      expect(listBody.data.find(server => server.name === memoryProviderBody.name)).toBeUndefined();
     });
   });
 
@@ -1961,6 +1361,114 @@ describe('mcp-servers routers', () => {
       expect(response.status).toBe(200);
       for (const created_by of [STANDALONE_REQUEST_CONTEXT.subject.id, OTHER_USER]) {
         expect(await toolGrantStore.hasToolGrant(grantFor({ created_by, tool_name: 'lookup_note' }))).toBe(false);
+      }
+    });
+  });
+
+  describe('the address check', () => {
+    function remoteBody(name: string, url: string) {
+      return { type: 'remote' as const, name, url, description: 'Address check case.' };
+    }
+
+    async function errorMessage(response: Response): Promise<string> {
+      return RequestErrorResponseSchema.parse(await response.json()).error.message;
+    }
+
+    it('refuses to create a server at a loopback address, and saves nothing', async () => {
+      const response = await settingsRouter.request(
+        '/',
+        postInit(wrapManifest(remoteBody('loopback-create', 'http://127.0.0.1:9999/mcp'))),
+      );
+
+      expect(response.status).toBe(400);
+      expect(await errorMessage(response)).toContain('home network or the internet');
+      const missing = await settingsRouter.request('/loopback-create');
+      expect(missing.status).toBe(404);
+    });
+
+    it('refuses to replace a server with the cloud metadata address', async () => {
+      const response = await settingsRouter.request(
+        '/',
+        putInit(wrapManifest(remoteBody('metadata-put', 'http://169.254.169.254/mcp'))),
+      );
+
+      expect(response.status).toBe(400);
+      expect(await errorMessage(response)).toContain(
+        'That address is on this computer, so the server cannot connect to it',
+      );
+    });
+
+    it('refuses an address carrying a name and password', async () => {
+      const response = await settingsRouter.request(
+        '/',
+        postInit(wrapManifest(remoteBody('credentialed-create', 'https://user:secret@8.8.8.8/mcp'))),
+      );
+
+      expect(response.status).toBe(400);
+      expect(await errorMessage(response)).toContain('without a name and password in it');
+    });
+
+    it('creates a server at a public address', async () => {
+      const response = await settingsRouter.request(
+        '/',
+        postInit(wrapManifest(remoteBody('public-create', 'https://8.8.8.8/mcp'))),
+      );
+
+      expect(response.status).toBe(201);
+      await settingsRouter.request('/public-create', { method: 'DELETE' });
+    });
+
+    it('creates a server at a loopback address the operator listed as their own origin', async () => {
+      const originalOrigins = configuration.FIRST_PARTY_MCP_ORIGINS;
+      configuration.FIRST_PARTY_MCP_ORIGINS = ['http://127.0.0.1:9999'];
+      try {
+        const response = await settingsRouter.request(
+          '/',
+          postInit(wrapManifest(remoteBody('own-loopback-create', 'http://127.0.0.1:9999/mcp'))),
+        );
+
+        expect(response.status).toBe(201);
+      } finally {
+        configuration.FIRST_PARTY_MCP_ORIGINS = originalOrigins;
+        await settingsRouter.request('/own-loopback-create', { method: 'DELETE' });
+      }
+    });
+
+    it('refuses the tools listing for a stored server at a loopback address', async () => {
+      await mcpServerStore.upsertServer({
+        tenant_id: TENANT_ID,
+        name: 'loopback-tools',
+        manifest: remoteBody('loopback-tools', 'http://127.0.0.1:9999/mcp'),
+        first_party: false,
+      });
+      try {
+        const response = await mcpServersRouter.request('/loopback-tools/tools');
+
+        expect(response.status).toBe(422);
+        expect(await errorMessage(response)).toContain(
+          'has an address on this computer, so the server cannot connect to it',
+        );
+      } finally {
+        await mcpServerStore.deleteServer({ tenant_id: TENANT_ID, name: 'loopback-tools' });
+      }
+    });
+
+    it('refuses to start sign-in for a stored server at a loopback address', async () => {
+      await mcpServerStore.upsertServer({
+        tenant_id: TENANT_ID,
+        name: 'loopback-authorize',
+        manifest: remoteBody('loopback-authorize', 'http://127.0.0.1:9999/mcp'),
+        first_party: false,
+      });
+      try {
+        const response = await mcpServersRouter.request('/loopback-authorize/authorize?return_to=/settings');
+
+        expect(response.status).toBe(422);
+        expect(await errorMessage(response)).toContain(
+          'That address is on this computer, so the server cannot connect to it',
+        );
+      } finally {
+        await mcpServerStore.deleteServer({ tenant_id: TENANT_ID, name: 'loopback-authorize' });
       }
     });
   });

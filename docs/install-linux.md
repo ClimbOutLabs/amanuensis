@@ -55,7 +55,7 @@ Aman is always installed from its latest release, never from the code that is st
    ./installer/install.sh
    ```
 
-2. It checks your computer first. Then it asks a few questions. Answer each one and press ++enter++:
+2. It checks your computer first. Then it prints a line that says **Your answer is needed** and asks a few questions. Answer each one and press ++enter++:
 
    | The installer asks                           | What to do                                                                         |
    | -------------------------------------------- | ---------------------------------------------------------------------------------- |
@@ -72,14 +72,14 @@ Aman is always installed from its latest release, never from the code that is st
 
    Your password needs at least 8 characters, with a number and a symbol such as @ or #.
 
-4. Wait while it works on its own for 20 to 40 minutes. You see one line per step, with the time it has taken. "Building the Aman app" is the longest step, and 15 minutes is normal.
+4. Wait while it works on its own for 20 to 40 minutes. Each step has a number, such as **4 of 6**, and a bar on the right that fills up as the install goes on. Each finished part gets a ✓ and the time it took. "Building the Aman app" is the longest step, and 15 minutes is normal.
 
 5. Near the end, it asks one or two more questions. Type `y` each time, then your computer password when it asks:
 
    - `Set up the sandbox now? [y/N]` Type `y`. This gives Aman a safe place to run code. If you press ++enter++ here, the install stops. Run the installer again and type `y`.
    - `Make Docker start with this computer? [y/N]` It asks this only if Docker doesn't start on its own yet. Type `y`.
 
-When it is done, it prints a box that starts with **Ready. Instance main is running.** The box lists the addresses to open.
+When it is done, it prints a green box that says **Ready. Instance main is running.** The addresses to open are listed under it.
 
 !!! note "If it stops with a red line"
 

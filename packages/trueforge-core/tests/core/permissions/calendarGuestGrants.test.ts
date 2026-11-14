@@ -330,6 +330,7 @@ describe('a fetched CalDAV event decides whether guests are reached', () => {
 
 describe('which calendar changes a grant may cover', () => {
   function info(tier_reason: string): InternalToolCallInfo {
+    const own_calendar_change = tier_reason === 'calendar_write' || tier_reason === 'caldav_calendar_change';
     return {
       type: 'truefoundry-system',
       mcp_server_id: GOOGLE,
@@ -338,6 +339,8 @@ describe('which calendar changes a grant may cover', () => {
       is_approval_required: true,
       tier: 3,
       tier_reason,
+      standing_grant_barred: !own_calendar_change,
+      own_calendar_change,
       effect: 'edit',
     };
   }

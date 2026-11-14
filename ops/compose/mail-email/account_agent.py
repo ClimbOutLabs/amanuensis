@@ -9,6 +9,8 @@ agent's HTTP port. The wrapper watches that file and restarts the mail server wi
 account whenever it changes, so this agent never touches Docker.
 
 Security rules, enforced here:
+- Every request must present the instance's shared account secret, the same caller check the
+  calendar account agent uses. Without a usable secret set, the port does not serve at all.
 - The password is accepted only in a save request's body, is checked before anything is
   stored, and is never written to a log, a response, or an error. Responses carry fixed result
   words only, so a mail server's error text (which can echo credentials) never reaches the app.
@@ -25,6 +27,7 @@ import email.parser
 import email.policy
 import email.utils
 import hashlib
+import hmac
 import imaplib
 import json
 import os
@@ -41,6 +44,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 ACCOUNT_FILE = os.environ.get("AMAN_MAIL_ACCOUNT_FILE", "/account/.env.mail-email")
 PORT = int(os.environ.get("AMAN_MAIL_ACCOUNT_PORT", "9559"))
 ALLOWED_HOST = os.environ.get("AMAN_MAIL_ALLOWED_HOST", "mail-email")
+SECRET = os.environ.get("AMAN_MAIL_ACCOUNT_SECRET", "")
+MIN_SECRET_LENGTH = 32
 CHECK_FILE = os.environ.get(
     "AMAN_MAIL_EMAIL_CHECK",
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "email_check.py"),
@@ -243,6 +248,21 @@ def remove_account():
         write_file_text("")
         LAST_CHECK.update({"fingerprint": None, "at": 0.0, "result": None})
     return 200, {"connected": False}
+
+
+def secret_is_usable(secret):
+    """A secret only counts when it is a string of at least MIN_SECRET_LENGTH characters."""
+    return isinstance(secret, str) and len(secret) >= MIN_SECRET_LENGTH
+
+
+def presented_secret_matches(header):
+    """Whether the caller's bearer secret is the stored one. Both sides are hashed first and
+    the hashes compared in constant time, so the answer never depends on where the two
+    values differ."""
+    presented = header[len("Bearer "):] if isinstance(header, str) and header.startswith("Bearer ") else ""
+    presented_hash = hashlib.sha256(presented.encode("utf-8")).digest()
+    stored_hash = hashlib.sha256(SECRET.encode("utf-8")).digest()
+    return hmac.compare_digest(presented_hash, stored_hash)
 
 
 MOST_LISTED_PER_CALL = 500
@@ -574,6 +594,12 @@ class Handler(BaseHTTPRequestHandler):
             if not self._host_allowed():
                 self._send(403, {"error": "forbidden_host"})
                 return
+            if not presented_secret_matches(self.headers.get("Authorization")):
+                # The body is never read on this path, so the connection closes with the
+                # answer; left open, the unread body would be read as the next request.
+                self.close_connection = True
+                self._send(401, {"error": "unauthorized"})
+                return
             if self.path == "/list_after" and method == "POST":
                 length = int(self.headers.get("Content-Length", "0"))
                 if length <= 0 or length > MAX_BODY_BYTES:
@@ -720,6 +746,9 @@ def main():
         sys.exit(write_account_stdin())
     if len(sys.argv) > 1 and sys.argv[1] == "--remove":
         sys.exit(remove_account_cli())
+    if not secret_is_usable(SECRET):
+        sys.stderr.write("mail account agent: no account secret is set, so its port is closed\n")
+        return
     server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
     server.serve_forever()
 

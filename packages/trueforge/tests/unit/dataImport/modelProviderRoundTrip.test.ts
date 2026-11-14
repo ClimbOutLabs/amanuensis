@@ -102,7 +102,7 @@ function importDeps(instance: Instance): DataImportDeps<Tx> {
     agentStore: instance.stores.agentStore,
     mcpCatalog: McpCatalog.loadShipped(),
     withTransaction: callback => instance.db.transaction().execute(callback),
-    memoryTarget: { kind: 'markdown', markdownDir: instance.memoryDir },
+    memoryMarkdownDir: instance.memoryDir,
     personaKnowledgeDir: instance.knowledgeDir,
     ownerName: '',
     knowledgeEmbedder: {
@@ -254,6 +254,7 @@ describe('model provider export and import round trip', () => {
         getProviderForUpdate: () => trueFoundryManaged(),
         createProvider: () => trueFoundryManaged(),
         upsertProvider: () => trueFoundryManaged(),
+        recordProviderCheck: () => trueFoundryManaged(),
         deleteProvider: () => trueFoundryManaged(),
         listModels: (input, tx) => sqlite.listModels(input, tx),
       };

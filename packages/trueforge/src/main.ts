@@ -13,6 +13,7 @@ import { configureOutboundFetches, extractErrorLogFields } from '@truefoundry/tr
 import type { Context } from 'hono';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
+import { configureRemoteAddressCheck, modelUrlProblem } from './runtime/remoteAddress';
 import {
   ensureLocalSandboxRootParent,
   prepareCodeModeSocketParent,
@@ -50,6 +51,10 @@ try {
   process.exit(1);
 }
 
+// The address check refuses this instance's container networks as well as its own addresses
+// when the installer named them; a host run names none, so its home network stays usable.
+configureRemoteAddressCheck({ ownNetworkRanges: configuration.CONTAINER_NETWORK_RANGES });
+
 configureOutboundFetches({
   model: {
     connectTimeoutMs: configuration.MODEL_HTTP_CONNECT_TIMEOUT_MS,
@@ -57,6 +62,10 @@ configureOutboundFetches({
     bodyTimeoutMs: configuration.MODEL_HTTP_BODY_TIMEOUT_MS,
     maxRetries: configuration.MODEL_HTTP_MAX_RETRIES,
   },
+  // A model provider's base address passes the address check when it is resolved for use; a
+  // redirect the provider answers with is judged by the same rule before it is followed.
+  modelRedirectCheck: async url =>
+    (await modelUrlProblem({ url, endpoints: configuration.LOCAL_MODEL_ENDPOINTS })) === null,
   mcp: {
     connectTimeoutMs: configuration.MCP_HTTP_CONNECT_TIMEOUT_MS,
     headersTimeoutMs: configuration.MCP_HTTP_HEADERS_TIMEOUT_MS,
@@ -117,6 +126,7 @@ import type { PostgresAgentStore } from './db/postgres/agent-store/PostgresAgent
 import type { Database as PostgresDatabase } from './db/postgres/types';
 import { PushSubscriptionStore, type IPushSubscriptionStore } from './db/pushSubscriptionStore';
 import { ReachSettingsStore, type IReachSettingsStore } from './db/reachSettingsStore';
+import { RecallExclusionStore, type IRecallExclusionStore } from './db/recallExclusionStore';
 import type { IRepositoryStore } from './db/repositoryStore';
 import type { ISandboxProviderStore } from './db/sandboxProviderStore';
 import type { IScheduleStore } from './db/scheduleStore';
@@ -159,6 +169,8 @@ import { instanceOwnerSubjectId } from './runtime/instanceOwner';
 import { registerMailConnectorFromSavedAccountInBackground } from './runtime/mailAccount';
 import { prepareMailPolicyAtBoot, registerMailConnectorAtBoot } from './runtime/mailConnector';
 import { warmEmbeddingsAtBoot } from './runtime/memory/embeddingRetrieval';
+import { ensureMemorySourceLines } from './runtime/memory/memorySourceLines';
+import { startNightlyMemoryJob } from './runtime/memory/nightlyService';
 import { startNotesFolderIndexing } from './runtime/notesFolder/notesFolderRuntime';
 import { sessionApprovalSource } from './runtime/noticing/approvalSource';
 import { createGoogleNoticingSources, googleCalendarTimezoneFor } from './runtime/noticing/googleSources';
@@ -254,6 +266,7 @@ interface ServerPersistence<TTransaction> {
   sentinelAuditStore: ISentinelAuditStore;
   sentinelSettingsStore: ISentinelSettingsStore<TTransaction>;
   briefItemStore: IBriefItemCompletionStore;
+  recallExclusionStore: IRecallExclusionStore;
   deliveryStore: IDeliveryStore;
   reachSettingsStore: IReachSettingsStore;
   textContactStore: ITextContactStore;
@@ -501,6 +514,7 @@ async function createStandalonePersistence(options: {
     sentinelAuditStore: new SentinelAuditStore(db as Kysely<SentinelAuditDatabase>),
     sentinelSettingsStore: new SqliteSentinelSettingsStore(db),
     briefItemStore: new BriefItemCompletionStore(db),
+    recallExclusionStore: new RecallExclusionStore(db),
     deliveryStore: new DeliveryStore(db),
     reachSettingsStore: new ReachSettingsStore(db),
     textContactStore: new TextContactStore(db),
@@ -692,6 +706,7 @@ async function createDistributedPersistence(options: {
     sentinelAuditStore: new SentinelAuditStore(db as Kysely<SentinelAuditDatabase>),
     sentinelSettingsStore: new PostgresSentinelSettingsStore(db),
     briefItemStore: new BriefItemCompletionStore(db),
+    recallExclusionStore: new RecallExclusionStore(db),
     deliveryStore: new DeliveryStore(db),
     reachSettingsStore: new ReachSettingsStore(db),
     textContactStore: new TextContactStore(db),
@@ -815,6 +830,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
   if (configuration.MAIL_EMAIL_MCP_URL === undefined) {
     registerMailConnectorFromSavedAccountInBackground({
       accountUrl: configuration.MAIL_EMAIL_ACCOUNT_URL,
+      secret: configuration.MAIL_EMAIL_ACCOUNT_SECRET,
       mcpUrl: configuration.MAIL_SIDECAR_MCP_URL,
       policyPath: configuration.MAIL_POLICY_FILE,
       fetchImpl: undefined,
@@ -1010,7 +1026,11 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
   const noticingService = createNoticingService({
     sources: createSidecarNoticingSources({
       mailUrl: configuration.MAIL_SIDECAR_MCP_URL,
-      mailAgentUrl: configuration.MAIL_EMAIL_ACCOUNT_URL,
+      // The account agent answers no caller without its secret, so without one the shared mailbox is not watched.
+      mailAgent:
+        configuration.MAIL_EMAIL_ACCOUNT_URL === undefined || configuration.MAIL_EMAIL_ACCOUNT_SECRET === undefined
+          ? undefined
+          : { url: configuration.MAIL_EMAIL_ACCOUNT_URL, secret: configuration.MAIL_EMAIL_ACCOUNT_SECRET },
       calendarUrl: configuration.CALENDAR_SIDECAR_MCP_URL,
       primary: createGoogleNoticingSources({ connections: googleConnectionStore, fetchImpl: undefined, logger }),
       instanceOwner: noticingInstanceOwner,
@@ -1144,8 +1164,18 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     personaStore,
     logger,
   });
+  // Once a day per vault, from the hour the person chose: ended lines move to Earlier, missed notes are sorted,
+  // and lines that disagree are listed. Best effort: a failure is logged and never reaches a turn.
+  const nightlyMemoryJob = startNightlyMemoryJob({
+    personaStore,
+    modelProviderStore,
+    globalSettingsStore,
+    tokenFactoryBudget,
+    logger,
+  });
   const callRoutes = phoneCallRoutes({ calls: phoneCalls });
   const app = createServerApp({
+    memoryTidy: nightlyMemoryJob,
     chatSearchIndexer,
     modelCatalog,
     mcpCatalog,
@@ -1172,6 +1202,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     repositoryStore,
     turnArtifactStore,
     chatDeletionStore,
+    recallExclusionStore: persistence.recallExclusionStore,
     globalSettingsStore,
     tokenFactoryBudget,
     sessionStore,
@@ -1287,10 +1318,15 @@ try {
     dir: configuration.PERSONA_KNOWLEDGE_DIR,
     envVar: 'PERSONA_KNOWLEDGE_DIR',
   });
-  if (configuration.MEMORY_BACKEND === 'markdown') {
-    await ensureWritableDataDir({
-      dir: configuration.MEMORY_MARKDOWN_DIR,
-      envVar: 'MEMORY_MARKDOWN_DIR',
+  await ensureWritableDataDir({
+    dir: configuration.MEMORY_MARKDOWN_DIR,
+    envVar: 'MEMORY_MARKDOWN_DIR',
+  });
+  const marked = await ensureMemorySourceLines({ baseDir: configuration.MEMORY_MARKDOWN_DIR });
+  if (marked !== undefined && marked.notesMarked > 0) {
+    logger.info('Older memory notes were marked as having no record of where they came from', {
+      files_changed: marked.filesChanged,
+      notes_marked: marked.notesMarked,
     });
   }
 
@@ -1519,7 +1555,7 @@ try {
   // on its own before the first chat turn. Fire-and-forget: startup never waits, a
   // failure degrades to keyword search with the usual cooldown retry, and other
   // tenants warm on first use reusing the shared download.
-  if (configuration.MEMORY_EMBEDDINGS_ENABLED && configuration.MEMORY_BACKEND === 'markdown') {
+  if (configuration.MEMORY_EMBEDDINGS_ENABLED) {
     warmEmbeddingsAtBoot({
       baseDir: configuration.MEMORY_MARKDOWN_DIR,
       namespace: TENANT_ID,

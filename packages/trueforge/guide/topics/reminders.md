@@ -17,9 +17,13 @@ Not sure when? Click **Don't let me forget** on the new chat screen. Aman asks w
 
 A reminder can also repeat every day, every weekday, or on the days you choose, such as "Remind me every Monday at 8 am to put the bins out".
 
+## Before a reminder goes off
+
+On the new chat screen, the panel on the right lists today's reminders under **Due** until they go off. On a phone, open the strip at the bottom to see them. The bell does not show a reminder before it goes off.
+
 ## When a reminder is due
 
-- It shows under **For you**, the bell at the top of the left panel. A number on the bell counts what you haven't seen. On a phone, tap the menu button to see the bell; that button shows the count too.
+- It leaves **Due** and shows under **For you**, the bell at the top of the left panel. A number on the bell counts what you haven't seen. On a phone, tap the menu button to see the bell; that button shows the count too.
 - It also appears at the end of the chat you set it in. If Aman is still answering in that chat, the line waits until the answer ends.
 - That chat shows an unread mark in your chat list until you open it.
 - If you turned on notices, your device shows one too, even when Aman is closed. The notice only says "Reminder". The words open in Aman. You choose how reminders reach you in **Settings**, then **Reach me**. See [Reach me](reach-me.md).
@@ -43,7 +47,7 @@ A reminder whose chat was deleted still shows under the bell. It has no **Open c
 
 ## Turn on notices
 
-After you set your first reminder, Aman offers to show notices on this device. Click **Turn on notices**, then allow them when your browser asks. Click **Not now** to skip. Aman offers again with your next reminder.
+After you set your first reminder, Aman offers to show notices on this device. Click **Turn on notices**, then allow them when your browser asks. Click **Not now** to skip. Aman does not offer again on this device.
 
 To change it later:
 
@@ -60,11 +64,11 @@ Say so when you ask, such as "Remind me at 5 pm to call the pharmacy, it's urgen
 
 === "Computer"
 
-    ![The Reminders page, with a reminder coming up in 7 days and an Open chat link](../../../../docs/screenshots/app/reminders-page-desktop.png)
+    ![The Reminders page, with a reminder coming up in 7 days, a link to its chat and a bin to delete it](../../../../docs/screenshots/app/reminders-page-desktop.png)
 
 === "Phone"
 
-    ![The Reminders page, with a reminder coming up in 7 days and an Open chat link](../../../../docs/screenshots/app/reminders-page-phone.png)
+    ![The Reminders page, with a reminder coming up in 7 days, a link to its chat and a bin to delete it](../../../../docs/screenshots/app/reminders-page-phone.png)
 
 1. Click **Reminders** in the left panel. It lists what is coming up and what has already reminded you, with the persona that set each one. Each reminder shows its day, how far off it is, such as "In 3 weeks", and whether it repeats or is paused. Click a reminder that says **Open chat** to go to the chat you set it in. A reminder says **No chat to open** when its chat was deleted, or when it was set before Aman kept track of the chat. Or, in any chat, ask "What reminders do I have?"
 2. To delete one on that page, click the bin at the end of its row. A box asks you to confirm. Click **Delete** to remove it, or **Cancel** to keep it.
@@ -74,7 +78,7 @@ A deleted or canceled reminder is gone for good. A repeating one will not remind
 
 ## Good to know
 
-- Reminders don't show on the Schedules page. They have their own list under **Reminders** in the left panel.
+- Reminders don't show on the Schedules page. They have their own list under **Reminders** in the left panel. That page is where you see every reminder and delete the ones you don't need.
 - An incognito chat can't set or cancel a reminder. Ask in a normal chat.
 - A scheduled run can't set a reminder by itself. It holds the reminder for your OK.
 - A reminder costs nothing when it fires. Aman doesn't use a model to deliver it.

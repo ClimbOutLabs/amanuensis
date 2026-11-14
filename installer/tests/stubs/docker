@@ -183,6 +183,11 @@ case "$cmd" in
             echo
             exit 0
             ;;
+          *--format*Subnet*) # The subnets of a network: lines "name subnet" in $S/network_subnets.
+            [ -f "$S/network_subnets" ] && awk -v n="$1" '$1 == n { printf "%s ", $2 }' "$S/network_subnets"
+            echo
+            exit 0
+            ;;
           *--format*) case "$1" in aman-*_default) echo "172.30.0.1 "; exit 0 ;; esac ;;
         esac
         grep -Fxq "$1" "$S/networks"

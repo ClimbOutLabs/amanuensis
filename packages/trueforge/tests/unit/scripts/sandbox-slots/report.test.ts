@@ -103,7 +103,7 @@ describe('SlotsReporter', () => {
       [5, 'Starting sandboxes'],
       [6, 'Safety checks'],
     ] as const) {
-      expect(text).toContain(`${title} (${String(n)} of 6)`);
+      expect(text).toContain(`[ ${String(n)} of 6 ]  ${title}`);
     }
     expect(text).toContain('+ Docker 29.1.0 aarch64 is running');
     expect(text).toContain('+ Built the sandbox');
@@ -197,7 +197,7 @@ describe('SlotsReporter', () => {
     const text = c.all();
     expect(text).toContain('+ Built the sandbox');
     expect(text).not.toContain('Setting up');
-    expect(text).not.toContain('(1 of');
+    expect(text).not.toContain('of 6 ]');
     expect(text).not.toContain('Docker 29.1.0');
     expect(text).not.toContain('Ready.');
     expect(text).not.toMatch(/-{20}/);

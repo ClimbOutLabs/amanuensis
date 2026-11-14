@@ -98,6 +98,19 @@ function stagedFilename(filename: string, content: Buffer, ordinal: number): str
   return `attachment-${String(ordinal).padStart(2, '0')}-${digest}-${filename}`;
 }
 
+const STAGED_NAME_PATTERN = /^attachment-\d{2,}-([0-9a-f]{32})-.+$/u;
+
+/** The content digest a staged name carries, or undefined when the name is not one staging made. */
+export function stagedNameDigest(stagedName: string): string | undefined {
+  return STAGED_NAME_PATTERN.exec(stagedName)?.[1];
+}
+
+/** Whether these bytes are the ones a staged name was made for. */
+export function matchesStagedName(input: { stagedName: string; content: Buffer }): boolean {
+  const digest = stagedNameDigest(input.stagedName);
+  return digest !== undefined && createHash('sha256').update(input.content).digest('hex').slice(0, 32) === digest;
+}
+
 /** The caps every source of attachments shares: how many files one message may carry, and their total size. */
 export function assertAttachmentBatch(sizes: readonly number[]): void {
   if (sizes.length > MAX_DOCUMENT_FILES) {

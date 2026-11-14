@@ -56,7 +56,6 @@ describe('the answer stamp, through each way a turn starts', () => {
   let server: ApprovalTestServer;
   let memoryDir = '';
   const original = {
-    MEMORY_BACKEND: configuration.MEMORY_BACKEND,
     MEMORY_MARKDOWN_DIR: configuration.MEMORY_MARKDOWN_DIR,
     MEMORY_EMBEDDINGS_ENABLED: configuration.MEMORY_EMBEDDINGS_ENABLED,
   };
@@ -64,7 +63,6 @@ describe('the answer stamp, through each way a turn starts', () => {
   beforeAll(async () => {
     memoryDir = await mkdtemp(join(tmpdir(), 'turn-answer-mark-'));
     Object.assign(configuration, {
-      MEMORY_BACKEND: 'markdown',
       MEMORY_MARKDOWN_DIR: memoryDir,
       MEMORY_EMBEDDINGS_ENABLED: false,
     });

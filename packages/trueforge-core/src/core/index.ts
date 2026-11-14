@@ -203,6 +203,8 @@ export {
   TOKEN_FACTORY_DEFAULT_BASE_URL,
   VERCEL_AI_PROVIDER_NAMES,
   VercelAILLM,
+  classifyProviderCallError,
+  describeAuthRefusal,
 } from './llm/VercelAILLM';
 export type { StreamTimeout, VercelAILLMConfig, VercelAIProviderConfig, VercelAIProviderName } from './llm/VercelAILLM';
 
@@ -299,7 +301,12 @@ export {
   DEFAULT_MODEL_HTTP_HEADERS_TIMEOUT_MS,
   DEFAULT_MODEL_HTTP_MAX_RETRIES,
   MCP_HTTP_HEADERS_TIMEOUT_MARGIN_MS,
+  OutboundRedirectRefusedError,
   configureOutboundFetches,
+  withCheckedRedirects,
+  withoutCrossOriginCredentials,
+  type OutboundRedirectCheck,
+  type OutboundRedirectRefusalKind,
 } from './util/outboundFetch';
 export { PromiseTimeoutError, withTimeout } from './util/promiseUtils';
 export { isRedirectStatus, redirectTargetOrigin } from './util/redirects';
@@ -343,6 +350,8 @@ export type {
 } from './sandbox/driver/RunCodeService';
 export { runCodeStatusFromReadiness } from './sandbox/driver/runCodeStatus';
 export { DisabledDriver } from './sandbox/driver/sandboxDisabled';
+export { DEFAULT_GIT_COMMIT_IDENTITY, GitCommitIdentitySchema } from './sandbox/gitCommitIdentity';
+export type { GitCommitIdentity } from './sandbox/gitCommitIdentity';
 export { GIT_NETWORK_ENV_NAMES, pickGitNetworkEnv } from './sandbox/hostAuthenticatedGit';
 export {
   PACKAGE_GIT_DEPENDENCY_MESSAGE,
@@ -419,6 +428,7 @@ export { existingSandboxIdForProvider, formatSandboxId, parseSandboxId, rawSandb
 export type { SandboxRefParts } from './sandbox/sandboxRef';
 export { GitBridge } from './sandbox/slots/git/gitBridge';
 export { execFileRunner } from './sandbox/slots/git/hostCommand';
+export type { HostCommandRunner } from './sandbox/slots/git/hostCommand';
 export { probeSlotAttachments } from './sandbox/slots/slotAttachmentProbe';
 export type { SlotAttachmentProbeResult } from './sandbox/slots/slotAttachmentProbe';
 export {
@@ -455,7 +465,10 @@ export type { HostToolCallPolicy, HostToolCallPolicyBlock, HostToolCallPolicyCal
 export {
   callResultSource,
   callReturnsOutsideContent,
+  contextCalledMemoryPagesWriter,
   contextHasOutsideToolResult,
+  personTypedText,
+  turnReadOutsideText,
 } from './capabilities/builtins/ChatProvenance';
 export type { ToolResultSource } from './capabilities/builtins/ChatProvenance';
 export {
@@ -539,10 +552,12 @@ export {
 export { checkOutboundStrings, collectOutboundStrings } from './permissions/outboundGuard';
 export type { OutboundGuardRule, OutboundGuardVerdict } from './permissions/outboundGuard';
 export {
+  hasReadContent,
   isTrustedLink,
   isTrustedPicture,
   recordPageImageUrls,
   recordPersonText,
+  recordReplyText,
   recordUntrustedText,
   searchResultUrls,
 } from './permissions/provenance';
@@ -575,6 +590,7 @@ export type { ToolGrantIdentity, ToolGrantKey, ToolGrantStore } from './permissi
 export {
   PAGE_PICTURES_LABEL,
   SILENT_SEARCH_LIMIT,
+  chatSawOutsideText,
   createWebSearchTurnState,
   pageImageUrls,
 } from './permissions/webSearch';

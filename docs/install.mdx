@@ -16,7 +16,7 @@ One instance serves one person. If two people in the same household need it, the
 - Nothing else: no Node.js is needed. For the sandbox setup the installer downloads a pinned Node.js from nodejs.org (about 35 MB, checked against a SHA-256 pinned in the repository) into `~/.amanuensis/runtime/node`, and uses it only to run that setup. `--use-host-node` uses your own Node.js 22.14 or newer instead; `--no-sandbox` skips all of it.
 - On Linux, Docker Engine 28 or newer: older versions let other devices on your network reach ports meant for this computer only, so the installer and `aman doctor` stop and say so.
 - Docker needs at least 6 GB of memory for the first build. The installer blocks below 6 GB and warns between 6 and 8 GB; 8 GB or more is recommended.
-- Your own model: the address of a model server you already run, for example `http://host.docker.internal:11434/v1`. The address and any API key are entered in the app afterwards, not in the installer. The installer never scans your machine for models.
+- Your own model: the address of a model server you already run, for example `http://host.docker.internal:11434/v1`. The address and any API key are entered in the app afterwards, not in the installer. That address names your computer from inside the container, not the container itself, so the app can use it as it stands, with nothing to name first (see [Setup Models](/models#adding-a-custom-provider)). The installer never scans your machine for models.
 - A git checkout of this repository. The installer runs from the checkout. When the checkout is a release whose images were published, it downloads Aman's images for your kind of processor, each checked against the digest pinned in the release. Otherwise, or with `--build-from-source`, it builds them from source.
 
 ## Windows
@@ -266,7 +266,7 @@ Upgrade refuses to start unless doctor shows no failures, unless you pass `--for
 
 ### Exporting one person's data
 
-To move a person's chats, agents, personas, spaces, schedules, connectors (without credentials), settings and memory to another instance, export them from the old one. The command reads the database and memory files directly, so it needs no sign-in and works on an instance that was never installed with the installer. Run it inside the app image, with the same environment and data volumes as the running app:
+To move a person's chats, agents, personas, spaces, schedules, connectors (without credentials), settings and memory, including the people and matters pages in your memory folder, to another instance, export them from the old one. The command reads the database and memory files directly, so it needs no sign-in and works on an instance that was never installed with the installer. Run it inside the app image, with the same environment and data volumes as the running app:
 
 ```bash
 aman export-data --list-users                          # who owns sessions, and how many

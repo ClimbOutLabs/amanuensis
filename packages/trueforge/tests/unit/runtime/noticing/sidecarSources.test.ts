@@ -65,6 +65,9 @@ const EMAIL = {
   attachments: [],
 };
 
+/** Synthetic; the agent asks every caller for it. */
+const AGENT_SECRET = 'test-agent-secret-0123456789abcdef0123';
+
 const noAgent: ListAfterAgent = () => Promise.reject(new Error('This source does not list mail.'));
 
 const mailSource = (
@@ -387,7 +390,7 @@ describe('sidecar mail source (IMAP)', () => {
         ),
       );
     const ask = (fetchImpl: typeof fetch) =>
-      imapAgent({ url: 'http://agent.invalid', fetchImpl })({
+      imapAgent({ url: 'http://agent.invalid', secret: AGENT_SECRET, fetchImpl })({
         uidvalidity: null,
         last_uid: null,
         dated_to_uid: null,
@@ -417,7 +420,10 @@ describe('sidecar mail source (IMAP)', () => {
       const read = await ask(fetchImpl);
       expect(fetchImpl).toHaveBeenCalledWith(
         'http://agent.invalid/list_after',
-        expect.objectContaining({ method: 'POST' }),
+        expect.objectContaining({
+          method: 'POST',
+          headers: expect.objectContaining({ authorization: `Bearer ${AGENT_SECRET}` }),
+        }),
       );
       expect(read.cursor).toEqual({ uidvalidity: 3, last_uid: 9 });
       expect(read.more).toBe(true);
@@ -814,7 +820,7 @@ describe('createSidecarNoticingSources', () => {
   it('offers nothing when no sidecar is set up', async () => {
     const provider = createSidecarNoticingSources({
       mailUrl: undefined,
-      mailAgentUrl: undefined,
+      mailAgent: undefined,
       calendarUrl: undefined,
       primary: none,
       instanceOwner: OWNER,
@@ -838,7 +844,7 @@ describe('createSidecarNoticingSources', () => {
     };
     const provider = createSidecarNoticingSources({
       mailUrl: 'http://mail.invalid/mcp',
-      mailAgentUrl: 'http://agent.invalid',
+      mailAgent: { url: 'http://agent.invalid', secret: AGENT_SECRET },
       calendarUrl: undefined,
       primary: { ...none, sourcesFor: () => Promise.resolve(own) },
       instanceOwner: OWNER,
@@ -850,7 +856,7 @@ describe('createSidecarNoticingSources', () => {
   it('gives the shared connectors to the instance owner only', async () => {
     const provider = createSidecarNoticingSources({
       mailUrl: undefined,
-      mailAgentUrl: undefined,
+      mailAgent: undefined,
       calendarUrl: 'http://calendar.invalid/mcp',
       primary: none,
       instanceOwner: OWNER,
@@ -868,7 +874,7 @@ describe('createSidecarNoticingSources', () => {
     const second = { tenant_id: 'default', created_by: 'owner-2' };
     const provider = createSidecarNoticingSources({
       mailUrl: 'http://mail.invalid/mcp',
-      mailAgentUrl: 'http://agent.invalid',
+      mailAgent: { url: 'http://agent.invalid', secret: AGENT_SECRET },
       calendarUrl: undefined,
       primary: { ...none, listOwners: () => Promise.resolve([second]) },
       instanceOwner: OWNER,
@@ -880,7 +886,7 @@ describe('createSidecarNoticingSources', () => {
   it('gives the shared connectors to no one when the instance names no owner', async () => {
     const provider = createSidecarNoticingSources({
       mailUrl: 'http://mail.invalid/mcp',
-      mailAgentUrl: 'http://agent.invalid',
+      mailAgent: { url: 'http://agent.invalid', secret: AGENT_SECRET },
       calendarUrl: 'http://calendar.invalid/mcp',
       primary: none,
       instanceOwner: undefined,
@@ -900,7 +906,7 @@ describe('createSidecarNoticingSources', () => {
     };
     const provider = createSidecarNoticingSources({
       mailUrl: 'http://mail.invalid/mcp',
-      mailAgentUrl: 'http://agent.invalid',
+      mailAgent: { url: 'http://agent.invalid', secret: AGENT_SECRET },
       calendarUrl: undefined,
       primary: { ...none, sourcesFor: () => Promise.resolve(reconnect) },
       instanceOwner: OWNER,
@@ -912,7 +918,7 @@ describe('createSidecarNoticingSources', () => {
   it('says a mail connector that is set up but cannot be reached is unreachable, not missing', async () => {
     const provider = createSidecarNoticingSources({
       mailUrl: 'http://127.0.0.1:1/mcp',
-      mailAgentUrl: 'http://agent.invalid',
+      mailAgent: { url: 'http://agent.invalid', secret: AGENT_SECRET },
       calendarUrl: undefined,
       primary: none,
       instanceOwner: OWNER,
@@ -926,7 +932,7 @@ describe('createSidecarNoticingSources', () => {
   it('leaves the shared mailbox unwatched when the account agent is not set up', async () => {
     const provider = createSidecarNoticingSources({
       mailUrl: 'http://mail.invalid/mcp',
-      mailAgentUrl: undefined,
+      mailAgent: undefined,
       calendarUrl: undefined,
       primary: none,
       instanceOwner: OWNER,
@@ -938,7 +944,7 @@ describe('createSidecarNoticingSources', () => {
   it('says nothing is unreachable when no mail connector is set up', async () => {
     const provider = createSidecarNoticingSources({
       mailUrl: undefined,
-      mailAgentUrl: undefined,
+      mailAgent: undefined,
       calendarUrl: undefined,
       primary: none,
       instanceOwner: OWNER,

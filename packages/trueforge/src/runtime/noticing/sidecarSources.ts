@@ -242,17 +242,27 @@ const AgentErrorSchema = z.object({ error: z.string() });
 
 const AgentMailboxSchema = z.object({ uidvalidity: z.number().int().nonnegative() });
 
+/** Where the mail sidecar's account agent answers, and the secret it asks every caller for. */
+export interface MailAgentAddress {
+  url: string;
+  secret: string;
+}
+
+type MailAgentAccess = MailAgentAddress & { fetchImpl: typeof fetch | undefined };
+
 /** The inbox's UIDVALIDITY now, from the mail sidecar's account agent. */
 export type MailboxValidity = () => Promise<number>;
 
 /** One call to the account agent, its failures told apart in the same words as a mail source's. */
 async function askAgent({
   url,
+  secret,
   fetchImpl,
   path,
   request,
 }: {
   url: string;
+  secret: string;
   fetchImpl: typeof fetch | undefined;
   path: '/list_after' | '/mailbox';
   /** The JSON body to post; without one the call is a GET. */
@@ -262,8 +272,12 @@ async function askAgent({
   try {
     response = await (fetchImpl ?? fetch)(`${url}${path}`, {
       ...(request === undefined
-        ? { method: 'GET' }
-        : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(request) }),
+        ? { method: 'GET', headers: { authorization: `Bearer ${secret}` } }
+        : {
+            method: 'POST',
+            headers: { authorization: `Bearer ${secret}`, 'content-type': 'application/json' },
+            body: JSON.stringify(request),
+          }),
       signal: AbortSignal.timeout(MAIL_CALL_MS),
       redirect: 'error',
     });
@@ -286,23 +300,17 @@ async function askAgent({
   return body;
 }
 
-export function imapMailboxValidity({
-  url,
-  fetchImpl,
-}: {
-  url: string;
-  fetchImpl: typeof fetch | undefined;
-}): MailboxValidity {
-  return async () => AgentMailboxSchema.parse(await askAgent({ url, fetchImpl, path: '/mailbox' })).uidvalidity;
+export function imapMailboxValidity({ url, secret, fetchImpl }: MailAgentAccess): MailboxValidity {
+  return async () => AgentMailboxSchema.parse(await askAgent({ url, secret, fetchImpl, path: '/mailbox' })).uidvalidity;
 }
 
 /**
  * The account agent's list of mail after a cursor. A message the agent sent that does not read as a message is counted
  * as skipped, and the cursor is already past it.
  */
-export function imapAgent({ url, fetchImpl }: { url: string; fetchImpl: typeof fetch | undefined }): ListAfterAgent {
+export function imapAgent({ url, secret, fetchImpl }: MailAgentAccess): ListAfterAgent {
   return async request => {
-    const reply = AgentReplySchema.parse(await askAgent({ url, fetchImpl, path: '/list_after', request }));
+    const reply = AgentReplySchema.parse(await askAgent({ url, secret, fetchImpl, path: '/list_after', request }));
     let skipped = reply.skipped;
     const messages: CursorMessage[] = [];
     for (const raw of reply.messages) {
@@ -537,7 +545,7 @@ export function sidecarCalendarSource({ call }: { call: CallSidecarTool }): Cale
  */
 export function createSidecarNoticingSources({
   mailUrl,
-  mailAgentUrl,
+  mailAgent,
   calendarUrl,
   primary,
   instanceOwner,
@@ -545,7 +553,7 @@ export function createSidecarNoticingSources({
 }: {
   mailUrl: string | undefined;
   /** The mail sidecar's account agent, which lists new mail. Without it the shared mailbox is not watched. */
-  mailAgentUrl: string | undefined;
+  mailAgent: MailAgentAddress | undefined;
   calendarUrl: string | undefined;
   primary: NoticingSourceProvider;
   /** Who the shared connectors belong to, or undefined when the instance names no owner. */
@@ -553,7 +561,7 @@ export function createSidecarNoticingSources({
   logger: Logger;
 }): NoticingSourceProvider {
   /** The shared mail connector, told apart as not set up (no account) or set up but out of reach. */
-  async function mailFromSidecar({ url, agentUrl }: { url: string; agentUrl: string }): Promise<MailAccess> {
+  async function mailFromSidecar({ url, agent }: { url: string; agent: MailAgentAddress }): Promise<MailAccess> {
     try {
       const call = sidecarTools({ name: MAIL_CONNECTOR_NAME, url, logger, callMs: MAIL_CALL_MS });
       const [account] = accountNamesOfResult(await call(MAIL_ACCOUNT_LIST_TOOL_NAME, {}));
@@ -564,8 +572,8 @@ export function createSidecarNoticingSources({
             source: sidecarMailSource({
               call,
               account,
-              agent: imapAgent({ url: agentUrl, fetchImpl: undefined }),
-              validity: imapMailboxValidity({ url: agentUrl, fetchImpl: undefined }),
+              agent: imapAgent({ ...agent, fetchImpl: undefined }),
+              validity: imapMailboxValidity({ ...agent, fetchImpl: undefined }),
             }),
             kind: 'email_connector',
           };
@@ -594,9 +602,9 @@ export function createSidecarNoticingSources({
       // login that has to be redone is shown instead of being hidden by another mailbox.
       return {
         mail:
-          own.mail.status !== 'none' || mailUrl === undefined || mailAgentUrl === undefined
+          own.mail.status !== 'none' || mailUrl === undefined || mailAgent === undefined
             ? own.mail
-            : await mailFromSidecar({ url: mailUrl, agentUrl: mailAgentUrl }),
+            : await mailFromSidecar({ url: mailUrl, agent: mailAgent }),
         calendar:
           own.calendar.status !== 'none' || calendarUrl === undefined
             ? own.calendar

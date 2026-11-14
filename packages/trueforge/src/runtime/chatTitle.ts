@@ -4,6 +4,7 @@ import { extractErrorLogFields, VercelAILLM, type LLMCreateParams } from '@truef
 import type { Logger } from 'winston';
 
 import type { IAgentStore } from '../db/agentStore';
+import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 import type { IModelProviderStore } from '../db/modelProviderStore';
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import type { EventSubscription } from './event-subscription';
@@ -68,6 +69,7 @@ export async function resolveChatTitleContext(params: {
   personaModelName: string | undefined;
   agentStore: IAgentStore;
   modelProviderStore: IModelProviderStore;
+  globalSettingsStore: IGlobalSettingsStore;
   tokenFactoryBudget: TokenFactoryBudget;
   sessionStore: ISessionStore<SessionCustom, TurnCustom>;
   derivedTitle: string;
@@ -81,6 +83,9 @@ export async function resolveChatTitleContext(params: {
       personaModelName: params.personaModelName,
       sessionAgent: params.sessionAgent,
       agentStore: params.agentStore,
+      globalSettingsStore: params.globalSettingsStore,
+      modelProviderStore: params.modelProviderStore,
+      logger,
     });
     if (modelName === undefined || modelName.trim() === '') {
       logger.debug('Chat title skipped for this chat: no title model resolved', { sessionId });

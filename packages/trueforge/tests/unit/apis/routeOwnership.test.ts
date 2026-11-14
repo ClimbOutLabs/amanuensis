@@ -111,7 +111,6 @@ function describeRouteOwnership(engine: OwnershipEngine): void {
     let seeded: Seeded;
     let memoryDir: string;
     const originalMemory = {
-      backend: configuration.MEMORY_BACKEND,
       directory: configuration.MEMORY_MARKDOWN_DIR,
       embeddings: configuration.MEMORY_EMBEDDINGS_ENABLED,
       summarize: configuration.MEMORY_SUMMARIZE,
@@ -178,7 +177,6 @@ function describeRouteOwnership(engine: OwnershipEngine): void {
 
     beforeAll(async () => {
       memoryDir = await mkdtemp(path.join(tmpdir(), 'tfy-ownership-memory-'));
-      configuration.MEMORY_BACKEND = 'markdown';
       configuration.MEMORY_MARKDOWN_DIR = memoryDir;
       configuration.MEMORY_EMBEDDINGS_ENABLED = false;
       configuration.MEMORY_SUMMARIZE = false;
@@ -365,7 +363,6 @@ function describeRouteOwnership(engine: OwnershipEngine): void {
     }, 120_000);
 
     afterAll(async () => {
-      configuration.MEMORY_BACKEND = originalMemory.backend;
       configuration.MEMORY_MARKDOWN_DIR = originalMemory.directory;
       configuration.MEMORY_EMBEDDINGS_ENABLED = originalMemory.embeddings;
       configuration.MEMORY_SUMMARIZE = originalMemory.summarize;

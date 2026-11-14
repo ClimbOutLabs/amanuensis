@@ -65,6 +65,7 @@ export const TABLES_TO_MOVE = [
   'sentinel_user_settings',
   'approval_token',
   'brief_item_completion',
+  'recall_exclusion',
   'delivery',
   'delivery_attempt',
   'reach_settings',

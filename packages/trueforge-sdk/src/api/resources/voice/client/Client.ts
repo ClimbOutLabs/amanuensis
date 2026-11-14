@@ -373,13 +373,14 @@ export class VoiceClient {
     }
 
     /**
-     * Accepts 16 kHz mono 16-bit PCM WAV audio and returns the transcript produced by the local STT sidecar. Audio bodies over 30 MB are rejected.
+     * Accepts 16 kHz mono 16-bit PCM WAV audio and returns the transcript produced by the local STT sidecar. Audio bodies over 30 MB are rejected. Each person may make a limited number of voice requests per minute, shared with spoken replies.
      *
      * @param {core.file.Uploadable} uploadable
      * @param {VoiceClient.RequestOptions} requestOptions - Request-specific configuration.
      *
      * @throws {@link TrueForge.BadRequestError}
      * @throws {@link TrueForge.ContentTooLargeError}
+     * @throws {@link TrueForge.TooManyRequestsError}
      * @throws {@link TrueForge.BadGatewayError}
      * @throws {@link TrueForge.ServiceUnavailableError}
      * @throws {@link errors.TrueForgeError}
@@ -451,6 +452,17 @@ export class VoiceClient {
                     );
                 case 413:
                     throw new TrueForge.ContentTooLargeError(
+                        serializers.RequestErrorResponse.parseOrThrow(_response.error.body, {
+                            unrecognizedObjectKeys: "passthrough",
+                            allowUnrecognizedUnionMembers: true,
+                            allowUnrecognizedEnumValues: true,
+                            skipValidation: true,
+                            breadcrumbsPrefix: ["response"],
+                        }),
+                        _response.rawResponse,
+                    );
+                case 429:
+                    throw new TrueForge.TooManyRequestsError(
                         serializers.RequestErrorResponse.parseOrThrow(_response.error.body, {
                             unrecognizedObjectKeys: "passthrough",
                             allowUnrecognizedUnionMembers: true,
