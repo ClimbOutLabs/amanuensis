@@ -92,10 +92,19 @@ function visibleOutboundText(text: string, plumbing: string | null): string {
     .join('\n');
 }
 
-function OutboundBlock({ text, truncated }: { text: string; truncated: boolean }) {
+/** The request lines a card lists as written. `label` names what the lines are when they are not the whole request. */
+export function OutboundBlock({
+  text,
+  truncated,
+  label = 'Full request',
+}: {
+  text: string;
+  truncated: boolean;
+  label?: string;
+}) {
   return (
     <div className="rounded border border-border bg-primary-bg px-3 py-2">
-      <p className="mb-1 font-medium text-text-secondary">Full request</p>
+      <p className="mb-1 font-medium text-text-secondary">{label}</p>
       {truncated && <p className="mb-1 text-text-primary">Part of what will be sent is not shown in full.</p>}
       <FoldedText
         text={text}

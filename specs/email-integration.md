@@ -94,6 +94,18 @@ Any other tool name is refused. A raw send that skips the draft does not exist.
 
 **Offline mode turns Gmail off**, because it needs the network.
 
+## Accounts connected with an app password
+
+An account connected with an app password uses the Email connector, whose own tools include a send that writes and sends a message in one call. Aman holds it to the same rule as Gmail: draft, approve, send, approve.
+
+- **A draft comes first.** `save_draft` always asks, with a card that shows the account, the recipients, the subject and the whole text. No standing answer covers it. Approving saves the draft in the account's Drafts folder and sends nothing.
+- **A send needs an approved draft.** `send_email` is refused, with no card, unless its recipients, copies, subject, text and attachments match a draft the user approved and that was saved. The refusal tells the model to save a draft first. A changed message is a new draft.
+- **A send still asks.** A send that matches an approved draft shows the send card with the whole message again. Once the message goes out, that draft cannot be sent a second time.
+- **A forward takes the same two steps.** The connector has no draft form for a forward, so the first card keeps the forward as a draft and sends nothing, and the second card sends it. The card shows the note, the message being forwarded and the names of the files sent with it.
+- **What is remembered.** Aman keeps a fingerprint of each approved draft in a file beside the account's send list, never the addresses or the text. It survives a restart and is dropped after 30 days or once the message is sent.
+
+Tests use synthetic data only.
+
 ## Not In v1
 
 Outlook and iCloud. Labels, archive, mark-read, and delete. Sending attachments or HTML. More than one account. Calendar, which is expected to reuse the same sign-in and its own consent.

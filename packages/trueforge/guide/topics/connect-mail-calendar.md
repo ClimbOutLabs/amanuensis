@@ -181,6 +181,7 @@ See [Reach me](reach-me.md) for what Aman watches for and how it tells you.
 
 - Reading is quiet. Every draft, every send and every new or changed event asks you first, on a card that shows exactly what will happen.
 - An app password is saved only on this computer, in the email or calendar connector. It is never shown again, and the assistant never sees it.
+- If you connected email or calendar with an early version of Aman, the next upgrade moves that account into the connector and deletes the old file. If you connected it again in Settings since, Aman keeps that newer one.
 - Never paste a password into a chat. A chat can't connect an account. Use Settings.
 - Aman reads only your own calendar. Calendars other people share with you, and holiday calendars, are left out on purpose.
 - Aman can't delete calendar events.

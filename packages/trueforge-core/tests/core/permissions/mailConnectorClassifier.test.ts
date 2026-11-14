@@ -12,6 +12,8 @@ const CLOSED_WORLD_READ = { read_only_hint: true, open_world_hint: false };
 const LOCAL_WRITE = { read_only_hint: false, open_world_hint: false };
 const OUTBOUND_WRITE = { read_only_hint: false, open_world_hint: true };
 
+import { inMemoryApprovedMailDrafts, mailDraftKey } from '../../../src/core/email/mailConnector/approvedDrafts';
+import { everyMailDraftApproved } from '../fixtures/approvedMailDrafts';
 function mailCall(
   tool_name: string,
   canonical_params: Record<string, unknown>,
@@ -43,7 +45,11 @@ function hostMailCall(
 
 function makeCtx(): ClassifyContext {
   return {
-    services: defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }),
+    // Most tests here are about one card, so the draft step counts as done; the draft-first tests use a real record.
+    services: {
+      ...defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }),
+      mail_approved_drafts: everyMailDraftApproved,
+    },
     tenant_id: 't1',
     created_by: 'u1',
     conversation_id: 'c1',
@@ -238,6 +244,342 @@ describe('Email connector classifier', () => {
     });
   });
 
+  describe('a send shows the message as a draft', () => {
+    const LISTED = 'dana@example.com';
+    const BODY = 'Hi Dana,\n\nThe terms look fine to me.\n\nNora';
+
+    function ctxWithList(listed: readonly string[]): ClassifyContext {
+      const ctx = makeCtx();
+      return {
+        ...ctx,
+        services: {
+          ...ctx.services,
+          mail_listed_addresses: () => Promise.resolve(listed),
+          mail_accounts: () =>
+            Promise.resolve({ accounts: ['nora@mail.example'], default_account: 'nora@mail.example' }),
+        },
+      };
+    }
+
+    it('lays out who it goes to, the subject and the whole text, and names the account it goes from', async () => {
+      const decision = await classifyTier(
+        hostMailCall(
+          'send_email',
+          { recipients: [LISTED], cc: [{ name: 'Pippa', email: 'pippa@example.com' }], subject: SUBJECT, body: BODY },
+          OUTBOUND_WRITE,
+        ),
+        ctxWithList([LISTED, 'pippa@example.com']),
+      );
+      expect(decision).toMatchObject({ tier: 3, auto_deny: null });
+      expect(decision.card?.email).toEqual({
+        action: 'send',
+        to: [{ name: '', address: LISTED }],
+        cc: [{ name: 'Pippa', address: 'pippa@example.com' }],
+        bcc: [],
+        subject: SUBJECT,
+        body: BODY,
+        check_code: null,
+        replaces: null,
+        reply_in_thread: null,
+        reply_to: null,
+        from_name: null,
+        name_left_off: false,
+        forwards: null,
+      });
+      expect(decision.card?.mail_from).toBe('nora@mail.example');
+      // The draft is the whole request here, so nothing is listed a second time beside it.
+      expect(decision.card?.outbound_text).toBeNull();
+    });
+
+    it('a send to a new address shows the same draft with the new-recipient notice', async () => {
+      const decision = await classifyTier(
+        hostMailCall(
+          'send_email',
+          { recipients: ['stranger@example.com'], subject: SUBJECT, body: BODY },
+          OUTBOUND_WRITE,
+        ),
+        ctxWithList([LISTED]),
+      );
+      expect(decision.reason).toBe('mail_new_recipient');
+      expect(decision.card?.email).toMatchObject({
+        action: 'send',
+        to: [{ name: '', address: 'stranger@example.com' }],
+        subject: SUBJECT,
+        body: BODY,
+      });
+    });
+
+    it('a draft to a new address shows the draft as something saved, not sent', async () => {
+      const decision = await classifyTier(
+        hostMailCall('save_draft', { recipients: ['stranger@example.com'], subject: SUBJECT, body: BODY }, LOCAL_WRITE),
+        ctxWithList([LISTED]),
+      );
+      expect(decision.card?.mail_draft).toBe(true);
+      expect(decision.card?.email).toMatchObject({ action: 'save', subject: SUBJECT, body: BODY });
+    });
+
+    it('lists every other argument beside the draft, so nothing that is sent is left off the card', async () => {
+      const decision = await classifyTier(
+        hostMailCall(
+          'send_email',
+          { recipients: [LISTED], subject: SUBJECT, body: BODY, attachments: ['/files/lease.pdf'], html: true },
+          OUTBOUND_WRITE,
+        ),
+        ctxWithList([LISTED]),
+      );
+      expect(decision.card?.email?.body).toBe(BODY);
+      expect(decision.card?.outbound_text).toContain('/files/lease.pdf');
+      expect(decision.card?.outbound_text).toContain('html');
+      expect(decision.card?.outbound_text).not.toContain(SUBJECT);
+    });
+
+    it('keeps the plain listing of the whole request when a part of the message cannot be shown as written', async () => {
+      const decision = await classifyTier(
+        hostMailCall('send_email', { recipients: [LISTED], subject: SUBJECT, body: { text: BODY } }, OUTBOUND_WRITE),
+        ctxWithList([LISTED]),
+      );
+      expect(decision).toMatchObject({ tier: 3, auto_deny: null });
+      expect(decision.card?.email ?? null).toBeNull();
+      expect(decision.card?.outbound_text).toContain(SUBJECT);
+    });
+
+    const FORWARDED = {
+      from: 'Pippa Reed <pippa@example.com>',
+      subject: 'Roof repair quote',
+      body: 'The quote is 1,200 for the whole roof.',
+      truncated: false,
+      attachments: ['quote.pdf'],
+    };
+
+    it('a forward shows the note, the message it sends on and the files that go with it', async () => {
+      const decision = await classifyTier(
+        {
+          ...hostMailCall(
+            'forward_email',
+            { email_id: 'e1', recipients: [LISTED], body: 'Can you look at this?' },
+            OUTBOUND_WRITE,
+          ),
+          mail_forward: FORWARDED,
+        },
+        ctxWithList([LISTED]),
+      );
+      expect(decision).toMatchObject({ tier: 3, auto_deny: null, reason: 'mail_send' });
+      expect(decision.card?.email).toMatchObject({
+        action: 'send',
+        to: [{ name: '', address: LISTED }],
+        subject: 'Fwd: Roof repair quote',
+        body: 'Can you look at this?',
+        forwards: FORWARDED,
+      });
+      expect(decision.card?.outbound_text).toBeNull();
+    });
+
+    it('a forward with no note still shows the message it sends on, and marks the subject once', async () => {
+      const decision = await classifyTier(
+        {
+          ...hostMailCall('forward_email', { email_id: 'e1', recipients: [LISTED] }, OUTBOUND_WRITE),
+          mail_forward: { ...FORWARDED, subject: 'Fwd: Roof repair quote' },
+        },
+        ctxWithList([LISTED]),
+      );
+      expect(decision.card?.email).toMatchObject({ subject: 'Fwd: Roof repair quote', body: '' });
+    });
+
+    it('a forward that leaves the files behind lists none', async () => {
+      const decision = await classifyTier(
+        {
+          ...hostMailCall(
+            'forward_email',
+            { email_id: 'e1', recipients: [LISTED], include_attachments: false },
+            OUTBOUND_WRITE,
+          ),
+          mail_forward: FORWARDED,
+        },
+        ctxWithList([LISTED]),
+      );
+      expect(decision.card?.email?.forwards?.attachments).toEqual([]);
+    });
+
+    it('a forward offers no other account, because one account holds the message', async () => {
+      const decision = await classifyTier(
+        {
+          ...hostMailCall('forward_email', { email_id: 'e1', recipients: [LISTED] }, OUTBOUND_WRITE),
+          mail_forward: FORWARDED,
+        },
+        ctxWithList([LISTED]),
+      );
+      expect(decision.card?.mail_from).toBe('nora@mail.example');
+      expect(decision.card?.mail_from_choices).toEqual([]);
+    });
+
+    it('a forward to a new address shows the same draft with the new-recipient notice', async () => {
+      const decision = await classifyTier(
+        {
+          ...hostMailCall('forward_email', { email_id: 'e1', recipients: ['stranger@example.com'] }, OUTBOUND_WRITE),
+          mail_forward: FORWARDED,
+        },
+        ctxWithList([LISTED]),
+      );
+      expect(decision.reason).toBe('mail_new_recipient');
+      expect(decision.card?.email?.forwards).toEqual(FORWARDED);
+    });
+
+    it('a forward whose message could not be read keeps the plain listing of the whole request', async () => {
+      const decision = await classifyTier(
+        {
+          ...hostMailCall('forward_email', { email_id: 'e1', recipients: [LISTED] }, OUTBOUND_WRITE),
+          mail_forward: null,
+        },
+        ctxWithList([LISTED]),
+      );
+      expect(decision).toMatchObject({ tier: 3, auto_deny: null });
+      expect(decision.card?.email ?? null).toBeNull();
+      expect(decision.card?.outbound_text).toContain('e1');
+    });
+  });
+
+  describe('a message is a draft the person approved before it can be sent', () => {
+    const LISTED = 'dana@example.com';
+    const BODY = 'Hi Dana,\n\nThe terms look fine to me.\n\nNora';
+    const MESSAGE = { recipients: [LISTED], subject: SUBJECT, body: BODY };
+    const OWNER = { tenant_id: 't1', created_by: 'u1' };
+
+    function ctxWithDrafts(): ClassifyContext {
+      const ctx = makeCtx();
+      return {
+        ...ctx,
+        services: {
+          ...ctx.services,
+          mail_approved_drafts: inMemoryApprovedMailDrafts(),
+          mail_listed_addresses: () => Promise.resolve([LISTED]),
+          mail_accounts: () =>
+            Promise.resolve({ accounts: ['nora@mail.example'], default_account: 'nora@mail.example' }),
+        },
+      };
+    }
+
+    async function approveDraft(ctx: ClassifyContext, tool_name: string, params: Record<string, unknown>) {
+      await ctx.services.mail_approved_drafts.add({ ...OWNER, key: mailDraftKey({ tool_name, params }) });
+    }
+
+    it('refuses a send with no approved draft, shows no card, and says to save a draft first', async () => {
+      const decision = await classifyTier(hostMailCall('send_email', MESSAGE, OUTBOUND_WRITE), ctxWithDrafts());
+      expect(decision).toMatchObject({ tier: 3, auto_deny: 'draft_first', card: null });
+      expect(decision.reason_detail).toContain('save_draft');
+    });
+
+    it('refuses a send to a new address with no approved draft, before any new-recipient card', async () => {
+      const decision = await classifyTier(
+        hostMailCall('send_email', { ...MESSAGE, recipients: ['stranger@example.com'] }, OUTBOUND_WRITE),
+        ctxWithDrafts(),
+      );
+      expect(decision).toMatchObject({ auto_deny: 'draft_first', card: null });
+    });
+
+    it('asks to save a draft with the whole message on the card, and no answer covers the next draft', async () => {
+      const decision = await classifyTier(hostMailCall('save_draft', MESSAGE, LOCAL_WRITE), ctxWithDrafts());
+      expect(decision).toMatchObject({ tier: 3, auto_deny: null, reason: 'mail_draft', standing_grant_barred: true });
+      expect(decision.card?.copy?.headline).toBe('Save this draft?');
+      expect(decision.card?.email).toMatchObject({ action: 'save', subject: SUBJECT, body: BODY });
+      expect(decision.card?.mail_from).toBe('nora@mail.example');
+      expect(decision.mail_send ?? false).toBe(false);
+    });
+
+    it('asks to send once the same message was approved as a draft', async () => {
+      const ctx = ctxWithDrafts();
+      await approveDraft(ctx, 'save_draft', MESSAGE);
+      const decision = await classifyTier(hostMailCall('send_email', MESSAGE, OUTBOUND_WRITE), ctx);
+      expect(decision).toMatchObject({ tier: 3, auto_deny: null, reason: 'mail_send', mail_send: true });
+      expect(decision.card?.email).toMatchObject({ action: 'send', subject: SUBJECT, body: BODY });
+    });
+
+    it('treats the same message written with other line endings and address case as the same draft', async () => {
+      const ctx = ctxWithDrafts();
+      await approveDraft(ctx, 'save_draft', { ...MESSAGE, body: 'Line one\r\nLine two  ' });
+      const decision = await classifyTier(
+        hostMailCall(
+          'send_email',
+          { recipients: ['Dana@Example.com'], subject: SUBJECT, body: 'Line one\nLine two', cc: [] },
+          OUTBOUND_WRITE,
+        ),
+        ctx,
+      );
+      expect(decision).toMatchObject({ auto_deny: null, reason: 'mail_send' });
+    });
+
+    it.each([
+      ['a changed text', { ...MESSAGE, body: `${BODY} One more thing.` }],
+      ['a changed subject', { ...MESSAGE, subject: 'Another subject' }],
+      ['another recipient', { ...MESSAGE, recipients: ['pippa@example.com'] }],
+      ['an added copy', { ...MESSAGE, cc: ['pippa@example.com'] }],
+      ['an added hidden copy', { ...MESSAGE, bcc: ['pippa@example.com'] }],
+      ['an added file', { ...MESSAGE, attachments: ['/files/lease.pdf'] }],
+    ])('refuses a send with %s, because that is not the draft the person approved', async (_what, changed) => {
+      const ctx = ctxWithDrafts();
+      await approveDraft(ctx, 'save_draft', MESSAGE);
+      const decision = await classifyTier(hostMailCall('send_email', changed, OUTBOUND_WRITE), ctx);
+      expect(decision).toMatchObject({ auto_deny: 'draft_first', card: null });
+    });
+
+    it('does not let an approved draft of a new message stand in for a forward', async () => {
+      const ctx = ctxWithDrafts();
+      await approveDraft(ctx, 'save_draft', { recipients: [LISTED], body: 'See below.' });
+      const decision = await classifyTier(
+        {
+          ...hostMailCall(
+            'forward_email',
+            { email_id: 'e1', recipients: [LISTED], body: 'See below.' },
+            OUTBOUND_WRITE,
+          ),
+          mail_forward: {
+            from: 'Pippa <pippa@example.com>',
+            subject: 'Quote',
+            body: 'Hi',
+            truncated: false,
+            attachments: [],
+          },
+        },
+        ctx,
+      );
+      expect(decision).toMatchObject({ auto_deny: null, reason: 'mail_draft' });
+    });
+
+    it('asks to keep a forward as a draft first, then asks to send the same forward', async () => {
+      const ctx = ctxWithDrafts();
+      const params = { email_id: 'e1', recipients: [LISTED], body: 'Can you look at this?' };
+      const forward = {
+        ...hostMailCall('forward_email', params, OUTBOUND_WRITE),
+        mail_forward: {
+          from: 'Pippa <pippa@example.com>',
+          subject: 'Quote',
+          body: 'Hi',
+          truncated: false,
+          attachments: [],
+        },
+      };
+      const first = await classifyTier(forward, ctx);
+      expect(first).toMatchObject({ tier: 3, auto_deny: null, reason: 'mail_draft', standing_grant_barred: true });
+      expect(first.mail_send ?? false).toBe(false);
+      expect(first.card?.copy?.headline).toBe('Save this draft?');
+      expect(first.card?.email).toMatchObject({ action: 'save', forwards: { subject: 'Quote' } });
+
+      await approveDraft(ctx, 'forward_email', params);
+      const second = await classifyTier(forward, ctx);
+      expect(second).toMatchObject({ auto_deny: null, reason: 'mail_send', mail_send: true });
+      expect(second.card?.email).toMatchObject({ action: 'send', forwards: { subject: 'Quote' } });
+    });
+
+    it('keeps a forward to a new address as a draft first, and adds the address with it', async () => {
+      const decision = await classifyTier(
+        hostMailCall('forward_email', { email_id: 'e1', recipients: ['stranger@example.com'] }, OUTBOUND_WRITE),
+        ctxWithDrafts(),
+      );
+      expect(decision).toMatchObject({ auto_deny: null, reason: 'mail_new_recipient' });
+      expect(decision.card?.mail_draft).toBe(true);
+      expect(decision.mail_send ?? false).toBe(false);
+    });
+  });
+
   describe('new recipients', () => {
     const LISTED = 'dana@example.com';
     const STRANGER = 'stranger@example.com';
@@ -270,7 +612,7 @@ describe('Email connector classifier', () => {
       expect(decision.card?.mail_draft ?? null).toBeNull();
       expect(decision.card?.cannot_be_undone).toBe("Once this is sent, it can't be unsent.");
       expect(decision.card?.destination_host).toBeNull();
-      expect(decision.card?.outbound_text).toContain(SUBJECT);
+      expect(decision.card?.email?.subject).toBe(SUBJECT);
       expect(decision.approval_token_id).not.toBeNull();
     });
 
@@ -354,7 +696,7 @@ describe('Email connector classifier', () => {
         hostMailCall('save_draft', { recipients: [LISTED], subject: SUBJECT, body: 'Hi' }, LOCAL_WRITE),
         ctxWithList([LISTED]),
       );
-      expect(decision.reason).toBe('connector_send');
+      expect(decision.reason).toBe('mail_draft');
       expect(decision.card?.plain_what).not.toContain('New recipient');
       expect(decision.card?.mail_new_recipients ?? null).toBeNull();
     });
@@ -364,8 +706,8 @@ describe('Email connector classifier', () => {
         hostMailCall('save_draft', { recipients: [LISTED], subject: SUBJECT, body: 'Hi' }, OUTBOUND_WRITE),
         ctxWithList([LISTED]),
       );
-      expect(decision).toMatchObject({ tier: 3, auto_deny: null, reason: 'connector_send' });
-      expect(decision.card?.plain_what).toContain('Save a message draft');
+      expect(decision).toMatchObject({ tier: 3, auto_deny: null, reason: 'mail_draft' });
+      expect(decision.card?.plain_what).toBe('Save this draft?');
       expect(decision.card?.cannot_be_undone).toBeNull();
       expect(decision.card?.destination_host).toBeNull();
       expect(decision.card?.recipient).toContain(LISTED);

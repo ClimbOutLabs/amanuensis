@@ -8,7 +8,14 @@ import { MEMORY_ORIGIN_METADATA_KEY, USER_STATED_ORIGIN } from './memoryOrigin';
 export type NoteOrigin =
   | { kind: 'own_words' }
   | { kind: 'sent_mail' }
-  | { kind: 'read'; source: Extract<FactSource, 'mail' | 'calendar' | 'read_content' | 'inferred'> };
+  | { kind: 'read'; source: Extract<FactSource, 'mail' | 'calendar' | 'read_content'> }
+  | { kind: 'assistant_reply' };
+
+/**
+ * An origin whose notes may be sorted onto pages. What the assistant said in a reply is not a fact about anyone
+ * in the person's life, so such a note is never sorted and no model is asked about it.
+ */
+export type SortableOrigin = Exclude<NoteOrigin, { kind: 'assistant_reply' }>;
 
 /**
  * The note's origin from its recall metadata. Only a note with no source and the person's own origin is their
@@ -31,7 +38,7 @@ export function noteOriginOf(metadata: Readonly<Record<string, string>>): NoteOr
     case 'calendar':
       return { kind: 'read', source: 'calendar' };
     case 'assistant_response':
-      return { kind: 'read', source: 'inferred' };
+      return { kind: 'assistant_reply' };
     case 'web':
     case 'attachment':
     case 'other':
@@ -40,7 +47,7 @@ export function noteOriginOf(metadata: Readonly<Record<string, string>>): NoteOr
 }
 
 /** The source written on every statement made from a note of this origin. The model never chooses it. */
-export function statementSourceOf(origin: NoteOrigin): FactSource {
+export function statementSourceOf(origin: SortableOrigin): FactSource {
   switch (origin.kind) {
     case 'own_words':
       return 'you_said';
@@ -52,7 +59,7 @@ export function statementSourceOf(origin: NoteOrigin): FactSource {
 }
 
 /** Where the note came from, in words for the prompt. */
-export function describeNoteOrigin(origin: NoteOrigin): string {
+export function describeNoteOrigin(origin: SortableOrigin): string {
   switch (origin.kind) {
     case 'own_words':
       return "the person's own words";
@@ -63,7 +70,6 @@ export function describeNoteOrigin(origin: NoteOrigin): string {
         mail: 'an email the assistant read',
         calendar: 'a calendar entry the assistant read',
         read_content: 'something the assistant read, such as a web page or a file',
-        inferred: "the assistant's own reply",
       }[origin.source];
   }
 }

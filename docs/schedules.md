@@ -42,7 +42,7 @@ When you ask for a schedule in a chat, a card shows it before anything is saved.
 
 ## Scheduled runs don't interrupt you
 
-A scheduled run sends no notice. Its results wait in its chat until you open it.
+A scheduled run sends no notice. Its results wait in its chat until you open it. A morning brief also leaves a quiet note under the **For you** bell when it is ready. The note never pushes to your devices or texts you.
 
 ## Nothing is sent or changed without you
 

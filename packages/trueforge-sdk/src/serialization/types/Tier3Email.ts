@@ -4,6 +4,7 @@ import type * as TrueForge from "../../api/index.js";
 import * as core from "../../core/index.js";
 import type * as serializers from "../index.js";
 import { Tier3EmailAction } from "./Tier3EmailAction.js";
+import { Tier3EmailForwards } from "./Tier3EmailForwards.js";
 import { Tier3EmailReplaces } from "./Tier3EmailReplaces.js";
 import { Tier3EmailReplyInThread } from "./Tier3EmailReplyInThread.js";
 import { Tier3Mailbox } from "./Tier3Mailbox.js";
@@ -15,6 +16,7 @@ export const Tier3Email: core.serialization.ObjectSchema<serializers.Tier3Email.
         body: core.serialization.string(),
         cc: core.serialization.list(Tier3Mailbox),
         checkCode: core.serialization.property("check_code", core.serialization.string().optionalNullable()),
+        forwards: Tier3EmailForwards.optionalNullable(),
         fromName: core.serialization.property("from_name", core.serialization.string().optionalNullable()),
         nameLeftOff: core.serialization.property("name_left_off", core.serialization.boolean().optional()),
         replaces: Tier3EmailReplaces.nullable(),
@@ -31,6 +33,7 @@ export declare namespace Tier3Email {
         body: string;
         cc: Tier3Mailbox.Raw[];
         check_code?: (string | null | undefined) | null;
+        forwards?: (Tier3EmailForwards.Raw | null | undefined) | null;
         from_name?: (string | null | undefined) | null;
         name_left_off?: boolean | null;
         replaces?: Tier3EmailReplaces.Raw | null;
