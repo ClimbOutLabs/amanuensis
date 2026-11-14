@@ -101,7 +101,6 @@ const TODAY: RailToday = {
     { held_action_id: 'call-1', title: 'Send the email to Ana', origin: 'Trip planning', session_id: 'chat-9' },
   ],
   needs_ok_more: false,
-  carrying: 3,
   as_of: new Date().toISOString(),
 };
 
@@ -116,12 +115,14 @@ function deskApi(today: RailToday): RailDeskApi & {
 }
 
 describe('the rail desk on Home', () => {
-  it('shows Today, Due and Needs your OK, says what is being carried, and opens chats from rows', async () => {
+  it('shows Today, Due and Needs your OK under a plain status word, and opens chats from rows', async () => {
     const onOpenChat = vi.fn();
     render(<AmanRuntimeRail status="ready" deskApi={deskApi(TODAY)} onOpenChat={onOpenChat} />);
 
     expect(await screen.findByText('Dentist')).toBeInTheDocument();
-    expect(screen.getByText('Ready · Carrying 3')).toBeInTheDocument();
+    // The caption under the name is the status word alone, with no count beside it.
+    expect(screen.getByText('Ready', { selector: '.aman-runtime-rail__status span' })).toBeInTheDocument();
+    expect(screen.queryByText(/Carrying/)).not.toBeInTheDocument();
     expect(screen.getByText('Take the morning pills')).toBeInTheDocument();
     expect(screen.getByText('Send the email to Ana')).toBeInTheDocument();
 

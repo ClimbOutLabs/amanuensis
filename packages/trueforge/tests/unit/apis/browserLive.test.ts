@@ -71,13 +71,22 @@ async function call(
 
 const originalBrowserUrl = configuration.BROWSER_URL;
 const originalBrowserSecret = configuration.BROWSER_SECRET;
+const originalBrowserEnabled = configuration.BROWSER_ENABLED;
 
 beforeEach(() => {
-  Object.assign(configuration, { BROWSER_URL: 'http://browser-relay:8792', BROWSER_SECRET: SECRET });
+  Object.assign(configuration, {
+    BROWSER_ENABLED: true,
+    BROWSER_URL: 'http://browser-relay:8792',
+    BROWSER_SECRET: SECRET,
+  });
 });
 
 afterEach(() => {
-  Object.assign(configuration, { BROWSER_URL: originalBrowserUrl, BROWSER_SECRET: originalBrowserSecret });
+  Object.assign(configuration, {
+    BROWSER_ENABLED: originalBrowserEnabled,
+    BROWSER_URL: originalBrowserUrl,
+    BROWSER_SECRET: originalBrowserSecret,
+  });
   jest.restoreAllMocks();
 });
 
@@ -96,7 +105,7 @@ describe('browser live routes', () => {
     const response = await call(app, { method: 'GET', path: '/api/browser/live/tabs' });
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
-      data: { tabs: [{ tab: 'chat-1', title: 'Sign in', url: 'https://example.test/login' }] },
+      data: { tabs: [{ tab: 'chat-1', title: 'Sign in', url: 'https://example.test/login' }], browser_on: true },
     });
     expect(sent).toEqual([
       {
@@ -105,6 +114,15 @@ describe('browser live routes', () => {
         body: { owner: 'default:user-a' },
       },
     ]);
+  });
+
+  it('answers an empty list without asking the browser when the browser is off', async () => {
+    Object.assign(configuration, { BROWSER_ENABLED: false });
+    const { app, sent } = buildApp(() => ({ json: { status: 'ok', tabs: [] } }));
+    const response = await call(app, { method: 'GET', path: '/api/browser/live/tabs' });
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ data: { tabs: [], browser_on: false } });
+    expect(sent).toEqual([]);
   });
 
   it("returns one frame of the caller's own tab", async () => {
