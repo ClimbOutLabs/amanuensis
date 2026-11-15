@@ -571,7 +571,7 @@ export class TurnResourceResolver<
             if (declared_change_tools !== undefined && declared_change_tools.length > 0) {
               this.#declaredChangeTools.set(entry.name, declared_change_tools);
             }
-            if (search_provider !== undefined && search_provider.served_in_process) {
+            if (search_provider?.served_in_process === true) {
               return new TavilySource({
                 id: entry.name,
                 name: entry.name,

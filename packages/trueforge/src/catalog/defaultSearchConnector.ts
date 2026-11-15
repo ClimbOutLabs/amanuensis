@@ -3,6 +3,7 @@ import { isDeepStrictEqual } from 'node:util';
 import type { McpServerRecord } from '../db/mcpServerStore';
 import type { IOAuthClientStore } from '../mcp/auth/types';
 import type { ResourceName } from '../schemas/common';
+import type { CatalogMcpServer } from '../schemas/mcpCatalog';
 import type { RemoteMcpServerManifest } from '../schemas/mcpServer';
 import type { McpCatalog } from './McpCatalog';
 
@@ -20,20 +21,31 @@ export function defaultSearchConnector(catalog: McpCatalog): DefaultSearchConnec
   if (preset === undefined) {
     return undefined;
   }
+  return { name: preset.name, manifest: designatedPresetManifest({ catalog, preset }) };
+}
+
+/**
+ * A search preset saved as the designated search provider, carrying the preset's own search
+ * declaration in the split shape. Its sign-in is left for the caller to add.
+ */
+export function designatedPresetManifest({
+  catalog,
+  preset,
+}: {
+  catalog: McpCatalog;
+  preset: CatalogMcpServer;
+}): RemoteMcpServerManifest {
   const declaration = catalog.searchDeclarationForUrl(preset.url);
   return {
+    type: 'remote',
     name: preset.name,
-    manifest: {
-      type: 'remote',
-      name: preset.name,
-      url: preset.url,
-      description: preset.description,
-      search_provider: true,
-      search_tools: [...(declaration?.search_tools ?? [])],
-      page_read_tools: [...(declaration?.page_read_tools ?? [])],
-      search_plumbing_fields: [...(declaration?.plumbing_fields ?? [])],
-      ...(declaration?.in_process === true ? { search_in_process: true } : {}),
-    },
+    url: preset.url,
+    description: preset.description,
+    search_provider: true,
+    search_tools: [...(declaration?.search_tools ?? [])],
+    page_read_tools: [...(declaration?.page_read_tools ?? [])],
+    search_plumbing_fields: [...(declaration?.plumbing_fields ?? [])],
+    ...(declaration?.in_process === true ? { search_in_process: true } : {}),
   };
 }
 

@@ -74,7 +74,7 @@ export async function buildGuideSearchToolSet(input: {
       return undefined;
     }
     const connection = await input.connectionFor(providerName);
-    if (connection.search_provider === undefined || !connection.search_provider.served_in_process) {
+    if (connection.search_provider?.served_in_process !== true) {
       return undefined;
     }
     const offline =

@@ -39,7 +39,7 @@ export function declaredSearchProviderTools(
   const search_tools: string[] = [];
   const page_read_tools: string[] = [];
   for (const tool of tools) {
-    if (tool.annotations?.readOnlyHint !== true || tool.annotations?.openWorldHint !== true) {
+    if (tool.annotations?.readOnlyHint !== true || tool.annotations.openWorldHint !== true) {
       continue;
     }
     const properties = tool.inputSchema?.properties ?? {};

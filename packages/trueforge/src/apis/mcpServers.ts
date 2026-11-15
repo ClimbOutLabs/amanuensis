@@ -270,7 +270,7 @@ function withSearchDeclaration({
 
 /** The declaration a stored record already carries, when it was designated and holds the split. */
 function storedSearchDeclaration(manifest: McpServerManifest | undefined): SearchDeclaration | undefined {
-  if (manifest === undefined || manifest.type !== 'remote' || manifest.search_provider !== true) {
+  if (manifest?.type !== 'remote' || manifest.search_provider !== true) {
     return undefined;
   }
   if (manifest.page_read_tools === undefined) {
@@ -301,7 +301,7 @@ function settledSearchDeclaration({
   if (manifest.type !== 'remote' || manifest.search_provider !== true) {
     return undefined;
   }
-  if (stored !== undefined && stored.type === 'remote' && stored.url === manifest.url) {
+  if (stored?.type === 'remote' && stored.url === manifest.url) {
     const carried = storedSearchDeclaration(stored);
     if (carried !== undefined) {
       return carried;
@@ -327,9 +327,7 @@ function withStoredDeclaredChangeTools({
     return manifest;
   }
   const kept =
-    existing !== undefined && existing.type === 'remote' && existing.url === manifest.url
-      ? existing.declared_change_tools
-      : undefined;
+    existing?.type === 'remote' && existing.url === manifest.url ? existing.declared_change_tools : undefined;
   return { ...manifest, declared_change_tools: kept };
 }
 
@@ -402,7 +400,7 @@ export function createSettingsMcpServersRouter<TTransaction>(
       };
     }
     let headers: RemoteMcpHeaders;
-    if (stored !== undefined && stored.manifest.type === 'remote' && stored.manifest.url === manifest.url) {
+    if (stored?.manifest.type === 'remote' && stored.manifest.url === manifest.url) {
       const connection = await getMcpConnection({ tenant_id, name: stored.name, store: mcpServerStore, userRef });
       headers = connection?.headers ?? resolveManifestRequestHeaders(manifest);
     } else {
@@ -904,8 +902,7 @@ export function createMcpServersRouter<TTransaction>(deps: McpServersRouterDeps<
         const store = deps.resolveMcpServerStore(c);
         const record = await store.getServer({ tenant_id: requestContext.tenant_id, name });
         if (
-          record !== undefined &&
-          record.manifest.type === 'remote' &&
+          record?.manifest.type === 'remote' &&
           record.manifest.search_provider === true &&
           record.manifest.page_read_tools === undefined &&
           record.manifest.url === connection.url
@@ -994,7 +991,7 @@ export function createMcpServersRouter<TTransaction>(deps: McpServersRouterDeps<
       try {
         const store = deps.resolveMcpServerStore(c);
         const record = await store.getServer({ tenant_id: requestContext.tenant_id, name });
-        if (record !== undefined && record.manifest.type === 'remote') {
+        if (record?.manifest.type === 'remote') {
           const declared = homeAssistantDeclaredChangeTools(listedTools);
           const stored = record.manifest.declared_change_tools ?? [];
           if (JSON.stringify(declared) !== JSON.stringify(stored)) {

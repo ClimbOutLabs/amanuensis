@@ -131,8 +131,7 @@ export async function isChatSeenLink(input: {
               'id' in call &&
               typeof call.id === 'string' &&
               'tool_info' in call &&
-              typeof call.tool_info === 'object' &&
-              call.tool_info !== null
+              typeof call.tool_info === 'object'
             ) {
               const info = call.tool_info;
               callRoles.set(call.id, {

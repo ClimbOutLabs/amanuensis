@@ -179,9 +179,7 @@ export function mailModeForCustomPort(kind: 'imap' | 'smtp', port: number): Mail
  * typed. The installer's email_clean_password reads the same flag from its copy of the table.
  */
 export function cleanMailPassword(input: { preset: EmailProviderPreset | undefined; password: string }): string {
-  return input.preset !== undefined && input.preset.app_password_spaces_stripped
-    ? input.password.replaceAll(' ', '')
-    : input.password;
+  return input.preset?.app_password_spaces_stripped === true ? input.password.replaceAll(' ', '') : input.password;
 }
 
 /**
