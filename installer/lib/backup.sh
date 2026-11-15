@@ -49,6 +49,7 @@ database_probe() { # name image path
 
 # Puts one more file into the scratch volume, from stdin, so it is sealed with the rest.
 backup_scratch_add() { # scratch image file
+  # shellcheck disable=SC2016 # $1 is the file name, expanded by the shell inside the container
   D run --rm -i --network none -v "$1:/backup" "$2" sh -c 'cat >"/backup/$1"' sh "$3"
 }
 
@@ -362,6 +363,7 @@ backup_takes_recovery_key() { # sealed file
 # The sealed file on stdout, opened with the recovery key in BACKUP_RECOVERY_KEY. The key goes in on the same
 # input as the file and is held in memory inside the container, so it is never in a command line or on a disk.
 backup_unseal_with_recovery_key() { # sealed file, image
+  # shellcheck disable=SC2016 # $key is read and expanded by the shell inside the container
   {
     printf '%s\n' "$BACKUP_RECOVERY_KEY"
     cat "$1"

@@ -426,6 +426,7 @@ case "$cmd" in
         tar -x -C "$S/scratchfs/$scratch_vol" -f -
         exit 0
         ;;
+      # shellcheck disable=SC2016 # matches the literal script the installer passes
       *'cat >"/backup/$1"'*)
         # One more file for the scratch volume, from stdin.
         args=("$@")
@@ -469,7 +470,8 @@ case "$cmd" in
           *) echo "$*" >>"$S/unseal_runs" ;;
         esac
         IFS= read -r header || { echo "The sealed file is cut short." >&2; exit 1; }
-        set -- $header
+        read -r -a fields <<<"$header"
+        set -- ${fields[@]+"${fields[@]}"}
         if [ "${1:-}" != AMANSEAL-STUB ]; then
           cat >/dev/null
           echo "This is not a sealed file." >&2

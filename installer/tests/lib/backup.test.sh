@@ -7,9 +7,11 @@ set -euo pipefail
 # Turns the only backup into the readable layout backups had before sealing, with the checksums such a backup had.
 make_backup_readable() { # dir name
   unseal_to_old_layout "$1" "$2"
-  (cd "$1" && find . -type f ! -name SHA256SUMS | sed 's|^\./||' | LC_ALL=C sort | while IFS= read -r f; do
+  local sums
+  sums=$(cd "$1" && find . -type f ! -name SHA256SUMS | sed 's|^\./||' | LC_ALL=C sort | while IFS= read -r f; do
     if command -v sha256sum >/dev/null 2>&1; then sha256sum "$f"; else shasum -a 256 "$f"; fi
-  done >SHA256SUMS)
+  done)
+  printf '%s\n' "$sums" >"$1/SHA256SUMS"
 }
 
 test_old_readable_backups_are_sealed() {

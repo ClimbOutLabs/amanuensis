@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Starts the app image the way the instance compose file does, as the image's own user with only the
-# /data volume and a tmpfs /tmp writable, and waits for it to become healthy. Needs a running Docker;
-# AMAN_TEST_IMAGE names an already built image and skips the build.
+# /data volume and a tmpfs /tmp writable and the computer's key mounted read-only, and waits for it to
+# become healthy. Needs a running Docker; AMAN_TEST_IMAGE names an already built image and skips the build.
 set -euo pipefail
 
 REPO=$(cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
@@ -11,6 +11,7 @@ NAME=aman-image-runtime-$$
 VOLUME=$NAME-data
 POLICY_VOLUME=$NAME-mail-policy
 MIRROR_VOLUME=$NAME-mirror
+KEY_VOLUME=$NAME-key
 SLOT_IMAGE_NAME=$NAME-slot
 
 cleanup() {
@@ -18,6 +19,7 @@ cleanup() {
   docker volume rm "$VOLUME" >/dev/null 2>&1 || true
   docker volume rm "$POLICY_VOLUME" >/dev/null 2>&1 || true
   docker volume rm "$MIRROR_VOLUME" >/dev/null 2>&1 || true
+  docker volume rm "$KEY_VOLUME" >/dev/null 2>&1 || true
   docker image rm "$SLOT_IMAGE_NAME" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
@@ -35,9 +37,15 @@ fi
 
 docker volume create "$VOLUME" >/dev/null
 docker volume create "$POLICY_VOLUME" >/dev/null
+docker volume create "$KEY_VOLUME" >/dev/null
+# The installer's setup step: the key is made in its own volume and the new database is tied to it, with no network.
+docker run --rm --network none --cap-drop ALL -v "$VOLUME:/data" -v "$KEY_VOLUME:/run/aman-key" --entrypoint aman "$IMAGE" \
+  secrets init --if-needed --sqlite /data/db/db.sqlite --key-file /run/aman-key/master.key >/dev/null ||
+  fail "the app image could not set up this computer's key"
 # The login service is not part of this check: the app boots with an issuer it cannot reach and retries.
 # The send list volume mounts the way the instance compose file mounts it for an instance with email.
 docker run -d --name "$NAME" --read-only --tmpfs /tmp -v "$VOLUME:/data" -v "$POLICY_VOLUME:/data/mail-policy" \
+  -v "$KEY_VOLUME:/run/aman-key:ro" -e SECRETS_KEY_FILE=/run/aman-key/master.key \
   -e NODE_ENV=production -e STANDALONE=true -e PORT=8790 \
   -e SQLITE_PATH=/data/db/db.sqlite -e MEMORY_MARKDOWN_DIR=/data/memory -e PERSONA_KNOWLEDGE_DIR=/data/persona-knowledge \
   -e OIDC_ISSUER_URL=http://127.0.0.1:9/dex -e OIDC_CLIENT_ID=image-runtime -e OIDC_CLIENT_SECRET=image-runtime \

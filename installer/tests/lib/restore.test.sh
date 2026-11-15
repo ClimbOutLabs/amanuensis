@@ -464,9 +464,11 @@ test_backup_from_before_sealing_still_restores() {
   local dir
   dir=$(backup_dirs | tail -n 1)
   unseal_to_old_layout "$dir" main
-  ( cd "$dir" && find . -type f ! -name SHA256SUMS | sed 's|^\./||' | LC_ALL=C sort | while IFS= read -r f; do
+  local sums
+  sums=$(cd "$dir" && find . -type f ! -name SHA256SUMS | sed 's|^\./||' | LC_ALL=C sort | while IFS= read -r f; do
     if command -v sha256sum >/dev/null 2>&1; then sha256sum "$f"; else shasum -a 256 "$f"; fi
-  done >SHA256SUMS )
+  done)
+  printf '%s\n' "$sums" >"$dir/SHA256SUMS"
   set_state two
   with_input "yes
 "

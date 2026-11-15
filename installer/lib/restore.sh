@@ -67,6 +67,7 @@ restore_database_check() { # folder holding db.sqlite, app image, what opened th
   local out members=(db.sqlite)
   [ ! -f "$1/db.sqlite.keys" ] || members+=(db.sqlite.keys)
   machine_key_args
+  # shellcheck disable=SC2016 # the script is expanded by the shell inside the container
   out=$({
     [ "${3:-}" != recovery ] || printf '%s\n' "$BACKUP_RECOVERY_KEY"
     tar -C "$1" -cf - "${members[@]}"
