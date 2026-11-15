@@ -2051,9 +2051,11 @@ function sandboxExecPreflightFailure(input: {
   ) {
     return 'Inline code evaluation (python -c, node -e), heredocs, and tee are not allowed for verify-purpose exec calls. Put the check in a shell script and run it by name so the verification step stays reviewable. Python and Node code cannot run through exec at all.';
   }
+  // A skill's approved websites are reached the way the skill says, so curl is not redirected to the web tool;
+  // the gateway still refuses every other site.
   const webEgressRejection = sandboxCommandWebEgressRejection({
     command: input.command,
-    webConnectorAttached: input.webConnectorAttached,
+    webConnectorAttached: input.webConnectorAttached && !input.skillNetworkGranted,
     webConnectorToolHint: input.webConnectorToolHint,
   });
   if (webEgressRejection !== undefined) {
