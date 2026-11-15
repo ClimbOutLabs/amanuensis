@@ -53,8 +53,8 @@ Let each device trust this computer
   <fingerprint, first half>
   <fingerprint, second half>
   If it differs, stop.
-  Bookmark host.local: it keeps working when this computer's address
-  changes.
+  Bookmark host.local. If this computer's address changes, run aman
+  doctor network --fix and the bookmark works again.
 
   Open a new terminal window to use the aman command.
   Update later: aman upgrade
