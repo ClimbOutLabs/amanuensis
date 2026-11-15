@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 // Fails (exit 1) when a source file is longer than the line limit, so no new oversized file appears.
-// Files that were already too long when the check arrived are listed in file-size-baseline.json with
-// their length then. Each may only shrink: once one gets shorter, its number is lowered to match, and
-// once it fits under the limit, it leaves the list. Tests, generated code and vendored code are not checked.
+// Files that were already too long when the check arrived are listed in file-size-baseline.json and may
+// not grow past their listed length. Shrinking always passes; a separate tidy lowers the numbers.
+// Tests, generated code and vendored code are not checked.
 //
 // Usage: node scripts/check-file-sizes.mjs [--update]
-//   --update lowers baseline numbers to match files that shrank and drops files that now fit or are gone.
-//            It never raises a number or adds a file.
+//   --update is the tidy: it lowers numbers to match files that shrank and drops files that now fit or are
+//            gone. It never raises a number or adds a file.
 
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -51,12 +51,15 @@ export function countLines(text) {
 }
 
 /**
- * Every size problem, and the baseline the tree would have if each grandfathered file's number matched it.
+ * Every size problem, notes on listed files that could leave or lower their number, and the baseline the tree
+ * would have after that tidy. Only growth fails: shrinking passes without a baseline edit, so pull requests
+ * that shorten the same listed file never conflict on the baseline.
  * @param {{ files: string[], countLinesOf: (file: string) => number, baseline: Record<string, number> }} input
- * @returns {{ problems: string[], updatedBaseline: Record<string, number> }}
+ * @returns {{ problems: string[], notes: string[], updatedBaseline: Record<string, number> }}
  */
 export function findFileSizeProblems({ files, countLinesOf, baseline }) {
   const problems = [];
+  const notes = [];
   const updatedBaseline = {};
   const tracked = new Set(files);
 
@@ -80,13 +83,9 @@ export function findFileSizeProblems({ files, countLinesOf, baseline }) {
       );
       updatedBaseline[file] = allowed;
     } else if (lines <= LINE_LIMIT) {
-      problems.push(
-        `${file}: now ${lines} lines, under the limit. Run pnpm check:file-sizes --update to take it off the list.`,
-      );
+      notes.push(`${file}: now ${lines} lines, under the limit; the next tidy takes it off the list.`);
     } else if (lines < allowed) {
-      problems.push(
-        `${file}: shrank from ${allowed} to ${lines} lines. Run pnpm check:file-sizes --update to lower its number.`,
-      );
+      notes.push(`${file}: shrank from ${allowed} to ${lines} lines; the next tidy lowers its number.`);
       updatedBaseline[file] = lines;
     } else {
       updatedBaseline[file] = allowed;
@@ -95,13 +94,11 @@ export function findFileSizeProblems({ files, countLinesOf, baseline }) {
 
   for (const file of Object.keys(baseline)) {
     if (!tracked.has(file) || !isCheckedFile(file)) {
-      problems.push(
-        `${file}: listed in the baseline but no longer checked. Run pnpm check:file-sizes --update to remove it.`,
-      );
+      notes.push(`${file}: listed but no longer checked; the next tidy removes it.`);
     }
   }
 
-  return { problems, updatedBaseline };
+  return { problems, notes, updatedBaseline };
 }
 
 function main() {
@@ -111,7 +108,7 @@ function main() {
   const files = execFileSync('git', ['ls-files', '-z'], { cwd: rootDir, encoding: 'utf8' })
     .split('\0')
     .filter(file => file.length > 0);
-  const { problems, updatedBaseline } = findFileSizeProblems({
+  const { problems, notes, updatedBaseline } = findFileSizeProblems({
     files,
     countLinesOf: file => countLines(readFileSync(path.join(rootDir, file), 'utf8')),
     baseline,
@@ -120,15 +117,11 @@ function main() {
   if (process.argv.includes('--update')) {
     const sorted = Object.fromEntries(Object.entries(updatedBaseline).sort(([a], [b]) => a.localeCompare(b)));
     writeFileSync(baselinePath, `${JSON.stringify(sorted, null, 2)}\n`);
-    const remaining = problems.filter(problem => !problem.includes('--update'));
-    if (remaining.length === 0) {
-      console.log('Baseline updated. File sizes are within the limit.');
-      return;
+    console.log(`Baseline tidied: ${notes.length} listed files lowered or removed.`);
+  } else {
+    for (const note of notes) {
+      console.log(`Note: ${note}`);
     }
-    for (const problem of remaining) {
-      console.error(`- ${problem}`);
-    }
-    process.exit(1);
   }
 
   if (problems.length === 0) {

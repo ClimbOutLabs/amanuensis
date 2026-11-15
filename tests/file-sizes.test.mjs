@@ -50,22 +50,24 @@ test('a grandfathered file at its listed size passes, and growing fails', () => 
   assert.deepEqual(grown.updatedBaseline, baseline);
 });
 
-test('a grandfathered file that shrank must lower its number', () => {
-  const { problems, updatedBaseline } = check({
+test('a grandfathered file that shrank passes, and the tidy lowers its number', () => {
+  const { problems, notes, updatedBaseline } = check({
     sizes: { 'packages/a/src/big.ts': 2500 },
     baseline: { 'packages/a/src/big.ts': 3000 },
   });
-  assert.match(problems[0], /shrank from 3000 to 2500/);
+  assert.deepEqual(problems, []);
+  assert.match(notes[0], /shrank from 3000 to 2500/);
   assert.deepEqual(updatedBaseline, { 'packages/a/src/big.ts': 2500 });
 });
 
-test('a grandfathered file under the limit, or gone, leaves the list', () => {
-  const { problems, updatedBaseline } = check({
+test('a grandfathered file under the limit, or gone, passes, and the tidy takes it off the list', () => {
+  const { problems, notes, updatedBaseline } = check({
     sizes: { 'packages/a/src/split.ts': 400 },
     baseline: { 'packages/a/src/split.ts': 3000, 'packages/a/src/deleted.ts': 2000 },
   });
-  assert.equal(problems.length, 2);
-  assert.match(problems[0], /under the limit/);
-  assert.match(problems[1], /no longer checked/);
+  assert.deepEqual(problems, []);
+  assert.equal(notes.length, 2);
+  assert.match(notes[0], /under the limit/);
+  assert.match(notes[1], /no longer checked/);
   assert.deepEqual(updatedBaseline, {});
 });

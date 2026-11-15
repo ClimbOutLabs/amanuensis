@@ -244,7 +244,7 @@ The repository-wide rules live in [`AGENTS.md`](AGENTS.md) (some packages have t
 - Wire shapes (HTTP/OpenAPI) and database identifiers use `snake_case`.
 - Server env reads go through `packages/trueforge/src/config.ts`, never `process.env` directly.
 - Remove dead code in the same change that makes it dead.
-- Keep source files at 1,000 lines or fewer (`pnpm check:file-sizes`). Tests, generated code and vendored code are not checked. Files that were already longer are listed in `scripts/file-size-baseline.json` and may only shrink. When one gets shorter, run `pnpm check:file-sizes --update` to lower its number. When a change has to add to one of them, put the new code in its own file. Raising a number by hand needs a reason in the PR description.
+- Keep source files at 1,000 lines or fewer (`pnpm check:file-sizes`). Tests, generated code and vendored code are not checked. Files that were already longer are listed in `scripts/file-size-baseline.json` and may not grow past their listed length. When a change has to add to one of them, put the new code in its own file. Making one shorter needs no edit to the list; a maintainer runs `pnpm check:file-sizes --update` from time to time in its own small PR to lower the numbers. Raising a number by hand needs a reason in the PR description.
 
 Prettier and ESLint run as pre-commit hooks via husky + lint-staged.
 
