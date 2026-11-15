@@ -30,8 +30,8 @@ import { newPairingCode, TELEGRAM_PAIRING_TTL_MS, type TelegramService } from '.
 /** The biggest file the channel will fetch from Telegram and attach to a turn. */
 export const TELEGRAM_MAX_FILE_BYTES = 10 * 1024 * 1024;
 
-/** The title of the one chat Telegram messages land in. */
-export const TELEGRAM_CHAT_TITLE = 'Telegram';
+/** In front of a Telegram chat's title, which otherwise names its subject like any chat. */
+export const TELEGRAM_CHAT_TITLE_PREFIX = 'Telegram: ';
 
 /** Session metadata key marking the Telegram chat, as the Reminders chat is marked. */
 export const TELEGRAM_METADATA_KEY = 'is_telegram';

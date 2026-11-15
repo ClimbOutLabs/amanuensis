@@ -39,7 +39,6 @@ import {
   newEventId,
   PromiseTimeoutError,
   rawSandboxId,
-  readGitSkillFiles,
   redisKey,
   SandboxError,
   SandboxFileNotFoundError,
@@ -174,6 +173,7 @@ import {
   withGatewayMetadataHeaders,
 } from '../runtime/sessionResources';
 import type { SkillTurnContext } from '../runtime/skillCapability';
+import { readSkillFilesFromGit } from '../runtime/skillWebsites';
 import { SPACE_WRITE_TOOL_ARGUMENT_LIMITS, SpaceTurnResourceResolver } from '../runtime/spaceCapability';
 import { TokenFactoryMeteredLLM, tokenFactoryRole, type TokenFactoryBudget } from '../runtime/tokenFactoryBudget';
 import { resolveToolOutputScreenEnabled } from '../runtime/toolOutputScreenSettings';
@@ -1968,6 +1968,8 @@ export async function beginTurnExecution(params: {
    * only ever replaces a derived working title.
    */
   session_title?: string | undefined;
+  /** Put in front of the derived and subject titles, so a chat that started elsewhere says where (a Telegram chat). */
+  session_title_prefix?: string | undefined;
 }): Promise<{ turn: TurnHandle<TurnCustom>; drainInput: TurnEventDrainInput }> {
   const clocks = startTurnClocks({ sessionId: params.session.session_id, logger: params.deps.logger });
   try {
@@ -2103,7 +2105,11 @@ async function beginAcceptedTurnExecution(
       // store never overwrites an existing title. A caller that names the session
       // itself (a schedule run) sets that title instead, and the turn then reports no
       // derived title, so the subject-title follow-up below leaves the name alone.
-      const derivedTitle = session.record.last_turn_id ? undefined : deriveSessionTitle(input);
+      const firstMessageTitle = session.record.last_turn_id ? undefined : deriveSessionTitle(input);
+      const derivedTitle =
+        firstMessageTitle === undefined
+          ? undefined
+          : capChatTitle(`${params.session_title_prefix ?? ''}${firstMessageTitle}`);
       const title = params.session_title ?? derivedTitle;
 
       const turn = await session.createTurn({
@@ -2185,6 +2191,7 @@ async function beginAcceptedTurnExecution(
           sessionStore: deps.sessionStore,
           derivedTitle,
           userText: extractUserMessageText(input ?? []),
+          titlePrefix: params.session_title_prefix ?? '',
           logger: deps.logger,
         });
 
@@ -2265,6 +2272,8 @@ export async function startTurnInProcess(params: {
   profileLearning?: { personalizationStore: IPersonalizationStore } | undefined;
   /** A title the caller has already chosen for this session; see beginTurnExecution. */
   session_title?: string | undefined;
+  /** See beginTurnExecution. */
+  session_title_prefix?: string | undefined;
   /** Given the finished answer's text once the turn is done; not called for a turn that failed or stopped. */
   onFinishedAnswer?: ((answerText: string) => Promise<void>) | undefined;
 }): Promise<TurnHandle<TurnCustom>> {
@@ -3039,7 +3048,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
               catalog: deps.skillCatalog.list(),
               sandboxReady: serverSandboxAvailable,
               lookup: { fetchImpl: undefined, resolveAddresses: undefined },
-              readFiles: source => readGitSkillFiles({ skill: source }),
+              readFiles: readSkillFilesFromGit,
             },
       schedules:
         deps.schedules === undefined || chatRunner === undefined
@@ -3395,6 +3404,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
                 sessionStore: deps.sessionStore,
                 derivedTitle: title,
                 userText: extractUserMessageText(body.input),
+                titlePrefix: '',
                 logger: deps.logger,
               });
         const drainInput = {
