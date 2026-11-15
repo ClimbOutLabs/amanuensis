@@ -124,6 +124,7 @@ export const AMAN_GUIDE_TOPICS: readonly AmanGuideTopic[] = [
     title: 'Get help',
     covers: [
       'command:doctor',
+      'command:help',
       'command:backup',
       'command:restore',
       'command:upgrade',

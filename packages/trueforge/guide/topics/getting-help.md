@@ -1,7 +1,7 @@
 ---
 id: getting-help
 title: Get help
-covers: command:doctor, command:backup, command:restore, command:upgrade, command:password, command:uninstall, route:help, route:bugReport
+covers: command:doctor, command:help, command:backup, command:restore, command:upgrade, command:password, command:uninstall, route:help, route:bugReport
 ---
 
 When something doesn't work, Aman's guide can look at your setup and tell you what to do. If that doesn't fix it, you can send us a bug report.

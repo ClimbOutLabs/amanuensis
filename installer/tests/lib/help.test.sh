@@ -25,7 +25,7 @@ run_aman() { # [ENV=VALUE...] -- args...
 }
 
 test_help_lists_every_command_in_groups() {
-  t_begin "aman help is one short screen: every command once, in groups, with one line each"
+  t_begin "command:help is one short screen: every command once, in groups, with one line each"
   sandbox_new
   mkdir -p "$SB/home"
   local c
@@ -96,7 +96,7 @@ test_every_dispatched_command_has_a_page() {
   local c
   # The commands of the main case block, as the help check reads them.
   for c in $(sed -n '/^# -* main/,$p' "$INSTALLER_DIR/doctor/aman" | awk '/^case "\$\{1:-\}" in/{n++} n>0{block[n]=block[n] $0 "\n"} END{for(i=1;i<=n;i++) if (block[i] ~ /Unknown command/) printf "%s", block[i]}' | grep -E '^  [a-z][a-z| -]*\)$' | tr -d ' )' | tr '|' ' '); do
-    case " $ALL_COMMANDS " in
+    case " help $ALL_COMMANDS " in
       *" $c "*) ;;
       *) t_fail "aman $c has no page in lib/help.sh" ;;
     esac
