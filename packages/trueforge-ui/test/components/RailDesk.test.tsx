@@ -182,6 +182,7 @@ const TODAY: RailToday = {
     },
   ],
   free_after: '2026-11-06T19:00:00.000Z',
+  calendar_unread: false,
   due: [
     {
       reminder_id: 'rem-1',
@@ -238,6 +239,18 @@ describe('the rail desk on Home', () => {
     expect(await screen.findByText('Nothing on the calendar.')).toBeInTheDocument();
     expect(screen.queryByText('Due')).not.toBeInTheDocument();
     expect(screen.queryByText('Needs your OK')).not.toBeInTheDocument();
+  });
+
+  it("says the calendar couldn't be read, not that the day is empty, when no account answered", async () => {
+    render(
+      <AmanRuntimeRail
+        status="ready"
+        deskApi={deskApi({ ...TODAY, calendar: [], free_after: null, calendar_unread: true })}
+      />,
+    );
+    expect(await screen.findByText(/Couldn't read your calendar just now/)).toBeInTheDocument();
+    expect(screen.queryByText('Nothing on the calendar.')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Free for the rest of the day/)).not.toBeInTheDocument();
   });
 
   it("names tomorrow on tomorrow's event, so it never reads as one of today's", async () => {
