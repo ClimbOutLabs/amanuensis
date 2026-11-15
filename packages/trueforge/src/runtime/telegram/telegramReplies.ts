@@ -1,6 +1,12 @@
 import type { ISessionStore } from '@truefoundry/trueforge-core/agent-session';
 import type { Tier3Card } from '@truefoundry/trueforge-core/core';
+import { isSkillBlockedHost } from '@truefoundry/trueforge-core/core/connectors/apiServices';
 import type { ActionRequiredEvent, ModelMessageEvent } from '@truefoundry/trueforge-core/core/events/schema';
+import {
+  SKILL_SITES_DATA_WARNING,
+  SKILL_SITES_EMAIL_BLOCKED,
+  skillSiteLabel,
+} from '@truefoundry/trueforge-core/core/permissions/skillSitesCopy';
 import type {
   Tier3CalendarEventSchema,
   Tier3EmailSchema,
@@ -13,6 +19,7 @@ import { SCHEDULE_AWAY_NOTE } from '@truefoundry/trueforge-core/core/schedules/s
 import type { Logger } from 'winston';
 import { z } from 'zod';
 
+import { isLoopbackHost } from '../../config';
 import type { SessionCustom, TurnCustom } from '../../db/sessionCustom';
 import type { ITelegramStore, TelegramConnection, TelegramPendingReply } from '../../db/telegramStore';
 import { telegramCallbackData } from './telegramChannel';
@@ -43,7 +50,36 @@ export interface TelegramReplyDeps {
   service: TelegramService;
   queue: TelegramSendQueue;
   sessionStore: Pick<ISessionStore<SessionCustom, TurnCustom>, 'getTurn'>;
+  /** Where the app can be opened from another device, so a message can link to its chat; undefined when only this computer can. */
+  appAddress: string | undefined;
   logger: Logger;
+}
+
+/**
+ * The app's address a phone could open, from the public address and the addresses the app may be opened at.
+ * A loopback address only works on the computer Aman runs on, so it is never linked.
+ */
+export function telegramAppAddress(input: {
+  publicBaseUrl: string;
+  allowedOrigins: readonly string[];
+}): string | undefined {
+  for (const candidate of [input.publicBaseUrl, ...input.allowedOrigins]) {
+    let url: URL;
+    try {
+      url = new URL(candidate);
+    } catch {
+      continue;
+    }
+    if (!isLoopbackHost(url.hostname)) {
+      return candidate.replace(/\/+$/, '');
+    }
+  }
+  return undefined;
+}
+
+/** The chat's own page in the app. */
+function chatLink(input: { appAddress: string; sessionId: string }): string {
+  return `${input.appAddress}/sessions/${encodeURIComponent(input.sessionId)}`;
 }
 
 /** The readable text of a finished turn's last message, or undefined when it ended without one. */
@@ -138,6 +174,7 @@ export const TELEGRAM_SHOWN_SECTION_FIELDS = {
     'reply_to',
     'from_name',
     'name_left_off',
+    'forwards',
   ] as const satisfies readonly (keyof z.infer<typeof Tier3EmailSchema>)[],
   calendar_event: [
     'action',
@@ -175,6 +212,9 @@ export const TELEGRAM_SHOWN_SECTION_FIELDS = {
     'version',
     'starter',
     'instructions',
+    'websites',
+    'makes_up_addresses',
+    'can_send',
   ] as const satisfies readonly (keyof z.infer<typeof Tier3SkillSchema>)[],
   skill_network: ['skill_name', 'hosts', 'reason', 'code_pin'] as const satisfies readonly (keyof z.infer<
     typeof Tier3SkillNetworkSchema
@@ -259,7 +299,8 @@ function approvalCardLines(card: Tier3Card): string[] {
   if (card.why_asked_again !== null) {
     lines.push(card.why_asked_again);
   }
-  if (card.recipient !== null) {
+  // An email lists its own recipients below, so the card's recipient line would only repeat them.
+  if (card.recipient !== null && (card.email ?? null) === null) {
     lines.push(`To: ${card.recipient}`);
   }
   if (card.destination !== null) {
@@ -310,8 +351,26 @@ function approvalCardLines(card: Tier3Card): string[] {
         `Replaces the saved draft "${email.replaces.subject}" to ${email.replaces.to.map(mailboxLine).join(', ')}`,
       );
     }
-    lines.push('Message body:');
-    lines.push(email.body);
+    const forwards = email.forwards ?? null;
+    if (forwards === null) {
+      lines.push('Message body:');
+      lines.push(email.body);
+    } else {
+      lines.push(email.body === '' ? 'No note is added.' : 'Your note:');
+      if (email.body !== '') {
+        lines.push(email.body);
+      }
+      lines.push(`Forwarded message from ${forwards.from}, subject "${forwards.subject}":`);
+      lines.push(forwards.body);
+      if (forwards.truncated) {
+        lines.push('The forwarded message is longer than the part shown here. All of it is sent.');
+      }
+      lines.push(
+        forwards.attachments.length === 0
+          ? 'No files are sent with it.'
+          : `Files sent with it: ${forwards.attachments.join(', ')}`,
+      );
+    }
   }
   const event = card.calendar_event ?? null;
   if (event !== null) {
@@ -407,6 +466,23 @@ function approvalCardLines(card: Tier3Card): string[] {
         : 'This skill was written by someone else. Add it only if you trust where it comes from.',
     );
     lines.push('It may bring files and scripts along. Running code still asks you first, as always.');
+    const websites = skill.websites ?? [];
+    if (websites.length === 0) {
+      lines.push("It doesn't send requests to any website.");
+    } else {
+      lines.push(
+        `It sends requests to these websites: ${websites.map(site => skillSiteLabel({ site, blocked: isSkillBlockedHost(site) })).join(', ')}`,
+      );
+      lines.push(`Adding it lets the skill reach these websites and no others. ${SKILL_SITES_DATA_WARNING}`);
+      if (skill.can_send === true) {
+        lines.push(SKILL_SITES_EMAIL_BLOCKED);
+      }
+    }
+    if (skill.makes_up_addresses === true) {
+      lines.push(
+        "Aman also found code that makes up web addresses while it runs. Those websites stay blocked, and you'll be asked about each one.",
+      );
+    }
     if (skill.instructions !== null) {
       lines.push('Instructions:');
       if (skillInstructionsCut(skill.instructions)) {
@@ -438,7 +514,8 @@ function approvalCardLines(card: Tier3Card): string[] {
     lines.push(`New email addresses: ${card.mail_new_recipients.join(', ')}`);
   }
   if (card.outbound_text !== null) {
-    lines.push('Full request:');
+    // Beside an email shown in full, these lines are only what else the call carries.
+    lines.push(email === null ? 'Full request:' : 'Also sent with this email:');
     if (card.outbound_truncated) {
       lines.push('Part of this request is not shown in full.');
     }
@@ -454,10 +531,23 @@ function approvalCardLines(card: Tier3Card): string[] {
   return lines;
 }
 
-const APP_ONLY_APPROVAL_LINE =
-  'Aman needs your ok for an action, but Telegram cannot show everything it will do. Open Aman to see it and answer there.';
-const TRUNCATED_APPROVAL_LINE =
-  'Part of this action is not shown in full, so it cannot be approved from Telegram. Open Aman to see the whole thing and answer there.';
+const NO_CARD_APPROVAL_LINE = 'Aman is waiting for your ok on something.';
+const IN_APP_LINE = "Telegram can't show all of it, so approve or deny it in Aman.";
+const TRUNCATED_APPROVAL_LINE = 'This is too long to show here in full, so approve or deny it in Aman.';
+
+/** A short ask for an action Telegram cannot show whole: what it is, and that the answer is given in the app. */
+function inAppApprovalLines(card: Tier3Card | null): string[] {
+  if (card === null) {
+    return [NO_CARD_APPROVAL_LINE, 'Approve or deny it in Aman.'];
+  }
+  const lines = [card.copy?.headline ?? card.plain_what];
+  const to = card.email?.to ?? [];
+  if (to.length > 0) {
+    lines.push(`To: ${to.map(mailboxLine).join(', ')}`);
+  }
+  lines.push(IN_APP_LINE);
+  return lines;
+}
 
 export interface TelegramApprovalPrompt {
   /** The text to send: the whole card, or the line that names the app when the card cannot be shown whole. */
@@ -498,11 +588,8 @@ export function approvalPrompt(action: ActionRequiredEvent, toolCallId: string):
     return undefined;
   }
   const card = call.tier3_card ?? null;
-  if (card === null) {
-    return { text: APP_ONLY_APPROVAL_LINE, complete: false, approve_label: 'Approve' };
-  }
-  if (cardHasUnshownField(card)) {
-    return { text: APP_ONLY_APPROVAL_LINE, complete: false, approve_label: 'Approve' };
+  if (card === null || cardHasUnshownField(card)) {
+    return { text: inAppApprovalLines(card).join('\n'), complete: false, approve_label: 'Approve' };
   }
   const lines = approvalCardLines(card);
   if (cardIsCut(card)) {
@@ -531,9 +618,22 @@ async function deliverOne(deps: TelegramReplyDeps, reply: TelegramPendingReply):
   await deps.store.deletePendingReply({ id: reply.id });
   const client = deps.service.clientFor(connection);
   const owner = { tenant_id: reply.tenant_id, created_by: reply.created_by };
-  const send = async (text: string, buttons?: readonly (readonly { text: string; callback_data: string }[])[]) => {
+  const send = async (
+    text: string,
+    options: {
+      buttons?: readonly (readonly { text: string; callback_data: string }[])[];
+      noLinkPreview?: boolean;
+    } = {},
+  ) => {
     try {
-      await sendTelegramText({ queue: deps.queue, client, chat_id: reply.chat_id, text, inline_buttons: buttons });
+      await sendTelegramText({
+        queue: deps.queue,
+        client,
+        chat_id: reply.chat_id,
+        text,
+        inline_buttons: options.buttons,
+        no_link_preview: options.noLinkPreview,
+      });
     } catch (error) {
       // One attempt is all a send gets; the answer stays in the app.
       deps.logger.warn('A Telegram reply could not be sent', {
@@ -563,7 +663,13 @@ async function deliverOne(deps: TelegramReplyDeps, reply: TelegramPendingReply):
         if (!prompt.complete) {
           // Telegram cannot show this action whole, so it gets no buttons and no row for a
           // button to point at: the ask is named, and the app is where it is answered.
-          await send(prompt.text);
+          if (deps.appAddress === undefined) {
+            await send(prompt.text);
+          } else {
+            await send(`${prompt.text}\n${chatLink({ appAddress: deps.appAddress, sessionId: reply.session_id })}`, {
+              noLinkPreview: true,
+            });
+          }
           continue;
         }
         const pending = await deps.store.addPendingApproval({
@@ -577,15 +683,17 @@ async function deliverOne(deps: TelegramReplyDeps, reply: TelegramPendingReply):
           prompt: prompt.text,
           expires_at: call.expires_at ?? null,
         });
-        await send(prompt.text, [
-          [
-            {
-              text: prompt.approve_label,
-              callback_data: telegramCallbackData({ decision: 'allow', approval_id: pending.id }),
-            },
-            { text: 'Deny', callback_data: telegramCallbackData({ decision: 'deny', approval_id: pending.id }) },
+        await send(prompt.text, {
+          buttons: [
+            [
+              {
+                text: prompt.approve_label,
+                callback_data: telegramCallbackData({ decision: 'allow', approval_id: pending.id }),
+              },
+              { text: 'Deny', callback_data: telegramCallbackData({ decision: 'deny', approval_id: pending.id }) },
+            ],
           ],
-        ]);
+        });
       }
     }
     if (appOnly) {

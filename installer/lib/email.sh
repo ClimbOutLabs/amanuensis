@@ -325,13 +325,21 @@ email_apply() { # name
   ui_ok "Email account connected to instance $name."
 }
 
+# The key of the connector's account file, as the one line the account agent reads first. Returns 1 when it could not
+# be read.
+email_file_keys() { # name
+  local keys
+  keys=$(secrets_setup_run "$1" connector-key --name mail --sqlite /data/db/db.sqlite --key-file "$MACHINE_KEY_FILE" </dev/null) && [ -n "$keys" ] || return 1
+  printf '%s\n' "$keys"
+}
+
 # Saves the account into the connector's volume through its account agent, run as a one-off container on the
 # instance's own compose project. The connector keeps the file encrypted, so the file's key goes in first, on its own
 # line, and the account after it. Both travel on stdin only, never on a command line or in a host file.
 # The entrypoint is overridden: the service entrypoint is the sidecar wrapper, which would swallow the agent's command.
 email_agent_write() { # name
   local name=$1 keys
-  keys=$(secrets_setup_run "$name" connector-key --name mail --sqlite /data/db/db.sqlite --key-file "$MACHINE_KEY_FILE" </dev/null) && [ -n "$keys" ] ||
+  keys=$(email_file_keys "$name") ||
     die "The email account could not be saved, because the key that protects it could not be read. Run: install.sh upgrade, then: install.sh instance email $name"
   if ! { printf '%s\n' "$keys" && email_env_text; } | dc "$name" run --rm --entrypoint python3 "$EMAIL_SERVICE" /usr/local/bin/aman-mail-account-agent --write-stdin >/dev/null; then
     die "The email account could not be saved in the connector. Run: install.sh instance email $name"
@@ -416,6 +424,39 @@ email_link_remove() { # env file
   return 0
 }
 
+# Moves an account an older installer kept in the instance folder into the connector's own storage, then deletes the
+# old file. An account already saved in the connector (connected again in Settings) is newer, so it is kept and the
+# old file is only deleted. Returns 1 when the account could not be moved, and then keeps the file.
+email_migrate_old_file() { # name
+  local name=$1 dir old answer keys
+  dir=$(instance_dir "$name")
+  old=$dir/.env.mail-email
+  [ -s "$old" ] || return 0
+  grep -q "^  $EMAIL_SERVICE:" "$dir/compose.yaml" 2>/dev/null || return 1
+  # The look below needs the agent this checkout brings, which an instance not drawn again by this run may not have yet.
+  write_if_changed "$dir/mail-account-agent.py" 644 <"$REPO_ROOT/ops/compose/mail-email/account_agent.py" || true
+  answer=$(dc "$name" run --rm --no-deps --entrypoint python3 "$EMAIL_SERVICE" /usr/local/bin/aman-mail-account-agent --has-account 2>/dev/null | tr -d '\r' | tail -n 1 || true)
+  # The old file goes only once the connector is known to hold an account: it already had one, or the old one was
+  # just saved. An empty or unknown answer means the look did not run, so the file stays.
+  case "$answer" in
+    none)
+      # The connector keeps the account encrypted, so the file's key goes in first.
+      keys=$(email_file_keys "$name") || return 1
+      { printf '%s\n' "$keys" && cat "$old"; } | dc "$name" run --rm --no-deps --entrypoint python3 "$EMAIL_SERVICE" /usr/local/bin/aman-mail-account-agent --write-stdin >/dev/null 2>&1 || return 1
+      rm -f -- "$old"
+      # The app finds the connector through this line; an instance set up before it had none.
+      if email_link_add "$dir/.env"; then
+        instance_render "$name" "$REL_APP_TAG" "$REL_DEX_IMAGE"
+        instance_up "$name" recreate >/dev/null 2>&1 || return 1
+      else
+        email_restart "$name"
+      fi
+      ;;
+    saved) rm -f -- "$old" ;;
+    *) return 1 ;;
+  esac
+}
+
 # Restarts only the email connector, so it picks up the new account file or drops the old one.
 email_restart() { # name
   local name=$1
@@ -441,6 +482,8 @@ cmd_instance_email() {
     # The saved password is deleted for good from the connector's volume, through its account agent.
     # An empty account in the volume means no account is connected.
     email_agent_remove "$name"
+    # The file an older installer kept in the instance folder goes too.
+    rm -f -- "$dir/.env.mail-email"
     if email_link_remove "$dir/.env"; then changed=1; fi
     if [ "$changed" = 1 ]; then
       instance_render "$name" "$REL_APP_TAG" "$REL_DEX_IMAGE"

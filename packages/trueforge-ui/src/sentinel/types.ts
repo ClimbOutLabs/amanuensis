@@ -78,6 +78,8 @@ export type SentinelApprovalEmail = {
   from_name?: string | null;
   /** True when a name was left off an address because it looked like an address; absent on an older card. */
   name_left_off?: boolean;
+  /** The message a forward sends on, below the note in `body`; null or absent when the message is not a forward. */
+  forwards?: { from: string; subject: string; body: string; truncated: boolean; attachments: string[] } | null;
 };
 
 export type SentinelNotSentReason = NotSentReason;
@@ -278,6 +280,12 @@ export type SentinelApprovalSkill = {
   starter: boolean;
   /** The skill's own instruction file, or null for a starter skill. */
   instructions: string | null;
+  /** The websites the skill sends requests to. Approving the card allows exactly these. */
+  websites: string[];
+  /** True when the skill also builds web addresses while it runs, which could not be read ahead of time. */
+  makes_up_addresses: boolean;
+  /** True when one of the websites can send email or change a calendar. */
+  can_send: boolean;
 };
 
 /** What the server says about an action a scheduled run held for its owner instead of asking. */
@@ -593,6 +601,23 @@ function parseEmail(value: unknown): SentinelApprovalEmail | null {
       ? null
       : (optionalString(value, 'from_name') ?? optionalString(value, 'fromName'));
   const nameLeftOff = optionalBoolean(value, 'name_left_off') ?? optionalBoolean(value, 'nameLeftOff');
+  const forwarded = value.forwards;
+  const forwardedFrom = isRecord(forwarded) ? optionalString(forwarded, 'from') : undefined;
+  const forwardedSubject = isRecord(forwarded) ? optionalString(forwarded, 'subject') : undefined;
+  const forwardedBody = isRecord(forwarded) ? optionalString(forwarded, 'body') : undefined;
+  const forwardedFiles = isRecord(forwarded) ? stringList(forwarded.attachments) : undefined;
+  // A forward whose message cannot be read is no email card at all, so it is never shown as a plain message.
+  if (
+    forwarded !== undefined &&
+    forwarded !== null &&
+    (!isRecord(forwarded) ||
+      forwardedFrom === undefined ||
+      forwardedSubject === undefined ||
+      forwardedBody === undefined ||
+      forwardedFiles === undefined)
+  ) {
+    return null;
+  }
   return {
     action,
     to,
@@ -608,6 +633,21 @@ function parseEmail(value: unknown): SentinelApprovalEmail | null {
     reply_to: replyTo,
     ...(fromName === undefined ? {} : { from_name: fromName }),
     ...(nameLeftOff === undefined ? {} : { name_left_off: nameLeftOff }),
+    ...(isRecord(forwarded) &&
+    forwardedFrom !== undefined &&
+    forwardedSubject !== undefined &&
+    forwardedBody !== undefined &&
+    forwardedFiles !== undefined
+      ? {
+          forwards: {
+            from: forwardedFrom,
+            subject: forwardedSubject,
+            body: forwardedBody,
+            truncated: optionalBoolean(forwarded, 'truncated') ?? false,
+            attachments: forwardedFiles,
+          },
+        }
+      : {}),
   };
 }
 
@@ -732,7 +772,16 @@ function parseSkill(value: unknown): SentinelApprovalSkill | null {
   const source = optionalString(value, 'source');
   const version = optionalString(value, 'version');
   const { starter, instructions } = value;
+  // A card saved before websites were shown has none of these; its approval cannot add websites. Through the SDK
+  // the two flags arrive camel-cased.
+  const websites = value.websites ?? [];
+  const makesUpAddresses = value.makes_up_addresses ?? value.makesUpAddresses ?? false;
+  const canSend = value.can_send ?? value.canSend ?? false;
   if (
+    !Array.isArray(websites) ||
+    !websites.every((site): site is string => typeof site === 'string') ||
+    typeof makesUpAddresses !== 'boolean' ||
+    typeof canSend !== 'boolean' ||
     name === undefined ||
     description === undefined ||
     source === undefined ||
@@ -742,7 +791,17 @@ function parseSkill(value: unknown): SentinelApprovalSkill | null {
   ) {
     return null;
   }
-  return { name, description, source, version, starter, instructions };
+  return {
+    name,
+    description,
+    source,
+    version,
+    starter,
+    instructions,
+    websites,
+    makes_up_addresses: makesUpAddresses,
+    can_send: canSend,
+  };
 }
 
 /** A card missing any field is not shown as a schedule, so a partial schedule is never approved as if it were whole. */

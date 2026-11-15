@@ -5,6 +5,13 @@ import type { Logger } from 'winston';
 
 import type { ITelegramStore, TelegramConnection, TelegramPendingApproval } from '../../db/telegramStore';
 import type { TelegramCallbackQuery, TelegramMessage, TelegramUpdate, TelegramUser } from '../../schemas/telegram';
+import {
+  handleTelegramCommand,
+  handleTelegramPick,
+  parseTelegramPick,
+  telegramCommandOf,
+  type TelegramChatControlsPort,
+} from './telegramChatControls';
 import type { TelegramClient } from './telegramClient';
 import { sendTelegramText, type TelegramSendQueue } from './telegramSendQueue';
 import { newPairingCode, TELEGRAM_PAIRING_TTL_MS, type TelegramService } from './telegramService';
@@ -23,8 +30,8 @@ import { newPairingCode, TELEGRAM_PAIRING_TTL_MS, type TelegramService } from '.
 /** The biggest file the channel will fetch from Telegram and attach to a turn. */
 export const TELEGRAM_MAX_FILE_BYTES = 10 * 1024 * 1024;
 
-/** The title of the one chat Telegram messages land in. */
-export const TELEGRAM_CHAT_TITLE = 'Telegram';
+/** In front of a Telegram chat's title, which otherwise names its subject like any chat. */
+export const TELEGRAM_CHAT_TITLE_PREFIX = 'Telegram: ';
 
 /** Session metadata key marking the Telegram chat, as the Reminders chat is marked. */
 export const TELEGRAM_METADATA_KEY = 'is_telegram';
@@ -41,6 +48,7 @@ const PAIRING_BUSY = 'Someone is pairing with this bot right now. If that is not
 const ALREADY_PAIRED = 'You are paired already. Send a message and it will be answered here.';
 const UNSUPPORTED_MESSAGE = 'I can only read text, photos and files here. Send one of those instead.';
 const TURN_START_FAILED = 'That message could not be started. Open Aman and try again there.';
+const COMMAND_FAILED = 'That did not work. Try again, or change it in Aman.';
 
 /** Starts and answers turns for the channel. The server wires it to the real turn machinery. */
 export interface TelegramTurnPort {
@@ -62,6 +70,8 @@ export interface TelegramChannelDeps {
   service: TelegramService;
   queue: TelegramSendQueue;
   turns: TelegramTurnPort;
+  /** Reads and changes the chat's model, persona and connectors for the command menu. */
+  controls: TelegramChatControlsPort;
   logger: Logger;
   /** How often a refusal may be repeated to a chat that is not the paired person's. */
   refusals: TelegramRefusalThrottle;
@@ -358,6 +368,20 @@ async function handleMessage(
     await say(deps, client, chat_id, ALREADY_PAIRED);
     return;
   }
+  const command = message.forward_origin === undefined ? telegramCommandOf(text) : undefined;
+  if (command !== undefined) {
+    try {
+      await handleTelegramCommand(deps, { client, connection, chat_id, command });
+    } catch (error) {
+      deps.logger.warn('A Telegram command could not be answered', {
+        connection_id: connection.id,
+        command,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      await say(deps, client, chat_id, COMMAND_FAILED).catch(() => undefined);
+    }
+    return;
+  }
   const input = await telegramTurnInput(deps, client, message);
   if (input === undefined) {
     await say(deps, client, chat_id, UNSUPPORTED_MESSAGE);
@@ -412,6 +436,24 @@ async function handleCallback(
       });
     });
   };
+  const pick = parseTelegramPick(query.data);
+  if (pick !== undefined) {
+    if (connection.paired_telegram_user_id === null || String(query.from.id) !== connection.paired_telegram_user_id) {
+      await answer('Only the person this bot is paired with can change this.');
+      return;
+    }
+    const chat_id = connection.paired_chat_id ?? String(query.from.id);
+    try {
+      await answer(await handleTelegramPick(deps, { client, connection, chat_id, pick }));
+    } catch (error) {
+      deps.logger.warn('A Telegram menu choice could not be applied', {
+        connection_id: connection.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      await answer(COMMAND_FAILED);
+    }
+    return;
+  }
   const parsed = parseCallbackData(query.data);
   if (parsed === undefined) {
     await answer('That button is out of date.');

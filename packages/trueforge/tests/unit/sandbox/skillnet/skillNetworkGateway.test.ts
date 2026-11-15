@@ -1,4 +1,5 @@
 import type { AuditRecordInput } from '@truefoundry/trueforge-core/core';
+import { API_SERVICE_DECLARATIONS } from '@truefoundry/trueforge-core/core/connectors/apiServices';
 import { mkdtempSync } from 'node:fs';
 import {
   createServer as createTcpServer,
@@ -171,6 +172,52 @@ describe('SkillNetworkGateway', () => {
     await expect(echoed).resolves.toBe('through the tunnel');
     socket.destroy();
     expect(harness.dials).toEqual([{ host: 'github.com', port: 443 }]);
+  });
+
+  it('refuses a site that can send email even when the grant names it, and records nothing a card could ask about', async () => {
+    const token = harness.registry.issue({ ...GRANT_INPUT, hosts: [...HOSTS, 'gmail.googleapis.com'] });
+    const reply = await connectVia(harness.socketPath, { authority: 'gmail.googleapis.com:443', token });
+    expect(reply.status).toBe(403);
+    expect(reply.body).toContain('a skill is never allowed to send email');
+    expect(harness.dials).toEqual([]);
+    expect(harness.registry.drainRefusals({ session_id: 's' })).toEqual([]);
+  });
+
+  it('refuses every site Aman knows can send email, even when the grant names it, and writes each to the activity log', async () => {
+    // One name for each service whose address carries a region or an account.
+    const named = [
+      'email.eu-west-1.amazonaws.com',
+      'mail.zoho.eu',
+      'hook.eu1.make.com',
+      'harbour.m.pipedream.net',
+      'harbour.app.n8n.cloud',
+    ];
+    const sites = [
+      ...API_SERVICE_DECLARATIONS.filter(service => service.can_send).flatMap(service => service.hosts),
+      ...named,
+    ];
+    expect(sites.length).toBeGreaterThan(named.length);
+    const token = harness.registry.issue({ ...GRANT_INPUT, hosts: [...HOSTS, ...sites] });
+
+    const opened: string[] = [];
+    for (const site of sites) {
+      const reply = await connectVia(harness.socketPath, { authority: `${site}:443`, token });
+      if (reply.status !== 403) {
+        opened.push(site);
+      }
+      reply.socket?.destroy();
+    }
+    expect(opened).toEqual([]);
+    expect(harness.dials).toEqual([]);
+
+    await new Promise(resolve => setTimeout(resolve, 25));
+    const logged = harness.auditRecords.map(record => record.description);
+    expect(sites.filter(site => !logged.some(line => line.includes(site)))).toEqual([]);
+
+    // An ordinary site in the same grant still opens.
+    const ordinary = await connectVia(harness.socketPath, { authority: 'github.com:443', token });
+    expect(ordinary.status).toBe(200);
+    ordinary.socket?.destroy();
   });
 
   it('refuses any other site, names it, and never dials it', async () => {

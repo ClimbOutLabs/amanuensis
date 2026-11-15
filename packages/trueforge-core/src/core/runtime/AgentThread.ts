@@ -2177,15 +2177,16 @@ export class AgentThread {
     // instead assume one from training and reason years into the past, which a
     // live session demonstrated against dated memory retrievals. Date only, no
     // time of day. The get_current_datetime tool remains for precise time.
-    const dateUtc = this.replyDate.toISOString().slice(0, 10);
+    // One date only, the person's own when their zone is known: from late afternoon in the Americas the UTC day
+    // is already tomorrow, and a model shown both days takes the first one for today.
     const local = resolveLocalTime(this.replyDate, this.definition.clientTimezone);
-    const localDateClause = local.isFallback
-      ? ''
-      : ` The user's local date is ${local.date} (${weekdayNameOf(local.date)}, ${local.zone}, UTC${local.utcOffset}).`;
+    const where = local.isFallback
+      ? "UTC, because the person's time zone is not known"
+      : `${local.zone}, UTC${local.utcOffset}`;
     // The weekday is stated, not left to the model: models often name the wrong day for a date.
     builder.addSection(
       'current-date',
-      `Today's date is ${dateUtc} (${weekdayNameOf(dateUtc)}, UTC).${localDateClause} Reason about past and future relative to this date, not to your training data.`,
+      `Today's date is ${local.date} (${weekdayNameOf(local.date)}, ${where}). Reason about past and future relative to this date, not to your training data.`,
     );
     if (!this.parent && this.definition.spokenReply === true) {
       builder.addSection(
@@ -2294,6 +2295,16 @@ export class AgentThread {
     }
     if (this.definition.setUpConnectorNames?.includes(CALDAV_SERVER_NAME)) {
       capabilities.addSection('calendar-passwords', CALENDAR_PASSWORD_PROMPT);
+      const calendarAccounts = this.definition.calendarAccounts;
+      if (calendarAccounts !== undefined && calendarAccounts.names.length > 0) {
+        const listed = calendarAccounts.names
+          .map(name => (name === calendarAccounts.default_name ? `${name} (the default)` : name))
+          .join(', ');
+        capabilities.addSection(
+          'calendar-accounts',
+          `The Calendar connector has these accounts: ${listed}. Calendar and event ids name their account before a | sign, and answers say which account each calendar and event belongs to. Reads span every account unless you name one. A new event lands on the account of the calendar it names, so pick the calendar from the account the person means.`,
+        );
+      }
     }
     // A chat with no sandbox object has no exec tool. Whether to say the sandbox is off or that the server has none
     // comes from the host's server status, never from this chat alone.

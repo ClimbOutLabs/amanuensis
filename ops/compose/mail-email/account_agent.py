@@ -1093,6 +1093,15 @@ def write_account_stdin():
     return 0
 
 
+def has_account_cli():
+    """The installer's look before it moves an older account in: one fixed word, never the account itself."""
+    raw = raw_file_text()
+    # An encrypted file always holds an account, because an empty one is stored as an empty file.
+    saved = raw.startswith(SEALED_PREFIX) or bool(parse_accounts(raw)[0])
+    sys.stdout.write("saved\n" if saved else "none\n")
+    return 0
+
+
 def remove_accounts_cli():
     """The installer's remove path: every account goes. Emptying the file needs no key."""
     try:
@@ -1107,6 +1116,8 @@ def remove_accounts_cli():
 def main():
     if len(sys.argv) > 1 and sys.argv[1] == "--write-stdin":
         sys.exit(write_account_stdin())
+    if len(sys.argv) > 1 and sys.argv[1] == "--has-account":
+        sys.exit(has_account_cli())
     if len(sys.argv) > 1 and sys.argv[1] == "--remove":
         sys.exit(remove_accounts_cli())
     publish_config()

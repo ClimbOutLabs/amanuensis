@@ -6,9 +6,15 @@
  * connection store, and is never logged or returned.
  */
 import { OpenAPIHono, type RouteHandler } from '@hono/zod-openapi';
-import { AgentSpecSchema, type SessionHandle, type TurnInputItem } from '@truefoundry/trueforge-core/agent-session';
+import {
+  AgentSpecSchema,
+  type AgentSpec,
+  type SessionHandle,
+  type TurnInputItem,
+} from '@truefoundry/trueforge-core/agent-session';
 import type { Context, MiddlewareHandler } from 'hono';
 import { HTTPException } from 'hono/http-exception';
+import { ulid } from 'ulid';
 import type { Logger } from 'winston';
 
 import {
@@ -19,8 +25,11 @@ import {
 import configuration from '../config';
 import type { AgentRecord } from '../db/agentStore';
 import type { IPersonalizationStore } from '../db/personalizationStore';
+import type { IPersonaStore } from '../db/personaStore';
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import type { ITelegramStore, TelegramConnection } from '../db/telegramStore';
+import { buildPersonaContext, type Persona } from '../personas/persona';
+import { activateSessionPersona } from '../personas/sessionPersona';
 import {
   cancelTelegramPairingRoute,
   confirmTelegramPairingRoute,
@@ -30,19 +39,23 @@ import {
   removeTelegramRoute,
   telegramWebhookRoute,
 } from '../routes/telegramRoutes';
-import { chatAssistantAgentName, getOrCreateChatAssistantAgent } from '../runtime/chatAssistant';
+import { UNNAMED_ASSISTANT } from '../runtime/chatAssistant';
 import { resolveDefaultChatModel } from '../runtime/defaultChatModel';
 import { createMemoryClient } from '../runtime/memory/createMemoryClient';
 import {
   createTelegramRefusalThrottle,
   processTelegramUpdate,
-  TELEGRAM_CHAT_TITLE,
+  TELEGRAM_CHAT_TITLE_PREFIX,
   TELEGRAM_METADATA_KEY,
   telegramExternalId,
   type TelegramTurnPort,
 } from '../runtime/telegram/telegramChannel';
+import { telegramChoiceKey, type TelegramChatControlsPort } from '../runtime/telegram/telegramChatControls';
 import { sendTelegramText, type TelegramSendQueue } from '../runtime/telegram/telegramSendQueue';
 import { TelegramSettingsError, type TelegramService } from '../runtime/telegram/telegramService';
+import { putDefaultModelFirst, readDefaultChatModel } from '../runtime/tokenFactoryProvider';
+import { resolveTurnPersona } from '../runtime/turnPersona';
+import type { TurnTimezone } from '../runtime/turnTimezone';
 import { TelegramUpdateSchema, type TelegramUpdate } from '../schemas/telegram';
 import { readServerSandboxAvailable } from './capabilities';
 import { requireJsonOrSameOrigin } from './crossSite';
@@ -55,13 +68,17 @@ export const TELEGRAM_WEBHOOK_BASE_PATH = '/api/telegram';
 /** Runtime + store resolvers needed to run Telegram turns and move its updates, mirroring the schedule execution deps. */
 export interface TelegramTurnExecutionDeps<TTransaction> extends Omit<
   ScheduleTurnExecutionDeps<TTransaction>,
-  'scheduleStore' | 'briefItemStore' | 'deliveryService' | 'personalizationStore'
+  'scheduleStore' | 'briefItemStore' | 'deliveryService' | 'personalizationStore' | 'personaStore'
 > {
   /** Read for the owner's profile, and written by profile learning after a message they sent. */
   personalizationStore: IPersonalizationStore<TTransaction>;
+  /** The chat's persona is read for each turn, and switched by the menu or by asking for a persona by name. */
+  personaStore: IPersonaStore<TTransaction>;
   telegramStore: ITelegramStore;
   telegramService: TelegramService;
   telegramQueue: TelegramSendQueue;
+  /** A Telegram message carries no time zone, so the person's is looked up for each turn. */
+  turnTimezone: TurnTimezone;
 }
 
 /** Thrown when the instance has no model yet, so a Telegram turn cannot run. */
@@ -76,19 +93,39 @@ function ownerOf(connection: TelegramConnection): { tenant_id: string; created_b
   return { tenant_id: connection.tenant_id, created_by: connection.created_by };
 }
 
+export const TELEGRAM_EARLIER_CHAT_DELETED = 'Your earlier chat was deleted in Aman, so this is a new chat.';
+
 /**
- * The Telegram chat for this owner: made on the first message and reused after, bound to the
- * owner's own assistant agent (the one a plain chat's schedules run as), built from the default
- * model. The chat is titled Telegram and marked, so the app shows it as its own chat.
+ * The Telegram chat for this owner: made on the first message and reused after. It is a plain chat,
+ * like one started here, set up from the default model, so the app shows it under the person's own
+ * assistant (not under an agent name) and its model, persona and connectors can be changed from the
+ * app like any chat's. It is marked as the Telegram chat, and its first turn titles it "Telegram: " and its subject.
+ * When the chat in use was deleted, a new one is made and Telegram is told so.
  */
 async function telegramSession<TTransaction>(params: {
   c: Context;
   deps: TelegramTurnExecutionDeps<TTransaction>;
   connection: TelegramConnection;
+  /** True for /new: a fresh chat is made even when one is in use. */
+  fresh?: boolean;
 }): Promise<{ session: SessionHandle<SessionCustom, TurnCustom>; previous_turn_id: string }> {
   const { c, deps, connection } = params;
   const owner = connection.created_by_subject;
   const tenant_id = connection.tenant_id;
+  // The chat in use is the one the connection names. The first chat is found by the owner's key; a chat
+  // started by /new, or one made because the chat in use was deleted, gets a key of its own.
+  let external_id = telegramExternalId(owner.subject_id);
+  let earlierChatDeleted = false;
+  if (params.fresh === true) {
+    external_id = `${external_id}:${ulid().toLowerCase()}`;
+  } else if (connection.session_id !== null) {
+    const current = await deps.sessions.get({ tenant_id, session_id: connection.session_id });
+    if (current !== undefined) {
+      return { session: current, previous_turn_id: current.record.last_turn_id ?? 'none' };
+    }
+    external_id = `${external_id}:${ulid().toLowerCase()}`;
+    earlierChatDeleted = true;
+  }
   const modelName = await resolveDefaultChatModel({
     tenantId: tenant_id,
     modelProviderStore: deps.resolveModelProviderStore(c),
@@ -103,36 +140,34 @@ async function telegramSession<TTransaction>(params: {
     tenant_id,
     logger: deps.logger,
   });
-  // The owner's plain-chat assistant agent, the same one a chat here with the default model runs as.
+  // Only a new chat starts from this; an existing one keeps whatever setup the person gave it.
   const spec = AgentSpecSchema.parse({
     model: { name: modelName },
     config: { sandbox: { enabled: sandboxAvailable } },
   });
-  const agent = await getOrCreateChatAssistantAgent({
+  const { session } = await deps.sessions.getOrCreateByExternalId({
     tenant_id,
-    owner,
-    name: chatAssistantAgentName({ owner, spec }),
-    spec,
-    agentStore: deps.agentStore,
-  });
-  const { session, created } = await deps.sessions.getOrCreateByExternalId({
-    tenant_id,
-    external_id: telegramExternalId(owner.subject_id),
+    external_id,
     created_by_subject: owner,
-    agent: { type: 'reference', id: agent.id, name: agent.name },
+    agent: { type: 'inline', spec },
     metadata: { [TELEGRAM_METADATA_KEY]: 'true' },
   });
-  if (created || session.record.title === null) {
-    await deps.sessionStore.updateSession({
-      tenant_id,
-      session_id: session.session_id,
-      agent: undefined,
-      title: TELEGRAM_CHAT_TITLE,
-      metadata: undefined,
-    });
-  }
   if (connection.session_id !== session.session_id) {
     await deps.telegramStore.setSessionId({ ...ownerOf(connection), session_id: session.session_id });
+  }
+  if (earlierChatDeleted && connection.paired_chat_id !== null) {
+    // Said before anything else is answered, so the person never takes a fresh chat for the old one.
+    await sendTelegramText({
+      queue: deps.telegramQueue,
+      client: deps.telegramService.clientFor(connection),
+      chat_id: connection.paired_chat_id,
+      text: TELEGRAM_EARLIER_CHAT_DELETED,
+    }).catch((error: unknown) => {
+      deps.logger.warn('Telegram could not be told that its earlier chat was deleted', {
+        connection_id: connection.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
   }
   return { session, previous_turn_id: session.record.last_turn_id ?? 'none' };
 }
@@ -150,6 +185,21 @@ async function startTelegramTurn<TTransaction>(params: {
   const tenant_id = connection.tenant_id;
   const userRef = connection.created_by;
   const personalizationProfile = await deps.personalizationStore.getProfile({ tenant_id, created_by: userRef });
+  // The chat's persona: the last one chosen in this chat (by the menu, in the app, or by name in a message),
+  // unless this message asks for another by name. A chat with no persona chosen answers as the assistant.
+  const persona = await resolveTurnPersona({
+    personaStore: deps.personaStore,
+    modelProviderStore: deps.resolveModelProviderStore(c),
+    defaultAssistantName: personalizationProfile?.assistant_name,
+    tenant_id,
+    created_by: userRef,
+    turnInput: input,
+    previousTurnCustom: undefined,
+    latestManualActivation: await deps.personaStore.getSessionPersona({ tenant_id, session_id: session.session_id }),
+    legacyParentActivation: undefined,
+    latestManualActivationAfterParent: undefined,
+  });
+  const answeringPersona = persona?.kind === 'persona' ? persona.persona : undefined;
   // The session's own agent, so the per-request stores resolve as its runs do, like a schedule run's.
   const agent: AgentRecord | undefined =
     session.record.agent.type === 'reference'
@@ -159,7 +209,10 @@ async function startTelegramTurn<TTransaction>(params: {
   const memoryClient = createMemoryClient({
     markdownDir: configuration.MEMORY_MARKDOWN_DIR,
     namespace: tenant_id,
-    vaultScope: undefined,
+    vaultScope:
+      answeringPersona === undefined
+        ? undefined
+        : { personaName: answeringPersona.display_name, personaId: answeringPersona.id },
     embeddings: configuration.MEMORY_EMBEDDINGS_ENABLED
       ? {
           modelDir: configuration.MEMORY_EMBEDDINGS_MODEL_DIR,
@@ -175,6 +228,8 @@ async function startTelegramTurn<TTransaction>(params: {
     userRef,
     // The person wrote this message, so their profile learns from it as it does from a chat here.
     profileLearning: { personalizationStore: deps.personalizationStore },
+    // Named after its subject like any chat, with Telegram in front so it is easy to find.
+    session_title_prefix: TELEGRAM_CHAT_TITLE_PREFIX,
     deps: {
       mcpCatalog: deps.mcpCatalog,
       activeTurns: deps.activeTurns,
@@ -198,12 +253,25 @@ async function startTelegramTurn<TTransaction>(params: {
       chatDeletionStore: deps.chatDeletionStore,
       chatSearchIndexer: deps.chatSearchIndexer,
       personalizationProfile,
-      personaContext: undefined,
+      personaContext: answeringPersona === undefined ? undefined : buildPersonaContext(answeringPersona),
       memoryClient,
       logger: deps.logger,
-      clientTimezone: undefined,
+      clientTimezone: await deps.turnTimezone({ owner: ownerOf(connection), clientTimezone: undefined }),
     },
   });
+  // A persona asked for by name stays for the next messages, as a switch in the app does.
+  if (persona?.selection === 'direct' && persona.skipActivationWrite !== true) {
+    await deps.personaStore.recordPersonaActivation({
+      tenant_id,
+      id: ulid().toLowerCase(),
+      session_id: session.session_id,
+      turn_id: turn.id,
+      persona_id: answeringPersona?.id ?? null,
+      persona_name: answeringPersona?.display_name ?? null,
+      model_name: answeringPersona?.model_name ?? null,
+      source: persona.source,
+    });
+  }
   return { session_id: session.session_id, turn_id: turn.id };
 }
 
@@ -242,6 +310,164 @@ export function createTelegramTurnPort<TTransaction>(params: {
   };
 }
 
+/** The owner's connectors that are ready to use: connected, or needing no sign-in. Web search providers are set elsewhere. */
+async function readyConnectors<TTransaction>(params: {
+  c: Context;
+  deps: TelegramTurnExecutionDeps<TTransaction>;
+  connection: TelegramConnection;
+}): Promise<string[]> {
+  const store = params.deps.resolveMcpServerStore(params.c);
+  const records = await store.listServers({ tenant_id: params.connection.tenant_id, names: undefined });
+  const statuses = await store.resolveAuthStatuses({ records, userRef: params.connection.created_by });
+  return records
+    .filter(record => !(record.manifest.type === 'remote' && record.manifest.search_provider !== undefined))
+    .filter(record => (statuses.get(record.name)?.status ?? 'auth_required') !== 'auth_required')
+    .map(record => record.name);
+}
+
+/** A model's name as a person reads it: the model, with its provider after it. */
+function modelLabel(name: string): string {
+  const slash = name.indexOf('/');
+  return slash < 0 ? name : `${name.slice(slash + 1)} (${name.slice(0, slash)})`;
+}
+
+const DEFAULT_PERSONA_KEY = 'default';
+
+/** The chat-controls port the command menu talks to, bound to one request like the turn port. */
+export function createTelegramChatControlsPort<TTransaction>(params: {
+  c: Context;
+  deps: TelegramTurnExecutionDeps<TTransaction>;
+}): TelegramChatControlsPort {
+  const { c, deps } = params;
+  const chat = async (connection: TelegramConnection) => (await telegramSession({ c, deps, connection })).session;
+  /** The chat's own setup. A chat bound to a saved agent cannot be changed here. */
+  const inlineSpec = (session: SessionHandle<SessionCustom, TurnCustom>): AgentSpec => {
+    if (session.record.agent.type !== 'inline') {
+      throw new Error('The Telegram chat runs as a saved agent, so its setup cannot be changed from Telegram.');
+    }
+    return session.record.agent.spec;
+  };
+  const saveSpec = async (session: SessionHandle<SessionCustom, TurnCustom>, spec: AgentSpec) => {
+    await deps.sessionStore.updateSession({
+      tenant_id: session.tenant_id,
+      session_id: session.session_id,
+      agent: { type: 'inline', spec },
+      title: undefined,
+      metadata: undefined,
+    });
+  };
+  const modelNames = async (connection: TelegramConnection) => {
+    const models = await deps.resolveModelProviderStore(c).listModels({ tenant_id: connection.tenant_id });
+    const defaultName = await readDefaultChatModel({
+      globalSettingsStore: deps.globalSettingsStore,
+      logger: deps.logger,
+    });
+    return putDefaultModelFirst(models, defaultName).map(model => model.name);
+  };
+  const assistantName = async (connection: TelegramConnection) =>
+    (await deps.personalizationStore.getProfile(ownerOf(connection)))?.assistant_name ?? UNNAMED_ASSISTANT;
+  /** The persona answering in this chat now, or undefined for the assistant. */
+  const activePersona = async (connection: TelegramConnection, session_id: string): Promise<Persona | undefined> => {
+    const active = await deps.personaStore.getSessionPersona({ tenant_id: connection.tenant_id, session_id });
+    if (active?.persona_id === null || active?.persona_id === undefined) {
+      return undefined;
+    }
+    return deps.personaStore.getPersona({ ...ownerOf(connection), id: active.persona_id });
+  };
+  return {
+    async setup(connection) {
+      const session = await chat(connection);
+      const spec = inlineSpec(session);
+      const persona = await activePersona(connection, session.session_id);
+      return {
+        model: modelLabel(spec.model.name),
+        persona: persona?.display_name ?? (await assistantName(connection)),
+        persona_model:
+          persona !== undefined && persona.model_name !== spec.model.name ? modelLabel(persona.model_name) : null,
+        connectors: (spec.mcp_servers ?? []).map(server => server.name),
+      };
+    },
+    async models(connection) {
+      const current = inlineSpec(await chat(connection)).model.name;
+      return (await modelNames(connection)).map(name => ({
+        key: telegramChoiceKey(name),
+        label: modelLabel(name),
+        current: name === current,
+      }));
+    },
+    async setModel({ connection, key }) {
+      const name = (await modelNames(connection)).find(candidate => telegramChoiceKey(candidate) === key);
+      if (name === undefined) {
+        return undefined;
+      }
+      const session = await chat(connection);
+      const spec = inlineSpec(session);
+      await saveSpec(session, { ...spec, model: { ...spec.model, name } });
+      return modelLabel(name);
+    },
+    async personas(connection) {
+      const session = await chat(connection);
+      const active = await activePersona(connection, session.session_id);
+      const personas = await deps.personaStore.listPersonas(ownerOf(connection));
+      return [
+        { key: DEFAULT_PERSONA_KEY, label: await assistantName(connection), current: active === undefined },
+        ...personas.map(persona => ({
+          key: telegramChoiceKey(persona.id),
+          label: persona.display_name,
+          current: persona.id === active?.id,
+        })),
+      ];
+    },
+    async setPersona({ connection, key }) {
+      const session = await chat(connection);
+      const persona =
+        key === DEFAULT_PERSONA_KEY
+          ? undefined
+          : (await deps.personaStore.listPersonas(ownerOf(connection))).find(
+              candidate => telegramChoiceKey(candidate.id) === key,
+            );
+      if (key !== DEFAULT_PERSONA_KEY && persona === undefined) {
+        return undefined;
+      }
+      await activateSessionPersona({
+        store: deps.personaStore,
+        tenant_id: connection.tenant_id,
+        session_id: session.session_id,
+        persona,
+      });
+      return persona?.display_name ?? (await assistantName(connection));
+    },
+    async connectors(connection) {
+      const on = new Set((inlineSpec(await chat(connection)).mcp_servers ?? []).map(server => server.name));
+      return (await readyConnectors({ c, deps, connection })).map(name => ({
+        key: telegramChoiceKey(name),
+        label: name,
+        current: on.has(name),
+      }));
+    },
+    async toggleConnector({ connection, key }) {
+      const name = (await readyConnectors({ c, deps, connection })).find(
+        candidate => telegramChoiceKey(candidate) === key,
+      );
+      if (name === undefined) {
+        return undefined;
+      }
+      const session = await chat(connection);
+      const spec = inlineSpec(session);
+      const servers = spec.mcp_servers ?? [];
+      const on = !servers.some(server => server.name === name);
+      const next = on
+        ? [...servers, ...(AgentSpecSchema.parse({ model: spec.model, mcp_servers: [{ name }] }).mcp_servers ?? [])]
+        : servers.filter(server => server.name !== name);
+      await saveSpec(session, { ...spec, mcp_servers: next });
+      return { label: name, on };
+    },
+    async newChat(connection) {
+      await telegramSession({ c, deps, connection, fresh: true });
+    },
+  };
+}
+
 /**
  * One refusal throttle for the whole server: the channel deps are rebuilt per call, and the
  * throttle only holds back repeat refusals if it outlives them.
@@ -254,6 +480,7 @@ function channelDeps<TTransaction>(params: { c: Context; deps: TelegramTurnExecu
     service: params.deps.telegramService,
     queue: params.deps.telegramQueue,
     turns: createTelegramTurnPort(params),
+    controls: createTelegramChatControlsPort(params),
     logger: params.deps.logger,
     refusals: telegramRefusals,
   };

@@ -831,6 +831,15 @@ check_instance_config() {
       "$INSTANCE_FIX"
     return
   fi
+  # An older installer kept the email or calendar app password in a file here. Nothing reads it now, and an upgrade
+  # moves it into the connector and deletes it, so one that is still here holds a password for no reason.
+  for file in .env.mail-email .env.calendar; do
+    if [ -s "${dir}/${file}" ]; then
+      record "$name" config warn "An old file, ${file}, still holds an app password that Aman no longer uses." \
+        "Run aman upgrade to move it into the connector and delete it"
+      return
+    fi
+  done
   record "$name" config ok "The settings files exist and are private to you." ""
 }
 

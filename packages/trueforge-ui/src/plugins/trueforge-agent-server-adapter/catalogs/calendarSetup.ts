@@ -22,6 +22,15 @@ const CalendarProviderWireSchema = z.object({
   setup_steps: z.array(z.string()),
 });
 
+const CalendarAccountEntryWireSchema = z.object({
+  email: z.string(),
+  username: z.string(),
+  calendar_url: z.string(),
+  provider_key: z.string(),
+  state: AccountConnectionStateWireSchema,
+  is_default: z.boolean(),
+});
+
 const CalendarAccountStatusWireSchema = z.object({
   available: z.boolean(),
   state: AccountConnectionStateWireSchema,
@@ -29,6 +38,8 @@ const CalendarAccountStatusWireSchema = z.object({
   username: z.string().nullable(),
   calendar_url: z.string().nullable(),
   provider_key: z.string(),
+  accounts: z.array(CalendarAccountEntryWireSchema),
+  default_address: z.string().nullable(),
   providers: z.array(CalendarProviderWireSchema),
 });
 
@@ -42,6 +53,15 @@ function toCalendarStatus(wire: CalendarAccountStatusWire): CalendarAccountStatu
     username: wire.username,
     calendarUrl: wire.calendar_url,
     providerKey: wire.provider_key,
+    accounts: wire.accounts.map(entry => ({
+      email: entry.email,
+      username: entry.username,
+      calendarUrl: entry.calendar_url,
+      providerKey: entry.provider_key,
+      state: entry.state,
+      isDefault: entry.is_default,
+    })),
+    defaultAddress: wire.default_address,
     providers: wire.providers.map(provider => ({
       key: provider.key,
       name: provider.name,
@@ -77,6 +97,9 @@ export function createCalendarSetupApi(options: CreateTrueForgeClientOptions = {
       }),
     // A JSON body is sent on purpose: a bodiless state-changing call can be refused as
     // not-from-this-app when the instance is reached through its proxy address.
-    removeCalendarAccount: async () => request({ method: 'DELETE', body: {} }),
+    removeCalendarAccount: async (address?: string) =>
+      request({ method: 'DELETE', body: address === undefined ? {} : { address } }),
+    setDefaultCalendarAccount: async (address: string) =>
+      request({ method: 'POST', suffix: '/default', body: { address } }),
   };
 }

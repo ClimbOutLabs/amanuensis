@@ -96,7 +96,7 @@ Aman always shows a card first. Aman itself reads the skill on GitHub, so the na
 
 What you approve is what is added. The skill is saved at the exact version on the card, so a later change to the repository isn't picked up. If the repository changes between the card and your answer, nothing is added and Aman asks again.
 
-Adding a skill gives it nothing else. Its scripts run only in the sandbox. **Commands in the sandbox** below says when they ask first. A skill that wants to reach sites still needs your OK in Settings, under Skills. From a chat, Aman can only add a skill. It can't change or remove one.
+Skills from a marketplace don't say which websites they use, so Aman reads all of the skill's files first and lists the websites it found on the card. If the skill makes up web addresses while it runs, the card says so, and those websites stay blocked until you allow each one. Approving is all or nothing: **Allow** adds the skill and lets it reach exactly the websites on the card, and nothing else. Its scripts run only in the sandbox. **Commands in the sandbox** below says when they ask first. From a chat, Aman can only add a skill. It can't change or remove one.
 
 An incognito chat can't add a skill. A scheduled run can't add one either, because the tool isn't there.
 
@@ -169,9 +169,12 @@ You can let file writes run without a card, and let work in the sandbox run with
 
 A skill can name the sites it needs to reach. Naming a site grants nothing on its own, and a skill can only ever reach named sites it has been allowed.
 
+- When a skill is added, from a chat or from Settings, Aman reads its files and lists the sites it sends requests to. Adding it allows exactly that list. You can't add the skill and leave the list out, and a list that changed before you answered adds nothing.
+
 - The first time a skill with named sites runs in a chat, a card asks whether the skill may reach the sites it names. **Allow** covers this chat only. **Always allow** remembers the sites for that skill in every chat. **Deny** remembers the refusal. You can change any of these later in Settings, then Skills.
 - Turning down one named site does not switch off the others. The sites you approved still work, and the turned-down site stays out. Clearing its refusal in Settings grants nothing by itself, because your approval never named that site. A card asks about the list again first.
 - If a command tries to reach a site no skill named, the connection is refused and a card asks about that one site. The card names no skill, because a refused connection cannot show which skill, if any, made the attempt. Its Always choice names the skill the answer is kept under.
+- A skill can never reach a site that can send email. That covers the email services Aman knows, such as Gmail, Outlook, SendGrid or Mailgun, and services that forward a web request as an email, such as Zapier or IFTTT. Aman refuses those sites whatever was allowed. No card asks about them, and the card that adds a skill marks them Blocked. Google and Microsoft run email on the same sites as their other services, so skills can't reach Google Drive, Google Calendar or Microsoft OneDrive either. Email only goes out through Aman, and you approve each one.
 - Connections to bare addresses are always refused, and no card can allow them. That covers addresses on your own machine, such as 127.0.0.1, addresses on your home network, and the address a cloud machine keeps its own settings behind.
 - No card ever waits inside a connection. The connection is refused first, and the question is asked in the chat.
 - Approving a card runs the held command again, unless the command needs an approval of its own. Then that approval is asked for on its own card, and only your answer about the sites is kept.

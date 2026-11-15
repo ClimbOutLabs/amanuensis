@@ -20,6 +20,7 @@ import { PostgresTurnArtifactStore } from '../../db/postgres/turn-artifact-store
 import type { Database as PostgresDatabase } from '../../db/postgres/types';
 import { ReachSettingsStore } from '../../db/reachSettingsStore';
 import { SentinelAuditStore } from '../../db/sentinelAuditStore';
+import { TelegramStore } from '../../db/telegramStore';
 import { TextContactStore } from '../../db/textContactStore';
 import { usePersonaKnowledgeKeys } from '../../personaKnowledge/sqliteKnowledgeRepository';
 import { openReadingVault } from '../../secrets/cliVault';
@@ -92,6 +93,7 @@ export async function openPostgresStores(options: {
     deliveryStore: new DeliveryStore(db),
     reachSettingsStore: new ReachSettingsStore(db),
     textContactStore: new TextContactStore(db),
+    telegramStore: new TelegramStore(db),
     close: () => db.destroy(),
   };
 }

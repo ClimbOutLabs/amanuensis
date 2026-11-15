@@ -223,10 +223,17 @@ export async function warmLog({
     model,
   });
   embeddings.ensureWarmed();
-  const startedAt = performance.now();
+  // Gives up when indexing stops moving, not after a fixed time: a large log on a busy machine is
+  // slow, not stuck, and the test's own time limit still ends a run that never finishes.
+  let indexed = embeddings.getStatus().indexedEntries;
+  let movedAt = performance.now();
   while (model.currentPhase === 'ready' && embeddings.getStatus().state !== 'ready') {
-    if (performance.now() - startedAt > 15_000) {
-      throw new Error(`The meaning search was not ready: ${embeddings.getStatus().detail}`);
+    const status = embeddings.getStatus();
+    if (status.indexedEntries !== indexed) {
+      indexed = status.indexedEntries;
+      movedAt = performance.now();
+    } else if (performance.now() - movedAt > 15_000) {
+      throw new Error(`The meaning search stopped before it was ready: ${status.detail}`);
     }
     await new Promise(resolve => setTimeout(resolve, 5));
   }

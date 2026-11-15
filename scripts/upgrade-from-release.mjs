@@ -88,6 +88,12 @@ async function fill({ api, tag }) {
   const kept = [];
   const keep = ({ what, pathname, words }) => kept.push({ what, pathname, words });
 
+  // A starter skill, the way the screen adds one: Aman takes a starter as shipped, so saving it
+  // needs no file from the internet.
+  const starters = await api({ pathname: '/api/v1/catalogs/skills' });
+  check(starters.status === 200, `Listing the starter skills answered ${String(starters.status)}.`);
+  const starter = JSON.parse(starters.text).data[0];
+  check(starter !== undefined, 'The app lists no starter skill to save.');
   await save({
     api,
     what: 'a skill',
@@ -97,10 +103,10 @@ async function fill({ api, tag }) {
       manifest: {
         type: 'git',
         name: `notes-${tag}`,
-        url: 'https://github.com/example/daily-notes',
-        ref: 'main',
+        url: starter.url,
+        ...(starter.path === undefined ? {} : { path: starter.path }),
+        ref: starter.ref,
         description: 'Fetches the notes for today.',
-        network_hosts: ['notes.example.com'],
       },
     },
   });

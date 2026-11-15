@@ -1,22 +1,26 @@
 # Calendar connector (CalDAV)
 
-This small service lets the Aman app read and change a CalDAV calendar. It runs the
-`@ni-c/caldav-mcp` tool server behind a plain HTTP address, on the private Docker network only.
+This small service lets the Aman app read and change CalDAV calendars. It runs one
+`@ni-c/caldav-mcp` tool server per connected account, behind a multiplexer at one plain HTTP
+address, on the private Docker network only.
 
 ## What it does
 
-- Serves the calendar tools at `http://calendar-caldav:9558/mcp` inside the Compose network, while a calendar login is saved. With no login saved, nothing listens on that port and no tools are offered.
+- Serves the calendar tools at `http://calendar-caldav:9558/mcp` inside the Compose network, while at least one calendar login is saved. With no login saved, nothing listens on that port and no tools are offered.
 - Offers eight tools: list calendars, list events, get an event, search events, create, update, delete, and respond to an event. Nothing else is offered.
 - Asks for confirmation before a change is made.
 - Runs a small account agent on port 9560, which the Settings Calendar card talks to. It answers only a caller that presents the instance's secret.
+- Calendar and event ids name their account in front of a | sign, like `alice@example.com|/dav/alice/personal/`. A read that names no account spans every account, and each answer says which account a calendar or event belongs to. A change goes to the account its ids name, so an approval keeps acting on the account it was given on.
 
 ## Credentials
 
-The calendar login is kept in one file, `/account/.env.calendar`, in a volume this service owns. The file is encrypted (see [The file's key](#the-files-key)). It is never copied into the image and never passed through the service's environment. Inside, its settings are:
+The calendar logins are kept in one file, `/account/.env.calendar`, in a volume this service owns. The file is encrypted (see [The file's key](#the-files-key)). The logins are never copied into the image. Inside, the file holds one block of settings per account:
 
 - `CALDAV_URL`: the address of the calendar server. It must be https.
 - `CALDAV_USERNAME` and `CALDAV_PASSWORD`: the login.
 - `CALDAV_USER_EMAIL`: your own email address, used to find your invitations.
+
+A line `AMAN_CALENDAR_DEFAULT_ACCOUNT=<address>` names the default account when it is not the first one in the file. A file with one account reads exactly as it always has.
 
 For a Google account, the Settings Calendar card and the installer fill in Google's CalDAV address from the email address.
 
@@ -25,14 +29,14 @@ Two things write the file, and both go through the account agent, which checks t
 - The Settings Calendar card, over the agent's HTTP port. The agent also checks the sign-in before it saves. The request must carry `Authorization: Bearer <CALENDAR_ACCOUNT_SECRET>` and a JSON body, or the agent refuses it (401 without the secret, 415 for another kind of body).
 - The installer, with `install.sh instance calendar NAME`. The file's key and the password go to the agent on stdin only, the key on the first line.
 
-The tool server always starts from this file and restarts when it changes. Removing the account deletes the file and stops the tool server.
+Each tool server always starts from this file and restarts when its account changes. Removing an account stops its tool server. Removing the last account deletes the file and closes the tool address.
 
 ## The file's key
 
 The account file is encrypted with AES-256-GCM. Its key is worked out by the app from this computer's key, and is only for this file. The agent holds it in memory and never writes it down, so the volume alone opens nothing.
 
 - The app asks the agent which key it holds (`GET /key`, which answers with a short name for the key, never the key) and hands the key over when it holds none (`POST /key`). It does this after each start of this service.
-- Until the key arrives, an encrypted file reads as locked: the agent answers 423, and the tool server is not started. Nothing is saved without the key.
+- Until the key arrives, an encrypted file reads as locked: the agent answers 423, and no tool server is started. Nothing is saved without the key.
 - A file from before encryption is still read, and is encrypted as soon as the key arrives.
 - After the instance moves to another computer, the app also sends the key from the earlier computer. The agent opens the file with it and writes it again under the new key.
 - A key that does not open the file is refused (409), and nothing changes.

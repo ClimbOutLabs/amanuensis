@@ -20,12 +20,14 @@ import { isRecipientRefusal, RECIPIENT_NOT_LISTED } from './recipientRefusal';
 import {
   isMailComposeToolName,
   isMailReadToolName,
+  isMailSendToolName,
   MAIL_ACCOUNT_ARGUMENT,
   MAIL_ACCOUNT_LIST_TOOL_NAME,
   MAIL_ATTACHMENT_TOOL_NAME,
   MAIL_CONNECTOR_TOOL_NAMES,
   MAIL_CONTENT_TOOL_NAME,
   MAIL_DRAFT_TOOL_NAME,
+  MAIL_FORWARD_TOOL_NAME,
   MAIL_LIST_TOOL_NAME,
   MAIL_MAILBOX_ARGUMENTS,
   MAIL_MAILBOX_LIST_TOOL_NAME,
@@ -50,6 +52,11 @@ const PROVIDER_FAILURE =
   'The mail server did not finish this request, so nothing was read. Try the same call once more. If it fails again, tell the person their mail server is not answering and to check the Email account in Settings.';
 const DRAFT_RECIPIENT_NOTE =
   'Recipients the person named must stay on the call: a recipient who is not on the Email list is handled by an approval card shown to the person, and a draft with no recipient is refused. Never leave recipients off to get past a refusal.';
+const DRAFT_FIRST_NOTE =
+  'Every new email starts here. The person is shown the draft and approves it. Nothing is sent. To send it, wait until the person asks, then call send_email with exactly the same recipients, subject and body.';
+const SEND_NOTE = `Sends only a draft the person already approved. Save the message with ${MAIL_DRAFT_TOOL_NAME} first; a send with no approved draft, or one that differs from it, is refused. To change the message, save a new draft.`;
+const FORWARD_NOTE =
+  'A forward takes two calls. The first shows the person the forward as a draft and sends nothing. When the person asks for it to be sent, call this again with exactly the same arguments.';
 const RECENT_WINDOW_NOTE = `With no since date, this looks at the ${String(RECENT_WINDOW_DAYS)} days up to before (or up to now), then ${String(WIDER_WINDOW_DAYS)} days if fewer messages than asked for come back. Results are newest first within that window. Set since to look further back. A since or before with no time zone offset is read in the user's time zone.`;
 
 // A file name alone is not a path the document reader can open without asking, so the model must fetch first.
@@ -85,10 +92,14 @@ function withHostFilledAccount(tool: AgentToolSchema): AgentToolSchema {
     tool.name === MAIL_LIST_TOOL_NAME
       ? `${tool.description ?? ''} ${RECENT_WINDOW_NOTE}`.trim()
       : tool.name === MAIL_DRAFT_TOOL_NAME
-        ? `${tool.description ?? ''} ${DRAFT_RECIPIENT_NOTE}`.trim()
-        : tool.name === MAIL_CONTENT_TOOL_NAME || tool.name === MAIL_ATTACHMENT_TOOL_NAME
-          ? `${tool.description ?? ''} ${ATTACHMENT_NOTE}`.trim()
-          : tool.description;
+        ? `${tool.description ?? ''} ${DRAFT_FIRST_NOTE} ${DRAFT_RECIPIENT_NOTE}`.trim()
+        : tool.name === MAIL_FORWARD_TOOL_NAME
+          ? `${tool.description ?? ''} ${FORWARD_NOTE}`.trim()
+          : isMailSendToolName(tool.name)
+            ? `${tool.description ?? ''} ${SEND_NOTE}`.trim()
+            : tool.name === MAIL_CONTENT_TOOL_NAME || tool.name === MAIL_ATTACHMENT_TOOL_NAME
+              ? `${tool.description ?? ''} ${ATTACHMENT_NOTE}`.trim()
+              : tool.description;
   if (properties === undefined || !isRecord(account)) {
     return { ...tool, description };
   }

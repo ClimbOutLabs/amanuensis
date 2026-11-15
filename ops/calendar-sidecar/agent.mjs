@@ -32,7 +32,15 @@ import { createServer } from 'node:http';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { accountProblem, allowedAddresses, hostOf, parseAccount, publicAccount, renderAccount } from './account.mjs';
+import {
+  accountProblem,
+  allowedAddresses,
+  defaultAccount,
+  hostOf,
+  parseAccounts,
+  publicAccount,
+  renderAccounts,
+} from './account.mjs';
 import { checkSignIn } from './signin.mjs';
 
 export const DEFAULT_ACCOUNT_FILE = '/account/.env.calendar';
@@ -203,7 +211,7 @@ export function createAccountStore({ file }) {
         if (!opened.key.equals(current)) {
           writeAccountText({ file, text: sealAccountText({ text: opened.text, key: current }) });
         }
-      } else if (parseAccount(raw) !== null) {
+      } else if (parseAccounts(raw).accounts.length > 0) {
         writeAccountText({ file, text: sealAccountText({ text: raw, key: current }) });
       }
       held = current;
@@ -240,7 +248,9 @@ const SAVE_REFUSALS = {
 /** Builds the agent. `deps` replaces the network and the clock in tests. */
 export function createAgent({ file = DEFAULT_ACCOUNT_FILE, store = createAccountStore({ file }), deps = {} } = {}) {
   const now = deps.now ?? Date.now;
-  let last = { fingerprint: null, at: 0, result: null };
+  // The last sign-in result per account, keyed by its address. An account is rechecked when its own
+  // saved text changes or the cached answer ages out, never because another account changed.
+  const checks = new Map();
   let busy = Promise.resolve();
 
   // One request at a time, so a save and a status check never interleave.
@@ -250,21 +260,40 @@ export function createAgent({ file = DEFAULT_ACCOUNT_FILE, store = createAccount
     return run;
   }
 
+  async function signInWord(account) {
+    const fingerprint = fingerprintOf(renderAccounts([account], null));
+    const cached = checks.get(account.email);
+    if (cached !== undefined && cached.fingerprint === fingerprint && now() - cached.at < RECHECK_AFTER_MS) {
+      return SIGN_IN_WORDS[cached.result];
+    }
+    const result = await checkSignIn(account, deps);
+    checks.set(account.email, { fingerprint, at: now(), result });
+    return SIGN_IN_WORDS[result];
+  }
+
+  async function statusBody(list) {
+    const entries = [];
+    for (const account of list.accounts) {
+      entries.push({ ...publicAccount(account), sign_in: await signInWord(account) });
+    }
+    const current = defaultAccount(list);
+    const currentEntry = entries.find(entry => entry.email === current?.email);
+    return {
+      connected: true,
+      // The flat fields name the default account, for a reader that predates the list.
+      ...publicAccount(current),
+      sign_in: currentEntry?.sign_in ?? 'unreachable',
+      accounts: entries,
+      default: current.email,
+    };
+  }
+
   async function status() {
-    const text = store.read();
-    const account = parseAccount(text);
-    if (account === null) {
+    const list = parseAccounts(store.read());
+    if (list.accounts.length === 0) {
       return { status: 200, body: { connected: false } };
     }
-    const fingerprint = fingerprintOf(text);
-    const fresh = last.fingerprint === fingerprint && last.result !== null && now() - last.at < RECHECK_AFTER_MS;
-    if (!fresh) {
-      last = { fingerprint, at: now(), result: await checkSignIn(account, deps) };
-    }
-    return {
-      status: 200,
-      body: { connected: true, ...publicAccount(account), sign_in: SIGN_IN_WORDS[last.result] },
-    };
+    return { status: 200, body: await statusBody(list) };
   }
 
   async function save(payload) {
@@ -284,16 +313,51 @@ export function createAgent({ file = DEFAULT_ACCOUNT_FILE, store = createAccount
     if (result !== 'ok') {
       return { status: 400, body: { error: SAVE_REFUSALS[result] ?? 'server_unreachable' } };
     }
-    const text = renderAccount(candidate);
-    store.write(text);
-    last = { fingerprint: fingerprintOf(text), at: now(), result: 'ok' };
-    return { status: 200, body: { connected: true, ...publicAccount(candidate), sign_in: 'ok' } };
+    const list = parseAccounts(store.read());
+    const at = list.accounts.findIndex(account => account.email === candidate.email);
+    if (at >= 0) {
+      list.accounts[at] = candidate;
+    } else {
+      list.accounts.push(candidate);
+    }
+    store.write(renderAccounts(list.accounts, defaultAccount(list)?.email ?? null));
+    checks.set(candidate.email, {
+      fingerprint: fingerprintOf(renderAccounts([candidate], null)),
+      at: now(),
+      result: 'ok',
+    });
+    return { status: 200, body: await statusBody(parseAccounts(store.read())) };
   }
 
-  async function remove() {
-    store.remove();
-    last = { fingerprint: null, at: 0, result: null };
-    return { status: 200, body: { connected: false } };
+  async function remove(payload) {
+    const address =
+      payload !== null && typeof payload === 'object' && typeof payload.address === 'string' ? payload.address : null;
+    if (address === null) {
+      store.remove();
+      checks.clear();
+      return { status: 200, body: { connected: false } };
+    }
+    const list = parseAccounts(store.read());
+    const kept = list.accounts.filter(account => account.email !== address);
+    checks.delete(address);
+    if (kept.length === 0) {
+      store.remove();
+      return { status: 200, body: { connected: false } };
+    }
+    const nextDefault = defaultAccount({ accounts: kept, defaultEmail: list.defaultEmail })?.email ?? null;
+    store.write(renderAccounts(kept, nextDefault));
+    return { status: 200, body: await statusBody(parseAccounts(store.read())) };
+  }
+
+  async function setDefault(payload) {
+    const address =
+      payload !== null && typeof payload === 'object' && typeof payload.address === 'string' ? payload.address : null;
+    const list = parseAccounts(store.read());
+    if (address === null || !list.accounts.some(account => account.email === address)) {
+      return { status: 400, body: { error: 'invalid' } };
+    }
+    store.write(renderAccounts(list.accounts, address));
+    return { status: 200, body: await statusBody(parseAccounts(store.read())) };
   }
 
   async function takeKeys(payload) {
@@ -317,7 +381,8 @@ export function createAgent({ file = DEFAULT_ACCOUNT_FILE, store = createAccount
     takeKeys: payload => serialized(() => takeKeys(payload)),
     status: () => serialized(status),
     save: payload => serialized(() => save(payload)),
-    remove: () => serialized(remove),
+    remove: payload => serialized(() => remove(payload)),
+    setDefault: payload => serialized(() => setDefault(payload)),
   };
 }
 
@@ -401,15 +466,30 @@ export function createAgentServer({ agent, secret }) {
         send(res, await agent.takeKeys(payload));
         return;
       }
-      if (req.url !== '/account') {
+      if (req.url !== '/account' && req.url !== '/account/default') {
         send(res, { status: 404, body: { error: 'not_found' } });
         return;
       }
-      if (req.method === 'GET') {
+      if (req.method === 'GET' && req.url === '/account') {
         send(res, await agent.status());
-      } else if (req.method === 'DELETE') {
-        send(res, await agent.remove());
-      } else if (req.method === 'POST') {
+        return;
+      }
+      if (req.method === 'DELETE' && req.url === '/account') {
+        // A delete may name one account in a JSON body; with no body, every account goes.
+        const raw = await readBody(req).catch(() => '');
+        let payload = null;
+        if (raw.trim() !== '') {
+          try {
+            payload = JSON.parse(raw);
+          } catch {
+            send(res, { status: 400, body: { error: 'invalid' } });
+            return;
+          }
+        }
+        send(res, await agent.remove(payload));
+        return;
+      }
+      if (req.method === 'POST') {
         if (!isJsonContentType(req.headers['content-type'])) {
           send(res, { status: 415, body: { error: 'unsupported_media_type' } });
           return;
@@ -421,10 +501,10 @@ export function createAgentServer({ agent, secret }) {
           send(res, { status: 400, body: { error: 'invalid' } });
           return;
         }
-        send(res, await agent.save(payload));
-      } else {
-        send(res, { status: 405, body: { error: 'method_not_allowed' } });
+        send(res, req.url === '/account/default' ? await agent.setDefault(payload) : await agent.save(payload));
+        return;
       }
+      send(res, { status: 405, body: { error: 'method_not_allowed' } });
     } catch (caught) {
       if (caught instanceof AccountLockedError) {
         send(res, { status: 423, body: { error: 'locked' } });
@@ -456,13 +536,14 @@ async function readStdin() {
 
 /**
  * The installer's commands. Each prints one fixed word and returns the exit code.
- * The file's keys arrive on the first line of stdin, in hex, the current one first.
- * --write-stdin stores the account text that follows the keys, encrypted, after the same checks a save
- * makes, except the sign-in itself, which --check reports so the installer can say what to fix and keep
- * the account. --remove needs no key.
+ * Whatever reads or writes accounts takes the file's keys on the first line of stdin, in hex, the
+ * current one first. --write-stdin stores the account text that follows the keys, encrypted, after the
+ * same checks a save makes, except the sign-in itself, which --check reports so the installer can say
+ * what to fix and keep the account. --remove with no address deletes the file and needs no key.
  */
 export async function runCommand({ command, file, stdin, deps = {}, out = process.stdout, err = process.stderr }) {
-  if (command === '--remove') {
+  const address = deps.address ?? null;
+  if (command === '--remove' && address === null) {
     try {
       removeAccountFile(file);
     } catch (caught) {
@@ -472,7 +553,7 @@ export async function runCommand({ command, file, stdin, deps = {}, out = proces
     out.write('removed\n');
     return 0;
   }
-  if (command !== '--write-stdin' && command !== '--check') {
+  if (command !== '--write-stdin' && command !== '--check' && command !== '--remove') {
     err.write('calendar account agent: unknown command\n');
     return 2;
   }
@@ -483,17 +564,50 @@ export async function runCommand({ command, file, stdin, deps = {}, out = proces
   if (keys !== null) {
     store.useKeys(keys);
   }
-  if (command === '--write-stdin') {
-    if (keys === null) {
-      err.write('calendar account agent: refused account text that came without its key\n');
-      return 2;
+  if (command === '--check') {
+    let saved;
+    try {
+      saved = store.read();
+    } catch {
+      out.write('locked\n');
+      return 0;
     }
-    const text = lineEnd === -1 ? '' : input.slice(lineEnd + 1);
-    const account = text === '' ? null : parseAccount(text);
+    const account = defaultAccount(parseAccounts(saved));
     if (account === null) {
-      err.write('calendar account agent: refused incomplete account text\n');
-      return 2;
+      out.write('none\n');
+      return 0;
     }
+    out.write(`${await checkSignIn(account, deps)}\n`);
+    return 0;
+  }
+  if (keys === null) {
+    err.write('calendar account agent: refused a change that came without the key of the account file\n');
+    return 2;
+  }
+  if (command === '--remove') {
+    try {
+      const list = parseAccounts(store.read());
+      const kept = list.accounts.filter(account => account.email !== address);
+      if (kept.length === 0) {
+        store.remove();
+      } else {
+        const nextDefault = defaultAccount({ accounts: kept, defaultEmail: list.defaultEmail })?.email ?? null;
+        store.write(renderAccounts(kept, nextDefault));
+      }
+    } catch (caught) {
+      err.write(`calendar account agent: account remove failed (${caught?.name ?? 'Error'})\n`);
+      return 1;
+    }
+    out.write('removed\n');
+    return 0;
+  }
+  const text = lineEnd === -1 ? '' : input.slice(lineEnd + 1);
+  const incoming = text === '' ? { accounts: [], defaultEmail: null } : parseAccounts(text);
+  if (incoming.accounts.length === 0) {
+    err.write('calendar account agent: refused incomplete account text\n');
+    return 2;
+  }
+  for (const account of incoming.accounts) {
     const allowed = await allowedAddresses(hostOf(account.url), deps);
     if (!allowed.ok) {
       err.write(
@@ -503,34 +617,41 @@ export async function runCommand({ command, file, stdin, deps = {}, out = proces
       );
       return 3;
     }
-    try {
-      store.write(renderAccount(account));
-    } catch (caught) {
-      err.write(`calendar account agent: account write failed (${caught?.name ?? 'Error'})\n`);
-      return 1;
-    }
-    out.write('saved\n');
-    return 0;
   }
-  let saved;
   try {
-    saved = store.read();
-  } catch {
-    out.write('locked\n');
-    return 0;
+    // Text carrying a default line or several accounts is a whole list and replaces the file. A
+    // single account with no default line, which is what the installer writes, is merged in: an
+    // account with the same address is replaced, the others are kept.
+    if (incoming.defaultEmail !== null || incoming.accounts.length > 1) {
+      store.write(renderAccounts(incoming.accounts, incoming.defaultEmail));
+    } else {
+      const current = parseAccounts(store.read());
+      const candidate = incoming.accounts[0];
+      const at = current.accounts.findIndex(account => account.email === candidate.email);
+      if (at >= 0) {
+        current.accounts[at] = candidate;
+      } else {
+        current.accounts.push(candidate);
+      }
+      store.write(renderAccounts(current.accounts, defaultAccount(current)?.email ?? null));
+    }
+  } catch (caught) {
+    err.write(`calendar account agent: account write failed (${caught?.name ?? 'Error'})\n`);
+    return 1;
   }
-  const account = parseAccount(saved);
-  if (account === null) {
-    out.write('none\n');
-    return 0;
-  }
-  out.write(`${await checkSignIn(account, deps)}\n`);
+  out.write('saved\n');
   return 0;
 }
 
 async function main() {
   const file = process.env.CALENDAR_ACCOUNT_FILE ?? DEFAULT_ACCOUNT_FILE;
-  process.exitCode = await runCommand({ command: process.argv[2], file, stdin: readStdin });
+  const address = process.argv[3] ?? null;
+  process.exitCode = await runCommand({
+    command: process.argv[2],
+    file,
+    stdin: readStdin,
+    deps: { address },
+  });
 }
 
 if (process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.argv[1]) {

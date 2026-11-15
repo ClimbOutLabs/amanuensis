@@ -46,6 +46,7 @@ export const AUTO_DENY_REASONS = [
   APPROVAL_EXPIRED_REASON_CODE,
   'cannot_describe',
   'destination_unverifiable',
+  'draft_first',
   'incognito_chat',
   'incomplete_send_card',
   'lookup_limit',
@@ -105,6 +106,18 @@ export const Tier3EmailSchema = z
       .boolean()
       .optional()
       .describe('True when a name was left off an address because it looked like an address.'),
+    // Absent on cards stored before this field existed, and on a message that is not a forward.
+    forwards: z
+      .object({
+        from: z.string().describe('Sender of the message being forwarded.'),
+        subject: z.string().describe('Subject of the message being forwarded.'),
+        body: z.string().describe('Text of the message being forwarded.'),
+        truncated: z.boolean().describe('True when the text is longer than the part shown.'),
+        attachments: z.array(z.string()).describe('Names of the files sent on with the message.'),
+      })
+      .nullable()
+      .optional()
+      .describe('The message a forward sends on, below the note in `body`; null when the message is not a forward.'),
   })
   .describe('The message an email action sends or saves, shown in full.')
   .openapi('Tier3Email');
@@ -210,6 +223,17 @@ export const Tier3SkillSchema = z
       .string()
       .nullable()
       .describe("The skill's own instruction file as the host read it, or null for a starter skill."),
+    websites: z
+      .array(z.string())
+      .optional()
+      .describe(
+        'The websites the skill sends requests to, as the host found them in its files. Approving allows these.',
+      ),
+    makes_up_addresses: z
+      .boolean()
+      .optional()
+      .describe('True when the skill also builds web addresses while it runs, which cannot be read ahead of time.'),
+    can_send: z.boolean().optional().describe('True when one of the websites can send email or change a calendar.'),
   })
   .describe('The skill a chat call adds, shown in full.')
   .openapi('Tier3Skill');

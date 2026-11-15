@@ -107,6 +107,8 @@ Each account keeps its own list of addresses you have approved. Approving a new 
 
 Aman signs in to your calendar once before it saves anything. If the sign-in fails, nothing is saved, and the panel says what to fix.
 
+You can connect more than one calendar account. To add another, click **Manage**, click the button that starts with "Add another", and fill in the form again. The Calendar card in Settings lists every connected account. One account is the default. To make a different account the default, click **Make default** next to it. Reads span every account, and answers say which account each calendar and event belongs to. A new event lands on the account of the calendar you pick for it, and the approval card names that calendar and its account before you approve. Nothing about an event changes after you approve it.
+
 === "Google"
 
     1. Turn on 2-Step Verification for your Google account, if it's not on yet. Google only offers app passwords after that.
@@ -163,10 +165,10 @@ See [Reach me](reach-me.md) for what Aman watches for and how it tells you.
 
 === "Email or Calendar card"
 
-    - Change it: click **Manage**, then **Change** on the account on the Email card, or "Change calendar" on the Calendar card. Type the details again and click **Connect**. Aman checks the new sign-in before it replaces the old one.
-    - Remove it: click **Manage**, then **Remove** on the account on the Email card, or **Remove** on the Calendar card. Then click "Remove account" or "Remove calendar". This deletes that saved app password for good and keeps your other accounts. Click **Keep it** if you change your mind.
-    - If the card says "Sign-in stopped working": make a new app password at your provider, then click **Manage** and save it again.
-    - If the card says "Not working right now": check your internet connection, then click **Manage**. You can type the details again, click **Cancel**, or click **Remove**.
+    - Change it: click **Manage**, then click **Change** next to the account. Type the details again and click **Connect**. Aman checks the new sign-in before it replaces the old one. To close the form without saving, click **Cancel**.
+    - Remove it: click **Manage**, click **Remove** next to the account, then click "Remove account". This deletes that account's saved app password for good and keeps your other accounts. Click **Keep it** if you change your mind.
+    - If the card says "Sign-in stopped working": make a new app password at your provider, then click **Manage**, click **Change** next to the account, and save it again.
+    - If the card says "Not working right now": check your internet connection, then click **Manage**. You can click **Change** next to the account and type the details again, click **Cancel**, or click **Remove**.
 
 === "Google card"
 
@@ -179,6 +181,7 @@ See [Reach me](reach-me.md) for what Aman watches for and how it tells you.
 
 - Reading is quiet. Every draft, every send and every new or changed event asks you first, on a card that shows exactly what will happen.
 - An app password is saved only on this computer, in the email or calendar connector. It is never shown again, and the assistant never sees it.
+- If you connected email or calendar with an early version of Aman, the next upgrade moves that account into the connector and deletes the old file. If you connected it again in Settings since, Aman keeps that newer one.
 - Never paste a password into a chat. A chat can't connect an account. Use Settings.
 - Aman reads only your own calendar. Calendars other people share with you, and holiday calendars, are left out on purpose.
 - Aman can't delete calendar events.

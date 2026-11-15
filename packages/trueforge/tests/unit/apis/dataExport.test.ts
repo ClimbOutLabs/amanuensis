@@ -29,6 +29,7 @@ import { SqliteSentinelSettingsStore } from '../../../src/db/sqlite/sentinel-set
 import { SqliteSpaceStore } from '../../../src/db/sqlite/space-store/SqliteSpaceStore';
 import { SqliteOAuthTokenStore } from '../../../src/db/sqlite/token-store/SqliteOAuthTokenStore';
 import { SqliteTurnArtifactStore } from '../../../src/db/sqlite/turn-artifact-store/SqliteTurnArtifactStore';
+import { TelegramStore } from '../../../src/db/telegramStore';
 import { personaKnowledgeLocation } from '../../../src/personaKnowledge/knowledgePaths';
 import { openPersonaKnowledgeRepository } from '../../../src/personaKnowledge/sqliteKnowledgeRepository';
 import { personaVaultNamespace, vaultFilesystemNamespace } from '../../../src/runtime/memory/markdownMemoryFiles';
@@ -44,6 +45,9 @@ const EXPORT_PATH = '/api/v1/data/export';
 const PROVIDER_API_KEY = 'sk-test-provider-key-1234567890abcdef';
 const CONNECTOR_HEADER_SECRET = 'test-header-secret-value-abcdef123456';
 const OAUTH_ACCESS_TOKEN = 'test-oauth-access-token-abcdef123456';
+// The Telegram bot's token and the secret its webhook is called with.
+const TELEGRAM_BOT_TOKEN = '7000000001:AAExampleBotTokenValue0123456789abcde';
+const TELEGRAM_WEBHOOK_SECRET = 'telegram-webhook-secret-abcdef123456';
 // Not stored anywhere: only the credential-pattern layer can catch it.
 const PASTED_GITHUB_TOKEN = ['ghp', 'pastedtoken1234567890abcdef'].join('_');
 const CONNECTOR_PATH_TOKEN = ['ghp', 'connectorpathtoken1234567890'].join('_');
@@ -262,7 +266,7 @@ describe('Data export route', () => {
       user: 'alice',
       sessionId: 'alice-session-1',
       folderId: 'folder-1',
-      userText: `My key is ${PROVIDER_API_KEY} please use it`,
+      userText: `My key is ${PROVIDER_API_KEY} please use it. The bot token is ${TELEGRAM_BOT_TOKEN} and its webhook secret is ${TELEGRAM_WEBHOOK_SECRET}.`,
       assistantText: `Noted. Also saw this token: ${PASTED_GITHUB_TOKEN}`,
     });
     await seedSession(server, {
@@ -277,6 +281,18 @@ describe('Data export route', () => {
       userText: 'bob asks the shared agent',
       assistantText: 'shared agent answer for bob',
       agentId: agent.id,
+    });
+
+    await new TelegramStore(db).saveConnection({
+      tenant_id: TENANT_ID,
+      created_by: 'alice',
+      created_by_subject: subject('alice'),
+      bot_token: TELEGRAM_BOT_TOKEN,
+      bot_id: '7000000001',
+      bot_name: 'Test bot',
+      bot_username: 'test_bot',
+      transport: 'webhook',
+      webhook_secret: TELEGRAM_WEBHOOK_SECRET,
     });
 
     // Schedules: one each.
@@ -761,6 +777,8 @@ describe('Data export route', () => {
         PROVIDER_API_KEY,
         CONNECTOR_HEADER_SECRET,
         OAUTH_ACCESS_TOKEN,
+        TELEGRAM_BOT_TOKEN,
+        TELEGRAM_WEBHOOK_SECRET,
         PASTED_GITHUB_TOKEN,
         CONNECTOR_PATH_TOKEN,
         CONNECTOR_QUERY_SECRET,

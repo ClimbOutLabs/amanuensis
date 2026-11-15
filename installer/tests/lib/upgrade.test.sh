@@ -164,7 +164,7 @@ test_successful_upgrade_backs_up_first() {
 }
 
 test_upgrade_notes_an_old_email_account_file() {
-  t_begin "upgrade says how to reconnect email when the old account file is there"
+  t_begin "upgrade says how to reconnect email when the old account file cannot be moved, and keeps it"
   sandbox_new
   install_machine
   printf '%s\n' '# Written by the installer for the Email connector. Keep it private: it holds the app password.' \
@@ -178,6 +178,65 @@ test_upgrade_notes_an_old_email_account_file() {
   assert_rc 0
   assert_contains "$OUT" "Already up to date"
   assert_flat_contains "$OUT$ERR" "Email was set up the old way, so its account was not carried over. Next: Connect it again in Settings, then Connectors, then Email."
+  sandbox_drop
+}
+
+old_email_account_text() { # address password
+  printf '%s\n' '# Written by the installer for the Email connector. Keep it private: it holds the app password.' \
+    "MCP_EMAIL_SERVER_EMAIL_ADDRESS=$1" "MCP_EMAIL_SERVER_PASSWORD='$2'" \
+    'MCP_EMAIL_SERVER_IMAP_HOST=imap.example.invalid' 'MCP_EMAIL_SERVER_IMAP_PORT=993' 'MCP_EMAIL_SERVER_IMAP_SSL=true' \
+    'MCP_EMAIL_SERVER_SMTP_HOST=smtp.example.invalid' 'MCP_EMAIL_SERVER_SMTP_PORT=465' 'MCP_EMAIL_SERVER_SMTP_SSL=true'
+}
+
+test_upgrade_moves_a_complete_old_email_account() {
+  t_begin "upgrade moves a complete old email account into the connector, deletes the old file and stays quiet after"
+  sandbox_new
+  install_machine
+  local dir=$AMAN_HOME/instances/main
+  old_email_account_text owner@example.invalid old-mail-sentinel-4b7e >"$dir/.env.mail-email"
+  repo_commit_change "app change"
+  run_install upgrade
+  assert_rc 0
+  assert_not_contains "$OUT$ERR" "Email was set up the old way"
+  assert_no_path "$dir/.env.mail-email"
+  assert_contains "$(cat "$STUB_STATE/mail-account-aman-main")" "MCP_EMAIL_SERVER_PASSWORD='old-mail-sentinel-4b7e'"
+  assert_eq "$(sort -u "$STUB_STATE/mail-account-keyed")" aman-main "the moved account went in with the key of the connector's file"
+  assert_eq "$(grep -c '^MAIL_EMAIL_MCP_URL=' "$dir/.env" || true)" 1 "the app is pointed at the connector"
+  assert_not_contains "$OUT$ERR" "old-mail-sentinel-4b7e"
+  run_install upgrade
+  assert_rc 0
+  assert_not_contains "$OUT$ERR" "Email was set up the old way"
+  sandbox_drop
+}
+
+test_upgrade_keeps_an_email_account_connected_again() {
+  t_begin "upgrade never replaces an email account connected again in Settings with the old file; it only deletes the old file"
+  sandbox_new
+  install_machine
+  local dir=$AMAN_HOME/instances/main
+  old_email_account_text new@example.invalid new-mail-sentinel >"$STUB_STATE/mail-account-aman-main"
+  old_email_account_text owner@example.invalid old-mail-sentinel >"$dir/.env.mail-email"
+  repo_commit_change "app change"
+  run_install upgrade
+  assert_rc 0
+  assert_no_path "$dir/.env.mail-email"
+  assert_contains "$(cat "$STUB_STATE/mail-account-aman-main")" "new-mail-sentinel"
+  assert_not_contains "$(cat "$STUB_STATE/mail-account-aman-main")" "old-mail-sentinel"
+  assert_not_contains "$OUT$ERR" "Email was set up the old way"
+  sandbox_drop
+}
+
+test_already_up_to_date_still_moves_an_old_email_account() {
+  t_begin "an upgrade with nothing new to install still moves an old email account and deletes the file"
+  sandbox_new
+  install_machine
+  local dir=$AMAN_HOME/instances/main
+  old_email_account_text owner@example.invalid old-mail-sentinel-uptodate >"$dir/.env.mail-email"
+  run_install upgrade
+  assert_rc 0
+  assert_contains "$OUT" "Already up to date"
+  assert_no_path "$dir/.env.mail-email"
+  assert_contains "$(cat "$STUB_STATE/mail-account-aman-main")" "old-mail-sentinel-uptodate"
   sandbox_drop
 }
 
@@ -924,6 +983,9 @@ test_a_record_from_before_the_flag_counts_as_having_data
 test_check_reports_without_changing
 test_successful_upgrade_backs_up_first
 test_upgrade_notes_an_old_email_account_file
+test_upgrade_moves_a_complete_old_email_account
+test_upgrade_keeps_an_email_account_connected_again
+test_already_up_to_date_still_moves_an_old_email_account
 test_upgrade_without_an_old_email_account_file_stays_quiet
 test_upgrade_notes_an_old_calendar_account_file
 test_upgrade_moves_a_complete_old_calendar_account

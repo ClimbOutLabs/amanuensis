@@ -171,6 +171,8 @@ describe('PersonalizationPanel', () => {
     render(<Host />);
 
     await screen.findByLabelText('Your name');
+    // Lets the loaded profile finish filling the form, so it cannot replace the row the click adds.
+    await act(async () => {});
     fireEvent.click(screen.getByRole('button', { name: '+ Add preference' }));
 
     const input = screen.getByLabelText('Pinned preference 1');

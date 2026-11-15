@@ -4,6 +4,7 @@ import winston from 'winston';
 
 import { DeliveryStore, type DeliveryDatabase } from '../../src/db/deliveryStore';
 import { NoticingStore, type NoticingDatabase } from '../../src/db/noticingStore';
+import { PersonTimezoneStore, type PersonTimezoneDatabase } from '../../src/db/personTimezoneStore';
 import { PushSubscriptionStore, type PushSubscriptionDatabase } from '../../src/db/pushSubscriptionStore';
 import { ReachSettingsStore, type ReachSettingsDatabase } from '../../src/db/reachSettingsStore';
 import { TelegramStore, type TelegramDatabase } from '../../src/db/telegramStore';
@@ -14,6 +15,7 @@ import { createReminderReach } from '../../src/runtime/noticing/reminderReach';
 import { createTelegramSendQueue } from '../../src/runtime/telegram/telegramSendQueue';
 import { createTelegramService } from '../../src/runtime/telegram/telegramService';
 import { createTextNumberService } from '../../src/runtime/texts/textNumber';
+import { turnTimezoneFor } from '../../src/runtime/turnTimezone';
 
 /**
  * The feed's stores and service over a test database, with no push channel and an activity log that drops writes,
@@ -24,6 +26,7 @@ export function deliveryDeps(
     DeliveryDatabase &
       PushSubscriptionDatabase &
       ReachSettingsDatabase &
+      PersonTimezoneDatabase &
       NoticingDatabase &
       TextContactDatabase &
       TelegramDatabase
@@ -45,6 +48,12 @@ export function deliveryDeps(
       logger: winston.createLogger({ silent: true }),
     }),
     reachSettingsStore,
+    turnTimezone: turnTimezoneFor({
+      reachSettings: reachSettingsStore,
+      browserZones: new PersonTimezoneStore(db),
+      knownTimezone: () => Promise.resolve(undefined),
+      logger: winston.createLogger({ silent: true }),
+    }),
     noticingStore,
     noticingService: { run: () => Promise.resolve({ owners: 0, raised: 0 }) },
     reminderReach: createReminderReach({
