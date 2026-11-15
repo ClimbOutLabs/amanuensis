@@ -266,4 +266,9 @@ longer than the dead limit while the others stay out.
 - Volumes an instance owns on Docker are named after it: `aman_<name>_data`
   and `aman_<name>_dex`, its Compose project is `aman-<name>`, and the
   shared volumes are `aman_home`, `aman_source`, `aman_stt_cache` and
-  `aman_machine`.
+  `aman_machine`. Its containers are `aman-<short>-<service>`, where
+  `<short>` is the name without a leading `aman-`, so `aman-` is written once;
+  the volumes that hold no data (`aman_<short>_local_model`,
+  `aman_<short>_mail_policy_status`) use the short name too. Volumes with data
+  keep the full name, so an older install keeps its data in place. Two
+  instances whose short names match (`x` and `aman-x`) are refused.
