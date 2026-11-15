@@ -11,6 +11,21 @@ const HN_SCRIPT = [
   "print('\\n'.join(get(f'https://hacker-news.firebaseio.com/v0/item/{i}.json')['title'] for i in ids))",
 ].join('\n');
 
+const WX_SCRIPT = [
+  'import urllib.request',
+  "print(urllib.request.urlopen('https://wttr.in/Lisbon?format=3', timeout=20).read().decode())",
+].join('\n');
+
+/** The command's own output from a tool result, so the reply reads as words. */
+function outputOf(raw) {
+  try {
+    const parsed = JSON.parse(raw);
+    return String(parsed?.result?.response?.result ?? parsed?.result?.error ?? raw);
+  } catch {
+    return raw;
+  }
+}
+
 const text = m => (typeof m.content === 'string' ? m.content : (m.content ?? []).map(p => p.text ?? '').join(''));
 
 function toolName(tools, want) {
@@ -48,14 +63,14 @@ function decide(body) {
     return { content: `Removed. ${results.at(-1).slice(0, 300)}` };
   }
   if (/weather/i.test(ask)) {
-    return results.length === 0
-      ? call('exec', { intent: 'Check the weather in Lisbon', purpose: 'execute', command: 'curl -s https://wttr.in/Lisbon?format=3' })
-      : { content: results.at(-1).slice(0, 1500) };
+    if (results.length === 0) return call('write_file', { intent: 'Save a script that reads the weather', path: 'wx.py', content: WX_SCRIPT });
+    if (results.length === 1) return call('exec', { intent: 'Check the weather in Lisbon', purpose: 'execute', command: 'python3 wx.py' });
+    return { content: `The weather now: ${outputOf(results.at(-1)).slice(0, 500)}` };
   }
   if (/hacker news/i.test(ask)) {
     if (results.length === 0) return call('write_file', { intent: 'Save a script that reads the Hacker News front page', path: 'hn.py', content: HN_SCRIPT });
     if (results.length === 1) return call('exec', { intent: 'Read the Hacker News front page', purpose: 'execute', command: 'python3 hn.py' });
-    return { content: results.at(-1).slice(0, 1500) };
+    return { content: `The top stories now:\n${outputOf(results.at(-1)).slice(0, 1500)}` };
   }
   return { content: 'Done.' };
 }
