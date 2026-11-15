@@ -25,6 +25,8 @@ How to get there: Click **More** in the left bar, then **Settings**, then **Skil
 1. Find the skill under Available. Type in **Search skills** to narrow the list.
 2. Click **Enable**. The skill moves up to Enabled.
 
+If the skill sends requests to websites, Aman shows them first. Click **Add skill and allow websites** to add it, or **Cancel** to leave it off.
+
 ## Use a skill in a chat
 
 1. In the chat, click **Add files and tools** beside the message box.
@@ -44,17 +46,20 @@ A skill script that needs a website or an extra package can't get it on its own.
 3. In **Repository URL**, paste the web address of the GitHub project that holds the skill.
 4. In **Folder containing the SKILL.md**, type the folder that holds the skill's instructions file, such as skills/release-notes.
 5. In **Branch**, type the branch to use, such as main.
-6. Click **Import**.
+6. Click **Check skill**. Aman reads the skill's files and lists the websites it sends requests to. Nothing in the skill runs while Aman reads it.
+7. Read the list. Click **Add skill and allow websites** to add the skill and let it reach those websites, and no others. When the skill sends no requests, the button says **Add skill**.
 
-You need to fill in every box.
+You need to fill in every box. If you change the address, folder or branch after checking, click **Check skill** again.
+
+Aman saves the skill at the exact version it checked, so later changes to the branch don't reach you. You can't add the skill without its websites. If the skill's files change before you click add, nothing is added, and Aman asks you to check again.
 
 ## Add a skill from a chat
 
 You can also ask Aman in a chat to add a skill.
 
 1. In a chat, say which skill you want, or paste its GitHub address, such as "add the skill at github.com/acme/skills/tree/main/skills/release-notes".
-2. A card shows the skill before anything is added: its name, what it's for, where it comes from and the exact version. Aman reads the name and description from the skill itself.
-3. Click **Allow** to add it, or **Not now** to skip it. This card asks every time.
+2. A card shows the skill before anything is added: its name, what it's for, where it comes from, the exact version and the websites it sends requests to. Aman reads the name and description from the skill itself, and finds the websites by reading its files.
+3. Click **Allow** to add it and let it reach those websites, or **Not now** to skip it. This card asks every time.
 
 After you allow it, the skill is on for that chat from your next message. It also shows in Settings, under Skills, where you can remove it.
 
@@ -70,7 +75,7 @@ Click **Remove** on the skill's row under Enabled. For a skill you imported, Ama
 
 ## Let a skill reach the internet
 
-Some skills need to reach certain websites. After you enable one, Aman lists the sites it asks for.
+Some skills need to reach certain websites. When you add one, Aman lists them and adding the skill allows them. A skill added before Aman did this lists its sites in Settings, under Skills, until you answer:
 
 - Click **Allow** to let chats using this skill reach those sites, and no others.
 - Click **Don’t allow** to keep it offline. Click **Review the sites** to decide again later.

@@ -9,11 +9,16 @@ export const CreateSkillRequest: core.serialization.Schema<
     serializers.settings.CreateSkillRequest.Raw,
     TrueForge.settings.CreateSkillRequest
 > = core.serialization.object({
+    approvedWebsites: core.serialization.property(
+        "approved_websites",
+        core.serialization.list(core.serialization.string()).optional(),
+    ),
     manifest: SkillManifest,
 });
 
 export declare namespace CreateSkillRequest {
     export interface Raw {
+        approved_websites?: string[] | null;
         manifest: SkillManifest.Raw;
     }
 }

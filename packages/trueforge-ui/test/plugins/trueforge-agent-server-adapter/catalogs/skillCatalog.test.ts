@@ -370,3 +370,92 @@ describe('skillCatalog network approval', () => {
     await assert.rejects(catalog.approveSkillNetwork({ id: 'ten-x', hosts: ['github.com'] }), /list of sites changed/);
   });
 });
+
+describe('skillCatalog websites check', () => {
+  function recordingCatalog(responseBody: unknown) {
+    const calls: { url: string; method: string | undefined; body: unknown }[] = [];
+    const fetchImpl: typeof fetch = async (input, init) => {
+      calls.push({
+        url: String(input),
+        method: init?.method,
+        body: typeof init?.body === 'string' ? JSON.parse(init.body) : undefined,
+      });
+      return new Response(JSON.stringify(responseBody), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+    const client = new TrueForge({ baseUrl: 'http://harness.test', maxRetries: 0, fetch: fetchImpl });
+    return { catalog: createSkillCatalog(client, { baseUrl: 'http://harness.test', fetch: fetchImpl }), calls };
+  }
+
+  it('checks a skill by url, path and ref, and maps the websites found', async () => {
+    const { catalog, calls } = recordingCatalog({
+      data: {
+        commit: 'a'.repeat(40),
+        websites: ['api.example-weather.test'],
+        makes_up_addresses: true,
+        can_send: false,
+      },
+    });
+
+    const check = await catalog.checkSkillWebsites({
+      repoURL: 'https://github.com/example/skills',
+      path: '  ',
+      ref: 'a'.repeat(40),
+    });
+
+    assert.deepEqual(calls, [
+      {
+        url: 'http://harness.test/api/v1/settings/skills/check-websites',
+        method: 'POST',
+        body: { url: 'https://github.com/example/skills', ref: 'a'.repeat(40) },
+      },
+    ]);
+    assert.deepEqual(check, {
+      commit: 'a'.repeat(40),
+      websites: ['api.example-weather.test'],
+      makesUpAddresses: true,
+      canSend: false,
+    });
+  });
+
+  it('adds a skill together with the websites the person approved', async () => {
+    const { catalog, calls } = recordingCatalog({
+      data: {
+        name: 'weather',
+        manifest: {
+          type: 'git',
+          name: 'weather',
+          url: 'https://github.com/example/skills',
+          path: 'weather',
+          ref: 'main',
+          description: 'Weather',
+        },
+      },
+    });
+
+    await catalog.addSkillWithWebsites({
+      name: 'weather',
+      description: 'Weather',
+      repoURL: 'https://github.com/example/skills',
+      path: 'weather',
+      ref: 'main',
+      approvedWebsites: ['api.example-weather.test'],
+    });
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0]?.method, 'POST');
+    assert.deepEqual(calls[0]?.body, {
+      manifest: {
+        type: 'git',
+        name: 'weather',
+        url: 'https://github.com/example/skills',
+        path: 'weather',
+        ref: 'main',
+        description: 'Weather',
+      },
+      approved_websites: ['api.example-weather.test'],
+    });
+  });
+});
