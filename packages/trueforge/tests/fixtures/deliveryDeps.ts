@@ -4,6 +4,7 @@ import winston from 'winston';
 
 import { DeliveryStore, type DeliveryDatabase } from '../../src/db/deliveryStore';
 import { NoticingStore, type NoticingDatabase } from '../../src/db/noticingStore';
+import { PersonTimezoneStore, type PersonTimezoneDatabase } from '../../src/db/personTimezoneStore';
 import { PushSubscriptionStore, type PushSubscriptionDatabase } from '../../src/db/pushSubscriptionStore';
 import { ReachSettingsStore, type ReachSettingsDatabase } from '../../src/db/reachSettingsStore';
 import { TelegramStore, type TelegramDatabase } from '../../src/db/telegramStore';
@@ -25,6 +26,7 @@ export function deliveryDeps(
     DeliveryDatabase &
       PushSubscriptionDatabase &
       ReachSettingsDatabase &
+      PersonTimezoneDatabase &
       NoticingDatabase &
       TextContactDatabase &
       TelegramDatabase
@@ -48,6 +50,7 @@ export function deliveryDeps(
     reachSettingsStore,
     turnTimezone: turnTimezoneFor({
       reachSettings: reachSettingsStore,
+      browserZones: new PersonTimezoneStore(db),
       knownTimezone: () => Promise.resolve(undefined),
       logger: winston.createLogger({ silent: true }),
     }),

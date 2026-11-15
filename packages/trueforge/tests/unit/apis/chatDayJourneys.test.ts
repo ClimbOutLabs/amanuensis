@@ -68,20 +68,30 @@ describe('the day a chat is told it is', () => {
     await server.close();
   }, TURN_TIMEOUT_MS);
 
-  /** The date line of the newest reply the model was asked for. */
-  function dateLineShownToModel(): string {
-    const lines = server.model
+  /** The date line of every reply the model was asked for, oldest first. */
+  function dateLinesShownToModel(): string[] {
+    return server.model
       .requests()
-      .map(request => /<current-date>(.*?)<\/current-date>/s.exec(JSON.stringify(request))?.[1])
-      .filter(line => line !== undefined);
-    const newest = lines[lines.length - 1];
-    if (newest === undefined) {
-      throw new Error('The model was asked for no reply.');
+      .flatMap(request => /<current-date>(.*?)<\/current-date>/s.exec(JSON.stringify(request))?.[1] ?? []);
+  }
+
+  /** Waits for the next reply the model is asked for and gives its date line. */
+  async function nextDateLine({ after }: { after: number }): Promise<string> {
+    const deadline = Date.now() + TURN_TIMEOUT_MS;
+    for (;;) {
+      const line = dateLinesShownToModel()[after];
+      if (line !== undefined) {
+        return line;
+      }
+      if (Date.now() > deadline) {
+        throw new Error('The model was asked for no reply in time.');
+      }
+      await new Promise(resolve => setTimeout(resolve, 25));
     }
-    return newest;
   }
 
   async function sendFromBrowser(timeZone: string): Promise<string> {
+    const after = dateLinesShownToModel().length;
     const created = await server.request('/api/v1/sessions', json({ agent: { spec: AGENT_SPEC } }));
     const chatId = z.object({ data: z.object({ id: z.string() }).loose() }).parse(await created.json()).data.id;
     const turn = await server.request(
@@ -94,7 +104,7 @@ describe('the day a chat is told it is', () => {
     );
     expect(turn.status).toBe(200);
     await turn.text();
-    return dateLineShownToModel();
+    return nextDateLine({ after });
   }
 
   async function sendFromTelegram(): Promise<string> {
@@ -103,7 +113,7 @@ describe('the day a chat is told it is', () => {
     if (connection === undefined) {
       throw new Error('The test bot is not connected.');
     }
-    const asked = server.model.requests().length;
+    const after = dateLinesShownToModel().length;
     const response = await server.request('/api/internal/telegram/updates', {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${configuration.TRUEFORGE_API_KEY}` },
@@ -123,24 +133,33 @@ describe('the day a chat is told it is', () => {
       }),
     });
     expect(response.status).toBe(204);
+    const line = await nextDateLine({ after });
+    await finishedTelegramTurn();
+    return line;
+  }
+
+  /** Waits until the Telegram chat's newest turn has ended, so the next message starts a turn of its own. */
+  async function finishedTelegramTurn(): Promise<void> {
+    const store = new TelegramStore(server.db());
     const sessionId = (await store.getConnection({ tenant_id: TENANT, created_by: OWNER }))?.session_id ?? null;
     if (sessionId === null) {
       throw new Error('The Telegram message started no chat.');
     }
     const deadline = Date.now() + TURN_TIMEOUT_MS;
     for (;;) {
-      const list = ListTurnsResponseSchema.parse(
+      const turns = ListTurnsResponseSchema.parse(
         await (await server.request(`/api/v1/sessions/${sessionId}/turns`)).json(),
+      ).data;
+      const states = await Promise.all(
+        turns.map(
+          async turn =>
+            GetTurnResponseSchema.parse(
+              await (await server.request(`/api/v1/sessions/${sessionId}/turns/${turn.id}`)).json(),
+            ).data.state.status,
+        ),
       );
-      const turnId = list.data[0]?.id;
-      const turn =
-        turnId === undefined
-          ? undefined
-          : GetTurnResponseSchema.parse(
-              await (await server.request(`/api/v1/sessions/${sessionId}/turns/${turnId}`)).json(),
-            ).data;
-      if (turn !== undefined && turn.state.status !== 'running' && server.model.requests().length > asked) {
-        return dateLineShownToModel();
+      if (states.every(status => status !== 'running')) {
+        return;
       }
       if (Date.now() > deadline) {
         throw new Error('The Telegram turn did not finish in time.');
@@ -150,21 +169,9 @@ describe('the day a chat is told it is', () => {
   }
 
   async function reachMe() {
-    const body = z
-      .object({
-        data: z
-          .object({
-            saved: z.boolean(),
-            settings: z.object({ timezone: z.string(), noticing_on: z.boolean() }).loose(),
-          })
-          .loose(),
-      })
-      .parse(await (await server.request('/api/v1/user/reach')).json());
-    return {
-      saved: body.data.saved,
-      timezone: body.data.settings.timezone,
-      noticing_on: body.data.settings.noticing_on,
-    };
+    return z
+      .object({ data: z.object({ saved: z.boolean(), settings: z.object({}).loose() }).loose() })
+      .parse(await (await server.request('/api/v1/user/reach')).json()).data;
   }
 
   it(
@@ -182,15 +189,25 @@ describe('the day a chat is told it is', () => {
       expect(auckland.match(/\d{4}-\d{2}-\d{2}/g)).toHaveLength(1);
       expect(auckland).not.toContain('UTC)');
 
-      // That zone is now kept in Reach me, as the quiet defaults, so nothing starts checking because of it.
-      expect(await reachMe()).toEqual({ saved: true, timezone: 'Pacific/Auckland', noticing_on: false });
+      // The zone is kept on its own. Reach me is left as it was: nothing saved there.
+      expect((await reachMe()).saved).toBe(false);
 
       // The next Telegram message is read in it.
       expect(await sendFromTelegram()).toContain('Pacific/Auckland');
 
-      // A browser somewhere else counts for its own message, and the saved zone is left as it was.
+      // The person travels: the newest browser zone counts, for that message and for Telegram after it.
       expect(await sendFromBrowser('America/Los_Angeles')).toContain('America/Los_Angeles, UTC-0');
-      expect((await reachMe()).timezone).toBe('Pacific/Auckland');
+      expect(await sendFromTelegram()).toContain('America/Los_Angeles, UTC-0');
+
+      // A zone the person saves in Reach me themselves comes before the browser's for messages that bring none.
+      const reach = await reachMe();
+      const saved = await server.request('/api/v1/user/reach', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ settings: { ...reach.settings, timezone: 'Europe/Paris' } }),
+      });
+      expect(saved.status).toBe(200);
+      expect(await sendFromTelegram()).toContain('Europe/Paris');
     },
     TURN_TIMEOUT_MS * 3,
   );

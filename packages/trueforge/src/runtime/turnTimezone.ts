@@ -3,8 +3,8 @@ import { isValidTimezone } from '@truefoundry/trueforge-core/core/util/clientTim
 import type { Logger } from 'winston';
 
 import type { PersonOwner } from '../db/personOwner';
+import type { IPersonTimezoneStore } from '../db/personTimezoneStore';
 import type { IReachSettingsStore } from '../db/reachSettingsStore';
-import { defaultReachSettings } from '../schemas/reach';
 
 /** The time zone a turn reads the person's day in; undefined when nothing says where they are. */
 export type TurnTimezone = (input: {
@@ -14,45 +14,48 @@ export type TurnTimezone = (input: {
 }) => Promise<string | undefined>;
 
 /**
- * A message from a browser says the person's zone. One that comes another way, such as from Telegram, carries only
- * the instant it was sent, so its zone is looked up: the one saved in Reach me, else the one their schedules or
- * calendar use. A browser's zone is saved to Reach me when the person has none there yet, so anyone who has used
- * the app once has a zone for every other way in. Never throws.
+ * A message from a browser says the person's zone, and that zone is kept. One that comes another way, such as from
+ * Telegram, carries only the instant it was sent, so its zone is looked up: the one the person saved in Reach me,
+ * else the one their browser last gave, else the one their schedules or calendar use. Never throws.
  */
 export function turnTimezoneFor({
   reachSettings,
+  browserZones,
   knownTimezone,
   logger,
 }: {
-  reachSettings: Pick<IReachSettingsStore, 'get' | 'importSettings'>;
+  reachSettings: Pick<IReachSettingsStore, 'get'>;
+  /** The zone each person's browser last gave. */
+  browserZones: IPersonTimezoneStore;
   /** The zone the person's schedules or calendar give. */
   knownTimezone: (owner: PersonOwner) => Promise<string | undefined>;
   logger: Logger;
 }): TurnTimezone {
-  // People known to have Reach me settings, so a browser message reads the store for them once and not every time.
-  const haveSettings = new Set<string>();
-  const remember = async ({ owner, timezone }: { owner: PersonOwner; timezone: string }): Promise<void> => {
+  // The zone last kept for each person, so a browser message writes only when the zone is new or has changed.
+  const kept = new Map<string, string>();
+  const keep = async ({ owner, timezone }: { owner: PersonOwner; timezone: string }): Promise<void> => {
     const key = `${owner.tenant_id}\u0000${owner.created_by}`;
-    if (haveSettings.has(key)) {
+    if (kept.get(key) === timezone) {
       return;
     }
     try {
-      if ((await reachSettings.get(owner)) === undefined) {
-        // Added only when there are none, so settings the person saved in the meantime are never replaced.
-        await reachSettings.importSettings({ ...owner, settings: defaultReachSettings(timezone) });
+      if ((await browserZones.get(owner)) !== timezone) {
+        await browserZones.put({ ...owner, timezone });
       }
-      haveSettings.add(key);
+      kept.set(key, timezone);
     } catch (error) {
-      logger.warn('The time zone from a browser could not be saved for later.', extractErrorLogFields(error));
+      logger.warn('The time zone from a browser could not be kept for later.', extractErrorLogFields(error));
     }
   };
   return async ({ owner, clientTimezone }) => {
     if (clientTimezone !== undefined && clientTimezone !== '' && isValidTimezone(clientTimezone)) {
-      await remember({ owner, timezone: clientTimezone });
+      await keep({ owner, timezone: clientTimezone });
       return clientTimezone;
     }
     try {
-      return (await reachSettings.get(owner))?.timezone ?? (await knownTimezone(owner));
+      return (
+        (await reachSettings.get(owner))?.timezone ?? (await browserZones.get(owner)) ?? (await knownTimezone(owner))
+      );
     } catch (error) {
       logger.warn('The time zone for a message with none could not be looked up.', extractErrorLogFields(error));
       return undefined;

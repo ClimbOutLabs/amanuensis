@@ -124,6 +124,7 @@ import { NoticingStore, type INoticingStore } from './db/noticingStore';
 import type { IPersonalizationStore } from './db/personalizationStore';
 import type { IPersonaStore } from './db/personaStore';
 import type { PersonOwner } from './db/personOwner';
+import { PersonTimezoneStore, type IPersonTimezoneStore } from './db/personTimezoneStore';
 import { PhoneCallStore, type IPhoneCallStore } from './db/phoneCallStore';
 import type { PostgresAgentStore } from './db/postgres/agent-store/PostgresAgentStore';
 import type { Database as PostgresDatabase } from './db/postgres/types';
@@ -278,6 +279,7 @@ interface ServerPersistence<TTransaction> {
   recallExclusionStore: IRecallExclusionStore;
   deliveryStore: IDeliveryStore;
   reachSettingsStore: IReachSettingsStore;
+  personTimezoneStore: IPersonTimezoneStore;
   textContactStore: ITextContactStore;
   phoneCallStore: IPhoneCallStore;
   noticingStore: INoticingStore;
@@ -527,6 +529,7 @@ async function createStandalonePersistence(options: {
     recallExclusionStore: new RecallExclusionStore(db),
     deliveryStore: new DeliveryStore(db),
     reachSettingsStore: new ReachSettingsStore(db),
+    personTimezoneStore: new PersonTimezoneStore(db),
     textContactStore: new TextContactStore(db),
     phoneCallStore: new PhoneCallStore(db),
     noticingStore: new NoticingStore(db),
@@ -720,6 +723,7 @@ async function createDistributedPersistence(options: {
     recallExclusionStore: new RecallExclusionStore(db),
     deliveryStore: new DeliveryStore(db),
     reachSettingsStore: new ReachSettingsStore(db),
+    personTimezoneStore: new PersonTimezoneStore(db),
     textContactStore: new TextContactStore(db),
     phoneCallStore: new PhoneCallStore(db),
     noticingStore: new NoticingStore(db),
@@ -770,6 +774,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     briefItemStore,
     deliveryStore,
     reachSettingsStore,
+    personTimezoneStore,
     textContactStore,
     phoneCallStore,
     noticingStore,
@@ -1248,7 +1253,12 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     telegramQueue,
     deliveryService: deliveries,
     reachSettingsStore,
-    turnTimezone: turnTimezoneFor({ reachSettings: reachSettingsStore, knownTimezone, logger }),
+    turnTimezone: turnTimezoneFor({
+      reachSettings: reachSettingsStore,
+      browserZones: personTimezoneStore,
+      knownTimezone,
+      logger,
+    }),
     noticingStore,
     noticingService,
     reminderReach: createReminderReach({
