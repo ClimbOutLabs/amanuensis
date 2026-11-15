@@ -93,11 +93,14 @@ function ownerOf(connection: TelegramConnection): { tenant_id: string; created_b
   return { tenant_id: connection.tenant_id, created_by: connection.created_by };
 }
 
+export const TELEGRAM_EARLIER_CHAT_DELETED = 'Your earlier chat was deleted in Aman, so this is a new chat.';
+
 /**
  * The Telegram chat for this owner: made on the first message and reused after. It is a plain chat,
  * like one started here, set up from the default model, so the app shows it under the person's own
  * assistant (not under an agent name) and its model, persona and connectors can be changed from the
  * app like any chat's. It is marked as the Telegram chat, and its first turn titles it "Telegram: " and its subject.
+ * When the chat in use was deleted, a new one is made and Telegram is told so.
  */
 async function telegramSession<TTransaction>(params: {
   c: Context;
@@ -112,6 +115,7 @@ async function telegramSession<TTransaction>(params: {
   // The chat in use is the one the connection names. The first chat is found by the owner's key; a chat
   // started by /new, or one made because the chat in use was deleted, gets a key of its own.
   let external_id = telegramExternalId(owner.subject_id);
+  let earlierChatDeleted = false;
   if (params.fresh === true) {
     external_id = `${external_id}:${ulid().toLowerCase()}`;
   } else if (connection.session_id !== null) {
@@ -120,6 +124,7 @@ async function telegramSession<TTransaction>(params: {
       return { session: current, previous_turn_id: current.record.last_turn_id ?? 'none' };
     }
     external_id = `${external_id}:${ulid().toLowerCase()}`;
+    earlierChatDeleted = true;
   }
   const modelName = await resolveDefaultChatModel({
     tenantId: tenant_id,
@@ -149,6 +154,20 @@ async function telegramSession<TTransaction>(params: {
   });
   if (connection.session_id !== session.session_id) {
     await deps.telegramStore.setSessionId({ ...ownerOf(connection), session_id: session.session_id });
+  }
+  if (earlierChatDeleted && connection.paired_chat_id !== null) {
+    // Said before anything else is answered, so the person never takes a fresh chat for the old one.
+    await sendTelegramText({
+      queue: deps.telegramQueue,
+      client: deps.telegramService.clientFor(connection),
+      chat_id: connection.paired_chat_id,
+      text: TELEGRAM_EARLIER_CHAT_DELETED,
+    }).catch((error: unknown) => {
+      deps.logger.warn('Telegram could not be told that its earlier chat was deleted', {
+        connection_id: connection.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
   }
   return { session, previous_turn_id: session.record.last_turn_id ?? 'none' };
 }
