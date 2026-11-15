@@ -661,11 +661,16 @@ ui_step_start() { # text [log file]
       shown=0
       while :; do
         e=$((SECONDS - t0))
-        line="  ${UI_FRAMES[$((i % n))]} $text"
-        # A few seconds is noise; and one line never wraps, since a wrapped line cannot be redrawn in place.
-        if [ "$e" -ge 5 ]; then line="$line  $(ui_fmt_elapsed "$e")"; fi
+        # A few seconds is noise.
+        time=''
+        if [ "$e" -ge 5 ]; then time="  $(ui_fmt_elapsed "$e")"; fi
+        # One line never wraps, since a wrapped line cannot be redrawn in place: an overlong text is cut, never the time.
+        shown_text=$text
+        if [ $((4 + ${#text} + ${#time})) -ge "$UI_WIDTH" ]; then
+          shown_text="${text:0:$((UI_WIDTH - 6 - ${#time}))}$S_ELL"
+        fi
+        line="  ${UI_FRAMES[$((i % n))]} $shown_text$time"
         if [ -n "$note" ] && [ $((${#line} + 3 + ${#note})) -lt "$UI_WIDTH" ]; then line="$line   $note"; fi
-        if [ "${#line}" -ge "$UI_WIDTH" ]; then line="${line:0:$((UI_WIDTH - 4))}$S_ELL"; fi
         printf '\r%*s\r%s%s' "$shown" '' "$side" "$line" >&2
         shown=$((${#line} + 2))
         i=$((i + 1))

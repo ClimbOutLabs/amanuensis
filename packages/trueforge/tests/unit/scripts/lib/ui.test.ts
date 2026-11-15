@@ -181,6 +181,24 @@ describe('progress lines', () => {
     expect(output()).not.toContain('\r');
   });
 
+  it('cuts a long text on a terminal but keeps the elapsed time whole', () => {
+    jest.useFakeTimers({ now: 0 });
+    try {
+      const { ui, output } = collect(true);
+      const step = ui.step({
+        text: 'Starting instance a-rather-long-instance-name-for-testing and waiting until it answers',
+      });
+      jest.advanceTimersByTime(6000);
+      const lines = output().split('\r');
+      const last = lines.filter(line => line.trim() !== '').pop() ?? '';
+      step.end({ status: 'ok', text: 'Started' });
+      expect(last).toMatch(/…  6s$/);
+      expect([...last].length).toBeLessThan(72);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it('rewrites one line in place on a terminal and ends with a result line', () => {
     const { ui, output } = collect(true);
     const step = ui.step({ text: 'Building the app image' });

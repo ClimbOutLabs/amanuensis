@@ -22,6 +22,13 @@ if [ "${2:-}" = --summary ]; then
   fi
   exit "${STUB_DOCTOR_EXIT:-0}"
 fi
+# The model row of the ending asks only for the model check; with no model added in the app it warns.
+case " $* " in
+  *" --only model "*)
+    printf '{"machine":[],"instances":{"main":[{"id":"model","state":"%s","detail":"","fix":""}]}}\n' "${STUB_MODEL_STATE:-warn}"
+    exit 0
+    ;;
+esac
 if [ -n "${STUB_DOCTOR_JSON:-}" ]; then
   printf '%s\n' "$STUB_DOCTOR_JSON"
 else
