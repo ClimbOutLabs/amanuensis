@@ -1552,6 +1552,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     '/api/v1/sessions',
     withAuth(
       createTurnsRouter({
+        telegramStore: deps.telegramStore,
         turnTimezone: deps.turnTimezone,
         mcpCatalog: deps.mcpCatalog,
         skillCatalog: deps.skillCatalog,

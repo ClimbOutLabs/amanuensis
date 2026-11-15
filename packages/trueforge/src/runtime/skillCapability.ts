@@ -1,4 +1,5 @@
 import type { CallToolRequest } from '@modelcontextprotocol/sdk/types.js';
+import { AgentSpecSchema, type ISessionStore, type SessionRecord } from '@truefoundry/trueforge-core/agent-session';
 import type {
   AgentCapability,
   AgentTracing,
@@ -79,6 +80,53 @@ export interface SkillTurnContext {
   lookup: SkillLookupDeps;
   /** Reads every file of a skill at one exact commit, so the host can see which websites it sends requests to. */
   readFiles: ReadSkillFiles;
+  /** Turns a skill just added here on for this chat; false when it could not be. */
+  turnOnForChat: (input: { name: string }) => Promise<boolean>;
+}
+
+/**
+ * Turns a skill on for one chat by adding it to the chat's own setup, so a skill added from any chat, the app or
+ * Telegram, is ready from the next message. Refuses (false) a chat that runs a saved agent or whose setup could
+ * not take it, such as one without the sandbox.
+ */
+export function chatSkillSwitch({
+  sessionStore,
+  tenant_id,
+  session_id,
+}: {
+  /** Only the chat's setup is read and written. */
+  sessionStore: {
+    getSession(input: {
+      tenant_id: string;
+      session_id: string;
+    }): Promise<Pick<SessionRecord<object>, 'agent'> | undefined>;
+    updateSession: ISessionStore<object, object>['updateSession'];
+  };
+  tenant_id: string;
+  session_id: string;
+}): SkillTurnContext['turnOnForChat'] {
+  return async ({ name }) => {
+    const session = await sessionStore.getSession({ tenant_id, session_id });
+    if (session?.agent.type !== 'inline') {
+      return false;
+    }
+    const current = session.agent.spec.skills ?? [];
+    if (current.some(skill => skill.name === name)) {
+      return true;
+    }
+    const next = AgentSpecSchema.safeParse({ ...session.agent.spec, skills: [...current, { name }] });
+    if (!next.success || !next.data.config.sandbox.enabled) {
+      return false;
+    }
+    await sessionStore.updateSession({
+      tenant_id,
+      session_id,
+      agent: { type: 'inline', spec: next.data },
+      title: undefined,
+      metadata: undefined,
+    });
+    return true;
+  };
 }
 
 interface SkillToolSetOptions extends SkillTurnContext {
@@ -142,7 +190,15 @@ function sourceLine(skill: Pick<GitSkill, 'url' | 'path'>): string {
   return skill.path === undefined ? repository : `${repository}, folder ${skill.path}`;
 }
 
-function addedMessage({ skill, sandboxReady }: { skill: GitSkill; sandboxReady: boolean }): string {
+function addedMessage({
+  skill,
+  sandboxReady,
+  onForChat,
+}: {
+  skill: GitSkill;
+  sandboxReady: boolean;
+  onForChat: boolean;
+}): string {
   if (!sandboxReady) {
     return `The skill ${skill.name} is added, but it cannot be used yet. Skills run in the sandbox, which is not set up. Tell the user in plain words: "Added the skill ${skill.name}. It will work once the sandbox is set up."`;
   }
@@ -150,7 +206,10 @@ function addedMessage({ skill, sandboxReady }: { skill: GitSkill; sandboxReady: 
     skill.network_hosts !== undefined && skill.network_hosts.length > 0
       ? ` It can reach only the websites the user approved on the card: ${skill.network_hosts.join(', ')}.`
       : '';
-  return `The skill ${skill.name} is added. Tell the user in one plain line: "Added the skill ${skill.name}." It is ready from the next message in this chat. If it is not, tell the user to turn it on for the chat, or to look in Settings, under Skills.${sites}`;
+  const ready = onForChat
+    ? 'It is on for this chat from the next message.'
+    : 'It could not be turned on for this chat, so tell the user to turn it on for a chat in the app, under Add-ons, then Skills.';
+  return `The skill ${skill.name} is added. Tell the user in one plain line: "Added the skill ${skill.name}." ${ready}${sites}`;
 }
 
 /**
@@ -484,9 +543,11 @@ export class SkillToolSet extends LocalToolMCP {
         });
       }
     }
+    // Turning it on is a convenience: the skill is added either way, and the reply says when it is not on.
+    const onForChat = await this.#options.turnOnForChat({ name: manifest.name }).catch(() => false);
     return jsonResult({
       added: { name: manifest.name, description: manifest.description },
-      next: addedMessage({ skill: manifest, sandboxReady: this.#options.sandboxReady }),
+      next: addedMessage({ skill: manifest, sandboxReady: this.#options.sandboxReady, onForChat }),
     });
   }
 }

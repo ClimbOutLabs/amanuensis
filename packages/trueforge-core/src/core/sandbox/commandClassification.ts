@@ -892,6 +892,60 @@ export function sandboxCommandUsesUnstructuredOperation(command: string): boolea
   );
 }
 
+/**
+ * Names, in plain words, the first construct that made a command unstructured, so a refusal says what to change.
+ * Call it only for a command sandboxCommandUsesUnstructuredOperation already refused.
+ */
+export function sandboxUnstructuredOperationName(command: string): string {
+  const text = commandForTokenizing(command);
+  let quote: "'" | '"' | undefined;
+  let escaped = false;
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index];
+    const next = text[index + 1];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (character === '\\' && quote !== "'") {
+      escaped = true;
+      continue;
+    }
+    if (quote !== "'" && (character === '`' || (character === '$' && next === '('))) {
+      return 'command substitution ($(...) or backticks)';
+    }
+    if (quote !== undefined) {
+      if (character === quote) {
+        quote = undefined;
+      }
+      continue;
+    }
+    if (character === "'" || character === '"') {
+      quote = character;
+      continue;
+    }
+    if (character === '<' && next === '<') {
+      return 'a heredoc (<<)';
+    }
+    if (character === '>' || character === '<') {
+      return 'redirection (> or <)';
+    }
+  }
+  const commands = tokenize(text);
+  if (commands.some(candidate => commandName(resolveEnvironmentCommand(candidate.tokens).commandTokens) === 'tee')) {
+    return 'tee';
+  }
+  if (
+    commands.some(candidate => {
+      const tokens = resolveEnvironmentCommand(candidate.tokens).commandTokens;
+      return commandInvokesInlinePython(tokens) || commandInvokesPythonFromStdin(tokens);
+    })
+  ) {
+    return 'inline Python (python -c, or code piped into python)';
+  }
+  return 'shell syntax that hides what runs, such as & or unclosed quotes';
+}
+
 function hasUnquotedPipeOperator(command: string): boolean {
   let quote: "'" | '"' | undefined;
   let escaped = false;
