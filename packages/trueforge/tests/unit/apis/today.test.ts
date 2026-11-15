@@ -632,6 +632,49 @@ describe('GET /api/v1/today with a CalDAV calendar', () => {
     ]);
   });
 
+  it("asks the connector for the person's two local days in wall-clock time, read in their zone", async () => {
+    inert = await startInertMcpServer({ calendar: true, calendarEvents: [] });
+    const router = createTodayRouter(baseDeps(caldavDeps()));
+
+    await readToday(router);
+
+    // The real connector refuses a bound with its own offset beside a zone, so the bounds carry none.
+    expect(inert.calendarListCalls()).toEqual([
+      expect.objectContaining({
+        from: '2026-11-06T00:00:00',
+        to: '2026-11-08T00:00:00',
+        timezone: 'America/Los_Angeles',
+        account: 'ada@example.org',
+      }),
+    ]);
+  });
+
+  it('logs a refused read as a failed read, and keeps the last good read standing in for it', async () => {
+    inert = await startInertMcpServer({
+      calendar: true,
+      calendarEvents: [
+        {
+          summary: 'Dentist',
+          start: { value: '2026-11-06T13:00:00-08:00', tzid: 'America/Los_Angeles', all_day: false },
+          end: { value: '2026-11-06T14:00:00-08:00', tzid: 'America/Los_Angeles', all_day: false },
+        },
+      ],
+    });
+    const logger = createLogger({ silent: true });
+    const warn = jest.spyOn(logger, 'warn');
+    let currentNow = NOW;
+    const router = createTodayRouter({ ...baseDeps(caldavDeps()), logger, now: () => currentNow });
+
+    expect((await readToday(router)).calendar).toEqual([expect.objectContaining({ title: 'Dentist' })]);
+
+    // Past the cache, the connector refuses: the day keeps the last good read rather than
+    // claiming nothing is on, and the refusal is in the log.
+    inert.setCalendarRefusal('caldav-mcp: the server answered 503.');
+    currentNow = new Date(NOW.getTime() + 5 * 60 * 1000);
+    expect((await readToday(router)).calendar).toEqual([expect.objectContaining({ title: 'Dentist' })]);
+    expect(warn).toHaveBeenCalledWith('Calendar could not be read for the rail', expect.anything());
+  });
+
   it('reads an empty CalDAV day as an empty list, not as no calendar', async () => {
     inert = await startInertMcpServer({ calendar: true, calendarEvents: [] });
     const router = createTodayRouter(baseDeps(caldavDeps()));
