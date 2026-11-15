@@ -16,10 +16,10 @@ import {
   type HomeAssistantTarget,
 } from '../homeassistant/toolContract';
 import { simpleCardCopy } from './cardCopy';
-import type { SentinelAction } from './classifier';
 import { escapeDisplayText } from './displayText';
 import { renderOutboundArguments, SEND_VALUE_MAX_CHARS } from './extractorRegistry';
 import { autoDenyDecision, tier1Decision, tier3Decision, type Tier3Card, type TierDecision } from './tier';
+import type { SentinelAction } from './tierTypes';
 import { TOOL_GRANT_REASON } from './toolGrants';
 
 /** Reason code for a Home Assistant read that runs without asking. */

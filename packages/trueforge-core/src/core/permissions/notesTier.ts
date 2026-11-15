@@ -14,8 +14,8 @@ import {
   isNotesFolderWriteToolName,
   SEARCH_NOTES_TOOL_NAME,
 } from '../notes/toolContract';
-import type { SentinelAction } from './classifier';
 import { failClosedDecision, tier1Decision, type TierDecision } from './tier';
+import type { SentinelAction } from './tierTypes';
 
 export function classifyNotesFolderTool(action: SentinelAction): TierDecision {
   if (isNotesFolderReadToolName(action.tool_name)) {

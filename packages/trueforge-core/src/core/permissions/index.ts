@@ -48,7 +48,6 @@ export {
   mapsDestinationHosts,
   shellBindingFromForm,
 } from './classifier';
-export type { ClassifyContext, ReminderLine, ScheduleStatusReview, SentinelAction } from './classifier';
 export {
   DEFAULT_PINNED_PATH,
   classifyContextFor,
@@ -102,6 +101,7 @@ export type {
   TierDecision,
   TrackedExecutionBinding,
 } from './tier';
+export type { ClassifyContext, ReminderLine, ScheduleStatusReview, SentinelAction } from './tierTypes';
 export type { ToolGrantIdentity, ToolGrantKey, ToolGrantStore } from './toolGrants';
 export {
   InMemoryTrackedExecutableStore,

@@ -1,15 +1,11 @@
-import {
-  classifyHostToolCall,
-  classifyTier,
-  type ClassifyContext,
-  type SentinelAction,
-} from '../../../src/core/permissions/classifier';
+import { classifyHostToolCall, classifyTier } from '../../../src/core/permissions/classifier';
 import {
   createSentinelHostContext,
   defaultSentinelServices,
   type SentinelServices,
 } from '../../../src/core/permissions/context';
 import { DEMO_CONNECTOR_REFUSAL } from '../../../src/core/permissions/sendAllowlist';
+import type { ClassifyContext, SentinelAction } from '../../../src/core/permissions/tierTypes';
 import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
 
 const MAIL_READS: Array<[string, Record<string, unknown>]> = [

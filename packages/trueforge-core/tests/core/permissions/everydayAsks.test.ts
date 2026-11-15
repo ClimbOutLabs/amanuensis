@@ -12,10 +12,11 @@ import {
   effectiveToolAdmissions,
 } from '../../../src/core/mcp/approvalGrant';
 import { stampSentinelDecision } from '../../../src/core/mcp/ToolSet';
-import { classifyTier, type ClassifyContext, type SentinelAction } from '../../../src/core/permissions/classifier';
+import { classifyTier } from '../../../src/core/permissions/classifier';
 import { defaultSentinelServices, forUnattendedRun } from '../../../src/core/permissions/context';
 import { recordPersonText, recordReplyText } from '../../../src/core/permissions/provenance';
 import type { TierDecision } from '../../../src/core/permissions/tier';
+import type { ClassifyContext, SentinelAction } from '../../../src/core/permissions/tierTypes';
 import {
   createWebSearchTurnState,
   hostToolStamp,
