@@ -166,6 +166,7 @@ import type { TextNumberService } from './runtime/texts/textNumber';
 import { TokenFactoryDailyCapError, type TokenFactoryBudget } from './runtime/tokenFactoryBudget';
 import { envManagedModelProviderNames } from './runtime/tokenFactoryProvider';
 import type { TurnDrainRegistry } from './runtime/turnDrains';
+import type { TurnTimezone } from './runtime/turnTimezone';
 import type { ReachAvailability } from './schemas/reach';
 import { InvalidCronError } from './schemas/schedule';
 import { TENANT_ID } from './tenancy';
@@ -357,6 +358,8 @@ export interface ServerDeps<TTransaction> {
   /** The one door into the feed; due reminders go through it. */
   deliveryService: DeliveryService;
   reachSettingsStore: IReachSettingsStore;
+  /** The zone each turn reads the person's day in. */
+  turnTimezone: TurnTimezone;
   noticingStore: Pick<INoticingStore, 'getCheckpoint'>;
   /** Runs the watcher passes the controller asks for. */
   noticingService: NoticingService;
@@ -591,6 +594,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     audit: deps.sentinelAuditStore,
   };
   const telegramTurnDeps: TelegramTurnExecutionDeps<TTransaction> = {
+    turnTimezone: deps.turnTimezone,
     mcpCatalog: deps.mcpCatalog,
     chatDeletionStore: deps.chatDeletionStore,
     sessions: deps.sessions,
@@ -1548,6 +1552,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     '/api/v1/sessions',
     withAuth(
       createTurnsRouter({
+        turnTimezone: deps.turnTimezone,
         mcpCatalog: deps.mcpCatalog,
         skillCatalog: deps.skillCatalog,
         sessions: deps.sessions,

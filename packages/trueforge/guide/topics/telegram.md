@@ -42,6 +42,8 @@ Tap the Menu button beside the text box in Telegram, or type / to see the bot's 
 
 These change only the Telegram chat, the same settings you see when you open that chat in Aman. If the Menu button is missing, close the bot chat and open it again. Telegram shows the menu once it has fetched it.
 
+Telegram does not tell Aman where you are. So "today" and "tomorrow" in the Telegram chat follow the time zone of the browser you last used Aman in. If you saved a time zone in your **Reach me** settings, that one is used. If Aman names the wrong day, click **More** in the left bar, then **Settings**, then **Reach me**. Set your time zone and save.
+
 Reminders and other notices that would show on your devices are sent to Telegram as well. When Aman tries to call you and the phone does not ring, the message comes to Telegram instead. Quiet notes stay under the bell in the app. So when your morning brief is ready, Telegram gets no message: read the brief in its chat in the app.
 
 The bot does not answer anyone else, and it does not work in group chats. Forwarded messages and files are treated as things to read, never as instructions to follow.

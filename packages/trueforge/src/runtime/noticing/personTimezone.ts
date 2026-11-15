@@ -6,10 +6,10 @@ const CALENDAR_ZONE_KEPT_MS = 6 * 3_600_000;
 
 /**
  * The time zone a person's day is read in before they ever save Reach me: the one their schedules use, since the
- * assistant set those up in the person's own time, else the one their own calendar is kept in. UTC only when neither
- * says, and the Reach me page offers the browser's time zone the first time it is opened.
+ * assistant set those up in the person's own time, else the one their own calendar is kept in. Undefined when
+ * neither says, so the caller decides what an unknown zone means.
  */
-export function personTimezoneFor({
+export function knownPersonTimezoneFor({
   scheduleStore,
   calendarTimezone,
   now = () => new Date(),
@@ -17,7 +17,7 @@ export function personTimezoneFor({
   scheduleStore: Pick<IScheduleStore<unknown>, 'listSchedules'>;
   calendarTimezone: (owner: PersonOwner) => Promise<string | undefined>;
   now?: () => Date;
-}): (owner: PersonOwner) => Promise<string> {
+}): (owner: PersonOwner) => Promise<string | undefined> {
   // Every pass asks again for people who never saved Reach me, so the calendar's answer is kept a while.
   const remembered = new Map<string, { zone: string | undefined; until: number }>();
   const calendarZone = async (owner: PersonOwner): Promise<string | undefined> => {
@@ -38,6 +38,6 @@ export function personTimezoneFor({
       agent_names: undefined,
       created_by_or_agent_ids: { created_by_subject_id: owner.created_by, agent_ids: [] },
     });
-    return data[0]?.manifest.timezone ?? (await calendarZone(owner).catch(() => undefined)) ?? 'UTC';
+    return data[0]?.manifest.timezone ?? (await calendarZone(owner).catch(() => undefined));
   };
 }
