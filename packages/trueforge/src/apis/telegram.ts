@@ -98,7 +98,7 @@ function ownerOf(connection: TelegramConnection): { tenant_id: string; created_b
  * The Telegram chat for this owner: made on the first message and reused after. It is a plain chat,
  * like one started here, set up from the default model, so the app shows it under the person's own
  * assistant (not under an agent name) and its model, persona and connectors can be changed from the
- * app like any chat's. The chat is titled Telegram and marked, so the app shows it as its own chat.
+ * app like any chat's. It is marked as the Telegram chat, and its first turn titles it "Telegram: " and its subject.
  */
 async function telegramSession<TTransaction>(params: {
   c: Context;
