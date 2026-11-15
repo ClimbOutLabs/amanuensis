@@ -127,3 +127,97 @@ ${body}
 </html>
 `;
 }
+
+/** True for a picture taken when a test failed, or by a test that went on to fail. */
+export function fromFailedTest(picture) {
+  return picture.failed || picture.passed === false;
+}
+
+function resultText(picture) {
+  if (picture.failed) {
+    return 'Test failed. This is the page at that moment.';
+  }
+  if (picture.passed === true) {
+    return 'Test passed';
+  }
+  if (picture.passed === false) {
+    return 'Test failed later';
+  }
+  return picture.test === null ? 'No result was recorded' : 'Test did not finish';
+}
+
+function pictureHtml({ feature, picture }) {
+  const bad = fromFailedTest(picture);
+  const rows = [
+    ['What the test did', picture.did],
+    ['What it should show', picture.expect],
+  ]
+    .filter(([, words]) => typeof words === 'string')
+    .map(([name, words]) => [name, escapeHtml(words)]);
+  return cardHtml({
+    file: picture.file,
+    alt: `${feature.id} · ${picture.step}`,
+    pill: { text: resultText(picture), tone: bad ? 'bad' : picture.passed === true ? 'good' : undefined },
+    where: `${feature.id} · ${picture.step}`,
+    heading: picture.test ?? null,
+    rows,
+    bad,
+  });
+}
+
+function count(number, word) {
+  return `${String(number)} ${word}${number === 1 ? '' : 's'}`;
+}
+
+/**
+ * The contact sheet as one page with no outside files, so it opens straight from the download. `home`
+ * is the link back to the list when the page sits on the site.
+ */
+export function galleryHtml({ run, title, home }) {
+  const shownIn = set => set.features.flatMap(feature => feature.pictures.map(picture => ({ feature, picture })));
+  const failures = run.feature_sets.flatMap(set => shownIn(set).filter(({ picture }) => fromFailedTest(picture)));
+  const withPictures = run.feature_sets.filter(set => shownIn(set).length > 0);
+  const sections = run.feature_sets.map(set => {
+    const shown = shownIn(set);
+    const tested = set.features.filter(feature => feature.has_test).length;
+    const noTest = set.features.filter(feature => !feature.has_test).map(feature => feature.id);
+    return [
+      `<section id="${escapeHtml(set.id)}">`,
+      `<div class="section-head"><h2>${escapeHtml(set.name)}</h2><p>${count(shown.length, 'picture')}. ${String(tested)} of ${String(set.features.length)} features have a test.</p></div>`,
+      shown.length > 0 ? `<div class="grid">${shown.map(pictureHtml).join('')}</div>` : '',
+      noTest.length > 0 ? `<p class="note">No test yet: ${escapeHtml(noTest.join(', '))}</p>` : '',
+      '</section>',
+    ].join('\n');
+  });
+  const { totals } = run;
+  const chips = withPictures.map(
+    set => `<a href="#${escapeHtml(set.id)}">${escapeHtml(set.name)}<i>${String(shownIn(set).length)}</i></a>`,
+  );
+  if (failures.length > 0) {
+    chips.unshift(`<a class="bad" href="#failed">Failed<i>${String(failures.length)}</i></a>`);
+  }
+  return pageHtml({
+    title,
+    eyebrow: 'Nightly tests',
+    lead: 'Every picture the automatic tests took on this run. Each one says which test took it, what the test did and what the picture should show.',
+    home,
+    hidden: home !== undefined,
+    body: `${tilesHtml([
+      { value: totals.pictures, label: 'pictures' },
+      { value: totals.pictures - totals.failed_pictures, label: 'from tests that did not fail', tone: 'good' },
+      {
+        value: totals.failed_pictures,
+        label: 'from failed tests',
+        tone: totals.failed_pictures > 0 ? 'bad' : undefined,
+      },
+      { value: `${String(totals.features_with_a_test)} of ${String(totals.features)}`, label: 'features have a test' },
+    ])}
+<nav>${chips.join('')}</nav>
+${
+  failures.length > 0
+    ? `<section id="failed"><div class="section-head"><h2>Failed</h2><p>${count(failures.length, 'picture')} from tests that failed.</p></div><div class="grid">${failures.map(pictureHtml).join('')}</div></section>`
+    : ''
+}
+${sections.join('\n')}`,
+  });
+}

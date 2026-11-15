@@ -13,8 +13,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
-import { galleryHtml } from './build-nightly-gallery.mjs';
-import { cardHtml, escapeHtml, pageHtml, parsedJson, pillHtml, tilesHtml } from './screenshot-pages.mjs';
+import { cardHtml, escapeHtml, galleryHtml, pageHtml, parsedJson, pillHtml, tilesHtml } from './screenshot-pages.mjs';
 
 const run = promisify(execFile);
 
