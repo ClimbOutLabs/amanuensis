@@ -235,15 +235,19 @@ upgrade_move_to_https() { # name
   UPGRADE_MOVED="$UPGRADE_MOVED $1"
 }
 
-# Reads the addresses of every instance open on the network again, so each one answers only at the addresses this
-# version listens on. A list an older version wrote is never carried over: an address it found by itself that this
+# Reads the addresses of every instance open on the network again when they differ from what this version finds, so
+# each one answers only at the addresses this version listens on. A list an older version wrote is never carried over: an address it found by itself that this
 # version leaves out stops working, and the owner adds it back with aman address add.
 upgrade_refresh_addresses() {
-  local name
+  local name origins tls_port expected
   for name in $(reg_names); do
-    if ! upgrade_moved "$name" && [ -n "$(reg_get "$name" origins)" ]; then
-      instance_apply_addresses "$name" refresh "$REL_APP_TAG"
-    fi
+    origins=$(reg_get "$name" origins)
+    if upgrade_moved "$name" || [ -z "$origins" ]; then continue; fi
+    tls_port=
+    case "$origins" in *https://*) tls_port=$(reg_get "$name" tls_port) ;; esac
+    # shellcheck disable=SC2046 # the extra hosts are checked names without spaces
+    expected=$(network_origin_list "$(reg_get "$name" app_port)" "$tls_port" $(reg_get "$name" extra_hosts))
+    if [ "$expected" != "$origins" ]; then instance_apply_addresses "$name" refresh "$REL_APP_TAG"; fi
   done
 }
 
