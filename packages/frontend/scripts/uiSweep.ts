@@ -2,11 +2,12 @@
  * Opens every screen of the app with the demo world, at a computer size, a phone size, a small phone size and in
  * dark colours, and writes down what looks wrong: errors, parts that do not fit, controls with no name. It saves
  * a picture of each screen and a report beside them, for a person to look through. This is a tool, not a test:
- * run it with `pnpm ui:sweep`, or `pnpm ui:sweep chat spaces` for just those screens.
+ * run it with `pnpm ui:sweep`, or `pnpm ui:sweep chat spaces` for just those screens. `--out=<folder>` saves
+ * into that folder, not a new temporary one.
  */
 import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 
 import type { Page } from 'playwright-core';
 
@@ -119,15 +120,18 @@ function report(findings: readonly Finding[]): string {
     '',
   );
   for (const finding of withProblems) {
-    lines.push(`## ${finding.surface} (${finding.size})`, '', `Picture: ${finding.picture}`, '');
+    lines.push(`## ${finding.surface} (${finding.size})`, '', `Picture: ${basename(finding.picture)}`, '');
     lines.push(...finding.problems.map(problem => `- ${problem}`), '');
   }
   return lines.join('\n');
 }
 
 async function main(): Promise<void> {
-  const wanted = process.argv.slice(2);
-  const outDir = await mkdtemp(join(tmpdir(), 'aman-ui-sweep-'));
+  const OUT_FLAG = '--out=';
+  const args = process.argv.slice(2);
+  const wanted = args.filter(arg => !arg.startsWith(OUT_FLAG));
+  const out = args.find(arg => arg.startsWith(OUT_FLAG))?.slice(OUT_FLAG.length);
+  const outDir = out === undefined ? await mkdtemp(join(tmpdir(), 'aman-ui-sweep-')) : resolve(out);
   await mkdir(outDir, { recursive: true });
   const app = await startDemoApp('ui-sweep');
   const findings: Finding[] = [];

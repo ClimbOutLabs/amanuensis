@@ -207,9 +207,12 @@ Open [http://localhost:8791](http://localhost:8791). Credentials come from `pack
 ```bash
 pnpm ui:sweep                  # every screen
 pnpm ui:sweep reminders spaces # only these screens
+pnpm ui:sweep --out=/tmp/look  # save into this folder
 ```
 
 This opens every screen of the app with made-up demo data, at a computer size, two phone sizes and in dark colours. It saves a picture of each one and a `report.md` that lists what it measured: sideways scrolling, parts that stick out of the window, cut-off words, controls with no name, small tap targets, page errors and failed requests. The folder it saved to is printed at the end. The report is a list of places to look, not a pass or fail. To cover a new screen, add it to `packages/frontend/scripts/uiSweep/surfaces.ts`.
+
+The **UI look-over** workflow runs this once a week on `main`. Its last four runs are on the same docs website page as the nightly pictures.
 
 ## Dependency licenses
 
@@ -288,6 +291,8 @@ In CI the pictures go in a folder named for the run's date and time in UTC, such
 AMAN_SCREENSHOT_DIR=/tmp/aman-shots pnpm test:frontend
 pnpm nightly:gallery /tmp/aman-shots
 ```
+
+The pictures of the last 14 nightly runs are also on the docs website, newest first, at <https://climboutlabs.github.io/amanuensis/test-screenshots/>. The page is not in the docs menu or the help. It is rebuilt after each nightly run by the **Docs site** workflow, which fetches each run's **screenshots** download.
 
 ### The signed-in journey
 
