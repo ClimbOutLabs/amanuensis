@@ -33,6 +33,7 @@ import {
   RepositoryBindingResolutionError,
   resolveBoundRepository,
   resolveGithubGitToken,
+  resolveGitSkills,
   TFG_METADATA_PREFIX,
   validateAgentSpec,
   withGatewayMetadataHeaders,
@@ -575,6 +576,27 @@ describe('validateAgentSpec', () => {
       status: 422,
       message: expect.stringContaining('PUT /settings/sandbox-providers'),
     } satisfies Partial<HTTPException>);
+  });
+
+  it('leaves out a skill removed after the chat turned it on, so the chat keeps working', async () => {
+    const stores = await setup();
+    await stores.skillStore.upsertSkill({
+      tenant_id: 'default',
+      name: 'demo',
+      manifest: {
+        type: 'git',
+        name: 'demo',
+        url: 'https://github.com/example/skills',
+        ref: 'main',
+        description: 'demo skill',
+      },
+    });
+    const resolved = await resolveGitSkills({
+      tenant_id: 'default',
+      skills: [{ name: 'removed-skill' }, { name: 'demo' }],
+      store: stores.skillStore,
+    });
+    expect(resolved.map(skill => skill.name)).toEqual(['demo']);
   });
 
   it('rejects skills when no sandbox provider is configured', async () => {

@@ -172,7 +172,7 @@ import {
   resolveSandboxProvider,
   withGatewayMetadataHeaders,
 } from '../runtime/sessionResources';
-import type { SkillTurnContext } from '../runtime/skillCapability';
+import { chatSkillSwitch, type SkillTurnContext } from '../runtime/skillCapability';
 import { readSkillFilesFromGit } from '../runtime/skillWebsites';
 import { SPACE_WRITE_TOOL_ARGUMENT_LIMITS, SpaceTurnResourceResolver } from '../runtime/spaceCapability';
 import { TokenFactoryMeteredLLM, tokenFactoryRole, type TokenFactoryBudget } from '../runtime/tokenFactoryBudget';
@@ -3049,6 +3049,11 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
               sandboxReady: serverSandboxAvailable,
               lookup: { fetchImpl: undefined, resolveAddresses: undefined },
               readFiles: readSkillFilesFromGit,
+              turnOnForChat: chatSkillSwitch({
+                sessionStore: deps.sessionStore,
+                tenant_id: requestContext.tenant_id,
+                session_id: session.session_id,
+              }),
             },
       schedules:
         deps.schedules === undefined || chatRunner === undefined
