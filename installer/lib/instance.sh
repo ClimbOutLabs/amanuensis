@@ -640,8 +640,18 @@ install_doctor_shim() {
 }
 
 # install.sh command: puts the aman command, its helper files and its path line back, and nothing else.
+# The checkout is judged first, by the rule the command's forwarded upgrade and backup use: a checkout that
+# cannot be made private is refused here, not installed with a warning.
 cmd_command() {
+  local problem words
   [ -d "$AMAN_HOME" ] || die "Aman is not set up on this computer yet. Run install.sh first."
+  tighten_checkout "$REPO_ROOT" || true
+  if problem=$(checkout_problem "$REPO_ROOT"); then
+    words=$(checkout_problem_words "$problem")
+    log_event "stopped: ${words%%|*}"
+    UI_FD=2 ui_fail "${words%%|*}" "${words#*|}"
+    exit 1
+  fi
   install_doctor_shim
   ui_ok "The aman command is installed"
 }

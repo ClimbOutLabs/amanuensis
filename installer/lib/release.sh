@@ -20,7 +20,7 @@ valid_digest_ref() {
 
 # Checks the pins shipped with the installer before anything is pulled or written.
 pins_validate() {
-  local dex
+  local dex mail
   [ -f "$PINS_FILE" ] || die "release manifest missing: $PINS_FILE"
   [ "$(json_get "$PINS_FILE" schema)" = 1 ] || die "unsupported release manifest schema in $PINS_FILE"
   dex=$(json_get "$PINS_FILE" dex_image)
@@ -158,7 +158,9 @@ release_resolve() {
   REL_MAIL_EMAIL_IMAGE=$(json_get "$PINS_FILE" mail_email_image)
 }
 
-# The resolved manifest recorded under release/; the previous one is kept for rollback.
+# The resolved manifest recorded under release/. Called with "upgrade" on the upgrade path, where the record it
+# replaces is kept in previous.release.json for rollback (STATE.md: the record from before the last upgrade). A
+# plain install write never touches previous.release.json.
 release_write() {
   local file="$RELEASE_DIR/release.json" tmp
   ensure_private_dir "$RELEASE_DIR"
@@ -181,7 +183,7 @@ release_write() {
     rm -f "$tmp"
     return 0
   fi
-  if [ -f "$file" ]; then
+  if [ "${1:-}" = upgrade ] && [ -f "$file" ]; then
     cp "$file" "$RELEASE_DIR/previous.release.json"
   fi
   chmod 600 "$tmp"

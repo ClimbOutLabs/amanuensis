@@ -13,19 +13,30 @@ say() {
 warn() { UI_FD=2 ui_warn "$*"; }
 die() {
   ui_step_abort
+  log_event "stopped: $*"
   UI_FD=2 ui_fail "$*"
   exit 1
 }
 usage_die() {
   ui_step_abort
+  # A usage error writes nothing new: it is logged only on a home that is already there.
+  LOG_STARTED=0 log_event "stopped: $*"
   UI_FD=2 ui_fail "$*" "install.sh --help"
   exit 2
 }
 
 # Only the state directory is written to; never anything that could hold a secret.
+# Once a run has started on this home (LOG_STARTED, set by cmd_install and by a failed check) the folder is made when
+# missing, so a run that stops before its first step still leaves a record of why. Before that, a usage error or a
+# print-only run writes nothing. Making the folder never fails the run.
 log_event() {
-  if [ -d "$STATE_DIR" ] && [ "$DRY_RUN" != 1 ]; then
-    printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >>"$STATE_DIR/install.log" 2>/dev/null || true
+  if [ -n "${STATE_DIR:-}" ] && [ "${DRY_RUN:-0}" != 1 ]; then
+    if [ "${LOG_STARTED:-0}" = 1 ] && [ ! -d "$STATE_DIR" ]; then
+      ensure_private_dir "$STATE_DIR" 2>/dev/null || true
+    fi
+    if [ -d "$STATE_DIR" ]; then
+      printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >>"$STATE_DIR/install.log" 2>/dev/null || true
+    fi
   fi
 }
 
@@ -186,6 +197,7 @@ step_log_tail() {
 
 # step_fail "what failed" "next" [details]: ends the line as a failure, shows the log tail and stops the run.
 step_fail() {
+  log_event "step failed: $1"
   UI_FD=2 ui_step_end fail "$1" "${2:-}" "${3:-}"
   step_log_tail
   exit 1

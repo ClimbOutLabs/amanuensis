@@ -433,6 +433,9 @@ export function createWorld({ instances = ['main'] } = {}) {
   }
 
   for (const name of instances) {
+    // The doctor lists instances from the registry, as the installer writes it, so each one has its file.
+    mkdirSync(path.join(home, 'state', 'instances'), { recursive: true });
+    writeFileSync(path.join(home, 'state', 'instances', `${name}.conf`), `name=${name}\n`);
     mkdirSync(world.instanceDir(name), { recursive: true });
     world.writeEnv(name);
     world.containers(name, [

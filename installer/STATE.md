@@ -43,6 +43,7 @@ Paths below are relative to the home.
 | `backups/<timestamp>/`                    | One folder per backup. See "Backups".                                                                                |
 | `bin/aman`                                | The doctor shim, copied in by the installer on install and upgrade. Mode 755.                                        |
 | `bin/aman-sandbox.mjs`                    | The sandbox setup copy the doctor runs.                                                                              |
+| `lib/`                                    | The helper files the aman command loads: shell libraries it shares with the installer, and `pki.mjs`.                |
 | `runtime/`                                | What the installer downloads to run itself, including `runtime/node/` (the pinned Node).                             |
 
 An instance set up by an older installer may also have `instances/<name>/.env.mail-email` or

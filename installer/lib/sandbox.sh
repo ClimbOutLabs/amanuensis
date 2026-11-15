@@ -321,8 +321,15 @@ sandbox_images_ensure() {
   [ "$DRY_RUN" != 1 ] || return 0
   sandbox_runtime_ensure
   sandbox_install_bundle
-  sandbox_run --build-only --instance "$(sandbox_first_instance)" ||
-    die "Building the sandbox failed. The log is at $(ui_path "$(sandbox_log)"). Fix what it says and run install.sh again, or pass --no-sandbox to install without run code."
+  # The build can take minutes, so it runs as a step: the person sees it working and how long it took.
+  ui_step_start "Building the sandbox (this might take a while)" "$(sandbox_log)"
+  if sandbox_run --build-only --instance "$(sandbox_first_instance)"; then
+    ui_step_end ok "Built the sandbox"
+  else
+    log_event "step failed: Building the sandbox failed"
+    UI_FD=2 ui_step_end fail "Building the sandbox failed" "The log is at $(ui_path "$(sandbox_log)"). Fix what it says and run install.sh again, or pass --no-sandbox to install without run code."
+    exit 1
+  fi
 }
 
 sandbox_first_instance() {
@@ -430,9 +437,13 @@ sandbox_docker_boot_ensure() {
 # table, with the one command that repairs it (and shows the check's output).
 sandbox_verify() {
   local name=$1
+  # The check can take minutes, so it shows as running. It has no result line of its own: the summary is the verdict.
+  ui_step_start "Checking the sandbox of instance $name" ""
   if DOCTOR_TIMEOUT=300 run_doctor sandbox --instance "$name" >/dev/null 2>&1; then
+    ui_step_abort
     return 0
   fi
+  ui_step_abort
   SANDBOX_VERIFY_FAILED=1
   SANDBOX_FAILED_NAMES="$SANDBOX_FAILED_NAMES $name"
 }

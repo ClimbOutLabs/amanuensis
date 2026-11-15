@@ -37,10 +37,11 @@
 set -u
 
 # The state directory: AMANUENSIS_HOME, else the folder this command was installed in (so a schedule or another
-# user of a custom home needs no setting), else ~/.amanuensis.
+# user of a custom home needs no setting), else ~/.amanuensis. The folder counts as a home only when its
+# state/source file names a checkout (STATE.md); an empty file left behind does not.
 if [ -n "${AMANUENSIS_HOME:-}" ]; then
   AMAN_HOME=$AMANUENSIS_HOME
-elif [ -f "$(dirname "${BASH_SOURCE[0]}")/../state/source" ]; then
+elif [ -s "$(dirname "${BASH_SOURCE[0]}")/../state/source" ]; then
   AMAN_HOME=$(cd -P -- "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 else
   AMAN_HOME="${HOME:-}/.amanuensis"
@@ -1108,12 +1109,14 @@ check_instance_core() {
   run_in_image_checks "$name"
 }
 
+# Instances come from the registry, one state/instances/<name>.conf each, the list the installer and the
+# TypeScript store read (STATE.md). A folder under instances/ with no registry file is not an instance.
 list_instances() {
   local entry
-  for entry in "${AMAN_HOME}/instances"/*/; do
-    [ -d "$entry" ] || continue
-    entry=${entry%/}
-    printf '%s\n' "${entry##*/}"
+  for entry in "${AMAN_HOME}/state/instances"/*.conf; do
+    [ -e "$entry" ] || continue
+    entry=${entry##*/}
+    printf '%s\n' "${entry%.conf}"
   done
 }
 
@@ -1339,7 +1342,7 @@ select_instances() {
     case "$ONLY_INSTANCE" in
       '' | *[!a-z0-9-]* | -*) die_usage "Instance names use lowercase letters, digits and hyphens." ;;
     esac
-    [ -d "${AMAN_HOME}/instances/${ONLY_INSTANCE}" ] || die_usage "No instance named \"${ONLY_INSTANCE}\" under ${AMAN_HOME}/instances."
+    [ -f "${AMAN_HOME}/state/instances/${ONLY_INSTANCE}.conf" ] || die_usage "No instance named \"${ONLY_INSTANCE}\" in the registry under ${AMAN_HOME}/state/instances."
     INSTANCES=("$ONLY_INSTANCE")
   else
     while IFS= read -r instance_name; do
