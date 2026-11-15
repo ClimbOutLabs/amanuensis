@@ -46,7 +46,7 @@ jobs:
           SANDBOX_SLOTS_DIR: ${{ runner.temp }}/slots
           SANDBOX_SLOTS: '2'
           EVAL_SERVER_LOG: ${{ runner.temp }}/server.log
-          EVAL_EVENTS_LOG: ${{ runner.temp }}/results/skill-events.jsonl
+          EVAL_EVENTS_LOG: ${{ runner.temp }}/skill-events.jsonl
         run: |
           pnpm eval:models:fresh -- --models tokenfactory/model-a --label proof --skills --out "$RUNNER_TEMP/results" || true
           grep -n '"case_id":"skills' -A0 "$RUNNER_TEMP/results/results.json" | head -2 || true
@@ -57,16 +57,22 @@ jobs:
       - name: Server log around skills
         if: always()
         run: grep -nE 'Unreachable|skill|exec|write_file|held|network|approval' "$RUNNER_TEMP/server.log" | grep -vE 'nowledge|noticing|STT' | cut -c1-900 | tail -120 || true
-      - name: Keep the skill chats' events
+      - name: Skill chats' turns and tool calls
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
-        with:
-          name: skill-proof
-          path: |
-            ${{ runner.temp }}/results/skill-events.jsonl
-            ${{ runner.temp }}/server.log
-          if-no-files-found: ignore
-          retention-days: 3
+        run: |
+          node -e "
+          const lines = require('fs').readFileSync(process.env.RUNNER_TEMP + '/skill-events.jsonl', 'utf8').trim().split('\\n');
+          for (const line of lines) {
+            const r = JSON.parse(line);
+            console.log('== ' + r.case + ' step ' + r.step);
+            for (const t of r.turns) console.log('turn', t.id, t.status, JSON.stringify(t.required_actions ?? []).slice(0, 1500));
+            for (const e of r.events) {
+              const ev = e.event;
+              if (ev.type === 'model.message' && ev.tool_calls) for (const c of ev.tool_calls) console.log('call', e.turn_id, c.id, c.function?.name, JSON.stringify(c.tool_info ?? {}).slice(0, 1200));
+              else if (String(ev.type).startsWith('tool.response')) console.log('result', e.turn_id, ev.tool_call_id, String(ev.content).slice(0, 400));
+              else if (ev.type === 'user.tool_approval' || String(ev.type).includes('approval')) console.log('approval', e.turn_id, JSON.stringify(ev).slice(0, 600));
+            }
+          }"
       - name: Stop the sandbox
         if: always()
         run: pnpm sandbox:slots --down --purge --instance eval
