@@ -600,7 +600,7 @@ record_source_checkout() {
 
 # The files the aman command is made of: the shim and the helper files it finds at ../lib next to its folder, here and
 # in a checkout alike.
-AMAN_COMMAND_LIBS="ui shared diagnose network schedule host-report"
+AMAN_COMMAND_LIBS="ui help shared diagnose network schedule host-report"
 
 aman_command_current() {
   local lib
