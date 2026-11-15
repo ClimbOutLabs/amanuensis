@@ -1266,10 +1266,11 @@ export async function writeVaultSharing(options: {
  */
 export const SUMMARY_PENDING_FILE = '.summary-pending.json';
 
-/** What the summary-pending marker records: when the attempt failed, and the log's reason code for why. */
+/** What the summary-pending marker records: when the attempt failed, the log's reason code for why, and the chat it was in when known. */
 export interface SummaryPendingMark {
   failed_at: string;
   reason: string;
+  session_id?: string;
 }
 
 function summaryPendingFileFor(baseDir: string, namespace: string): string {
@@ -1277,7 +1278,12 @@ function summaryPendingFileFor(baseDir: string, namespace: string): string {
 }
 
 function isSummaryPendingMark(value: unknown): value is SummaryPendingMark {
-  return isRecord(value) && typeof value['failed_at'] === 'string' && typeof value['reason'] === 'string';
+  return (
+    isRecord(value) &&
+    typeof value['failed_at'] === 'string' &&
+    typeof value['reason'] === 'string' &&
+    (value['session_id'] === undefined || typeof value['session_id'] === 'string')
+  );
 }
 
 /** Records that this vault's newest turn summary failed and is still owed. */

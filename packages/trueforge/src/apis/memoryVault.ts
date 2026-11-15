@@ -36,7 +36,7 @@ import {
 import type { RetainItem, MemoryVaultEntry as VaultEntry } from '../runtime/memory/memoryClient';
 import { IMPORTED_ORIGIN, MEMORY_ORIGIN_METADATA_KEY } from '../runtime/memory/memoryOrigin';
 import { createVaultClient } from '../runtime/memory/vaultClient';
-import type { MemoryVaultEntry } from '../schemas/memoryVault';
+import type { MemoryVaultEntry, MemoryVaultSummaryFailureCause } from '../schemas/memoryVault';
 
 export interface MemoryVaultRouterDeps {
   resolveRequestContext: ResolveRequestContext;
@@ -98,6 +98,27 @@ function normalizeSharing(shares: Record<string, string[]>): { shares: Record<st
     normalized[name] = [...seen];
   }
   return { shares: normalized };
+}
+
+/** The log's reason code for a failed summary, as one of the few causes the Memories page words; an unknown code has none. */
+function summaryFailureCause(reason: string): MemoryVaultSummaryFailureCause | null {
+  switch (reason) {
+    case 'model_timeout':
+      return 'model_too_slow';
+    case 'model_failed':
+      return 'model_error';
+    case 'model_unresolved':
+      return 'model_not_found';
+    case 'summary_cut_short':
+    case 'summary_empty':
+    case 'summary_too_long':
+    case 'summary_unreadable':
+      return 'answer_unusable';
+    case 'summary_not_finished':
+      return 'interrupted';
+    default:
+      return null;
+  }
 }
 
 export function createMemoryVaultRouter(deps: MemoryVaultRouterDeps) {
@@ -250,13 +271,15 @@ export function createMemoryVaultRouter(deps: MemoryVaultRouterDeps) {
     const { namespace } = c.req.valid('query');
     const requestContext = deps.resolveRequestContext(c);
     const client = createVaultClient({ logger: deps.logger, tenantId: requestContext.tenant_id });
-    const failedAt = await client.summaryPendingSince({ namespace: namespace ?? '' });
-    const parsedAt = failedAt === undefined ? Number.NaN : Date.parse(failedAt);
+    const mark = await client.summaryPending({ namespace: namespace ?? '' });
+    const parsedAt = mark === undefined ? Number.NaN : Date.parse(mark.failed_at);
     return c.json(
       {
         data: {
-          summary_pending: failedAt !== undefined,
+          summary_pending: mark !== undefined,
           failed_at: Number.isNaN(parsedAt) ? null : new Date(parsedAt).toISOString(),
+          cause: mark === undefined ? null : summaryFailureCause(mark.reason),
+          session_id: mark?.session_id ?? null,
         },
       },
       200,

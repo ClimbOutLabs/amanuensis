@@ -86,7 +86,7 @@ test('a pair moved on the sign-in side only still hands both ports over', () => 
 });
 
 test('the first install line adds https on this computer and daily backups to the starter line', () => {
-  assert.deepEqual(firstInstallArgs({ email: 'friend@example.com', appPort: 8791, loginPort: 5556, hasKey: true }), [
+  assert.deepEqual(firstInstallArgs({ email: 'friend@example.com', appPort: 8791, loginPort: 5556 }), [
     'installer/install.sh',
     '--yes',
     '--name',
@@ -94,7 +94,6 @@ test('the first install line adds https on this computer and daily backups to th
     '--email',
     'friend@example.com',
     '--password-stdin',
-    '--token-factory-key-stdin',
     '--tls',
     'local',
     '--address',
@@ -104,13 +103,13 @@ test('the first install line adds https on this computer and daily backups to th
   ]);
 });
 
-test('the first install line with no key given asks for no key on the input', () => {
-  const args = firstInstallArgs({ email: 'friend@example.com', appPort: 8791, loginPort: 5556, hasKey: false });
+test('the first install line asks for no model key and does not keep Aman on this computer only', () => {
+  const args = firstInstallArgs({ email: 'friend@example.com', appPort: 8791, loginPort: 5556 });
   assert.ok(!args.includes('--token-factory-key-stdin'));
   assert.ok(!args.includes('--local-only'));
 });
 
 test('the first install line with a moved pair hands both ports over', () => {
-  const args = firstInstallArgs({ email: 'friend@example.com', appPort: 8792, loginPort: 5556, hasKey: false });
+  const args = firstInstallArgs({ email: 'friend@example.com', appPort: 8792, loginPort: 5556 });
   assert.deepEqual(args.slice(-4), ['--port', '8792', '--login-port', '5556']);
 });

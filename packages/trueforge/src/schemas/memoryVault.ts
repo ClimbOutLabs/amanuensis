@@ -133,6 +133,12 @@ export const UpdateMemoryVaultSharingRequestSchema = z
   })
   .openapi('UpdateMemoryVaultSharingRequest');
 
+/** Why a turn summary failed, as the Memories page words it. */
+export const MemoryVaultSummaryFailureCauseSchema = z
+  .enum(['model_too_slow', 'model_error', 'model_not_found', 'answer_unusable', 'interrupted'])
+  .openapi('MemoryVaultSummaryFailureCause');
+export type MemoryVaultSummaryFailureCause = z.infer<typeof MemoryVaultSummaryFailureCauseSchema>;
+
 /** Whether one vault namespace is still owed a turn summary after a failed attempt. */
 export const MemoryVaultSummaryStatusSchema = z
   .object({
@@ -143,6 +149,11 @@ export const MemoryVaultSummaryStatusSchema = z
       .datetime()
       .nullable()
       .describe('When that summary failed, or null when none is owed or the time was not kept.'),
+    cause: MemoryVaultSummaryFailureCauseSchema.nullable(),
+    session_id: z
+      .string()
+      .nullable()
+      .describe('The chat whose summary failed, or null when none is owed or the chat was not kept.'),
   })
   .openapi('MemoryVaultSummaryStatus');
 
