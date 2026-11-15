@@ -133,6 +133,13 @@ data and not in any backup.
   the installer stops it. From then on nothing reads `db.sqlite` without
   the key: the app, `aman backup`, `aman backup-check`, import, export,
   the doctor and the password reset all open it through `aman_key`.
+- The keys of paid accounts (`NEBIUS_API_KEY`, `TAVILY_API_KEY`,
+  `TWILIO_AUTH_TOKEN`) are not kept in the instance's `.env`. The installer
+  saves them encrypted in `db.sqlite.keys` (`aman secrets env put`, value on
+  standard input), and the app reads them from there when it starts. A key
+  a person types into `.env` is moved the same way after the next good
+  start, and its line is removed. With a version from before this, the line
+  stays in `.env`, where that version reads it.
 - Each persona's knowledge library (`<persona>.sqlite` under the persona
   knowledge folder) is encrypted the same way, with its own key derived
   from the computer's key. The app encrypts a library from before

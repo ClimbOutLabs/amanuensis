@@ -916,6 +916,26 @@ case "$cmd" in
             fi
             exit 0
             ;;
+          *" secrets-setup env put "*)
+            # Keeps a paid-account key the way the app does: encrypted, so only a digest of it is ever on disk here.
+            # STUB_SAVED_ENV_OLD models a version from before keys were kept this way.
+            [ -z "${STUB_SAVED_ENV_OLD:-}" ] || { echo "Usage: aman secrets <init|first-run|check-recovery|adopt|key>" >&2; exit 2; }
+            if [ ! -f "$S/secrets_$proj" ] || [ "$(sed -n 1p "$S/secrets_$proj")" != "$(cat "$S/key" 2>/dev/null)" ]; then
+              echo 'Saved secrets are not set up for this database with this key. Run "aman secrets init" first.' >&2
+              exit 1
+            fi
+            name=
+            while [ "$#" -gt 0 ]; do
+              if [ "$1" = --name ]; then name=$2; fi
+              shift
+            done
+            IFS= read -r value || true
+            [ -n "$value" ] || { echo "No value came in on stdin." >&2; exit 2; }
+            { grep -v "^$name " "$S/saved_env_$proj" 2>/dev/null || true; printf '%s %s\n' "$name" "$(printf '%s' "$value" | sha256sum | cut -c1-64)"; } >"$S/saved_env_$proj.new"
+            mv "$S/saved_env_$proj.new" "$S/saved_env_$proj"
+            printf '{"saved":"%s"}\n' "$name"
+            exit 0
+            ;;
           *" secrets-setup check-recovery "*)
             typed=$(cat)
             if [ "$(printf '%s' "$typed" | tr -cd 0-9)" = "$(sed -n 2p "$S/secrets_$proj" 2>/dev/null | tr -cd 0-9)" ]; then

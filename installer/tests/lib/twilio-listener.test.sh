@@ -159,15 +159,21 @@ test_a_rerun_applies_a_new_auth_token() {
   assert_rc 0
   assert_eq "$(log_count 'force-recreate')" 0 "nothing changed, nothing restarts"
   assert_flat_contains "$OUT" "Instance main is running"
-  sed -i.bak 's/^TWILIO_AUTH_TOKEN=.*/TWILIO_AUTH_TOKEN=second-token-for-tests/' "$env"
-  rm -f "$env.bak"
+  assert_eq "$(saved_key main TWILIO_AUTH_TOKEN)" "$(key_digest first-token-for-tests)" "the first token was moved out of the settings file"
+  assert_tree_lacks "$AMAN_HOME" "first-token-for-tests"
+  printf '%s\n' 'TWILIO_AUTH_TOKEN=second-token-for-tests' >>"$env"
   run_install --yes
   assert_rc 0
   assert_flat_contains "$OUT" "Restart instance main with the texts settings from its settings file"
   assert_eq "$(log_count 'force-recreate')" 1 "one restart, for the new token"
   local found
   found=$(grep -rIl -- "second-token-for-tests" "$AMAN_HOME" "$STUB_LOG" 2>/dev/null | sort | tr '\n' ' ' || true)
-  assert_eq "$found" "$env " "the token is kept only in the settings file"
+  assert_eq "$found" "" "the token is in no file once the app has started with it"
+  assert_eq "$(saved_key main TWILIO_AUTH_TOKEN)" "$(key_digest second-token-for-tests)" "the new token is the one saved"
+  : >"$STUB_LOG"
+  run_install --yes
+  assert_rc 0
+  assert_eq "$(log_count 'force-recreate')" 0 "moving the token out does not restart the app again"
   assert_not_contains "$OUT$ERR" "second-token-for-tests" "the token is never printed"
   sandbox_drop
 }

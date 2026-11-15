@@ -29,3 +29,21 @@ export function voiceModelDirFromEnv(env: CliEnv): string {
   const set = env['VOICE_VAD_MODEL_DIR'];
   return set !== undefined && set.trim() !== '' ? path.resolve(set) : path.join(appDataDirFromEnv(env), 'voice-model');
 }
+
+function pathFromEnv({ env, name, fallback }: { env: CliEnv; name: string; fallback: string[] }): string {
+  const set = env[name];
+  return set !== undefined && set.trim() !== '' ? path.resolve(set) : path.join(appDataDirFromEnv(env), ...fallback);
+}
+
+/** The SQLite file of standalone mode: `SQLITE_PATH` when set, else `db/db.sqlite` in the data folder. */
+export function sqlitePathFromEnv(env: CliEnv): string {
+  return pathFromEnv({ env, name: 'SQLITE_PATH', fallback: ['db', 'db.sqlite'] });
+}
+
+/**
+ * Where the host puts the master key for saved secrets: `SECRETS_KEY_FILE` when set (the installer points it at
+ * the file its startup job fills), else `secrets/master.key` in the data folder.
+ */
+export function secretsKeyFileFromEnv(env: CliEnv): string {
+  return pathFromEnv({ env, name: 'SECRETS_KEY_FILE', fallback: ['secrets', 'master.key'] });
+}

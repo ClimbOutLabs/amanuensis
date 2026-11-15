@@ -15,6 +15,7 @@ import { KEY_CHECK_SETTING, createMasterKey } from '../../../../src/secrets/keyC
 import { KeyRecordFile, keyRecordPath } from '../../../../src/secrets/keyRecordFile';
 import { RECOVERY_COPY_SETTING, recoverMasterKey } from '../../../../src/secrets/recoveryKey';
 import { RETIRED_KEYS_SETTING } from '../../../../src/secrets/retiredKeys';
+import { savedEnvFor } from '../../../../src/secrets/savedEnvStart';
 import { secretKeyId } from '../../../../src/secrets/secretCipher';
 import { SecretVault } from '../../../../src/secrets/secretVault';
 import { fakeIo } from '../../../unit/cli/fakeIo';
@@ -282,6 +283,82 @@ describe('aman secrets', () => {
     expect(await runSecrets({ args: ['key', '--key-file', keyFile], io: second, env: {} })).toBe(0);
     expect(JSON.parse(second.out.join(''))).toEqual({ created: false });
     expect(await readFile(keyFile, 'utf8')).toBe(made);
+  });
+
+  describe('env', () => {
+    const TOKEN = 'made-up-token-factory-key-0123456789';
+
+    async function envCommand(args: string[], stdin?: string): Promise<unknown> {
+      const io = fakeIo(stdin === undefined ? {} : { stdin });
+      const code = await runSecrets({ args: ['env', ...args, '--sqlite', sqlite, '--key-file', keyFile], io, env: {} });
+      expect(code).toBe(0);
+      return JSON.parse(io.out.join(''));
+    }
+
+    function atStart(): Record<string, string> {
+      return savedEnvFor({ SQLITE_PATH: sqlite, SECRETS_KEY_FILE: keyFile });
+    }
+
+    it('keeps a paid-account key encrypted beside the database and hands it over at start', async () => {
+      await init();
+      expect(await envCommand(['put', '--name', 'NEBIUS_API_KEY'], `${TOKEN}\n`)).toEqual({ saved: 'NEBIUS_API_KEY' });
+      expect(await envCommand(['list'])).toEqual({ names: ['NEBIUS_API_KEY'] });
+      expect(await readFile(keyRecordPath(sqlite), 'utf8')).not.toContain(TOKEN);
+      expect(atStart()).toEqual({ NEBIUS_API_KEY: TOKEN });
+
+      expect(await envCommand(['put', '--name', 'TWILIO_AUTH_TOKEN'], 'made-up-twilio-token')).toEqual({
+        saved: 'TWILIO_AUTH_TOKEN',
+      });
+      expect(await envCommand(['drop', '--name', 'NEBIUS_API_KEY'])).toEqual({ dropped: 'NEBIUS_API_KEY' });
+      expect(atStart()).toEqual({ TWILIO_AUTH_TOKEN: 'made-up-twilio-token' });
+    }, 120_000);
+
+    it('hands nothing over without this computer key, with another key, or for a Postgres instance', async () => {
+      await init();
+      await envCommand(['put', '--name', 'NEBIUS_API_KEY'], TOKEN);
+      expect(savedEnvFor({ SQLITE_PATH: sqlite, SECRETS_KEY_FILE: path.join(dir, 'none.key') })).toEqual({});
+      const other = path.join(dir, 'other.key');
+      await writeFile(other, encodeKeyFile(createMasterKey()), { mode: 0o600 });
+      expect(savedEnvFor({ SQLITE_PATH: sqlite, SECRETS_KEY_FILE: other })).toEqual({});
+      expect(savedEnvFor({ SQLITE_PATH: sqlite, SECRETS_KEY_FILE: keyFile, STANDALONE: 'false' })).toEqual({});
+    }, 120_000);
+
+    it('takes only the settings that are paid-account keys, and never an empty value', async () => {
+      await init();
+      const put = (name: string, stdin: string): Promise<number> =>
+        runSecrets({
+          args: ['env', 'put', '--name', name, '--sqlite', sqlite, '--key-file', keyFile],
+          io: fakeIo({ stdin }),
+          env: {},
+        });
+      await expect(put('OIDC_CLIENT_SECRET', 'x')).rejects.toBeInstanceOf(UsageError);
+      await expect(put('NEBIUS_API_KEY', '\n')).rejects.toBeInstanceOf(UsageError);
+      expect(await envCommand(['list'])).toEqual({ names: [] });
+    }, 120_000);
+
+    it('refuses to save before setup, and with a key that is not this database key', async () => {
+      await readableDatabase();
+      const put = (): Promise<number> =>
+        runSecrets({
+          args: ['env', 'put', '--name', 'NEBIUS_API_KEY', '--sqlite', sqlite, '--key-file', keyFile],
+          io: fakeIo({ stdin: TOKEN }),
+          env: {},
+        });
+      await expect(put()).rejects.toThrow('aman secrets init');
+      await init();
+      keyFile = path.join(dir, 'other.key');
+      await writeFile(keyFile, encodeKeyFile(createMasterKey()), { mode: 0o600 });
+      await expect(put()).rejects.toThrow('aman secrets init');
+    }, 120_000);
+
+    it('moves the saved keys along when the database moves to another computer', async () => {
+      const recoveryKey = await init();
+      await envCommand(['put', '--name', 'NEBIUS_API_KEY'], TOKEN);
+      keyFile = path.join(dir, 'other-computer', 'master.key');
+      const io = fakeIo({ stdin: recoveryKey });
+      expect(await runSecrets({ args: ['adopt', '--sqlite', sqlite, '--key-file', keyFile], io, env: {} })).toBe(0);
+      expect(atStart()).toEqual({ NEBIUS_API_KEY: TOKEN });
+    }, 120_000);
   });
 
   describe('adopt', () => {

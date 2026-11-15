@@ -1,6 +1,6 @@
 # shellcheck shell=bash
-# Optional hosted model (Nebius Token Factory): the key is read from stdin, kept in shell memory, and written
-# only to the instance .env. The app derives its default provider from that file; the installer never calls the API.
+# Optional hosted model (Nebius Token Factory): the key is read from stdin, kept in shell memory, and saved encrypted
+# with the instance's data. The app gets it when it starts; the installer never calls the API.
 
 # Must equal DEFAULT_TOKEN_FACTORY_MODEL in packages/trueforge/src/runtime/tokenFactoryDefaults.ts (contract test).
 TF_DEFAULT_MODEL=nvidia/nemotron-3-super-120b-a12b
@@ -70,19 +70,22 @@ tf_rotation_collect() {
   TF_ROTATE_NAME=$name
 }
 
-# Rewrites NEBIUS_API_KEY inside the managed block of the instance .env; the key only passes through shell builtins.
-tf_rotation_write_env() {
-  local name=$1 env
-  env="$(instance_dir "$name")/.env"
-  [ -f "$env" ] || die "Instance $name has no settings file, so its Token Factory key was not changed."
-  grep -q '^# >>> managed by the installer' "$env" || die "The settings file $env is missing the part the installer manages, so the Token Factory key was not changed."
-  env_managed_set "$env" NEBIUS_API_KEY "$AMAN_TF_KEY"
+# The key of a new instance, held in shell memory between writing its settings and its first start.
+TF_KEY_WAITING=
+TF_KEY_WAITING_FOR=
+
+tf_key_waiting_apply() { # name
+  [ -n "$TF_KEY_WAITING" ] && [ "$TF_KEY_WAITING_FOR" = "$1" ] || return 0
+  saved_env_keep "$1" NEBIUS_API_KEY "$TF_KEY_WAITING"
+  TF_KEY_WAITING=
+  TF_KEY_WAITING_FOR=
 }
 
 tf_rotation_apply() {
   local name=$TF_ROTATE_NAME
   [ -n "$name" ] && [ -n "$AMAN_TF_KEY" ] || return 0
-  tf_rotation_write_env "$name"
+  [ -f "$(instance_dir "$name")/.env" ] || die "Instance $name has no settings file, so its Token Factory key was not changed."
+  saved_env_keep "$name" NEBIUS_API_KEY "$AMAN_TF_KEY"
   AMAN_TF_KEY=
   TF_ROTATE_NAME=
   if [ "$(reg_get "$name" token_factory)" != 1 ]; then
@@ -96,7 +99,7 @@ tf_rotation_apply() {
 }
 
 tf_plan_detail() {
-  local text="The key is saved only in the settings file of this instance."
+  local text="The key is kept encrypted with this instance's data."
   if [ -n "$I_TF_CAP" ]; then text="$text Capped at $I_TF_CAP tokens per day."; fi
   printf '%s' "$text"
 }

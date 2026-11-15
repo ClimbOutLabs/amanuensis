@@ -35,19 +35,19 @@ $TAVILY_KEY
 }
 
 test_demo_install_with_a_tavily_key() {
-  t_begin "install --demo --tavily-key-stdin puts SEARCH_PROVIDER and the key in the managed block and nowhere else"
+  t_begin "install --demo --tavily-key-stdin puts SEARCH_PROVIDER in the managed block and saves the key encrypted, in no file"
   sandbox_new
   install_demo_with_tavily
   assert_rc 0
   assert_eq "$(env_value main SEARCH_PROVIDER)" tavily
-  assert_eq "$(env_value main TAVILY_API_KEY)" "$TAVILY_KEY"
+  assert_eq "$(saved_key main TAVILY_API_KEY)" "$(key_digest "$TAVILY_KEY")"
   local env managed found
   env=$(cat "$AMAN_HOME/instances/main/.env")
   managed=${env%%# <<< end of managed block*}
   assert_contains "$managed" "SEARCH_PROVIDER=tavily" "inside the managed block"
-  assert_contains "$managed" "TAVILY_API_KEY=$TAVILY_KEY" "inside the managed block"
+  assert_not_contains "$env" "TAVILY_API_KEY" "the key has no line in the settings file"
   found=$(grep -rIl -- "$TAVILY_KEY" "$AMAN_HOME" "$STUB_LOG" 2>/dev/null | sort | tr '\n' ' ' || true)
-  assert_eq "$found" "$AMAN_HOME/instances/main/.env " "files holding the key"
+  assert_eq "$found" "" "files holding the key"
   assert_not_contains "$OUT$ERR" "$TAVILY_KEY" "the key is never printed"
   assert_eq "$(env_value main DEMO_MODE)" true
   assert_eq "$(seed_count)" 1 "the seed still ran"
@@ -85,10 +85,10 @@ $TAVILY_KEY
   clear_input
   assert_rc 0
   assert_eq "$(cat "$SB_STATE/hash_stdin")" "$SENTINEL_PASSWORD" "sign-in password"
-  assert_eq "$(env_value main NEBIUS_API_KEY)" "v1.sentinel-order-tf-key_3b7c" "Token Factory key"
+  assert_eq "$(saved_key main NEBIUS_API_KEY)" "$(key_digest "v1.sentinel-order-tf-key_3b7c")" "Token Factory key"
   assert_eq "$(calendar_value CALDAV_PASSWORD)" "sentinel-order-cal-pw-58" "calendar app password"
   assert_eq "$(account_value MCP_EMAIL_SERVER_PASSWORD)" "'sentinel-order-mail-pw-94'" "email app password"
-  assert_eq "$(env_value main TAVILY_API_KEY)" "$TAVILY_KEY" "Tavily key"
+  assert_eq "$(saved_key main TAVILY_API_KEY)" "$(key_digest "$TAVILY_KEY")" "Tavily key"
   assert_eq "$(env_value main SEARCH_PROVIDER)" tavily
   assert_eq "$(env_value main DEMO_MODE)" true
   assert_eq "$(seed_count)" 1 "the seed ran"
@@ -173,7 +173,7 @@ test_demo_on_an_existing_instance_with_a_tavily_key() {
   assert_rc 0
   assert_eq "$(env_value main DEMO_MODE)" true
   assert_eq "$(env_value main SEARCH_PROVIDER)" tavily
-  assert_eq "$(env_value main TAVILY_API_KEY)" "$TAVILY_KEY"
+  assert_eq "$(saved_key main TAVILY_API_KEY)" "$(key_digest "$TAVILY_KEY")"
   assert_eq "$(seed_count)" 1
   assert_eq "$(log_count 'force-recreate')" 2 "one restart for the search settings, one for demo mode"
   sandbox_drop
@@ -189,7 +189,7 @@ test_a_tavily_key_on_a_rerun_replaces_the_old_one() {
   run_install --yes --demo --tavily-key-stdin
   clear_input
   assert_rc 0
-  assert_eq "$(env_value main TAVILY_API_KEY)" "$NEW_TAVILY_KEY"
+  assert_eq "$(saved_key main TAVILY_API_KEY)" "$(key_digest "$NEW_TAVILY_KEY")"
   assert_tree_lacks "$AMAN_HOME" "$TAVILY_KEY"
   assert_not_contains "$OUT$ERR" "$NEW_TAVILY_KEY" "the new key is never printed"
   assert_eq "$(log_count 'force-recreate')" 2 "one more restart for the new key"
@@ -199,7 +199,7 @@ test_a_tavily_key_on_a_rerun_replaces_the_old_one() {
   run_install --yes --demo --tavily-key-stdin
   clear_input
   assert_rc 0
-  assert_eq "$(env_value main TAVILY_API_KEY)" "$NEW_TAVILY_KEY"
+  assert_eq "$(saved_key main TAVILY_API_KEY)" "$(key_digest "$NEW_TAVILY_KEY")"
   assert_eq "$(log_count 'force-recreate')" 2 "the same key again restarts nothing"
   sandbox_drop
 }
@@ -213,7 +213,7 @@ test_demo_dry_run_with_a_tavily_key_plans_it() {
   clear_input
   assert_rc 0
   assert_flat_contains "$OUT" "Use Tavily for web search on instance main"
-  assert_flat_contains "$OUT" "The key is saved only in the settings file of this instance."
+  assert_flat_contains "$OUT" "The key is kept encrypted with this instance's data."
   assert_not_contains "$OUT$ERR" "$TAVILY_KEY"
   assert_no_path "$AMAN_HOME/instances"
   sandbox_drop

@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -20,6 +21,20 @@ type KeyRecords = z.infer<typeof KeyRecordsSchema>;
 /** The file beside a SQLite database that holds its key records. */
 export function keyRecordPath(sqlitePath: string): string {
   return `${sqlitePath}.keys`;
+}
+
+/** One record, read in one go for start-up, which cannot wait. A missing file or record gives nothing. */
+export function readKeyRecord({ file, key }: { file: string; key: string }): string | undefined {
+  let text: string;
+  try {
+    text = readFileSync(file, 'utf8');
+  } catch (caught) {
+    if (errorCode(caught) === 'ENOENT') {
+      return undefined;
+    }
+    throw caught;
+  }
+  return KeyRecordsSchema.parse(JSON.parse(text))[key]?.value;
 }
 
 /**

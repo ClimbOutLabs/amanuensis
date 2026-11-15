@@ -93,7 +93,11 @@ describe('model check', () => {
   });
 
   it.each([
-    ['a refused key', { ok: false, label: 'GET /models', detail: 'HTTP 401 unauthorized' }, 'NEBIUS_API_KEY'],
+    [
+      'a refused key',
+      { ok: false, label: 'GET /models', detail: 'HTTP 401 unauthorized' },
+      '--token-factory-key-stdin',
+    ],
     [
       'an unlisted model',
       { ok: false, label: `model listed ${MODEL}`, detail: 'not in /models' },

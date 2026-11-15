@@ -8,7 +8,7 @@ import { isStandalone, sqlitePath } from './database';
 
 function fixFor(failed: SmokeCheck): string {
   if (/^HTTP 40[13]\b/.test(failed.detail)) {
-    return 'Token Factory refused the key. Create a new key in the Token Factory console, put it in NEBIUS_API_KEY in the instance .env file, then restart the instance.';
+    return 'Token Factory refused the key. Create a new key in the Token Factory console, then run the installer again with --token-factory-key-stdin and give it the new key.';
   }
   if (failed.label.startsWith('model listed')) {
     return 'Set TOKEN_FACTORY_MODEL in the instance .env file to a model id that Token Factory lists for your key, then restart the instance.';

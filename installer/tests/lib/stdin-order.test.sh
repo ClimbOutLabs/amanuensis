@@ -53,7 +53,7 @@ assert_lines_landed() { # letters first|again
   local letters=$1 label="$1 ($2)"
   assert_rc 0
   case "$letters" in
-    *t*) assert_eq "$(file_value .env NEBIUS_API_KEY)" "$TF_LINE" "$label Token Factory key" ;;
+    *t*) assert_eq "$(saved_key main NEBIUS_API_KEY)" "$(key_digest "$TF_LINE")" "$label Token Factory key" ;;
   esac
   case "$letters" in
     *c*) assert_eq "$(calendar_value CALDAV_PASSWORD)" "$CAL_LINE" "$label calendar app password" ;;

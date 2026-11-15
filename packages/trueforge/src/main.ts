@@ -9,6 +9,9 @@
  * (migrate, Redis, listen) are caught below and exit non-zero. SQLite vs
  * Postgres store modules stay dynamic so only the active engine is loaded.
  */
+// First, so the keys this instance keeps encrypted are in place before the config below reads the environment.
+import './secrets/savedEnvStart';
+
 import { configureOutboundFetches, extractErrorLogFields } from '@truefoundry/trueforge-core/core';
 import type { Context } from 'hono';
 import { mkdir } from 'node:fs/promises';

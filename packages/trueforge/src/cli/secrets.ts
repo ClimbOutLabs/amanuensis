@@ -16,6 +16,7 @@ import {
   saveRecoveryCopy,
 } from '../secrets/recoveryKey';
 import { adoptDatabase } from '../secrets/retiredKeys';
+import { SAVED_ENV_NAMES, SavedEnvNameSchema, dropSavedEnv, putSavedEnv, savedEnvNames } from '../secrets/savedEnv';
 import type { Command } from './command';
 import { processEnv, type CliEnv } from './env';
 import { errorCode } from './errorCode';
@@ -24,6 +25,7 @@ import type { SecretsDatabase } from './secretsRuntime';
 import { sqliteSecretsDatabase } from './secretsSqlite';
 
 const USAGE = `Usage: aman secrets <init|first-run|check-recovery|adopt|key> [--sqlite <file>] [--key-file <file>] [--if-needed]
+       aman secrets env <put|drop|list> [--name <setting>] [--sqlite <file>] [--key-file <file>]
 
   init            Set up saved secrets for this database and print its recovery key as {"recovery_key": "..."}.
                   Uses the key file if it is there, and makes one only if it is not.
@@ -36,6 +38,10 @@ const USAGE = `Usage: aman secrets <init|first-run|check-recovery|adopt|key> [--
                   The same recovery key keeps working afterwards.
   key             Make this computer's key file if it is not there, and print {"created": true or false}.
                   It touches no database.
+  env put         Read the key of a paid account on stdin and keep it encrypted, so it does not have to sit in
+                  the settings file. Aman gets it when it starts. --name is one of: ${SAVED_ENV_NAMES.join(', ')}.
+  env drop        Forget the saved value of --name.
+  env list        Print the names that have a saved value as {"names": [...]}. Values are never printed.
 
 --if-needed makes init print {"already_set_up": true} and change nothing when setup is already done.
 --sqlite defaults to SQLITE_PATH, --key-file to SECRETS_KEY_FILE. With neither --sqlite nor SQLITE_PATH,
@@ -153,6 +159,64 @@ async function adopt({
   }
 }
 
+const NOT_SET_UP = 'Saved secrets are not set up for this database with this key. Run "aman secrets init" first.';
+
+/** Keeps, forgets or lists the paid-account keys that are stored encrypted instead of in the settings file. */
+async function runSecretsEnv({ args, io, env }: { args: readonly string[]; io: CliIo; env: CliEnv }): Promise<number> {
+  const [verb, ...rest] = args;
+  if (verb !== 'put' && verb !== 'drop' && verb !== 'list') {
+    throw new UsageError(USAGE);
+  }
+  let values: { sqlite?: string; 'key-file'?: string; name?: string };
+  try {
+    ({ values } = parseArgs({
+      args: [...rest],
+      options: { sqlite: { type: 'string' }, 'key-file': { type: 'string' }, name: { type: 'string' } },
+      strict: true,
+      allowPositionals: false,
+    }));
+  } catch (caught) {
+    throw new UsageError(`${caught instanceof Error ? caught.message : 'Bad arguments.'}\n\n${USAGE}`, {
+      cause: caught,
+    });
+  }
+  const name = SavedEnvNameSchema.safeParse(values.name);
+  if (verb !== 'list' && !name.success) {
+    throw new UsageError(`--name must be one of: ${SAVED_ENV_NAMES.join(', ')}.\n\n${USAGE}`);
+  }
+  const database = await openDatabase({
+    action: 'env',
+    sqlitePath: values.sqlite ?? (env['STANDALONE'] === 'false' ? undefined : env['SQLITE_PATH']),
+    keyFile: values['key-file'] ?? env['SECRETS_KEY_FILE'],
+  });
+  try {
+    const { settings } = database;
+    if (verb === 'list' || !name.success) {
+      await io.stdout(`${JSON.stringify({ names: await savedEnvNames({ settings }) })}\n`);
+      return 0;
+    }
+    if (verb === 'drop') {
+      await dropSavedEnv({ settings, name: name.data });
+      await io.stdout(`${JSON.stringify({ dropped: name.data })}\n`);
+      return 0;
+    }
+    const loaded = await new FileKeyProvider(database.keyFile).load();
+    if (loaded.status !== 'loaded' || (await checkMasterKey({ settings, key: loaded.key })) !== 'match') {
+      throw new Error(NOT_SET_UP);
+    }
+    // One line, as a settings file would hold it; a pasted line break is not part of a key.
+    const value = (await io.readStdin()).split(/\r?\n/, 1)[0]?.trim() ?? '';
+    if (value === '') {
+      throw new UsageError('No value came in on stdin. Pipe the key in, for example: printf %s "$value" | ...');
+    }
+    await putSavedEnv({ settings, key: loaded.key, name: name.data, value });
+    await io.stdout(`${JSON.stringify({ saved: name.data })}\n`);
+    return 0;
+  } finally {
+    await database.close();
+  }
+}
+
 export async function runSecrets({
   args,
   io,
@@ -163,6 +227,9 @@ export async function runSecrets({
   env: CliEnv;
 }): Promise<number> {
   const [action, ...rest] = args;
+  if (action === 'env') {
+    return runSecretsEnv({ args: rest, io, env });
+  }
   if (
     action !== 'init' &&
     action !== 'first-run' &&
@@ -240,7 +307,7 @@ async function openDatabase({
   sqlitePath,
   keyFile,
 }: {
-  action: 'init' | 'first-run' | 'check-recovery' | 'adopt';
+  action: 'init' | 'first-run' | 'check-recovery' | 'adopt' | 'env';
   sqlitePath: string | undefined;
   keyFile: string | undefined;
 }): Promise<SecretsDatabase> {
@@ -250,6 +317,9 @@ async function openDatabase({
     return keyFile === undefined ? configured : { ...configured, keyFile: path.resolve(keyFile) };
   }
   const file = path.resolve(sqlitePath);
+  if (action === 'env' && !existsSync(file)) {
+    throw new Error(`No database at ${file}. Run "aman secrets init" first.`);
+  }
   if ((action === 'check-recovery' || action === 'adopt') && !existsSync(file)) {
     throw new Error(
       action === 'adopt'

@@ -132,12 +132,24 @@ test_token_factory_settings_match_the_server() {
   defaults=$(sed -n "s/^export const DEFAULT_TOKEN_FACTORY_MODEL = '\(.*\)';/\1/p" "$repo/packages/trueforge/src/runtime/tokenFactoryDefaults.ts")
   assert_eq "$(sed -n 's/^TF_DEFAULT_MODEL=//p' "$INSTALLER_DIR/lib/tokenfactory.sh")" "$defaults" "default model"
   config=$(cat "$repo/packages/trueforge/src/config.ts")
-  for key in NEBIUS_API_KEY TOKEN_FACTORY_MODEL TOKEN_FACTORY_DAILY_TOKEN_CAP; do
+  for key in TOKEN_FACTORY_MODEL TOKEN_FACTORY_DAILY_TOKEN_CAP; do
     assert_contains "$config" "getEnv('$key'" "the server reads $key"
     assert_contains "$(cat "$INSTALLER_DIR/templates/instance/env.tpl")" "$key=" "the installer writes $key"
   done
+  assert_contains "$config" "getEnv('NEBIUS_API_KEY'" "the server reads NEBIUS_API_KEY"
+  assert_not_contains "$(cat "$INSTALLER_DIR/templates/instance/env.tpl")" "NEBIUS_API_KEY" "the key is never written to the settings file"
   assert_not_contains "$config" "TOKEN_FACTORY_CHEAPER_MODEL" "the server no longer reads a separate helper model"
   assert_not_contains "$(cat "$INSTALLER_DIR/templates/instance/env.tpl")" "TOKEN_FACTORY_CHEAPER_MODEL" "the installer does not write a separate helper model"
+}
+
+test_saved_keys_match_the_app() {
+  t_begin "the installer moves exactly the paid-account keys the app keeps encrypted"
+  local repo=$INSTALLER_DIR/.. app key
+  app=$(sed -n "s/^export const SAVED_ENV_NAMES = \[\(.*\)\] as const;/\1/p" "$repo/packages/trueforge/src/secrets/savedEnv.ts" | tr -d "' " | tr ',' ' ')
+  assert_eq "$(sed -n 's/^SAVED_ENV_KEYS="\(.*\)"/\1/p' "$INSTALLER_DIR/lib/machinekey.sh")" "$app" "the same names, in the same order"
+  for key in $app; do
+    assert_contains "$(cat "$repo/packages/trueforge/src/config.ts")" "getEnv('$key'" "the server reads $key"
+  done
 }
 
 test_sign_in_settings_match_the_server() {

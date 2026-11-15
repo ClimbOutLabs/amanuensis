@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { moveSavedEnv } from './savedEnv';
 
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 import { KEY_CHECK_SETTING, checkMasterKey, keyCheckValue } from './keyCheck';
@@ -73,6 +74,7 @@ export async function adoptDatabase({
   }
   const earlierKey = await recoverMasterKey({ settings, recoveryKey });
   await moveDatabase(earlierKey);
+  await moveSavedEnv({ settings, from: earlierKey, to: masterKey });
   const retired = await loadRetiredKeys({ settings, masterKey: earlierKey });
   retired.set(masterKeyId(earlierKey).toString('hex'), earlierKey);
   const keys = [...retired.entries()].map(([keyId, key]) => ({

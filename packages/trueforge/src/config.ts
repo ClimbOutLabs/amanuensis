@@ -36,7 +36,7 @@ import {
 } from '@truefoundry/trueforge-core/core';
 import { MEMORY_MAX_TIMEOUT_MS } from '@truefoundry/trueforge-core/core/memory/memorySettingsLimits';
 
-import { appDataDirFromEnv, voiceModelDirFromEnv } from './appDataDir';
+import { appDataDirFromEnv, secretsKeyFileFromEnv, sqlitePathFromEnv, voiceModelDirFromEnv } from './appDataDir';
 import { ARCHIVE_DEFAULT_MAX_BYTES } from './dataExport/archiveLimits';
 import { ZIP_MAX_ARCHIVE_BYTES } from './dataExport/zipStreamWriter';
 import { normalizedOrigin } from './mcp/firstParty';
@@ -1273,31 +1273,6 @@ function resolveOptionalPathEnv(envKey: string): string | undefined {
     return undefined;
   }
   return path.resolve(override);
-}
-
-/**
- * Absolute SQLite file path for standalone mode.
- * Env: `SQLITE_PATH` (optional). Default: `{app data dir}/db/db.sqlite`.
- */
-function resolveSqlitePath(appDataDir: string): string {
-  const override = getEnv('SQLITE_PATH');
-  if (override !== undefined && override.trim() !== '') {
-    return path.resolve(override);
-  }
-  return path.join(appDataDir, 'db', 'db.sqlite');
-}
-
-/**
- * Where the host puts the master key for saved secrets.
- * Env: `SECRETS_KEY_FILE` (optional). Default: `{app data dir}/secrets/master.key`; the installer points
- * it at the memory-only file its startup job fills.
- */
-function resolveSecretsKeyFile(appDataDir: string): string {
-  const override = getEnv('SECRETS_KEY_FILE');
-  if (override !== undefined && override.trim() !== '') {
-    return path.resolve(override);
-  }
-  return path.join(appDataDir, 'secrets', 'master.key');
 }
 
 /** Parent for local sandbox roots. Same app data dir as SQLite. */
@@ -3235,14 +3210,14 @@ const shared: SharedServerConfiguration = {
     defaultValue: false,
   }),
   TRUEFORGE_MTLS_CERTS_DIR: getEnv('TRUEFORGE_MTLS_CERTS_DIR', { defaultValue: '/etc/tls' }) ?? '/etc/tls',
-  SECRETS_KEY_FILE: resolveSecretsKeyFile(appDataDir),
+  SECRETS_KEY_FILE: secretsKeyFileFromEnv(process.env),
 };
 
 const configuration: ServerConfiguration = standalone
   ? {
       ...shared,
       STANDALONE: true,
-      SQLITE_PATH: resolveSqlitePath(appDataDir),
+      SQLITE_PATH: sqlitePathFromEnv(process.env),
       LOCAL_SANDBOX_ROOT_PARENT: resolveLocalSandboxRootParent(appDataDir),
       CODE_MODE_SOCKET_PARENT: resolveCodeModeSocketParent({ port }),
     }

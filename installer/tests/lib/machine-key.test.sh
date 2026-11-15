@@ -155,6 +155,40 @@ $SENTINEL_PASSWORD
   sandbox_drop
 }
 
+test_a_paid_key_in_the_settings_file_is_moved_after_a_good_start() {
+  t_begin "a paid-account key typed into the settings file is saved encrypted after the app started with it, and its line is removed"
+  sandbox_new
+  install_machine
+  local env=$AMAN_HOME/instances/main/.env
+  printf '%s\n' 'MY_OWN_SETTING=kept' 'NEBIUS_API_KEY="made-up-model-key-0123456789"' >>"$env"
+  : >"$STUB_LOG"
+  run_install --yes instance refresh main
+  assert_rc 0
+  assert_eq "$(grep -n ' up -d \| secrets-setup env put ' "$STUB_LOG" | grep 'aman-main' | head -n 1 | grep -c ' up -d ')" 1 "the app starts with the key before it is moved"
+  assert_eq "$(saved_key main NEBIUS_API_KEY)" "$(key_digest made-up-model-key-0123456789)" "saved without the quotes"
+  assert_not_contains "$(cat "$env")" "NEBIUS_API_KEY" "the line is gone"
+  assert_contains "$(cat "$env")" "MY_OWN_SETTING=kept" "other lines stay"
+  assert_mode "$env" 600
+  assert_tree_lacks "$AMAN_HOME" "made-up-model-key-0123456789"
+  assert_tree_lacks "$STUB_LOG" "made-up-model-key-0123456789"
+  assert_flat_contains "$OUT" "The paid-account keys of main are now kept encrypted, and no longer in its settings file."
+  sandbox_drop
+}
+
+test_a_version_from_before_saved_keys_keeps_the_settings_file() {
+  t_begin "with a version that cannot keep keys encrypted, the key stays in the settings file where that version reads it"
+  sandbox_new
+  install_machine
+  local env=$AMAN_HOME/instances/main/.env
+  printf '%s\n' 'TWILIO_AUTH_TOKEN=made-up-twilio-token' >>"$env"
+  STUB_SAVED_ENV_OLD=1 run_install --yes instance refresh main
+  assert_rc 0
+  assert_contains "$(cat "$env")" "TWILIO_AUTH_TOKEN=made-up-twilio-token" "the line stays"
+  assert_eq "$(saved_key main TWILIO_AUTH_TOKEN)" "" "nothing was saved"
+  assert_not_contains "$OUT" "are now kept encrypted"
+  sandbox_drop
+}
+
 test_install_sets_up_the_key_before_the_app_starts
 test_an_encrypted_disk_gets_no_warning
 test_a_later_run_does_not_set_up_again
@@ -164,4 +198,6 @@ test_the_key_is_typed_back_at_a_terminal
 test_a_failed_setup_stops_before_the_app_starts
 test_data_from_another_key_is_not_started
 test_removing_the_last_instance_removes_the_key
+test_a_paid_key_in_the_settings_file_is_moved_after_a_good_start
+test_a_version_from_before_saved_keys_keeps_the_settings_file
 tests_finish
