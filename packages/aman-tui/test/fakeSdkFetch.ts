@@ -2,6 +2,12 @@
  * A fake fetch that speaks the SDK's wire shapes (snake_case JSON and SSE
  * frames), so the chat client can be tested end to end through the real SDK
  * and the real shared chat package, with no network at all.
+ *
+ * The client under test always calls with a paired terminal key, so every
+ * call is checked against the terminal key scope Step 1 defines, and a call
+ * outside it is refused the way the real server refuses it. A future call
+ * that drifts outside the scope fails loudly here instead of passing
+ * against a fake that allows everything.
  */
 
 export interface SseFrame {
@@ -18,14 +24,44 @@ export interface RecordedSdkCall {
 export interface FakeSdkScript {
   sessions?: Record<string, unknown>[];
   personaBySession?: Record<string, string | null>;
-  agents?: string[];
   historyBySession?: Record<string, Record<string, unknown>[]>;
+
   createdSession?: Record<string, unknown>;
   onCreateTurn?: (sessionId: string) => { frames: SseFrame[]; failAtEnd?: boolean };
   onSubscribe?: (sessionId: string, turnId: string) => { frames: SseFrame[] };
 }
 
 const AT = '2026-11-15T12:00:00.000Z';
+
+/** The refusal Step 1 sends a terminal key that reaches outside its chat scope, with its status. */
+const TERMINAL_KEY_SCOPE_MESSAGE =
+  'A paired terminal can only reach chats. Open Aman on the web to use this part of Aman.';
+
+const TERMINAL_KEY_PATH_PREFIXES = ['/api/v1/sessions', '/api/v1/user/chat-search'];
+const TERMINAL_KEY_EXACT_PATHS = ['/api/v1/terminal-pairings/revoke-current'];
+
+function sessionPathIsCarvedOut(path: string, prefix: string): boolean {
+  const segments = path
+    .slice(prefix.length)
+    .split('/')
+    .filter(segment => segment !== '');
+  if (segments[1] === 'repository') {
+    return true;
+  }
+  return segments[1] === 'turns' && segments[3] === 'download-sandbox-file';
+}
+
+/** Step 1's terminal key scope, mirrored from its terminalScope: the routes a paired terminal may reach. */
+function terminalKeyMayReachPath(path: string): boolean {
+  if (TERMINAL_KEY_EXACT_PATHS.includes(path)) {
+    return true;
+  }
+  const prefix = TERMINAL_KEY_PATH_PREFIXES.find(candidate => path === candidate || path.startsWith(`${candidate}/`));
+  if (prefix === undefined) {
+    return false;
+  }
+  return prefix !== '/api/v1/sessions' || !sessionPathIsCarvedOut(path, prefix);
+}
 
 /** One session in wire shape, with Nora's made-up data. */
 export function wireSession(overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -94,17 +130,17 @@ export function makeFakeSdkFetch(script: FakeSdkScript): { fetcher: typeof fetch
     const path = url.pathname;
     calls.push({ method, path, body: parseBody(init) });
 
+    if (!terminalKeyMayReachPath(path)) {
+      return new Response(JSON.stringify({ error: { message: TERMINAL_KEY_SCOPE_MESSAGE } }), {
+        status: 403,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
     if (path === '/api/v1/sessions' && method === 'GET') {
       return jsonResponse({ data: script.sessions ?? [], pagination: { limit: 50 } });
     }
     if (path === '/api/v1/sessions' && method === 'POST') {
       return jsonResponse({ data: script.createdSession ?? wireSession({ id: 'session-new', title: null }) });
-    }
-    if (path === '/api/v1/agents') {
-      return jsonResponse({
-        data: (script.agents ?? []).map(name => ({ id: `agent-${name}`, name })),
-        pagination: { limit: 1 },
-      });
     }
     const personaMatch = /^\/api\/v1\/sessions\/([^/]+)\/persona$/.exec(path);
     if (personaMatch !== null && method === 'GET') {

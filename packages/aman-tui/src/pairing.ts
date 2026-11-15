@@ -9,7 +9,11 @@
  * an Origin header naming the instance address. The server's request guard
  * refuses a state-changing call that has neither an Origin it lists nor a
  * Bearer token, and this app never weakens that check to make pairing work.
+ * A refusal's own line is read through serverErrors, the one place that
+ * reads server refusals for the pairing calls and the chat calls alike.
  */
+import { serverMessageOfBodyText } from './serverErrors.js';
+
 export interface PairingStart {
   pairingId: string;
   code: string;
@@ -52,26 +56,6 @@ function dataOf(body: unknown): Record<string, unknown> | undefined {
   return isRecord(data) ? data : undefined;
 }
 
-/** The server's own line from an error answer: the JSON error message, or the plain text body as sent. */
-function serverMessageOf(bodyText: string): string | undefined {
-  const trimmed = bodyText.trim();
-  if (trimmed === '') {
-    return undefined;
-  }
-  try {
-    const parsed: unknown = JSON.parse(trimmed);
-    if (isRecord(parsed) && isRecord(parsed.error)) {
-      const message = readNonEmptyString(parsed.error.message);
-      if (message !== undefined) {
-        return message;
-      }
-    }
-  } catch {
-    // Not JSON: the body is the message itself, as the address refusal sends it.
-  }
-  return trimmed;
-}
-
 export interface PairingClient {
   start(deviceName: string): Promise<PairingStart>;
   complete(options: { pairingId: string; code: string }): Promise<PairingCompletion>;
@@ -96,7 +80,7 @@ export function createPairingClient(options: { baseUrl: string; fetch?: typeof f
     }
     const bodyText = await response.text().catch(() => '');
     if (!response.ok) {
-      throw new PairingRefusedError(serverMessageOf(bodyText) ?? didNotWorkLine, response.status);
+      throw new PairingRefusedError(serverMessageOfBodyText(bodyText) ?? didNotWorkLine, response.status);
     }
     try {
       return JSON.parse(bodyText);

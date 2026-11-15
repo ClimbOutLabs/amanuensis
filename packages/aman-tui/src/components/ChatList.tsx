@@ -2,10 +2,13 @@ import { Box, Text, useInput } from 'ink';
 import { useEffect, useState } from 'react';
 
 import type { ChatClient, ChatSummary } from '../chatClient.js';
+import { chatErrorLine } from '../serverErrors.js';
 import { lastActiveWord } from '../words.js';
 
 type ListState =
-  { status: 'loading' } | { status: 'error'; message: string } | { status: 'ready'; chats: ChatSummary[] };
+  | { status: 'loading' }
+  | { status: 'error'; message: string; keyRefused: boolean }
+  | { status: 'ready'; chats: ChatSummary[] };
 
 /**
  * The chat list: the person's chats, newest first, with the persona and when
@@ -44,10 +47,8 @@ export function ChatList({
       })
       .catch((error: unknown) => {
         if (!cancelled) {
-          setState({
-            status: 'error',
-            message: error instanceof Error ? error.message : 'The chats could not be loaded.',
-          });
+          const line = chatErrorLine(error, 'The chats could not be loaded.');
+          setState({ status: 'error', message: line.message, keyRefused: line.keyRefused });
         }
       });
     return () => {
@@ -81,10 +82,8 @@ export function ChatList({
         .createChat()
         .then(chat => onOpen(chat))
         .catch((error: unknown) => {
-          setState({
-            status: 'error',
-            message: error instanceof Error ? error.message : 'A new chat could not be started.',
-          });
+          const line = chatErrorLine(error, 'A new chat could not be started.');
+          setState({ status: 'error', message: line.message, keyRefused: line.keyRefused });
         });
     } else if (input === 's' && instanceCount > 1) {
       onSwitchInstance();
@@ -102,7 +101,11 @@ export function ChatList({
       {state.status === 'error' ? (
         <Box flexDirection="column">
           <Text color="red">{state.message}</Text>
-          <Text dimColor>Press R to try again, or Q to leave.</Text>
+          {state.keyRefused ? (
+            <Text dimColor>Pair again with: aman-tui login {address}, or press Q to leave.</Text>
+          ) : (
+            <Text dimColor>Press R to try again, or Q to leave.</Text>
+          )}
         </Box>
       ) : null}
       {state.status === 'ready' && state.chats.length === 0 ? (

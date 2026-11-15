@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 
 import type { ChatClient } from '../chatClient.js';
 import { ChatView as ChatViewFold } from '../chatEvents.js';
+import { chatErrorLine } from '../serverErrors.js';
 import { BlockView, isFinalBlock } from './BlockView.js';
 
 /**
@@ -51,7 +52,10 @@ export function ChatView({
       })
       .catch((error: unknown) => {
         if (!cancelled) {
-          setLoadError(error instanceof Error ? error.message : 'This chat could not be loaded.');
+          const line = chatErrorLine(error, 'This chat could not be loaded.');
+          setLoadError(
+            line.keyRefused ? `${line.message} Pair again with: aman-tui login ${webAddress}` : line.message,
+          );
         }
       });
     return () => {

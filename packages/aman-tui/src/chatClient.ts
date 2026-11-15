@@ -2,6 +2,7 @@ import { createSessionResyncExtensions, createTrueForgeClient, type SessionTipIn
 import type { TrueForge, TrueForgeApi } from '@truefoundry/trueforge-sdk';
 
 import type { ChatEvent } from './chatEvents.js';
+import { keyWasRefused } from './serverErrors.js';
 
 /** One row of the chat list. */
 export interface ChatSummary {
@@ -133,9 +134,22 @@ export function createChatClient(options: {
         agent = { name: newest.agent.name };
       }
       if (agent === undefined) {
-        const firstAgent = (await client.agents.list({ limit: 1 })).data[0];
-        if (firstAgent !== undefined) {
-          agent = { name: firstAgent.name };
+        try {
+          const firstAgent = (await client.agents.list({ limit: 1 })).data[0];
+          if (firstAgent !== undefined) {
+            agent = { name: firstAgent.name };
+          }
+        } catch (error) {
+          // The agents list sits outside a paired terminal's chat scope, so
+          // the server refuses this call for a terminal key, and the refusal
+          // lands on the plain line below like an empty registry does. Any
+          // other failure of the call lands on a plain line too, never a raw
+          // throw the person cannot act on.
+          if (!keyWasRefused(error)) {
+            throw new Error('Aman could not be reached to start a new chat. Check your connection, then try again.', {
+              cause: error,
+            });
+          }
         }
       }
       if (agent === undefined) {

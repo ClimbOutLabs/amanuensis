@@ -60,6 +60,27 @@ describe('the chat client over a fake SDK fetch', () => {
     ]);
   });
 
+  it('refuses a route outside the terminal key scope, as the real server does', async () => {
+    const { fetcher } = makeFakeSdkFetch({});
+    const response = await fetcher(`${BASE}/api/v1/agents`);
+    expect(response.status).toBe(403);
+    const body: unknown = await response.json();
+    expect(body).toEqual({
+      error: { message: 'A paired terminal can only reach chats. Open Aman on the web to use this part of Aman.' },
+    });
+  });
+
+  it('answers a new chat on an instance with no chats with the plain line, not the scope refusal', async () => {
+    const { fetcher, calls } = makeFakeSdkFetch({ sessions: [] });
+    const client = createChatClient({ baseUrl: BASE, token: 'aman_tk_test', fetch: fetcher, sleep: noSleep });
+    await expect(client.createChat()).rejects.toThrow(
+      'No agent is set up on this Aman yet. Start your first chat in the web app.',
+    );
+    // The agents list was tried and refused as out of scope, and no chat was created.
+    expect(calls.some(call => call.path === '/api/v1/agents')).toBe(true);
+    expect(calls.some(call => call.method === 'POST' && call.path === '/api/v1/sessions')).toBe(false);
+  });
+
   it('starts a new chat on the agent of the newest chat', async () => {
     const { fetcher, calls } = makeFakeSdkFetch({
       sessions: [wireSession({ id: 'session-1' })],

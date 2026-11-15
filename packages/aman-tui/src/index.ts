@@ -31,6 +31,14 @@ export {
   type PairingStart,
 } from './pairing.js';
 export {
+  chatErrorLine,
+  keyWasRefused,
+  serverMessageOfBody,
+  serverMessageOfBodyText,
+  statusCodeOfError,
+  type ChatErrorLine,
+} from './serverErrors.js';
+export {
   lastActiveWord,
   outcomeOfDisposition,
   outcomeWord,

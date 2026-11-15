@@ -1,10 +1,15 @@
-import type { TrueForgeApi } from '@truefoundry/trueforge-sdk';
+import { TrueForgeError, type TrueForgeApi } from '@truefoundry/trueforge-sdk';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { ChatClient, ChatSummary } from '../src/chatClient.js';
 import type { ChatEvent } from '../src/chatEvents.js';
+import { App } from '../src/components/App.js';
 import { ChatList } from '../src/components/ChatList.js';
 import { ChatView } from '../src/components/ChatView.js';
+import { saveInstanceStore } from '../src/instances.js';
 import { renderApp, type RenderedApp } from './renderHarness.js';
 
 const WEB = 'https://nora.example:8443';
@@ -136,6 +141,77 @@ describe('ChatList', () => {
   });
 });
 
+describe('ChatList errors', () => {
+  it('shows the re-pair line and no raw error body when the key was refused', async () => {
+    const refused = new TrueForgeError({
+      statusCode: 401,
+      body: { error: { message: 'Authentication required.' } },
+    });
+    const app = renderApp(
+      <ChatList
+        client={fakeClient({
+          listChats: async (): Promise<ChatSummary[]> => {
+            throw refused;
+          },
+        })}
+        address={WEB}
+        instanceCount={1}
+        onOpen={() => undefined}
+        onSwitchInstance={() => undefined}
+        onExit={() => undefined}
+      />,
+    );
+    await untilText(app, `Pair again with: aman-tui login ${WEB}`);
+    const frame = app.text();
+    expect(frame).toContain('Aman no longer accepts this terminal');
+    expect(frame).not.toContain('Status code');
+    expect(frame).not.toContain('"error"');
+    expect(frame).not.toContain('Press R to try again');
+    app.unmount();
+  });
+
+  it("shows the server's own line for a plain server error, with trying again on offer", async () => {
+    const failed = new TrueForgeError({
+      statusCode: 500,
+      body: { error: { message: 'The chats are taking a break.' } },
+    });
+    const app = renderApp(
+      <ChatList
+        client={fakeClient({
+          listChats: async (): Promise<ChatSummary[]> => {
+            throw failed;
+          },
+        })}
+        address={WEB}
+        instanceCount={1}
+        onOpen={() => undefined}
+        onSwitchInstance={() => undefined}
+        onExit={() => undefined}
+      />,
+    );
+    await untilText(app, 'The chats are taking a break.');
+    const frame = app.text();
+    expect(frame).not.toContain('Status code');
+    expect(frame).not.toContain('"error"');
+    expect(frame).toContain('Press R to try again');
+    app.unmount();
+  });
+});
+
+describe('App startup', () => {
+  it('lands on the pair-again screen when the key store cannot be read', async () => {
+    const configDir = mkdtempSync(path.join(tmpdir(), 'aman-tui-app-'));
+    saveInstanceStore(configDir, {
+      instances: [{ address: WEB, deviceName: 'Pippa', keyStore: 'keychain' }],
+      activeAddress: WEB,
+    });
+    const app = renderApp(<App configDir={configDir} />);
+    await untilText(app, 'is not on this computer any more');
+    expect(app.text()).toContain(`aman-tui login ${WEB}`);
+    app.unmount();
+  });
+});
+
 describe('ChatView', () => {
   it('renders saved history, then a streamed reply as it arrives', async () => {
     const client = fakeClient({
@@ -245,6 +321,36 @@ describe('ChatView', () => {
     );
     await untilText(app, 'cannot show');
     expect(app.text()).toContain(WEB);
+    app.unmount();
+  });
+
+  it('shows the re-pair line and no raw error body when the key was refused', async () => {
+    const refused = new TrueForgeError({
+      statusCode: 401,
+      body: { error: { message: 'Authentication required.' } },
+    });
+    const client = fakeClient({
+      loadHistory: async (): Promise<ChatEvent[]> => {
+        throw refused;
+      },
+    });
+    const app = renderApp(
+      <ChatView
+        client={client}
+        sessionId="session-1"
+        title="Weekend plans"
+        speakerName="Mannie"
+        webAddress={WEB}
+        onBack={() => undefined}
+      />,
+    );
+    await untilText(app, "no longer accepts this terminal's key");
+    // The line wraps on a narrow terminal, so the words are matched with the
+    // wrapping folded away, as a person reading it would see them.
+    const frame = app.text().replace(/\s+/g, ' ');
+    expect(frame).toContain(`Pair again with: aman-tui login ${WEB}`);
+    expect(frame).not.toContain('Status code');
+    expect(frame).not.toContain('"error"');
     app.unmount();
   });
 });

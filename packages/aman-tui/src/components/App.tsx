@@ -38,7 +38,14 @@ export function App({ configDir }: { configDir: string }) {
         }
         return;
       }
-      const key = await keyStoreForKind(instance.keyStore, { configDir }).get(instance.address);
+      let key: string | undefined;
+      try {
+        key = await keyStoreForKind(instance.keyStore, { configDir }).get(instance.address);
+      } catch {
+        // A key store that cannot be read leaves the key as good as gone, and
+        // the key-missing screen below already names the remedy for both.
+        key = undefined;
+      }
       if (cancelled) {
         return;
       }
