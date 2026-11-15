@@ -237,7 +237,7 @@
   "Send": "packages/trueforge-ui/src/sentinel/ChangeRequestBox.tsx",
   "Details": "packages/trueforge-ui/src/components/MapCard.tsx",
   "Confirm": "packages/trueforge-ui/src/containers/WorkOnRepoControls.tsx",
-  "Revoke": "packages/trueforge-ui/src/containers/ImplementationPlanGrantControls.tsx",
+  "Revoke": "packages/trueforge-ui/src/containers/SettingsBuilder/ConnectorDetails.tsx",
   "Add and save draft": "packages/trueforge-ui/src/sentinel/approvalChoices.ts",
   "Don't save": "packages/trueforge-ui/src/sentinel/approvalChoices.ts",
   "Deny": "packages/trueforge-ui/src/sentinel/approvalChoices.ts",
