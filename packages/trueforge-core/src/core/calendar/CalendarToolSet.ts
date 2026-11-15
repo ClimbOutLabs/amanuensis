@@ -9,7 +9,7 @@ import type { InternalToolCallInfo } from '../llm/LLMTypes';
 import type { ToolInvocationContext } from '../mcp/IMCPServer';
 import { defineTool, LocalToolMCP, type ToolDefinition } from '../mcp/LocalToolMCP';
 import { stampSentinelDecision } from '../mcp/ToolSet';
-import { stableStringify } from '../permissions/approvalTokens';
+import { REVIEW_HASH_ARGUMENT, stableStringify } from '../permissions/approvalTokens';
 import { classifyHostToolCall } from '../permissions/classifier';
 import type { SentinelHostContext } from '../permissions/context';
 import { DEMO_SEND_REFUSAL, recipientsAllowed } from '../permissions/sendAllowlist';
@@ -46,9 +46,8 @@ import {
   type UpdateEventInput,
 } from './toolContract';
 
-/** Keys the host adds to an approved write: the zone the times were read in and the hash of what was shown. */
+/** Key the host adds to an approved write beside the review hash: the zone the times were read in. */
 const APPROVED_ZONE_KEY = 'resolved_time_zone';
-const REVIEW_HASH_KEY = 'review_hash';
 
 const NO_ZONE =
   "Nothing was saved because Aman doesn't know which time zone the times are in. Ask the user, then pass time_zone.";
@@ -279,7 +278,7 @@ export class CalendarToolSet extends LocalToolMCP {
         approved: {
           ...(params.arguments ?? {}),
           [APPROVED_ZONE_KEY]: zone,
-          [REVIEW_HASH_KEY]: hashEventWrite(resolved.request),
+          [REVIEW_HASH_ARGUMENT]: hashEventWrite(resolved.request),
         },
         review: resolved.review,
       };
@@ -351,7 +350,7 @@ export class CalendarToolSet extends LocalToolMCP {
     }
     const {
       [APPROVED_ZONE_KEY]: zone,
-      [REVIEW_HASH_KEY]: hash,
+      [REVIEW_HASH_ARGUMENT]: hash,
       ...approvedArgs
     } = input.context?.approved_params ?? {};
     // The approved params are settled when the call is classified, before anyone answers, so only the person's

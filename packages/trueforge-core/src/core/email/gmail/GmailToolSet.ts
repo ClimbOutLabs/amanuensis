@@ -12,6 +12,7 @@ import type { InternalToolCallInfo } from '../../llm/LLMTypes';
 import { toolResultResponse, type ToolInvocationContext } from '../../mcp/IMCPServer';
 import { defineTool, LocalToolMCP, type ToolDefinition } from '../../mcp/LocalToolMCP';
 import { stampSentinelDecision } from '../../mcp/ToolSet';
+import { REVIEW_HASH_ARGUMENT } from '../../permissions/approvalTokens';
 import { messageForDisplay } from '../../permissions/cardText';
 import { classifyHostToolCall } from '../../permissions/classifier';
 import type { SentinelHostContext } from '../../permissions/context';
@@ -336,7 +337,7 @@ export class GmailToolSet extends LocalToolMCP {
   #approvedParams(input: { call: CallToolRequest['params']; draft: ReviewableDraft | undefined }) {
     const args = input.call.arguments ?? {};
     return input.call.name === SEND_DRAFT_TOOL_NAME && input.draft !== undefined
-      ? { ...args, review_hash: hashDraft(input.draft) }
+      ? { ...args, [REVIEW_HASH_ARGUMENT]: hashDraft(input.draft) }
       : args;
   }
 
@@ -354,7 +355,7 @@ export class GmailToolSet extends LocalToolMCP {
     if (!assessed.ok) {
       throw new Error(assessed.reason);
     }
-    return { ...parsed, review_hash: hashDraft(assessed.draft) };
+    return { ...parsed, [REVIEW_HASH_ARGUMENT]: hashDraft(assessed.draft) };
   }
 
   /** A send the host stopped at dispatch went nowhere, and needs a fresh card; its receipt says so. */
@@ -814,7 +815,7 @@ export class GmailToolSet extends LocalToolMCP {
       if (!threading.ok) {
         return notSent('draft_changed', errorResult(this.#refuseSend(threading.reason)));
       }
-      const approved = context?.approved_params?.['review_hash'];
+      const approved = context?.approved_params?.[REVIEW_HASH_ARGUMENT];
       if (typeof approved !== 'string') {
         return notSent(
           'needs_ok_again',
