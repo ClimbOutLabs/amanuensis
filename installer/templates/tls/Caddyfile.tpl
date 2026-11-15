@@ -56,6 +56,6 @@ http://:@@HTTP_IN@@ {
 		redir https://{http.request.host}:@@HTTPS_PORT@@{uri} 308
 	}
 	handle {
-		respond "You opened Aman at {http.request.host}, which is not one of its addresses. To allow it, run this on the computer that runs Aman: aman address add {http.request.host}" 421
+		respond "You opened Aman at {http.request.host}, which is not one of its addresses. If you typed it in yourself, run this on the computer that runs Aman to allow it: aman address add {http.request.host}" 421
 	}
 }

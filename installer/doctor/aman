@@ -1114,7 +1114,7 @@ check_instance_network() {
   refused=$(refused_addresses "$name")
   if [ -n "$refused" ]; then
     # Not a fault of the instance, so --fix has nothing to do for it; the line says how to allow one.
-    record "$name" network ok "Aman opens at ${count} addresses of this computer, and sign-in works at each. In the last week it refused:${refused}. To allow one, run: aman address add ADDRESS" ""
+    record "$name" network ok "Aman opens at ${count} addresses of this computer, and sign-in works at each. In the last week it refused:${refused}. To allow one you opened yourself, run: aman address add ADDRESS" ""
     return
   fi
   record "$name" network ok "Aman opens at ${count} addresses of this computer, and sign-in works at each." ""

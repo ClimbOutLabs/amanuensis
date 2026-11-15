@@ -100,7 +100,7 @@ export function addressNotListedPage({
 <div class="card">
 <h1>Aman is not set up for this address</h1>
 <p>You opened Aman at <strong>${escapeHtml(shown)}</strong>, which is not one of its addresses. Aman refuses addresses it does not know, so sign-in cannot be sent anywhere else.</p>
-<p>To allow it, run this on the computer that runs Aman, then open this page again:</p>
+<p>Only allow an address you typed in yourself. To allow it, run this on the computer that runs Aman, then open this page again:</p>
 <code id="command" data-own-ports="${escapeHtml([...ownPorts].join(','))}">${escapeHtml(command)}</code>
 <button id="copy" type="button" hidden>Copy</button>
 <p>If this computer's address changed, run this there instead: aman doctor network --fix</p>
