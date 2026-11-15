@@ -19,6 +19,7 @@ import { SCHEDULE_AWAY_NOTE } from '@truefoundry/trueforge-core/core/schedules/s
 import type { Logger } from 'winston';
 import { z } from 'zod';
 
+import { isLoopbackHost } from '../../config';
 import type { SessionCustom, TurnCustom } from '../../db/sessionCustom';
 import type { ITelegramStore, TelegramConnection, TelegramPendingReply } from '../../db/telegramStore';
 import { telegramCallbackData } from './telegramChannel';
@@ -49,7 +50,36 @@ export interface TelegramReplyDeps {
   service: TelegramService;
   queue: TelegramSendQueue;
   sessionStore: Pick<ISessionStore<SessionCustom, TurnCustom>, 'getTurn'>;
+  /** Where the app can be opened from another device, so a message can link to its chat; undefined when only this computer can. */
+  appAddress: string | undefined;
   logger: Logger;
+}
+
+/**
+ * The app's address a phone could open, from the public address and the addresses the app may be opened at.
+ * A loopback address only works on the computer Aman runs on, so it is never linked.
+ */
+export function telegramAppAddress(input: {
+  publicBaseUrl: string;
+  allowedOrigins: readonly string[];
+}): string | undefined {
+  for (const candidate of [input.publicBaseUrl, ...input.allowedOrigins]) {
+    let url: URL;
+    try {
+      url = new URL(candidate);
+    } catch {
+      continue;
+    }
+    if (!isLoopbackHost(url.hostname)) {
+      return candidate.replace(/\/+$/, '');
+    }
+  }
+  return undefined;
+}
+
+/** The chat's own page in the app. */
+function chatLink(input: { appAddress: string; sessionId: string }): string {
+  return `${input.appAddress}/sessions/${encodeURIComponent(input.sessionId)}`;
 }
 
 /** The readable text of a finished turn's last message, or undefined when it ended without one. */
@@ -501,10 +531,23 @@ function approvalCardLines(card: Tier3Card): string[] {
   return lines;
 }
 
-const APP_ONLY_APPROVAL_LINE =
-  'Aman needs your ok for an action, but Telegram cannot show everything it will do. Open Aman to see it and answer there.';
-const TRUNCATED_APPROVAL_LINE =
-  'Part of this action is not shown in full, so it cannot be approved from Telegram. Open Aman to see the whole thing and answer there.';
+const NO_CARD_APPROVAL_LINE = 'Aman is waiting for your ok on something.';
+const IN_APP_LINE = "Telegram can't show all of it, so approve or deny it in Aman.";
+const TRUNCATED_APPROVAL_LINE = 'This is too long to show here in full, so approve or deny it in Aman.';
+
+/** A short ask for an action Telegram cannot show whole: what it is, and that the answer is given in the app. */
+function inAppApprovalLines(card: Tier3Card | null): string[] {
+  if (card === null) {
+    return [NO_CARD_APPROVAL_LINE, 'Approve or deny it in Aman.'];
+  }
+  const lines = [card.copy?.headline ?? card.plain_what];
+  const to = card.email?.to ?? [];
+  if (to.length > 0) {
+    lines.push(`To: ${to.map(mailboxLine).join(', ')}`);
+  }
+  lines.push(IN_APP_LINE);
+  return lines;
+}
 
 export interface TelegramApprovalPrompt {
   /** The text to send: the whole card, or the line that names the app when the card cannot be shown whole. */
@@ -545,11 +588,8 @@ export function approvalPrompt(action: ActionRequiredEvent, toolCallId: string):
     return undefined;
   }
   const card = call.tier3_card ?? null;
-  if (card === null) {
-    return { text: APP_ONLY_APPROVAL_LINE, complete: false, approve_label: 'Approve' };
-  }
-  if (cardHasUnshownField(card)) {
-    return { text: APP_ONLY_APPROVAL_LINE, complete: false, approve_label: 'Approve' };
+  if (card === null || cardHasUnshownField(card)) {
+    return { text: inAppApprovalLines(card).join('\n'), complete: false, approve_label: 'Approve' };
   }
   const lines = approvalCardLines(card);
   if (cardIsCut(card)) {
@@ -578,9 +618,22 @@ async function deliverOne(deps: TelegramReplyDeps, reply: TelegramPendingReply):
   await deps.store.deletePendingReply({ id: reply.id });
   const client = deps.service.clientFor(connection);
   const owner = { tenant_id: reply.tenant_id, created_by: reply.created_by };
-  const send = async (text: string, buttons?: readonly (readonly { text: string; callback_data: string }[])[]) => {
+  const send = async (
+    text: string,
+    options: {
+      buttons?: readonly (readonly { text: string; callback_data: string }[])[];
+      noLinkPreview?: boolean;
+    } = {},
+  ) => {
     try {
-      await sendTelegramText({ queue: deps.queue, client, chat_id: reply.chat_id, text, inline_buttons: buttons });
+      await sendTelegramText({
+        queue: deps.queue,
+        client,
+        chat_id: reply.chat_id,
+        text,
+        inline_buttons: options.buttons,
+        no_link_preview: options.noLinkPreview,
+      });
     } catch (error) {
       // One attempt is all a send gets; the answer stays in the app.
       deps.logger.warn('A Telegram reply could not be sent', {
@@ -610,7 +663,13 @@ async function deliverOne(deps: TelegramReplyDeps, reply: TelegramPendingReply):
         if (!prompt.complete) {
           // Telegram cannot show this action whole, so it gets no buttons and no row for a
           // button to point at: the ask is named, and the app is where it is answered.
-          await send(prompt.text);
+          if (deps.appAddress === undefined) {
+            await send(prompt.text);
+          } else {
+            await send(`${prompt.text}\n${chatLink({ appAddress: deps.appAddress, sessionId: reply.session_id })}`, {
+              noLinkPreview: true,
+            });
+          }
           continue;
         }
         const pending = await deps.store.addPendingApproval({
@@ -624,15 +683,17 @@ async function deliverOne(deps: TelegramReplyDeps, reply: TelegramPendingReply):
           prompt: prompt.text,
           expires_at: call.expires_at ?? null,
         });
-        await send(prompt.text, [
-          [
-            {
-              text: prompt.approve_label,
-              callback_data: telegramCallbackData({ decision: 'allow', approval_id: pending.id }),
-            },
-            { text: 'Deny', callback_data: telegramCallbackData({ decision: 'deny', approval_id: pending.id }) },
+        await send(prompt.text, {
+          buttons: [
+            [
+              {
+                text: prompt.approve_label,
+                callback_data: telegramCallbackData({ decision: 'allow', approval_id: pending.id }),
+              },
+              { text: 'Deny', callback_data: telegramCallbackData({ decision: 'deny', approval_id: pending.id }) },
+            ],
           ],
-        ]);
+        });
       }
     }
     if (appOnly) {

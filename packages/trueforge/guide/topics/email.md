@@ -12,6 +12,8 @@ How to get there: Click **Chats** in the left bar, then **New chat**, and ask ab
 
     Connect your email first. You can connect Gmail, or another email account with an app password. See [Connect email and calendar](connect-mail-calendar.md).
 
+    If no email is connected, Aman may offer to connect it right in the chat when you ask for something that needs email. You still connect in Settings, and a password never goes in a chat. If you pick **Not now** on the card Aman shows, Aman remembers that choice and does not offer again. You can still connect any time in **Settings**, then **Connectors**, from the **Email** card.
+
 ## Go through your mail
 
 1. Click **Chats** in the left bar, then click **New chat**.

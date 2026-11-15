@@ -26,10 +26,12 @@ A few cards on the new chat screen help too:
 
 Reading your calendar runs without asking.
 
+If you connected more than one calendar account, reads span every account, and answers say which account each calendar and event belongs to. Ask for one account by name to hear only about that one.
+
 ## Add or change an event
 
 1. Ask, such as "Add lunch with Sam on Friday at 12:30 for an hour".
-2. A card asks "Add "Lunch with Sam" to your calendar?" and shows exactly what will be saved: the calendar, title, time, time zone, length, place and guests.
+2. A card asks "Add "Lunch with Sam" to your calendar?" and shows exactly what will be saved: the calendar and the account it belongs to, title, time, time zone, length, place and guests.
 3. For a change, the card shows the event as it is now, and how it will look after the change.
 4. Click **Allow** to save it. Click **Change it** to ask Aman to fix something first. Click **Not now** to leave your calendar as it is.
 

@@ -30,7 +30,7 @@ import { useInstalledSkill } from '../hooks/useInstalledSkill.js';
 import { useActiveSessionCanManage } from '../hooks/useResourcePermissions.js';
 import { useHighlightedCard } from '../hooks/useRewardLedger.js';
 import { useWaitingToolCallIds } from '../hooks/useWaitingToolCallIds.js';
-import { ALWAYS_ALLOW_TOOL_OPTION_ID, offersChangeIt, SAVE_DRAFT_OPTION_ID } from '../sentinel/approvalChoices.js';
+import { ALWAYS_ALLOW_TOOL_OPTION_ID, offersChangeIt } from '../sentinel/approvalChoices.js';
 import { EmailApprovalCard } from '../sentinel/EmailApprovalCard.js';
 import { PermissionApprovalCard } from '../sentinel/PermissionApprovalCard.js';
 import { SendReceiptCard } from '../sentinel/SendReceiptCard.js';
@@ -265,8 +265,6 @@ function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
             }
           }
         : undefined;
-    // A draft option exists only when the server offers it on this approval; otherwise no button shows.
-    const saveDraftOption = options.find(option => option.id === SAVE_DRAFT_OPTION_ID);
     // A "Change it" answer is a denial that carries the person's words, so the call never runs.
     const onChangeRequest = offersChangeIt(approvalInfo.card)
       ? (text: string) => onSelectOption(denyOption?.id ?? '__deny', changeRequestReason(text))
@@ -279,11 +277,6 @@ function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
           onApprove={fromAccount => onSelectOption(allowOnceId, undefined, fromAccount)}
           onDeny={onDeny}
           onChangeRequest={onChangeRequest}
-          onSaveDraft={
-            saveDraftOption === undefined
-              ? undefined
-              : fromAccount => onSelectOption(SAVE_DRAFT_OPTION_ID, undefined, fromAccount)
-          }
           disabled={!canManageSession}
         />
       );

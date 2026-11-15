@@ -9,6 +9,12 @@ import {
   telegramCallbackData,
   type TelegramTurnPort,
 } from '../../../../src/runtime/telegram/telegramChannel';
+import {
+  createTelegramCommandMenu,
+  telegramChoiceKey,
+  type TelegramChatControlsPort,
+  type TelegramChoice,
+} from '../../../../src/runtime/telegram/telegramChatControls';
 import { createTelegramService } from '../../../../src/runtime/telegram/telegramService';
 import type { TelegramMessage, TelegramUpdate } from '../../../../src/schemas/telegram';
 import {
@@ -40,22 +46,89 @@ class FakeTurnPort implements TelegramTurnPort {
   }
 }
 
+/** A chat with two models, a persona and one connector, changed in memory. */
+class FakeControlsPort implements TelegramChatControlsPort {
+  model = 'house/big';
+  persona: string | null = null;
+  connectorsOn = new Set<string>();
+  freshChats = 0;
+
+  setup() {
+    return Promise.resolve({
+      model: this.model,
+      persona: this.persona ?? 'Mannie',
+      persona_model: null,
+      connectors: [...this.connectorsOn],
+    });
+  }
+  models(): Promise<TelegramChoice[]> {
+    return Promise.resolve(
+      ['house/big', 'house/small'].map(name => ({
+        key: telegramChoiceKey(name),
+        label: name,
+        current: name === this.model,
+      })),
+    );
+  }
+  setModel({ key }: { key: string }) {
+    const name = ['house/big', 'house/small'].find(candidate => telegramChoiceKey(candidate) === key);
+    if (name !== undefined) {
+      this.model = name;
+    }
+    return Promise.resolve(name);
+  }
+  personas(): Promise<TelegramChoice[]> {
+    return Promise.resolve([
+      { key: 'default', label: 'Mannie', current: this.persona === null },
+      { key: telegramChoiceKey('zara'), label: 'Zara', current: this.persona === 'Zara' },
+    ]);
+  }
+  setPersona({ key }: { key: string }) {
+    this.persona = key === 'default' ? null : key === telegramChoiceKey('zara') ? 'Zara' : this.persona;
+    return Promise.resolve(key === 'default' ? 'Mannie' : key === telegramChoiceKey('zara') ? 'Zara' : undefined);
+  }
+  connectors(): Promise<TelegramChoice[]> {
+    return Promise.resolve([
+      { key: telegramChoiceKey('notes'), label: 'notes', current: this.connectorsOn.has('notes') },
+    ]);
+  }
+  toggleConnector({ key }: { key: string }) {
+    if (key !== telegramChoiceKey('notes')) {
+      return Promise.resolve(undefined);
+    }
+    const on = !this.connectorsOn.has('notes');
+    if (on) {
+      this.connectorsOn.add('notes');
+    } else {
+      this.connectorsOn.delete('notes');
+    }
+    return Promise.resolve({ label: 'notes', on });
+  }
+  newChat() {
+    this.freshChats += 1;
+    return Promise.resolve();
+  }
+}
+
 function harness(connection: TelegramConnection) {
   const store = new InMemoryTelegramStore();
   store.connection = connection;
   const client = new FakeTelegramClient();
   const service = createTelegramService({ store, publicBaseUrl: 'http://localhost', createClient: () => client });
   const turns = new FakeTurnPort();
+  const controls = new FakeControlsPort();
   const deps = {
     store,
     service,
     queue: immediateQueue,
     turns,
+    controls,
+    commandMenu: createTelegramCommandMenu(),
     logger,
     refusals: createTelegramRefusalThrottle(),
     newCode: () => '654321',
   };
-  return { store, client, turns, deps };
+  return { store, client, turns, controls, deps };
 }
 
 function messageUpdate(input: {
@@ -289,6 +362,8 @@ describe('telegram channel refusals', () => {
       service,
       queue: immediateQueue,
       turns,
+      controls: new FakeControlsPort(),
+      commandMenu: createTelegramCommandMenu(),
       logger,
       refusals: createTelegramRefusalThrottle(),
       now: () => now,
@@ -380,5 +455,89 @@ describe('telegram channel approvals', () => {
     expect(turns.approvals).toHaveLength(0);
     expect(store.pendingApprovals).toHaveLength(0);
     expect(client.answeredCallbacks[0]?.text).toBe('That action has expired. Open Aman to see it.');
+  });
+});
+
+describe('telegram command menu', () => {
+  const paired = (text: string, update_id = 1) => messageUpdate({ update_id, message: { text } });
+  // The store only takes updates newer than the last one, so each tap gets its own id.
+  let nextTap = 50;
+  const tap = (data: string, from_id = 555): TelegramUpdate => ({
+    update_id: nextTap++,
+    callback_query: { id: 'cb-1', from: { id: from_id, first_name: 'Person' }, data },
+  });
+
+  it('sets the menu in the paired chat once, the first time the paired person writes', async () => {
+    const { client, deps } = harness(fakePairedConnection());
+    await processTelegramUpdate(deps, { connection: fakePairedConnection(), update: paired('/status', 1) });
+    await processTelegramUpdate(deps, { connection: fakePairedConnection(), update: paired('/status', 2) });
+    expect(client.commandMenus).toEqual([
+      { chat_id: '777', commands: ['new', 'model', 'persona', 'connectors', 'status'] },
+    ]);
+  });
+
+  it('answers /status with what the chat uses, and starts no turn', async () => {
+    const { client, turns, deps } = harness(fakePairedConnection());
+    await processTelegramUpdate(deps, { connection: fakePairedConnection(), update: paired('/status') });
+    expect(client.sent[0]?.text).toBe('Model: house/big\nPersona: Mannie\nConnectors on: None');
+    expect(turns.started).toHaveLength(0);
+  });
+
+  it('offers one button per model with the one in use ticked, and a tap switches', async () => {
+    const { client, controls, deps } = harness(fakePairedConnection());
+    await processTelegramUpdate(deps, { connection: fakePairedConnection(), update: paired('/model@test_bot') });
+    const buttons = client.sent[0]?.inline_buttons?.map(row => row[0]?.text);
+    expect(buttons).toEqual(['✓ house/big', 'house/small']);
+    const small = client.sent[0]?.inline_buttons?.[1]?.[0]?.callback_data ?? '';
+    await processTelegramUpdate(deps, { connection: fakePairedConnection(), update: tap(small) });
+    expect(controls.model).toBe('house/small');
+    expect(client.sent.at(-1)?.text).toBe('This chat now uses house/small.');
+    expect(client.answeredCallbacks.at(-1)?.text).toBe('Switched.');
+  });
+
+  it('switches the persona and turns a connector on and off from buttons', async () => {
+    const { client, controls, deps } = harness(fakePairedConnection());
+    await processTelegramUpdate(deps, { connection: fakePairedConnection(), update: paired('/persona') });
+    const zara = client.sent[0]?.inline_buttons?.[1]?.[0]?.callback_data ?? '';
+    await processTelegramUpdate(deps, { connection: fakePairedConnection(), update: tap(zara) });
+    expect(controls.persona).toBe('Zara');
+    expect(client.sent.at(-1)?.text).toBe('Zara answers from now on.');
+
+    await processTelegramUpdate(deps, { connection: fakePairedConnection(), update: paired('/connectors', nextTap++) });
+    const notes = client.sent.at(-1)?.inline_buttons?.[0]?.[0]?.callback_data ?? '';
+    await processTelegramUpdate(deps, { connection: fakePairedConnection(), update: tap(notes) });
+    expect(client.sent.at(-1)?.text).toBe('notes is on for this chat.');
+    await processTelegramUpdate(deps, { connection: fakePairedConnection(), update: tap(notes) });
+    expect(client.sent.at(-1)?.text).toBe('notes is off for this chat.');
+  });
+
+  it('starts a fresh chat on /new', async () => {
+    const { client, controls, deps } = harness(fakePairedConnection());
+    await processTelegramUpdate(deps, { connection: fakePairedConnection(), update: paired('/new') });
+    expect(controls.freshChats).toBe(1);
+    expect(client.sent[0]?.text).toBe('Started a fresh chat. The earlier one stays in Aman.');
+  });
+
+  it('ignores a menu button tapped by anyone but the paired person', async () => {
+    const { client, controls, deps } = harness(fakePairedConnection());
+    await processTelegramUpdate(deps, {
+      connection: fakePairedConnection(),
+      update: tap(`tc:m:${telegramChoiceKey('house/small')}`, 999),
+    });
+    expect(controls.model).toBe('house/big');
+    expect(client.answeredCallbacks.at(-1)?.text).toBe('Only the person this bot is paired with can change this.');
+  });
+
+  it('sends an unknown command and a forwarded command to the assistant as ordinary messages', async () => {
+    const { turns, deps } = harness(fakePairedConnection());
+    await processTelegramUpdate(deps, { connection: fakePairedConnection(), update: paired('/weather', 1) });
+    await processTelegramUpdate(deps, {
+      connection: fakePairedConnection(),
+      update: messageUpdate({
+        update_id: 2,
+        message: { text: '/model', forward_origin: { type: 'hidden_user', date: 1, sender_user_name: 'Pat' } },
+      }),
+    });
+    expect(turns.started).toHaveLength(2);
   });
 });

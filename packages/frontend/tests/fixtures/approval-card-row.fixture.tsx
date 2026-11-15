@@ -166,14 +166,7 @@ createRoot(rootElement).render(
         />
       </section>
       <section data-row-card="email">
-        <EmailApprovalCard
-          approvalId="email"
-          card={emailCard}
-          onApprove={noop}
-          onDeny={noop}
-          onChangeRequest={noop}
-          onSaveDraft={noop}
-        />
+        <EmailApprovalCard approvalId="email" card={emailCard} onApprove={noop} onDeny={noop} onChangeRequest={noop} />
       </section>
       <section data-row-card="email-new-recipient">
         <EmailApprovalCard
@@ -182,7 +175,6 @@ createRoot(rootElement).render(
           onApprove={noop}
           onDeny={noop}
           onChangeRequest={noop}
-          onSaveDraft={noop}
         />
       </section>
       <section data-row-card="command">

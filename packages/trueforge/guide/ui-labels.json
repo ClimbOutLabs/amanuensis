@@ -108,7 +108,6 @@
   "Dark": "packages/trueforge-ui/src/containers/SettingsBuilder/ThemeSettings.tsx",
   "Allow": "packages/trueforge-ui/src/sentinel/approvalCopy.ts",
   "Always allow in this chat": "packages/trueforge-ui/src/sentinel/approvalChoices.ts",
-  "Save as draft": "packages/trueforge-ui/src/sentinel/approvalChoices.ts",
   "Add and send": "packages/trueforge-ui/src/sentinel/approvalChoices.ts",
   "Add and save draft": "packages/trueforge-ui/src/sentinel/approvalChoices.ts",
   "Send message": "packages/trueforge-ui/src/atoms/ComposerSections.tsx",
