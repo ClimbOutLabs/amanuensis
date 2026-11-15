@@ -10,7 +10,9 @@ ending() {
   printf '%s\n' "$OUT" | sed -n '/^+- \[ 6 of 6 \]  Checking the result/,$p' |
     sed "s|$SB_INSTALLER|<checkout>/installer|g; s|$AMAN_HOME|<home>|g" |
     sed -E 's/([0-9A-F]{2}:){31}[0-9A-F]{2}/<fingerprint>/g; s/^  ([0-9A-F]{2}:){16}$/  <fingerprint, first half>/; s/^  ([0-9A-F]{2}:){15}[0-9A-F]{2}$/  <fingerprint, second half>/' |
-    awk '/^$/ { held = 1; next } /^Done in / { held = 0; next } { if (held) print ""; held = 0; print }'
+    awk '/^$/ { held = 1; next } /^Done in / { held = 0; next }
+      /^-+ Done in [^-]+ --$/ { rule = $0; gsub(/./, "-", rule); $0 = rule }
+      { if (held) print ""; held = 0; print }'
 }
 
 TF_KEY=tf-key-0123456789abcdef
