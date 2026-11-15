@@ -253,6 +253,7 @@ Read [AGENTS.md](AGENTS.md) and any package-level `AGENTS.md` before changing co
 | `packages/trueforge`      | HTTP server, storage, providers and Aman's host features               |
 | `packages/trueforge-core` | Agent runtime, tool orchestration and session contracts                |
 | `packages/trueforge-chat` | Non-visual chat client machinery shared by the web UI and terminal app |
+| `packages/aman-tui`       | The terminal app: pair once with a one-time code, then chat            |
 | `packages/frontend`       | The browser app                                                        |
 | `packages/trueforge-ui`   | UI components and server-facing UI contracts                           |
 | `packages/trueforge-sdk`  | Generated TypeScript SDK                                               |

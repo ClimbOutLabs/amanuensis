@@ -93,6 +93,7 @@
             "pages": [
               "chat-ui",
               "voice-input",
+              "terminal-app",
               "ui-sdk/get-started/quickstart",
               {
                 "group": "Frontend Customisation",
