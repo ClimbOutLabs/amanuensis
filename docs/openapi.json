@@ -15003,6 +15003,10 @@
               "null"
             ]
           },
+          "calendar_unread": {
+            "description": "True when a calendar is connected but none of its accounts could be read just now. The day then lists no events and no free time, since neither is known.",
+            "type": "boolean"
+          },
           "due": {
             "description": "Reminders due today or overdue, earliest first.",
             "items": {
@@ -15032,6 +15036,7 @@
         "required": [
           "calendar",
           "free_after",
+          "calendar_unread",
           "due",
           "needs_ok",
           "needs_ok_more",
