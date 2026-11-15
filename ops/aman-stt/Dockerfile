@@ -23,7 +23,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 RUN useradd --create-home --uid 10001 stt
 
 # Hugging Face cache layout for the pinned revision (see _offline_snapshot_dir in aman_stt.py).
-# Files are read-only and owned by root: the service only reads them.
+# Files are read-only and owned by root: the service only reads them. The folders are made here with the
+# normal mode: --chmod on ADD would also set the folders to 0644, which drops the search bit, so the
+# service user could not see the snapshot and would try to download it.
+RUN mkdir -p /opt/aman-stt-models/models--Systran--faster-whisper-small/snapshots/536b0662742c02347bc0e980a01041f333bce120
 ADD --chmod=0644 --checksum=sha256:b55496ac7940a7ae47d2c01eab40edfd8701feec1229d9cce3b40014383fb828 https://huggingface.co/Systran/faster-whisper-small/resolve/536b0662742c02347bc0e980a01041f333bce120/config.json /opt/aman-stt-models/models--Systran--faster-whisper-small/snapshots/536b0662742c02347bc0e980a01041f333bce120/config.json
 ADD --chmod=0644 --checksum=sha256:3e305921506d8872816023e4c273e75d2419fb89b24da97b4fe7bce14170d671 https://huggingface.co/Systran/faster-whisper-small/resolve/536b0662742c02347bc0e980a01041f333bce120/model.bin /opt/aman-stt-models/models--Systran--faster-whisper-small/snapshots/536b0662742c02347bc0e980a01041f333bce120/model.bin
 ADD --chmod=0644 --checksum=sha256:fb7b63191e9bb045082c79fd742a3106a12c99513ab30df4a0d47fa6cb6fd0ab https://huggingface.co/Systran/faster-whisper-small/resolve/536b0662742c02347bc0e980a01041f333bce120/tokenizer.json /opt/aman-stt-models/models--Systran--faster-whisper-small/snapshots/536b0662742c02347bc0e980a01041f333bce120/tokenizer.json
