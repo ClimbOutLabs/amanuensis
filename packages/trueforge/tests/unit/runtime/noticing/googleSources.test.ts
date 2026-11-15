@@ -181,6 +181,11 @@ describe('Gmail source', () => {
     return { api, listMessages };
   }
 
+  it('states that it reports sender confirmation, from the Authentication-Results it passes on', () => {
+    const { api } = gmail({ messages: [], perPage: 1 });
+    expect(gmailMailSource(api).reportsSenderConfirmation).toBe(true);
+  });
+
   it('pages through the inbox by message and hands back the oldest mail first', async () => {
     const messages = [3, 2, 1].map(n => message({ id: String(n), thread: `t-${String(n)}`, at: minute(50 + n) }));
     const { api, listMessages } = gmail({ messages, perPage: 1 });

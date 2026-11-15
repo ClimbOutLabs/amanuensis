@@ -77,6 +77,8 @@ describe('PersonalizationPanel', () => {
     );
 
     const nameField = await screen.findByLabelText('Your name');
+    // Lets the loaded profile finish filling the form, so it cannot land on top of the typed text.
+    await act(async () => {});
     const addressField = screen.getByLabelText('How Aman should address you');
     const [firstSection] = screen.getAllByRole('region');
     expect(firstSection).toHaveAccessibleName('About you');
@@ -344,6 +346,8 @@ describe('PersonalizationPanel', () => {
     // The learned profile is edited under Settings > Memory, not here: neither sub-tab shows
     // it, but it stays on the profile this form saves.
     const nameField = await screen.findByLabelText('Your name');
+    // Lets the loaded profile finish filling the form, so it cannot land on top of the typed text.
+    await act(async () => {});
     expect(screen.queryByRole('heading', { name: 'Learned profile' })).not.toBeInTheDocument();
     fireEvent.change(nameField, { target: { value: 'Sam Rivera' } });
 

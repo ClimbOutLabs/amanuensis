@@ -95,6 +95,7 @@ import {
   sandboxCommandUsesUnstructuredOperation,
   sandboxCommandWebEgressRejection,
   sandboxInvocationPolicy,
+  sandboxUnstructuredOperationName,
   sandboxVerifyCommandUsesInlineEval,
   sandboxVerifyCommandUsesUnsafeSyntax,
   type SandboxCommandEffect,
@@ -1940,6 +1941,22 @@ function execInterpreterGuardFailure(input: {
   return verdict.verdict === 'reject' ? interpreterInvocationRefusal(verdict.reason) : undefined;
 }
 
+/**
+ * Names what was refused and the route that works. run_code is offline, so a job that needs a website (often a
+ * skill whose instructions loop over curl) has to go through a script file run by exec instead.
+ */
+function unstructuredCommandRefusal(command: string): string {
+  return (
+    `This command was not run because it uses ${sandboxUnstructuredOperationName(command)}. ` +
+    'exec runs plain commands only, so the approval shows exactly what runs; pipes between plain commands are fine. ' +
+    'Do not retry it in another shell form. ' +
+    "For a loop, several steps, or one command's output feeding the next, write the steps as a Python script with write_file and run that file with exec, for example python3 fetch.py. " +
+    'That script reaches the same websites a plain command could. run_code is offline and cannot reach any website. ' +
+    'To read a file use cat, head or sed -n; to edit one use apply_patch or replace_text. ' +
+    "To trim long output, use the exec tool's output.head_lines, output.tail_lines or output.grep fields."
+  );
+}
+
 const OFFLINE_NETWORK_COMMAND_REFUSAL =
   'This sandbox is offline by design, so this command cannot reach the internet and was not run. Do not retry it and do not try another tool for the same job. Tell the user in plain words that you cannot open websites from here.';
 
@@ -2017,7 +2034,7 @@ function sandboxExecPreflightFailure(input: {
     (input.purpose === 'inspect' || input.purpose === 'edit' || input.purpose === 'execute') &&
     sandboxCommandUsesUnstructuredOperation(input.command)
   ) {
-    return "Unstructured shell redirection, heredocs, tee, and inline Python evaluation are not allowed for inspect, edit, or execute-purpose exec calls. Inspect a file with a plain exec command such as cat, head or sed -n, use write_file for a new file, apply_patch/replace_text for an edit, or run_code for Python or Node code. To trim long output, use the exec tool's output.head_lines, output.tail_lines or output.grep fields instead of a shell pipe.";
+    return unstructuredCommandRefusal(input.command);
   }
   // Verification has to stay observable: redirection, substitution, and
   // backgrounding hide what the check actually ran, so a green result would

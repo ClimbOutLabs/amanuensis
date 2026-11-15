@@ -35,6 +35,8 @@ Every change applies only to the Telegram chat and is the same setting the app s
 
 **A deleted chat is named, never silently replaced.** When the person deletes the Telegram chat in the app, the next message starts a new chat and the bot first says the earlier chat was deleted in Aman, so the person does not take the new chat for the old one.
 
+**What is typed in the app reaches Telegram too.** A message typed in a Telegram chat in the app, and its answer, are sent to Telegram after the answer is done, the person's words first and marked "You, in Aman:". Only chats Telegram made are copied, only for the person who paired the bot, and only their text: a file stays in the app. An ask for the person's ok raised there is answered in the app, so Telegram gets a line pointing to it and never Approve and Deny buttons.
+
 **Forwarded and unknown commands are ordinary messages.** A forwarded `/model` is something to read, never an instruction, and an unknown command goes to the assistant.
 
 ## Scope
@@ -42,15 +44,16 @@ Every change applies only to the Telegram chat and is the same setting the app s
 - The command menu and its handling in the Telegram channel
 - Reading and changing the Telegram chat's model, persona and connectors
 - Persona context and persona memory for Telegram turns
+- Copying what is typed in the app's Telegram chats to Telegram
 - The Telegram help page and the privacy page
 
 ## Privacy
 
-The names of the person's models, personas and connectors pass through Telegram's servers when they use the menu. The privacy page lists this. Nothing else new leaves the device.
+The names of the person's models, personas and connectors pass through Telegram's servers when they use the menu. What the person types in a Telegram chat in the app, and its answer, pass through them too. The privacy page lists both. Nothing else new leaves the device.
 
 ## Testing
 
-Unit tests with a fake Telegram client cover each command, each kind of tap, a stranger's tap, and forwarded and unknown commands. A server test switches the model with a tap and starts a fresh chat with `/new`. All tests use synthetic data.
+Unit tests with a fake Telegram client cover each command, each kind of tap, a stranger's tap, and forwarded and unknown commands. A server test switches the model with a tap, starts a fresh chat with `/new`, and checks that only the Telegram chat's app messages are owed to Telegram. All tests use synthetic data.
 
 ## Out of Scope
 
