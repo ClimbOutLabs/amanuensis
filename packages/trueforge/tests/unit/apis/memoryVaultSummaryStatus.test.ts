@@ -5,7 +5,7 @@
  * failed summary never shows as another agent's.
  */
 import { OpenAPIHono } from '@hono/zod-openapi';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import winston from 'winston';
@@ -23,7 +23,12 @@ const ALICE: RequestContext = {
 };
 
 const SummaryStatusResponseSchema = z.object({
-  data: z.object({ summary_pending: z.boolean(), failed_at: z.string().nullable() }),
+  data: z.object({
+    summary_pending: z.boolean(),
+    failed_at: z.string().nullable(),
+    cause: z.string().nullable(),
+    session_id: z.string().nullable(),
+  }),
 });
 
 describe('memory vault summary status', () => {
@@ -107,5 +112,52 @@ describe('memory vault summary status', () => {
     // A later failed summary shows the note again.
     await zaraClient.noteSummaryOutcome({ outcome: 'failed', reason: 'model_timeout' });
     expect(await summaryPending('persona:Zara')).toBe(true);
+  });
+
+  async function statusAfter(note: { reason: string; sessionId?: string }) {
+    const client = new MarkdownMemoryClient({ baseDir, namespace: 'default' });
+    await client.noteSummaryOutcome({ outcome: 'failed', ...note });
+    const response = await app.request('/api/v1/memory/vault/summary-status');
+    return SummaryStatusResponseSchema.parse(await response.json()).data;
+  }
+
+  it('says why the summary failed and which chat it was for', async () => {
+    expect(await statusAfter({ reason: 'model_timeout', sessionId: 'chat-oat-bars' })).toMatchObject({
+      summary_pending: true,
+      cause: 'model_too_slow',
+      session_id: 'chat-oat-bars',
+    });
+    expect(await statusAfter({ reason: 'model_failed', sessionId: 'chat-2' })).toMatchObject({ cause: 'model_error' });
+    expect(await statusAfter({ reason: 'model_unresolved' })).toMatchObject({ cause: 'model_not_found' });
+    for (const reason of ['summary_cut_short', 'summary_empty', 'summary_too_long', 'summary_unreadable']) {
+      expect(await statusAfter({ reason })).toMatchObject({ cause: 'answer_unusable' });
+    }
+    expect(await statusAfter({ reason: 'summary_not_finished', sessionId: 'chat-3' })).toMatchObject({
+      cause: 'interrupted',
+      session_id: 'chat-3',
+    });
+  });
+
+  it('still shows a mark left by an older version, with no chat, and one with a reason it has no words for', async () => {
+    const folder = join(baseDir, 'default');
+    await mkdir(folder, { recursive: true });
+    await writeFile(
+      join(folder, '.summary-pending.json'),
+      JSON.stringify({ failed_at: '2026-08-14T12:00:00.000Z', reason: 'model_timeout' }),
+    );
+    const older = await app.request('/api/v1/memory/vault/summary-status');
+    expect(SummaryStatusResponseSchema.parse(await older.json()).data).toEqual({
+      summary_pending: true,
+      failed_at: '2026-08-14T12:00:00.000Z',
+      cause: 'model_too_slow',
+      session_id: null,
+    });
+
+    expect(await statusAfter({ reason: 'a_reason_added_later' })).toMatchObject({
+      summary_pending: true,
+      cause: null,
+      session_id: null,
+    });
+    expect(await summaryPending('persona:Zara')).toBe(false);
   });
 });

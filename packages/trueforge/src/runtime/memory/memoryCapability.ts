@@ -1865,7 +1865,11 @@ export class MemoryProcessor implements PreLLMProcessor, PreLLMEphemeralAgentCon
   ): Promise<void> {
     if (!this.keepsFullExchange) {
       try {
-        await this.client.noteSummaryOutcome?.({ outcome: 'failed', reason: 'summary_not_finished' });
+        await this.client.noteSummaryOutcome?.({
+          outcome: 'failed',
+          reason: 'summary_not_finished',
+          sessionId: this.sessionId,
+        });
       } catch (error) {
         this.logger.debug('Marking the unfinished summary failed', {
           reason: error instanceof Error ? error.message : String(error),

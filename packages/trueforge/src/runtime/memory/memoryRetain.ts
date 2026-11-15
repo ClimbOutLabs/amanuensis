@@ -381,6 +381,9 @@ async function decidePersonFacts(params: SubmitRetainParams): Promise<TurnMemory
     });
     return { kind: 'exchange', notes: fullReplyNotes(params) };
   }
+  // A failed summary's log line says how long the model was given, so a slow model shows as one.
+  const askedAt = Date.now();
+  const secondsTaken = (): number => Math.round((Date.now() - askedAt) / 1000);
   try {
     const result = await summarizeTurnContent({
       userText: params.userText,
@@ -431,7 +434,11 @@ async function decidePersonFacts(params: SubmitRetainParams): Promise<TurnMemory
       case 'failed':
         params.logger.debug('Memory summarization failed', { reason: result.reason });
         await recordSummaryOutcome(params, { outcome: 'failed', reason: result.fallback });
-        logTurnMemoryNotSaved(params, { message: 'the summary failed', reason: result.fallback });
+        logTurnMemoryNotSaved(params, {
+          message: 'the summary failed',
+          reason: result.fallback,
+          seconds: secondsTaken(),
+        });
         return { kind: 'nothing' };
       case 'skipped':
         params.logger.debug('Memory summarization skipped', { reason: result.reason });
@@ -447,7 +454,7 @@ async function decidePersonFacts(params: SubmitRetainParams): Promise<TurnMemory
       reason: error instanceof Error ? error.message : String(error),
     });
     await recordSummaryOutcome(params, { outcome: 'failed', reason: 'model_failed' });
-    logTurnMemoryNotSaved(params, { message: 'the summary failed', reason: 'model_failed' });
+    logTurnMemoryNotSaved(params, { message: 'the summary failed', reason: 'model_failed', seconds: secondsTaken() });
     return { kind: 'nothing' };
   }
 }
@@ -490,7 +497,7 @@ async function recordSummaryOutcome(
   note: { outcome: 'summarized' | 'failed'; reason?: SummaryFallbackReason | undefined },
 ): Promise<void> {
   try {
-    await params.client.noteSummaryOutcome?.(note);
+    await params.client.noteSummaryOutcome?.({ ...note, sessionId: params.sessionId });
   } catch (error) {
     params.logger.debug('Recording the turn summary outcome failed', {
       sessionId: params.sessionId,
@@ -501,7 +508,10 @@ async function recordSummaryOutcome(
 }
 
 /** Info line for a turn that adds nothing to memory, with the one reason; interactive turns only. */
-function logTurnMemoryNotSaved(params: SubmitRetainParams, why: { message: string; reason: string }): void {
+function logTurnMemoryNotSaved(
+  params: SubmitRetainParams,
+  why: { message: string; reason: string; seconds?: number },
+): void {
   if (params.outcomeLog === undefined) {
     return;
   }
@@ -510,6 +520,7 @@ function logTurnMemoryNotSaved(params: SubmitRetainParams, why: { message: strin
     turnId: params.turnId,
     personaName: params.outcomeLog.personaName,
     reason: why.reason,
+    ...(why.seconds === undefined ? {} : { seconds: why.seconds }),
   });
 }
 

@@ -56,3 +56,5 @@ docker compose exec server node -e "fetch('http://calendar-caldav:9558/mcp', {me
 ```
 
 The answer lists the eight tools above. To run the same check without Docker, use `pnpm test:calendar-sidecar`.
+
+The Dockerfile copies the connector's files one by one. When you add a file the connector loads, add it to the `COPY` line too. `pnpm test:calendar-sidecar` fails when a file the start command loads is not copied.

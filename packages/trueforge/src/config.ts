@@ -2315,6 +2315,13 @@ export interface SharedServerConfiguration {
    */
   MEMORY_SUMMARIZE: boolean;
   /**
+   * How long Aman waits before it asks again for a turn summary that ran out of time, in milliseconds.
+   * The wait gives a model that was busy with a reply time to come free.
+   *
+   * Env: `MEMORY_SUMMARY_RETRY_WAIT_MS`. Default 90000 (90 seconds).
+   */
+  MEMORY_SUMMARY_RETRY_WAIT_MS: number;
+  /**
    * Whether each note saved to the daily log is sorted onto the people and matter pages: `off` does nothing,
    * `report` asks the model and only records what it would have done in the vault's `.sorter-report.jsonl`,
    * `on` writes the pages.
@@ -3154,6 +3161,11 @@ const shared: SharedServerConfiguration = {
     envKey: 'MEMORY_SUMMARIZE',
     raw: getEnv('MEMORY_SUMMARIZE'),
     defaultValue: true,
+  }),
+  MEMORY_SUMMARY_RETRY_WAIT_MS: parsePositiveInt({
+    envKey: 'MEMORY_SUMMARY_RETRY_WAIT_MS',
+    raw: getEnv('MEMORY_SUMMARY_RETRY_WAIT_MS'),
+    defaultValue: 90_000,
   }),
   MEMORY_PAGE_SORTING: parsePageSortMode({
     envKey: 'MEMORY_PAGE_SORTING',
