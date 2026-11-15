@@ -49,6 +49,13 @@ describe('parseRecallFacts', () => {
     expect(facts.map(fact => fact.text)).toEqual(['Ana is a friend', 'The ferry leaves at 9']);
   });
 
+  it('finds the latest turn whichever way round the turns arrive, as the server lists the newest first', () => {
+    const older = turnContext('t1', blockOf(['[2026-08-14] The gate code is 4417']));
+    const newer = turnContext('t2', blockOf(['[2026-08-20] The ferry leaves at 9']));
+    expect(parseRecallFacts([newer, older]).map(fact => fact.text)).toEqual(['The ferry leaves at 9']);
+    expect(parseRecallFacts([turnContext('t2', null), older])).toEqual([]);
+  });
+
   it('shows nothing when the latest turn recalled nothing, whatever earlier turns recalled', () => {
     const older = turnContext('t1', blockOf(['[2026-08-14] The gate code is 4417']));
     const newer = turnContext('t2', null);
@@ -69,7 +76,8 @@ describe('parseRecallFacts', () => {
     const facts = parseRecallFacts([turn]);
     expect(facts).toHaveLength(4);
     expect(facts[0]).toMatchObject({ source: 'person', origin: 'You said this · Aug 14, 2026' });
-    expect(facts[1]).toMatchObject({ source: 'read' });
+    // No source is known for it, so it is not called something that was read.
+    expect(facts[1]).toMatchObject({ source: 'read', origin: 'Noted by your assistant, not confirmed · Aug 20, 2026' });
     expect(facts[2]).toMatchObject({ source: 'finding' });
     expect(facts[3]).toMatchObject({ source: 'assistant' });
   });
@@ -96,7 +104,11 @@ describe('parseRecallFacts', () => {
       'See you at the ferry',
     ]);
     expect(facts[0]).toMatchObject({ source: 'person', origin: 'You said this · 2 years ago' });
-    expect(facts[1]).toMatchObject({ source: 'read', date: '2026-11-12' });
+    expect(facts[1]).toMatchObject({
+      source: 'read',
+      date: '2026-11-12',
+      origin: 'Noted by your assistant, not confirmed · yesterday',
+    });
     expect(facts[2]).toMatchObject({ source: 'finding' });
     expect(facts[3]).toMatchObject({ source: 'assistant' });
     expect(facts[4]).toMatchObject({ source: 'person', origin: 'You said this' });
@@ -332,6 +344,34 @@ describe('the rail desk in a chat', () => {
     expect(screen.queryByRole('button', { name: 'Delete this memory: Lives in Denver now.' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Delete this memory: The gate code is 4417' })).toBeInTheDocument();
     expect(screen.getByText(/A line from a page is changed on its page\./)).toBeInTheDocument();
+  });
+
+  it('keeps the memory row and says so when the last message used nothing from memory', async () => {
+    const quietApi: MemoryRecallApi = {
+      listMemoryTurnContext: async () => [
+        turnContext('t1', blockOf(['[2026-08-14] The gate code is 4417'])),
+        turnContext('t2', null),
+      ],
+    };
+    render(
+      <MemoryRecallProvider api={quietApi}>
+        <AmanRuntimeRail status="ready" sessionId="chat-1" deskApi={deskApi(TODAY)} />
+      </MemoryRecallProvider>,
+    );
+    expect(await screen.findByText('From memory (0)')).toBeInTheDocument();
+    expect(screen.getByText(/Nothing from memory was used for your last message\./)).toBeInTheDocument();
+    expect(screen.queryByText('The gate code is 4417')).not.toBeInTheDocument();
+  });
+
+  it('shows no memory row in a chat where memory was never looked up', async () => {
+    const offApi: MemoryRecallApi = { listMemoryTurnContext: async () => [{ turnId: 't1' }] };
+    render(
+      <MemoryRecallProvider api={offApi}>
+        <AmanRuntimeRail status="ready" sessionId="chat-1" deskApi={deskApi(TODAY)} />
+      </MemoryRecallProvider>,
+    );
+    expect(await screen.findByText('Activity')).toBeInTheDocument();
+    expect(screen.queryByText(/From memory/)).not.toBeInTheDocument();
   });
 
   it('deletes a memory only after a yes, and keeps it when the person says keep', async () => {

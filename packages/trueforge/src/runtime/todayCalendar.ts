@@ -141,8 +141,8 @@ async function connectedAccounts(deps: TodayCalendarDeps, owner: GoogleOwner): P
         fetchImpl: deps.fetchImpl,
         logger: deps.logger,
       });
-      if (state.account !== null) {
-        accounts.push({ source: 'caldav', account_id: state.account.email });
+      for (const entry of state.accounts) {
+        accounts.push({ source: 'caldav', account_id: entry.account.email });
       }
     } catch (error) {
       deps.logger.warn('Calendar account state could not be read for the rail', extractErrorLogFields(error));
@@ -355,6 +355,8 @@ async function fetchCaldavEvents(
       to: input.window.end.toISOString(),
       timezone: input.zone,
       limit: EVENT_CAP,
+      // One read per account, so each event keeps the account it came from.
+      account: input.account.account_id,
     },
   });
   if (!('result' in response)) {

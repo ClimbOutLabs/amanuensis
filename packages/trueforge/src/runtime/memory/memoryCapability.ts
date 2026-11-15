@@ -75,7 +75,7 @@ import {
   sanitizeMemoryLine,
   sanitizeMemoryText,
 } from './memoryPageLoader';
-import { retainOperationId, submitRetain } from './memoryRetain';
+import { retainIsUnderWay, retainOperationId, submitRetain } from './memoryRetain';
 import { recallFactExcluded, shownFactText } from './recallExclusions';
 import { rankNamedPeopleFirst } from './recallNameBoost';
 import { ScreenClient, type ScreenClassifyResult } from './screenClient';
@@ -1784,6 +1784,11 @@ export class MemoryProcessor implements PreLLMProcessor, PreLLMEphemeralAgentCon
         next.push(entry);
         continue;
       }
+      if (result.status === 'unknown' && retainIsUnderWay(entry.op)) {
+        // The turn's save is still being written here, so there is no record of it yet. Look again next turn.
+        next.push(entry);
+        continue;
+      }
       if (result.status === 'unknown') {
         // A vanished operation is not necessarily done: it may never have reached the provider.
         // The previous turn's own op gets a real recovery attempt from context (below, via the
@@ -1860,7 +1865,11 @@ export class MemoryProcessor implements PreLLMProcessor, PreLLMEphemeralAgentCon
   ): Promise<void> {
     if (!this.keepsFullExchange) {
       try {
-        await this.client.noteSummaryOutcome?.({ outcome: 'failed', reason: 'summary_not_finished' });
+        await this.client.noteSummaryOutcome?.({
+          outcome: 'failed',
+          reason: 'summary_not_finished',
+          sessionId: this.sessionId,
+        });
       } catch (error) {
         this.logger.debug('Marking the unfinished summary failed', {
           reason: error instanceof Error ? error.message : String(error),

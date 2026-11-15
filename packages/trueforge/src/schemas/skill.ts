@@ -7,6 +7,7 @@ import { z } from '@hono/zod-openapi';
 import {
   API_SERVICE_DECLARATIONS,
   apiServiceHostsCanSend,
+  isSkillBlockedHost,
   type ApiServiceDeclaration,
 } from '@truefoundry/trueforge-core/core/connectors/apiServices';
 import { NameSchema } from './common';
@@ -116,12 +117,9 @@ export const SkillNetworkHostsSchema = z
   .describe('Exact site names the skill needs to reach. The person approves this list in Settings.');
 
 /**
- * True when any of the given sites belongs to a service that declares it can send mail or change
- * a calendar. The fact lives on the service's own declaration in the API service registry, so a
- * new service brings its answer with it and no list of sites is kept here. When a declared list
- * names such a site, the approval in Settings says so in plain words, because approving the site
- * approves the sending too: the gateway cannot see inside the encrypted connection to tell a read
- * from a send. A site no service declares counts as read-only reach.
+ * True when any of the given sites belongs to a service that can send mail or change a calendar,
+ * from the service's own declaration. Such a site is never allowed for a skill, and the card says
+ * so. A site no service declares counts as read-only reach.
  */
 export function skillNetworkHostsCanSend(
   hosts: readonly string[],
@@ -150,7 +148,8 @@ export function effectiveSkillNetworkHosts(input: {
     return null;
   }
   const denied = new Set(input.denied);
-  const inForce = declared.filter(host => !denied.has(host));
+  // A blocked site is left out like a turned-down one, so approving the rest still counts.
+  const inForce = declared.filter(host => !denied.has(host) && !isSkillBlockedHost(host));
   if (inForce.length === 0) {
     return null;
   }
@@ -190,7 +189,7 @@ export function grantedSkillNetworkHosts(input: {
   for (const host of denied) {
     hosts.delete(host);
   }
-  return [...hosts];
+  return [...hosts].filter(host => !isSkillBlockedHost(host));
 }
 
 /** Configured skill document persisted as `skill.manifest`. */
@@ -249,10 +248,20 @@ export const ConfiguredSkillSchema = z
   .strict()
   .openapi('ConfiguredSkill');
 
+/**
+ * The websites the person approved together with adding a git skill. Adding is all or nothing: the
+ * list must be exactly what the website check found, or nothing is saved.
+ */
+const ApprovedWebsitesSchema = z
+  .array(SkillNetworkHostSchema)
+  .max(20)
+  .describe('The websites the person approved with this skill, exactly as the website check listed them.');
+
 /** Create/update $ref SkillManifest so OpenAPI SkillType stays git|truefoundry. */
 export const CreateSkillRequestSchema = z
   .object({
     manifest: SkillManifestSchema,
+    approved_websites: ApprovedWebsitesSchema.optional(),
   })
   .strict()
   .openapi('CreateSkillRequest');
@@ -260,9 +269,39 @@ export const CreateSkillRequestSchema = z
 export const UpdateSkillRequestSchema = z
   .object({
     manifest: SkillManifestSchema,
+    approved_websites: ApprovedWebsitesSchema.optional(),
   })
   .strict()
   .openapi('UpdateSkillRequest');
+
+/** Where a git skill is, to check which websites it sends requests to before it is added. */
+export const CheckSkillWebsitesRequestSchema = z
+  .object({
+    url: SkillGitUrlSchema,
+    path: SkillGitPathSchema.optional(),
+    ref: SkillGitRefSchema,
+  })
+  .strict()
+  .openapi('CheckSkillWebsitesRequest');
+
+/** The websites a skill sends requests to, as found in its files at one commit. */
+export const SkillWebsitesSchema = z
+  .object({
+    commit: z.string().describe('The exact commit whose files were read.'),
+    websites: z
+      .array(SkillNetworkHostSchema)
+      .describe('The websites the skill sends requests to. Approving allows these.'),
+    makes_up_addresses: z
+      .boolean()
+      .describe('True when the skill also builds web addresses while it runs, which cannot be read ahead of time.'),
+    can_send: z.boolean().describe('True when one of the websites can send email or change a calendar.'),
+  })
+  .strict()
+  .openapi('SkillWebsites');
+
+export const CheckSkillWebsitesResponseSchema = z
+  .object({ data: SkillWebsitesSchema })
+  .openapi('CheckSkillWebsitesResponse');
 
 export const GetSkillResponseSchema = z.object({ data: ConfiguredSkillSchema }).openapi('GetSkillResponse');
 export const ListSkillsResponseSchema = z
@@ -369,6 +408,8 @@ export const DeleteSkillNetworkHostResponseSchema = z.object({}).openapi('Delete
 
 export type ConfiguredSkill = z.infer<typeof ConfiguredSkillSchema>;
 export type CreateSkillRequest = z.infer<typeof CreateSkillRequestSchema>;
+export type CheckSkillWebsitesRequest = z.infer<typeof CheckSkillWebsitesRequestSchema>;
+export type SkillWebsitesView = z.infer<typeof SkillWebsitesSchema>;
 export type UpdateSkillRequest = z.infer<typeof UpdateSkillRequestSchema>;
 export type AvailableSkill = z.infer<typeof AvailableSkillSchema>;
 export type SkillVersion = z.infer<typeof SkillVersionSchema>;

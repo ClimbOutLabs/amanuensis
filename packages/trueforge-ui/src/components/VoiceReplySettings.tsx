@@ -10,6 +10,7 @@ import {
   isServerVoiceId,
   readSpeechVoiceURI,
   SERVER_VOICES,
+  useReadWholeMessages,
   useServerVoice,
   useSpeakVoiceReplies,
   writeSpeechVoiceURI,
@@ -25,6 +26,7 @@ const selectClassName =
 /** Read-aloud settings for voice conversations. Hidden when this browser cannot read text aloud. */
 export function VoiceReplySettings() {
   const { enabled, setEnabled } = useSpeakVoiceReplies();
+  const { enabled: readWholeEnabled, setEnabled: setReadWholeEnabled } = useReadWholeMessages();
   const voices = useSpeechVoices();
   const spokenReply = useSpokenReply();
   const [voiceURI, setVoiceURI] = useState(() => readSpeechVoiceURI() ?? '');
@@ -55,6 +57,23 @@ export function VoiceReplySettings() {
           }}
           aria-labelledby="voice-reply-switch-label"
           aria-describedby="voice-reply-switch-hint"
+        />
+      </div>
+      <div className="mt-4 flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <p id="voice-reply-whole-label" className="text-sm font-medium text-text-primary">
+            Read whole messages aloud
+          </p>
+          <p id="voice-reply-whole-hint" className="mt-1 text-xs leading-snug text-text-secondary">
+            When this is off, a long message is read in part and the rest stays on screen. When it is on, the readout
+            reads the whole message, however long it is. Saved in this browser only.
+          </p>
+        </div>
+        <Switch
+          checked={readWholeEnabled}
+          onCheckedChange={setReadWholeEnabled}
+          aria-labelledby="voice-reply-whole-label"
+          aria-describedby="voice-reply-whole-hint"
         />
       </div>
       {hasServerVoice && (

@@ -6,7 +6,7 @@ import { extractErrorLogFields } from '@truefoundry/trueforge-core/core';
 import type { Logger } from 'winston';
 
 import { appendHandledNote, type HandledOutcome } from './handledNotes';
-import { commitPageChange, type PageChangeOptions } from './memoryPageWriter';
+import { noteTextWithoutLabel } from './memoryNotes';
 import type { PageListing } from './memoryPages';
 import {
   addFact,
@@ -20,10 +20,11 @@ import {
   type MemoryPage,
   type PageKind,
 } from './memoryPages';
+import { commitPageChange, type PageChangeOptions } from './memoryPageWriter';
 import { extractReplyJson } from './memorySummarize';
 import { SortReplySchema, type SortDecision } from './pageSortDecisions';
 import type { PageSortMode, SortStopCause } from './pageSortMode';
-import { noteOriginOf, statementSourceOf, type NoteOrigin } from './pageSortOrigin';
+import { noteOriginOf, statementSourceOf, type SortableOrigin } from './pageSortOrigin';
 import { buildSortPrompt, type ShownStatement } from './pageSortPrompt';
 import { appendSortReport, type SortReportLine } from './pageSortReport';
 import { ruleDecisions, type PlannedDecision } from './pageSortRules';
@@ -126,7 +127,7 @@ async function applyPlanned({
 }: {
   vaultDir: string;
   planned: readonly PlannedDecision[];
-  origin: NoteOrigin;
+  origin: SortableOrigin;
   day: string;
   newId: () => string;
 }): Promise<void> {
@@ -305,13 +306,32 @@ export async function sortNote({
     return result;
   };
 
-  if (note.text.trim() === '') {
+  const origin = noteOriginOf(note.metadata);
+  if (origin.kind === 'assistant_reply') {
+    // Decided here and not by the model: a reply is the assistant talking, and belongs on no page.
+    if (mode === 'report') {
+      await report({ mode, vaultDir, logger, line: { ...line, outcome: 'sorted', decisions: [] } });
+      return { status: 'sorted', written: false, outcome: 'none', decisions: [] };
+    }
+    try {
+      await appendHandledNote({ vaultDir, noteId: note.id, outcome: 'none' });
+    } catch (error) {
+      logger.warn('A reply note could not be recorded as needing no page.', {
+        noteId: note.id,
+        ...extractErrorLogFields(error),
+      });
+      return { status: 'failed', reason: reasonOf(error), cause: 'write_failed' };
+    }
+    return { status: 'sorted', written: true, outcome: 'none', decisions: [] };
+  }
+  // Only a note with a source carries a label. The prompt states the origin itself, so the label is not shown.
+  const said = { ...note, text: origin.kind === 'own_words' ? note.text : noteTextWithoutLabel(note.text) };
+  if (said.text.trim() === '') {
     return stop({ status: 'failed', reason: 'the note is empty', cause: 'note_empty' });
   }
-  const origin = noteOriginOf(note.metadata);
   let prompt: Awaited<ReturnType<typeof buildSortPrompt>>;
   try {
-    prompt = await buildSortPrompt({ vaultDir, note, origin, similarPages });
+    prompt = await buildSortPrompt({ vaultDir, note: said, origin, similarPages });
   } catch (error) {
     return stop({
       status: 'failed',
@@ -338,7 +358,7 @@ export async function sortNote({
   const ruled = ruleDecisions({
     decisions: parsed.data.decisions,
     origin,
-    noteText: note.text,
+    noteText: said.text,
     day: note.day,
     shown: prompt.shown,
     known: prompt.known,

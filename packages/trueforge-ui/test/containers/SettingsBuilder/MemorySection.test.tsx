@@ -57,6 +57,7 @@ const vaultCatalog: MemoryVaultCatalog = {
     { id: 'fact-1', text: 'The user drinks tea in the morning.', timestamp: '2026-10-15T08:00:00.000Z', persona: null },
   ],
   getSummaryStatus: async () => ({ summaryPending: false }),
+  dismissSummaryStatus: async () => undefined,
   updateEntry: async options => ({
     id: options.entryId,
     text: options.text,

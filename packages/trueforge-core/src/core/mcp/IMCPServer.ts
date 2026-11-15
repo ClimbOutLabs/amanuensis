@@ -180,6 +180,14 @@ export interface IToolSet {
   staysInWorkspace?(input: { name: string; argumentsText: string }): boolean;
 
   /**
+   * Whether this set's registered tool by that name declares that it writes files, as its own
+   * registration states. Pre-dispatch verification re-checks containment for such tools, because
+   * containment can change between classification and execution. Absent means the set declares
+   * no file-writing tools.
+   */
+  isFileWriteTool?(name: string): boolean;
+
+  /**
    * The connector this call goes to as of now, for re-checking an approval at dispatch. Absent on
    * tool sets whose approvals are not bound to a connector.
    */

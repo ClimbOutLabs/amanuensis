@@ -132,7 +132,7 @@ test_group_member_without_relogin_uses_sg() {
   assert_contains "$(cat "$STUB_LOG")" "sg docker -c env DOCKER_BUILDKIT=1 docker build"
   assert_tree_lacks "$AMAN_HOME" "$SENTINEL_PASSWORD"
   assert_not_contains "$(cat "$STUB_LOG")" "$SENTINEL_PASSWORD"
-  assert_log_has "sg docker -c env AMANUENSIS_HOME=$AMAN_HOME HOME=$SB/user timeout 180 $AMAN_HOME/bin/aman doctor"
+  assert_log_has "sg docker -c env AMANUENSIS_HOME=$AMAN_HOME HOME=$SB/user AMAN_UI_FRAMED=1 timeout 180 $AMAN_HOME/bin/aman doctor"
   run_install instance list
   assert_rc 0
   assert_log_has "sg docker -c env AMANUENSIS_HOME=$AMAN_HOME HOME=$SB/user timeout 60 $AMAN_HOME/bin/aman doctor --json --instance main --local"
@@ -153,7 +153,7 @@ test_doctor_follows_sudo_access() {
   INSTALL_EXTRA=(--add-docker-group)
   install_machine
   assert_flat_contains "$ERR" "Using sudo for Docker during this run only"
-  assert_log_has "sudo env AMANUENSIS_HOME=$AMAN_HOME HOME=$SB/user timeout 180 $AMAN_HOME/bin/aman doctor"
+  assert_log_has "sudo env AMANUENSIS_HOME=$AMAN_HOME HOME=$SB/user AMAN_UI_FRAMED=1 timeout 180 $AMAN_HOME/bin/aman doctor"
   sandbox_drop
 }
 

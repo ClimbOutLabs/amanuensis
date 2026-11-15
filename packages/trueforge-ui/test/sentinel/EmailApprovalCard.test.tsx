@@ -266,11 +266,10 @@ describe('EmailApprovalCard actions', () => {
         onApprove={onApprove}
         onDeny={onDeny}
         onChangeRequest={vi.fn()}
-        onSaveDraft={vi.fn()}
       />,
     );
     const buttons = screen.getAllByRole('button').filter(button => button.closest('section') === null);
-    expect(buttons.map(button => button.textContent)).toEqual(['Allow', 'Change it', 'Save as draft', "Don't send"]);
+    expect(buttons.map(button => button.textContent)).toEqual(['Allow', 'Change it', "Don't send"]);
     for (const button of buttons) {
       expect(button.className).toMatch(/bg-secondary-button-bg/);
       expect(button.className).not.toMatch(/bg-primary-button-bg|text-failure-bg/);
@@ -303,24 +302,6 @@ describe('EmailApprovalCard actions', () => {
     const { onDeny } = renderEmail();
     fireEvent.click(screen.getByRole('button', { name: 'Not now' }));
     expect(onDeny).toHaveBeenCalledTimes(1);
-  });
-
-  it('shows Save as draft only when the server offers a draft option', () => {
-    const { unmount } = render(
-      <EmailApprovalCard approvalId="approval-1" card={cardWith()} onApprove={vi.fn()} onDeny={vi.fn()} />,
-    );
-    expect(screen.queryByRole('button', { name: 'Save as draft' })).not.toBeInTheDocument();
-    unmount();
-
-    const onSaveDraft = vi.fn();
-    renderEmail({}, { onSaveDraft });
-    fireEvent.click(screen.getByRole('button', { name: 'Save as draft' }));
-    expect(onSaveDraft).toHaveBeenCalledTimes(1);
-  });
-
-  it('does not offer Save as draft on a card that is already a draft', () => {
-    renderEmail({ action: 'save' }, { onSaveDraft: vi.fn() });
-    expect(screen.queryByRole('button', { name: 'Save as draft' })).not.toBeInTheDocument();
   });
 
   it('shows Change it only when the container passes a change handler, and sends the typed change', () => {
@@ -357,8 +338,7 @@ describe('EmailApprovalCard for a new recipient', () => {
     mail_new_recipients: ['grace@example.com'],
   };
 
-  it("offers Add and send, Change it, Save as draft and Don't send, with the full recipient list", () => {
-    const onSaveDraft = vi.fn();
+  it("offers Add and send, Change it and Don't send, with the full recipient list", () => {
     render(
       <EmailApprovalCard
         approvalId="approval-1"
@@ -366,11 +346,10 @@ describe('EmailApprovalCard for a new recipient', () => {
         onApprove={vi.fn()}
         onDeny={vi.fn()}
         onChangeRequest={vi.fn()}
-        onSaveDraft={onSaveDraft}
       />,
     );
     const labels = screen.getAllByRole('button').map(button => button.textContent);
-    expect(labels).toEqual(['Add and send', 'Change it', 'Save as draft', "Don't send"]);
+    expect(labels).toEqual(['Add and send', 'Change it', "Don't send"]);
     expect(screen.getByText('grace@example.com, lin@example.com')).toBeInTheDocument();
   });
 
@@ -420,5 +399,115 @@ describe('EmailApprovalCard server sentences', () => {
     );
     expect(screen.getByText(/says: You asked for the lease reply\.$/)).toBeInTheDocument();
     expect(screen.getByText("Once this is sent, it can't be unsent.")).toBeInTheDocument();
+  });
+});
+
+describe('EmailApprovalCard account picker', () => {
+  it('offers the connected accounts and approves with the picked one', () => {
+    const onApprove = vi.fn();
+    render(
+      <EmailApprovalCard
+        approvalId="approval-1"
+        card={{
+          ...cardWith(),
+          mail_from: 'home@example.com',
+          mail_from_choices: ['home@example.com', 'work@example.com'],
+        }}
+        onApprove={onApprove}
+        onDeny={vi.fn()}
+      />,
+    );
+    const picker = screen.getByLabelText('From');
+    if (!(picker instanceof HTMLSelectElement)) throw new Error('From picker is not a select');
+    expect(picker.value).toBe('home@example.com');
+    fireEvent.change(picker, { target: { value: 'work@example.com' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Allow' }));
+    expect(onApprove).toHaveBeenCalledWith('work@example.com');
+  });
+
+  it('shows no picker when there is only one account to send from', () => {
+    renderEmail();
+    expect(screen.queryByLabelText('From')).toBeNull();
+  });
+});
+
+describe('an email from an account connected with an app password', () => {
+  function renderCard(overrides: Partial<SentinelApprovalCard>) {
+    render(
+      <EmailApprovalCard
+        approvalId="approval-1"
+        card={{ ...cardWith(), ...overrides }}
+        onApprove={vi.fn()}
+        onDeny={vi.fn()}
+      />,
+    );
+  }
+
+  it('shows the account the email goes from when there is one account', () => {
+    renderCard({ mail_from: 'sam@mail.example', mail_from_choices: ['sam@mail.example'] });
+    expect(screen.getByText('From')).toBeTruthy();
+    expect(screen.getByText('sam@mail.example')).toBeTruthy();
+    expect(screen.queryByRole('combobox')).toBeNull();
+  });
+
+  it('shows the account once, in the picker, when there are two accounts', () => {
+    renderCard({ mail_from: 'sam@mail.example', mail_from_choices: ['sam@mail.example', 'work@mail.example'] });
+    expect(screen.getByRole('combobox')).toBeTruthy();
+    expect(screen.getAllByText('From')).toHaveLength(1);
+  });
+
+  it('lists what else is sent with the email under the message', () => {
+    renderCard({ outbound_text: 'attachments (array): ["/files/menu.pdf"]' });
+    expect(screen.getByText('Also sent with this email')).toBeTruthy();
+    expect(screen.getByText('attachments (array): ["/files/menu.pdf"]')).toBeTruthy();
+  });
+
+  it('shows no extra block when the email is all that is sent', () => {
+    renderCard({});
+    expect(screen.queryByText('Also sent with this email')).toBeNull();
+  });
+});
+
+describe('a forward', () => {
+  const FORWARDS = {
+    from: 'Pippa Reed <pippa@example.com>',
+    subject: 'Roof repair quote',
+    body: 'The quote is 1,200 for the whole roof.',
+    truncated: false,
+    attachments: ['quote.pdf'],
+  };
+
+  function renderForward({ note, forwards }: { note: string; forwards: typeof FORWARDS }) {
+    const base = cardWith();
+    if (base.email === null) throw new Error('expected an email card');
+    render(
+      <EmailApprovalCard
+        approvalId="approval-1"
+        card={{ ...base, email: { ...base.email, subject: 'Fwd: Roof repair quote', body: note, forwards } }}
+        onApprove={vi.fn()}
+        onDeny={vi.fn()}
+      />,
+    );
+  }
+
+  it('shows the note, the message it sends on and the files that go with it', () => {
+    renderForward({ note: 'Can you look at this?', forwards: FORWARDS });
+    expect(screen.getByText('Your note')).toBeTruthy();
+    expect(screen.getByText('Can you look at this?')).toBeTruthy();
+    expect(
+      screen.getByText('Forwarded message from Pippa Reed <pippa@example.com>, subject “Roof repair quote”'),
+    ).toBeTruthy();
+    expect(screen.getByText('The quote is 1,200 for the whole roof.')).toBeTruthy();
+    expect(screen.getByText('Files sent with it: quote.pdf')).toBeTruthy();
+  });
+
+  it('says when no note is added, no file goes along, and the message is longer than shown', () => {
+    renderForward({ note: '', forwards: { ...FORWARDS, truncated: true, attachments: [] } });
+    expect(screen.getByText('No note is added.')).toBeTruthy();
+    expect(screen.queryByText('This message has no text.')).toBeNull();
+    expect(screen.getByText('No files are sent with it.')).toBeTruthy();
+    expect(
+      screen.getByText('The forwarded message is longer than the part shown here. All of it is sent.'),
+    ).toBeTruthy();
   });
 });

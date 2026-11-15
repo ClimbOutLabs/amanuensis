@@ -787,6 +787,7 @@ describe('a write through a symlink is checked where it lands', () => {
             tool_type: 'truefoundry-system',
             canonical_params: params,
             tier: 1,
+            sandbox_file_write: true,
             approval_token_id: null,
             approval_binding: null,
             shell_binding: null,

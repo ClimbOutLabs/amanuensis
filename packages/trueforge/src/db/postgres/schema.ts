@@ -69,6 +69,7 @@ export const TABLES_TO_MOVE = [
   'delivery',
   'delivery_attempt',
   'reach_settings',
+  'person_timezone',
   'text_contact',
   'phone_call',
   'text_send_count',
@@ -78,6 +79,9 @@ export const TABLES_TO_MOVE = [
   'reach_lease',
   'push_subscription',
   'local_user',
+  'telegram_connection',
+  'telegram_pending_reply',
+  'telegram_pending_approval',
 ] as const;
 
 /**

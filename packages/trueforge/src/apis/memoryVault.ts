@@ -13,6 +13,7 @@ import type { ResolveRequestContext } from '../auth/identity';
 import configuration from '../config';
 import {
   deleteMemoryVaultEntryRoute,
+  deleteMemoryVaultSummaryStatusRoute,
   deleteShownMemoryRoute,
   exportMemoryVaultRoute,
   getMemoryVaultSharingRoute,
@@ -35,7 +36,7 @@ import {
 import type { RetainItem, MemoryVaultEntry as VaultEntry } from '../runtime/memory/memoryClient';
 import { IMPORTED_ORIGIN, MEMORY_ORIGIN_METADATA_KEY } from '../runtime/memory/memoryOrigin';
 import { createVaultClient } from '../runtime/memory/vaultClient';
-import type { MemoryVaultEntry } from '../schemas/memoryVault';
+import type { MemoryVaultEntry, MemoryVaultSummaryFailureCause } from '../schemas/memoryVault';
 
 export interface MemoryVaultRouterDeps {
   resolveRequestContext: ResolveRequestContext;
@@ -97,6 +98,27 @@ function normalizeSharing(shares: Record<string, string[]>): { shares: Record<st
     normalized[name] = [...seen];
   }
   return { shares: normalized };
+}
+
+/** The log's reason code for a failed summary, as one of the few causes the Memories page words; an unknown code has none. */
+function summaryFailureCause(reason: string): MemoryVaultSummaryFailureCause | null {
+  switch (reason) {
+    case 'model_timeout':
+      return 'model_too_slow';
+    case 'model_failed':
+      return 'model_error';
+    case 'model_unresolved':
+      return 'model_not_found';
+    case 'summary_cut_short':
+    case 'summary_empty':
+    case 'summary_too_long':
+    case 'summary_unreadable':
+      return 'answer_unusable';
+    case 'summary_not_finished':
+      return 'interrupted';
+    default:
+      return null;
+  }
 }
 
 export function createMemoryVaultRouter(deps: MemoryVaultRouterDeps) {
@@ -249,8 +271,27 @@ export function createMemoryVaultRouter(deps: MemoryVaultRouterDeps) {
     const { namespace } = c.req.valid('query');
     const requestContext = deps.resolveRequestContext(c);
     const client = createVaultClient({ logger: deps.logger, tenantId: requestContext.tenant_id });
-    const summaryPending = await client.summaryPending({ namespace: namespace ?? '' });
-    return c.json({ data: { summary_pending: summaryPending } }, 200);
+    const mark = await client.summaryPending({ namespace: namespace ?? '' });
+    const parsedAt = mark === undefined ? Number.NaN : Date.parse(mark.failed_at);
+    return c.json(
+      {
+        data: {
+          summary_pending: mark !== undefined,
+          failed_at: Number.isNaN(parsedAt) ? null : new Date(parsedAt).toISOString(),
+          cause: mark === undefined ? null : summaryFailureCause(mark.reason),
+          session_id: mark?.session_id ?? null,
+        },
+      },
+      200,
+    );
+  };
+
+  const dismissSummaryStatusHandler: RouteHandler<typeof deleteMemoryVaultSummaryStatusRoute> = async c => {
+    const { namespace } = c.req.valid('query');
+    const requestContext = deps.resolveRequestContext(c);
+    const client = createVaultClient({ logger: deps.logger, tenantId: requestContext.tenant_id });
+    await client.dismissSummaryPending({ namespace: namespace ?? '' });
+    return c.json({}, 200);
   };
 
   const router = new OpenAPIHono();
@@ -261,6 +302,7 @@ export function createMemoryVaultRouter(deps: MemoryVaultRouterDeps) {
   router.openapi(getMemoryVaultSharingRoute, getSharingHandler);
   router.openapi(putMemoryVaultSharingRoute, putSharingHandler);
   router.openapi(getMemoryVaultSummaryStatusRoute, summaryStatusHandler);
+  router.openapi(deleteMemoryVaultSummaryStatusRoute, dismissSummaryStatusHandler);
   router.openapi(deleteShownMemoryRoute, deleteShownHandler);
   router.openapi(updateMemoryVaultEntryRoute, updateHandler);
   router.openapi(deleteMemoryVaultEntryRoute, deleteHandler);

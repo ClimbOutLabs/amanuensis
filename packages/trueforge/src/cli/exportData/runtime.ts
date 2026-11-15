@@ -38,6 +38,7 @@ async function buildSession<TTransaction>({
     mcpServers: stores.mcpServerStore,
     tokens: stores.tokenStore,
     googleConnections: stores.googleConnectionStore,
+    telegram: stores.telegramStore,
   });
 
   async function listOwners(): Promise<SessionOwner[]> {

@@ -29,6 +29,14 @@ There are two versions of the command. Which one you have depends on how you ins
 
 The rest of this page, up to the Windows section, is for Mac, Linux and WSL.
 
+## See your addresses and settings
+
+```
+aman status
+```
+
+It shows each instance: every address it answers at, the email you sign in with, the model, running code, data and backups. It also shows how to set up a new phone or computer, with the trust page link, the fingerprint and a code to scan. It changes nothing. The end of an install or an upgrade shows only the one address to open and anything that needs you.
+
 ## Check that everything works
 
 ```bash
@@ -246,7 +254,7 @@ Every command says what went wrong and the one thing to do next. If that doesn't
 
 ## Colors and plain text
 
-In a terminal, the installer, `aman upgrade` and `aman doctor` use color, numbered steps and boxes. The colors come from your terminal's own theme, so they work on light and dark backgrounds. To turn color off, set `NO_COLOR=1`:
+In a terminal, the installer, `aman upgrade` and `aman doctor` use color, and put each numbered step (or each part of the doctor's report) in a framed panel. A command to copy keeps its whole line, so it copies cleanly. The colors come from your terminal's own theme, so they work on light and dark backgrounds. To turn color off, set `NO_COLOR=1`:
 
 ```bash
 NO_COLOR=1 aman doctor

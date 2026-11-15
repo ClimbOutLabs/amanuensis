@@ -4,6 +4,9 @@ Aman's own web browser: a real, headed Chromium running under Xvfb (a virtual sc
 persistent profile per person so logins survive restarts, and one tab per chat inside it. It is never
 published to the host.
 
+Chromium never offers to save passwords, payment cards or addresses: the image sets that by policy
+(`chromium-policy.json`), so a profile keeps sign-in cookies but no saved passwords.
+
 ## How it is walled off
 
 The browser reads hostile pages, so it shares a network with nothing of Aman's.
@@ -91,6 +94,8 @@ The live view, where the person drives their own tab by hand from the app's `/br
   own clipboard: the selected part of the focused field, or else the page's selection, from the
   focused frame first. Answers `nothing_selected`, or `password` for a password field, whose text is
   never read out. The text is never logged or kept.
+- `POST /live/close { owner, tab }`: closes the tab when the person ends the session. The chat then
+  has no page, so the model's next step on it answers `closed` until it opens a page again.
 - `POST /live/upload { owner, tab, name, mime, data }` — a file, base64, at most 10 MB, put into the
   file picker the page opened (dropped once the page moves on), or else its first file field. The
   page itself sends it.

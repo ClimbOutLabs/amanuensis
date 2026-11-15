@@ -6,6 +6,7 @@ import { createRoute, z } from '@hono/zod-openapi';
 import { RequestErrorResponseSchema } from '../schemas/errors';
 import {
   DeleteMemoryVaultEntryResponseSchema,
+  DeleteMemoryVaultSummaryStatusResponseSchema,
   DeleteShownMemoryRequestSchema,
   DeleteShownMemoryResponseSchema,
   ExportMemoryVaultResponseSchema,
@@ -208,6 +209,32 @@ export const getMemoryVaultSummaryStatusRoute = createRoute({
     200: {
       content: { 'application/json': { schema: GetMemoryVaultSummaryStatusResponseSchema } },
       description: 'Whether a turn summary is still owed for the namespace.',
+    },
+    400: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'Invalid namespace.',
+    },
+    ...UNAUTHENTICATED,
+    ...SERVER_ERROR,
+  },
+});
+
+export const deleteMemoryVaultSummaryStatusRoute = createRoute({
+  method: 'delete',
+  path: '/summary-status',
+  tags: [OpenApiTag.CAPABILITIES],
+  summary: 'Dismiss a failed turn summary',
+  description:
+    'Put away the note that one vault namespace is owed a turn summary. Nothing in memory changes, and a later failed summary shows the note again.',
+  'x-fern-sdk-group-name': ['memory', 'vault'],
+  'x-fern-sdk-method-name': 'dismiss_summary_status',
+  request: {
+    query: ListMemoryVaultEntriesQuerySchema,
+  },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: DeleteMemoryVaultSummaryStatusResponseSchema } },
+      description: 'The note is put away.',
     },
     400: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },

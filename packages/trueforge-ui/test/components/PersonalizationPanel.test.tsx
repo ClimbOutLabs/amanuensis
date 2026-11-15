@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -46,7 +46,10 @@ describe('PersonalizationPanel', () => {
       </PersonalizationProvider>,
     );
 
-    fireEvent.change(await screen.findByLabelText('Your name'), { target: { value: 'Sam Rivera' } });
+    const name = await screen.findByLabelText('Your name');
+    // Lets the loaded profile finish filling the form, so it cannot land on top of the typed name.
+    await act(async () => {});
+    fireEvent.change(name, { target: { value: 'Sam Rivera' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save personalization' }));
 
     expect(await screen.findByText('Personalization saved.')).toBeInTheDocument();
@@ -79,8 +82,10 @@ describe('PersonalizationPanel', () => {
     expect(firstSection).toHaveAccessibleName('About you');
     expect(firstSection).toContainElement(nameField);
     expect(firstSection).toContainElement(addressField);
-    // The name fields come before everything else on the page, including the assistant's own profile.
-    expect(nameField.compareDocumentPosition(screen.getByLabelText('Name'))).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    // The page opens on the Your profile sub-tab, so the name fields come before everything
+    // else: the assistant's own profile sits behind the Assistant profile sub-tab.
+    expect(screen.getByRole('tab', { name: 'Your profile' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.queryByLabelText('Name')).not.toBeInTheDocument();
 
     fireEvent.change(nameField, { target: { value: 'Sam Rivera' } });
     fireEvent.change(addressField, { target: { value: 'Sam' } });
@@ -91,6 +96,10 @@ describe('PersonalizationPanel', () => {
         expect.objectContaining({ user_name: 'Sam Rivera', address_as: 'Sam' }),
       ),
     );
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Assistant profile' }));
+    expect(screen.getByRole('region', { name: 'Assistant profile' })).toContainElement(screen.getByLabelText('Name'));
+    expect(screen.queryByLabelText('Your name')).not.toBeInTheDocument();
   });
 
   it('loads and saves the profile from Settings while updating the runtime identity', async () => {
@@ -108,10 +117,13 @@ describe('PersonalizationPanel', () => {
       </PersonalizationProvider>,
     );
 
+    // The assistant's name lives on the Assistant profile sub-tab; the rail shows it either way.
+    fireEvent.click(await screen.findByRole('tab', { name: 'Assistant profile' }));
     expect(await screen.findByDisplayValue('Mira')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Mira' })).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Sage' } });
+    fireEvent.click(screen.getByRole('tab', { name: 'Your profile' }));
     fireEvent.change(screen.getByLabelText('Pinned preference 1'), { target: { value: 'No em dashes.' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save personalization' }));
 
@@ -158,7 +170,9 @@ describe('PersonalizationPanel', () => {
 
     render(<Host />);
 
-    await screen.findByDisplayValue('Mira');
+    await screen.findByLabelText('Your name');
+    // Lets the loaded profile finish filling the form, so it cannot replace the row the click adds.
+    await act(async () => {});
     fireEvent.click(screen.getByRole('button', { name: '+ Add preference' }));
 
     const input = screen.getByLabelText('Pinned preference 1');
@@ -196,6 +210,7 @@ describe('PersonalizationPanel', () => {
       </PersonalizationProvider>,
     );
 
+    fireEvent.click(await screen.findByRole('tab', { name: 'Assistant profile' }));
     await screen.findByDisplayValue('Mira');
     expect(screen.queryByText('What would help you most?')).not.toBeInTheDocument();
     expect(screen.queryByRole('checkbox', { name: 'I just moved here' })).not.toBeInTheDocument();
@@ -226,6 +241,7 @@ describe('PersonalizationPanel', () => {
       </PersonalizationProvider>,
     );
 
+    fireEvent.click(await screen.findByRole('tab', { name: 'Assistant profile' }));
     expect(await screen.findByDisplayValue('Mira')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Clear all' }));
 
@@ -299,6 +315,7 @@ describe('PersonalizationPanel', () => {
       </PersonalizationProvider>,
     );
 
+    fireEvent.click(await screen.findByRole('tab', { name: 'Assistant profile' }));
     await screen.findByDisplayValue('Mira');
     expect(screen.queryByRole('heading', { name: 'Learned profile' })).not.toBeInTheDocument();
     expect(screen.queryByRole('switch', { name: 'Learn from conversations' })).not.toBeInTheDocument();
@@ -308,5 +325,44 @@ describe('PersonalizationPanel', () => {
     expect(updateProfile.mock.calls[0]?.[0]).not.toHaveProperty('learning_enabled');
     expect(updateProfile.mock.calls[0]?.[0]).toHaveProperty('learned_profile', '# Learned\n\n- Enjoys woodworking.');
     expect(await screen.findByRole('status')).toHaveTextContent('Personalization saved.');
+  });
+
+  it('keeps one shared form across the sub-tabs and saves the learned profile through untouched', async () => {
+    const updateProfile = vi.fn(async (profile: PersonalizationProfile) => ({ ...profile }));
+    render(
+      <PersonalizationProvider
+        api={{
+          getProfile: async () => ({ ...initialProfile, learned_profile: '# Learned\n\n- Enjoys woodworking.' }),
+          updateProfile,
+          deleteProfile: async () => {},
+        }}
+      >
+        <PersonalizationPanel />
+      </PersonalizationProvider>,
+    );
+
+    // The learned profile is edited under Settings > Memory, not here: neither sub-tab shows
+    // it, but it stays on the profile this form saves.
+    const nameField = await screen.findByLabelText('Your name');
+    expect(screen.queryByRole('heading', { name: 'Learned profile' })).not.toBeInTheDocument();
+    fireEvent.change(nameField, { target: { value: 'Sam Rivera' } });
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Assistant profile' }));
+    expect(screen.queryByLabelText('Your name')).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Learned profile' })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Sage' } });
+
+    // The one Save below the sub-tabs carries the edits from both in a single profile, with
+    // the learned profile riding through unchanged.
+    fireEvent.click(screen.getByRole('button', { name: 'Save personalization' }));
+    await waitFor(() =>
+      expect(updateProfile).toHaveBeenCalledWith(
+        expect.objectContaining({
+          user_name: 'Sam Rivera',
+          assistant_name: 'Sage',
+          learned_profile: '# Learned\n\n- Enjoys woodworking.',
+        }),
+      ),
+    );
   });
 });

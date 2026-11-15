@@ -12,6 +12,7 @@ describe('buildSkillNetworkCard', () => {
       skill_name: 'ten-x',
       hosts: ['github.com', 'api.github.com'],
       reason: 'first_use',
+      code_pin: null,
     });
     expect(card.plain_what).toBe('Let the ten-x skill reach github.com, api.github.com?');
     expect(card.plain_why).toContain('names these sites as the ones it needs');
@@ -30,6 +31,7 @@ describe('buildSkillNetworkCard', () => {
       skill_name: 'ten-x',
       hosts: ['uploads.example.com'],
       reason: 'undeclared_host',
+      code_pin: null,
     });
     // A refused connection cannot show which skill, if any, reached for the site, so the card
     // asks about the site and says so. The skill stays in the payload, which is where the
@@ -47,11 +49,31 @@ describe('buildSkillNetworkCard', () => {
     });
   });
 
+  it('says the code changed since approval when the pin moved, and carries the new pin', () => {
+    const pin = 'a'.repeat(40);
+    const card = buildSkillNetworkCard({
+      skill_name: 'ten-x',
+      hosts: ['github.com', 'api.github.com'],
+      reason: 'code_changed',
+      code_pin: pin,
+    });
+    expect(card.plain_what).toBe('Let the ten-x skill reach github.com, api.github.com?');
+    expect(card.plain_why).toContain('code changed since you approved it');
+    expect(card.plain_why).toContain('approval was cancelled');
+    expect(card.skill_network).toEqual({
+      skill_name: 'ten-x',
+      hosts: ['github.com', 'api.github.com'],
+      reason: 'code_changed',
+      code_pin: pin,
+    });
+  });
+
   it('shows an international name decoded with its coded form beside it, and asks about the coded form', () => {
     const card = buildSkillNetworkCard({
       skill_name: 'ten-x',
       hosts: ['xn--mnchen-3ya.de'],
       reason: 'first_use',
+      code_pin: null,
     });
     expect(card.plain_what).toBe('Let the ten-x skill reach münchen.de (xn--mnchen-3ya.de)?');
     expect(card.destination).toBe('münchen.de (xn--mnchen-3ya.de)');
@@ -72,6 +94,7 @@ describe('buildSkillNetworkCard', () => {
       skill_name: 'ten-x',
       hosts: ['xn--pypal-4ve.com'],
       reason: 'undeclared_host',
+      code_pin: null,
     });
     const shown = 'p\u0430ypal.com (xn--pypal-4ve.com)';
     expect(card.plain_what).toBe(`Allow a connection to ${shown} in this chat?`);
@@ -88,12 +111,18 @@ describe('buildSkillNetworkCard', () => {
       skill_name: 'ten-x',
       hosts: ['paypal.com', 'api.paypal.com'],
       reason: 'first_use',
+      code_pin: null,
     });
     expect(card.plain_what).toBe('Let the ten-x skill reach paypal.com, api.paypal.com?');
     expect(card.destination).toBe('paypal.com, api.paypal.com');
     expect(card.plain_why).not.toContain('(');
     expect(card.plain_why).not.toContain('brackets');
-    const single = buildSkillNetworkCard({ skill_name: 'ten-x', hosts: ['paypal.com'], reason: 'undeclared_host' });
+    const single = buildSkillNetworkCard({
+      skill_name: 'ten-x',
+      hosts: ['paypal.com'],
+      reason: 'undeclared_host',
+      code_pin: null,
+    });
     expect(single.plain_what).toBe('Allow a connection to paypal.com in this chat?');
     expect(single.destination_host).toBe('paypal.com');
   });
@@ -181,6 +210,7 @@ describe('checkHeldReplay for a skill network card', () => {
         skill_name: 'ten-x',
         hosts: ['uploads.example.com'],
         reason: 'undeclared_host',
+        code_pin: null,
       }),
     });
     const fresh = info({ approval_token_id: freshToken.token_id, tier3_card: card() });
@@ -211,6 +241,7 @@ describe('checkHeldReplay for a skill network card', () => {
         skill_name: 'ten-x',
         hosts: ['uploads.example.com'],
         reason: 'undeclared_host',
+        code_pin: null,
       }),
       skill_network: {
         skill_name: 'ten-x',

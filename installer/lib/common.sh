@@ -1,7 +1,14 @@
 # shellcheck shell=bash
 # Output, prompts, locking and small filesystem helpers shared by every command.
 
-say() { printf '%s\n' "$*"; }
+# Inside a step panel the line goes through the panel, so it keeps the panel's sides.
+say() {
+  if [ "${UI_PANEL:-0}" = 1 ] || [ "${UI_FRAMED:-0}" = 1 ]; then
+    ui_say "$*"
+  else
+    printf '%s\n' "$*"
+  fi
+}
 # Warnings and failures use the shared line style on stderr.
 warn() { UI_FD=2 ui_warn "$*"; }
 die() {

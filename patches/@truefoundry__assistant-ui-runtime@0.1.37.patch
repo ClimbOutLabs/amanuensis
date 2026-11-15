@@ -117,7 +117,7 @@ diff --git a/dist/chunk-4O6D3YUJ.js.map b/dist/chunk-4O6D3YUJ.js.map
 deleted file mode 100644
 index 6fd3add4e62f65f2c46dcbb6b066317a3a7278de..0000000000000000000000000000000000000000
 diff --git a/dist/index.d.ts b/dist/index.d.ts
-index 6c2f1b9a90a9b2b690c8f6f938e875678cb87f3d..44e78d21713bd3e46c924a11c6552461b2116db8 100644
+index 6c2f1b9a90a9b2b690c8f6f938e875678cb87f3d..e217d2939e96ae911bfdfb76982f168a8c7042e2 100644
 --- a/dist/index.d.ts
 +++ b/dist/index.d.ts
 @@ -4,10 +4,6 @@ import { A as AgentSpec, a as AgentChatServer, T as TurnEvent, b as ThreadCreate
@@ -153,7 +153,16 @@ index 6c2f1b9a90a9b2b690c8f6f938e875678cb87f3d..44e78d21713bd3e46c924a11c6552461
      done: boolean;
      title?: string;
      agentInfo?: AgentInfo;
-@@ -138,9 +139,18 @@ declare function toTrueFoundryApprovalInputs(message: Extract<ThreadMessage, {
+@@ -131,6 +132,8 @@ type RespondToToolApprovalOptions = {
+     approved: boolean;
+     optionId?: string;
+     reason?: string;
++    /** For a mail approval: the account the person picked on the card, when they changed it. */
++    fromAccount?: string;
+ };
+ declare function messageHasPendingApprovals(message: ThreadMessage | undefined): boolean;
+ declare function collectApprovalInputs(message: ThreadMessage, threadId: string): UserToolApprovalEvent[];
+@@ -138,9 +141,18 @@ declare function toTrueFoundryApprovalInputs(message: Extract<ThreadMessage, {
      role: "assistant";
  }>, response: RespondToToolApprovalOptions, defaultThreadId?: string): UserToolApprovalEvent[];
  
@@ -172,7 +181,7 @@ index 6c2f1b9a90a9b2b690c8f6f938e875678cb87f3d..44e78d21713bd3e46c924a11c6552461
      runningTurn?: Turn;
      unstable_resume?: boolean;
  };
-@@ -247,6 +257,8 @@ type TrueFoundryRuntimeExtras = {
+@@ -247,6 +259,8 @@ type TrueFoundryRuntimeExtras = {
          mcpServers: McpAuthRequiredEvent["mcpServers"];
      } | null;
      resumeUnavailable: boolean;
@@ -181,7 +190,7 @@ index 6c2f1b9a90a9b2b690c8f6f938e875678cb87f3d..44e78d21713bd3e46c924a11c6552461
      sandboxId: string | undefined;
      respondToToolApproval: (response: RespondToToolApprovalOptions) => void;
      respondToToolResponse: (response: RespondToToolResponseOptions) => void;
-@@ -333,6 +345,9 @@ declare const useTrueFoundryHistoryPagination: () => {
+@@ -333,6 +347,9 @@ declare const useTrueFoundryHistoryPagination: () => {
   * arrive in this client. Falls back to `false` on runtimes that predate the flag.
   */
  declare const useTrueFoundryResumeUnavailable: () => boolean;
@@ -191,7 +200,7 @@ index 6c2f1b9a90a9b2b690c8f6f938e875678cb87f3d..44e78d21713bd3e46c924a11c6552461
  /** Returns a function to reset (re-submit) a user turn from any render context. */
  declare const useTrueFoundryResetFromTurn: () => (turnId: string) => Promise<void>;
  /** Current draft agent spec and sync state (draft mode only). */
-@@ -381,4 +396,12 @@ declare function getSession(server: AgentChatServer, sessionId: string): Promise
+@@ -381,4 +398,12 @@ declare function getSession(server: AgentChatServer, sessionId: string): Promise
   */
  declare const trueFoundryAttachmentAdapter: AttachmentAdapter;
  
@@ -206,7 +215,7 @@ index 6c2f1b9a90a9b2b690c8f6f938e875678cb87f3d..44e78d21713bd3e46c924a11c6552461
 +
 +export { AgentChatServer, AgentSpec, type AgentSpecUpdate, type ConvertTurnsResult, type DraftAgentConfig, type DraftSession, type DraftSessionBridge, type McpAuthMessageCustomMetadata, McpAuthRequiredEvent, type NamedAgentConfig, type PendingApproval, type PendingToolResponse, ROOT_THREAD_ID, type SandboxMessageCustomMetadata, Session, type SubAgentArtifact, type SubAgentCustomMetadata, type SubAgentMessageCustomMetadata, TOOL_RESPONSE_THREAD_ID_CUSTOM_KEY, ThreadCreatedEvent, type ToolApprovalMessageCustomMetadata, type ToolResponseMessageCustomMetadata, type TrueFoundryAgentConfig, type TrueFoundryDraftRuntimeExtras, type TrueFoundryMessageCustomMetadata, type TrueFoundryRuntimeExtras, Turn, TurnEvent, TurnInputItem, type UseTrueFoundryAgentRuntimeOptions, type UserMessageContent, UserToolApprovalEvent, UserToolResponseEvent, buildEditedUserMessageContent, buildTurnAssistantContent, buildUserMessageContent, collectApprovalInputs, collectRequiredActionInputs, collectResponseInputs, convertTurnsToThreadMessages, createDraftSessionBridge, createTrueFoundryDraftThreadListAdapter, createTrueFoundryOwnedSessionsThreadListAdapter, createTrueFoundryThreadListAdapter, draftSessionTitle, findPausedAssistantMessage, getSession, getTrueFoundryExtras, getTurnMessageContent, mergeAgentSpec, messageHasPendingApprovals, messageHasPendingRequiredActions, messageHasPendingResponses, parseTurnIdFromMessageId, repositoryItemsFromMessages, toTrueFoundryApprovalInputs, toolInvocationKey, toolInvocationRawId, trueFoundryAttachmentAdapter, trueFoundryExtras, tryGetTrueFoundryExtras, useTrueFoundryAdoptAgentSpec, useTrueFoundryAgentRuntime, useTrueFoundryAgentSpec, useTrueFoundryApprovals, useTrueFoundryCancel, useTrueFoundryDownloadSandboxFile, useTrueFoundryFlushAgentSpec, useTrueFoundryHistoryPagination, useTrueFoundryMcpAuth, useTrueFoundryReload, useTrueFoundryResetFromTurn, useTrueFoundryRespondToToolApproval, useTrueFoundryRespondToToolResponse, useTrueFoundryResumeMcpAuth, useTrueFoundryResumeUnavailable, useTrueFoundrySandboxId, useTrueFoundryTerminalError, useTrueFoundryCancelledTurn, useTrueFoundryToolResponses, useTrueFoundryTurnId, useTrueFoundryUpdateAgentSpec };
 diff --git a/dist/index.js b/dist/index.js
-index 7931deb018203ae9c0a616fa30e25aeb8c667d85..7f16805bfcf8df906e1e4e1d0d3b0f9ad9109993 100644
+index 7931deb018203ae9c0a616fa30e25aeb8c667d85..99b6445cf2307989b969c97d0bb8efda243dc375 100644
 --- a/dist/index.js
 +++ b/dist/index.js
 @@ -2,16 +2,6 @@ import {
@@ -226,44 +235,67 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..7f16805bfcf8df906e1e4e1d0d3b0f9a
  
  // src/useTrueFoundryAgentRuntime.ts
  import {
-@@ -158,6 +148,7 @@ function applyApprovalDecisionsToContent(content, decisions) {
+@@ -34,13 +24,14 @@ function hasPendingToolApproval(approval) {
+   return approval != null && approval.approved === void 0 && approval.resolution === void 0;
+ }
+ function applyApprovalDecisionToToolCall(part, options) {
+-  const { approved, optionId, reason } = options;
++  const { approved, optionId, reason, fromAccount } = options;
+   const targetApproval = part.approval;
+   const approval = {
+     ...targetApproval,
+     approved,
+     ...optionId != null ? { optionId } : {},
+-    ...reason != null ? { reason } : {}
++    ...reason != null ? { reason } : {},
++    ...fromAccount != null ? { fromAccount } : {}
+   };
+   if (approved) {
+     return { ...part, approval };
+@@ -158,7 +149,9 @@ function applyApprovalDecisionsToContent(content, decisions) {
        nextPart = applyApprovalDecisionToToolCall(part, {
          approvalId: part.approval.id,
          approved: decision.approved,
+-        reason: decision.reason
 +        ...decision.optionId != null ? { optionId: decision.optionId } : {},
-         reason: decision.reason
++        reason: decision.reason,
++        ...decision.fromAccount != null ? { fromAccount: decision.fromAccount } : {}
        });
      }
-@@ -189,6 +180,7 @@ function collectSubsequentApprovalDecisions(turns, fromIndex) {
+     if (nextPart.messages == null) {
+@@ -189,6 +182,8 @@ function collectSubsequentApprovalDecisions(turns, fromIndex) {
      for (const event of extractToolApprovalsFromTurnInput(input)) {
        decisions.set(event.toolCallId, {
          approved: event.approval.status === "allow",
 +        ...event.approval.status === "allow" && event.approval.scope === "chat" ? { optionId: "allow-chat" } : {},
++        ...event.approval.status === "allow" && event.approval.from_account != null ? { fromAccount: event.approval.from_account } : {},
          ...event.approval.status === "deny" && event.approval.reason != null ? { reason: event.approval.reason } : {}
        });
      }
-@@ -200,14 +192,18 @@ function collectApprovalDecisionsFromTurnInput(input) {
+@@ -200,14 +195,20 @@ function collectApprovalDecisionsFromTurnInput(input) {
    for (const event of extractToolApprovalsFromTurnInput(input)) {
      decisions.set(event.toolCallId, {
        approved: event.approval.status === "allow",
 +      ...event.approval.status === "allow" && event.approval.scope === "chat" ? { optionId: "allow-chat" } : {},
++      ...event.approval.status === "allow" && event.approval.from_account != null ? { fromAccount: event.approval.from_account } : {},
        ...event.approval.status === "deny" && event.approval.reason != null ? { reason: event.approval.reason } : {}
      });
    }
    return decisions;
  }
 -function mapApprovalDecision(approved, reason) {
-+function mapApprovalDecision(approved, reason, optionId) {
++function mapApprovalDecision(approved, reason, optionId, fromAccount) {
    if (approved) {
 -    return { status: "allow" };
 +    return {
 +      status: "allow",
-+      scope: optionId === "allow-chat" || optionId === "allow-always" ? "chat" : optionId === "allow-standing" ? "always" : "once"
++      scope: optionId === "allow-chat" || optionId === "allow-always" ? "chat" : optionId === "allow-standing" ? "always" : "once",
++      ...fromAccount != null ? { from_account: fromAccount } : {}
 +    };
    }
    return { status: "deny", ...reason != null ? { reason } : {} };
  }
-@@ -250,7 +246,11 @@ function collectApprovalInputs(message, threadId) {
+@@ -250,7 +251,12 @@ function collectApprovalInputs(message, threadId) {
          type: "user.tool_approval",
          threadId: scopedThreadId,
          toolCallId: approval.id,
@@ -271,12 +303,13 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..7f16805bfcf8df906e1e4e1d0d3b0f9a
 +        approval: mapApprovalDecision(
 +          approval.approved,
 +          approval.reason,
-+          approval.optionId
++          approval.optionId,
++          approval.fromAccount
 +        )
        });
      }
      if (part.messages != null) {
-@@ -413,6 +413,16 @@ function extractImageUrlFromUserContentItem(part) {
+@@ -413,6 +419,16 @@ function extractImageUrlFromUserContentItem(part) {
  }
  
  // src/modelMessageContent.ts
@@ -293,7 +326,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..7f16805bfcf8df906e1e4e1d0d3b0f9a
  function parseToolArgs(argsText) {
    if (!argsText) {
      return {};
-@@ -427,12 +437,30 @@ function parseToolArgs(argsText) {
+@@ -427,12 +443,30 @@ function parseToolArgs(argsText) {
      return {};
    }
  }
@@ -328,7 +361,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..7f16805bfcf8df906e1e4e1d0d3b0f9a
    let interrupt;
    if (pendingResponse != null && toolResult === void 0) {
      interrupt = {
-@@ -448,10 +476,19 @@ function toolCallToPart(toolCall, context) {
+@@ -448,10 +482,19 @@ function toolCallToPart(toolCall, context) {
      approval = {
        id: approvalDecision.id,
        approved: approvalDecision.approved,
@@ -349,7 +382,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..7f16805bfcf8df906e1e4e1d0d3b0f9a
    }
    let result;
    let isError = false;
-@@ -461,12 +498,14 @@ function toolCallToPart(toolCall, context) {
+@@ -461,12 +504,14 @@ function toolCallToPart(toolCall, context) {
      result = { error: approvalDecision.reason || "Tool approval denied" };
      isError = true;
    }
@@ -364,7 +397,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..7f16805bfcf8df906e1e4e1d0d3b0f9a
      ...result !== void 0 ? { result } : {},
      ...isError ? { isError: true } : {},
      ...approval != null ? { approval } : {},
-@@ -508,6 +547,15 @@ function buildAssistantContent(message, context) {
+@@ -508,6 +553,15 @@ function buildAssistantContent(message, context) {
  }
  
  // src/foldPeerThreads.ts
@@ -380,7 +413,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..7f16805bfcf8df906e1e4e1d0d3b0f9a
  var isDev = typeof process !== "undefined" && typeof process.env !== "undefined" && process.env.NODE_ENV !== "production";
  function warnUnexpectedRootThread(threadId, eventType) {
    if (!isDev) {
-@@ -541,6 +589,7 @@ var PeerThreadFoldState = class {
+@@ -541,6 +595,7 @@ var PeerThreadFoldState = class {
          pendingApprovals: /* @__PURE__ */ new Map(),
          approvalDecisions: /* @__PURE__ */ new Map(),
          pendingResponses: /* @__PURE__ */ new Map(),
@@ -388,7 +421,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..7f16805bfcf8df906e1e4e1d0d3b0f9a
          done: false
        };
        this.threads.set(threadId, bucket);
-@@ -559,6 +608,9 @@ function ingestEventIntoBucket(bucket, message) {
+@@ -559,6 +614,9 @@ function ingestEventIntoBucket(bucket, message) {
      const base = bucket.events.get(message.id);
      if (base != null) {
        mergeStreamEventDelta(base, message);
@@ -398,7 +431,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..7f16805bfcf8df906e1e4e1d0d3b0f9a
      }
      return;
    }
-@@ -567,28 +619,45 @@ function ingestEventIntoBucket(bucket, message) {
+@@ -567,28 +625,45 @@ function ingestEventIntoBucket(bucket, message) {
      if (!bucket.modelMessageIds.includes(message.id)) {
        bucket.modelMessageIds.push(message.id);
      }
@@ -454,7 +487,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..7f16805bfcf8df906e1e4e1d0d3b0f9a
      }
      return;
    }
-@@ -600,7 +669,7 @@ function ingestEventIntoBucket(bucket, message) {
+@@ -600,7 +675,7 @@ function ingestEventIntoBucket(bucket, message) {
    }
  }
  function isContentAffectingEvent(message) {
@@ -463,7 +496,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..7f16805bfcf8df906e1e4e1d0d3b0f9a
  }
  function ingestStreamEvent(state, message) {
    if (message.type === "mcp.auth_required" || isTurnScopedEvent(message)) {
-@@ -689,7 +758,7 @@ function childSubThreadIds(state, parentThreadId, toolCallId) {
+@@ -689,7 +764,7 @@ function childSubThreadIds(state, parentThreadId, toolCallId) {
    return ids;
  }
  function bucketHasUnresolvedPendingResponses(bucket) {
@@ -472,7 +505,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..7f16805bfcf8df906e1e4e1d0d3b0f9a
      if (!bucket.toolResults.has(id)) {
        return true;
      }
-@@ -724,11 +793,12 @@ function attachSubAgentMessages(state, parentThreadId, parts) {
+@@ -724,11 +799,12 @@ function attachSubAgentMessages(state, parentThreadId, parts) {
      if (part.type !== "tool-call" || parentBucket == null) {
        return part;
      }
@@ -487,7 +520,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..7f16805bfcf8df906e1e4e1d0d3b0f9a
      if (childIds.length === 0) {
        return part;
      }
-@@ -775,17 +845,19 @@ function buildThreadAssistantParts(state, threadId, modelMessageIds) {
+@@ -775,17 +851,19 @@ function buildThreadAssistantParts(state, threadId, modelMessageIds) {
        toolResults: bucket.toolResults,
        pendingApprovals: bucket.pendingApprovals,
        approvalDecisions: bucket.approvalDecisions,
@@ -513,7 +546,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..7f16805bfcf8df906e1e4e1d0d3b0f9a
      }
    }
    return attachSubAgentMessages(state, threadId, parts);
-@@ -847,40 +919,83 @@ function recordToolApprovalInFold(fold, decision) {
+@@ -847,40 +925,83 @@ function recordToolApprovalInFold(fold, decision) {
    const record = {
      id: decision.toolCallId,
      approved: decision.approved,
@@ -613,7 +646,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..7f16805bfcf8df906e1e4e1d0d3b0f9a
  
  // src/toolResponse.ts
  var TOOL_RESPONSE_THREAD_ID_CUSTOM_KEY = "toolResponseThreadId";
-@@ -966,7 +1081,7 @@ function collectResponseInputs(message, threadId) {
+@@ -966,7 +1087,7 @@ function collectResponseInputs(message, threadId) {
        events.push({
          type: "user.tool_response",
          threadId: scopedThreadId,
@@ -622,7 +655,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..7f16805bfcf8df906e1e4e1d0d3b0f9a
          content: String(part.result)
        });
      }
-@@ -983,7 +1098,7 @@ function applyStagedResponsesToContentMap(content, staged) {
+@@ -983,7 +1104,7 @@ function applyStagedResponsesToContentMap(content, staged) {
      if (part.type !== "tool-call") {
        return part;
      }
@@ -631,7 +664,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..7f16805bfcf8df906e1e4e1d0d3b0f9a
      let nextPart = part;
      if (contentValue != null && hasPendingToolResponse(part)) {
        nextPart = applyToolResponseToToolCall(part, contentValue);
-@@ -1019,12 +1134,15 @@ function applyUserToolResponsesToFold(fold, inputs) {
+@@ -1019,12 +1140,16 @@ function applyUserToolResponsesToFold(fold, inputs) {
      if (item.type === "user.tool_response") {
        recordToolResponseInFold(fold, {
          toolCallId: item.toolCallId,
@@ -645,10 +678,11 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..7f16805bfcf8df906e1e4e1d0d3b0f9a
 +        threadId: item.threadId,
          approved: item.approval.status === "allow",
 +        ...item.approval.status === "allow" && item.approval.scope === "chat" ? { optionId: "allow-chat" } : {},
++        ...item.approval.status === "allow" && item.approval.from_account != null ? { fromAccount: item.approval.from_account } : {},
          ...item.approval.status === "deny" && item.approval.reason != null ? { reason: item.approval.reason } : {}
        });
      }
-@@ -1282,6 +1400,20 @@ function appendMcpAuthToTurnContent(content, turn) {
+@@ -1282,6 +1407,20 @@ function appendMcpAuthToTurnContent(content, turn) {
  }
  
  // src/sessionSnapshot.ts
@@ -669,7 +703,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..7f16805bfcf8df906e1e4e1d0d3b0f9a
  function emptyRequiredActionsOverlay() {
    return {
      approvals: /* @__PURE__ */ new Map(),
-@@ -1305,13 +1437,13 @@ function turnToSessionRecord(turn) {
+@@ -1305,13 +1444,13 @@ function turnToSessionRecord(turn) {
      input: turn.input
    };
  }
@@ -685,7 +719,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..7f16805bfcf8df906e1e4e1d0d3b0f9a
      input: createdEvent.input,
      rootModelMessageIds,
      ...sandboxId != null ? { sandboxId } : {}
-@@ -1351,7 +1483,7 @@ function oldestCompleteTurnGroupState(itemsAsc) {
+@@ -1351,7 +1490,7 @@ function oldestCompleteTurnGroupState(itemsAsc) {
    if (!hasDone) {
      return "incomplete";
    }
@@ -694,7 +728,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..7f16805bfcf8df906e1e4e1d0d3b0f9a
  }
  async function fetchSessionEventsPage(server, sessionId, options) {
    const page = await server.listEvents({
-@@ -1422,6 +1554,12 @@ function cloneThreadBucket(bucket) {
+@@ -1422,6 +1561,12 @@ function cloneThreadBucket(bucket) {
      pendingApprovals: new Map(bucket.pendingApprovals),
      approvalDecisions: new Map(bucket.approvalDecisions),
      pendingResponses: new Map(bucket.pendingResponses),
@@ -707,7 +741,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..7f16805bfcf8df906e1e4e1d0d3b0f9a
      done: bucket.done,
      ...bucket.title != null ? { title: bucket.title } : {},
      ...bucket.agentInfo != null ? { agentInfo: bucket.agentInfo } : {}
-@@ -1466,6 +1604,17 @@ function prependFoldState(older, newer) {
+@@ -1466,6 +1611,17 @@ function prependFoldState(older, newer) {
          ...olderBucket.pendingResponses,
          ...newerBucket.pendingResponses
        ]),
@@ -725,7 +759,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..7f16805bfcf8df906e1e4e1d0d3b0f9a
        done: newerBucket.done || olderBucket.done,
        ...newerBucket.title != null || olderBucket.title != null ? { title: newerBucket.title ?? olderBucket.title } : {},
        ...newerBucket.agentInfo != null || olderBucket.agentInfo != null ? { agentInfo: newerBucket.agentInfo ?? olderBucket.agentInfo } : {}
-@@ -1484,41 +1633,46 @@ function ingestSessionEventsIntoSnapshot(snapshot, items, onTurnComplete) {
+@@ -1484,41 +1640,46 @@ function ingestSessionEventsIntoSnapshot(snapshot, items, onTurnComplete) {
    let currentCreatedEvent = null;
    let currentContentEvents = [];
    let beforeCount = 0;
@@ -799,7 +833,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..7f16805bfcf8df906e1e4e1d0d3b0f9a
      } else {
        if (currentTurnId != null) {
          ingestTurnEvent(snapshot.fold, event);
-@@ -1535,7 +1689,7 @@ function attachRunningTurn(snapshot, runningTurn) {
+@@ -1535,7 +1696,7 @@ function attachRunningTurn(snapshot, runningTurn) {
    return replaceSessionSnapshot(snapshot, {
      runningTurn,
      unstable_resume: true,
@@ -808,7 +842,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..7f16805bfcf8df906e1e4e1d0d3b0f9a
      ...pendingUserText !== void 0 ? {
        pendingUser: {
          turnId: runningTurn.id,
-@@ -1844,6 +1998,9 @@ function rootModelMessageIdsSinceBaseline(foldState, baseline) {
+@@ -1844,6 +2005,9 @@ function rootModelMessageIdsSinceBaseline(foldState, baseline) {
    const baselineSet = new Set(baseline);
    return bucket.modelMessageIds.filter((id) => !baselineSet.has(id));
  }
@@ -818,7 +852,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..7f16805bfcf8df906e1e4e1d0d3b0f9a
  function computeGroupRootBaseline(turns) {
    let groupStartIndex = turns.length - 1;
    while (groupStartIndex >= 0 && turns[groupStartIndex]?.userText == null) {
-@@ -2066,6 +2223,12 @@ function projectSessionMessages(snapshot, options) {
+@@ -2066,6 +2230,12 @@ function projectSessionMessages(snapshot, options) {
      const resolvedUpdate = streamComplete === true ? projectActiveStreamUpdate(snapshot) : update;
      const last = messages.at(-1);
      const existingAssistant = isContinuation && last?.role === "assistant" ? last : void 0;
@@ -831,7 +865,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..7f16805bfcf8df906e1e4e1d0d3b0f9a
      let assistantMessage = turnStreamUpdateToAssistantMessage(
        turnId,
        resolvedUpdate,
-@@ -2096,8 +2259,8 @@ function ingestTurnsIntoSnapshot(snapshot, turns, eventArrays) {
+@@ -2096,8 +2266,8 @@ function ingestTurnsIntoSnapshot(snapshot, turns, eventArrays) {
      const turn = turns[i];
      const rootBucket = snapshot.fold.threads.get(ROOT_THREAD_ID);
      const beforeCount = rootBucket?.modelMessageIds.length ?? 0;
@@ -841,7 +875,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..7f16805bfcf8df906e1e4e1d0d3b0f9a
      const afterBucket = snapshot.fold.threads.get(ROOT_THREAD_ID);
      const rootModelMessageIds = (afterBucket?.modelMessageIds ?? []).slice(
        beforeCount
-@@ -2166,6 +2329,7 @@ async function convertTurnsToThreadMessages(server, sessionId) {
+@@ -2166,6 +2336,7 @@ async function convertTurnsToThreadMessages(server, sessionId) {
    return {
      messages,
      foldState: snapshot.fold,
@@ -849,7 +883,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..7f16805bfcf8df906e1e4e1d0d3b0f9a
      ...snapshot.runningTurn != null ? {
        runningTurn: snapshot.runningTurn,
        unstable_resume: true
-@@ -2336,7 +2500,11 @@ async function* streamTurnEvents(stream, foldState, groupRootBaseline, onTurnIdA
+@@ -2336,7 +2507,11 @@ async function* streamTurnEvents(stream, foldState, groupRootBaseline, onTurnIdA
      }
      if (event.type === "turn.done") {
        if (event.state.status === "error") {
@@ -862,7 +896,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..7f16805bfcf8df906e1e4e1d0d3b0f9a
        }
        break;
      }
-@@ -3039,19 +3207,7 @@ function buildTurnInput(options) {
+@@ -3039,19 +3214,7 @@ function buildTurnInput(options) {
    }
    return [{ type: "user.message", content: options.userMessage ?? "" }];
  }
@@ -882,7 +916,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..7f16805bfcf8df906e1e4e1d0d3b0f9a
    if (abortSignal.aborted) {
      return;
    }
-@@ -3083,22 +3239,15 @@ async function* streamTurnContent(server, sessionId, foldState, options, abortSi
+@@ -3083,22 +3246,15 @@ async function* streamTurnContent(server, sessionId, foldState, options, abortSi
        return;
      }
      throw error;
@@ -905,7 +939,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..7f16805bfcf8df906e1e4e1d0d3b0f9a
    try {
      yield* streamTurnEvents(
        server.subscribeToTurn({
-@@ -3115,8 +3264,6 @@ async function* resumeTurnStream(server, sessionId, turnId, foldState, abortSign
+@@ -3115,8 +3271,6 @@ async function* resumeTurnStream(server, sessionId, turnId, foldState, abortSign
        return;
      }
      throw error;
@@ -914,7 +948,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..7f16805bfcf8df906e1e4e1d0d3b0f9a
    }
  }
  
-@@ -3176,20 +3323,49 @@ function appendTurnInputs(base, continuationInputs) {
+@@ -3176,20 +3330,49 @@ function appendTurnInputs(base, continuationInputs) {
    }
    return [...base, ...continuationInputs];
  }
@@ -967,7 +1001,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..7f16805bfcf8df906e1e4e1d0d3b0f9a
    );
    const lastTurn = snapshot.turns.at(-1);
    if (lastTurn?.id === active.turnId) {
-@@ -3241,6 +3417,17 @@ function resolveTurnInput(snapshot, turnId) {
+@@ -3241,6 +3424,17 @@ function resolveTurnInput(snapshot, turnId) {
    }
    return void 0;
  }
@@ -985,7 +1019,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..7f16805bfcf8df906e1e4e1d0d3b0f9a
  function useTrueFoundryAgentMessages({
    server,
    sessionId,
-@@ -3259,6 +3446,7 @@ function useTrueFoundryAgentMessages({
+@@ -3259,6 +3453,7 @@ function useTrueFoundryAgentMessages({
    const [isLoadingOlderHistory, setIsLoadingOlderHistory] = useState2(false);
    const [loadRetryTrigger, setLoadRetryTrigger] = useState2(0);
    const [resumeUnavailable, setResumeUnavailable] = useState2(false);
@@ -993,7 +1027,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..7f16805bfcf8df906e1e4e1d0d3b0f9a
    const snapshotRef = useRef2(snapshot);
    snapshotRef.current = snapshot;
    const loadOlderInflightRef = useRef2(null);
-@@ -3273,6 +3461,10 @@ function useTrueFoundryAgentMessages({
+@@ -3273,6 +3468,10 @@ function useTrueFoundryAgentMessages({
    const createdAtByMessageIdRef = useRef2(/* @__PURE__ */ new Map());
    const abortControllerRef = useRef2(null);
    const activeRunRef = useRef2(null);
@@ -1004,7 +1038,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..7f16805bfcf8df906e1e4e1d0d3b0f9a
    const resumeUnavailableRef = useRef2(false);
    const runningTurnRef = useRef2(void 0);
    const loadGenerationRef = useRef2(0);
-@@ -3302,6 +3494,8 @@ function useTrueFoundryAgentMessages({
+@@ -3302,6 +3501,8 @@ function useTrueFoundryAgentMessages({
      () => projectSessionMessages(snapshot, projectOptions),
      [snapshot, projectOptions]
    );
@@ -1013,7 +1047,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..7f16805bfcf8df906e1e4e1d0d3b0f9a
    const runStream = useCallback3(
      (createStream, turnIdRef, isContinuation) => {
        const streamGeneration = ++streamGenerationRef.current;
-@@ -3310,9 +3504,11 @@ function useTrueFoundryAgentMessages({
+@@ -3310,9 +3511,11 @@ function useTrueFoundryAgentMessages({
        abortControllerRef.current = abortController;
        setIsRunning(true);
        markResumeUnavailable(false);
@@ -1025,7 +1059,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..7f16805bfcf8df906e1e4e1d0d3b0f9a
          const flushPendingStreamUpdate = () => {
            streamUpdateRaf = null;
            const pending = pendingStreamUpdate;
-@@ -3347,6 +3543,7 @@ function useTrueFoundryAgentMessages({
+@@ -3347,6 +3550,7 @@ function useTrueFoundryAgentMessages({
              }
              applyStreamUpdate(update);
            }
@@ -1033,7 +1067,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..7f16805bfcf8df906e1e4e1d0d3b0f9a
          } catch (error) {
            if (error instanceof Error && error.name === "AbortError") {
              return;
-@@ -3366,22 +3563,37 @@ function useTrueFoundryAgentMessages({
+@@ -3366,22 +3570,37 @@ function useTrueFoundryAgentMessages({
              abortControllerRef.current = null;
            }
            setIsRunning(false);
@@ -1085,7 +1119,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..7f16805bfcf8df906e1e4e1d0d3b0f9a
          }
        })();
        activeRunRef.current = run;
-@@ -3401,6 +3613,9 @@ function useTrueFoundryAgentMessages({
+@@ -3401,6 +3620,9 @@ function useTrueFoundryAgentMessages({
        setSnapshot(createEmptySessionSnapshot());
        return;
      }
@@ -1095,7 +1129,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..7f16805bfcf8df906e1e4e1d0d3b0f9a
      const isEarlyInitialLoad = isMain === false && isInitialSession === true && initialLoadStartedForRef.current !== sessionId;
      if (isMain === false) {
        if (!isEarlyInitialLoad) return;
-@@ -3447,6 +3662,7 @@ function useTrueFoundryAgentMessages({
+@@ -3447,6 +3669,7 @@ function useTrueFoundryAgentMessages({
          return;
        }
        createdAtByMessageIdRef.current = /* @__PURE__ */ new Map();
@@ -1103,7 +1137,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..7f16805bfcf8df906e1e4e1d0d3b0f9a
        setSnapshot(loadedSnapshot);
        runningTurnRef.current = loadedSnapshot.runningTurn;
        setIsLoading(false);
-@@ -3587,7 +3803,12 @@ function useTrueFoundryAgentMessages({
+@@ -3587,7 +3810,12 @@ function useTrueFoundryAgentMessages({
                  snapshotRef.current.fold,
                  { inputs: options.inputs, ...streamHeaders },
                  signal,
@@ -1117,7 +1151,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..7f16805bfcf8df906e1e4e1d0d3b0f9a
                );
              }
              if ("resumeMcpAuth" in options) {
-@@ -3597,7 +3818,12 @@ function useTrueFoundryAgentMessages({
+@@ -3597,7 +3825,12 @@ function useTrueFoundryAgentMessages({
                  snapshotRef.current.fold,
                  { resumeMcpAuth: true, ...streamHeaders },
                  signal,
@@ -1131,7 +1165,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..7f16805bfcf8df906e1e4e1d0d3b0f9a
                );
              }
              return streamTurnContent(
-@@ -3662,26 +3888,64 @@ function useTrueFoundryAgentMessages({
+@@ -3662,26 +3895,64 @@ function useTrueFoundryAgentMessages({
      [server, runStream, sessionId]
    );
    const cancel = useCallback3(async () => {
@@ -1206,7 +1240,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..7f16805bfcf8df906e1e4e1d0d3b0f9a
          return;
        }
        const projected = projectSessionMessages(nextSnapshot, projectOptions);
-@@ -3690,18 +3954,29 @@ function useTrueFoundryAgentMessages({
+@@ -3690,19 +3961,31 @@ function useTrueFoundryAgentMessages({
          return;
        }
        const inputs = collectRequiredActionInputs(paused);
@@ -1234,11 +1268,14 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..7f16805bfcf8df906e1e4e1d0d3b0f9a
        const approvals = new Map(prev.requiredActions.approvals);
        approvals.set(response.approvalId, {
          approved: response.approved,
+-        ...response.reason != null ? { reason: response.reason } : {}
 +        ...response.optionId != null ? { optionId: response.optionId } : {},
-         ...response.reason != null ? { reason: response.reason } : {}
++        ...response.reason != null ? { reason: response.reason } : {},
++        ...response.fromAccount != null ? { fromAccount: response.fromAccount } : {}
        });
        const nextSnapshot = replaceSessionSnapshot(prev, {
-@@ -3710,6 +3985,7 @@ function useTrueFoundryAgentMessages({
+         requiredActions: {
+@@ -3710,6 +3993,7 @@ function useTrueFoundryAgentMessages({
            approvals
          }
        });
@@ -1246,7 +1283,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..7f16805bfcf8df906e1e4e1d0d3b0f9a
        setSnapshot(nextSnapshot);
        trySendCollectedRequiredActions(nextSnapshot);
      },
-@@ -3726,6 +4002,7 @@ function useTrueFoundryAgentMessages({
+@@ -3726,6 +4010,7 @@ function useTrueFoundryAgentMessages({
            toolResponses
          }
        });
@@ -1254,7 +1291,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..7f16805bfcf8df906e1e4e1d0d3b0f9a
        setSnapshot(nextSnapshot);
        trySendCollectedRequiredActions(nextSnapshot);
      },
-@@ -3880,6 +4157,8 @@ function useTrueFoundryAgentMessages({
+@@ -3880,6 +4165,8 @@ function useTrueFoundryAgentMessages({
    }, [server, isMain, sessionId]);
    return {
      messages,
@@ -1263,7 +1300,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..7f16805bfcf8df906e1e4e1d0d3b0f9a
      isRunning,
      resumeUnavailable,
      isLoading,
-@@ -3958,6 +4237,8 @@ function useTrueFoundryAgentRuntimeImpl(options, pendingAgentSpecRef) {
+@@ -3958,6 +4245,8 @@ function useTrueFoundryAgentRuntimeImpl(options, pendingAgentSpecRef) {
    const [toolStatuses, setToolStatuses] = useState3({});
    const {
      messages,
@@ -1272,7 +1309,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..7f16805bfcf8df906e1e4e1d0d3b0f9a
      isRunning,
      resumeUnavailable,
      isLoading,
-@@ -4010,9 +4291,6 @@ function useTrueFoundryAgentRuntimeImpl(options, pendingAgentSpecRef) {
+@@ -4010,9 +4299,6 @@ function useTrueFoundryAgentRuntimeImpl(options, pendingAgentSpecRef) {
            "This session has not been saved yet, so its files cannot be downloaded."
          );
        }
@@ -1282,7 +1319,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..7f16805bfcf8df906e1e4e1d0d3b0f9a
        return await server.downloadSandboxFile({
          sessionId,
          turnId,
-@@ -4047,6 +4325,8 @@ function useTrueFoundryAgentRuntimeImpl(options, pendingAgentSpecRef) {
+@@ -4047,6 +4333,8 @@ function useTrueFoundryAgentRuntimeImpl(options, pendingAgentSpecRef) {
        pendingToolResponses,
        pendingMcpAuth,
        resumeUnavailable,
@@ -1291,7 +1328,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..7f16805bfcf8df906e1e4e1d0d3b0f9a
        sandboxId,
        respondToToolApproval,
        respondToToolResponse,
-@@ -4249,8 +4529,13 @@ var useTrueFoundryMcpAuth = () => {
+@@ -4249,8 +4537,13 @@ var useTrueFoundryMcpAuth = () => {
    );
  };
  var useTrueFoundryRespondToToolApproval = () => {
@@ -1307,7 +1344,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..7f16805bfcf8df906e1e4e1d0d3b0f9a
  };
  var useTrueFoundryRespondToToolResponse = () => {
    const aui = useAui3();
-@@ -4298,6 +4583,8 @@ var useTrueFoundryHistoryPagination = () => {
+@@ -4298,6 +4591,8 @@ var useTrueFoundryHistoryPagination = () => {
    );
  };
  var useTrueFoundryResumeUnavailable = () => useTrueFoundryRuntimeExtras()?.resumeUnavailable ?? false;
@@ -1316,7 +1353,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..7f16805bfcf8df906e1e4e1d0d3b0f9a
  var useTrueFoundryResetFromTurn = () => {
    const aui = useAui3();
    return (turnId) => getTrueFoundryExtras(aui).resetFromTurn(turnId);
-@@ -4383,23 +4670,15 @@ export {
+@@ -4383,23 +4678,15 @@ export {
    collectResponseInputs,
    convertTurnsToThreadMessages,
    createDraftSessionBridge,
@@ -1340,7 +1377,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..7f16805bfcf8df906e1e4e1d0d3b0f9a
    mergeAgentSpec,
    mergeEventDelta,
    messageHasPendingApprovals,
-@@ -4408,6 +4687,8 @@ export {
+@@ -4408,6 +4695,8 @@ export {
    parseTurnIdFromMessageId,
    repositoryItemsFromMessages,
    toTrueFoundryApprovalInputs,
@@ -1349,7 +1386,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..7f16805bfcf8df906e1e4e1d0d3b0f9a
    trueFoundryAttachmentAdapter,
    trueFoundryExtras,
    tryGetTrueFoundryExtras,
-@@ -4427,6 +4708,8 @@ export {
+@@ -4427,6 +4716,8 @@ export {
    useTrueFoundryResumeMcpAuth,
    useTrueFoundryResumeUnavailable,
    useTrueFoundrySandboxId,
@@ -1368,7 +1405,7 @@ diff --git a/dist/plugins/truefoundry-agent-server-adapter/index.js.map b/dist/p
 deleted file mode 100644
 index 84c51b288c478ac0d18748007ccfb8cddc797f3a..0000000000000000000000000000000000000000
 diff --git a/dist/types-hS8TQqBP.d.ts b/dist/types-hS8TQqBP.d.ts
-index bddf93d1f4ad64c3df464ec48e884fc6f586e816..8de8ea1e3b57b5be6fd22e3d37f8abb8129ee026 100644
+index bddf93d1f4ad64c3df464ec48e884fc6f586e816..3a25f7f2fad50742cc1186a54a72198c6e9817bc 100644
 --- a/dist/types-hS8TQqBP.d.ts
 +++ b/dist/types-hS8TQqBP.d.ts
 @@ -9,7 +9,12 @@ interface ToolCallFunction {
@@ -1467,15 +1504,17 @@ index bddf93d1f4ad64c3df464ec48e884fc6f586e816..8de8ea1e3b57b5be6fd22e3d37f8abb8
      instructions?: string;
      variables?: Record<string, string>;
  }
-@@ -406,6 +440,7 @@ interface UserMessage {
+@@ -406,6 +440,9 @@ interface UserMessage {
  }
  type ApprovalDecision = {
      status: "allow";
 +    scope?: "once" | "chat" | "always";
++    /** For a mail approval: the account the person picked on the card, when they changed it. */
++    from_account?: string;
  } | {
      status: "deny";
      reason?: string;
-@@ -525,12 +560,13 @@ interface AgentChatServer<TSpec extends AgentSpec = AgentSpec, TSession extends
+@@ -525,12 +562,13 @@ interface AgentChatServer<TSpec extends AgentSpec = AgentSpec, TSession extends
      /**
       * Reads a file the agent wrote inside its sandbox. Hosts whose download route is scoped to a
       * turn resolve the sandbox from `turnId` and ignore `sandboxId`; hosts addressing sandboxes
@@ -1491,7 +1530,7 @@ index bddf93d1f4ad64c3df464ec48e884fc6f586e816..8de8ea1e3b57b5be6fd22e3d37f8abb8
          path: string;
      }): Promise<Blob>;
  }
-@@ -565,6 +601,7 @@ interface AgentBuilderCapabilitiesResponse {
+@@ -565,6 +603,7 @@ interface AgentBuilderCapabilitiesResponse {
      data: {
          sandbox: {
              enabled: boolean;
@@ -1499,7 +1538,7 @@ index bddf93d1f4ad64c3df464ec48e884fc6f586e816..8de8ea1e3b57b5be6fd22e3d37f8abb8
          };
          skill: {
              enabled: boolean;
-@@ -671,7 +708,7 @@ interface ToolBase {
+@@ -671,7 +710,7 @@ interface ToolBase {
      description: string;
  }
  /** Strict auth type id. Hosts widen branches via intersection + re-union. */
@@ -1508,7 +1547,7 @@ index bddf93d1f4ad64c3df464ec48e884fc6f586e816..8de8ea1e3b57b5be6fd22e3d37f8abb8
  type ConnectorAuthOAuth = {
      type: "dcr";
      authUrl?: string;
-@@ -684,7 +721,13 @@ type ConnectorAuthApiKey = {
+@@ -684,7 +723,13 @@ type ConnectorAuthApiKey = {
  type ConnectorAuthNone = {
      type: "none";
  };
@@ -1523,7 +1562,7 @@ index bddf93d1f4ad64c3df464ec48e884fc6f586e816..8de8ea1e3b57b5be6fd22e3d37f8abb8
  type ConnectorAuthPublicOAuth = {
      type: "dcr";
      authUrl?: string;
-@@ -696,7 +739,12 @@ type ConnectorAuthPublicApiKey = {
+@@ -696,7 +741,12 @@ type ConnectorAuthPublicApiKey = {
  type ConnectorAuthPublicNone = {
      type: "none";
  };
@@ -1537,7 +1576,7 @@ index bddf93d1f4ad64c3df464ec48e884fc6f586e816..8de8ea1e3b57b5be6fd22e3d37f8abb8
  /**
   * MCP / connector create-edit config. Host extends for extra fields, etc.
   */
-@@ -994,6 +1042,8 @@ interface Schedule {
+@@ -994,6 +1044,8 @@ interface Schedule {
      agentId: string;
      /** Display name; omit when the host only has `agentId`. */
      agentName?: string;
@@ -2940,7 +2979,7 @@ index 677d5b7bacd18aceb962c7f948bf1a92de5695e0..c928225c4a2a28ec929b4066909dad82
      | ThreadDoneEvent
      | McpAuthRequiredEvent
 diff --git a/src/server/types.ts b/src/server/types.ts
-index 68b20cbb0f3506b46ed72f7431c3b483ece82c0c..27f23471cd6ba1e04ed3e73c18cb1d741ecb70f5 100644
+index 68b20cbb0f3506b46ed72f7431c3b483ece82c0c..0b36cf1a691f6f2bab212f6a01272d47671d69fd 100644
 --- a/src/server/types.ts
 +++ b/src/server/types.ts
 @@ -168,6 +168,11 @@ export interface AgentSpec<
@@ -2955,16 +2994,21 @@ index 68b20cbb0f3506b46ed72f7431c3b483ece82c0c..27f23471cd6ba1e04ed3e73c18cb1d74
    instructions?: string;
    variables?: Record<string, string>;
  }
-@@ -249,7 +254,7 @@ export interface UserMessage {
+@@ -249,7 +254,12 @@ export interface UserMessage {
  }
  
  export type ApprovalDecision =
 -  | { status: "allow" }
-+  | { status: "allow"; scope?: "once" | "chat" | "always" }
++  | {
++      status: "allow";
++      scope?: "once" | "chat" | "always";
++      /** For a mail approval: the account the person picked on the card, when they changed it. */
++      from_account?: string;
++    }
    | { status: "deny"; reason?: string };
  
  export interface UserToolApprovalEvent {
-@@ -390,12 +395,13 @@ export interface AgentChatServer<
+@@ -390,12 +400,13 @@ export interface AgentChatServer<
    /**
     * Reads a file the agent wrote inside its sandbox. Hosts whose download route is scoped to a
     * turn resolve the sandbox from `turnId` and ignore `sandboxId`; hosts addressing sandboxes
@@ -2980,7 +3024,7 @@ index 68b20cbb0f3506b46ed72f7431c3b483ece82c0c..27f23471cd6ba1e04ed3e73c18cb1d74
      path: string;
    }): Promise<Blob>;
  }
-@@ -432,7 +438,7 @@ export interface McpToolSelection {
+@@ -432,7 +443,7 @@ export interface McpToolSelection {
   */
  export interface AgentBuilderCapabilitiesResponse {
    data: {
@@ -2989,7 +3033,7 @@ index 68b20cbb0f3506b46ed72f7431c3b483ece82c0c..27f23471cd6ba1e04ed3e73c18cb1d74
      skill: { enabled: boolean; reason?: string };
      settings?: { enabled: boolean };
    };
-@@ -970,6 +976,8 @@ export interface Schedule {
+@@ -970,6 +981,8 @@ export interface Schedule {
    agentId: string;
    /** Display name; omit when the host only has `agentId`. */
    agentName?: string;
@@ -3238,7 +3282,7 @@ index 7d09601fe67f4a76b394dbca71fb91a352b6fc15..53dc0d2559f44cb2cc82b4f2989df16e
      }
  }
 diff --git a/src/toolApproval.test.ts b/src/toolApproval.test.ts
-index 43835a0e54cfa1045440625f7cc909e8c2b6ff6a..7a3a083bcf87b02d8bacedfc65ee6f89842431d9 100644
+index 43835a0e54cfa1045440625f7cc909e8c2b6ff6a..7f7b0f6071a856670b4f0fb500c81b0e11bbe496 100644
 --- a/src/toolApproval.test.ts
 +++ b/src/toolApproval.test.ts
 @@ -1,8 +1,11 @@
@@ -3253,7 +3297,7 @@ index 43835a0e54cfa1045440625f7cc909e8c2b6ff6a..7a3a083bcf87b02d8bacedfc65ee6f89
      messageHasPendingApprovals,
  } from "./toolApproval.js";
  
-@@ -96,11 +99,82 @@ describe("toolApproval", () => {
+@@ -96,11 +99,149 @@ describe("toolApproval", () => {
                  type: "user.tool_approval",
                  threadId: "main",
                  toolCallId: "approval-1",
@@ -3318,6 +3362,73 @@ index 43835a0e54cfa1045440625f7cc909e8c2b6ff6a..7a3a083bcf87b02d8bacedfc65ee6f89
 +        });
 +    });
 +
++    it("carries the account picked on a mail card into the approval input", () => {
++        expect(mapApprovalDecision(true, undefined, "allow-once", "work@example.com")).toEqual({
++            status: "allow",
++            scope: "once",
++            from_account: "work@example.com",
++        });
++
++        const pending = {
++            id: "a1",
++            role: "assistant" as const,
++            content: [
++                {
++                    type: "tool-call" as const,
++                    toolCallId: "approval-1",
++                    toolName: "send_email",
++                    args: {},
++                    argsText: "{}",
++                    approval: { id: "approval-1" },
++                },
++            ],
++            status: { type: "requires-action" as const, reason: "tool-calls" as const },
++            createdAt: new Date(),
++            metadata: {
++                unstable_state: null,
++                unstable_annotations: [],
++                unstable_data: [],
++                steps: [],
++                custom: {},
++            },
++        };
++
++        const decided = {
++            ...pending,
++            content: applyApprovalDecisionsToContent(
++                pending.content,
++                new Map([
++                    [
++                        "approval-1",
++                        { approved: true, optionId: "allow-once", fromAccount: "work@example.com" },
++                    ],
++                ]),
++            ),
++        };
++
++        expect(collectApprovalInputs(decided, "main")).toEqual([
++            {
++                type: "user.tool_approval",
++                threadId: "main",
++                toolCallId: "approval-1",
++                approval: { status: "allow", scope: "once", from_account: "work@example.com" },
++            },
++        ]);
++
++        const restored = collectApprovalDecisionsFromTurnInput([
++            {
++                type: "user.tool_approval",
++                threadId: "main",
++                toolCallId: "approval-1",
++                approval: { status: "allow", scope: "once", from_account: "work@example.com" },
++            },
++        ]);
++        expect(restored.get("approval-1")).toEqual({
++            approved: true,
++            fromAccount: "work@example.com",
++        });
++    });
++
 +    it("restores chat scope from a persisted approval continuation", () => {
 +        const decisions = collectApprovalDecisionsFromTurnInput([
 +            {
@@ -3338,26 +3449,75 @@ index 43835a0e54cfa1045440625f7cc909e8c2b6ff6a..7a3a083bcf87b02d8bacedfc65ee6f89
          const pending = {
              id: "turn-1-assistant",
 diff --git a/src/toolApproval.ts b/src/toolApproval.ts
-index 6ed4a4cc74b0bc3b81f00f76df3f7cf0f81b1453..e4a01402913ff408bb3f7df7ebef5225767e670a 100644
+index 6ed4a4cc74b0bc3b81f00f76df3f7cf0f81b1453..114754f511cb82fcf8ad4ed9689cf168625d54ab 100644
 --- a/src/toolApproval.ts
 +++ b/src/toolApproval.ts
-@@ -19,6 +19,7 @@ export { ROOT_THREAD_ID } from "./constants.js";
+@@ -19,6 +19,9 @@ export { ROOT_THREAD_ID } from "./constants.js";
  export type StoredApprovalDecision = {
      approved: boolean;
      reason?: string;
 +    optionId?: string;
++    /** For a mail approval: the account the person picked on the card, when they changed it. */
++    fromAccount?: string;
  };
  
  export const TOOL_APPROVAL_THREAD_ID_CUSTOM_KEY = "toolApprovalThreadId";
-@@ -218,6 +219,7 @@ export function collectDecidedApprovalsFromContent(
+@@ -28,6 +31,8 @@ export type RespondToToolApprovalOptions = {
+     approved: boolean;
+     optionId?: string;
+     reason?: string;
++    /** For a mail approval: the account the person picked on the card, when they changed it. */
++    fromAccount?: string;
+ };
+ 
+ type ApprovalDecision = UserToolApprovalEvent["approval"];
+@@ -42,6 +47,15 @@ type AssistantToolCallPart = Extract<
+     { type: "tool-call" }
+ >;
+ 
++/** A tool call's approval as this package keeps it: the core shape plus the account a mail card picked. */
++type PartApproval = NonNullable<AssistantToolCallPart["approval"]> & {
++    fromAccount?: string;
++};
++
++function readFromAccount(approval: PartApproval | undefined): string | undefined {
++    return approval?.fromAccount;
++}
++
+ export function hasPendingToolApproval(
+     approval: ToolCallPart["approval"] | undefined,
+ ): boolean {
+@@ -56,13 +70,14 @@ function applyApprovalDecisionToToolCall(
+     part: AssistantToolCallPart,
+     options: RespondToToolApprovalOptions,
+ ): AssistantToolCallPart {
+-    const { approved, optionId, reason } = options;
++    const { approved, optionId, reason, fromAccount } = options;
+     const targetApproval = part.approval!;
+-    const approval = {
++    const approval: PartApproval = {
+         ...targetApproval,
+         approved,
+         ...(optionId != null ? { optionId } : {}),
+         ...(reason != null ? { reason } : {}),
++        ...(fromAccount != null ? { fromAccount } : {}),
+     };
+     if (approved) {
+         return { ...part, approval };
+@@ -216,9 +231,12 @@ export function collectDecidedApprovalsFromContent(
+         if (approval?.id == null || approval.approved === undefined) {
+             return;
          }
++        const fromAccount = readFromAccount(approval);
          decisions.set(approval.id, {
              approved: approval.approved,
 +            ...(approval.optionId != null ? { optionId: approval.optionId } : {}),
              ...(approval.reason != null ? { reason: approval.reason } : {}),
++            ...(fromAccount != null ? { fromAccount } : {}),
          });
      });
-@@ -260,6 +262,9 @@ export function applyApprovalDecisionsToContent(
+     return decisions;
+@@ -260,7 +278,13 @@ export function applyApprovalDecisionsToContent(
              nextPart = applyApprovalDecisionToToolCall(part, {
                  approvalId: part.approval.id,
                  approved: decision.approved,
@@ -3365,9 +3525,13 @@ index 6ed4a4cc74b0bc3b81f00f76df3f7cf0f81b1453..e4a01402913ff408bb3f7df7ebef5225
 +                    ? { optionId: decision.optionId }
 +                    : {}),
                  reason: decision.reason,
++                ...(decision.fromAccount != null
++                    ? { fromAccount: decision.fromAccount }
++                    : {}),
              });
          }
-@@ -313,6 +318,10 @@ export function collectSubsequentApprovalDecisions(
+ 
+@@ -313,6 +337,13 @@ export function collectSubsequentApprovalDecisions(
          for (const event of extractToolApprovalsFromTurnInput(input)) {
              decisions.set(event.toolCallId, {
                  approved: event.approval.status === "allow",
@@ -3375,10 +3539,13 @@ index 6ed4a4cc74b0bc3b81f00f76df3f7cf0f81b1453..e4a01402913ff408bb3f7df7ebef5225
 +                event.approval.scope === "chat"
 +                    ? { optionId: "allow-chat" }
 +                    : {}),
++                ...(event.approval.status === "allow" && event.approval.from_account != null
++                    ? { fromAccount: event.approval.from_account }
++                    : {}),
                  ...(event.approval.status === "deny" && event.approval.reason != null
                      ? { reason: event.approval.reason }
                      : {}),
-@@ -330,6 +339,10 @@ export function collectApprovalDecisionsFromTurnInput(
+@@ -330,6 +361,13 @@ export function collectApprovalDecisionsFromTurnInput(
      for (const event of extractToolApprovalsFromTurnInput(input)) {
          decisions.set(event.toolCallId, {
              approved: event.approval.status === "allow",
@@ -3386,14 +3553,18 @@ index 6ed4a4cc74b0bc3b81f00f76df3f7cf0f81b1453..e4a01402913ff408bb3f7df7ebef5225
 +            event.approval.scope === "chat"
 +                ? { optionId: "allow-chat" }
 +                : {}),
++            ...(event.approval.status === "allow" && event.approval.from_account != null
++                ? { fromAccount: event.approval.from_account }
++                : {}),
              ...(event.approval.status === "deny" && event.approval.reason != null
                  ? { reason: event.approval.reason }
                  : {}),
-@@ -381,9 +394,18 @@ export function resolveToolApprovalUpdate(
+@@ -381,9 +419,20 @@ export function resolveToolApprovalUpdate(
  export function mapApprovalDecision(
      approved: boolean,
      reason?: string,
 +    optionId?: string,
++    fromAccount?: string,
  ): ApprovalDecision {
      if (approved) {
 -        return { status: "allow" };
@@ -3405,11 +3576,12 @@ index 6ed4a4cc74b0bc3b81f00f76df3f7cf0f81b1453..e4a01402913ff408bb3f7df7ebef5225
 +                    : optionId === "allow-standing"
 +                      ? "always"
 +                      : "once",
++            ...(fromAccount != null ? { from_account: fromAccount } : {}),
 +        };
      }
      return { status: "deny", ...(reason != null ? { reason } : {}) };
  }
-@@ -437,7 +459,11 @@ export function collectApprovalInputs(
+@@ -437,7 +486,12 @@ export function collectApprovalInputs(
                  type: "user.tool_approval",
                  threadId: scopedThreadId,
                  toolCallId: approval.id,
@@ -3418,12 +3590,13 @@ index 6ed4a4cc74b0bc3b81f00f76df3f7cf0f81b1453..e4a01402913ff408bb3f7df7ebef5225
 +                    approval.approved!,
 +                    approval.reason,
 +                    approval.optionId,
++                    readFromAccount(approval),
 +                ),
              });
          }
          if (part.messages != null) {
 diff --git a/src/toolResponse.ts b/src/toolResponse.ts
-index aedff3a8c5e841cf2ce82a1ac4cc2c8bbf20021a..057b0091dde69128cee3da4c998a7fd1edce6993 100644
+index aedff3a8c5e841cf2ce82a1ac4cc2c8bbf20021a..e12a136f3aa549e397a74da598dc35426aa618d4 100644
 --- a/src/toolResponse.ts
 +++ b/src/toolResponse.ts
 @@ -17,6 +17,7 @@ import {
@@ -3462,7 +3635,7 @@ index aedff3a8c5e841cf2ce82a1ac4cc2c8bbf20021a..057b0091dde69128cee3da4c998a7fd1
          let nextPart: AssistantToolCallPart = part;
          if (contentValue != null && hasPendingToolResponse(part)) {
              nextPart = applyToolResponseToToolCall(part, contentValue);
-@@ -347,11 +349,17 @@ export function applyUserToolResponsesToFold(
+@@ -347,11 +349,20 @@ export function applyUserToolResponsesToFold(
              recordToolResponseInFold(fold, {
                  toolCallId: item.toolCallId,
                  content: item.content,
@@ -3476,6 +3649,9 @@ index aedff3a8c5e841cf2ce82a1ac4cc2c8bbf20021a..057b0091dde69128cee3da4c998a7fd1
 +                ...(item.approval.status === "allow" &&
 +                item.approval.scope === "chat"
 +                    ? { optionId: "allow-chat" }
++                    : {}),
++                ...(item.approval.status === "allow" && item.approval.from_account != null
++                    ? { fromAccount: item.approval.from_account }
 +                    : {}),
                  ...(item.approval.status === "deny" && item.approval.reason != null
                      ? { reason: item.approval.reason }
@@ -3839,7 +4015,7 @@ index 979a49f6b7d89068628ff53fb93ef268b032dc58..62e899b8c614b1d4b00026a3f60dc06c
          it("reports and restores a user message when initializeSession fails", async () => {
              const onError = vi.fn();
 diff --git a/src/useTrueFoundryAgentMessages.ts b/src/useTrueFoundryAgentMessages.ts
-index 81d2f7e9f072a6763ed744291dd6fdae8f21ce6a..0f210714e049783752fdced3fc26de094c60c9a3 100644
+index 81d2f7e9f072a6763ed744291dd6fdae8f21ce6a..35b2eff7b302e58794f5fc6b8af31df451dd5e31 100644
 --- a/src/useTrueFoundryAgentMessages.ts
 +++ b/src/useTrueFoundryAgentMessages.ts
 @@ -38,8 +38,11 @@ import {
@@ -4242,7 +4418,7 @@ index 81d2f7e9f072a6763ed744291dd6fdae8f21ce6a..0f210714e049783752fdced3fc26de09
  
      const respondToToolApproval = useCallback(
          (response: RespondToToolApprovalOptions) => {
-@@ -891,6 +1056,9 @@ export function useTrueFoundryAgentMessages({
+@@ -891,7 +1056,13 @@ export function useTrueFoundryAgentMessages({
              const approvals = new Map(prev.requiredActions.approvals);
              approvals.set(response.approvalId, {
                  approved: response.approved,
@@ -4250,9 +4426,13 @@ index 81d2f7e9f072a6763ed744291dd6fdae8f21ce6a..0f210714e049783752fdced3fc26de09
 +                    ? { optionId: response.optionId }
 +                    : {}),
                  ...(response.reason != null ? { reason: response.reason } : {}),
++                ...(response.fromAccount != null
++                    ? { fromAccount: response.fromAccount }
++                    : {}),
              });
              const nextSnapshot = replaceSessionSnapshot(prev, {
-@@ -899,6 +1067,7 @@ export function useTrueFoundryAgentMessages({
+                 requiredActions: {
+@@ -899,6 +1070,7 @@ export function useTrueFoundryAgentMessages({
                      approvals,
                  },
              });
@@ -4260,7 +4440,7 @@ index 81d2f7e9f072a6763ed744291dd6fdae8f21ce6a..0f210714e049783752fdced3fc26de09
              setSnapshot(nextSnapshot);
              trySendCollectedRequiredActions(nextSnapshot);
          },
-@@ -916,6 +1085,7 @@ export function useTrueFoundryAgentMessages({
+@@ -916,6 +1088,7 @@ export function useTrueFoundryAgentMessages({
                      toolResponses,
                  },
              });
@@ -4268,7 +4448,7 @@ index 81d2f7e9f072a6763ed744291dd6fdae8f21ce6a..0f210714e049783752fdced3fc26de09
              setSnapshot(nextSnapshot);
              trySendCollectedRequiredActions(nextSnapshot);
          },
-@@ -1094,6 +1264,8 @@ export function useTrueFoundryAgentMessages({
+@@ -1094,6 +1267,8 @@ export function useTrueFoundryAgentMessages({
  
      return {
          messages,

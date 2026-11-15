@@ -66,6 +66,72 @@ await client.internal.listPermissions({
 </dl>
 </details>
 
+## Telegram
+<details><summary><code>client.telegram.<a href="/src/api/resources/telegram/client/Client.ts">webhook</a>({ ...params }) -> void</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+The address Telegram posts updates to when a public https address is configured. The secret Telegram was given at setup must ride the call, or it is refused. An update in a shape this build cannot read is dropped with the same success answer, so Telegram does not keep retrying it.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.telegram.webhook({
+    updateId: 1
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.TelegramWebhookUpdate`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `TelegramClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
 ## Agents
 <details><summary><code>client.agents.<a href="/src/api/resources/agents/client/Client.ts">list</a>({ ...params }) -> core.Page&lt;TrueForge.Agent, TrueForge.ListAgentsResponse&gt;</code></summary>
 <dl>
@@ -8618,6 +8684,75 @@ await client.internal.sessions.getOrCreateByExternalId({
 </dl>
 </details>
 
+## Internal Telegram
+<details><summary><code>client.internal.telegram.<a href="/src/api/resources/internal/resources/telegram/client/Client.ts">processUpdate</a>({ ...params }) -> void</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Handles one update the controller polled for a connection: a message becomes a turn, a button tap answers an approval. Called only with the service credential.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.internal.telegram.processUpdate({
+    connectionId: "connection_id",
+    update: {
+        updateId: 1
+    }
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.internal.ProcessTelegramUpdateRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `TelegramClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
 ## Internal Agents
 <details><summary><code>client.internal.agents.<a href="/src/api/resources/internal/resources/agents/client/Client.ts">getCodeSnippets</a>(agent_id, { ...params }) -> TrueForge.GetAgentCodeSnippetsResponse</code></summary>
 <dl>
@@ -9942,6 +10077,69 @@ await client.memory.vault.getSummaryStatus();
 <dd>
 
 **request:** `TrueForge.memory.GetSummaryStatusVaultRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `VaultClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.memory.vault.<a href="/src/api/resources/memory/resources/vault/client/Client.ts">dismissSummaryStatus</a>({ ...params }) -> TrueForge.DeleteMemoryVaultSummaryStatusResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Put away the note that one vault namespace is owed a turn summary. Nothing in memory changes, and a later failed summary shows the note again.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.memory.vault.dismissSummaryStatus();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.memory.DismissSummaryStatusVaultRequest`
 
 </dd>
 </dl>
@@ -12841,6 +13039,72 @@ await client.settings.skills.createOrUpdate({
 </dl>
 </details>
 
+<details><summary><code>client.settings.skills.<a href="/src/api/resources/settings/resources/skills/client/Client.ts">checkWebsites</a>({ ...params }) -> TrueForge.CheckSkillWebsitesResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Reads every file of a git skill and lists the websites it sends requests to. Nothing is saved. Approve the list when adding the skill.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.skills.checkWebsites({
+    ref: "ref",
+    url: "url"
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.settings.CheckSkillWebsitesRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `SkillsClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
 <details><summary><code>client.settings.skills.<a href="/src/api/resources/settings/resources/skills/client/Client.ts">delete</a>(name) -> TrueForge.DeleteSkillResponse</code></summary>
 <dl>
 <dd>
@@ -13101,7 +13365,7 @@ await client.settings.skills.deleteNetworkApproval("name");
 <dl>
 <dd>
 
-Allows one site for the skill on its own, apart from the declared list approval.
+Allows one site for the skill on its own, apart from the declared list approval. On a skill with no approval yet, the allowance is bound to the skill's code as it stands, and a code version that cannot be read refuses it.
 </dd>
 </dl>
 </dd>
@@ -13626,7 +13890,7 @@ await client.settings.calendar.saveAccount({
 </dl>
 </details>
 
-<details><summary><code>client.settings.calendar.<a href="/src/api/resources/settings/resources/calendar/client/Client.ts">removeAccount</a>() -> TrueForge.RemoveCalendarAccountResponse</code></summary>
+<details><summary><code>client.settings.calendar.<a href="/src/api/resources/settings/resources/calendar/client/Client.ts">removeAccount</a>({ ...params }) -> TrueForge.RemoveCalendarAccountResponse</code></summary>
 <dl>
 <dd>
 
@@ -13638,7 +13902,7 @@ await client.settings.calendar.saveAccount({
 <dl>
 <dd>
 
-Deletes the saved account and its app password from the sidecar for good.
+Deletes the named account and its app password from the sidecar for good, or every account when the body names none.
 </dd>
 </dl>
 </dd>
@@ -13669,6 +13933,79 @@ await client.settings.calendar.removeAccount();
 <dl>
 <dd>
 
+**request:** `TrueForge.settings.RemoveCalendarAccountRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `CalendarClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.settings.calendar.<a href="/src/api/resources/settings/resources/calendar/client/Client.ts">setDefaultAccount</a>({ ...params }) -> TrueForge.SetDefaultCalendarAccountResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Makes the named connected account the default. Naming an account that is not connected changes nothing.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.calendar.setDefaultAccount({
+    address: "address"
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.settings.SetDefaultCalendarAccountRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
 **requestOptions:** `CalendarClient.RequestOptions`
 
 </dd>
@@ -13693,7 +14030,7 @@ await client.settings.calendar.removeAccount();
 <dl>
 <dd>
 
-Returns whether a calendar account is connected, its email, login and calendar address, and the provider table for the picker. The app password is never returned.
+Returns whether a calendar account is connected, its accounts and the default among them, and the provider table for the picker. The app password is never returned.
 </dd>
 </dl>
 </dd>
@@ -13804,7 +14141,7 @@ await client.settings.email.saveAccount({
 </dl>
 </details>
 
-<details><summary><code>client.settings.email.<a href="/src/api/resources/settings/resources/email/client/Client.ts">removeAccount</a>() -> TrueForge.RemoveEmailAccountResponse</code></summary>
+<details><summary><code>client.settings.email.<a href="/src/api/resources/settings/resources/email/client/Client.ts">removeAccount</a>({ ...params }) -> TrueForge.RemoveEmailAccountResponse</code></summary>
 <dl>
 <dd>
 
@@ -13816,7 +14153,7 @@ await client.settings.email.saveAccount({
 <dl>
 <dd>
 
-Deletes the saved account and its app password from the sidecar for good.
+Deletes the named account and its app password from the sidecar for good, or every account when the body names none.
 </dd>
 </dl>
 </dd>
@@ -13847,6 +14184,79 @@ await client.settings.email.removeAccount();
 <dl>
 <dd>
 
+**request:** `TrueForge.settings.RemoveEmailAccountRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `EmailClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.settings.email.<a href="/src/api/resources/settings/resources/email/client/Client.ts">setDefaultAccount</a>({ ...params }) -> TrueForge.SetDefaultEmailAccountResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Makes the named connected account the default. Naming an account that is not connected changes nothing.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.email.setDefaultAccount({
+    address: "address"
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.settings.SetDefaultEmailAccountRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
 **requestOptions:** `EmailClient.RequestOptions`
 
 </dd>
@@ -13871,7 +14281,7 @@ await client.settings.email.removeAccount();
 <dl>
 <dd>
 
-Returns whether an email account is connected, its address and provider, and the provider table for the picker. The app password is never returned.
+Returns whether an email account is connected, its accounts and the default among them, and the provider table for the picker. The app password is never returned.
 </dd>
 </dl>
 </dd>
@@ -14444,6 +14854,302 @@ await client.settings.notes.getStatus();
 <dd>
 
 **requestOptions:** `NotesClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+## Settings Telegram
+<details><summary><code>client.settings.telegram.<a href="/src/api/resources/settings/resources/telegram/client/Client.ts">connect</a>({ ...params }) -> TrueForge.ConnectTelegramResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Checks the bot token with Telegram first and saves the connection only when it passes. The token is stored with the connection and never returned.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.telegram.connect({
+    token: "token"
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.settings.ConnectTelegramRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `TelegramClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.settings.telegram.<a href="/src/api/resources/settings/resources/telegram/client/Client.ts">remove</a>() -> TrueForge.RemoveTelegramResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Removes the bot, its token and its pairing for good. Messages to the bot are no longer answered.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.telegram.remove();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**requestOptions:** `TelegramClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.settings.telegram.<a href="/src/api/resources/settings/resources/telegram/client/Client.ts">cancelPairing</a>() -> TrueForge.CancelTelegramPairingResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Drops the pairing that is waiting, without pairing anyone, so a /start from someone else can be refused. The person can send /start again to start over.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.telegram.cancelPairing();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**requestOptions:** `TelegramClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.settings.telegram.<a href="/src/api/resources/settings/resources/telegram/client/Client.ts">confirmPairing</a>({ ...params }) -> TrueForge.ConfirmTelegramPairingResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Pairs the person who sent /start to the bot, when the code they type matches the code the bot sent them in Telegram. Only that person can then talk to the bot.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.telegram.confirmPairing({
+    code: "code"
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.settings.ConfirmTelegramPairingRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `TelegramClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.settings.telegram.<a href="/src/api/resources/settings/resources/telegram/client/Client.ts">getStatus</a>() -> TrueForge.GetTelegramAccountResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Returns whether a bot is connected, its name, where pairing stands, and the name of the person waiting to pair while one waits. The bot token and the pairing code are never returned: the code is shown only in Telegram.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.telegram.getStatus();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**requestOptions:** `TelegramClient.RequestOptions`
 
 </dd>
 </dl>

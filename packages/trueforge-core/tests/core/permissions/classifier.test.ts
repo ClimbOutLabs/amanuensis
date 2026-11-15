@@ -35,8 +35,22 @@ function servicesWithTempAllowlist(): { services: SentinelServices; cleanup: () 
   const shell_allowlist: ShellAllowlistConfig = {
     pinned_path: dir,
     commands: {
-      mycmd: { args: ['-l'], operands: 'workspace_relative', offline_ok: true, script: null, subcommands: null },
-      ls: { args: ['-l'], operands: 'workspace_relative', offline_ok: true, script: null, subcommands: null },
+      mycmd: {
+        args: ['-l'],
+        operands: 'workspace_relative',
+        offline_ok: true,
+        script: null,
+        count_flag: false,
+        subcommands: null,
+      },
+      ls: {
+        args: ['-l'],
+        operands: 'workspace_relative',
+        offline_ok: true,
+        script: null,
+        count_flag: false,
+        subcommands: null,
+      },
     },
   };
   const services = defaultSentinelServices({ pinned_path: dir });
@@ -1077,6 +1091,7 @@ describe('verifyPreDispatch', () => {
           tool_type: 'truefoundry-system',
           canonical_params: params,
           tier: 2,
+          sandbox_file_write: true,
           approval_token_id: token.token_id,
           approval_binding: null,
           shell_binding: null,

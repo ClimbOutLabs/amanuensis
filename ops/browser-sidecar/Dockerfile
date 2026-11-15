@@ -14,7 +14,13 @@ RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
 
 COPY src ./src
 
-# Each person's profile (cookies, local storage, saved logins) lives under here on a named volume,
+# Chromium never offers to save passwords, cards or addresses: a profile that held them would keep them in a file
+# with only light scrambling. The policy goes where each build looks for it: Chrome for Testing (x64) and
+# Playwright's own Chromium (arm64). test/image/saving-off.mjs checks it on the built image.
+COPY chromium-policy.json /etc/opt/chrome_for_testing/policies/managed/aman.json
+COPY chromium-policy.json /etc/chromium/policies/managed/aman.json
+
+# Each person's profile (cookies, local storage) lives under here on a named volume,
 # owned by the image's built-in unprivileged user. Nothing else reads this folder.
 RUN mkdir /profiles && chown pwuser:pwuser /profiles
 USER pwuser

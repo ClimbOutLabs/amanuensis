@@ -61,8 +61,9 @@ Open **Export, import, and topics** at the bottom of the **Memories** tab.
 A [persona](personas.md) is a helper with its own name that answers in your chats. Each persona keeps its own notes from its chats. Notes from chats with your main assistant are shared, so every persona can read them.
 
 1. Open the **Sharing** tab.
-2. Find the persona's row. The first column, **Can also read notes from**, lists your main assistant and each persona.
-3. In that row, check the box under each persona or topic whose notes it may read. Each change saves at once.
+2. Find the row of the persona that should read more. Your main assistant has a row too. Each row says in words what it reads now.
+3. Click **Select** in that row. Under **Can also read notes from**, check each persona or topic whose notes it may read. Each change saves at once.
+4. Click **Done** to close the row.
 
 A persona's own notes stay private to it until you share them here.
 
@@ -112,7 +113,7 @@ The **Settings** tab also has these:
 - Your memories stay on your computer. Searching them uses a small helper that also runs on your computer.
 - A chat you delete leaves the past-chat search at once.
 - An incognito chat can use your memories, but Aman saves nothing from it.
-- If Aman couldn't save anything from your latest chat, the **Memories** tab tells you. Ask it to remember the important part again in your next chat.
+- If Aman couldn't save anything from your latest chat, the **Memories** tab tells you. Ask it to remember the important part again in your next chat. The note says when it happened, why, and what to do. For example, if the model took too long, it says to choose a faster **Background model** in Settings. Click **Open the chat** to go to the chat it was about. The note goes away after the next chat that saves, or when you click **Dismiss**. Dismissing changes nothing in memory.
 - To learn where memories are kept and how Aman finds them, see [How memory works](../../../../docs/memory.md).
 
 ## Related

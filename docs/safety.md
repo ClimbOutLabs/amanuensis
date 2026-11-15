@@ -96,7 +96,7 @@ Aman always shows a card first. Aman itself reads the skill on GitHub, so the na
 
 What you approve is what is added. The skill is saved at the exact version on the card, so a later change to the repository isn't picked up. If the repository changes between the card and your answer, nothing is added and Aman asks again.
 
-Adding a skill gives it nothing else. Its scripts run only in the sandbox. **Commands in the sandbox** below says when they ask first. A skill that wants to reach sites still needs your OK in Settings, under Skills. From a chat, Aman can only add a skill. It can't change or remove one.
+Skills from a marketplace don't say which websites they use, so Aman reads all of the skill's files first and lists the websites it found on the card. If the skill makes up web addresses while it runs, the card says so, and those websites stay blocked until you allow each one. Approving is all or nothing: **Allow** adds the skill and lets it reach exactly the websites on the card, and nothing else. Its scripts run only in the sandbox. **Commands in the sandbox** below says when they ask first. From a chat, Aman can only add a skill. It can't change or remove one.
 
 An incognito chat can't add a skill. A scheduled run can't add one either, because the tool isn't there.
 
@@ -104,13 +104,13 @@ An incognito chat can't add a skill. A scheduled run can't add one either, becau
 
 The sandbox is the sealed-off space on your computer where Aman runs code.
 
-In the sandbox, a command that only reads inside the workspace runs without asking. That's still true when several reads are joined, as in `cd repo && git status`. Reads are listing files, reading a file or part of one, searching files, and looking at git history. A file named by its full path counts the same as one named from the workspace, so Aman reading an installed skill's instructions doesn't ask. A full path outside the workspace still asks.
+In the sandbox, a command that only reads inside the workspace runs without asking. That's still true when several reads are joined, as in `cd repo && git status`. That's also true when one read feeds the next, as in a search whose results are cut to the first 60 lines. Reads are listing files, reading a file or part of one, searching files, counting or sorting lines, and looking at git history. Writing the results to a file still asks. A file named by its full path counts the same as one named from the workspace, so Aman reading an installed skill's instructions doesn't ask. A full path outside the workspace still asks.
 
 Every other command asks first, unless the **Sandbox** switch covers it. Answering **Always allow in this chat** on a command covers running that same command again in this chat, and nothing else.
 
 Installing a package asks first on every sandbox. The **Sandbox** switch never covers it.
 
-A script that ships with a skill you installed runs without asking, with or without the switch, while the sandbox has no internet. It asks where the sandbox can reach the internet, including a chat that uses a skill you let reach its own sites. It also asks when Aman edited a file in that skill's folder with its file tools earlier in the chat. A script that is a link to a file outside the skill's folder doesn't run.
+A script that ships with a skill you installed runs without asking, with or without the switch, while the sandbox has no internet. It asks where the sandbox can reach the internet, including a chat that uses a skill you let reach its own sites. It also asks when Aman edited a file in that skill's folder with its file tools earlier in the chat. A script that is a link to a file outside the skill's folder doesn't run. Code Aman writes for `run_code` that names a skill's folder is refused before any card, because `run_code` can't see that folder; Aman runs the skill's own script instead.
 
 ??? note "What the Sandbox switch covers"
 
@@ -169,9 +169,12 @@ You can let file writes run without a card, and let work in the sandbox run with
 
 A skill can name the sites it needs to reach. Naming a site grants nothing on its own, and a skill can only ever reach named sites it has been allowed.
 
+- When a skill is added, from a chat or from Settings, Aman reads its files and lists the sites it sends requests to. Adding it allows exactly that list. You can't add the skill and leave the list out, and a list that changed before you answered adds nothing.
+
 - The first time a skill with named sites runs in a chat, a card asks whether the skill may reach the sites it names. **Allow** covers this chat only. **Always allow** remembers the sites for that skill in every chat. **Deny** remembers the refusal. You can change any of these later in Settings, then Skills.
 - Turning down one named site does not switch off the others. The sites you approved still work, and the turned-down site stays out. Clearing its refusal in Settings grants nothing by itself, because your approval never named that site. A card asks about the list again first.
 - If a command tries to reach a site no skill named, the connection is refused and a card asks about that one site. The card names no skill, because a refused connection cannot show which skill, if any, made the attempt. Its Always choice names the skill the answer is kept under.
+- A skill can never reach a site that can send email. That covers the email services Aman knows, such as Gmail, Outlook, SendGrid or Mailgun, and services that forward a web request as an email, such as Zapier or IFTTT. Aman refuses those sites whatever was allowed. No card asks about them, and the card that adds a skill marks them Blocked. Google and Microsoft run email on the same sites as their other services, so skills can't reach Google Drive, Google Calendar or Microsoft OneDrive either. Email only goes out through Aman, and you approve each one.
 - Connections to bare addresses are always refused, and no card can allow them. That covers addresses on your own machine, such as 127.0.0.1, addresses on your home network, and the address a cloud machine keeps its own settings behind.
 - No card ever waits inside a connection. The connection is refused first, and the question is asked in the chat.
 - Approving a card runs the held command again, unless the command needs an approval of its own. Then that approval is asked for on its own card, and only your answer about the sites is kept.
@@ -183,7 +186,7 @@ A scheduled run has nobody watching it, so it never sends anything by itself. Th
 ??? note "Every rule for scheduled runs"
 
     - It can read and search, the same as a chat.
-    - It can make and change any space without asking, so a list it keeps for you stays up to date. Every change keeps a version you can ask Aman to bring back. Each change a run saves is also one line in the activity log, under **Settings**, **Audit**.
+    - It can make and change any space without asking, so a list it keeps for you stays up to date. Every change keeps a version you can ask Aman to bring back. Each change a run saves is also one line in the activity log, under **Settings**, **Activity log**.
     - Aman can't delete a space.
     - A space only keeps a clickable link that you gave or that a search returned. A link that only an email or a web page supplied is kept as plain text.
     - Any action that would show a card in a chat is held instead. It doesn't run, and the model is told it was saved for you.

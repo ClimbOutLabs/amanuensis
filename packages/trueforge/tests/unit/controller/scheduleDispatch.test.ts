@@ -1,5 +1,4 @@
-import { DOCUMENT_REPORT_TOOL_NAMES } from '@truefoundry/trueforge-core/core';
-import { SANDBOX_FILE_WRITE_TOOLS } from '@truefoundry/trueforge-core/core/permissions/dispatch';
+import { DOCUMENT_REPORT_TOOL_NAMES, SANDBOX_FILE_WRITE_TOOLS } from '@truefoundry/trueforge-core/core';
 import {
   MORNING_BRIEF_PROMPT,
   MORNING_BRIEF_SCHEDULE_NAME,

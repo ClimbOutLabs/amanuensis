@@ -11,15 +11,12 @@ import {
 
 export type MemorySharingPersona = { id: string; displayName: string };
 
-/** One persona row: who reads, and the key its grants are saved under. */
+/** One reader: the main assistant or a persona, and the key its grants are saved under. */
 type SharingRow = { key: string; label: string; main: boolean };
 
-/** One column of the grid: a collection of notes a row's persona can be granted. A persona column
- * knows its persona's key, so the crossing with that persona's own row can be left blank. */
-type SharingColumn = { value: string; label: string; personaKey: string | null };
-
-/** One grant a box can change: a collection of notes, by the name a person sees for it. */
-type SharingChoice = { value: string; label: string };
+/** One set of notes a reader can be granted. A persona's set knows its persona's key, so a reader is
+ * never offered its own notes. */
+type SharingChoice = { value: string; label: string; personaKey: string | null };
 
 const SAVE_FAILED_LINE = 'That change was not saved. Check your connection, then try again.';
 
@@ -43,10 +40,20 @@ function withGrant({
   return copy;
 }
 
+/** "Ada", "Ada and Ben", "Ada, Ben and Cy", then "Ada, Ben and 3 more": a line that stays short. */
+function namesInWords(names: readonly string[]): string {
+  const [first = '', second = '', third = ''] = names;
+  if (names.length <= 1) return first;
+  if (names.length === 2) return `${first} and ${second}`;
+  if (names.length === 3) return `${first}, ${second} and ${third}`;
+  return `${first}, ${second} and ${String(names.length - 2)} more`;
+}
+
 /**
  * Which other personas' notes each persona can read. Everything the person says about themselves is
  * shared with every persona already; this only adds a persona's own notes to another's reading. Each
- * change saves as it is made.
+ * reader is one row that says what it reads in words; its boxes open on request, so the screen stays
+ * short however many personas there are. Each change saves as it is made.
  */
 export function MemorySharing(props: {
   personas: MemorySharingPersona[];
@@ -54,13 +61,15 @@ export function MemorySharing(props: {
   assistant: string;
   /** Display names of the personas that have notes of their own. */
   personasWithNotes: ReadonlySet<string>;
-  /** Topic collections, offered on every row after the personas. */
+  /** Topic collections, offered to every reader after the personas. */
   namespaces: Array<{ value: string; label: string }>;
   sharing: MemoryVaultSharing;
   onSave: (sharing: MemoryVaultSharing) => Promise<void>;
 }) {
   const [shares, setShares] = useState<Record<string, string[]>>(() => ({ ...props.sharing.shares }));
   const [status, setStatus] = useState<'idle' | 'saving' | 'saved' | 'failed'>('idle');
+  /** The reader whose boxes are open; one at a time keeps the list short. */
+  const [openKey, setOpenKey] = useState<string | null>(null);
   const confirmed = useRef<Record<string, string[]>>({ ...props.sharing.shares });
   // Saves run one after another, so a quick second change never lands before the first.
   const queue = useRef<Promise<void>>(Promise.resolve());
@@ -71,7 +80,6 @@ export function MemorySharing(props: {
     .map(persona => ({
       key: persona.id,
       label: persona.displayName === AMAN_GUIDE_NAME ? 'Help' : persona.displayName,
-      main: false,
       namespace: personaVaultNamespace(persona.displayName),
     }));
   const rows: SharingRow[] = [
@@ -79,13 +87,17 @@ export function MemorySharing(props: {
     ...listed.map(persona => ({ key: persona.key, label: persona.label, main: false })),
   ];
 
-  // The main assistant keeps no notes of its own, so it is a row but never a column. Topic
-  // collections follow the persona columns, as they followed the persona boxes before.
-  const columns: SharingColumn[] = [
-    ...listed.map(persona => ({ value: persona.namespace, label: persona.label, personaKey: persona.key })),
-    ...props.namespaces.map(namespace => ({ value: namespace.value, label: namespace.label, personaKey: null })),
-  ];
-  const firstTopicIndex = listed.length;
+  // The main assistant keeps no notes of its own, so it reads but is never offered.
+  const personaChoices: SharingChoice[] = listed.map(persona => ({
+    value: persona.namespace,
+    label: persona.label,
+    personaKey: persona.key,
+  }));
+  const topicChoices: SharingChoice[] = props.namespaces.map(namespace => ({
+    value: namespace.value,
+    label: namespace.label,
+    personaKey: null,
+  }));
 
   function toggle({ row, choice, on }: { row: SharingRow; choice: SharingChoice; on: boolean }) {
     const next = withGrant({ shares, key: row.key, namespace: choice.value, on });
@@ -118,78 +130,79 @@ export function MemorySharing(props: {
         Everything you tell any persona about yourself is shared with all of them. Each persona also keeps its own
         notes. Choose which other personas’ notes each one can read.
       </p>
-      {/* Relative so the scroll box clips the hidden "Its own notes" labels; otherwise they widen the page. */}
-      <div className="relative overflow-x-auto rounded-[0.75rem] border border-border bg-card-bg">
-        <table
-          aria-label="Which notes each persona can read"
-          className="w-full border-collapse text-left text-[0.875rem] text-text-primary"
-        >
-          <thead>
-            <tr className="border-b border-border">
-              <th
-                scope="col"
-                className="sticky left-0 min-w-[10rem] bg-card-bg px-3 py-2.5 font-medium text-text-secondary"
-              >
-                Can also read notes from
-              </th>
-              {columns.map((column, index) => (
-                <th
-                  key={column.value}
-                  scope="col"
-                  className={`min-w-[4rem] px-2 py-2.5 text-center font-medium${
-                    index === firstTopicIndex && firstTopicIndex > 0 ? ' border-l border-border' : ''
-                  }`}
+      <ul
+        aria-label="Which notes each persona can read"
+        className="m-0 list-none divide-y divide-border rounded-[0.75rem] border border-border bg-card-bg p-0 text-[0.875rem] text-text-primary"
+      >
+        {rows.map(row => {
+          const granted = shares[row.key] ?? [];
+          const offered = [...personaChoices, ...topicChoices].filter(choice => choice.personaKey !== row.key);
+          const reading = offered.filter(choice => granted.includes(choice.value)).map(choice => choice.label);
+          const open = openKey === row.key;
+          const boxes = (choices: SharingChoice[]) =>
+            choices
+              .filter(choice => choice.personaKey !== row.key)
+              .map(choice => {
+                const on = granted.includes(choice.value);
+                return (
+                  <label
+                    key={choice.value}
+                    className={`flex cursor-pointer items-center gap-2 rounded-full border px-3 py-1.5 ${
+                      on ? 'border-text-primary bg-secondary-bg' : 'border-border'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      aria-label={choice.label}
+                      className="aui-sharing-box size-4 cursor-pointer accent-primary-button-bg"
+                      checked={on}
+                      onChange={event => toggle({ row, choice, on: event.target.checked })}
+                    />
+                    <span aria-hidden="true">{choice.label}</span>
+                  </label>
+                );
+              });
+          return (
+            <li key={row.key} aria-label={row.label} className="px-4 py-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <span className="block font-medium">{row.label}</span>
+                  {reading.length === 0 ? (
+                    <span className="block text-text-muted">
+                      {row.main ? 'Only the shared notes' : 'Only its own notes'}
+                    </span>
+                  ) : (
+                    <span className="block text-text-secondary">Also reads notes from {namesInWords(reading)}</span>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  aria-expanded={open}
+                  aria-label={open ? `Close the choices for ${row.label}` : `Select what ${row.label} can read`}
+                  className="shrink-0 cursor-pointer rounded-full border border-border bg-transparent px-3 py-1.5 text-[0.8125rem] text-text-primary hover:bg-ghost-button-hover"
+                  onClick={() => setOpenKey(open ? null : row.key)}
                 >
-                  {column.label}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {rows.map(row => {
-              const granted = shares[row.key] ?? [];
-              const anyOn = columns.some(column => column.personaKey !== row.key && granted.includes(column.value));
-              return (
-                <tr key={row.key}>
-                  <th scope="row" className="sticky left-0 bg-card-bg px-3 py-2.5 align-top font-normal">
-                    <span className="block">{row.label}</span>
-                    {anyOn ? null : (
-                      <span className="block text-text-muted">
-                        {row.main ? 'Only the shared notes' : 'Only its own notes'}
-                      </span>
-                    )}
-                  </th>
-                  {columns.map((column, index) => (
-                    <td
-                      key={column.value}
-                      className={`px-2 py-2.5 text-center${
-                        index === firstTopicIndex && firstTopicIndex > 0 ? ' border-l border-border' : ''
-                      }`}
-                    >
-                      {column.personaKey === row.key ? (
-                        <>
-                          <span aria-hidden="true" className="text-text-muted">
-                            ·
-                          </span>
-                          <span className="sr-only">Its own notes</span>
-                        </>
-                      ) : (
-                        <input
-                          type="checkbox"
-                          aria-label={column.label}
-                          className="aui-sharing-box size-4 cursor-pointer accent-primary-button-bg"
-                          checked={granted.includes(column.value)}
-                          onChange={event => toggle({ row, choice: column, on: event.target.checked })}
-                        />
-                      )}
-                    </td>
-                  ))}
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+                  {open ? 'Done' : 'Select'}
+                </button>
+              </div>
+              {open ? (
+                <div className="mt-3 flex flex-col gap-3">
+                  <fieldset className="m-0 flex flex-wrap gap-2 border-0 p-0">
+                    <legend className="mb-2 p-0 text-[0.8125rem] text-text-secondary">Can also read notes from</legend>
+                    {boxes(personaChoices)}
+                  </fieldset>
+                  {topicChoices.length > 0 ? (
+                    <fieldset className="m-0 flex flex-wrap gap-2 border-0 p-0">
+                      <legend className="mb-2 p-0 text-[0.8125rem] text-text-secondary">Topics</legend>
+                      {boxes(topicChoices)}
+                    </fieldset>
+                  ) : null}
+                </div>
+              ) : null}
+            </li>
+          );
+        })}
+      </ul>
       <p role="status" aria-live="polite" className="m-0 min-h-[1.25rem] text-[0.8125rem] text-text-secondary">
         {status === 'saved' ? 'Saved' : status === 'saving' ? 'Saving…' : ''}
       </p>

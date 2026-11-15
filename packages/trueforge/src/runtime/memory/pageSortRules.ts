@@ -6,7 +6,7 @@
 import { kindHasSection, type PageKind, type PageListing } from './memoryPages';
 import { holdsWordOnlyRead } from './memorySummarize';
 import type { SortDecision } from './pageSortDecisions';
-import type { NoteOrigin } from './pageSortOrigin';
+import type { SortableOrigin } from './pageSortOrigin';
 import { OWN_STATEMENT_SOURCES, type ShownPage, type ShownStatement, type ShownWords } from './pageSortPrompt';
 import { cleanLine, MAX_FACT_CHARS, MAX_NAME_CHARS, sameText } from './pageStatements';
 
@@ -29,7 +29,7 @@ export type RuledReply = { ok: true; planned: PlannedDecision[] } | { ok: false;
 const WRITING_SECTION = 'How you write to them';
 
 interface RuleContext {
-  origin: NoteOrigin;
+  origin: SortableOrigin;
   /** The note being sorted. Compared with the model's wording, never obeyed. */
   noteText: string;
   day: string;

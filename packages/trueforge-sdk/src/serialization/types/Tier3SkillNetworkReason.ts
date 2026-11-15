@@ -7,8 +7,8 @@ import type * as serializers from "../index.js";
 export const Tier3SkillNetworkReason: core.serialization.Schema<
     serializers.Tier3SkillNetworkReason.Raw,
     TrueForge.Tier3SkillNetworkReason
-> = core.serialization.enum_(["first_use", "undeclared_host"]);
+> = core.serialization.enum_(["first_use", "undeclared_host", "code_changed"]);
 
 export declare namespace Tier3SkillNetworkReason {
-    export type Raw = "first_use" | "undeclared_host";
+    export type Raw = "first_use" | "undeclared_host" | "code_changed";
 }

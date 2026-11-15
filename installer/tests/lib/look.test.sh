@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # How install (command:install), upgrade (command:upgrade) and the doctor (command:doctor) look from start to end: the
-# banner, the step badges with their progress bar, a separator before every question and the boxed verdict, in color
-# on a terminal, without color under NO_COLOR, and as plain text when the output is not a terminal.
+# banner, a framed panel per step with its number and progress bar, a separator before every question and the boxed
+# verdict, in color on a terminal, without color under NO_COLOR, and as plain text when the output is not a terminal.
 set -euo pipefail
 # shellcheck source=../helpers.sh
 . "$(dirname "${BASH_SOURCE[0]}")/../helpers.sh"
@@ -28,8 +28,9 @@ is_ascii() { ! printf '%s' "$1" | LC_ALL=C grep -q '[^ -~[:space:]]'; }
 assert_boxes_closed() { # text
   local widths
   # Counting bytes that start a character gives columns whatever the locale of the machine running the test.
-  widths=$(printf '%s\n' "$1" | LC_ALL=C grep -E '^(\+-|\| |╭|╰|│ )' | LC_ALL=C tr -d '\200-\277' | LC_ALL=C awk '{ print length($0) }' | sort -u)
-  assert_eq "$widths" 72 "every box line is 72 columns wide, so the right side lines up"
+  # A line too long for its panel (a fingerprint) keeps only its left side on purpose, so it is not counted.
+  widths=$(printf '%s\n' "$1" | LC_ALL=C grep -E '^(\+-|\| |╭|╰|│ )' | LC_ALL=C grep -E '(\+|\||╮|╯|│)$' | LC_ALL=C tr -d '\200-\277' | LC_ALL=C awk '{ print length($0) }' | sort -u)
+  assert_eq "$widths" 72 "every box and panel line is 72 columns wide, so the right side lines up"
 }
 
 test_install_in_color() {
@@ -38,7 +39,7 @@ test_install_in_color() {
   RUN_ENV_EXTRA=("${COLOR_ENV[@]}")
   install_machine
   assert_contains "$OUT" "${ESC}[1;36mAMAN${ESC}[0m  Setting up a private assistant on this computer"
-  assert_contains "$OUT" "${ESC}[7;36m 1 of 6 ${ESC}[0m  ${ESC}[1mChecking this computer${ESC}[0m"
+  assert_contains "$OUT" "${ESC}[2m╭─${ESC}[0m ${ESC}[7;36m 1 of 6 ${ESC}[0m  ${ESC}[1mChecking this computer${ESC}[0m" "the step's panel starts with its number"
   assert_contains "$OUT" "${ESC}[7;36m 6 of 6 ${ESC}[0m  ${ESC}[1mChecking the result${ESC}[0m"
   assert_contains "$OUT" "${ESC}[32m━━━━━━━━━━━━${ESC}[0m" "the last step fills the bar"
   assert_contains "$OUT" "${ESC}[1;32m✓ Ready. Instance main is running.${ESC}[0m"
@@ -89,6 +90,8 @@ Enter password again=>$SENTINEL_PASSWORD"
   local flat_out
   flat_out=$(flat "$OUT")
   assert_contains "$flat_out" "> Your answer is needed ---" "the separator names what the run waits for"
+  assert_contains "$flat_out" "-+ > Your answer is needed ---" "the step's panel closes before the questions"
+  assert_contains "$flat_out" "+- [ 3 of 6 ] The plan" "each step opens a panel with its number in the top line"
   assert_contains "$flat_out" "Your answer is needed ------------------------------------------------ Each person gets a new instance. > Name for this instance"
   assert_contains "$flat_out" "Your answer is needed ------------------------------------------------ > Connect a calendar?"
   assert_contains "$flat_out" "Your answer is needed ------------------------------------------------ > Go ahead? [Y/n]"

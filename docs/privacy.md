@@ -84,9 +84,22 @@ For a short overview, see [Your privacy](../packages/trueforge/guide/topics/priv
 
     Whatever a connector call sends, such as an email you approved. Calls that send or change something show a card first. See [Safety rules in detail](safety.md).
 
+??? note "To Telegram, when you connect a Telegram bot"
+
+    These all pass through Telegram's servers:
+
+    - The messages you send the bot, and Aman's replies.
+    - Reminder text.
+    - The details of anything that needs your ok.
+    - Any photos or files you send the bot.
+    - The names of your models, personas and connectors, when you use the bot's menu to pick one.
+    - The web address of Aman and the chat's id, when a message asks you to answer in Aman and Aman can be opened from other devices.
+
+    Chats with a bot are not end to end encrypted, so Telegram can hold and read them. Do not send the bot anything you would not want Telegram to hold. The chats themselves still live on your computer.
+
 ??? note "To GitHub, when you ask Aman in a chat to add a skill"
 
-    The address of that skill and a request to read it. Nothing about you is in it. GitHub also sees this computer's internet address.
+    The address of that skill and a request to read it, then a download of the skill's files at that version so Aman can check which websites the skill uses. Nothing about you is in it. GitHub also sees this computer's internet address.
 
 ??? note "To package sources, when a skill you approved installs packages"
 

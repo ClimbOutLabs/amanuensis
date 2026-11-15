@@ -11,6 +11,7 @@ import path from 'node:path';
 import { EMBEDDING_DIMENSIONS, getSharedEmbeddingModel, type EmbeddingModel } from './embeddingModel';
 import { EmbeddingStore, hashEntryText, LOG_VECTORS_FILE } from './embeddingStore';
 import { namespaceDirFor, scanNamespaceEntries, withoutSourceLines } from './markdownMemoryFiles';
+import { trackMemoryBackgroundWork } from './memoryBackgroundWork';
 
 /** How many vector hits lead the ranking; bounded work per recall. */
 export const VECTOR_TOP_K = 50;
@@ -301,7 +302,7 @@ export class EmbeddingSubsystem {
     // would let it fire inside the new attempt's cooldown, get gated, and
     // silently end the retry chain.
     this.clearRetry();
-    this.warmPromise = this.warm().then(
+    this.warmPromise = trackMemoryBackgroundWork(this.warm()).then(
       warmed => {
         this.warmPromise = undefined;
         // Only a warm that actually backfilled counts as success: a failed
@@ -455,11 +456,13 @@ export class EmbeddingSubsystem {
     if (entries.length === 0) {
       return;
     }
-    void this.queueStoreMutation(() => this.indexEntries(entries)).catch((error: unknown) => {
-      this.log?.(
-        `Smart search couldn't index ${String(entries.length)} new memories (${error instanceof Error ? error.message : String(error)}); the next warm will retry.`,
-      );
-    });
+    void trackMemoryBackgroundWork(this.queueStoreMutation(() => this.indexEntries(entries))).catch(
+      (error: unknown) => {
+        this.log?.(
+          `Smart search couldn't index ${String(entries.length)} new memories (${error instanceof Error ? error.message : String(error)}); the next warm will retry.`,
+        );
+      },
+    );
   }
 
   private async indexEntries(entries: RankedMemory[]): Promise<void> {
