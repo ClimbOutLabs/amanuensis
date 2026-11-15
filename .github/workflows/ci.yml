@@ -585,6 +585,24 @@ jobs:
         if: runner.os == 'Windows'
         run: packages/aman-installer/dist/aman.exe --version
 
+      # Kept so a person can try this exact build on their own Windows PC. It only runs the setup under this name.
+      - name: Name the executable Aman-Setup.exe
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP 'aman-setup'
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          Copy-Item packages/aman-installer/dist/aman.exe (Join-Path $dir 'Aman-Setup.exe')
+
+      - name: Keep Aman-Setup.exe
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v7
+        with:
+          name: Aman-Setup
+          path: ${{ runner.temp }}/aman-setup/Aman-Setup.exe
+          if-no-files-found: error
+          retention-days: 7
+
       # The setup window is drawn by Windows PowerShell, so only a Windows machine can open it. PowerShell's own
       # records of what it runs are turned on first, so the last step can prove nothing typed ends up in them.
       - name: Turn on PowerShell transcripts and script logging
