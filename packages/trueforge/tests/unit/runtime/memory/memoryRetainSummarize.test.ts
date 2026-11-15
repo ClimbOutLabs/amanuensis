@@ -711,6 +711,7 @@ describe('turn outcome log at info', () => {
       expect.objectContaining({
         message: 'Turn memory not saved: it held nothing worth keeping',
         reason: 'nothing_to_keep',
+        seconds: expect.any(Number),
         personaName: 'shared',
       }),
     ]);
@@ -771,7 +772,7 @@ describe('turn outcome log at info', () => {
     }
   });
 
-  it('keeps a normal summarized turn silent at info', async () => {
+  it('logs how long a kept summary took, without its words', async () => {
     const { client, retain } = retainingClient();
     retain.mockResolvedValue({ ok: true });
     mockSummarize.mockResolvedValue({ status: 'summarized', facts: ['The person has a cactus named Gerald.'] });
@@ -779,7 +780,17 @@ describe('turn outcome log at info', () => {
 
     await submitRetain(submitFor({ client, logger, interactive: true }));
 
-    expect(infoEntries(lines)).toHaveLength(0);
+    expect(infoEntries(lines)).toEqual([
+      expect.objectContaining({
+        message: 'Turn memory saved: the summary was kept',
+        sessionId: 's1',
+        turnId: 't1',
+        personaName: 'shared',
+        factCount: 1,
+        seconds: expect.any(Number),
+      }),
+    ]);
+    expect(lines.join('\n')).not.toContain('Gerald');
   });
 
   it('logs nothing at info for a scheduled turn, even when the summary fails', async () => {
