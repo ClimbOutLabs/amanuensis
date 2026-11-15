@@ -8,6 +8,7 @@ import type { Context } from 'hono';
 import type { Logger } from 'winston';
 import type { ResolveRequestContext } from '../auth/identity';
 import type { McpCatalog } from '../catalog/McpCatalog';
+import type { SkillCatalog } from '../catalog/SkillCatalog';
 import configuration from '../config';
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 import type { IMcpServerWithAuthStore } from '../db/mcpServerStore';
@@ -21,6 +22,7 @@ import type { NightlyMemoryJob } from '../runtime/memory/nightlyService';
 import type { CheckSavedModelProvider } from '../runtime/modelProviderCheck';
 import type { ResolveAddresses } from '../runtime/remoteAddress';
 import { getSharedRunCodeService } from '../runtime/sessionResources';
+import { readSkillFilesFromGit, type ReadSkillFiles } from '../runtime/skillWebsites';
 import type { TokenFactoryBudget } from '../runtime/tokenFactoryBudget';
 import { sandboxDisabledByInstaller } from '../sandbox/slotBackend';
 import { createFirstRunGuideRouter } from './firstRunGuide';
@@ -45,6 +47,10 @@ export interface SettingsRouterDeps<TTransaction> {
   tokenStore: IOAuthTokenStore<TTransaction>;
   toolGrantStore: IMcpToolGrantStore<TTransaction>;
   resolveSkillStore: ResolveSkillStore<TTransaction>;
+  /** The starter skills, taken as shipped when one is added. */
+  skillCatalog: Pick<SkillCatalog, 'list'>;
+  /** Reads a git skill's files to find its websites; tests replace it. */
+  readSkillFiles?: ReadSkillFiles;
   resolveSandboxProviderStore: (c: Context) => ISandboxProviderStore<TTransaction>;
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
   personalizationStore: Pick<IPersonalizationStore<TTransaction>, 'getProfile'>;
@@ -94,6 +100,8 @@ export function createSettingsRouter<TTransaction>(deps: SettingsRouterDeps<TTra
       resolveSkillStore: deps.resolveSkillStore,
       withTransaction: deps.withTransaction,
       resolveRequestContext: deps.resolveRequestContext,
+      catalog: deps.skillCatalog.list(),
+      readFiles: deps.readSkillFiles ?? readSkillFilesFromGit,
     }),
   );
   router.route(

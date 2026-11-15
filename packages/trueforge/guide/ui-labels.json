@@ -391,6 +391,9 @@
   "Due": "packages/trueforge-ui/src/components/RailDesk.tsx",
   "From memory": "packages/trueforge-ui/src/components/RailDesk.tsx",
   "Manage memory": "packages/trueforge-ui/src/components/RailDesk.tsx",
+  "Check skill": "packages/trueforge-ui/src/containers/SettingsBuilder/ImportGithubSkillForm.tsx",
+  "Add skill and allow websites": "packages/trueforge-ui/src/containers/SettingsBuilder/SkillWebsitesReview.tsx",
+  "Add skill": "packages/trueforge-ui/src/containers/SettingsBuilder/SkillWebsitesReview.tsx",
   "Chat stats": "packages/trueforge-ui/src/atoms/SessionsBrowserButton.tsx",
   "Test your agent here": "packages/trueforge-ui/src/containers/ThreadContainer.tsx",
   "Ask user questions": "packages/trueforge-ui/src/atoms/draft/AgentRuntimeConfigFields.tsx"

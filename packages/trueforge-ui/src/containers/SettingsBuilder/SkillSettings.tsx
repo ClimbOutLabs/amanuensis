@@ -9,14 +9,17 @@ import { Icon } from '@/icons/Icon.js';
 import { useCatalogServer } from '../../server/ServerContext.js';
 import {
   hasSkillNetworkApproval,
+  hasSkillWebsites,
   skillNetworkApprovalLines,
   skillNetworkApprovedLine,
   type SkillNetworkApprovalState,
+  type SkillWebsiteCheck,
 } from '../../server/skillNetworkApproval.js';
 import type { RegistrySkill, SkillBase, SkillCatalogEntry, SkillConfigBase } from '../../server/types.js';
 import { getErrorMessage } from '../../utils/getErrorMessage.js';
 import { useToasterOptional } from '../ToasterContainer.js';
 import ImportGithubSkillForm from './ImportGithubSkillForm.js';
+import { addSkillLabel, SkillWebsitesReview } from './SkillWebsitesReview.js';
 
 const matchesQuery = (query: string, name: string, description: string) =>
   !query || name.toLowerCase().includes(query) || description.toLowerCase().includes(query);
@@ -43,6 +46,10 @@ const SkillSettings = () => {
   // A git-imported skill is deleted outright, so removing it goes through a confirm dialog.
   // A registry (catalog) skill's Remove is a disable that just returns it to Available.
   const [pendingRemoval, setPendingRemoval] = useState<SkillBase | null>(null);
+  // A starter skill that sends requests to websites waits here until the person approves them.
+  const [pendingStarter, setPendingStarter] = useState<{ entry: SkillCatalogEntry; check: SkillWebsiteCheck } | null>(
+    null,
+  );
   // Network approval state per enabled skill, keyed by skill id. A skill with no entry (the
   // catalog carries no approval calls, or the read failed) simply shows no panel.
   const [networkApprovals, setNetworkApprovals] = useState<Record<string, SkillNetworkApprovalState>>({});
@@ -114,16 +121,33 @@ const SkillSettings = () => {
     return <p className="text-sm text-text-secondary">Could not load the skills catalog. Try again.</p>;
   }
 
+  const starterDraft = (entry: SkillCatalogEntry) => ({
+    catalogId: entry.id,
+    name: entry.name,
+    description: entry.description,
+    repoURL: entry.repoURL,
+    path: entry.path,
+    ref: entry.ref,
+  });
+
   const handleSelect = (entry: SkillCatalogEntry) => {
+    if (hasSkillWebsites(skillCatalog)) {
+      void runMutation(async () => {
+        const check = await skillCatalog.checkSkillWebsites({
+          repoURL: entry.repoURL,
+          path: entry.path,
+          ref: entry.ref,
+        });
+        if (check.websites.length > 0) {
+          setPendingStarter({ entry, check });
+          return;
+        }
+        await skillCatalog.addSkillWithWebsites({ ...starterDraft(entry), approvedWebsites: [] });
+      }).catch(() => {});
+      return;
+    }
     void runMutation(async () => {
-      await skillCatalog.createSkill({
-        catalogId: entry.id,
-        name: entry.name,
-        description: entry.description,
-        repoURL: entry.repoURL,
-        path: entry.path,
-        ref: entry.ref,
-      });
+      await skillCatalog.createSkill(starterDraft(entry));
     }).catch(() => {});
   };
 
@@ -151,9 +175,25 @@ const SkillSettings = () => {
     if (skill) handleRemove(skill);
   };
 
-  const handleImport = async (draft: SkillConfigBase) => {
+  const confirmStarter = () => {
+    const pending = pendingStarter;
+    setPendingStarter(null);
+    if (pending === null || !hasSkillWebsites(skillCatalog)) return;
+    void runMutation(async () => {
+      await skillCatalog.addSkillWithWebsites({
+        ...starterDraft(pending.entry),
+        approvedWebsites: pending.check.websites,
+      });
+    }).catch(() => {});
+  };
+
+  const handleImport = async (draft: SkillConfigBase, approvedWebsites?: string[]) => {
     setFormError(null);
     await runMutation(async () => {
+      if (approvedWebsites !== undefined && hasSkillWebsites(skillCatalog)) {
+        await skillCatalog.addSkillWithWebsites({ ...draft, approvedWebsites });
+        return;
+      }
       await skillCatalog.createSkill(draft);
     }, setFormError);
     setTimeout(() => {
@@ -502,6 +542,7 @@ const SkillSettings = () => {
           if (!open) setFormError(null);
         }}
         onImport={handleImport}
+        {...(hasSkillWebsites(skillCatalog) ? { onCheck: source => skillCatalog.checkSkillWebsites(source) } : {})}
         busy={busy || managedExternally}
         error={formError}
       />
@@ -527,6 +568,28 @@ const SkillSettings = () => {
           <Button variant="destructive" type="button" disabled={busy} onClick={confirmRemove}>
             Remove skill
           </Button>
+        </footer>
+      </CenteredModal>
+
+      <CenteredModal
+        open={pendingStarter !== null}
+        onOpenChange={open => {
+          if (!open) setPendingStarter(null);
+        }}
+        title={`Add ${pendingStarter?.entry.name ?? 'skill'}?`}
+        contentSized
+        className="md:max-w-md"
+      >
+        <div className="px-5 py-5">
+          {pendingStarter !== null && <SkillWebsitesReview check={pendingStarter.check} />}
+        </div>
+        <footer className="flex justify-end gap-2 border-t border-border px-5 py-4">
+          <Button variant="ghost" type="button" onClick={() => setPendingStarter(null)} disabled={busy}>
+            Cancel
+          </Button>
+          <Button.Primary type="button" disabled={busy} onClick={confirmStarter}>
+            {pendingStarter === null ? 'Add skill' : addSkillLabel(pendingStarter.check)}
+          </Button.Primary>
         </footer>
       </CenteredModal>
     </>
