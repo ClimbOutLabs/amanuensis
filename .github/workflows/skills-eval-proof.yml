@@ -36,6 +36,31 @@ jobs:
           ls -la "$RUNNER_TEMP/slots/1" "$RUNNER_TEMP/slots/1/mirror/"
       - name: Start the stand-in model
         run: STUB_LOG="$RUNNER_TEMP/stub.log" nohup node scripts/eval-models-proof/skill-stub.mjs >/dev/null 2>&1 &
+      - name: Start a server by hand to read why it does not start
+        env:
+          NEBIUS_API_KEY: stand-in
+          TOKEN_FACTORY_BASE_URL: http://127.0.0.1:9999/v1
+          TOKEN_FACTORY_MODEL: stub/model-a
+          LOCAL_MODEL_ENDPOINTS: 127.0.0.1:9999
+          SANDBOX_BACKEND: slots
+          SANDBOX_SLOTS_DIR: ${{ runner.temp }}/slots
+          SANDBOX_SLOTS: '2'
+          AMAN_EVAL_MODE: 'true'
+          AMAN_EVAL_SKILLS: 'true'
+          TRUEFORGE_AUTH_MODE: local
+          APP_DATA_DIR: ${{ runner.temp }}/diag-data
+          PORT: '8899'
+        run: |
+          cd packages/trueforge
+          pnpm run build:gen > /dev/null
+          (setsid pnpm run serve:eval > "$RUNNER_TEMP/diag.log" 2>&1 &)
+          for i in $(seq 1 48); do
+            if curl -s http://127.0.0.1:8899/healthz; then echo; echo "healthy after $((i*5))s"; break; fi
+            sleep 5
+          done
+          grep -v noticing "$RUNNER_TEMP/diag.log" | tail -80 | cut -c1-500
+          pkill -f "tsx src/main.ts" || true
+          sleep 3
       - name: Run the eval with skills
         env:
           NEBIUS_API_KEY: stand-in
