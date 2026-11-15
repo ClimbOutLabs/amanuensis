@@ -136,6 +136,8 @@ On a home network the app is served over https at port 8443 (or the next free po
 
 The home network addresses are listened on by a small container of their own. If this computer gets a new address from the router, that container cannot start on the old one, but Aman still starts and still answers on `127.0.0.1`. Other devices can't reach it until you run `aman doctor network --fix`, which moves Aman to the new address in about a minute. Every `aman` command says so at the top until then, and `aman doctor network` names the address that went away. To keep the address from changing, reserve it for this computer in your router's settings (often called a DHCP reservation or a fixed address).
 
+On a Mac, Chrome and other browsers need permission to reach devices on your home network. If one says the address is unreachable while Safari opens it, turn that browser on in System Settings, Privacy & Security, Local Network, then reload.
+
 Your password is never stored anywhere. The installer hashes it once and keeps only the hash.
 
 ## Adding people

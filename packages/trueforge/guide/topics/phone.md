@@ -55,6 +55,7 @@ While you trust it, your device shows a long code called a fingerprint. It must 
 - "Turn on for this device" says the device doesn't trust the computer. Notices need the same trust step. Do it on this device, then go back to **Settings**, **Reach me** and press **Turn on for this device** again.
 - Aman was restored from a backup, or its certificate was made again. Each device needs to trust the computer again. Do the trust step once more.
 - The page doesn't open at all. Check that the device is on the same Wi-Fi as the computer, and that the computer is on.
+- On a Mac, a browser that says the address is unreachable while Safari opens it needs permission to reach your home network. In the Mac's System Settings, open Privacy & Security, then Local Network, turn the browser on, and reload.
 
 ## Over a VPN or another address
 
