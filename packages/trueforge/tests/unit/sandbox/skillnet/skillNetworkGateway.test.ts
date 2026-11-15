@@ -173,6 +173,15 @@ describe('SkillNetworkGateway', () => {
     expect(harness.dials).toEqual([{ host: 'github.com', port: 443 }]);
   });
 
+  it('refuses a site that can send email even when the grant names it, and records nothing a card could ask about', async () => {
+    const token = harness.registry.issue({ ...GRANT_INPUT, hosts: [...HOSTS, 'gmail.googleapis.com'] });
+    const reply = await connectVia(harness.socketPath, { authority: 'gmail.googleapis.com:443', token });
+    expect(reply.status).toBe(403);
+    expect(reply.body).toContain('a skill is never allowed to send email');
+    expect(harness.dials).toEqual([]);
+    expect(harness.registry.drainRefusals({ session_id: 's' })).toEqual([]);
+  });
+
   it('refuses any other site, names it, and never dials it', async () => {
     const token = harness.registry.issue({ ...GRANT_INPUT, hosts: HOSTS });
     const reply = await connectVia(harness.socketPath, { authority: 'evil.example.com:443', token });

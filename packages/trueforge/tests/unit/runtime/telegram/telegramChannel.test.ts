@@ -10,7 +10,6 @@ import {
   type TelegramTurnPort,
 } from '../../../../src/runtime/telegram/telegramChannel';
 import {
-  createTelegramCommandMenu,
   telegramChoiceKey,
   type TelegramChatControlsPort,
   type TelegramChoice,
@@ -123,7 +122,6 @@ function harness(connection: TelegramConnection) {
     queue: immediateQueue,
     turns,
     controls,
-    commandMenu: createTelegramCommandMenu(),
     logger,
     refusals: createTelegramRefusalThrottle(),
     newCode: () => '654321',
@@ -363,7 +361,6 @@ describe('telegram channel refusals', () => {
       queue: immediateQueue,
       turns,
       controls: new FakeControlsPort(),
-      commandMenu: createTelegramCommandMenu(),
       logger,
       refusals: createTelegramRefusalThrottle(),
       now: () => now,
@@ -467,15 +464,6 @@ describe('telegram command menu', () => {
     callback_query: { id: 'cb-1', from: { id: from_id, first_name: 'Person' }, data },
   });
 
-  it('sets the menu in the paired chat once, the first time the paired person writes', async () => {
-    const { client, deps } = harness(fakePairedConnection());
-    await processTelegramUpdate(deps, { connection: fakePairedConnection(), update: paired('/status', 1) });
-    await processTelegramUpdate(deps, { connection: fakePairedConnection(), update: paired('/status', 2) });
-    expect(client.commandMenus).toEqual([
-      { chat_id: '777', commands: ['new', 'model', 'persona', 'connectors', 'status'] },
-    ]);
-  });
-
   it('answers /status with what the chat uses, and starts no turn', async () => {
     const { client, turns, deps } = harness(fakePairedConnection());
     await processTelegramUpdate(deps, { connection: fakePairedConnection(), update: paired('/status') });
@@ -493,6 +481,17 @@ describe('telegram command menu', () => {
     expect(controls.model).toBe('house/small');
     expect(client.sent.at(-1)?.text).toBe('This chat now uses house/small.');
     expect(client.answeredCallbacks.at(-1)?.text).toBe('Switched.');
+  });
+
+  it('answers the plural spellings people reach for as the menu commands', async () => {
+    const { client, turns, deps } = harness(fakePairedConnection());
+    await processTelegramUpdate(deps, { connection: fakePairedConnection(), update: paired('/personas', 1) });
+    await processTelegramUpdate(deps, { connection: fakePairedConnection(), update: paired('/Models', 2) });
+    expect(client.sent.map(sent => sent.text.split('.')[0])).toEqual([
+      'Pick who answers in this chat',
+      'Pick the model for this chat',
+    ]);
+    expect(turns.started).toHaveLength(0);
   });
 
   it('switches the persona and turns a connector on and off from buttons', async () => {

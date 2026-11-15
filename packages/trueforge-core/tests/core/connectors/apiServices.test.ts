@@ -2,6 +2,7 @@ import {
   API_SERVICE_DECLARATIONS,
   apiServiceDeclarationForHost,
   apiServiceHostsCanSend,
+  isSkillBlockedHost,
   type ApiServiceDeclaration,
 } from '../../../src/core/connectors/apiServices';
 
@@ -12,12 +13,14 @@ import {
 const INVENTED_SEND_SERVICE: ApiServiceDeclaration = {
   service: 'Parchment Post',
   hosts: ['api.parchment-post.example'],
+  host_patterns: [],
   can_send: true,
 };
 
 const INVENTED_READ_SERVICE: ApiServiceDeclaration = {
   service: 'Ledger Look',
   hosts: ['api.ledger-look.example'],
+  host_patterns: [],
   can_send: false,
 };
 
@@ -71,5 +74,29 @@ describe('apiServiceDeclarationForHost', () => {
     expect(apiServiceDeclarationForHost({ host: 'undeclared.example', declarations: INVENTED_DECLARATIONS })).toBe(
       undefined,
     );
+  });
+});
+
+describe('isSkillBlockedHost', () => {
+  it('blocks the mail, email-sending and forwarding services Aman knows, however the name is written', () => {
+    for (const host of [
+      'gmail.googleapis.com',
+      'GRAPH.microsoft.com',
+      'api.sendgrid.com.',
+      'api.eu.mailgun.net',
+      'email.eu-west-1.amazonaws.com',
+      'mail.zoho.eu',
+      'hooks.zapier.com',
+      'hook.eu1.make.com',
+      'abc123.m.pipedream.net',
+    ]) {
+      expect(isSkillBlockedHost(host)).toBe(true);
+    }
+  });
+
+  it('leaves other sites alone, including neighbours of a blocked one', () => {
+    for (const host of ['api.github.com', 's3.amazonaws.com', 'zapier.com', 'notmail.zoho.com.example', 'make.com']) {
+      expect(isSkillBlockedHost(host)).toBe(false);
+    }
   });
 });

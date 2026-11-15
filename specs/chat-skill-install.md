@@ -46,7 +46,9 @@ Nothing here changes or removes a skill.
 
 - It saves one skill, with the same checks the Settings page saves under.
 - It only adds. A skill from the same place that is already there is not added twice, and a different skill with the same name is not replaced. Both say what to do next.
-- It grants no network access. Sites a starter skill declares are saved as asked for only; reaching them still needs the approval in Settings, under Skills. A skill read from GitHub is saved with no sites.
+- Before the card, the host reads every file of the skill at the pinned commit (the same host-side git fetch the sandbox copy uses) and scans them for websites (`scanSkillSites`). Nothing in the skill runs. The found list becomes the skill's `network_hosts`; a starter skill uses the list its catalog entry names. Code that builds addresses at run time is flagged on the card. If the files cannot be read, or the list is longer than a skill may name, nothing is offered.
+- Approval is all or nothing. Allow saves the skill and its approval of exactly the listed websites; if that approval cannot be saved, the skill is removed again. The list is part of what the approval covers, so a different list at dispatch ends the approval and nothing is saved.
+- Removing a skill in Settings removes its websites with its record, and drops its allow-once answers in open chats. A website another installed skill lists stays allowed through that skill's own record.
 - Scripts a skill brings run in the sandbox under the same rules as any other code.
 - After a call that finishes while the chat is open, the app turns the skill on for that chat. A finished call in an older chat is left alone.
 - Without a sandbox the skill is still added, and the assistant says it will work once the sandbox is set up.
@@ -67,7 +69,7 @@ Adding a skill from GitHub sends GitHub the address of that skill and a request 
 All tests use synthetic data and a stand-in for GitHub; none reaches the real site.
 
 - Classifier: the list runs without asking, an install always asks, skill text is escaped, an unsettled install is refused, an unknown tool fails closed, and an incognito chat is refused.
-- Tool set: the card holds what the server read; the name and description cannot be passed in; nothing is saved without approval; a branch that moved ends the approval; starter skills need no lookup; no sites are granted; nothing is replaced or added twice; each refusal says the one thing to do next.
+- Tool set: the card holds what the server read; the name and description cannot be passed in; nothing is saved without approval; a branch that moved ends the approval; starter skills need no lookup; the card lists the websites found and approving allows exactly those; a changed list ends the approval; unreadable files add nothing; a failed approval write removes the skill; nothing is replaced or added twice; each refusal says the one thing to do next.
 - Reader: address forms, the opening block, each failure, and the size limit.
 - App: the card, the server event parser, and turning the skill on for the chat.
 - End to end: a chat asks for a starter skill, the card shows, a chat-wide answer is refused, and Allow saves it. The browser test does the same on the screen.
@@ -76,4 +78,4 @@ All tests use synthetic data and a stand-in for GitHub; none reaches the real si
 
 - Changing, updating or removing a skill from a chat.
 - Private repositories and GitLab from a chat. Both still work in Settings.
-- Letting a skill reach sites from a chat.
+- Allowing a website one by one from the install card: the list is approved whole or not at all.

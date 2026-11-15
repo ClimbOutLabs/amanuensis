@@ -6,7 +6,6 @@ import type { Logger } from 'winston';
 import type { ITelegramStore, TelegramConnection, TelegramPendingApproval } from '../../db/telegramStore';
 import type { TelegramCallbackQuery, TelegramMessage, TelegramUpdate, TelegramUser } from '../../schemas/telegram';
 import {
-  createTelegramCommandMenu,
   handleTelegramCommand,
   handleTelegramPick,
   parseTelegramPick,
@@ -73,8 +72,6 @@ export interface TelegramChannelDeps {
   turns: TelegramTurnPort;
   /** Reads and changes the chat's model, persona and connectors for the command menu. */
   controls: TelegramChatControlsPort;
-  /** Sets the command menu in the paired chat once per process; shared like the refusal throttle. */
-  commandMenu: ReturnType<typeof createTelegramCommandMenu>;
   logger: Logger;
   /** How often a refusal may be repeated to a chat that is not the paired person's. */
   refusals: TelegramRefusalThrottle;
@@ -367,7 +364,6 @@ async function handleMessage(
     await sayRefusal(deps, connection, client, chat_id, PRIVATE_REFUSAL);
     return;
   }
-  await deps.commandMenu.ensure({ client, connection, logger: deps.logger });
   if (text === '/start' || text.startsWith('/start ')) {
     await say(deps, client, chat_id, ALREADY_PAIRED);
     return;

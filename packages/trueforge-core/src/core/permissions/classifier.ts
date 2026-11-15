@@ -17,6 +17,11 @@ import path from 'path';
 import { DOCUMENTS_SERVER_ID, EXTRACT_DOCUMENT_TEXT_TOOL_NAME } from '../../documents/toolContract';
 import type { CalendarWriteReview } from '../calendar/eventWrite';
 import { CALENDAR_SERVER_ID, isCalendarReadToolName, isCalendarWriteToolName } from '../calendar/toolContract';
+import {
+  CONNECTION_OFFER_SERVER_ID,
+  CONNECTION_OFFER_STATUS_TOOL_NAME,
+  RECORD_CONNECTION_OFFER_DECLINE_TOOL_NAME,
+} from '../connectors/connectionOfferContract';
 import { DRIVE_SERVER_ID, isDriveReadToolName, isDriveWriteToolName } from '../drive/toolContract';
 import type { DriveWriteReview } from '../drive/writeReview';
 import { checkCodeOf, hashDraft, type ReviewableDraft } from '../email/gmail/draftReview';
@@ -229,6 +234,7 @@ import {
 
 import type { CaldavEventReview } from '../calendar/caldav/eventReview';
 import { CALDAV_SERVER_NAME, isCaldavReadToolName } from '../calendar/caldav/toolContract';
+import { isSkillBlockedHost } from '../connectors/apiServices';
 import { MAIL_DRAFT_FIRST_DETAIL, mailDraftKey } from '../email/mailConnector/approvedDrafts';
 import { forwardedSubject, type MailForwardReview } from '../email/mailConnector/forwardReview';
 import {
@@ -247,6 +253,7 @@ import {
   simpleCardCopy,
 } from './cardCopy';
 import { classifyHomeAssistantTool } from './homeAssistantTier';
+import { SKILL_SITES_DATA_WARNING, SKILL_SITES_EMAIL_BLOCKED, skillSiteLabel } from './skillSitesCopy';
 
 export interface SentinelAction {
   /** Original tool name (sandbox name or mcp server tool name). */
@@ -2818,6 +2825,31 @@ function classifyGoogleSetupTool(action: SentinelAction): TierDecision {
 }
 
 /**
+ * The connection offer tools are the host's own, named by server like the Google setup read. The
+ * status read says only whether one connector is connected and whether the person already turned
+ * its offer down: no connector content, so it runs without asking and is not a sensitive read.
+ * Recording the decline writes down the answer the person just gave in that same chat, so it also
+ * runs without asking. Anything else on this server fails closed.
+ */
+function classifyConnectionOfferTool(action: SentinelAction): TierDecision {
+  if (action.tool_name === CONNECTION_OFFER_STATUS_TOOL_NAME) {
+    return tier1Decision({
+      reason: 'connection_offer_read',
+      reason_detail: 'Read whether a connector is connected.',
+      sensitive_read: false,
+    });
+  }
+  if (action.tool_name === RECORD_CONNECTION_OFFER_DECLINE_TOOL_NAME) {
+    return tier1Decision({
+      reason: 'connection_offer_decline',
+      reason_detail: 'Remember that you turned down an offer to connect a connector.',
+      sensitive_read: false,
+    });
+  }
+  return failClosedDecision({ reason_detail: 'Unknown connection offer tool.' });
+}
+
+/**
  * Gmail tools are the host's own, named by server so a connector's tool of the same name never takes this
  * path. Reads are silent but flagged as sensitive, and a session that read mail can no longer search silently.
  */
@@ -3330,11 +3362,24 @@ async function classifyPersonaTool(action: SentinelAction, ctx: ClassifyContext)
   });
 }
 
+/**
+ * Approving an install also allows the websites the skill sends requests to, so the card says so,
+ * with the same warnings the Settings network approval gives.
+ */
+function skillWebsitesSentence(review: Tier3Skill): string {
+  const websites = review.websites ?? [];
+  if (websites.length === 0) {
+    return '';
+  }
+  const send = review.can_send === true ? ` ${SKILL_SITES_EMAIL_BLOCKED}` : '';
+  return ` It sends requests to ${websites.map(site => skillSiteLabel({ site: escapeDisplayText(site), blocked: isSkillBlockedHost(site) })).join(', ')}. Adding it lets the skill reach these websites and no others. ${SKILL_SITES_DATA_WARNING}${send}`;
+}
+
 function skillInstallCard(input: { review: Tier3Skill; assistant: string; agent_intent: string | null }): Tier3Card {
   const { review } = input;
   const show = (text: string) => escapeDisplayText(text);
   return {
-    plain_what: `Add the skill ${cardSubject(review.name)}? ${input.assistant} will follow its instructions when a task calls for it.`,
+    plain_what: `Add the skill ${cardSubject(review.name)}? ${input.assistant} will follow its instructions when a task calls for it.${skillWebsitesSentence(review)}`,
     copy: simpleCardCopy({ headline: `Add the skill ${cardSubject(review.name)}?`, undo: null, reason: null }),
     plain_why: plainWhy(input.agent_intent),
     cannot_be_undone: null,
@@ -3354,6 +3399,9 @@ function skillInstallCard(input: { review: Tier3Skill; assistant: string; agent_
       starter: review.starter,
       instructions:
         review.instructions === null ? null : escapeDisplayText(review.instructions, { keepNewlines: true }),
+      websites: (review.websites ?? []).map(show),
+      makes_up_addresses: review.makes_up_addresses ?? false,
+      can_send: review.can_send ?? false,
     },
   };
 }
@@ -4542,6 +4590,9 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
   }
   if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === GOOGLE_SETUP_SERVER_ID) {
     return steeringChecked({ decision: classifyGoogleSetupTool(action), ctx, guests: [] });
+  }
+  if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === CONNECTION_OFFER_SERVER_ID) {
+    return steeringChecked({ decision: classifyConnectionOfferTool(action), ctx, guests: [] });
   }
   if (isHostMailRead(action)) {
     return classifyMailRead(action, ctx);

@@ -1,15 +1,21 @@
 import type { ISessionStore } from '@truefoundry/trueforge-core/agent-session';
 import type { Logger } from 'winston';
-import { getPublicBaseUrl } from './config';
+import configuration, { getPublicBaseUrl } from './config';
 import { Controller } from './controller/Controller';
 import { noticingLoops } from './controller/noticingLoops';
 import { privateChatSweepLoop } from './controller/privateChatSweep';
 import { scheduleDispatchLoop } from './controller/scheduleDispatch';
-import { telegramPollLoop, telegramReplyLoop, type TelegramUpdateExecutor } from './controller/telegramDispatch';
+import {
+  telegramCommandMenuLoop,
+  telegramPollLoop,
+  telegramReplyLoop,
+  type TelegramUpdateExecutor,
+} from './controller/telegramDispatch';
 import type { IScheduleStore } from './db/scheduleStore';
 import type { SessionCustom, TurnCustom } from './db/sessionCustom';
 import type { ITelegramStore } from './db/telegramStore';
 import type { WithTransaction } from './db/transaction';
+import { telegramAppAddress } from './runtime/telegram/telegramReplies';
 import { createTelegramService, type TelegramService } from './runtime/telegram/telegramService';
 
 /** What the Telegram loops need: the connection store, a way to read finished turns, and the service that builds bot clients. */
@@ -56,8 +62,13 @@ export function createController<TTransaction>(params: {
         store: params.telegram.store,
         service,
         sessionStore: params.telegram.sessionStore,
+        appAddress: telegramAppAddress({
+          publicBaseUrl: getPublicBaseUrl(),
+          allowedOrigins: configuration.ALLOWED_ORIGINS,
+        }),
         logger: params.logger,
       }),
+      telegramCommandMenuLoop({ store: params.telegram.store, service, logger: params.logger }),
     );
   }
   return new Controller({ loops, logger: params.logger });

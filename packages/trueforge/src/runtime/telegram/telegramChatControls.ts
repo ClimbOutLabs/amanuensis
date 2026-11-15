@@ -63,10 +63,18 @@ export function telegramChoiceKey(name: string): string {
   return createHash('sha256').update(name).digest('hex').slice(0, 16);
 }
 
+/** Other spellings people reach for, answered as the menu command they mean. */
+const COMMAND_ALIASES: Readonly<Record<string, TelegramCommand>> = {
+  models: 'model',
+  personas: 'persona',
+  connector: 'connectors',
+};
+
 /** The menu command a message is, or undefined for an ordinary message. `/model@my_bot` counts as `/model`. */
 export function telegramCommandOf(text: string): TelegramCommand | undefined {
   const match = /^\/([a-z]+)(?:@\w+)?$/i.exec(text.trim());
-  const name = match?.[1]?.toLowerCase();
+  const typed = match?.[1]?.toLowerCase();
+  const name = typed === undefined ? undefined : (COMMAND_ALIASES[typed] ?? typed);
   if (name === 'help') {
     return 'help';
   }
@@ -233,15 +241,15 @@ export async function handleTelegramPick(
 }
 
 /**
- * Sets the command menu once per connection per process, in the paired person's chat only. The menu
- * lives on Telegram's side, so a failure only means the menu is missing until the next try.
+ * Sets the command menu once per connection per process, in the paired person's chat only. A failure
+ * throws and leaves the menu unset, so the caller decides when to try again.
  */
 export function createTelegramCommandMenu(): {
-  ensure(input: { client: TelegramClient; connection: TelegramConnection; logger: Logger }): Promise<void>;
+  ensure(input: { client: TelegramClient; connection: TelegramConnection }): Promise<void>;
 } {
   const done = new Set<string>();
   return {
-    async ensure({ client, connection, logger }) {
+    async ensure({ client, connection }) {
       const chat_id = connection.paired_chat_id;
       if (chat_id === null) {
         return;
@@ -255,10 +263,7 @@ export function createTelegramCommandMenu(): {
         await client.setMyCommands({ chat_id, commands: TELEGRAM_COMMANDS });
       } catch (error) {
         done.delete(key);
-        logger.warn('The Telegram command menu could not be set', {
-          connection_id: connection.id,
-          error: error instanceof Error ? error.message : String(error),
-        });
+        throw error;
       }
     },
   };

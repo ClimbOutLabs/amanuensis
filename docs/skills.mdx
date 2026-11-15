@@ -23,11 +23,13 @@ The starter skills come from the skill catalog that ships with Aman. See [Initia
 You can ask the assistant to add a skill for you: name one of the starter skills, or paste the address of a skill in a public GitHub repository.
 
 - The assistant reads the skill's `SKILL.md` on GitHub and settles the branch or tag to one exact commit. The skill is saved pinned to that commit, so a later change to the repository is not picked up.
-- An approval card shows the name, the description, the repository and folder, and the commit. For a skill read from GitHub it also shows the skill's own instructions. The name and description come from the skill's `SKILL.md`, not from the model. Nothing is saved until you allow it, and the card asks every time.
-- A starter skill is added as shipped, at the commit the catalog pins, with no lookup.
+- Skills from a marketplace don't say which websites they use, so Aman reads every file of the skill at that commit to find out. It looks for web addresses in the scripts, the instructions and the settings files, and for add-on packages that always talk to one service. Nothing in the skill runs while Aman reads it.
+- An approval card shows the name, the description, the repository and folder, and the commit. It lists the websites the skill sends requests to, or says it sends none. Like the Settings network approval, it warns that the skill can send any of your data to those websites, and that Aman can't see what a site does with it. A site that can send email is marked Blocked, and the card says Aman blocks it. If the skill makes up web addresses while it runs, so they can't be read ahead of time, the card says so. For a skill read from GitHub it also shows the skill's own instructions. The name and description come from the skill's `SKILL.md`, not from the model. Nothing is saved until you allow it, and the card asks every time.
+- Approving is all or nothing. **Allow** adds the skill and lets it reach exactly the websites on the card. **Not now** adds nothing and allows nothing. If the skill's files changed between the card and your answer, nothing is added.
+- A starter skill is added as shipped, at the commit the catalog pins, with no lookup. Its card lists the websites the catalog names for it.
 - After you allow it, the skill is turned on for that chat and listed under **Settings → Skills**.
 
-From a chat the assistant can only add. Changing or removing a skill, and letting a skill reach sites, stay in **Settings → Skills**. Incognito chats and scheduled runs cannot add a skill. See the [safety story](/safety) for the rules behind this.
+From a chat the assistant can only add. Changing or removing a skill stays in **Settings → Skills**. Incognito chats and scheduled runs cannot add a skill. See the [safety story](/safety) for the rules behind this.
 
 ## What a skill contains
 
@@ -58,9 +60,9 @@ While a turn runs:
 
 ### Network access
 
-A skill has no internet access by default. A skill can list the sites it needs. Settings then asks the person to allow them, and once allowed, a chat using that skill can reach those sites and no others. Settings warns when one of the sites can send email.
+A skill has no internet access by default. A skill can list the sites it needs. Settings then asks the person to allow them, and once allowed, a chat using that skill can reach those sites and no others. A skill can never reach a site that can send email: the email services Aman knows, such as Gmail, Outlook, SendGrid or Mailgun, and services that forward a web request as an email, such as Zapier or IFTTT. Aman refuses those sites whatever was allowed, and no card asks about them. Google and Microsoft run email on the same sites as their other services, so skills can't reach Google Drive, Google Calendar or Microsoft OneDrive either. Email only goes out through Aman, which asks about each one. Aman can't recognise every site that could pass data on by email, so a skill's other sites still need your trust.
 
-A skill names the sites it needs in its manifest (`network_hosts`). The sandbox has no network of its own, so a skill can reach only the sites you allow for it, and only while it is switched on for the chat.
+A skill added from a chat gets its list from what Aman found in its files, and allowing the card allows that list. A skill added in Settings names the sites it needs in its manifest (`network_hosts`). The sandbox has no network of its own, so a skill can reach only the sites you allow for it, and only while it is switched on for the chat.
 
 The first time a skill with named sites runs in a chat, a card asks whether it may reach the sites it still needs: the ones you have not already allowed, and not the ones you turned down. The chat keeps working without the sites until you answer. If a skill tries a site it did not name, the connection is refused at once and a card asks about that one site. A card names the site and why it is asking.
 
@@ -73,6 +75,8 @@ Each card takes one of three answers:
 A scheduled run never waits for an answer. The run finishes, and the card waits for you with the run's other held actions.
 
 An approval covers the skill's code as it is when you approve. For a skill from GitHub, that is one exact commit, and chats run that commit while the approval stands. If the code changes later, for example after a new commit on its branch, the approval and the sites allowed one by one are cancelled, and a card asks again. Sites you turned down stay turned down. If Aman cannot read the skill's code version, it cannot save an approval, and the card or Settings says so.
+
+Removing a skill takes away its websites. A website another installed skill also uses stays allowed for that skill, because each skill keeps its own list and a chat's list is rebuilt from them before every command. Websites you allowed once in a chat for the removed skill go too, so adding it again later starts fresh.
 
 **Settings, Skills** shows, for each skill, the sites it names, the ones in force, the ones allowed one by one, the ones allowed once in a chat that is still open, and the ones turned down. You can clear an allowed or turned-down site there, or take back the whole approval. A change takes effect on the next command.
 
