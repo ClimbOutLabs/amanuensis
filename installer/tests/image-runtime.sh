@@ -79,11 +79,10 @@ if [ "$(id -u)" = 0 ] && command -v setpriv >/dev/null 2>&1 && command -v python
   agent_tmp=$(mktemp -d)
   trap 'if [ -n "${agent_tmp:-}" ]; then rm -rf "$agent_tmp"; fi; cleanup' EXIT
   agent="$REPO/ops/compose/mail-email/account_agent.py"
-  agent_env() {
-    setpriv --bounding-set=-all --inh-caps=-all -- env AMAN_MAIL_ACCOUNT_FILE="$1" python3 "$agent" --print-config
-  }
+  agent_key=$(printf '5a%.0s' $(seq 32))
+  # The installer's write: the file's key on the first line, the account after it.
   agent_write() {
-    printf '%s\n' "$2" | setpriv --bounding-set=-all --inh-caps=-all -- env AMAN_MAIL_ACCOUNT_FILE="$1" python3 "$agent" --write-stdin
+    printf '%s\n%s\n' "$agent_key" "$2" | setpriv --bounding-set=-all --inh-caps=-all -- env AMAN_MAIL_ACCOUNT_FILE="$1" python3 "$agent" --write-stdin
   }
   agent_remove() {
     setpriv --bounding-set=-all --inh-caps=-all -- env AMAN_MAIL_ACCOUNT_FILE="$1" python3 "$agent" --remove
@@ -103,37 +102,36 @@ if [ "$(id -u)" = 0 ] && command -v setpriv >/dev/null 2>&1 && command -v python
     'MCP_EMAIL_SERVER_SMTP_START_SSL=false' \
     'MCP_EMAIL_SERVER_SMTP_VERIFY_SSL=true')
   changed_text=$(printf '%s' "$account_text" | sed 's/a@example.invalid/b@example.invalid/')
-  # The sidecar's own file: owned by the sidecar's user, readable only by that user.
+  # The sidecar's own file: owned by the sidecar's user, readable only by that user, and encrypted.
   owned="$agent_tmp/owned.env"
-  printf '%s\n' "$account_text" >"$owned"
+  : >"$owned"
   chmod 600 "$owned"
-  agent_env "$owned" | grep -q 'account_name = "a@example.invalid"' ||
-    agent_fail "the capability-free agent could not read the sidecar's own account file"
-  agent_write "$owned" "$changed_text" | grep -qx 'saved' ||
+  agent_write "$owned" "$account_text" | grep -qx 'saved' ||
     agent_fail "the capability-free agent could not save the sidecar's own account file"
-  grep -q 'MCP_EMAIL_SERVER_EMAIL_ADDRESS=b@example.invalid' "$owned" ||
-    agent_fail "the saved account did not land in the sidecar's own account file"
+  grep -q '^aman-sealed:v1:' "$owned" ||
+    agent_fail "the saved account file is not encrypted"
+  if grep -q 'image-runtime-pw\|a@example.invalid' "$owned"; then
+    agent_fail "the saved account file can be read without its key"
+  fi
   [ "$(stat -c %a "$owned")" = 600 ] ||
     agent_fail "the saved account file has mode $(stat -c %a "$owned"), expected 600"
+  # A second write opens the saved file with the same key and keeps it encrypted.
+  agent_write "$owned" "$changed_text" | grep -qx 'saved' ||
+    agent_fail "the capability-free agent could not open and save the sidecar's own account file again"
   agent_remove "$owned" | grep -qx 'removed' ||
     agent_fail "the capability-free agent could not remove the sidecar's own account file"
   [ ! -s "$owned" ] || agent_fail "the account file is not empty after remove"
-  # With no account left, the agent prints no config at all.
-  [ -z "$(agent_env "$owned")" ] ||
-    agent_fail "a removed account still reads as connected"
   # Another user's file: the old bind-mounted layout, which the volume replaces.
   foreign="$agent_tmp/foreign.env"
   printf '%s\n' "$account_text" >"$foreign"
   chmod 600 "$foreign"
   chown 1000 "$foreign"
-  [ -z "$(agent_env "$foreign")" ] ||
-    agent_fail "the capability-free agent read another user's account file"
   if agent_write "$foreign" "$changed_text" >/dev/null 2>&1; then
     agent_fail "the capability-free agent wrote another user's account file"
   fi
   grep -q 'MCP_EMAIL_SERVER_EMAIL_ADDRESS=a@example.invalid' "$foreign" ||
     agent_fail "the failed save changed another user's account file"
-  printf 'ok: the capability-free account agent reads, saves and removes the sidecar-owned account file, and not another user'"'"'s file\n'
+  printf 'ok: the capability-free account agent saves the sidecar-owned account file encrypted and removes it, and not another user'"'"'s file\n'
 else
   printf 'skip: the account agent permission case needs root, setpriv and python3\n'
 fi
@@ -150,3 +148,22 @@ mirror_uid=$(docker run --rm -v "$MIRROR_VOLUME:/run/aman/mirror" --entrypoint s
 docker run --rm --user 65532:65532 -v "$MIRROR_VOLUME:/run/aman/mirror" --entrypoint sh "$SLOT_IMAGE_NAME" -c 'test -x /run/aman/mirror' ||
   fail "the slot user cannot pass through a fresh mirror volume"
 printf 'ok: a fresh mirror volume is owned by uid 10001 and the slot user can pass through it\n'
+
+# The pinned Email connector image must be able to encrypt its account file: the agent's write path runs in the
+# image itself, with the image's own Python, the way the installer runs it.
+mail_image=$(sed -n 's/^    image: \(ghcr.io\/wh1isper\/mcp-email-server@sha256:[0-9a-f]*\)$/\1/p' "$REPO/docker-compose.yml" | head -n 1)
+[ -n "$mail_image" ] || fail "the Email connector image is not named in docker-compose.yml"
+mail_out=$(printf '%s\n%s\n' "$(printf '5a%.0s' $(seq 32))" "MCP_EMAIL_SERVER_EMAIL_ADDRESS=a@example.invalid
+MCP_EMAIL_SERVER_PASSWORD='image-runtime-pw'
+MCP_EMAIL_SERVER_IMAP_HOST=imap.example.invalid
+MCP_EMAIL_SERVER_IMAP_PORT=993
+MCP_EMAIL_SERVER_SMTP_HOST=smtp.example.invalid
+MCP_EMAIL_SERVER_SMTP_PORT=465" |
+  docker run --rm -i --network none --cap-drop ALL --tmpfs /account \
+    -v "$REPO/ops/compose/mail-email/account_agent.py:/usr/local/bin/aman-mail-account-agent:ro" \
+    -e AMAN_MAIL_ACCOUNT_FILE=/account/.env.mail-email \
+    --entrypoint /bin/sh "$mail_image" -c 'python3 /usr/local/bin/aman-mail-account-agent --write-stdin && head -c 15 /account/.env.mail-email') ||
+  fail "the Email connector image could not encrypt its account file"
+[ "$mail_out" = "saved
+aman-sealed:v1:" ] || fail "the Email connector image did not write an encrypted account file: $mail_out"
+printf 'ok: the Email connector image encrypts its account file\n'

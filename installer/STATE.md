@@ -145,6 +145,22 @@ data and not in any backup.
   from the computer's key. The app encrypts a library from before
   encryption the first time it opens it. After a restore on another
   computer it moves the library to that computer's key on first open.
+- The Email and Calendar connectors each keep their account, with its app
+  password, in one file in a volume of their own (`aman_<name>_mail_account`,
+  `aman_<name>_calendar_account`). The connector writes that file encrypted
+  and holds its key in memory only. The key is derived from the computer's
+  key, one per connector, so a connector never holds the computer's key.
+  The app hands it over after each start of the connector, and again
+  whenever the connector says it holds none. Until then the connector reads
+  as locked and offers no tools. When the installer saves an account it gets
+  the same key from the instance (`aman secrets connector-key`, through the
+  `secrets-setup` service) and pipes it to the connector on standard input,
+  ahead of the account. A file from before encryption is still read, and is
+  encrypted as soon as the key arrives. The Email connector's mail server
+  reads its accounts from a config file; that file is composed in a folder
+  that lives in memory (`/run/aman-mail`), never on disk. These volumes are
+  not in a backup, so after a restore on another computer the account is
+  connected again in Settings.
 - The file `db.sqlite.keys` beside the database holds the instance's key
   records: a value that tells whether a key is this database's key, the
   computer's key encrypted with the recovery key, and any earlier keys

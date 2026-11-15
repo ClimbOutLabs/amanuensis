@@ -226,6 +226,27 @@ $CAL_SECRET
   assert_log_has "run --rm --no-deps --entrypoint node calendar-caldav /app/agent.mjs --write-stdin"
   assert_log_has "up -d --force-recreate --no-deps --wait --wait-timeout 240 app"
   assert_log_lacks "$CAL_SECRET"
+  assert_log_has "secrets-setup connector-key --name calendar"
+  assert_eq "$(sort -u "$STUB_STATE/calendar-account-keyed")" aman-main "the connector got the key of its account file with the account"
+  sandbox_drop
+}
+
+test_no_account_without_the_file_key() {
+  t_begin "an account is not saved when the key that protects it cannot be read"
+  sandbox_new
+  install_for_calendar
+  rm -f "$SB_STATE/secrets_aman-main"
+  with_input "2
+owner@example.invalid
+
+$CAL_SECRET
+"
+  run_install instance calendar main
+  clear_input
+  assert_rc 1
+  assert_flat_contains "$ERR" "the key that protects it could not be read"
+  assert_flat_contains "$ERR" "install.sh instance calendar main"
+  assert_no_path "$(CAL_VOLUME)"
   sandbox_drop
 }
 
@@ -390,6 +411,7 @@ test_connector_starts_with_the_instance
 test_connect_prompt_yes_asks_the_calendar_questions
 test_second_run_replaces_the_account
 test_app_restarts_to_learn_of_the_calendar
+test_no_account_without_the_file_key
 test_piped_input_and_remove
 test_remove_clears_an_old_way_file_and_line
 test_a_refused_address_saves_nothing

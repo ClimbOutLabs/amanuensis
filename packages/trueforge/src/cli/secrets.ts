@@ -17,6 +17,7 @@ import {
 } from '../secrets/recoveryKey';
 import { adoptDatabase } from '../secrets/retiredKeys';
 import { SAVED_ENV_NAMES, SavedEnvNameSchema, dropSavedEnv, putSavedEnv, savedEnvNames } from '../secrets/savedEnv';
+import { SecretVault } from '../secrets/secretVault';
 import type { Command } from './command';
 import { processEnv, type CliEnv } from './env';
 import { errorCode } from './errorCode';
@@ -26,6 +27,7 @@ import { sqliteSecretsDatabase } from './secretsSqlite';
 
 const USAGE = `Usage: aman secrets <init|first-run|check-recovery|adopt|key> [--sqlite <file>] [--key-file <file>] [--if-needed]
        aman secrets env <put|drop|list> [--name <setting>] [--sqlite <file>] [--key-file <file>]
+       aman secrets connector-key --name <mail|calendar> [--sqlite <file>] [--key-file <file>]
 
   init            Set up saved secrets for this database and print its recovery key as {"recovery_key": "..."}.
                   Uses the key file if it is there, and makes one only if it is not.
@@ -42,6 +44,9 @@ const USAGE = `Usage: aman secrets <init|first-run|check-recovery|adopt|key> [--
                   the settings file. Aman gets it when it starts. --name is one of: ${SAVED_ENV_NAMES.join(', ')}.
   env drop        Forget the saved value of --name.
   env list        Print the names that have a saved value as {"names": [...]}. Values are never printed.
+  connector-key   Print the key of a connector's own account file on one line, for the installer to hand to
+                  that connector when it saves an account. Keys the file may still be under after a move
+                  to this computer follow on the same line. It is not the key of this database.
 
 --if-needed makes init print {"already_set_up": true} and change nothing when setup is already done.
 --sqlite defaults to SQLITE_PATH, --key-file to SECRETS_KEY_FILE. With neither --sqlite nor SQLITE_PATH,
@@ -217,6 +222,51 @@ async function runSecretsEnv({ args, io, env }: { args: readonly string[]; io: C
   }
 }
 
+/** Prints the keys of one connector's account file. The installer pipes them straight into that connector. */
+async function runConnectorKey({
+  args,
+  io,
+  env,
+}: {
+  args: readonly string[];
+  io: CliIo;
+  env: CliEnv;
+}): Promise<number> {
+  let values: { sqlite?: string; 'key-file'?: string; name?: string };
+  try {
+    ({ values } = parseArgs({
+      args: [...args],
+      options: { sqlite: { type: 'string' }, 'key-file': { type: 'string' }, name: { type: 'string' } },
+      strict: true,
+      allowPositionals: false,
+    }));
+  } catch (caught) {
+    throw new UsageError(`${caught instanceof Error ? caught.message : 'Bad arguments.'}\n\n${USAGE}`, {
+      cause: caught,
+    });
+  }
+  const connector = values.name;
+  if (connector !== 'mail' && connector !== 'calendar') {
+    throw new UsageError(`--name must be mail or calendar.\n\n${USAGE}`);
+  }
+  const database = await openDatabase({
+    action: 'env',
+    sqlitePath: values.sqlite ?? (env['STANDALONE'] === 'false' ? undefined : env['SQLITE_PATH']),
+    keyFile: values['key-file'] ?? env['SECRETS_KEY_FILE'],
+  });
+  try {
+    const vault = new SecretVault({ provider: new FileKeyProvider(database.keyFile), settings: database.settings });
+    if ((await vault.refresh()).status !== 'unlocked') {
+      throw new Error(NOT_SET_UP);
+    }
+    const keys = vault.connectorKeys(connector);
+    await io.stdout(`${[keys.current, ...keys.earlier].map(key => key.toString('hex')).join(' ')}\n`);
+    return 0;
+  } finally {
+    await database.close();
+  }
+}
+
 export async function runSecrets({
   args,
   io,
@@ -229,6 +279,9 @@ export async function runSecrets({
   const [action, ...rest] = args;
   if (action === 'env') {
     return runSecretsEnv({ args: rest, io, env });
+  }
+  if (action === 'connector-key') {
+    return runConnectorKey({ args: rest, io, env });
   }
   if (
     action !== 'init' &&

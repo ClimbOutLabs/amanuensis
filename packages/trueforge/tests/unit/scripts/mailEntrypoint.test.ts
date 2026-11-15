@@ -4,6 +4,7 @@ import { tmpdir } from 'os';
 import { join, resolve } from 'path';
 
 import { allowedRecipientsFileHash } from '../../../src/runtime/mailAllowedRecipients';
+import { giveMailAgentKey, MAIL_AGENT_SECRET, sealMailAccountText } from './mailAgentSupport';
 
 const ENTRYPOINT = resolve(__dirname, '../../../../../ops/compose/mail-email/entrypoint.sh');
 const ACCOUNT_AGENT = resolve(__dirname, '../../../../../ops/compose/mail-email/account_agent.py');
@@ -116,6 +117,7 @@ describe('mail-email entrypoint wrapper', () => {
         MCP_EMAIL_SERVER_CONFIG_PATH: policy,
         AMAN_MAIL_STATUS_FILE: status,
         AMAN_MAIL_ACCOUNT_FILE: accountFile,
+        AMAN_MAIL_RUN_DIR: join(dir, 'run'),
         AMAN_MAIL_ACCOUNT_AGENT: ACCOUNT_AGENT,
         AMAN_MAIL_ACCOUNT_PORT: '19759',
         AMAN_MAIL_EMAIL_CHECK: EMAIL_CHECK,
@@ -152,32 +154,39 @@ describe('mail-email entrypoint wrapper', () => {
     expect((await readOrEmpty(envLog)).split('\n')[0]).toBe('unset');
   }, 20_000);
 
-  it('restarts the server with the saved account when the account file changes', async () => {
-    startWrapper();
+  it('starts the server without the saved account while its file is locked, and restarts with it once the key arrives', async () => {
+    await writeFile(
+      accountFile,
+      sealMailAccountText({
+        text: [
+          '# Written by the installer for the Email connector. Keep it private: it holds the app password.',
+          'MCP_EMAIL_SERVER_EMAIL_ADDRESS=person@example.com',
+          "MCP_EMAIL_SERVER_PASSWORD='<redacted>'",
+          'MCP_EMAIL_SERVER_IMAP_HOST=imap.example.com',
+          'MCP_EMAIL_SERVER_IMAP_PORT=993',
+          'MCP_EMAIL_SERVER_IMAP_SSL=true',
+          'MCP_EMAIL_SERVER_IMAP_START_SSL=false',
+          'MCP_EMAIL_SERVER_IMAP_VERIFY_SSL=true',
+          'MCP_EMAIL_SERVER_SMTP_HOST=smtp.example.com',
+          'MCP_EMAIL_SERVER_SMTP_PORT=465',
+          'MCP_EMAIL_SERVER_SMTP_SSL=true',
+          'MCP_EMAIL_SERVER_SMTP_START_SSL=false',
+          'MCP_EMAIL_SERVER_SMTP_VERIFY_SSL=true',
+          '',
+        ].join('\n'),
+      }),
+    );
+    startWrapper({ AMAN_MAIL_ACCOUNT_SECRET: MAIL_AGENT_SECRET });
     await eventually(async () => (await readOrEmpty(status)) !== '');
     // The hash is written once the server is launched, which may not have logged its account yet.
     await eventually(async () => (await readOrEmpty(envLog)).includes('addr:unset'));
-    await writeFile(
-      accountFile,
-      [
-        '# Written by the installer for the Email connector. Keep it private: it holds the app password.',
-        'MCP_EMAIL_SERVER_EMAIL_ADDRESS=person@example.com',
-        "MCP_EMAIL_SERVER_PASSWORD='<redacted>'",
-        'MCP_EMAIL_SERVER_IMAP_HOST=imap.example.com',
-        'MCP_EMAIL_SERVER_IMAP_PORT=993',
-        'MCP_EMAIL_SERVER_IMAP_SSL=true',
-        'MCP_EMAIL_SERVER_IMAP_START_SSL=false',
-        'MCP_EMAIL_SERVER_IMAP_VERIFY_SSL=true',
-        'MCP_EMAIL_SERVER_SMTP_HOST=smtp.example.com',
-        'MCP_EMAIL_SERVER_SMTP_PORT=465',
-        'MCP_EMAIL_SERVER_SMTP_SSL=true',
-        'MCP_EMAIL_SERVER_SMTP_START_SSL=false',
-        'MCP_EMAIL_SERVER_SMTP_VERIFY_SSL=true',
-        '',
-      ].join('\n'),
-    );
+    const given = await giveMailAgentKey({ url: 'http://127.0.0.1:19759', secret: MAIL_AGENT_SECRET });
+    expect(given.status).toBe(200);
     await eventually(async () => (await readOrEmpty(envLog)).includes('addr:person@example.com'));
     expect(await startCount()).toBeGreaterThanOrEqual(2);
+    // The composed config holds the password, so it lives in the run folder and not beside the account file.
+    expect(await readOrEmpty(join(dir, 'run', 'config.toml'))).toContain('person@example.com');
+    expect(await readOrEmpty(join(dir, 'config.toml'))).toBe('');
   }, 30_000);
 
   it('logs that it is waiting for the send list, and starts once the list exists', async () => {
@@ -189,6 +198,7 @@ describe('mail-email entrypoint wrapper', () => {
         MCP_EMAIL_SERVER_CONFIG_PATH: policy,
         AMAN_MAIL_STATUS_FILE: status,
         AMAN_MAIL_ACCOUNT_FILE: accountFile,
+        AMAN_MAIL_RUN_DIR: join(dir, 'run'),
         AMAN_MAIL_ACCOUNT_AGENT: ACCOUNT_AGENT,
         AMAN_MAIL_ACCOUNT_PORT: '19759',
         AMAN_MAIL_EMAIL_CHECK: EMAIL_CHECK,
@@ -312,6 +322,7 @@ describe('mail-email entrypoint bounded stop', () => {
         MCP_EMAIL_SERVER_CONFIG_PATH: policy,
         AMAN_MAIL_STATUS_FILE: status,
         AMAN_MAIL_ACCOUNT_FILE: accountFile,
+        AMAN_MAIL_RUN_DIR: join(dir, 'run'),
         AMAN_MAIL_ACCOUNT_AGENT: ACCOUNT_AGENT,
         AMAN_MAIL_ACCOUNT_PORT: '19759',
         AMAN_MAIL_EMAIL_CHECK: EMAIL_CHECK,

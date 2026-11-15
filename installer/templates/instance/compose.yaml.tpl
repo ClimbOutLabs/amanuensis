@@ -249,7 +249,7 @@ services:
 # set it up. The app reaches it at http://calendar-caldav:9558/mcp. Nothing is published. It sits on a network of its own
 # that only the app's network holder shares, so no other service (the mail connector reads untrusted mail) can reach its
 # account port, which also answers only a caller that presents this instance's secret.
-# The calendar login lives in a volume this sidecar owns, which the installer writes through the sidecar's account agent
+# The calendar login lives encrypted in a volume this sidecar owns, which the installer writes through the sidecar's account agent
 # and the Settings Calendar card changes through the same agent on port 9560.
 # The tool server inside runs only while a login is saved.
 @@IF_CALENDAR@@  calendar-caldav:
@@ -278,7 +278,7 @@ services:
 
 # Email connector. It starts with the instance, and the app reaches it at http://mail-email:9557/mcp. Nothing is
 # published. It sits on a network of its own that only the app's network holder shares, so no other service can reach
-# its tool port or its account port. The account lives in a volume this sidecar owns, which the installer writes
+# its tool port or its account port. The account lives encrypted in a volume this sidecar owns, which the installer writes
 # through the sidecar's account agent and the Settings Email card changes through the same agent on port 9559.
 # The account agent answers only a caller that presents this instance's secret.
 @@IF_EMAIL@@  mail-email:
@@ -296,6 +296,8 @@ services:
 @@IF_EMAIL@@      AMAN_MAIL_STATUS_FILE: /mail-status/loaded.sha256
 @@IF_EMAIL@@      # The account agent: the account file it owns, its private-network port, and its own path in the image.
 @@IF_EMAIL@@      AMAN_MAIL_ACCOUNT_FILE: /account/.env.mail-email
+@@IF_EMAIL@@      # In memory: the accounts in the form the mail server reads, which the agent renders once it has the file's key.
+@@IF_EMAIL@@      AMAN_MAIL_RUN_DIR: /run/aman-mail
 @@IF_EMAIL@@      AMAN_MAIL_ACCOUNT_PORT: '9559'
 @@IF_EMAIL@@      # Shared with the app through .env, which the installer fills in once.
 @@IF_EMAIL@@      AMAN_MAIL_ACCOUNT_SECRET: ${MAIL_EMAIL_ACCOUNT_SECRET:?missing from .env}
@@ -312,6 +314,8 @@ services:
 @@IF_EMAIL@@      - mail-policy:/policy:ro
 @@IF_EMAIL@@      - mail-policy-status:/mail-status
 @@IF_EMAIL@@      - mail-email-data:/data
+@@IF_EMAIL@@    tmpfs:
+@@IF_EMAIL@@      - /run/aman-mail:mode=0700
 @@IF_EMAIL@@    expose:
 @@IF_EMAIL@@      - '9557'
 @@IF_EMAIL@@      - '9559'
@@ -443,7 +447,7 @@ volumes:
 @@IF_EMAIL@@    name: aman_@@NAME@@_mail_email_data
 @@IF_EMAIL@@    labels:
 @@IF_EMAIL@@      com.amanuensis.instance: @@NAME@@
-@@IF_EMAIL@@  # The Email account file, owned by the connector. Holds the app password; nothing else reads it.
+@@IF_EMAIL@@  # The Email account file, owned by the connector. Holds the app password, encrypted; nothing else reads it.
 @@IF_EMAIL@@  mail-account:
 @@IF_EMAIL@@    name: aman_@@NAME@@_mail_account
 @@IF_EMAIL@@    labels:

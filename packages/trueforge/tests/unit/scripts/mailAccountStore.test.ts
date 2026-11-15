@@ -7,6 +7,8 @@ import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
+import { giveMailAgentKey, MAIL_AGENT_KEY, openMailAccountText } from './mailAgentSupport';
+
 const REPO_ROOT = resolve(__dirname, '..', '..', '..', '..', '..');
 const AGENT = resolve(REPO_ROOT, 'ops/compose/mail-email/account_agent.py');
 const EMAIL_CHECK = resolve(REPO_ROOT, 'ops/compose/mail-email/email_check.py');
@@ -63,13 +65,6 @@ function installerEnvText(account: MailAccount): string {
   );
 }
 
-/** One value out of the account file, the way the installer tests read it back. */
-function fileValue(file: string, key: string): string {
-  return execFileSync('bash', ['-c', `grep '^${key}=' "$1" | head -1 | cut -d= -f2-`, 'test', file], {
-    encoding: 'utf8',
-  }).trim();
-}
-
 describe('the installer and Settings share one account store', () => {
   let dir: string;
   let accountFile: string;
@@ -112,6 +107,7 @@ describe('the installer and Settings share one account store', () => {
       env: {
         ...process.env,
         AMAN_MAIL_ACCOUNT_FILE: accountFile,
+        AMAN_MAIL_RUN_DIR: join(dir, 'run'),
         AMAN_MAIL_ACCOUNT_PORT: String(AGENT_PORT),
         AMAN_MAIL_ACCOUNT_SECRET: SECRET,
         AMAN_MAIL_EMAIL_CHECK: EMAIL_CHECK,
@@ -145,8 +141,12 @@ describe('the installer and Settings share one account store', () => {
       smtp_port: 465,
       smtp_mode: 'ssl',
     };
-    // Written exactly as the installer writes it: email_env_text into the instance file.
-    writeFileSync(accountFile, installerEnvText(account), { mode: 0o600 });
+    // Written exactly as the installer writes it: the file's key, then email_env_text, into the agent's write path.
+    execFileSync('python3', [AGENT, '--write-stdin'], {
+      env: { ...process.env, AMAN_MAIL_ACCOUNT_FILE: accountFile },
+      input: `${MAIL_AGENT_KEY}\n${installerEnvText(account)}`,
+    });
+    await giveMailAgentKey({ url: `http://127.0.0.1:${String(AGENT_PORT)}`, secret: SECRET });
     const response = await agentFetch();
     const body = JSON.parse(await response.text());
     expect(body.connected).toBe(true);
@@ -158,7 +158,7 @@ describe('the installer and Settings share one account store', () => {
     expect(body.accounts[0].sign_in).toBe('ok');
   }, 30_000);
 
-  it('an account saved through the agent is byte-for-byte what the installer writes', async () => {
+  it('an account saved through the agent holds byte-for-byte what the installer writes', async () => {
     const changed: MailAccount = {
       address: ADDRESS,
       password: CANARY,
@@ -175,11 +175,8 @@ describe('the installer and Settings share one account store', () => {
       body: JSON.stringify({ provider_key: 'other', ...changed }),
     });
     expect(response.status).toBe(200);
-    const onDisk = readFileSync(accountFile, 'utf8');
+    const onDisk = openMailAccountText({ sealed: readFileSync(accountFile, 'utf8') });
     expect(onDisk).toBe(installerEnvText(changed));
     expect(onDisk).toBe(renderMailAccountEnv(changed));
-    expect(fileValue(accountFile, 'MCP_EMAIL_SERVER_SMTP_PORT')).toBe('587');
-    expect(fileValue(accountFile, 'MCP_EMAIL_SERVER_SMTP_START_SSL')).toBe('true');
-    expect(fileValue(accountFile, 'MCP_EMAIL_SERVER_EMAIL_ADDRESS')).toBe(ADDRESS);
   }, 30_000);
 });

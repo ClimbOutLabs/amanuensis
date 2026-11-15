@@ -168,6 +168,7 @@ import { CHAT_IMAGE_RETENTION_DAYS } from './runtime/chatImages/limits';
 import { createImageReencoder } from './runtime/chatImages/reencodeInSandbox';
 import { ChatSearchIndexer } from './runtime/chatSearchIndexing';
 import { recoverAbandonedCommandExecutions } from './runtime/commandExecutionRecovery';
+import { keepConnectorKeyDelivered, type ConnectorAccountKeys } from './runtime/connectorAccountKey';
 import { designateTavilyAtBoot, seedDefaultSearchProviderAtBoot } from './runtime/defaultSearchProvider';
 import { createDeliveryService, type DeliveryService } from './runtime/delivery/deliveryService';
 import { createTelegramSender } from './runtime/delivery/telegramSender';
@@ -208,6 +209,7 @@ import { ensureEnvManagedTokenFactoryProvider, seedEnvManagedDefaultChatModel } 
 import { TurnDrainRegistry } from './runtime/turnDrains';
 import { createPackageMirrorAllowanceCheck } from './sandbox/mirrors/packageMirrorAllowance';
 import { slotsBackendEnabled, startPackageMirrorGateway, startSkillNetworkGateway } from './sandbox/slotBackend';
+import type { AccountConnector } from './secrets/databaseKey';
 import { EncryptedGoogleConnectionStore } from './secrets/encryptedGoogleConnectionStore';
 import { EncryptedMcpServerStore } from './secrets/encryptedMcpServerStore';
 import { EncryptedModelProviderStore } from './secrets/encryptedModelProviderStore';
@@ -283,6 +285,8 @@ interface ServerPersistence<TTransaction> {
   tokenFactoryUsageStore: ITokenFactoryUsageStore<TTransaction>;
   mcpToolGrantStore: IMcpToolGrantStore<TTransaction>;
   googleConnectionStore: IGoogleConnectionStore;
+  /** The key of a connector's own account file, for the app to hand to that connector. */
+  connectorKeys: (connector: AccountConnector) => ConnectorAccountKeys;
   /** The one local user for local sign-in; the table exists in every topology, the mode decides use. */
   localUserStore: ILocalUserStore;
   sentinelAuditStore: ISentinelAuditStore;
@@ -595,6 +599,7 @@ async function createStandalonePersistence(options: {
     globalSettingsStore,
     tokenFactoryUsageStore: new SqliteTokenFactoryUsageStore(db),
     mcpToolGrantStore: new SqliteMcpToolGrantStore(db),
+    connectorKeys: connector => secretVault.connectorKeys(connector),
     googleConnectionStore: new EncryptedGoogleConnectionStore({
       store: new SqliteGoogleConnectionStore(db),
       vault: secretVault,
@@ -801,6 +806,7 @@ async function createDistributedPersistence(options: {
     globalSettingsStore,
     tokenFactoryUsageStore: new PostgresTokenFactoryUsageStore(db),
     mcpToolGrantStore: new PostgresMcpToolGrantStore(db),
+    connectorKeys: connector => secretVault.connectorKeys(connector),
     googleConnectionStore: new EncryptedGoogleConnectionStore({
       store: new PostgresGoogleConnectionStore(db),
       vault: secretVault,
@@ -917,6 +923,38 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     tenant_id: TENANT_ID,
     logger,
   });
+  // Each connector keeps its account file encrypted and holds the key in memory only.
+  const accountConnectors: {
+    name: AccountConnector;
+    label: string;
+    accountUrl: string | undefined;
+    secret: string | undefined;
+  }[] = [
+    {
+      name: 'mail',
+      label: 'Email',
+      accountUrl: configuration.MAIL_EMAIL_ACCOUNT_URL,
+      secret: configuration.MAIL_EMAIL_ACCOUNT_SECRET,
+    },
+    {
+      name: 'calendar',
+      label: 'Calendar',
+      accountUrl: configuration.CALENDAR_ACCOUNT_URL,
+      secret: configuration.CALENDAR_ACCOUNT_SECRET,
+    },
+  ];
+  for (const connector of accountConnectors) {
+    if (connector.accountUrl !== undefined && connector.secret !== undefined) {
+      void keepConnectorKeyDelivered({
+        accountUrl: connector.accountUrl,
+        secret: connector.secret,
+        keys: persistence.connectorKeys(connector.name),
+        label: connector.label,
+        fetchImpl: undefined,
+        logger,
+      });
+    }
+  }
   // Registered at boot when the mail sidecar is configured; a no-op otherwise.
   await registerMailConnectorAtBoot({
     url: configuration.MAIL_EMAIL_MCP_URL,

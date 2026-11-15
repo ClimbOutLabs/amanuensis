@@ -9,7 +9,7 @@ import { runSecrets } from '../../../../src/cli/secrets';
 import { migrateSqliteToLatest } from '../../../../src/db/migrateSqlite';
 import { DatabaseKeyError, createSqliteDb, sqliteFileState } from '../../../../src/db/sqlite/client';
 import { SqliteGlobalSettingsStore } from '../../../../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
-import { deriveDatabaseKey } from '../../../../src/secrets/databaseKey';
+import { deriveConnectorKey, deriveDatabaseKey } from '../../../../src/secrets/databaseKey';
 import { FileKeyProvider, encodeKeyFile } from '../../../../src/secrets/fileKeyProvider';
 import { KEY_CHECK_SETTING, createMasterKey } from '../../../../src/secrets/keyCheck';
 import { KeyRecordFile, keyRecordPath } from '../../../../src/secrets/keyRecordFile';
@@ -358,6 +358,57 @@ describe('aman secrets', () => {
       const io = fakeIo({ stdin: recoveryKey });
       expect(await runSecrets({ args: ['adopt', '--sqlite', sqlite, '--key-file', keyFile], io, env: {} })).toBe(0);
       expect(atStart()).toEqual({ NEBIUS_API_KEY: TOKEN });
+    }, 120_000);
+  });
+
+  describe('connector-key', () => {
+    async function connectorKeys(name: string): Promise<string[]> {
+      const io = fakeIo();
+      const args = ['connector-key', '--name', name, '--sqlite', sqlite, '--key-file', keyFile];
+      expect(await runSecrets({ args, io, env: {} })).toBe(0);
+      return io.out.join('').trim().split(' ');
+    }
+
+    it('prints a key of its own for each connector, never the key of this computer or of the database', async () => {
+      await init();
+      const master = await machineKey();
+      const [mail, ...earlier] = await connectorKeys('mail');
+      expect(earlier).toEqual([]);
+      expect(mail).toBe(deriveConnectorKey({ masterKey: master, connector: 'mail' }).toString('hex'));
+      expect(mail).toMatch(/^[0-9a-f]{64}$/);
+      const [calendar] = await connectorKeys('calendar');
+      expect(new Set([mail, calendar, master.toString('hex'), deriveDatabaseKey(master).toString('hex')]).size).toBe(4);
+    }, 120_000);
+
+    it('adds the key from the earlier computer after a move, so a file saved there still opens', async () => {
+      const recoveryKey = await init();
+      const earlier = deriveConnectorKey({ masterKey: await machineKey(), connector: 'mail' }).toString('hex');
+      keyFile = path.join(dir, 'other-computer', 'master.key');
+      const io = fakeIo({ stdin: recoveryKey });
+      expect(await runSecrets({ args: ['adopt', '--sqlite', sqlite, '--key-file', keyFile], io, env: {} })).toBe(0);
+      const current = deriveConnectorKey({ masterKey: await machineKey(), connector: 'mail' }).toString('hex');
+      expect(await connectorKeys('mail')).toEqual([current, earlier]);
+    }, 120_000);
+
+    it('prints nothing for a database that is not set up, or for a connector it does not know', async () => {
+      await init();
+      const unknown = runSecrets({
+        args: ['connector-key', '--name', 'photos', '--sqlite', sqlite, '--key-file', keyFile],
+        io: fakeIo(),
+        env: {},
+      });
+      await expect(unknown).rejects.toThrow(UsageError);
+      keyFile = path.join(dir, 'other-computer', 'master.key');
+      await mkdir(path.dirname(keyFile), { recursive: true });
+      await writeFile(keyFile, encodeKeyFile(createMasterKey()), { mode: 0o600 });
+      const io = fakeIo();
+      const other = runSecrets({
+        args: ['connector-key', '--name', 'mail', '--sqlite', sqlite, '--key-file', keyFile],
+        io,
+        env: {},
+      });
+      await expect(other).rejects.toThrow('not set up');
+      expect(io.out).toEqual([]);
     }, 120_000);
   });
 

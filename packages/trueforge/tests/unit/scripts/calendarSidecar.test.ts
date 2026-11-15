@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process';
+import { createDecipheriv } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -96,6 +97,8 @@ describe('calendar-caldav sidecar', () => {
 describe('the installer and the calendar account agent', () => {
   const AGENT = resolve(REPO_ROOT, 'ops/calendar-sidecar/agent.mjs');
   const CANARY = 'CANARY-APP-PASSWORD-7f3d9';
+  // A synthetic key for the account file, in the hex form the installer pipes in.
+  const FILE_KEY = '5a'.repeat(32);
   let folder: string;
 
   beforeEach(() => {
@@ -119,7 +122,17 @@ describe('the installer and the calendar account agent', () => {
       ],
       { encoding: 'utf8' },
     );
-    return done.stdout;
+    // The file's key goes first, on its own line, the way calendar_agent_write sends it.
+    return `${FILE_KEY}\n${done.stdout}`;
+  }
+
+  /** The account text inside the encrypted file, opened the way the sidecar opens it. */
+  function savedText(file: string): string {
+    const blob = Buffer.from(readFileSync(file, 'utf8').slice('aman-sealed:v1:'.length).trim(), 'base64');
+    const decipher = createDecipheriv('aes-256-gcm', Buffer.from(FILE_KEY, 'hex'), blob.subarray(0, 12));
+    decipher.setAAD(Buffer.from('aman calendar account v1'));
+    decipher.setAuthTag(blob.subarray(blob.length - 16));
+    return Buffer.concat([decipher.update(blob.subarray(12, blob.length - 16)), decipher.final()]).toString('utf8');
   }
 
   function runAgent(command: string, input: string) {
@@ -130,14 +143,18 @@ describe('the installer and the calendar account agent', () => {
     });
   }
 
-  it('saves what the installer sends as a private file the sidecar reads, and says nothing else', () => {
+  it('saves what the installer sends as a private, encrypted file the sidecar reads, and says nothing else', () => {
     const done = runAgent('--write-stdin', installerText('https://203.0.113.10/dav/'));
     expect(done.status).toBe(0);
     expect(done.stdout).toBe('saved\n');
     expect(done.stderr).not.toContain(CANARY);
     const file = join(folder, '.env.calendar');
     expect(statSync(file).mode & 0o777).toBe(0o600);
-    const text = readFileSync(file, 'utf8');
+    const onDisk = readFileSync(file, 'utf8');
+    expect(onDisk.startsWith('aman-sealed:v1:')).toBe(true);
+    expect(onDisk).not.toContain(CANARY);
+    expect(onDisk).not.toContain('owner@example.invalid');
+    const text = savedText(file);
     expect(text).toContain('CALDAV_URL=https://203.0.113.10/dav/\n');
     expect(text).toContain(`CALDAV_PASSWORD=${CANARY}\n`);
     expect(text).toContain('CALDAV_USERNAME=owner@example.invalid\n');

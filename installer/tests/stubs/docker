@@ -936,6 +936,20 @@ case "$cmd" in
             printf '{"saved":"%s"}\n' "$name"
             exit 0
             ;;
+          *" secrets-setup connector-key "*)
+            # Prints the key of a connector's own account file, which only an instance tied to this computer's key has.
+            if [ ! -f "$S/secrets_$proj" ] || [ "$(sed -n 1p "$S/secrets_$proj")" != "$(cat "$S/key" 2>/dev/null)" ]; then
+              echo 'Saved secrets are not set up for this database with this key. Run "aman secrets init" first.' >&2
+              exit 1
+            fi
+            name=
+            while [ "$#" -gt 0 ]; do
+              if [ "$1" = --name ]; then name=$2; fi
+              shift
+            done
+            printf '%s-key-%s\n' "$name" "$(sha256sum <"$S/key" | cut -c1-16)"
+            exit 0
+            ;;
           *" secrets-setup check-recovery "*)
             typed=$(cat)
             if [ "$(printf '%s' "$typed" | tr -cd 0-9)" = "$(sed -n 2p "$S/secrets_$proj" 2>/dev/null | tr -cd 0-9)" ]; then
@@ -948,7 +962,8 @@ case "$cmd" in
         esac
         # A connector's account agent, run one-off: it reads the account from stdin, empties it, or checks
         # it, in the named volume the compose project owns. The service must exist in the file, as in
-        # Compose. The account text arrives on stdin only, never in the logged command. The calendar agent
+        # Compose. The account text arrives on stdin only, never in the logged command. The store stands for
+        # what the agent holds once its file is opened. The calendar agent
         # can be made to refuse an address (STUB_CALENDAR_REFUSES) or to report a sign-in answer
         # (STUB_CALENDAR_CHECK, default ok).
         svc=
@@ -962,15 +977,20 @@ case "$cmd" in
         [ -n "$svc" ] || exit 1
         grep -q "^  $svc:" "$file" 2>/dev/null || { echo "no such service: $svc" >&2; exit 1; }
         case "$svc" in
-          calendar-caldav) store="$S/calendar-account-$proj" ;;
-          *) store="$S/mail-account-$proj" ;;
+          calendar-caldav) kind=calendar ;;
+          *) kind=mail ;;
         esac
+        store="$S/$kind-account-$proj"
         case "$*" in
           *--write-stdin*)
             if [ "$svc" = calendar-caldav ] && [ -n "${STUB_CALENDAR_REFUSES:-}" ]; then
               cat >/dev/null
               exit 3
             fi
+            # The agents keep their file encrypted: the first line must be the key of this instance's file.
+            IFS= read -r given || true
+            [ "$given" = "$kind-key-$(sha256sum <"$S/key" 2>/dev/null | cut -c1-16)" ] || { cat >/dev/null; exit 2; }
+            echo "$proj" >>"$S/$kind-account-keyed"
             text=$(cat)
             # The calendar agent refuses text that does not hold all four settings.
             if [ "$svc" = calendar-caldav ] && [ "$(printf '%s\n' "$text" | grep -c '^CALDAV_\(URL\|USERNAME\|PASSWORD\|USER_EMAIL\)=.')" -lt 4 ]; then
@@ -985,7 +1005,15 @@ case "$cmd" in
             ;;
           *--check*)
             # STUB_CALENDAR_CHECK=silent models a check that printed nothing.
-            if [ -s "$store" ]; then [ "${STUB_CALENDAR_CHECK:-ok}" = silent ] || echo "${STUB_CALENDAR_CHECK:-ok}"; else echo none; fi
+            # A saved account opens only with the key of this instance's file, given on the first line.
+            IFS= read -r given || true
+            if [ ! -s "$store" ]; then
+              echo none
+            elif [ "$given" != "$kind-key-$(sha256sum <"$S/key" 2>/dev/null | cut -c1-16)" ]; then
+              echo locked
+            else
+              [ "${STUB_CALENDAR_CHECK:-ok}" = silent ] || echo "${STUB_CALENDAR_CHECK:-ok}"
+            fi
             ;;
         esac
         exit 0

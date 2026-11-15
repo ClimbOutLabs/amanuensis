@@ -2,6 +2,7 @@
 // @ni-c/caldav-mcp once an account is saved) and checks the HTTP tool list. No CalDAV server is
 // needed: tools/list never contacts one.
 import assert from 'node:assert/strict';
+import { Buffer } from 'node:buffer';
 import { spawn } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
@@ -9,6 +10,8 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
+
+import { sealAccountText } from '../agent.mjs';
 
 const SIDECAR_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const READY_TIMEOUT_MS = 30_000;
@@ -216,6 +219,36 @@ describe('calendar sidecar follows the saved account', () => {
 
     rmSync(accountFile);
     await waitFor(async () => !(await listening(port)), 'the tool server to stop');
+  });
+
+  it('starts no tool server on an encrypted account until the app hands over its key', async () => {
+    child?.kill('SIGTERM');
+    const port = await freePort();
+    const agentPort = await freePort();
+    const accountFile = join(folder, '.env.calendar');
+    const key = '5a'.repeat(32);
+    writeFileSync(
+      accountFile,
+      sealAccountText({
+        text: 'CALDAV_URL=https://203.0.113.10/dav/\nCALDAV_USERNAME=owner@example.invalid\nCALDAV_PASSWORD=test-password\nCALDAV_USER_EMAIL=owner@example.invalid\n',
+        key: Buffer.from(key, 'hex'),
+      }),
+      { mode: 0o600 },
+    );
+    const [command, ...args] = entrypointFromDockerfile();
+    const env = childEnv({ accountFile, port, agentPort });
+    child = spawn(command, args, { cwd: SIDECAR_ROOT, env, stdio: 'ignore' });
+    await waitFor(() => listeningAt(`http://127.0.0.1:${agentPort}/account`), 'the account agent');
+    // Two rounds of the supervisor's watch pass with the file still locked.
+    await sleep(4500);
+    assert.equal(await listening(port), false, 'no tool server while the account file is locked');
+    const taken = await fetch(`http://127.0.0.1:${agentPort}/key`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${env.CALENDAR_ACCOUNT_SECRET}` },
+      body: JSON.stringify({ current: key, earlier: [] }),
+    });
+    assert.equal(taken.status, 200);
+    await waitFor(() => listening(port), 'the tool server to start once the key arrived');
   });
 });
 

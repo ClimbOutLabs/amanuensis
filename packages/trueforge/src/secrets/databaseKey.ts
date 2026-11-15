@@ -14,3 +14,20 @@ export function deriveDatabaseKey(masterKey: Buffer): Buffer {
 export function deriveKnowledgeKey(masterKey: Buffer): Buffer {
   return Buffer.from(hkdfSync('sha256', masterKey, 'aman database v1', 'knowledge file', MASTER_KEY_BYTES));
 }
+
+/** A connector that keeps its own account file, outside the database. */
+export type AccountConnector = 'mail' | 'calendar';
+
+/**
+ * The key of one connector's account file. The connector is handed only this key, so it never
+ * holds the master key and cannot open the database or the other connector's file.
+ */
+export function deriveConnectorKey({
+  masterKey,
+  connector,
+}: {
+  masterKey: Buffer;
+  connector: AccountConnector;
+}): Buffer {
+  return Buffer.from(hkdfSync('sha256', masterKey, 'aman connector v1', `${connector} account file`, MASTER_KEY_BYTES));
+}

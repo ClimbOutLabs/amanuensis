@@ -9,11 +9,27 @@ import { join } from 'node:path';
 import { after, before, beforeEach, describe, it } from 'node:test';
 
 import { ownNetworks, renderAccount } from '../account.mjs';
-import { createAgent, createAgentServer, MIN_SECRET_LENGTH, runCommand } from '../agent.mjs';
+import {
+  createAccountStore,
+  createAgent,
+  createAgentServer,
+  keyIdOf,
+  MIN_SECRET_LENGTH,
+  openAccountText,
+  runCommand,
+  sealAccountText,
+} from '../agent.mjs';
 
 const CANARY = 'CANARY-APP-PASSWORD-7f3d9';
 const SECRET = 'test-account-secret-0123456789abcdef0123';
 const WRONG = 'CANARY-WRONG-PASSWORD-9z';
+// Synthetic keys for the account file, in the hex form the app and the installer send.
+const KEY_HEX = '5a'.repeat(32);
+const KEY = Buffer.from(KEY_HEX, 'hex');
+const OLD_KEY_HEX = '11'.repeat(32);
+const OLD_KEY = Buffer.from(OLD_KEY_HEX, 'hex');
+/** The account text inside the file on disk, which must be encrypted with the test key. */
+const savedText = path => openAccountText({ sealed: readFileSync(path, 'utf8'), key: KEY });
 const HOST = 'caldav.example.invalid';
 const USERNAME = 'owner@example.invalid';
 const PUBLIC_ADDRESS = '93.184.216.34';
@@ -36,6 +52,7 @@ describe('the calendar account agent', () => {
   let behavior;
   let deps;
   let agent;
+  let store;
   let listener;
   let listenerPort;
   let tlsCert;
@@ -152,7 +169,10 @@ describe('the calendar account agent', () => {
             : callback(null, '127.0.0.1', 4),
       },
     };
-    agent = createAgent({ file, deps });
+    store = createAccountStore({ file });
+    // The app hands the key over after each start; most cases begin from there.
+    store.takeKeys({ current: KEY, earlier: [] });
+    agent = createAgent({ file, store, deps });
     listener?.closeAllConnections();
     listener?.close();
     listener = createAgentServer({ agent, secret: SECRET });
@@ -181,7 +201,11 @@ describe('the calendar account agent', () => {
     });
     assert.ok(!saved.text.includes(CANARY));
     assert.equal(statSync(file).mode & 0o777, 0o600);
-    assert.ok(readFileSync(file, 'utf8').includes(`CALDAV_PASSWORD=${CANARY}`));
+    // Nothing of the account is readable in the file: not the password, not even the address.
+    const onDisk = readFileSync(file, 'utf8');
+    assert.ok(!onDisk.includes(CANARY) && !onDisk.includes(HOST) && !onDisk.includes(USERNAME));
+    assert.ok(savedText(file).includes(`CALDAV_PASSWORD=${CANARY}`));
+    assert.equal(openAccountText({ sealed: onDisk, key: OLD_KEY }), null);
     assert.equal(seen[0].method, 'PROPFIND');
     const status = await call('GET');
     assert.equal(status.status, 200);
@@ -311,8 +335,85 @@ describe('the calendar account agent', () => {
   });
 
   it('reports a saved login the server no longer accepts', async () => {
-    writeFileSync(file, renderAccount({ ...payload(), password: WRONG }), { mode: 0o600 });
+    writeFileSync(file, sealAccountText({ text: renderAccount({ ...payload(), password: WRONG }), key: KEY }), {
+      mode: 0o600,
+    });
     assert.equal(JSON.parse((await call('GET')).text).sign_in, 'refused');
+  });
+
+  async function keyCall(method, body, headers = {}) {
+    const response = await fetch(`http://127.0.0.1:${listenerPort}/key`, {
+      method,
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${SECRET}`, ...headers },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+    return { status: response.status, body: await response.json() };
+  }
+
+  /** A fresh agent on the same file, as after a restart: it holds no key. */
+  async function restartWithoutKey() {
+    store = createAccountStore({ file });
+    agent = createAgent({ file, store, deps });
+    listener.closeAllConnections();
+    listener.close();
+    listener = createAgentServer({ agent, secret: SECRET });
+    await new Promise(done => listener.listen(0, '127.0.0.1', done));
+    listenerPort = listener.address().port;
+  }
+
+  it('saves nothing while it holds no key, and stays locked on an encrypted file until its key arrives', async () => {
+    await restartWithoutKey();
+    assert.deepEqual(await keyCall('GET'), { status: 200, body: { key_id: null } });
+    const refused = await call('POST', payload());
+    assert.equal(refused.status, 423);
+    assert.deepEqual(JSON.parse(refused.text), { error: 'locked' });
+    assert.equal(existsSync(file), false);
+    assert.equal(seen.length, 0, 'no sign-in is tried for an account that cannot be saved');
+
+    writeFileSync(file, sealAccountText({ text: renderAccount(payload()), key: KEY }), { mode: 0o600 });
+    assert.equal((await call('GET')).status, 423);
+    assert.deepEqual(await keyCall('POST', { current: OLD_KEY_HEX, earlier: [] }), {
+      status: 409,
+      body: { error: 'wrong_key' },
+    });
+    assert.equal((await call('GET')).status, 423);
+    assert.deepEqual(await keyCall('POST', { current: KEY_HEX, earlier: [] }), {
+      status: 200,
+      body: { key_id: keyIdOf(KEY) },
+    });
+    assert.equal(JSON.parse((await call('GET')).text).connected, true);
+  });
+
+  it('takes a key only from a caller with the secret, and only a whole key', async () => {
+    await restartWithoutKey();
+    assert.equal(
+      (await keyCall('POST', { current: KEY_HEX, earlier: [] }, { authorization: 'Bearer wrong' })).status,
+      401,
+    );
+    assert.equal((await keyCall('POST', { current: 'abcd', earlier: [] })).status, 400);
+    assert.equal((await keyCall('POST', { current: KEY_HEX, earlier: ['abcd'] })).status, 400);
+    assert.deepEqual(await keyCall('GET'), { status: 200, body: { key_id: null } });
+    const taken = await keyCall('POST', { current: KEY_HEX, earlier: [] });
+    assert.ok(!JSON.stringify(taken.body).includes(KEY_HEX));
+    assert.deepEqual(await keyCall('GET'), taken);
+  });
+
+  it('still reads a file from before encryption, and encrypts it once the key arrives', async () => {
+    await restartWithoutKey();
+    writeFileSync(file, renderAccount(payload()), { mode: 0o600 });
+    assert.equal(JSON.parse((await call('GET')).text).connected, true);
+    assert.equal((await keyCall('POST', { current: KEY_HEX, earlier: [] })).status, 200);
+    assert.ok(!readFileSync(file, 'utf8').includes(CANARY));
+    assert.equal(savedText(file), renderAccount(payload()));
+    assert.equal(statSync(file).mode & 0o777, 0o600);
+  });
+
+  it('opens a file under an earlier key and moves it to the current key', async () => {
+    await restartWithoutKey();
+    writeFileSync(file, sealAccountText({ text: renderAccount(payload()), key: OLD_KEY }), { mode: 0o600 });
+    assert.equal((await keyCall('POST', { current: KEY_HEX, earlier: [OLD_KEY_HEX] })).status, 200);
+    assert.equal(savedText(file), renderAccount(payload()));
+    assert.equal(JSON.parse((await call('GET')).text).connected, true);
   });
 
   it('answers only a caller that presents the secret, and says nothing else without it', async () => {
@@ -387,8 +488,10 @@ describe('the installer commands', () => {
     },
   };
   const resolveTo = address => ({ resolve: async () => [address], ownNetworks: ownNetworks({}) });
-  const installerText = (url = 'https://caldav.example.invalid/dav/') =>
+  const accountLines = (url = 'https://caldav.example.invalid/dav/') =>
     `CALDAV_URL=${url}\nCALDAV_USERNAME=${USERNAME}\nCALDAV_PASSWORD=${CANARY}\nCALDAV_USER_EMAIL=${USERNAME}\n`;
+  // What the installer pipes in: the file's key on the first line, the account after it.
+  const installerText = url => `${KEY_HEX}\n${accountLines(url)}`;
   const run = (command, stdinText, deps) => runCommand({ command, file, stdin: async () => stdinText, deps, out, err });
 
   beforeEach(() => {
@@ -402,20 +505,23 @@ describe('the installer commands', () => {
     rmSync(folder, { recursive: true, force: true });
   });
 
-  it('saves the account text from stdin as a private file and prints one word', async () => {
+  it('saves the account text from stdin as a private, encrypted file and prints one word', async () => {
     assert.equal(await run('--write-stdin', installerText(), resolveTo(PUBLIC_ADDRESS)), 0);
     assert.equal(out.text, 'saved\n');
     assert.equal(statSync(file).mode & 0o777, 0o600);
-    assert.ok(readFileSync(file, 'utf8').includes(`CALDAV_PASSWORD=${CANARY}`));
+    assert.ok(!readFileSync(file, 'utf8').includes(CANARY));
+    assert.ok(savedText(file).includes(`CALDAV_PASSWORD=${CANARY}`));
     assert.ok(!out.text.includes(CANARY) && !err.text.includes(CANARY));
   });
 
   it('refuses incomplete text and an address on the never list, and prints no password', async () => {
     assert.equal(
-      await run('--write-stdin', 'CALDAV_URL=https://caldav.example.invalid/\n', resolveTo(PUBLIC_ADDRESS)),
+      await run('--write-stdin', `${KEY_HEX}\nCALDAV_URL=https://caldav.example.invalid/\n`, resolveTo(PUBLIC_ADDRESS)),
       2,
     );
     assert.equal(await run('--write-stdin', '', resolveTo(PUBLIC_ADDRESS)), 2);
+    // Account text with no key in front of it is never written.
+    assert.equal(await run('--write-stdin', accountLines(), resolveTo(PUBLIC_ADDRESS)), 2);
     assert.equal(await run('--write-stdin', installerText(), resolveTo('169.254.169.254')), 3);
     assert.equal(await run('--write-stdin', installerText('https://169.254.169.254/dav/'), undefined), 3);
     assert.equal(existsSync(file), false);
@@ -429,7 +535,17 @@ describe('the installer commands', () => {
     assert.equal(out.text, 'removed\n');
     assert.equal(existsSync(file), false);
     out.text = '';
-    assert.equal(await run('--check'), 0);
+    assert.equal(await run('--check', `${KEY_HEX}\n`), 0);
     assert.equal(out.text, 'none\n');
+  });
+
+  it('says the saved account is locked when the check comes without the key that opens it', async () => {
+    await run('--write-stdin', installerText(), resolveTo(PUBLIC_ADDRESS));
+    out.text = '';
+    assert.equal(await run('--check', ''), 0);
+    assert.equal(out.text, 'locked\n');
+    out.text = '';
+    assert.equal(await run('--check', `${OLD_KEY_HEX}\n`), 0);
+    assert.equal(out.text, 'locked\n');
   });
 });

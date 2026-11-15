@@ -1,18 +1,18 @@
 // Starts the calendar sidecar: the account agent, and the CalDAV tool server behind a plain HTTP address
 // while an account is saved. The tool server always starts from the account file, never from the
-// environment Docker loaded, and it restarts when that file changes. With no account saved it is not
-// started at all, so no calendar tools are offered.
+// environment Docker loaded, and it restarts when the account changes. With no account saved, or while
+// the account file is still locked, it is not started at all, so no calendar tools are offered.
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { fileURLToPath, URL } from 'node:url';
 
 import { allowedAddresses, hostOf, parseAccount } from './account.mjs';
 import {
+  createAccountStore,
   createAgent,
   createAgentServer,
   DEFAULT_ACCOUNT_FILE,
   DEFAULT_PORT as DEFAULT_AGENT_PORT,
-  readAccountText,
   secretIsUsable,
 } from './agent.mjs';
 
@@ -53,7 +53,15 @@ function withoutAgentSecret(environment) {
 
 const hashOf = text => createHash('sha256').update(text, 'utf8').digest('hex');
 
-export function startSupervisor({ file, host, port, deps = {} }) {
+export function startSupervisor({ file, store = createAccountStore({ file }), host, port, deps = {} }) {
+  // A locked file reads as no account: the tool server starts once the key that opens it arrives.
+  function savedText() {
+    try {
+      return store.read();
+    } catch {
+      return '';
+    }
+  }
   let child = null;
   let running = null;
   let ticking = false;
@@ -72,7 +80,7 @@ export function startSupervisor({ file, host, port, deps = {} }) {
     }
     ticking = true;
     try {
-      const text = readAccountText(file);
+      const text = savedText();
       const account = parseAccount(text);
       const wanted = account === null ? null : hashOf(text);
       const alive = child !== null && child.exitCode === null && child.signalCode === null;
@@ -124,7 +132,8 @@ if (process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.
   const secret = process.env.CALENDAR_ACCOUNT_SECRET;
   // Without a usable secret the account port stays closed. The saved account is still served, and the
   // installer still writes it through the command line.
-  const server = secretIsUsable(secret) ? createAgentServer({ agent: createAgent({ file }), secret }) : null;
+  const store = createAccountStore({ file });
+  const server = secretIsUsable(secret) ? createAgentServer({ agent: createAgent({ file, store }), secret }) : null;
   if (server === null) {
     process.stderr.write('calendar account agent: no account secret is set, so its port is closed\n');
   } else {
@@ -132,6 +141,7 @@ if (process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.
   }
   const supervisor = startSupervisor({
     file,
+    store,
     host: process.env.CALENDAR_MCP_HOST ?? '0.0.0.0',
     port: Number(process.env.CALENDAR_MCP_PORT ?? 9558),
   });

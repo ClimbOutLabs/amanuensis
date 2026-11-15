@@ -70,13 +70,9 @@ test_entrypoint_records_the_list_once_the_server_answers() {
   local wrap=$SB/wrap
   mkdir -p "$wrap/bin" "$wrap/status"
   cat >"$wrap/agent.py" <<'PYEOF'
-import sys
 import time
 
-if "--print-config" in sys.argv:
-    print("")
-else:
-    time.sleep(3600)
+time.sleep(3600)
 PYEOF
   cat >"$wrap/bin/mcp-email-server" <<'SHEOF'
 #!/bin/sh
@@ -93,13 +89,16 @@ SHEOF
   chmod 755 "$wrap/bin/mcp-email-server"
   printf '4\n' >"$wrap/delay"
   printf 'db_location = "/data/db.sqlite3"\nallowed_recipients = []\n' >"$wrap/policy.toml"
-  printf 'account one\n' >"$wrap/account.toml"
+  mkdir -p "$wrap/run"
+  : >"$wrap/account.toml"
+  : >"$wrap/run/accounts.toml"
   local hash
   hash=$(sha256sum "$wrap/policy.toml" | cut -d' ' -f1)
   WRAP_DELAY="$wrap/delay" PATH="$wrap/bin:$SB_BIN" \
     MCP_EMAIL_SERVER_CONFIG_PATH="$wrap/policy.toml" \
     AMAN_MAIL_STATUS_FILE="$wrap/status/loaded.sha256" \
     AMAN_MAIL_ACCOUNT_FILE="$wrap/account.toml" \
+    AMAN_MAIL_RUN_DIR="$wrap/run" \
     AMAN_MAIL_ACCOUNT_AGENT="$wrap/agent.py" \
     sh "$INSTALLER_DIR/../ops/compose/mail-email/entrypoint.sh" streamable-http --host 0.0.0.0 --port 9557 >"$wrap/log" 2>&1 &
   local ep=$!
@@ -113,7 +112,7 @@ SHEOF
   done
   assert_eq "$(cat "$wrap/status/loaded.sha256" 2>/dev/null || true)" "$hash" "loaded record names the list once the server answers"
   # An account change restarts the server on the same list: the record clears while it comes up.
-  printf 'account two\n' >"$wrap/account.toml"
+  printf '[[emails]]\naccount_name = "two"\n' >"$wrap/run/accounts.toml"
   tries=0
   while [ -f "$wrap/status/loaded.sha256" ] && [ "$tries" -lt 100 ]; do
     sleep 0.2
@@ -139,13 +138,9 @@ test_entrypoint_probes_the_port_the_server_is_given() {
   local wrap=$SB/wrap
   mkdir -p "$wrap/bin" "$wrap/status"
   cat >"$wrap/agent.py" <<'PYEOF'
-import sys
 import time
 
-if "--print-config" in sys.argv:
-    print("")
-else:
-    time.sleep(3600)
+time.sleep(3600)
 PYEOF
   cat >"$wrap/bin/mcp-email-server" <<'SHEOF'
 #!/bin/sh
@@ -161,13 +156,16 @@ time.sleep(3600)
 SHEOF
   chmod 755 "$wrap/bin/mcp-email-server"
   printf 'db_location = "/data/db.sqlite3"\nallowed_recipients = []\n' >"$wrap/policy.toml"
-  printf 'account one\n' >"$wrap/account.toml"
+  mkdir -p "$wrap/run"
+  : >"$wrap/account.toml"
+  : >"$wrap/run/accounts.toml"
   local hash
   hash=$(sha256sum "$wrap/policy.toml" | cut -d' ' -f1)
   PATH="$wrap/bin:$SB_BIN" \
     MCP_EMAIL_SERVER_CONFIG_PATH="$wrap/policy.toml" \
     AMAN_MAIL_STATUS_FILE="$wrap/status/loaded.sha256" \
     AMAN_MAIL_ACCOUNT_FILE="$wrap/account.toml" \
+    AMAN_MAIL_RUN_DIR="$wrap/run" \
     AMAN_MAIL_ACCOUNT_AGENT="$wrap/agent.py" \
     sh "$INSTALLER_DIR/../ops/compose/mail-email/entrypoint.sh" streamable-http --host 0.0.0.0 --port 19557 >"$wrap/log" 2>&1 &
   local ep=$!
@@ -191,13 +189,9 @@ test_entrypoint_records_a_server_that_answers_after_the_wait() {
   local wrap=$SB/wrap
   mkdir -p "$wrap/bin" "$wrap/status"
   cat >"$wrap/agent.py" <<'PYEOF'
-import sys
 import time
 
-if "--print-config" in sys.argv:
-    print("")
-else:
-    time.sleep(3600)
+time.sleep(3600)
 PYEOF
   cat >"$wrap/bin/mcp-email-server" <<'SHEOF'
 #!/bin/sh
@@ -213,13 +207,16 @@ time.sleep(3600)
 SHEOF
   chmod 755 "$wrap/bin/mcp-email-server"
   printf 'db_location = "/data/db.sqlite3"\nallowed_recipients = []\n' >"$wrap/policy.toml"
-  printf 'account one\n' >"$wrap/account.toml"
+  mkdir -p "$wrap/run"
+  : >"$wrap/account.toml"
+  : >"$wrap/run/accounts.toml"
   local hash
   hash=$(sha256sum "$wrap/policy.toml" | cut -d' ' -f1)
   AMAN_MAIL_ANSWER_WAIT_SECONDS=2 PATH="$wrap/bin:$SB_BIN" \
     MCP_EMAIL_SERVER_CONFIG_PATH="$wrap/policy.toml" \
     AMAN_MAIL_STATUS_FILE="$wrap/status/loaded.sha256" \
     AMAN_MAIL_ACCOUNT_FILE="$wrap/account.toml" \
+    AMAN_MAIL_RUN_DIR="$wrap/run" \
     AMAN_MAIL_ACCOUNT_AGENT="$wrap/agent.py" \
     sh "$INSTALLER_DIR/../ops/compose/mail-email/entrypoint.sh" streamable-http --host 0.0.0.0 --port 19558 >"$wrap/log" 2>&1 &
   local ep=$!
@@ -357,6 +354,24 @@ test_scripted_flags_with_piped_input() {
   assert_eq "$(sed -n 5p "$SB_STATE/imap_stdin")" "$EMAIL_PW" "the password reached the sign-in check on stdin"
   assert_not_contains "$(cat "$SB_STATE/imap_argv")" "$EMAIL_PW" "the password is not on the command line"
   assert_secret_only_in_account_file
+  assert_eq "$(cat "$STUB_STATE/mail-account-keyed")" aman-main "the connector got the key of its account file with the account"
+  assert_log_has "secrets-setup connector-key --name mail"
+  sandbox_drop
+
+  t_begin "an account is not saved when the key that protects it cannot be read"
+  sandbox_new
+  install_python_stub
+  with_input "$SENTINEL_PASSWORD
+"
+  run_install --yes --password-stdin --email owner@example.invalid
+  clear_input
+  assert_rc 0
+  rm -f "$SB_STATE/secrets_aman-main"
+  mail_run --yes --email-provider gmail --email-address you@gmail.com --email-password-stdin
+  assert_rc 1
+  assert_flat_contains "$ERR" "the key that protects it could not be read"
+  assert_flat_contains "$ERR" "install.sh instance email main"
+  assert_no_mail_account
   sandbox_drop
 }
 

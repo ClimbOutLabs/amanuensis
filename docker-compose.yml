@@ -270,8 +270,9 @@ services:
       AMAN_MAIL_STATUS_FILE: /mail-status/loaded.sha256
       # The account agent: the account file it owns, its private-network port, and its own path in the image.
       AMAN_MAIL_ACCOUNT_FILE: /account/.env.mail-email
-      # The composed config the wrapper writes from the send list and the saved accounts.
-      AMAN_MAIL_CONFIG_FILE: /account/config.toml
+      # In memory: the accounts in the form the mail server reads, and the composed config the wrapper
+      # writes from the send list and those accounts. The account file itself is kept encrypted.
+      AMAN_MAIL_RUN_DIR: /run/aman-mail
       AMAN_MAIL_ACCOUNT_PORT: '9559'
       # Only a caller that presents this secret can read, replace or remove the account (same value as the server).
       AMAN_MAIL_ACCOUNT_SECRET: ${MAIL_EMAIL_ACCOUNT_SECRET:?set MAIL_EMAIL_ACCOUNT_SECRET to a random value of 32 or more characters, for example from openssl rand -hex 32}
@@ -293,6 +294,8 @@ services:
       - mail-policy:/policy:ro
       - mail-policy-status:/mail-status
       - mail-email-data:/data
+    tmpfs:
+      - /run/aman-mail:mode=0700
     expose:
       - '9557'
       - '9559'
@@ -300,7 +303,7 @@ services:
 
   # Calendar connector sidecar (CalDAV). Built from ops/calendar-sidecar and private: `expose` only, never `ports`,
   # on its own network. The server reaches it as http://calendar-caldav:9558/mcp.
-  # The calendar login lives in a volume this sidecar owns, which the Settings Calendar card saves
+  # The calendar login lives encrypted in a volume this sidecar owns, which the Settings Calendar card saves
   # through the sidecar's account agent on port 9560. The tool server runs only while a login is saved.
   calendar-caldav:
     build:

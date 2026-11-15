@@ -1,5 +1,5 @@
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
-import { deriveDatabaseKey, deriveKnowledgeKey } from './databaseKey';
+import { deriveConnectorKey, deriveDatabaseKey, deriveKnowledgeKey, type AccountConnector } from './databaseKey';
 import { checkMasterKey } from './keyCheck';
 import type { KeyProvider } from './keyProvider';
 import { recoverMasterKey } from './recoveryKey';
@@ -98,6 +98,14 @@ export class SecretVault {
     return {
       current: deriveKnowledgeKey(this.#unlockedKey()),
       earlier: [...this.#retiredKeys.values()].map(deriveKnowledgeKey),
+    };
+  }
+
+  /** The key of a connector's account file, and the keys the file may still be under after a move. */
+  connectorKeys(connector: AccountConnector): { current: Buffer; earlier: Buffer[] } {
+    return {
+      current: deriveConnectorKey({ masterKey: this.#unlockedKey(), connector }),
+      earlier: [...this.#retiredKeys.values()].map(masterKey => deriveConnectorKey({ masterKey, connector })),
     };
   }
 
