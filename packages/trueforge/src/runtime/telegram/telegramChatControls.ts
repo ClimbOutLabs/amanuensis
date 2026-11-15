@@ -241,15 +241,15 @@ export async function handleTelegramPick(
 }
 
 /**
- * Sets the command menu once per connection per process, in the paired person's chat only. The menu
- * lives on Telegram's side, so a failure only means the menu is missing until the next try.
+ * Sets the command menu once per connection per process, in the paired person's chat only. A failure
+ * throws and leaves the menu unset, so the caller decides when to try again.
  */
 export function createTelegramCommandMenu(): {
-  ensure(input: { client: TelegramClient; connection: TelegramConnection; logger: Logger }): Promise<void>;
+  ensure(input: { client: TelegramClient; connection: TelegramConnection }): Promise<void>;
 } {
   const done = new Set<string>();
   return {
-    async ensure({ client, connection, logger }) {
+    async ensure({ client, connection }) {
       const chat_id = connection.paired_chat_id;
       if (chat_id === null) {
         return;
@@ -263,10 +263,7 @@ export function createTelegramCommandMenu(): {
         await client.setMyCommands({ chat_id, commands: TELEGRAM_COMMANDS });
       } catch (error) {
         done.delete(key);
-        logger.warn('The Telegram command menu could not be set', {
-          connection_id: connection.id,
-          error: error instanceof Error ? error.message : String(error),
-        });
+        throw error;
       }
     },
   };

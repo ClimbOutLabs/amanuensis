@@ -3,7 +3,9 @@ import winston from 'winston';
 
 import {
   pollTelegramOnce,
+  TELEGRAM_MENU_INTERVAL_MS,
   telegramCommandMenuLoop,
+  telegramMenuBackoffMs,
   telegramPollBackoffMs,
 } from '../../../src/controller/telegramDispatch';
 import type { TelegramClient } from '../../../src/runtime/telegram/telegramClient';
@@ -246,13 +248,36 @@ describe('telegram command menu loop', () => {
     expect(client.commandMenus).toHaveLength(1);
   });
 
-  it('tries again on the next pass when Telegram refuses', async () => {
+  it('backs off after Telegram refuses, then tries again once the wait is over', async () => {
     const { store, client, service } = harness([]);
     const setMyCommands = client.setMyCommands.bind(client);
-    client.setMyCommands = () => Promise.reject(new Error('Telegram is down'));
-    const loop = telegramCommandMenuLoop({ store, service, logger });
+    let refusals = 0;
+    client.setMyCommands = () => {
+      refusals += 1;
+      return Promise.reject(new Error('Telegram is down'));
+    };
+    let clock = 1_000;
+    const warnings: string[] = [];
+    const watched = winston.createLogger({
+      transports: [
+        new winston.transports.Stream({
+          stream: new Writable({
+            write(chunk: Buffer, _encoding, done) {
+              warnings.push(chunk.toString());
+              done();
+            },
+          }),
+        }),
+      ],
+    });
+    const loop = telegramCommandMenuLoop({ store, service, logger: watched, now: () => clock });
     await loop.tick(new AbortController().signal);
+    clock += TELEGRAM_MENU_INTERVAL_MS;
+    await loop.tick(new AbortController().signal);
+    expect(refusals).toBe(1);
+    expect(warnings).toHaveLength(1);
     client.setMyCommands = setMyCommands;
+    clock += telegramMenuBackoffMs(1);
     await loop.tick(new AbortController().signal);
     expect(client.commandMenus).toHaveLength(1);
   });

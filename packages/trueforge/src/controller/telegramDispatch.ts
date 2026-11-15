@@ -28,6 +28,12 @@ export const TELEGRAM_REPLY_LOOP_NAME = 'telegram-replies';
 export const TELEGRAM_REPLY_INTERVAL_MS = 3000;
 export const TELEGRAM_MENU_LOOP_NAME = 'telegram-menu';
 export const TELEGRAM_MENU_INTERVAL_MS = 15_000;
+const MENU_BACKOFF_CAP_MS = 60 * 60_000;
+
+/** How long a menu waits after `consecutiveFailures` refusals in a row: 30s, doubling up to an hour. */
+export function telegramMenuBackoffMs(consecutiveFailures: number): number {
+  return Math.min(MENU_BACKOFF_CAP_MS, TELEGRAM_MENU_INTERVAL_MS * 2 ** Math.max(1, consecutiveFailures));
+}
 
 const BACKOFF_BASE_MS = 5000;
 const BACKOFF_CAP_MS = 60_000;
@@ -181,24 +187,38 @@ export function telegramReplyLoop(params: {
 
 /**
  * Sets the command menu in each paired chat soon after start or pairing, without waiting for the
- * person to write first. Each menu is set once per process; a failed try is tried again next pass.
+ * person to write first. Each menu is set once per process. A failed try backs off, so a bot whose
+ * token stopped working is not retried and logged every pass.
  */
 export function telegramCommandMenuLoop(params: {
   store: ITelegramStore;
   service: TelegramService;
   logger: Logger;
+  now?: () => number;
 }): ControlLoop {
+  const now = params.now ?? (() => Date.now());
   const menu = createTelegramCommandMenu();
+  const state = new Map<string, ConnectionPollState>();
   return {
     name: TELEGRAM_MENU_LOOP_NAME,
     intervalMs: TELEGRAM_MENU_INTERVAL_MS,
     async tick(): Promise<void> {
       for (const connection of await params.store.listConnections()) {
+        const attempt = state.get(connection.id) ?? { failures: 0, nextAttemptAt: 0 };
+        state.set(connection.id, attempt);
+        if (now() < attempt.nextAttemptAt) {
+          continue;
+        }
         try {
-          await menu.ensure({ client: params.service.clientFor(connection), connection, logger: params.logger });
+          await menu.ensure({ client: params.service.clientFor(connection), connection });
+          attempt.failures = 0;
+          attempt.nextAttemptAt = 0;
         } catch (error) {
-          params.logger.warn('The Telegram command menu could not be set', {
+          attempt.failures += 1;
+          attempt.nextAttemptAt = now() + telegramMenuBackoffMs(attempt.failures);
+          params.logger.warn('The Telegram command menu could not be set; backing off', {
             connection_id: connection.id,
+            failures: attempt.failures,
             error: error instanceof Error ? error.message : String(error),
           });
         }
