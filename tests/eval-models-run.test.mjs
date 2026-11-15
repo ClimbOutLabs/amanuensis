@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { collectToolCalls, countRefusedCommands, runCheck } from '../scripts/eval-models/checks.mjs';
+import { collectToolCalls, countRefusedCommands, runCheck, toolNameMatches } from '../scripts/eval-models/checks.mjs';
 import { DROP_EXIT_CODE, parseModelArgs } from '../scripts/eval-models/cli.mjs';
 import {
   checkScheduledRun,
@@ -599,6 +599,13 @@ test('persona cases fail when a persona reads facts it should not see or saves t
 
 const refusal = text => ({ turn_id: 't', event: { type: 'tool.response.v2', content: text } });
 
+test('sandbox tools match by name whatever the call was for', () => {
+  assert.equal(toolNameMatches({ stored: 'exec:execute:27fa62a8238855cb', tool: 'exec' }), true);
+  assert.equal(toolNameMatches({ stored: 'write_file:edit', tool: 'write_file' }), true);
+  assert.equal(toolNameMatches({ stored: 'gmail.send_draft', tool: 'send_draft' }), true);
+  assert.equal(toolNameMatches({ stored: 'run_skill_script', tool: 'exec' }), false);
+});
+
 test('refused commands are counted from tool results in either wording', () => {
   assert.equal(
     countRefusedCommands([
@@ -713,7 +720,7 @@ function skillClient({ broken = false, noSandbox = false } = {}) {
         const refused = broken
           ? ['This command was not run because it uses $(...).', 'This command was not run because it uses a loop.']
           : [];
-        add(id, [['exec', '{"command":"curl wttr.in/Lisbon"}']], [...refused, 'Lisbon: 18°C']);
+        add(id, [['exec:execute:abc123', '{"command":"curl wttr.in/Lisbon"}']], [...refused, 'Lisbon: 18°C']);
         replies.set(id, 'It is 18°C in Lisbon.');
       } else {
         add(id, [['remove_skill', '{"name":"weather"}']]);
