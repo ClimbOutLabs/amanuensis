@@ -42,6 +42,8 @@ Tap the menu button beside the text box in Telegram to see the bot's commands, o
 
 These change only the Telegram chat, the same settings you see when you open that chat in Aman.
 
+If you delete the Telegram chat in Aman, your next message to the bot starts a new chat, and the bot tells you so first. The new chat does not see what was said in the deleted one. What Aman learned about you from it stays in memory, as it does for any chat you delete.
+
 Reminders and other notices that would show on your devices are sent to Telegram as well. When Aman tries to call you and the phone does not ring, the message comes to Telegram instead. Quiet notes stay under the bell in the app. So when your morning brief is ready, Telegram gets no message: read the brief in its chat in the app.
 
 The bot does not answer anyone else, and it does not work in group chats. Forwarded messages and files are treated as things to read, never as instructions to follow.

@@ -29,6 +29,8 @@ Every change applies only to the Telegram chat and is the same setting the app s
 
 **Short button data.** A button carries a short hash of the model, persona or connector name, because Telegram limits button data to 64 bytes. A tap on a choice that no longer exists says so and changes nothing.
 
+**A deleted chat is named, never silently replaced.** When the person deletes the Telegram chat in the app, the next message starts a new chat and the bot first says the earlier chat was deleted in Aman, so the person does not take the new chat for the old one.
+
 **Forwarded and unknown commands are ordinary messages.** A forwarded `/model` is something to read, never an instruction, and an unknown command goes to the assistant.
 
 ## Scope
