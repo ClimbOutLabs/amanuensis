@@ -35,15 +35,24 @@ jest.mock('../../../../src/runtime/memory/memorySummarize', () => {
   return { ...actual, summarizeTurnContent: jest.fn() };
 });
 
+jest.mock('../../../../src/runtime/memory/memoryNotesSummarize', () => {
+  const actual = jest.requireActual<typeof import('../../../../src/runtime/memory/memoryNotesSummarize')>(
+    '../../../../src/runtime/memory/memoryNotesSummarize',
+  );
+  return { ...actual, summarizeTurnNotes: jest.fn(actual.summarizeTurnNotes) };
+});
+
 import type { ILLM } from '@truefoundry/trueforge-core/core';
 import { type IModelProviderStore } from '../../../../src/db/modelProviderStore';
 import type { MemoryClient } from '../../../../src/runtime/memory/memoryClient';
 import { type RetainOutcome } from '../../../../src/runtime/memory/memoryClient';
+import { summarizeTurnNotes } from '../../../../src/runtime/memory/memoryNotesSummarize';
 import { submitRetain, submitRetainWithVerification } from '../../../../src/runtime/memory/memoryRetain';
 import { summarizeTurnContent } from '../../../../src/runtime/memory/memorySummarize';
 import { QuietMemoryClient } from '../../../fixtures/memory/quietMemoryClient';
 
 const mockSummarize = jest.mocked(summarizeTurnContent);
+const mockSummarizeNotes = jest.mocked(summarizeTurnNotes);
 
 function makeLogger() {
   return winston.createLogger({ silent: true });
@@ -358,6 +367,32 @@ describe('summarization observability', () => {
 
   beforeEach(() => {
     mockSummarize.mockReset();
+  });
+
+  it('asks for the notes only after the facts are answered, so the two never share the model', async () => {
+    const { client, retain } = retainingClient();
+    retain.mockResolvedValue({ ok: true });
+    const order: string[] = [];
+    mockSummarize.mockImplementation(async () => {
+      order.push('facts asked');
+      await new Promise(resolve => setImmediate(resolve));
+      order.push('facts answered');
+      return { status: 'nothing_to_keep' };
+    });
+    mockSummarizeNotes.mockImplementationOnce(() => {
+      order.push('notes asked');
+      return Promise.resolve([]);
+    });
+    const { logger } = capturingLogger();
+
+    await submitRetain({
+      session: { is_incognito: false },
+      ...baseSubmit(logger),
+      client,
+      summarize: summarizeContext(),
+    });
+
+    expect(order).toEqual(['facts asked', 'facts answered', 'notes asked']);
   });
 
   it('logs when a turn is summarized instead of stored as an exchange', async () => {
