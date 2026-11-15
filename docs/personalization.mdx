@@ -48,25 +48,38 @@ Profile learning is off until you turn on **Learn from conversations** in **Sett
 
 ### What it does
 
-With learning on, Aman runs a short pass after each finished turn.
+With learning on, learning has no model call of its own.
 
-1. A model call reads the current learned profile and that turn's exchange.
-2. It returns the whole profile rewritten: lasting facts, preferences and ways of working, under Markdown headings.
-3. If the exchange held nothing lasting, the profile comes back unchanged and nothing is written.
+1. After each finished turn, one helper call already decides what the turn holds that is worth remembering.
+2. That same call is shown the learned profile's lines. It also says which of the facts it kept belong in the profile: who you are, a lasting preference, or how you want the assistant to work with you.
+3. The server's own code then edits the document. A model never rewrites it.
 
-The pass checks the switch as it starts and again after the model call. If you turn learning off during a turn, the pass stops without writing anything.
+The call sees only what you wrote in the turn. It never sees a tool result, a file, or recalled memory. Of the assistant's reply it sees at most the last question, to understand a short answer. When no such call runs for a turn (no memory, or turn summaries off), the server makes that one call itself. Nothing is learned from an Incognito chat.
+
+A new line is added under one of two headings: `## How to work with me` for how you want the assistant to work with you, and `## About me` for everything else. A line that corrects an older one takes its place. Nothing already in the document is reworded, shortened or merged.
+
+### When it is full
+
+The document is limited to 4,000 characters. When a new line does not fit, the oldest line under `## About me` (or under any other heading you wrote yourself) is moved into memory exactly as written, and the new line goes in.
+
+- The note is marked `External source: learned profile`, because the profile does not record which words each line was learned from. Aman still finds and uses the note, and asks you before it acts on an address or a link in it.
+- Lines under `## How to work with me` stay. One of them moves only when no other line is left to move.
+- A line is moved only after memory has accepted it. If memory is off or does not accept it, the document is left as it is and the new fact stays in memory only.
+
+So the profile holds your standing wishes and the most recent things you said about yourself, and memory holds the rest in full. There is nothing to clean up by hand.
 
 ### Limits
 
-- The pass never delays or fails the turn it learns from. If anything goes wrong inside it, it quietly does nothing.
-- After the pass writes, it waits before writing again: `PROFILE_LEARNING_MIN_INTERVAL_MS`, one hour by default. Your own edits are never limited.
-- `PROFILE_LEARNING_MODEL` picks a separate model for the pass. When it is empty, the pass uses the turn's own model. Neither setting turns learning on.
+- Learning never delays or fails the turn it learned from. Every failure inside it is logged and changes nothing.
+- The switch is read again after the turn, so turning it off while a turn is running takes effect for that turn too.
+- If you edit the profile while a turn is being learned from, the new lines are added to your edit.
+- The helper call uses the background model from **Roles and Personas**, else the main chat model. Its usage shows on the turn's usage line with the other helper calls.
 
 ### The change trail
 
-Every write by the pass adds an `aman.profile.learned` event to that turn's event log. The event holds the previous profile, the new one, and the new revision number, so you can review every change through the events API. With **Agent details** on, the answer also shows a **Learned profile updated** card.
+Every write adds an `aman.profile.learned` event to that turn's event log. The event holds the previous profile, the new one, and the new revision number, so you can review every change through the events API. With **Agent details** on, the answer also shows a **Learned profile updated** card.
 
-When a memory provider is set up, a pass that finishes with learning still on also copies the current profile into it, under one document id per person. An unchanged profile is not stored twice.
+The learned profile lives in Settings and in the prompt. Memory holds only the lines that were moved out of a full profile, one note each. Earlier versions also saved a copy of the whole document as a memory note. Each turn that is learned from, and each save or delete of the profile in Settings, now removes any such copy, and recall never shows one. Clearing the learned profile in Settings therefore stops it being used anywhere. As with any deleted memory, the copy's old text stays in the dated file in the memory folder, hidden, until the line is removed from that file by hand.
 
 ### Where you see it
 
@@ -83,6 +96,7 @@ GET    /api/v1/personalization/context
 
 - The signed-in identity owns the profile. A caller can't pick another person's profile.
 - `PUT` replaces the whole profile. A `PUT` with nothing in it is refused, because `DELETE` is how you remove a profile.
+- Send `expected_revision` beside `profile` with the revision you read, or `null` when you read no profile. If the profile has changed or been created since, for example because Aman learned something, the save is refused with `409` and nothing is written. Settings does this for you and saves your edits on top of the newest profile, so text learned while the page was open is kept.
 - `learning_enabled` counts as content whether it is on or off. So a profile holding only the switch is valid; that is where someone lands after trying profile learning and turning it back off. Leaving the field out counts as no content, and as learning off.
 - `GET /api/v1/personalization/context` returns the main assistant's view of the profile. On a persona turn the server builds the persona's view from the persona settings.
 - `profile_digest` identifies the source profile, not the exact text sent to the model.

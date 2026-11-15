@@ -152,13 +152,18 @@ describe('readZipArchive', () => {
     expect(() => readZipArchive(zip, LIMITS)).toThrow(/not a valid export archive/);
   });
 
-  it.each(['../evil.json', 'memory/../../evil.json', '/abs.json', 'memory\\evil.json', 'C:/evil.json'])(
-    'refuses the unsafe path %s',
-    name => {
-      const zip = buildZip([{ name, data: Buffer.from('{}') }]);
-      expect(() => readZipArchive(zip, LIMITS)).toThrow(/file path that is not allowed/);
-    },
-  );
+  it.each([
+    '../evil.json',
+    'memory/../../evil.json',
+    'memory/default/people/../../evil.md',
+    'memory/default/people/..\\evil.md',
+    '/abs.json',
+    'memory\\evil.json',
+    'C:/evil.json',
+  ])('refuses the unsafe path %s', name => {
+    const zip = buildZip([{ name, data: Buffer.from('{}') }]);
+    expect(() => readZipArchive(zip, LIMITS)).toThrow(/file path that is not allowed/);
+  });
 
   it('refuses duplicate entry names', () => {
     const zip = buildZip([

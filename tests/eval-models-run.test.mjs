@@ -245,7 +245,7 @@ test('a run grades every case, removes its memories and space, and writes the co
         ],
       },
       modelSet: {
-        version: 3,
+        version: 4,
         memories: [{ text: 'My dentist is Dr. Okafor.', timestamp: '2026-08-04T09:10:00Z' }],
         personas: [],
         cases: [
@@ -505,7 +505,7 @@ function personaClient({ leaky = false } = {}) {
 }
 
 const personaSet = {
-  version: 3,
+  version: 4,
   memories: [{ text: 'My manager at work is Lena Ortiz.', timestamp: '2026-09-01T09:00:00Z' }],
   profile: { user_name: 'Robin Hale' },
   personas: [

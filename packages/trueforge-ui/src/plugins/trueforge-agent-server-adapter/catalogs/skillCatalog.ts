@@ -16,6 +16,8 @@ import {
   parseSkillNetworkApproval,
   type SkillNetworkApproval,
   type SkillNetworkApprovalState,
+  type SkillWebsiteCheck,
+  type SkillWebsites,
 } from '../../../server/skillNetworkApproval.js';
 import type { DefinedSkill, SkillCatalogEntry, SkillCatalogServer, SkillConfigBase } from '../../../server/types.js';
 import type { CreateTrueForgeClientOptions } from '../client.js';
@@ -126,7 +128,7 @@ async function requestSkillRoute({
  * The skill port plus the network approval calls, which the runtime's generic port type does not
  * declare. Widened here rather than in `@truefoundry/assistant-ui-runtime`.
  */
-export type HarnessSkillCatalog = SkillCatalogServer<UiSkill> & SkillNetworkApproval;
+export type HarnessSkillCatalog = SkillCatalogServer<UiSkill> & SkillNetworkApproval & SkillWebsites;
 
 export function createSkillCatalog(
   client: TrueForge,
@@ -165,6 +167,23 @@ export function createSkillCatalog(
         name: body.data.name,
         description: body.data.manifest.description,
       };
+    },
+    checkSkillWebsites: async ({ repoURL, path, ref }): Promise<SkillWebsiteCheck> => {
+      const trimmed = path.trim();
+      const body = await client.settings.skills.checkWebsites({
+        url: repoURL,
+        ...(trimmed === '' ? {} : { path: trimmed }),
+        ref,
+      });
+      return {
+        commit: body.data.commit,
+        websites: body.data.websites,
+        makesUpAddresses: body.data.makesUpAddresses,
+        canSend: body.data.canSend,
+      };
+    },
+    addSkillWithWebsites: async ({ approvedWebsites, ...req }): Promise<void> => {
+      await client.settings.skills.create({ manifest: toHarnessManifest(req), approvedWebsites });
     },
     deleteSkill: async ({ id }) => {
       // Deleting a skill row is a local DB write; it never needs the SDK's full 60s default.

@@ -10,12 +10,6 @@
  * Turn execution resolves DCR tokens via resolveMcpAuth.
  */
 import { z } from '@hono/zod-openapi';
-import {
-  type IntegerBounds,
-  MEMORY_RECALL_MIN_SCORE_LIMITS,
-  MEMORY_SETTINGS_LIMITS,
-  REFLECT_BUDGETS,
-} from '@truefoundry/trueforge-core/core/memory/memorySettingsLimits';
 import type { OAuthToken } from '../mcp/auth/types';
 import { NameSchema } from './common';
 import {
@@ -49,80 +43,6 @@ export const ListMcpServerToolsResponseSchema = z
   })
   .openapi('ListMCPServerToolsResponse');
 
-const boundedInt = (bounds: IntegerBounds) => z.number().int().min(bounds.min).max(bounds.max).optional();
-/** As {@link boundedInt}, for a fractional bound (`recall_min_score`) rather than an integer one. */
-const boundedNumber = (bounds: IntegerBounds) => z.number().min(bounds.min).max(bounds.max).optional();
-
-/**
- * Per-bank memory tuning, set in Settings > Memory. Every field is optional: one that is absent
- * keeps the server-wide `MEMORY_*` default, so an instance with no tuning behaves exactly as the
- * environment says and nothing is configured in two places at once. Bounds come from
- * trueforge-core, which the settings form also renders with.
- */
-export const MemoryProviderSettingsSchema = z
-  .object({
-    recall_timeout_ms: boundedInt(MEMORY_SETTINGS_LIMITS.recallTimeoutMs).describe(
-      'How long a turn waits for recalled memory before continuing without it. Default MEMORY_RECALL_TIMEOUT_MS.',
-    ),
-    recall_query_window: boundedInt(MEMORY_SETTINGS_LIMITS.recallQueryWindow).describe(
-      'How many recent user messages form the recall query. Default MEMORY_RECALL_QUERY_WINDOW.',
-    ),
-    recall_min_score: boundedNumber(MEMORY_RECALL_MIN_SCORE_LIMITS).describe(
-      'Relevance floor for a recalled item or entity summary that carries a provider score; anything ' +
-        'scored lower is dropped. Ignored for a response with no scores. Default MEMORY_RECALL_MIN_SCORE.',
-    ),
-    recall_max_items: boundedInt(MEMORY_SETTINGS_LIMITS.recallMaxItems).describe(
-      'Most recalled items kept, by provider rank, when the response carries no per-item score. ' +
-        'Default MEMORY_RECALL_MAX_ITEMS.',
-    ),
-    recall_max_entities: boundedInt(MEMORY_SETTINGS_LIMITS.recallMaxEntities).describe(
-      'Most entity summaries kept, by provider rank, when the response carries no per-entity score. ' +
-        'Default MEMORY_RECALL_MAX_ENTITIES.',
-    ),
-    prerecall_gate_enabled: z
-      .boolean()
-      .optional()
-      .describe(
-        'Skip the memory provider reads on high-confidence trivial turns (short greetings, bare ' +
-          'acknowledgements). Default MEMORY_PRERECALL_GATE_ENABLED.',
-      ),
-    curated_enabled: z
-      .boolean()
-      .optional()
-      .describe('Inject the bank profile and matching mental models on every turn. Default MEMORY_CURATED_ENABLED.'),
-    curated_max_models: boundedInt(MEMORY_SETTINGS_LIMITS.curatedMaxModels).describe(
-      'Most mental models injected on one turn. Default MEMORY_CURATED_MAX_MODELS.',
-    ),
-    curated_max_tokens: boundedInt(MEMORY_SETTINGS_LIMITS.curatedMaxTokens).describe(
-      'Token budget for the injected mental-model lines. Default MEMORY_CURATED_MAX_TOKENS.',
-    ),
-    reflect_enabled: z
-      .boolean()
-      .optional()
-      .describe('Ask the bank to reflect on synthesis-shaped asks. Default MEMORY_REFLECT_ENABLED.'),
-    reflect_budget: z.enum(REFLECT_BUDGETS).optional().describe('Reflect effort. Default MEMORY_REFLECT_BUDGET.'),
-    reflect_max_tokens: boundedInt(MEMORY_SETTINGS_LIMITS.reflectMaxTokens).describe(
-      'Max tokens the bank may spend on a reflect answer. Default MEMORY_REFLECT_MAX_TOKENS.',
-    ),
-    reflect_timeout_ms: boundedInt(MEMORY_SETTINGS_LIMITS.reflectTimeoutMs).describe(
-      'How long a turn waits for a reflection before continuing without it. Default MEMORY_REFLECT_TIMEOUT_MS.',
-    ),
-    screen_enabled: z
-      .boolean()
-      .optional()
-      .describe(
-        'Screen recalled items and entity summaries with the Prompt Guard classifier before they reach the ' +
-          'model. Has no effect when no classifier service is configured (`MEMORY_SCREEN_URL`). Default MEMORY_SCREEN_ENABLED.',
-      ),
-  })
-  .strict()
-  .describe(
-    'Per-bank memory tuning; each field present overrides the matching server-wide MEMORY_* setting for this provider.',
-  )
-  .openapi('MemoryProviderSettings');
-
-export type MemoryProviderSettings = z.infer<typeof MemoryProviderSettingsSchema>;
-
 /** User-configured remote MCP endpoint. */
 const RemoteMcpServerManifestSchema = z
   .object({
@@ -131,13 +51,6 @@ const RemoteMcpServerManifestSchema = z
     url: z.url().describe('MCP endpoint URL.'),
     description: McpServerDescriptionSchema,
     auth: McpServerManifestAuthSchema.optional(),
-    memory_provider: z
-      .boolean()
-      .optional()
-      .describe(
-        'When true, this connector is the long-term memory provider: the host recalls from it before every model call and retains every completed turn. Its URL must be a single-bank Hindsight MCP URL.',
-      ),
-    memory_settings: MemoryProviderSettingsSchema.optional(),
     search_provider: z
       .boolean()
       .optional()

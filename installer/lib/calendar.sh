@@ -423,7 +423,10 @@ check_calendar_options() {
   if [ "$COMMAND:$SUBCOMMAND" = instance:calendar ]; then
     if [ "$OPT_REMOVE" = 1 ] && calendar_flags_given; then usage_die "--remove cannot be used with the calendar options; use one or the other"; fi
   else
-    if [ "$OPT_REMOVE" = 1 ] && [ "$COMMAND:$SUBCOMMAND" != instance:email ]; then usage_die "--remove applies to instance calendar or instance email"; fi
+    case "$COMMAND:$SUBCOMMAND" in
+      instance:email | instance:local-model) ;;
+      *) if [ "$OPT_REMOVE" = 1 ]; then usage_die "--remove applies to instance calendar, instance email or instance local-model"; fi ;;
+    esac
     if calendar_flags_given && [ "$COMMAND" != install ]; then usage_die "The --calendar-* options apply to install and instance calendar"; fi
   fi
 }

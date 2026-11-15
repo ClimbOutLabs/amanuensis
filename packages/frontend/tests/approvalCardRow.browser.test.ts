@@ -26,7 +26,6 @@ const SLOTS: readonly (readonly string[])[] = [
   ['Always allow everywhere', 'Always allow for this skill'],
   ['Allow all', 'Allow all (3)'],
   ['Change it'],
-  ['Save as draft'],
   ['Not now', 'Deny', 'Keep it', "Don't send", "Don't save"],
 ];
 

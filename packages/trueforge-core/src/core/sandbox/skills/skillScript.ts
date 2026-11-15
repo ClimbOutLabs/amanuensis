@@ -90,3 +90,43 @@ export function skillScriptStaysInFolder(input: { skillsDir: string; skill: stri
   const skillsInPlace = !input.skillsDir.startsWith('/') || skillsReal === input.skillsDir.replace(/\/+$/u, '');
   return skillsInPlace && folderReal === `${skillsReal}/${input.skill}` && scriptReal.startsWith(`${folderReal}/`);
 }
+
+/**
+ * The skill whose folder a run_code call names, if any. run_code runs in an empty folder and cannot
+ * see a skill's folder, so such a call can only fail; the person is not asked to approve it.
+ */
+export function skillFolderNamedInRunCode(input: {
+  skillsDir: string;
+  skillNames: readonly string[];
+  text: string;
+}): string | undefined {
+  return input.skillNames.find(skillName => {
+    const folder = getSkillPath({ skillsDir: input.skillsDir, skillName }).replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+    // The name must end where the folder name ends, so `ai-news` does not match `ai-news-skill`.
+    return new RegExp(`${folder}(?![A-Za-z0-9._-])`, 'u').test(input.text);
+  });
+}
+
+/**
+ * What to tell the model when a skill's script stopped because a package is missing, read from its
+ * error output. It stops the model from installing the package some other way.
+ */
+export function missingPackageNextStep(output: string): string | undefined {
+  const python = /ModuleNotFoundError: No module named '([^'\s]+)'/u.exec(output)?.[1];
+  if (python !== undefined) {
+    const module = python.split('.')[0] ?? python;
+    return (
+      `The sandbox does not have the Python module '${module}' that this script needs. ` +
+      'Tell the person that in plain words and stop. Do not install it another way. ' +
+      'On an installed Aman they can add the package that provides it with `aman doctor sandbox --add-python <package>`, then ask again.'
+    );
+  }
+  const node = /Cannot find (?:module|package) '([^'./][^'\s]*)'/u.exec(output)?.[1];
+  if (node !== undefined) {
+    return (
+      `The sandbox does not have the Node package '${node}' that this script needs. ` +
+      'Tell the person that in plain words and stop. Do not install it another way.'
+    );
+  }
+  return undefined;
+}

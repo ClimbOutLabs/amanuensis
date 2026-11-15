@@ -68,6 +68,7 @@ export function ThreadListRow({
         <span className="min-w-0 flex-1">
           <span className="flex min-w-0 items-center gap-1.5">
             <span
+              data-slot="aui_thread-list-item-title"
               className={cn(
                 'block truncate text-sm text-text-primary',
                 unread === true ? 'font-semibold' : 'font-normal',

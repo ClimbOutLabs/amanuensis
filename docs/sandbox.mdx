@@ -254,6 +254,13 @@ passed as they are, with no shell in between. A skill's script runs without aski
 can't reach the internet. It asks when the sandbox can reach the internet, or when Aman edited a file
 in that skill's folder with its file tools earlier in the chat.
 
+Aman skips a skill's install steps, such as `pip install`, and runs the script with the packages the
+sandbox already has. When a script stops because a package is missing, Aman says which one and stops,
+instead of installing it another way. On an installed Aman, `aman doctor sandbox --add-python` adds a
+Python package, as described under sandbox slots. `run_code` can't see a skill's folder, so a
+`run_code` call that names one is refused before any approval card, with a pointer to the skill's
+own action.
+
 A shell command is stopped after 60 seconds unless Aman asks for longer. It can ask for up to 10
 minutes for one command, which is what a package install, a build or a long test run needs. When a
 command is stopped for taking too long, the result says so and says how to ask for more time.

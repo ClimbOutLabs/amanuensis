@@ -234,6 +234,7 @@ print_plan() {
   fi
   if [ -n "$PLAN_UPGRADE_NOTE" ]; then ui_line "$PLAN_UPGRADE_NOTE"; fi
   print_plan_rows
+  ui_gap
   if [ "${PLAN_DOWNLOADS_AMAN:-0}" = 1 ]; then
     ui_hint "Aman's own parts are downloaded where a release published them, checked by their pinned digest, and the rest is built on this computer. Nothing is sent anywhere."
   else
@@ -644,7 +645,8 @@ install_execute() {
   # Before the build and the backup, so a port Tailscale would take stops the run with nothing changed.
   for name in $(reg_names); do instance_tailscale_port_check "$name"; done
   if need_new_instance && [ -z "$AMAN_PASSWORD" ]; then
-    ui_hint "Asked now so the rest of the setup runs on its own."
+    if [ -t 0 ]; then ui_ask_begin; fi
+    UI_IN_PROMPT=1 ui_hint "Asked now so the rest of the setup runs on its own."
     ask_password AMAN_PASSWORD
   fi
   ui_phase "Building the app" 4 6

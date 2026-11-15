@@ -19,7 +19,7 @@ const BODY_PAIRS: Array<{ text: TokenName; surface: TokenName; base?: TokenName 
   { text: 'textMuted', surface: 'cardBg' },
   { text: 'sidebarText', surface: 'sidebarBg' },
   { text: 'userMessageText', surface: 'userMessageBg', base: 'primaryBg' },
-  { text: 'assistantMessageText', surface: 'primaryBg' },
+  { text: 'assistantMessageText', surface: 'assistantMessageBg' },
   { text: 'primaryButtonText', surface: 'primaryButtonBg' },
   { text: 'secondaryButtonText', surface: 'secondaryButtonBg' },
   { text: 'ghostButtonText', surface: 'primaryBg' },

@@ -82,13 +82,15 @@ describe('mail-email entrypoint wrapper', () => {
     await writeFile(accountFile, '');
     await mkdir(join(dir, 'status'));
     // A stand-in server: it logs each start, binds the mail port like the real server, and then
-    // runs as the only process, so a signal reaches it.
+    // runs as the only process, so a signal reaches it. Like the real server it takes its accounts
+    // from the config file it is pointed at, never from the environment, so it logs the first
+    // account address that file names.
     const bin = join(dir, 'bin');
     await mkdir(bin);
     const holder = await writePortHolder(bin);
     await writeFile(
       join(bin, 'mcp-email-server'),
-      `#!/bin/sh\necho start >> "${starts}"\necho "\${MCP_EMAIL_SERVER_ALLOWED_RECIPIENTS-unset}" >> "${envLog}"\necho "addr:\${MCP_EMAIL_SERVER_EMAIL_ADDRESS-unset}" >> "${envLog}"\nexec python3 "${holder}"\n`,
+      `#!/bin/sh\necho start >> "${starts}"\necho "\${MCP_EMAIL_SERVER_ALLOWED_RECIPIENTS-unset}" >> "${envLog}"\naddr=$(sed -n 's/^email_address = "\\(.*\\)"$/\\1/p' "$MCP_EMAIL_SERVER_CONFIG_PATH" | head -n 1)\necho "addr:\${addr:-unset}" >> "${envLog}"\nexec python3 "${holder}"\n`,
     );
     await chmod(join(bin, 'mcp-email-server'), 0o755);
   });
@@ -152,9 +154,9 @@ describe('mail-email entrypoint wrapper', () => {
 
   it('restarts the server with the saved account when the account file changes', async () => {
     startWrapper();
-    // The server records what it was started with once it runs, which can be after the status is written.
-    await eventually(async () => (await readOrEmpty(envLog)).includes('addr:'));
-    expect(await readOrEmpty(envLog)).toContain('addr:unset');
+    await eventually(async () => (await readOrEmpty(status)) !== '');
+    // The hash is written once the server is launched, which may not have logged its account yet.
+    await eventually(async () => (await readOrEmpty(envLog)).includes('addr:unset'));
     await writeFile(
       accountFile,
       [

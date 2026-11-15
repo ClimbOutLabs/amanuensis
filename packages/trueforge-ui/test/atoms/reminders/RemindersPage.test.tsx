@@ -6,6 +6,7 @@ import { RemindersPage } from '@/atoms/reminders/RemindersPage.js';
 import { RemindersButton } from '@/atoms/RemindersButton.js';
 import { ReminderListProvider } from '@/reminders/ReminderListContext.js';
 import type { ReminderItem, RemindersApi } from '@/reminders/types.js';
+import type { AgentUIServer } from '@/server/types.js';
 
 function stubShell() {
   return {
@@ -28,6 +29,24 @@ vi.mock('@/server/ShellModeContext.js', async importOriginal => ({
   ...(await importOriginal<typeof import('@/server/ShellModeContext.js')>()),
   useOptionalShellMode: () => shell,
 }));
+
+// The page looks a chat up before it opens it; each test says what the lookup answers.
+let getSession = vi.fn<AgentUIServer['getSession']>();
+
+vi.mock('@/server/ServerContext.js', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/server/ServerContext.js')>()),
+  useOptionalServer: () => ({ getSession }),
+}));
+
+function chatThere(): AgentUIServer['getSession'] {
+  return async ({ sessionId }) => ({
+    id: sessionId,
+    title: 'Bins',
+    isMutable: false,
+    createdAt: '2026-11-01T09:00:00.000Z',
+    updatedAt: '2026-11-01T09:00:00.000Z',
+  });
+}
 
 function item(overrides: Partial<ReminderItem>): ReminderItem {
   return {
@@ -57,6 +76,7 @@ function renderPage(api: Pick<RemindersApi, 'listReminders'> & Partial<Reminders
 
 beforeEach(() => {
   shell = stubShell();
+  getSession = vi.fn(chatThere());
 });
 
 afterEach(() => {
@@ -96,8 +116,16 @@ describe('the Reminders page', () => {
     });
 
     fireEvent.click(await screen.findByRole('button', { name: 'Take the bins out. Opens the chat it was set in.' }));
+    await waitFor(() =>
+      expect(shell?.openHistorySession).toHaveBeenCalledWith({
+        sessionId: 'chat-7',
+        isMutable: false,
+        isCreateAgent: false,
+      }),
+    );
+    expect(getSession).toHaveBeenCalledWith({ sessionId: 'chat-7' });
     expect(shell?.setRemindersOpen).toHaveBeenCalledWith(false);
-    expect(shell?.openHistorySession).toHaveBeenCalledWith({ sessionId: 'chat-7', isMutable: false });
+    expect(screen.queryByRole('alert')).toBeNull();
     expect(screen.queryByRole('button', { name: /Water the plants\. Opens the chat/ })).toBeNull();
     expect(screen.getAllByText('Open chat')).toHaveLength(1);
     expect(screen.getByText('No chat to open')).toBeTruthy();
@@ -157,6 +185,22 @@ describe('the Reminders page', () => {
       'That reminder could not be deleted. Check your connection, then try again.',
     );
     expect(screen.getAllByText('Take the bins out').length).toBeGreaterThan(0);
+  });
+
+  it('says the chat was deleted when a reminder leads to a chat that is gone, and opens nothing', async () => {
+    const gone = new Error('Session not found');
+    gone.name = 'NotFoundError';
+    getSession = vi.fn(async () => {
+      throw gone;
+    });
+    renderPage({
+      listReminders: () => Promise.resolve([item({ id: 'a', what: 'Take the bins out', sessionId: 'chat-7' })]),
+    });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Take the bins out. Opens the chat it was set in.' }));
+
+    expect((await screen.findByRole('alert')).textContent).toBe('This chat was deleted');
+    expect(shell?.openHistorySession).not.toHaveBeenCalled();
   });
 
   it('says there are no reminders yet when none were set', async () => {

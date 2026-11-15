@@ -682,6 +682,8 @@ export async function seedRichInstance<TTransaction>(input: SeedRichInstanceInpu
 
   await stores.globalSettingsStore.setSetting({ key: 'default_chat_model', value: SEED_DEFAULT_CHAT_MODEL });
   await stores.globalSettingsStore.setSetting({ key: 'memory_summarize_enabled', value: 'true' });
+  await stores.globalSettingsStore.setSetting({ key: 'memory_page_sorting_mode', value: 'report' });
+  await stores.globalSettingsStore.setSetting({ key: 'memory_nightly_job_enabled', value: 'true' });
   await stores.globalSettingsStore.setSetting({ key: 'tool_output_screen_enabled', value: 'true' });
   await stores.globalSettingsStore.setSetting({ key: 'memory_screen_enabled', value: 'false' });
   await stores.sentinelSettingsStore.patch({

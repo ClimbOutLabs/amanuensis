@@ -69,12 +69,21 @@ interface RecordedAnswer {
   answer: SkillNetworkAnswer;
 }
 
-async function setup() {
+async function setup(options: { refuseAnswers?: boolean } = {}) {
   const answers: RecordedAnswer[] = [];
   const audit: AuditRecordInput[] = [];
   const services: SentinelServices = {
     ...defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }),
     skill_network_record_answer: input => {
+      if (options.refuseAnswers === true) {
+        // The server's recorder refused the answer because the skill's code version could
+        // not be read; core only ever sees the error's name and its plain-words message.
+        const refusal = new Error(
+          "Aman could not read this skill's code version. Check the skill's address and try again.",
+        );
+        refusal.name = 'SkillCodePinRefusedError';
+        return Promise.reject(refusal);
+      }
       answers.push({ skill_network: input.skill_network, answer: input.answer });
       return Promise.resolve();
     },
@@ -98,7 +107,9 @@ async function setup() {
     result: { content: [{ type: 'text', text: REFUSAL_TEXT }], isError: true },
     wasInitialized: undefined,
     verificationReceiptCandidate: undefined,
-    skillNetworkCards: [{ skill_name: 'ten-x', hosts: ['uploads.example.com'], reason: 'undeclared_host' }],
+    skillNetworkCards: [
+      { skill_name: 'ten-x', hosts: ['uploads.example.com'], reason: 'undeclared_host', code_pin: null },
+    ],
   };
   const callTool = jest.fn(() =>
     Promise.resolve<CallToolResolvedResponse>({
@@ -297,5 +308,37 @@ describe('a scheduled run that hits an undeclared site', () => {
       },
     ]);
     expect(callTool).toHaveBeenCalledTimes(2);
+  });
+
+  it('shows the refusal sentence and keeps the card undecided when recording the answer is refused', async () => {
+    const { session, run, callTool, answers } = await setup({ refuseAnswers: true });
+    const night = await run([{ type: EventType.USER_MESSAGE, content: 'Nightly check' }], { unattended: true });
+    expect((await session.getTurn(night.turn.id))?.state).toMatchObject({ status: 'done', required_actions: [] });
+    const ref = networkCardRef(night.events);
+
+    // The owner answers in the morning, but the answer cannot be recorded: the send itself
+    // is refused with the recorder's sentence, so the person sees it, no command re-runs,
+    // and nothing is recorded or persisted.
+    const answer = () =>
+      run([
+        {
+          type: EventType.USER_TOOL_APPROVAL,
+          thread_id: 'main',
+          tool_call_id: ref.id,
+          approval: { status: 'allow' },
+        },
+      ]);
+    await expect(answer()).rejects.toThrow(
+      "Aman could not read this skill's code version. Check the skill's address and try again.",
+    );
+    expect(answers).toEqual([]);
+    expect(callTool).toHaveBeenCalledTimes(1);
+
+    // The card was not consumed by the refused answer: answering it again reaches the
+    // recorder again (and is refused the same way while the code still cannot be read).
+    await expect(answer()).rejects.toThrow(
+      "Aman could not read this skill's code version. Check the skill's address and try again.",
+    );
+    expect(callTool).toHaveBeenCalledTimes(1);
   });
 });

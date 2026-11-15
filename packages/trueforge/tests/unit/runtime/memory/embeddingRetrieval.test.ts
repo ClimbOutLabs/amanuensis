@@ -34,6 +34,8 @@ class FakeEmbeddingModel extends EmbeddingModel {
   blockEnsureReady = false;
   embedGate: (() => Promise<void>) | undefined;
   queryVector: number[] = oneHot(0);
+  /** A query vector for particular texts; any other text gets `queryVector`. */
+  queryVectorFor: (text: string) => number[] | undefined = () => undefined;
   vectorForText: (text: string) => number[] = () => oneHot(1);
   embeddedPassageTexts: string[][] = [];
 
@@ -57,7 +59,7 @@ class FakeEmbeddingModel extends EmbeddingModel {
   }
 
   override async embedQueries(texts: string[]): Promise<number[][]> {
-    return texts.map(() => [...this.queryVector]);
+    return texts.map(text => [...(this.queryVectorFor(text) ?? this.queryVector)]);
   }
 
   override async embedPassages(texts: string[]): Promise<number[][]> {
@@ -94,6 +96,7 @@ async function retainTexts(fixture: Fixture, texts: string[], day = '2026-09-19'
       content,
       timestamp: `${day}T10:0${String(i)}:00.000Z`,
       document_id: `doc-${String(i)}`,
+      metadata: { origin: 'user_stated' },
     })),
     operationId: `op-${day}-${String(texts.length)}`,
     timeoutMs: 5000,
@@ -315,6 +318,32 @@ describe('getSharedEmbeddingModel', () => {
 });
 
 describe('EmbeddingSubsystem', () => {
+  it('embeds a memory without the line that says where it came from, and does not embed it again', async () => {
+    const fixture = await makeFixture();
+    try {
+      await retainTexts(fixture, ['Maya lives in Lisbon.']);
+      fixture.subsystem.ensureWarmed();
+      await waitForState(fixture.subsystem, 'ready');
+      expect(fixture.model.embeddedPassageTexts.flat()).toEqual([
+        '## 2026-09-19T10:00:00.000Z\n\nMaya lives in Lisbon.',
+      ]);
+
+      // A second index over the same folder finds the memory unchanged.
+      const again = new EmbeddingSubsystem({
+        baseDir: fixture.baseDir,
+        namespace: fixture.namespace,
+        modelDir: fixture.modelDir,
+        batchSize: 2,
+        model: fixture.model,
+      });
+      again.ensureWarmed();
+      await waitForState(again, 'ready');
+      expect(fixture.model.embeddedPassageTexts.flat()).toHaveLength(1);
+    } finally {
+      await cleanup(fixture);
+    }
+  });
+
   it('reports unavailable when the model cannot load', async () => {
     const fixture = await makeFixture();
     try {
@@ -374,7 +403,7 @@ describe('EmbeddingSubsystem', () => {
   it('backfills every entry, persists, and reports ready', async () => {
     const fixture = await makeFixture();
     try {
-      await retainTexts(fixture, ['Alex booked SFO→ORD→MAD for Sep 22', 'Lexie is a Bernese Mountain Dog']);
+      await retainTexts(fixture, ['Alex booked SFO→ORD→MAD for Sep 22', 'Pippa is a Bernese Mountain Dog']);
       fixture.subsystem.ensureWarmed();
       await waitForState(fixture.subsystem, 'ready');
       const status = fixture.subsystem.getStatus();
@@ -577,7 +606,14 @@ describe('EmbeddingSubsystem', () => {
         embeddings: () => fixture.subsystem,
       });
       await client.retain({
-        items: [{ content: 'gamma entry', timestamp: '2026-09-19T12:00:00.000Z', document_id: 'doc-g' }],
+        items: [
+          {
+            metadata: { origin: 'user_stated' },
+            content: 'gamma entry',
+            timestamp: '2026-09-19T12:00:00.000Z',
+            document_id: 'doc-g',
+          },
+        ],
         operationId: 'op-gamma',
         timeoutMs: 5000,
       });
@@ -752,19 +788,19 @@ describe('EmbeddingSubsystem', () => {
             content: 'Turn summary: hotel in Madrid is Petit Palace',
             timestamp: '2026-09-19T10:00:00.000Z',
             document_id: 'd1',
-            metadata: { session_id: 'chat-other' },
+            metadata: { origin: 'user_stated', session_id: 'chat-other' },
           },
           {
             content: 'Turn summary: hotel plan is still undecided',
             timestamp: '2026-09-19T10:01:00.000Z',
             document_id: 'd2',
-            metadata: { session_id: 'chat-now' },
+            metadata: { origin: 'user_stated', session_id: 'chat-now' },
           },
           {
-            content: 'Turn summary: Lexie is a Bernese Mountain Dog',
+            content: 'Turn summary: Pippa is a Bernese Mountain Dog',
             timestamp: '2026-09-19T10:02:00.000Z',
             document_id: 'd3',
-            metadata: { session_id: 'chat-other' },
+            metadata: { origin: 'user_stated', session_id: 'chat-other' },
           },
         ],
         operationId: 'op-scope',
@@ -783,8 +819,6 @@ describe('EmbeddingSubsystem', () => {
       const outcome = await client.recall({
         query: 'accommodation in Spain',
         maxTokens: 4000,
-        queryTimestamp: '2026-09-20T10:00:00.000Z',
-        entityTokens: 0,
         timeoutMs: 5000,
         currentSessionId: 'chat-now',
       });
@@ -799,10 +833,43 @@ describe('EmbeddingSubsystem', () => {
     }
   });
 
+  it('finds a memory by meaning however many days of notes came after it', async () => {
+    const fixture = await makeFixture();
+    try {
+      await retainTexts(fixture, ['Alex hotel in Madrid is Petit Palace'], '2026-01-05');
+      for (let day = 1; day <= 20; day += 1) {
+        await retainTexts(fixture, ['Pippa went to the park'], `2026-09-${String(day).padStart(2, '0')}`);
+      }
+      fixture.model.vectorForText = text => (text.includes('hotel') ? oneHot(0) : oneHot(1));
+      // With 21 notes the log is judged by meaning: ordinary messages must sit away from the note.
+      fixture.model.queryVector = oneHot(2);
+      fixture.model.queryVectorFor = text => (text === 'accommodation in Spain' ? oneHot(0) : undefined);
+      fixture.subsystem.ensureWarmed();
+      await waitForState(fixture.subsystem, 'ready');
+
+      const client = new MarkdownMemoryClient({
+        baseDir: fixture.baseDir,
+        namespace: fixture.namespace,
+        embeddings: () => fixture.subsystem,
+      });
+      const outcome = await client.recall({
+        query: 'accommodation in Spain',
+        maxTokens: 4000,
+        timeoutMs: 5000,
+      });
+      expect(outcome.ok).toBe(true);
+      if (outcome.ok) {
+        expect(outcome.results[0]?.text).toBe('Alex hotel in Madrid is Petit Palace');
+      }
+    } finally {
+      await cleanup(fixture);
+    }
+  });
+
   it('finds a memory by meaning when keywords do not match', async () => {
     const fixture = await makeFixture();
     try {
-      await retainTexts(fixture, ['Alex hotel in Madrid is Petit Palace', 'Lexie is a Bernese Mountain Dog']);
+      await retainTexts(fixture, ['Alex hotel in Madrid is Petit Palace', 'Pippa is a Bernese Mountain Dog']);
       fixture.model.vectorForText = text => (text.includes('hotel') ? oneHot(0) : oneHot(1));
       fixture.model.queryVector = oneHot(0);
       fixture.subsystem.ensureWarmed();
@@ -816,8 +883,6 @@ describe('EmbeddingSubsystem', () => {
       const outcome = await client.recall({
         query: 'accommodation in Spain',
         maxTokens: 4000,
-        queryTimestamp: '2026-09-20T10:00:00.000Z',
-        entityTokens: 0,
         timeoutMs: 5000,
       });
       expect(outcome.ok).toBe(true);
@@ -845,7 +910,14 @@ describe('EmbeddingSubsystem', () => {
         embeddings: () => fixture.subsystem,
       });
       await client.retain({
-        items: [{ content: 'second memory', timestamp: '2026-09-19T12:00:00.000Z', document_id: 'doc-9' }],
+        items: [
+          {
+            metadata: { origin: 'user_stated' },
+            content: 'second memory',
+            timestamp: '2026-09-19T12:00:00.000Z',
+            document_id: 'doc-9',
+          },
+        ],
         operationId: 'op-second',
         timeoutMs: 5000,
       });

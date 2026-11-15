@@ -14,6 +14,7 @@ import type { TurnToolResult } from '../../../../src/runtime/memory/memoryNotesS
 import { MEMORY_ORIGIN_METADATA_KEY } from '../../../../src/runtime/memory/memoryOrigin';
 import { submitRetain } from '../../../../src/runtime/memory/memoryRetain';
 import { discardedModelUsage } from '../../../fixtures/discardedModelUsage';
+import { inMemoryGlobalSettingsStore } from '../../../fixtures/inMemoryGlobalSettingsStore';
 import { uncappedTokenFactoryBudget } from '../../../fixtures/uncappedTokenFactoryBudget';
 
 /** The next scripted answer for each of the two model calls a turn can make. */
@@ -105,6 +106,7 @@ describe('a turn that only read an email', () => {
       summarize: {
         tenantId: 't1',
         modelProviderStore: unusedStore,
+        globalSettingsStore: inMemoryGlobalSettingsStore(),
         summarizationModelFqn: 'provider/model',
         tokenFactoryBudget: uncappedTokenFactoryBudget,
         modelUsage: discardedModelUsage,
@@ -167,6 +169,7 @@ describe('a turn that only read an email', () => {
       summarize: {
         tenantId: 't1',
         modelProviderStore: unusedStore,
+        globalSettingsStore: inMemoryGlobalSettingsStore(),
         summarizationModelFqn: 'provider/model',
         tokenFactoryBudget: uncappedTokenFactoryBudget,
         modelUsage: discardedModelUsage,

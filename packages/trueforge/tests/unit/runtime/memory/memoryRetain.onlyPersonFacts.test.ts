@@ -10,6 +10,7 @@ import type { IModelProviderStore } from '../../../../src/db/modelProviderStore'
 import { MarkdownMemoryClient } from '../../../../src/runtime/memory/markdownMemoryClient';
 import { submitRetain } from '../../../../src/runtime/memory/memoryRetain';
 import { discardedModelUsage } from '../../../fixtures/discardedModelUsage';
+import { inMemoryGlobalSettingsStore } from '../../../fixtures/inMemoryGlobalSettingsStore';
 import { uncappedTokenFactoryBudget } from '../../../fixtures/uncappedTokenFactoryBudget';
 
 jest.mock('../../../../src/runtime/memory/memorySummarize', () => {
@@ -65,6 +66,7 @@ describe('memory across chats', () => {
       const client = new MarkdownMemoryClient({ baseDir: dir, namespace: 'tenant-1' });
 
       await submitRetain({
+        origin: 'user_stated',
         session: { is_incognito: false },
         client,
         sessionId: 'chat-1',
@@ -79,6 +81,7 @@ describe('memory across chats', () => {
           modelProviderStore: unusedStore,
           summarizationModelFqn: 'openai/gpt-4o',
           tokenFactoryBudget: uncappedTokenFactoryBudget,
+          globalSettingsStore: inMemoryGlobalSettingsStore(),
           modelUsage: discardedModelUsage,
           personName: 'Maya',
         },
@@ -87,8 +90,6 @@ describe('memory across chats', () => {
       const recall = await client.recall({
         query: 'ranks insert chunks table mechanic bill',
         maxTokens: 4000,
-        queryTimestamp: '2026-10-29T09:00:00.000Z',
-        entityTokens: 0,
         timeoutMs: 1000,
         currentSessionId: 'chat-2',
       });

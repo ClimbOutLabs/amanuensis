@@ -119,7 +119,7 @@ aman_copy() {
     -e STANDALONE=false -e NODE_ENV=production -e TRUEFORGE_API_KEY=unused-export-only \
     -e POSTGRES_HOST="mig-$PERSON-pg" -e POSTGRES_PORT=5432 \
     -e POSTGRES_USER="$PGUSER" -e POSTGRES_PASSWORD="$PGPASS" -e POSTGRES_DB="$PGDB" \
-    -e MEMORY_BACKEND=markdown -e MEMORY_MARKDOWN_DIR=/data/memory -e PERSONA_KNOWLEDGE_DIR=/data/persona-knowledge \
+    -e MEMORY_MARKDOWN_DIR=/data/memory -e PERSONA_KNOWLEDGE_DIR=/data/persona-knowledge \
     -v "mig-$PERSON-memory":/data/memory -v "mig-$PERSON-knowledge":/data/persona-knowledge \
     -v "$WORK/old.env":/migrate/old.env:ro -v "mig-$PERSON-out":/out aman-migrate:new aman "$@"
 }

@@ -52,6 +52,7 @@ import {
   type ThinkingBlock,
 } from './LLMTypes';
 import { resolveMaxOutputTokens } from './maxOutputTokens';
+import { modelUnreachableErrorOf, type PlaceOfModelHost } from './modelUnreachable';
 import { reasoningTagMiddleware } from './reasoningTags';
 import { RepeatedUnitGuard } from './repeatedUnitGuard';
 import { noticeAfter, REPEAT_STOP_NOTE } from './replyNotices';
@@ -147,6 +148,11 @@ export interface VercelAILLMConfig {
   fallbackProviderConfig?: VercelAIProviderConfig | undefined;
   /** Called, before any output, each time a request actually fell over to the fallback provider. */
   onFallback?: (() => void) | undefined;
+  /**
+   * Host-owned: where a model address points (Aman's local link or elsewhere), so a connection that never started
+   * is described in words that fit. Undefined means elsewhere.
+   */
+  placeOfModelHost?: PlaceOfModelHost | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -1903,11 +1909,14 @@ export async function* mapStreamToChunks({
   stream,
   chunkMeta,
   toolArgumentLimits,
+  placeOfModelHost,
 }: {
   stream: AsyncIterable<TextStreamPart<ToolSet>>;
   chunkMeta: ChunkMeta;
   /** Host-owned per-tool limits on streamed argument characters; absent means no tool has one. */
   toolArgumentLimits?: ReadonlyMap<string, number> | undefined;
+  /** Host-owned place of a model address, for the words of a connection that never started. */
+  placeOfModelHost?: PlaceOfModelHost | undefined;
 }): AsyncGenerator<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage, unknown> {
   const makeBase = (): Omit<ExtendedChatCompletionChunk, 'choices' | 'usage'> => ({
     id: chunkMeta.id,
@@ -2154,6 +2163,12 @@ export async function* mapStreamToChunks({
       case 'error': {
         const raw = part.error;
         const message = describeStreamError(raw);
+        // A connection that never started is not a stream that broke: no reply began, so it is never a
+        // ModelStreamFault, and its message says the model could not be reached.
+        const unreachable = modelUnreachableErrorOf({ raw, placeOfModelHost });
+        if (unreachable !== undefined) {
+          throw unreachable;
+        }
         // Preserve the original stream error as cause; toast/turn use .message only.
         const cause = raw instanceof Error ? raw : new Error(message);
         // A definite provider response (a status code on the error: auth, rate limit, bad
@@ -2504,6 +2519,7 @@ export class VercelAILLM implements ILLM {
         stream: deadlineGuardedStream,
         chunkMeta,
         toolArgumentLimits: this.config.toolArgumentLimits,
+        placeOfModelHost: this.config.placeOfModelHost,
       });
       result.output.source = `${provider.type}/${provider.name}/${model.name}`;
       return result;

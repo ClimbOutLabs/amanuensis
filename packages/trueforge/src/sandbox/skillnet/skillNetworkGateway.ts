@@ -1,4 +1,5 @@
 import type { AuditLogWriter } from '@truefoundry/trueforge-core/core';
+import { isSkillBlockedHost } from '@truefoundry/trueforge-core/core/connectors/apiServices';
 import { chmod, mkdir, unlink } from 'node:fs/promises';
 import { createServer, type Server } from 'node:http';
 import { isIP, connect as netConnect, type Socket } from 'node:net';
@@ -131,6 +132,18 @@ export class SkillNetworkGateway {
         host: target.host,
         grant,
         auditDescription: `A connection to ${target.host} was refused because it is not a named site.`,
+      });
+      return;
+    }
+    // Checked before the grant, so no approval of any kind can open it and no card asks about it.
+    if (isSkillBlockedHost(target.host)) {
+      this.#refuse({
+        socket,
+        status: 403,
+        message: `${target.host} can send email, and a skill is never allowed to send email. Email only goes out through Aman, which asks the person about each one.`,
+        host: target.host,
+        grant,
+        auditDescription: `A connection to ${target.host} was refused because a skill is never allowed to reach a site that can send email.`,
       });
       return;
     }

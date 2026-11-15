@@ -16,6 +16,7 @@ import {
   type PersonalizationApi,
 } from './PersonalizationContext.js';
 import { RailChatDesk, RailHomeDesk, useRailToday, type RailDeskApi } from './RailDesk.js';
+import { RailFoldedRow } from './RailFoldedRow.js';
 
 export type AmanRuntimeRailStatus = 'ready' | 'connecting' | 'offline' | 'degraded';
 
@@ -88,8 +89,8 @@ export type AmanRuntimeRailProps = {
    */
   onOpenChat?: (sessionId: string) => void;
   /**
-   * The host's way to open the memory editing path, for a fact's "Forget everywhere". The rail
-   * itself never edits memory, so the control shows only when the host hands this over.
+   * The host's way to open the memory settings, for "Manage memory" under the recalled memories.
+   * The control shows only when the host hands this over.
    */
   onOpenMemorySettings?: () => void;
 };
@@ -165,17 +166,6 @@ function statusToneOf({
 }
 
 type RuntimeRailContentProps = Omit<AmanRuntimeRailProps, 'personalizationApi'>;
-
-/** One folded row of the panel: a label with its chevron on the left, closed by default. */
-const FoldedRow: FC<{ section: string; title: string; children: ReactNode }> = ({ section, title, children }) => (
-  <details className="aman-runtime-rail__details" data-section={section}>
-    <summary className="aman-runtime-rail__details-summary">
-      <Icon name="chevron-right" size={12} className="aman-runtime-rail__fold-chevron" aria-hidden="true" />
-      <span>{title}</span>
-    </summary>
-    <div className="aman-runtime-rail__details-body">{children}</div>
-  </details>
-);
 
 /** The Rules fold's sentences, one per rule; none until the settings have loaded. */
 function ruleSentences({
@@ -380,10 +370,15 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
           {/* A private chat's desk stays shut: what the assistant is using in it is exactly
               what the rail must not describe for a chat that keeps nothing. */}
           {sessionId !== undefined && deskApi !== undefined && !privateChat ? (
-            <RailChatDesk sessionId={sessionId} deskApi={deskApi} onOpenMemorySettings={onOpenMemorySettings} />
+            <RailChatDesk
+              sessionId={sessionId}
+              deskApi={deskApi}
+              refreshSignal={avatarActivity}
+              onOpenMemorySettings={onOpenMemorySettings}
+            />
           ) : null}
 
-          <FoldedRow section="activity" title="Activity">
+          <RailFoldedRow section="activity" title="Activity">
             {/* The wait line comes straight from the chat, not the receipt: a carded action is
             written to the history only after it is answered, so while it waits the history
             holds nothing about it, and this line is the sign of it here. */}
@@ -406,9 +401,9 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
                 Audits
               </button>
             )}
-          </FoldedRow>
+          </RailFoldedRow>
 
-          <FoldedRow section="rules" title="Rules">
+          <RailFoldedRow section="rules" title="Rules">
             {rules.length === 0 ? (
               <p className="aman-runtime-rail__row-text">No rules to show yet.</p>
             ) : (
@@ -418,7 +413,7 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
                 ))}
               </ul>
             )}
-          </FoldedRow>
+          </RailFoldedRow>
         </>
       )}
     </aside>

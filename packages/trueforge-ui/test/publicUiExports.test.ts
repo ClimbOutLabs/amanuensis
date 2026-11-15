@@ -50,6 +50,7 @@ const expectedRuntimeExports: Array<keyof typeof sdk> = [
   'HelpStuckButton',
   'HELP_BUTTON_LABEL',
   'IRIS_HELP_CHOICES',
+  'PersonalizationConflictError',
   'PersonalizationProvider',
   'PersonalizationPanel',
   'ApprovalNavBanner',

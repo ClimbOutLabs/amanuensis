@@ -66,11 +66,14 @@ export function selectChatDraftSpecPreferences(spec: AgentSpec): AgentSpec {
   };
 }
 
-/** New Agent: full composer seed including runtime config (sandbox, ask-user, …). */
+/**
+ * New Agent: full composer seed including runtime config (sandbox, …). Asking the user questions
+ * starts off for every new agent, whatever the last draft chose; the builder can turn it on.
+ */
 export function selectAgentDraftSpecPreferences(spec: AgentSpec): AgentSpec {
   return {
     ...selectChatDraftSpecPreferences(spec),
-    ...(spec.config !== undefined ? { config: spec.config } : {}),
+    config: { ...spec.config, askUserQuestions: { enabled: false } },
   };
 }
 

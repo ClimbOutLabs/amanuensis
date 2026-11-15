@@ -9,8 +9,8 @@ With `NEBIUS_API_KEY` set, the server connects a read-only `tokenfactory` provid
 | Main chat           | Answers you, including requests for a briefing                                                 | Main chat model                                             |
 | Coding / sub-agent  | Work the assistant hands to sub-agents                                                         | Coding / subagent model, else the main chat model           |
 | Compaction          | Summarizes old context in long conversations                                                   | Compaction model, else the main chat model                  |
-| Summarization       | Condenses each turn before it is written to memory, and names a new chat after its first reply | Summarization model, else the main chat model               |
-| Profile learning    | Rewrites the learned profile after a turn, when enabled                                        | `PROFILE_LEARNING_MODEL`, else the main chat model          |
+| Summarization       | Condenses each turn before it is written to memory, and names a new chat after its first reply | Background model, else the main chat model                  |
+| Profile learning    | Shares the Summarization call; no call of its own                                              | Background model, else the main chat model                  |
 | Knowledge relevance | Checks which library passages help answer a question                                           | The persona's model                                         |
 | Persona             | Answers as that persona                                                                        | The model bound to the persona under **Roles and Personas** |
 

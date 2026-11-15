@@ -2,10 +2,7 @@ import { z } from '@hono/zod-openapi';
 
 /**
  * The turn-summarization setting: the stored value (`enabled`: persisted override when
- * set, else the `MEMORY_SUMMARIZE` env default) plus `effective_enabled`, what the
- * server will actually do for the next turn — the stored value with the markdown-only
- * gate applied. On any other backend turns are retained verbatim even when `enabled`
- * is true, so the Settings toggle shows `effective_enabled`: what you see is the truth.
+ * set, else the `MEMORY_SUMMARIZE` env default).
  */
 export const MemorySummarizeSchema = z
   .object({
@@ -14,11 +11,6 @@ export const MemorySummarizeSchema = z
       .describe('The stored setting: the persisted override when set, else the `MEMORY_SUMMARIZE` env default.'),
     overridden: z.boolean().describe('Whether a persisted override is currently stored.'),
     default_enabled: z.boolean().describe('The `MEMORY_SUMMARIZE` env default used when no override is stored.'),
-    effective_enabled: z
-      .boolean()
-      .describe(
-        'What the server will actually do: the stored setting with the markdown-only gate applied. The Settings toggle shows this value.',
-      ),
   })
   .openapi('MemorySummarize');
 

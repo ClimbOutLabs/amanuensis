@@ -31,7 +31,7 @@ A call lasts at most 10 minutes. What was said is written in a chat called "Phon
 
 ## If you miss the call
 
-If a voicemail picks up, Aman leaves one short message that says only that something needs you. If no one answers, it leaves no message. Either way it then sends one text and one notice to your devices. It never calls again about the same thing.
+If a voicemail picks up, Aman leaves one short message that says only that something needs you. If no one answers, it leaves no message. Either way it then sends one text and one notice to your devices. If you connected a Telegram bot, it sends one Telegram message too. It never calls again about the same thing.
 
 If Aman's voice cannot speak on the call, it hangs up and sends the text and the notice instead.
 

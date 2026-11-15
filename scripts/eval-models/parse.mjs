@@ -6,7 +6,7 @@ import { SHARED_VAULT } from './personas.mjs';
 
 /** Must match the `group` values in packages/trueforge/evals/model-set.json. */
 export const MODEL_SET_GROUPS = Object.freeze(['memory', 'safety', 'brief', 'persona']);
-export const MODEL_SET_VERSION = 3;
+export const MODEL_SET_VERSION = 4;
 /** The Personalization page fields a set may fill in for the run. */
 const PROFILE_FIELDS = Object.freeze(['user_name', 'address_as']);
 export const CHECK_TYPES = Object.freeze([
@@ -28,7 +28,7 @@ export const CHECK_TYPES = Object.freeze([
  * @typedef {{ id: string, group: string, prompt: string, approval_policy: 'approve' | 'decline', checks: Check[], checklist: string[], client_timezone?: string, journey?: Journey, persona?: string, incognito?: boolean }} ModelCase
  * @typedef {{ text: string, timestamp: string }} SeedMemory
  * @typedef {{ name: string, instructions: string, memories: SeedMemory[] }} SetPersona
- * @typedef {{ version: 3, memories: SeedMemory[], profile?: Record<string, string>, personas: SetPersona[], cases: ModelCase[] }} ModelSet
+ * @typedef {{ version: 4, memories: SeedMemory[], profile?: Record<string, string>, personas: SetPersona[], cases: ModelCase[] }} ModelSet
  */
 
 export class ModelSetError extends Error {

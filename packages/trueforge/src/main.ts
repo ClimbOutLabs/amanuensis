@@ -28,6 +28,7 @@ let getTrueForgeAuthMode: typeof import('./config').getTrueForgeAuthMode;
 let getConfiguredSecretValues: typeof import('./config').getConfiguredSecretValues;
 let assertNetworkAuthRequirement: typeof import('./config').assertNetworkAuthRequirement;
 let getPublicUiBasePath: typeof import('./config').getPublicUiBasePath;
+let getPublicBaseUrl: typeof import('./config').getPublicBaseUrl;
 let TrueForgeAuthMode: typeof import('./config').TrueForgeAuthMode;
 let isPlaceholderTrueForgeApiKey: typeof import('./config').isPlaceholderTrueForgeApiKey;
 
@@ -40,6 +41,7 @@ try {
     getConfiguredSecretValues,
     assertNetworkAuthRequirement,
     getPublicUiBasePath,
+    getPublicBaseUrl,
     TrueForgeAuthMode,
     isPlaceholderTrueForgeApiKey,
   } = await import('./config'));
@@ -87,6 +89,7 @@ import type { Kysely, Transaction } from 'kysely';
 import type { RedisClientType } from 'redis';
 import type { Logger } from 'winston';
 
+import { FALLBACK_TIMEZONE } from '@truefoundry/trueforge-core/core/util/clientTimezone';
 import { sweepExpiredPrivateChats } from './apis/privateChats';
 import { createServerApp } from './app';
 import { TrueForgeAuthorizer, type Authorizer } from './auth/authorizer';
@@ -121,6 +124,7 @@ import { NoticingStore, type INoticingStore } from './db/noticingStore';
 import type { IPersonalizationStore } from './db/personalizationStore';
 import type { IPersonaStore } from './db/personaStore';
 import type { PersonOwner } from './db/personOwner';
+import { PersonTimezoneStore, type IPersonTimezoneStore } from './db/personTimezoneStore';
 import { PhoneCallStore, type IPhoneCallStore } from './db/phoneCallStore';
 import type { PostgresAgentStore } from './db/postgres/agent-store/PostgresAgentStore';
 import type { Database as PostgresDatabase } from './db/postgres/types';
@@ -137,6 +141,7 @@ import type { ISessionMetricsStore } from './db/sessionMetricsStore';
 import type { ISkillStore } from './db/skillStore';
 import type { ISpaceStore } from './db/spaceStore';
 import type { Database as SqliteDatabase } from './db/sqlite/types';
+import { TelegramStore, type ITelegramStore } from './db/telegramStore';
 import { TextContactStore, type ITextContactStore } from './db/textContactStore';
 import type { ITokenFactoryUsageStore } from './db/tokenFactoryUsageStore';
 import type { WithTransaction } from './db/transaction';
@@ -163,18 +168,22 @@ import { ChatSearchIndexer } from './runtime/chatSearchIndexing';
 import { recoverAbandonedCommandExecutions } from './runtime/commandExecutionRecovery';
 import { designateTavilyAtBoot, seedDefaultSearchProviderAtBoot } from './runtime/defaultSearchProvider';
 import { createDeliveryService, type DeliveryService } from './runtime/delivery/deliveryService';
+import { createTelegramSender } from './runtime/delivery/telegramSender';
 import { createWebPushSender } from './runtime/delivery/webPushSender';
 import { EventSubscriptionRegistry } from './runtime/event-subscription';
 import { instanceOwnerSubjectId } from './runtime/instanceOwner';
-import { registerMailConnectorFromSavedAccountInBackground } from './runtime/mailAccount';
+import { getMailAccountState, registerMailConnectorFromSavedAccountInBackground } from './runtime/mailAccount';
 import { prepareMailPolicyAtBoot, registerMailConnectorAtBoot } from './runtime/mailConnector';
 import { warmEmbeddingsAtBoot } from './runtime/memory/embeddingRetrieval';
+import { memoryBackgroundWorkSettled } from './runtime/memory/memoryBackgroundWork';
+import { ensureMemorySourceLines } from './runtime/memory/memorySourceLines';
+import { startNightlyMemoryJob } from './runtime/memory/nightlyService';
 import { startNotesFolderIndexing } from './runtime/notesFolder/notesFolderRuntime';
 import { sessionApprovalSource } from './runtime/noticing/approvalSource';
 import { createGoogleNoticingSources, googleCalendarTimezoneFor } from './runtime/noticing/googleSources';
 import { createNoticingJudgeResolver } from './runtime/noticing/judgeFactory';
 import { createNoticingService } from './runtime/noticing/noticingService';
-import { personTimezoneFor } from './runtime/noticing/personTimezone';
+import { knownPersonTimezoneFor } from './runtime/noticing/personTimezone';
 import { reachChannelsFor, type ChannelViewer } from './runtime/noticing/reachChannels';
 import { createReminderReach } from './runtime/noticing/reminderReach';
 import { createSidecarNoticingSources } from './runtime/noticing/sidecarSources';
@@ -182,6 +191,8 @@ import { createOutboundSecretSource } from './runtime/outboundSecrets';
 import { seedOwnerNameAtBoot } from './runtime/ownerName';
 import { createSentinelServices } from './runtime/sentinelServices';
 import { getSharedRunCodeService } from './runtime/sessionResources';
+import { createTelegramSendQueue } from './runtime/telegram/telegramSendQueue';
+import { createTelegramService } from './runtime/telegram/telegramService';
 import {
   createTwilioSmsProvider,
   pointNumberWithRetry,
@@ -193,6 +204,7 @@ import { createTextNumberService } from './runtime/texts/textNumber';
 import { createTokenFactoryBudget } from './runtime/tokenFactoryBudget';
 import { ensureEnvManagedTokenFactoryProvider, seedEnvManagedDefaultChatModel } from './runtime/tokenFactoryProvider';
 import { TurnDrainRegistry } from './runtime/turnDrains';
+import { turnTimezoneFor } from './runtime/turnTimezone';
 import { createPackageMirrorAllowanceCheck } from './sandbox/mirrors/packageMirrorAllowance';
 import { slotsBackendEnabled, startPackageMirrorGateway, startSkillNetworkGateway } from './sandbox/slotBackend';
 import { printStandaloneStartupBanner } from './startupBanner';
@@ -267,10 +279,12 @@ interface ServerPersistence<TTransaction> {
   recallExclusionStore: IRecallExclusionStore;
   deliveryStore: IDeliveryStore;
   reachSettingsStore: IReachSettingsStore;
+  personTimezoneStore: IPersonTimezoneStore;
   textContactStore: ITextContactStore;
   phoneCallStore: IPhoneCallStore;
   noticingStore: INoticingStore;
   pushSubscriptionStore: IPushSubscriptionStore;
+  telegramStore: ITelegramStore;
   approvalTokenStore: ApprovalTokenStore;
   destroyDb: () => Promise<void>;
   redis: RedisClientType | undefined;
@@ -515,10 +529,12 @@ async function createStandalonePersistence(options: {
     recallExclusionStore: new RecallExclusionStore(db),
     deliveryStore: new DeliveryStore(db),
     reachSettingsStore: new ReachSettingsStore(db),
+    personTimezoneStore: new PersonTimezoneStore(db),
     textContactStore: new TextContactStore(db),
     phoneCallStore: new PhoneCallStore(db),
     noticingStore: new NoticingStore(db),
     pushSubscriptionStore: new PushSubscriptionStore(db),
+    telegramStore: new TelegramStore(db),
     approvalTokenStore: new SqliteApprovalTokenStore(db),
     modelProviderStore,
     resolveModelProviderStore: () => modelProviderStore,
@@ -707,10 +723,12 @@ async function createDistributedPersistence(options: {
     recallExclusionStore: new RecallExclusionStore(db),
     deliveryStore: new DeliveryStore(db),
     reachSettingsStore: new ReachSettingsStore(db),
+    personTimezoneStore: new PersonTimezoneStore(db),
     textContactStore: new TextContactStore(db),
     phoneCallStore: new PhoneCallStore(db),
     noticingStore: new NoticingStore(db),
     pushSubscriptionStore: new PushSubscriptionStore(db),
+    telegramStore: new TelegramStore(db),
     approvalTokenStore: new PostgresApprovalTokenStore(db),
     modelProviderStore,
     resolveModelProviderStore,
@@ -756,10 +774,12 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     briefItemStore,
     deliveryStore,
     reachSettingsStore,
+    personTimezoneStore,
     textContactStore,
     phoneCallStore,
     noticingStore,
     pushSubscriptionStore,
+    telegramStore,
     approvalTokenStore,
     destroyDb,
     redis,
@@ -885,7 +905,10 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     mcpServers: mcpOAuthStore,
     tokens: tokenStore,
     googleConnections: googleConnectionStore,
+    telegram: telegramStore,
   });
+  const telegramQueue = createTelegramSendQueue();
+  const telegramService = createTelegramService({ store: telegramStore, publicBaseUrl: getPublicBaseUrl(), logger });
   const smsProvider =
     configuration.TWILIO === undefined ? undefined : createTwilioSmsProvider({ settings: configuration.TWILIO });
   const textNumbers = createTextNumberService({
@@ -1009,6 +1032,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
         textNumbers,
       }),
       phoneCalls.sender,
+      createTelegramSender({ store: telegramStore, service: telegramService, queue: telegramQueue }),
     ],
     audit: sentinelAuditStore,
     logger,
@@ -1021,6 +1045,10 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
   });
   const noticingInstanceOwner =
     noticingOwnerId === undefined ? undefined : { tenant_id: TENANT_ID, created_by: noticingOwnerId };
+  const knownTimezone = knownPersonTimezoneFor({
+    scheduleStore,
+    calendarTimezone: googleCalendarTimezoneFor({ connections: googleConnectionStore, fetchImpl: undefined }),
+  });
   const noticingService = createNoticingService({
     sources: createSidecarNoticingSources({
       mailUrl: configuration.MAIL_SIDECAR_MCP_URL,
@@ -1050,10 +1078,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     channels: reachChannels,
     logger,
     assistantNameFor: async owner => await assistantNameFor({ personalizationStore, owner }),
-    timezoneFor: personTimezoneFor({
-      scheduleStore,
-      calendarTimezone: googleCalendarTimezoneFor({ connections: googleConnectionStore, fetchImpl: undefined }),
-    }),
+    timezoneFor: async owner => (await knownTimezone(owner)) ?? FALLBACK_TIMEZONE,
   });
   const sentinelServices = createSentinelServices({
     demoMode: configuration.DEMO_MODE,
@@ -1065,6 +1090,18 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     outboundSecrets,
     mailPolicyPath: configuration.MAIL_POLICY_FILE,
     mailPolicyStatusPath: configuration.MAIL_POLICY_STATUS_FILE,
+    mailAccounts: async () => {
+      const state = await getMailAccountState({
+        accountUrl: configuration.MAIL_EMAIL_ACCOUNT_URL,
+        secret: configuration.MAIL_EMAIL_ACCOUNT_SECRET,
+        fetchImpl: undefined,
+        logger,
+      });
+      return {
+        accounts: state.accounts.map(entry => entry.account.address),
+        default_account: state.default_key,
+      };
+    },
     skillStore,
   });
   const sessions = new Sessions({ sessionStore, sentinelServices });
@@ -1128,6 +1165,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
         scheduleStore,
         withTransaction,
         logger,
+        telegram: { store: telegramStore, sessionStore, service: telegramService },
       })
     : undefined;
 
@@ -1162,8 +1200,18 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     personaStore,
     logger,
   });
+  // Once a day per vault, from the hour the person chose: ended lines move to Earlier, missed notes are sorted,
+  // and lines that disagree are listed. Best effort: a failure is logged and never reaches a turn.
+  const nightlyMemoryJob = startNightlyMemoryJob({
+    personaStore,
+    modelProviderStore,
+    globalSettingsStore,
+    tokenFactoryBudget,
+    logger,
+  });
   const callRoutes = phoneCallRoutes({ calls: phoneCalls });
   const app = createServerApp({
+    memoryTidy: nightlyMemoryJob,
     chatSearchIndexer,
     modelCatalog,
     mcpCatalog,
@@ -1200,8 +1248,17 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     briefItemStore,
     deliveryStore,
     pushSubscriptionStore,
+    telegramStore,
+    telegramService,
+    telegramQueue,
     deliveryService: deliveries,
     reachSettingsStore,
+    turnTimezone: turnTimezoneFor({
+      reachSettings: reachSettingsStore,
+      browserZones: personTimezoneStore,
+      knownTimezone,
+      logger,
+    }),
     noticingStore,
     noticingService,
     reminderReach: createReminderReach({
@@ -1306,10 +1363,15 @@ try {
     dir: configuration.PERSONA_KNOWLEDGE_DIR,
     envVar: 'PERSONA_KNOWLEDGE_DIR',
   });
-  if (configuration.MEMORY_BACKEND === 'markdown') {
-    await ensureWritableDataDir({
-      dir: configuration.MEMORY_MARKDOWN_DIR,
-      envVar: 'MEMORY_MARKDOWN_DIR',
+  await ensureWritableDataDir({
+    dir: configuration.MEMORY_MARKDOWN_DIR,
+    envVar: 'MEMORY_MARKDOWN_DIR',
+  });
+  const marked = await ensureMemorySourceLines({ baseDir: configuration.MEMORY_MARKDOWN_DIR });
+  if (marked !== undefined && marked.notesMarked > 0) {
+    logger.info('Older memory notes were marked as having no record of where they came from', {
+      files_changed: marked.filesChanged,
+      notes_marked: marked.notesMarked,
     });
   }
 
@@ -1538,7 +1600,7 @@ try {
   // on its own before the first chat turn. Fire-and-forget: startup never waits, a
   // failure degrades to keyword search with the usual cooldown retry, and other
   // tenants warm on first use reusing the shared download.
-  if (configuration.MEMORY_EMBEDDINGS_ENABLED && configuration.MEMORY_BACKEND === 'markdown') {
+  if (configuration.MEMORY_EMBEDDINGS_ENABLED) {
     warmEmbeddingsAtBoot({
       baseDir: configuration.MEMORY_MARKDOWN_DIR,
       namespace: TENANT_ID,
@@ -1657,6 +1719,8 @@ try {
         logger.info(`Waiting for ${String(turnDrains.size)} in-flight turn drains before shutdown`);
       }
       await turnDrains.shutdownAndWait({ timeoutMs: configuration.TURN_DRAIN_SHUTDOWN_TIMEOUT_MS });
+      // A drain's save may have started sorting its notes onto pages or indexing them; both write to the memory folder.
+      await memoryBackgroundWorkSettled({ timeoutMs: configuration.TURN_DRAIN_SHUTDOWN_TIMEOUT_MS });
       // Finish the library document being indexed; queued ones resume on the next start.
       await closePersonaKnowledgeIndexers();
       clearInterval(commandExecutionRecoveryTimer);

@@ -7,17 +7,17 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import configuration from '../../../src/config';
-import { hindsightMemoryCapability } from '../../../src/runtime/memory/memoryCapability';
+import { memoryCapability } from '../../../src/runtime/memory/memoryCapability';
 import { MODEL_FQN, startApprovalTestServer, type ApprovalTestServer } from '../../fixtures/approvalTestServer';
 
 jest.mock('../../../src/runtime/memory/memoryCapability', () => {
   const actual = jest.requireActual<typeof import('../../../src/runtime/memory/memoryCapability')>(
     '../../../src/runtime/memory/memoryCapability',
   );
-  return { ...actual, hindsightMemoryCapability: jest.fn(actual.hindsightMemoryCapability) };
+  return { ...actual, memoryCapability: jest.fn(actual.memoryCapability) };
 });
 
-const mockCapability = jest.mocked(hindsightMemoryCapability);
+const mockCapability = jest.mocked(memoryCapability);
 
 const TURN_TIMEOUT_MS = 60_000;
 
@@ -50,7 +50,6 @@ async function runChatTurn(server: ApprovalTestServer): Promise<void> {
 
 describe('the chat route and turn summaries', () => {
   const original = {
-    backend: configuration.MEMORY_BACKEND,
     directory: configuration.MEMORY_MARKDOWN_DIR,
     embeddings: configuration.MEMORY_EMBEDDINGS_ENABLED,
     summarize: configuration.MEMORY_SUMMARIZE,
@@ -60,14 +59,12 @@ describe('the chat route and turn summaries', () => {
 
   beforeAll(async () => {
     memoryDir = await mkdtemp(path.join(tmpdir(), 'turn-summaries-wiring-'));
-    configuration.MEMORY_BACKEND = 'markdown';
     configuration.MEMORY_MARKDOWN_DIR = memoryDir;
     configuration.MEMORY_EMBEDDINGS_ENABLED = false;
     server = await startApprovalTestServer();
   }, TURN_TIMEOUT_MS);
 
   afterAll(async () => {
-    configuration.MEMORY_BACKEND = original.backend;
     configuration.MEMORY_MARKDOWN_DIR = original.directory;
     configuration.MEMORY_EMBEDDINGS_ENABLED = original.embeddings;
     configuration.MEMORY_SUMMARIZE = original.summarize;

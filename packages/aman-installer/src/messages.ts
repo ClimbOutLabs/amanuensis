@@ -921,7 +921,8 @@ export const INSTALL_CONTINUING_LINE = 'Continuing where it left off.';
 
 export const INSTALL_EMAIL_QUESTION = 'Your email, used to sign in:';
 
-export const INSTALL_PASSWORD_QUESTION = 'Choose a password (at least 8 characters, not shown):';
+export const INSTALL_PASSWORD_QUESTION =
+  'Choose a password with at least 8 characters, a number and a symbol, like @ # $ % (not shown):';
 
 export const INSTALL_PASSWORD_AGAIN_QUESTION = 'Type it again:';
 
@@ -963,12 +964,6 @@ export function installPasswordProblem(password: string): string | null {
   return `That password still needs ${missing[0] ?? ''}, ${missing[1] ?? ''} and ${missing[2] ?? ''}.`;
 }
 
-export const INSTALL_KEY_QUESTION = 'Paste your model key (not shown):';
-
-// Said when the key answer is empty, which is allowed: the install
-// goes ahead without a key, and Aman opens but cannot answer.
-export const INSTALL_KEY_EMPTY_LINE = 'Aman will open but cannot answer until you add a key in Settings, then Models.';
-
 export const INSTALL_PHONE_QUESTION =
   'Also use Aman from your phone and other devices on your home Wi-Fi? (yes or no):';
 
@@ -985,7 +980,7 @@ export const INSTALL_DONE_LINE = 'Aman is installed, and the getting started pag
 export const INSTALL_DRY_RUN_LINES: readonly string[] = [
   'This shows what aman install would do. Nothing is changed and nothing is asked.',
   'It checks that Docker Desktop is installed and running, and installs it first if it is missing.',
-  'It asks four questions: your email, a password, your model key, and whether to open Aman to your phone.',
+  'It asks three questions: your email, a password, and whether to open Aman to your phone.',
   'It downloads the newest Aman and sets it up with daily backups and an https address on this computer.',
   'It puts the aman command and the Start menu entries in place, and opens Aman in your browser.',
   'It opens a short getting started page in your browser at the end.',
@@ -1256,8 +1251,6 @@ export function allMessageLines(): string[] {
   lines.push(INSTALL_PASSWORD_TOO_LONG_LINE);
   lines.push(installPasswordProblem('short') ?? '');
   lines.push(installPasswordProblem('longenough') ?? '');
-  lines.push(INSTALL_KEY_QUESTION);
-  lines.push(INSTALL_KEY_EMPTY_LINE);
   lines.push(INSTALL_PHONE_QUESTION);
   lines.push(INSTALL_YES_OR_NO_LINE);
   lines.push(INSTALL_DONE_LINE);

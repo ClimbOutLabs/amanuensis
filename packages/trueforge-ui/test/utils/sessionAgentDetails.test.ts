@@ -81,6 +81,7 @@ describe('sessionDisplayFormat', () => {
     assert.equal(formatCostUsd(1.4872), '$1.4872');
     assert.equal(formatDurationMs(76_800), '1.28m');
     assert.equal(formatSessionListMetrics({ totalTurns: 5, totalDurationMs: 42_691 }), '5 turns | 43s');
+    assert.equal(formatSessionListMetrics({ totalTurns: 1, totalDurationMs: 42_691 }), '1 turn | 43s');
   });
 });
 

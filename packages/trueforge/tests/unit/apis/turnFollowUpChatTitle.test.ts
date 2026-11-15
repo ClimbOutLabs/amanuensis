@@ -188,7 +188,17 @@ async function createChat(options?: { incognito?: boolean }) {
   };
 
   /** Begins a turn with the server's own wiring; the model's reply is a finished turn. */
-  const beginTurn = async ({ turnId, text, sessionTitle }: { turnId: string; text: string; sessionTitle?: string }) => {
+  const beginTurn = async ({
+    turnId,
+    text,
+    sessionTitle,
+    titlePrefix,
+  }: {
+    turnId: string;
+    text: string;
+    sessionTitle?: string;
+    titlePrefix?: string;
+  }) => {
     const record = await sessionStore.getSession({ tenant_id: TENANT_ID, session_id: SESSION_ID });
     if (record === undefined) {
       throw new Error('test session was never created');
@@ -216,6 +226,7 @@ async function createChat(options?: { incognito?: boolean }) {
       previous_turn_id: record.last_turn_id ?? undefined,
       userRef: STANDALONE_REQUEST_CONTEXT.subject.id,
       session_title: sessionTitle,
+      session_title_prefix: titlePrefix,
       deps,
     });
   };
@@ -348,6 +359,27 @@ describe('a finished first turn gives the chat a subject title', () => {
     expect(mockHelperCall).toHaveBeenCalledTimes(1);
     expect(replaceSpy).not.toHaveBeenCalled();
     expect(await chat.readTitle()).toBe(firstMessage.slice(0, 50));
+  });
+});
+
+describe('a chat that started elsewhere says so in front of its title', () => {
+  it('keeps the prefix on the working title and on the subject title', async () => {
+    // The title call waits, so the working title can be read before it is swapped.
+    const { promise: titleAnswer, resolve: releaseTitle } = Promise.withResolvers<RawAssistantMessageWithUsage>();
+    mockHelperCall.mockReturnValue(titleAnswer);
+    chat = await createChat();
+
+    const { drainInput } = await chat.beginTurn({
+      turnId: 'turn-1',
+      text: 'Plan the dentist visit for next week',
+      titlePrefix: 'Telegram: ',
+    });
+    expect(await chat.readTitle()).toBe('Telegram: Plan the dentist visit for next week');
+    await withinBound(drainTurnEvents(drainInput), "the first turn's follow-up");
+    await chat.waitForHelperCalls(1);
+    releaseTitle(helperAnswer('Dentist visit'));
+
+    await chat.waitForTitle('Telegram: Dentist visit');
   });
 });
 

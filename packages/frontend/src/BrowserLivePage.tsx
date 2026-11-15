@@ -149,6 +149,9 @@ async function loadTabs(): Promise<LiveTab[] | 'off' | null> {
   }
 }
 
+/** How long the second press of End session is waited for before the button goes back to normal. */
+const END_CONFIRM_MS = 4000;
+
 /** How often a new frame is asked for while a tab is shown. */
 const FRAME_INTERVAL_MS = 500;
 
@@ -543,6 +546,47 @@ export function BrowserLivePage() {
       });
   };
 
+  // Ending closes Aman's page in that chat, so the first press only asks; the second, within a few seconds, ends it.
+  const [confirmEnd, setConfirmEnd] = useState(false);
+  useEffect(() => {
+    if (!confirmEnd) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setConfirmEnd(false);
+    }, END_CONFIRM_MS);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [confirmEnd]);
+
+  const onEndSession = () => {
+    if (selected === undefined) {
+      return;
+    }
+    if (!confirmEnd) {
+      setConfirmEnd(true);
+      return;
+    }
+    setConfirmEnd(false);
+    const ending = selected;
+    liveCall('/api/browser/live/close', { tab: ending })
+      .then(() => {
+        // The tab is gone, so there is no hand to give back.
+        takeoverRef.current = false;
+        setTakeover(false);
+        setFrame(undefined);
+        setSelected(current => (current === ending ? undefined : current));
+        void loadTabs().then(list => {
+          applyTabs(list);
+          setNote('Session ended. That page is closed, so Aman has to open it again to go on. Tell Aman in the chat.');
+        });
+      })
+      .catch((error: unknown) => {
+        setNote(error instanceof Error ? error.message : 'The session could not be ended. Try again in a moment.');
+      });
+  };
+
   /**
    * Hands the shown tab back to Aman when the person leaves it without pressing Hand back, so a
    * tab is never left in the person's hand after they have gone: Aman would refuse every step on
@@ -653,6 +697,16 @@ export function BrowserLivePage() {
               {takeover ? 'Hand back' : 'Take over'}
             </button>
           ) : null}
+          {selected !== undefined && !closed ? (
+            <button
+              type="button"
+              className="browser-live-button"
+              aria-describedby={confirmEnd ? 'browser-live-end-ask' : undefined}
+              onClick={onEndSession}
+            >
+              {confirmEnd ? 'Press again to end' : 'End session'}
+            </button>
+          ) : null}
           <button
             type="button"
             className="browser-live-button browser-live-button-primary"
@@ -667,6 +721,11 @@ export function BrowserLivePage() {
         </div>
       </header>
       <div className="browser-live-body">
+        {confirmEnd ? (
+          <p className="browser-live-note" id="browser-live-end-ask" role="status">
+            Ending the session closes this page in Aman&apos;s browser. Press End session again to end it.
+          </p>
+        ) : null}
         {closed ? (
           <p className="browser-live-note" role="status">
             That page is closed now. Pick another tab, or ask Aman to open the page again.
@@ -787,7 +846,7 @@ export function BrowserLivePage() {
               Click the site&apos;s name or password box in the picture, fill the matching box below from your password
               manager, then press its Put in page button. Nothing you put here is saved or shown to Aman.
             </p>
-            <div className="browser-live-type">
+            <div className="browser-live-sign-in-row">
               <input
                 className="browser-live-input"
                 aria-label="Name or email for the page"
@@ -809,7 +868,7 @@ export function BrowserLivePage() {
                 Put name in page
               </button>
             </div>
-            <div className="browser-live-type">
+            <div className="browser-live-sign-in-row">
               <input
                 className="browser-live-input"
                 aria-label="Password for the page"

@@ -69,6 +69,7 @@ import { SqliteSkillStore } from '../../src/db/sqlite/skill-store/SqliteSkillSto
 import { SqliteSpaceStore } from '../../src/db/sqlite/space-store/SqliteSpaceStore';
 import { SqliteOAuthTokenStore } from '../../src/db/sqlite/token-store/SqliteOAuthTokenStore';
 import { SqliteTurnArtifactStore } from '../../src/db/sqlite/turn-artifact-store/SqliteTurnArtifactStore';
+import { TelegramStore } from '../../src/db/telegramStore';
 import { ActiveTurnRegistry } from '../../src/runtime/activeTurns';
 import { createChatImageService } from '../../src/runtime/chatImages/chatImageService';
 import { createImageReencoder } from '../../src/runtime/chatImages/reencodeInSandbox';
@@ -139,6 +140,7 @@ type SharedDeps = Pick<
   | 'skillCatalog'
   | 'sandboxCatalog'
   | 'tokenFactoryBudget'
+  | 'memoryTidy'
   | 'activeTurns'
   | 'turnDrains'
   | 'requestReplyRouter'
@@ -157,6 +159,7 @@ function sharedDeps(): SharedDeps {
     skillCatalog: SkillCatalog.load(),
     sandboxCatalog: SandboxCatalog.load(),
     tokenFactoryBudget: uncappedTokenFactoryBudget,
+    memoryTidy: { tidyNow: () => undefined, tidyState: () => ({ status: 'idle' }) },
     activeTurns: new ActiveTurnRegistry(),
     turnDrains: new TurnDrainRegistry(),
     requestReplyRouter: new RequestReplyRouter(),
@@ -275,6 +278,7 @@ async function startSqlite(): Promise<OwnershipServer> {
     mcpServers: mcpServerStore,
     tokens: tokenStore,
     googleConnections: googleConnectionStore,
+    telegram: new TelegramStore(db),
   });
   const sentinelServices = createSentinelServices({
     demoMode: false,
@@ -382,6 +386,7 @@ async function startPostgres(): Promise<OwnershipServer | undefined> {
     mcpServers: mcpServerStore,
     tokens: tokenStore,
     googleConnections: googleConnectionStore,
+    telegram: new TelegramStore(db),
   });
   const sentinelServices = createSentinelServices({
     demoMode: false,

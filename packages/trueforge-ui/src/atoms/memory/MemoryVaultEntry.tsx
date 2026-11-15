@@ -10,14 +10,29 @@ import type { ExplorerMemory } from './memoryExplorer.js';
 
 const COPIED_NOTE_MS = 2000;
 
-function ownerLabel(memory: ExplorerMemory): string {
+/** Whose memory it is, said only when it is not the person's own: a persona's name or a shared topic. */
+function ownerLabel(memory: ExplorerMemory): string | null {
   if (memory.owner === 'persona') return memory.persona ?? 'Persona';
-  return memory.owner === 'you' ? 'You' : 'Shared topic';
+  return memory.owner === 'you' ? null : 'Shared topic';
 }
 
+/** The person's own words need no label; anything else says where it came from. */
+const OWN_SOURCE = 'From you';
+
+/** The time of day a memory was saved; its day is the heading it sits under. */
 function savedLabel(timestamp: string): string {
   const date = new Date(timestamp);
-  return Number.isNaN(date.getTime()) ? timestamp : date.toLocaleString();
+  return Number.isNaN(date.getTime())
+    ? timestamp
+    : date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+}
+
+const SOURCE_LINE_PATTERN = /\n+> (From you|External source: [^\n]+)\s*$/;
+
+/** A memory's text without its closing "where it came from" line, and that line's words when it has one. */
+export function splitSourceLine(text: string): { body: string; source: string | null } {
+  const match = SOURCE_LINE_PATTERN.exec(text);
+  return match === null ? { body: text, source: null } : { body: text.slice(0, match.index), source: match[1] ?? null };
 }
 
 /** One memory: formatted text, select, edit in place, copy, and forget. Forgetting is undone from the list. */
@@ -31,6 +46,7 @@ export function MemoryVaultEntryRow(props: {
   onForget: (id: string) => void;
 }) {
   const { entry } = props;
+  const shown = splitSourceLine(entry.text);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(entry.text);
   const [busy, setBusy] = useState(false);
@@ -75,7 +91,7 @@ export function MemoryVaultEntryRow(props: {
   }
 
   return (
-    <li className="flex gap-3 rounded-xl border border-border bg-card-bg p-4">
+    <li className="flex gap-3 p-3">
       <input
         type="checkbox"
         checked={props.selected}
@@ -125,10 +141,12 @@ export function MemoryVaultEntryRow(props: {
           </div>
         ) : (
           <>
-            <Markdown content={entry.text} highlight={props.highlight} readOnly />
+            <Markdown content={shown.body} highlight={props.highlight} readOnly className="text-sm!" />
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="text-xs text-text-secondary">
-                {ownerLabel(entry)} · {savedLabel(entry.timestamp)}
+                {[shown.source === OWN_SOURCE ? null : shown.source, ownerLabel(entry), savedLabel(entry.timestamp)]
+                  .filter(part => part !== null)
+                  .join(' · ')}
               </span>
               <div className="flex flex-wrap items-center gap-1">
                 {copied ? (

@@ -77,7 +77,7 @@ test('personalization API omits the learning switch from a save when the server 
 
   // Byte for byte what came back, so an older server sees no key it does not know and the save
   // succeeds instead of failing over a field the user never touched.
-  assert.deepEqual(savedProfiles, [{ profile: profileWithoutSwitch }]);
+  assert.deepEqual(savedProfiles, [{ profile: profileWithoutSwitch, expected_revision: null }]);
 });
 
 test('personalization API sends the learning switch back when the server sent one', async () => {
@@ -85,7 +85,7 @@ test('personalization API sends the learning switch back when the server sent on
 
   await api.updateProfile(await loadProfile(api));
 
-  assert.deepEqual(savedProfiles, [{ profile }]);
+  assert.deepEqual(savedProfiles, [{ profile, expected_revision: null }]);
 });
 
 test('personalization API sends a toggled switch even to a server that never sent one', async () => {
@@ -95,7 +95,9 @@ test('personalization API sends a toggled switch even to a server that never sen
   // The user has now expressed a choice, and there is no way to honour it without sending it.
   await api.updateProfile({ ...loaded, learning_enabled: true });
 
-  assert.deepEqual(savedProfiles, [{ profile: { ...profileWithoutSwitch, learning_enabled: true } }]);
+  assert.deepEqual(savedProfiles, [
+    { profile: { ...profileWithoutSwitch, learning_enabled: true }, expected_revision: null },
+  ]);
 });
 
 test('personalization API keeps the help areas in the order saved and rejects an unknown area', async () => {
@@ -187,5 +189,26 @@ test('personalization API uses the Phase 1 profile routes', async () => {
       ['DELETE', '/api/v1/personalization/profile'],
     ],
   );
-  assert.deepEqual(await requests[1]!.json(), { profile });
+  const saveRequest = requests[1];
+  assert.ok(saveRequest !== undefined);
+  assert.deepEqual(await saveRequest.json(), { profile, expected_revision: null });
+});
+
+test('personalization API sends the revision it read beside the profile, never inside it', async () => {
+  const { api, savedProfiles } = recordingApi({ ...profile, revision: 4 });
+
+  await api.updateProfile(await loadProfile(api));
+
+  assert.deepEqual(savedProfiles, [{ profile, expected_revision: 4 }]);
+});
+
+test('personalization API reports a save from an older copy as a conflict, with the server wording', async () => {
+  const api = createPersonalizationApi(async () =>
+    Response.json({ error: { message: 'Your profile changed while this page was open.' } }, { status: 409 }),
+  );
+
+  await assert.rejects(api.updateProfile({ ...profile, revision: 1 }), {
+    name: 'PersonalizationConflictError',
+    message: 'Your profile changed while this page was open.',
+  });
 });

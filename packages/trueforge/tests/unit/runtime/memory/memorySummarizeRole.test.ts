@@ -6,7 +6,10 @@
  * For stored agents, the agent record must be fetched exactly once (single DB read).
  */
 import { AgentSpecSchema, type SessionAgent, type SessionAgentInline } from '@truefoundry/trueforge-core/agent-session';
+import { createLogger } from 'winston';
+
 import { type AgentRecord, type IAgentStore } from '../../../../src/db/agentStore';
+import type { IGlobalSettingsStore } from '../../../../src/db/globalSettingsStore';
 import { resolveSummarizationModelFqn } from '../../../../src/runtime/memory/memorySummarize';
 
 function fakeAgentStore(): IAgentStore {
@@ -18,6 +21,31 @@ function fakeAgentStore(): IAgentStore {
     createAgent: jest.fn(),
     updateAgent: jest.fn(),
     deleteAgent: jest.fn(),
+  };
+}
+
+/** The Settings side of the lookup: the helper model stored there, and the models the catalog lists. */
+function helper({ chosen, listed = [] }: { chosen?: string; listed?: string[] } = {}) {
+  const globalSettingsStore: IGlobalSettingsStore = {
+    getSetting: jest.fn(() =>
+      Promise.resolve(
+        chosen === undefined
+          ? undefined
+          : { key: 'memory_helper_model', value: chosen, updated_at: '2026-11-13T00:00:00.000Z' },
+      ),
+    ),
+    setSetting: jest.fn(),
+    deleteSetting: jest.fn(),
+    compareAndSetSetting: jest.fn(),
+  };
+  const listModels = jest.fn(() =>
+    Promise.resolve(listed.map(name => ({ name, model_id: name, provider: { name: 'test' }, properties: {} }))),
+  );
+  return {
+    globalSettingsStore,
+    modelProviderStore: { listModels },
+    logger: createLogger({ silent: true }),
+    listModels,
   };
 }
 
@@ -67,6 +95,7 @@ describe('resolveSummarizationModelFqn', () => {
       personaModelName: undefined,
       sessionAgent: inlineAgent('anthropic/claude-3-5-sonnet'),
       agentStore: fakeAgentStore(),
+      ...helper(),
     });
 
     expect(result).toBe('anthropic/claude-3-5-sonnet');
@@ -79,6 +108,7 @@ describe('resolveSummarizationModelFqn', () => {
       personaModelName: undefined,
       sessionAgent: inlineAgent(),
       agentStore: store,
+      ...helper(),
     });
 
     expect(result).toBe('openai/gpt-4o');
@@ -96,6 +126,7 @@ describe('resolveSummarizationModelFqn', () => {
       personaModelName: undefined,
       sessionAgent: referenceAgent(),
       agentStore: store,
+      ...helper(),
     });
 
     expect(result).toBe('google/gemini-2.0-flash');
@@ -112,6 +143,7 @@ describe('resolveSummarizationModelFqn', () => {
       personaModelName: undefined,
       sessionAgent: referenceAgent(),
       agentStore: store,
+      ...helper(),
     });
 
     expect(result).toBe('openai/gpt-4o');
@@ -125,6 +157,7 @@ describe('resolveSummarizationModelFqn', () => {
       personaModelName: 'openai/gpt-4o-mini',
       sessionAgent: inlineAgent('anthropic/claude-3-5-sonnet'),
       agentStore: fakeAgentStore(),
+      ...helper(),
     });
 
     expect(result).toBe('anthropic/claude-3-5-sonnet');
@@ -137,6 +170,7 @@ describe('resolveSummarizationModelFqn', () => {
       personaModelName: 'openai/gpt-4o-mini',
       sessionAgent: inlineAgent(),
       agentStore: store,
+      ...helper(),
     });
 
     expect(result).toBe('openai/gpt-4o-mini');
@@ -150,6 +184,7 @@ describe('resolveSummarizationModelFqn', () => {
         personaModelName: 'tokenfactory/nemotron-3-super-120b-a12b',
         sessionAgent: inlineAgent(),
         agentStore: fakeAgentStore(),
+        ...helper(),
       });
 
       expect(result).toBe('tokenfactory/nemotron-3-super-120b-a12b');
@@ -161,9 +196,77 @@ describe('resolveSummarizationModelFqn', () => {
         personaModelName: 'tokenfactory/nemotron-3-super-120b-a12b',
         sessionAgent: inlineAgent('tokenfactory/gpt-oss-120b'),
         agentStore: fakeAgentStore(),
+        ...helper(),
       });
 
       expect(result).toBe('tokenfactory/gpt-oss-120b');
+    });
+  });
+
+  describe('the helper model chosen in Settings', () => {
+    it('is used ahead of the persona model and the main model', async () => {
+      const result = await resolveSummarizationModelFqn({
+        tenantId: 'tenant-1',
+        personaModelName: 'openai/gpt-4o-mini',
+        sessionAgent: inlineAgent(),
+        agentStore: fakeAgentStore(),
+        ...helper({ chosen: 'local/small', listed: ['local/small', 'openai/gpt-4o'] }),
+      });
+
+      expect(result).toBe('local/small');
+    });
+
+    it("gives way to an agent's own summarization model", async () => {
+      const settings = helper({ chosen: 'local/small', listed: ['local/small'] });
+      const result = await resolveSummarizationModelFqn({
+        tenantId: 'tenant-1',
+        personaModelName: undefined,
+        sessionAgent: inlineAgent('anthropic/claude-3-5-sonnet'),
+        agentStore: fakeAgentStore(),
+        ...settings,
+      });
+
+      expect(result).toBe('anthropic/claude-3-5-sonnet');
+      expect(settings.listModels).not.toHaveBeenCalled();
+    });
+
+    it('counts as unset when the model is no longer listed', async () => {
+      const result = await resolveSummarizationModelFqn({
+        tenantId: 'tenant-1',
+        personaModelName: undefined,
+        sessionAgent: inlineAgent(),
+        agentStore: fakeAgentStore(),
+        ...helper({ chosen: 'local/gone', listed: ['openai/gpt-4o'] }),
+      });
+
+      expect(result).toBe('openai/gpt-4o');
+    });
+
+    it('does not read the model list when nothing is chosen', async () => {
+      const settings = helper();
+      await resolveSummarizationModelFqn({
+        tenantId: 'tenant-1',
+        personaModelName: undefined,
+        sessionAgent: inlineAgent(),
+        agentStore: fakeAgentStore(),
+        ...settings,
+      });
+
+      expect(settings.listModels).not.toHaveBeenCalled();
+    });
+
+    it('counts as unset when the setting cannot be read', async () => {
+      const settings = helper();
+      settings.globalSettingsStore.getSetting = jest.fn(() => Promise.reject(new Error('store is down')));
+      const result = await resolveSummarizationModelFqn({
+        tenantId: 'tenant-1',
+        personaModelName: undefined,
+        sessionAgent: inlineAgent(),
+        agentStore: fakeAgentStore(),
+        ...settings,
+      });
+
+      expect(result).toBe('openai/gpt-4o');
     });
   });
 });

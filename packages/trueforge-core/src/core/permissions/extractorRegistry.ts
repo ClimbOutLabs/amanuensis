@@ -448,8 +448,8 @@ const EXTRACTOR_REGISTRY: ExtractorEntry[] = [
     delivers_message: false,
   },
   {
-    // Without this entry the word `email` in the name would make an archive an external send with no destination.
-    match: nameIncludes('archive_email'),
+    // Without this entry the word `email` in the name would make these mailbox changes an external send with no destination.
+    match: nameIncludes('archive_email', 'mark_emails_as_read'),
     extract: genericExtractor,
     external_service: false,
     delivers_message: false,
@@ -664,6 +664,11 @@ const CONNECTOR_FAMILIES: ConnectorFamily[] = [
     // Archiving only moves mail inside the mailbox, so it carries no recipient and is not an external send.
     match: words => hasPhrase(words, 'archive'),
     describe: ({ where }) => `Archive emails${where}?`,
+  },
+  {
+    // Like archiving, marking mail read changes only the mailbox, so it carries no recipient.
+    match: words => hasPhrase(words, 'mark_emails_as_read'),
+    describe: ({ where }) => `Mark emails as read${where}?`,
   },
   {
     match: words =>

@@ -17,7 +17,6 @@ import type { McpCatalog } from '../catalog/McpCatalog';
 import configuration from '../config';
 import { formatArchiveBytes } from '../dataExport/archiveLimits';
 import { DataImportError } from '../dataImport/importError';
-import type { MemoryImportTarget } from '../dataImport/importPreflight';
 import { runDataImport } from '../dataImport/importService';
 import type { AgentRecord, IAgentStore } from '../db/agentStore';
 import type { IDeliveryStore } from '../db/deliveryStore';
@@ -37,10 +36,7 @@ import type { ITurnArtifactStore } from '../db/turnArtifactStore';
 import type { IOAuthTokenStore } from '../mcp/auth/types';
 import { importDataRoute } from '../routes/dataImportRoutes';
 import type { ChatSearchIndexer } from '../runtime/chatSearchIndexing';
-import { createMemoryClient } from '../runtime/memory/createMemoryClient';
 import { getSharedEmbeddingModel } from '../runtime/memory/embeddingModel';
-import type { MemoryClient } from '../runtime/memory/memoryClient';
-import { resolveMemoryProvider } from '../runtime/memory/memoryProvider';
 import { resolveManagedAgentIds } from './agentAccess';
 
 export interface DataImportRouterDeps<TTransaction> {
@@ -97,38 +93,6 @@ async function readBodyWithCap(c: Context, maxBytes: number): Promise<Buffer> {
   return Buffer.concat(chunks, total);
 }
 
-/** The import target is the install's own default memory backend, whatever the export came from. */
-async function resolveMemoryTarget<TTransaction>(
-  deps: DataImportRouterDeps<TTransaction>,
-  c: Context,
-  input: { tenantId: string; subjectId: string },
-): Promise<MemoryImportTarget> {
-  if (configuration.MEMORY_BACKEND === 'markdown') {
-    return { kind: 'markdown', markdownDir: configuration.MEMORY_MARKDOWN_DIR };
-  }
-  const provider = await resolveMemoryProvider({
-    mcpServerStore: deps.resolveMcpServerStore(c),
-    tokenStore: deps.tokenStore,
-    tenantId: input.tenantId,
-    clientName: configuration.MCP_DCR_OAUTH_CLIENT_NAME,
-    userRef: input.subjectId,
-    logger: deps.logger,
-  });
-  const client: MemoryClient | undefined = createMemoryClient({
-    backend: configuration.MEMORY_BACKEND,
-    markdownDir: configuration.MEMORY_MARKDOWN_DIR,
-    namespace: input.tenantId,
-    hindsight:
-      provider === undefined
-        ? undefined
-        : { apiBase: provider.apiBase, bank: provider.bank, headers: provider.headers },
-  });
-  if (client === undefined) {
-    throw new HTTPException(500, { message: 'The memory backend is unavailable, so the import cannot run.' });
-  }
-  return { kind: 'client', client };
-}
-
 export function createDataImportRouter<TTransaction>(deps: DataImportRouterDeps<TTransaction>): OpenAPIHono {
   const app = new OpenAPIHono();
 
@@ -148,7 +112,6 @@ export function createDataImportRouter<TTransaction>(deps: DataImportRouterDeps<
       context: requestContext,
       authorizer: deps.authorizer,
     });
-    const memoryTarget = await resolveMemoryTarget(deps, c, { tenantId, subjectId });
 
     const knowledgeEmbedder = getSharedEmbeddingModel({
       modelDir: configuration.MEMORY_EMBEDDINGS_MODEL_DIR,
@@ -176,7 +139,7 @@ export function createDataImportRouter<TTransaction>(deps: DataImportRouterDeps<
           agentStore,
           mcpCatalog: deps.mcpCatalog,
           withTransaction: deps.withTransaction,
-          memoryTarget,
+          memoryMarkdownDir: configuration.MEMORY_MARKDOWN_DIR,
           ownerName: configuration.OWNER_NAME,
           personaKnowledgeDir: configuration.PERSONA_KNOWLEDGE_DIR,
           knowledgeEmbedder,

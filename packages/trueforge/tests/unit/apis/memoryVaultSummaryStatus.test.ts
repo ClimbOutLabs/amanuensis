@@ -5,7 +5,7 @@
  * failed summary never shows as another agent's.
  */
 import { OpenAPIHono } from '@hono/zod-openapi';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import winston from 'winston';
@@ -22,17 +22,22 @@ const ALICE: RequestContext = {
   user_credential: null,
 };
 
-const SummaryStatusResponseSchema = z.object({ data: z.object({ summary_pending: z.boolean() }) });
+const SummaryStatusResponseSchema = z.object({
+  data: z.object({
+    summary_pending: z.boolean(),
+    failed_at: z.string().nullable(),
+    cause: z.string().nullable(),
+    session_id: z.string().nullable(),
+  }),
+});
 
 describe('memory vault summary status', () => {
-  const originalBackend = configuration.MEMORY_BACKEND;
   const originalDir = configuration.MEMORY_MARKDOWN_DIR;
   let baseDir: string;
   let app: OpenAPIHono;
 
   beforeEach(async () => {
     baseDir = await mkdtemp(join(tmpdir(), 'vault-summary-status-'));
-    configuration.MEMORY_BACKEND = 'markdown';
     configuration.MEMORY_MARKDOWN_DIR = baseDir;
     app = new OpenAPIHono();
     app.route(
@@ -45,7 +50,6 @@ describe('memory vault summary status', () => {
   });
 
   afterEach(async () => {
-    configuration.MEMORY_BACKEND = originalBackend;
     configuration.MEMORY_MARKDOWN_DIR = originalDir;
     await rm(baseDir, { recursive: true, force: true });
   });
@@ -74,6 +78,86 @@ describe('memory vault summary status', () => {
     expect(await summaryPending('persona:Nova')).toBe(false);
 
     await zaraClient.noteSummaryOutcome({ outcome: 'summarized' });
+    expect(await summaryPending('persona:Zara')).toBe(false);
+  });
+
+  it('says when the summary failed, and puts the note away for that vault only when it is dismissed', async () => {
+    const zaraClient = new MarkdownMemoryClient({
+      baseDir,
+      namespace: 'default',
+      vaultScope: { personaName: 'Zara', personaId: 'p-zara' },
+    });
+    const sharedClient = new MarkdownMemoryClient({ baseDir, namespace: 'default' });
+    await zaraClient.noteSummaryOutcome({ outcome: 'failed', reason: 'model_timeout' });
+    await sharedClient.noteSummaryOutcome({ outcome: 'failed', reason: 'model_timeout' });
+
+    const status = await app.request('/api/v1/memory/vault/summary-status?namespace=persona%3AZara');
+    const failedAt = SummaryStatusResponseSchema.parse(await status.json()).data.failed_at;
+    expect(Date.now() - Date.parse(failedAt ?? '')).toBeLessThan(60_000);
+
+    const dismissed = await app.request('/api/v1/memory/vault/summary-status?namespace=persona%3AZara', {
+      method: 'DELETE',
+    });
+    expect(dismissed.status).toBe(200);
+    expect(await dismissed.json()).toEqual({});
+    expect(await summaryPending('persona:Zara')).toBe(false);
+    expect(await summaryPending()).toBe(true);
+
+    // Dismissing again, with nothing to put away, still answers 200.
+    const again = await app.request('/api/v1/memory/vault/summary-status?namespace=persona%3AZara', {
+      method: 'DELETE',
+    });
+    expect(again.status).toBe(200);
+
+    // A later failed summary shows the note again.
+    await zaraClient.noteSummaryOutcome({ outcome: 'failed', reason: 'model_timeout' });
+    expect(await summaryPending('persona:Zara')).toBe(true);
+  });
+
+  async function statusAfter(note: { reason: string; sessionId?: string }) {
+    const client = new MarkdownMemoryClient({ baseDir, namespace: 'default' });
+    await client.noteSummaryOutcome({ outcome: 'failed', ...note });
+    const response = await app.request('/api/v1/memory/vault/summary-status');
+    return SummaryStatusResponseSchema.parse(await response.json()).data;
+  }
+
+  it('says why the summary failed and which chat it was for', async () => {
+    expect(await statusAfter({ reason: 'model_timeout', sessionId: 'chat-oat-bars' })).toMatchObject({
+      summary_pending: true,
+      cause: 'model_too_slow',
+      session_id: 'chat-oat-bars',
+    });
+    expect(await statusAfter({ reason: 'model_failed', sessionId: 'chat-2' })).toMatchObject({ cause: 'model_error' });
+    expect(await statusAfter({ reason: 'model_unresolved' })).toMatchObject({ cause: 'model_not_found' });
+    for (const reason of ['summary_cut_short', 'summary_empty', 'summary_too_long', 'summary_unreadable']) {
+      expect(await statusAfter({ reason })).toMatchObject({ cause: 'answer_unusable' });
+    }
+    expect(await statusAfter({ reason: 'summary_not_finished', sessionId: 'chat-3' })).toMatchObject({
+      cause: 'interrupted',
+      session_id: 'chat-3',
+    });
+  });
+
+  it('still shows a mark left by an older version, with no chat, and one with a reason it has no words for', async () => {
+    const folder = join(baseDir, 'default');
+    await mkdir(folder, { recursive: true });
+    await writeFile(
+      join(folder, '.summary-pending.json'),
+      JSON.stringify({ failed_at: '2026-08-14T12:00:00.000Z', reason: 'model_timeout' }),
+    );
+    const older = await app.request('/api/v1/memory/vault/summary-status');
+    expect(SummaryStatusResponseSchema.parse(await older.json()).data).toEqual({
+      summary_pending: true,
+      failed_at: '2026-08-14T12:00:00.000Z',
+      cause: 'model_too_slow',
+      session_id: null,
+    });
+
+    expect(await statusAfter({ reason: 'a_reason_added_later' })).toMatchObject({
+      summary_pending: true,
+      cause: null,
+      session_id: null,
+    });
     expect(await summaryPending('persona:Zara')).toBe(false);
   });
 });

@@ -315,6 +315,7 @@ async function main(): Promise<number> {
       const label = 'Create the slot disks?';
       if (values.yes === true) {
         // --yes is this command's own approval of the one question it asks.
+        ui.askBegin();
         ui.promptHead({ label: `${label} [y/N]` });
         ui.writeProgress('yes (--yes)\n');
         return true;
