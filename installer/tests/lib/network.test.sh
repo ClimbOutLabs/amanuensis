@@ -356,6 +356,7 @@ test_summary_lists_the_addresses_and_the_trust_steps() {
   assert_flat_contains "$OUT" "Every address and setting: aman status"
   run_install --yes
   assert_not_contains "$OUT" "/trust" "a later run leaves out how to set up a device"
+  # command:status prints every address, every row and how to set up a new device.
   run_install status
   assert_rc 0
   assert_flat_contains "$OUT" "Open https://192.168.1.20:8443 https://100.101.102.103:8443 https://host.example.ts.net:8443 https://host.local:8443 https://host:8443 http://127.0.0.1:8791 http://localhost:8791"
