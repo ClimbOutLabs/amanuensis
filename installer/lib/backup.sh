@@ -118,6 +118,110 @@ backup_instance() {
   mv "$dest/$name.sealed.part" "$dest/$name.sealed"
 }
 
+# ---- backups from before sealing ----------------------------------------------------------------
+
+# Backup folders that still hold a readable copy of an instance, as backups did before they were sealed.
+# Prints "folder|instance" lines.
+backup_readable_parts() {
+  local dir part
+  [ -d "$BACKUPS_DIR" ] || return 0
+  while IFS= read -r dir; do
+    for part in "$dir"/*/; do
+      [ -f "${part}db.sqlite" ] || [ -f "${part}manifest.json" ] || continue
+      part=${part%/}
+      printf '%s|%s\n' "$dir" "${part##*/}"
+    done
+  done < <(find "$BACKUPS_DIR" -mindepth 1 -maxdepth 1 -type d | LC_ALL=C sort)
+}
+
+# Seals one readable copy in place and removes it. The readable copy is removed only after the sealed file has
+# been opened again and holds the same files. An instance that still exists and is tied to this computer's key
+# gets a file its recovery key opens too; a copy of an instance that is gone opens only on this computer.
+# Returns 2 when the instance is not tied to the key yet, so the copy waits for that.
+backup_seal_old_part() { # dir name image
+  local dir=$1 name=$2 image=$3 scratch how=--this-computer-only mounts=() rc=0 before after
+  scratch="aman_${name}_backup_scratch"
+  if reg_exists "$name"; then
+    [ "$(reg_get "$name" secrets)" = 1 ] || return 2
+    docker_volume_exists "aman_${name}_data" || return 2
+    how="--sqlite $(env_get "$(instance_dir "$name")/.env" SQLITE_PATH)"
+    mounts=(-v "aman_${name}_data:/data")
+  fi
+  D volume rm -f "$scratch" >/dev/null 2>&1 || true
+  D volume create --label "$BACKUP_SCRATCH_LABEL" "$scratch" >/dev/null || return 1
+  tar -C "$dir/$name" -cf - . |
+    D run --rm -i --network none -v "$scratch:/backup" "$image" tar -x --no-same-owner -C /backup -f - || rc=1
+  if [ "$rc" = 0 ]; then
+    D run --rm --network none -v "$scratch:/backup" ${mounts[@]+"${mounts[@]}"} -v "$MACHINE_KEY_VOLUME:/run/aman-key:ro" "$image" sh -c \
+      "tar -C /backup -cf - . | aman seal --in - --out - $how --key-file \"\$1\"" sh "$MACHINE_KEY_FILE" \
+      >"$dir/$name.sealed.part" 2>/dev/null || rc=1
+  fi
+  D volume rm -f "$scratch" >/dev/null 2>&1 || true
+  if [ "$rc" = 0 ]; then
+    before=$(cd "$dir/$name" && find . -type f | LC_ALL=C sort)
+    after=$(D run --rm -i --network none -v "$MACHINE_KEY_VOLUME:/run/aman-key:ro" "$image" \
+      aman unseal --in - --out - --key-file "$MACHINE_KEY_FILE" <"$dir/$name.sealed.part" 2>/dev/null |
+      tar -tf - 2>/dev/null | grep -v '/$' | LC_ALL=C sort) || rc=1
+    [ -n "$before" ] && [ "$before" = "$after" ] || rc=1
+  fi
+  if [ "$rc" != 0 ]; then
+    rm -f "$dir/$name.sealed.part"
+    return 1
+  fi
+  chmod 600 "$dir/$name.sealed.part"
+  mv "$dir/$name.sealed.part" "$dir/$name.sealed"
+  rm -rf "${dir:?}/$name"
+}
+
+# Seals every backup made before backups were encrypted, and takes the certificate authority's private key out of
+# the few early backups that hold a copy: nothing ever reads it from a backup, and whoever holds it can vouch for
+# any name this computer is opened at. A copy that cannot be sealed stays as it is and is tried again next time.
+backup_seal_old() { # image
+  local image=$1 line dir name sealed=0 waiting=0 failed=0 keys=0 changed='' rc
+  [ -d "$BACKUPS_DIR" ] || return 0
+  while IFS= read -r dir; do
+    rm -f "$dir/tls/root.key"
+    keys=$((keys + 1))
+    changed="$changed$dir"$'\n'
+  done < <(find "$BACKUPS_DIR" -mindepth 3 -maxdepth 3 -type f -path '*/tls/root.key' | sed 's|/tls/root.key$||')
+  if [ -n "$(backup_readable_parts)" ]; then
+    image_has_key_support "$image" && machine_key_ensure "$image" || return 0
+    say "Encrypting the backups made before backups were encrypted. This can take a few minutes."
+    while IFS='|' read -r dir name; do
+      rc=0
+      backup_seal_old_part "$dir" "$name" "$image" || rc=$?
+      case "$rc" in
+        0)
+          sealed=$((sealed + 1))
+          changed="$changed$dir"$'\n'
+          ;;
+        2) waiting=$((waiting + 1)) ;;
+        *) failed=$((failed + 1)) ;;
+      esac
+    done < <(backup_readable_parts)
+  fi
+  while IFS= read -r dir; do
+    [ -n "$dir" ] || continue
+    # The old list names files that are gone, and would otherwise be counted as one of the files itself.
+    rm -f "$dir/SHA256SUMS"
+    write_checksums "$dir"
+  done < <(printf '%s' "$changed" | LC_ALL=C sort -u)
+  if [ "$keys" -gt 0 ]; then
+    ui_ok "Removed a copy of the certificate key from $keys old backup(s). The key this computer uses is untouched."
+    log_event "removed the certificate key from $keys old backup(s)"
+  fi
+  if [ "$sealed" -gt 0 ]; then
+    ui_ok "Encrypted $sealed old backup(s). They open on this computer, or with the recovery key."
+    log_event "sealed $sealed old backup(s)"
+  fi
+  if [ "$waiting" -gt 0 ]; then
+    warn "$waiting old backup(s) are not encrypted yet, because their instance is not set up with this computer's key." "Run: aman upgrade"
+  fi
+  if [ "$failed" -gt 0 ]; then
+    warn "$failed old backup(s) could not be encrypted and were left as they are." "Run: aman backup"
+  fi
+}
+
 # Only plain timestamped backups count and are pruned; a kept one (named after its stamp) stays until removed by hand.
 plain_backups() {
   [ -d "$BACKUPS_DIR" ] || return 0
@@ -186,6 +290,8 @@ backup_run() {
   LAST_BACKUP_DIR=$dir
   backup_prune
   log_event "backup $dir"
+  # An upgrade backs up before its instances are tied to this computer's key, so it seals old backups at its end.
+  [ -n "${BACKUP_IMAGE:-}" ] || backup_seal_old "$image"
   if [ -n "$label" ]; then
     ui_ok "Saved a backup to $(ui_path "$dir"), kept until you remove it."
   else

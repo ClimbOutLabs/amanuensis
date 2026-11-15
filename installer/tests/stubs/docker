@@ -420,6 +420,12 @@ case "$cmd" in
         fi
         exit 0
         ;;
+      *"tar -x --no-same-owner -C /backup"*)
+        # A readable backup from before sealing, unpacked into the scratch volume.
+        mkdir -p "$S/scratchfs/$scratch_vol"
+        tar -x -C "$S/scratchfs/$scratch_vol" -f -
+        exit 0
+        ;;
       *'cat >"/backup/$1"'*)
         # One more file for the scratch volume, from stdin.
         args=("$@")

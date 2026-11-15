@@ -60,6 +60,7 @@ test_import_stops_the_app_runs_the_cli_and_starts_it_again() {
   assert_contains "$(cat "$AMAN_HOME/state/logs/import.log")" '"user_id":"stub"'
   assert_contains "$(cat "$AMAN_HOME/state/logs/import.log")" 'Not brought over: model keys'
   assert_flat_contains "$ERR" "Full log:"
+  assert_flat_contains "$ERR" "still holds these chats, and anyone who gets it can read them. Delete it once you have checked the result."
   assert_file "$SB_STATE/up/aman-main"
   sandbox_drop
 }

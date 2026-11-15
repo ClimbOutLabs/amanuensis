@@ -224,3 +224,26 @@ rm -rf "$WORK"
 ```
 
 Keep the dump and the copied volumes until the new instance has been in daily use for a while, and keep the old stack until you are sure.
+
+## 9. Remove what is still readable
+
+The new instance keeps saved logins and backups encrypted. The old stack and the files this move made do not. Each of these still holds chats or keys that anyone who gets the file can read:
+
+- the export file in `~/.amanuensis/exports/`;
+- the dump and the copied volumes from step 1;
+- the old stack's settings file (`packages/trueforge/.env`, or `.env` next to `compose.yml`) and its Postgres volume.
+
+Once the new instance has been in daily use for a while and you no longer need to go back, delete them:
+
+```bash
+rm ~/.amanuensis/exports/aman-export-*.zip
+docker volume rm "mig-$PERSON-memory" "mig-$PERSON-knowledge"
+rm -rf "$WORK"
+```
+
+Then stop the old stack and remove its data. Run this in the old stack's folder. It deletes the old chats for good, so do it only when you are sure:
+
+```bash
+docker compose down --volumes
+rm packages/trueforge/.env
+```

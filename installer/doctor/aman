@@ -578,13 +578,21 @@ backup_mode_is_recent() {
 }
 
 check_backup() {
-  local dir newest="" newest_time=0 entry mtime age_days=-1 now mode scheduled=0 days=""
+  local dir newest="" newest_time=0 entry mtime age_days=-1 now mode scheduled=0 days="" readable=0
   # Backups are made of instances; before the first one exists there is nothing to be late.
   if [ -z "$(list_instances)" ]; then
     record machine backup ok "No instances yet; nothing to back up." ""
     return
   fi
   dir="${AMAN_HOME}/backups"
+  # A backup from before backups were encrypted holds readable chats; the next backup run encrypts it.
+  for entry in "$dir"/*/*/; do
+    if [ -f "${entry}db.sqlite" ] || [ -f "${entry}manifest.json" ]; then readable=$((readable + 1)); fi
+  done
+  if [ "$readable" -gt 0 ]; then
+    record machine backup warn "${readable} old backup(s) in $(ui_path "$dir") are not encrypted, so anyone who gets the folder can read the chats in them." "Run aman backup"
+    return
+  fi
   for entry in "$dir"/*/; do
     [ -d "$entry" ] || continue
     mtime=$(file_mtime "$entry")

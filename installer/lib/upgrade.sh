@@ -134,6 +134,8 @@ upgrade_switch() {
   done
   UPGRADE_STAGE=finished
   log_event "upgrade to $REL_APP_TAG"
+  # Every instance is tied to this computer's key now, so backups from before sealing can get a recovery key too.
+  backup_seal_old "$REL_APP_TAG" || true
 }
 
 # Runs the doctor so the app's saved report is current when an upgrade finds nothing to change; its own result is not used.

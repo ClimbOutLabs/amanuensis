@@ -152,6 +152,7 @@ import_run() {
   fi
   log_event "data import into instance $name from $base"
   ui_ok "Imported into instance $name."
+  UI_FD=2 ui_hint "The file $(ui_path "$file") still holds these chats, and anyone who gets it can read them. Delete it once you have checked the result."
   UI_FD=2 ui_hint "Full log: $(ui_path "$log")"
 }
 

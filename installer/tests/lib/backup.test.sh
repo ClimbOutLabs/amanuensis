@@ -4,6 +4,89 @@ set -euo pipefail
 # shellcheck source=../helpers.sh
 . "$(dirname "${BASH_SOURCE[0]}")/../helpers.sh"
 
+# Turns the only backup into the readable layout backups had before sealing, with the checksums such a backup had.
+make_backup_readable() { # dir name
+  unseal_to_old_layout "$1" "$2"
+  (cd "$1" && find . -type f ! -name SHA256SUMS | sed 's|^\./||' | LC_ALL=C sort | while IFS= read -r f; do
+    if command -v sha256sum >/dev/null 2>&1; then sha256sum "$f"; else shasum -a 256 "$f"; fi
+  done >SHA256SUMS)
+}
+
+test_old_readable_backups_are_sealed() {
+  t_begin "the next backup encrypts backups made before sealing, and takes the certificate key out of them"
+  sandbox_new
+  install_machine
+  run_install backup
+  local old
+  old=$(find "$AMAN_HOME/backups" -mindepth 1 -maxdepth 1 -type d | head -n 1)
+  make_backup_readable "$old" main
+  mkdir -p "$old/tls"
+  echo "PRIVATE KEY" >"$old/tls/root.key"
+  mv "$old" "$AMAN_HOME/backups/20261016T031500Z"
+  old=$AMAN_HOME/backups/20261016T031500Z
+  local doctor
+  doctor=$(AMANUENSIS_HOME="$AMAN_HOME" PATH="$SB_BIN" bash "$INSTALLER_DIR/doctor/aman" doctor --json --only backup) || true
+  assert_contains "$doctor" '"id":"backup","state":"warn","detail":"1 old backup(s) in' "the doctor says an old backup is readable"
+  assert_contains "$doctor" "Run aman backup"
+  run_install backup
+  assert_rc 0
+  assert_flat_contains "$OUT" "Encrypted 1 old backup(s). They open on this computer, or with the recovery key."
+  assert_flat_contains "$OUT" "Removed a copy of the certificate key from 1 old backup(s)."
+  assert_no_path "$old/main"
+  assert_no_path "$old/tls/root.key"
+  assert_mode "$old/main.sealed" 600
+  assert_contains "$(sealed_cat "$old/main.sealed" db.sqlite)" "SQLITE-OF-aman_main_data"
+  assert_contains "$(sealed_names "$old/main.sealed")" "memory/note.md"
+  assert_eq "$(sealed_recovery "$old/main.sealed")" "000001-222222-333333-444444-555555-666666-777777-888888" "the recovery key opens it too"
+  if (cd "$old" && sha256sum -c SHA256SUMS >/dev/null 2>&1); then t_pass; else t_fail "checksums do not verify"; fi
+  assert_not_contains "$(cat "$old/SHA256SUMS")" "root.key"
+  assert_eq "$(find "$AMAN_HOME/backups" -name db.sqlite | wc -l | tr -d ' ')" 0 "no readable database is left"
+  assert_eq "$(cat "$SB_STATE/volumes" 2>/dev/null | grep -c backup_scratch || true)" 0 "the scratch volume is gone"
+  with_input "yes
+"
+  run_install restore main 20261016T031500Z
+  assert_rc 0
+  : >"$SB_STATE/seal_runs"
+  run_install backup
+  assert_not_contains "$OUT" "old backup"
+  sandbox_drop
+}
+
+test_old_backup_of_a_removed_instance() {
+  t_begin "an old backup of an instance that is gone is encrypted for this computer only"
+  sandbox_new
+  install_machine
+  run_install backup
+  local old
+  old=$(find "$AMAN_HOME/backups" -mindepth 1 -maxdepth 1 -type d | head -n 1)
+  make_backup_readable "$old" main
+  mv "$old/main" "$old/gone"
+  run_install backup
+  assert_rc 0
+  assert_no_path "$old/gone"
+  assert_eq "$(sealed_recovery "$old/gone.sealed")" none
+  assert_contains "$(sealed_cat "$old/gone.sealed" db.sqlite)" "SQLITE-OF-aman_main_data"
+  sandbox_drop
+}
+
+test_old_backup_waits_for_the_key() {
+  t_begin "an old backup stays as it is while its instance is not tied to this computer's key, and says so"
+  sandbox_new
+  install_machine
+  run_install backup
+  local old
+  old=$(find "$AMAN_HOME/backups" -mindepth 1 -maxdepth 1 -type d | head -n 1)
+  make_backup_readable "$old" main
+  sed -i.bak '/^secrets=/d' "$AMAN_HOME/state/instances/main.conf"
+  rm -f "$AMAN_HOME/state/instances/main.conf.bak"
+  run_install backup
+  assert_rc 0
+  assert_file "$old/main/db.sqlite"
+  assert_no_path "$old/main.sealed"
+  assert_flat_contains "$ERR" "1 old backup(s) are not encrypted yet"
+  sandbox_drop
+}
+
 test_backup_layout_and_modes() {
   t_begin "a backup is one sealed file per instance, private, checksummed and streamed from containers"
   sandbox_new
@@ -201,6 +284,9 @@ test_an_older_version_is_told_to_upgrade
 test_backup_runs_the_cli_with_a_target
 test_backup_of_stopped_instance
 test_leftover_scratch_volume_is_pruned
+test_old_readable_backups_are_sealed
+test_old_backup_of_a_removed_instance
+test_old_backup_waits_for_the_key
 test_backup_prunes_to_seven
 test_kept_backups_are_never_pruned
 test_failed_backup_leaves_nothing

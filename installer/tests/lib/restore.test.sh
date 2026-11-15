@@ -454,7 +454,7 @@ yes
 }
 
 test_backup_from_before_sealing_still_restores() {
-  t_begin "a backup made before backups were encrypted still restores, and the data is then tied to this computer's key"
+  t_begin "a backup made before backups were encrypted still restores, and is encrypted on the way"
   sandbox_new
   install_machine
   set_state one
@@ -466,13 +466,15 @@ test_backup_from_before_sealing_still_restores() {
     if command -v sha256sum >/dev/null 2>&1; then sha256sum "$f"; else shasum -a 256 "$f"; fi
   done >SHA256SUMS )
   set_state two
-  : >"$SB_STATE/unseal_runs"
   with_input "yes
 "
   run_install restore main "$(basename "$dir")"
   assert_rc 0
   assert_contains "$(restored_db main)" "SQLITE-OF-aman_main_data-one"
-  assert_eq "$(cat "$SB_STATE/unseal_runs")" "" "nothing needed opening"
+  # The copy saved first also encrypts the old backup where it is, and the restore then reads the encrypted one.
+  assert_no_path "$dir/main"
+  assert_file "$dir/main.sealed"
+  assert_no_path "$AMAN_HOME/state/stage"
   assert_contains "$(sealed_cat "$(backup_dirs | tail -n 1)/main.sealed" db.sqlite)" "SQLITE-OF-aman_main_data-two"
   assert_eq "$(reg_value main secrets)" 1
   sandbox_drop

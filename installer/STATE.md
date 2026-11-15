@@ -198,7 +198,16 @@ key on any computer. A backup of an instance that is not tied to the key yet
 here. A backup needs an app image that can seal; with an older one it stops
 and says to run `aman upgrade`. An upgrade loads the new images before its
 backup, so the new image seals it. Backups from before sealing hold one
-readable folder per instance and still restore. Unlabelled
+readable folder per instance and still restore. `backup_seal_old` turns each
+of those folders into a sealed file in place: it runs at the end of every
+backup that is not an upgrade's, and at the end of an upgrade, once every
+instance is tied to the key. The readable folder is removed only after the
+sealed file was opened again and lists the same files. A folder of an
+instance that no longer exists is sealed for this computer only; one whose
+instance is not tied to the key yet waits. The same pass deletes
+`tls/root.key` from the few early backups that hold it, and writes
+`SHA256SUMS` again. The doctor's backup check warns while a readable folder
+is left. Unlabelled
 backups are pruned to the newest seven. The database copy in each backup
 holds no incognito chats: `aman backup` deletes them from its copy before the
 copy is checked, so an incognito chat open at backup time is not kept.

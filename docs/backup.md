@@ -29,7 +29,7 @@ A backup's name starts with its date, year first, so October 17, 2026 reads `202
 
     Each backup is encrypted with a key kept on this computer. Nobody can read your chats or secrets from a backup file alone. To open a backup on another computer you need your recovery key. That's the 48 digits Aman showed you once when it was set up. Keep it somewhere safe.
 
-    Backups made by older versions of Aman aren't encrypted. They still work, but treat them like a file of passwords.
+    Backups made by older versions of Aman weren't encrypted. After you update, the next backup encrypts them where they are, and `aman doctor` warns while any is still readable. A copy you made of an old backup, on another drive or in the cloud, stays readable. Delete it, or replace it with the encrypted one.
 
 ??? note "What's in a backup"
 
@@ -142,7 +142,7 @@ A backup on the same disk doesn't help if that disk fails. Copy the newest backu
     1. Choose **Backups** in the Start menu.
     2. Copy the backup with the newest date onto the other drive.
 
-A backup is encrypted, so it's safe on a shared or cloud drive. Without this computer or your recovery key, nobody can open it. Backups from older versions of Aman aren't encrypted, so keep those on a drive only you can read.
+A backup is encrypted, so it's safe on a shared or cloud drive. Without this computer or your recovery key, nobody can open it. An old copy from before backups were encrypted is still readable, so delete it or replace it.
 
 ## Restore by hand
 
