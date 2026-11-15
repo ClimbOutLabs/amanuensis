@@ -14298,7 +14298,7 @@
             "$ref": "#/components/schemas/Tier3CalendarEventBefore"
           },
           "calendar": {
-            "description": "The Google account whose main calendar is written.",
+            "description": "The account whose main calendar is written, as its own service names it.",
             "type": "string"
           },
           "description": {
@@ -14309,9 +14309,10 @@
             "description": "How long the event lasts, in plain words.",
             "type": "string"
           },
-          "guests_emailed": {
-            "description": "True when Google emails the guests about this.",
-            "type": "boolean"
+          "guests_line": {
+            "default": "",
+            "description": "What the card tells the person about the guests being emailed, in the finished words of the review that built the card. Empty when the event has no guests.",
+            "type": "string"
           },
           "location": {
             "description": "Place; empty when none.",
@@ -14349,7 +14350,6 @@
           "location",
           "description",
           "attendees",
-          "guests_emailed",
           "one_of_repeating",
           "before"
         ],
@@ -14437,7 +14437,7 @@
             "type": "boolean"
           },
           "mail_from": {
-            "description": "For a card on the Email connector: the account the message goes from. Otherwise null.",
+            "description": "For a mail card: the account the message goes from. Otherwise null.",
             "type": [
               "string",
               "null"

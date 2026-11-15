@@ -152,7 +152,9 @@ export const EVENT_FIELD_RULES: Record<keyof CalendarEvent, NestedRule> = {
   location: 'spoken',
   description: 'spoken',
   attendees: 'empty',
-  guests_emailed: 'empty',
+  // A string field, so it follows the other string fields here: a guest event is already kept on the
+  // screen by the attendees rule, and a guest-free event carries no line.
+  guests_line: 'spoken',
   one_of_repeating: 'empty',
   before: 'empty',
   already_created: 'spoken',

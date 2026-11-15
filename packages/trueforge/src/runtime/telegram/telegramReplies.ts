@@ -192,7 +192,7 @@ export const TELEGRAM_SHOWN_SECTION_FIELDS = {
     'location',
     'description',
     'attendees',
-    'guests_emailed',
+    'guests_line',
     'one_of_repeating',
     'before',
     'already_created',
@@ -412,12 +412,8 @@ function approvalCardLines(card: Tier3Card): string[] {
       lines.push('Repeats: Only this one event of the series changes');
     }
     lines.push(`Guests: ${event.attendees.length === 0 ? 'None' : event.attendees.join(', ')}`);
-    if (event.attendees.length > 0) {
-      lines.push(
-        event.guests_emailed
-          ? 'Google will email every guest about this.'
-          : 'Google will not email the guests about this.',
-      );
+    if (event.guests_line !== '') {
+      lines.push(event.guests_line);
     }
     if (event.description !== '') {
       lines.push('Description:');

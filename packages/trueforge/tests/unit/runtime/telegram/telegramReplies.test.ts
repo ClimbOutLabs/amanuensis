@@ -405,6 +405,11 @@ describe('telegram pending replies', () => {
   it.each([
     { field: 'already_created', event: { already_created: true }, line: 'You already have this event.' },
     { field: 'span_days', event: { span_days: 3 }, line: 'This event runs over 3 days.' },
+    {
+      field: 'guests_line',
+      event: { attendees: ['lin@example.com'], guests_line: 'Moonmail will email every guest about this.' },
+      line: 'Moonmail will email every guest about this.',
+    },
   ])("shows the calendar card's $field line, as the app card does", async ({ event, line }) => {
     const card = cardWith({
       plain_what: 'Add this event.',
@@ -418,7 +423,7 @@ describe('telegram pending replies', () => {
         location: '',
         description: '',
         attendees: [],
-        guests_emailed: false,
+        guests_line: '',
         one_of_repeating: false,
         before: null,
         ...event,

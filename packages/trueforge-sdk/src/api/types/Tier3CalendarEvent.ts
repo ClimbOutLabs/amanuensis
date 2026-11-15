@@ -13,14 +13,14 @@ export interface Tier3CalendarEvent {
     /** Every guest on the event. */
     attendees: string[];
     before: TrueForge.Tier3CalendarEventBefore | null;
-    /** The Google account whose main calendar is written. */
+    /** The account whose main calendar is written, as its own service names it. */
     calendar: string;
     /** Description the write sets; empty when none. */
     description: string;
     /** How long the event lasts, in plain words. */
     duration: string;
-    /** True when Google emails the guests about this. */
-    guestsEmailed: boolean;
+    /** What the card tells the person about the guests being emailed, in the finished words of the review that built the card. Empty when the event has no guests. */
+    guestsLine?: string;
     /** Place; empty when none. */
     location: string;
     /** True when this changes one date of a repeating event. */

@@ -2569,6 +2569,8 @@ function gmailWriteCard(input: { action: SentinelAction; agent_intent: string | 
     destination_host: null,
     outbound_truncated: false,
     email,
+    // The draft was checked to send from the connected account, so the card names that account.
+    mail_from: escapeDisplayText(content.fromAddress),
   };
 }
 
@@ -2942,7 +2944,7 @@ function calendarWriteCard(input: {
       location: show(review.location),
       description: escapeDisplayText(review.description, { keepNewlines: true }),
       attendees: review.attendees.map(show),
-      guests_emailed: review.guests_emailed,
+      guests_line: show(review.guests_line),
       one_of_repeating: review.one_of_repeating,
       already_created: review.action === 'create' && review.already_created,
       span_days: review.span_days,
