@@ -60,6 +60,7 @@ Settings has no button for these. On a Mac or Linux, type them in a terminal:
 - `aman restore` goes back to a backup. It asks which one, and waits for you to type yes. The password goes back to the one you had then, and devices may need to sign in again.
 - `aman upgrade` updates Aman. Get the newest release first, as [The aman command](../../../../docs/commands.md#update-aman) shows. It downloads Aman's parts ready-made when they match your version. When they don't, it builds them on this computer, which takes longer.
 - `aman password` sets a new password.
+- `aman help` lists every command on one screen. `aman help doctor` shows the options of one command.
 
 On Windows, the Start menu has entries for the common ones, so you don't need a terminal:
 
