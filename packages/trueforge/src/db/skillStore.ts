@@ -22,6 +22,15 @@ export interface SkillRecord {
    */
   network_approval: readonly string[] | null;
   /**
+   * The code version every persisted network grant on this skill is bound to: the commit a
+   * git skill's ref named when the grant was saved, or a registry skill's version name. Set
+   * when an approval is saved, or when a per-site allowance is saved on a skill with no
+   * binding yet, and cleared when the last grant goes. Null when the skill holds no grants,
+   * or for grants saved before pinning existed. When the skill's code moves off the pin,
+   * the grants are cancelled and the network card asks again.
+   */
+  network_approval_code_sha: string | null;
+  /**
    * Sites the person allowed one by one for this skill, from a network card or Settings. Each
    * site stands on its own: allowing one never changes the declared list or its approval.
    */
@@ -62,6 +71,19 @@ export interface SetSkillNetworkApprovalInput {
   name: string;
   /** The approved site list, or null to remove the approval. */
   hosts: readonly string[] | null;
+  /**
+   * The code version the grants are pinned to, stored when the approval is set. On removal
+   * this value does not decide the pin: the pin follows the grants, staying while per-site
+   * allowances remain and clearing when none remain.
+   */
+  code_sha: string | null;
+}
+
+export interface SetSkillNetworkCodePinInput {
+  tenant_id: string;
+  name: string;
+  /** The code version the skill's persisted grants are bound to from now on. */
+  code_sha: string;
 }
 
 export interface SetSkillNetworkHostDecisionInput {
@@ -113,10 +135,21 @@ export interface ISkillStore<TTransaction = never> {
   ): Promise<SkillRecord | undefined>;
   /**
    * Stores or clears the person's decision on one site for one skill. Returns the updated
-   * record, or undefined when no skill with that name exists.
+   * record, or undefined when no skill with that name exists. Clearing the last per-site
+   * allowance on a skill with no approval also clears the code pin: a pin binds grants,
+   * and with none left there is nothing for it to bind.
    */
   setSkillNetworkHostDecision(
     input: SetSkillNetworkHostDecisionInput,
+    transaction?: TTransaction,
+  ): Promise<SkillRecord | undefined>;
+  /**
+   * Stores the code version the skill's persisted grants are bound to, without touching the
+   * grants themselves: how an allowance write binds a skill that holds no approval and no
+   * pin yet. Returns the updated record, or undefined when no skill with that name exists.
+   */
+  setSkillNetworkCodePin(
+    input: SetSkillNetworkCodePinInput,
     transaction?: TTransaction,
   ): Promise<SkillRecord | undefined>;
   listSkillVersions(input: { name: string }): Promise<SkillVersion[]>;

@@ -1,6 +1,6 @@
 import { execFileRunner } from '@truefoundry/trueforge-core/core';
 import { execFileSync } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createLogger } from 'winston';
@@ -304,23 +304,6 @@ describe('what the host allows, by where the note came from', () => {
     expect(await read(vaultDir, 'person', 'nora')).toBe(before.nora);
   });
 
-  it('turns an ended statement from the assistant’s reply into a guess that it may have ended', async () => {
-    const vaultDir = await makeVault();
-    await sortWith({
-      vaultDir,
-      noteToSort: note({ metadata: REPLY, text: 'You decided against shipping the furniture to Madrid.' }),
-      model: modelReplying({
-        decisions: [{ decision: 'ended', about: 'the-madrid-move', statement_id: 'f_11', until: DAY, reason }],
-      }),
-    });
-
-    const page = await read(vaultDir, 'matter', 'the-madrid-move');
-    expect(page).toContain(
-      '- Shipping the furniture, not selling it. <!-- fact: id=f_11 src=you_said since=2026-10-22 -->',
-    );
-    expect(page).toContain(`(may have ended by ${DAY}) <!-- fact: id=f_s1 src=inferred seen=${DAY} -->`);
-  });
-
   it('never lets a read note write to How you write to them', async () => {
     const vaultDir = await makeVault();
     await sortWith({
@@ -454,6 +437,112 @@ describe('what the host allows, by where the note came from', () => {
       expect(confirmed(after)).toEqual(confirmed(slug === 'nora' ? before.nora : before.madrid));
     }
     expect(history(vaultDir).filter(message => message.startsWith('Aman sorted'))).toHaveLength(1);
+  });
+});
+
+/** Every page file in the vault with its content, so a test can show that nothing at all changed. */
+async function allPages(vaultDir: string): Promise<Record<string, string>> {
+  const pages: Record<string, string> = {};
+  for (const entry of await readdir(vaultDir, { recursive: true, withFileTypes: true })) {
+    const file = path.join(entry.parentPath, entry.name);
+    const relative = path.relative(vaultDir, file);
+    if (entry.isFile() && relative.endsWith('.md') && !relative.startsWith('.')) {
+      pages[relative] = await readFile(file, 'utf8');
+    }
+  }
+  return pages;
+}
+
+describe('a note of the assistant’s own reply', () => {
+  // A model that would put the reply on a page in every way a decision can, if it were ever asked.
+  const writesEverywhere = {
+    decisions: [
+      {
+        decision: 'new',
+        about: 'juno',
+        page_kind: 'person',
+        title: 'Juno',
+        section: 'Now',
+        text: 'Juno said oat bars travel well.',
+        reason,
+      },
+      { decision: 'new', about: 'nora', page_kind: 'person', section: 'Now', text: 'Nora likes oat bars.', reason },
+      { decision: 'ended', about: 'the-madrid-move', statement_id: 'f_11', until: DAY, reason },
+    ],
+  };
+  const replies: [string, SortNote['metadata'], string][] = [
+    [
+      'with its label',
+      REPLY,
+      "From Juno's reply, Nov 6: If you keep the oat bars for the walk, they will travel well.",
+    ],
+    ['without a label', REPLY, 'Oat bars travel well, so keep them for the walk with Nora.'],
+    [
+      'from a chat that had read nothing',
+      { ...REPLY, reply_read_nothing: 'true' },
+      'You decided against shipping the furniture to Madrid.',
+    ],
+    ['that names a person who has a page', REPLY, 'Nora now works at Brightline, as I said before.'],
+    ['with no origin stored', { note_source: 'assistant_response' }, 'Juno thinks the move to Madrid is off.'],
+  ];
+
+  it.each(replies)('never asks the model and changes no page: %s', async (_name, metadata, text) => {
+    const vaultDir = await makeVault();
+    const before = await allPages(vaultDir);
+    const model = modelReplying(writesEverywhere);
+
+    const result = await sortWith({ vaultDir, model, noteToSort: note({ metadata, text }) });
+
+    expect(model.prompts).toEqual([]);
+    expect(await allPages(vaultDir)).toEqual(before);
+    expect(result).toEqual({ status: 'sorted', written: true, outcome: 'none', decisions: [] });
+    // Marked as needing no page, so the daily tidy does not pick it up again.
+    expect(await readHandledNotes(vaultDir)).toEqual(new Map([[NOTE_ID, 'none']]));
+  });
+
+  it('never looks for pages close in meaning to a reply', async () => {
+    const vaultDir = await makeVault();
+    const similarPages = jest.fn(() => Promise.resolve([]));
+    await sortNote({
+      mode: 'on',
+      note: note({ metadata: REPLY, text: 'Nora now works at Brightline.' }),
+      askModel: modelReplying(writesEverywhere),
+      options: { vaultDir, runner: execFileRunner, today: DAY, logger: createLogger({ silent: true }) },
+      similarPages,
+    });
+    expect(similarPages).not.toHaveBeenCalled();
+  });
+
+  it('writes one report line with no decisions in report mode, and still asks no model', async () => {
+    const vaultDir = await makeVault();
+    const before = await allPages(vaultDir);
+    const model = modelReplying(writesEverywhere);
+
+    const result = await sortWith({
+      vaultDir,
+      mode: 'report',
+      model,
+      noteToSort: note({ metadata: REPLY, text: 'Oat bars travel well.' }),
+    });
+
+    expect(model.prompts).toEqual([]);
+    expect(await allPages(vaultDir)).toEqual(before);
+    expect(result).toEqual({ status: 'sorted', written: false, outcome: 'none', decisions: [] });
+    expect(await readHandledNotes(vaultDir)).toEqual(new Map());
+    const raw = await readFile(path.join(vaultDir, SORT_REPORT_FILE), 'utf8');
+    expect(SortReportLineSchema.parse(JSON.parse(raw.trim()))).toMatchObject({
+      note_id: NOTE_ID,
+      outcome: 'sorted',
+      decisions: [],
+    });
+    expect(raw).not.toContain('Oat bars');
+  });
+
+  it('still sorts the person’s own words that quote what the assistant said', async () => {
+    const vaultDir = await makeVault();
+    const model = modelReplying({ decisions: [{ decision: 'ignore', reason }] });
+    await sortWith({ vaultDir, model, noteToSort: note({ text: 'Juno said oat bars travel well, and I agree.' }) });
+    expect(model.prompts).toHaveLength(1);
   });
 });
 
@@ -858,6 +947,27 @@ describe('the prompt', () => {
     expect(prompt).toContain('- the-madrid-move (matter): The Madrid move');
     expect(prompt).not.toContain('<page slug="the-madrid-move"');
     expect(prompt).toContain('an email the assistant read');
+  });
+
+  it('shows a found note without its label, and the person’s own words as they are', async () => {
+    const vaultDir = await makeVault();
+    const model = modelReplying({ decisions: [] });
+    await sortWith({
+      vaultDir,
+      model,
+      noteToSort: note({ metadata: MAIL, text: 'From an email, found Nov 6: Nora is away until Friday.' }),
+    });
+    await sortWith({
+      vaultDir,
+      model,
+      noteToSort: note({
+        text: 'From an email, found Nov 6: that is how my notes start.',
+        id: 'md:vault:2026-11-06.md#1',
+      }),
+    });
+
+    expect(model.prompts[0]).toContain('<note>\nNora is away until Friday.\n</note>');
+    expect(model.prompts[1]).toContain('<note>\nFrom an email, found Nov 6: that is how my notes start.\n</note>');
   });
 
   it('says what it left out when the note is too long', async () => {

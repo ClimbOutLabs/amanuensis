@@ -40,9 +40,26 @@ export type MemoryVaultReviewResult = {
   refused: { entryId: string; reason: string }[];
 };
 
+/** Why a turn summary failed, when the server says. */
+export type MemoryVaultSummaryFailureCause =
+  'model_too_slow' | 'model_error' | 'model_not_found' | 'answer_unusable' | 'interrupted';
+
+const SUMMARY_FAILURE_CAUSES: readonly MemoryVaultSummaryFailureCause[] = [
+  'model_too_slow',
+  'model_error',
+  'model_not_found',
+  'answer_unusable',
+  'interrupted',
+];
+
 /** Whether a vault is still owed a turn summary after a failed attempt. */
 export type MemoryVaultSummaryStatus = {
   summaryPending: boolean;
+  /** When that summary failed, when the server says. */
+  failedAt?: string | null;
+  cause?: MemoryVaultSummaryFailureCause | null;
+  /** The chat whose summary failed, when the server kept it. */
+  sessionId?: string | null;
 };
 
 /** Wire namespace of a persona's own vault. */
@@ -53,6 +70,8 @@ export function personaVaultNamespace(displayName: string): string {
 export interface MemoryVaultCatalog {
   listEntries(namespace?: string): Promise<MemoryVaultEntry[]>;
   getSummaryStatus(namespace?: string): Promise<MemoryVaultSummaryStatus>;
+  /** Puts away the failed-summary line for one vault. Nothing in memory changes. */
+  dismissSummaryStatus(namespace?: string): Promise<void>;
   updateEntry(options: { entryId: string; text: string }): Promise<MemoryVaultEntry>;
   deleteEntry(entryId: string): Promise<void>;
   exportEntries(namespace?: string): Promise<{ namespace: string; exportedAt: string; entries: MemoryVaultEntry[] }>;
@@ -122,7 +141,15 @@ export function createMemoryVaultCatalog(options: CreateTrueForgeClientOptions =
       request('GET', `/api/v1/memory/vault${namespaceQuery(namespace)}`, undefined, parseEntries),
     getSummaryStatus: async namespace => {
       const parsed = z
-        .object({ data: z.object({ summary_pending: z.boolean() }) })
+        .object({
+          data: z.object({
+            summary_pending: z.boolean(),
+            failed_at: z.string().nullish(),
+            // A cause this page has no words for reads as no cause, so a newer server never breaks the page.
+            cause: z.enum(SUMMARY_FAILURE_CAUSES).nullish().catch(null),
+            session_id: z.string().nullish(),
+          }),
+        })
         .safeParse(
           await request(
             'GET',
@@ -134,8 +161,15 @@ export function createMemoryVaultCatalog(options: CreateTrueForgeClientOptions =
       if (!parsed.success) {
         throw new Error('The server returned an unexpected memory payload');
       }
-      return { summaryPending: parsed.data.data.summary_pending };
+      return {
+        summaryPending: parsed.data.data.summary_pending,
+        failedAt: parsed.data.data.failed_at ?? null,
+        cause: parsed.data.data.cause ?? null,
+        sessionId: parsed.data.data.session_id ?? null,
+      };
     },
+    dismissSummaryStatus: namespace =>
+      request('DELETE', `/api/v1/memory/vault/summary-status${namespaceQuery(namespace)}`, undefined, () => undefined),
     updateEntry: ({ entryId, text }) =>
       request('PUT', `/api/v1/memory/vault/${encodeURIComponent(entryId)}`, { text }, parseEntry),
     deleteEntry: entryId =>

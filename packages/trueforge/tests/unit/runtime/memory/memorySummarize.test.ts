@@ -1,6 +1,7 @@
 import { ModelOutputRepetitionError, type ILLM } from '@truefoundry/trueforge-core/core';
 import type { Server } from 'node:http';
 import winston from 'winston';
+import configuration from '../../../../src/config';
 import { migrateSqliteToLatest } from '../../../../src/db/migrateSqlite';
 import { type IModelProviderStore } from '../../../../src/db/modelProviderStore';
 import { createSqliteDb } from '../../../../src/db/sqlite/client';
@@ -475,6 +476,74 @@ describe('summarizeTurnContent', () => {
       fallback: 'model_timeout',
     });
     expect(calls).toBe(2);
+  });
+
+  describe('the wait before the retry after a timeout', () => {
+    const wait = configuration.MEMORY_SUMMARY_RETRY_WAIT_MS;
+    const FACTS = '{"facts": ["The person has a synthetic test robot named Bleep-Bloop."]}';
+
+    afterEach(() => {
+      configuration.MEMORY_SUMMARY_RETRY_WAIT_MS = wait;
+    });
+
+    /** A resolver whose first client times out and whose second answers, and the moment each was asked for. */
+    function timesOutOnce(): { resolveLlm: () => Promise<ILLM>; askedAt: number[] } {
+      const clients: ILLM[] = [
+        fakeSummarizerThrowing(new Error('The request timed out after 60000 ms')),
+        fakeSummarizer(FACTS),
+      ];
+      const askedAt: number[] = [];
+      return {
+        askedAt,
+        resolveLlm: async () => {
+          askedAt.push(performance.now());
+          const client = clients.shift();
+          if (client === undefined) {
+            throw new Error('the summarizer was resolved more times than the test set up');
+          }
+          return client;
+        },
+      };
+    }
+
+    it('asks again only after the wait, so a model that was busy has time to come free', async () => {
+      configuration.MEMORY_SUMMARY_RETRY_WAIT_MS = 200;
+      const { resolveLlm, askedAt } = timesOutOnce();
+
+      const result = await summarizeTurnContent({ ...base, resolveLlm });
+
+      expect(result.status).toBe('summarized');
+      expect(askedAt).toHaveLength(2);
+      expect((askedAt[1] ?? 0) - (askedAt[0] ?? 0)).toBeGreaterThanOrEqual(190);
+    });
+
+    it('holds no place in the queue while it waits, so other summaries go ahead', async () => {
+      configuration.MEMORY_SUMMARY_RETRY_WAIT_MS = 400;
+      const order: string[] = [];
+      // Two summaries time out and wait: as many as may run at once.
+      const waiting = [timesOutOnce(), timesOutOnce()].map(({ resolveLlm }) =>
+        summarizeTurnContent({ ...base, resolveLlm }).then(result => {
+          order.push(`waited: ${result.status}`);
+        }),
+      );
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      const third = await summarizeTurnContent({ ...base, resolveLlm: async () => fakeSummarizer(FACTS) });
+      order.push(`third: ${third.status}`);
+      await Promise.all(waiting);
+
+      expect(order).toEqual(['third: summarized', 'waited: summarized', 'waited: summarized']);
+    });
+
+    it('does not wait after a repetition stop, which is not about a busy model', async () => {
+      configuration.MEMORY_SUMMARY_RETRY_WAIT_MS = 600_000;
+      const clients: ILLM[] = [fakeSummarizerThrowing(new ModelOutputRepetitionError()), fakeSummarizer(FACTS)];
+      const resolveLlm = async (): Promise<ILLM> => clients.shift() ?? fakeSummarizer(FACTS);
+
+      const result = await summarizeTurnContent({ ...base, resolveLlm });
+
+      expect(result.status).toBe('summarized');
+    });
   });
 
   it('retries once after the repetition guard stops the call, through a fresh client, and saves what the retry returns', async () => {

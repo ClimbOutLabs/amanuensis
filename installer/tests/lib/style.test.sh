@@ -390,7 +390,8 @@ test_the_closing_block_and_warnings() {
   assert_flat_contains "$OUT" "Ready. Instance main is running."
   assert_flat_contains "$OUT" "Model not set: add one in Settings > Models"
   assert_contains "$OUT" "| + Ready. Instance main is running."
-  assert_eq "$(printf '%s\n' "$OUT" | grep -c '^+-\{70\}+$')" 4 "the banner and the verdict each sit in a box"
+  assert_eq "$(printf '%s\n' "$OUT" | grep -c '^+- \[ [1-6] of 6 \]  .* -+$')" 6 "each of the six steps opens a panel with its number in the top line"
+  assert_eq "$(printf '%s\n' "$OUT$ERR" | grep -c '^| AMAN  \|^| + Ready')" 2 "the banner and the verdict each sit in a box"
   assert_eq "$(printf '%s\n' "$OUT" | grep -c '^-\{72\}$')" 1 "a rule closes the block"
   sandbox_drop
 }

@@ -46,6 +46,7 @@ export const AUTO_DENY_REASONS = [
   APPROVAL_EXPIRED_REASON_CODE,
   'cannot_describe',
   'destination_unverifiable',
+  'draft_first',
   'incognito_chat',
   'incomplete_send_card',
   'lookup_limit',
@@ -105,6 +106,18 @@ export const Tier3EmailSchema = z
       .boolean()
       .optional()
       .describe('True when a name was left off an address because it looked like an address.'),
+    // Absent on cards stored before this field existed, and on a message that is not a forward.
+    forwards: z
+      .object({
+        from: z.string().describe('Sender of the message being forwarded.'),
+        subject: z.string().describe('Subject of the message being forwarded.'),
+        body: z.string().describe('Text of the message being forwarded.'),
+        truncated: z.boolean().describe('True when the text is longer than the part shown.'),
+        attachments: z.array(z.string()).describe('Names of the files sent on with the message.'),
+      })
+      .nullable()
+      .optional()
+      .describe('The message a forward sends on, below the note in `body`; null when the message is not a forward.'),
   })
   .describe('The message an email action sends or saves, shown in full.')
   .openapi('Tier3Email');
@@ -198,15 +211,48 @@ export const Tier3PersonaSchema = z
   .describe('The persona a chat call adds, shown in full.')
   .openapi('Tier3Persona');
 
-/** Why a skill network card is asked: the skill's first use, or a site it reached for without declaring. */
+/** A skill that a chat call adds, as the host read it from where it comes from. */
+export const Tier3SkillSchema = z
+  .object({
+    name: z.string().describe('Skill name.'),
+    description: z.string().describe('What the skill is for, as the skill itself says.'),
+    source: z.string().describe('The repository the skill comes from, and the folder in it when there is one.'),
+    version: z.string().describe('The exact commit that is added. A later change to the repository is not picked up.'),
+    starter: z.boolean().describe('True when this is one of the starter skills that come with the app.'),
+    instructions: z
+      .string()
+      .nullable()
+      .describe("The skill's own instruction file as the host read it, or null for a starter skill."),
+    websites: z
+      .array(z.string())
+      .optional()
+      .describe(
+        'The websites the skill sends requests to, as the host found them in its files. Approving allows these.',
+      ),
+    makes_up_addresses: z
+      .boolean()
+      .optional()
+      .describe('True when the skill also builds web addresses while it runs, which cannot be read ahead of time.'),
+    can_send: z.boolean().optional().describe('True when one of the websites can send email or change a calendar.'),
+  })
+  .describe('The skill a chat call adds, shown in full.')
+  .openapi('Tier3Skill');
+
+/**
+ * Why a skill network card is asked: the skill's first use, a site it reached for without
+ * declaring, or its code changed since the person approved it.
+ */
 export const Tier3SkillNetworkReasonSchema = z
-  .enum(['first_use', 'undeclared_host'])
-  .describe('Why the card is asked: the skill\u2019s first use, or a site it did not declare.')
+  .enum(['first_use', 'undeclared_host', 'code_changed'])
+  .describe(
+    'Why the card is asked: the skill\u2019s first use, a site it did not declare, or its code changed since it was approved.',
+  )
   .openapi('Tier3SkillNetworkReason');
 
 /**
  * The network question a skill network card asks, shown in full: the skill, the sites, and why.
- * `code_pin` names the exact code the approval covers once code pinning lands; until then null.
+ * `code_pin` names the exact code the approval covers: the commit a git skill's approval is
+ * pinned to, or null when no pin is in force.
  */
 export const Tier3SkillNetworkSchema = z
   .object({
@@ -220,22 +266,6 @@ export const Tier3SkillNetworkSchema = z
   })
   .describe('The skill network access a card asks about, shown in full.')
   .openapi('Tier3SkillNetwork');
-
-/** A skill that a chat call adds, as the host read it from where it comes from. */
-export const Tier3SkillSchema = z
-  .object({
-    name: z.string().describe('Skill name.'),
-    description: z.string().describe('What the skill is for, as the skill itself says.'),
-    source: z.string().describe('The repository the skill comes from, and the folder in it when there is one.'),
-    version: z.string().describe('The exact commit that is added. A later change to the repository is not picked up.'),
-    starter: z.boolean().describe('True when this is one of the starter skills that come with the app.'),
-    instructions: z
-      .string()
-      .nullable()
-      .describe("The skill's own instruction file as the host read it, or null for a starter skill."),
-  })
-  .describe('The skill a chat call adds, shown in full.')
-  .openapi('Tier3Skill');
 
 /**
  * The words an approval card is made of, produced in trueforge-core by one owner per action kind
@@ -318,6 +348,18 @@ export const Tier3CardSchema = z
       .boolean()
       .optional()
       .describe('True when a card carrying mail_new_recipients approves saving a draft rather than sending.'),
+    mail_from: z
+      .string()
+      .nullable()
+      .optional()
+      .describe('For a card on the Email connector: the account the message goes from. Otherwise null.'),
+    mail_from_choices: z
+      .array(z.string())
+      .nullable()
+      .optional()
+      .describe(
+        'For a card on the Email connector: every connected account the person could pick instead. Otherwise null.',
+      ),
     skill_network: Tier3SkillNetworkSchema.nullable()
       .optional()
       .describe('For a skill network card: the skill, the sites it asks for, and why. Otherwise null.'),

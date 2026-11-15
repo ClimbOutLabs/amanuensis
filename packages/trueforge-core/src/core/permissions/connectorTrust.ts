@@ -13,14 +13,14 @@ export const FIRST_PARTY_TOOL_REASON = 'mcp_first_party_read_only';
 /** A read of the operator's own Email sidecar, which runs without a card as Gmail's reads do. */
 export const MAIL_READ_REASON = 'mail_read';
 
-/** Reading mail with mark-as-read set: the read becomes a change, so it asks with its own card. */
-export const MAIL_MARK_AS_READ_REASON = 'mail_mark_as_read';
-
 /** A read of the operator's own Calendar sidecar, which runs without a card. */
 export const CALDAV_PRIVATE_READ_REASON = 'caldav_private_read';
 
 /** A send through the operator's own Email sidecar. It always asks, and approving it checks the Email list. */
 export const MAIL_SEND_REASON = 'mail_send';
+
+/** A draft through the operator's own Email sidecar. It always asks, and only an approved draft can be sent. */
+export const MAIL_DRAFT_REASON = 'mail_draft';
 
 /** A send or a draft through the operator's own Email sidecar to an address not yet on the Email list. */
 export const MAIL_NEW_RECIPIENT_REASON = 'mail_new_recipient';

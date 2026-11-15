@@ -202,7 +202,7 @@ describe('a mail send the sidecar refuses after approval', () => {
     };
     const source = new MailConnectorSource({
       inner,
-      accounts: () => Promise.resolve(['main']),
+      accounts: () => Promise.resolve({ names: ['main'], default_name: 'main', allowed: null }),
       now: () => new Date(),
       timeZone: undefined,
     });

@@ -372,6 +372,10 @@
       },
       "ApprovalAllow": {
         "properties": {
+          "from_account": {
+            "description": "For an approved Email send or draft: the account the person picked on the card. Omitted means the account the card showed, which is the default unless the call named one.",
+            "type": "string"
+          },
           "scope": {
             "description": "Omitted or once allows only this invocation; chat grants this exact tool for the current session; always allows this read-only connector tool for the caller until revoked.",
             "enum": [
@@ -1300,28 +1304,85 @@
         ],
         "type": "object"
       },
+      "CalendarAccountEntry": {
+        "properties": {
+          "calendar_url": {
+            "description": "The calendar address of this account.",
+            "type": "string"
+          },
+          "email": {
+            "description": "The email address of this account.",
+            "type": "string"
+          },
+          "is_default": {
+            "description": "Whether this is the account new events land on.",
+            "type": "boolean"
+          },
+          "provider_key": {
+            "description": "The provider of this account, worked out from its address.",
+            "type": "string"
+          },
+          "state": {
+            "description": "Connected, not connected, connected but the saved sign-in no longer works, or saved but the server cannot be reached right now.",
+            "enum": [
+              "connected",
+              "not_connected",
+              "sign_in_stopped",
+              "not_working"
+            ],
+            "type": "string"
+          },
+          "username": {
+            "description": "The login name of this account; never the password.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "username",
+          "calendar_url",
+          "provider_key",
+          "state",
+          "is_default"
+        ],
+        "type": "object"
+      },
       "CalendarAccountStatus": {
         "properties": {
+          "accounts": {
+            "description": "Every connected account, in saved order.",
+            "items": {
+              "$ref": "#/components/schemas/CalendarAccountEntry"
+            },
+            "type": "array"
+          },
           "available": {
             "description": "Whether this instance has the Calendar connector at all; when false, no card is shown.",
             "type": "boolean"
           },
           "calendar_url": {
-            "description": "The calendar address of the connected account; null when none.",
+            "description": "The calendar address of the default account; null when none.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "default_address": {
+            "description": "The account new events land on; null when none is connected.",
             "type": [
               "string",
               "null"
             ]
           },
           "email": {
-            "description": "The email address of the connected account; null when none is connected.",
+            "description": "The email address of the default account; null when none is connected.",
             "type": [
               "string",
               "null"
             ]
           },
           "provider_key": {
-            "description": "The provider of the connected account, worked out from its address; the picker default otherwise.",
+            "description": "The provider of the default account, worked out from its address; the picker default otherwise.",
             "type": "string"
           },
           "providers": {
@@ -1342,7 +1403,7 @@
             "type": "string"
           },
           "username": {
-            "description": "The login name of the connected account; never the password.",
+            "description": "The login name of the default account; never the password.",
             "type": [
               "string",
               "null"
@@ -1356,6 +1417,8 @@
           "username",
           "calendar_url",
           "provider_key",
+          "accounts",
+          "default_address",
           "providers"
         ],
         "type": "object"
@@ -1455,6 +1518,17 @@
       "CancelSessionResponse": {
         "description": "Empty success body. HTTP 200 means the cancel request was accepted (or nothing was running).",
         "properties": {},
+        "type": "object"
+      },
+      "CancelTelegramPairingResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/TelegramAccountStatus"
+          }
+        },
+        "required": [
+          "data"
+        ],
         "type": "object"
       },
       "CapabilitiesData": {
@@ -1939,6 +2013,45 @@
         ],
         "type": "object"
       },
+      "CheckSkillWebsitesRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "description": "Path to the skill directory within the repository. Omit to use the repository root.",
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9._\\-/]+$",
+            "type": "string"
+          },
+          "ref": {
+            "description": "Git ref — branch name, tag, or commit SHA.",
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9._\\-/]+$",
+            "type": "string"
+          },
+          "url": {
+            "description": "Full HTTPS URL of a GitHub or GitLab repository.",
+            "minLength": 1,
+            "pattern": "^https:\\/\\/(github\\.com\\/[A-Za-z0-9._-]+\\/[A-Za-z0-9._-]+|gitlab\\.com\\/[A-Za-z0-9._-]+(?:\\/[A-Za-z0-9._-]+)+)(\\/|\\.git)?$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url",
+          "ref"
+        ],
+        "type": "object"
+      },
+      "CheckSkillWebsitesResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/SkillWebsites"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "ClientTimezoneInput": {
         "description": "IANA timezone name of the client (e.g. \"America/Los_Angeles\"), typically Intl.DateTimeFormat().resolvedOptions().timeZone from the browser. Used to report local time from get_current_datetime and in the ambient current-date context. An unrecognized name and an omitted field both fall back to UTC.",
         "minLength": 1,
@@ -2096,6 +2209,29 @@
         },
         "type": "object"
       },
+      "ConfirmTelegramPairingRequest": {
+        "properties": {
+          "code": {
+            "description": "The six-digit code the bot sent in Telegram after /start, typed to confirm the pairing.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "type": "object"
+      },
+      "ConfirmTelegramPairingResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/TelegramAccountStatus"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "ConfirmTextCodeRequest": {
         "properties": {
           "code": {
@@ -2132,6 +2268,30 @@
         "required": [
           "command_id",
           "timeout_ms"
+        ],
+        "type": "object"
+      },
+      "ConnectTelegramRequest": {
+        "properties": {
+          "token": {
+            "description": "The bot token from BotFather. Write-only: it is checked with Telegram, saved with the connection, and never returned.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "type": "object"
+      },
+      "ConnectTelegramResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/TelegramAccountStatus"
+          }
+        },
+        "required": [
+          "data"
         ],
         "type": "object"
       },
@@ -2615,6 +2775,17 @@
       "CreateSkillRequest": {
         "additionalProperties": false,
         "properties": {
+          "approved_websites": {
+            "description": "The websites the person approved with this skill, exactly as the website check listed them.",
+            "items": {
+              "description": "One exact site name the skill needs to reach.",
+              "maxLength": 253,
+              "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$",
+              "type": "string"
+            },
+            "maxItems": 20,
+            "type": "array"
+          },
           "manifest": {
             "$ref": "#/components/schemas/SkillManifest"
           }
@@ -2812,6 +2983,10 @@
         "type": "object"
       },
       "DeleteMemoryVaultEntryResponse": {
+        "properties": {},
+        "type": "object"
+      },
+      "DeleteMemoryVaultSummaryStatusResponse": {
         "properties": {},
         "type": "object"
       },
@@ -3028,7 +3203,8 @@
           "in_app",
           "web_push",
           "sms",
-          "call"
+          "call",
+          "telegram"
         ],
         "type": "string"
       },
@@ -3212,10 +3388,88 @@
         },
         "type": "object"
       },
-      "EmailAccountStatus": {
+      "EmailAccountEntry": {
         "properties": {
           "address": {
-            "description": "The connected account address; null when none is connected.",
+            "description": "The account address.",
+            "type": "string"
+          },
+          "imap_host": {
+            "description": "Incoming mail server.",
+            "type": "string"
+          },
+          "imap_mode": {
+            "description": "How the server is reached: direct TLS, or plain first and upgraded with STARTTLS.",
+            "enum": [
+              "ssl",
+              "starttls"
+            ],
+            "type": "string"
+          },
+          "imap_port": {
+            "description": "Incoming mail port.",
+            "type": "integer"
+          },
+          "is_default": {
+            "description": "Whether this is the account new mail goes out from.",
+            "type": "boolean"
+          },
+          "provider_key": {
+            "description": "The provider of this account, worked out from its servers.",
+            "type": "string"
+          },
+          "smtp_host": {
+            "description": "Outgoing mail server.",
+            "type": "string"
+          },
+          "smtp_mode": {
+            "description": "How the server is reached: direct TLS, or plain first and upgraded with STARTTLS.",
+            "enum": [
+              "ssl",
+              "starttls"
+            ],
+            "type": "string"
+          },
+          "smtp_port": {
+            "description": "Outgoing mail port.",
+            "type": "integer"
+          },
+          "state": {
+            "description": "Connected, not connected, connected but the saved sign-in no longer works, or saved but the server cannot be reached right now.",
+            "enum": [
+              "connected",
+              "not_connected",
+              "sign_in_stopped",
+              "not_working"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "address",
+          "provider_key",
+          "state",
+          "is_default",
+          "imap_host",
+          "imap_port",
+          "imap_mode",
+          "smtp_host",
+          "smtp_port",
+          "smtp_mode"
+        ],
+        "type": "object"
+      },
+      "EmailAccountStatus": {
+        "properties": {
+          "accounts": {
+            "description": "Every connected account, in saved order.",
+            "items": {
+              "$ref": "#/components/schemas/EmailAccountEntry"
+            },
+            "type": "array"
+          },
+          "address": {
+            "description": "The default account address; null when none is connected.",
             "type": [
               "string",
               "null"
@@ -3225,8 +3479,15 @@
             "description": "Whether this instance has the Email connector at all; when false, no card is shown.",
             "type": "boolean"
           },
+          "default_address": {
+            "description": "The account new mail goes out from; null when none is connected.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "provider_key": {
-            "description": "The provider of the connected account, worked out from its servers; the picker default otherwise.",
+            "description": "The provider of the default account, worked out from its servers; the picker default otherwise.",
             "type": "string"
           },
           "providers": {
@@ -3252,6 +3513,8 @@
           "state",
           "address",
           "provider_key",
+          "accounts",
+          "default_address",
           "providers"
         ],
         "type": "object"
@@ -4208,6 +4471,17 @@
         "properties": {
           "data": {
             "$ref": "#/components/schemas/Space"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "GetTelegramAccountResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/TelegramAccountStatus"
           }
         },
         "required": [
@@ -8307,15 +8581,50 @@
         ],
         "type": "object"
       },
+      "MemoryVaultSummaryFailureCause": {
+        "enum": [
+          "model_too_slow",
+          "model_error",
+          "model_not_found",
+          "answer_unusable",
+          "interrupted",
+          null
+        ],
+        "type": [
+          "string",
+          "null"
+        ]
+      },
       "MemoryVaultSummaryStatus": {
         "properties": {
+          "cause": {
+            "$ref": "#/components/schemas/MemoryVaultSummaryFailureCause"
+          },
+          "failed_at": {
+            "description": "When that summary failed, or null when none is owed or the time was not kept.",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "session_id": {
+            "description": "The chat whose summary failed, or null when none is owed or the chat was not kept.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "summary_pending": {
             "description": "True when the newest turn summary for this vault failed and has not been made yet.",
             "type": "boolean"
           }
         },
         "required": [
-          "summary_pending"
+          "summary_pending",
+          "failed_at",
+          "cause",
+          "session_id"
         ],
         "type": "object"
       },
@@ -9198,6 +9507,16 @@
             "maxItems": 8,
             "type": "array"
           },
+          "calendar_accounts": {
+            "description": "Calendar accounts this persona may use, by email address. Omitted means every connected account.",
+            "items": {
+              "maxLength": 320,
+              "minLength": 3,
+              "type": "string"
+            },
+            "maxItems": 16,
+            "type": "array"
+          },
           "created_at": {
             "format": "date-time",
             "type": "string"
@@ -9223,6 +9542,16 @@
             "maxLength": 2000,
             "minLength": 1,
             "type": "string"
+          },
+          "mail_accounts": {
+            "description": "Email accounts this persona may use, by address. Omitted means every connected account.",
+            "items": {
+              "maxLength": 320,
+              "minLength": 3,
+              "type": "string"
+            },
+            "maxItems": 16,
+            "type": "array"
           },
           "model_name": {
             "description": "Fully qualified model name (`provider/model`) selected when this persona is active.",
@@ -9334,6 +9663,16 @@
             "maxItems": 8,
             "type": "array"
           },
+          "calendar_accounts": {
+            "description": "Calendar accounts this persona may use, by email address. Omitted means every connected account.",
+            "items": {
+              "maxLength": 320,
+              "minLength": 3,
+              "type": "string"
+            },
+            "maxItems": 16,
+            "type": "array"
+          },
           "display_name": {
             "description": "Name shown in the UI and typed to invoke the persona.",
             "example": "Zara",
@@ -9346,6 +9685,16 @@
             "maxLength": 2000,
             "minLength": 1,
             "type": "string"
+          },
+          "mail_accounts": {
+            "description": "Email accounts this persona may use, by address. Omitted means every connected account.",
+            "items": {
+              "maxLength": 320,
+              "minLength": 3,
+              "type": "string"
+            },
+            "maxItems": 16,
+            "type": "array"
           },
           "model_name": {
             "description": "Fully qualified model name (`provider/model`) selected when this persona is active.",
@@ -9817,6 +10166,23 @@
         ],
         "default": "auto",
         "description": "Defaults to 'auto' (chain to session last turn). Use 'none' for a new root turn."
+      },
+      "ProcessTelegramUpdateRequest": {
+        "properties": {
+          "connection_id": {
+            "description": "The connection the update was polled for.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "update": {
+            "$ref": "#/components/schemas/TelegramUpdate"
+          }
+        },
+        "required": [
+          "connection_id",
+          "update"
+        ],
+        "type": "object"
       },
       "ProfileLearnedPersistedEvent": {
         "properties": {
@@ -10524,6 +10890,15 @@
         ],
         "type": "object"
       },
+      "RemoveCalendarAccountRequest": {
+        "properties": {
+          "address": {
+            "description": "The one account to remove, by its email address; without it, every connected account is removed.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "RemoveCalendarAccountResponse": {
         "properties": {
           "data": {
@@ -10533,6 +10908,15 @@
         "required": [
           "data"
         ],
+        "type": "object"
+      },
+      "RemoveEmailAccountRequest": {
+        "properties": {
+          "address": {
+            "description": "The one account to remove; without it, every connected account is removed.",
+            "type": "string"
+          }
+        },
         "type": "object"
       },
       "RemoveEmailAccountResponse": {
@@ -10550,6 +10934,17 @@
         "properties": {
           "data": {
             "$ref": "#/components/schemas/NotesFolderStatus"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "RemoveTelegramResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/TelegramAccountStatus"
           }
         },
         "required": [
@@ -12618,6 +13013,52 @@
         ],
         "type": "string"
       },
+      "SetDefaultCalendarAccountRequest": {
+        "properties": {
+          "address": {
+            "description": "The connected account to make the default, by its email address.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "address"
+        ],
+        "type": "object"
+      },
+      "SetDefaultCalendarAccountResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CalendarAccountStatus"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "SetDefaultEmailAccountRequest": {
+        "properties": {
+          "address": {
+            "description": "The connected account to make the default.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "address"
+        ],
+        "type": "object"
+      },
+      "SetDefaultEmailAccountResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/EmailAccountStatus"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "SetPackageDownloadsRequest": {
         "additionalProperties": false,
         "properties": {
@@ -12907,6 +13348,40 @@
           "display_name",
           "description",
           "version"
+        ],
+        "type": "object"
+      },
+      "SkillWebsites": {
+        "additionalProperties": false,
+        "properties": {
+          "can_send": {
+            "description": "True when one of the websites can send email or change a calendar.",
+            "type": "boolean"
+          },
+          "commit": {
+            "description": "The exact commit whose files were read.",
+            "type": "string"
+          },
+          "makes_up_addresses": {
+            "description": "True when the skill also builds web addresses while it runs, which cannot be read ahead of time.",
+            "type": "boolean"
+          },
+          "websites": {
+            "description": "The websites the skill sends requests to. Approving allows these.",
+            "items": {
+              "description": "One exact site name the skill needs to reach.",
+              "maxLength": 253,
+              "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$",
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "commit",
+          "websites",
+          "makes_up_addresses",
+          "can_send"
         ],
         "type": "object"
       },
@@ -13211,6 +13686,301 @@
             "type": "integer"
           }
         },
+        "type": "object"
+      },
+      "TelegramAccountStatus": {
+        "properties": {
+          "available": {
+            "description": "Whether this instance offers Telegram at all; when false, no card is shown.",
+            "type": "boolean"
+          },
+          "bot_name": {
+            "description": "The bot name Telegram shows; null when no bot is connected.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "bot_username": {
+            "description": "The bot username, without the @; null when no bot is connected.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "pairing_name": {
+            "description": "The name Telegram shows for the person waiting to pair, so they can be checked before pairing; null when nobody waits. The pairing code itself is never returned: the bot shows it only in Telegram.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "state": {
+            "$ref": "#/components/schemas/TelegramConnectionState"
+          }
+        },
+        "required": [
+          "available",
+          "state",
+          "bot_name",
+          "bot_username",
+          "pairing_name"
+        ],
+        "type": "object"
+      },
+      "TelegramCallbackQuery": {
+        "description": "A button tap, when this update is one.",
+        "properties": {
+          "data": {
+            "description": "The button payload the bot set.",
+            "type": "string"
+          },
+          "from": {
+            "$ref": "#/components/schemas/TelegramUser"
+          },
+          "id": {
+            "description": "Callback id, answered once so Telegram stops showing a spinner.",
+            "type": "string"
+          },
+          "message": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TelegramMessage"
+              },
+              {
+                "description": "The message the button belongs to, when Telegram sends it."
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "from"
+        ],
+        "type": "object"
+      },
+      "TelegramChat": {
+        "properties": {
+          "id": {
+            "description": "Telegram chat id.",
+            "type": "integer"
+          },
+          "type": {
+            "description": "private, group, supergroup or channel.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "type"
+        ],
+        "type": "object"
+      },
+      "TelegramConnectionState": {
+        "enum": [
+          "not_connected",
+          "awaiting_pairing",
+          "connected"
+        ],
+        "type": "string"
+      },
+      "TelegramDocument": {
+        "description": "The attached file, when the message carries one.",
+        "properties": {
+          "file_id": {
+            "description": "File id to fetch the document with.",
+            "type": "string"
+          },
+          "file_name": {
+            "description": "The name the sender gave the file.",
+            "type": "string"
+          },
+          "file_size": {
+            "description": "Size in bytes, when Telegram says.",
+            "type": "integer"
+          },
+          "file_unique_id": {
+            "description": "Stable file id across bots.",
+            "type": "string"
+          },
+          "mime_type": {
+            "description": "The file type, when Telegram says.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file_id"
+        ],
+        "type": "object"
+      },
+      "TelegramMessage": {
+        "description": "A new message, when this update is one.",
+        "properties": {
+          "caption": {
+            "description": "The caption on a photo or document, when there is one.",
+            "type": "string"
+          },
+          "caption_entities": {
+            "description": "Marked spans in the caption.",
+            "items": {
+              "$ref": "#/components/schemas/TelegramMessageEntity"
+            },
+            "type": "array"
+          },
+          "chat": {
+            "$ref": "#/components/schemas/TelegramChat"
+          },
+          "date": {
+            "description": "When it was sent, as a Unix time in seconds.",
+            "type": "integer"
+          },
+          "document": {
+            "$ref": "#/components/schemas/TelegramDocument"
+          },
+          "entities": {
+            "description": "Marked spans in the text.",
+            "items": {
+              "$ref": "#/components/schemas/TelegramMessageEntity"
+            },
+            "type": "array"
+          },
+          "forward_origin": {
+            "description": "Set when the message was forwarded from somewhere else; its presence marks the content untrusted."
+          },
+          "from": {
+            "$ref": "#/components/schemas/TelegramUser"
+          },
+          "message_id": {
+            "description": "Message id inside its chat.",
+            "type": "integer"
+          },
+          "photo": {
+            "description": "Photo sizes, smallest first, when the message is a photo.",
+            "items": {
+              "$ref": "#/components/schemas/TelegramPhotoSize"
+            },
+            "type": "array"
+          },
+          "text": {
+            "description": "The message text, when the message is text.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message_id",
+          "chat",
+          "date"
+        ],
+        "type": "object"
+      },
+      "TelegramMessageEntity": {
+        "properties": {
+          "length": {
+            "description": "How long the span is.",
+            "type": "integer"
+          },
+          "offset": {
+            "description": "Where the span starts in the text.",
+            "type": "integer"
+          },
+          "type": {
+            "description": "url, text_link, bot_command, mention, and the rest of Telegram’s kinds.",
+            "type": "string"
+          },
+          "url": {
+            "description": "The address a text_link points at, when Telegram sends it.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "offset",
+          "length"
+        ],
+        "type": "object"
+      },
+      "TelegramPhotoSize": {
+        "properties": {
+          "file_id": {
+            "description": "File id to fetch the photo with.",
+            "type": "string"
+          },
+          "file_size": {
+            "description": "Size in bytes, when Telegram says.",
+            "type": "integer"
+          },
+          "file_unique_id": {
+            "description": "Stable file id across bots.",
+            "type": "string"
+          },
+          "height": {
+            "description": "Height in pixels.",
+            "type": "integer"
+          },
+          "width": {
+            "description": "Width in pixels.",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "file_id"
+        ],
+        "type": "object"
+      },
+      "TelegramUpdate": {
+        "properties": {
+          "callback_query": {
+            "$ref": "#/components/schemas/TelegramCallbackQuery"
+          },
+          "message": {
+            "$ref": "#/components/schemas/TelegramMessage"
+          },
+          "update_id": {
+            "description": "Update id; the poll offset is the last one handled plus one.",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "update_id"
+        ],
+        "type": "object"
+      },
+      "TelegramUser": {
+        "description": "Who sent it; absent for channel posts.",
+        "properties": {
+          "first_name": {
+            "description": "First name, when Telegram sends one.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Telegram user id.",
+            "type": "integer"
+          },
+          "is_bot": {
+            "description": "True when the account is a bot.",
+            "type": "boolean"
+          },
+          "username": {
+            "description": "Username without the @, when the person has one.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "type": "object"
+      },
+      "TelegramWebhookUpdate": {
+        "additionalProperties": {},
+        "properties": {
+          "update_id": {
+            "description": "Update id; the rest of the update is checked by the handler.",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "update_id"
+        ],
         "type": "object"
       },
       "TestGoogleConnectionResponse": {
@@ -13658,6 +14428,23 @@
             "description": "True when a card carrying mail_new_recipients approves saving a draft rather than sending.",
             "type": "boolean"
           },
+          "mail_from": {
+            "description": "For a card on the Email connector: the account the message goes from. Otherwise null.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "mail_from_choices": {
+            "description": "For a card on the Email connector: every connected account the person could pick instead. Otherwise null.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "mail_new_recipients": {
             "description": "For a mail send to addresses not yet on the Email list: those addresses, lowercased. Otherwise null.",
             "items": {
@@ -13819,6 +14606,45 @@
             "description": "Short code for a send, repeated on its receipt; null for a draft.",
             "type": [
               "string",
+              "null"
+            ]
+          },
+          "forwards": {
+            "description": "The message a forward sends on, below the note in `body`; null when the message is not a forward.",
+            "properties": {
+              "attachments": {
+                "description": "Names of the files sent on with the message.",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "body": {
+                "description": "Text of the message being forwarded.",
+                "type": "string"
+              },
+              "from": {
+                "description": "Sender of the message being forwarded.",
+                "type": "string"
+              },
+              "subject": {
+                "description": "Subject of the message being forwarded.",
+                "type": "string"
+              },
+              "truncated": {
+                "description": "True when the text is longer than the part shown.",
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "from",
+              "subject",
+              "body",
+              "truncated",
+              "attachments"
+            ],
+            "type": [
+              "object",
               "null"
             ]
           },
@@ -14082,6 +14908,10 @@
       "Tier3Skill": {
         "description": "The skill a chat call adds, shown in full.",
         "properties": {
+          "can_send": {
+            "description": "True when one of the websites can send email or change a calendar.",
+            "type": "boolean"
+          },
           "description": {
             "description": "What the skill is for, as the skill itself says.",
             "type": "string"
@@ -14092,6 +14922,10 @@
               "string",
               "null"
             ]
+          },
+          "makes_up_addresses": {
+            "description": "True when the skill also builds web addresses while it runs, which cannot be read ahead of time.",
+            "type": "boolean"
           },
           "name": {
             "description": "Skill name.",
@@ -14108,6 +14942,13 @@
           "version": {
             "description": "The exact commit that is added. A later change to the repository is not picked up.",
             "type": "string"
+          },
+          "websites": {
+            "description": "The websites the skill sends requests to, as the host found them in its files. Approving allows these.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           }
         },
         "required": [
@@ -14124,10 +14965,11 @@
         ]
       },
       "Tier3SkillNetworkReason": {
-        "description": "Why the card is asked: the skill’s first use, or a site it did not declare.",
+        "description": "Why the card is asked: the skill’s first use, a site it did not declare, or its code changed since it was approved.",
         "enum": [
           "first_use",
-          "undeclared_host"
+          "undeclared_host",
+          "code_changed"
         ],
         "type": "string"
       },
@@ -16802,6 +17644,17 @@
       "UpdateSkillRequest": {
         "additionalProperties": false,
         "properties": {
+          "approved_websites": {
+            "description": "The websites the person approved with this skill, exactly as the website check listed them.",
+            "items": {
+              "description": "One exact site name the skill needs to reach.",
+              "maxLength": 253,
+              "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$",
+              "type": "string"
+            },
+            "maxItems": 20,
+            "type": "array"
+          },
           "manifest": {
             "$ref": "#/components/schemas/SkillManifest"
           }
@@ -18082,6 +18935,93 @@
           "sessions"
         ],
         "x-fern-sdk-method-name": "get_or_create_by_external_id"
+      }
+    },
+    "/api/internal/telegram/updates": {
+      "post": {
+        "description": "Handles one update the controller polled for a connection: a message becomes a turn, a button tap answers an approval. Called only with the service credential.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProcessTelegramUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "The update was handled, or there was nothing in it to handle."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid service credential."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The connection is not there."
+          }
+        },
+        "summary": "Process one Telegram update",
+        "tags": [
+          "Internal"
+        ],
+        "x-fern-sdk-group-name": [
+          "internal",
+          "telegram"
+        ],
+        "x-fern-sdk-method-name": "process_update"
+      }
+    },
+    "/api/telegram/webhook": {
+      "post": {
+        "description": "The address Telegram posts updates to when a public https address is configured. The secret Telegram was given at setup must ride the call, or it is refused. An update in a shape this build cannot read is dropped with the same success answer, so Telegram does not keep retrying it.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TelegramWebhookUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "The update was handled, dropped as unreadable, or there was nothing in it to handle."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The call did not carry the webhook secret."
+          }
+        },
+        "summary": "Receive one Telegram webhook update",
+        "tags": [
+          "Internal"
+        ],
+        "x-fern-sdk-group-name": [
+          "telegram"
+        ],
+        "x-fern-sdk-method-name": "webhook"
       }
     },
     "/api/v1/agents": {
@@ -21187,6 +22127,73 @@
       }
     },
     "/api/v1/memory/vault/summary-status": {
+      "delete": {
+        "description": "Put away the note that one vault namespace is owed a turn summary. Nothing in memory changes, and a later failed summary shows the note again.",
+        "parameters": [
+          {
+            "description": "Vault namespace: omit for the shared vault, `persona:<name>` for a persona vault, else a topic name.",
+            "in": "query",
+            "name": "namespace",
+            "required": false,
+            "schema": {
+              "description": "Vault namespace: omit for the shared vault, `persona:<name>` for a persona vault, else a topic name.",
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteMemoryVaultSummaryStatusResponse"
+                }
+              }
+            },
+            "description": "The note is put away."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid namespace."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The vault operation failed."
+          }
+        },
+        "summary": "Dismiss a failed turn summary",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "memory",
+          "vault"
+        ],
+        "x-fern-sdk-method-name": "dismiss_summary_status"
+      },
       "get": {
         "description": "Say whether one vault namespace is still owed a turn summary after a failed attempt.",
         "parameters": [
@@ -28327,7 +29334,17 @@
                 }
               }
             },
-            "description": "A skill with this name already exists."
+            "description": "A skill with this name already exists, or its websites are not the approved list."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The skill's files could not be read to check its websites."
           },
           "424": {
             "content": {
@@ -28383,6 +29400,26 @@
             },
             "description": "Invalid request body."
           },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "A new skill whose websites are not the approved list."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The skill's files could not be read to check its websites."
+          },
           "424": {
             "content": {
               "application/json": {
@@ -28403,6 +29440,62 @@
           "skills"
         ],
         "x-fern-sdk-method-name": "create_or_update"
+      }
+    },
+    "/api/v1/settings/skills/check-websites": {
+      "post": {
+        "description": "Reads every file of a git skill and lists the websites it sends requests to. Nothing is saved. Approve the list when adding the skill.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CheckSkillWebsitesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckSkillWebsitesResponse"
+                }
+              }
+            },
+            "description": "The websites the skill sends requests to."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request body."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The skill's files could not be read, or it uses too many websites."
+          }
+        },
+        "summary": "Check a skill's websites",
+        "tags": [
+          "Skills"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "skills"
+        ],
+        "x-fern-sdk-method-name": "check_websites"
       }
     },
     "/api/v1/settings/skills/{name}": {
@@ -28702,7 +29795,7 @@
         "x-fern-sdk-method-name": "delete_network_allowed_host"
       },
       "put": {
-        "description": "Allows one site for the skill on its own, apart from the declared list approval.",
+        "description": "Allows one site for the skill on its own, apart from the declared list approval. On a skill with no approval yet, the allowance is bound to the skill's code as it stands, and a code version that cannot be read refuses it.",
         "parameters": [
           {
             "in": "path",
@@ -28753,6 +29846,16 @@
               }
             },
             "description": "No skill with this name"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The skill's code version could not be read, so nothing was stored."
           },
           "424": {
             "content": {
@@ -31473,7 +32576,17 @@
     },
     "/api/v1/user/settings/calendar": {
       "delete": {
-        "description": "Deletes the saved account and its app password from the sidecar for good.",
+        "description": "Deletes the named account and its app password from the sidecar for good, or every account when the body names none.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RemoveCalendarAccountRequest"
+              }
+            }
+          },
+          "required": false
+        },
         "responses": {
           "200": {
             "content": {
@@ -31601,9 +32714,85 @@
         "x-fern-sdk-method-name": "save_account"
       }
     },
+    "/api/v1/user/settings/calendar/default": {
+      "post": {
+        "description": "Makes the named connected account the default. Naming an account that is not connected changes nothing.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetDefaultCalendarAccountRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetDefaultCalendarAccountResponse"
+                }
+              }
+            },
+            "description": "The default account is set."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The named account is not connected."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The caller is not an admin, or the request did not come from this app, so nothing was done."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The calendar connector could not be reached."
+          }
+        },
+        "summary": "Set the default calendar account",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "calendar"
+        ],
+        "x-fern-sdk-method-name": "set_default_account"
+      }
+    },
     "/api/v1/user/settings/calendar/status": {
       "get": {
-        "description": "Returns whether a calendar account is connected, its email, login and calendar address, and the provider table for the picker. The app password is never returned.",
+        "description": "Returns whether a calendar account is connected, its accounts and the default among them, and the provider table for the picker. The app password is never returned.",
         "responses": {
           "200": {
             "content": {
@@ -31659,7 +32848,17 @@
     },
     "/api/v1/user/settings/email": {
       "delete": {
-        "description": "Deletes the saved account and its app password from the sidecar for good.",
+        "description": "Deletes the named account and its app password from the sidecar for good, or every account when the body names none.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RemoveEmailAccountRequest"
+              }
+            }
+          },
+          "required": false
+        },
         "responses": {
           "200": {
             "content": {
@@ -31787,9 +32986,85 @@
         "x-fern-sdk-method-name": "save_account"
       }
     },
+    "/api/v1/user/settings/email/default": {
+      "post": {
+        "description": "Makes the named connected account the default. Naming an account that is not connected changes nothing.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetDefaultEmailAccountRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetDefaultEmailAccountResponse"
+                }
+              }
+            },
+            "description": "The default account is set."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The named account is not connected."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The caller is not an admin, or the request did not come from this app, so nothing was done."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The email connector could not be reached."
+          }
+        },
+        "summary": "Set the default email account",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "email"
+        ],
+        "x-fern-sdk-method-name": "set_default_account"
+      }
+    },
     "/api/v1/user/settings/email/status": {
       "get": {
-        "description": "Returns whether an email account is connected, its address and provider, and the provider table for the picker. The app password is never returned.",
+        "description": "Returns whether an email account is connected, its accounts and the default among them, and the provider table for the picker. The app password is never returned.",
         "responses": {
           "200": {
             "content": {
@@ -32466,6 +33741,294 @@
           "personalization"
         ],
         "x-fern-sdk-method-name": "update_sentinel_settings"
+      }
+    },
+    "/api/v1/user/settings/telegram": {
+      "delete": {
+        "description": "Removes the bot, its token and its pairing for good. Messages to the bot are no longer answered.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RemoveTelegramResponse"
+                }
+              }
+            },
+            "description": "The bot is disconnected."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The caller is not an admin, or the request did not come from this app, so nothing was done."
+          }
+        },
+        "summary": "Disconnect the Telegram bot",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "telegram"
+        ],
+        "x-fern-sdk-method-name": "remove"
+      },
+      "post": {
+        "description": "Checks the bot token with Telegram first and saves the connection only when it passes. The token is stored with the connection and never returned.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConnectTelegramRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectTelegramResponse"
+                }
+              }
+            },
+            "description": "The bot is connected and waiting to be paired."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Telegram refused the token."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The caller is not an admin, or the request did not come from this app, so nothing was done."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Telegram could not be reached."
+          }
+        },
+        "summary": "Connect a Telegram bot",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "telegram"
+        ],
+        "x-fern-sdk-method-name": "connect"
+      }
+    },
+    "/api/v1/user/settings/telegram/cancel-pairing": {
+      "post": {
+        "description": "Drops the pairing that is waiting, without pairing anyone, so a /start from someone else can be refused. The person can send /start again to start over.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CancelTelegramPairingResponse"
+                }
+              }
+            },
+            "description": "No pairing is waiting now."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "No bot is connected."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The caller is not an admin, or the request did not come from this app, so nothing was done."
+          }
+        },
+        "summary": "Cancel a waiting Telegram pairing",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "telegram"
+        ],
+        "x-fern-sdk-method-name": "cancel_pairing"
+      }
+    },
+    "/api/v1/user/settings/telegram/confirm": {
+      "post": {
+        "description": "Pairs the person who sent /start to the bot, when the code they type matches the code the bot sent them in Telegram. Only that person can then talk to the bot.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmTelegramPairingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfirmTelegramPairingResponse"
+                }
+              }
+            },
+            "description": "The pairing is confirmed."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "No code is waiting, it has expired, or the code does not match."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The caller is not an admin, or the request did not come from this app, so nothing was done."
+          }
+        },
+        "summary": "Confirm a Telegram pairing",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "telegram"
+        ],
+        "x-fern-sdk-method-name": "confirm_pairing"
+      }
+    },
+    "/api/v1/user/settings/telegram/status": {
+      "get": {
+        "description": "Returns whether a bot is connected, its name, where pairing stands, and the name of the person waiting to pair while one waits. The bot token and the pairing code are never returned: the code is shown only in Telegram.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetTelegramAccountResponse"
+                }
+              }
+            },
+            "description": "The Telegram status."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The caller is not an admin, or the request did not come from this app, so nothing was done."
+          }
+        },
+        "summary": "Get the Telegram bot status",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "telegram"
+        ],
+        "x-fern-sdk-method-name": "get_status"
       }
     },
     "/api/v1/voice/connect": {

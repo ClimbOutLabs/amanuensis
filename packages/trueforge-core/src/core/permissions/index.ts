@@ -60,7 +60,7 @@ export {
   withoutRelaxations,
 } from './context';
 export type { SentinelCallIdentity, SentinelHostContext, SentinelServices } from './context';
-export { SANDBOX_FILE_WRITE_TOOLS, verifyPreDispatch } from './dispatch';
+export { verifyPreDispatch } from './dispatch';
 export type { DispatchCheckContext, VerifiableCall } from './dispatch';
 export { extractCardFields, genericExtractor } from './extractorRegistry';
 export type { CardFieldExtractor, ExtractedCardFields, ExtractionResult } from './extractorRegistry';

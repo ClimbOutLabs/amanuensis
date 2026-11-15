@@ -15,7 +15,7 @@ export class CurrentDateTime extends LocalToolMCP {
   readonly name = CURRENT_DATETIME_SERVER_ID;
   readonly displayName = 'CurrentDateTime';
 
-  /** IANA zone name from the client (AgentDefinition.clientTimezone); undefined falls back to UTC. */
+  /** The person's IANA zone (AgentDefinition.clientTimezone); undefined falls back to UTC. */
   #timezone: string | undefined;
 
   constructor(tracing: AgentTracing, timezone?: string) {
@@ -28,8 +28,8 @@ export class CurrentDateTime extends LocalToolMCP {
       name: GET_CURRENT_DATETIME_TOOL_NAME,
       requiresNetwork: false,
       description:
-        'Returns the current datetime. Reports the local date, weekday, time, IANA zone and UTC offset when the ' +
-        "client's timezone is known, and always also reports UTC in ISO-8601 and unix epoch MS format.",
+        "Returns the current date, weekday and time in the person's own time zone, with the IANA zone and its UTC " +
+        'offset. When their zone is not known the answer is in UTC and says so. Also reports unix epoch MS.',
       schema: inputSchema,
       annotations: { readOnlyHint: true, openWorldHint: false },
       handler: () => Promise.resolve(this.getCurrentDateTime()),
@@ -40,27 +40,22 @@ export class CurrentDateTime extends LocalToolMCP {
     return this.tools;
   }
 
-  // Date.prototype.toISOString() is spec-guaranteed to return UTC (suffix 'Z').
   // Date.prototype.getTime() returns UTC epoch ms regardless of process timezone.
   private getCurrentDateTime(): CallToolResponse {
     const now = new Date();
     const local = resolveLocalTime(now, this.#timezone);
+    // One date and one time only. A second, UTC, date next to the person's own is read as today from late
+    // afternoon in the Americas, when the UTC day is already tomorrow. The offset still fixes the instant.
     const payload = {
-      // Local time first: this is what a user asking "what time is it" means. Falls back to UTC
-      // (isFallback: true) when the client did not send a timezone.
-      local: {
-        date: local.date,
-        // Stated so the model never has to work out the day of the week itself.
-        weekday: weekdayNameOf(local.date),
-        time: local.time,
-        zone: local.zone,
-        utcOffset: local.utcOffset,
-        isFallback: local.isFallback,
-      },
-      utc: {
-        iso: now.toISOString(),
-        unixEpochMS: now.getTime(),
-      },
+      date: local.date,
+      // Stated so the model never has to work out the day of the week itself.
+      weekday: weekdayNameOf(local.date),
+      time: local.time,
+      zone: local.zone,
+      utcOffset: local.utcOffset,
+      // False when no zone is known for the person, so the date and time above are UTC and not their own.
+      zoneIsThePersons: !local.isFallback,
+      unixEpochMS: now.getTime(),
     };
     return toolResultResponse({ text: JSON.stringify(payload) });
   }

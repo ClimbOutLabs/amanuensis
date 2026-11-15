@@ -118,6 +118,10 @@
       "set": "install",
       "tests": ["installer/tests/lib/look.test.sh"]
     },
+    "command:local-model": {
+      "set": "install",
+      "tests": []
+    },
     "command:migrate": {
       "set": "install",
       "tests": []
@@ -144,7 +148,7 @@
     },
     "command:status": {
       "set": "install",
-      "tests": []
+      "tests": ["installer/tests/lib/network.test.sh"]
     },
     "command:uninstall": {
       "set": "install",
@@ -424,6 +428,10 @@
     "route:spaceFolder": {
       "set": "spaces",
       "tests": []
+    },
+    "route:telegram": {
+      "set": "reach",
+      "tests": ["packages/frontend/tests/settingsPanels.browser.test.ts"]
     },
     "route:text": {
       "set": "reach",
@@ -783,13 +791,13 @@
     "command:backup",
     "command:backups",
     "command:import",
+    "command:local-model",
     "command:migrate",
     "command:network",
     "command:open",
     "command:password",
     "command:restore",
     "command:setup",
-    "command:status",
     "command:uninstall",
     "command:verify",
     "command:version",

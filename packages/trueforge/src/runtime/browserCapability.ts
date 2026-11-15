@@ -132,6 +132,10 @@ export const LiveCopyReplySchema = z.discriminatedUnion('status', [
   z.object({ status: z.literal('password') }),
   ClosedReplySchema,
 ]);
+export const LiveCloseReplySchema = z.discriminatedUnion('status', [
+  z.object({ status: z.literal('ok') }),
+  ClosedReplySchema,
+]);
 export const LiveTakeoverReplySchema = z.discriminatedUnion('status', [
   z.object({ status: z.literal('ok'), takeover: z.boolean() }),
   z.object({ status: z.literal('bad_input') }),

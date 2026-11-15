@@ -28,6 +28,7 @@ services:
 @@IF_CALENDAR@@      - calendar
 @@IF_EMAIL@@      - mail
 @@IF_BROWSER@@      - browser-control
+@@IF_LOCAL_MODEL@@      - local-model
     restart: unless-stopped
 
   # Carries the app's speech requests to the shared speech services and nothing else: speech-to-text on 8001, the voice
@@ -113,6 +114,68 @@ services:
     # Above the app's graceful shutdown window so a kill does not cut off turn drain.
     stop_grace_period: 35s
     restart: unless-stopped
+
+@@IF_LOCAL_MODEL@@  # The local model bridge: carries the app's model requests to a model server on this computer, at the ports its owner
+@@IF_LOCAL_MODEL@@  # named with aman local-model. This host side dials the model and listens only on socket files in a volume it shares
+@@IF_LOCAL_MODEL@@  # with the link side below, never on a network port, so nothing else reaches the model through it.
+@@IF_LOCAL_MODEL@@  local-model-host:
+@@IF_LOCAL_MODEL@@    image: @@APP_IMAGE@@
+@@IF_LOCAL_MODEL@@    pull_policy: never
+@@IF_LOCAL_MODEL@@    init: true
+@@IF_LOCAL_MODEL@@    user: '10001:10001'
+@@IF_LOCAL_MODEL@@    entrypoint: ['node', '/usr/local/lib/aman/local-model-bridge.mjs']
+@@IF_LOCAL_MODEL@@    environment:
+@@IF_LOCAL_MODEL@@      LOCAL_MODEL_SIDE: host
+@@IF_LOCAL_MODEL@@      LOCAL_MODEL_PORTS: '@@LOCAL_MODEL_PORTS@@'
+@@IF_LOCAL_MODEL@@      LOCAL_MODEL_TARGET: '@@LOCAL_MODEL_TARGET@@'
+@@IF_LOCAL_MODEL_HOSTNET@@    # Docker runs on this computer itself, so this side shares its network to reach a model that listens on 127.0.0.1.
+@@IF_LOCAL_MODEL_HOSTNET@@    network_mode: host
+@@IF_LOCAL_MODEL_DESKTOP@@    # Docker Desktop reaches a model on this computer at host.docker.internal, from a network of this side's own.
+@@IF_LOCAL_MODEL_DESKTOP@@    networks:
+@@IF_LOCAL_MODEL_DESKTOP@@      - local-model-egress
+@@IF_LOCAL_MODEL_DESKTOP@@    extra_hosts:
+@@IF_LOCAL_MODEL_DESKTOP@@      - 'host.docker.internal:host-gateway'
+@@IF_LOCAL_MODEL@@    volumes:
+@@IF_LOCAL_MODEL@@      - ./local-model-bridge.mjs:/usr/local/lib/aman/local-model-bridge.mjs:ro
+@@IF_LOCAL_MODEL@@      - local-model-sockets:/run/aman-local-model
+@@IF_LOCAL_MODEL@@    cap_drop:
+@@IF_LOCAL_MODEL@@      - ALL
+@@IF_LOCAL_MODEL@@    security_opt:
+@@IF_LOCAL_MODEL@@      - no-new-privileges:true
+@@IF_LOCAL_MODEL@@    read_only: true
+@@IF_LOCAL_MODEL@@    mem_limit: 64m
+@@IF_LOCAL_MODEL@@    pids_limit: 64
+@@IF_LOCAL_MODEL@@    restart: unless-stopped
+
+@@IF_LOCAL_MODEL@@  # The link side: answers the app at aman-local-model on a network only the app's network holder shares, and passes
+@@IF_LOCAL_MODEL@@  # each connection to the host side's socket file.
+@@IF_LOCAL_MODEL@@  local-model-link:
+@@IF_LOCAL_MODEL@@    image: @@APP_IMAGE@@
+@@IF_LOCAL_MODEL@@    pull_policy: never
+@@IF_LOCAL_MODEL@@    init: true
+@@IF_LOCAL_MODEL@@    user: '10001:10001'
+@@IF_LOCAL_MODEL@@    entrypoint: ['node', '/usr/local/lib/aman/local-model-bridge.mjs']
+@@IF_LOCAL_MODEL@@    environment:
+@@IF_LOCAL_MODEL@@      LOCAL_MODEL_SIDE: link
+@@IF_LOCAL_MODEL@@      LOCAL_MODEL_PORTS: '@@LOCAL_MODEL_PORTS@@'
+@@IF_LOCAL_MODEL@@    networks:
+@@IF_LOCAL_MODEL@@      local-model:
+@@IF_LOCAL_MODEL@@        aliases:
+@@IF_LOCAL_MODEL@@          - aman-local-model
+@@IF_LOCAL_MODEL@@    volumes:
+@@IF_LOCAL_MODEL@@      - ./local-model-bridge.mjs:/usr/local/lib/aman/local-model-bridge.mjs:ro
+@@IF_LOCAL_MODEL@@      - local-model-sockets:/run/aman-local-model
+@@IF_LOCAL_MODEL@@    depends_on:
+@@IF_LOCAL_MODEL@@      local-model-host:
+@@IF_LOCAL_MODEL@@        condition: service_started
+@@IF_LOCAL_MODEL@@    cap_drop:
+@@IF_LOCAL_MODEL@@      - ALL
+@@IF_LOCAL_MODEL@@    security_opt:
+@@IF_LOCAL_MODEL@@      - no-new-privileges:true
+@@IF_LOCAL_MODEL@@    read_only: true
+@@IF_LOCAL_MODEL@@    mem_limit: 64m
+@@IF_LOCAL_MODEL@@    pids_limit: 64
+@@IF_LOCAL_MODEL@@    restart: unless-stopped
 
 @@IF_TLS@@  # Serves the app over https on the addresses of this computer, with a certificate from its own authority, and sends the
 @@IF_TLS@@  # plain port to https. It shares the network of the app, so the app is never reachable except through it.
@@ -368,6 +431,11 @@ volumes:
 @@IF_BROWSER@@    name: aman_@@NAME@@_browser_profiles
 @@IF_BROWSER@@    labels:
 @@IF_BROWSER@@      com.amanuensis.instance: @@NAME@@
+@@IF_LOCAL_MODEL@@  # The local model bridge's socket files. Holds no data.
+@@IF_LOCAL_MODEL@@  local-model-sockets:
+@@IF_LOCAL_MODEL@@    name: aman_@@NAME@@_local_model
+@@IF_LOCAL_MODEL@@    labels:
+@@IF_LOCAL_MODEL@@      com.amanuensis.instance: @@NAME@@
 @@IF_SANDBOX@@  # Created by the slots project, which the installer starts before this one.
 @@IF_SANDBOX@@  slot_ctl_1:
 @@IF_SANDBOX@@    name: @@NAME@@_slot_ctl_1
@@ -405,3 +473,8 @@ networks:
 @@IF_BROWSER@@    internal: true
 @@IF_BROWSER@@  # The gateway's own way out to the internet. Nothing else is on it.
 @@IF_BROWSER@@  browser-egress: {}
+@@IF_LOCAL_MODEL@@  # The app's network holder and the local model bridge's link side only. Internal: it has no way out.
+@@IF_LOCAL_MODEL@@  local-model:
+@@IF_LOCAL_MODEL@@    internal: true
+@@IF_LOCAL_MODEL_DESKTOP@@  # The bridge's host side alone, for its calls to the model at host.docker.internal under Docker Desktop.
+@@IF_LOCAL_MODEL_DESKTOP@@  local-model-egress: {}

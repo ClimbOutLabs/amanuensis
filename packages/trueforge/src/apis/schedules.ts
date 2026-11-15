@@ -76,6 +76,7 @@ import {
   putScheduleToolsRoute,
 } from '../routes/scheduleRoutes';
 import type { ActiveTurnRegistry } from '../runtime/activeTurns';
+import { deliverBriefReady, isBriefRun } from '../runtime/briefDelivery';
 import {
   chatAssistantAgentName,
   ChatAssistantUnavailableError,
@@ -287,6 +288,16 @@ export async function startScheduleRunOnRequest<TTransaction>(params: {
     // Nobody watches a scheduled run, so it holds what would ask instead of stopping at a card.
     unattended: true,
     withheldTools: scheduleWithheldTools({ name: item.schedule.name, task: item.schedule.manifest.task }),
+    onFinishedAnswer: isBriefRun(item)
+      ? answer =>
+          deliverBriefReady({
+            item,
+            session_id: prepared.session.session_id,
+            answer,
+            deliveries: deps.deliveryService,
+            logger: deps.logger,
+          })
+      : undefined,
     deps: {
       mcpCatalog: deps.mcpCatalog,
       activeTurns: deps.activeTurns,

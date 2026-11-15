@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import {
   CurrentDateTime,
   GET_CURRENT_DATETIME_TOOL_NAME,
@@ -5,12 +6,18 @@ import {
 import { isCallToolResponseResult } from '../../../../src/core/mcp/IMCPServer';
 import { NOOP_AGENT_TRACING } from '../../../../src/core/tracing/NoopAgentTracing';
 
-interface DateTimePayload {
-  local: { date: string; weekday: string; time: string; zone: string; utcOffset: string; isFallback: boolean };
-  utc: { iso: string; unixEpochMS: number };
-}
+const DateTimePayloadSchema = z.object({
+  date: z.string(),
+  weekday: z.string(),
+  time: z.string(),
+  zone: z.string(),
+  utcOffset: z.string(),
+  zoneIsThePersons: z.boolean(),
+  unixEpochMS: z.number(),
+});
+type DateTimePayload = z.infer<typeof DateTimePayloadSchema>;
 
-async function callGetCurrentDateTime(tool: CurrentDateTime): Promise<DateTimePayload> {
+async function answerText(tool: CurrentDateTime): Promise<string> {
   const response = await tool.callTool({ name: GET_CURRENT_DATETIME_TOOL_NAME, arguments: {} });
   if (!isCallToolResponseResult(response)) {
     throw new Error('Expected a resolved call_tool response');
@@ -19,7 +26,11 @@ async function callGetCurrentDateTime(tool: CurrentDateTime): Promise<DateTimePa
   if (first === undefined || first.type !== 'text') {
     throw new Error('Expected text content');
   }
-  return JSON.parse(first.text) as DateTimePayload;
+  return first.text;
+}
+
+async function callGetCurrentDateTime(tool: CurrentDateTime): Promise<DateTimePayload> {
+  return DateTimePayloadSchema.parse(JSON.parse(await answerText(tool)));
 }
 
 describe('CurrentDateTime', () => {
@@ -27,21 +38,21 @@ describe('CurrentDateTime', () => {
     const tool = new CurrentDateTime(NOOP_AGENT_TRACING);
     const payload = await callGetCurrentDateTime(tool);
 
-    expect(payload.local.isFallback).toBe(true);
-    expect(payload.local.zone).toBe('UTC');
-    expect(payload.utc.iso.endsWith('Z')).toBe(true);
-    expect(typeof payload.utc.unixEpochMS).toBe('number');
+    expect(payload.zoneIsThePersons).toBe(false);
+    expect(payload.zone).toBe('UTC');
+    expect(payload.utcOffset).toBe('+00:00');
+    expect(typeof payload.unixEpochMS).toBe('number');
   });
 
   it('reports local date/time/zone/offset for a real timezone', async () => {
     const tool = new CurrentDateTime(NOOP_AGENT_TRACING, 'America/Los_Angeles');
     const payload = await callGetCurrentDateTime(tool);
 
-    expect(payload.local.isFallback).toBe(false);
-    expect(payload.local.zone).toBe('America/Los_Angeles');
-    expect(payload.local.utcOffset).toMatch(/^[+-]\d{2}:\d{2}$/);
-    expect(payload.local.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
-    expect(payload.local.time).toMatch(/^\d{2}:\d{2}:\d{2}$/);
+    expect(payload.zoneIsThePersons).toBe(true);
+    expect(payload.zone).toBe('America/Los_Angeles');
+    expect(payload.utcOffset).toMatch(/^[+-]\d{2}:\d{2}$/);
+    expect(payload.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(payload.time).toMatch(/^\d{2}:\d{2}:\d{2}$/);
   });
 
   it('names the local weekday of the local date', async () => {
@@ -49,8 +60,30 @@ describe('CurrentDateTime', () => {
     try {
       // Friday in UTC, still Thursday evening in Los Angeles.
       const payload = await callGetCurrentDateTime(new CurrentDateTime(NOOP_AGENT_TRACING, 'America/Los_Angeles'));
-      expect(payload.local.date).toBe('2026-11-12');
-      expect(payload.local.weekday).toBe('Thursday');
+      expect(payload.date).toBe('2026-11-12');
+      expect(payload.weekday).toBe('Thursday');
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('never shows the UTC day next to the person’s own, when it is already tomorrow in UTC', async () => {
+    // 4:01 PM on a Saturday in Los Angeles is one minute into Sunday in UTC.
+    jest.useFakeTimers({ now: new Date('2026-11-15T00:01:00Z') });
+    try {
+      const tool = new CurrentDateTime(NOOP_AGENT_TRACING, 'America/Los_Angeles');
+      const text = await answerText(tool);
+      expect(await callGetCurrentDateTime(tool)).toEqual({
+        date: '2026-11-14',
+        weekday: 'Saturday',
+        time: '16:01:00',
+        zone: 'America/Los_Angeles',
+        utcOffset: '-08:00',
+        zoneIsThePersons: true,
+        unixEpochMS: Date.parse('2026-11-15T00:01:00Z'),
+      });
+      expect(text).not.toContain('2026-11-15');
+      expect(text).not.toContain('Sunday');
     } finally {
       jest.useRealTimers();
     }
@@ -60,7 +93,7 @@ describe('CurrentDateTime', () => {
     const tool = new CurrentDateTime(NOOP_AGENT_TRACING, 'Not/A_Zone');
     const payload = await callGetCurrentDateTime(tool);
 
-    expect(payload.local.isFallback).toBe(true);
-    expect(payload.local.zone).toBe('UTC');
+    expect(payload.zoneIsThePersons).toBe(false);
+    expect(payload.zone).toBe('UTC');
   });
 });

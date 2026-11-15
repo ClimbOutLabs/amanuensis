@@ -62,6 +62,15 @@ import { createAvailableSkillsRouter, type ResolveSkillStore } from './apis/skil
 import { createSpaceFolderAssignmentsRouter, createSpaceFoldersRouter } from './apis/spaceFolders';
 import { createSpacePicturesRouter } from './apis/spacePictures';
 import { createSpacesRouter } from './apis/spaces';
+import {
+  createTelegramExecutionRouter,
+  createTelegramSettingsRouter,
+  createTelegramWebhookRouter,
+  createTelegramWebhookSecretMiddleware,
+  TELEGRAM_SETTINGS_BASE_PATH,
+  TELEGRAM_WEBHOOK_BASE_PATH,
+  type TelegramTurnExecutionDeps,
+} from './apis/telegram';
 import { createTextNumberRouter } from './apis/textNumber';
 import { createTodayRouter } from './apis/today';
 import { createTurnsRouter } from './apis/turns';
@@ -120,6 +129,7 @@ import type { SessionCustom, TurnCustom } from './db/sessionCustom';
 import type { ISessionMetricsStore } from './db/sessionMetricsStore';
 import type { ISkillStore } from './db/skillStore';
 import type { ISpaceStore } from './db/spaceStore';
+import type { ITelegramStore } from './db/telegramStore';
 import type { ITextContactStore } from './db/textContactStore';
 import type { WithTransaction } from './db/transaction';
 import type { ITurnArtifactStore } from './db/turnArtifactStore';
@@ -150,10 +160,13 @@ import type { ChannelViewer } from './runtime/noticing/reachChannels';
 import type { ReminderReach } from './runtime/noticing/reminderReach';
 import { resolveSandboxProvider } from './runtime/sessionResources';
 import { createSpacePictureService } from './runtime/spacePictures/spacePictureService';
+import type { TelegramSendQueue } from './runtime/telegram/telegramSendQueue';
+import type { TelegramService } from './runtime/telegram/telegramService';
 import type { TextNumberService } from './runtime/texts/textNumber';
 import { TokenFactoryDailyCapError, type TokenFactoryBudget } from './runtime/tokenFactoryBudget';
 import { envManagedModelProviderNames } from './runtime/tokenFactoryProvider';
 import type { TurnDrainRegistry } from './runtime/turnDrains';
+import type { TurnTimezone } from './runtime/turnTimezone';
 import type { ReachAvailability } from './schemas/reach';
 import { InvalidCronError } from './schemas/schedule';
 import { TENANT_ID } from './tenancy';
@@ -336,9 +349,17 @@ export interface ServerDeps<TTransaction> {
   recallExclusionStore: IRecallExclusionStore;
   deliveryStore: IDeliveryStore;
   pushSubscriptionStore: IPushSubscriptionStore;
+  /** The Telegram channel's connection, pairing and owed replies. */
+  telegramStore: ITelegramStore;
+  /** What the Settings Telegram card does: connect, confirm a pairing, disconnect. */
+  telegramService: TelegramService;
+  /** The one queue every Telegram send on the server side goes through. */
+  telegramQueue: TelegramSendQueue;
   /** The one door into the feed; due reminders go through it. */
   deliveryService: DeliveryService;
   reachSettingsStore: IReachSettingsStore;
+  /** The zone each turn reads the person's day in. */
+  turnTimezone: TurnTimezone;
   noticingStore: Pick<INoticingStore, 'getCheckpoint'>;
   /** Runs the watcher passes the controller asks for. */
   noticingService: NoticingService;
@@ -572,6 +593,39 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     chatSearchIndexer: deps.chatSearchIndexer,
     audit: deps.sentinelAuditStore,
   };
+  const telegramTurnDeps: TelegramTurnExecutionDeps<TTransaction> = {
+    turnTimezone: deps.turnTimezone,
+    mcpCatalog: deps.mcpCatalog,
+    chatDeletionStore: deps.chatDeletionStore,
+    sessions: deps.sessions,
+    agentStore: deps.agentStore,
+    personaStore: deps.personaStore,
+    personalizationStore: deps.personalizationStore,
+    eventSubscriptions: deps.eventSubscriptions,
+    logger: deps.logger,
+    resolveModelProviderStore: deps.resolveModelProviderStore,
+    resolveMcpServerStore: deps.resolveMcpServerStore,
+    resolveSandboxProviderStore: deps.resolveSandboxProviderStore,
+    activeTurns: deps.activeTurns,
+    turnDrains: deps.turnDrains,
+    resolveSkillStore: deps.resolveSkillStore,
+    tokenStore: deps.tokenStore,
+    repositoryStore: deps.repositoryStore,
+    sentinelSettingsStore: deps.sentinelSettingsStore,
+    sessionStore: deps.sessionStore,
+    spaceStore: deps.spaceStore,
+    googleConnectionStore: deps.googleConnectionStore,
+    turnArtifactStore: deps.turnArtifactStore,
+    sandboxProviderResolver: deps.sandboxProviderResolver,
+    globalSettingsStore: deps.globalSettingsStore,
+    tokenFactoryBudget: deps.tokenFactoryBudget,
+    chatSearchIndexer: deps.chatSearchIndexer,
+    audit: deps.sentinelAuditStore,
+    reminderReach: deps.reminderReach,
+    telegramStore: deps.telegramStore,
+    telegramService: deps.telegramService,
+    telegramQueue: deps.telegramQueue,
+  };
 
   if (configuration.ACCESS_LOGS) {
     app.use('*', createAccessLogMiddleware(deps.logger));
@@ -776,6 +830,19 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     withAuth(createNoticingRouter({ noticing: deps.noticingService }), scheduleExecutionAuthMiddleware),
   );
   app.route(
+    '/api/internal/telegram',
+    withAuth(createTelegramExecutionRouter(telegramTurnDeps), scheduleExecutionAuthMiddleware),
+  );
+  // No session or service key: Telegram posts here, and the secret it was given at setup decides.
+  // The secret gate runs ahead of the route, so a call without it is refused before its body is read.
+  app.route(
+    TELEGRAM_WEBHOOK_BASE_PATH,
+    withAuth(
+      createTelegramWebhookRouter(telegramTurnDeps),
+      createTelegramWebhookSecretMiddleware({ telegramStore: deps.telegramStore }),
+    ),
+  );
+  app.route(
     '/api/internal/private-chats',
     withAuth(
       createPrivateChatSweepRouter({
@@ -898,6 +965,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         tokenStore: deps.tokenStore,
         toolGrantStore: deps.mcpToolGrantStore,
         resolveSkillStore: deps.resolveSkillStore,
+        skillCatalog: deps.skillCatalog,
         resolveSandboxProviderStore: deps.resolveSandboxProviderStore,
         globalSettingsStore: deps.globalSettingsStore,
         personalizationStore: deps.personalizationStore,
@@ -989,7 +1057,14 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
   );
   app.route(
     '/api/v1/user/deliveries',
-    withAuth(createDeliveriesRouter({ deliveryStore: deps.deliveryStore, resolveRequestContext }), authMiddleware),
+    withAuth(
+      createDeliveriesRouter({
+        deliveryStore: deps.deliveryStore,
+        sessionStore: deps.sessionStore,
+        resolveRequestContext,
+      }),
+      authMiddleware,
+    ),
   );
   app.route(
     '/api/v1/user/reach',
@@ -1145,6 +1220,24 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
           fetchImpl: undefined,
           logger: deps.logger,
           mcpServerStore: deps.resolveMcpServerStore(),
+        }),
+        adminAuthMiddleware,
+      ),
+      createUiSessionAuthMiddleware(deps.authenticator),
+    ),
+  );
+  // Browser session only and admin only, like Email and Calendar: the bot token passes through the
+  // connect call to the connection store only, and no agent or API token can read or change it.
+  app.route(
+    TELEGRAM_SETTINGS_BASE_PATH,
+    withAuth(
+      withAdminAuth(
+        createTelegramSettingsRouter({
+          telegramService: deps.telegramService,
+          telegramStore: deps.telegramStore,
+          telegramQueue: deps.telegramQueue,
+          resolveRequestContext,
+          logger: deps.logger,
         }),
         adminAuthMiddleware,
       ),
@@ -1459,6 +1552,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     '/api/v1/sessions',
     withAuth(
       createTurnsRouter({
+        turnTimezone: deps.turnTimezone,
         mcpCatalog: deps.mcpCatalog,
         skillCatalog: deps.skillCatalog,
         sessions: deps.sessions,

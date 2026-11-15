@@ -77,21 +77,25 @@ export function starterInstallArgs(options: { email: string; appPort: number; lo
 // pieces the native install adds. The instance is made with the local
 // authority (--tls local) at this computer's own name (--address
 // localhost), so there is no --local-only (the two are opposites to
-// the installer), and the backups are daily from the first day. The
-// key flag is there only when a key was given: the installer refuses
-// an empty key line, and an install with no key is a plain install.
+// the installer), and the backups are daily from the first day. No
+// model key is passed: the model is added in Aman after the install.
 // The port flags follow the starter's rule, as above.
-export function firstInstallArgs(options: {
-  email: string;
-  appPort: number;
-  loginPort: number;
-  hasKey: boolean;
-}): string[] {
-  const args = ['installer/install.sh', '--yes', '--name', 'main', '--email', options.email, '--password-stdin'];
-  if (options.hasKey) {
-    args.push('--token-factory-key-stdin');
-  }
-  args.push('--tls', 'local', '--address', 'localhost', '--backups', 'daily');
+export function firstInstallArgs(options: { email: string; appPort: number; loginPort: number }): string[] {
+  const args = [
+    'installer/install.sh',
+    '--yes',
+    '--name',
+    'main',
+    '--email',
+    options.email,
+    '--password-stdin',
+    '--tls',
+    'local',
+    '--address',
+    'localhost',
+    '--backups',
+    'daily',
+  ];
   if (options.appPort !== DEFAULT_APP_PORT || options.loginPort !== DEFAULT_LOGIN_PORT) {
     args.push('--port', String(options.appPort), '--login-port', String(options.loginPort));
   }

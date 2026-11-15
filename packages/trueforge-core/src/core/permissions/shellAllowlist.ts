@@ -41,6 +41,8 @@ export interface ShellAllowlistEntry {
    * pattern. Null when every non-flag token is an operand.
    */
   script: 'sed_print' | 'search_pattern' | null;
+  /** True when `-N` (such as `head -60`) is a line count, the same as `-n N`. */
+  count_flag: boolean;
   /**
    * When non-null the command is subcommand-driven: argv[1] must name one of
    * these and only that subcommand's policy applies; `args`/`operands` are unused.
@@ -320,10 +322,9 @@ export function matchAllowlist(parsed: ParsedSimpleCommand, config: ShellAllowli
   let scriptPending = entry.script !== null;
   for (const token of parsed.argv.slice(1)) {
     if (token.startsWith('-')) {
-      // Flags match exactly; unlisted flags (including smuggled `--config`/`-c`
-      // style overrides) fail closed. Listed long-flag tokens are full
-      // spellings, never unambiguous prefixes of dangerous flags.
-      if (!entry.args.includes(token)) {
+      // Unlisted flags (including smuggled `--config`/`-c` style overrides) fail closed. Listed long-flag tokens are
+      // full spellings, never unambiguous prefixes of dangerous flags.
+      if (!flagAllowed({ token, entry })) {
         return undefined;
       }
       continue;
@@ -348,6 +349,30 @@ export function matchAllowlist(parsed: ParsedSimpleCommand, config: ShellAllowli
   return scriptPending ? undefined : matched();
 }
 
+/**
+ * A listed flag, a line count on a command that takes one, or listed single-letter flags written together (`-oiE`
+ * for `-o -i -E`). A letter in a group that takes a value gets the rest of the group as it, which is only ever more
+ * listed letters, so a group can do nothing its letters could not do one by one.
+ */
+function flagAllowed({ token, entry }: { token: string; entry: ShellAllowlistEntry }): boolean {
+  if (entry.args.includes(token)) {
+    return true;
+  }
+  if (entry.count_flag && /^-\d+$/u.test(token)) {
+    return true;
+  }
+  const letters = /^-([A-Za-z]{2,})$/u.exec(token)?.[1];
+  if (letters === undefined) {
+    return false;
+  }
+  for (let index = 0; index < letters.length; index += 1) {
+    if (!entry.args.includes(`-${letters.charAt(index)}`)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 /** A `sed` script that only prints lines: `12p` or `55,172p`. */
 const SED_PRINT_RANGE = /^\d+(?:,\d+)?p$/u;
 
@@ -362,10 +387,11 @@ export function seedShellAllowlist(pinnedPath: string): ShellAllowlistConfig {
     pinned_path: pinnedPath,
     commands: {
       ls: {
-        args: ['-l', '-a', '-la', '-al', '-lh', '-1', '--all', '--almost-all'],
+        args: ['-l', '-a', '-h', '-1', '--all', '--almost-all'],
         operands: 'workspace_relative',
         offline_ok: true,
         script: null,
+        count_flag: false,
         subcommands: null,
       },
       cat: {
@@ -373,6 +399,7 @@ export function seedShellAllowlist(pinnedPath: string): ShellAllowlistConfig {
         operands: 'workspace_relative',
         offline_ok: true,
         script: null,
+        count_flag: false,
         subcommands: null,
       },
       pwd: {
@@ -380,6 +407,7 @@ export function seedShellAllowlist(pinnedPath: string): ShellAllowlistConfig {
         operands: 'none',
         offline_ok: true,
         script: null,
+        count_flag: false,
         subcommands: null,
       },
       sed: {
@@ -388,6 +416,7 @@ export function seedShellAllowlist(pinnedPath: string): ShellAllowlistConfig {
         operands: 'workspace_relative',
         offline_ok: true,
         script: 'sed_print',
+        count_flag: false,
         subcommands: null,
       },
       grep: {
@@ -409,11 +438,6 @@ export function seedShellAllowlist(pinnedPath: string): ShellAllowlistConfig {
           '-o',
           '-s',
           '-q',
-          '-rn',
-          '-ri',
-          '-rl',
-          '-rni',
-          '-in',
           '--line-number',
           '--ignore-case',
           '--recursive',
@@ -430,14 +454,50 @@ export function seedShellAllowlist(pinnedPath: string): ShellAllowlistConfig {
         operands: 'workspace_relative',
         offline_ok: true,
         script: 'search_pattern',
+        count_flag: false,
         subcommands: null,
       },
       head: {
-        // The short count spellings models write most, listed exactly like every other flag.
-        args: ['-n', '-c', '-q', '-5', '-10', '-20', '-30', '-40', '-50', '-100', '-200'],
+        args: ['-n', '-c', '-q'],
         operands: 'workspace_relative',
         offline_ok: true,
         script: null,
+        count_flag: true,
+        subcommands: null,
+      },
+      tail: {
+        // `-f` is absent: following a file never ends.
+        args: ['-n', '-c', '-q'],
+        operands: 'workspace_relative',
+        offline_ok: true,
+        script: null,
+        count_flag: true,
+        subcommands: null,
+      },
+      wc: {
+        args: ['-l', '-w', '-c', '-m', '-L'],
+        operands: 'workspace_relative',
+        offline_ok: true,
+        script: null,
+        count_flag: false,
+        subcommands: null,
+      },
+      sort: {
+        // `-o` (write a file), `-T` (temporary folder) and the flags that run a program or read a list of files are absent.
+        args: ['-n', '-r', '-u', '-f', '-b', '-h', '-V', '-s', '-k', '-t'],
+        operands: 'workspace_relative',
+        offline_ok: true,
+        script: null,
+        count_flag: false,
+        subcommands: null,
+      },
+      uniq: {
+        // No operands: a second one names a file uniq writes to.
+        args: ['-c', '-d', '-u', '-i'],
+        operands: 'none',
+        offline_ok: true,
+        script: null,
+        count_flag: false,
         subcommands: null,
       },
       git: {
@@ -449,6 +509,7 @@ export function seedShellAllowlist(pinnedPath: string): ShellAllowlistConfig {
         operands: 'none',
         offline_ok: true,
         script: null,
+        count_flag: false,
         subcommands: {
           status: {
             args: ['--short', '--porcelain', '--branch', '-s', '-b'],
@@ -544,6 +605,7 @@ export function seedShellAllowlist(pinnedPath: string): ShellAllowlistConfig {
         operands: 'none',
         offline_ok: true,
         script: null,
+        count_flag: false,
         subcommands: null,
       },
       python3: {
@@ -551,6 +613,7 @@ export function seedShellAllowlist(pinnedPath: string): ShellAllowlistConfig {
         operands: 'none',
         offline_ok: true,
         script: null,
+        count_flag: false,
         subcommands: null,
       },
     },
@@ -865,6 +928,10 @@ export const OFFLINE_SHELL_COMMANDS: readonly string[] = [
   'sed',
   'grep',
   'head',
+  'tail',
+  'wc',
+  'sort',
+  'uniq',
   'git',
   'node',
   'python3',

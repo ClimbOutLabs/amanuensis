@@ -209,8 +209,9 @@ describe("idempotency store", () => {
       withIdempotencyKeyLock("work", "k1", () => slowSend("a"), env),
       withIdempotencyKeyLock("work", "k2", () => slowSend("b"), env),
     ]);
-    // Both entered before either exited → they ran concurrently.
-    expect(order.slice(0, 2)).toEqual(["a:enter", "b:enter"]);
+    // Both entered before either exited → they ran concurrently. Each key takes its own lock file, so which
+    // one enters first depends on the file system and is not part of the contract.
+    expect([...order.slice(0, 2)].sort()).toEqual(["a:enter", "b:enter"]);
   });
 
   it("breaks a stale cross-process lock file instead of deadlocking", async () => {

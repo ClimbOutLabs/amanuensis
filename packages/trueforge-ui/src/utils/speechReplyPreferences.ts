@@ -17,6 +17,25 @@ export function useSpeakVoiceReplies(): { enabled: boolean; setEnabled: (enabled
   return { enabled, setEnabled: speakVoiceReplies.set };
 }
 
+/**
+ * Whether a readout reads a whole message instead of the first stretch with the rest on screen.
+ * Kept in this browser like the other display switches, and off unless switched on.
+ */
+export const READ_WHOLE_MESSAGES_STORAGE_KEY = 'aman.read_whole_messages';
+
+const readWholeMessages = createBooleanDisplayPreference({
+  storageKey: READ_WHOLE_MESSAGES_STORAGE_KEY,
+  defaultValue: false,
+});
+
+export function useReadWholeMessages(): { enabled: boolean; setEnabled: (enabled: boolean) => void } {
+  const enabled = readWholeMessages.useValue();
+  return { enabled, setEnabled: readWholeMessages.set };
+}
+
+/** Read as a reply is about to be read aloud, so the choice in force at that moment applies. */
+export const readReadWholeMessages = readWholeMessages.read;
+
 /** The browser voice URI the person picked, or null for the browser's default voice. */
 export const SPEECH_VOICE_STORAGE_KEY = 'aman.speech_voice';
 

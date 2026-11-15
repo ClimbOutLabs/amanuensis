@@ -125,6 +125,17 @@ export async function callsHarness({
       ]);
     },
   };
+  // Telegram with nobody paired: it makes no attempt, but sees every nudge it is handed.
+  const telegrams: string[] = [];
+  const telegram: DeliveryChannelSender = {
+    channel: 'telegram',
+    send: ({ delivery }) => {
+      if (delivery.level === 'nudge') {
+        telegrams.push(delivery.id);
+      }
+      return Promise.resolve([]);
+    },
+  };
   const placed: { to: string; call_id: string }[] = [];
   const nextCall: { result: PlaceCallResult } = { result: { outcome: 'started', call_sid: CALL_SID } };
   const provider: CallProvider = wireCalls ?? {
@@ -182,6 +193,7 @@ export async function callsHarness({
         now: () => clock.now,
       }),
       service.sender,
+      telegram,
     ],
     audit: {
       record: input => {
@@ -367,6 +379,7 @@ export async function callsHarness({
     service,
     texts,
     pushes,
+    telegrams,
     placed,
     nextCall,
     opened,

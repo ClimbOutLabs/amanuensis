@@ -5,6 +5,7 @@ import { useAuiState } from '@assistant-ui/react';
 import { useTrueFoundryAgentSpec } from '@truefoundry/assistant-ui-runtime';
 import { useEffect, useRef, useState } from 'react';
 
+import { useDraftCatalog } from '../atoms/draft/DraftCatalogProvider.js';
 import {
   hasSessionResync,
   type LastCompactionStatus,
@@ -12,32 +13,35 @@ import {
 import { useOptionalServer } from '../server/ServerContext.js';
 
 export type CompactionStatusResult = {
-  /** Model context limit in tokens, when known from the agent spec. */
+  /** Model context limit in tokens, when the model list knows it. */
   contextLimit: number | null;
   /** Input tokens from the session's most recent turn (what the model last saw). */
   liveTokens: number | null;
-  /** Max output tokens reserved by the model, when known from the agent spec. */
+  /** Max output tokens reserved by the model, when the model list knows it. */
   maxOutputTokens: number | null;
   /** Most recent compaction, or null when none has run yet. */
   lastCompaction: LastCompactionStatus | null;
   loading: boolean;
 };
 
-/** Reads numeric model properties from the agent spec, when present. */
-function useModelProperties(): { contextLength: number | null; maxOutputTokens: number | null } {
+/** What the chat's model can hold, read from the model list by the name the chat uses. */
+function useModelProperties({ wanted }: { wanted: boolean }): {
+  contextLength: number | null;
+  maxOutputTokens: number | null;
+} {
   const { agentSpec } = useTrueFoundryAgentSpec();
-  // The agent spec's model ref may carry resolved properties depending on
-  // the server; treat as unknown and narrow.
-  const model: unknown = agentSpec?.model;
-  if (typeof model !== 'object' || model === null) return { contextLength: null, maxOutputTokens: null };
-  const properties: unknown = (model as { properties?: unknown }).properties;
-  if (typeof properties !== 'object' || properties === null) return { contextLength: null, maxOutputTokens: null };
-  const props = properties as Record<string, unknown>;
-  const read = (key: string): number | null => {
-    const value: unknown = props[key];
-    return typeof value === 'number' && value > 0 ? value : null;
+  const { models, ensureLoaded } = useDraftCatalog();
+  // The chat only names its model; the limits live in the model list, which loads on demand.
+  useEffect(() => {
+    if (wanted) ensureLoaded();
+  }, [wanted, ensureLoaded]);
+  const modelName = agentSpec?.model.name;
+  const properties = models.find(model => model.name === modelName)?.properties;
+  const positive = (value: number | undefined): number | null => (value !== undefined && value > 0 ? value : null);
+  return {
+    contextLength: positive(properties?.contextLength),
+    maxOutputTokens: positive(properties?.maxOutputTokens),
   };
-  return { contextLength: read('contextLength'), maxOutputTokens: read('maxOutputTokens') };
 }
 
 /**
@@ -49,9 +53,9 @@ function useModelProperties(): { contextLength: number | null; maxOutputTokens: 
 export function useCompactionStatus(): CompactionStatusResult {
   const sessionId = useAuiState(state => state.threadListItem?.remoteId);
   const server = useOptionalServer();
-  const { contextLength: contextLimit, maxOutputTokens } = useModelProperties();
   const [lastCompaction, setLastCompaction] = useState<LastCompactionStatus | null>(null);
   const [liveTokens, setLiveTokens] = useState<number | null>(null);
+  const { contextLength: contextLimit, maxOutputTokens } = useModelProperties({ wanted: liveTokens !== null });
   const [loading, setLoading] = useState(false);
 
   // A turn ending can trigger a compaction, so refresh then too, not only

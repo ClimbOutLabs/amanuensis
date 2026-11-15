@@ -49,6 +49,7 @@ import {
   type HeldRefusalReason,
 } from '@truefoundry/trueforge-core/core';
 import { readTurnedOffConnectorKeys } from '@truefoundry/trueforge-core/core/connectors/chatConnectorChoice';
+import { MAIL_CONNECTOR_NAME } from '@truefoundry/trueforge-core/core/email/mailConnector/toolContract';
 import type { RawToolCall } from '@truefoundry/trueforge-core/core/llm/LLMTypes';
 import { upgradeStoredTurnState } from '@truefoundry/trueforge-core/core/permissions/storedCards';
 import type { Context } from 'hono';
@@ -96,6 +97,7 @@ import {
 import type { ActiveTurnRegistry, TurnAdmission } from '../runtime/activeTurns';
 import { findTurnArtifact } from '../runtime/artifacts/findTurnArtifact';
 import { submitArtifactPersistence } from '../runtime/artifacts/persistTurnArtifacts';
+import { getCalendarAccountState } from '../runtime/calendarAccount';
 import { chatModelName, resolveChatAssistant, scheduleRunsAs, type ChatRunner } from '../runtime/chatAssistant';
 import type { ChatSearchIndexer } from '../runtime/chatSearchIndexing';
 import { readChatSearchEnabled } from '../runtime/chatSearchSettings';
@@ -109,17 +111,21 @@ import { StreamGoneError, type EventSubscription, type EventSubscriptionRegistry
 import { effectiveGitCommitIdentity, readStoredGitCommitIdentity } from '../runtime/gitCommitIdentitySettings';
 import { buildInternalSourceToolPolicy, type InternalSourceState } from '../runtime/internalSourceGuard';
 import { stampLatestAnswer, type LatestAnswerSessionStore } from '../runtime/latestAnswer';
+import { placeOfModelHost } from '../runtime/localModels';
+import { getMailAccountState } from '../runtime/mailAccount';
 import { mailAccountDirectory } from '../runtime/mailConnector';
 import { createMemoryClient } from '../runtime/memory/createMemoryClient';
 import type { MemoryClient } from '../runtime/memory/memoryClient';
 import type { TurnToolResult } from '../runtime/memory/memoryNotesSummarize';
 import {
+  markRetainUnderWay,
+  noteUnfinishedTurnOwesNoSummary,
   submitRetainWithVerification,
   type RetainOutcomeLog,
   type SummarizeTurnContext,
 } from '../runtime/memory/memoryRetain';
 import { serverMemoryConfig, withMemoryScreenOverride } from '../runtime/memory/memorySettings';
-import { resolveSummarizationModelFqn, type ProfileLineSuggestion } from '../runtime/memory/memorySummarize';
+import type { ProfileLineSuggestion } from '../runtime/memory/memorySummarize';
 import { saveSentMail, sentMailFromCall, sentMailWentThrough } from '../runtime/memory/sentMail';
 import { createOutsideInputTracker, inputAttachesFiles } from '../runtime/memory/turnOutsideInput';
 import { readMemoryRecallSetting } from '../runtime/memoryRecallSettings';
@@ -140,7 +146,7 @@ import type { PersonaTurnContext } from '../runtime/personaCapability';
 import type { PersonaSwitchNotice } from '../runtime/PersonaTurnResourceResolver';
 import { privateChatExpiry, sessionKeepsNothing } from '../runtime/privateChat';
 import {
-  learnedProfileLines,
+  profileLearningForTurn,
   submitProfileLearning,
   type ProfileLearningDrainMember,
 } from '../runtime/profileLearning';
@@ -167,6 +173,7 @@ import {
   withGatewayMetadataHeaders,
 } from '../runtime/sessionResources';
 import type { SkillTurnContext } from '../runtime/skillCapability';
+import { readSkillFilesFromGit } from '../runtime/skillWebsites';
 import { SPACE_WRITE_TOOL_ARGUMENT_LIMITS, SpaceTurnResourceResolver } from '../runtime/spaceCapability';
 import { TokenFactoryMeteredLLM, tokenFactoryRole, type TokenFactoryBudget } from '../runtime/tokenFactoryBudget';
 import { resolveToolOutputScreenEnabled } from '../runtime/toolOutputScreenSettings';
@@ -180,6 +187,7 @@ import {
   TurnCouldNotStartError,
   TurnStartBound,
 } from '../runtime/turnStartBound';
+import type { TurnTimezone } from '../runtime/turnTimezone';
 import type { DeletedChatUsageReader } from '../runtime/usageSummaryCapability';
 import { packageMirrorTokens } from '../sandbox/mirrors/packageMirrorTokens';
 import { checkSnapshotStatus } from '../sandbox/providerUtils';
@@ -295,6 +303,8 @@ export interface TurnsRouterDeps {
   resolveSkillStore: (c: Context) => ISkillStore;
   /** The starter skills a chat can add; absent, no skill tools mount. */
   skillCatalog?: SkillCatalog | undefined;
+  /** The zone each turn reads the person's day in. */
+  turnTimezone: TurnTimezone;
   resolveAgentStore: (c: Context) => IAgentStore;
   /** Fork-only: not agent-scoped upstream, so these stay directly injected rather than resolved per-request. */
   tokenStore: IOAuthTokenStore;
@@ -371,7 +381,7 @@ export type BeginTurnExecutionDeps = Pick<
    */
   sentinelSettingsStore?: ISentinelSettingsStore | undefined;
   /** Lists the person's personas for the past-chat search; absent, the search tool stays off. */
-  personaStore?: Pick<IPersonaStore, 'listPersonas'> | undefined;
+  personaStore?: Pick<IPersonaStore, 'listPersonas' | 'getPersona'> | undefined;
   /** Adds finished turns to the past-chat search for people who turned it on; absent, nothing is added. */
   chatSearchIndexer?: ChatSearchIndexer | undefined;
   /** persists run_code's harvested result files as turn artifacts at harvest time. */
@@ -386,7 +396,7 @@ export type BeginTurnExecutionDeps = Pick<
   /** The Settings switch for the recall screen, when the person set one. */
   memoryScreenOverride?: boolean | undefined;
   previousTurnId?: string | null;
-  /** From CreateTurnRequest.client_timezone, or a schedule's own time zone for its runs. */
+  /** The person's zone for this turn, or a schedule's own time zone for its runs. */
   clientTimezone?: string | undefined;
   /** From CreateTurnRequest.spoken_reply. */
   spokenReply?: boolean | undefined;
@@ -446,13 +456,13 @@ function createTurnResolver(deps: {
   /** The person's past-chat search switch for this turn; off, the search tool is not offered. */
   chatSearchEnabled: boolean;
   /** Lists the person's personas, so the search keeps to the chats this persona may recall; absent, the tool is not offered. */
-  personaStore: Pick<IPersonaStore, 'listPersonas'> | undefined;
+  personaStore: Pick<IPersonaStore, 'listPersonas' | 'getPersona'> | undefined;
   spaceStore: ISpaceStore;
   /** Per-user Google logins; absent, no Gmail tools mount. */
   googleConnectionStore?: IGoogleConnectionStore | undefined;
-  /** The instance's global settings, where the notes folder choice lives; absent, no notes tools mount. */
-  globalSettingsStore?: IGlobalSettingsStore | undefined;
-  /** From CreateTurnRequest.client_timezone. See ITurnResourceResolver.clientTimezone. */
+  /** Instance settings: the connection offer remembers a person's no in them, and the notes folder choice lives in them too. */
+  globalSettingsStore: IGlobalSettingsStore;
+  /** The person's zone for this turn. See ITurnResourceResolver.clientTimezone. */
   clientTimezone?: string | undefined;
   /** From CreateTurnRequest.spoken_reply. See ITurnResourceResolver.spokenReply. */
   spokenReply?: boolean | undefined;
@@ -515,6 +525,7 @@ function createTurnResolver(deps: {
     personaStore,
     spaceStore,
     googleConnectionStore,
+    globalSettingsStore,
     turnArtifactStore,
     clientTimezone,
     spokenReply,
@@ -578,6 +589,7 @@ function createTurnResolver(deps: {
             streamTimeout: resolved.streamTimeout,
             toolCallChunkMs: configuration.MODEL_STREAM_TOOL_CALL_IDLE_TIMEOUT_MS,
             toolArgumentLimits: SPACE_WRITE_TOOL_ARGUMENT_LIMITS,
+            placeOfModelHost,
           });
           return new UsageRecordingLLM({
             llm: client,
@@ -679,6 +691,62 @@ function createTurnResolver(deps: {
       setUpConnectorNames: async () =>
         setUpConnectorNamesOf(await mcpServerStore.listServers({ tenant_id, names: undefined })),
       mailAccounts: mailAccountDirectory,
+      mailAccountFacts: async () => {
+        const state = await getMailAccountState({
+          accountUrl: configuration.MAIL_EMAIL_ACCOUNT_URL,
+          secret: configuration.MAIL_EMAIL_ACCOUNT_SECRET,
+          fetchImpl: undefined,
+          logger,
+        }).catch(() => undefined);
+        if (state === undefined || !state.connected || state.accounts.length === 0) {
+          return undefined;
+        }
+        return { names: state.accounts.map(entry => entry.account.address), default_name: state.default_key };
+      },
+      mailRouting: async () => {
+        const state = await getMailAccountState({
+          accountUrl: configuration.MAIL_EMAIL_ACCOUNT_URL,
+          secret: configuration.MAIL_EMAIL_ACCOUNT_SECRET,
+          fetchImpl: undefined,
+          logger,
+        }).catch(() => undefined);
+        let allowed: readonly string[] | null = null;
+        if (personaContext !== undefined && personaStore !== undefined) {
+          const persona = await personaStore
+            .getPersona({ tenant_id, id: personaContext.persona_id, created_by: userRef })
+            .catch(() => undefined);
+          allowed = persona?.mail_accounts ?? null;
+        }
+        return { default_name: state?.default_key ?? null, allowed };
+      },
+      calendarAccountFacts: async () => {
+        const state = await getCalendarAccountState({
+          accountUrl: configuration.CALENDAR_ACCOUNT_URL,
+          secret: configuration.CALENDAR_ACCOUNT_SECRET,
+          fetchImpl: undefined,
+          logger,
+        }).catch(() => undefined);
+        if (state === undefined || !state.connected || state.accounts.length === 0) {
+          return undefined;
+        }
+        return { names: state.accounts.map(entry => entry.account.email), default_name: state.default_key };
+      },
+      calendarRouting: async () => {
+        const state = await getCalendarAccountState({
+          accountUrl: configuration.CALENDAR_ACCOUNT_URL,
+          secret: configuration.CALENDAR_ACCOUNT_SECRET,
+          fetchImpl: undefined,
+          logger,
+        }).catch(() => undefined);
+        let allowed: readonly string[] | null = null;
+        if (personaContext !== undefined && personaStore !== undefined) {
+          const persona = await personaStore
+            .getPersona({ tenant_id, id: personaContext.persona_id, created_by: userRef })
+            .catch(() => undefined);
+          allowed = persona?.calendar_accounts ?? null;
+        }
+        return { default_name: state?.default_key ?? null, allowed };
+      },
       mcpRequestTimeoutMs: configuration.MCP_REQUEST_TIMEOUT_MS,
       mcpConnectTimeoutMs: configuration.MCP_CONNECT_TIMEOUT_MS,
       mcpMaxResponseBytes: configuration.MCP_TOOL_CALL_MAX_RESPONSE_BYTES,
@@ -726,10 +794,7 @@ function createTurnResolver(deps: {
           store: mcpServerStore,
         });
         const gitCommitIdentity = effectiveGitCommitIdentity({
-          stored:
-            deps.globalSettingsStore === undefined
-              ? { name: null, email: null }
-              : await readStoredGitCommitIdentity({ globalSettingsStore: deps.globalSettingsStore, logger }),
+          stored: await readStoredGitCommitIdentity({ globalSettingsStore: deps.globalSettingsStore, logger }),
           personName: personalizationProfile?.user_name,
         });
         return buildTurnSandbox({
@@ -1005,12 +1070,14 @@ function createTurnResolver(deps: {
     {
       store: spaceStore,
       googleConnections: googleConnectionStore,
-      notesFolder:
-        deps.globalSettingsStore === undefined
-          ? undefined
-          : {
-              service: sharedNotesFolderService(notesFolderServiceDeps({ settings: deps.globalSettingsStore, logger })),
-            },
+      connectionOffer: {
+        settings: globalSettingsStore,
+        mailConnectorRegistered: async () =>
+          (await mcpServerStore.listServers({ tenant_id, names: [MAIL_CONNECTOR_NAME] })).length > 0,
+      },
+      notesFolder: {
+        service: sharedNotesFolderService(notesFolderServiceDeps({ settings: deps.globalSettingsStore, logger })),
+      },
       authority: { tenantId: tenant_id, userRef },
       sessionId,
       schedules,
@@ -1018,6 +1085,8 @@ function createTurnResolver(deps: {
       skills,
       logger,
       startsAnswer,
+      // A scheduled run has nobody to answer the connection offer card, so the offer stays unmounted.
+      unattended: deps.unattended,
     },
     { store: turnArtifactStore, tenantId: tenant_id, sessionId, turnId, logger },
     {
@@ -1351,6 +1420,8 @@ export interface DrainTurnEventsInput {
    * detached; nothing in the drain waits for it.
    */
   chatTitle?: ChatTitleDrainMember | undefined;
+  /** Present only on a scheduled run that leaves a line in the bell: given the finished answer's text. Never throws. */
+  onFinishedAnswer?: ((answerText: string) => Promise<void>) | undefined;
 }
 
 export interface PrivateChatDrainMember {
@@ -1509,6 +1580,15 @@ async function runTurnEventDrain(params: {
           toolResults,
           markArtifactsCaptured,
         });
+      } else if (event.type === EventType.TURN_DONE && memory !== undefined) {
+        await noteUnfinishedTurnOwesNoSummary({
+          client: memory.client,
+          session: memory.session,
+          sessionId,
+          turnId,
+          summarize: memory.summarize,
+          logger,
+        });
       }
     }
     if (followUp !== undefined) {
@@ -1563,7 +1643,11 @@ async function runTurnFollowUp(params: {
     chatSearch,
     answerMark,
     chatTitle,
+    onFinishedAnswer,
   } = input;
+  // Before the first step: the next turn may start as soon as the files below are saved, and must not take
+  // this turn's memory save for lost while the steps before it still run.
+  const memorySaveEnded = memory === undefined ? undefined : markRetainUnderWay({ sessionId, turnId });
   try {
     // First, and never behind a model call: the chat's next turn reuses the sandbox and waits
     // on this step, so its tools cannot change a file before this turn has saved it.
@@ -1593,6 +1677,8 @@ async function runTurnFollowUp(params: {
         logger,
       });
     }
+    // Ahead of the memory steps, so the bell line never waits on their model calls.
+    await onFinishedAnswer?.(formatAssistantMessageText(state.output?.content));
     // Before the model calls below, so the answer's usage is visible before that slower work.
     const flushUsage = async () => {
       if (modelUsage !== undefined) {
@@ -1656,6 +1742,8 @@ async function runTurnFollowUp(params: {
     await flushUsage();
   } catch (error) {
     logger.error('Turn follow-up work failed', { sessionId, turnId, ...extractErrorLogFields(error) });
+  } finally {
+    memorySaveEnded?.();
   }
   if (chatSearch !== undefined) {
     // Outside the steps above, so a failure there never keeps the turn out of the search. It never throws.
@@ -1852,6 +1940,7 @@ export interface TurnEventDrainInput {
   answerMark?: DrainTurnEventsInput['answerMark'];
   chatTitle?: DrainTurnEventsInput['chatTitle'];
   privateChat?: DrainTurnEventsInput['privateChat'];
+  profileLearning?: DrainTurnEventsInput['profileLearning'];
 }
 
 /**
@@ -1869,12 +1958,19 @@ export async function beginTurnExecution(params: {
   /** Built-in tool names this turn does not offer. */
   withheldTools?: readonly string[] | undefined;
   /**
+   * Set when the person wrote this turn themselves (a Telegram message), so their profile may learn from it
+   * when they have learning on. A scheduled run leaves it unset: nobody wrote its input.
+   */
+  profileLearning?: { personalizationStore: IPersonalizationStore } | undefined;
+  /**
    * A title the caller has already chosen for this session (a schedule run names its chat
    * for the schedule). Set on the first turn instead of the working title derived from the
    * first user message, and the subject-title follow-up does not run for it: the follow-up
    * only ever replaces a derived working title.
    */
   session_title?: string | undefined;
+  /** Put in front of the derived and subject titles, so a chat that started elsewhere says where (a Telegram chat). */
+  session_title_prefix?: string | undefined;
 }): Promise<{ turn: TurnHandle<TurnCustom>; drainInput: TurnEventDrainInput }> {
   const clocks = startTurnClocks({ sessionId: params.session.session_id, logger: params.deps.logger });
   try {
@@ -2010,7 +2106,11 @@ async function beginAcceptedTurnExecution(
       // store never overwrites an existing title. A caller that names the session
       // itself (a schedule run) sets that title instead, and the turn then reports no
       // derived title, so the subject-title follow-up below leaves the name alone.
-      const derivedTitle = session.record.last_turn_id ? undefined : deriveSessionTitle(input);
+      const firstMessageTitle = session.record.last_turn_id ? undefined : deriveSessionTitle(input);
+      const derivedTitle =
+        firstMessageTitle === undefined
+          ? undefined
+          : capChatTitle(`${params.session_title_prefix ?? ''}${firstMessageTitle}`);
       const title = params.session_title ?? derivedTitle;
 
       const turn = await session.createTurn({
@@ -2045,6 +2145,33 @@ async function beginAcceptedTurnExecution(
   }
   const { turn, resolver, memorySummarize, derivedTitle } = setup.value;
 
+  // Only a turn the person wrote can teach the profile. Like the chat title below, resolved after the turn exists
+  // and never allowed to fail it.
+  const profileLearning =
+    params.profileLearning === undefined
+      ? undefined
+      : await profileLearningForTurn({
+          profile: deps.personalizationProfile,
+          session: session.record,
+          sessionId,
+          personalizationStore: params.profileLearning.personalizationStore,
+          eventStore: deps.sessionStore,
+          memoryClient: deps.memoryClient,
+          retainTimeoutMs: configuration.MEMORY_RETAIN_TIMEOUT_MS,
+          tenantId: tenant_id,
+          createdBy: userRef,
+          userText: extractUserMessageText(input ?? []),
+          timeZone: deps.clientTimezone,
+          memorySummarize,
+          personaModelName: deps.personaContext?.model_name,
+          agentStore: deps.agentStore,
+          globalSettingsStore: deps.globalSettingsStore,
+          modelProviderStore: deps.modelProviderStore,
+          tokenFactoryBudget: deps.tokenFactoryBudget,
+          modelUsage,
+          logger: deps.logger,
+        });
+
   // A first turn that set a working title also carries the context for the
   // subject-title step its follow-up starts. Resolved here, after the turn exists,
   // and never allowed to fail the turn (the resolver returns undefined instead).
@@ -2065,6 +2192,7 @@ async function beginAcceptedTurnExecution(
           sessionStore: deps.sessionStore,
           derivedTitle,
           userText: extractUserMessageText(input ?? []),
+          titlePrefix: params.session_title_prefix ?? '',
           logger: deps.logger,
         });
 
@@ -2101,6 +2229,7 @@ async function beginAcceptedTurnExecution(
       logger: deps.logger,
       turnDrains: deps.turnDrains,
       modelUsage: { ledger: modelUsage, eventStore: deps.sessionStore },
+      profileLearning,
       answerMark: { sessionStore: deps.sessionStore, tenantId: tenant_id },
       privateChat: privateChatDrainMember({ session, sessionStore: deps.sessionStore }),
       chatSearch:
@@ -2141,8 +2270,13 @@ export async function startTurnInProcess(params: {
   deps: BeginTurnExecutionDeps;
   unattended?: boolean | undefined;
   withheldTools?: readonly string[] | undefined;
+  profileLearning?: { personalizationStore: IPersonalizationStore } | undefined;
   /** A title the caller has already chosen for this session; see beginTurnExecution. */
   session_title?: string | undefined;
+  /** See beginTurnExecution. */
+  session_title_prefix?: string | undefined;
+  /** Given the finished answer's text once the turn is done; not called for a turn that failed or stopped. */
+  onFinishedAnswer?: ((answerText: string) => Promise<void>) | undefined;
 }): Promise<TurnHandle<TurnCustom>> {
   const { turn, drainInput } = await beginTurnExecution(params);
 
@@ -2150,6 +2284,7 @@ export async function startTurnInProcess(params: {
   const { promise: firstEventDualWritten, resolve: markFirstEventDualWritten } = Promise.withResolvers<undefined>();
   void drainTurnEvents({
     ...drainInput,
+    onFinishedAnswer: params.onFinishedAnswer,
     onEvent: () => {
       markFirstEventDualWritten(undefined);
       return Promise.resolve();
@@ -2602,6 +2737,10 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
           }),
         }
       : submitted;
+    const timeZone = await deps.turnTimezone({
+      owner: { tenant_id: requestContext.tenant_id, created_by: userRef },
+      clientTimezone: body.client_timezone,
+    });
 
     // A card whose request ended is cleared, never run. Deny and Dismiss record that and answer with
     // the turn named, unchanged: no turn is created and no model is called. Approve is refused below.
@@ -2791,53 +2930,28 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
     });
 
     // Read off the profile already loaded for the personalization context, so learning left off
-    // (the default) costs nothing here. Learning rides the turn's fact call; the model named here
-    // is asked only when no fact call runs for the turn. The switch is read again after the turn,
-    // so a user who turns it off mid-turn is still obeyed.
-    //
-    // This runs on the create-turn path, so it must not fail a turn: an agent-store read that
-    // throws drops learning for this turn and nothing more.
-    let profileLearning: ProfileLearningDrainMember | undefined;
-    if (profile?.learning_enabled === true) {
-      try {
-        profileLearning = {
-          session: session.record,
-          personalizationStore: deps.personalizationStore,
-          eventStore: deps.sessionStore,
-          memoryClient,
-          retainTimeoutMs: configuration.MEMORY_RETAIN_TIMEOUT_MS,
-          tenantId: requestContext.tenant_id,
-          createdBy: userRef,
-          userText: extractUserMessageText(body.input),
-          knownLines: learnedProfileLines(profile.learned_profile),
-          factCall: {
-            modelProviderStore,
-            summarizationModelFqn:
-              memorySummarize === undefined
-                ? await resolveSummarizationModelFqn({
-                    tenantId: requestContext.tenant_id,
-                    personaModelName: persona?.kind === 'persona' ? persona.persona.model_name : undefined,
-                    sessionAgent: session.record.agent,
-                    agentStore,
-                    globalSettingsStore: deps.globalSettingsStore,
-                    modelProviderStore,
-                    logger: deps.logger,
-                  })
-                : memorySummarize.summarizationModelFqn,
-            tokenFactoryBudget: deps.tokenFactoryBudget,
-            modelUsage,
-            personName: profile.user_name ?? undefined,
-            timeZone: body.client_timezone,
-          },
-        };
-      } catch (error) {
-        deps.logger.debug('Profile learning disabled for this turn: the model FQN did not resolve', {
-          sessionId,
-          ...extractErrorLogFields(error),
-        });
-        profileLearning = undefined;
-      }
-    }
+    // (the default) costs nothing here.
+    const profileLearning = await profileLearningForTurn({
+      profile,
+      session: session.record,
+      sessionId,
+      personalizationStore: deps.personalizationStore,
+      eventStore: deps.sessionStore,
+      memoryClient,
+      retainTimeoutMs: configuration.MEMORY_RETAIN_TIMEOUT_MS,
+      tenantId: requestContext.tenant_id,
+      createdBy: userRef,
+      userText: extractUserMessageText(body.input),
+      timeZone,
+      memorySummarize,
+      personaModelName: persona?.kind === 'persona' ? persona.persona.model_name : undefined,
+      agentStore,
+      globalSettingsStore: deps.globalSettingsStore,
+      modelProviderStore,
+      tokenFactoryBudget: deps.tokenFactoryBudget,
+      modelUsage,
+      logger: deps.logger,
+    });
 
     const turnId = mintPeeredTurnId(configuration.EXECUTOR_ID);
     // One read per turn: the persisted override (or env default) applies to the whole turn.
@@ -2906,7 +3020,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       spaceStore: deps.spaceStore,
       googleConnectionStore: deps.googleConnectionStore,
       globalSettingsStore: deps.globalSettingsStore,
-      clientTimezone: body.client_timezone,
+      clientTimezone: timeZone,
       spokenReply: body.spoken_reply,
       toolOutputScreenEnabled,
       turnArtifactStore: deps.turnArtifactStore,
@@ -2935,6 +3049,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
               catalog: deps.skillCatalog.list(),
               sandboxReady: serverSandboxAvailable,
               lookup: { fetchImpl: undefined, resolveAddresses: undefined },
+              readFiles: readSkillFilesFromGit,
             },
       schedules:
         deps.schedules === undefined || chatRunner === undefined
@@ -3290,6 +3405,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
                 sessionStore: deps.sessionStore,
                 derivedTitle: title,
                 userText: extractUserMessageText(body.input),
+                titlePrefix: '',
                 logger: deps.logger,
               });
         const drainInput = {
@@ -3312,7 +3428,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
             attachedFiles: inputAttachesFiles(body.input ?? []),
             chatHasReadContent: () => chatSawOutsideText(resolver.webSearchTurn),
             chatWrotePages: () => resolver.chatWrotePages,
-            timeZone: body.client_timezone,
+            timeZone,
             // Resolved once on the create-turn path above; absent means verbatim.
             summarize: memorySummarize,
             outcomeLog: {

@@ -65,6 +65,7 @@ import {
   withoutHiddenMarkers,
   withoutSourceLines,
   type NamespaceScan,
+  type SummaryPendingMark,
   type VaultScope,
   type VaultTombstone,
 } from './markdownMemoryFiles';
@@ -739,7 +740,11 @@ export class MarkdownMemoryClient implements MemoryClient {
         await markSummaryFailed({
           baseDir: this.baseDir,
           namespace: this.writeNamespace,
-          mark: { failed_at: new Date().toISOString(), reason: params.reason ?? 'model_failed' },
+          mark: {
+            failed_at: new Date().toISOString(),
+            reason: params.reason ?? 'model_failed',
+            ...(params.sessionId === undefined ? {} : { session_id: params.sessionId }),
+          },
         });
       }
     } catch {
@@ -747,14 +752,20 @@ export class MarkdownMemoryClient implements MemoryClient {
     }
   }
 
-  /** Whether the vault for a wire namespace is still owed a turn summary. Never throws. */
-  async summaryPending(params: { namespace: string }): Promise<boolean> {
+  /** The failed summary the vault for a wire namespace is still owed, or undefined when none is owed. Never throws. */
+  async summaryPending(params: { namespace: string }): Promise<SummaryPendingMark | undefined> {
     try {
       const filesystemNamespace = vaultFilesystemNamespace(this.namespace, params.namespace);
-      return (await readSummaryPending({ baseDir: this.baseDir, namespace: filesystemNamespace })) !== undefined;
+      return await readSummaryPending({ baseDir: this.baseDir, namespace: filesystemNamespace });
     } catch {
-      return false;
+      return undefined;
     }
+  }
+
+  /** The person has read the failed-summary line for a wire namespace's vault and put it away. */
+  async dismissSummaryPending(params: { namespace: string }): Promise<void> {
+    const filesystemNamespace = vaultFilesystemNamespace(this.namespace, params.namespace);
+    await clearSummaryPending({ baseDir: this.baseDir, namespace: filesystemNamespace });
   }
 
   async updateEntry(params: {

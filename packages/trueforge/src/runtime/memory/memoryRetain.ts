@@ -228,7 +228,45 @@ export interface SubmitRetainParams {
  * state) is the retry path for a submission that never reached the provider.
  */
 export async function submitRetain(params: SubmitRetainParams): Promise<void> {
-  await attemptRetainSubmission(params);
+  await whileRetainUnderWay({ params, work: () => attemptRetainSubmission(params) });
+}
+
+/** The turns whose save is being decided or written in this process right now, by operation id. */
+const retainsUnderWay = new Set<string>();
+
+/**
+ * Whether a turn's save is still being worked on here. A summary on a slow model can outlast the person's next
+ * message, and until it ends the store holds no record of the turn. That is not a lost save.
+ */
+export function retainIsUnderWay(operationId: string): boolean {
+  return retainsUnderWay.has(operationId);
+}
+
+/**
+ * Counts a turn's save as under way from now until the returned function is called. The work after a turn calls
+ * this before its first step, so the next turn of the chat never finds the save unrecorded and unannounced.
+ */
+export function markRetainUnderWay(params: Pick<SubmitRetainParams, 'sessionId' | 'turnId'>): () => void {
+  const operationId = retainOperationId({ sessionId: params.sessionId, turnId: params.turnId });
+  retainsUnderWay.add(operationId);
+  return () => {
+    retainsUnderWay.delete(operationId);
+  };
+}
+
+async function whileRetainUnderWay<T>({
+  params,
+  work,
+}: {
+  params: Pick<SubmitRetainParams, 'sessionId' | 'turnId'>;
+  work: () => Promise<T>;
+}): Promise<T> {
+  const ended = markRetainUnderWay(params);
+  try {
+    return await work();
+  } finally {
+    ended();
+  }
 }
 
 /** Outcome of one retain submission attempt; `skipped` means there was nothing to retain. */
@@ -343,6 +381,9 @@ async function decidePersonFacts(params: SubmitRetainParams): Promise<TurnMemory
     });
     return { kind: 'exchange', notes: fullReplyNotes(params) };
   }
+  // A failed summary's log line says how long the model was given, so a slow model shows as one.
+  const askedAt = Date.now();
+  const secondsTaken = (): number => Math.round((Date.now() - askedAt) / 1000);
   try {
     const result = await summarizeTurnContent({
       userText: params.userText,
@@ -393,7 +434,11 @@ async function decidePersonFacts(params: SubmitRetainParams): Promise<TurnMemory
       case 'failed':
         params.logger.debug('Memory summarization failed', { reason: result.reason });
         await recordSummaryOutcome(params, { outcome: 'failed', reason: result.fallback });
-        logTurnMemoryNotSaved(params, { message: 'the summary failed', reason: result.fallback });
+        logTurnMemoryNotSaved(params, {
+          message: 'the summary failed',
+          reason: result.fallback,
+          seconds: secondsTaken(),
+        });
         return { kind: 'nothing' };
       case 'skipped':
         params.logger.debug('Memory summarization skipped', { reason: result.reason });
@@ -409,8 +454,35 @@ async function decidePersonFacts(params: SubmitRetainParams): Promise<TurnMemory
       reason: error instanceof Error ? error.message : String(error),
     });
     await recordSummaryOutcome(params, { outcome: 'failed', reason: 'model_failed' });
-    logTurnMemoryNotSaved(params, { message: 'the summary failed', reason: 'model_failed' });
+    logTurnMemoryNotSaved(params, { message: 'the summary failed', reason: 'model_failed', seconds: secondsTaken() });
     return { kind: 'nothing' };
+  }
+}
+
+/**
+ * A turn that was stopped or ended in an error has no finished reply, so it owes no summary. It is
+ * recorded as done, so the next turn does not report a failed summary for it. This applies only with
+ * summaries on: a turn kept in full is still rebuilt from the chat by the next turn. Never throws.
+ */
+export async function noteUnfinishedTurnOwesNoSummary(params: {
+  client: MemoryClient;
+  session: Pick<SessionRecord, 'is_incognito'>;
+  sessionId: string;
+  turnId: string;
+  summarize: SummarizeTurnContext | undefined;
+  logger: Logger;
+}): Promise<void> {
+  if (params.summarize === undefined || sessionKeepsNothing({ session: params.session })) {
+    return;
+  }
+  try {
+    await params.client.completeOperation?.(retainOperationId({ sessionId: params.sessionId, turnId: params.turnId }));
+  } catch (error) {
+    params.logger.debug('Recording that an unfinished turn owes no summary failed', {
+      sessionId: params.sessionId,
+      turnId: params.turnId,
+      reason: error instanceof Error ? error.message : String(error),
+    });
   }
 }
 
@@ -425,7 +497,7 @@ async function recordSummaryOutcome(
   note: { outcome: 'summarized' | 'failed'; reason?: SummaryFallbackReason | undefined },
 ): Promise<void> {
   try {
-    await params.client.noteSummaryOutcome?.(note);
+    await params.client.noteSummaryOutcome?.({ ...note, sessionId: params.sessionId });
   } catch (error) {
     params.logger.debug('Recording the turn summary outcome failed', {
       sessionId: params.sessionId,
@@ -436,7 +508,10 @@ async function recordSummaryOutcome(
 }
 
 /** Info line for a turn that adds nothing to memory, with the one reason; interactive turns only. */
-function logTurnMemoryNotSaved(params: SubmitRetainParams, why: { message: string; reason: string }): void {
+function logTurnMemoryNotSaved(
+  params: SubmitRetainParams,
+  why: { message: string; reason: string; seconds?: number },
+): void {
   if (params.outcomeLog === undefined) {
     return;
   }
@@ -445,6 +520,7 @@ function logTurnMemoryNotSaved(params: SubmitRetainParams, why: { message: strin
     turnId: params.turnId,
     personaName: params.outcomeLog.personaName,
     reason: why.reason,
+    ...(why.seconds === undefined ? {} : { seconds: why.seconds }),
   });
 }
 
@@ -707,6 +783,10 @@ async function attemptRetainSubmission(
  * accepted by a retry), so callers can make claims about a save only on that outcome.
  */
 export async function submitRetainWithVerification(params: SubmitRetainParams): Promise<boolean> {
+  return whileRetainUnderWay({ params, work: () => retainAndVerify(params) });
+}
+
+async function retainAndVerify(params: SubmitRetainParams): Promise<boolean> {
   // Before the summary model runs: a private chat's words reach neither memory nor its notes.
   if (sessionKeepsNothing({ session: params.session })) {
     return false;

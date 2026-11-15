@@ -62,6 +62,18 @@ export interface AgentDefinition {
    * resolver, not here.
    */
   configuredModels: readonly ConfiguredModelSummary[] | undefined;
+  /**
+   * The Email accounts connected on this host at turn time and which of them is the default, for
+   * the prompt's host-owned facts: the model is told the accounts outright instead of having to
+   * guess an account name. Undefined when the host cannot say, or no Email connector is set up.
+   */
+  mailAccounts?: { names: readonly string[]; default_name: string | null } | undefined;
+  /**
+   * The Calendar accounts connected on this host at turn time and which of them is the default, for
+   * the prompt's host-owned facts, so the model can name the account a calendar belongs to instead
+   * of guessing. Undefined when the host cannot say, or no Calendar connector is set up.
+   */
+  calendarAccounts?: { names: readonly string[]; default_name: string | null } | undefined;
   modelProperties?:
     | {
         /** Maximum combined input/output context for the resolved model, when known. */
@@ -69,11 +81,10 @@ export interface AgentDefinition {
       }
     | undefined;
   /**
-   * IANA timezone name the client sent with the turn (e.g. via
-   * Intl.DateTimeFormat().resolvedOptions().timeZone), used to report local time from
-   * get_current_datetime and in the ambient current-date section. Undefined when the client
-   * sent none, or the resolver has no client to ask; both the tool and the section fall back
-   * to UTC.
+   * The person's IANA timezone for this turn: the one the client sent (e.g. via
+   * Intl.DateTimeFormat().resolvedOptions().timeZone), else the one the host knows for them. It is the only zone
+   * get_current_datetime and the ambient current-date section report in. Undefined when none is known; both then
+   * report UTC and say the person's zone is not known.
    */
   clientTimezone?: string | undefined;
   /** True when the person spoke the message and the client reads the reply aloud. */

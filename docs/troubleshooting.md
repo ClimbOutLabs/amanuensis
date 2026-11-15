@@ -78,6 +78,8 @@ Inside Aman, click **Help, I'm stuck** at the top of the screen. The guide check
 
     Run `aman doctor`. If it says an instance isn't running, run `aman doctor instance --fix`. It asks before it restarts the instance.
 
+    If the instance still has a problem after that restart, the repair says so and does not send you back to it. Restarting again will not help then. Follow the step the box at the end gives. When a part of Aman is missing a file, that step is `aman upgrade --force`, which gets the newest Aman. `--force` lets the upgrade run while an instance has a problem.
+
 ??? question "The sign-in page says it's unavailable"
 
     On a first install, the sign-in service takes a few seconds to start. Wait, then reload the page. If it still fails, run `aman doctor` and follow the sign-in check's **Next:** line.
@@ -132,7 +134,7 @@ Inside Aman, click **Help, I'm stuck** at the top of the screen. The guide check
 ??? question "The model is set, but the chat says it can't reach it"
 
     - For a hosted model, check the key in **Settings**, then **Models**.
-    - For a local model such as Ollama, check that it's running on the same computer.
+    - For a model on this computer, such as Ollama, check that it's running. If Aman still can't reach it, see [A model on this computer](../packages/trueforge/guide/topics/local-model.md).
 
 ??? question "Aman can't run code or read an attachment"
 

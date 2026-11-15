@@ -35,14 +35,7 @@ export const EMAIL_CHOICES = {
     label: APPROVAL_CHOICES.changeIt.label,
     hint: 'Ask the persona to change this first. Nothing is sent now.',
   },
-  saveDraft: { label: 'Save as draft', hint: 'Save this as a draft. Nothing is sent.' },
 } as const;
-
-/**
- * The server option that saves a mail as a draft instead of sending it. The card shows Save as draft
- * only when the server offers this option on the approval, so nothing is faked on a server without it.
- */
-export const SAVE_DRAFT_OPTION_ID = 'save_draft';
 
 /**
  * The choices on a skill network card. Allow covers this chat, always covers the skill until cleared

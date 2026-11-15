@@ -36,6 +36,15 @@ let world;
 const make = options => (world = createWorld(options));
 afterEach(() => world?.dispose());
 
+/** The report as one line of words: the sides of its panels dropped and wrapped lines joined. */
+function flatText(text) {
+  return text
+    .split('\n')
+    .map(line => line.replace(/^[|│] (.*?) *[|│]$/, '$1'))
+    .join(' ')
+    .replace(/\s+/g, ' ');
+}
+
 function machine(result, id) {
   return find(result.doc.machine, id);
 }
@@ -126,12 +135,16 @@ describe('document and exit codes', () => {
     world.df(1 * GIB_KB);
     const result = world.run();
     assert.equal(result.code, 1);
-    assert.match(result.stdout, /\n\[ Checking this computer \] +\d+ ok, 1 problem\n/);
+    assert.match(result.stdout, /\n\+- \[ Checking this computer \] -+ \d+ ok, 1 problem -\+\n/);
     assert.match(result.stdout, / x Only 1\.0 GB is free for Docker data/);
     assert.match(result.stdout, /Next: Run aman doctor disk --fix/);
-    assert.match(result.stdout, /\n\[ Checking instance main \]/);
+    assert.match(result.stdout, /\n\+- \[ Checking instance main \]/);
     assert.match(result.stdout, /\| x 1 problem +\|/);
-    assert.match(result.stdout, /\| x 1 problem +\|[\s\S]* x Only 1\.0 GB is free for Docker data[\s\S]*Next: Run aman doctor disk --fix/, 'the closing block lists the problem with its next step');
+    assert.match(
+      result.stdout,
+      /\| x 1 problem +\|[\s\S]* x Only 1\.0 GB is free for Docker data[\s\S]*Next: Run aman doctor disk --fix/,
+      'the closing block lists the problem with its next step',
+    );
     assert.match(result.stdout, /Do the Next step of each, then run aman doctor again\./);
   });
 
@@ -140,7 +153,7 @@ describe('document and exit codes', () => {
     world.set('info', { out: '', rc: 1, err: 'Cannot connect to the Docker daemon' });
     const result = world.run();
     assert.equal(result.code, 1);
-    const flat = result.stdout.replace(/\s+/g, ' ');
+    const flat = flatText(result.stdout);
     assert.match(flat, /Skipped: Docker is not reachable\. \(images, disk, docker_memory, clock\)/);
     assert.equal(flat.split('Skipped: Docker is not reachable.').length - 1, 2, 'two lines for five skipped checks');
   });
@@ -152,7 +165,7 @@ describe('document and exit codes', () => {
     assert.match(plain.stdout, /All checks passed\./);
     assert.doesNotMatch(plain.stdout, /\(docker\)/);
     const verbose = world.run(['--verbose']);
-    assert.match(verbose.stdout, /Docker 28\.0\.1 is running and Compose 2\.29\.1 is available\. \(docker\)/);
+    assert.match(flatText(verbose.stdout), /Docker 28\.0\.1 is running and Compose 2\.29\.1 is available\. \(docker\)/);
   });
 
   it('--summary is one line when everything passed, with the number of checks and nothing else', () => {
@@ -244,7 +257,7 @@ describe('usage', () => {
 
   it('needs the doctor command and no longer takes --home (the state directory is AMANUENSIS_HOME)', () => {
     make();
-    for (const argv of [[], ['--json'], ['status'], ['doctor', '--home', '/tmp/elsewhere']]) {
+    for (const argv of [[], ['--json'], ['bogus'], ['doctor', '--home', '/tmp/elsewhere']]) {
       const result = world.shim(argv);
       assert.equal(result.code, 2, argv.join(' '));
       assert.equal(result.stdout, '');
@@ -721,9 +734,15 @@ describe('instance settings file', () => {
         '',
       ].join('\n');
 
-    function setUp({ allowed, envText, hashes = [], registered = true, records = '', dex = '' }) {
+    function setUp({ allowed, envText, hashes = [], registered = true, records = '', dex = '', oldFile = '' }) {
       world?.dispose();
       make();
+      if (oldFile) {
+        mkdirSync(world.instanceDir('main'), { recursive: true });
+        writeFileSync(path.join(world.instanceDir('main'), oldFile), 'PASSWORD=SENTINEL-old-app-password\n', {
+          mode: 0o600,
+        });
+      }
       const file = path.join(world.instanceDir('main'), 'dex.env');
       writeFileSync(file, ["DEX_USER_PASSWORD_HASH='SENTINEL-owner-hash'", ...hashes, ''].join('\n'));
       chmodSync(file, 0o600);
@@ -860,6 +879,16 @@ describe('instance settings file', () => {
         assert.equal(check.state, 'warn');
         assert.equal(check.detail, 'More than the owner can sign in: late@x.invalid.');
         assert.equal(check.fix, fixCommand);
+      });
+    }
+
+    for (const file of ['.env.mail-email', '.env.calendar']) {
+      it(`warns about an old ${file} left in the instance folder, and never shows what it holds`, () => {
+        const check = setUp({ allowed: OWNER, oldFile: file });
+        assert.equal(check.state, 'warn');
+        assert.equal(check.detail, `An old file, ${file}, still holds an app password that Aman no longer uses.`);
+        assert.equal(check.fix, 'Run aman upgrade to move it into the connector and delete it');
+        assert.doesNotMatch(world.json().stdout, /SENTINEL/);
       });
     }
 
@@ -1448,6 +1477,54 @@ describe('why an instance does not run', () => {
     assert.match(fixed.stdout, /The main app is not running\./);
   });
 
+  it('with --fix, ends with a closed verdict that does not send the person back to the same repair', () => {
+    make();
+    const repo = world.sandbox();
+    world.installerStub(repo);
+    containers([app({ state: 'restarting', status: 'Restarting (1) 5 seconds ago' }), dex()]);
+    world.set('logs_c1', {
+      out: "Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/app/extra.mjs' imported from /app/entrypoint.mjs\n",
+    });
+    world.set('logs_c2', { out: '' });
+    const fixed = world.shim(['doctor', 'instance', '--fix', '--yes']);
+    assert.equal(fixed.code, 1, fixed.stderr + fixed.stdout);
+    const flat = fixed.stdout.replace(/[│|]/g, ' ').replace(/\s+/g, ' ');
+    assert.match(flat, /Checking instance main again/);
+    assert.match(flat, /a file is missing from it\. This is a bug in Aman/);
+    // Only a newer image fixes a missing file, so no line sends the person to a restart.
+    assert.doesNotMatch(flat, /aman doctor instance --fix/);
+    assert.match(flat, /Restarting did not fix instance main, so restarting again will not help\./);
+    assert.match(flat, /aman upgrade --force/);
+    // The last line is the closing rule, not a line inside a box that is still open.
+    const last = fixed.stdout.trimEnd().split('\n').at(-1) ?? '';
+    assert.doesNotMatch(last, /^[│|]/);
+  });
+
+  it('with --fix, sends a problem an upgrade cannot fix to its own cause, not to an upgrade', () => {
+    make();
+    const repo = world.sandbox();
+    world.installerStub(repo);
+    containers([app({ state: 'exited', status: 'Exited (1) 3 minutes ago' }), dex()]);
+    world.set('logs_c1', { out: 'Error: ENOSPC: no space left on device, write\n' });
+    world.set('logs_c2', { out: '' });
+    const fixed = world.shim(['doctor', 'instance', '--fix', '--yes']);
+    assert.equal(fixed.code, 1, fixed.stderr + fixed.stdout);
+    const flat = fixed.stdout.replace(/[│|]/g, ' ').replace(/\s+/g, ' ');
+    assert.match(flat, /This computer ran out of disk space\./);
+    assert.match(flat, /Restarting did not fix instance main/);
+    assert.match(flat, /Fix the problem shown above, then run aman doctor\./);
+    assert.doesNotMatch(flat, /aman upgrade/);
+  });
+
+  it('with --fix, closes its panel when there is nothing to repair', () => {
+    make();
+    containers([app({ state: 'running', status: 'Up 2 minutes' }), dex({ state: 'running', status: 'Up 2 minutes' })]);
+    const result = world.shim(['doctor', 'instance', '--fix', '--yes']);
+    assert.equal(result.code, 0, result.stderr + result.stdout);
+    const last = result.stdout.trimEnd().split('\n').at(-1) ?? '';
+    assert.doesNotMatch(last, /^[│|]/);
+  });
+
   it('with --fix, claims fixed when the refresh leaves no failing check', () => {
     make();
     const repo = world.sandbox();
@@ -1807,6 +1884,14 @@ describe('aman backup and aman upgrade', () => {
     assert.equal(world.shim(['upgrade', '--check']).code, 0);
     assert.ok(world.calls().includes(`install.sh --home ${world.home} backup main`));
     assert.ok(world.calls().includes(`install.sh --home ${world.home} upgrade --check`));
+  });
+
+  it('run aman status through the installer', () => {
+    make();
+    const repo = world.sandbox();
+    world.installerStub(repo);
+    assert.equal(world.shim(['status']).code, 0);
+    assert.ok(world.calls().includes(`install.sh --home ${world.home} status`));
   });
 
   it('run aman restore through the installer with the arguments given', () => {

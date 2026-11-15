@@ -3,16 +3,23 @@
 import type * as TrueForge from "../../api/index.js";
 import * as core from "../../core/index.js";
 import type * as serializers from "../index.js";
+import { MemoryVaultSummaryFailureCause } from "./MemoryVaultSummaryFailureCause.js";
 
 export const MemoryVaultSummaryStatus: core.serialization.ObjectSchema<
     serializers.MemoryVaultSummaryStatus.Raw,
     TrueForge.MemoryVaultSummaryStatus
 > = core.serialization.object({
+    cause: MemoryVaultSummaryFailureCause.nullable(),
+    failedAt: core.serialization.property("failed_at", core.serialization.date().nullable()),
+    sessionId: core.serialization.property("session_id", core.serialization.string().nullable()),
     summaryPending: core.serialization.property("summary_pending", core.serialization.boolean()),
 });
 
 export declare namespace MemoryVaultSummaryStatus {
     export interface Raw {
+        cause?: MemoryVaultSummaryFailureCause.Raw | null;
+        failed_at?: string | null;
+        session_id?: string | null;
         summary_pending: boolean;
     }
 }

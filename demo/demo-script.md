@@ -34,8 +34,8 @@ Every date counts from the day the demo is seeded. The examples here use Monday 
 ### 3. Draft, approval card, send (30 seconds) serves Tech, Design
 
 - Type: `Reply to Lucía in Spanish: Thursday works, she picks the place. Keep it warm and short.`
-- On screen: a draft in Lucía's thread with recipient, subject and body, written by Aman live. Then the approval card: who it goes to, the subject, a body preview, and four buttons: **Allow**, **Change it**, **Save as draft**, **Don't send**.
-- Presenter: "Nothing leaves this computer until I press this. I can send it, ask for a change, or keep it as a draft."
+- On screen: a draft in Lucía's thread with recipient, subject and body, written by Aman live. Then the approval card: who it goes to, the subject, a body preview, and three buttons: **Allow**, **Change it**, **Don't send**.
+- Presenter: "Nothing leaves this computer until I press this. I can send it, ask for a change, or stop it."
 - Click **Allow**. On screen: the thread shows the reply as sent, under Lucía's message.
 - Fallback: if the send fails with a provider error, the card keeps the draft and shows Retry; press it once. If Gmail is disconnected, show the draft only and say "the card is the only door out, and today it stays shut."
 

@@ -2,6 +2,25 @@ import type { CallToolRequest, ToolAnnotations } from '@modelcontextprotocol/sdk
 import type { Logger } from 'winston';
 import { caldavEventReviewFrom, type CaldavEventReview } from '../calendar/caldav/eventReview';
 import { CALDAV_SERVER_NAME } from '../calendar/caldav/toolContract';
+import { caldavResultForModel } from '../calendar/caldav/toolResults';
+import {
+  MAIL_DRAFT_FIRST_DETAIL,
+  mailDraftKey,
+  type ApprovedMailDraft,
+} from '../email/mailConnector/approvedDrafts';
+import {
+  mailForwardReadArguments,
+  mailForwardReviewFrom,
+  type MailForwardReview,
+} from '../email/mailConnector/forwardReview';
+import {
+  MAIL_CONNECTOR_NAME,
+  MAIL_CONTENT_TOOL_NAME,
+  MAIL_FORWARD_TOOL_NAME,
+  isMailDraftToolName,
+  isMailSendToolName,
+  mailSendOutcome,
+} from '../email/mailConnector/toolContract';
 import { McpConnectionError, ToolPolicyBlockedError, ToolPreDispatchError } from '../errors';
 import type { ApprovalDecision, ToolResultRemediation } from '../events/schema';
 import type { InternalToolCallInfo, ToolEffectHints } from '../llm/LLMTypes';
@@ -17,14 +36,13 @@ import {
   isApprovalExpiredReason,
 } from '../permissions/approvalExpiry';
 import type { ConnectorBinding } from '../permissions/approvalTokens';
-import { caldavResultNote } from '../permissions/caldavTier';
 import { isChangeRequestReason } from '../permissions/changeRequest';
 import { isHostVouchedDecision, isStandingTrustDecision } from '../permissions/connectorTrust';
 import { isMapsToolName } from '../permissions/mapsToolNames';
 import { appendOutboundTrace, collectOutboundStrings } from '../permissions/outboundGuard';
 import {
-  isSearchAskReason,
   countsAsSilentLookup,
+  isSearchAskReason,
   resultTexts,
   runOneAtATime,
   type SearchProviderGrant,
@@ -93,7 +111,11 @@ export const REPEATED_DENIAL_REMEDIATION: ToolResultRemediation = {
 /** Marks a denied call whose card expired, so the chat says it expired instead of "you said no". */
 export function deniedToolCallRemediation(reason: string | undefined): ToolResultRemediation | undefined {
   return isApprovalExpiredReason(reason)
-    ? { reason_code: APPROVAL_EXPIRED_REASON_CODE, message: APPROVAL_EXPIRED_RESULT, suggested_action: 'request_approval' }
+    ? {
+        reason_code: APPROVAL_EXPIRED_REASON_CODE,
+        message: APPROVAL_EXPIRED_RESULT,
+        suggested_action: 'request_approval',
+      }
     : undefined;
 }
 
@@ -178,10 +200,16 @@ function searchNotRunText(input: { detail: string; unattended: boolean }): strin
   return JSON.stringify({ error: `The web search was not run. ${input.detail} ${next}` });
 }
 
+/** What the model is told when a forward was approved as a draft only. */
+const FORWARD_KEPT_AS_DRAFT =
+  'The forward is kept as a draft. Nothing was sent. Tell the person it is ready. When they ask for it to be sent, call forward_email again with exactly the same arguments.';
+
 function autoDenyMessage(decision: TierDecision): string {
   switch (decision.auto_deny) {
     case 'offline_mode':
       return 'Auto-denied: offline mode is on.';
+    case 'draft_first':
+      return `Not sent: ${decision.reason_detail ?? 'the person approves a draft before an email is sent.'}`;
     case 'incomplete_send_card':
       return `Auto-denied: ${decision.reason_detail ?? 'the send cannot be shown in full.'}`;
     case 'unattended_run':
@@ -405,7 +433,40 @@ export class ToolSet implements IToolSet {
       });
     }
 
-    const response = this.withCaldavResultNote({
+    const mailDraft = await this.mailDraftFor(params);
+    if (mailDraft?.step === 'keep') {
+      // The card the person just approved was the draft of a forward: nothing is sent on this call.
+      await mailDraft.drafts.add(mailDraft.draft);
+      return toolResultResponse({ text: FORWARD_KEPT_AS_DRAFT });
+    }
+    // A send takes its draft before it goes, so two approvals of the same message cannot both send it.
+    if (mailDraft?.step === 'send' && !(await mailDraft.drafts.take(mailDraft.draft))) {
+      return toolResultResponse({
+        text: JSON.stringify({ error: `Not sent: ${MAIL_DRAFT_FIRST_DETAIL}` }),
+        isError: true,
+      });
+    }
+
+    let response: CallToolResponse;
+    try {
+      response = await this.dispatchShaped({ params, decision, context });
+    } catch (error) {
+      if (mailDraft?.step === 'send') {
+        await mailDraft.drafts.add(mailDraft.draft);
+      }
+      throw error;
+    }
+    await this.recordMailDraft({ mailDraft, response });
+    return this.withPagesRecorded({ params, response, wasInitialized: listed.wasInitialized });
+  }
+
+  private async dispatchShaped(input: {
+    params: CallToolRequest['params'];
+    decision: ApprovalDecision | undefined;
+    context: ToolInvocationContext | undefined;
+  }): Promise<CallToolResponse> {
+    const { params, decision, context } = input;
+    return this.withCaldavResultShape({
       params,
       response: normalizeGithubFileContentsResponse({
         serverName: this.name,
@@ -413,6 +474,14 @@ export class ToolSet implements IToolSet {
         response: await this.dispatch({ params, decision, context }),
       }),
     });
+  }
+
+  private withPagesRecorded(input: {
+    params: CallToolRequest['params'];
+    response: CallToolResponse;
+    wasInitialized: CallToolResolvedResponse['wasInitialized'];
+  }): CallToolResponse {
+    const { params, response, wasInitialized } = input;
     if (
       this.pages !== undefined &&
       this.pagesScope !== undefined &&
@@ -447,8 +516,8 @@ export class ToolSet implements IToolSet {
     }
     // The priming listTools() may have captured the first-connect init; carry it forward since the
     // subsequent callTool sees an already-open connection and reports none.
-    if (listed.wasInitialized && isCallToolResponseResult(response) && !response.wasInitialized) {
-      return { ...response, wasInitialized: listed.wasInitialized };
+    if (wasInitialized && isCallToolResponseResult(response) && !response.wasInitialized) {
+      return { ...response, wasInitialized };
     }
     return response;
   }
@@ -621,8 +690,90 @@ export class ToolSet implements IToolSet {
     }
   }
 
-  /** Adds the plain-words note the CalDAV reply result needs when the calendar sent no reply itself. */
-  private withCaldavResultNote({
+  /**
+   * The message an Email forward sends on, read once before it is classified so the card can show it.
+   * Null when that read fails; the card then lists the request as written.
+   */
+  private async mailForwardFor(params: CallToolRequest['params']): Promise<MailForwardReview | null | undefined> {
+    if (!this.firstParty || this.name !== MAIL_CONNECTOR_NAME || params.name !== MAIL_FORWARD_TOOL_NAME) {
+      return undefined;
+    }
+    const read = mailForwardReadArguments(isRecord(params.arguments) ? params.arguments : {});
+    if (read === undefined) {
+      return undefined;
+    }
+    try {
+      const response = await this.source.callTool({ name: MAIL_CONTENT_TOOL_NAME, arguments: read });
+      if (!isCallToolResponseResult(response) || response.result.isError === true) {
+        return null;
+      }
+      return mailForwardReviewFrom({ id: read.email_ids[0], result: response.result });
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Where an Email call stands in the two steps a message takes. `save` is a draft being saved, `keep` a
+   * forward the person has only approved as a draft, and `send` a message whose draft they approved.
+   */
+  private async mailDraftFor(params: CallToolRequest['params']): Promise<
+    | {
+        step: 'save' | 'keep' | 'send';
+        draft: ApprovedMailDraft;
+        drafts: SentinelHostContext['services']['mail_approved_drafts'];
+      }
+    | undefined
+  > {
+    const { sentinel } = this;
+    if (!this.firstParty || this.name !== MAIL_CONNECTOR_NAME || sentinel === undefined) {
+      return undefined;
+    }
+    const send = isMailSendToolName(params.name);
+    if (!send && !isMailDraftToolName(params.name)) {
+      return undefined;
+    }
+    const drafts = sentinel.services.mail_approved_drafts;
+    const draft = {
+      tenant_id: sentinel.tenant_id,
+      created_by: sentinel.created_by,
+      key: mailDraftKey({ tool_name: params.name, params: isRecord(params.arguments) ? params.arguments : {} }),
+    };
+    if (!send) {
+      return { step: 'save', draft, drafts };
+    }
+    // Only a forward has no draft tool, so only a forward with no draft on file is kept as one.
+    const keep = params.name === MAIL_FORWARD_TOOL_NAME && !(await drafts.has(draft));
+    return { step: keep ? 'keep' : 'send', draft, drafts };
+  }
+
+  /** A saved draft becomes one that may be sent. A send that did not go out gives its draft back. */
+  private async recordMailDraft(input: {
+    mailDraft: Awaited<ReturnType<ToolSet['mailDraftFor']>>;
+    response: CallToolResponse;
+  }): Promise<void> {
+    const { mailDraft, response } = input;
+    if (mailDraft === undefined) {
+      return;
+    }
+    const failed = !isCallToolResponseResult(response) || response.result.isError === true;
+    if (mailDraft.step === 'save') {
+      if (!failed) {
+        await mailDraft.drafts.add(mailDraft.draft);
+      }
+      return;
+    }
+    const wentOut =
+      isCallToolResponseResult(response) &&
+      !failed &&
+      resultTexts(response.result).some(text => mailSendOutcome(text) === 'sent');
+    if (!wentOut) {
+      await mailDraft.drafts.add(mailDraft.draft);
+    }
+  }
+
+  /** Shapes a CalDAV result for the model: the id to reuse, and plain notes where the calendar gives none. */
+  private withCaldavResultShape({
     params,
     response,
   }: {
@@ -632,14 +783,7 @@ export class ToolSet implements IToolSet {
     if (!this.firstParty || this.name !== CALDAV_SERVER_NAME || !isCallToolResponseResult(response)) {
       return response;
     }
-    const note = caldavResultNote({ tool_name: params.name, structured: response.result.structuredContent });
-    if (note === undefined) {
-      return response;
-    }
-    return {
-      ...response,
-      result: { ...response.result, content: [...response.result.content, { type: 'text', text: note }] },
-    };
+    return { ...response, result: caldavResultForModel({ tool_name: params.name, result: response.result }) };
   }
 
   private async buildToolCallInfo(
@@ -675,6 +819,7 @@ export class ToolSet implements IToolSet {
       return { info, classification: undefined };
     }
     const caldavEvent = await this.caldavEventFor(params);
+    const mailForward = await this.mailForwardFor(params);
     const decision = await classifyHostToolCall({
       sentinel,
       repository_id: null,
@@ -695,6 +840,7 @@ export class ToolSet implements IToolSet {
         mcp_declared_change_tools: this.declaredChangeTools,
         requires_network: info.requires_network,
         caldav_event: caldavEvent,
+        mail_forward: mailForward,
         mcp_hints: {
           read_only_hint: info.read_only_hint,
           destructive_hint: info.destructive_hint,

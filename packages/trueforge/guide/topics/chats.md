@@ -40,6 +40,8 @@ The row under the message box holds everything you can add to a message:
 - The model name at the right end says which model answers. See "Pick the model" below.
 - The microphone and the sound-wave button let you talk instead of type. See [Talk to Aman](voice.md).
 
+A small line under the message box says how much room the chat has taken, such as "This chat has used 72K of 128K the model can hold." The numbers count tokens, which are small pieces of words. If Aman does not know how much the model can hold, the line gives the size alone, such as "This chat has used 4K tokens so far." When the chat fills up, Aman shortens its older messages.
+
 ## Pick the model
 
 1. Click the model name at the right end of the message box. Its tip says "Select model".
@@ -115,7 +117,7 @@ On a computer, a panel on the right shows how Aman is doing, and what is coming 
 - The line under Aman's picture says only how Aman is doing: "Ready", "Waiting for you" when a card needs your answer, or that the connection has a problem. When the connection drops, click **Retry**.
 - "Answering" shows the persona that answers this chat, when it is not Aman.
 - On the new chat screen, **Today** lists your calendar for the day and when you are free. **Due** lists today's reminders that have not gone off yet. **Needs your OK** lists actions that wait for your answer. Click a reminder or an action to open its chat.
-- In a chat, **From memory** lists what Aman remembered for your last message. Click it to open the list. The × takes a memory out of this chat only. **Delete** removes the memory everywhere, after it asks you once. A line from one of your pages names the page, and you change it on that page. **Manage memory** opens your memory settings.
+- In a chat, **From memory** lists what Aman remembered for your last message. Click it to open the list. When your last message used nothing from memory, the row stays and says so. The × takes a memory out of this chat only. **Delete** removes the memory everywhere, after it asks you once. A line from one of your pages names the page, and you change it on that page. **Manage memory** opens your memory settings.
 - **Activity** lists what Aman did in this chat. Click **Audits** to see the full list in Settings.
 - **Rules** says what Aman may do here without asking, such as web searches, and whether Offline mode is on.
 
