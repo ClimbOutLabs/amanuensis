@@ -1,7 +1,7 @@
 ---
 id: getting-help
 title: Get help
-covers: command:doctor, command:backup, command:restore, command:upgrade, command:password, command:uninstall, route:help, route:bugReport
+covers: command:doctor, command:help, command:backup, command:restore, command:upgrade, command:password, command:uninstall, route:help, route:bugReport
 ---
 
 When something doesn't work, Aman's guide can look at your setup and tell you what to do. If that doesn't fix it, you can send us a bug report.
@@ -60,6 +60,7 @@ Settings has no button for these. On a Mac or Linux, type them in a terminal:
 - `aman restore` goes back to a backup. It asks which one, and waits for you to type yes. The password goes back to the one you had then, and devices may need to sign in again.
 - `aman upgrade` updates Aman. Get the newest release first, as [The aman command](../../../../docs/commands.md#update-aman) shows. It downloads Aman's parts ready-made when they match your version. When they don't, it builds them on this computer, which takes longer. If a pull left the folder you installed from changeable by your own group, as Ubuntu does, it makes that folder private to you again and says so.
 - `aman password` sets a new password.
+- `aman help` lists every command on one screen. `aman help doctor` shows the options of one command.
 
 On Windows, the Start menu has entries for the common ones, so you don't need a terminal:
 

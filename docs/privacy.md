@@ -89,6 +89,7 @@ For a short overview, see [Your privacy](../packages/trueforge/guide/topics/priv
     These all pass through Telegram's servers:
 
     - The messages you send the bot, and Aman's replies.
+    - What you type in a Telegram chat in Aman, and Aman's replies there. Files you add there stay in Aman. Other chats are never sent.
     - Reminder text.
     - The details of anything that needs your ok.
     - Any photos or files you send the bot.

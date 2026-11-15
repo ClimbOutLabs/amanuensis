@@ -14,6 +14,7 @@
 #   aman local-model PORT [--instance NAME] [--remove]
 #   aman address list | add ADDRESS | remove ADDRESS [--instance NAME]
 #   aman migrate --from-compose FOLDER [--user ID]
+#   aman help [COMMAND]
 #
 # --json never loads the terminal style and is the same document as before.
 #
@@ -85,36 +86,21 @@ DOCKER_VERSION=""
 DOCKER_MEM=""
 APP_CONTAINER=""
 
-usage() {
-  cat >&2 <<'USAGE'
-Usage: aman status
-         shows each instance's addresses, settings and how to set up a new phone or computer
-       aman doctor [--json] [--verbose] [--only ID] [--instance NAME] [--deep] [--local]
-       aman doctor instance|network [--fix [--yes]] [--instance NAME]
-       aman doctor sandbox [--fix [--yes]] [--instance NAME] [--disk-gb N] [--no-hard-disk-limit]
-         [--add go,rust,java] [--remove go,rust,java] [--add-python PACKAGES] [--remove-python PACKAGES]
-         --add and --add-python put toolchains or your own Python packages in the sandbox and rebuild it
-       aman doctor docker|disk|backup|checkout|tls [--fix [--yes]]
-       aman backup [NAME]
-       aman restore [NAME] [TIME | --latest]
-       aman upgrade [--check] [--force]
-       aman password [--instance NAME] [--password-stdin]
-         sets a new owner password; run it on the computer where Aman is installed
-       aman address list | add ADDRESS | remove ADDRESS [--instance NAME]
-         the addresses Aman answers at: an address of this computer to listen on, a name, or the full address
-         (https://name) of another program that passes visitors on to Aman
-       aman import FILE [--instance NAME] [--display-name NAME] [--dry-run]
-         --dry-run checks the file and imports nothing; an instance that has never started is started once first
-       aman migrate --from-compose FOLDER [--user ID]
-       aman local-model PORT [--instance NAME] [--remove]
-         lets Aman reach a model server on this computer at that port; --remove takes the port away
-USAGE
+die_usage() {
+  printf '%s\nRun aman help to see what each command does.\n' "$1" >&2
+  exit 2
 }
 
-die_usage() {
-  printf '%s\n' "$1" >&2
-  usage
-  exit 2
+# aman help [COMMAND]: the overview, or the page of one command, on the standard output.
+run_help() {
+  load_ui
+  require_lib help
+  if [ -z "${1:-}" ]; then
+    help_overview
+  elif ! help_command "$1"; then
+    printf 'There is no command called %s.\nRun aman help to see the commands.\n' "$1" >&2
+    exit 2
+  fi
 }
 
 # Helper files sit in ../lib beside this file's folder, installed and in a checkout alike.
@@ -1505,7 +1491,7 @@ doctor_sandbox() {
         shift
         ;;
       -h | --help)
-        usage
+        run_help doctor
         exit 0
         ;;
       *) die_usage "Unknown argument: $1" ;;
@@ -1670,7 +1656,7 @@ doctor_repair() { # kind
         shift
         ;;
       -h | --help)
-        usage
+        run_help doctor
         exit 0
         ;;
       *) die_usage "Unknown argument: $1" ;;
@@ -1788,7 +1774,7 @@ doctor_machine_repair() { # kind
       --yes) yes=1 ;;
       --verbose) UI_VERBOSE=1 ;;
       -h | --help)
-        usage
+        run_help doctor
         exit 0
         ;;
       *) die_usage "Unknown argument: $1" ;;
@@ -2123,6 +2109,18 @@ case "${1:-} ${2:-}" in
   *) warn_if_address_gone ;;
 esac
 
+# `aman COMMAND --help` shows the command's page; doctor reads its own arguments, so it is left out here.
+case "${2:-}" in
+  -h | --help)
+    case "${1:-}" in
+      status | upgrade | backup | restore | password | import | migrate | local-model | address)
+        run_help "$1"
+        exit 0
+        ;;
+    esac
+    ;;
+esac
+
 case "${1:-}" in
   doctor | backup | upgrade | import | migrate | local-model | address) renew_tls_if_due ;;
 esac
@@ -2146,11 +2144,20 @@ case "${1:-}" in
     shift
     run_installer instance password "$@"
     ;;
-  -h | --help)
-    usage
+  help)
+    shift
+    run_help "$@"
     exit 0
     ;;
-  *) die_usage "Unknown command: ${1:-(none)}" ;;
+  -h | --help)
+    run_help
+    exit 0
+    ;;
+  '')
+    run_help
+    exit 0
+    ;;
+  *) die_usage "Unknown command: $1" ;;
 esac
 
 case "${1:-}" in
@@ -2191,7 +2198,7 @@ while [ $# -gt 0 ]; do
       shift
       ;;
     -h | --help)
-      usage
+      run_help doctor
       exit 0
       ;;
     *) die_usage "Unknown argument: $1" ;;

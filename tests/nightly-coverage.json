@@ -114,6 +114,10 @@
       "set": "install",
       "tests": ["installer/tests/lib/look.test.sh"]
     },
+    "command:help": {
+      "set": "install",
+      "tests": ["installer/tests/lib/help.test.sh"]
+    },
     "command:import": {
       "set": "install",
       "tests": []
