@@ -257,7 +257,7 @@ describe('usage', () => {
 
   it('needs the doctor command and no longer takes --home (the state directory is AMANUENSIS_HOME)', () => {
     make();
-    for (const argv of [[], ['--json'], ['status'], ['doctor', '--home', '/tmp/elsewhere']]) {
+    for (const argv of [[], ['--json'], ['bogus'], ['doctor', '--home', '/tmp/elsewhere']]) {
       const result = world.shim(argv);
       assert.equal(result.code, 2, argv.join(' '));
       assert.equal(result.stdout, '');
@@ -1477,6 +1477,54 @@ describe('why an instance does not run', () => {
     assert.match(fixed.stdout, /The main app is not running\./);
   });
 
+  it('with --fix, ends with a closed verdict that does not send the person back to the same repair', () => {
+    make();
+    const repo = world.sandbox();
+    world.installerStub(repo);
+    containers([app({ state: 'restarting', status: 'Restarting (1) 5 seconds ago' }), dex()]);
+    world.set('logs_c1', {
+      out: "Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/app/extra.mjs' imported from /app/entrypoint.mjs\n",
+    });
+    world.set('logs_c2', { out: '' });
+    const fixed = world.shim(['doctor', 'instance', '--fix', '--yes']);
+    assert.equal(fixed.code, 1, fixed.stderr + fixed.stdout);
+    const flat = fixed.stdout.replace(/[│|]/g, ' ').replace(/\s+/g, ' ');
+    assert.match(flat, /Checking instance main again/);
+    assert.match(flat, /a file is missing from it\. This is a bug in Aman/);
+    // Only a newer image fixes a missing file, so no line sends the person to a restart.
+    assert.doesNotMatch(flat, /aman doctor instance --fix/);
+    assert.match(flat, /Restarting did not fix instance main, so restarting again will not help\./);
+    assert.match(flat, /aman upgrade --force/);
+    // The last line is the closing rule, not a line inside a box that is still open.
+    const last = fixed.stdout.trimEnd().split('\n').at(-1) ?? '';
+    assert.doesNotMatch(last, /^[│|]/);
+  });
+
+  it('with --fix, sends a problem an upgrade cannot fix to its own cause, not to an upgrade', () => {
+    make();
+    const repo = world.sandbox();
+    world.installerStub(repo);
+    containers([app({ state: 'exited', status: 'Exited (1) 3 minutes ago' }), dex()]);
+    world.set('logs_c1', { out: 'Error: ENOSPC: no space left on device, write\n' });
+    world.set('logs_c2', { out: '' });
+    const fixed = world.shim(['doctor', 'instance', '--fix', '--yes']);
+    assert.equal(fixed.code, 1, fixed.stderr + fixed.stdout);
+    const flat = fixed.stdout.replace(/[│|]/g, ' ').replace(/\s+/g, ' ');
+    assert.match(flat, /This computer ran out of disk space\./);
+    assert.match(flat, /Restarting did not fix instance main/);
+    assert.match(flat, /Fix the problem shown above, then run aman doctor\./);
+    assert.doesNotMatch(flat, /aman upgrade/);
+  });
+
+  it('with --fix, closes its panel when there is nothing to repair', () => {
+    make();
+    containers([app({ state: 'running', status: 'Up 2 minutes' }), dex({ state: 'running', status: 'Up 2 minutes' })]);
+    const result = world.shim(['doctor', 'instance', '--fix', '--yes']);
+    assert.equal(result.code, 0, result.stderr + result.stdout);
+    const last = result.stdout.trimEnd().split('\n').at(-1) ?? '';
+    assert.doesNotMatch(last, /^[│|]/);
+  });
+
   it('with --fix, claims fixed when the refresh leaves no failing check', () => {
     make();
     const repo = world.sandbox();
@@ -1836,6 +1884,14 @@ describe('aman backup and aman upgrade', () => {
     assert.equal(world.shim(['upgrade', '--check']).code, 0);
     assert.ok(world.calls().includes(`install.sh --home ${world.home} backup main`));
     assert.ok(world.calls().includes(`install.sh --home ${world.home} upgrade --check`));
+  });
+
+  it('run aman status through the installer', () => {
+    make();
+    const repo = world.sandbox();
+    world.installerStub(repo);
+    assert.equal(world.shim(['status']).code, 0);
+    assert.ok(world.calls().includes(`install.sh --home ${world.home} status`));
   });
 
   it('run aman restore through the installer with the arguments given', () => {

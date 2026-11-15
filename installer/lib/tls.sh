@@ -213,16 +213,10 @@ cmd_tls() {
 
 # The link as a code a phone can scan, drawn in the terminal; only where colors and UTF-8 are on, since it is drawn with
 # black and white blocks. Skipped quietly when the code cannot be made.
-tls_print_qr() { # link
-  local out
+# The code a phone can scan for a link, as lines of text; nothing without colors, UTF-8, Docker or the app image.
+tls_qr_text() { # link
   [ "$UI_COLOR_1" = 1 ] && [ "$UI_UTF8" = 1 ] || return 0
-  out=$(D run --rm --network none --user "$(id -u):$(id -g)" -v "$INSTALLER_DIR/lib/qr.mjs:/qr.mjs:ro" --entrypoint node "$REL_APP_TAG" /qr.mjs "$1" 2>/dev/null) || return 0
-  [ -n "$out" ] || return 0
-  _ui_out ""
-  while IFS= read -r line; do
-    _ui_out "  $line"
-  done <<<"$out"
-  _ui_out ""
+  D run --rm --network none --user "$(id -u):$(id -g)" -v "$INSTALLER_DIR/lib/qr.mjs:/qr.mjs:ro" --entrypoint node "$REL_APP_TAG" /qr.mjs "$1" 2>/dev/null || true
 }
 
 # Everything the front end needs before the instance starts.

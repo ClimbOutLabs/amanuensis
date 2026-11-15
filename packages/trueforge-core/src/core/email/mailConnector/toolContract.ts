@@ -64,7 +64,15 @@ export function isMailComposeToolName(tool_name: string): boolean {
   return MAIL_COMPOSE_TOOL_NAMES.some(name => name === tool_name);
 }
 
-export const MAIL_WRITE_TOOL_NAMES = [MAIL_DRAFT_TOOL_NAME, ...MAIL_SEND_TOOL_NAMES, 'archive_emails'] as const;
+/** Marks messages as read. Reading never does this; only this tool does, and only when the person asks. */
+export const MAIL_MARK_READ_TOOL_NAME = 'mark_emails_as_read';
+
+export const MAIL_WRITE_TOOL_NAMES = [
+  MAIL_DRAFT_TOOL_NAME,
+  ...MAIL_SEND_TOOL_NAMES,
+  'archive_emails',
+  MAIL_MARK_READ_TOOL_NAME,
+] as const;
 
 /** Every tool the model is offered on the Email connector, reads first. */
 export const MAIL_CONNECTOR_TOOL_NAMES = [...MAIL_READ_TOOL_NAMES, ...MAIL_WRITE_TOOL_NAMES] as const;
@@ -87,8 +95,14 @@ export const MAIL_MAILBOX_ARGUMENTS = ['mailbox', 'source_mailbox'] as const;
 /** Lists and searches messages; the host keeps it to a recent window when the call sets no date. */
 export const MAIL_LIST_TOOL_NAME = 'list_emails_metadata';
 
-/** Reads message bodies; its optional mark-as-read choice is the one read argument that changes the mailbox. */
+/** Reads message bodies. */
 export const MAIL_CONTENT_TOOL_NAME = 'get_emails_content';
+
+/**
+ * The sidecar's switch that makes a body read also mark the message read. It is hidden from the model and
+ * always sent off, so a read never changes the mailbox and never asks the person about it.
+ */
+export const MAIL_CONTENT_MARK_READ_ARGUMENT = 'mark_as_read';
 
 /** Names a model tends to guess when it looks for the Email connector under another name. */
 export function isMailConnectorGuess(name: string): boolean {

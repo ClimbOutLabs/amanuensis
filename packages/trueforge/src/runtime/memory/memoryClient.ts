@@ -194,6 +194,8 @@ export interface SummaryOutcomeNote {
   outcome: 'summarized' | 'failed';
   /** The log's reason code when the attempt failed; omitted when a summary was made. */
   reason?: string | undefined;
+  /** The chat the failed attempt was summarizing, so the Memories page can lead back to it. */
+  sessionId?: string | undefined;
 }
 
 /** One memory fact as the vault presents it. */

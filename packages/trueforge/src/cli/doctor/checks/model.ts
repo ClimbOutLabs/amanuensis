@@ -51,6 +51,18 @@ async function checkAddedModels({ deps, id }: { deps: DoctorDeps; id: string }):
 }
 
 /**
+ * The model check that needs no outside service: the models added in the app are counted, and a hosted model key is
+ * only noted, since checking it would call Token Factory.
+ */
+export function checkModelLocally({ deps }: { deps: DoctorDeps }): Check {
+  const apiKey = deps.env['NEBIUS_API_KEY']?.trim();
+  if (apiKey === undefined || apiKey === '') {
+    return checkAddedModels({ deps, id: 'model' });
+  }
+  return offCheck({ id: 'model', detail: 'Skipped: only checks that need no outside service were asked for.' });
+}
+
+/**
  * The hosted model answers: the model list names the configured model and one tool-call request works.
  * The checks themselves have one owner, the live smoke test; this only reads the settings and words the result.
  */

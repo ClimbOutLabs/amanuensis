@@ -105,6 +105,8 @@ describe('docker-compose.slots.yml', () => {
 function renderInstanceTemplate({ calendar }: { calendar: boolean }): unknown {
   const pairs = [
     'NAME=main',
+    'CONTAINER_PREFIX=aman-main',
+    'SHORT_NAME=main',
     `IF_CALENDAR=${calendar ? '1' : '0'}`,
     'CALENDAR_IMAGE=calendar-test:1',
     'IF_EMAIL=0',

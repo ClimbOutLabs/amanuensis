@@ -558,7 +558,7 @@ describe("the operator's own Email sidecar, with the annotations the mail server
     expect(response).not.toHaveProperty('approvalRequired');
   });
 
-  it('asks before reading with mark as read set, with the card for that change', async () => {
+  it('never asks about marking mail read on a content read, whatever the switch says', async () => {
     const email = makeToolSet({
       tools: [contentTool],
       services: servicesWithGrants([]),
@@ -569,11 +569,10 @@ describe("the operator's own Email sidecar, with the annotations the mail server
       name: 'get_emails_content',
       arguments: { email_ids: ['e1'], mark_as_read: true },
     });
-    expect(info).toMatchObject({ tier: 3, tier_reason: 'mail_mark_as_read', is_approval_required: true });
-    expect(info.approval_token_id).toEqual(expect.any(String));
+    expect(info).toMatchObject({ tier: 1, tier_reason: 'mail_read', is_approval_required: false });
   });
 
-  it('asks before marking when the choice arrives spelled as text through the call_tool wrapper', async () => {
+  it('never asks about marking mail read when the switch arrives spelled as text through the call_tool wrapper', async () => {
     const email = makeToolSet({
       tools: [contentTool],
       services: servicesWithGrants([]),
@@ -589,8 +588,7 @@ describe("the operator's own Email sidecar, with the annotations the mail server
         input: { email_ids: ['e1'], mark_as_read: 'true' },
       },
     });
-    expect(info).toMatchObject({ tier: 3, tier_reason: 'mail_mark_as_read', is_approval_required: true });
-    expect(info.approval_token_id).toEqual(expect.any(String));
+    expect(info).toMatchObject({ tier: 1, tier_reason: 'mail_read', is_approval_required: false });
   });
 
   it.each([

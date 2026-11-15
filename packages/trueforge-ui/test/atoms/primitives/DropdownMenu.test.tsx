@@ -136,6 +136,43 @@ describe('DropdownMenu', () => {
     expect(menu.className).toContain('fixed');
   });
 
+  it('flips the menu above the trigger when there is no room below, and keeps it below when there is', () => {
+    const originalHeight = window.innerHeight;
+    const rect = vi
+      .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+      .mockReturnValue(new DOMRect(100, 700, 200, 24));
+    const height = vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(200);
+
+    try {
+      Object.defineProperty(window, 'innerHeight', { configurable: true, value: 800 });
+      const { unmount } = render(
+        <DropdownMenu trigger={<button>Actions</button>}>
+          <DropdownMenuItem>Rename</DropdownMenuItem>
+        </DropdownMenu>,
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'Actions' }));
+      const flipped = screen.getByRole('menu');
+      expect(flipped.style.top).toBe('696px');
+      expect(flipped.style.transform).toContain('translateY(-100%)');
+      unmount();
+
+      Object.defineProperty(window, 'innerHeight', { configurable: true, value: 2000 });
+      render(
+        <DropdownMenu trigger={<button>Actions</button>}>
+          <DropdownMenuItem>Rename</DropdownMenuItem>
+        </DropdownMenu>,
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'Actions' }));
+      const below = screen.getByRole('menu');
+      expect(below.style.top).toBe('728px');
+      expect(below.style.transform).not.toContain('translateY(-100%)');
+    } finally {
+      rect.mockRestore();
+      height.mockRestore();
+      Object.defineProperty(window, 'innerHeight', { configurable: true, value: originalHeight });
+    }
+  });
+
   it('keeps the menu open for interactive content when closeOnClick is false', () => {
     render(
       <DropdownMenu closeOnClick={false} trigger={<button>Actions</button>}>

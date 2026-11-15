@@ -73,5 +73,16 @@ test_fixtures_match() {
   flush
 }
 
+# A progress line on a terminal stays on one line: a text too long for it is cut, while the elapsed time stays whole.
+test_progress_line_keeps_the_time() {
+  t_begin "a long progress line keeps its elapsed time and stays within the panel"
+  local out last
+  out=$(env -i PATH="$PATH" TERM=xterm LANG=C.UTF-8 bash -c ". '$UI_SH'; ui_init; UI_ANIM=1; _ui_panel_open 'Step'; ui_step_start 'Starting instance a-rather-long-instance-name-for-testing and waiting until it answers'; sleep 6; ui_step_abort" 2>&1 </dev/null)
+  last=$(printf '%s' "$out" | tr '\r' '\n' | grep -E '…  [0-9]+s$' | tail -n 1 || true)
+  if [ -n "$last" ]; then t_pass; else t_fail "no progress line ends with its elapsed time: $(printf '%s' "$out" | tr '\r' '\n' | tail -n 3)"; fi
+  if [ "$(printf '%s' "$last" | LC_ALL=C.UTF-8 wc -m)" -le 70 ]; then t_pass; else t_fail "line is ${#last} characters wide: $last"; fi
+}
+
+test_progress_line_keeps_the_time
 test_fixtures_match
 tests_finish

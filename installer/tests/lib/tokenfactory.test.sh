@@ -419,6 +419,23 @@ test_a_rerun_key_is_checked_and_planned() {
   sandbox_drop
 }
 
+
+test_a_model_added_in_the_app_is_set() {
+  t_begin "the ending and aman status say a model is set up when one was added in the app"
+  sandbox_new
+  STUB_MODEL_STATE=ok
+  install_machine
+  assert_flat_contains "$OUT" "Model set up in Settings > Models"
+  assert_not_contains "$OUT" "not set"
+  run_install status
+  assert_flat_contains "$OUT" "Model set up in Settings > Models"
+  assert_log_has "doctor --json --instance main --local --only model"
+  unset STUB_MODEL_STATE
+  run_install status
+  assert_flat_contains "$OUT" "Model not set: add one in Settings > Models"
+  sandbox_drop
+}
+
 test_key_from_stdin_reaches_only_the_env
 test_model_and_cap_flags
 test_password_first_then_key_on_stdin
@@ -441,4 +458,5 @@ test_a_key_on_a_rerun_with_the_password_line
 test_a_key_for_a_named_instance
 test_a_key_for_an_instance_that_had_none
 test_a_rerun_key_is_checked_and_planned
+test_a_model_added_in_the_app_is_set
 tests_finish

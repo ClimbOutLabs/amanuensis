@@ -778,7 +778,14 @@ describe("VaultClient", () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
 
-        const rawResponseBody = { data: { failed_at: "2024-01-15T09:30:00Z", summary_pending: true } };
+        const rawResponseBody = {
+            data: {
+                cause: "model_too_slow",
+                failed_at: "2024-01-15T09:30:00Z",
+                session_id: "session_id",
+                summary_pending: true,
+            },
+        };
 
         server
             .mockEndpoint()
@@ -791,7 +798,9 @@ describe("VaultClient", () => {
         const response = await client.memory.vault.getSummaryStatus();
         expect(response).toEqual({
             data: {
+                cause: "model_too_slow",
                 failedAt: new Date("2024-01-15T09:30:00.000Z"),
+                sessionId: "session_id",
                 summaryPending: true,
             },
         });

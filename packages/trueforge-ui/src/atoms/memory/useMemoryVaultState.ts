@@ -3,13 +3,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { useOptionalPersonas } from '@/components/PersonaContext.js';
+import { openDeliveryLink } from '@/deliveries/openDelivery.js';
 import {
   memoryVaultErrorMessage,
   personaVaultNamespace,
   type MemoryVaultCatalog,
   type MemoryVaultSharing,
+  type MemoryVaultSummaryFailureCause,
 } from '@/plugins/trueforge-agent-server-adapter/catalogs/memoryVaultCatalog.js';
 import { useOptionalServer } from '@/server/ServerContext.js';
+import { useOptionalShellMode } from '@/server/ShellModeContext.js';
 import {
   DEFAULT_MEMORY_FILTERS,
   filterMemories,
@@ -42,8 +45,14 @@ function hasMemoryVaultPort(server: object): server is { memoryVault: MemoryVaul
 
 export type NamespaceOption = { value: string; label: string };
 
-/** A collection whose newest turn summary failed and is still owed, and when it failed if the server said. */
-export type SummaryPendingNote = { namespace: string; persona: string | null; failedAt: string | null };
+/** A collection whose newest turn summary failed and is still owed, with when, why and in which chat if the server said. */
+export type SummaryPendingNote = {
+  namespace: string;
+  persona: string | null;
+  failedAt: string | null;
+  cause: MemoryVaultSummaryFailureCause | null;
+  sessionId: string | null;
+};
 
 /** One place memories are kept, read on every refresh. */
 type Collection = { namespace: string; owner: MemoryOwner; persona: string | null };
@@ -64,6 +73,7 @@ function readImportItems(parsed: unknown): unknown[] | null {
  */
 export function useMemoryVaultState() {
   const server = useOptionalServer();
+  const shell = useOptionalShellMode();
   const vault = server !== null && hasMemoryVaultPort(server) ? server.memoryVault : null;
   const personasContext = useOptionalPersonas();
   const personas = useMemo(
@@ -145,6 +155,8 @@ export function useMemoryVaultState() {
           })),
           summaryPending: status?.summaryPending ?? false,
           summaryFailedAt: status?.failedAt ?? null,
+          summaryCause: status?.cause ?? null,
+          summarySessionId: status?.sessionId ?? null,
         };
       }),
     );
@@ -163,6 +175,8 @@ export function useMemoryVaultState() {
             namespace: load.collection.namespace,
             persona: load.collection.persona,
             failedAt: load.summaryFailedAt,
+            cause: load.summaryCause,
+            sessionId: load.summarySessionId,
           })),
       );
       setLoadWarning(failure === undefined ? null : 'Some memories could not be loaded. Try again.');
@@ -372,6 +386,17 @@ export function useMemoryVaultState() {
     [topicNamespaces],
   );
 
+  /** Opens the chat a failed summary was for, or undefined where this surface cannot open chats. */
+  const openSummaryChat =
+    shell === null
+      ? undefined
+      : (sessionId: string) => {
+          setActionError(null);
+          void openDeliveryLink({ shell, server, link: { type: 'chat', sessionId } }).then(outcome => {
+            if (!outcome.opened) setActionError(`${outcome.message}.`);
+          });
+        };
+
   return {
     personas,
     namespace,
@@ -384,6 +409,7 @@ export function useMemoryVaultState() {
     loadWarning,
     summaryPending,
     dismissSummaryPending,
+    openSummaryChat,
     actionError,
     search,
     setSearch,

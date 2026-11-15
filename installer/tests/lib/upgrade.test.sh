@@ -957,6 +957,74 @@ test_upgrade_from_a_release_without_the_voice_adds_it() {
 }
 
 
+test_upgrade_names_containers_once_and_keeps_the_data() {
+  t_begin "an upgrade of an instance named aman-... from before container names writes aman- once and keeps its data"
+  sandbox_new
+  INSTALL_EXTRA=(--name aman-home)
+  install_machine
+  INSTALL_EXTRA=()
+  local file=$AMAN_HOME/instances/aman-home/compose.yaml
+  # The compose file of a release from before container names.
+  sed -i '/container_name:/d' "$file"
+  assert_not_contains "$(cat "$file")" "container_name"
+  : >"$STUB_LOG"
+  repo_commit_change "app change"
+  run_install upgrade
+  assert_rc 0
+  assert_contains "$(cat "$file")" "container_name: aman-home-app"
+  assert_contains "$(cat "$file")" "container_name: aman-home-dex"
+  assert_not_contains "$(cat "$file")" "container_name: aman-aman-" "aman- is written once"
+  assert_contains "$(cat "$file")" "name: aman-aman-home" "the compose project, and so its networks, keep their names"
+  assert_contains "$(cat "$file")" "name: aman_aman-home_data" "the data volume keeps its name"
+  assert_contains "$(grep -- '--project-name aman-aman-home ' "$STUB_LOG")" "up -d" "the instance starts again under its old project"
+  assert_log_lacks "volume rm -f aman_aman-home_data"
+  assert_log_lacks "volume rm aman_aman-home_data"
+  assert_contains "$(cat "$SB_STATE/volumes")" "aman_aman-home_data" "the data volume is still there"
+  sandbox_drop
+}
+
+test_a_name_whose_containers_would_clash_is_refused() {
+  t_begin "a new x beside an aman-x would take its container names, so it is refused and nothing is made"
+  sandbox_new
+  INSTALL_EXTRA=(--name aman-home)
+  install_machine
+  INSTALL_EXTRA=()
+  with_input "$SENTINEL_PASSWORD
+"
+  run_install instance add home --yes --password-stdin --email other@example.invalid
+  clear_input
+  assert_rc 1
+  assert_flat_contains "$OUT$ERR" "Instance aman-home already uses the name aman-home in Docker"
+  assert_no_path "$AMAN_HOME/state/instances/home.conf"
+  sandbox_drop
+}
+
+test_upgrade_keeps_apart_an_x_and_an_aman_x() {
+  t_begin "an upgrade of an install with both x and aman-x gives each its own container and store names"
+  sandbox_new
+  INSTALL_EXTRA=(--name home)
+  install_machine
+  INSTALL_EXTRA=()
+  with_input "$SENTINEL_PASSWORD
+"
+  run_install instance add aman-home --yes --password-stdin --email other@example.invalid
+  clear_input
+  assert_rc 0
+  local plain=$AMAN_HOME/instances/home/compose.yaml long=$AMAN_HOME/instances/aman-home/compose.yaml
+  # Compose files of a release from before container names.
+  sed -i '/container_name:/d' "$plain" "$long"
+  : >"$STUB_LOG"
+  repo_commit_change "app change"
+  run_install upgrade
+  assert_rc 0
+  assert_contains "$(cat "$plain")" "container_name: aman-home-app"
+  assert_contains "$(cat "$long")" "container_name: aman-aman-home-app" "aman-home keeps aman- twice so the two never share a name"
+  assert_not_contains "$(cat "$long")" "container_name: aman-home-app"
+  assert_contains "$(cat "$long")" "name: aman_aman-home_data" "aman-home keeps its data volume"
+  assert_contains "$(cat "$plain")" "name: aman_home_data" "home keeps its data volume"
+  sandbox_drop
+}
+
 test_noop_when_current
 test_upgrade_check_names_the_move_to_https_and_changes_nothing
 test_upgrade_moves_a_plain_http_instance_to_https
@@ -1003,4 +1071,7 @@ test_doctor_failure_blocks_unless_forced
 test_upgrade_from_a_release_without_the_voice_adds_it
 test_gate_passes_when_the_doctor_reports_only_warnings
 test_gate_blocks_when_the_doctor_cannot_be_checked
+test_upgrade_names_containers_once_and_keeps_the_data
+test_a_name_whose_containers_would_clash_is_refused
+test_upgrade_keeps_apart_an_x_and_an_aman_x
 tests_finish

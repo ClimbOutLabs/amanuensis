@@ -1084,6 +1084,14 @@ jobs:
         if: matrix.image == 'calendar'
         run: docker build -t aman-calendar:arm64-check ops/calendar-sidecar
 
+      # Loading the start file inside the built image fails on any module the image left out; its main only runs
+      # when it is started as the command, so this loads it and nothing more.
+      - name: Check the calendar image has every file it starts with
+        if: matrix.image == 'calendar'
+        run: |
+          docker run --rm --entrypoint node aman-calendar:arm64-check --input-type=module \
+            -e "await import('/app/entrypoint.mjs'); await import('/app/agent.mjs');"
+
       - name: Build the browser and gateway images
         if: matrix.image == 'browser'
         run: |

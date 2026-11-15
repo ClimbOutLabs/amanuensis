@@ -79,7 +79,7 @@ Aman is always installed from its latest release, never from the code that is st
    - `Set up the sandbox now? [y/N]` Type `y`. This gives Aman a safe place to run code. If you press ++enter++ here, the install stops. Run the installer again and type `y`.
    - `Make Docker start with this computer? [y/N]` It asks this only if Docker doesn't start on its own yet. Type `y`.
 
-When it is done, it prints a green box that says **Ready. Instance main is running.** The addresses to open are listed under it.
+When it is done, it prints a green box that says **Ready. Instance main is running.** Under it is the one address to open and the email you sign in with. To see every address the instance answers at, run `aman status`.
 
 !!! note "If it stops with a red line"
 

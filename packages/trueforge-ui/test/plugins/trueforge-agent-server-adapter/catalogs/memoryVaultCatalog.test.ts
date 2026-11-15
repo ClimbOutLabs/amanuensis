@@ -25,7 +25,12 @@ describe('createMemoryVaultCatalog', () => {
       fetch: fetchFor((path, method) => {
         calls.push({ path, method });
         if (path === '/api/v1/memory/vault/summary-status?namespace=persona%3AZara' && method === 'GET')
-          return { summary_pending: true, failed_at: '2026-08-14T12:00:00.000Z' };
+          return {
+            summary_pending: true,
+            failed_at: '2026-08-14T12:00:00.000Z',
+            cause: 'model_too_slow',
+            session_id: 'chat-oat-bars',
+          };
         if (path === '/api/v1/memory/vault/summary-status' && method === 'GET') return { summary_pending: false };
         if (path === '/api/v1/memory/vault/summary-status?namespace=persona%3AZara' && method === 'DELETE') return {};
         throw new Error(`unexpected request ${method} ${path}`);
@@ -35,9 +40,16 @@ describe('createMemoryVaultCatalog', () => {
     assert.deepEqual(await catalog.getSummaryStatus('persona:Zara'), {
       summaryPending: true,
       failedAt: '2026-08-14T12:00:00.000Z',
+      cause: 'model_too_slow',
+      sessionId: 'chat-oat-bars',
     });
-    // A server from before the failed time was sent still reads.
-    assert.deepEqual(await catalog.getSummaryStatus(), { summaryPending: false, failedAt: null });
+    // A server from before the time, the cause and the chat were sent still reads.
+    assert.deepEqual(await catalog.getSummaryStatus(), {
+      summaryPending: false,
+      failedAt: null,
+      cause: null,
+      sessionId: null,
+    });
     await catalog.dismissSummaryStatus('persona:Zara');
     assert.deepEqual(calls, [
       { path: '/api/v1/memory/vault/summary-status?namespace=persona%3AZara', method: 'GET' },
