@@ -15,8 +15,12 @@ function copiedFiles() {
   const files = new Set();
   for (const line of DOCKERFILE.split('\n')) {
     const parts = line.trim().split(/\s+/);
-    if (parts[0] !== 'COPY' || parts.some(part => part.startsWith('--'))) continue;
-    for (const source of parts.slice(1, -1)) files.add(source);
+    if (parts[0] !== 'COPY' || parts.some(part => part.startsWith('--'))) {
+      continue;
+    }
+    for (const source of parts.slice(1, -1)) {
+      files.add(source);
+    }
   }
   return files;
 }
@@ -35,12 +39,16 @@ function localImports(first) {
   const queue = [first];
   while (queue.length > 0) {
     const file = queue.shift();
-    if (file === undefined || seen.has(file)) continue;
+    if (file === undefined || seen.has(file)) {
+      continue;
+    }
     seen.add(file);
     const source = readFileSync(join(SIDECAR_ROOT, file), 'utf8');
     for (const match of source.matchAll(/(?:from|import)\s*\(?\s*'(\.\/[^']+)'/g)) {
       const target = match[1];
-      if (target !== undefined) queue.push(target.slice(2));
+      if (target !== undefined) {
+        queue.push(target.slice(2));
+      }
     }
   }
   return seen;
