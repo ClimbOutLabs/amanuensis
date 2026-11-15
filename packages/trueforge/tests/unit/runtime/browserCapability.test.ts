@@ -329,7 +329,7 @@ describe('browser capability', () => {
     const { sent, call } = mount(() => ({ json: { status: 'refused', reason: 'sensitive_field' } }));
     const result = await call('browser_type', { ref: 'e1', text: 'hunter2' }, checkedContext(FIELD));
     expect(result.isError).toBe(true);
-    expect(JSON.parse(textOf(result)).message).toBe(
+    expect(textOf(result)).toBe(
       'This field is for a password, a payment detail or a one-time code. Ask the person to type it themselves.',
     );
     expect(sent[0]?.url).toBe('http://browser-relay:8792/type');
@@ -389,7 +389,7 @@ describe('browser capability', () => {
       const { call } = mount(() => ({ json: { status: 'refused', reason } }));
       const result = await call('browser_click', { ref: 'e3' }, checkedContext(CHECKED));
       expect(result.isError).toBe(true);
-      expect(JSON.parse(textOf(result)).message).toBe(message);
+      expect(textOf(result)).toBe(message);
     }
   });
 
@@ -402,7 +402,7 @@ describe('browser capability', () => {
     ] as const) {
       const result = await call(name, args);
       expect(result.isError).toBe(true);
-      expect(JSON.parse(textOf(result)).message).toBe(
+      expect(textOf(result)).toBe(
         'Aman could not check that part of the page first, so it was not touched. Read the page again, then try again.',
       );
     }
@@ -413,7 +413,7 @@ describe('browser capability', () => {
     const { call } = mount(() => ({ json: { status: 'refused', reason: 'changed' } }));
     const result = await call('browser_click', { ref: 'e3' }, checkedContext(CHECKED));
     expect(result.isError).toBe(true);
-    expect(JSON.parse(textOf(result)).message).toBe(
+    expect(textOf(result)).toBe(
       'That part of the page changed after Aman checked it, so it was not touched. Read the page again, then try again.',
     );
   });

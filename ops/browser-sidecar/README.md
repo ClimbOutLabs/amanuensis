@@ -58,6 +58,9 @@ and names the person's profile (`owner`) and the chat's tab (`tab`).
 
 A step that fails answers 500 with a fixed `reason` (`timeout`, `navigation_failed`, `page_changed`,
 `page_script_error` or `unknown`), never the error's own text; the full error goes to the sidecar's log.
+A tab whose page closed some other way than through the sidecar (the person or the page closed it, or
+it crashed), before or during a step, answers `closed`, like a chat with no tab, and the next open
+makes a fresh tab.
 
 - `POST /element-info { owner, tab, ref }` — reads one element without touching it: the site, the
   name a person sees on it, its role, whether it submits a form, the form's values (sensitive ones
