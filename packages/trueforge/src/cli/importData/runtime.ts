@@ -3,6 +3,7 @@ import path from 'node:path';
 
 import { createLogger, format, transports } from 'winston';
 
+import { usePersonaKnowledgeKeys } from '../../personaKnowledge/sqliteKnowledgeRepository';
 import { EncryptedMcpServerStore } from '../../secrets/encryptedMcpServerStore';
 import { EncryptedModelProviderStore } from '../../secrets/encryptedModelProviderStore';
 import { openSqliteVault } from '../../secrets/sqliteAccess';
@@ -96,6 +97,7 @@ export async function openImportDataSession(): Promise<ImportDataSession> {
     keyFile: configuration.SECRETS_KEY_FILE,
     mode: 'command',
   });
+  usePersonaKnowledgeKeys({ ...vault.knowledgeKeys(), upgrade: true });
   const db = createSqliteDb(configuration.SQLITE_PATH, { key: databaseKey });
   try {
     await withLogsOnStderr(() => migrateSqliteToLatest(db));

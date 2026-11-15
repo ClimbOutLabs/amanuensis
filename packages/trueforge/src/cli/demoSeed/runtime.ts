@@ -5,6 +5,7 @@ import { McpCatalog } from '../../catalog/McpCatalog';
 import { SkillCatalog } from '../../catalog/SkillCatalog';
 import { flattenProviderModels } from '../../db/modelProviderStore';
 import { getPersonaKnowledgeIndexer } from '../../personaKnowledge/knowledgeIndexer';
+import { usePersonaKnowledgeKeys } from '../../personaKnowledge/sqliteKnowledgeRepository';
 import { openSqliteVault } from '../../secrets/sqliteAccess';
 import { createKnowledgeLibrary } from './knowledgeLibrary';
 import { buildDemoSession, type DemoSeedSession } from './session';
@@ -35,6 +36,7 @@ export async function openDemoSeedSession(): Promise<DemoSeedSession> {
     keyFile: configuration.SECRETS_KEY_FILE,
     mode: 'command',
   });
+  usePersonaKnowledgeKeys({ ...vault.knowledgeKeys(), upgrade: true });
   const db = createSqliteDb(configuration.SQLITE_PATH, { key: databaseKey });
   try {
     await migrateSqliteToLatest(db);

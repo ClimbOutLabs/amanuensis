@@ -133,6 +133,11 @@ data and not in any backup.
   the installer stops it. From then on nothing reads `db.sqlite` without
   the key: the app, `aman backup`, `aman backup-check`, import, export,
   the doctor and the password reset all open it through `aman_key`.
+- Each persona's knowledge library (`<persona>.sqlite` under the persona
+  knowledge folder) is encrypted the same way, with its own key derived
+  from the computer's key. The app encrypts a library from before
+  encryption the first time it opens it. After a restore on another
+  computer it moves the library to that computer's key on first open.
 - The file `db.sqlite.keys` beside the database holds the instance's key
   records: a value that tells whether a key is this database's key, the
   computer's key encrypted with the recovery key, and any earlier keys

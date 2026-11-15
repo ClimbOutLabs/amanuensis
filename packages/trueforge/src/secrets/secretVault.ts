@@ -1,5 +1,5 @@
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
-import { deriveDatabaseKey } from './databaseKey';
+import { deriveDatabaseKey, deriveKnowledgeKey } from './databaseKey';
 import { checkMasterKey } from './keyCheck';
 import type { KeyProvider } from './keyProvider';
 import { recoverMasterKey } from './recoveryKey';
@@ -88,6 +88,17 @@ export class SecretVault {
   /** The key of this instance's encrypted SQLite file. */
   databaseKey(): Buffer {
     return deriveDatabaseKey(this.#unlockedKey());
+  }
+
+  /**
+   * The key of the knowledge library files, and the keys a library may still be under when it came
+   * here from another computer.
+   */
+  knowledgeKeys(): { current: Buffer; earlier: Buffer[] } {
+    return {
+      current: deriveKnowledgeKey(this.#unlockedKey()),
+      earlier: [...this.#retiredKeys.values()].map(deriveKnowledgeKey),
+    };
   }
 
   #unlockedKey(): Buffer {

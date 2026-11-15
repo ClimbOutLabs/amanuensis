@@ -5,7 +5,7 @@ description: 'Every service Aman talks to, what each one sees, and what stays on
 
 # Privacy in detail
 
-Aman runs on your computer. Your chats, personas and settings are kept in a database file on that computer. The file is encrypted with a key kept on the same computer, so a copy of the file alone can't be read. Your memory is a set of plain text files (Markdown) on your disk. Those files aren't encrypted, so turn on disk encryption for the computer.
+Aman runs on your computer. Your chats, personas and settings are kept in a database file on that computer. The file is encrypted with a key kept on the same computer, so a copy of the file alone can't be read. The documents you give a persona to learn from are kept the same way. Your memory is a set of plain text files (Markdown) on your disk. Those files aren't encrypted, so turn on disk encryption for the computer.
 
 For a short overview, see [Your privacy](../packages/trueforge/guide/topics/privacy.md).
 

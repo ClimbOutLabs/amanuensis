@@ -150,6 +150,7 @@ import { createServerLogger, shouldColorize } from './logger';
 import type { IOAuthTokenStore } from './mcp/auth/types';
 import { PACKAGE_VERSION } from './packageVersion';
 import { closePersonaKnowledgeIndexers } from './personaKnowledge/knowledgeIndexer';
+import { usePersonaKnowledgeKeys } from './personaKnowledge/sqliteKnowledgeRepository';
 import { ActiveTurnRegistry } from './runtime/activeTurns';
 import { registerCalendarConnectorForBoot } from './runtime/calendarAccount';
 import { createCallAnswerer } from './runtime/calls/callAnswerer';
@@ -547,6 +548,7 @@ async function createStandalonePersistence(options: {
   ] = sqliteStores;
 
   const secretVault = await openSecretVault(new KeyRecordFile(keyRecordPath(sqlitePath)));
+  usePersonaKnowledgeKeys({ ...secretVault.knowledgeKeys(), upgrade: true });
   const db = createSqliteDb(sqlitePath, { key: secretVault.databaseKey() });
   await migrateSqliteToLatest(db);
   logger.info(`Standalone mode: sqlite at ${sqlitePath}`);
@@ -715,6 +717,7 @@ async function createDistributedPersistence(options: {
   const globalSettingsStore = new PostgresGlobalSettingsStore(db);
   await waitUntilUnlocked({ checkKey: key => checkMasterKey({ settings: globalSettingsStore, key }), logger });
   const secretVault = await openSecretVault(globalSettingsStore);
+  usePersonaKnowledgeKeys({ ...secretVault.knowledgeKeys(), upgrade: true });
   const tokenStore = new EncryptedOAuthTokenStore({ store: new PostgresOAuthTokenStore(db), vault: secretVault });
   const modelProviderStore = new EncryptedModelProviderStore({
     store: new PostgresModelProviderStore(db),

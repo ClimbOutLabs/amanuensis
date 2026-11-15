@@ -21,6 +21,7 @@ import type { Database as PostgresDatabase } from '../../db/postgres/types';
 import { ReachSettingsStore } from '../../db/reachSettingsStore';
 import { SentinelAuditStore } from '../../db/sentinelAuditStore';
 import { TextContactStore } from '../../db/textContactStore';
+import { usePersonaKnowledgeKeys } from '../../personaKnowledge/sqliteKnowledgeRepository';
 import { openReadingVault } from '../../secrets/cliVault';
 import { encryptSecretStores, type SecretBearingStores } from '../../secrets/encryptedStores';
 import type { ExportStores } from './stores';
@@ -57,8 +58,13 @@ export async function openPostgresStores(options: {
   const globalSettingsStore = new PostgresGlobalSettingsStore(db);
   let secretStores: SecretBearingStores<Transaction<PostgresDatabase>>;
   try {
+    const vault = await openReadingVault({ settings: globalSettingsStore, keyFile: options.keyFile });
+    // An export only reads: a library is opened under whichever key it has and is left as it is.
+    usePersonaKnowledgeKeys(
+      vault.state.status === 'unlocked' ? { ...vault.knowledgeKeys(), upgrade: false } : undefined,
+    );
     secretStores = encryptSecretStores({
-      vault: await openReadingVault({ settings: globalSettingsStore, keyFile: options.keyFile }),
+      vault,
       stores: {
         modelProviderStore: new PostgresModelProviderStore(db),
         sandboxProviderStore: new PostgresSandboxProviderStore(db),

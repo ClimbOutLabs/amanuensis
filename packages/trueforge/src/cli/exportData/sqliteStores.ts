@@ -22,6 +22,7 @@ import { SqliteOAuthTokenStore } from '../../db/sqlite/token-store/SqliteOAuthTo
 import { SqliteTurnArtifactStore } from '../../db/sqlite/turn-artifact-store/SqliteTurnArtifactStore';
 import type { Database as SqliteDatabase } from '../../db/sqlite/types';
 import { TextContactStore } from '../../db/textContactStore';
+import { usePersonaKnowledgeKeys } from '../../personaKnowledge/sqliteKnowledgeRepository';
 import { encryptSecretStores, type SecretBearingStores } from '../../secrets/encryptedStores';
 import { openSqliteVault } from '../../secrets/sqliteAccess';
 import type { ExportStores } from './stores';
@@ -41,6 +42,8 @@ export async function openSqliteStores(options: {
     keyFile: options.keyFile,
     mode: 'reading',
   });
+  // An export only reads: a library is opened under whichever key it has and is left as it is.
+  usePersonaKnowledgeKeys(vault.state.status === 'unlocked' ? { ...vault.knowledgeKeys(), upgrade: false } : undefined);
   const db = createSqliteDb(options.sqlitePath, { key: databaseKey });
   try {
     if (options.migrate) {
