@@ -33,8 +33,12 @@ upgrade_rollback() {
     instance_ever_healthy "$name" || continue
     say "Putting instance $name back"
     dc "$name" down >/dev/null 2>&1
-    if [ -n "$UPGRADE_BACKUP" ]; then
-      (restore_sqlite "$name" "$UPGRADE_BACKUP" "$CUR_APP_TAG") || failed=1
+    if [ -n "$UPGRADE_BACKUP" ] && backup_has "$name" "$UPGRADE_BACKUP"; then
+      # The version that made the backup opens it; the version being put back may be from before sealed backups.
+      (backup_open "$name" "$UPGRADE_BACKUP" "${BACKUP_IMAGE:-$CUR_APP_TAG}" &&
+        restore_sqlite "$name" "$(backup_view "$name" "$UPGRADE_BACKUP")" "$CUR_APP_TAG") || failed=1
+      # The data is the backup's again, which may be from before it was tied to this computer's key.
+      reg_unset "$name" secrets
     fi
     instance_render "$name" "$CUR_APP_TAG" "$CUR_DEX_IMAGE"
     instance_up "$name" || failed=1
@@ -103,15 +107,16 @@ upgrade_ports_ready() {
   for name in $(reg_names); do instance_tailscale_port_check "$name"; done
 }
 
-# Backs up every instance that has data, then builds what is missing. Touches nothing that is running, so a failed
-# build needs no rollback.
+# Builds what is missing, then backs up every instance that has data with the new version, which can seal the backup
+# even when the old one cannot. Touches nothing that is running, so a failed build or backup needs no rollback.
 upgrade_prepare() {
   UPGRADE_BACKUP=
+  images_ensure
   if [ -n "$(reg_names)" ]; then
+    BACKUP_IMAGE=$REL_APP_TAG
     BACKUP_ONLY_HEALTHY=1 backup_run "" || die "The backup before the upgrade failed, so nothing was changed."
     UPGRADE_BACKUP=$LAST_BACKUP_DIR
   fi
-  images_ensure
 }
 
 # Records the new release and restarts everything on it; from here a failure restores the backup and the old images.
@@ -352,7 +357,7 @@ cmd_upgrade() {
     return 0
   fi
   lock_acquire
-  ui_hint "Steps: check each instance, back up every instance, build the new version, restart the instances, check again."
+  ui_hint "Steps: check each instance, build the new version, back up every instance, restart the instances, check again."
   ui_hint "If anything fails, the old version and the backup are put back."
   ui_phase "Checking and backing up" 2 4
   upgrade_health_gate

@@ -41,7 +41,7 @@ restore_stamps() { # name
   while IFS= read -r dir; do
     stamp=$(basename "$dir")
     restore_stamp_valid "$stamp" || continue
-    [ -d "$dir/$1" ] || continue
+    backup_has "$1" "$dir" || continue
     printf '%s\n' "$stamp"
   done < <(find "$BACKUPS_DIR" -mindepth 1 -maxdepth 1 -type d | LC_ALL=C sort -r)
 }
@@ -76,22 +76,25 @@ aman backup-check --sqlite /tmp/check.sqlite' <"$1" 2>/dev/null) || {
   esac
 }
 
-# Prints "incomplete|why" or "newer|why" when the backup must not be used, and nothing when it can be.
+# Prints "incomplete|why", "newer|why" or "locked|why" when the backup must not be used, and nothing when it can be.
+# A sealed backup that passes is left opened for the restore that follows.
 restore_problem() { # name dir
-  local name=$1 dir=$2 file schema_backup schema_now version
-  for file in "$name/db.sqlite" "$name/manifest.json" "$name/dex.tar" "$name/env" "$name/dex.env" release.json; do
+  local name=$1 dir=$2 file schema_backup schema_now version view sealed=0 listed
+  [ ! -f "$dir/$name.sealed" ] || sealed=1
+  view=$(backup_view "$name" "$dir")
+  [ -f "$dir/release.json" ] || {
+    echo "incomplete|part of it is missing"
+    return 0
+  }
+  # The list of checks covers what the backup folder holds: the sealed file, or each file of an older backup.
+  if [ "$sealed" = 1 ]; then listed="$name.sealed"; else listed="$name/db.sqlite $name/manifest.json $name/dex.tar $name/env $name/dex.env"; fi
+  for file in $listed; do
     [ -f "$dir/$file" ] || {
       echo "incomplete|part of it is missing"
       return 0
     }
-    [ "$file" = release.json ] || grep -q "^[0-9a-f]\{64\}  $file\$" "$dir/SHA256SUMS" 2>/dev/null || {
+    grep -q "^[0-9a-f]\{64\}  $file\$" "$dir/SHA256SUMS" 2>/dev/null || {
       echo "incomplete|its list of checks is missing or damaged"
-      return 0
-    }
-  done
-  for file in "$name/memory" "$name/persona-knowledge"; do
-    [ -d "$dir/$file" ] || {
-      echo "incomplete|part of it is missing"
       return 0
     }
   done
@@ -99,9 +102,25 @@ restore_problem() { # name dir
     echo "incomplete|it was copied only in part or has been changed"
     return 0
   }
+  backup_open "$name" "$dir" "$RESTORE_IMAGE" || {
+    echo "locked|neither this computer's key nor the recovery key opens it"
+    return 0
+  }
+  for file in db.sqlite manifest.json dex.tar env dex.env; do
+    [ -f "$view/$name/$file" ] || {
+      echo "incomplete|part of it is missing"
+      return 0
+    }
+  done
+  for file in memory persona-knowledge; do
+    [ -d "$view/$name/$file" ] || {
+      echo "incomplete|part of it is missing"
+      return 0
+    }
+  done
   schema_backup=$(json_get "$dir/release.json" schema)
   schema_now=$(json_get "$RELEASE_DIR/release.json" schema)
-  version=$(sed -n 's/.*"version": *\([0-9][0-9]*\).*/\1/p' "$dir/$name/manifest.json" | head -n 1)
+  version=$(sed -n 's/.*"version": *\([0-9][0-9]*\).*/\1/p' "$view/$name/manifest.json" | head -n 1)
   case "$schema_backup$schema_now$version" in
     '' | *[!0-9]*)
       echo "incomplete|its version record cannot be read"
@@ -112,7 +131,7 @@ restore_problem() { # name dir
     echo "newer|it was made by a newer version of Aman than this one"
     return 0
   fi
-  case "$(restore_database_check "$dir/$name/db.sqlite" "$RESTORE_IMAGE")" in
+  case "$(restore_database_check "$view/$name/db.sqlite" "$RESTORE_IMAGE")" in
     newer) echo "newer|it was made by a newer version of Aman than this one" ;;
     unreadable) echo "incomplete|its chats cannot be read" ;;
   esac
@@ -202,7 +221,7 @@ restore_prepare() { # name backupdir
   RESTORE_PREPARED=1
   ensure_private_dir "$idir"
   if [ ! -f "$idir/.env" ]; then
-    write_if_changed "$idir/.env" 600 <"$2/$name/env" || true
+    write_if_changed "$idir/.env" 600 <"$(backup_view "$name" "$2")/$name/env" || true
     restore_settings_rebase "$name"
   fi
   instance_render "$name" "$RESTORE_IMAGE" "$RESTORE_DEX_IMAGE"
@@ -213,7 +232,10 @@ restore_prepare() { # name backupdir
 # instance that had no data yet, so its data is emptied; any other part the backup does not hold is left as it is.
 # Used for the restore itself and for undoing it.
 restore_apply() {
-  local name=$1 dir=$2 src=$2/$1 idir env path
+  local name=$1 dir src idir env path adopt=0
+  backup_open "$name" "$2" "$RESTORE_IMAGE" || return 1
+  dir=$(backup_view "$name" "$2")
+  src=$dir/$name
   idir=$(instance_dir "$name")
   restore_stop "$name" || return 1
   ensure_private_dir "$idir"
@@ -221,6 +243,7 @@ restore_apply() {
   [ ! -f "$src/dex.env" ] || write_if_changed "$idir/dex.env" 600 <"$src/dex.env" || true
   restore_settings_rebase "$name" || return 1
   env="$idir/.env"
+  [ "$(cat "$dir/.opened-$name" 2>/dev/null)" != recovery ] || adopt=1
   if [ -f "$src/db.sqlite" ]; then
     restore_sqlite "$name" "$dir" "$RESTORE_IMAGE" || return 1
     for path in "MEMORY_MARKDOWN_DIR:memory" "PERSONA_KNOWLEDGE_DIR:persona-knowledge"; do
@@ -232,9 +255,50 @@ restore_apply() {
   if [ -f "$src/dex.tar" ]; then
     restore_tar "aman_${name}_dex" /data "$RESTORE_IMAGE" 1 <"$src/dex.tar" || return 1
   fi
+  # The data now is the backup's, which may be from before it was tied to this computer's key.
+  reg_unset "$name" secrets
   instance_render "$name" "$RESTORE_IMAGE" "$RESTORE_DEX_IMAGE"
+  if [ "$adopt" = 1 ]; then
+    restore_adopt "$name" || return 1
+  fi
   instance_up "$name"
 }
+
+# Ties data that another computer's key protected to this computer's key, with the recovery key that opened its
+# backup. The saved logins in it stay readable, and the same recovery key keeps working.
+restore_adopt() { # name
+  local out
+  machine_key_ensure "$RESTORE_IMAGE" || return 1
+  out=$(printf '%s' "$BACKUP_RECOVERY_KEY" | secrets_setup_run "$1" adopt --sqlite /data/db/db.sqlite --key-file "$MACHINE_KEY_FILE") || return 1
+  case "$out" in
+    *'"adopted":true'* | *'"already_adopted":true'*) ;;
+    *) return 1 ;;
+  esac
+  log_event "instance $1 data tied to this computer's key"
+}
+
+# Asks for the recovery key of a backup that this computer's key does not open, until one opens it. Sets
+# RESTORE_PROBLEM to what is still wrong with the backup, or to nothing.
+restore_unlock() { # name dir label
+  local name=$1 dir=$2 typed tries=0
+  backup_takes_recovery_key "$dir/$name.sealed" ||
+    restore_refuse "The backup from $3 can only be opened on the computer that made it. Nothing was changed." "Pick another one with: aman restore $name"
+  say "The backup from $3 was made on another computer, or before this computer's key was replaced."
+  say "It opens with the recovery key of that Aman: eight groups of six digits, shown when it was set up."
+  while [ "$tries" -lt "$UI_MAX_TRIES" ]; do
+    ui_prompt typed "Recovery key" || restore_no_answer
+    if [ "$(printf '%s' "$typed" | tr -cd '0-9' | wc -c | tr -d ' ')" = 48 ]; then
+      BACKUP_RECOVERY_KEY=$typed
+      RESTORE_PROBLEM=$(restore_problem "$name" "$dir")
+      case "$RESTORE_PROBLEM" in locked\|*) ;; *) return 0 ;; esac
+    fi
+    UI_IN_PROMPT=1 UI_FD=2 ui_fail "That recovery key does not open this backup. Check each group of six digits and type it again."
+    tries=$((tries + 1))
+  done
+  BACKUP_RECOVERY_KEY=
+  restore_refuse "The backup from $3 was not opened, so nothing was changed." "Find the recovery key of the Aman that made it, then run aman restore $name again."
+}
+RESTORE_PROBLEM=
 
 # Runs from a failed restore and from the EXIT trap, so a failed command, a die or a signal all end with the instance put back.
 restore_rollback() {
@@ -253,6 +317,9 @@ restore_on_exit() {
   if [ "$RESTORE_STAGE" = applying ]; then
     restore_rollback || true
   fi
+  BACKUP_RECOVERY_KEY=
+  # An opened backup is readable, so it never outlives the run.
+  [ -z "${STATE_DIR:-}" ] || backup_stage_prune
 }
 
 # A backup time (as the list shows in the folder name) or an instance name, in either order.
@@ -293,7 +360,7 @@ restore_choose() { # name
   say "Backups of $name, newest first:" >&2
   for stamp in "${stamps[@]}"; do
     n=$((n + 1))
-    printf '  %s. %s  %s\n' "$n" "$(restore_label "$stamp")" "$(restore_size_label "$BACKUPS_DIR/$stamp/$name")" >&2
+    printf '  %s. %s  %s\n' "$n" "$(restore_label "$stamp")" "$(restore_size_label "$(backup_part "$name" "$BACKUPS_DIR/$stamp")")" >&2
   done
   ui_prompt answer "Restore which backup (number):" "" || restore_no_answer
   case "$answer" in '' | *[!0-9]*) restore_refuse "That is not a number from the list. Nothing was changed." "Run aman restore again and type one of the numbers." ;; esac
@@ -347,18 +414,20 @@ cmd_restore() {
     [ -n "$stamp" ] || restore_refuse "There is no backup of $name yet." "Make one with: aman backup $name"
   elif [ -n "$OPT_RESTORE_STAMP" ]; then
     stamp=$OPT_RESTORE_STAMP
-    [ -d "$BACKUPS_DIR/$stamp/$name" ] || restore_refuse "There is no backup of $name from $stamp." "See the list with: aman restore $name"
+    backup_has "$name" "$BACKUPS_DIR/$stamp" || restore_refuse "There is no backup of $name from $stamp." "See the list with: aman restore $name"
   else
     stamp=$(restore_choose "$name")
   fi
   dir=$BACKUPS_DIR/$stamp
   label=$(restore_label "$stamp")
-  problem=$(restore_problem "$name" "$dir")
+  RESTORE_PROBLEM=$(restore_problem "$name" "$dir")
+  case "$RESTORE_PROBLEM" in locked\|*) restore_unlock "$name" "$dir" "$label" ;; esac
+  problem=$RESTORE_PROBLEM
   case "$problem" in
     incomplete\|*) restore_refuse "The backup from $label cannot be used because ${problem#*|}. Nothing was changed." "Pick another one with: aman restore $name" ;;
     newer\|*) restore_refuse "The backup from $label cannot be used because ${problem#*|}. Nothing was changed." "Update Aman with aman upgrade, or pick an older backup with: aman restore $name" ;;
   esac
-  restore_question "$name" "$label" "$dir/$name/env"
+  restore_question "$name" "$label" "$(backup_view "$name" "$dir")/$name/env"
   ui_prompt answer "Type yes to continue:" "" || restore_no_answer
   [ "$(lowercase "$answer")" = yes ] || {
     say "Nothing was changed."
@@ -378,6 +447,10 @@ cmd_restore() {
   fi
   RESTORE_STAGE=idle
   log_event "restore $name from $dir"
+  if [ -n "$BACKUP_RECOVERY_KEY" ]; then
+    BACKUP_RECOVERY_KEY=
+    say "The data of $name is now protected by this computer's key. The recovery key you typed still opens it."
+  fi
   say "Done. $name is back to how it was on $label, and it is running."
   say "If that is not what you wanted, go back with: aman restore $name ${undo##*/}"
 }

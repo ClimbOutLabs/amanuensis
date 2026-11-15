@@ -608,7 +608,8 @@ test_app_env_lacks_dex_only_values() {
   assert_not_contains "$(cat "$AMAN_HOME/instances/main/.env")" "DEX_"
   assert_contains "$(sed -n '/^  dex:/,/^configs:/p' <<<"$compose")" "dex.env"
   assert_not_contains "$(sed -n '/^  app:/,/^  dex:/p' <<<"$compose")" "dex.env"
-  assert_contains "$(cat "$AMAN_HOME/backups/"*/main/dex.env 2>/dev/null || { run_install backup; cat "$AMAN_HOME"/backups/*/main/dex.env; })" "DEX_USER_PASSWORD_HASH"
+  run_install backup
+  assert_contains "$(sealed_cat "$(find "$AMAN_HOME/backups" -name main.sealed | head -n 1)" dex.env)" "DEX_USER_PASSWORD_HASH"
   sandbox_drop
 }
 

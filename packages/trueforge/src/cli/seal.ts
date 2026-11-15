@@ -22,10 +22,11 @@ import { processEnv, type CliEnv } from './env';
 import { UsageError } from './io';
 
 const USAGE = `Usage:
-  aman seal   --in <file|-> --out <file|-> [--sqlite <file>] [--key-file <file>]
+  aman seal   --in <file|-> --out <file|-> [--sqlite <file> | --this-computer-only] [--key-file <file>]
   aman unseal --in <file|-> --out <file|-> [--key-file <file> | --recovery-key-file <file>]
 
 seal    Encrypt a file so only this computer's key or the recovery key can open it.
+        With --this-computer-only no recovery key can open it: for data from before a recovery key existed.
 unseal  Open a sealed file. On another computer, pass a file holding the recovery key.
 
 "-" reads from stdin or writes to stdout. --sqlite defaults to SQLITE_PATH, --key-file to SECRETS_KEY_FILE.
@@ -44,10 +45,18 @@ interface SealOptions {
   sqlite: string | undefined;
   keyFile: string | undefined;
   recoveryKeyFile: string | undefined;
+  thisComputerOnly: boolean;
 }
 
 function parseOptions({ args, env }: { args: readonly string[]; env: CliEnv }): SealOptions {
-  let values: { in?: string; out?: string; sqlite?: string; 'key-file'?: string; 'recovery-key-file'?: string };
+  let values: {
+    in?: string;
+    out?: string;
+    sqlite?: string;
+    'key-file'?: string;
+    'recovery-key-file'?: string;
+    'this-computer-only'?: boolean;
+  };
   try {
     ({ values } = parseArgs({
       args: [...args],
@@ -57,6 +66,7 @@ function parseOptions({ args, env }: { args: readonly string[]; env: CliEnv }): 
         sqlite: { type: 'string' },
         'key-file': { type: 'string' },
         'recovery-key-file': { type: 'string' },
+        'this-computer-only': { type: 'boolean' },
       },
       strict: true,
       allowPositionals: false,
@@ -77,6 +87,7 @@ function parseOptions({ args, env }: { args: readonly string[]; env: CliEnv }): 
     sqlite: optional(values.sqlite ?? env['SQLITE_PATH']),
     keyFile: optional(values['key-file'] ?? env['SECRETS_KEY_FILE']),
     recoveryKeyFile: optional(values['recovery-key-file']),
+    thisComputerOnly: values['this-computer-only'] === true,
   };
 }
 
@@ -152,7 +163,9 @@ function openInput({ input, deps }: { input: string; deps: SealDeps }): AsyncIte
 
 async function runSeal({ options, deps }: { options: SealOptions; deps: SealDeps }): Promise<void> {
   const masterKey = await loadMachineKey(options.keyFile);
-  const recoveryCopy = await loadRecoveryCopy({ sqlite: options.sqlite, key: masterKey });
+  const recoveryCopy = options.thisComputerOnly
+    ? null
+    : await loadRecoveryCopy({ sqlite: options.sqlite, key: masterKey });
   await writeOutput({
     out: options.out,
     content: sealStream({ source: openInput({ input: options.in, deps }), masterKey, recoveryCopy }),

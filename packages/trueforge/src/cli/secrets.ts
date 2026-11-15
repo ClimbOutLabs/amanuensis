@@ -18,13 +18,14 @@ import {
   recoverMasterKey,
   saveRecoveryCopy,
 } from '../secrets/recoveryKey';
+import { adoptDatabase } from '../secrets/retiredKeys';
 import type { Command } from './command';
 import { processEnv, type CliEnv } from './env';
 import { errorCode } from './errorCode';
 import { UsageError, type CliIo } from './io';
 import type { SecretsDatabase } from './secretsRuntime';
 
-const USAGE = `Usage: aman secrets <init|first-run|check-recovery> [--sqlite <file>] [--key-file <file>] [--if-needed]
+const USAGE = `Usage: aman secrets <init|first-run|check-recovery|adopt|key> [--sqlite <file>] [--key-file <file>] [--if-needed]
 
   init            Set up saved secrets for this database and print its recovery key as {"recovery_key": "..."}.
                   Uses the key file if it is there, and makes one only if it is not.
@@ -32,6 +33,11 @@ const USAGE = `Usage: aman secrets <init|first-run|check-recovery> [--sqlite <fi
   first-run       The same setup for a person at a terminal: shows the recovery key in plain words,
                   and says nothing when setup is already done.
   check-recovery  Read a recovery key on stdin and print {"ok": true} if it unlocks this database.
+  adopt           Read a recovery key on stdin and tie a database that came from another computer to this
+                  computer's key. Prints {"adopted": true}, or {"already_adopted": true} when it was done before.
+                  The same recovery key keeps working afterwards.
+  key             Make this computer's key file if it is not there, and print {"created": true or false}.
+                  It touches no database.
 
 --if-needed makes init print {"already_set_up": true} and change nothing when setup is already done.
 --sqlite defaults to SQLITE_PATH, --key-file to SECRETS_KEY_FILE. With neither --sqlite nor SQLITE_PATH,
@@ -100,15 +106,42 @@ async function checkRecovery({ settings, io }: { settings: IGlobalSettingsStore;
     await recoverMasterKey({ settings, recoveryKey: await io.readStdin() });
   } catch (caught) {
     if (caught instanceof RecoveryKeyFormatError || caught instanceof RecoveryKeyRejectedError) {
-      throw new UsageError(
-        'That recovery key does not unlock this database. Check each group of digits and try again.',
-        {
-          cause: caught,
-        },
-      );
+      throw new UsageError(WRONG_RECOVERY_KEY, { cause: caught });
     }
     if (caught instanceof RecoveryCopyMissingError) {
       throw new Error('This database has no recovery key yet. Run "aman secrets init" first.', { cause: caught });
+    }
+    throw caught;
+  }
+}
+
+const WRONG_RECOVERY_KEY = 'That recovery key does not unlock this database. Check each group of digits and try again.';
+
+async function adopt({
+  settings,
+  keyFile,
+  io,
+}: {
+  settings: IGlobalSettingsStore;
+  keyFile: string;
+  io: CliIo;
+}): Promise<'adopted' | 'already_adopted'> {
+  const recoveryKey = await io.readStdin();
+  const { key, created } = await loadOrCreateKey(keyFile);
+  try {
+    return await adoptDatabase({ settings, masterKey: key, recoveryKey });
+  } catch (caught) {
+    if (created) {
+      await rm(keyFile, { force: true });
+    }
+    if (caught instanceof RecoveryKeyFormatError || caught instanceof RecoveryKeyRejectedError) {
+      throw new UsageError(WRONG_RECOVERY_KEY, { cause: caught });
+    }
+    if (caught instanceof RecoveryCopyMissingError) {
+      throw new Error(
+        'This database has no recovery key, so it cannot be moved to this computer. Restore it on the computer it came from.',
+        { cause: caught },
+      );
     }
     throw caught;
   }
@@ -124,7 +157,13 @@ export async function runSecrets({
   env: CliEnv;
 }): Promise<number> {
   const [action, ...rest] = args;
-  if (action !== 'init' && action !== 'first-run' && action !== 'check-recovery') {
+  if (
+    action !== 'init' &&
+    action !== 'first-run' &&
+    action !== 'check-recovery' &&
+    action !== 'adopt' &&
+    action !== 'key'
+  ) {
     throw new UsageError(USAGE);
   }
   let values: { sqlite?: string; 'key-file'?: string; 'if-needed'?: boolean };
@@ -140,6 +179,11 @@ export async function runSecrets({
       cause: caught,
     });
   }
+  if (action === 'key') {
+    const { created } = await loadOrCreateKey(requiredKeyFile(values['key-file'] ?? env['SECRETS_KEY_FILE']));
+    await io.stdout(`${JSON.stringify({ created })}\n`);
+    return 0;
+  }
   const database = await openDatabase({
     action,
     sqlitePath: values.sqlite ?? (env['STANDALONE'] === 'false' ? undefined : env['SQLITE_PATH']),
@@ -149,6 +193,11 @@ export async function runSecrets({
     if (action === 'check-recovery') {
       await checkRecovery({ settings: database.settings, io });
       await io.stdout(`${JSON.stringify({ ok: true })}\n`);
+      return 0;
+    }
+    if (action === 'adopt') {
+      const result = await adopt({ settings: database.settings, keyFile: database.keyFile, io });
+      await io.stdout(`${JSON.stringify(result === 'adopted' ? { adopted: true } : { already_adopted: true })}\n`);
       return 0;
     }
     if (action === 'first-run') {
@@ -176,7 +225,7 @@ async function openDatabase({
   sqlitePath,
   keyFile,
 }: {
-  action: 'init' | 'first-run' | 'check-recovery';
+  action: 'init' | 'first-run' | 'check-recovery' | 'adopt';
   sqlitePath: string | undefined;
   keyFile: string | undefined;
 }): Promise<SecretsDatabase> {
@@ -186,8 +235,12 @@ async function openDatabase({
     return keyFile === undefined ? configured : { ...configured, keyFile: path.resolve(keyFile) };
   }
   const file = path.resolve(sqlitePath);
-  if (action === 'check-recovery' && !existsSync(file)) {
-    throw new Error(`No database at ${file}. Run "aman secrets init" first.`);
+  if ((action === 'check-recovery' || action === 'adopt') && !existsSync(file)) {
+    throw new Error(
+      action === 'adopt'
+        ? `No database at ${file}. Restore the backup first, then run this again.`
+        : `No database at ${file}. Run "aman secrets init" first.`,
+    );
   }
   await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
   const db = createSqliteDb(file);

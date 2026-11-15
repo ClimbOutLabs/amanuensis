@@ -400,6 +400,91 @@ case "$cmd" in
       prev=$a
     done
     case "$*" in
+      *" aman help")
+        # What the app image can do. An image from before sealed backups, listed in $S/images_without_seal, cannot seal.
+        all_args="$*"
+        image=${all_args% aman help}
+        image=${image##* }
+        echo "Commands: hash-password backup backup-check doctor export-data"
+        grep -Fxq "$image" "$S/images_without_seal" 2>/dev/null || echo "  secrets seal unseal"
+        exit 0
+        ;;
+      *"aman secrets key"*)
+        # Makes this computer's key when there is none, without touching any data.
+        if [ -f "$S/key" ]; then
+          printf '{"created":false}\n'
+        else
+          echo "key-$(date +%s%N)" >"$S/key"
+          echo "backup" >>"$S/key_made_by"
+          printf '{"created":true}\n'
+        fi
+        exit 0
+        ;;
+      *'cat >"/backup/$1"'*)
+        # One more file for the scratch volume, from stdin.
+        args=("$@")
+        mkdir -p "$S/scratchfs/$scratch_vol"
+        cat >"$S/scratchfs/$scratch_vol/${args[${#args[@]} - 1]}"
+        exit 0
+        ;;
+      *"aman seal"*)
+        # Models the CLI: one header line naming the key and the recovery key that open the file, then the scratch
+        # volume as a tar archive. The real file is encrypted; the stub keeps it readable so tests can look inside.
+        echo "$*" >>"$S/seal_runs"
+        [ -n "${STUB_SEAL_FAIL:-}" ] && { echo "seal failed" >&2; exit 1; }
+        [ -f "$S/key" ] || { echo "This computer's key is not available: missing." >&2; exit 1; }
+        proj=aman-${scratch_vol#aman_}
+        proj=${proj%_backup_scratch}
+        case "$*" in
+          *--this-computer-only*) recovery=none ;;
+          *)
+            if [ ! -f "$S/secrets_$proj" ] || [ "$(sed -n 1p "$S/secrets_$proj")" != "$(cat "$S/key")" ]; then
+              echo "Saved secrets are not set up for this database with this key." >&2
+              exit 1
+            fi
+            recovery=$(sed -n 2p "$S/secrets_$proj")
+            ;;
+        esac
+        # The real header is JSON and says "recovery_copy":null when no recovery key opens the file.
+        [ "$recovery" != none ] || recovery='none "recovery_copy":null'
+        printf 'AMANSEAL-STUB %s %s\n' "$(cat "$S/key")" "$recovery"
+        tar -C "$S/scratchfs/$scratch_vol" -cf - .
+        exit 0
+        ;;
+      *"aman unseal"*)
+        # Opens a sealed file from stdin with this computer's key, and refuses one sealed with another key. With
+        # --recovery-key-file the first line of stdin is the recovery key, which opens it on any computer.
+        # $S/unsealed_owner then names the key and recovery key of the data that was opened, for the restore that follows.
+        typed=
+        case "$*" in
+          *--recovery-key-file*)
+            echo "unseal with a recovery key" >>"$S/unseal_runs"
+            IFS= read -r typed || exit 1
+            ;;
+          *) echo "$*" >>"$S/unseal_runs" ;;
+        esac
+        IFS= read -r header || { echo "The sealed file is cut short." >&2; exit 1; }
+        set -- $header
+        if [ "${1:-}" != AMANSEAL-STUB ]; then
+          cat >/dev/null
+          echo "This is not a sealed file." >&2
+          exit 1
+        fi
+        if [ -n "$typed" ]; then
+          if [ "${3:-}" = none ] || [ "$(printf '%s' "$typed" | tr -cd 0-9)" != "$(printf '%s' "${3:-}" | tr -cd 0-9)" ]; then
+            cat >/dev/null
+            echo "That recovery key does not open this file." >&2
+            exit 2
+          fi
+        elif [ ! -f "$S/key" ] || [ "${2:-}" != "$(cat "$S/key")" ]; then
+          cat >/dev/null
+          echo "This file was sealed with another computer's key." >&2
+          exit 1
+        fi
+        printf '%s\n%s\n' "${2:-}" "${3:-}" >"$S/unsealed_owner"
+        cat
+        exit 0
+        ;;
       *"--entrypoint cat"*)
         # The slot setup copied out of the app image.
         [ -n "${STUB_NO_BUNDLE:-}" ] && exit 1
@@ -657,6 +742,19 @@ case "$cmd" in
         exit 0
         ;;
       *"sh -c"*)
+        case "$*" in
+          *db.sqlite.restore*)
+            # A database carries the key it was set up with, so putting one back from a sealed backup brings that along.
+            if [ -f "$S/unsealed_owner" ]; then
+              if [ "$(sed -n 2p "$S/unsealed_owner")" = none ]; then
+                rm -f "$S/secrets_aman-$(printf %s "${vol#aman_}" | sed "s/_data$//")"
+              else
+                cp "$S/unsealed_owner" "$S/secrets_aman-$(printf %s "${vol#aman_}" | sed "s/_data$//")"
+              fi
+              rm -f "$S/unsealed_owner"
+            fi
+            ;;
+        esac
         cat >"$S/restored_$vol"
         echo "restore $vol" >>"$S/restores"
         exit 0
@@ -788,6 +886,24 @@ case "$cmd" in
             printf '%s\n%s\n' "$(cat "$S/key")" "$recovery" >"$S/secrets_$proj"
             printf '{"recovery_key":"%s"}\n' "$recovery"
             echo "Saved secrets are set up. Write down the recovery key now: it is shown only this once." >&2
+            exit 0
+            ;;
+          *" secrets-setup adopt "*)
+            # Ties data set up with another computer's key to this one, given that data's recovery key on stdin.
+            typed=$(cat)
+            echo "$proj" >>"$S/adopt_runs"
+            [ -n "${STUB_ADOPT_FAIL:-}" ] && { echo "The database could not be opened." >&2; exit 1; }
+            if [ "$(printf '%s' "$typed" | tr -cd 0-9)" != "$(sed -n 2p "$S/secrets_$proj" 2>/dev/null | tr -cd 0-9)" ]; then
+              echo "That recovery key does not unlock this database." >&2
+              exit 2
+            fi
+            [ -f "$S/key" ] || { echo "key-$(date +%s%N)" >"$S/key"; echo "$proj" >>"$S/key_made_by"; }
+            if [ "$(sed -n 1p "$S/secrets_$proj")" = "$(cat "$S/key")" ]; then
+              printf '{"already_adopted":true}\n'
+            else
+              printf '%s\n%s\n' "$(cat "$S/key")" "$typed" >"$S/secrets_$proj"
+              printf '{"adopted":true}\n'
+            fi
             exit 0
             ;;
           *" secrets-setup check-recovery "*)

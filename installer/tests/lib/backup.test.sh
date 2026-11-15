@@ -5,7 +5,7 @@ set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/../helpers.sh"
 
 test_backup_layout_and_modes() {
-  t_begin "a backup is the CLI's output, private, checksummed and streamed from containers"
+  t_begin "a backup is one sealed file per instance, private, checksummed and streamed from containers"
   sandbox_new
   install_machine
   assert_no_path "$AMAN_HOME/backups"
@@ -15,16 +15,22 @@ test_backup_layout_and_modes() {
   dir=$(find "$AMAN_HOME/backups" -mindepth 1 -maxdepth 1 -type d | head -n 1)
   assert_mode "$AMAN_HOME/backups" 700
   assert_mode "$dir" 700
-  assert_mode "$dir/main" 700
-  assert_mode "$dir/main/db.sqlite" 600
-  assert_mode "$dir/main/dex.tar" 600
-  assert_mode "$dir/main/env" 600
+  assert_mode "$dir/main.sealed" 600
   assert_mode "$dir/SHA256SUMS" 600
-  assert_contains "$(cat "$dir/main/db.sqlite")" "SQLITE-OF-aman_main_data"
-  assert_file "$dir/main/manifest.json"
-  assert_eq "$([ -d "$dir/main/memory" ] && [ -d "$dir/main/persona-knowledge" ] && echo yes)" yes "memory and persona directories"
-  assert_contains "$(tr -d '\0' <"$dir/main/dex.tar")" "TAR-OF-aman_main_dex"
-  assert_contains "$(cat "$dir/SHA256SUMS")" "main/db.sqlite"
+  assert_no_path "$dir/main"
+  assert_eq "$(find "$dir" -type f | sed "s|$dir/||" | LC_ALL=C sort | tr '\n' ' ')" "SHA256SUMS main.sealed release.json " "the instance is one sealed file"
+  assert_contains "$(sealed_cat "$dir/main.sealed" db.sqlite)" "SQLITE-OF-aman_main_data"
+  assert_contains "$(sealed_names "$dir/main.sealed")" "manifest.json"
+  assert_contains "$(sealed_names "$dir/main.sealed")" "memory/note.md" "the memory files are inside"
+  assert_contains "$(sealed_names "$dir/main.sealed")" "persona-knowledge/" "the persona folder is inside"
+  assert_contains "$(sealed_cat "$dir/main.sealed" dex.tar | tr -d '\0')" "TAR-OF-aman_main_dex"
+  assert_contains "$(sealed_cat "$dir/main.sealed" env)" "OIDC_CLIENT_SECRET=" "the settings are inside"
+  assert_contains "$(sealed_cat "$dir/main.sealed" dex.env)" "PASSWORD_HASH" "the sign-in settings are inside"
+  assert_eq "$(sealed_recovery "$dir/main.sealed")" "000001-222222-333333-444444-555555-666666-777777-888888" "the instance's recovery key opens it"
+  assert_contains "$(cat "$SB_STATE/seal_runs")" "--sqlite /backup/db.sqlite"
+  assert_contains "$(cat "$SB_STATE/seal_runs")" "aman_key:/run/aman-key:ro" "the key is only read"
+  assert_contains "$(cat "$dir/SHA256SUMS")" "main.sealed"
+  assert_flat_contains "$OUT" "It is encrypted. Only this computer, or the recovery key of each instance, can open it."
   if (cd "$dir" && sha256sum -c SHA256SUMS >/dev/null 2>&1); then t_pass; else t_fail "checksums do not verify"; fi
   assert_not_contains "$(cat "$STUB_LOG")" "bind" "no bind mounts"
   assert_tree_lacks "$AMAN_HOME/backups" "$SENTINEL_PASSWORD"
@@ -60,7 +66,7 @@ test_backup_of_stopped_instance() {
   run_install backup main
   assert_rc 0
   assert_contains "$(cat "$SB_STATE/backup_runs")" "aman backup --target /backup"
-  assert_file "$(find "$AMAN_HOME/backups" -name db.sqlite | head -n 1)"
+  assert_contains "$(sealed_names "$(find "$AMAN_HOME/backups" -name main.sealed | head -n 1)")" "db.sqlite"
   sandbox_drop
 }
 
@@ -139,14 +145,59 @@ test_backup_with_a_lost_settings_file() {
   assert_flat_contains "$ERR" "The settings file dex.env of main is missing, so this backup does not include it."
   local dir
   dir=$(find "$AMAN_HOME/backups" -mindepth 1 -maxdepth 1 -type d | head -n 1)
-  assert_file "$dir/main/env"
-  assert_file "$dir/main/db.sqlite"
-  assert_no_path "$dir/main/dex.env"
+  assert_contains "$(sealed_names "$dir/main.sealed")" "env"
+  assert_contains "$(sealed_names "$dir/main.sealed")" "db.sqlite"
+  assert_not_contains "$(sealed_names "$dir/main.sealed")" "dex.env"
+  sandbox_drop
+}
+
+test_a_failed_seal_leaves_nothing() {
+  t_begin "when the backup cannot be sealed nothing is left behind, readable or not"
+  sandbox_new
+  install_machine
+  STUB_SEAL_FAIL=1 run_install backup
+  assert_rc 1
+  assert_flat_contains "$ERR" "The backup of main failed, so the unfinished backup was removed."
+  assert_eq "$(find "$AMAN_HOME/backups" -type f 2>/dev/null | wc -l | tr -d ' ')" 0 "no file is left"
+  assert_not_contains "$(cat "$SB_STATE/volumes")" "backup_scratch" "the scratch volume is gone"
+  sandbox_drop
+}
+
+test_an_instance_without_a_recovery_key_is_sealed_for_this_computer() {
+  t_begin "an instance not yet tied to this computer's key is sealed for this computer only, making the key if needed"
+  sandbox_new
+  install_machine
+  local conf=$AMAN_HOME/state/instances/main.conf dir
+  grep -v '^secrets=' "$conf" >"$conf.new" && mv "$conf.new" "$conf"
+  chmod 600 "$conf"
+  rm -f "$SB_STATE/secrets_aman-main" "$SB_STATE/key"
+  run_install backup
+  assert_rc 0
+  dir=$(find "$AMAN_HOME/backups" -mindepth 1 -maxdepth 1 -type d | head -n 1)
+  assert_contains "$(cat "$SB_STATE/seal_runs")" "--this-computer-only"
+  assert_eq "$(sealed_recovery "$dir/main.sealed")" none
+  assert_file "$SB_STATE/key"
+  assert_contains "$(sealed_cat "$dir/main.sealed" db.sqlite)" "SQLITE-OF-aman_main_data"
+  sandbox_drop
+}
+
+test_an_older_version_is_told_to_upgrade() {
+  t_begin "a version of Aman from before sealed backups is told to upgrade, and no readable backup is written"
+  sandbox_new
+  install_machine
+  sed -n 's/^    image: //p' "$AMAN_HOME/instances/main/compose.yaml" | sort -u >"$SB_STATE/images_without_seal"
+  run_install backup
+  assert_rc 1
+  assert_flat_contains "$ERR" "This version of Aman cannot make an encrypted backup yet. Run: aman upgrade"
+  assert_eq "$(find "$AMAN_HOME/backups" -type f 2>/dev/null | wc -l | tr -d ' ')" 0
   sandbox_drop
 }
 
 test_backup_layout_and_modes
 test_backup_with_a_lost_settings_file
+test_a_failed_seal_leaves_nothing
+test_an_instance_without_a_recovery_key_is_sealed_for_this_computer
+test_an_older_version_is_told_to_upgrade
 test_backup_runs_the_cli_with_a_target
 test_backup_of_stopped_instance
 test_leftover_scratch_volume_is_pruned

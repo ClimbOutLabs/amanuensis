@@ -2,7 +2,8 @@ import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 import { checkMasterKey } from './keyCheck';
 import type { KeyProvider } from './keyProvider';
 import { recoverMasterKey } from './recoveryKey';
-import { decryptSecret, encryptSecret, type SecretContext } from './secretCipher';
+import { loadRetiredKeys } from './retiredKeys';
+import { decryptSecret, encryptSecret, secretKeyId, type SecretContext } from './secretCipher';
 
 /**
  * Why secrets are locked. `no_key`: the host has not delivered a key yet. `not_set_up`: this
@@ -26,6 +27,7 @@ export class SecretVault {
   readonly #provider: KeyProvider;
   readonly #settings: IGlobalSettingsStore;
   #key: Buffer | undefined;
+  #retiredKeys = new Map<string, Buffer>();
   #state: SecretVaultState = { status: 'locked', reason: 'no_key', detail: 'Not checked yet' };
 
   constructor({ provider, settings }: { provider: KeyProvider; settings: IGlobalSettingsStore }) {
@@ -53,6 +55,7 @@ export class SecretVault {
         match === 'not_set_up' ? 'This database has no key check value' : 'The key does not match this database',
       );
     }
+    this.#retiredKeys = await loadRetiredKeys({ settings: this.#settings, masterKey: loaded.key });
     this.#key = loaded.key;
     this.#state = { status: 'unlocked' };
     return this.#state;
@@ -64,6 +67,7 @@ export class SecretVault {
    */
   async unlockWithRecoveryKey(recoveryKey: string): Promise<Buffer> {
     const key = await recoverMasterKey({ settings: this.#settings, recoveryKey });
+    this.#retiredKeys = await loadRetiredKeys({ settings: this.#settings, masterKey: key });
     this.#key = key;
     this.#state = { status: 'unlocked' };
     return key;
@@ -74,7 +78,10 @@ export class SecretVault {
   }
 
   decrypt({ value, context }: { value: string; context: SecretContext }): string {
-    return decryptSecret({ key: this.#unlockedKey(), value, context });
+    const current = this.#unlockedKey();
+    // A secret saved before this database moved to this computer opens with the key it was saved with.
+    const earlier = this.#retiredKeys.get(secretKeyId(value) ?? '');
+    return decryptSecret({ key: earlier ?? current, value, context });
   }
 
   #unlockedKey(): Buffer {
@@ -86,6 +93,7 @@ export class SecretVault {
 
   #lock(reason: 'no_key' | 'not_set_up' | 'wrong_key', detail: string): SecretVaultState {
     this.#key = undefined;
+    this.#retiredKeys = new Map();
     this.#state = { status: 'locked', reason, detail };
     return this.#state;
   }

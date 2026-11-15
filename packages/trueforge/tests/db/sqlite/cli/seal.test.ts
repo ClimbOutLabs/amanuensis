@@ -77,6 +77,21 @@ describe('aman seal and unseal', () => {
     expect((await readFile(opened)).equals(original)).toBe(true);
   });
 
+  it("with --this-computer-only needs no database, opens with this computer's key and with no recovery key", async () => {
+    const sealed = path.join(dir, 'early.sealed');
+    await run('seal', ['--in', plain, '--out', sealed, '--this-computer-only', '--key-file', keyFile]);
+    expect((await readFile(sealed)).includes(CANARY)).toBe(false);
+    const opened = path.join(dir, 'early.tar');
+    await run('unseal', ['--in', sealed, '--out', opened, '--key-file', keyFile]);
+    expect((await readFile(opened)).equals(original)).toBe(true);
+
+    const recoveryFile = path.join(dir, 'recovery.txt');
+    await writeFile(recoveryFile, recoveryKey);
+    await expect(
+      run('unseal', ['--in', sealed, '--out', path.join(dir, 'no.tar'), '--recovery-key-file', recoveryFile]),
+    ).rejects.toThrow('only be opened on the computer that made it');
+  });
+
   it('streams through stdin and stdout', async () => {
     const chunks: Buffer[] = [];
     const sink = new PassThrough();

@@ -51,6 +51,11 @@ export async function checkMasterKey({
   }
 }
 
+/** The value that marks a database as belonging to `key`. */
+export function keyCheckValue(key: Buffer): string {
+  return encryptSecret({ key, plaintext: KEY_CHECK_PLAINTEXT, context: KEY_CHECK_CONTEXT });
+}
+
 /** A new random master key. Only setup calls this, and it saves the key before recording its check value. */
 export function createMasterKey(): Buffer {
   return randomBytes(MASTER_KEY_BYTES);
@@ -67,8 +72,11 @@ export async function recordKeyCheck({
   settings: IGlobalSettingsStore;
   key: Buffer;
 }): Promise<void> {
-  const value = encryptSecret({ key, plaintext: KEY_CHECK_PLAINTEXT, context: KEY_CHECK_CONTEXT });
-  const wrote = await settings.compareAndSetSetting({ key: KEY_CHECK_SETTING, expected: null, value });
+  const wrote = await settings.compareAndSetSetting({
+    key: KEY_CHECK_SETTING,
+    expected: null,
+    value: keyCheckValue(key),
+  });
   if (!wrote) {
     throw new SecretsAlreadySetUpError();
   }

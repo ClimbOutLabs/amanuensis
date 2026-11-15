@@ -1,5 +1,6 @@
 # shellcheck shell=bash
-# Backups: the CLI writes into a scratch volume and every archive is streamed over stdout, so no host bind mounts are involved.
+# Backups: the CLI writes into a scratch volume and each instance leaves it as one sealed file streamed over stdout, so
+# no host bind mounts are involved and nothing readable reaches the backup folder.
 
 BACKUP_KEEP=7
 # The newest manifest.json version of the backup CLI that restore understands.
@@ -46,19 +47,30 @@ database_probe() { # name image path
   return 1
 }
 
-# backup_data NAME DESTDIR IMAGE: runs `aman backup --target` into a scratch volume mounted at
-# /backup, then streams that volume into DESTDIR as tar. The scratch volume is always removed again.
+# Puts one more file into the scratch volume, from stdin, so it is sealed with the rest.
+backup_scratch_add() { # scratch image file
+  D run --rm -i --network none -v "$1:/backup" "$2" sh -c 'cat >"/backup/$1"' sh "$3"
+}
+
+# backup_instance NAME DESTDIR IMAGE: one sealed file, DESTDIR/NAME.sealed, holding the database, the memory and
+# persona files, the sign-in service's data and both settings files. Everything is gathered in a scratch volume
+# and sealed there with this computer's key, so nothing readable is ever written to the backup folder. The
+# instance's recovery key opens the file on another computer. The scratch volume is always removed again.
 # The CLI opens the live database through SQLite's online backup API, safe beside the running app.
-backup_data() {
-  local name=$1 dest=$2 image=$3 scratch env_file sqlite rc=0
+backup_instance() {
+  local name=$1 dest=$2 image=$3 scratch env_file sqlite file how rc=0
   scratch="aman_${name}_backup_scratch"
   env_file="$(instance_dir "$name")/.env"
   sqlite=$(env_get "$env_file" SQLITE_PATH)
+  docker_volume_exists "aman_${name}_data" || {
+    say "Instance $name has no data yet, so there is nothing to back up for it."
+    return 0
+  }
   # An instance that never got as far as creating its database has no data yet; that is not a failed backup.
   database_probe "$name" "$image" "$sqlite" || {
     case $? in
       1)
-        say "Instance $name has no data yet, so only its settings are saved."
+        say "Instance $name has no data yet, so there is nothing to back up for it."
         return 0
         ;;
       *)
@@ -73,33 +85,37 @@ backup_data() {
     --sqlite "$sqlite" \
     --memory-dir "$(env_get "$env_file" MEMORY_MARKDOWN_DIR)" \
     --persona-dir "$(env_get "$env_file" PERSONA_KNOWLEDGE_DIR)" >/dev/null || rc=1
-  if [ "$rc" = 0 ]; then
-    volume_tar "$scratch" "$image" | tar -x --no-same-owner -C "$dest" -f - || rc=1
-  fi
-  D volume rm -f "$scratch" >/dev/null 2>&1 || true
-  return "$rc"
-}
-
-# backup_instance NAME DESTDIR IMAGE
-backup_instance() {
-  local name=$1 dest=$2/$1 image=$3 file
-  ensure_private_dir "$dest"
-  if docker_volume_exists "aman_${name}_data"; then
-    backup_data "$name" "$dest" "$image" || return 1
-  fi
-  if docker_volume_exists "aman_${name}_dex"; then
-    volume_tar "aman_${name}_dex" "$image" >"$dest/dex.tar.part" || return 1
-    mv "$dest/dex.tar.part" "$dest/dex.tar"
+  if [ "$rc" = 0 ] && docker_volume_exists "aman_${name}_dex"; then
+    volume_tar "aman_${name}_dex" "$image" | backup_scratch_add "$scratch" "$image" dex.tar || rc=1
   fi
   # A settings file that is already lost cannot be saved; that is told, not a reason to lose the rest.
   for file in env:.env dex.env:dex.env; do
+    [ "$rc" = 0 ] || break
     if [ -f "$(instance_dir "$name")/${file#*:}" ]; then
-      cp "$(instance_dir "$name")/${file#*:}" "$dest/${file%%:*}"
-      chmod 600 "$dest/${file%%:*}"
+      backup_scratch_add "$scratch" "$image" "${file%%:*}" <"$(instance_dir "$name")/${file#*:}" || rc=1
     else
       warn "The settings file ${file#*:} of $name is missing, so this backup does not include it."
     fi
   done
+  # An instance not yet tied to this computer's key has no recovery key, so its backup opens only on this computer.
+  if [ "$(reg_get "$name" secrets)" = 1 ]; then
+    how='--sqlite /backup/db.sqlite'
+  else
+    how='--this-computer-only'
+    [ "$rc" != 0 ] || machine_key_ensure "$image" || rc=1
+  fi
+  if [ "$rc" = 0 ]; then
+    D run --rm --network none -v "$scratch:/backup" -v "$MACHINE_KEY_VOLUME:/run/aman-key:ro" "$image" sh -c \
+      "tar -C /backup -cf - . | aman seal --in - --out - $how --key-file \"\$1\"" sh "$MACHINE_KEY_FILE" \
+      >"$dest/$name.sealed.part" || rc=1
+  fi
+  D volume rm -f "$scratch" >/dev/null 2>&1 || true
+  if [ "$rc" != 0 ] || [ ! -s "$dest/$name.sealed.part" ]; then
+    rm -f "$dest/$name.sealed.part"
+    return 1
+  fi
+  chmod 600 "$dest/$name.sealed.part"
+  mv "$dest/$name.sealed.part" "$dest/$name.sealed"
 }
 
 # Only plain timestamped backups count and are pruned; a kept one (named after its stamp) stays until removed by hand.
@@ -135,10 +151,13 @@ backup_run() {
   LAST_BACKUP_DIR=
   [ -n "$(backup_targets "$only")" ] || return 0
   release_load "$RELEASE_DIR/release.json" || die "The record of the installed version cannot be read. Run install.sh again."
-  image=$CUR_APP_TAG
+  # An upgrade backs up with the version it is about to start, which can seal a backup even when the old one cannot.
+  image=${BACKUP_IMAGE:-$CUR_APP_TAG}
   docker_image_exists "$image" || die "Part of Aman ($image) is missing. Run install.sh to build it again."
+  image_has_key_support "$image" || die "This version of Aman cannot make an encrypted backup yet. Run: aman upgrade"
   ensure_private_dir "$BACKUPS_DIR"
   backup_scratch_prune
+  backup_stage_prune
   stamp=$(date -u +%Y%m%dT%H%M%SZ)${label:+-$label}
   dir=$BACKUPS_DIR/$stamp
   while [ -e "$dir" ]; do
@@ -155,8 +174,8 @@ backup_run() {
     ui_ok "Backed up instance $name"
     n=$((n + 1))
   done
-  # Only the authority's certificate goes into a backup, never its private key: a backup is not encrypted, and whoever
-  # holds that key can vouch for any name this computer is opened at. A restore makes a new key.
+  # Only the authority's certificate goes into a backup, never its private key: whoever holds that key can vouch
+  # for any name this computer is opened at. A restore makes a new key.
   if [ -f "$(tls_ca_dir)/root.crt" ]; then
     ensure_private_dir "$dir/tls"
     cp "$(tls_ca_dir)/root.crt" "$dir/tls/"
@@ -172,7 +191,7 @@ backup_run() {
   else
     ui_ok "Saved a backup to $(ui_path "$dir")."
   fi
-  ui_hint "It holds your passwords and keys, so keep it on this computer."
+  ui_hint "It is encrypted. Only this computer, or the recovery key of each instance, can open it."
   if [ -f "$dir/tls/root.crt" ]; then
     ui_hint "After a restore, each device needs to trust this computer again."
   fi
@@ -195,7 +214,84 @@ cmd_backup() {
   tls_renew_all "$REL_APP_TAG" || warn "A certificate could not be renewed. Run: aman doctor tls --fix"
 }
 
-# restore_sqlite NAME BACKUPDIR IMAGE: puts the backed-up database back and drops stale WAL files.
+# ---- opening a backup ---------------------------------------------------------------------------
+
+# A sealed backup is opened into a private folder under the state folder, in the layout a backup had before sealing:
+# one folder per instance. It is removed again as soon as the restore ends, and by the next backup or restore if a
+# run was killed. A backup from before sealing is read where it is.
+backup_stage_dir() { printf '%s/stage' "$STATE_DIR"; }
+
+backup_stage_prune() {
+  local stage
+  stage=$(backup_stage_dir)
+  [ ! -d "$stage" ] || rm -rf "$stage"
+}
+
+# The file or folder of an instance in a backup, for its size.
+backup_part() { # name dir
+  if [ -f "$2/$1.sealed" ]; then printf '%s/%s.sealed' "$2" "$1"; else printf '%s/%s' "$2" "$1"; fi
+}
+
+# Whether a backup folder holds the instance, sealed or not.
+backup_has() { # name dir
+  [ -f "$2/$1.sealed" ] || [ -d "$2/$1" ]
+}
+
+# The folder that holds NAME/ for a backup: the backup itself, or where its sealed file was opened.
+backup_view() { # name dir
+  if [ -f "$2/$1.sealed" ]; then
+    printf '%s/%s' "$(backup_stage_dir)" "$(basename "$2")"
+  else
+    printf '%s' "$2"
+  fi
+}
+
+# Whether a sealed file can be opened with a recovery key. One made for data that had no recovery key yet cannot.
+backup_takes_recovery_key() { # sealed file
+  ! head -c 4096 "$1" | LC_ALL=C grep -aq '"recovery_copy":null'
+}
+
+# The sealed file on stdout, opened with the recovery key in BACKUP_RECOVERY_KEY. The key goes in on the same
+# input as the file and is held in memory inside the container, so it is never in a command line or on a disk.
+backup_unseal_with_recovery_key() { # sealed file, image
+  {
+    printf '%s\n' "$BACKUP_RECOVERY_KEY"
+    cat "$1"
+  } | D run --rm -i --network none --tmpfs /tmp "$2" sh -c \
+    'umask 077; IFS= read -r key && printf %s "$key" >/tmp/recovery-key && exec aman unseal --in - --out - --recovery-key-file /tmp/recovery-key' 2>/dev/null
+}
+
+# Opens a sealed backup of one instance with this computer's key, or, for a backup another computer made, with the
+# recovery key in BACKUP_RECOVERY_KEY when one was typed. Does nothing for a backup from before sealing, or one
+# already opened in this run. Fails when neither opens it. BACKUP_OPENED_BY then says which one did.
+BACKUP_RECOVERY_KEY=
+backup_open() { # name dir image
+  local name=$1 dir=$2 image=$3 view
+  [ -f "$dir/$name.sealed" ] || return 0
+  view=$(backup_view "$name" "$dir")
+  [ ! -f "$view/.opened-$name" ] || return 0
+  ensure_private_dir "$(backup_stage_dir)"
+  ensure_private_dir "$view"
+  rm -rf "${view:?}/$name"
+  ensure_private_dir "$view/$name"
+  if ! D run --rm -i --network none -v "$MACHINE_KEY_VOLUME:/run/aman-key:ro" "$image" \
+    aman unseal --in - --out - --key-file "$MACHINE_KEY_FILE" <"$dir/$name.sealed" 2>/dev/null |
+    tar -x --no-same-owner -C "$view/$name" -f - 2>/dev/null; then
+    rm -rf "${view:?}/$name"
+    [ -n "$BACKUP_RECOVERY_KEY" ] || return 1
+    ensure_private_dir "$view/$name"
+    if ! backup_unseal_with_recovery_key "$dir/$name.sealed" "$image" | tar -x --no-same-owner -C "$view/$name" -f - 2>/dev/null; then
+      rm -rf "${view:?}/$name"
+      return 1
+    fi
+    echo recovery >"$view/.opened-$name"
+    return 0
+  fi
+  echo computer >"$view/.opened-$name"
+}
+
+# restore_sqlite NAME BACKUPDIR IMAGE: puts the backed-up database back and drops stale WAL files. BACKUPDIR is the
+# folder that holds NAME/, so an opened one for a sealed backup.
 restore_sqlite() {
   local name=$1 dir=$2 image=$3
   if [ ! -f "$dir/$name/db.sqlite" ]; then

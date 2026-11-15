@@ -259,7 +259,7 @@ installer/install.sh backup          # back up every instance
 installer/install.sh backup main     # back up one instance
 ```
 
-Backups land in `~/.amanuensis/backups/<timestamp>/` with restricted permissions. The installer keeps the seven most recent. A backup taken before an import is named `<timestamp>-before-import`, does not count toward the seven, and is kept until you remove it. Install asks whether to back up every day at 03:30 (default yes; `--backups daily|off` answers without asking), and `installer/install.sh backups daily` or `installer/install.sh backups off` changes that later. `aman doctor backup` checks that backups are recent and scheduled. To check a copied backup, run `sha256sum -c SHA256SUMS` in its folder (`shasum -a 256 -c SHA256SUMS` on a Mac). To copy backups off this computer, see [Backups](/backup).
+Backups land in `~/.amanuensis/backups/<timestamp>/` with restricted permissions. Each one is encrypted: it opens on this computer, or on another one with the recovery key shown at setup. The installer keeps the seven most recent. A backup taken before an import is named `<timestamp>-before-import`, does not count toward the seven, and is kept until you remove it. Install asks whether to back up every day at 03:30 (default yes; `--backups daily|off` answers without asking), and `installer/install.sh backups daily` or `installer/install.sh backups off` changes that later. `aman doctor backup` checks that backups are recent and scheduled. To check a copied backup, run `sha256sum -c SHA256SUMS` in its folder (`shasum -a 256 -c SHA256SUMS` on a Mac). To copy backups off this computer, see [Backups](/backup).
 
 ### Restore an instance from a backup
 
@@ -277,10 +277,10 @@ A backup is refused, with the reason in plain words, when part of it is missing,
 
 ```bash
 installer/install.sh upgrade --check   # compare the installed version with the checkout 
-installer/install.sh upgrade           # back up, rebuild, restart, health-check
+installer/install.sh upgrade           # rebuild, back up, restart, health-check
 ```
 
-Upgrade refuses to start unless doctor shows no failures, unless you pass `--force`. It backs up every instance first, downloads or rebuilds the images, restarts each stack, and checks health. If the upgrade fails after the restart begins, it restores the backup and the previous images, then tells you what it did.
+Upgrade refuses to start unless doctor shows no failures, unless you pass `--force`. It downloads or rebuilds the images, backs up every instance with the new version, restarts each stack, and checks health. If the upgrade fails after the restart begins, it restores the backup and the previous images, then tells you what it did.
 
 ### Exporting one person's data
 

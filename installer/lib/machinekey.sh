@@ -16,6 +16,25 @@ machine_key_volume_ensure() {
 }
 MACHINE_KEY_NEW=0
 
+# Whether an app image can seal backups and set up the key. An image from before this could not, and the version
+# an upgrade puts back when it fails may be one of those.
+image_has_key_support() { # image
+  D run --rm --network none "$1" aman help 2>&1 | grep -q 'unseal'
+}
+
+# Makes this computer's key when there is none yet, without touching any instance's data. Used for a backup of an
+# instance that has not been tied to the key yet.
+machine_key_ensure() { # image
+  local out
+  machine_key_volume_ensure
+  out=$(D run --rm --network none -v "$MACHINE_KEY_VOLUME:/run/aman-key" "$1" aman secrets key --key-file "$MACHINE_KEY_FILE" 2>/dev/null) || return 1
+  case "$out" in
+    *'"created":true'*) MACHINE_KEY_NEW=1 ;;
+    *'"created":false'*) ;;
+    *) return 1 ;;
+  esac
+}
+
 # Runs the setup command in the instance's own one-off container, which is the only one that may write the key.
 # Prints the command's answer; what it says on the way goes to the step log, which never sees the answer.
 secrets_setup_run() { # name args...
@@ -83,6 +102,8 @@ disk_encryption_on() {
 instance_secrets_ensure() { # name
   local name=$1 out key
   [ "$(reg_get "$name" secrets)" != 1 ] || return 0
+  # A version from before the key, put back after a failed upgrade, has no setup to run.
+  image_has_key_support "$(awk '/^  app:/ { app = 1 } app && /^    image: / { print $2; exit }' "$(instance_dir "$name")/compose.yaml")" || return 0
   machine_key_volume_ensure
   step_begin "secrets-$name" "Setting up the key that protects saved logins for $name"
   if [ "$(instance_state "$name")" != stopped ]; then

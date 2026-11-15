@@ -25,19 +25,26 @@ A backup's name starts with its date, year first, so October 17, 2026 reads `202
 - If any part of a backup fails, Aman removes the half-written folder.
 - A backup made before an import or a restore has `-before-import` or `-before-restore` after its date. It doesn't count toward the 7, and stays until you delete it.
 
-!!! warning "Keep backups safe"
+!!! note "Backups are encrypted"
 
-    Backups aren't encrypted, and they hold secrets such as your model key. Treat them like a file of passwords.
+    Each backup is encrypted with a key kept on this computer. Nobody can read your chats or secrets from a backup file alone. To open a backup on another computer you need your recovery key. That's the 48 digits Aman showed you once when it was set up. Keep it somewhere safe.
+
+    Backups made by older versions of Aman aren't encrypted. They still work, but treat them like a file of passwords.
 
 ??? note "What's in a backup"
 
-    For each instance, a backup holds:
+    For each instance, a backup holds one encrypted file, named after the instance and ending in `.sealed`. Inside it are:
 
     - the database with your chats, personas and settings, checked after copying;
     - your memory files and persona knowledge files;
-    - the sign-in data and the instance settings, including its secrets;
+    - the sign-in data and the instance settings, including its secrets.
+
+    Next to it, not encrypted because they hold nothing private, are:
+
     - the certificate of the local certificate authority, but never its private key;
     - a `SHA256SUMS` file to check every file in the folder.
+
+    If an instance was never given a recovery key, its backup opens only on the computer that made it. Run `aman upgrade` once and the next backup opens with the recovery key too.
 
     An incognito chat that's open when the backup runs is left out, because an incognito chat is gone when it closes. See [Incognito chat](../packages/trueforge/guide/topics/incognito.md).
 
@@ -100,6 +107,13 @@ Before it changes anything, it saves a copy of what you have now and shows you w
    - Mac and Linux: `~/.amanuensis/backups`
    - Windows: `%LOCALAPPDATA%\Amanuensis\backups`, so that folder holds `20261017T031500Z` itself.
 3. Run `aman restore --latest`.
+4. It asks for the recovery key of the Aman that made the backup. Type the 48 digits, with or without the dashes.
+
+The new computer then protects the data with its own key. Your recovery key stays the same, so keep it.
+
+!!! note "Windows"
+
+    On Windows, `aman restore` can't ask for the recovery key yet. A backup made on another PC can't be restored there for now.
 
 The instance keeps the addresses and sign-in setup of the new computer, so signing in keeps working.
 
@@ -128,7 +142,7 @@ A backup on the same disk doesn't help if that disk fails. Copy the newest backu
     1. Choose **Backups** in the Start menu.
     2. Copy the backup with the newest date onto the other drive.
 
-Because backups hold secrets, pick a drive only you can read, or one that encrypts what it stores.
+A backup is encrypted, so it's safe on a shared or cloud drive. Without this computer or your recovery key, nobody can open it. Backups from older versions of Aman aren't encrypted, so keep those on a drive only you can read.
 
 ## Restore by hand
 

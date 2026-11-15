@@ -97,7 +97,7 @@ import_wait_for_search_model() {
 
 # import_run NAME FILE OWNER DISPLAY IMAGE: the file is streamed in and held on a private tmpfs, because the app user
 # inside the image cannot read a 0600 file of the host user; the instance's own settings reach the CLI through its .env,
-# so it reads the same database and memory paths the app does.
+# so it reads the same database and memory paths the app does. It saves logins, so it gets this computer's key too.
 import_run() {
   local name=$1 file=$2 owner=$3 display=$4 image=$5 base was_running=0 rc=0 log layout check=()
   base=$(basename -- "$file")
@@ -123,6 +123,7 @@ import_run() {
   (D run --rm -i --network none \
     --env-file "$(instance_dir "$name")/.env" -e NODE_ENV=production \
     -v "aman_${name}_data:/data" \
+    -v "$MACHINE_KEY_VOLUME:/run/aman-key:ro" -e SECRETS_KEY_FILE="$MACHINE_KEY_FILE" \
     --tmpfs /import:rw,mode=0700,uid=10001,gid=10001,size=1200m \
     "$image" sh -c "cat >/import/export.zip && exec aman import-data --in /import/export.zip --user \"\$1\" --display-name \"\$2\" \${3:+\"\$3\"}" \
     import "$owner" "$display" ${check[@]+"${check[@]}"} <"$file") >"$layout" 2>"$log" || rc=$?

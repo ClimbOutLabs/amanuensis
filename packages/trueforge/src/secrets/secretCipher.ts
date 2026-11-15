@@ -46,6 +46,15 @@ export function isEncryptedSecret(value: string): boolean {
   return value.startsWith(PREFIX_V1);
 }
 
+/** The id of the key an encrypted value was made with, as hex, or undefined when it is not an encrypted value. */
+export function secretKeyId(value: string): string | undefined {
+  if (!isEncryptedSecret(value)) {
+    return undefined;
+  }
+  const body = Buffer.from(value.slice(PREFIX_V1.length), 'base64url');
+  return body.length < KEY_ID_BYTES ? undefined : body.subarray(0, KEY_ID_BYTES).toString('hex');
+}
+
 export function encryptSecret({
   key,
   plaintext,

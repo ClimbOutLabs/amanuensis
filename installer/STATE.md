@@ -185,9 +185,20 @@ The sandbox slot image is always built on the computer.
 Each backup is one folder under `backups/`, named with the UTC time it was
 made (`%Y%m%dT%H%M%SZ`, for example `20261020T030405Z`), with `-<label>`
 added when it carries a label, and `-1`, `-2` and so on when the name is
-already taken. Inside: one folder per instance that was backed up, a copy of
-`release/release.json`, a copy of the authority's `root.crt` under `tls/`
-(never its key), and `SHA256SUMS` with the hash of every file. Unlabelled
+already taken. Inside: one file `<instance>.sealed` per instance that was
+backed up, a copy of `release/release.json`, a copy of the authority's
+`root.crt` under `tls/` (never its key), and `SHA256SUMS` with the hash of
+every file. The sealed file is the instance's database copy, memory files,
+persona knowledge files, sign-in data (`dex.tar`), `env`, `dex.env` and
+`manifest.json`, gathered in a scratch Docker volume and encrypted there by
+`aman seal` in the app image, so nothing readable is written to the backup
+folder. It opens with this computer's key, or with the instance's recovery
+key on any computer. A backup of an instance that is not tied to the key yet
+(`secrets` is not `1`) is sealed with `--this-computer-only` and opens only
+here. A backup needs an app image that can seal; with an older one it stops
+and says to run `aman upgrade`. An upgrade loads the new images before its
+backup, so the new image seals it. Backups from before sealing hold one
+readable folder per instance and still restore. Unlabelled
 backups are pruned to the newest seven. The database copy in each backup
 holds no incognito chats: `aman backup` deletes them from its copy before the
 copy is checked, so an incognito chat open at backup time is not kept.
@@ -195,7 +206,18 @@ copy is checked, so an incognito chat open at backup time is not kept.
 part its instance needs is there, `SHA256SUMS` matches, neither
 `release.json`'s `schema` nor the instance's `manifest.json` version is newer
 than this installer's, and `aman backup-check` in the installed app image finds
-no database migration that image does not ship. The copy it saves first carries
+no database migration that image does not ship. A sealed backup is opened into
+`state/stage/<timestamp>/<instance>/` (mode 700) for the checks and the restore;
+`state/stage` is removed when the run ends, however it ends. When this
+computer's key does not open the backup, restore asks for the recovery key. The
+typed key reaches the container on its input only, never on a command line, in
+a file on disk or in a log. After the data is put back, `aman secrets adopt`
+runs in the `secrets-setup` service: it keeps the earlier key in the database,
+encrypted with this computer's key, so saved logins still open, and makes the
+same recovery key open the data under this computer's key. A sealed backup with
+no recovery copy is refused on another computer without asking. Every restore
+clears `secrets` in the registry, and the start that follows sets it again.
+The copy it saves first carries
 the label `before-restore`. After writing the backup's `.env` it sets the keys
 the registry owns again from the registry (`PUBLIC_BASE_URL`,
 `ALLOWED_ORIGINS`, `AUTH_COOKIE_SUFFIX`, `OIDC_ISSUER_URL`,

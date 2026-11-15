@@ -552,7 +552,9 @@ export function systemWindowsJobs(options: {
       const holding =
         options?.holding === undefined
           ? ''
-          : `| Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName ${psQuote(options.holding)}) -PathType Container } `;
+          : // An encrypted backup holds one file per instance; one from before that holds a folder.
+            `| Where-Object { (Test-Path -LiteralPath (Join-Path $_.FullName ${psQuote(`${options.holding}.sealed`)}) -PathType Leaf) -or ` +
+            `(Test-Path -LiteralPath (Join-Path $_.FullName ${psQuote(options.holding)}) -PathType Container) } `;
       const stdout = await runPowerShell(
         `[Console]::OutputEncoding = [Text.Encoding]::UTF8; ` +
           `if (Test-Path -LiteralPath ${psQuote(paths.backupsDir)}) { ` +
