@@ -1,44 +1,11 @@
 import { createLocalUser, verifyLocalSignIn } from '../../../src/auth/localSignIn';
 import { runResetPassword, type ResetPasswordDeps } from '../../../src/cli/resetPassword';
-import {
-  LocalUserAlreadyExistsError,
-  type ILocalUserStore,
-  type LocalUserRecord,
-} from '../../../src/db/localUserStore';
 import { fakeIo } from './fakeIo';
+import { MemoryLocalUserStore } from './memoryLocalUserStore';
 
 const EMAIL = 'owner@example.com';
 const OLD_PASSWORD = 'the old long password';
 const NEW_PASSWORD = 'the new long password';
-
-class MemoryLocalUserStore implements ILocalUserStore {
-  #user: LocalUserRecord | undefined;
-
-  getUser(): Promise<LocalUserRecord | undefined> {
-    return Promise.resolve(this.#user);
-  }
-
-  createUser(record: LocalUserRecord): Promise<void> {
-    if (this.#user !== undefined) {
-      return Promise.reject(new LocalUserAlreadyExistsError());
-    }
-    this.#user = record;
-    return Promise.resolve();
-  }
-
-  replacePasswordHash(input: { password_hash: string; updated_at: string }): Promise<boolean> {
-    if (this.#user === undefined) {
-      return Promise.resolve(false);
-    }
-    this.#user = {
-      ...this.#user,
-      password_hash: input.password_hash,
-      session_version: this.#user.session_version + 1,
-      updated_at: input.updated_at,
-    };
-    return Promise.resolve(true);
-  }
-}
 
 async function setup(params: { serverRunning?: boolean; withUser?: boolean } = {}) {
   const store = new MemoryLocalUserStore();
