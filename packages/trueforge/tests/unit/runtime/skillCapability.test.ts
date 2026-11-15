@@ -119,13 +119,15 @@ type Setup = Awaited<ReturnType<typeof setup>>;
 /** Classifies a call as the chat would, then dispatches it with the user's answer (none for a call that never asks). */
 async function dispatch(input: {
   built: Setup;
+  /** install_skill unless named. */
+  name?: string | undefined;
   args: Record<string, unknown>;
   decision?: ApprovalDecision | undefined;
   /** Runs between the card and the answer, to change what the card showed. */
   beforeAnswer?: (() => void) | undefined;
 }) {
   const { tools, sentinel } = input.built;
-  const name = 'install_skill';
+  const name = input.name ?? 'install_skill';
   const info = await tools.toolCallInfo({ name, arguments: input.args });
   input.beforeAnswer?.();
   const message: InternalEnrichedAssistantMessage = {
@@ -417,6 +419,52 @@ describe('list_skills', () => {
   });
 });
 
+describe('remove_skill', () => {
+  async function added() {
+    const built = await setup();
+    await dispatch({ built, args: RELEASE_NOTES, decision: { status: 'allow' } });
+    return built;
+  }
+
+  it('asks every time, naming the skill and the websites it loses', async () => {
+    const built = await added();
+    const info = await built.tools.toolCallInfo({ name: 'remove_skill', arguments: { name: 'release-notes' } });
+    expect(info).toMatchObject({ tier: 3, tier_reason: 'skill_remove', is_approval_required: true });
+    expect(allowsChatApproval(info)).toBe(false);
+    expect(info.tier3_card?.plain_what).toBe(
+      'Remove the skill "release-notes"? It is taken out of every chat. It will no longer reach api.release-feed.info.',
+    );
+    expect(await built.saved()).toHaveLength(1);
+  });
+
+  it('takes the skill out everywhere on approval, with its websites', async () => {
+    const built = await added();
+    const { result } = await dispatch({
+      built,
+      name: 'remove_skill',
+      args: { name: 'release-notes' },
+      decision: { status: 'allow' },
+    });
+    expect(resultText(result)).toContain('Removed the skill release-notes.');
+    expect(await built.saved()).toEqual([]);
+  });
+
+  it('removes nothing without approval, whether denied or called directly', async () => {
+    const built = await added();
+    await dispatch({ built, name: 'remove_skill', args: { name: 'release-notes' }, decision: { status: 'deny' } });
+    const direct = await built.tools.callTool({ name: 'remove_skill', arguments: { name: 'release-notes' } });
+    expect(isCallToolResponseResult(direct) && direct.result.isError).toBe(true);
+    expect(await built.saved()).toHaveLength(1);
+  });
+
+  it('shows no card for a skill that is not there', async () => {
+    const built = await setup();
+    const info = await built.tools.toolCallInfo({ name: 'remove_skill', arguments: { name: 'release-notes' } });
+    expect(info.pre_dispatch_failure?.message).toContain('Call list_skills');
+    expect(info.tier3_card).toBeUndefined();
+  });
+});
+
 describe('storedSkillName', () => {
   it('turns a skill name into the form a stored name takes, or gives up', () => {
     expect(storedSkillName('Release Notes')).toBe('release-notes');
@@ -427,16 +475,20 @@ describe('storedSkillName', () => {
 });
 
 describe('in an incognito chat', () => {
-  it('can list skills but not add one', async () => {
+  it('can list skills but not add or remove one', async () => {
     const built = await setup();
     const tools = new SkillToolSet({ ...built.options, keepsNothing: true });
     expect((await tools.listTools()).result.tools.map(tool => tool.name)).toEqual(['list_skills']);
     const refused = await tools.callTool({ name: 'install_skill', arguments: RELEASE_NOTES });
     expect(isCallToolResponseResult(refused) && refused.result.isError).toBe(true);
     expect(await built.saved()).toEqual([]);
+    await dispatch({ built, args: RELEASE_NOTES, decision: { status: 'allow' } });
+    const notRemoved = await tools.callTool({ name: 'remove_skill', arguments: { name: 'release-notes' } });
+    expect(isCallToolResponseResult(notRemoved) && notRemoved.result.isError).toBe(true);
+    expect(await built.saved()).toHaveLength(1);
   });
 
-  it('tells the model it cannot add a skill here', () => {
+  it('tells the model it cannot add or remove a skill here', () => {
     const instruction = new InstructionBuilder('system-prompt');
     const sentinel = createSentinelHostContext({
       services: defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }),
@@ -464,7 +516,7 @@ describe('in an incognito chat', () => {
       build(instruction);
     }
     const text = instruction.build();
-    expect(text).toContain('This incognito chat cannot add a skill.');
+    expect(text).toContain('This incognito chat cannot add or remove a skill.');
     expect(text).not.toContain('install_skill');
   });
 });

@@ -65,6 +65,7 @@ describe('an incognito chat makes or changes nothing that outlives it', () => {
     ['a cancelled reminder', ownTool(SCHEDULE_SERVER_ID, 'cancel_reminder', { id: 'r1' })],
     ['a new persona', ownTool(PERSONA_SERVER_ID, 'create_persona', { name: 'Planner' })],
     ['a new skill', ownTool(SKILL_SERVER_ID, 'install_skill', { url: 'https://github.com/acme/skills' })],
+    ['a removed skill', ownTool(SKILL_SERVER_ID, 'remove_skill', { name: 'release-notes' })],
     ['an entry in the notes inbox', ownTool(NOTES_FOLDER_SERVER_ID, 'append_to_inbox', { text: 'Buy milk' })],
     ['a new note', ownTool(NOTES_FOLDER_SERVER_ID, 'create_note', { path: 'ideas.md', text: 'An idea' })],
     [

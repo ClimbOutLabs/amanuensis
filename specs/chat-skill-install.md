@@ -1,4 +1,4 @@
-# Spec: Adding a skill from a chat
+# Spec: Adding and removing a skill from a chat
 
 **Status:** draft
 
@@ -18,12 +18,13 @@ Three rules do not bend:
 
 ## 1. Tools
 
-Two tools of the server's own, mounted on a chat turn's root thread:
+Three tools of the server's own, mounted on a chat turn's root thread:
 
 - `list_skills`: the skills already added, and the starter skills that can still be added. Read-only, runs without a card.
 - `install_skill`: takes `url`, and optionally `path` and `ref`. It accepts the plain repository address and the address of the skill folder or its `SKILL.md` as a browser shows it. It takes no name and no description.
+- `remove_skill`: takes the `name` of an added skill. See section 6.
 
-Nothing here changes or removes a skill.
+Nothing here changes a skill that stays.
 
 ## 2. Reading the skill
 
@@ -56,10 +57,19 @@ Nothing here changes or removes a skill.
 
 ## 5. Where it is off
 
-- **Incognito chats:** the tool is not offered, and the classifier refuses the call, like every other lasting change.
+- **Incognito chats:** the add and remove tools are not offered, and the classifier refuses the call, like every other lasting change.
 - **Scheduled runs:** the tools are not mounted. Nobody is there to read the card.
 - **Instances whose skills are kept by a managed registry:** the tools are not mounted.
-- **Offline mode:** `install_skill` is marked as needing the network.
+- **Offline mode:** `install_skill` is marked as needing the network. `remove_skill` is not.
+
+## 6. Removing a skill
+
+- The classifier ranks `remove_skill` as an action that always asks, with its own reason (`skill_remove`), and no earlier answer covers it.
+- The host finds the skill by name. A name that is not added is refused without a card, and tells the model to call `list_skills`.
+- The card is a plain sentence card: it names the skill, says it is taken out of every chat, and lists the websites it will no longer reach (the same list the sandbox would grant it). It says the step can't be undone: to use the skill again, it is added again and its websites approved again.
+- The approved call carries the name and the website list. If either differs when the person answers, the approval no longer covers the call and nothing is removed.
+- Allow does what Settings' Remove does: deletes the record, which takes its websites with it, and drops its allow-once answers in open chats. Not now changes nothing.
+- After a call that finishes while the chat is open, the app takes the skill out of that chat and reads the skill lists again.
 
 ## Privacy
 
@@ -69,14 +79,14 @@ Adding a skill from GitHub sends GitHub the address of that skill and a request 
 
 All tests use synthetic data and a stand-in for GitHub; none reaches the real site.
 
-- Classifier: the list runs without asking, an install always asks, skill text is escaped, an unsettled install is refused, an unknown tool fails closed, and an incognito chat is refused.
-- Tool set: the card holds what the server read; the name and description cannot be passed in; nothing is saved without approval; a branch that moved ends the approval; starter skills need no lookup; the card lists the websites found and approving allows exactly those; a changed list ends the approval; unreadable files add nothing; a failed approval write removes the skill; nothing is replaced or added twice; each refusal says the one thing to do next.
+- Classifier: the list runs without asking, an install always asks, a removal always asks and names the websites it loses, skill text is escaped, an unsettled install is refused, an unknown tool fails closed, and an incognito chat is refused.
+- Tool set: the card holds what the server read; the name and description cannot be passed in; nothing is saved without approval; a branch that moved ends the approval; starter skills need no lookup; the card lists the websites found and approving allows exactly those; a changed list ends the approval; unreadable files add nothing; a failed approval write removes the skill; nothing is replaced or added twice; each refusal says the one thing to do next; a removal asks, removes on approval, removes nothing without it, and refuses a name that is not added.
 - Reader: address forms, the opening block, each failure, and the size limit.
 - App: the card, the server event parser, and turning the skill on for the chat.
 - End to end: a chat asks for a starter skill, the card shows, a chat-wide answer is refused, and Allow saves it. The browser test does the same on the screen.
 
 ## Out of scope
 
-- Changing, updating or removing a skill from a chat.
+- Changing or updating a skill from a chat.
 - Private repositories and GitLab from a chat. Both still work in Settings.
 - Allowing a website one by one from the install card: the list is approved whole or not at all.

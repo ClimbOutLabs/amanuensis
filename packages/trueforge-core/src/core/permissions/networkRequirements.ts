@@ -42,6 +42,8 @@ const FIRST_PARTY_REQUIRES_NETWORK: Record<string, boolean> = {
   web_search: true,
   // Adding a skill reads it from the site it comes from.
   install_skill: true,
+  // Removing a skill only changes this computer's list.
+  remove_skill: false,
   // Embedded maps: geocoding, routing, and tiles all leave the machine.
   render_map: true,
   render_route: true,
