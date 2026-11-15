@@ -649,7 +649,7 @@ test('news titles count only when the reply names what the front page shows now'
  * An instance where the chat adds, runs and removes a skill. Each turn stores its own events. `broken` adds
  * two skills, gets refused twice and never removes anything.
  */
-function skillClient({ broken = false } = {}) {
+function skillClient({ broken = false, noSandbox = false } = {}) {
   const state = { skills: [{ name: 'kept' }], deleted: [] };
   const events = [];
   const replies = new Map();
@@ -685,17 +685,21 @@ function skillClient({ broken = false } = {}) {
     async importMemories() {
       return undefined;
     },
+    async getCapabilities() {
+      return { sandbox: noSandbox ? { enabled: false, reason: 'the slots are not built' } : { enabled: true } };
+    },
     async listSkills() {
       return [...state.skills];
     },
     async getSkillNetworkApproval() {
-      return { allowed_hosts: ['wttr.in'] };
+      return { declared_hosts: ['wttr.in'] };
     },
     async deleteSkill(name) {
       state.deleted.push(name);
       state.skills = state.skills.filter(skill => skill.name !== name);
     },
-    async createSession() {
+    async createSession({ sandbox }) {
+      state.sandboxChats = (state.sandboxChats ?? 0) + (sandbox ? 1 : 0);
       return `s${String(++counter)}`;
     },
     async createTurn(_sessionId, { input }) {
@@ -806,6 +810,13 @@ test('a skill case adds, runs and removes a skill in one chat, checking each mes
   assert.match(row.reply, /^Step 1: Added\.\n\nStep 2: It is 18°C in Lisbon\.\n\nStep 3: Removed\.$/);
   assert.deepEqual(client.state.skills, [{ name: 'kept' }]);
   assert.deepEqual(client.state.deleted, []);
+  assert.equal(client.state.sandboxChats, 1, 'the skill chat has the sandbox on');
+});
+
+test('skill cases stop before any chat when the instance has no working sandbox', async () => {
+  const client = skillClient({ noSandbox: true });
+  await assert.rejects(runSkillSet({ client, skills: true }), /no working sandbox \(the slots are not built\)/);
+  assert.equal(client.state.sandboxChats, undefined);
 });
 
 test('a skill case fails on extra skills, repeated refusals and a skill left behind, and the run removes it', async () => {

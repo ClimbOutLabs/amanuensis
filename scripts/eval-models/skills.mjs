@@ -27,7 +27,7 @@ export async function snapshotSkills({ client }) {
 }
 
 /**
- * After the add: exactly one new skill, listed in Settings, with the websites it needs approved.
+ * After the add: exactly one new skill, listed in Settings with the websites it needs.
  * Returns the checks and the new skill's name, for the later steps.
  * @param {{ client: any, before: Set<string>, websites: string[] }} options
  */
@@ -44,17 +44,18 @@ export async function checkSkillAdded({ client, before, websites }) {
   if (skill === undefined) {
     return { results, name: undefined };
   }
+  // The websites are approved on the skill's first run, so after the add they are only listed.
   const approval = await client.getSkillNetworkApproval(skill.name);
-  const allowed = Array.isArray(approval.allowed_hosts) ? approval.allowed_hosts : [];
-  const missing = websites.filter(host => !allowed.includes(host));
+  const listed = Array.isArray(approval.declared_hosts) ? approval.declared_hosts : [];
+  const missing = websites.filter(host => !listed.includes(host));
   results.push(
     result({
       check:
         websites.length === 0
-          ? 'the skill may reach at least one website'
-          : `the skill may reach ${websites.join(', ')}`,
-      pass: websites.length === 0 ? allowed.length > 0 : missing.length === 0,
-      detail: allowed.length === 0 ? 'no website is approved' : `it may reach only ${allowed.join(', ')}`,
+          ? 'the skill lists at least one website it needs'
+          : `the skill lists ${websites.join(', ')} as websites it needs`,
+      pass: websites.length === 0 ? listed.length > 0 : missing.length === 0,
+      detail: listed.length === 0 ? 'it lists no website' : `it lists only ${listed.join(', ')}`,
     }),
   );
   return { results, name: skill.name };
