@@ -1190,6 +1190,17 @@ text_checks() { # scope
   flush_skipped
 }
 
+# Whether a failing check of these scopes can only be fixed by a newer Aman.
+records_want_update() { # scope...
+  local scope _id state _detail fix want
+  for want in "$@"; do
+    while IFS=$'\t' read -r scope _id state _detail fix; do
+      if [ "$state" = fail ] && [ "$fix" = "$UPDATE_FIX" ]; then return 0; fi
+    done < <(visible_records "$want")
+  done
+  return 1
+}
+
 # Both repairs render the instance again from its record and restart it.
 is_refresh_fix() { [ "$1" = "$INSTANCE_FIX" ] || [ "$1" = "Run aman doctor network --fix" ]; }
 
@@ -1593,7 +1604,7 @@ check_machine() {
 # aman doctor instance|network [--fix [--yes]] [--instance NAME]: show the check and, with --fix, let the installer
 # render the instance again from its record and restart it, then check again and say fixed only when no check fails.
 doctor_repair() { # kind
-  local kind=$1 fix=0 yes=0 name installer failed=0 question args=() not_fixed=""
+  local kind=$1 fix=0 yes=0 name installer failed=0 question args=() not_fixed="" needs_update=0
   shift
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -1663,13 +1674,19 @@ doctor_repair() { # kind
       else
         failed=1
         not_fixed="${not_fixed}|${name}"
+        if records_want_update machine "$name"; then needs_update=1; fi
       fi
     fi
   done
   # The run always ends with its panel closed, so it never looks like it is still waiting for an answer.
   if [ -n "$not_fixed" ]; then
     ui_summary fail "Restarting did not fix instance $(join_words "$not_fixed"), so restarting again will not help."
-    ui_line "$UPDATE_FIX"
+    # Only a missing file is fixed by a newer Aman; a full disk or a busy port has its own fix in the problem above.
+    if [ "$needs_update" = 1 ]; then
+      ui_line "$UPDATE_FIX"
+    else
+      ui_line "Fix the problem shown above, then run aman doctor."
+    fi
     ui_summary_end
   else
     ui_panel_end

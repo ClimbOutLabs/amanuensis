@@ -1500,6 +1500,22 @@ describe('why an instance does not run', () => {
     assert.doesNotMatch(last, /^[│|]/);
   });
 
+  it('with --fix, sends a problem an upgrade cannot fix to its own cause, not to an upgrade', () => {
+    make();
+    const repo = world.sandbox();
+    world.installerStub(repo);
+    containers([app({ state: 'exited', status: 'Exited (1) 3 minutes ago' }), dex()]);
+    world.set('logs_c1', { out: 'Error: ENOSPC: no space left on device, write\n' });
+    world.set('logs_c2', { out: '' });
+    const fixed = world.shim(['doctor', 'instance', '--fix', '--yes']);
+    assert.equal(fixed.code, 1, fixed.stderr + fixed.stdout);
+    const flat = fixed.stdout.replace(/[│|]/g, ' ').replace(/\s+/g, ' ');
+    assert.match(flat, /This computer ran out of disk space\./);
+    assert.match(flat, /Restarting did not fix instance main/);
+    assert.match(flat, /Fix the problem shown above, then run aman doctor\./);
+    assert.doesNotMatch(flat, /aman upgrade/);
+  });
+
   it('with --fix, closes its panel when there is nothing to repair', () => {
     make();
     containers([app({ state: 'running', status: 'Up 2 minutes' }), dex({ state: 'running', status: 'Up 2 minutes' })]);
