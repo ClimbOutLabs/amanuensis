@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
+import type { CreateTrueForgeClientOptions } from '@truefoundry/trueforge-chat';
 import { getErrorMessage } from '../../../utils/getErrorMessage.js';
-import type { CreateTrueForgeClientOptions } from '../client.js';
 import { createMemoryRequester } from './memoryRequest.js';
 
 /** One memory fact as the vault presents it. */

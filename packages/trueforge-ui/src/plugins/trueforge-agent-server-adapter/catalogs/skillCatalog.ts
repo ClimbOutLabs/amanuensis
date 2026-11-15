@@ -10,6 +10,7 @@
  * still go through the destructive-delete confirmation, not the registry
  * disable path.
  */
+import type { CreateTrueForgeClientOptions } from '@truefoundry/trueforge-chat';
 import type { TrueForge, TrueForgeApi } from '@truefoundry/trueforge-sdk';
 import { z } from 'zod';
 import {
@@ -20,7 +21,6 @@ import {
   type SkillWebsites,
 } from '../../../server/skillNetworkApproval.js';
 import type { DefinedSkill, SkillCatalogEntry, SkillCatalogServer, SkillConfigBase } from '../../../server/types.js';
-import type { CreateTrueForgeClientOptions } from '../client.js';
 
 /** Manifest fields that must match a catalog entry for a configured skill to count as that preset. */
 type CatalogGitFields = Pick<TrueForgeApi.CatalogSkill, 'url' | 'path' | 'ref'>;

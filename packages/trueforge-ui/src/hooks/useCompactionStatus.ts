@@ -3,13 +3,10 @@
 import { useThreadIsRunning } from '@assistant-ui/core/react';
 import { useAuiState } from '@assistant-ui/react';
 import { useTrueFoundryAgentSpec } from '@truefoundry/assistant-ui-runtime';
+import { hasSessionResync, type LastCompactionStatus } from '@truefoundry/trueforge-chat';
 import { useEffect, useRef, useState } from 'react';
 
 import { useDraftCatalog } from '../atoms/draft/DraftCatalogProvider.js';
-import {
-  hasSessionResync,
-  type LastCompactionStatus,
-} from '../plugins/trueforge-agent-server-adapter/sessionResync.js';
 import { useOptionalServer } from '../server/ServerContext.js';
 
 export type CompactionStatusResult = {

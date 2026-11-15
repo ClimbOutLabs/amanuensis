@@ -12,6 +12,7 @@ import {
   type HomeAssistantCheckPort,
 } from '../../../server/connectorChecks.js';
 
+import type { CreateTrueForgeClientOptions } from '@truefoundry/trueforge-chat';
 import type { CalendarSetupPort } from '../../../server/calendarSetup.js';
 import { parseToolGrants, type ConnectorToolGrants } from '../../../server/connectorToolGrants.js';
 import type { EmailSetupPort } from '../../../server/emailSetup.js';
@@ -30,7 +31,6 @@ import type {
 } from '../../../server/types.js';
 import { catalogLogoSrc, withLogo } from '../../../utils/catalogLogo.js';
 import { getErrorMessage } from '../../../utils/getErrorMessage.js';
-import type { CreateTrueForgeClientOptions } from '../client.js';
 import { createCalendarSetupApi } from './calendarSetup.js';
 import { createEmailSetupApi } from './emailSetup.js';
 import { createGoogleSetupApi } from './googleSetup.js';

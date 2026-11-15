@@ -31,10 +31,9 @@ import {
   RECONNECT_GIVE_UP_MS,
   type StreamDropChannel,
 } from '@/hooks/useForegroundEventSync.js';
-import type { SessionTipInfo } from '@/plugins/trueforge-agent-server-adapter/sessionResync.js';
-import { publishBlockedSend } from '@/plugins/trueforge-agent-server-adapter/sessionResync.js';
 import { ServerProvider } from '@/server/ServerContext.js';
 import { publishStaleApproval } from '@/utils/staleApproval.js';
+import { publishBlockedSend, type SessionTipInfo } from '@truefoundry/trueforge-chat';
 
 let hidden = false;
 Object.defineProperty(document, 'hidden', {

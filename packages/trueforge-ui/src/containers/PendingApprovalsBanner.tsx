@@ -2,14 +2,11 @@
 
 import { useAuiState } from '@assistant-ui/react';
 import { useTrueFoundryReload } from '@truefoundry/assistant-ui-runtime';
+import { subscribeToBlockedSend, type HarnessChatServerExtensions } from '@truefoundry/trueforge-chat';
 import { useCallback, useEffect, useState } from 'react';
 
 import { Button } from '../atoms/primitives/Button.js';
 import { useAnswerableApprovals } from '../hooks/useAnswerableApprovals.js';
-import {
-  subscribeToBlockedSend,
-  type HarnessChatServerExtensions,
-} from '../plugins/trueforge-agent-server-adapter/sessionResync.js';
 import { useOptionalServer } from '../server/ServerContext.js';
 import { isStaleApprovalError } from '../utils/staleApproval.js';
 import { useToasterOptional } from './ToasterContainer.js';

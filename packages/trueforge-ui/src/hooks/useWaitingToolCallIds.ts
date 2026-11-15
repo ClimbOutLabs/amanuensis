@@ -2,9 +2,9 @@
 
 import { useAuiState } from '@assistant-ui/react';
 import { toolInvocationRawId } from '@truefoundry/assistant-ui-runtime';
+import { hasSessionResync } from '@truefoundry/trueforge-chat';
 import { useEffect, useState } from 'react';
 
-import { hasSessionResync } from '../plugins/trueforge-agent-server-adapter/sessionResync.js';
 import { useOptionalServer } from '../server/ServerContext.js';
 
 /** How long to wait before reading again while the tip turn is still being saved, and how often. */

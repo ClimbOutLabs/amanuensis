@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
+import type { CreateTrueForgeClientOptions } from '@truefoundry/trueforge-chat';
 import { getErrorMessage } from '../../../utils/getErrorMessage.js';
-import type { CreateTrueForgeClientOptions } from '../client.js';
 
 /**
  * The turn-summarization setting: `enabled` is the stored value (persisted override when

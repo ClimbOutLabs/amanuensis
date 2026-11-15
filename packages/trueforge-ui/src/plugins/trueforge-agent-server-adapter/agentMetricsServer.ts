@@ -1,7 +1,7 @@
+import { createTrueForgeClient, parseIsoDate, type CreateTrueForgeClientOptions } from '@truefoundry/trueforge-chat';
 import type { TrueForge, TrueForgeApi } from '@truefoundry/trueforge-sdk';
 
 import type { AgentMetricsServer } from '../../server/types.js';
-import { createTrueForgeClient, parseIsoDate, type CreateTrueForgeClientOptions } from './client.js';
 
 export type CreateHarnessAgentMetricsServerOptions = CreateTrueForgeClientOptions & {
   client?: TrueForge;

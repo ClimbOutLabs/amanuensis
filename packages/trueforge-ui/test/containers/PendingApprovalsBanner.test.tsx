@@ -28,8 +28,8 @@ vi.mock('@/containers/ToasterContainer.js', () => ({
 }));
 
 import { PendingApprovalsBanner } from '@/containers/PendingApprovalsBanner.js';
-import { publishBlockedSend } from '@/plugins/trueforge-agent-server-adapter/sessionResync.js';
 import { ServerProvider } from '@/server/ServerContext.js';
+import { publishBlockedSend } from '@truefoundry/trueforge-chat';
 
 function pendingCall(id: string) {
   return { type: 'tool-call', toolCallId: id, toolName: 'bash', approval: { id, approved: undefined } };

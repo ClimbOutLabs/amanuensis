@@ -1,11 +1,7 @@
 // @vitest-environment jsdom
 import { act, renderHook, waitFor } from '@testing-library/react';
+import type { HarnessChatServerExtensions, LastCompactionStatus } from '@truefoundry/trueforge-chat';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-
-import type {
-  HarnessChatServerExtensions,
-  LastCompactionStatus,
-} from '@/plugins/trueforge-agent-server-adapter/sessionResync.js';
 
 const useThreadIsRunning = vi.fn(() => false);
 let auiState: { threadListItem?: { remoteId?: string } } = {

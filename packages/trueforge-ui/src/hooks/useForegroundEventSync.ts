@@ -3,6 +3,11 @@
 import { useAuiState } from '@assistant-ui/react';
 import { useTrueFoundryReload } from '@truefoundry/assistant-ui-runtime';
 import {
+  subscribeToBlockedSend,
+  type HarnessChatServerExtensions,
+  type SessionTipInfo,
+} from '@truefoundry/trueforge-chat';
+import {
   APPROVAL_EXPIRY_MINUTES,
   approvalExpiredReason,
 } from '@truefoundry/trueforge-core/core/permissions/approvalExpiry';
@@ -10,11 +15,6 @@ import type { ReactNode } from 'react';
 import { createContext, createElement, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 
 import { useToasterOptional } from '../containers/ToasterContainer.js';
-import {
-  subscribeToBlockedSend,
-  type HarnessChatServerExtensions,
-  type SessionTipInfo,
-} from '../plugins/trueforge-agent-server-adapter/sessionResync.js';
 import { useOptionalServer } from '../server/ServerContext.js';
 import { isStaleApprovalError, subscribeToStaleApproval } from '../utils/staleApproval.js';
 

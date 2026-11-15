@@ -2,13 +2,13 @@
  * AgentBuilderServer callbacks for createTrueFoundryServer.
  * Composer pickers + agent library backed by the Harness agents registry.
  */
+import { createTrueForgeClient, type CreateTrueForgeClientOptions } from '@truefoundry/trueforge-chat';
 import type { TrueForge, TrueForgeApi } from '@truefoundry/trueforge-sdk';
 import type { AgentBuilderServer, AgentLibraryEntry, ModelSelection, SearchAgentsParams } from '../../server/types.js';
 import { catalogLogoSrc } from '../../utils/catalogLogo.js';
 import { AGENTS_PAGE_DEFAULT, clampAgentsPageSize, drainAgentsList, listAgentsPage } from './agentsList.js';
 import { toUiConnectorFromReadEntry, toUiTool } from './catalogs/connectorCatalog.js';
 import { toHarnessAgentSpec, toUiAgentSpec } from './chatServer.js';
-import { createTrueForgeClient, type CreateTrueForgeClientOptions } from './client.js';
 import { listConfiguredMcpServers, listSkills } from './lists.js';
 import type { HarnessAgentSpec } from './types.js';
 

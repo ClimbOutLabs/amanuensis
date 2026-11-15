@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
+import type { CreateTrueForgeClientOptions } from '@truefoundry/trueforge-chat';
 import { getErrorMessage } from '../../../utils/getErrorMessage.js';
-import type { CreateTrueForgeClientOptions } from '../client.js';
 
 /** How saved notes are sorted onto pages. `report` only writes down what Aman would do. */
 export type PageSortMode = 'off' | 'report' | 'on';

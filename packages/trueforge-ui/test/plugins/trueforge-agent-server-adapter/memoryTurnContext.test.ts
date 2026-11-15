@@ -1,8 +1,8 @@
+import { createTrueForgeClient } from '@truefoundry/trueforge-chat';
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
 
 import { createHarnessChatServer, listMemoryTurnContext } from '@/plugins/trueforge-agent-server-adapter/chatServer.js';
-import { createTrueForgeClient } from '@/plugins/trueforge-agent-server-adapter/client.js';
 
 const recallEventRaw = {
   type: 'aman.memory.recall' as const,

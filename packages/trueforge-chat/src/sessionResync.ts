@@ -10,8 +10,6 @@
  */
 import type { TrueForge, TrueForgeApi } from '@truefoundry/trueforge-sdk';
 
-import type { HeldActionOutcome } from '../../sentinel/heldActionErrors.js';
-
 /** One tool call still waiting for a human decision on the session tip turn. */
 export interface PendingApprovalInfo {
   /** Tool call id awaiting the decision. */
@@ -39,6 +37,9 @@ export interface LastCompactionStatus {
 
 /** What the owner picks on a held action. */
 export type HeldActionDecision = 'approve' | 'always_allow' | 'deny';
+
+/** What happened to an approved action, read from the answer's own turn. */
+export type HeldActionOutcome = 'done' | 'failed' | 'unclear' | 'not_run';
 
 /** Host-facing methods beyond the vendor `AgentChatServer` contract. */
 export interface HarnessChatServerExtensions {

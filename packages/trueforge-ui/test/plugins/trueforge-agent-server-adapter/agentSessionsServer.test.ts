@@ -1,9 +1,9 @@
+import { resolveTrueForgeBaseUrl } from '@truefoundry/trueforge-chat';
 import type { TrueForge } from '@truefoundry/trueforge-sdk';
 import assert from 'node:assert/strict';
 import { describe, it, vi } from 'vitest';
 
 import { createHarnessAgentSessionsServer } from '@/plugins/trueforge-agent-server-adapter/agentSessionsServer.js';
-import { resolveTrueForgeBaseUrl } from '@/plugins/trueforge-agent-server-adapter/client.js';
 
 describe('createHarnessAgentSessionsServer', () => {
   it('maps agent details and code snippets to the UI contract', async () => {

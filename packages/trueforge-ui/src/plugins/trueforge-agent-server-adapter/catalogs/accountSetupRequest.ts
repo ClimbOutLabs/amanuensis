@@ -4,9 +4,9 @@
  * a defensive parse of the answer. An unrecognized shape is dropped. Every failure ends as one fixed plain
  * line with one next step: the server's own line when it sent one, else a line for what went wrong.
  */
+import type { CreateTrueForgeClientOptions } from '@truefoundry/trueforge-chat';
 import { z } from 'zod';
 import { ACCOUNT_CONNECTION_STATES } from '../../../server/accountSetup.js';
-import type { CreateTrueForgeClientOptions } from '../client.js';
 
 /** The connection state as the routes send it, shared by every account card. */
 export const AccountConnectionStateWireSchema = z.enum(ACCOUNT_CONNECTION_STATES);

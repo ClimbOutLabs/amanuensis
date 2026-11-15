@@ -3,9 +3,9 @@
  * how the calls are made). The routes are browser-session only: they accept the browser session
  * cookie and refuse any bearer credential.
  */
+import type { CreateTrueForgeClientOptions } from '@truefoundry/trueforge-chat';
 import { z } from 'zod';
 import type { TelegramAccountStatus, TelegramSetupPort } from '../../../server/telegramSetup.js';
-import type { CreateTrueForgeClientOptions } from '../client.js';
 import { createAccountSetupRequest } from './accountSetupRequest.js';
 
 const TelegramAccountStatusWireSchema = z.object({

@@ -3,9 +3,9 @@
  * how the calls are made). The routes are browser-session only: they accept the browser session
  * cookie and refuse any bearer token.
  */
+import type { CreateTrueForgeClientOptions } from '@truefoundry/trueforge-chat';
 import { z } from 'zod';
 import type { EmailAccountSaveRequest, EmailAccountStatus, EmailSetupPort } from '../../../server/emailSetup.js';
-import type { CreateTrueForgeClientOptions } from '../client.js';
 import { AccountConnectionStateWireSchema, createAccountSetupRequest } from './accountSetupRequest.js';
 
 const EmailProviderWireSchema = z.object({

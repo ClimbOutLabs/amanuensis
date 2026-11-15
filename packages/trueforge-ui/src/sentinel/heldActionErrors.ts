@@ -3,6 +3,8 @@
  * what went wrong by status and `error.code`; its own message text is never shown.
  */
 
+import type { HeldActionOutcome } from '@truefoundry/trueforge-chat';
+
 import { apiErrorCode } from '../utils/apiErrorCode.js';
 import { answerRefusalText, turnRefusalCode } from '../utils/turnRefusal.js';
 
@@ -56,9 +58,6 @@ export function describeHeldAnswerFailure(error: unknown, assistantName: string)
   }
   return { kind: 'retry', message: GENERIC_FAILURE };
 }
-
-/** What happened to an approved action, read from the answer's own turn. */
-export type HeldActionOutcome = 'done' | 'failed' | 'unclear' | 'not_run';
 
 export const APPROVED_OUTCOME_TEXT: Record<HeldActionOutcome, string> = {
   done: 'Approved and done.',

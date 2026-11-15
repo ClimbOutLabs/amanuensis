@@ -2,9 +2,9 @@
 
 import { useAuiState } from '@assistant-ui/react';
 import { toolInvocationRawId, useTrueFoundryReload } from '@truefoundry/assistant-ui-runtime';
+import { hasSessionResync } from '@truefoundry/trueforge-chat';
 import { useCallback, useState } from 'react';
 
-import { hasSessionResync } from '../plugins/trueforge-agent-server-adapter/sessionResync.js';
 import { useOptionalServer } from '../server/ServerContext.js';
 import { useToasterOptional } from './ToasterContainer.js';
 

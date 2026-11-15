@@ -1,7 +1,8 @@
 'use client';
 
+import type { LastCompactionStatus } from '@truefoundry/trueforge-chat';
+
 import { useCompactionStatus } from '../hooks/useCompactionStatus.js';
-import type { LastCompactionStatus } from '../plugins/trueforge-agent-server-adapter/sessionResync.js';
 import { formatTokenCount } from '../utils/sessionDisplayFormat.js';
 import { cn } from './lib/cn.js';
 import { formatRelativeTime } from './schedules/cadence.js';
