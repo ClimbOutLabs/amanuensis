@@ -256,7 +256,7 @@ instance_render() {
     if tls_home_in_volume; then tls_volume=1; else tls_host=1; fi
   fi
   render_template "$TEMPLATES_DIR/instance/compose.yaml.tpl" \
-    "NAME=$name" "IF_CALENDAR=$calendar_on" "CALENDAR_IMAGE=${REL_CALENDAR_TAG:-}" "IF_EMAIL=$email_on" "MAIL_EMAIL_IMAGE=${REL_MAIL_EMAIL_IMAGE:-}" \
+    "NAME=$name" "CONTAINER_PREFIX=$(container_prefix "$name")" "SHORT_NAME=${name#aman-}" "IF_CALENDAR=$calendar_on" "CALENDAR_IMAGE=${REL_CALENDAR_TAG:-}" "IF_EMAIL=$email_on" "MAIL_EMAIL_IMAGE=${REL_MAIL_EMAIL_IMAGE:-}" \
     "IF_BROWSER=$browser_on" "BROWSER_IMAGE=${REL_BROWSER_TAG:-}" "BROWSER_GATEWAY_IMAGE=${REL_BROWSER_GATEWAY_TAG:-}" "STT_NETWORK=$(stt_network "$name")" "APP_IMAGE=$app_image" "DEX_IMAGE=$dex_image" "APP_PORT=$app_port" "IF_SANDBOX=$sandbox_on" \
     "IF_EDGE=$edge_on" "LOGIN_HOST=$login_host" \
     "LOGIN_PORT=$login_port" "DEX_TELEMETRY_PORT=$DEX_TELEMETRY_PORT" "APP_PORTS=$app_ports" \
@@ -937,7 +937,7 @@ instance_apply_addresses() { # name open|close|refresh app_image
 # ---- create / list / remove -------------------------------------------------------------------
 
 instance_create() {
-  local dir cookie client_id client_secret api_key hash created tf_cap_on=0 demo_on=0 network_on=0
+  local other dir cookie client_id client_secret api_key hash created tf_cap_on=0 demo_on=0 network_on=0
   dir=$(instance_dir "$I_NAME")
   if reg_exists "$I_NAME"; then
     say "Instance $I_NAME already exists. Making sure it is running."
@@ -945,6 +945,9 @@ instance_create() {
     instance_render "$I_NAME" "$REL_APP_TAG" "$REL_DEX_IMAGE"
     instance_up "$I_NAME"
     return
+  fi
+  if other=$(container_prefix_owner "$I_NAME"); then
+    die "Instance $other already uses the name $(container_prefix "$I_NAME") in Docker, so instance $I_NAME cannot be made. Run this again with another name."
   fi
   issuer_check "$I_ISSUER"
   if [ -n "$I_ORIGINS" ]; then network_on=1; fi
@@ -1386,14 +1389,34 @@ refresh_report() { # name
   AMAN_REPORT_COMMAND=refresh DOCTOR_TIMEOUT=180 run_doctor --json --instance "$1" >/dev/null 2>&1 || true
 }
 
+# What Docker lists an instance's containers under: "aman-" and the name, written once even when the name starts with it.
+container_prefix() { # name
+  printf 'aman-%s\n' "${1#aman-}"
+}
+
+# The instance whose containers would have the same names as a new instance's, such as "x" for a new "aman-x".
+container_prefix_owner() { # name
+  local other prefix
+  prefix=$(container_prefix "$1")
+  for other in $(reg_names); do
+    if [ "$other" != "$1" ] && [ "$(container_prefix "$other")" = "$prefix" ]; then
+      printf '%s\n' "$other"
+      return 0
+    fi
+  done
+  return 1
+}
+
 # A name typed for a new instance must also be free; naming an existing one is only for re-running instance add on it.
 new_instance_name_problem() {
-  local problem
+  local problem other
   problem=$(name_problem "$1")
   if [ -n "$problem" ]; then
     echo "$problem"
   elif reg_exists "$1"; then
     echo "An instance called $1 already exists. Pick another name."
+  elif other=$(container_prefix_owner "$1"); then
+    echo "Instance $other already uses the name $(container_prefix "$1") in Docker. Pick another name."
   fi
 }
 
