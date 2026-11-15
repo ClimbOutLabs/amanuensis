@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readFile, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -128,4 +128,29 @@ test('with nothing stored the page still builds and says so', async () => {
   assert.deepEqual(listed, { nights: [], sweeps: [] });
   assert.deepEqual(asked, []);
   assert.match(await readFile(path.join(siteDir, SECTION, 'index.html'), 'utf8'), /Nothing is stored yet/);
+});
+
+test('a link inside stored pictures is dropped, so nothing outside them is published', async () => {
+  const siteDir = await mkdtemp(path.join(tmpdir(), 'aman-site-'));
+  const outside = path.join(await mkdtemp(path.join(tmpdir(), 'aman-outside-')), 'private.txt');
+  await writeFile(outside, 'not for the site');
+  const { github, unzip } = standInGithub({
+    runs: { [SOURCES.nightly.workflow]: [finishedRun({ id: 11, day: '14' })] },
+    stored: {
+      11: [{ id: 101, name: 'screenshots', files: nightFiles({ folder: '2026/11/14/1551', pictures: 1, failed: 0 }) }],
+    },
+  });
+  const night = path.join(siteDir, SECTION, 'nightly/2026/11/14/1551');
+  const unzipWithLinks = async ({ zip, folder }) => {
+    await unzip({ zip, folder });
+    await symlink(outside, path.join(night, 'chat', 'linked.png'));
+    await symlink(path.dirname(outside), path.join(night, 'linked-folder'));
+  };
+
+  await collectScreenshots({ siteDir, github, unzip: unzipWithLinks });
+
+  await assert.rejects(lstat(path.join(night, 'chat', 'linked.png')), { code: 'ENOENT' });
+  await assert.rejects(lstat(path.join(night, 'linked-folder')), { code: 'ENOENT' });
+  assert.equal(await readFile(outside, 'utf8'), 'not for the site', 'the file outside is left alone');
+  assert.equal(await readFile(path.join(night, 'chat/screen-chat--open.png'), 'utf8'), 'png');
 });

@@ -234,6 +234,21 @@ async function fetchKind({ github, source, folder, unzip }) {
   }
 }
 
+/**
+ * Removes everything under `folder` that is not a plain file or folder. A stored download could hold a
+ * link to a file outside it, and publishing follows links.
+ */
+export async function removeLinks(folder) {
+  for (const entry of await readdir(folder, { withFileTypes: true })) {
+    const full = path.join(folder, entry.name);
+    if (entry.isDirectory()) {
+      await removeLinks(full);
+    } else if (!entry.isFile()) {
+      await rm(full, { force: true });
+    }
+  }
+}
+
 /** Fills `<site>/test-screenshots/` and returns what it listed. */
 export async function collectScreenshots({ siteDir, github, unzip = unzipInto }) {
   const root = path.join(siteDir, SECTION);
@@ -241,6 +256,7 @@ export async function collectScreenshots({ siteDir, github, unzip = unzipInto })
   for (const [kind, source] of Object.entries(SOURCES)) {
     await mkdir(path.join(root, kind), { recursive: true });
     await fetchKind({ github, source, folder: path.join(root, kind), unzip });
+    await removeLinks(path.join(root, kind));
   }
   const nights = await readNights(path.join(root, 'nightly'));
   const sweeps = await readSweeps(path.join(root, 'weekly'));
