@@ -166,6 +166,7 @@ Workspace tasks go through `package.json` scripts - if a repeatable workflow is 
 | `pnpm test` / `pnpm typecheck`                       | Workspace checks                                      |
 | `pnpm lint` / `pnpm format`                          | ESLint (with fixes) / Prettier                        |
 | `pnpm smoke` / `pnpm smoke:down`                     | Full Docker Compose stack + health check              |
+| `pnpm ui:sweep`                                      | Picture and measure every screen (see below)          |
 | `pnpm smoke:npx`                                     | Pack the published CLI and boot it like `npx`         |
 | `pnpm smoke:npx:amanuensis`                          | Pack `amanuensis` and start it with `npx`; CI runs it |
 | `pnpm chart:lint` / `pnpm chart:template`            | Validate the Helm chart                               |
@@ -200,6 +201,15 @@ pnpm smoke:down
 ```
 
 Open [http://localhost:8791](http://localhost:8791). Credentials come from `packages/trueforge/.env`. The app is on host `:8791` (offset from local `pnpm dev` on `:8790`); Postgres and Redis stay on the compose network only.
+
+### Looking over every screen
+
+```bash
+pnpm ui:sweep                  # every screen
+pnpm ui:sweep reminders spaces # only these screens
+```
+
+This opens every screen of the app with made-up demo data, at a computer size, two phone sizes and in dark colours. It saves a picture of each one and a `report.md` that lists what it measured: sideways scrolling, parts that stick out of the window, cut-off words, controls with no name, small tap targets, page errors and failed requests. The folder it saved to is printed at the end. The report is a list of places to look, not a pass or fail. To cover a new screen, add it to `packages/frontend/scripts/uiSweep/surfaces.ts`.
 
 ## Dependency licenses
 

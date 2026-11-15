@@ -9,7 +9,7 @@ Setting Aman up takes about 45 minutes. Most of that is waiting while things dow
 - **A computer that stays on while you use Aman.** It can be a Mac, a Windows PC, or a Linux computer with Ubuntu or Debian.
 - **16 GB of memory.** 8 GB is the bare minimum, and the first install is slow there.
 - **Free disk space.** You need about 20 GB on a Mac or a Windows PC, and about 45 GB on Linux.
-- **An API key for an AI model.** An API key is a long password that lets Aman use your account at an AI company. Aman works with Together AI, OpenAI, Anthropic and Google Gemini. You make the key on that company's website, and paste it into Aman after the install.
+- **An API key for an AI model.** An API key is a long password that lets Aman use your account at an AI company. Aman works with Together AI, OpenAI, Anthropic and Google Gemini. You make the key on that company's website, and paste it into Aman after the install. Or use a model you run yourself on the same computer, such as Ollama. See [A model on this computer](../packages/trueforge/guide/topics/local-model.md).
 
 !!! note "What it costs"
 

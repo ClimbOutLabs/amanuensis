@@ -23,16 +23,33 @@ export const EmailProviderSchema = z
   })
   .openapi('EmailProvider');
 
+export const EmailAccountEntrySchema = z
+  .object({
+    address: z.string().describe('The account address.'),
+    provider_key: z.string().describe('The provider of this account, worked out from its servers.'),
+    state: ConnectorAccountStateSchema,
+    is_default: z.boolean().describe('Whether this is the account new mail goes out from.'),
+    imap_host: z.string().describe('Incoming mail server.'),
+    imap_port: z.number().int().describe('Incoming mail port.'),
+    imap_mode: MailServerModeSchema,
+    smtp_host: z.string().describe('Outgoing mail server.'),
+    smtp_port: z.number().int().describe('Outgoing mail port.'),
+    smtp_mode: MailServerModeSchema,
+  })
+  .openapi('EmailAccountEntry');
+
 export const EmailAccountStatusSchema = z
   .object({
     available: z
       .boolean()
       .describe('Whether this instance has the Email connector at all; when false, no card is shown.'),
     state: ConnectorAccountStateSchema,
-    address: z.string().nullable().describe('The connected account address; null when none is connected.'),
+    address: z.string().nullable().describe('The default account address; null when none is connected.'),
     provider_key: z
       .string()
-      .describe('The provider of the connected account, worked out from its servers; the picker default otherwise.'),
+      .describe('The provider of the default account, worked out from its servers; the picker default otherwise.'),
+    accounts: z.array(EmailAccountEntrySchema).describe('Every connected account, in saved order.'),
+    default_address: z.string().nullable().describe('The account new mail goes out from; null when none is connected.'),
     providers: z.array(EmailProviderSchema).describe('The provider picker table, in display order.'),
   })
   .openapi('EmailAccountStatus');
@@ -59,9 +76,30 @@ export const SaveEmailAccountResponseSchema = z
   .object({ data: EmailAccountStatusSchema })
   .openapi('SaveEmailAccountResponse');
 
+export const RemoveEmailAccountRequestSchema = z
+  .object({
+    address: z
+      .string()
+      .optional()
+      .describe('The one account to remove; without it, every connected account is removed.'),
+  })
+  .openapi('RemoveEmailAccountRequest');
+
 export const RemoveEmailAccountResponseSchema = z
   .object({ data: EmailAccountStatusSchema })
   .openapi('RemoveEmailAccountResponse');
 
+export const SetDefaultEmailAccountRequestSchema = z
+  .object({
+    address: z.string().describe('The connected account to make the default.'),
+  })
+  .openapi('SetDefaultEmailAccountRequest');
+
+export const SetDefaultEmailAccountResponseSchema = z
+  .object({ data: EmailAccountStatusSchema })
+  .openapi('SetDefaultEmailAccountResponse');
+
 export type EmailAccountStatus = z.infer<typeof EmailAccountStatusSchema>;
 export type SaveEmailAccountRequest = z.infer<typeof SaveEmailAccountRequestSchema>;
+export type RemoveEmailAccountRequest = z.infer<typeof RemoveEmailAccountRequestSchema>;
+export type SetDefaultEmailAccountRequest = z.infer<typeof SetDefaultEmailAccountRequestSchema>;

@@ -8,6 +8,8 @@ import { FirstRunGuideClient } from "../resources/firstRunGuide/client/Client.js
 import { GitCommitIdentityClient } from "../resources/gitCommitIdentity/client/Client.js";
 import { GoogleClient } from "../resources/google/client/Client.js";
 import { McpServersClient } from "../resources/mcpServers/client/Client.js";
+import { MemoryNightlyClient } from "../resources/memoryNightly/client/Client.js";
+import { MemoryPageSortingClient } from "../resources/memoryPageSorting/client/Client.js";
 import { MemoryRecallsClient } from "../resources/memoryRecalls/client/Client.js";
 import { MemoryScreensClient } from "../resources/memoryScreens/client/Client.js";
 import { MemorySummarizeClient } from "../resources/memorySummarize/client/Client.js";
@@ -16,6 +18,7 @@ import { NotesClient } from "../resources/notes/client/Client.js";
 import { RunCodeClient } from "../resources/runCode/client/Client.js";
 import { SandboxProvidersClient } from "../resources/sandboxProviders/client/Client.js";
 import { SkillsClient } from "../resources/skills/client/Client.js";
+import { TelegramClient } from "../resources/telegram/client/Client.js";
 import { TokenFactoryUsageClient } from "../resources/tokenFactoryUsage/client/Client.js";
 import { ToolOutputScreensClient } from "../resources/toolOutputScreens/client/Client.js";
 
@@ -28,6 +31,8 @@ export class SettingsClient {
     protected _firstRunGuide: FirstRunGuideClient | undefined;
     protected _gitCommitIdentity: GitCommitIdentityClient | undefined;
     protected _mcpServers: McpServersClient | undefined;
+    protected _memoryNightly: MemoryNightlyClient | undefined;
+    protected _memoryPageSorting: MemoryPageSortingClient | undefined;
     protected _memoryRecalls: MemoryRecallsClient | undefined;
     protected _memoryScreens: MemoryScreensClient | undefined;
     protected _memorySummarize: MemorySummarizeClient | undefined;
@@ -41,6 +46,7 @@ export class SettingsClient {
     protected _email: EmailClient | undefined;
     protected _google: GoogleClient | undefined;
     protected _notes: NotesClient | undefined;
+    protected _telegram: TelegramClient | undefined;
 
     constructor(options: SettingsClient.Options) {
         this._options = normalizeClientOptionsWithAuth(options);
@@ -56,6 +62,14 @@ export class SettingsClient {
 
     public get mcpServers(): McpServersClient {
         return (this._mcpServers ??= new McpServersClient(this._options));
+    }
+
+    public get memoryNightly(): MemoryNightlyClient {
+        return (this._memoryNightly ??= new MemoryNightlyClient(this._options));
+    }
+
+    public get memoryPageSorting(): MemoryPageSortingClient {
+        return (this._memoryPageSorting ??= new MemoryPageSortingClient(this._options));
     }
 
     public get memoryRecalls(): MemoryRecallsClient {
@@ -108,5 +122,9 @@ export class SettingsClient {
 
     public get notes(): NotesClient {
         return (this._notes ??= new NotesClient(this._options));
+    }
+
+    public get telegram(): TelegramClient {
+        return (this._telegram ??= new TelegramClient(this._options));
     }
 }

@@ -12,7 +12,6 @@ const recallEvent: TrueForgeApi.MemoryRecallPersistedEvent = {
   injectedBlock: '<aman-memory>recalled fact</aman-memory>',
   stats: {
     items: 1,
-    entities: 2,
     droppedOverBudget: 0,
     droppedBelowThreshold: 0,
     estimatedTokens: 42,
@@ -30,16 +29,34 @@ describe('MemoryContextCard', () => {
   });
 
   it('pluralizes counts correctly at one and at other counts, including an irregular plural', () => {
-    render(<MemoryContextCard recall={recallEvent} />);
-    // The collapsed status line names only the memories; the entity count is a detail
-    // that stays in the expanded body.
+    const { rerender } = render(<MemoryContextCard recall={recallEvent} />);
     expect(screen.getByText('1 memory')).toBeInTheDocument();
-    expect(screen.queryByText('1 item, 2 entities')).not.toBeInTheDocument();
 
-    // Expand to also check the same counts rendered as their own rows in the body.
+    rerender(<MemoryContextCard recall={{ ...recallEvent, stats: { ...recallEvent.stats, items: 2 } }} />);
+    expect(screen.getByText('2 memories')).toBeInTheDocument();
+
+    // Expand to also check the same count rendered as its own row in the body.
     fireEvent.click(screen.getByRole('button', { name: 'Expand step' }));
-    expect(screen.getByText('1 item')).toBeInTheDocument();
-    expect(screen.getByText('2 entities')).toBeInTheDocument();
+    expect(screen.getByText('2 items')).toBeInTheDocument();
+  });
+
+  it('counts a page as recalled memory when no note was recalled', () => {
+    const pages = { candidates: 1, loaded: 1, droppedOverCount: 0, droppedOverBudget: 0, withheld: 0 };
+    const { rerender } = render(
+      <MemoryContextCard
+        recall={{ ...recallEvent, stats: { ...recallEvent.stats, items: 0, outcome: 'empty' }, layers: { pages } }}
+      />,
+    );
+    expect(screen.getByText('1 page')).toBeInTheDocument();
+    expect(screen.queryByText('No memory recalled')).not.toBeInTheDocument();
+
+    rerender(<MemoryContextCard recall={{ ...recallEvent, layers: { pages: { ...pages, loaded: 2 } } }} />);
+    expect(screen.getByText('1 memory, 2 pages')).toBeInTheDocument();
+
+    rerender(
+      <MemoryContextCard recall={{ ...recallEvent, stats: { ...recallEvent.stats, items: 0, outcome: 'empty' } }} />,
+    );
+    expect(screen.getByText('No memory recalled')).toBeInTheDocument();
   });
 
   it('shows an actionable unavailable state instead of rendering as if nothing happened', () => {

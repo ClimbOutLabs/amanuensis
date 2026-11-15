@@ -71,7 +71,6 @@ function memoryRecallEvent(id: string) {
     injected_block: null,
     stats: {
       items: 0,
-      entities: 0,
       dropped_over_budget: 0,
       dropped_below_threshold: 0,
       estimated_tokens: 0,

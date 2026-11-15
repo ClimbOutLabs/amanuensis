@@ -1,18 +1,22 @@
 import { generateKeyPairSync, randomBytes } from 'node:crypto';
 
 import { OpenAPIHono } from '@hono/zod-openapi';
+import { AgentSpecSchema, Sessions, type CreatedBySubject } from '@truefoundry/trueforge-core/agent-session';
 
 import { createDeliveriesRouter, createPushRouter } from '../../../src/apis/deliveries';
 import type { RequestContext } from '../../../src/auth/identity';
 import { DeliveryStore } from '../../../src/db/deliveryStore';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
 import { PushSubscriptionStore } from '../../../src/db/pushSubscriptionStore';
+import { SqliteAgentStore } from '../../../src/db/sqlite/agent-store/SqliteAgentStore';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
+import { SqliteSessionStore } from '../../../src/db/sqlite/session-store/SqliteSessionStore';
 import {
   GetDeliveryResponseSchema,
   GetPushSubscriptionResponseSchema,
   ListDeliveriesResponseSchema,
   LookupPushSubscriptionResponseSchema,
+  type DeliveryLink,
 } from '../../../src/schemas/deliveries';
 
 function person(id: string): RequestContext {
@@ -30,10 +34,33 @@ async function build({ pushOn = true }: { pushOn?: boolean } = {}) {
   await migrateSqliteToLatest(db);
   const deliveryStore = new DeliveryStore(db);
   const pushSubscriptionStore = new PushSubscriptionStore(db);
+  const sessionStore = new SqliteSessionStore(db);
+  const agentStore = new SqliteAgentStore(db);
+  const agentSubject: CreatedBySubject = { subject_id: 'alice', subject_type: 'user', subject_display_name: 'alice' };
+  const agent = await agentStore.createAgent({
+    host_managed: true,
+    tenant_id: 'default',
+    created_by_subject: agentSubject,
+    name: 'assistant-test',
+    description: 'Runs the chats in these tests.',
+    manifest: AgentSpecSchema.parse({ model: { name: 'test-provider/test-model' }, instructions: 'test' }),
+    external_id: null,
+  });
+  const sessions = new Sessions({ sessionStore });
+  const makeChat = async (session_id: string, owner = 'alice') => {
+    await sessions.create({
+      tenant_id: 'default',
+      session_id,
+      created_by_subject:
+        owner === 'alice' ? agentSubject : { subject_id: owner, subject_type: 'user', subject_display_name: owner },
+      agent: { type: 'reference', id: agent.id, name: agent.name },
+      external_id: null,
+    });
+  };
   let current = person('alice');
   const resolveRequestContext = () => current;
   const app = new OpenAPIHono();
-  app.route('/deliveries', createDeliveriesRouter({ deliveryStore, resolveRequestContext }));
+  app.route('/deliveries', createDeliveriesRouter({ deliveryStore, sessionStore, resolveRequestContext }));
   app.route('/push', createPushRouter({ pushSubscriptionStore, publicKey, resolveRequestContext }));
   const as = (id: string) => {
     current = person(id);
@@ -44,17 +71,29 @@ async function build({ pushOn = true }: { pushOn?: boolean } = {}) {
       headers: { 'content-type': 'application/json' },
       ...(init === undefined ? {} : { body: JSON.stringify(init.body) }),
     });
-  const give = (created_by: string, text: string) =>
+  const giveLinked = (input: { created_by: string; text: string; link: DeliveryLink | null }) =>
     deliveryStore.create({
       tenant_id: 'default',
-      created_by,
+      created_by: input.created_by,
       kind: 'reminder',
       level: 'nudge',
-      text,
+      text: input.text,
       reason: 'You asked for it.',
-      link: { type: 'chat', session_id: 's1' },
+      link: input.link,
     });
-  return { as, json, give, deliveryStore };
+  const give = (created_by: string, text: string) =>
+    giveLinked({ created_by, text, link: { type: 'chat', session_id: 's1' } });
+  const giveApproval = (input: { created_by: string; text: string; session_id: string }) =>
+    deliveryStore.create({
+      tenant_id: 'default',
+      created_by: input.created_by,
+      kind: 'approval_waiting',
+      level: 'call',
+      text: input.text,
+      reason: 'A card is waiting.',
+      link: { type: 'approval', session_id: input.session_id, approval_id: 'appr-1' },
+    });
+  return { as, json, give, giveLinked, giveApproval, makeChat, deliveryStore, sessionStore };
 }
 
 describe('deliveries routes', () => {
@@ -134,6 +173,154 @@ describe('deliveries routes', () => {
   it('refuses an empty list of ids', async () => {
     const { json } = await build();
     expect((await json('/deliveries/seen', { method: 'POST', body: { ids: [] } })).status).toBe(400);
+  });
+});
+
+describe('links to chats that are gone', () => {
+  it('keeps the link while the chat is there, on the list and on a single read', async () => {
+    const { json, giveLinked, makeChat } = await build();
+    await makeChat('live-chat');
+    const made = await giveLinked({
+      created_by: 'alice',
+      text: 'still here',
+      link: { type: 'chat', session_id: 'live-chat' },
+    });
+
+    const list = ListDeliveriesResponseSchema.parse(await (await json('/deliveries')).json());
+    expect(list.data[0]?.link).toEqual({ type: 'chat', session_id: 'live-chat' });
+    const one = GetDeliveryResponseSchema.parse(await (await json(`/deliveries/${made.id}`)).json());
+    expect(one.data.link).toEqual({ type: 'chat', session_id: 'live-chat' });
+  });
+
+  it('serves an item without its link when the chat was deleted, on the list and on a single read', async () => {
+    const { json, giveLinked } = await build();
+    const made = await giveLinked({
+      created_by: 'alice',
+      text: 'the chat is gone',
+      link: { type: 'chat', session_id: 'deleted-chat' },
+    });
+
+    const list = ListDeliveriesResponseSchema.parse(await (await json('/deliveries')).json());
+    expect(list.data[0]?.text).toBe('the chat is gone');
+    expect(list.data[0]?.link).toBeNull();
+    const one = GetDeliveryResponseSchema.parse(await (await json(`/deliveries/${made.id}`)).json());
+    expect(one.data.text).toBe('the chat is gone');
+    expect(one.data.link).toBeNull();
+  });
+
+  it('serves an approval link without the link when its chat was deleted', async () => {
+    const { json, giveLinked } = await build();
+    await giveLinked({
+      created_by: 'alice',
+      text: 'the card chat is gone',
+      link: { type: 'approval', session_id: 'deleted-chat', approval_id: 'appr-1' },
+    });
+
+    const list = ListDeliveriesResponseSchema.parse(await (await json('/deliveries')).json());
+    expect(list.data[0]?.link).toBeNull();
+  });
+
+  it('serves an item without its link when the chat belongs to someone else', async () => {
+    const { json, giveLinked, makeChat } = await build();
+    await makeChat('bobs-chat', 'bob');
+    const made = await giveLinked({
+      created_by: 'alice',
+      text: 'not her chat',
+      link: { type: 'chat', session_id: 'bobs-chat' },
+    });
+
+    const list = ListDeliveriesResponseSchema.parse(await (await json('/deliveries')).json());
+    expect(list.data[0]?.text).toBe('not her chat');
+    expect(list.data[0]?.link).toBeNull();
+    const one = GetDeliveryResponseSchema.parse(await (await json(`/deliveries/${made.id}`)).json());
+    expect(one.data.link).toBeNull();
+  });
+
+  it('keeps an approval item with its link while its chat is there', async () => {
+    const { json, giveApproval, makeChat } = await build();
+    await makeChat('card-chat');
+    await giveApproval({ created_by: 'alice', text: 'waiting on you', session_id: 'card-chat' });
+
+    const list = ListDeliveriesResponseSchema.parse(await (await json('/deliveries')).json());
+    expect(list.data[0]?.kind).toBe('approval_waiting');
+    expect(list.data[0]?.link).toEqual({ type: 'approval', session_id: 'card-chat', approval_id: 'appr-1' });
+  });
+
+  it('resolves an approval item when its chat was deleted', async () => {
+    const { json, giveApproval } = await build();
+    const made = await giveApproval({ created_by: 'alice', text: 'the card chat is gone', session_id: 'deleted-chat' });
+
+    const list = ListDeliveriesResponseSchema.parse(await (await json('/deliveries')).json());
+    expect(list.data).toEqual([]);
+    expect((await json(`/deliveries/${made.id}`)).status).toBe(404);
+  });
+
+  it('resolves an approval item when its chat belongs to someone else', async () => {
+    const { json, giveApproval, makeChat } = await build();
+    await makeChat('bobs-card-chat', 'bob');
+    await giveApproval({ created_by: 'alice', text: 'not her card', session_id: 'bobs-card-chat' });
+
+    const list = ListDeliveriesResponseSchema.parse(await (await json('/deliveries')).json());
+    expect(list.data).toEqual([]);
+  });
+
+  it('takes an approval item out of the unread count once its chat is deleted', async () => {
+    const { json, give, giveApproval, makeChat, sessionStore, deliveryStore } = await build();
+    await makeChat('card-chat');
+    const approval = await giveApproval({ created_by: 'alice', text: 'waiting on you', session_id: 'card-chat' });
+    await give('alice', 'a reminder');
+    await expect((await json('/deliveries/unread-count')).json()).resolves.toEqual({ data: { unread_count: 2 } });
+
+    await sessionStore.deleteSession({ tenant_id: 'default', session_id: 'card-chat' });
+
+    await expect((await json('/deliveries/unread-count')).json()).resolves.toEqual({ data: { unread_count: 1 } });
+    const stored = await deliveryStore.get({ tenant_id: 'default', created_by: 'alice', id: approval.id });
+    expect(stored?.seen_at).not.toBeNull();
+  });
+
+  it('marks an approval item seen in the store when the feed leaves it out', async () => {
+    const { json, giveApproval, deliveryStore } = await build();
+    const approval = await giveApproval({
+      created_by: 'alice',
+      text: 'the card chat is gone',
+      session_id: 'gone-chat',
+    });
+
+    ListDeliveriesResponseSchema.parse(await (await json('/deliveries')).json());
+
+    expect(await deliveryStore.countUnread({ tenant_id: 'default', created_by: 'alice' })).toBe(0);
+    const stored = await deliveryStore.get({ tenant_id: 'default', created_by: 'alice', id: approval.id });
+    expect(stored?.seen_at).not.toBeNull();
+  });
+
+  it('looks up chat ownership once for a whole page', async () => {
+    const { json, giveLinked, makeChat, sessionStore } = await build();
+    await makeChat('live-chat');
+    await giveLinked({ created_by: 'alice', text: 'one', link: { type: 'chat', session_id: 'live-chat' } });
+    await giveLinked({ created_by: 'alice', text: 'two', link: { type: 'chat', session_id: 'deleted-chat' } });
+    await giveLinked({ created_by: 'alice', text: 'three', link: { type: 'space', space_id: 'space-1' } });
+    const spy = jest.spyOn(sessionStore, 'getOwnedIds');
+
+    const list = ListDeliveriesResponseSchema.parse(await (await json('/deliveries')).json());
+    expect(list.data).toHaveLength(3);
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy).toHaveBeenCalledWith({
+      tenant_id: 'default',
+      subject_id: 'alice',
+      ids: expect.arrayContaining(['live-chat', 'deleted-chat']),
+    });
+  });
+
+  it('never checks a space link against the chats', async () => {
+    const { json, giveLinked } = await build();
+    await giveLinked({
+      created_by: 'alice',
+      text: 'a space, not a chat',
+      link: { type: 'space', space_id: 'space-1' },
+    });
+
+    const list = ListDeliveriesResponseSchema.parse(await (await json('/deliveries')).json());
+    expect(list.data[0]?.link).toEqual({ type: 'space', space_id: 'space-1' });
   });
 });
 

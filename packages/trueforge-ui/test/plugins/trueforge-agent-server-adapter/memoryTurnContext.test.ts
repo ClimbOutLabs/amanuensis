@@ -11,7 +11,6 @@ const recallEventRaw = {
   injected_block: '<aman-memory>recalled fact</aman-memory>',
   stats: {
     items: 2,
-    entities: 1,
     dropped_over_budget: 0,
     dropped_below_threshold: 0,
     estimated_tokens: 42,

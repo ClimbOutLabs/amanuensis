@@ -173,7 +173,7 @@ describe('draft composer sections', () => {
       </ShellModeProvider>,
     );
 
-    expect(screen.queryByRole('button', { name: 'Agent config' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Agent setup' })).not.toBeInTheDocument();
 
     rerender(
       <ShellModeProvider agentConfig={{ mode: 'AgentComposer' }}>
@@ -189,12 +189,12 @@ describe('draft composer sections', () => {
     expect(screen.queryByRole('button', { name: 'Attach a file' })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Add' }));
-    expect(screen.getByRole('menuitem', { name: 'Agent config' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Agent setup' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('menuitem', { name: 'Attach files' }));
     expect(onAttach).toHaveBeenCalledOnce();
 
     fireEvent.click(screen.getByRole('button', { name: 'Add' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Agent config' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Agent setup' }));
     expect(screen.getByText('Config open')).toBeInTheDocument();
   });
 

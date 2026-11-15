@@ -1,11 +1,11 @@
 import { namedPeopleInMessage, rankNamedPeopleFirst } from '../../../../src/runtime/memory/recallNameBoost';
 
 const MESSAGE =
-  "Hi June, remember Wendy's is coming up in December in India and I wont be able to attend. Can you come up with 3 gift ideas and create a space for me";
+  "Hi June, remember Nora's is coming up in December in India and I wont be able to attend. Can you come up with 3 gift ideas and create a space for me";
 
 describe('namedPeopleInMessage', () => {
   it('finds capitalized words mid-sentence and skips the sentence opener and the month', () => {
-    expect(namedPeopleInMessage(MESSAGE)).toEqual(['Wendy', 'India']);
+    expect(namedPeopleInMessage(MESSAGE)).toEqual(['Nora', 'India']);
   });
 
   it('skips the pronoun I, a single capital letter, and words that open a sentence', () => {
@@ -17,7 +17,7 @@ describe('namedPeopleInMessage', () => {
   });
 
   it('skips short months and weekdays', () => {
-    expect(namedPeopleInMessage('Remind me on Oct 5, Sept 9 and Tues about Wendy')).toEqual(['Wendy']);
+    expect(namedPeopleInMessage('Remind me on Oct 5, Sept 9 and Tues about Nora')).toEqual(['Nora']);
   });
 
   it('keeps at most 15 names', () => {
@@ -26,7 +26,7 @@ describe('namedPeopleInMessage', () => {
   });
 
   it('finds nothing in a lowercase message', () => {
-    expect(namedPeopleInMessage('remind me about the wendy trip in december')).toEqual([]);
+    expect(namedPeopleInMessage('remind me about the nora trip in december')).toEqual([]);
   });
 });
 
@@ -34,9 +34,9 @@ describe('rankNamedPeopleFirst', () => {
   const candidates = [
     { id: 'a', text: 'Photo gear for Lisbon: a light tripod and two lenses.' },
     { id: 'b', text: 'Rental budget for the autumn is tight.' },
-    { id: 'c', text: "Maya's really good friend is Wendy." },
+    { id: 'c', text: "Maya's really good friend is Nora." },
     { id: 'd', text: 'Fado nights are on Thursdays.' },
-    { id: 'e', text: "Maya won't be able to attend Wendy's in December 2026 in India." },
+    { id: 'e', text: "Maya won't be able to attend Nora's in December 2026 in India." },
   ];
 
   it('moves notes naming a person from the message ahead of the rest, keeping each group in order', () => {
@@ -62,8 +62,8 @@ describe('rankNamedPeopleFirst', () => {
   });
 
   it('matches the name as a whole word, not inside another word', () => {
-    const items = [{ text: 'The Wendys burger chain opened downtown.' }, { text: 'Wendy called back.' }];
-    expect(rankNamedPeopleFirst({ candidates: items, message: 'Did Wendy call?' })).toEqual([items[1], items[0]]);
+    const items = [{ text: 'The Noras burger chain opened downtown.' }, { text: 'Nora called back.' }];
+    expect(rankNamedPeopleFirst({ candidates: items, message: 'Did Nora call?' })).toEqual([items[1], items[0]]);
   });
 
   it('does not boost a note only because it mentions a short month', () => {

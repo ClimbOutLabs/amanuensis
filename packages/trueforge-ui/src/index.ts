@@ -277,6 +277,7 @@ export type {
 } from './components/PersonaContext.js';
 export {
   EMPTY_PERSONALIZATION_PROFILE,
+  PersonalizationConflictError,
   PersonalizationProvider,
   useOptionalPersonalization,
   usePersonalization,
@@ -515,7 +516,6 @@ export type {
   ConnectorChecks,
   ConnectorConnectionFailureKind,
   ConnectorConnectionTest,
-  MemoryProviderCheck,
 } from './server/connectorChecks.js';
 export { createTrueFoundryServer } from './server/createTrueFoundryServer.js';
 export type { CreateTrueFoundryServerOptions, TrueFoundryServer } from './server/createTrueFoundryServer.js';

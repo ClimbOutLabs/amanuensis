@@ -156,6 +156,8 @@ const TruefoundrySettingsBuilder = () => {
     if (!settingsOpen) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
+      // A window open on top of Settings takes Escape for itself, so one press closes only that window.
+      if (document.querySelector('dialog[open]') !== null) return;
       event.stopImmediatePropagation();
       closeSettings();
     };
@@ -185,7 +187,7 @@ const TruefoundrySettingsBuilder = () => {
     }
     if (hasSentinel) {
       baseSections.push({ id: 'permissions', label: 'Permissions', icon: 'lock' });
-      baseSections.push({ id: 'audit', label: 'Audit', icon: 'clock-rotate-left' });
+      baseSections.push({ id: 'audit', label: 'Activity log', icon: 'clock-rotate-left' });
     }
     if (hasDeliveries) {
       baseSections.push({ id: 'reach-me', label: 'Reach me', icon: 'bell' });

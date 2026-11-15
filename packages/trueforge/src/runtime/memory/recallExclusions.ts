@@ -1,3 +1,6 @@
+import { withoutNoteTrailer } from './memoryNotes';
+import { sanitizeMemoryLine } from './memoryPageLoader';
+
 /**
  * Matching a recalled fact against the facts a person pulled out of one chat's recall. The
  * exclusions themselves are stored with the chat (see db/recallExclusionStore); this module
@@ -5,6 +8,11 @@
  * of that chat: the recall path skips the fact there, other chats still recall it, and the
  * memory itself is never changed or deleted.
  */
+
+/** The words recall shows for a stored memory: one line, without the hidden note marker. */
+export function shownFactText(text: string): string {
+  return sanitizeMemoryLine(withoutNoteTrailer(text));
+}
 
 /**
  * The mark a fact's text carries when it was cut short to fit a token budget: the same three

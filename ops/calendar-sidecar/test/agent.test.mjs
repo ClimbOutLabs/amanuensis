@@ -16,6 +16,7 @@ const SECRET = 'test-account-secret-0123456789abcdef0123';
 const WRONG = 'CANARY-WRONG-PASSWORD-9z';
 const HOST = 'caldav.example.invalid';
 const USERNAME = 'owner@example.invalid';
+const SECOND = 'second@example.invalid';
 const PUBLIC_ADDRESS = '93.184.216.34';
 const GOOGLE_USER = 'person@gmail.com';
 const GOOGLE_HOME = `/calendar/dav/${GOOGLE_USER.replace('@', '%40')}/`;
@@ -115,8 +116,9 @@ describe('the calendar account agent', () => {
         res.end();
         return;
       }
-      const expected = `Basic ${Buffer.from(`${USERNAME}:${CANARY}`).toString('base64')}`;
-      if (req.headers.authorization === expected) {
+      // Either account signs in, and only with the right password.
+      const accepted = [USERNAME, SECOND].map(user => `Basic ${Buffer.from(`${user}:${CANARY}`).toString('base64')}`);
+      if (accepted.includes(req.headers.authorization)) {
         res.writeHead(207, { 'Content-Type': 'application/xml' });
         res.end('<d:multistatus xmlns:d="DAV:"/>');
       } else {
@@ -178,6 +180,8 @@ describe('the calendar account agent', () => {
       username: USERNAME,
       email: USERNAME,
       sign_in: 'ok',
+      accounts: [{ url: payload().url, username: USERNAME, email: USERNAME, sign_in: 'ok' }],
+      default: USERNAME,
     });
     assert.ok(!saved.text.includes(CANARY));
     assert.equal(statSync(file).mode & 0o777, 0o600);
@@ -299,6 +303,45 @@ describe('the calendar account agent', () => {
     }
     assert.equal((await call('POST', undefined)).status, 400);
     assert.equal(existsSync(file), false);
+  });
+
+  it('keeps several accounts, names the default, and removes one at a time', async () => {
+    const callPath = async (path, method, body) => {
+      const response = await fetch(`http://127.0.0.1:${listenerPort}${path}`, {
+        method,
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${SECRET}` },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      });
+      return { status: response.status, body: JSON.parse(await response.text()) };
+    };
+    await call('POST', payload());
+    const two = await call('POST', payload({ username: SECOND, email: SECOND }));
+    assert.equal(two.status, 200);
+    const listed = JSON.parse(two.text);
+    assert.deepEqual(
+      listed.accounts.map(entry => entry.email),
+      [USERNAME, SECOND],
+    );
+    assert.equal(listed.default, USERNAME);
+    assert.ok(!two.text.includes(CANARY));
+
+    const moved = await callPath('/account/default', 'POST', { address: SECOND });
+    assert.equal(moved.status, 200);
+    assert.equal(moved.body.default, SECOND);
+    assert.equal(moved.body.email, SECOND);
+    const unknown = await callPath('/account/default', 'POST', { address: 'ghost@example.invalid' });
+    assert.equal(unknown.status, 400);
+    assert.deepEqual(unknown.body, { error: 'invalid' });
+
+    const removed = await callPath('/account', 'DELETE', { address: USERNAME });
+    assert.equal(removed.status, 200);
+    assert.deepEqual(
+      removed.body.accounts.map(entry => entry.email),
+      [SECOND],
+    );
+    assert.equal(removed.body.default, SECOND);
+    assert.ok(readFileSync(file, 'utf8').includes(`CALDAV_USER_EMAIL=${SECOND}`));
+    assert.ok(!readFileSync(file, 'utf8').includes(`CALDAV_USER_EMAIL=${USERNAME}`));
   });
 
   it('removes the account for good', async () => {
@@ -431,5 +474,44 @@ describe('the installer commands', () => {
     out.text = '';
     assert.equal(await run('--check'), 0);
     assert.equal(out.text, 'none\n');
+  });
+
+  it('merges a second single account, replaces the file for a whole list, and removes one by address', async () => {
+    const secondText = () =>
+      `CALDAV_URL=https://caldav.example.invalid/dav/\nCALDAV_USERNAME=second@example.invalid\nCALDAV_PASSWORD=<redacted>\nCALDAV_USER_EMAIL=second@example.invalid\n`;
+    assert.equal(await run('--write-stdin', installerText(), resolveTo(PUBLIC_ADDRESS)), 0);
+    assert.equal(await run('--write-stdin', secondText(), resolveTo(PUBLIC_ADDRESS)), 0);
+    let text = readFileSync(file, 'utf8');
+    assert.ok(text.includes('CALDAV_USER_EMAIL=owner@example.invalid'));
+    assert.ok(text.includes('CALDAV_USER_EMAIL=second@example.invalid'));
+
+    const thirdText = () =>
+      `CALDAV_URL=https://caldav.example.invalid/dav/\nCALDAV_USERNAME=third@example.invalid\nCALDAV_PASSWORD=<redacted>\nCALDAV_USER_EMAIL=third@example.invalid\n`;
+    const wholeList =
+      '# Written by the installer for the Calendar connector. Keep it private: it holds the app password.\n' +
+      'AMAN_CALENDAR_DEFAULT_ACCOUNT=second@example.invalid\n' +
+      thirdText() +
+      secondText();
+    assert.equal(await run('--write-stdin', wholeList, resolveTo(PUBLIC_ADDRESS)), 0);
+    text = readFileSync(file, 'utf8');
+    assert.ok(!text.includes('CALDAV_USER_EMAIL=owner@example.invalid'));
+    assert.ok(text.includes('AMAN_CALENDAR_DEFAULT_ACCOUNT=second@example.invalid'));
+    assert.ok(text.includes('CALDAV_USER_EMAIL=third@example.invalid'));
+
+    assert.equal(await run('--write-stdin', installerText(), resolveTo(PUBLIC_ADDRESS)), 0);
+    assert.equal(
+      await runCommand({
+        command: '--remove',
+        file,
+        stdin: async () => '',
+        deps: { address: 'second@example.invalid' },
+        out,
+        err,
+      }),
+      0,
+    );
+    text = readFileSync(file, 'utf8');
+    assert.ok(text.includes('CALDAV_USER_EMAIL=owner@example.invalid'));
+    assert.ok(!text.includes('CALDAV_USER_EMAIL=second@example.invalid'));
   });
 });

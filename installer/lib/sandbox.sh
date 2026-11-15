@@ -302,7 +302,7 @@ sandbox_install_bundle() {
 # Runs the slot setup with the Docker access of this run. Build output goes to a log file, progress lines to the
 # terminal; --embedded keeps its title, phase headers and closing block out, since this run prints its own.
 sandbox_run() {
-  as_docker_user env DOCKER_BUILDKIT=1 "$(sandbox_node)" "$(sandbox_bundle)" "$@" \
+  as_docker_user env DOCKER_BUILDKIT=1 ${AMAN_UI_FRAMED:+"AMAN_UI_FRAMED=$AMAN_UI_FRAMED"} "$(sandbox_node)" "$(sandbox_bundle)" "$@" \
     --repo-root "$REPO_ROOT" --log-file "$(sandbox_log)" --command-name "aman doctor sandbox" --embedded
 }
 

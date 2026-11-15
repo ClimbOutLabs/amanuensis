@@ -31,6 +31,7 @@ To hide this line, click **More** in the left bar, then **Settings**, then **App
 - If the model's company doesn't report how much a chat used, the line says "usage not reported".
 - If you use Token Factory models, **Settings**, then **Models** shows a **Token Factory today** box. It shows today's use per model and how much of the daily limit is left. The count starts again at midnight UTC, which is the same time worldwide.
 - An answer that failed or that you stopped shows no cost line, but its use still counts.
+- To see how many turns each chat took and how long it ran, click **More** in the left bar, then **Chat stats**.
 
 ## Related
 

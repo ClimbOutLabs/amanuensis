@@ -86,8 +86,10 @@ function parseAgentAccount(body: unknown): PublicMailAccount | null {
 const mailKind: ConnectorAccountKind<PublicMailAccount> = {
   label: 'Email',
   parseAccount: parseAgentAccount,
+  accountKey: account => account.address,
   connectorUnreachableMessage: MAIL_CONNECTOR_UNREACHABLE_MESSAGE,
   statusUnreachableMessage: MAIL_STATUS_UNREACHABLE_MESSAGE,
+  unknownAccountMessage: 'That email account is not connected. Connect it first, then try again.',
   saveRefusal: body => {
     const kind = agentErrorKind(body);
     if (kind === 'sign_in_refused') {
@@ -189,9 +191,17 @@ export async function saveMailAccount(
   return mailClient.save(deps, resolved.payload);
 }
 
-/** Removes the saved account through the agent; the password is deleted from the account file. */
-export function removeMailAccount(deps: ConnectorAccountClientDeps): Promise<MailAccountState> {
-  return mailClient.remove(deps);
+/**
+ * Removes saved accounts through the agent; their passwords are deleted from the account file. With an
+ * address, only that account goes; without one, every account goes.
+ */
+export function removeMailAccount(deps: ConnectorAccountClientDeps, address?: string): Promise<MailAccountState> {
+  return mailClient.remove(deps, address);
+}
+
+/** Makes one saved account the default: the one new mail goes out from unless a draft says otherwise. */
+export function setMailDefaultAccount(deps: ConnectorAccountClientDeps, address: string): Promise<MailAccountState> {
+  return mailClient.setDefault(deps, address);
 }
 
 /** Registers the Email connector (with its send list prepared) or removes it, as the saved account says. */

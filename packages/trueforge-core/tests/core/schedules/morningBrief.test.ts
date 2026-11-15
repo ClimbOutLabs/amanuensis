@@ -24,7 +24,7 @@ const VALID = {
     {
       section: 'coming_up',
       title: 'Sunday party',
-      subtitle: ['683 Florida St, SF', 'with Wendy'],
+      subtitle: ['683 Florida St, SF', 'with Nora'],
       when: '2026-10-25T15:30:00-07:00',
       action: { label: 'Plan route', target: { kind: 'link', url: 'https://maps.example.com/route' } },
     },

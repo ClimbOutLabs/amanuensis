@@ -14,7 +14,6 @@ import configuration from '../../../src/config';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqliteGlobalSettingsStore } from '../../../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
-import { SqliteMcpServerStore } from '../../../src/db/sqlite/mcp-server-store/SqliteMcpServerStore';
 import { SqliteSandboxProviderStore } from '../../../src/db/sqlite/sandbox-provider-store/SqliteSandboxProviderStore';
 import { readPersistedSnapshotStatus } from '../../../src/sandbox/providerUtils';
 
@@ -45,7 +44,6 @@ describe('app-level bug-report HTTP endpoints', () => {
 
     const db = createSqliteDb(':memory:');
     await migrateSqliteToLatest(db);
-    const mcpServerStore = new SqliteMcpServerStore(db);
     const sandboxProviderStore = new SqliteSandboxProviderStore(db);
 
     app = new OpenAPIHono();
@@ -55,7 +53,6 @@ describe('app-level bug-report HTTP endpoints', () => {
       '/bug-reports',
       createAppBugReportRouter({
         sandboxProviderStore,
-        mcpServerStore,
         globalSettingsStore: new SqliteGlobalSettingsStore(db),
         resolveRequestContext: () => STANDALONE_REQUEST_CONTEXT,
         logger: createLogger({ silent: true }),

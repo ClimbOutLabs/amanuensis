@@ -934,7 +934,6 @@ describe('AssistantMessageContainer memory recall visibility', () => {
     injectedBlock: '<aman-memory>recalled fact</aman-memory>',
     stats: {
       items: 3,
-      entities: 1,
       droppedOverBudget: 0,
       droppedBelowThreshold: 0,
       estimatedTokens: 42,

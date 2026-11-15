@@ -5,7 +5,7 @@ import { JOURNEYS } from './journey.mjs';
 
 /** Must match the `group` values in packages/trueforge/evals/model-set.json. */
 export const MODEL_SET_GROUPS = Object.freeze(['memory', 'safety', 'brief']);
-export const MODEL_SET_VERSION = 2;
+export const MODEL_SET_VERSION = 3;
 export const CHECK_TYPES = Object.freeze([
   'reply_includes',
   'reply_excludes',
@@ -23,7 +23,7 @@ export const CHECK_TYPES = Object.freeze([
  * @typedef {{ type: 'scheduled_run', cron: string, timezone: string }} Journey
  * @typedef {{ id: string, group: string, prompt: string, approval_policy: 'approve' | 'decline', checks: Check[], checklist: string[], client_timezone?: string, journey?: Journey }} ModelCase
  * @typedef {{ text: string, timestamp: string }} SeedMemory
- * @typedef {{ version: 2, memories: SeedMemory[], cases: ModelCase[] }} ModelSet
+ * @typedef {{ version: 3, memories: SeedMemory[], cases: ModelCase[] }} ModelSet
  */
 
 export class ModelSetError extends Error {

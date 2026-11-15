@@ -45,10 +45,16 @@ import type { DeliveryAttemptTable, DeliveryTable } from '../deliveryStore';
 import type { LocalUserTable } from '../localUserStore';
 import type { OAuthClient, OAuthPendingAuthorizationData, OAuthServer, OAuthToken } from '../mcpServerStore';
 import type { NoticingCheckpointTable, NoticingEventTable, ReachLeaseTable } from '../noticingStore';
+import type { PersonTimezoneTable } from '../personTimezoneStore';
 import type { PhoneCallTable } from '../phoneCallStore';
 import type { PushSubscriptionTable } from '../pushSubscriptionStore';
 import type { ReachSettingsTable } from '../reachSettingsStore';
 import type { RecallExclusionTable } from '../recallExclusionStore';
+import type {
+  TelegramConnectionTable,
+  TelegramPendingApprovalTable,
+  TelegramPendingReplyTable,
+} from '../telegramStore';
 import type { TextContactTable, TextSendCountTable, TextWordTable } from '../textContactStore';
 
 /**
@@ -685,6 +691,8 @@ export interface SkillTable {
   manifest: JSONColumnType<SkillManifest, SkillManifest, SkillManifest>;
   /** The person's approved site list for this skill's network access, or null when not approved */
   network_approval: JSONColumnType<string[], string[], string[]> | null;
+  /** The code version the approval is pinned to, or null when there is no pin */
+  network_approval_code_sha: string | null;
   /** Sites the person allowed one by one for this skill */
   network_allowed_hosts: JSONColumnType<string[], string[], string[]>;
   /** Sites the person turned down for this skill */
@@ -1016,6 +1024,7 @@ export interface Database {
   delivery: DeliveryTable;
   delivery_attempt: DeliveryAttemptTable;
   reach_settings: ReachSettingsTable;
+  person_timezone: PersonTimezoneTable;
   text_contact: TextContactTable;
   phone_call: PhoneCallTable;
   text_send_count: TextSendCountTable;
@@ -1025,6 +1034,9 @@ export interface Database {
   reach_lease: ReachLeaseTable;
   push_subscription: PushSubscriptionTable;
   local_user: LocalUserTable;
+  telegram_connection: TelegramConnectionTable;
+  telegram_pending_reply: TelegramPendingReplyTable;
+  telegram_pending_approval: TelegramPendingApprovalTable;
   approval_token: ApprovalTokenTable;
   sentinel_user_settings: SentinelUserSettingsTable;
   implementation_plan_grant: ImplementationPlanGrantTable;

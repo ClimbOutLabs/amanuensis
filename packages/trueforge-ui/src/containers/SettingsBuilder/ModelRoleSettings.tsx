@@ -9,6 +9,8 @@ import { useOptionalPersonas } from '@/components/PersonaContext.js';
 import { getErrorMessage } from '@/utils/getErrorMessage.js';
 import { useTrueFoundryAgentSpec } from '@truefoundry/assistant-ui-runtime';
 import { useAssistantDisplayName } from '../../components/PersonalizationContext.js';
+import { HelperModelSelector } from './HelperModelSelector.js';
+import { useMemoryNightlySetting } from './memoryHelperSettings.js';
 import PersonaSettings from './PersonaSettings.js';
 
 type ModelRolesTab = 'roles' | 'personas';
@@ -23,9 +25,10 @@ const MODEL_ROLES_TABS: ReadonlyArray<{ id: ModelRolesTab; label: string }> = [
  *
  * Provider connections, credentials, and inventory stay under Models; this
  * page only assigns models to roles. Every role here has a real, separate
- * model call behind it. Title generation is a string slice, uploaded images
- * ride the ordinary chat message, and approval is a pure function, so none of
- * them can be given a setting that changes anything.
+ * model call behind it. Uploaded images ride the ordinary chat message and
+ * approval is a pure function, so neither can be given a setting that changes
+ * anything. The background model is kept on the server, unlike the other roles,
+ * because its work also runs when no chat is open.
  *
  * The two halves sit on sub-tabs (the underlined tablist Settings > Memory
  * uses): Roles for the assignments, Personas for the named personas. A host
@@ -38,6 +41,7 @@ const ModelRoleSettings = () => {
   const assistant = useAssistantDisplayName();
   const personas = useOptionalPersonas();
   const { specError } = useTrueFoundryAgentSpec();
+  const helper = useMemoryNightlySetting();
   const [tab, setTab] = useState<ModelRolesTab>('roles');
   const activeTab: ModelRolesTab = personas == null ? 'roles' : tab;
 
@@ -109,19 +113,19 @@ const ModelRoleSettings = () => {
                 </div>
               </article>
 
-              <article className="flex flex-col gap-3 border-b border-border p-3 last:border-b-0 sm:flex-row sm:items-start sm:justify-between">
-                <div className="min-w-0 flex-1">
-                  <h5 className="text-sm font-medium text-text-primary">Summarization model</h5>
-                  <p className="mt-0.5 text-sm text-text-secondary">
-                    Condenses each message before it is saved to memory, when memory summarization is on. Only the
-                    summary is kept, and each one costs an extra model call. A poor summary means less useful memories
-                    later.
-                  </p>
-                </div>
-                <div className="w-full shrink-0 sm:w-80">
-                  <DraftAuxiliaryModelSelector role="summarization" roleLabel="Summarization" />
-                </div>
-              </article>
+              {helper.supported ? (
+                <article className="flex flex-col gap-3 border-b border-border p-3 last:border-b-0 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0 flex-1">
+                    <h5 className="text-sm font-medium text-text-primary">Background model</h5>
+                    <p className="mt-0.5 text-sm text-text-secondary">
+                      Saves what to remember after each chat, tidies your pages and names the chat.
+                    </p>
+                  </div>
+                  <div className="w-full shrink-0 sm:w-80">
+                    <HelperModelSelector setting={helper} />
+                  </div>
+                </article>
+              ) : null}
             </div>
             <p className="mt-2 text-sm text-text-secondary">
               Short background checks, like understanding a request to change personas, reuse the main chat model. They

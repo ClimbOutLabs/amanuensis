@@ -71,7 +71,7 @@ function makeDraftToolSet(): IToolSet {
   return toolSet;
 }
 
-const DRAFT = { recipients: ['wendy@example.com'], subject: 'Hi' };
+const DRAFT = { recipients: ['nora@example.com'], subject: 'Hi' };
 const OTHER_DRAFT = { recipients: ['sam@example.com'], subject: 'Hi' };
 
 /** Runs one turn: the scripted steps in order. Any step past the script fails the test. */
@@ -106,7 +106,7 @@ async function runTurn(steps: (() => ModelStream)[]): Promise<{
       instruction: 'test',
       toolSets: [makeDraftToolSet()],
     },
-    context: [{ role: 'user', content: 'Save a draft to Wendy' }],
+    context: [{ role: 'user', content: 'Save a draft to Nora' }],
   });
   const events: AgentThreadEvent[] = [];
   let text = '';
@@ -143,7 +143,7 @@ describe('a turn never ends silently after tool calls', () => {
     ]);
 
     expect(requests).toHaveLength(3);
-    expect(text).toBe('Saved the draft to wendy@example.com. Nothing was sent.');
+    expect(text).toBe('Saved the draft to nora@example.com. Nothing was sent.');
   });
 
   it('tells the person why a repeated call was skipped, and still ends with words', async () => {
@@ -180,7 +180,7 @@ describe('silentTurnEndLine', () => {
         { toolName: 'save_draft', args: draft, disposition: 'executed_ok' },
         { toolName: 'save_draft', args: draft, disposition: 'never_ran' },
       ]),
-    ).toBe('Saved the draft to wendy@example.com. Nothing was sent.');
+    ).toBe('Saved the draft to nora@example.com. Nothing was sent.');
   });
 
   it('names at most three recipients, skips entries with no readable address, and counts the rest', () => {

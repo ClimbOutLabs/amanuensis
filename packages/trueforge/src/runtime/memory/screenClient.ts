@@ -1,11 +1,9 @@
 /**
  * Typed client for the `aman-content-screen` prompt-injection classifier used by the memory
- * recall screen (`POST {url}/classify`, bearer auth). It is a separate service from the memory
- * provider (Hindsight): the provider stores and recalls memories, this classifier judges whether
- * a recalled memory's text is a prompt-injection attempt before it reaches the model.
+ * recall screen (`POST {url}/classify`, bearer auth). The classifier judges whether a recalled
+ * memory's text is a prompt-injection attempt before it reaches the model.
  *
- * Same posture as {@link HindsightClient}: every call returns a discriminated result and never
- * throws. A screen that is disabled, misconfigured, unreachable, non-2xx, slow, oversized, or
+ * Every call returns a discriminated result and never throws. A screen that is disabled, misconfigured, unreachable, non-2xx, slow, oversized, or
  * unparseable degrades to a well-defined `ok: false` "unknown" result; the caller (the recall
  * capability) owns the fail posture, so no screen failure can fail, block, or delay a turn beyond
  * its own timeout.
@@ -193,8 +191,7 @@ export class ScreenClient {
   }
 
   /**
-   * Caps the body read via the shared {@link readBoundedBody} reader (one owner with
-   * {@link HindsightClient}), mapping its neutral result to this client's reason strings. Never
+   * Caps the body read via the shared {@link readBoundedBody} reader, mapping its neutral result to this client's reason strings. Never
    * throws: an over-cap body or any decode/stream failure resolves to an `ok: false` reason the
    * caller maps to "unknown".
    */

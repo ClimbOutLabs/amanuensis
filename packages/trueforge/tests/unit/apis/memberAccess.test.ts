@@ -62,6 +62,8 @@ const SETTINGS_PATHS = [
   '/api/v1/settings/memory-screens',
   '/api/v1/settings/memory-recalls',
   '/api/v1/settings/memory-summarize',
+  '/api/v1/settings/memory-page-sorting',
+  '/api/v1/settings/memory-nightly',
   '/api/v1/settings/anything-added-later',
 ];
 const WRITE_METHODS = ['POST', 'PUT', 'PATCH', 'DELETE'];

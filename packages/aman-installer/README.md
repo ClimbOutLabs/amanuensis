@@ -32,8 +32,8 @@ What it can do today:
   when it is missing (the download is checked against Docker Inc's
   signature before it runs, and a resume entry is set so an install a
   restart stops is carried on from), checks Docker's memory before
-  asking anything, asks the four questions (an email, a password, the
-  model key, and whether to open Aman to the phone), and runs the
+  asking anything, asks the three questions (an email, a password, and
+  whether to open Aman to the phone), and runs the
   shell's installer in the setup container with https on this computer
   and daily backups. Then the steps the earlier commands added run in
   their order: the adopt step puts the command and the Start menu

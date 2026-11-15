@@ -245,7 +245,7 @@ test('a run grades every case, removes its memories and space, and writes the co
         ],
       },
       modelSet: {
-        version: 1,
+        version: 2,
         memories: [{ text: 'My dentist is Dr. Okafor.', timestamp: '2026-08-04T09:10:00Z' }],
         cases: [
           {

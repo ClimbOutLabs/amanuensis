@@ -155,6 +155,26 @@ describe('what is read back for a voice approval', () => {
     return result.body;
   }
 
+  it('reads out the one account a mail goes from, as an address', () => {
+    const body = said({ ...sendReplyCard(), mail_from: 'me@example.com', mail_from_choices: ['me@example.com'] });
+    expect(body).toContain('From me at example dot com');
+  });
+
+  it('with two accounts, reads only the account the mail goes from, so a "yes" approves the one heard', () => {
+    const body = said({
+      ...sendReplyCard(),
+      mail_from: 'me@example.com',
+      mail_from_choices: ['me@example.com', 'work@other-place.org'],
+    });
+    expect(body).toContain('From me at example dot com');
+    expect(body).not.toContain('other dash place');
+  });
+
+  it('leaves a from account with a line break, or on a card that is not a mail, for the screen', () => {
+    expect(plan({ ...sendReplyCard(), mail_from: 'me@example.com\nTo x' })).toEqual({ kind: 'typed_only' });
+    expect(plan({ ...dentistCard, mail_from: 'me@example.com' })).toEqual({ kind: 'typed_only' });
+  });
+
   it('reads out the name a mail is sent as, so a spoofed sender name cannot go unheard', () => {
     const base = sendReplyCard();
     if (!base.email) {

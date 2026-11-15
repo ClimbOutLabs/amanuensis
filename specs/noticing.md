@@ -68,6 +68,8 @@ One model call per new event asks only for a level, a reason and a one-sentence 
 
 Quiet hours (default 21:00 to 08:00 in the person's time zone) hold back calls only. A person who never saved Reach me uses the time zone of their schedules, else the one their own Google Calendar is kept in, and UTC only when neither says. The Reach me page offers the browser's time zone the first time it is opened.
 
+**The day a chat is told it is.** Each reply is told one date, with its weekday, in the person's own time zone, and no second date in UTC: from late afternoon in the Americas the UTC day is already tomorrow, and a model shown both takes the first for today. The clock tool answers the same way. A message from a browser brings its zone, and the newest one is kept per person in `person_timezone`, on its own and apart from Reach me, so Reach me settings exist only once the person saves them. A message that brings no zone, such as one from Telegram, which sends only the moment it was written, uses the zone the person saved in Reach me, else the one their browser last gave, else the one from their schedules or calendar. When nothing says, the reply gets the UTC date and is told the person's time zone is not known. A scheduled run uses the schedule's own zone.
+
 The model call uses the model a new chat starts on, with no tools. It is metered under the `noticing` usage role and counts toward the daily Token Factory cap.
 
 ## Reminders

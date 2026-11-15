@@ -1,5 +1,5 @@
 /**
- * Persistent per-namespace embedding cache (`{namespaceDir}/.embeddings.json`).
+ * Persistent per-namespace embedding cache (`{namespaceDir}/{fileName}`; the log's is `.embeddings.json`).
  * Stores only ids, content hashes, and vectors — never memory text. Hit text
  * always resolves from the live Markdown scan, so deleted memories leave no
  * plaintext in the cache. Writes are atomic (tmp + rename); the cache is
@@ -11,7 +11,8 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { EMBEDDING_DIMENSIONS, EMBEDDING_MODEL_ID, EMBEDDING_MODEL_REVISION } from './embeddingModel';
 
-const STORE_FILENAME = '.embeddings.json';
+/** The file the daily log's vectors live in. */
+export const LOG_VECTORS_FILE = '.embeddings.json';
 const STORE_TMP_SUFFIX = '.tmp';
 const STORE_VERSION = 2;
 
@@ -100,8 +101,8 @@ export class EmbeddingStore {
   private constructor(private readonly filePath: string) {}
 
   /** Loads the cache; any corruption or model-pin mismatch starts empty. */
-  static async load(options: { namespaceDir: string }): Promise<EmbeddingStore> {
-    const store = new EmbeddingStore(path.join(options.namespaceDir, STORE_FILENAME));
+  static async load(options: { namespaceDir: string; fileName: string }): Promise<EmbeddingStore> {
+    const store = new EmbeddingStore(path.join(options.namespaceDir, options.fileName));
     await store.read();
     return store;
   }

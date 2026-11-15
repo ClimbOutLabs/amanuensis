@@ -16,26 +16,18 @@ afterEach(async () => {
 });
 
 function markdownClient(vaultScope: VaultScope | undefined): MemoryClient {
-  const client = createMemoryClient({
-    backend: 'markdown',
-    markdownDir,
-    namespace: 'tenant-1',
-    vaultScope,
-    hindsight: undefined,
-  });
-  if (client === undefined) {
-    throw new Error('expected a markdown memory client');
-  }
-  return client;
+  return createMemoryClient({ markdownDir, namespace: 'tenant-1', vaultScope });
 }
 
 async function retainOne(client: MemoryClient, content: string): Promise<void> {
   const outcome = await client.retain({
-    items: [{ content, timestamp: '2026-09-26T10:00:00.000Z', document_id: 'doc-1' }],
+    items: [
+      { metadata: { origin: 'user_stated' }, content, timestamp: '2026-09-26T10:00:00.000Z', document_id: 'doc-1' },
+    ],
     operationId: 'op-1',
     timeoutMs: 5000,
   });
-  expect(outcome).toEqual({ ok: true });
+  expect(outcome).toMatchObject({ ok: true });
 }
 
 describe('createMemoryClient vault scope', () => {

@@ -130,8 +130,8 @@ test_check_reports_without_changing() {
   repo_commit_change "speech update"
   run_install upgrade --check
   assert_rc 0
-  assert_contains "$OUT" "speech  aman-stt:"
-  assert_contains "$OUT" "sandbox PDF and image reading (builds the sandbox again)"
+  assert_contains "$OUT" "speech    aman-stt:"
+  assert_contains "$OUT" "sandbox   PDF and image reading (builds the sandbox again)"
   assert_eq "$(log_count "docker build")" "$builds"
   assert_eq "$(app_tag "$AMAN_HOME/release/release.json")" "$old"
   assert_no_path "$AMAN_HOME/backups"
@@ -163,7 +163,7 @@ test_successful_upgrade_backs_up_first() {
 }
 
 test_upgrade_notes_an_old_email_account_file() {
-  t_begin "upgrade says how to reconnect email when the old account file is there"
+  t_begin "upgrade says how to reconnect email when the old account file cannot be moved, and keeps it"
   sandbox_new
   install_machine
   printf '%s\n' '# Written by the installer for the Email connector. Keep it private: it holds the app password.' \
@@ -171,12 +171,70 @@ test_upgrade_notes_an_old_email_account_file() {
   repo_commit_change "app change"
   run_install upgrade
   assert_rc 0
-  assert_contains "$OUT" "Email was set up the old way. Connect it again in Settings, then Connectors, then Email."
+  assert_flat_contains "$OUT$ERR" "Email was set up the old way, so its account was not carried over. Next: Connect it again in Settings, then Connectors, then Email."
   assert_file "$AMAN_HOME/instances/main/.env.mail-email"
   run_install upgrade
   assert_rc 0
   assert_contains "$OUT" "Already up to date"
-  assert_contains "$OUT" "Email was set up the old way. Connect it again in Settings, then Connectors, then Email."
+  assert_flat_contains "$OUT$ERR" "Email was set up the old way, so its account was not carried over. Next: Connect it again in Settings, then Connectors, then Email."
+  sandbox_drop
+}
+
+old_email_account_text() { # address password
+  printf '%s\n' '# Written by the installer for the Email connector. Keep it private: it holds the app password.' \
+    "MCP_EMAIL_SERVER_EMAIL_ADDRESS=$1" "MCP_EMAIL_SERVER_PASSWORD='$2'" \
+    'MCP_EMAIL_SERVER_IMAP_HOST=imap.example.invalid' 'MCP_EMAIL_SERVER_IMAP_PORT=993' 'MCP_EMAIL_SERVER_IMAP_SSL=true' \
+    'MCP_EMAIL_SERVER_SMTP_HOST=smtp.example.invalid' 'MCP_EMAIL_SERVER_SMTP_PORT=465' 'MCP_EMAIL_SERVER_SMTP_SSL=true'
+}
+
+test_upgrade_moves_a_complete_old_email_account() {
+  t_begin "upgrade moves a complete old email account into the connector, deletes the old file and stays quiet after"
+  sandbox_new
+  install_machine
+  local dir=$AMAN_HOME/instances/main
+  old_email_account_text owner@example.invalid old-mail-sentinel-4b7e >"$dir/.env.mail-email"
+  repo_commit_change "app change"
+  run_install upgrade
+  assert_rc 0
+  assert_not_contains "$OUT$ERR" "Email was set up the old way"
+  assert_no_path "$dir/.env.mail-email"
+  assert_contains "$(cat "$STUB_STATE/mail-account-aman-main")" "MCP_EMAIL_SERVER_PASSWORD='old-mail-sentinel-4b7e'"
+  assert_eq "$(grep -c '^MAIL_EMAIL_MCP_URL=' "$dir/.env" || true)" 1 "the app is pointed at the connector"
+  assert_not_contains "$OUT$ERR" "old-mail-sentinel-4b7e"
+  run_install upgrade
+  assert_rc 0
+  assert_not_contains "$OUT$ERR" "Email was set up the old way"
+  sandbox_drop
+}
+
+test_upgrade_keeps_an_email_account_connected_again() {
+  t_begin "upgrade never replaces an email account connected again in Settings with the old file; it only deletes the old file"
+  sandbox_new
+  install_machine
+  local dir=$AMAN_HOME/instances/main
+  old_email_account_text new@example.invalid new-mail-sentinel >"$STUB_STATE/mail-account-aman-main"
+  old_email_account_text owner@example.invalid old-mail-sentinel >"$dir/.env.mail-email"
+  repo_commit_change "app change"
+  run_install upgrade
+  assert_rc 0
+  assert_no_path "$dir/.env.mail-email"
+  assert_contains "$(cat "$STUB_STATE/mail-account-aman-main")" "new-mail-sentinel"
+  assert_not_contains "$(cat "$STUB_STATE/mail-account-aman-main")" "old-mail-sentinel"
+  assert_not_contains "$OUT$ERR" "Email was set up the old way"
+  sandbox_drop
+}
+
+test_already_up_to_date_still_moves_an_old_email_account() {
+  t_begin "an upgrade with nothing new to install still moves an old email account and deletes the file"
+  sandbox_new
+  install_machine
+  local dir=$AMAN_HOME/instances/main
+  old_email_account_text owner@example.invalid old-mail-sentinel-uptodate >"$dir/.env.mail-email"
+  run_install upgrade
+  assert_rc 0
+  assert_contains "$OUT" "Already up to date"
+  assert_no_path "$dir/.env.mail-email"
+  assert_contains "$(cat "$STUB_STATE/mail-account-aman-main")" "old-mail-sentinel-uptodate"
   sandbox_drop
 }
 
@@ -187,7 +245,7 @@ test_upgrade_without_an_old_email_account_file_stays_quiet() {
   repo_commit_change "app change"
   run_install upgrade
   assert_rc 0
-  assert_not_contains "$OUT" "Email was set up the old way"
+  assert_not_contains "$OUT$ERR" "Email was set up the old way"
   sandbox_drop
 }
 
@@ -200,13 +258,13 @@ test_upgrade_notes_an_old_calendar_account_file() {
   repo_commit_change "app change"
   run_install upgrade
   assert_rc 0
-  assert_contains "$OUT" "Calendar was set up the old way. Connect it again in Settings, then Connectors, then Calendar."
-  assert_not_contains "$OUT" "Email was set up the old way"
+  assert_flat_contains "$OUT$ERR" "Calendar was set up the old way, so its account was not carried over. Next: Connect it again in Settings, then Connectors, then Calendar."
+  assert_not_contains "$OUT$ERR" "Email was set up the old way"
   assert_file "$AMAN_HOME/instances/main/.env.calendar"
   run_install upgrade
   assert_rc 0
   assert_contains "$OUT" "Already up to date"
-  assert_contains "$OUT" "Calendar was set up the old way. Connect it again in Settings, then Connectors, then Calendar."
+  assert_flat_contains "$OUT$ERR" "Calendar was set up the old way, so its account was not carried over. Next: Connect it again in Settings, then Connectors, then Calendar."
   sandbox_drop
 }
 
@@ -221,14 +279,14 @@ test_upgrade_moves_a_complete_old_calendar_account() {
   repo_commit_change "app change"
   run_install upgrade
   assert_rc 0
-  assert_not_contains "$OUT" "Calendar was set up the old way"
+  assert_not_contains "$OUT$ERR" "Calendar was set up the old way"
   assert_no_path "$dir/.env.calendar"
   assert_eq "$(grep -c '^CALENDAR_CONNECTOR_URL=' "$dir/.env" || true)" 0 "the old connector line is gone"
   assert_contains "$(cat "$STUB_STATE/calendar-account-aman-main")" "CALDAV_PASSWORD=old-sentinel-91c2"
   assert_not_contains "$OUT$ERR" "old-sentinel-91c2"
   run_install upgrade
   assert_rc 0
-  assert_not_contains "$OUT" "Calendar was set up the old way"
+  assert_not_contains "$OUT$ERR" "Calendar was set up the old way"
   sandbox_drop
 }
 
@@ -247,7 +305,7 @@ test_upgrade_keeps_a_calendar_account_connected_again() {
   assert_no_path "$dir/.env.calendar"
   assert_contains "$(cat "$STUB_STATE/calendar-account-aman-main")" "CALDAV_PASSWORD=new-sentinel"
   assert_not_contains "$(cat "$STUB_STATE/calendar-account-aman-main")" "old-sentinel"
-  assert_not_contains "$OUT" "Calendar was set up the old way"
+  assert_not_contains "$OUT$ERR" "Calendar was set up the old way"
   sandbox_drop
 }
 
@@ -264,7 +322,7 @@ test_upgrade_keeps_the_old_calendar_file_when_the_check_says_nothing() {
   STUB_CALENDAR_CHECK=silent run_install upgrade
   assert_rc 0
   assert_file "$dir/.env.calendar"
-  assert_contains "$OUT" "Calendar was set up the old way. Connect it again in Settings, then Connectors, then Calendar."
+  assert_flat_contains "$OUT$ERR" "Calendar was set up the old way, so its account was not carried over. Next: Connect it again in Settings, then Connectors, then Calendar."
   assert_contains "$(cat "$STUB_STATE/calendar-account-aman-main")" "CALDAV_PASSWORD=new-sentinel"
   sandbox_drop
 }
@@ -276,7 +334,7 @@ test_upgrade_without_an_old_calendar_account_file_stays_quiet() {
   repo_commit_change "app change"
   run_install upgrade
   assert_rc 0
-  assert_not_contains "$OUT" "Calendar was set up the old way"
+  assert_not_contains "$OUT$ERR" "Calendar was set up the old way"
   sandbox_drop
 }
 
@@ -304,7 +362,7 @@ test_upgrade_turns_the_browser_on_for_an_install_from_before_it() {
   sed -i '/BROWSER\|browser/d' "$compose"
   run_install upgrade --check
   assert_rc 0
-  assert_contains "$OUT" "browser (new) -> aman-browser:"
+  assert_contains "$OUT" "browser   (new) -> aman-browser:"
   run_install upgrade
   assert_rc 0
   assert_contains "$(cat "$release")" '"browser_image": "aman-browser:'
@@ -526,7 +584,7 @@ test_install_rerun_of_an_instance_that_never_started_is_a_fresh_build() {
   run_install --yes
   assert_rc 0
   assert_flat_contains "$OUT" "This copy of Aman is newer than the installed one, so it will be updated."
-  assert_not_contains "$OUT$ERR" "Backing up instance"
+  assert_not_contains "$OUT$ERR" "Backed up instance"
   assert_no_path "$AMAN_HOME/backups"
   assert_eq "$(compose_image main)" "$(app_tag "$AMAN_HOME/release/release.json")"
   assert_eq "$(sed -n 's/^healthy=//p' "$AMAN_HOME/state/instances/main.conf")" 1 "now it is healthy and counts as having data"
@@ -639,7 +697,7 @@ run_printed_command() {
 
 # The command line the behind message told the person to run, without the words before it.
 printed_command() {
-  printf '%s\n' "$OUT" | sed -n 's/^To get the newer version, run: //p'
+  printf '%s\n' "$OUT" | sed -n '/To get the newer version, run:$/{n;s/^ *//;p;}'
 }
 
 # The data volume exists (Docker made it when the app first started) but holds no database.
@@ -887,7 +945,7 @@ test_upgrade_from_a_release_without_the_voice_adds_it() {
   : >"$SB_STATE/network_aliases"
   run_install upgrade --check
   assert_rc 0
-  assert_contains "$OUT" "voice   (not installed) -> aman-tts:"
+  assert_contains "$OUT" "voice     (not installed) -> aman-tts:"
   run_install upgrade
   assert_rc 0
   assert_contains "$(cat "$release")" '"tts_image": "aman-tts:'
@@ -896,6 +954,74 @@ test_upgrade_from_a_release_without_the_voice_adds_it() {
   sandbox_drop
 }
 
+
+test_upgrade_names_containers_once_and_keeps_the_data() {
+  t_begin "an upgrade of an instance named aman-... from before container names writes aman- once and keeps its data"
+  sandbox_new
+  INSTALL_EXTRA=(--name aman-home)
+  install_machine
+  INSTALL_EXTRA=()
+  local file=$AMAN_HOME/instances/aman-home/compose.yaml
+  # The compose file of a release from before container names.
+  sed -i '/container_name:/d' "$file"
+  assert_not_contains "$(cat "$file")" "container_name"
+  : >"$STUB_LOG"
+  repo_commit_change "app change"
+  run_install upgrade
+  assert_rc 0
+  assert_contains "$(cat "$file")" "container_name: aman-home-app"
+  assert_contains "$(cat "$file")" "container_name: aman-home-dex"
+  assert_not_contains "$(cat "$file")" "container_name: aman-aman-" "aman- is written once"
+  assert_contains "$(cat "$file")" "name: aman-aman-home" "the compose project, and so its networks, keep their names"
+  assert_contains "$(cat "$file")" "name: aman_aman-home_data" "the data volume keeps its name"
+  assert_contains "$(grep -- '--project-name aman-aman-home ' "$STUB_LOG")" "up -d" "the instance starts again under its old project"
+  assert_log_lacks "volume rm -f aman_aman-home_data"
+  assert_log_lacks "volume rm aman_aman-home_data"
+  assert_contains "$(cat "$SB_STATE/volumes")" "aman_aman-home_data" "the data volume is still there"
+  sandbox_drop
+}
+
+test_a_name_whose_containers_would_clash_is_refused() {
+  t_begin "a new x beside an aman-x would take its container names, so it is refused and nothing is made"
+  sandbox_new
+  INSTALL_EXTRA=(--name aman-home)
+  install_machine
+  INSTALL_EXTRA=()
+  with_input "$SENTINEL_PASSWORD
+"
+  run_install instance add home --yes --password-stdin --email other@example.invalid
+  clear_input
+  assert_rc 1
+  assert_flat_contains "$OUT$ERR" "Instance aman-home already uses the name aman-home in Docker"
+  assert_no_path "$AMAN_HOME/state/instances/home.conf"
+  sandbox_drop
+}
+
+test_upgrade_keeps_apart_an_x_and_an_aman_x() {
+  t_begin "an upgrade of an install with both x and aman-x gives each its own container and store names"
+  sandbox_new
+  INSTALL_EXTRA=(--name home)
+  install_machine
+  INSTALL_EXTRA=()
+  with_input "$SENTINEL_PASSWORD
+"
+  run_install instance add aman-home --yes --password-stdin --email other@example.invalid
+  clear_input
+  assert_rc 0
+  local plain=$AMAN_HOME/instances/home/compose.yaml long=$AMAN_HOME/instances/aman-home/compose.yaml
+  # Compose files of a release from before container names.
+  sed -i '/container_name:/d' "$plain" "$long"
+  : >"$STUB_LOG"
+  repo_commit_change "app change"
+  run_install upgrade
+  assert_rc 0
+  assert_contains "$(cat "$plain")" "container_name: aman-home-app"
+  assert_contains "$(cat "$long")" "container_name: aman-aman-home-app" "aman-home keeps aman- twice so the two never share a name"
+  assert_not_contains "$(cat "$long")" "container_name: aman-home-app"
+  assert_contains "$(cat "$long")" "name: aman_aman-home_data" "aman-home keeps its data volume"
+  assert_contains "$(cat "$plain")" "name: aman_home_data" "home keeps its data volume"
+  sandbox_drop
+}
 
 test_noop_when_current
 test_upgrade_check_names_the_move_to_https_and_changes_nothing
@@ -923,6 +1049,9 @@ test_a_record_from_before_the_flag_counts_as_having_data
 test_check_reports_without_changing
 test_successful_upgrade_backs_up_first
 test_upgrade_notes_an_old_email_account_file
+test_upgrade_moves_a_complete_old_email_account
+test_upgrade_keeps_an_email_account_connected_again
+test_already_up_to_date_still_moves_an_old_email_account
 test_upgrade_without_an_old_email_account_file_stays_quiet
 test_upgrade_notes_an_old_calendar_account_file
 test_upgrade_moves_a_complete_old_calendar_account
@@ -940,4 +1069,7 @@ test_doctor_failure_blocks_unless_forced
 test_upgrade_from_a_release_without_the_voice_adds_it
 test_gate_passes_when_the_doctor_reports_only_warnings
 test_gate_blocks_when_the_doctor_cannot_be_checked
+test_upgrade_names_containers_once_and_keeps_the_data
+test_a_name_whose_containers_would_clash_is_refused
+test_upgrade_keeps_apart_an_x_and_an_aman_x
 tests_finish

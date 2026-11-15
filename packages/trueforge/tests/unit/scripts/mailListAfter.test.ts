@@ -293,6 +293,17 @@ describe('the mail account agent lists new mail by number', () => {
     expect(harness?.output()).not.toContain('CANARY-WRONG-LIST-PASSWORD');
   }, 30_000);
 
+  it('with several accounts, watches the default account, wherever it sits in the file', async () => {
+    setMailbox({ uidvalidity: 7, messages: [stored({ uid: 3, minute: 5 })] });
+    // The account listed first could not sign in, so an answer at all shows the default was used.
+    harness?.saveBehindOtherAccount({ address: 'other@example.com', password: 'CANARY-OTHER-PASSWORD' });
+    try {
+      await expect(validity()).resolves.toBe(7);
+    } finally {
+      saveAccount(PASSWORD);
+    }
+  }, 30_000);
+
   it('refuses a request it cannot read', async () => {
     const response = await fetch(`${URL}/list_after`, {
       method: 'POST',

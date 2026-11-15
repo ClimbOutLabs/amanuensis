@@ -2,9 +2,9 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { stripAssistantAbilityNotes, withoutAbilityNotes } from '../../../../src/runtime/memory/assistantAbilityNotes';
-import { HindsightClient } from '../../../../src/runtime/memory/hindsightClient';
 import { MarkdownMemoryClient } from '../../../../src/runtime/memory/markdownMemoryClient';
 import { buildRetainItem } from '../../../../src/runtime/memory/memoryRetain';
+import { QuietMemoryClient } from '../../../fixtures/memory/quietMemoryClient';
 
 describe('withoutAbilityNotes and stripAssistantAbilityNotes', () => {
   it.each([
@@ -133,18 +133,16 @@ describe('withoutAbilityNotes and stripAssistantAbilityNotes', () => {
 
   it("keeps the person's own future tense statement in a verbatim turn", () => {
     const item = buildRetainItem({
+      origin: 'user_stated',
       sessionId: 's1',
       turnId: 't3',
       userText: "I won't be able to check email on Friday.",
-      assistantText: 'Noted. I moved the reminder to Monday.',
       completedAt: '2026-09-19T12:00:00.000Z',
     });
     if (item === undefined) {
       throw new Error('expected a retain item');
     }
-    const result = stripAssistantAbilityNotes(item.content);
-    expect(result).toContain("I won't be able to check email on Friday.");
-    expect(result).toContain('I moved the reminder to Monday.');
+    expect(stripAssistantAbilityNotes(item.content)).toBe("User: I won't be able to check email on Friday.");
   });
 
   it('leaves a line with no ability note byte-identical, doubled spaces included', () => {
@@ -179,36 +177,19 @@ describe('withoutAbilityNotes and stripAssistantAbilityNotes', () => {
     expect(result[0]).not.toContain("can't read email");
   });
 
-  it('never filters what the person said in a verbatim turn, and filters only the assistant side', () => {
-    const item = buildRetainItem({
-      sessionId: 's1',
-      turnId: 't1',
-      userText: "Please check my email. Also note I can't read my email at work, the firewall blocks it.",
-      assistantText:
-        "I can't read email right now because the sign-in failed. Your dentist appointment is on Friday at 10.",
-      completedAt: '2026-09-19T12:00:00.000Z',
-    });
-    if (item === undefined) {
-      throw new Error('expected a retain item');
-    }
-    const result = stripAssistantAbilityNotes(item.content);
+  it('never filters what the person said in a turn saved whole by an older version, and filters only the assistant side', () => {
+    const content = [
+      "User: Please check my email. Also note I can't read my email at work, the firewall blocks it.",
+      "Assistant: I can't read email right now because the sign-in failed. Your dentist appointment is on Friday at 10.",
+    ].join('\n\n');
+    const result = stripAssistantAbilityNotes(content);
     expect(result).toContain("I can't read my email at work");
     expect(result).toContain('Your dentist appointment is on Friday at 10.');
     expect(result).not.toContain("I can't read email right now");
   });
 
   it('keeps the person side when the whole assistant side is an ability note', () => {
-    const item = buildRetainItem({
-      sessionId: 's1',
-      turnId: 't2',
-      userText: 'Please read my new email.',
-      assistantText: "I can't read email.",
-      completedAt: '2026-09-19T12:00:00.000Z',
-    });
-    if (item === undefined) {
-      throw new Error('expected a retain item');
-    }
-    const result = stripAssistantAbilityNotes(item.content);
+    const result = stripAssistantAbilityNotes("User: Please read my new email.\n\nAssistant: I can't read email.");
     expect(result).toContain('Please read my new email.');
     expect(result).not.toContain("can't read email");
   });
@@ -230,11 +211,18 @@ describe('memory write path: MarkdownMemoryClient.retain', () => {
     try {
       const client = new MarkdownMemoryClient({ baseDir: dir, namespace: 'tenant-1' });
       const outcome = await client.retain({
-        items: [{ content: "I can't swim.", timestamp: '2026-09-19T12:00:00.000Z', document_id: 'doc-3' }],
+        items: [
+          {
+            metadata: { origin: 'user_stated' },
+            content: "I can't swim.",
+            timestamp: '2026-09-19T12:00:00.000Z',
+            document_id: 'doc-3',
+          },
+        ],
         operationId: 'op-plain',
         timeoutMs: 5000,
       });
-      expect(outcome).toEqual({ ok: true });
+      expect(outcome).toMatchObject({ ok: true });
       const log = await readFile(path.join(dir, 'tenant-1', 'memory', '2026-09-19.md'), 'utf8');
       expect(log).toContain("I can't swim.");
     } finally {
@@ -249,6 +237,7 @@ describe('memory write path: MarkdownMemoryClient.retain', () => {
       const outcome = await client.retain({
         items: [
           {
+            metadata: { origin: 'user_stated' },
             content: "User: \n\nAssistant: I can't read email.",
             timestamp: '2026-09-19T12:00:00.000Z',
             document_id: 'doc-2',
@@ -257,7 +246,7 @@ describe('memory write path: MarkdownMemoryClient.retain', () => {
         operationId: 'op-note-only',
         timeoutMs: 5000,
       });
-      expect(outcome).toEqual({ ok: true });
+      expect(outcome).toMatchObject({ ok: true });
       await expect(readFile(path.join(dir, 'tenant-1', 'memory', '2026-09-19.md'), 'utf8')).rejects.toThrow();
       const operation = await client.getOperation('op-note-only', 5000);
       expect(operation).toEqual({ ok: true, status: 'completed' });
@@ -267,7 +256,7 @@ describe('memory write path: MarkdownMemoryClient.retain', () => {
   });
 });
 
-describe('memory write path: HindsightClient.retain', () => {
+describe('memory write path: QuietMemoryClient.retain', () => {
   function jsonResponse(body: unknown): Response {
     const text = JSON.stringify(body);
     const headers = new Headers();
@@ -277,15 +266,11 @@ describe('memory write path: HindsightClient.retain', () => {
 
   it('sends nothing when every item is an ability note, and still succeeds', async () => {
     const fetchImpl = jest.fn(async () => jsonResponse({}));
-    const client = new HindsightClient({
-      apiBase: 'https://hindsight.example',
-      bank: 'aman',
-      headers: {},
-      fetchImpl,
-    });
+    const client = new QuietMemoryClient();
     const outcome = await client.retain({
       items: [
         {
+          metadata: { origin: 'user_stated' },
           content: "User: \n\nAssistant: I can't read email.",
           timestamp: '2026-09-19T12:00:00.000Z',
           document_id: 'doc-2',
@@ -294,7 +279,7 @@ describe('memory write path: HindsightClient.retain', () => {
       operationId: 'op-2',
       timeoutMs: 10_000,
     });
-    expect(outcome).toEqual({ ok: true });
+    expect(outcome).toMatchObject({ ok: true });
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 });

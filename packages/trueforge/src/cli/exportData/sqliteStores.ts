@@ -21,6 +21,7 @@ import { SqliteSpaceStore } from '../../db/sqlite/space-store/SqliteSpaceStore';
 import { SqliteOAuthTokenStore } from '../../db/sqlite/token-store/SqliteOAuthTokenStore';
 import { SqliteTurnArtifactStore } from '../../db/sqlite/turn-artifact-store/SqliteTurnArtifactStore';
 import type { Database as SqliteDatabase } from '../../db/sqlite/types';
+import { TelegramStore } from '../../db/telegramStore';
 import { TextContactStore } from '../../db/textContactStore';
 import type { ExportStores } from './stores';
 
@@ -60,6 +61,7 @@ export async function openSqliteStores(options: {
     deliveryStore: new DeliveryStore(db),
     reachSettingsStore: new ReachSettingsStore(db),
     textContactStore: new TextContactStore(db),
+    telegramStore: new TelegramStore(db),
     close: () => db.destroy(),
   };
 }
