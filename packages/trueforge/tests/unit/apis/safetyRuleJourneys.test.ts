@@ -25,6 +25,7 @@ import { HARBOUR_ADDRESS, installRecordedTavily } from '../../fixtures/groundedF
 import {
   HA_CALL_ACTION_TOOL,
   HA_LAMP,
+  HA_THERMOSTAT,
   HA_UNFAMILIAR_TOOL,
   startHomeAssistantStub,
   type HomeAssistantStub,
@@ -1340,6 +1341,28 @@ describe('the Home Assistant connector', () => {
 
       expect(await onTheLamp({ chatId, tool: HA_UNFAMILIAR_TOOL })).toHaveLength(1);
       expect(home.invocations(HA_UNFAMILIAR_TOOL)).toBe(1);
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
+    'lets "Always allow everywhere" cover the heating on a connector saved before it kept the tools it may change',
+    async () => {
+      const setHeating = async (chatId: string) => {
+        server.model.next({ toolArguments: { entity_id: HA_THERMOSTAT, temperature: 19 } });
+        return cards(await runTurn({ server, chatId, input: ask('HassClimateSetTemperature') }));
+      };
+      const chatId = await createChat(server, HOME_AGENT_SPEC);
+      const [card] = await setHeating(chatId);
+      if (card === undefined) {
+        throw new Error('setting the heating showed no card');
+      }
+      expect(card.can_always_allow).toBe(true);
+      await runTurn({ server, chatId, input: answer({ card, scope: 'always' }) });
+      expect(home.invocations('HassClimateSetTemperature')).toBe(1);
+
+      expect(await setHeating(await createChat(server, HOME_AGENT_SPEC))).toEqual([]);
+      expect(home.invocations('HassClimateSetTemperature')).toBe(2);
     },
     TURN_TIMEOUT_MS,
   );

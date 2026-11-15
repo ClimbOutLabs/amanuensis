@@ -288,7 +288,7 @@ export class ToolSet implements IToolSet {
     searchProvider?: SearchProviderGrant | undefined;
     /**
      * Bare names of the tools this server itself declared as changing things, captured by the
-     * host from the server's own tool list at connect time and stored on the connector record.
+     * host from the server's own tool list and stored on the connector record.
      * Set by the host only, never from a connector URL, client input, or this call's metadata.
      */
     declaredChangeTools?: readonly string[] | undefined;

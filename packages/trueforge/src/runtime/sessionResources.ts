@@ -82,8 +82,8 @@ export interface McpConnection {
   first_party: boolean;
   /** Set when the user designated this connector as their search provider: the declaration stored on its record, from which the turn builds the provider's grant. */
   search_provider: StoredSearchDeclaration | undefined;
-  /** Bare names of the tools this server itself declared as changing things, stored on its record at connect time. Empty when none were captured. */
-  declared_change_tools: readonly string[];
+  /** Bare names of the tools this server itself declared as changing things, stored on its record. Undefined until a tool list has been captured for it. */
+  declared_change_tools: readonly string[] | undefined;
   /** What an "Always allow" grant on this connector binds to: its setup digest from `connectorGrantBinding`. */
   grant_binding: string;
 }
@@ -582,7 +582,7 @@ export async function getMcpConnection({
           search_in_process: record.manifest.search_in_process,
         }
       : undefined;
-  const declaredChangeTools = record.manifest.type === 'remote' ? (record.manifest.declared_change_tools ?? []) : [];
+  const declaredChangeTools = record.manifest.type === 'remote' ? record.manifest.declared_change_tools : undefined;
   const grantBinding = connectorGrantBinding(record);
   const needsLiveAuth = record.manifest.auth?.type === 'dcr' || record.manifest.auth?.type === 'oauth_client';
   // Only the live-auth case delegates: a with-auth store's `resolveInvokeHeaders` may be

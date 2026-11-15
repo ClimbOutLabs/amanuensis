@@ -10,8 +10,9 @@ import {
   type MailAccountSnapshot,
 } from '../core/email/mailConnector/MailConnectorSource';
 import { MAIL_CONNECTOR_NAME } from '../core/email/mailConnector/toolContract';
+import { HOME_ASSISTANT_SERVER_NAME, homeAssistantDeclaredChangeTools } from '../core/homeassistant/toolContract';
 import type { ILLM } from '../core/llm/ILLM';
-import type { ToolSource } from '../core/mcp/IMCPServer';
+import { isAuthRequired, type ToolSource } from '../core/mcp/IMCPServer';
 import { RemoteMCP, type RemoteMcpHeaders } from '../core/mcp/RemoteMCP';
 import type { ToolSelectorConfig } from '../core/mcp/ToolSelectorPolicy';
 import { ToolSet } from '../core/mcp/ToolSet';
@@ -170,11 +171,21 @@ export class TurnResourceResolver<
         headers?: RemoteMcpHeaders;
         first_party?: boolean;
         search_provider?: SearchProviderGrant | undefined;
-        /** Bare names of the tools this server itself declared as changing things, from the host's record of the connector. */
+        /**
+         * Bare names of the tools this server itself declared as changing things, from the host's
+         * record of the connector. Undefined when the record holds none yet: for Home Assistant the
+         * turn then captures it from the server's own tool list.
+         */
         declared_change_tools?: readonly string[] | undefined;
         /** What an "Always allow" grant on this connector binds to, from the host's record of it; see `ToolGrantKey`. */
         grant_binding?: string | undefined;
       }>;
+      /**
+       * Stores the change tools a Home Assistant connector declared in the tool list this turn
+       * read, on a record that held none. Omit and the capture applies to this turn only.
+       */
+      storeDeclaredChangeTools?:
+        ((input: { name: string; url: string; declared_change_tools: readonly string[] }) => Promise<void>) | undefined;
       mcpRequestTimeoutMs: number;
       mcpConnectTimeoutMs: number;
       mcpMaxResponseBytes?: number | undefined;
@@ -348,6 +359,40 @@ export class TurnResourceResolver<
       return undefined;
     });
     return this.#calendarAccountFactsPromise;
+  }
+
+  /**
+   * A Home Assistant record saved before change tools were stored on it holds no declaration.
+   * The server's own tool list, which this turn reads anyway (the remote caches it), supplies it,
+   * and the host stores it so later turns read it from the record. A failed read leaves every
+   * change asking, the safe direction.
+   */
+  async #captureDeclaredChangeTools({
+    name,
+    url,
+    remote,
+  }: {
+    name: string;
+    url: string;
+    remote: RemoteMCP;
+  }): Promise<void> {
+    let declared: string[];
+    try {
+      const listed = await remote.listTools();
+      if (isAuthRequired(listed)) {
+        return;
+      }
+      declared = homeAssistantDeclaredChangeTools(listed.result.tools);
+    } catch (error) {
+      this.deps.logger.warn(`The change tools of "${name}" could not be read`, extractErrorLogFields(error));
+      return;
+    }
+    this.#declaredChangeTools.set(name, declared);
+    try {
+      await this.deps.storeDeclaredChangeTools?.({ name, url, declared_change_tools: declared });
+    } catch (error) {
+      this.deps.logger.warn(`The change tools of "${name}" could not be stored`, extractErrorLogFields(error));
+    }
   }
 
   #setUpConnectorNamesPromise?: Promise<readonly string[] | undefined> | undefined;
@@ -602,6 +647,9 @@ export class TurnResourceResolver<
               tracing,
               signal,
             });
+            if (entry.name === HOME_ASSISTANT_SERVER_NAME && declared_change_tools === undefined) {
+              await this.#captureDeclaredChangeTools({ name: entry.name, url, remote });
+            }
             if (entry.name === CALDAV_SERVER_NAME && first_party === true) {
               return new CalendarConnectorSource({
                 inner: remote,

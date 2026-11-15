@@ -81,6 +81,7 @@ import type { ITurnArtifactStore } from '../db/turnArtifactStore';
 import { gateEvalApprovals } from '../eval/approvalGate';
 import { evalPageFixtures } from '../eval/pageFixtures';
 import type { IOAuthTokenStore } from '../mcp/auth/types';
+import { storeHomeAssistantDeclaredChangeTools } from '../mcp/homeAssistant';
 import { setUpConnectorNamesOf } from '../mcp/hostConnectors';
 import type { PersonaKnowledgeHit } from '../personaKnowledge/knowledgeRetrieval';
 import { personalizationFactLines, type PersonalizationProfile } from '../personalization/profile';
@@ -688,6 +689,8 @@ function createTurnResolver(deps: {
               : mcpCatalog.searchProviderGrant({ manifest: connection.search_provider }),
         };
       },
+      storeDeclaredChangeTools: ({ name, url, declared_change_tools }) =>
+        storeHomeAssistantDeclaredChangeTools({ store: mcpServerStore, tenant_id, name, url, declared_change_tools }),
       setUpConnectorNames: async () =>
         setUpConnectorNamesOf(await mcpServerStore.listServers({ tenant_id, names: undefined })),
       mailAccounts: mailAccountDirectory,

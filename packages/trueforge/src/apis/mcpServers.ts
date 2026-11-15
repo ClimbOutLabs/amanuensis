@@ -32,7 +32,12 @@ import { mcpOAuthRedirectUris } from '../mcp/auth/mcpOAuthHelpers';
 import type { IOAuthTokenStore, OAuthClientRecord } from '../mcp/auth/types';
 import { connectorGrantBinding } from '../mcp/connectorGrantBinding';
 import { isFirstPartyOrigin } from '../mcp/firstParty';
-import { checkHomeAssistant, homeAssistantUrlProblem, type HomeAssistantProbeClient } from '../mcp/homeAssistant';
+import {
+  checkHomeAssistant,
+  homeAssistantUrlProblem,
+  storeHomeAssistantDeclaredChangeTools,
+  type HomeAssistantProbeClient,
+} from '../mcp/homeAssistant';
 import {
   authorizeMcpServerRoute,
   createMcpServerRoute,
@@ -989,20 +994,13 @@ export function createMcpServersRouter<TTransaction>(deps: McpServersRouterDeps<
       // in its own tool list and store them on the connector record, where standing-grant
       // eligibility reads them. A failed capture leaves the stored declaration as it was.
       try {
-        const store = deps.resolveMcpServerStore(c);
-        const record = await store.getServer({ tenant_id: requestContext.tenant_id, name });
-        if (record?.manifest.type === 'remote') {
-          const declared = homeAssistantDeclaredChangeTools(listedTools);
-          const stored = record.manifest.declared_change_tools ?? [];
-          if (JSON.stringify(declared) !== JSON.stringify(stored)) {
-            await store.upsertServer({
-              tenant_id: requestContext.tenant_id,
-              name: record.name,
-              manifest: { ...record.manifest, declared_change_tools: declared },
-              first_party: record.first_party,
-            });
-          }
-        }
+        await storeHomeAssistantDeclaredChangeTools({
+          store: deps.resolveMcpServerStore(c),
+          tenant_id: requestContext.tenant_id,
+          name,
+          url: connection.url,
+          declared_change_tools: homeAssistantDeclaredChangeTools(listedTools),
+        });
       } catch (error) {
         deps.logger.warn(`Home Assistant change tools could not be stored for "${name}"`, extractErrorLogFields(error));
       }

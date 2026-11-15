@@ -52,7 +52,8 @@ export function isHomeAssistantCallActionTool(tool_name: string): boolean {
 /**
  * The change tools the server itself declares, from its own tool list: the bare names of the
  * tools whose metadata says they change things (readOnlyHint set to false on the tool). The
- * host captures this at connect time and stores it on the connector record; grant eligibility
+ * host captures this at connect time, or on the first turn of a record that holds none, and
+ * stores it on the connector record; grant eligibility
  * reads the stored declaration, never a list Aman ships. A tool the server does not declare
  * this way is not in the set, so it asks every time and no standing grant covers it.
  */
