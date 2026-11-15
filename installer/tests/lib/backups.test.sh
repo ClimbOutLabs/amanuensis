@@ -9,15 +9,16 @@ mode_file() { cat "$AMAN_HOME/state/backups" 2>/dev/null || true; }
 cron_table() { cat "$SB_STATE/crontab" 2>/dev/null || true; }
 
 test_default_install_schedules_a_daily_backup() {
-  t_begin "an unattended install backs up every day: a crontab line without root, the choice recorded, one row in the table"
+  t_begin "an unattended install backs up every day: a crontab line without root, the choice recorded, one row in aman status"
   sandbox_new
   install_machine
   assert_eq "$(mode_file)" daily
   assert_contains "$(cron_table)" "30 3 * * * $AMAN_HOME/bin/aman backup >/dev/null 2>&1 # amanuensis-backup"
   assert_eq "$(cron_table | grep -c 'amanuensis-backup')" 1
   assert_log_lacks "sudo "
-  assert_flat_contains "$OUT" "Backups daily, keeps the last 7"
   assert_flat_contains "$OUT$ERR" "Back up automatically every day? [Y/n] yes (--yes)"
+  run_install status
+  assert_flat_contains "$OUT" "Backups daily, keeps the last 7"
   sandbox_drop
 }
 

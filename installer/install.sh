@@ -148,6 +148,8 @@ OPT_ADDRESS_ACTION=
 OPT_ADDRESS_VALUE=
 COMMAND=install
 SUBCOMMAND=
+SUMMARY_FULL=0
+TRUST_NEW_NAMES=
 LOCK_HELD=0
 AMAN_PASSWORD=
 AMAN_TF_KEY=
@@ -200,6 +202,7 @@ Amanuensis installer
   install.sh docker               install or start Docker, or update it, asking before anything that needs admin rights
   install.sh command              put the aman command back
   install.sh tls                  renew the https certificates that are due
+  install.sh status               show each instance's addresses, settings and how to set up a new phone or computer
 
 Options
   --home DIR            keep Aman's data in this folder (default ~/.amanuensis)
@@ -330,7 +333,7 @@ parse_args() {
         case "$positional:$COMMAND" in
           1:install)
             case "$arg" in
-              instance | backup | backups | upgrade | docker | command | tls | migrate | restore) COMMAND=$arg ;;
+              instance | backup | backups | upgrade | docker | command | tls | migrate | restore | status) COMMAND=$arg ;;
               *) usage_die "unknown command $arg" ;;
             esac
             ;;
@@ -535,6 +538,7 @@ main() {
     docker) docker_fix ;;
     command) cmd_command ;;
     tls) cmd_tls ;;
+    status) cmd_status ;;
     upgrade) cmd_upgrade ;;
     migrate) cmd_migrate ;;
     instance)

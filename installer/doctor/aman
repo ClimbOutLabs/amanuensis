@@ -85,7 +85,9 @@ APP_CONTAINER=""
 
 usage() {
   cat >&2 <<'USAGE'
-Usage: aman doctor [--json] [--verbose] [--only ID] [--instance NAME] [--deep] [--local]
+Usage: aman status
+         shows each instance's addresses, settings and how to set up a new phone or computer
+       aman doctor [--json] [--verbose] [--only ID] [--instance NAME] [--deep] [--local]
        aman doctor instance|network [--fix [--yes]] [--instance NAME]
        aman doctor sandbox [--fix [--yes]] [--instance NAME] [--disk-gb N] [--no-hard-disk-limit]
          [--add go,rust,java] [--remove go,rust,java] [--add-python PACKAGES] [--remove-python PACKAGES]
@@ -2069,7 +2071,7 @@ esac
 
 case "${1:-}" in
   doctor) shift ;;
-  backup | restore | upgrade | migrate) run_installer "$@" ;;
+  backup | restore | upgrade | migrate | status) run_installer "$@" ;;
   import)
     shift
     run_import "$@"

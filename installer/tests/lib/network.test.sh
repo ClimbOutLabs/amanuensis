@@ -336,10 +336,19 @@ test_summary_lists_the_addresses_and_the_trust_steps() {
   sandbox_new_open
   fixture_full_machine
   install_machine
-  assert_flat_contains "$OUT" "Open https://192.168.1.20:8443 https://host.local:8443 https://host:8443 http://127.0.0.1:8791 http://localhost:8791"
-  assert_flat_contains "$OUT" "follow its steps: http://192.168.1.20:8791/trust"
+  assert_flat_contains "$OUT" "Open https://host.local:8443"
+  assert_not_contains "$OUT" "https://192.168.1.20:8443" "the ending names one address"
+  assert_flat_contains "$OUT" "Open http://192.168.1.20:8791/trust on it once"
   assert_not_contains "$OUT" "not encrypted"
-  assert_flat_contains "$OUT" "Bookmark host.local. If this computer's address changes, run aman doctor network --fix and the bookmark works again."
+  assert_flat_contains "$OUT" "Every address and setting: aman status"
+  run_install --yes
+  assert_not_contains "$OUT" "/trust" "a later run leaves out how to set up a device"
+  # command:status prints every address, every row and how to set up a new device.
+  run_install status
+  assert_rc 0
+  assert_flat_contains "$OUT" "Open https://192.168.1.20:8443 https://host.local:8443 https://host:8443 http://127.0.0.1:8791 http://localhost:8791"
+  assert_flat_contains "$OUT" "Open http://192.168.1.20:8791/trust on it once"
+  assert_flat_contains "$OUT" "Data saved in Docker"
   sandbox_drop
   sandbox_new_open
   INSTALL_EXTRA=(--local-only)
@@ -474,7 +483,8 @@ test_an_existing_instance_opens_on_the_network_on_a_plain_rerun() {
   assert_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "- '192.168.1.20:8443:8443'"
   assert_log_has "--force-recreate"
   assert_not_contains "$(cat "$STUB_LOG")" "volume rm" "no data was removed"
-  assert_flat_contains "$OUT" "Open https://192.168.1.20:8443"
+  assert_flat_contains "$OUT" "Open https://host.local:8443"
+  assert_flat_contains "$OUT" "/trust on it once" "a move to https says how to set up each device"
   run_install --yes
   assert_flat_contains "$OUT" "Nothing to do."
   sandbox_drop

@@ -76,13 +76,26 @@ const SIDECAR_TOOLS = [
   },
   {
     name: 'get_emails_content',
-    description: 'Read email bodies.',
+    description: 'Read email bodies. This tool is non-read-only because mark_as_read=true changes remote flags.',
     inputSchema: {
       type: 'object' as const,
-      properties: { account_name: accountProperty, mailbox: { type: 'string', description: 'The mailbox.' } },
+      properties: {
+        account_name: accountProperty,
+        mailbox: { type: 'string', description: 'The mailbox.' },
+        mark_as_read: { type: 'boolean', default: false, description: 'If True, mark each retrieved email as read.' },
+      },
       required: ['account_name'],
     },
     annotations: readAnnotations,
+  },
+  {
+    name: 'mark_emails_as_read',
+    description: 'Mark emails as read.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: { account_name: accountProperty, email_ids: { type: 'array' } },
+      required: ['account_name', 'email_ids'],
+    },
   },
   {
     name: 'get_attachment_content',
@@ -175,6 +188,9 @@ function scriptedSidecar({
     if (params.name === 'get_emails_content') {
       return Promise.resolve(text({ emails: [] }));
     }
+    if (params.name === 'mark_emails_as_read') {
+      return Promise.resolve({ content: [{ type: 'text', text: 'Successfully marked 1 email(s) as read' }] });
+    }
     if (params.name === 'send_email') {
       return Promise.resolve({ content: [{ type: 'text', text: 'Email sent successfully to the recipients' }] });
     }
@@ -244,6 +260,7 @@ function makeSpec(): AgentSpec {
           'list_mailboxes',
           'send_email',
           'save_draft',
+          'mark_emails_as_read',
         ],
       },
     ],
@@ -702,6 +719,57 @@ describe('Email connector attachments', () => {
       expect(tool?.description).toContain('call extract_document_text with that path');
       expect(tool?.description).toContain("Never pass an attachment's file name as the path");
     }
+  });
+});
+
+describe('Email connector mark as read', () => {
+  beforeEach(() => {
+    mockConnect.mockReset();
+  });
+
+  it('never shows the model a way to mark mail read while reading it', async () => {
+    scriptedSidecar({ accountList: oneAccount });
+    const toolSet = await emailToolSet(makeResolver(new MailAccountDirectory()));
+
+    const listed = await toolSet.listTools();
+    if (!('result' in listed)) {
+      throw new Error('Expected a tool list');
+    }
+    const content = listed.result.tools.find(entry => entry.name === 'get_emails_content');
+    expect(content?.inputSchema.properties).not.toHaveProperty('mark_as_read');
+    expect(content?.description).not.toContain('mark_as_read');
+    expect(content?.description).toContain('Reading never marks an email as read.');
+  });
+
+  it.each([true, 'true', 1])('reads with marking off even when the call sets it to %p', async value => {
+    const sidecar = scriptedSidecar({ accountList: oneAccount });
+    const toolSet = await emailToolSet(makeResolver(new MailAccountDirectory()));
+
+    await toolSet.callTool({ name: 'get_emails_content', arguments: { email_ids: ['1'], mark_as_read: value } });
+    await toolSet.callTool({ name: 'get_emails_content', arguments: { email_ids: ['2'] } });
+
+    const reads = sidecar.calls.filter(call => call['tool'] === 'get_emails_content');
+    expect(reads.map(call => call['mark_as_read'])).toEqual([false, false]);
+  });
+
+  it('offers marking mail read as its own step, used only when the person asks, behind a card', async () => {
+    const sidecar = scriptedSidecar({ accountList: oneAccount });
+    const toolSet = await emailToolSet(makeResolver(new MailAccountDirectory()));
+
+    const listed = await toolSet.listTools();
+    if (!('result' in listed)) {
+      throw new Error('Expected a tool list');
+    }
+    const mark = listed.result.tools.find(entry => entry.name === 'mark_emails_as_read');
+    expect(mark?.description).toContain('only when the person asked');
+    expect(mark?.description).toContain('Never offer or suggest it');
+
+    const unapproved = await toolSet.callTool({ name: 'mark_emails_as_read', arguments: { email_ids: ['1'] } });
+    expect(unapproved).toHaveProperty('approvalRequired');
+    expect(sidecar.calls.filter(call => call['tool'] === 'mark_emails_as_read')).toHaveLength(0);
+
+    const approved = await toolSet.callTool({ name: 'mark_emails_as_read', arguments: { email_ids: ['1'] } }, APPROVED);
+    expect(resultText(approved).text).toContain('marked 1 email(s) as read');
   });
 });
 

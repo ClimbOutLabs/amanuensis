@@ -154,10 +154,10 @@ test_the_plan_and_the_summary() {
   assert_no_path "$AMAN_HOME"
   RUN_ENV_EXTRA=(CLICOLOR_FORCE=1 LANG=C.UTF-8 TERM=xterm)
   install_machine
-  assert_flat_contains "$OUT" "Open https://192.168.1.20:8443"
-  assert_flat_contains "$OUT" "follow its steps: http://192.168.1.20:8791/trust"
-  assert_flat_contains "$OUT" "browser will first warn that the page is not private. Do not click past the warning."
-  assert_flat_contains "$OUT" "install the profile, then turn it on in Settings, General, About, Certificate Trust Settings."
+  assert_flat_contains "$OUT" "Open https://host.local:8443"
+  assert_flat_contains "$OUT" "Set up a new phone or computer"
+  assert_flat_contains "$OUT" "Open http://192.168.1.20:8791/trust on it once and follow its steps, or scan the code below. Do not click past a warning that the page is not private."
+  assert_flat_contains "$OUT" "Your device shows a long code called a fingerprint. It must be this one. If it differs, stop."
   assert_not_contains "$OUT" "not encrypted"
   assert_contains "$OUT" "▀" "a code a phone can scan"
   assert_log_lacks "sudo "
@@ -174,8 +174,9 @@ test_no_code_without_colors() {
   lan
   RUN_ENV_EXTRA=(LANG=C)
   install_machine
-  assert_flat_contains "$OUT" "follow its steps: http://192.168.1.20:8791/trust"
+  assert_flat_contains "$OUT" "Open http://192.168.1.20:8791/trust on it once"
   assert_not_contains "$OUT" "▀"
+  assert_not_contains "$(flat "$OUT")" "scan the code" "no code is promised when none is drawn"
   assert_no_path "$STUB_STATE/qr_runs"
   sandbox_drop
 }
@@ -310,7 +311,7 @@ test_an_existing_instance_moves_to_https() {
   assert_eq "$(env_value main OIDC_CLIENT_SECRET)" "$secret" "secrets stay as they were"
   assert_log_has "--force-recreate"
   assert_not_contains "$(cat "$STUB_LOG")" "volume rm" "no data was removed"
-  assert_flat_contains "$OUT" "open this page once on that device"
+  assert_flat_contains "$OUT" "/trust on it once and follow its steps"
   run_install --yes
   assert_flat_contains "$OUT" "Nothing to do."
   # An instance recorded with plain http from before moves to https on the next plain re-run.
@@ -508,7 +509,7 @@ test_the_fingerprint_is_shown_where_trust_is_given() {
   local fingerprint
   fingerprint=$(cat "$AMAN_HOME/tls/ca/root.fingerprint")
   assert_contains "$fingerprint" ":"
-  assert_flat_contains "$OUT" "Your device will show a long code called a fingerprint. It must be this one: ${fingerprint:0:48} ${fingerprint:48} If it differs, stop."
+  assert_flat_contains "$OUT" "Your device shows a long code called a fingerprint. It must be this one. If it differs, stop. ${fingerprint:0:48} ${fingerprint:48}"
   local page
   page=$(cat "$AMAN_HOME/tls/trust/main/index.html")
   assert_not_contains "$page" "$fingerprint" "the plain-http page does not show a value it cannot vouch for"
@@ -553,7 +554,7 @@ test_a_new_name_makes_the_authority_again_and_says_so() {
   rm -f "$AMAN_HOME/tls/ca/root.names"
   run_install tls
   assert_rc 0
-  assert_flat_contains "$OUT" "open this page once on that device"
+  assert_flat_contains "$OUT" "/trust on it once and follow its steps"
   assert_flat_contains "$OUT" "root certificate was made again"
   sandbox_drop
 }

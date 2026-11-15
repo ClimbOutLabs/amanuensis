@@ -152,7 +152,7 @@
     },
     "command:status": {
       "set": "install",
-      "tests": []
+      "tests": ["installer/tests/lib/network.test.sh"]
     },
     "command:uninstall": {
       "set": "install",
@@ -802,7 +802,6 @@
     "command:password",
     "command:restore",
     "command:setup",
-    "command:status",
     "command:uninstall",
     "command:verify",
     "command:version",
