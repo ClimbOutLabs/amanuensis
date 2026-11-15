@@ -45,7 +45,7 @@ import { createMemoryClient } from '../runtime/memory/createMemoryClient';
 import {
   createTelegramRefusalThrottle,
   processTelegramUpdate,
-  TELEGRAM_CHAT_TITLE,
+  TELEGRAM_CHAT_TITLE_PREFIX,
   TELEGRAM_METADATA_KEY,
   telegramExternalId,
   type TelegramTurnPort,
@@ -141,22 +141,13 @@ async function telegramSession<TTransaction>(params: {
     model: { name: modelName },
     config: { sandbox: { enabled: sandboxAvailable } },
   });
-  const { session, created } = await deps.sessions.getOrCreateByExternalId({
+  const { session } = await deps.sessions.getOrCreateByExternalId({
     tenant_id,
     external_id,
     created_by_subject: owner,
     agent: { type: 'inline', spec },
     metadata: { [TELEGRAM_METADATA_KEY]: 'true' },
   });
-  if (created || session.record.title === null) {
-    await deps.sessionStore.updateSession({
-      tenant_id,
-      session_id: session.session_id,
-      agent: undefined,
-      title: TELEGRAM_CHAT_TITLE,
-      metadata: undefined,
-    });
-  }
   if (connection.session_id !== session.session_id) {
     await deps.telegramStore.setSessionId({ ...ownerOf(connection), session_id: session.session_id });
   }
@@ -219,6 +210,8 @@ async function startTelegramTurn<TTransaction>(params: {
     userRef,
     // The person wrote this message, so their profile learns from it as it does from a chat here.
     profileLearning: { personalizationStore: deps.personalizationStore },
+    // Named after its subject like any chat, with Telegram in front so it is easy to find.
+    session_title_prefix: TELEGRAM_CHAT_TITLE_PREFIX,
     deps: {
       mcpCatalog: deps.mcpCatalog,
       activeTurns: deps.activeTurns,
