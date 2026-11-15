@@ -76,6 +76,8 @@ Do you run your own model on this computer, such as Ollama? Then you don't need 
 
 The company moves up to "Configured", with a green "Connected" mark. Its models now appear in the model button under the message box. Click that button in any chat to pick another model.
 
+On Mac and Linux, `aman status` on the computer now says the model is set up.
+
 === "Computer"
 
     ![The Models page in Settings, with the Add provider box open for a key](../../../../docs/screenshots/app/first-steps-add-model-desktop.png)
