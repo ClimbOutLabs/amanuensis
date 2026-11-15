@@ -169,13 +169,15 @@ export class UiStep {
         const symbol = ui.symbols.frames[frame % ui.symbols.frames.length] ?? '';
         frame += 1;
         const seconds = Math.floor((Date.now() - t0) / 1000);
-        let line = `  ${symbol} ${this.text}${seconds >= MIN_SHOWN_SECONDS ? `  ${formatElapsed(seconds)}` : ''}`;
+        const time = seconds >= MIN_SHOWN_SECONDS ? `  ${formatElapsed(seconds)}` : '';
+        // One line never wraps, since a wrapped line cannot be redrawn in place: an overlong text is cut, never the time.
+        const text =
+          4 + this.text.length + time.length >= ui.width
+            ? `${this.text.slice(0, ui.width - 6 - time.length)}${ui.symbols.ellipsis}`
+            : this.text;
+        let line = `  ${symbol} ${text}${time}`;
         if (this.note !== '' && line.length + 3 + this.note.length < ui.width) {
           line = `${line}   ${this.note}`;
-        }
-        // One line never wraps, since a wrapped line cannot be redrawn in place.
-        if (line.length >= ui.width) {
-          line = `${line.slice(0, ui.width - 4)}${ui.symbols.ellipsis}`;
         }
         ui.writeProgress(`\r${' '.repeat(this.shown)}\r${side}${line}`);
         this.shown = line.length + (side === '' ? 0 : 2);

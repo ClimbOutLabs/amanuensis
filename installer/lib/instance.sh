@@ -488,7 +488,7 @@ instance_state() {
 instance_up() {
   local name=$1 rc=0 recreate=() clash
   if [ "${2:-}" = recreate ]; then recreate=(--force-recreate); fi
-  step_begin "start-$name" "Starting instance $name and waiting until it answers"
+  step_begin "start-$name" "Starting instance $name"
   # Tailscale would take the port the moment the instance stops, so a start that would stop it is not begun.
   clash=$(instance_tailscale_clash "$name")
   if [ -n "$clash" ]; then
