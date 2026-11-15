@@ -125,6 +125,6 @@ Cost for a Token Factory model comes from the instance's own Token Factory count
 ## Limits
 
 - The web search cases need a web search provider on the instance. On GitHub there may be none, so those cases can fail for every model alike.
-- The skill cases add real skills from GitHub and reach real websites. If GitHub, Hacker News or wttr.in is down, those cases fail for every model alike.
+- The skill cases add real skills from GitHub and reach real websites. If GitHub, Hacker News or wttr.in is down, or GitHub refuses more lookups for the hour, those cases fail for every model alike.
 - Rule checks look for set words. A reply that gives the right fact in other words, such as "the fourteenth of March", can fail a check.
 - One run per case is cheap but noisy. Before you decide between two models, run with `--runs 3`.
