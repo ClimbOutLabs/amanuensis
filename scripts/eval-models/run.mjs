@@ -1,3 +1,4 @@
+import { appendFileSync } from 'node:fs';
 // Runs every case on every model, grades the replies, and writes the comparison.
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -280,6 +281,9 @@ async function runCase({
       const events = (await client.listSessionEvents(sessionId)).filter(
         item => !several || stepTurnIds.has(item.turn_id),
       );
+      if (process.env.EVAL_EVENTS_LOG !== undefined) {
+        appendFileSync(process.env.EVAL_EVENTS_LOG, `${JSON.stringify({ case: testCase.id, step: index + 1, turns: progress.turns.slice(firstTurn).map(t => ({ id: t.id, status: t.state.status, required_actions: t.state.required_actions })), events })}\n`);
+      }
       const stepCalls = collectToolCalls(events);
       toolCalls = [...toolCalls, ...stepCalls];
       const reply = lastReply(progress.turns.slice(firstTurn));

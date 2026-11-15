@@ -46,6 +46,7 @@ jobs:
           SANDBOX_SLOTS_DIR: ${{ runner.temp }}/slots
           SANDBOX_SLOTS: '2'
           EVAL_SERVER_LOG: ${{ runner.temp }}/server.log
+          EVAL_EVENTS_LOG: ${{ runner.temp }}/results/skill-events.jsonl
         run: |
           pnpm eval:models:fresh -- --models tokenfactory/model-a --label proof --skills --out "$RUNNER_TEMP/results" || true
           grep -n '"case_id":"skills' -A0 "$RUNNER_TEMP/results/results.json" | head -2 || true
@@ -56,6 +57,16 @@ jobs:
       - name: Server log around skills
         if: always()
         run: grep -nE 'Unreachable|skill|exec|write_file|held|network|approval' "$RUNNER_TEMP/server.log" | grep -vE 'nowledge|noticing|STT' | cut -c1-900 | tail -120 || true
+      - name: Keep the skill chats' events
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: skill-proof
+          path: |
+            ${{ runner.temp }}/results/skill-events.jsonl
+            ${{ runner.temp }}/server.log
+          if-no-files-found: ignore
+          retention-days: 3
       - name: Stop the sandbox
         if: always()
         run: pnpm sandbox:slots --down --purge --instance eval
