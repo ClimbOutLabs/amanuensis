@@ -65,20 +65,27 @@ From then on, Aman asks before it uses that tool again.
 
 ## Mail cards
 
-A mail card shows who the mail goes to and its full text.
+Sending mail takes two cards, and you answer each one.
 
-- Click **Allow** to send it.
-- Click **Change it** to ask Aman to change it first.
-- Click **Don't send** to stop it.
+1. The draft card asks "Save this draft?" It shows the account the mail goes from, who it goes to, the subject and the full text.
+   - Click **Allow** to save it in your Drafts folder. Nothing is sent.
+   - Click **Change it** to ask Aman to change it first.
+   - Click **Not now** to stop it. Nothing is saved.
+2. When you tell Aman to send it, the send card asks "Send this email?" It shows the same mail again.
+   - Click **Allow** to send it.
+   - Click **Change it** to go back to the draft step.
+   - Click **Don't send** to stop it. The draft stays in your Drafts folder.
 
-If the mail goes to an address that isn't on your Email list, the buttons change:
+Aman can't send mail you have not approved as a draft. If the mail differs from the draft you approved, the send is refused.
 
-- **Add and send** puts those addresses on your list, then sends.
-- **Don't send** stops it, and nothing is added to your list.
+If the draft goes to an address that isn't on your Email list, the buttons change:
 
-When the card saves a draft instead, they read **Add and save draft** and **Don't save**.
+- **Add and save draft** puts those addresses on your list, then saves the draft.
+- **Don't save** stops it, and nothing is added to your list.
 
-Sending always asks. No button on a mail card lets you skip that question next time.
+If your list changed after you approved the draft, the send card says so too. Its buttons read **Add and send** and **Don't send**.
+
+Saving a draft and sending both always ask. No button on a mail card lets you skip that question next time. [Email](email.md) has the details.
 
 ## Cards from a scheduled run
 
