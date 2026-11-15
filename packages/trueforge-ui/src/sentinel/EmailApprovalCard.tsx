@@ -39,8 +39,6 @@ export type EmailApprovalCardProps = {
   onDeny: () => void;
   /** Passed only when the card may be revised. The text is the change the person typed. */
   onChangeRequest?: ((text: string) => void) | undefined;
-  /** Passed only when the server offers a draft option for this approval. */
-  onSaveDraft?: ((fromAccount?: string) => void) | undefined;
 };
 
 export function mailboxListText(mailboxes: readonly SentinelApprovalMailbox[]): string {
@@ -143,7 +141,6 @@ export const EmailApprovalCard: FC<EmailApprovalCardProps> = ({
   onApprove,
   onDeny,
   onChangeRequest,
-  onSaveDraft,
 }) => {
   const assistant = useAssistantDisplayName();
   const [changing, setChanging] = useState(false);
@@ -305,15 +302,6 @@ export const EmailApprovalCard: FC<EmailApprovalCardProps> = ({
               disabled={disabled}
             >
               {EMAIL_CHOICES.changeIt.label}
-            </ApprovalButton>
-          )}
-          {sending && onSaveDraft !== undefined && (
-            <ApprovalButton
-              title={EMAIL_CHOICES.saveDraft.hint}
-              onClick={() => onSaveDraft(fromPick.picked)}
-              disabled={disabled}
-            >
-              {EMAIL_CHOICES.saveDraft.label}
             </ApprovalButton>
           )}
           <ApprovalButton
