@@ -50,11 +50,7 @@ import {
   telegramExternalId,
   type TelegramTurnPort,
 } from '../runtime/telegram/telegramChannel';
-import {
-  createTelegramCommandMenu,
-  telegramChoiceKey,
-  type TelegramChatControlsPort,
-} from '../runtime/telegram/telegramChatControls';
+import { telegramChoiceKey, type TelegramChatControlsPort } from '../runtime/telegram/telegramChatControls';
 import { sendTelegramText, type TelegramSendQueue } from '../runtime/telegram/telegramSendQueue';
 import { TelegramSettingsError, type TelegramService } from '../runtime/telegram/telegramService';
 import { putDefaultModelFirst, readDefaultChatModel } from '../runtime/tokenFactoryProvider';
@@ -460,9 +456,6 @@ export function createTelegramChatControlsPort<TTransaction>(params: {
   };
 }
 
-/** Sets the bot's command menu once per process for each connection, shared like the refusal throttle. */
-const telegramCommandMenu = createTelegramCommandMenu();
-
 /**
  * One refusal throttle for the whole server: the channel deps are rebuilt per call, and the
  * throttle only holds back repeat refusals if it outlives them.
@@ -476,7 +469,6 @@ function channelDeps<TTransaction>(params: { c: Context; deps: TelegramTurnExecu
     queue: params.deps.telegramQueue,
     turns: createTelegramTurnPort(params),
     controls: createTelegramChatControlsPort(params),
-    commandMenu: telegramCommandMenu,
     logger: params.deps.logger,
     refusals: telegramRefusals,
   };
