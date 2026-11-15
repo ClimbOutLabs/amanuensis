@@ -9,6 +9,7 @@
 #        install.sh instance email <name> [--remove]
 #        install.sh instance calendar <name> [--remove]
 #        install.sh instance local-model <name> <port> [--remove]
+#        install.sh instance address <name> list|add|remove [<address>]
 #        install.sh instance password [<name>]
 #        install.sh backup [<name>]
 #        install.sh backups daily|off
@@ -67,6 +68,8 @@ DOWNLOADS_FILE=$INSTALLER_DIR/downloads.txt
 . "$INSTALLER_DIR/lib/instance.sh"
 # shellcheck source=lib/localmodel.sh
 . "$INSTALLER_DIR/lib/localmodel.sh"
+# shellcheck source=lib/address.sh
+. "$INSTALLER_DIR/lib/address.sh"
 # shellcheck source=lib/email.sh
 . "$INSTALLER_DIR/lib/email.sh"
 # shellcheck source=lib/demo.sh
@@ -141,6 +144,8 @@ OPT_CAL_USER=
 OPT_CAL_PASSWORD_STDIN=0
 OPT_REMOVE=0
 OPT_LOCAL_MODEL=
+OPT_ADDRESS_ACTION=
+OPT_ADDRESS_VALUE=
 COMMAND=install
 SUBCOMMAND=
 LOCK_HELD=0
@@ -176,6 +181,14 @@ Amanuensis installer
   install.sh instance local-model <name> <port> [--remove]
                                   let an instance reach a model server on this computer at that port, through Aman's
                                   own local link (http://aman-local-model:<port>/v1); --remove takes the port away
+  install.sh instance address <name> list|add|remove [<address>]
+                                  list the addresses an instance answers at, or add or remove one: an address or name
+                                  of this computer (Aman listens there), or a full address such as https://name.example
+                                  that another program passes on to http://127.0.0.1:<app port>
+  install.sh instance address <name> list|add|remove [<address>]
+                                  list the addresses an instance answers at, or add or remove one: an address or name
+                                  of this computer (Aman listens there), or a full address such as https://name.example
+                                  that another program passes on to http://127.0.0.1:<app port>
   install.sh instance password [<name>]
                                   set a new owner password and sign everyone out
   install.sh backup [<name>]      make a backup now
@@ -324,7 +337,15 @@ parse_args() {
           2:instance) SUBCOMMAND=$arg ;;
           3:instance | 2:backup) OPT_NAME=$arg ;;
           4:instance)
-            if [ "$SUBCOMMAND" = local-model ]; then OPT_LOCAL_MODEL=$arg; else OPT_IMPORT_FILE=$arg; fi
+            case "$SUBCOMMAND" in
+              local-model) OPT_LOCAL_MODEL=$arg ;;
+              address) OPT_ADDRESS_ACTION=$arg ;;
+              *) OPT_IMPORT_FILE=$arg ;;
+            esac
+            ;;
+          5:instance)
+            [ "$SUBCOMMAND" = address ] || usage_die "unexpected argument $arg"
+            OPT_ADDRESS_VALUE=$arg
             ;;
           2:backups) OPT_BACKUPS_ARG=$arg ;;
           2:restore | 3:restore) restore_take_arg "$arg" ;;
@@ -528,7 +549,8 @@ main() {
         password) cmd_instance_password ;;
         calendar) cmd_instance_calendar ;;
         local-model) cmd_instance_local_model ;;
-        *) usage_die "usage: install.sh instance add|list|remove|demo-seed|import|refresh|email|password|calendar|local-model" ;;
+        address) cmd_instance_address ;;
+        *) usage_die "usage: install.sh instance add|list|remove|demo-seed|import|refresh|email|password|calendar|local-model|address" ;;
       esac
       ;;
   esac

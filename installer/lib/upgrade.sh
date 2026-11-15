@@ -94,15 +94,6 @@ upgrade_health_gate() {
   done
 }
 
-# Tailscale serve keeps trying for each port it is set up for, so it takes a port of an instance the moment the upgrade
-# stops the instance, and the new version and the rollback would both fail to start. The app port is never moved by
-# itself, so one Tailscale wants stops the upgrade before anything changes. An https port is moved when the instance is
-# drawn again, after the backup and the build.
-upgrade_ports_ready() {
-  local name
-  for name in $(reg_names); do instance_tailscale_port_check "$name"; done
-}
-
 # Backs up every instance that has data, then builds what is missing. Touches nothing that is running, so a failed
 # build needs no rollback.
 upgrade_prepare() {
@@ -308,7 +299,6 @@ cmd_upgrade() {
       return 0
     fi
     lock_acquire
-    upgrade_ports_ready
     ui_phase "Building the missing parts again"
     images_ensure
     machine_up "$REL_STT_TAG" "$REL_TTS_TAG"
@@ -318,8 +308,6 @@ cmd_upgrade() {
     for name in $(reg_names); do
       rc=
       if upgrade_moved "$name"; then rc=recreate; fi
-      # Containers rebuilt here restart, so an https port Tailscale serve took is moved first.
-      if tls_port_taken_by_tailscale "$name"; then instance_render "$name" "$REL_APP_TAG" "$REL_DEX_IMAGE"; fi
       instance_up "$name" ${rc:+"$rc"} || exit 1
     done
     upgrade_old_account_notices
@@ -357,7 +345,6 @@ cmd_upgrade() {
   ui_hint "If anything fails, the old version and the backup are put back."
   ui_phase "Checking and backing up" 2 4
   upgrade_health_gate
-  upgrade_ports_ready
   upgrade_prepare
   for name in $(upgrade_http_instances); do
     upgrade_move_to_https "$name"
