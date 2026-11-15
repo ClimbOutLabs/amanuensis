@@ -194,6 +194,7 @@ Choose a password with at least 8 characters, a number and a symbol, like @ # $ 
 Type it again:
 The passwords do not match. Type them again.
 The password can have at most 72 characters. Accented or non-Latin letters count as more than one.
+That password has something in it that is not a letter, a number or a symbol, like a line break. Type it instead of pasting it.
 That password still needs at least 8 characters, a number and a symbol, like @ # $ %.
 That password still needs a number and a symbol, like @ # $ %.
 Also use Aman from your phone and other devices on your home Wi-Fi? (yes or no):

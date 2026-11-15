@@ -5,7 +5,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 
-import { runInstall, type InstallDeps } from '../../src/commands/install.ts';
+import {
+  installWithAnswers,
+  prepareInstall,
+  runInstall,
+  type InstallDeps,
+  type InstallProgress,
+} from '../../src/commands/install.ts';
 import { FakeHost } from '../../src/host/fakeHost.ts';
 import { FakeWindowsJobs, type FakeWindowsJobStep } from '../../src/host/fakeWindowsJobs.ts';
 import { DOCKER_DESKTOP_DOWNLOAD_URL } from '../../src/host/windowsJobs.ts';
@@ -19,6 +25,7 @@ import {
   INSTALL_DRY_RUN_LINES,
   INSTALL_NOT_WINDOWS,
   INSTALL_NO_ANSWER,
+  INSTALL_PASSWORD_CONTROL_LINE,
   INSTALL_PASSWORD_MISMATCH_LINE,
   INSTALL_RELEASE_NOT_THERE,
   INSTALL_RESTART_NEEDED,
@@ -237,20 +244,30 @@ class WorldRunner implements ProcessRunner {
     return Promise.resolve({ exitCode: 1, stdout: '', stderr: '', started: false });
   }
 
-  runBytes(command: string, args: readonly string[], stdin: Uint8Array): Promise<ProcessBytesResult> {
+  runBytes(
+    command: string,
+    args: readonly string[],
+    stdin: Uint8Array,
+    onLine?: (line: string) => void,
+  ): Promise<ProcessBytesResult> {
     void command;
     if (args.includes('sh')) {
       return Promise.resolve(okBytesResult(new Uint8Array()));
     }
     if (args.includes('installer/install.sh')) {
-      this.installRuns.push({ args, stdin });
+      // A copy, as the container reads it: the install wipes its own.
+      this.installRuns.push({ args, stdin: stdin.slice() });
       const exit = this.options.containerExit ?? 0;
       if (exit === 0) {
         this.store.installed = true;
       }
+      const text = this.options.containerStdout ?? 'Instance main is ready.\n';
+      for (const line of text.split('\n').slice(0, -1)) {
+        onLine?.(line);
+      }
       return Promise.resolve({
         exitCode: exit,
-        stdout: new TextEncoder().encode(this.options.containerStdout ?? 'Instance main is ready.\n'),
+        stdout: new TextEncoder().encode(text),
         stderr: '',
         started: true,
       });
@@ -522,7 +539,12 @@ class FreshVolumeRunner implements ProcessRunner {
     return this.inner.run(command, args);
   }
 
-  async runBytes(command: string, args: readonly string[], stdin: Uint8Array): Promise<ProcessBytesResult> {
+  async runBytes(
+    command: string,
+    args: readonly string[],
+    stdin: Uint8Array,
+    onLine?: (line: string) => void,
+  ): Promise<ProcessBytesResult> {
     if (args.includes('cat')) {
       const path = args[args.length - 1];
       const rel = typeof path === 'string' ? path.replace(`${VOLUME_HOME}/`, '') : '';
@@ -553,7 +575,7 @@ class FreshVolumeRunner implements ProcessRunner {
       return okBytesResult(tar);
     }
     if (args.includes('installer/install.sh')) {
-      const result = await this.inner.runBytes(command, args, stdin);
+      const result = await this.inner.runBytes(command, args, stdin, onLine);
       if (result.exitCode === 0) {
         this.writeInstall();
       }
@@ -800,8 +822,11 @@ test('the password rule counts accented letters in bytes, as the shell counts th
   // Each accented letter here is two bytes: the first password is six
   // letters but nine bytes, past the shell's eight; the second is
   // seven bytes, short of it, though both have a number and a symbol.
-  assert.equal(installPasswordProblem('ééé1!a'), null);
-  assert.equal(installPasswordProblem('éé1!a'), 'That password still needs at least 8 characters.');
+  assert.equal(installPasswordProblem(new TextEncoder().encode('ééé1!a')), null);
+  assert.equal(
+    installPasswordProblem(new TextEncoder().encode('éé1!a')),
+    'That password still needs at least 8 characters.',
+  );
 });
 
 test('an accented password at the byte boundary is accepted at the question', async () => {
@@ -879,4 +904,84 @@ test('a run that finds Aman already installed finishes the later steps and opens
   assert.deepEqual(world.jobs.browserUrls, ['https://localhost:8443']);
   assert.ok(world.printed.includes(ADOPTED_LINE));
   assert.ok(!world.printed.includes(INSTALL_DONE_LINE));
+});
+
+test('the password is wiped once the installer has read it', async () => {
+  const world = await makeWorld();
+  assert.equal(await prepareInstall(world.deps), 'fresh');
+  const password = new TextEncoder().encode(PASSWORD);
+  const code = await installWithAnswers(world.deps, { email: 'friend@example.com', password, phone: false });
+  assert.equal(code, 0);
+  assert.ok(password.every(byte => byte === 0));
+  const run = world.runner.installRuns[0];
+  assert.ok(run !== undefined);
+  assert.equal(new TextDecoder().decode(run.stdin), `${PASSWORD}\n`);
+});
+
+test('the password is wiped when the install stops before the installer runs', async () => {
+  const world = await makeWorld({ tamperManifest: true });
+  const password = new TextEncoder().encode(PASSWORD);
+  const code = await installWithAnswers(world.deps, { email: 'friend@example.com', password, phone: false });
+  assert.equal(code, 1);
+  assert.ok(password.every(byte => byte === 0));
+  assert.equal(world.runner.installRuns.length, 0);
+});
+
+test('a password with a line break in it never reaches the installer', async () => {
+  const world = await makeWorld();
+  const password = new TextEncoder().encode(`${PASSWORD}\nsecond line`);
+  const code = await installWithAnswers(world.deps, { email: 'friend@example.com', password, phone: false });
+  assert.equal(code, 1);
+  assert.equal(world.runner.installRuns.length, 0);
+  assert.ok(password.every(byte => byte === 0));
+  assert.ok(world.printed.includes(INSTALL_PASSWORD_CONTROL_LINE));
+});
+
+test('the password rule refuses every control character and takes letters from other alphabets', () => {
+  const encode = (text: string): Uint8Array => new TextEncoder().encode(text);
+  for (const bad of ['\n', '\r', '\t', '\u0000', '\u001b', '\u007f']) {
+    assert.equal(installPasswordProblem(encode(`Good1!pass${bad}`)), INSTALL_PASSWORD_CONTROL_LINE);
+  }
+  assert.equal(installPasswordProblem(encode('пароль1!')), null);
+});
+
+test('each stage of a first install is reported as it starts and ends, in order', async () => {
+  const world = await makeWorld();
+  const seen: string[] = [];
+  world.deps.report = (progress: InstallProgress) => {
+    seen.push(`${progress.stage}:${progress.state}`);
+  };
+  const code = await runInstall(world.deps, { dryRun: false });
+  assert.equal(code, 0);
+  assert.deepEqual(seen, [
+    'docker:started',
+    'docker:done',
+    'checks:started',
+    'checks:done',
+    'download:started',
+    'download:done',
+    'install:started',
+    'install:done',
+    'shortcuts:started',
+    'shortcuts:done',
+    'update:started',
+    'update:done',
+    'private:started',
+    'private:done',
+    'open:started',
+    'open:done',
+    'phone:started',
+    'phone:done',
+  ]);
+});
+
+test('a stage that fails is reported as failed and nothing after it starts', async () => {
+  const world = await makeWorld({ containerExit: 1 });
+  const seen: string[] = [];
+  world.deps.report = (progress: InstallProgress) => {
+    seen.push(`${progress.stage}:${progress.state}`);
+  };
+  const code = await runInstall(world.deps, { dryRun: false });
+  assert.equal(code, 1);
+  assert.deepEqual(seen.slice(-2), ['install:started', 'install:failed']);
 });

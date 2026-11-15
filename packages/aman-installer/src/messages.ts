@@ -928,6 +928,9 @@ export const INSTALL_PASSWORD_AGAIN_QUESTION = 'Type it again:';
 
 export const INSTALL_PASSWORD_MISMATCH_LINE = 'The passwords do not match. Type them again.';
 
+export const INSTALL_PASSWORD_CONTROL_LINE =
+  'That password has something in it that is not a letter, a number or a symbol, like a line break. Type it instead of pasting it.';
+
 export const INSTALL_PASSWORD_TOO_LONG_LINE =
   'The password can have at most 72 characters. Accented or non-Latin letters count as more than one.';
 
@@ -937,8 +940,15 @@ export const INSTALL_PASSWORD_TOO_LONG_LINE =
 // later. The sentence is the shell's, built from what is missing.
 // Both lengths are counted in bytes, as the shell counts them under
 // LC_ALL=C: an accented letter is two of them, on both checks.
-export function installPasswordProblem(password: string): string | null {
-  const byteLength = new TextEncoder().encode(password).length;
+// The password is judged as the bytes the installer will be handed
+// (UTF-8), so a secret never has to become text to be checked. A line
+// break or another control character is refused first: the installer
+// reads the password as one line, and a paste can carry one.
+export function installPasswordProblem(password: Uint8Array): string | null {
+  if (password.some(byte => byte < 0x20 || byte === 0x7f)) {
+    return INSTALL_PASSWORD_CONTROL_LINE;
+  }
+  const byteLength = password.length;
   if (byteLength > 72) {
     return INSTALL_PASSWORD_TOO_LONG_LINE;
   }
@@ -946,10 +956,15 @@ export function installPasswordProblem(password: string): string | null {
   if (byteLength < 8) {
     missing.push('at least 8 characters');
   }
-  if (!/\d/.test(password)) {
+  if (!password.some(byte => byte >= 0x30 && byte <= 0x39)) {
     missing.push('a number');
   }
-  if (!/[!-/:-@[-`{-~]/.test(password)) {
+  const isSymbol = (byte: number): boolean =>
+    (byte >= 0x21 && byte <= 0x2f) ||
+    (byte >= 0x3a && byte <= 0x40) ||
+    (byte >= 0x5b && byte <= 0x60) ||
+    (byte >= 0x7b && byte <= 0x7e);
+  if (!password.some(isSymbol)) {
     missing.push('a symbol, like @ # $ %');
   }
   if (missing.length === 0) {
@@ -1249,8 +1264,9 @@ export function allMessageLines(): string[] {
   lines.push(INSTALL_PASSWORD_AGAIN_QUESTION);
   lines.push(INSTALL_PASSWORD_MISMATCH_LINE);
   lines.push(INSTALL_PASSWORD_TOO_LONG_LINE);
-  lines.push(installPasswordProblem('short') ?? '');
-  lines.push(installPasswordProblem('longenough') ?? '');
+  lines.push(INSTALL_PASSWORD_CONTROL_LINE);
+  lines.push(installPasswordProblem(new TextEncoder().encode('short')) ?? '');
+  lines.push(installPasswordProblem(new TextEncoder().encode('longenough')) ?? '');
   lines.push(INSTALL_PHONE_QUESTION);
   lines.push(INSTALL_YES_OR_NO_LINE);
   lines.push(INSTALL_DONE_LINE);
