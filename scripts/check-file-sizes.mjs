@@ -43,7 +43,9 @@ export function isCheckedFile(file) {
  * @param {string} text
  */
 export function countLines(text) {
-  if (text.length === 0) return 0;
+  if (text.length === 0) {
+    return 0;
+  }
   const lines = text.split('\n').length;
   return text.endsWith('\n') ? lines - 1 : lines;
 }
@@ -59,7 +61,9 @@ export function findFileSizeProblems({ files, countLinesOf, baseline }) {
   const tracked = new Set(files);
 
   for (const file of files) {
-    if (!isCheckedFile(file)) continue;
+    if (!isCheckedFile(file)) {
+      continue;
+    }
     const lines = countLinesOf(file);
     const allowed = baseline[file];
     if (allowed === undefined) {
@@ -121,7 +125,9 @@ function main() {
       console.log('Baseline updated. File sizes are within the limit.');
       return;
     }
-    for (const problem of remaining) console.error(`- ${problem}`);
+    for (const problem of remaining) {
+      console.error(`- ${problem}`);
+    }
     process.exit(1);
   }
 
@@ -129,7 +135,9 @@ function main() {
     console.log(`File sizes are within the ${LINE_LIMIT}-line limit.`);
     return;
   }
-  for (const problem of problems) console.error(`- ${problem}`);
+  for (const problem of problems) {
+    console.error(`- ${problem}`);
+  }
   process.exit(1);
 }
 
