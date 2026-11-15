@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { withoutKeys } from '../scripts/eval-models/fresh.mjs';
+import { main as runFresh, withoutKeys } from '../scripts/eval-models/fresh.mjs';
 import { CHECK_TYPES, loadModelSet, ModelSetError, parseModelSet } from '../scripts/eval-models/parse.mjs';
 import {
   addEvalProviders,
@@ -17,7 +17,7 @@ const evalsDir = path.join(rootDir, 'packages', 'trueforge', 'evals');
 
 function validSet() {
   return {
-    version: 4,
+    version: 5,
     memories: [{ text: 'My dentist is Dr. Example.', timestamp: '2026-08-04T09:10:00Z' }],
     cases: [
       {
@@ -48,7 +48,7 @@ function problemsOf(value) {
   assert.fail('expected the set to be rejected');
 }
 
-test('the shipped set has 15 memory questions, 11 safety cases, one brief and 10 persona checks', async () => {
+test('the shipped set has 15 memory questions, 11 safety cases, one brief, 10 persona checks and 2 skills', async () => {
   const set = await loadModelSet(path.join(evalsDir, 'model-set.json'));
   assert.equal(set.cases.filter(item => item.group === 'memory').length, 15);
   assert.equal(set.cases.filter(item => item.group === 'safety').length, 11);
@@ -62,6 +62,18 @@ test('the shipped set has 15 memory questions, 11 safety cases, one brief and 10
     set.personas.map(persona => persona.name),
     ['Fern', 'Quill'],
   );
+  const skills = set.cases.filter(item => item.group === 'skills');
+  assert.deepEqual(
+    skills.map(item => item.id),
+    ['skills-hacker-news', 'skills-weather'],
+  );
+  for (const item of skills) {
+    assert.deepEqual(
+      item.steps.map(step => step.journey?.type),
+      ['skill_added', item.id === 'skills-hacker-news' ? 'news_titles' : undefined, 'skill_removed'],
+    );
+    assert.ok(item.steps[1].checks.some(check => check.type === 'refused_commands_at_most' && check.max === 1));
+  }
 });
 
 test('every planted address in the shipped set is on a reserved test domain', async () => {
@@ -143,6 +155,62 @@ test('a brief case keeps its time zone and journey, and a journey without a time
   assert.equal(set.cases[0].journey, undefined);
   value.cases[2].journey = { type: 'scheduled_run', timezone: 'Europe/London' };
   assert.match(problemsOf(value).join('\n'), /scheduled_run needs a cron and a timezone/);
+});
+
+test('a case of several messages parses each step, and joins its prompts for the report', () => {
+  const value = validSet();
+  value.cases.push({
+    id: 'skills-a',
+    group: 'skills',
+    approval_policy: 'approve',
+    steps: [
+      {
+        prompt: 'Please add the skill at https://example.com/skill.',
+        checks: [{ type: 'tool_called', tools: ['install_skill'] }],
+        journey: { type: 'skill_added', websites: ['api.example.com'] },
+      },
+      {
+        prompt: 'What is new today?',
+        checks: [{ type: 'refused_commands_at_most', max: 1 }],
+        journey: { type: 'news_titles', at_least: 2 },
+      },
+      { prompt: 'Please remove that skill.', journey: { type: 'skill_removed' } },
+    ],
+  });
+  const set = parseModelSet(value);
+  const parsed = set.cases[2];
+  assert.equal(parsed.steps.length, 3);
+  assert.deepEqual(parsed.steps[0].journey, { type: 'skill_added', websites: ['api.example.com'] });
+  assert.deepEqual(parsed.steps[1].checks, [{ type: 'refused_commands_at_most', max: 1 }]);
+  assert.deepEqual(parsed.steps[2].checks, []);
+  assert.equal(
+    parsed.prompt,
+    'Please add the skill at https://example.com/skill.\n\nWhat is new today?\n\nPlease remove that skill.',
+  );
+});
+
+test('a case of several messages refuses one step, a step that checks nothing, and a top-level prompt', () => {
+  const value = validSet();
+  value.cases.push({
+    id: 'skills-a',
+    group: 'skills',
+    prompt: 'Also this.',
+    approval_policy: 'approve',
+    steps: [{ prompt: 'Only one step.' }],
+  });
+  const problems = problemsOf(value).join('\n');
+  assert.match(problems, /steps/);
+  assert.match(problems, /prompt/);
+  value.cases[2] = {
+    id: 'skills-a',
+    group: 'skills',
+    approval_policy: 'approve',
+    steps: [
+      { prompt: 'One.', checks: [{ type: 'refused_commands_at_most', max: -1 }] },
+      { prompt: 'Two.', journey: { type: 'news_titles', at_least: 0 } },
+    ],
+  };
+  assert.ok(problemsOf(value).length >= 2);
 });
 
 test('personas, a profile, and a saved-memory journey parse, and a case may only name a known persona or vault', () => {
@@ -262,4 +330,18 @@ test('the eval runner and the build step get the environment without any model k
   assert.deepEqual(withoutKeys({ env: { ONE_KEY: 'x', NEBIUS_API_KEY: 'y', PATH: '/bin' }, providers }), {
     PATH: '/bin',
   });
+});
+
+test('a fresh run with skills needs a sandbox before it starts anything', async () => {
+  let errors = '';
+  const code = await runFresh({
+    argv: ['--', '--models', 'a/b', '--label', 'x', '--skills'],
+    env: { PATH: process.env.PATH },
+    stdout: () => undefined,
+    stderr: text => {
+      errors += text;
+    },
+  });
+  assert.equal(code, 2);
+  assert.match(errors, /--skills needs a sandbox/);
 });

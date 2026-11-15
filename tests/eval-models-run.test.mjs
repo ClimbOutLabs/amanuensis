@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { collectToolCalls, runCheck } from '../scripts/eval-models/checks.mjs';
+import { collectToolCalls, countRefusedCommands, runCheck } from '../scripts/eval-models/checks.mjs';
 import { DROP_EXIT_CODE, parseModelArgs } from '../scripts/eval-models/cli.mjs';
 import {
   checkScheduledRun,
@@ -15,6 +15,7 @@ import {
 import { buildJudgePrompt, parseVerdict } from '../scripts/eval-models/judge.mjs';
 import { findDrops } from '../scripts/eval-models/report.mjs';
 import { modelCost, runEvalModels } from '../scripts/eval-models/run.mjs';
+import { checkNewsTitles, replyNamesTitle } from '../scripts/eval-models/skills.mjs';
 import { UsageProblem } from '../scripts/eval-tokens/cli.mjs';
 
 const toolEvent = calls => ({
@@ -143,6 +144,8 @@ test('arguments: several models, a judge, and plain errors', () => {
     UsageProblem,
   );
   assert.equal(DROP_EXIT_CODE, 3);
+  assert.equal(args.skills, false);
+  assert.equal(parseModelArgs(['--instance', 'http://x', '--models', 'a/b', '--label', 'x', '--skills']).skills, true);
 });
 
 /** Stands in for the eval instance's API. Replies are scripted per prompt; the judge passes item 1 only. */
@@ -592,4 +595,235 @@ test('persona cases fail when a persona reads facts it should not see or saves t
   const result = await runPersonaSet(personaClient({ leaky: true }));
   const failed = result.rows.flatMap(row => row.checks.filter(check => !check.pass).map(check => check.check));
   assert.deepEqual(failed, ['reply leaves out Bluefin', 'Pickle was saved in Fern', 'Pickle was not saved in shared']);
+});
+
+const refusal = text => ({ turn_id: 't', event: { type: 'tool.response.v2', content: text } });
+
+test('refused commands are counted from tool results in either wording', () => {
+  assert.equal(
+    countRefusedCommands([
+      refusal('This command was not run because it uses $(...). Write a script instead.'),
+      refusal('Unstructured shell redirection is not allowed.'),
+      refusal('200 OK'),
+      { turn_id: 't', event: { type: 'model.message', content: 'This command was not run because' } },
+    ]),
+    2,
+  );
+  assert.deepEqual(
+    runCheck({ check: { type: 'refused_commands_at_most', max: 1 }, reply: '', toolCalls: [], refusedCommands: 2 })
+      .pass,
+    false,
+  );
+  assert.deepEqual(
+    runCheck({ check: { type: 'refused_commands_at_most', max: 1 }, reply: '', toolCalls: [], refusedCommands: 1 })
+      .pass,
+    true,
+  );
+});
+
+test('news titles count only when the reply names what the front page shows now', async () => {
+  const front = ['Show HN: A tiny database written in one weekend', 'The quiet history of the paperclip', 'Rust 2.0'];
+  const fetchImpl = async url => ({
+    ok: true,
+    json: async () =>
+      url.endsWith('topstories.json') ? [1, 2, 3] : { title: front[Number(/item\/(\d+)/.exec(url)[1]) - 1] },
+  });
+  assert.equal(
+    replyNamesTitle({ reply: '1. **"Show HN: A tiny database written in one weekend"**', title: front[0] }),
+    true,
+  );
+  assert.equal(replyNamesTitle({ reply: 'The quiet history of the paperclip industry…', title: front[1] }), true);
+  assert.equal(replyNamesTitle({ reply: 'Nothing about databases.', title: front[0] }), false);
+  const named = await checkNewsTitles({
+    reply: 'Top now: Show HN: A tiny database written in one weekend, and The quiet history of the paperclip.',
+    atLeast: 2,
+    fetchImpl,
+  });
+  assert.equal(named[0].pass, true);
+  const remembered = await checkNewsTitles({ reply: 'Stories from last year.', atLeast: 2, fetchImpl });
+  assert.equal(remembered[0].pass, false);
+  assert.match(remembered[0].detail, /names 0; the front page starts with "Show HN/);
+});
+
+/**
+ * An instance where the chat adds, runs and removes a skill. Each turn stores its own events. `broken` adds
+ * two skills, gets refused twice and never removes anything.
+ */
+function skillClient({ broken = false } = {}) {
+  const state = { skills: [{ name: 'kept' }], deleted: [] };
+  const events = [];
+  const replies = new Map();
+  let counter = 0;
+  const add = (turnId, calls, results = []) => {
+    events.push({ ...toolEvent(calls), turn_id: turnId });
+    results.forEach(text => events.push({ turn_id: turnId, event: { type: 'tool.response.v2', content: text } }));
+  };
+  return {
+    state,
+    origin: 'http://fake.local',
+    async listModels() {
+      return [{ name: 'custom/m', model_id: 'm', provider: { name: 'custom' } }];
+    },
+    async listModelProviders() {
+      return [{ name: 'custom', type: 'custom' }];
+    },
+    async getTokenFactoryUsage() {
+      return { usage_date: '2026-11-16', models: [] };
+    },
+    async listSpaces() {
+      return { aggregate_revision: 0 };
+    },
+    async createSpace() {
+      return { space: { id: 'space_1', revision: 1 } };
+    },
+    async deleteSpace() {
+      return undefined;
+    },
+    async listMemoryEntries() {
+      return [];
+    },
+    async importMemories() {
+      return undefined;
+    },
+    async listSkills() {
+      return [...state.skills];
+    },
+    async getSkillNetworkApproval() {
+      return { allowed_hosts: ['wttr.in'] };
+    },
+    async deleteSkill(name) {
+      state.deleted.push(name);
+      state.skills = state.skills.filter(skill => skill.name !== name);
+    },
+    async createSession() {
+      return `s${String(++counter)}`;
+    },
+    async createTurn(_sessionId, { input }) {
+      const id = `t${String(++counter)}`;
+      const prompt = input[0].content;
+      if (prompt.includes('add the skill')) {
+        add(id, [['install_skill', '{"source":"https://example.com/weather"}']]);
+        state.skills.push({ name: 'weather' }, ...(broken ? [{ name: 'extra' }] : []));
+        replies.set(id, 'Added.');
+      } else if (prompt.includes('weather')) {
+        const refused = broken
+          ? ['This command was not run because it uses $(...).', 'This command was not run because it uses a loop.']
+          : [];
+        add(id, [['exec', '{"command":"curl wttr.in/Lisbon"}']], [...refused, 'Lisbon: 18°C']);
+        replies.set(id, 'It is 18°C in Lisbon.');
+      } else {
+        add(id, [['remove_skill', '{"name":"weather"}']]);
+        if (!broken) {
+          state.skills = state.skills.filter(skill => skill.name !== 'weather');
+        }
+        replies.set(id, 'Removed.');
+      }
+      return { id, state: { status: 'running' } };
+    },
+    async getTurn(_sessionId, turnId) {
+      return {
+        id: turnId,
+        state: { status: 'done', output: { content: replies.get(turnId) }, required_actions: [], metrics: {} },
+      };
+    },
+    async listSessionEvents() {
+      return [...events];
+    },
+  };
+}
+
+const skillSet = {
+  version: 5,
+  memories: [],
+  personas: [],
+  cases: [
+    {
+      id: 'skills-weather',
+      group: 'skills',
+      approval_policy: 'approve',
+      prompt: 'joined',
+      checklist: [],
+      steps: [
+        {
+          prompt: 'Please add the skill at https://example.com/weather',
+          checks: [{ type: 'tool_called', tools: ['install_skill'] }],
+          journey: { type: 'skill_added', websites: ['wttr.in'] },
+        },
+        {
+          prompt: "What's the weather like in Lisbon right now?",
+          checks: [
+            { type: 'tool_called', tools: ['exec'] },
+            { type: 'no_tool', tools: ['install_skill', 'remove_skill'] },
+            { type: 'refused_commands_at_most', max: 1 },
+            { type: 'reply_includes', any: ['°'] },
+          ],
+        },
+        {
+          prompt: 'Thanks. Please remove that skill now.',
+          checks: [{ type: 'tool_called', tools: ['remove_skill'] }],
+          journey: { type: 'skill_removed' },
+        },
+      ],
+    },
+  ],
+};
+
+async function runSkillSet({ client, skills }) {
+  const outDir = await mkdtemp(path.join(tmpdir(), 'eval-models-'));
+  try {
+    return await runEvalModels({
+      client,
+      tokenSet: { version: 1, prompts: [] },
+      modelSet: skillSet,
+      space: { name: 'n', purpose: 'p', status: 'active', body: 'b', format: 'markdown' },
+      models: ['custom/m'],
+      judgeModel: 'custom/m',
+      temperature: 0,
+      runs: 1,
+      label: 'test',
+      outDir,
+      pollIntervalMs: 0,
+      memorySettleMs: 0,
+      skills,
+    });
+  } finally {
+    await rm(outDir, { recursive: true, force: true });
+  }
+}
+
+test('a skill case adds, runs and removes a skill in one chat, checking each message on its own', async () => {
+  const client = skillClient();
+  const result = await runSkillSet({ client, skills: true });
+  assert.equal(result.rows.length, 1);
+  const [row] = result.rows;
+  assert.deepEqual(
+    row.checks.filter(check => !check.pass),
+    [],
+  );
+  assert.ok(row.checks.some(check => check.check === 'step 2: called exec'));
+  assert.ok(row.checks.some(check => check.check === 'step 3: the skill is gone from Settings'));
+  assert.equal(row.part, 'tasks');
+  assert.match(row.reply, /^Step 1: Added\.\n\nStep 2: It is 18°C in Lisbon\.\n\nStep 3: Removed\.$/);
+  assert.deepEqual(client.state.skills, [{ name: 'kept' }]);
+  assert.deepEqual(client.state.deleted, []);
+});
+
+test('a skill case fails on extra skills, repeated refusals and a skill left behind, and the run removes it', async () => {
+  const client = skillClient({ broken: true });
+  const result = await runSkillSet({ client, skills: true });
+  const failed = result.rows.flatMap(row => row.checks.filter(check => !check.pass).map(check => check.check));
+  assert.deepEqual(failed, [
+    'step 1: one new skill is listed in Settings',
+    'step 2: the sandbox refused at most 1 command',
+    'step 3: the skill is gone from Settings',
+  ]);
+  assert.deepEqual(client.state.deleted.sort(), ['extra', 'weather']);
+  assert.deepEqual(client.state.skills, [{ name: 'kept' }]);
+});
+
+test('skill cases run only when the instance has a sandbox for them', async () => {
+  const client = skillClient();
+  const result = await runSkillSet({ client, skills: false });
+  assert.equal(result.rows.length, 0);
+  assert.deepEqual(client.state.skills, [{ name: 'kept' }]);
 });

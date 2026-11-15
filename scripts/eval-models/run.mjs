@@ -11,11 +11,12 @@ import {
   replyTextOf,
 } from '../eval-tokens/run.mjs';
 import { removeSpace, seedSpace } from '../eval-tokens/space.mjs';
-import { collectToolCalls, runChecks } from './checks.mjs';
+import { collectToolCalls, countRefusedCommands, runChecks } from './checks.mjs';
 import { checkMemorySaved, checkScheduledRun, cleanUpJourney, snapshotJourney, snapshotVaults } from './journey.mjs';
 import { buildJudgePrompt, parseVerdict } from './judge.mjs';
 import { newPersonaSetUp, setUpPersonas, tearDownPersonas } from './personas.mjs';
 import { buildReport, RESULT_CSV_COLUMNS, resultCsv } from './report.mjs';
+import { checkNewsTitles, checkSkillAdded, checkSkillRemoved, cleanUpSkills, snapshotSkills } from './skills.mjs';
 
 /** Which part of the score a group counts toward. Every token-set group is an everyday task. */
 export function partOf(group) {
@@ -37,16 +38,18 @@ function sleep(ms) {
 
 /**
  * The cases in the order they run: memory first, so earlier chats of the same run have not yet
- * been remembered, then safety, then the brief, then the persona cases, then the everyday tasks from the token set.
- * @param {{ modelSet: import('./parse.mjs').ModelSet, tokenSet: import('../eval-tokens/parse.mjs').TokenSet }} options
+ * been remembered, then safety, then the brief, then the persona cases, then the skill cases when the instance has a
+ * sandbox for them, then the everyday tasks from the token set.
+ * @param {{ modelSet: import('./parse.mjs').ModelSet, tokenSet: import('../eval-tokens/parse.mjs').TokenSet, skills: boolean }} options
  */
-export function orderedCases({ modelSet, tokenSet }) {
+export function orderedCases({ modelSet, tokenSet, skills }) {
   const byGroup = group => modelSet.cases.filter(item => item.group === group);
   return [
     ...byGroup('memory'),
     ...byGroup('safety'),
     ...byGroup('brief'),
     ...byGroup('persona'),
+    ...(skills ? byGroup('skills') : []),
     ...tokenSet.prompts.map(prompt => ({ ...prompt, checks: [] })),
   ];
 }
@@ -153,10 +156,39 @@ async function snapshotFor({ client, journey }) {
   return undefined;
 }
 
-async function checkJourney({ client, before, journey, pollIntervalMs, settleMs }) {
-  return journey.type === 'scheduled_run'
-    ? await checkScheduledRun({ client, before, expect: journey, pollIntervalMs })
-    : await checkMemorySaved({ client, before, expect: journey, settleMs });
+/** What one step's journey finds. `skills` carries the skill a case added from its add step to the later ones. */
+async function checkJourney({ client, before, journey, reply, pollIntervalMs, settleMs, skills }) {
+  switch (journey.type) {
+    case 'scheduled_run':
+      return await checkScheduledRun({ client, before, expect: journey, pollIntervalMs });
+    case 'memory_saved':
+      return await checkMemorySaved({ client, before, expect: journey, settleMs });
+    case 'skill_added': {
+      const added = await checkSkillAdded({ client, before: skills.before, websites: journey.websites });
+      skills.added = added.name;
+      return added.results;
+    }
+    case 'skill_removed':
+      return await checkSkillRemoved({ client, name: skills.added });
+    case 'news_titles':
+      return await checkNewsTitles({ reply, atLeast: journey.at_least });
+    default:
+      return [{ check: 'unknown journey', pass: false, detail: 'the set has a journey this runner does not know' }];
+  }
+}
+
+/** The messages of a case, in order. A case of one message is one step. */
+function stepsOf(testCase) {
+  return testCase.steps ?? [{ prompt: testCase.prompt, checks: testCase.checks, journey: testCase.journey }];
+}
+
+function usesSkills(steps) {
+  return steps.some(step => step.journey?.type === 'skill_added');
+}
+
+function lastReply(turns) {
+  const last = turns.at(-1);
+  return last !== undefined && last.state.status === 'done' ? replyTextOf(last.state.output) : '';
 }
 
 async function runCase({
@@ -175,9 +207,14 @@ async function runCase({
   let status;
   let error;
   let toolCalls = [];
-  let journeyChecks = [];
-  const { journey } = testCase;
-  const before = await snapshotFor({ client, journey });
+  const checks = [];
+  const replies = [];
+  const steps = stepsOf(testCase);
+  const several = steps.length > 1;
+  const scheduleBefore = steps.some(step => step.journey?.type === 'scheduled_run')
+    ? await snapshotJourney({ client })
+    : undefined;
+  const skills = { before: usesSkills(steps) ? await snapshotSkills({ client }) : undefined, added: undefined };
   try {
     const sessionId = await client.createSession({
       model: model.name,
@@ -187,29 +224,62 @@ async function runCase({
     if (testCase.persona !== undefined) {
       await client.setSessionPersona({ sessionId, personaId: personaIds[testCase.persona] });
     }
-    status = await driveTurns({
-      client,
-      sessionId,
-      input: [{ type: 'user.message', content: testCase.prompt }],
-      previousTurnId: 'none',
-      approvalPolicy: testCase.approval_policy,
-      pollIntervalMs,
-      turnTimeoutMs,
-      progress,
-      clientTimezone: testCase.client_timezone,
-    });
-    error = describeTerminalState(progress.turns.at(-1)?.state ?? {});
-    toolCalls = collectToolCalls(await client.listSessionEvents(sessionId));
-    if (journey !== undefined && status === 'done') {
-      try {
-        journeyChecks = await checkJourney({ client, before, journey, pollIntervalMs, settleMs });
-      } catch (caught) {
-        if (isRunStopping(caught)) {
-          throw caught;
+    for (const [index, step] of steps.entries()) {
+      const label = several ? `step ${String(index + 1)}: ` : '';
+      const before =
+        step.journey?.type === 'scheduled_run' ? scheduleBefore : await snapshotFor({ client, journey: step.journey });
+      const firstTurn = progress.turns.length;
+      status = await driveTurns({
+        client,
+        sessionId,
+        input: [{ type: 'user.message', content: step.prompt }],
+        previousTurnId: progress.turns.at(-1)?.id ?? 'none',
+        approvalPolicy: testCase.approval_policy,
+        pollIntervalMs,
+        turnTimeoutMs,
+        progress,
+        clientTimezone: testCase.client_timezone,
+      });
+      error = describeTerminalState(progress.turns.at(-1)?.state ?? {});
+      const stepTurnIds = new Set(progress.turns.slice(firstTurn).map(turn => turn.id));
+      const events = (await client.listSessionEvents(sessionId)).filter(
+        item => !several || stepTurnIds.has(item.turn_id),
+      );
+      const stepCalls = collectToolCalls(events);
+      toolCalls = [...toolCalls, ...stepCalls];
+      const reply = lastReply(progress.turns.slice(firstTurn));
+      replies.push(several ? `Step ${String(index + 1)}: ${reply}` : reply);
+      if (status !== 'done') {
+        break;
+      }
+      checks.push(
+        ...runChecks({
+          checks: step.checks,
+          reply,
+          toolCalls: stepCalls,
+          refusedCommands: countRefusedCommands(events),
+        }).map(item => ({ ...item, check: `${label}${item.check}` })),
+      );
+      if (step.journey !== undefined) {
+        try {
+          const found = await checkJourney({
+            client,
+            before,
+            journey: step.journey,
+            reply,
+            pollIntervalMs,
+            settleMs,
+            skills,
+          });
+          checks.push(...found.map(item => ({ ...item, check: `${label}${item.check}` })));
+        } catch (caught) {
+          if (isRunStopping(caught)) {
+            throw caught;
+          }
+          // A journey that could not be followed must fail the case, never leave only the chat's checks.
+          const detail = caught instanceof Error ? caught.message : 'unknown failure';
+          checks.push({ check: `${label}what the chat left behind could be read`, pass: false, detail });
         }
-        // A journey that could not be followed must fail the case, never leave only the chat's checks.
-        const detail = caught instanceof Error ? caught.message : 'unknown failure';
-        journeyChecks = [{ check: 'what the chat left behind could be read', pass: false, detail }];
       }
     }
   } catch (caught) {
@@ -219,12 +289,13 @@ async function runCase({
     status = status ?? 'request_failed';
     error = caught instanceof Error ? caught.message : 'Unknown request failure.';
   } finally {
-    if (journey?.type === 'scheduled_run') {
-      leftovers.push(...(await cleanUpJourney({ client, before })));
+    if (scheduleBefore !== undefined) {
+      leftovers.push(...(await cleanUpJourney({ client, before: scheduleBefore })));
+    }
+    if (skills.before !== undefined) {
+      leftovers.push(...(await cleanUpSkills({ client, before: skills.before })));
     }
   }
-  const last = progress.turns.at(-1);
-  const reply = last !== undefined && last.state.status === 'done' ? replyTextOf(last.state.output) : '';
   return {
     run,
     model: model.name,
@@ -235,9 +306,9 @@ async function runCase({
     error,
     approvals: progress.approvals,
     ...combineTurnMetrics(progress.turns.map(turn => turn.state.metrics)),
-    reply,
+    reply: replies.join('\n\n'),
     tool_calls: toolCalls,
-    checks: status === 'done' ? [...runChecks({ checks: testCase.checks, reply, toolCalls }), ...journeyChecks] : [],
+    checks: status === 'done' ? checks : [],
     checklist: testCase.checklist,
     prompt: testCase.prompt,
     judged: [],
@@ -309,6 +380,7 @@ export function rowPasses(row) {
  *   pollIntervalMs?: number,
  *   turnTimeoutMs?: number,
  *   memorySettleMs?: number,
+ *   skills?: boolean,
  *   log?: (message: string) => void,
  * }} options
  */
@@ -328,12 +400,13 @@ export async function runEvalModels({
   pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
   turnTimeoutMs = DEFAULT_TURN_TIMEOUT_MS,
   memorySettleMs = DEFAULT_MEMORY_SETTLE_MS,
+  skills = false,
   log = ignoreLog,
 }) {
   const resolved = await resolveModels({ client, names: [...new Set([...models, judgeModel])] });
   const testedModels = resolved.filter(model => models.includes(model.name));
   const judge = resolved.find(model => model.name === judgeModel);
-  const cases = orderedCases({ modelSet, tokenSet });
+  const cases = orderedCases({ modelSet, tokenSet, skills });
   const rows = [];
   const costs = {};
   const cleanupProblems = [];

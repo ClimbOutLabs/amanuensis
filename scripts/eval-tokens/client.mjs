@@ -215,6 +215,26 @@ export function createInstanceClient({ baseUrl, token, fetchImpl = fetch }) {
     async deleteProfile() {
       await request('DELETE', '/api/v1/personalization/profile');
     },
+    /** @returns {Promise<{ name: string, manifest: unknown }[]>} the skills added in Settings */
+    async listSkills() {
+      const body = await request('GET', '/api/v1/settings/skills');
+      if (!isRecord(body) || !Array.isArray(body.data)) {
+        throw new Error('The instance did not return its skills. Is --instance a TrueForge server?');
+      }
+      return body.data;
+    },
+    /** @returns {Promise<{ allowed_hosts: string[] }>} the websites a skill may reach */
+    async getSkillNetworkApproval(name) {
+      const body = await request('GET', `/api/v1/settings/skills/${encodeURIComponent(name)}/network-approval`);
+      if (!isRecord(body) || !isRecord(body.data)) {
+        throw new Error("The instance did not return the skill's websites. Is --instance a TrueForge server?");
+      }
+      return body.data;
+    },
+    /** @param {string} name */
+    async deleteSkill(name) {
+      await request('DELETE', `/api/v1/settings/skills/${encodeURIComponent(name)}`);
+    },
     /** @param {string} scheduleId */
     async deleteSchedule(scheduleId) {
       await request('DELETE', `/api/v1/schedules/${encodeURIComponent(scheduleId)}`);

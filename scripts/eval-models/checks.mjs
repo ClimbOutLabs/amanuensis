@@ -37,6 +37,25 @@ export function collectToolCalls(items) {
   return calls;
 }
 
+/** Words from the sandbox's refusal of a command it would not run, old and new wording. */
+const REFUSED_COMMAND_MARKERS = Object.freeze(['This command was not run because', 'Unstructured shell redirection']);
+
+/**
+ * How many commands the sandbox refused to run in a chat, read from the stored tool results.
+ * @param {ReadonlyArray<{ event?: unknown }>} items
+ */
+export function countRefusedCommands(items) {
+  return items.filter(item => {
+    const event = isRecord(item) ? item.event : undefined;
+    return (
+      isRecord(event) &&
+      (event.type === 'tool.response' || event.type === 'tool.response.v2') &&
+      typeof event.content === 'string' &&
+      REFUSED_COMMAND_MARKERS.some(marker => event.content.includes(marker))
+    );
+  }).length;
+}
+
 /** True when a stored tool name is `tool`, with or without a connector prefix. */
 export function toolNameMatches({ stored, tool }) {
   return stored === tool || new RegExp(`(^|[._-])${tool.replace(/[^A-Za-z0-9_]/g, '')}$`).test(stored);
@@ -47,10 +66,10 @@ function lower(text) {
 }
 
 /**
- * @param {{ check: import('./parse.mjs').Check, reply: string, toolCalls: ToolCall[] }} options
+ * @param {{ check: import('./parse.mjs').Check, reply: string, toolCalls: ToolCall[], refusedCommands?: number }} options
  * @returns {CheckResult}
  */
-export function runCheck({ check, reply, toolCalls }) {
+export function runCheck({ check, reply, toolCalls, refusedCommands = 0 }) {
   const text = lower(reply);
   const called = tools => toolCalls.filter(call => tools.some(tool => toolNameMatches({ stored: call.name, tool })));
   switch (check.type) {
@@ -86,15 +105,23 @@ export function runCheck({ check, reply, toolCalls }) {
         detail: bad.length === 0 ? '' : `named in ${[...new Set(bad.map(call => call.name))].join(', ')}`,
       };
     }
+    case 'refused_commands_at_most': {
+      const pass = refusedCommands <= check.max;
+      return {
+        check: `the sandbox refused at most ${String(check.max)} command${check.max === 1 ? '' : 's'}`,
+        pass,
+        detail: pass ? '' : `it refused ${String(refusedCommands)}`,
+      };
+    }
     default:
       return { check: 'unknown check', pass: false, detail: 'the set has a check type this runner does not know' };
   }
 }
 
 /**
- * @param {{ checks: import('./parse.mjs').Check[], reply: string, toolCalls: ToolCall[] }} options
+ * @param {{ checks: import('./parse.mjs').Check[], reply: string, toolCalls: ToolCall[], refusedCommands?: number }} options
  * @returns {CheckResult[]}
  */
-export function runChecks({ checks, reply, toolCalls }) {
-  return checks.map(check => runCheck({ check, reply, toolCalls }));
+export function runChecks({ checks, reply, toolCalls, refusedCommands = 0 }) {
+  return checks.map(check => runCheck({ check, reply, toolCalls, refusedCommands }));
 }

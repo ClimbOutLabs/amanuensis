@@ -20,6 +20,9 @@ const PASSED_SETTINGS = [
   'TOKEN_FACTORY_BASE_URL',
   'TOKEN_FACTORY_MODEL',
   'TOKEN_FACTORY_PRICES',
+  'SANDBOX_BACKEND',
+  'SANDBOX_SLOTS_DIR',
+  'SANDBOX_SLOTS',
   'PATH',
   'HOME',
 ];
@@ -109,6 +112,13 @@ export async function main({ argv, env = process.env, stdout, stderr, rootDir = 
   if (args.includes('--help') || args.includes('-h')) {
     return runModels({ argv: ['--help'], env, stdout, stderr, rootDir });
   }
+  const skills = args.includes('--skills');
+  if (skills && (env.SANDBOX_BACKEND !== 'slots' || (env.SANDBOX_SLOTS_DIR ?? '').trim() === '')) {
+    stderr(
+      '--skills needs a sandbox. Start one with pnpm sandbox:slots, then set SANDBOX_BACKEND=slots and SANDBOX_SLOTS_DIR to the folder that holds its sockets.\n',
+    );
+    return 2;
+  }
   const dataDir = await mkdtemp(path.join(tmpdir(), 'aman-eval-'));
   const port = await freePort();
   const origin = `http://127.0.0.1:${String(port)}`;
@@ -120,6 +130,8 @@ export async function main({ argv, env = process.env, stdout, stderr, rootDir = 
     TRUEFORGE_AUTH_MODE: 'local',
     APP_DATA_DIR: dataDir,
     PORT: String(port),
+    // Lets the eval approve adding, running and removing a skill, which only the skill cases ask for.
+    ...(skills ? { AMAN_EVAL_SKILLS: 'true' } : {}),
   });
   const trueforge = path.join(rootDir, 'packages', 'trueforge');
   let child;
