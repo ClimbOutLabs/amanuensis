@@ -160,7 +160,7 @@ describe('local sign-in startup', () => {
 
     expect(await booted.exited).toBe(1);
     expect(booted.output()).toContain(
-      'Local sign-in works on this computer or behind https. Set PUBLIC_BASE_URL to an https address, or use the Docker install.',
+      'Local sign-in works on this computer or behind https. Change every plain http address in PUBLIC_BASE_URL and ALLOWED_ORIGINS to https, or use the Docker install.',
     );
   });
 

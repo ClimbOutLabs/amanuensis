@@ -26,7 +26,7 @@ Change the password any time in Settings, Account. Changing it signs out every o
 
 Forgot the password? There is no reset by email. Stop Aman, run `npx amanuensis --reset-password`, and type a new password twice on the terminal (it does not show what you type). Then start Aman again and sign in with the new password. The sign-in page carries the same instruction in one line.
 
-Local sign-in works on this computer, or behind an https address you set as `PUBLIC_BASE_URL`. If a plain http address on another computer is listed, Aman refuses to start and says why: a password should not travel over an open connection.
+Local sign-in works on this computer, or behind an https address you set as `PUBLIC_BASE_URL`. If a plain http address on another computer is listed anywhere, even beside an https public address, Aman refuses to start and says why: a password should not travel over an open connection.
 
 ### Advanced: your own sign-in service
 
