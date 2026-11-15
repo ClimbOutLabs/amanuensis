@@ -33,7 +33,7 @@ Two rules do not bend:
 ## 3. Revoking a key
 
 - Settings, under Account, lists the paired terminals with their names and paired and last used times, and each one can be revoked there. A revoke lands on the terminal's next request.
-- On an Aman that keeps its own sign-in, changing the password takes away every terminal key at once. On an Aman that uses a sign-in service, the server never hears about a password change, so keys there are revoked in Settings, one by one or all together. The docs say this plainly.
+- On an Aman that keeps its own sign-in, changing the password takes away every terminal key at once. On an Aman that uses a sign-in service, the server never hears about a password change, so each key there is revoked in Settings, one by one. The docs say this plainly.
 - A confirmed pairing whose key is never collected leaves no working key behind. The stored row is revoked when the pairing is dropped.
 
 ## 4. Chatting
