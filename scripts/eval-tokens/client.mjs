@@ -102,14 +102,25 @@ export function createInstanceClient({ baseUrl, token, fetchImpl = fetch }) {
     async getHealth() {
       return await request('GET', '/healthz');
     },
+    /** What the server can do, such as whether its sandbox is ready. */
+    async getCapabilities() {
+      const body = await request('GET', '/api/v1/capabilities');
+      return isRecord(body) && isRecord(body.data) ? body.data : body;
+    },
     /**
      * An incognito chat is neither remembered nor shown remembered facts, which keeps a judge's chats out of memory.
-     * @param {{ model: string, temperature: number, incognito?: boolean }} options
+     * A chat with the sandbox on can run skills and commands, as the app's chats do when the server has one.
+     * @param {{ model: string, temperature: number, incognito?: boolean, sandbox?: boolean }} options
      * @returns {Promise<string>} session id
      */
-    async createSession({ model, temperature, incognito = false }) {
+    async createSession({ model, temperature, incognito = false, sandbox = false }) {
       const body = await request('POST', '/api/v1/sessions', {
-        agent: { spec: { model: { name: model, params: { temperature } } } },
+        agent: {
+          spec: {
+            model: { name: model, params: { temperature } },
+            ...(sandbox ? { config: { sandbox: { enabled: true } } } : {}),
+          },
+        },
         ...(incognito ? { is_incognito: true } : {}),
       });
       return readSessionId(body);
@@ -223,7 +234,7 @@ export function createInstanceClient({ baseUrl, token, fetchImpl = fetch }) {
       }
       return body.data;
     },
-    /** @returns {Promise<{ allowed_hosts: string[] }>} the websites a skill may reach */
+    /** @returns {Promise<{ declared_hosts: string[], allowed_hosts: string[] }>} the websites a skill names and may reach */
     async getSkillNetworkApproval(name) {
       const body = await request('GET', `/api/v1/settings/skills/${encodeURIComponent(name)}/network-approval`);
       if (!isRecord(body) || !isRecord(body.data)) {

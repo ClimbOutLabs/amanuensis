@@ -177,6 +177,19 @@ async function checkJourney({ client, before, journey, reply, pollIntervalMs, se
   }
 }
 
+/** The skill cases need a working sandbox. Without one every skill case would fail for a reason that is not the model's. */
+async function requireSandbox(client) {
+  const capabilities = await client.getCapabilities();
+  const sandbox =
+    typeof capabilities?.sandbox === 'object' && capabilities.sandbox !== null ? capabilities.sandbox : {};
+  if (sandbox.enabled !== true) {
+    const reason = typeof sandbox.reason === 'string' && sandbox.reason !== '' ? ` (${sandbox.reason})` : '';
+    throw new Error(
+      `The eval instance has no working sandbox${reason}, so the skill cases cannot run. Start one with pnpm sandbox:slots, or leave out --skills.`,
+    );
+  }
+}
+
 /** The messages of a case, in order. A case of one message is one step. */
 function stepsOf(testCase) {
   return testCase.steps ?? [{ prompt: testCase.prompt, checks: testCase.checks, journey: testCase.journey }];
@@ -220,6 +233,7 @@ async function runCase({
       model: model.name,
       temperature,
       incognito: testCase.incognito === true,
+      sandbox: usesSkills(steps),
     });
     if (testCase.persona !== undefined) {
       await client.setSessionPersona({ sessionId, personaId: personaIds[testCase.persona] });
@@ -407,6 +421,9 @@ export async function runEvalModels({
   const testedModels = resolved.filter(model => models.includes(model.name));
   const judge = resolved.find(model => model.name === judgeModel);
   const cases = orderedCases({ modelSet, tokenSet, skills });
+  if (skills) {
+    await requireSandbox(client);
+  }
   const rows = [];
   const costs = {};
   const cleanupProblems = [];
