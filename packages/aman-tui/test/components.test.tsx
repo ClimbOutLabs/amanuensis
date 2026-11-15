@@ -146,6 +146,39 @@ describe('ChatList', () => {
     );
     app.unmount();
   });
+
+  it('starts a new chat on a capital N, and leaves on a capital Q', async () => {
+    const onOpen = vi.fn();
+    const onExit = vi.fn();
+    const app = renderApp(
+      <ChatList
+        client={fakeClient()}
+        address={WEB}
+        instanceCount={1}
+        onOpen={onOpen}
+        onSwitchInstance={() => undefined}
+        onExit={onExit}
+      />,
+    );
+    await untilText(app, 'Weekend plans');
+    // A terminal sends the capital when Shift is held, and the footer names
+    // the keys in capitals, so the capital has to work too.
+    await vi.waitFor(
+      () => {
+        app.write('N');
+        expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ id: 'session-new' }));
+      },
+      { timeout: 10000, interval: 50 },
+    );
+    await vi.waitFor(
+      () => {
+        app.write('Q');
+        expect(onExit).toHaveBeenCalled();
+      },
+      { timeout: 10000, interval: 50 },
+    );
+    app.unmount();
+  });
 });
 
 describe('ChatList errors', () => {
@@ -201,6 +234,42 @@ describe('ChatList errors', () => {
     expect(frame).not.toContain('Status code');
     expect(frame).not.toContain('"error"');
     expect(frame).toContain('Press R to try again');
+    app.unmount();
+  });
+
+  it('reloads on a capital R after a plain server error', async () => {
+    const failed = new TrueForgeError({
+      statusCode: 500,
+      body: { error: { message: 'The chats are taking a break.' } },
+    });
+    let calls = 0;
+    const app = renderApp(
+      <ChatList
+        client={fakeClient({
+          listChats: async (): Promise<ChatSummary[]> => {
+            calls += 1;
+            if (calls === 1) {
+              throw failed;
+            }
+            return CHATS;
+          },
+        })}
+        address={WEB}
+        instanceCount={1}
+        onOpen={() => undefined}
+        onSwitchInstance={() => undefined}
+        onExit={() => undefined}
+      />,
+    );
+    await untilText(app, 'Press R to try again');
+    await vi.waitFor(
+      () => {
+        app.write('R');
+        expect(app.text()).toContain('Weekend plans');
+      },
+      { timeout: 10000, interval: 50 },
+    );
+    expect(calls).toBe(2);
     app.unmount();
   });
 });
@@ -420,6 +489,47 @@ describe('ChatView', () => {
     await typeAndSend(app, 'Hello');
     await untilText(app, 'The connection was lost.');
     expect(app.text()).toContain('Press R to retry now');
+    release();
+    await untilText(app, 'Hello Nora');
+    app.unmount();
+  });
+
+  it('retries the rejoin at once on a capital R while the connection is lost', async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const retryConnectionNow = vi.fn();
+    const client = fakeClient({
+      streamMessage: async function* (_sessionId, _text, hooks) {
+        yield turnCreated('e1', [{ type: 'user.message', content: 'Hello' }]);
+        hooks?.onConnectionLost?.();
+        await gate;
+        yield modelMessage('e3', 'Hello Nora');
+        yield turnDone('e4');
+      },
+      retryConnectionNow,
+    });
+    const app = renderApp(
+      <ChatView
+        client={client}
+        sessionId="session-1"
+        title="Weekend plans"
+        speakerName="Mannie"
+        webAddress={WEB}
+        onBack={() => undefined}
+      />,
+    );
+    await untilText(app, '›');
+    await typeAndSend(app, 'Hello');
+    await untilText(app, 'The connection was lost.');
+    await vi.waitFor(
+      () => {
+        app.write('R');
+        expect(retryConnectionNow).toHaveBeenCalled();
+      },
+      { timeout: 10000, interval: 50 },
+    );
     release();
     await untilText(app, 'Hello Nora');
     app.unmount();

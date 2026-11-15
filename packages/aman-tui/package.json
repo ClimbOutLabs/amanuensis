@@ -61,6 +61,7 @@
   "scripts": {
     "build": "tsup && node ../../scripts/chmod-path.mjs dist/cli.js 755",
     "lint": "eslint src test --ext .ts,.tsx",
+    "pack:dry": "pnpm pack --dry-run",
     "prepack": "node ../../scripts/copy-license-files.mjs",
     "pretest": "pnpm --filter @truefoundry/trueforge-sdk build && pnpm --filter @truefoundry/trueforge-chat build",
     "pretypecheck": "pnpm --filter @truefoundry/trueforge-sdk build",

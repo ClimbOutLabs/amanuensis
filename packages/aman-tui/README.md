@@ -2,11 +2,15 @@
 
 Aman in the terminal. Pair once with a one-time code, then read and write chats from the command line, with replies streaming in as they are written.
 
+## Install
+
+The app needs Node 22.14 or newer. Run it without installing it with `npx @truefoundry/aman-tui`, or install it with `npm install -g @truefoundry/aman-tui` to put the `aman-tui` command on your path.
+
 ## Pairing
 
 Run `aman-tui login <address>` with the address Aman is opened at. The terminal starts a pairing, shows a one-time code and a link in large clear text, and waits while you confirm the code in the web app. The code works once and lasts five minutes. When you confirm, the terminal receives its own key for that instance.
 
-The key lives in the system keychain where the platform offers one this app can reach (the macOS keychain, or the Linux secret service through `secret-tool`), and in an owner-only file in the app's config folder where it does not. The key is never printed and never logged. Each paired instance keeps its own key and device name. Pair another instance with `aman-tui login` again, list them with `aman-tui instances`, and switch the active one with `aman-tui use <address>` or inside the app.
+The key lives in the system keychain where the platform offers one this app can reach (the macOS keychain, or the Linux secret service through `secret-tool`), and in an owner-only file in the app's config folder where it does not. The config folder is `.config/aman-tui` in the home folder on a Mac and on Linux, and the `aman-tui` folder inside the AppData roaming folder on Windows, where the key file rests on that folder being private to your account. On a Mac there is one accepted limit: the keychain tool takes the key as part of its command, so another program running under your account that lists running program commands could see it while it is being saved, which takes less than a second. The key is never printed and never logged. Each paired instance keeps its own key and device name. Pair another instance with `aman-tui login` again, list them with `aman-tui instances`, and switch the active one with `aman-tui use <address>` or inside the app.
 
 ## Chatting
 

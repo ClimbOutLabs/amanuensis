@@ -266,7 +266,9 @@ export function ChatView({
       }
       return;
     }
-    if (connectionLost && inputChar === 'r') {
+    if (connectionLost && (inputChar === 'r' || inputChar === 'R')) {
+      // The line on screen says R, and a terminal sends the capital when
+      // Shift is held, so both cases retry.
       client.retryConnectionNow();
       return;
     }
