@@ -29,6 +29,14 @@ There are two versions of the command. Which one you have depends on how you ins
 
 The rest of this page, up to the Windows section, is for Mac, Linux and WSL.
 
+## See your addresses and settings
+
+```
+aman status
+```
+
+It shows each instance: every address it answers at, the email you sign in with, the model, running code, data and backups. It also shows how to set up a new phone or computer, with the trust page link, the fingerprint and a code to scan. It changes nothing. The end of an install or an upgrade shows only the one address to open and anything that needs you.
+
 ## Check that everything works
 
 ```bash

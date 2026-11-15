@@ -257,7 +257,7 @@ describe('usage', () => {
 
   it('needs the doctor command and no longer takes --home (the state directory is AMANUENSIS_HOME)', () => {
     make();
-    for (const argv of [[], ['--json'], ['status'], ['doctor', '--home', '/tmp/elsewhere']]) {
+    for (const argv of [[], ['--json'], ['bogus'], ['doctor', '--home', '/tmp/elsewhere']]) {
       const result = world.shim(argv);
       assert.equal(result.code, 2, argv.join(' '));
       assert.equal(result.stdout, '');
@@ -1836,6 +1836,14 @@ describe('aman backup and aman upgrade', () => {
     assert.equal(world.shim(['upgrade', '--check']).code, 0);
     assert.ok(world.calls().includes(`install.sh --home ${world.home} backup main`));
     assert.ok(world.calls().includes(`install.sh --home ${world.home} upgrade --check`));
+  });
+
+  it('run aman status through the installer', () => {
+    make();
+    const repo = world.sandbox();
+    world.installerStub(repo);
+    assert.equal(world.shim(['status']).code, 0);
+    assert.ok(world.calls().includes(`install.sh --home ${world.home} status`));
   });
 
   it('run aman restore through the installer with the arguments given', () => {
