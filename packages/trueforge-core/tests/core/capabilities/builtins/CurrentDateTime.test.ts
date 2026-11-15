@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import {
   CurrentDateTime,
   GET_CURRENT_DATETIME_TOOL_NAME,
@@ -5,15 +6,16 @@ import {
 import { isCallToolResponseResult } from '../../../../src/core/mcp/IMCPServer';
 import { NOOP_AGENT_TRACING } from '../../../../src/core/tracing/NoopAgentTracing';
 
-interface DateTimePayload {
-  date: string;
-  weekday: string;
-  time: string;
-  zone: string;
-  utcOffset: string;
-  zoneIsThePersons: boolean;
-  unixEpochMS: number;
-}
+const DateTimePayloadSchema = z.object({
+  date: z.string(),
+  weekday: z.string(),
+  time: z.string(),
+  zone: z.string(),
+  utcOffset: z.string(),
+  zoneIsThePersons: z.boolean(),
+  unixEpochMS: z.number(),
+});
+type DateTimePayload = z.infer<typeof DateTimePayloadSchema>;
 
 async function answerText(tool: CurrentDateTime): Promise<string> {
   const response = await tool.callTool({ name: GET_CURRENT_DATETIME_TOOL_NAME, arguments: {} });
@@ -28,7 +30,7 @@ async function answerText(tool: CurrentDateTime): Promise<string> {
 }
 
 async function callGetCurrentDateTime(tool: CurrentDateTime): Promise<DateTimePayload> {
-  return JSON.parse(await answerText(tool)) as DateTimePayload;
+  return DateTimePayloadSchema.parse(JSON.parse(await answerText(tool)));
 }
 
 describe('CurrentDateTime', () => {
