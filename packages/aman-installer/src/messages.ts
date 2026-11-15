@@ -1001,6 +1001,196 @@ export const INSTALL_DRY_RUN_LINES: readonly string[] = [
   'It opens a short getting started page in your browser at the end.',
 ];
 
+// The setup window's words. The window draws only what it is sent, so
+// every word it shows is here.
+export const WINDOW_TITLE = 'Aman Setup';
+
+export const WINDOW_BRAND = 'Aman';
+
+export const WINDOW_STEPS: readonly string[] = [
+  'Welcome',
+  'Check this computer',
+  'About you',
+  'Options',
+  'Review',
+  'Install',
+  'Done',
+];
+
+export const WINDOW_NEXT = 'Next';
+export const WINDOW_BACK = 'Back';
+export const WINDOW_INSTALL = 'Install';
+export const WINDOW_TRY_AGAIN = 'Try again';
+export const WINDOW_CLOSE = 'Close';
+export const WINDOW_DETAILS = 'Show details';
+
+export const WINDOW_CLOSE_QUESTION =
+  'Aman is still being installed. If you close this window, the install carries on in the other window. Close it?';
+
+export const WINDOW_WELCOME_TITLE = 'Welcome to Aman';
+
+export const WINDOW_WELCOME_LINES: readonly string[] = [
+  'This sets up Aman on this computer. Aman is your own assistant, and everything it keeps stays on this computer.',
+  'First it checks this computer and installs Docker Desktop if it is missing. Docker Desktop is a free program Aman runs inside.',
+  'Then it asks for your email and a password, and installs Aman. The first install builds Aman on this computer, which can take up to an hour.',
+  'Keep the computer on and connected to the internet until it is done.',
+];
+
+export const WINDOW_CHECK_TITLE = 'Checking this computer';
+
+export const WINDOW_CHECK_LINES: readonly string[] = [
+  'If Docker Desktop is missing, it is downloaded and installed now. Windows may ask you to allow it, and Docker Desktop may ask you to accept its terms.',
+];
+
+export const WINDOW_CHECK_READY_LINE = 'This computer is ready for Aman.';
+
+export const WINDOW_CHECK_DOCKER_ROW = 'Docker Desktop is installed and running';
+export const WINDOW_CHECK_MEMORY_ROW = 'Docker Desktop has what Aman needs';
+
+export const WINDOW_ABOUT_TITLE = 'About you';
+
+export const WINDOW_ABOUT_LINES: readonly string[] = ['You sign in to Aman with this email and password.'];
+
+export const WINDOW_EMAIL_LABEL = 'Your email';
+export const WINDOW_PASSWORD_LABEL = 'Choose a password';
+export const WINDOW_AGAIN_LABEL = 'Type the password again';
+
+// The password rule, one line for each part, in the order the window
+// ticks them off as the person types.
+export const WINDOW_RULE_LABELS: readonly string[] = [
+  'At least 8 characters',
+  'A number',
+  'A symbol, like @ # $ %',
+  'The two passwords match',
+];
+
+export const WINDOW_KEEP_LINE =
+  'Keep this password somewhere safe. Aman does not show it again, and nobody else can look it up for you.';
+
+export const WINDOW_EMAIL_PROBLEM = 'Type your email address, like name@example.com.';
+
+export const WINDOW_OPTIONS_TITLE = 'Use Aman on your phone?';
+
+export const WINDOW_OPTIONS_LINES: readonly string[] = [
+  'Aman can also be opened from your phone and other devices on your home Wi-Fi.',
+  'If you say yes, Windows asks you once to allow it. You can change this later from the Start menu.',
+];
+
+export const WINDOW_PHONE_YES = 'Yes, also use Aman on my phone at home';
+export const WINDOW_PHONE_NO = 'No, only on this computer';
+
+export const WINDOW_REVIEW_TITLE = 'Ready to install';
+
+export const WINDOW_REVIEW_LINES: readonly string[] = [
+  'This is what happens when you choose Install.',
+  'Windows asks you to allow one or two of these steps. Each one is named below.',
+];
+
+export function windowReviewEmailRow(email: string): string {
+  return `You sign in as ${printable(email)}`;
+}
+
+export const WINDOW_REVIEW_ROWS: readonly string[] = [
+  'The newest Aman is downloaded and checked',
+  'Aman is built and set up on this computer, with a backup every day',
+  'Aman is added to the Start menu',
+  'Aman opens in your browser. Windows asks you to allow its certificate, so the browser trusts it',
+];
+
+export const WINDOW_REVIEW_PHONE_ROW = 'Aman is opened to your home Wi-Fi. Windows asks you to allow a firewall change';
+
+export const WINDOW_INSTALL_TITLE = 'Installing Aman';
+
+export const WINDOW_INSTALL_LINES: readonly string[] = [
+  'This can take up to an hour the first time. You can use the computer for other things meanwhile.',
+];
+
+export const WINDOW_STAGE_ROWS: Readonly<Record<string, string>> = {
+  download: 'Download and check the newest Aman',
+  install: 'Build and set up Aman',
+  shortcuts: 'Add Aman to the Start menu',
+  update: 'Check for a newer setup program',
+  private: 'Make the Aman folder private to you',
+  open: 'Open Aman in your browser',
+  phone: 'Open Aman to your home Wi-Fi',
+};
+
+export const WINDOW_DONE_TITLE = 'Aman is installed';
+
+export const WINDOW_DONE_LINES: readonly string[] = [
+  'Aman is open in your browser, with a short getting started page beside it.',
+  'To open Aman again later, choose Aman from the Start menu.',
+];
+
+export const WINDOW_STOPPED_TITLE = 'Setup stopped';
+
+export const WINDOW_STOPPED_LINES: readonly string[] = [
+  'Aman is not fully set up yet. What went wrong, and what to do next, is below.',
+  'After that, open Aman Setup again. It carries on from what is already done.',
+];
+
+export const WINDOW_OPEN_LINE = 'Aman Setup is open in its own window. Leave this window open until setup is done.';
+
+export const WINDOW_FALLBACK_LINE =
+  'The setup window could not be opened on this computer, so setup asks its questions here.';
+
+export const WINDOW_CLOSED_LINE = 'The setup window was closed. The install carries on here.';
+
+export const WINDOW_CLOSED_EARLY: Problem = {
+  happened: 'The setup window was closed, so nothing was installed.',
+  fix: 'Open Aman Setup again when you are ready.',
+};
+
+export function windowMessageLines(): string[] {
+  return [
+    WINDOW_TITLE,
+    WINDOW_BRAND,
+    ...WINDOW_STEPS,
+    WINDOW_NEXT,
+    WINDOW_BACK,
+    WINDOW_INSTALL,
+    WINDOW_TRY_AGAIN,
+    WINDOW_CLOSE,
+    WINDOW_DETAILS,
+    WINDOW_CLOSE_QUESTION,
+    WINDOW_WELCOME_TITLE,
+    ...WINDOW_WELCOME_LINES,
+    WINDOW_CHECK_TITLE,
+    ...WINDOW_CHECK_LINES,
+    WINDOW_CHECK_READY_LINE,
+    WINDOW_CHECK_DOCKER_ROW,
+    WINDOW_CHECK_MEMORY_ROW,
+    WINDOW_ABOUT_TITLE,
+    ...WINDOW_ABOUT_LINES,
+    WINDOW_EMAIL_LABEL,
+    WINDOW_PASSWORD_LABEL,
+    WINDOW_AGAIN_LABEL,
+    ...WINDOW_RULE_LABELS,
+    WINDOW_KEEP_LINE,
+    WINDOW_EMAIL_PROBLEM,
+    WINDOW_OPTIONS_TITLE,
+    ...WINDOW_OPTIONS_LINES,
+    WINDOW_PHONE_YES,
+    WINDOW_PHONE_NO,
+    WINDOW_REVIEW_TITLE,
+    ...WINDOW_REVIEW_LINES,
+    windowReviewEmailRow('friend@example.com'),
+    ...WINDOW_REVIEW_ROWS,
+    WINDOW_REVIEW_PHONE_ROW,
+    WINDOW_INSTALL_TITLE,
+    ...WINDOW_INSTALL_LINES,
+    ...Object.values(WINDOW_STAGE_ROWS),
+    WINDOW_DONE_TITLE,
+    ...WINDOW_DONE_LINES,
+    WINDOW_STOPPED_TITLE,
+    ...WINDOW_STOPPED_LINES,
+    WINDOW_OPEN_LINE,
+    WINDOW_FALLBACK_LINE,
+    WINDOW_CLOSED_LINE,
+    problemText(WINDOW_CLOSED_EARLY),
+  ];
+}
+
 export const UNINSTALL_NOT_WINDOWS: Problem = {
   happened: 'aman uninstall removes an Aman set up with the Aman Setup download, and this is not a Windows computer.',
   fix: 'Run installer/install.sh instance remove with the name of each instance and --purge-data instead.',
@@ -1271,6 +1461,7 @@ export function allMessageLines(): string[] {
   lines.push(INSTALL_YES_OR_NO_LINE);
   lines.push(INSTALL_DONE_LINE);
   lines.push(...INSTALL_DRY_RUN_LINES);
+  lines.push(...windowMessageLines());
   lines.push(PRESS_ENTER_TO_CLOSE_LINE);
   lines.push(problemText(UNINSTALL_NOT_WINDOWS));
   lines.push(problemText(UNINSTALL_DOCKER_NOT_ANSWERING));

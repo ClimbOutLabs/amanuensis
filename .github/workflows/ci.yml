@@ -585,6 +585,32 @@ jobs:
         if: runner.os == 'Windows'
         run: packages/aman-installer/dist/aman.exe --version
 
+      # The setup window is drawn by Windows PowerShell, so only a Windows machine can open it. PowerShell's own
+      # records of what it runs are turned on first, so the last step can prove nothing typed ends up in them.
+      - name: Turn on PowerShell transcripts and script logging
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP 'ps-transcripts'
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          $base = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell'
+          New-Item -Force "$base\Transcription" | Out-Null
+          Set-ItemProperty "$base\Transcription" EnableTranscripting 1 -Type DWord
+          Set-ItemProperty "$base\Transcription" EnableInvocationHeader 1 -Type DWord
+          Set-ItemProperty "$base\Transcription" OutputDirectory $dir
+          New-Item -Force "$base\ScriptBlockLogging" | Out-Null
+          Set-ItemProperty "$base\ScriptBlockLogging" EnableScriptBlockLogging 1 -Type DWord
+          "AMAN_TRANSCRIPTS=$dir" >> $env:GITHUB_ENV
+
+      - name: Open the setup window and walk through it
+        if: runner.os == 'Windows'
+        run: pnpm test:aman-installer:window
+
+      - name: Check that nothing typed reached a transcript or the script log
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: packages/aman-installer/tests/window/checkRecords.ps1 -Dir $env:AMAN_TRANSCRIPTS
+
       # Start it the way a person does, as Aman-Setup with no command, and check that it ends
       # on a sentence it means to say instead of crashing or closing with nothing printed.
       - name: Start it as Aman Setup

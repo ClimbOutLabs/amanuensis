@@ -38,7 +38,12 @@ If that page lists no release, Aman Setup is not out yet. Check again later.
 
 ## Step 2: run it
 
-Double-click `Aman-Setup.exe`. A window opens where Aman Setup shows what it is doing and asks its questions.
+Double-click `Aman-Setup.exe`. Two windows open:
+
+- The **Aman Setup** window, with its steps listed down the left side. This is the one you use.
+- A plain black window behind it. Leave it open. It shows the same progress as text, and setup ends when it closes.
+
+Choose **Next** on the Welcome screen.
 
 !!! note "Windows says \"Windows protected your PC\""
 
@@ -55,34 +60,45 @@ If not, Aman Setup downloads it from Docker, checks that the download is signed 
 > Docker Desktop needs your computer to restart before it can run. Restart your computer, and Aman Setup will open again by itself and carry on.
 
 1. Restart the computer.
-2. Sign back in. Aman Setup opens again by itself and says `Continuing where it left off.`
+2. Sign back in. Aman Setup opens again by itself, on its **Check this computer** screen.
 3. If Docker Desktop shows its own welcome or terms window the first time it starts, accept it so Docker can finish starting.
 
 If Aman Setup can't open again by itself, it says so before the restart. In that case, open the Aman Setup download again from where you saved it, usually your Downloads folder.
 
 ## Step 4: answer three questions
 
-Aman Setup checks that Docker has enough memory. Then it asks three questions, one at a time:
+The **Check this computer** screen ticks off Docker Desktop and its memory. When it says the computer is ready, choose **Next**. If something is wrong, the screen says what to do, and **Try again** checks once more.
 
-1. `Your email, used to sign in:` This is only your sign-in name. Nothing is sent to it.
-2. `Choose a password with at least 8 characters, a number and a symbol, like @ # $ % (not shown):` If the password falls short, it says what is missing and asks again. Then it asks `Type it again:`. Nothing shows while you type.
-3. `Also use Aman from your phone and other devices on your home Wi-Fi? (yes or no):` Answer `yes` or `no`. You can change this later.
+Then Aman Setup asks three things:
+
+1. **Your email.** This is only your sign-in name. Nothing is sent to it.
+2. **A password.** It needs at least 8 characters, a number and a symbol, like `@ # $ %`. Each part of the rule gets a tick as you type, and so does typing the same password a second time. Keep the password somewhere safe: Aman does not show it again.
+3. **Use Aman on your phone?** Choose yes or no. You can change this later.
+
+The **Review** screen lists what will happen, and names the steps where Windows will ask you to allow something. Choose **Install**.
 
 Nothing else is asked. Aman Setup then downloads the newest Aman and builds it on your computer, with daily backups and a secure (https) address.
 
-This is the long part. Leave the window open. It keeps the computer awake until it is done.
+This is the long part. The **Install** screen ticks off each step, and **Show details** shows the installer's own lines. Leave both windows open. Setup keeps the computer awake until it is done.
 
 Near the end, Windows asks two things in its own boxes. Choose **Yes** both times:
 
 - Whether to trust Aman's certificate, so your browser opens Aman at its secure address without a warning.
-- If you answered yes to the phone question, whether to let devices on your home network through the firewall. Aman Setup then prints the address and a code to scan with your phone.
+- If you answered yes to the phone question, whether to let devices on your home network through the firewall. The black window then shows the address and a code to scan with your phone.
+
+??? note "The setup window did not open"
+
+    On a few computers, mostly ones managed by an employer, Windows does not let Aman Setup open its window. Aman Setup then says so in the black window and asks the same three questions there, one at a time. Nothing shows while you type the password. The install is the same.
+
+    To use the black window on purpose, open PowerShell in the folder that holds the download and run `.\Aman-Setup.exe install --console`.
 
 ## Step 5: open Aman
 
-When it finishes, Aman opens in your browser, and a short **Getting started** page opens beside it. Aman Setup says `Aman is installed, and the getting started page is open in your browser.`
+When it finishes, Aman opens in your browser, and a short **Getting started** page opens beside it. The Aman Setup window shows **Aman is installed**.
 
-1. Sign in with the email and password from step 4.
-2. Read the Aman Setup window. When it says `Press Enter to close this window.`, press ++enter++.
+1. Choose **Close** on the Done screen.
+2. Sign in with the email and password from step 4.
+3. When the black window says `Press Enter to close this window.`, press ++enter++.
 
 Your Start menu now has **Aman**, **Check Aman**, **Update Aman**, **Backups** and **Remove Aman**. It also has **Use Aman on my phone** if you answered yes to the phone question.
 

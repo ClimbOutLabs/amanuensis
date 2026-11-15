@@ -20,6 +20,12 @@ export interface InstallerConfig {
   // reads it, for the folders the aman command and its shortcuts live
   // in. Elsewhere it is the folder Windows would name, unused.
   localAppDataDir: string;
+  // The Windows folder, as Windows names it (SystemRoot). Only the
+  // setup window reads it, to start Windows PowerShell from inside it.
+  systemRoot: string | undefined;
+  // What the setup window's own process may be given of the
+  // environment; the window picks the names Windows itself sets.
+  windowEnv: Readonly<Record<string, string | undefined>>;
 }
 
 // The one place the installer's environment settings are read. AMANUENSIS_HOME
@@ -44,5 +50,7 @@ export function installerConfig(options: {
     appService: appService !== undefined && appService !== '' ? appService : 'app',
     localAppDataDir:
       localAppData !== undefined && localAppData !== '' ? localAppData : join(options.homeDir, 'AppData', 'Local'),
+    systemRoot: options.env['SystemRoot'],
+    windowEnv: options.env,
   };
 }

@@ -1,0 +1,7 @@
+-NoProfile
+-NoLogo
+-NonInteractive
+-InputFormat
+None
+-Command
+$ErrorActionPreference='Stop';$PSModuleAutoLoadingPreference='None';$i=[Console]::OpenStandardInput();$h=[byte[]]::new(4);$n=0;while($n -lt 4){$r=$i.Read($h,$n,4-$n);if($r -le 0){exit 3};$n+=$r};$l=([int]$h[0] -shl 24) -bor ([int]$h[1] -shl 16) -bor ([int]$h[2] -shl 8) -bor [int]$h[3];if($l -le 0 -or $l -gt 262144){exit 3};$b=[byte[]]::new($l);$n=0;while($n -lt $l){$r=$i.Read($b,$n,$l-$n);if($r -le 0){exit 3};$n+=$r};$null=& ([ScriptBlock]::Create([Text.Encoding]::UTF8.GetString($b))) $i

@@ -40,6 +40,9 @@ import {
   INSTALL_YES_OR_NO_LINE,
   installPasswordProblem,
   problemText,
+  WINDOW_EMAIL_PROBLEM,
+  WINDOW_FALLBACK_LINE,
+  WINDOW_OPEN_LINE,
 } from '../messages.ts';
 import type { FetchBytes } from '../release/download.ts';
 import { fetchLatestManifest, fetchReleaseFile, sourceArchiveName } from '../release/download.ts';
@@ -268,6 +271,22 @@ export interface InstallAnswers {
   email: string;
   password: Uint8Array;
   phone: boolean;
+}
+
+// How a first install shown in the setup window ended: it ran to an
+// end with an exit code, it found Aman already installed, or the
+// window could not be used and the questions go to the terminal.
+export type WindowOutcome = { kind: 'finished'; code: number } | { kind: 'installed' } | { kind: 'fallback' };
+
+// The email as the window takes it: something before and after one @,
+// no spaces or control characters, and no leading dash, because the
+// installer is handed it as one word after --email.
+export function installEmailProblem(email: string): string | null {
+  const trimmed = email.trim();
+  if (trimmed.length > 254 || trimmed.startsWith('-') || !/^[^\s\p{Cc}@]+@[^\s\p{Cc}@]+$/u.test(trimmed)) {
+    return WINDOW_EMAIL_PROBLEM;
+  }
+  return null;
 }
 
 function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
@@ -614,7 +633,16 @@ async function finishInstall(deps: InstallDeps, options: { phone: boolean; page:
 // run in their order, and a getting started page opens at the end.
 // A run that finds Aman already installed finishes those same stages
 // instead of asking anything.
-export async function runInstall(deps: InstallDeps, options: { dryRun: boolean }): Promise<number> {
+export async function runInstall(
+  deps: InstallDeps,
+  options: {
+    dryRun: boolean;
+    // Shows the first install in the setup window. Answers null when
+    // no window can be opened on this computer. Left out, the
+    // questions are asked on the terminal.
+    window?: (deps: InstallDeps) => Promise<WindowOutcome | null>;
+  },
+): Promise<number> {
   const { host, print } = deps;
   if (host.kind !== 'windows') {
     print(problemText(INSTALL_NOT_WINDOWS));
@@ -625,6 +653,17 @@ export async function runInstall(deps: InstallDeps, options: { dryRun: boolean }
       print(line);
     }
     return 0;
+  }
+  if (options.window !== undefined) {
+    print(WINDOW_OPEN_LINE);
+    const outcome = await options.window(deps);
+    if (outcome !== null && outcome.kind === 'finished') {
+      return outcome.code;
+    }
+    if (outcome !== null && outcome.kind === 'installed') {
+      return finishInstall(deps, { phone: false, page: false });
+    }
+    print(WINDOW_FALLBACK_LINE);
   }
   const prepared = await prepareInstall(deps);
   if (prepared === 'failed') {
