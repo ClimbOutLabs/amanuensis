@@ -37,6 +37,7 @@ test_other_devices_come_in_through_the_lan_service() {
   assert_contains "$lan" "- '192.168.1.20:8443:8443'"
   assert_contains "$lan" "- '192.168.1.20:8791:8081'"
   assert_contains "$lan" "PROXY TCP4"
+  assert_contains "$lan" "n.connect(q,'loopback')" "the lan service passes visitors to the service that holds the front end"
   assert_not_contains "$file" "100.101.102.103"
   assert_eq "$(reg_value main listen_addresses)" "192.168.1.20"
   sandbox_drop

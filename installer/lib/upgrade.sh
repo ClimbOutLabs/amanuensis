@@ -235,6 +235,18 @@ upgrade_move_to_https() { # name
   UPGRADE_MOVED="$UPGRADE_MOVED $1"
 }
 
+# Reads the addresses of every instance open on the network again, so each one answers only at the addresses this
+# version listens on. A list an older version wrote is never carried over: an address it found by itself that this
+# version leaves out stops working, and the owner adds it back with aman address add.
+upgrade_refresh_addresses() {
+  local name
+  for name in $(reg_names); do
+    if ! upgrade_moved "$name" && [ -n "$(reg_get "$name" origins)" ]; then
+      instance_apply_addresses "$name" refresh "$REL_APP_TAG"
+    fi
+  done
+}
+
 # Whether this upgrade moved the instance to https.
 upgrade_moved() { # name
   case " $UPGRADE_MOVED " in *" $1 "*) return 0 ;; esac
@@ -349,6 +361,7 @@ cmd_upgrade() {
   for name in $(upgrade_http_instances); do
     upgrade_move_to_https "$name"
   done
+  upgrade_refresh_addresses
   ui_phase "Restarting with the new version" 3 4
   upgrade_switch
   upgrade_old_account_notices

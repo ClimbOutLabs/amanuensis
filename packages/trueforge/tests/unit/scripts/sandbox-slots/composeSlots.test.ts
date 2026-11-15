@@ -129,6 +129,7 @@ function renderInstanceTemplate({ calendar }: { calendar: boolean }): unknown {
     'LAN_PORTS=',
     'LAN_FORWARDS=',
     'LAN_PROXY=0',
+    'TLS_CONFIG=',
   ];
   // `die` lives in a library that needs the whole installer; the renderer only needs it to stop with a message.
   const script = 'die() { printf "%s\\n" "$*" >&2; exit 1; }; . "$1"; shift; render_template "$@"';

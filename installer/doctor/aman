@@ -1074,7 +1074,7 @@ check_instance() {
 # it there; a new address is not on the list until the instance is refreshed, and sign-in is refused there. Nothing is
 # recorded for an instance that is open on this computer only.
 check_instance_network() {
-  local name=$1 origins port host missing='' count expected tls_port='' gone refused
+  local name=$1 origins port host missing='' stale='' count expected tls_port='' gone refused
   origins=$(registry_value "$name" origins)
   [ -n "$origins" ] || return 0
   gone=$(network_gone_addresses "$(registry_value "$name" listen_addresses)" | tr '\n' ' ')
@@ -1095,6 +1095,18 @@ check_instance_network() {
   done < <(printf '%s\n' "$expected" | tr ',' '\n')
   if [ -n "$missing" ]; then
     record "$name" network warn "This computer has addresses Aman is not set up for:${missing}. Until they are added, every page opened at them is refused." \
+      "Run aman doctor network --fix"
+    return
+  fi
+  # An address an older version found by itself that this one leaves out, such as a VPN address, is read away again.
+  while IFS= read -r host; do
+    case ",${expected}," in
+      *",${host},"*) ;;
+      *) stale="${stale} $(origin_host "$host")" ;;
+    esac
+  done < <(printf '%s\n' "$origins" | tr ',' '\n')
+  if [ -n "$stale" ]; then
+    record "$name" network warn "Aman is still set up for addresses it would not use today:${stale}. Use aman address add for any you want to keep." \
       "Run aman doctor network --fix"
     return
   fi

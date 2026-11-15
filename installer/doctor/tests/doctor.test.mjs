@@ -1646,6 +1646,18 @@ describe('network address check', () => {
     assert.equal(find(world.json().doc.instances.main, 'network').state, 'ok');
   });
 
+  it('names an address an older version listed by itself that this one would not use, such as a VPN address', () => {
+    make();
+    world.network('main', {
+      origins: 'http://127.0.0.1:8791,http://localhost:8791,http://192.168.1.20:8791,http://100.101.102.103:8791',
+      addresses: ['127.0.0.1', '192.168.1.20', 'tailscale0:100.101.102.103'],
+    });
+    const check = find(world.json().doc.instances.main, 'network');
+    assert.equal(check.state, 'warn');
+    assert.match(check.detail, /would not use today: 100\.101\.102\.103/);
+    assert.match(check.fix, /aman doctor network --fix/);
+  });
+
   it('does not offer an address on a container or VPN link', () => {
     make();
     world.network('main', {

@@ -44,7 +44,7 @@ services:
 @@IF_LAN@@      - node
 @@IF_LAN@@      - --input-type=module
 @@IF_LAN@@      - -e
-@@IF_LAN@@      - "import n from 'node:net';const v=a=>(a||'').replace(/^::ffff:/,'');const r=(p,q)=>n.createServer(c=>{const u=n.connect(q,'aman-front');const x=()=>{c.destroy();u.destroy()};c.on('error',x);u.on('error',x);const s=v(c.remoteAddress),d=v(c.localAddress);if(@@LAN_PROXY@@)u.write(n.isIPv4(s)&&n.isIPv4(d)?'PROXY TCP4 '+s+' '+d+' '+c.remotePort+' '+c.localPort+'\\r\\n':'PROXY UNKNOWN\\r\\n');c.pipe(u).pipe(c)}).listen(p);@@LAN_FORWARDS@@"
+@@IF_LAN@@      - "import n from 'node:net';const v=a=>(a||'').replace(/^::ffff:/,'');const r=(p,q)=>n.createServer(c=>{const u=n.connect(q,'loopback');const x=()=>{c.destroy();u.destroy()};c.on('error',x);u.on('error',x);const s=v(c.remoteAddress),d=v(c.localAddress);if(@@LAN_PROXY@@)u.write(n.isIPv4(s)&&n.isIPv4(d)?'PROXY TCP4 '+s+' '+d+' '+c.remotePort+' '+c.localPort+'\\r\\n':'PROXY UNKNOWN\\r\\n');c.pipe(u).pipe(c)}).listen(p);@@LAN_FORWARDS@@"
 @@IF_LAN@@    ports:
 @@LAN_PORTS@@
 @@IF_LAN@@    networks:
@@ -215,6 +215,8 @@ services:
 @@IF_TLS@@    network_mode: 'service:loopback'
 @@IF_TLS@@    user: '@@TLS_USER@@'
 @@IF_TLS@@    command: ['caddy', 'run', '--config', '/etc/caddy/Caddyfile']
+@@IF_TLS@@    labels:
+@@IF_TLS@@      aman.tls-config: '@@TLS_CONFIG@@'
 @@IF_TLS@@    volumes:
 @@IF_TLS@@      - ./tls.Caddyfile:/etc/caddy/Caddyfile:ro
 @@IF_TLS_HOST@@      - @@TLS_LEAF_DIR@@:/certs:ro

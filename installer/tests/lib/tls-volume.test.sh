@@ -26,7 +26,7 @@ render_compose() { # if_tls_host if_tls_volume
       "IF_TLS=1" "IF_TLS_HOST=$1" "IF_TLS_VOLUME=$2" "CADDY_IMAGE=caddy:test" "TLS_USER=1000:1000" \
       "TLS_LEAF_DIR=/home/person/.amanuensis/tls/leaf/main" \
       "TLS_TRUST_DIR=/home/person/.amanuensis/tls/trust/main" "TLS_HTTP_IN=8081" \
-      "IF_LAN=0" "LAN_PORTS=" "LAN_FORWARDS=" "LAN_PROXY=0"
+      "IF_LAN=0" "LAN_PORTS=" "LAN_FORWARDS=" "LAN_PROXY=0" "TLS_CONFIG=test"
   )
 }
 
