@@ -68,8 +68,9 @@ jobs:
             for (const t of r.turns) console.log('turn', t.id, t.status, JSON.stringify(t.required_actions ?? []).slice(0, 1500));
             for (const e of r.events) {
               const ev = e.event;
-              if (ev.type === 'model.message' && ev.tool_calls) for (const c of ev.tool_calls) console.log('call', e.turn_id, c.id, c.function?.name, JSON.stringify(c.tool_info ?? {}).slice(0, 1200));
+              if (ev.type === 'model.message' && ev.tool_calls) for (const c of ev.tool_calls) console.log('call', e.turn_id, c.id, c.function?.name, JSON.stringify(c.tool_info ?? {}).replace(/\\"description\\":\\"[^\\"]*\\",/, '').slice(0, 2500));
               else if (String(ev.type).startsWith('tool.response')) console.log('result', e.turn_id, ev.tool_call_id, String(ev.content).slice(0, 400));
+              else if (ev.type === 'user.message' || ev.type === 'user.tool_approval' || String(ev.type).includes('error')) console.log('event', e.turn_id, JSON.stringify(ev).slice(0, 1500));
               else if (ev.type === 'user.tool_approval' || String(ev.type).includes('approval')) console.log('approval', e.turn_id, JSON.stringify(ev).slice(0, 600));
             }
           }"

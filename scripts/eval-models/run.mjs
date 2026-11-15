@@ -320,7 +320,7 @@ async function runCase({
           checks.push({ check: `${label}what the chat left behind could be read`, pass: false, detail });
         }
       }
-      await mountAddedSkill({ client, sessionId, model, temperature, skills });
+      // Temporary: leave the skill off, to reproduce the write_file error.
     }
   } catch (caught) {
     if (isRunStopping(caught)) {
