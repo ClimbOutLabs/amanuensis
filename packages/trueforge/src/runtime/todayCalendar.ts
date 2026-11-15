@@ -248,6 +248,7 @@ const CaldavTimeValueSchema = z.object({
 });
 
 const CaldavListEventsResultSchema = z.object({
+  isError: z.boolean().optional(),
   structuredContent: z
     .object({
       events: z.array(
@@ -263,6 +264,17 @@ const CaldavListEventsResultSchema = z.object({
 });
 
 type CaldavTimeValue = z.infer<typeof CaldavTimeValueSchema>;
+
+const CaldavErrorTextSchema = z.object({
+  content: z.array(z.looseObject({ type: z.string(), text: z.string().optional() })),
+});
+
+/** The connector's own words for a refused read, for the log; its error text names no event. */
+function caldavErrorText(result: unknown): string {
+  const parsed = CaldavErrorTextSchema.safeParse(result);
+  const text = parsed.success ? parsed.data.content.find(part => part.type === 'text')?.text : undefined;
+  return text === undefined ? 'no reason given' : text.slice(0, 300);
+}
 
 /** The instant a CalDAV time value names: its own offset when it carries one, else its zone, else the person's. */
 function caldavInstant(time: CaldavTimeValue, personZone: string): Date | null {
@@ -329,9 +341,14 @@ function caldavDayEvent(
   };
 }
 
+/** A local midnight as wall-clock time with no offset, the form the connector reads in the zone it is given. */
+function wallMidnight(day: CalendarDay): string {
+  return `${isoDay(day)}T00:00:00`;
+}
+
 async function fetchCaldavEvents(
   deps: TodayCalendarDeps,
-  input: { account: CalendarAccountRef; window: { start: Date; end: Date }; zone: string },
+  input: { account: CalendarAccountRef; days: { first: CalendarDay; end: CalendarDay }; zone: string },
 ): Promise<DayEvent[]> {
   const record = await deps.mcpServerStore.getServer({ tenant_id: deps.tenant_id, name: CALDAV_SERVER_NAME });
   if (record?.manifest.type !== 'remote') {
@@ -351,8 +368,10 @@ async function fetchCaldavEvents(
   const response = await remote.callTool({
     name: 'list_events',
     arguments: {
-      from: input.window.start.toISOString(),
-      to: input.window.end.toISOString(),
+      // Wall-clock bounds read in the zone: the connector refuses a bound that carries its own
+      // offset beside a zone, and the zone is still needed to place events that name none.
+      from: wallMidnight(input.days.first),
+      to: wallMidnight(input.days.end),
       timezone: input.zone,
       limit: EVENT_CAP,
       // One read per account, so each event keeps the account it came from.
@@ -360,11 +379,13 @@ async function fetchCaldavEvents(
     },
   });
   if (!('result' in response)) {
-    return [];
+    throw new Error('The calendar connector asked for a sign-in the rail cannot give.');
   }
+  // A refusal or an answer without events is a failed read, never an empty day: the day would
+  // otherwise read "Nothing on the calendar" while the connector was saying why it read nothing.
   const parsed = CaldavListEventsResultSchema.safeParse(response.result);
-  if (!parsed.success || parsed.data.structuredContent === undefined) {
-    return [];
+  if (!parsed.success || parsed.data.isError === true || parsed.data.structuredContent === undefined) {
+    throw new Error(`The calendar connector did not list the events: ${caldavErrorText(response.result)}`);
   }
   const events: DayEvent[] = [];
   for (const shaped of parsed.data.structuredContent.events) {
@@ -384,6 +405,7 @@ async function accountEvents(
     account: CalendarAccountRef;
     day_key: string;
     window: { start: Date; end: Date };
+    days: { first: CalendarDay; end: CalendarDay };
     zone: string;
   },
 ): Promise<DayEvent[]> {
@@ -405,7 +427,7 @@ async function accountEvents(
             window: input.window,
             zone: input.zone,
           })
-        : await fetchCaldavEvents(deps, { account: input.account, window: input.window, zone: input.zone });
+        : await fetchCaldavEvents(deps, { account: input.account, days: input.days, zone: input.zone });
   } catch (error) {
     // A calendar that cannot be read leaves the day as the other accounts give it; the failure is logged, never hidden.
     deps.logger.warn('Calendar could not be read for the rail', extractErrorLogFields(error));
@@ -463,8 +485,11 @@ export async function readTodayCalendar(
     return { calendar: null, free_after: null };
   }
   const window = { start: dayStart, end: windowEnd };
+  const days = { first: today, end: addDays({ day: today, days: 2 }) };
   const perAccount = await Promise.all(
-    accounts.map(account => accountEvents(deps, { owner: input.owner, account, day_key: isoDay(today), window, zone })),
+    accounts.map(account =>
+      accountEvents(deps, { owner: input.owner, account, day_key: isoDay(today), window, days, zone }),
+    ),
   );
   const all = perAccount.flat();
   const nowMs = now.getTime();
