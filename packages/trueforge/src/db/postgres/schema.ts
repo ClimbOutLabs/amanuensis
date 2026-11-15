@@ -69,6 +69,7 @@ export const TABLES_TO_MOVE = [
   'delivery',
   'delivery_attempt',
   'reach_settings',
+  'person_timezone',
   'text_contact',
   'phone_call',
   'text_send_count',

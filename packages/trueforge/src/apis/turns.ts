@@ -187,6 +187,7 @@ import {
   TurnCouldNotStartError,
   TurnStartBound,
 } from '../runtime/turnStartBound';
+import type { TurnTimezone } from '../runtime/turnTimezone';
 import type { DeletedChatUsageReader } from '../runtime/usageSummaryCapability';
 import { packageMirrorTokens } from '../sandbox/mirrors/packageMirrorTokens';
 import { checkSnapshotStatus } from '../sandbox/providerUtils';
@@ -302,6 +303,8 @@ export interface TurnsRouterDeps {
   resolveSkillStore: (c: Context) => ISkillStore;
   /** The starter skills a chat can add; absent, no skill tools mount. */
   skillCatalog?: SkillCatalog | undefined;
+  /** The zone each turn reads the person's day in. */
+  turnTimezone: TurnTimezone;
   resolveAgentStore: (c: Context) => IAgentStore;
   /** Fork-only: not agent-scoped upstream, so these stay directly injected rather than resolved per-request. */
   tokenStore: IOAuthTokenStore;
@@ -393,7 +396,7 @@ export type BeginTurnExecutionDeps = Pick<
   /** The Settings switch for the recall screen, when the person set one. */
   memoryScreenOverride?: boolean | undefined;
   previousTurnId?: string | null;
-  /** From CreateTurnRequest.client_timezone, or a schedule's own time zone for its runs. */
+  /** The person's zone for this turn, or a schedule's own time zone for its runs. */
   clientTimezone?: string | undefined;
   /** From CreateTurnRequest.spoken_reply. */
   spokenReply?: boolean | undefined;
@@ -459,7 +462,7 @@ function createTurnResolver(deps: {
   googleConnectionStore?: IGoogleConnectionStore | undefined;
   /** Instance settings: the connection offer remembers a person's no in them, and the notes folder choice lives in them too. */
   globalSettingsStore: IGlobalSettingsStore;
-  /** From CreateTurnRequest.client_timezone. See ITurnResourceResolver.clientTimezone. */
+  /** The person's zone for this turn. See ITurnResourceResolver.clientTimezone. */
   clientTimezone?: string | undefined;
   /** From CreateTurnRequest.spoken_reply. See ITurnResourceResolver.spokenReply. */
   spokenReply?: boolean | undefined;
@@ -2733,6 +2736,10 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
           }),
         }
       : submitted;
+    const timeZone = await deps.turnTimezone({
+      owner: { tenant_id: requestContext.tenant_id, created_by: userRef },
+      clientTimezone: body.client_timezone,
+    });
 
     // A card whose request ended is cleared, never run. Deny and Dismiss record that and answer with
     // the turn named, unchanged: no turn is created and no model is called. Approve is refused below.
@@ -2934,7 +2941,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       tenantId: requestContext.tenant_id,
       createdBy: userRef,
       userText: extractUserMessageText(body.input),
-      timeZone: body.client_timezone,
+      timeZone,
       memorySummarize,
       personaModelName: persona?.kind === 'persona' ? persona.persona.model_name : undefined,
       agentStore,
@@ -3012,7 +3019,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       spaceStore: deps.spaceStore,
       googleConnectionStore: deps.googleConnectionStore,
       globalSettingsStore: deps.globalSettingsStore,
-      clientTimezone: body.client_timezone,
+      clientTimezone: timeZone,
       spokenReply: body.spoken_reply,
       toolOutputScreenEnabled,
       turnArtifactStore: deps.turnArtifactStore,
@@ -3420,7 +3427,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
             attachedFiles: inputAttachesFiles(body.input ?? []),
             chatHasReadContent: () => chatSawOutsideText(resolver.webSearchTurn),
             chatWrotePages: () => resolver.chatWrotePages,
-            timeZone: body.client_timezone,
+            timeZone,
             // Resolved once on the create-turn path above; absent means verbatim.
             summarize: memorySummarize,
             outcomeLog: {
