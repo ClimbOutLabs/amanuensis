@@ -33,6 +33,7 @@ const TOOL_KINDS: Record<string, Kind> = {
   'Email/forward_email': 'acts',
   'Email/save_draft': 'acts',
   'Email/archive_emails': 'acts',
+  'Email/mark_emails_as_read': 'acts',
   'Email/get_attachment_content': 'reads',
   'Email/get_emails_content': 'reads',
   'Email/list_emails_metadata': 'reads',

@@ -13,9 +13,6 @@ export const FIRST_PARTY_TOOL_REASON = 'mcp_first_party_read_only';
 /** A read of the operator's own Email sidecar, which runs without a card as Gmail's reads do. */
 export const MAIL_READ_REASON = 'mail_read';
 
-/** Reading mail with mark-as-read set: the read becomes a change, so it asks with its own card. */
-export const MAIL_MARK_AS_READ_REASON = 'mail_mark_as_read';
-
 /** A read of the operator's own Calendar sidecar, which runs without a card. */
 export const CALDAV_PRIVATE_READ_REASON = 'caldav_private_read';
 
