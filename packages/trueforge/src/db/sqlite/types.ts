@@ -48,6 +48,7 @@ import type { DeliveryAttemptTable, DeliveryTable } from '../deliveryStore';
 import type { LocalUserTable } from '../localUserStore';
 import type { OAuthClient, OAuthPendingAuthorizationData, OAuthServer, OAuthToken } from '../mcpServerStore';
 import type { NoticingCheckpointTable, NoticingEventTable, ReachLeaseTable } from '../noticingStore';
+import type { PersonTimezoneTable } from '../personTimezoneStore';
 import type { PhoneCallTable } from '../phoneCallStore';
 import type { PushSubscriptionTable } from '../pushSubscriptionStore';
 import type { ReachSettingsTable } from '../reachSettingsStore';
@@ -848,6 +849,7 @@ export interface Database {
   delivery: DeliveryTable;
   delivery_attempt: DeliveryAttemptTable;
   reach_settings: ReachSettingsTable;
+  person_timezone: PersonTimezoneTable;
   text_contact: TextContactTable;
   phone_call: PhoneCallTable;
   text_send_count: TextSendCountTable;

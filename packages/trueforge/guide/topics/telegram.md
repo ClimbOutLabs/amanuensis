@@ -44,6 +44,8 @@ These change only the Telegram chat, the same settings you see when you open tha
 
 If you delete the Telegram chat in Aman, your next message to the bot starts a new chat, and the bot tells you so first. The new chat does not see what was said in the deleted one. What Aman learned about you from it stays in memory, as it does for any chat you delete.
 
+Telegram does not tell Aman where you are. So "today" and "tomorrow" in the Telegram chat follow the time zone of the browser you last used Aman in. If you saved a time zone in your **Reach me** settings, that one is used. If Aman names the wrong day, click **More** in the left bar, then **Settings**, then **Reach me**. Set your time zone and save.
+
 Reminders and other notices that would show on your devices are sent to Telegram as well. When Aman tries to call you and the phone does not ring, the message comes to Telegram instead. Quiet notes stay under the bell in the app. So when your morning brief is ready, Telegram gets no message: read the brief in its chat in the app.
 
 The bot does not answer anyone else, and it does not work in group chats. Forwarded messages and files are treated as things to read, never as instructions to follow.

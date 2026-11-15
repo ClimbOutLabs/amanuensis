@@ -55,6 +55,7 @@ import { sendTelegramText, type TelegramSendQueue } from '../runtime/telegram/te
 import { TelegramSettingsError, type TelegramService } from '../runtime/telegram/telegramService';
 import { putDefaultModelFirst, readDefaultChatModel } from '../runtime/tokenFactoryProvider';
 import { resolveTurnPersona } from '../runtime/turnPersona';
+import type { TurnTimezone } from '../runtime/turnTimezone';
 import { TelegramUpdateSchema, type TelegramUpdate } from '../schemas/telegram';
 import { readServerSandboxAvailable } from './capabilities';
 import { requireJsonOrSameOrigin } from './crossSite';
@@ -76,6 +77,8 @@ export interface TelegramTurnExecutionDeps<TTransaction> extends Omit<
   telegramStore: ITelegramStore;
   telegramService: TelegramService;
   telegramQueue: TelegramSendQueue;
+  /** A Telegram message carries no time zone, so the person's is looked up for each turn. */
+  turnTimezone: TurnTimezone;
 }
 
 /** Thrown when the instance has no model yet, so a Telegram turn cannot run. */
@@ -253,7 +256,7 @@ async function startTelegramTurn<TTransaction>(params: {
       personaContext: answeringPersona === undefined ? undefined : buildPersonaContext(answeringPersona),
       memoryClient,
       logger: deps.logger,
-      clientTimezone: undefined,
+      clientTimezone: await deps.turnTimezone({ owner: ownerOf(connection), clientTimezone: undefined }),
     },
   });
   // A persona asked for by name stays for the next messages, as a switch in the app does.

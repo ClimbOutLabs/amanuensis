@@ -30,6 +30,7 @@ import { ActiveTurnRegistry } from '../../../src/runtime/activeTurns';
 import { EventSubscriptionRegistry } from '../../../src/runtime/event-subscription/index.js';
 import { TurnDrainRegistry } from '../../../src/runtime/turnDrains';
 import { ListSessionsResponseSchema } from '../../../src/schemas/session';
+import { browserTurnTimezone } from '../../fixtures/browserTurnTimezone';
 import { uncappedTokenFactoryBudget } from '../../fixtures/uncappedTokenFactoryBudget';
 
 describe('public CRUD after session deletion', () => {
@@ -80,6 +81,7 @@ describe('public CRUD after session deletion', () => {
     app.route(
       '/',
       createTurnsRouter({
+        turnTimezone: browserTurnTimezone,
         chatDeletionStore: { listDeletedChatModelUsage: () => Promise.resolve([]) },
         mcpCatalog: McpCatalog.loadShipped(),
         globalSettingsStore: new SqliteGlobalSettingsStore(db),

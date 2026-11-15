@@ -6,17 +6,35 @@ import { auiInputClass } from '@/atoms/lib/inputClasses.js';
 import { Button } from '@/atoms/primitives/Button.js';
 import { CenteredModal } from '@/atoms/primitives/CenteredModal.js';
 import { Icon } from '@/icons/Icon.js';
+import type { SkillWebsiteCheck } from '../../server/skillNetworkApproval.js';
 import type { SkillConfigBase } from '../../server/types.js';
+import { addSkillLabel, SkillWebsitesReview } from './SkillWebsitesReview.js';
 
 type ImportGithubSkillFormProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onImport: (draft: SkillConfigBase) => void | Promise<void>;
+  /** Adds the skill; `approvedWebsites` is the list the person saw, when the websites were checked. */
+  onImport: (draft: SkillConfigBase, approvedWebsites?: string[]) => void | Promise<void>;
+  /**
+   * Checks which websites the skill sends requests to. When given, the form shows them before
+   * anything is added, and adding allows exactly those.
+   */
+  onCheck?: (source: { repoURL: string; path: string; ref: string }) => Promise<SkillWebsiteCheck>;
   busy?: boolean;
   error?: string | null;
 };
 
-const ImportGithubSkillForm = ({ open, onOpenChange, onImport, busy = false, error }: ImportGithubSkillFormProps) => {
+const ImportGithubSkillForm = ({
+  open,
+  onOpenChange,
+  onImport,
+  onCheck,
+  busy = false,
+  error,
+}: ImportGithubSkillFormProps) => {
+  const [check, setCheck] = useState<SkillWebsiteCheck | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [checkError, setCheckError] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [repoURL, setRepoURL] = useState('');
@@ -24,6 +42,8 @@ const ImportGithubSkillForm = ({ open, onOpenChange, onImport, busy = false, err
   const [ref, setRef] = useState('');
 
   const reset = () => {
+    setCheck(null);
+    setCheckError(null);
     setName('');
     setDescription('');
     setRepoURL('');
@@ -38,23 +58,46 @@ const ImportGithubSkillForm = ({ open, onOpenChange, onImport, busy = false, err
 
   const handleSubmit = async (event: SyntheticEvent<HTMLFormElement, SubmitEvent>) => {
     event.preventDefault();
-    if (!name.trim() || !description.trim() || !repoURL.trim() || !path.trim() || !ref.trim() || busy) return;
+    if (!name.trim() || !description.trim() || !repoURL.trim() || !path.trim() || !ref.trim() || busy || checking) {
+      return;
+    }
+    const draft = {
+      name: name.trim(),
+      description: description.trim(),
+      repoURL: repoURL.trim(),
+      path: path.trim(),
+      ref: ref.trim(),
+    };
+    if (onCheck !== undefined && check === null) {
+      setChecking(true);
+      setCheckError(null);
+      try {
+        setCheck(await onCheck({ repoURL: draft.repoURL, path: draft.path, ref: draft.ref }));
+      } catch (err) {
+        setCheckError(err instanceof Error ? err.message : 'The skill could not be checked. Try again.');
+      } finally {
+        setChecking(false);
+      }
+      return;
+    }
 
     try {
-      await onImport({
-        name: name.trim(),
-        description: description.trim(),
-        repoURL: repoURL.trim(),
-        path: path.trim(),
-        ref: ref.trim(),
-      });
+      await (check === null ? onImport(draft) : onImport(draft, check.websites));
       close();
     } catch {
       // Parent surfaces error; keep form open.
     }
   };
 
-  const canImport = Boolean(name.trim() && description.trim() && repoURL.trim() && path.trim() && ref.trim()) && !busy;
+  // Changing where the skill is means its websites must be checked again.
+  const edited = (set: (value: string) => void) => (value: string) => {
+    set(value);
+    setCheck(null);
+  };
+
+  const canImport =
+    Boolean(name.trim() && description.trim() && repoURL.trim() && path.trim() && ref.trim()) && !busy && !checking;
+  const submitLabel = onCheck === undefined ? 'Import' : check === null ? 'Check skill' : addSkillLabel(check);
 
   return (
     <CenteredModal
@@ -117,7 +160,7 @@ const ImportGithubSkillForm = ({ open, onOpenChange, onImport, busy = false, err
               type="url"
               value={repoURL}
               onChange={event => {
-                setRepoURL(event.target.value);
+                edited(setRepoURL)(event.target.value);
               }}
               placeholder="https://github.com/org/repo"
               required
@@ -133,7 +176,7 @@ const ImportGithubSkillForm = ({ open, onOpenChange, onImport, busy = false, err
               id="skill-path"
               value={path}
               onChange={event => {
-                setPath(event.target.value);
+                edited(setPath)(event.target.value);
               }}
               placeholder="skills/release-notes"
               required
@@ -149,7 +192,7 @@ const ImportGithubSkillForm = ({ open, onOpenChange, onImport, busy = false, err
               id="skill-ref"
               value={ref}
               onChange={event => {
-                setRef(event.target.value);
+                edited(setRef)(event.target.value);
               }}
               placeholder="main"
               required
@@ -157,10 +200,13 @@ const ImportGithubSkillForm = ({ open, onOpenChange, onImport, busy = false, err
             />
           </div>
 
+          {check !== null ? <SkillWebsitesReview check={check} /> : null}
+
           <div className="space-y-3">
+            {checkError ? <p className="text-failure-bg text-sm">{checkError}</p> : null}
             {error ? <p className="text-failure-bg text-sm">{error}</p> : null}
             <Button.Primary type="submit" disabled={!canImport} className="w-full">
-              Import
+              {checking ? 'Checking the skill…' : submitLabel}
             </Button.Primary>
           </div>
         </div>

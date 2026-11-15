@@ -34,6 +34,7 @@ import { SqliteTurnArtifactStore } from '../../src/db/sqlite/turn-artifact-store
 import { ActiveTurnRegistry } from '../../src/runtime/activeTurns';
 import { EventSubscriptionRegistry } from '../../src/runtime/event-subscription/index.js';
 import { TurnDrainRegistry } from '../../src/runtime/turnDrains';
+import { browserTurnTimezone } from './browserTurnTimezone';
 import { uncappedTokenFactoryBudget } from './uncappedTokenFactoryBudget';
 
 export const SESSION_ID = 's1';
@@ -258,6 +259,7 @@ export async function buildApp(
   app.route(
     '/',
     createTurnsRouter({
+      turnTimezone: browserTurnTimezone,
       chatDeletionStore: { listDeletedChatModelUsage: () => Promise.resolve([]) },
       mcpCatalog: McpCatalog.loadShipped(),
       globalSettingsStore: new SqliteGlobalSettingsStore(db),

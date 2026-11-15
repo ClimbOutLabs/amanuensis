@@ -89,6 +89,7 @@ import type { Kysely, Transaction } from 'kysely';
 import type { RedisClientType } from 'redis';
 import type { Logger } from 'winston';
 
+import { FALLBACK_TIMEZONE } from '@truefoundry/trueforge-core/core/util/clientTimezone';
 import { sweepExpiredPrivateChats } from './apis/privateChats';
 import { createServerApp } from './app';
 import { TrueForgeAuthorizer, type Authorizer } from './auth/authorizer';
@@ -123,6 +124,7 @@ import { NoticingStore, type INoticingStore } from './db/noticingStore';
 import type { IPersonalizationStore } from './db/personalizationStore';
 import type { IPersonaStore } from './db/personaStore';
 import type { PersonOwner } from './db/personOwner';
+import { PersonTimezoneStore, type IPersonTimezoneStore } from './db/personTimezoneStore';
 import { PhoneCallStore, type IPhoneCallStore } from './db/phoneCallStore';
 import type { PostgresAgentStore } from './db/postgres/agent-store/PostgresAgentStore';
 import type { Database as PostgresDatabase } from './db/postgres/types';
@@ -181,7 +183,7 @@ import { sessionApprovalSource } from './runtime/noticing/approvalSource';
 import { createGoogleNoticingSources, googleCalendarTimezoneFor } from './runtime/noticing/googleSources';
 import { createNoticingJudgeResolver } from './runtime/noticing/judgeFactory';
 import { createNoticingService } from './runtime/noticing/noticingService';
-import { personTimezoneFor } from './runtime/noticing/personTimezone';
+import { knownPersonTimezoneFor } from './runtime/noticing/personTimezone';
 import { reachChannelsFor, type ChannelViewer } from './runtime/noticing/reachChannels';
 import { createReminderReach } from './runtime/noticing/reminderReach';
 import { createSidecarNoticingSources } from './runtime/noticing/sidecarSources';
@@ -202,6 +204,7 @@ import { createTextNumberService } from './runtime/texts/textNumber';
 import { createTokenFactoryBudget } from './runtime/tokenFactoryBudget';
 import { ensureEnvManagedTokenFactoryProvider, seedEnvManagedDefaultChatModel } from './runtime/tokenFactoryProvider';
 import { TurnDrainRegistry } from './runtime/turnDrains';
+import { turnTimezoneFor } from './runtime/turnTimezone';
 import { createPackageMirrorAllowanceCheck } from './sandbox/mirrors/packageMirrorAllowance';
 import { slotsBackendEnabled, startPackageMirrorGateway, startSkillNetworkGateway } from './sandbox/slotBackend';
 import { printStandaloneStartupBanner } from './startupBanner';
@@ -276,6 +279,7 @@ interface ServerPersistence<TTransaction> {
   recallExclusionStore: IRecallExclusionStore;
   deliveryStore: IDeliveryStore;
   reachSettingsStore: IReachSettingsStore;
+  personTimezoneStore: IPersonTimezoneStore;
   textContactStore: ITextContactStore;
   phoneCallStore: IPhoneCallStore;
   noticingStore: INoticingStore;
@@ -525,6 +529,7 @@ async function createStandalonePersistence(options: {
     recallExclusionStore: new RecallExclusionStore(db),
     deliveryStore: new DeliveryStore(db),
     reachSettingsStore: new ReachSettingsStore(db),
+    personTimezoneStore: new PersonTimezoneStore(db),
     textContactStore: new TextContactStore(db),
     phoneCallStore: new PhoneCallStore(db),
     noticingStore: new NoticingStore(db),
@@ -718,6 +723,7 @@ async function createDistributedPersistence(options: {
     recallExclusionStore: new RecallExclusionStore(db),
     deliveryStore: new DeliveryStore(db),
     reachSettingsStore: new ReachSettingsStore(db),
+    personTimezoneStore: new PersonTimezoneStore(db),
     textContactStore: new TextContactStore(db),
     phoneCallStore: new PhoneCallStore(db),
     noticingStore: new NoticingStore(db),
@@ -768,6 +774,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     briefItemStore,
     deliveryStore,
     reachSettingsStore,
+    personTimezoneStore,
     textContactStore,
     phoneCallStore,
     noticingStore,
@@ -1038,6 +1045,10 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
   });
   const noticingInstanceOwner =
     noticingOwnerId === undefined ? undefined : { tenant_id: TENANT_ID, created_by: noticingOwnerId };
+  const knownTimezone = knownPersonTimezoneFor({
+    scheduleStore,
+    calendarTimezone: googleCalendarTimezoneFor({ connections: googleConnectionStore, fetchImpl: undefined }),
+  });
   const noticingService = createNoticingService({
     sources: createSidecarNoticingSources({
       mailUrl: configuration.MAIL_SIDECAR_MCP_URL,
@@ -1067,10 +1078,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     channels: reachChannels,
     logger,
     assistantNameFor: async owner => await assistantNameFor({ personalizationStore, owner }),
-    timezoneFor: personTimezoneFor({
-      scheduleStore,
-      calendarTimezone: googleCalendarTimezoneFor({ connections: googleConnectionStore, fetchImpl: undefined }),
-    }),
+    timezoneFor: async owner => (await knownTimezone(owner)) ?? FALLBACK_TIMEZONE,
   });
   const sentinelServices = createSentinelServices({
     demoMode: configuration.DEMO_MODE,
@@ -1245,6 +1253,12 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     telegramQueue,
     deliveryService: deliveries,
     reachSettingsStore,
+    turnTimezone: turnTimezoneFor({
+      reachSettings: reachSettingsStore,
+      browserZones: personTimezoneStore,
+      knownTimezone,
+      logger,
+    }),
     noticingStore,
     noticingService,
     reminderReach: createReminderReach({
