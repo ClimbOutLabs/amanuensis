@@ -6,9 +6,6 @@ export interface RemoteMcpServerManifest {
     auth?: TrueForge.McpServerManifestAuth;
     /** Concise summary of what this MCP server provides. */
     description: string;
-    /** When true, this connector is the long-term memory provider: the host recalls from it before every model call and retains every completed turn. Its URL must be a single-bank Hindsight MCP URL. */
-    memoryProvider?: boolean;
-    memorySettings?: TrueForge.MemoryProviderSettings;
     name: TrueForge.ResourceName;
     /** When true, this connector is the web search provider: its read-only tools run without asking, behind an outbound secret check, unless the user switched searches to Ask. At most one connector holds it. */
     searchProvider?: boolean;

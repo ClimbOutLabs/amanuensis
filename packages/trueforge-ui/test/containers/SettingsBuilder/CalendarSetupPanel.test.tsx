@@ -89,6 +89,23 @@ const OTHER: CalendarProviderInfo = {
   setupSteps: [],
 };
 
+function accountOf(
+  email: string,
+  state: CalendarAccountStatus['state'] = 'connected',
+  isDefault = true,
+  rest: Partial<CalendarAccountStatus['accounts'][number]> = {},
+): CalendarAccountStatus['accounts'][number] {
+  return {
+    email,
+    username: email,
+    calendarUrl: 'https://caldav.fastmail.com/dav/',
+    providerKey: 'fastmail',
+    state,
+    isDefault,
+    ...rest,
+  };
+}
+
 function statusOf(overrides: Partial<CalendarAccountStatus> = {}): CalendarAccountStatus {
   return {
     available: true,
@@ -97,16 +114,30 @@ function statusOf(overrides: Partial<CalendarAccountStatus> = {}): CalendarAccou
     username: null,
     calendarUrl: null,
     providerKey: 'fastmail',
+    accounts: [],
+    defaultAddress: null,
     providers: [GOOGLE, FASTMAIL, GMX, WEBDE, OTHER],
     ...overrides,
   };
 }
 
+function connectedStatus(email = 'owner@example.invalid'): CalendarAccountStatus {
+  return statusOf({
+    state: 'connected',
+    email,
+    username: email,
+    calendarUrl: 'https://caldav.fastmail.com/dav/',
+    accounts: [accountOf(email)],
+    defaultAddress: email,
+  });
+}
+
 function makePort(status: CalendarAccountStatus) {
   const port: CalendarSetupPort = {
     getCalendarStatus: vi.fn(async () => status),
-    saveCalendarAccount: vi.fn(async () => statusOf({ state: 'connected', email: 'owner@example.invalid' })),
+    saveCalendarAccount: vi.fn(async () => connectedStatus()),
     removeCalendarAccount: vi.fn(async () => statusOf()),
+    setDefaultCalendarAccount: vi.fn(async () => status),
   };
   return port;
 }
@@ -139,8 +170,8 @@ describe('CalendarSetupPanel', () => {
       email: 'owner@example.invalid',
       password: CANARY,
     });
-    // After the answer the form is gone and the password is nowhere on the page.
-    expect(await screen.findByText(/Connected as/)).toBeTruthy();
+    // After the answer the form is gone and the account is listed; the password is nowhere on the page.
+    expect(await screen.findByText('owner@example.invalid')).toBeTruthy();
     expect(document.body.textContent).not.toContain(CANARY);
   });
 
@@ -234,19 +265,27 @@ describe('CalendarSetupPanel', () => {
   });
 
   it('shows the stopped line when the saved sign-in no longer works', async () => {
-    renderPanel(makePort(statusOf({ state: 'sign_in_stopped', email: 'owner@example.invalid' })));
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      'Sign-in stopped working. Make a new app password and save it again.',
+    renderPanel(
+      makePort(
+        statusOf({
+          state: 'sign_in_stopped',
+          email: 'owner@example.invalid',
+          accounts: [accountOf('owner@example.invalid', 'sign_in_stopped')],
+          defaultAddress: 'owner@example.invalid',
+        }),
+      ),
     );
+    expect(await screen.findByText(/Sign-in stopped working/)).toBeTruthy();
   });
 
-  it('remove takes two steps and calls the port once confirmed', async () => {
-    const port = makePort(statusOf({ state: 'connected', email: 'owner@example.invalid' }));
+  it('remove takes two steps and calls the port with the account address once confirmed', async () => {
+    const port = makePort(connectedStatus());
     renderPanel(port);
     fireEvent.click(await screen.findByRole('button', { name: 'Remove' }));
     expect(await screen.findByText(/deleted for good/)).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Remove calendar' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Remove account' }));
     await waitFor(() => expect(port.removeCalendarAccount).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(port.removeCalendarAccount).mock.calls[0]?.[0]).toBe('owner@example.invalid');
     expect(await screen.findByLabelText(/calendar provider/i)).toBeTruthy();
   });
 
@@ -258,10 +297,18 @@ describe('CalendarSetupPanel', () => {
         username: 'owner-login',
         calendarUrl: 'https://nas.example.invalid/dav/',
         providerKey: 'other',
+        accounts: [
+          accountOf('owner@example.invalid', 'connected', true, {
+            username: 'owner-login',
+            calendarUrl: 'https://nas.example.invalid/dav/',
+            providerKey: 'other',
+          }),
+        ],
+        defaultAddress: 'owner@example.invalid',
       }),
     );
     renderPanel(port);
-    fireEvent.click(await screen.findByRole('button', { name: 'Change calendar' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Change' }));
     expect(screen.getByLabelText(/calendar address/i)).toHaveValue('https://nas.example.invalid/dav/');
     expect(screen.getByLabelText(/login name/i)).toHaveValue('owner-login');
     expect(screen.getByLabelText(/email address/i)).toHaveValue('owner@example.invalid');
@@ -280,17 +327,8 @@ describe('CalendarSetupPanel', () => {
   });
 
   it('leaves the login box empty when the login is the email address', async () => {
-    renderPanel(
-      makePort(
-        statusOf({
-          state: 'connected',
-          email: 'owner@example.invalid',
-          username: 'owner@example.invalid',
-          calendarUrl: 'https://caldav.fastmail.com/dav/',
-        }),
-      ),
-    );
-    fireEvent.click(await screen.findByRole('button', { name: 'Change calendar' }));
+    renderPanel(makePort(connectedStatus()));
+    fireEvent.click(await screen.findByRole('button', { name: 'Change' }));
     expect(screen.getByLabelText(/login name/i)).toHaveValue('');
   });
 
@@ -302,11 +340,19 @@ describe('CalendarSetupPanel', () => {
         username: 'owner-login',
         calendarUrl: 'https://nas.example.invalid/dav/',
         providerKey: 'other',
+        accounts: [
+          accountOf('owner@example.invalid', 'connected', true, {
+            username: 'owner-login',
+            calendarUrl: 'https://nas.example.invalid/dav/',
+            providerKey: 'other',
+          }),
+        ],
+        defaultAddress: 'owner@example.invalid',
       }),
     );
     renderPanel(port);
     fireEvent.click(await screen.findByRole('button', { name: 'Remove' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Remove calendar' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Remove account' }));
     const provider = await screen.findByLabelText(/calendar provider/i);
     expect(provider).toHaveValue('fastmail');
     expect(screen.getByLabelText(/email address/i)).toHaveValue('');
@@ -318,24 +364,47 @@ describe('CalendarSetupPanel', () => {
   it.each([
     ['sign_in_stopped', /Sign-in stopped working/],
     ['not_working', /not working right now/],
-  ] as const)('a %s account can still be removed, or the window closed', async (state, line) => {
-    const onOpenChange = vi.fn();
-    const port = makePort(statusOf({ state, email: 'owner@example.invalid' }));
-    render(<CalendarSetupPanel open onOpenChange={onOpenChange} port={port} onChanged={() => undefined} />);
-    expect(await screen.findByRole('alert')).toHaveTextContent(line);
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
-    expect(onOpenChange).toHaveBeenCalledWith(false);
+  ] as const)('a %s account can still be removed', async (state, line) => {
+    const port = makePort(
+      statusOf({
+        state,
+        email: 'owner@example.invalid',
+        accounts: [accountOf('owner@example.invalid', state)],
+        defaultAddress: 'owner@example.invalid',
+      }),
+    );
+    renderPanel(port);
+    expect(await screen.findByText(line)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Remove calendar' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove account' }));
     await waitFor(() => expect(port.removeCalendarAccount).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(port.removeCalendarAccount).mock.calls[0]?.[0]).toBe('owner@example.invalid');
   });
 
-  it('a connected account being changed can go back with Cancel, and still be removed from the form', async () => {
-    renderPanel(makePort(statusOf({ state: 'connected', email: 'owner@example.invalid' })));
-    fireEvent.click(await screen.findByRole('button', { name: 'Change calendar' }));
-    expect(screen.getByRole('button', { name: 'Remove' })).toBeTruthy();
+  it('a connected account being changed can go back with Cancel', async () => {
+    renderPanel(makePort(connectedStatus()));
+    fireEvent.click(await screen.findByRole('button', { name: 'Change' }));
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
-    expect(await screen.findByText(/Connected as/)).toBeTruthy();
+    expect(await screen.findByText('owner@example.invalid')).toBeTruthy();
+  });
+
+  it('lists every account, makes another the default, and offers to add one more', async () => {
+    const two = statusOf({
+      state: 'connected',
+      email: 'owner@example.invalid',
+      accounts: [accountOf('owner@example.invalid'), accountOf('work@example.invalid', 'connected', false)],
+      defaultAddress: 'owner@example.invalid',
+    });
+    const port = makePort(two);
+    renderPanel(port);
+    expect(await screen.findByText('work@example.invalid')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Make default' }));
+    await waitFor(() => expect(port.setDefaultCalendarAccount).toHaveBeenCalledWith('work@example.invalid'));
+    fireEvent.click(screen.getByRole('button', { name: 'Add another account' }));
+    expect(await screen.findByLabelText(/calendar provider/i)).toBeTruthy();
+    const emailField = screen.getByLabelText(/email address/i);
+    if (!(emailField instanceof HTMLInputElement)) throw new Error('email address field is not an input');
+    expect(emailField.value).toBe('');
   });
 
   it('asks the list to refresh when a save fails, since a cut-off save may still have gone through', async () => {

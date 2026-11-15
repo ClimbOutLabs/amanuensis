@@ -84,9 +84,22 @@ For a short overview, see [Your privacy](../packages/trueforge/guide/topics/priv
 
     Whatever a connector call sends, such as an email you approved. Calls that send or change something show a card first. See [Safety rules in detail](safety.md).
 
+??? note "To Telegram, when you connect a Telegram bot"
+
+    These all pass through Telegram's servers:
+
+    - The messages you send the bot, and Aman's replies.
+    - Reminder text.
+    - The details of anything that needs your ok.
+    - Any photos or files you send the bot.
+    - The names of your models, personas and connectors, when you use the bot's menu to pick one.
+    - The web address of Aman and the chat's id, when a message asks you to answer in Aman and Aman can be opened from other devices.
+
+    Chats with a bot are not end to end encrypted, so Telegram can hold and read them. Do not send the bot anything you would not want Telegram to hold. The chats themselves still live on your computer.
+
 ??? note "To GitHub, when you ask Aman in a chat to add a skill"
 
-    The address of that skill and a request to read it. Nothing about you is in it. GitHub also sees this computer's internet address.
+    The address of that skill and a request to read it, then a download of the skill's files at that version so Aman can check which websites the skill uses. Nothing about you is in it. GitHub also sees this computer's internet address.
 
 ??? note "To package sources, when a skill you approved installs packages"
 
@@ -104,6 +117,7 @@ Apart from the services above, Aman's server contacts nothing. Every outside add
 
 - **Voice input and voice mode.** A small model on your computer turns your speech into text, and a voice on your computer reads replies aloud. Nothing you say is saved, except the message in your chat. The small speech-detection model it needs ships inside Aman. Voice mode ends by itself after 2 minutes without you speaking, and after 30 minutes in any case, so a forgotten tab doesn't keep the microphone on. See [Voice input](voice-input.mdx).
 - **Memory search.** A small model on your computer finds related memories.
+- **Deleting a memory.** Deleting a memory on the Memories page removes its text from your disk, and editing one replaces the old wording. A backup or an export you made earlier still holds what it held.
 - **Backups.** They're written to a folder on your computer. See [Back up and restore](backup.md).
 
 ## Incognito chats

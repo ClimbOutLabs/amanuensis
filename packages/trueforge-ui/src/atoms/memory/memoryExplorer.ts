@@ -123,15 +123,19 @@ export function sortNewestFirst(memories: ExplorerMemory[]): ExplorerMemory[] {
   return [...memories].sort((a, b) => time(b) - time(a));
 }
 
-/** The heading for a memory's day: Today, Yesterday, Last week, or the month and year. */
+/** The heading for a memory's day: Today, Yesterday, or the day itself, so each heading is one day. */
 export function dateGroupLabel(options: { timestamp: string; now: Date }): string {
   const time = Date.parse(options.timestamp);
   if (Number.isNaN(time)) return 'Earlier';
   const days = Math.round((startOfDay(options.now).getTime() - startOfDay(new Date(time)).getTime()) / DAY_MS);
   if (days <= 0) return 'Today';
   if (days === 1) return 'Yesterday';
-  if (days <= RECENT_DAYS) return 'Last week';
-  return new Date(time).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+  return new Date(time).toLocaleDateString('en-US', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
 }
 
 /** Groups memories that are already sorted newest first; each group keeps that order. */

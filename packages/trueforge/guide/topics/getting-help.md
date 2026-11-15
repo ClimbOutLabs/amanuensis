@@ -42,7 +42,9 @@ Some problems are outside the app, such as Docker or the sandbox. Check them on 
 
 === "Mac or Linux"
 
-    Open a terminal and type `aman doctor`. It checks each part of your install. For each problem, it prints a "Next:" line with the command that fixes it.
+    Open a terminal and type `aman doctor`. It checks each part of your install and shows each part in its own framed panel. While a slow part runs, one line shows how long it has taken so far. For each problem, it prints a "Next:" line with the command that fixes it. The box at the end lists every problem again, so you don't have to scroll back up.
+
+    When the Next line is a repair with `--fix`, the repair restarts the instance and checks it again. If the problem is still there, it says so in a box at the end and gives a different next step, because restarting again won't help. A part that is missing a file is a bug in Aman: get the newest Aman with `aman upgrade --force`.
 
 === "Windows"
 

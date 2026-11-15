@@ -195,6 +195,7 @@ export const CHATS = {
   dinner: {
     title: 'Dinner with chickpeas and spinach',
     ask: 'What can I make tonight with chickpeas, spinach and rice?',
+    remembers: ['Sam has chickpeas, spinach and rice to cook with.'],
     reply: [
       'Try a quick chickpea and spinach curry over rice. It takes about 25 minutes.',
       '',
@@ -368,3 +369,6 @@ export const DUE_REMINDER = { text: 'Call the pharmacy', minutesAgo: 20 };
 export const MAILBOX_CHATS: readonly ChatKey[] = ['calendarEvent'];
 
 export const EXCHANGES: readonly DemoExchange[] = Object.values(CHATS);
+
+/** Words that only test data shows. No picture of the demo world may show one. */
+export const TEST_WORDS = ['scripted', 'inert', 'trueforge-default', 'run:', 'Request failed', 'test.example'];

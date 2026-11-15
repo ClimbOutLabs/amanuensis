@@ -16,7 +16,6 @@ import { hasAdminRole, resolveRequestContext } from '../auth/identity';
 import configuration from '../config';
 import { ExportBodyCancelledError, exportResponseBody } from '../dataExport/exportBody';
 import { runDataExport } from '../dataExport/exportService';
-import { resolveMemoryExportSource } from '../dataExport/memorySource';
 import { normalizeSecrets } from '../dataExport/secretScrub';
 import {
   ZipEntryLimitExceededError,
@@ -101,13 +100,6 @@ export function createDataExportRouter<TTransaction>(deps: DataExportRouterDeps<
     const mcpServerStore = deps.resolveMcpServerStore(c);
     const agentStore = deps.resolveAgentStore(c);
     const secrets = normalizeSecrets(await deps.outboundSecrets({ tenant_id: tenantId, created_by: subjectId }));
-    const memorySource = await resolveMemoryExportSource({
-      mcpServerStore,
-      tokenStore: deps.tokenStore,
-      tenantId,
-      subjectId,
-      logger: deps.logger,
-    });
     const exportedAt = new Date();
 
     const recordAudit = async (description: string): Promise<void> => {
@@ -148,7 +140,7 @@ export function createDataExportRouter<TTransaction>(deps: DataExportRouterDeps<
               modelProviderStore: deps.resolveModelProviderStore(c),
               listAgents: () =>
                 listManageableAgents({ store: agentStore, context: requestContext, authorizer: deps.authorizer }),
-              memorySource,
+              memoryMarkdownDir: configuration.MEMORY_MARKDOWN_DIR,
               personaKnowledgeDir: configuration.PERSONA_KNOWLEDGE_DIR,
             },
             {

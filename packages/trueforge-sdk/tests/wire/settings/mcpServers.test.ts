@@ -94,7 +94,6 @@ describe("McpServersClient", () => {
                 manifest: {
                     auth: { type: "dcr" },
                     description: "description",
-                    memory_provider: true,
                     name: "name",
                     search_provider: true,
                     search_tools: ["search_tools"],
@@ -133,7 +132,6 @@ describe("McpServersClient", () => {
                         type: "dcr",
                     },
                     description: "description",
-                    memoryProvider: true,
                     name: "name",
                     searchProvider: true,
                     searchTools: ["search_tools"],
@@ -263,7 +261,6 @@ describe("McpServersClient", () => {
                 manifest: {
                     auth: { type: "dcr" },
                     description: "description",
-                    memory_provider: true,
                     name: "name",
                     search_provider: true,
                     search_tools: ["search_tools"],
@@ -302,7 +299,6 @@ describe("McpServersClient", () => {
                         type: "dcr",
                     },
                     description: "description",
-                    memoryProvider: true,
                     name: "name",
                     searchProvider: true,
                     searchTools: ["search_tools"],
@@ -432,7 +428,6 @@ describe("McpServersClient", () => {
                 manifest: {
                     auth: { type: "dcr" },
                     description: "description",
-                    memory_provider: true,
                     name: "name",
                     search_provider: true,
                     search_tools: ["search_tools"],
@@ -463,7 +458,6 @@ describe("McpServersClient", () => {
                         type: "dcr",
                     },
                     description: "description",
-                    memoryProvider: true,
                     name: "name",
                     searchProvider: true,
                     searchTools: ["search_tools"],

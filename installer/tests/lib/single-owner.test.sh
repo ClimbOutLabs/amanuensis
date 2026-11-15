@@ -11,7 +11,7 @@ env_value() { sed -n "s/^$2=//p" "$AMAN_HOME/instances/$1/.env" | head -n 1; }
 dex_yaml() { cat "$AMAN_HOME/instances/main/dex.yaml"; }
 dex_env() { cat "$AMAN_HOME/instances/main/dex.env"; }
 registry() { cat "$AMAN_HOME/state/instances/main.conf"; }
-removal_lines() { printf '%s\n' "$OUT" | grep -c "^Removed .* from instance main" || true; }
+removal_lines() { flat "$OUT" | grep -oE "Removed ([^ ]+, )*[^ ]+ from instance main" | wc -l | tr -d ' '; }
 
 # The files an earlier `instance add-user` left for judge1 and judge2: records, hashes, Dex entries, allowed emails.
 make_legacy_users() {
@@ -128,7 +128,7 @@ test_install_rerun_removes_extra_users() {
   run_install --yes
   assert_rc 0
   assert_eq "$(removal_lines)" 1 "one plain line"
-  assert_eq "$(printf '%s\n' "$OUT" | grep '^Removed ')" "Removed judge1@demo.invalid, judge2@demo.invalid from instance main." "nothing after the names"
+  assert_flat_contains "$OUT" "Removed judge1@demo.invalid, judge2@demo.invalid from instance main." "nothing after the names"
   assert_not_contains "$OUT$ERR" 'legacyhash'
   assert_single_owner
   assert_contains "$(cat "$AMAN_HOME/state/install.log")" "removed judge1@demo.invalid, judge2@demo.invalid from instance main; an upgrade rollback restores the database but not these accounts"

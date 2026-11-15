@@ -8,6 +8,9 @@ beforeEach(() => {
   window.localStorage.clear();
 });
 
+/** Far enough in that a chat's title starts under the folder's name. */
+const CHILD_INDENT = 'pl-[2.3125rem]';
+
 function parentOf(element: HTMLElement): HTMLElement {
   const parent = element.parentElement;
   if (parent === null) throw new Error('Expected the element to have a parent');
@@ -23,12 +26,12 @@ describe('FolderSection indentation', () => {
     );
 
     const wrapper = parentOf(screen.getByTestId('space-card'));
-    expect(wrapper.classList.contains('pl-8')).toBe(true);
+    expect(wrapper.classList.contains(CHILD_INDENT)).toBe(true);
     expect(wrapper.classList.contains('pl-2')).toBe(false);
 
     // The folder row itself keeps its place at the list edge.
     const headerRow = parentOf(screen.getByRole('button', { name: /Briefings/ }));
-    expect(headerRow.classList.contains('pl-8')).toBe(false);
+    expect(headerRow.classList.contains(CHILD_INDENT)).toBe(false);
   });
 
   it('indents the chats in a folder by the same step', () => {
@@ -39,7 +42,7 @@ describe('FolderSection indentation', () => {
     );
 
     const wrapper = parentOf(screen.getByTestId('chat-row'));
-    expect(wrapper.classList.contains('pl-8')).toBe(true);
+    expect(wrapper.classList.contains(CHILD_INDENT)).toBe(true);
     expect(wrapper.classList.contains('pl-2')).toBe(false);
   });
 
@@ -55,8 +58,37 @@ describe('FolderSection indentation', () => {
     // The inner folder section sits inside the outer folder's indented children...
     const innerSection = screen.getByText('Nested page').closest('section');
     if (innerSection === null) throw new Error('Expected the nested card to sit in a section');
-    expect(parentOf(innerSection).classList.contains('pl-8')).toBe(true);
+    expect(parentOf(innerSection).classList.contains(CHILD_INDENT)).toBe(true);
     // ...and the inner folder's own children take the same step again from there.
-    expect(parentOf(screen.getByTestId('nested-card')).classList.contains('pl-8')).toBe(true);
+    expect(parentOf(screen.getByTestId('nested-card')).classList.contains(CHILD_INDENT)).toBe(true);
+  });
+
+  it('sizes the folder name like the chat titles under it, not smaller', () => {
+    render(
+      <FolderSection kind="chat" folder={{ id: 'folder-a', name: 'Projects' }} count={1} operations={null}>
+        <div>Quarterly plan</div>
+      </FolderSection>,
+    );
+
+    const heading = screen.getByRole('button', { name: /Projects/ });
+    expect(heading).toHaveClass('text-sm');
+    expect(heading).not.toHaveClass('text-xs');
+  });
+
+  it('shows the settings button without hover on a phone, and hides it at rest only on a computer', () => {
+    const operations = {
+      createFolder: () => Promise.resolve({ id: 'new', name: 'New' }),
+      renameFolder: () => Promise.resolve(),
+      deleteFolder: () => Promise.resolve(),
+    };
+    render(
+      <FolderSection kind="chat" folder={{ id: 'folder-a', name: 'Projects' }} count={1} operations={operations}>
+        <div>Quarterly plan</div>
+      </FolderSection>,
+    );
+
+    const manage = screen.getByRole('button', { name: 'Manage Projects' });
+    expect(manage).not.toHaveClass('opacity-0');
+    expect(manage).toHaveClass('md:opacity-0', 'md:group-hover/folder:opacity-100');
   });
 });

@@ -50,6 +50,10 @@ export const updatePersonalizationProfileRoute = createRoute({
       description: 'Saved profile.',
     },
     400: { content: { 'application/json': { schema: RequestErrorResponseSchema } }, description: 'Invalid profile.' },
+    409: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'The profile changed since the revision this save was made from.',
+    },
     ...protectedResponses,
   },
 });

@@ -16,6 +16,8 @@ export interface Tier3Email {
     cc: TrueForge.Tier3Mailbox[];
     /** Short code for a send, repeated on its receipt; null for a draft. */
     checkCode?: string | null;
+    /** The message a forward sends on, below the note in `body`; null when the message is not a forward. */
+    forwards?: TrueForge.Tier3EmailForwards | null;
     /** The display name the message is sent as, or null when none is set. */
     fromName?: string | null;
     /** True when a name was left off an address because it looked like an address. */

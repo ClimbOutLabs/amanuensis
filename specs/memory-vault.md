@@ -32,7 +32,7 @@ A Memory Vault UI and API layer on top of the existing Markdown memory backend. 
 
 **Views.** The shared vault is not a global view of all facts. Any "all vaults" view in the UI is a union for the signed-in user only and never widens what a persona recalls.
 
-**Markdown backend only.** The vault and persona scoping need the Markdown backend. Hindsight stays cold-archived and has no vaults.
+**A summary that failed is said, with its reason.** A summary that runs out of time is asked for once more after a wait of 90 seconds, with no place held in the queue of summaries meanwhile. When a chat's summary still cannot be made, nothing from that turn is saved and the vault it would have gone to keeps one mark: when it failed, why, and which chat it was. The Memories tab shows a note for that vault with the time, the reason in plain words and the one thing to do about it, **Open the chat** to go to that chat, and **Dismiss**. The mark holds no words from the chat. It clears on the next summary that succeeds for that vault. The server log line for the failure names the chat, the reason and the seconds the model took.
 
 ## Scope
 
@@ -59,9 +59,9 @@ A Memory Vault UI and API layer on top of the existing Markdown memory backend. 
 - Verify: sharing A's vault with B lets B recall A's facts, and an unshared vault stays isolated
 - Verify: search indexes and retain bookkeeping do not leak between vaults
 - Verify: export and re-import round-trips without loss
+- Verify: a failed summary leaves a note that says when, why and which chat, for that vault only, and the note opens the chat
 
 ## Out of Scope
 
 - Encryption at rest (see private-by-architecture)
 - Automatic fact deduplication or merging
-- Memory backend migration (Hindsight stays cold-archived)

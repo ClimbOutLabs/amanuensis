@@ -10,7 +10,7 @@ test_dry_run_changes_nothing() {
   run_install --dry-run
   assert_rc 0
   assert_no_path "$AMAN_HOME"
-  assert_contains "$OUT" "The plan (3 of 6)"
+  assert_contains "$OUT" "[ 3 of 6 ]  The plan"
   assert_contains "$OUT" "Downloads: about"
   assert_contains "$OUT" "Full list of downloads and sources: --verbose"
   assert_not_contains "$OUT" "Whisper small speech model weights" "the long list waits for --verbose"
@@ -54,7 +54,8 @@ test_first_install() {
   t_begin "first install builds locally and creates private files"
   sandbox_new
   install_machine
-  assert_flat_contains "$OUT" "Open http://127.0.0.1:8791 http://localhost:8791"
+  assert_flat_contains "$OUT" "Open http://127.0.0.1:8791"
+  assert_not_contains "$OUT" "http://localhost:8791" "the ending names one address"
   assert_not_contains "$OUT" "not localhost"
   assert_not_contains "$OUT" "print-proxy-requirements"
   assert_not_contains "$OUT" "not a page to open"

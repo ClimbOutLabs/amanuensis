@@ -11,7 +11,7 @@ import type {
 import { InternalEventType } from '@truefoundry/trueforge-core/core';
 import winston from 'winston';
 
-import { hindsightMemoryCapability, type MemoryConfig } from '../../../../src/runtime/memory/memoryCapability';
+import { memoryCapability, type MemoryConfig } from '../../../../src/runtime/memory/memoryCapability';
 import type { MemoryClient } from '../../../../src/runtime/memory/memoryClient';
 
 /** The facts each chat has pulled out of its recall, as the stored read returns them. */
@@ -24,18 +24,15 @@ function pullFact(sessionId: string, factText: string): void {
 
 const CONFIG: MemoryConfig = {
   recallMaxTokens: 2048,
-  recallEntityTokens: 512,
   recallTimeoutMs: 2500,
   recallQueryWindow: 5,
   recallMinScore: 0.5,
   recallMaxItems: 12,
-  recallMaxEntities: 8,
   preRecallGateEnabled: false,
   retainTimeoutMs: 10_000,
   sweepMaxPerTurn: 5,
   screen: { enabled: false, url: '', authToken: '', threshold: 0.5, timeoutMs: 1500, maxConcurrency: 8 },
-  curated: { enabled: false, maxModels: 3, maxTokens: 512 },
-  reflect: { enabled: false, budget: 'low', maxTokens: 512, timeoutMs: 8000 },
+  pages: { maxCount: 6, maxTokens: 1500 },
 };
 
 const FACT = 'The gate code is 4417';
@@ -47,16 +44,11 @@ function makeClient(): MemoryClient {
       Promise.resolve({
         ok: true,
         results: [{ id: '1', occurred_start: '2026-08-14', text: FACT }],
-        entities: [],
       }),
     retain: () => Promise.resolve({ ok: true }),
     deleteDocument: () => Promise.resolve({ ok: true }),
     getOperation: () => Promise.resolve({ ok: true, status: 'unknown' }),
     retryOperation: () => Promise.resolve({ ok: true }),
-    getProfile: () =>
-      Promise.resolve({ ok: true, profile: { name: undefined, mission: undefined, background: undefined } }),
-    listMentalModels: () => Promise.resolve({ ok: true, models: [] }),
-    reflect: () => Promise.resolve({ ok: true, text: '', basedOn: 0 }),
     listEntries: () => Promise.resolve({ ok: true, entries: [] }),
     updateEntry: params =>
       Promise.resolve({
@@ -81,7 +73,7 @@ async function recallBlockFor(sessionId: string): Promise<string | null> {
 }
 
 /** The block one turn builds from the given memory client. */
-async function blockFrom(capability: ReturnType<typeof hindsightMemoryCapability>): Promise<string | null> {
+async function blockFrom(capability: ReturnType<typeof memoryCapability>): Promise<string | null> {
   const processor = capability.preLLMProcessors?.[0];
   if (processor === undefined) {
     throw new Error('expected a preLLM processor');
@@ -127,7 +119,6 @@ function makeClientReturning(texts: string[]): MemoryClient {
       Promise.resolve({
         ok: true,
         results: texts.map((text, index) => ({ id: String(index), occurred_start: '2026-08-14', text })),
-        entities: [],
       }),
   };
 }
@@ -139,7 +130,7 @@ async function recallBlockServing(
   client: MemoryClient = makeClientReturning(texts),
 ): Promise<string | null> {
   return blockFrom(
-    hindsightMemoryCapability({
+    memoryCapability({
       client,
       config: CONFIG,
       logger: winston.createLogger({ silent: true }),
@@ -174,7 +165,7 @@ describe('recall exclusions for facts shown shortened', () => {
     const block = await recallBlockServing('chat-neighbour', [FACT, other]);
     expect(block).toContain(other);
     // The pulled fact's own line is gone; the other fact's line only shares its opening words.
-    expect(block?.split('\n')).not.toContain(`[2026-08-14] ${FACT}`);
+    expect(block?.split('\n').some(line => line.endsWith(`] ${FACT}`))).toBe(false);
   });
 
   it('does not trust a shortening cut too short to name the fact', async () => {

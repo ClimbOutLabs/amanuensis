@@ -67,6 +67,8 @@ Aman doesn't come with an AI model. It can't answer until you add one.
 
 How to get there: Click **Choose a model** next to **Add a model** in the checklist. Or click **More** in the left bar, then **Settings**, then **Models**.
 
+Do you run your own model on this computer, such as Ollama? Then you don't need a key. See [A model on this computer](local-model.md).
+
 1. Under "Available", find the company you have a key for, such as Together AI, OpenAI, Anthropic or Google Gemini.
 2. Click **Configure** next to it.
 3. Paste your key into **API key**.
@@ -102,10 +104,10 @@ Aman greets you by name and speaks to you the way you ask.
 
 How to get there: Click **Open Personalization** in the checklist. Or click **More** in the left bar, then **Settings**, then **Personalization**.
 
-1. Type your name in **Your name**.
+1. On the **Your profile** tab, type your name in **Your name**.
 2. If you like, fill in how Aman should address you, and a few lines about where you live, what you work on and what you care about.
-3. If you like, give the assistant a different name under "Assistant profile".
-4. Click **Save personalization**.
+3. If you like, click the **Assistant profile** tab and give the assistant a different name.
+4. Click **Save personalization**. It saves both tabs at once.
 
 Everything you type here stays on your computer.
 

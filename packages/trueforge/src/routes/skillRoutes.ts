@@ -7,6 +7,8 @@
 import { createRoute } from '@hono/zod-openapi';
 import { RequestErrorResponseSchema } from '../schemas/errors';
 import {
+  CheckSkillWebsitesRequestSchema,
+  CheckSkillWebsitesResponseSchema,
   CreateSkillRequestSchema,
   DeleteSkillNetworkApprovalResponseSchema,
   DeleteSkillNetworkHostRequestQuerySchema,
@@ -121,11 +123,46 @@ export const createSkillRoute = createRoute({
     },
     409: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },
-      description: 'A skill with this name already exists.',
+      description: 'A skill with this name already exists, or its websites are not the approved list.',
+    },
+    422: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: "The skill's files could not be read to check its websites.",
     },
     424: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },
       description: 'Unsupported because skills are managed by an external system.',
+    },
+  },
+});
+
+export const checkSkillWebsitesRoute = createRoute({
+  method: 'post',
+  path: '/check-websites',
+  tags: [OpenApiTag.SKILLS],
+  summary: "Check a skill's websites",
+  description:
+    'Reads every file of a git skill and lists the websites it sends requests to. Nothing is saved. Approve the list when adding the skill.',
+  'x-fern-sdk-group-name': ['settings', 'skills'],
+  'x-fern-sdk-method-name': 'check_websites',
+  request: {
+    body: {
+      content: { 'application/json': { schema: CheckSkillWebsitesRequestSchema } },
+      required: true,
+    },
+  },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: CheckSkillWebsitesResponseSchema } },
+      description: 'The websites the skill sends requests to.',
+    },
+    400: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'Invalid request body.',
+    },
+    422: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: "The skill's files could not be read, or it uses too many websites.",
     },
   },
 });
@@ -152,6 +189,14 @@ export const putSkillRoute = createRoute({
     400: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },
       description: 'Invalid request body.',
+    },
+    409: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'A new skill whose websites are not the approved list.',
+    },
+    422: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: "The skill's files could not be read to check its websites.",
     },
     424: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },
@@ -277,7 +322,8 @@ export const updateSkillNetworkAllowedHostRoute = createRoute({
   path: '/{name}/network-approval/allowed-host',
   tags: [OpenApiTag.SKILLS],
   summary: 'Allow one site for a skill',
-  description: 'Allows one site for the skill on its own, apart from the declared list approval.',
+  description:
+    "Allows one site for the skill on its own, apart from the declared list approval. On a skill with no approval yet, the allowance is bound to the skill's code as it stands, and a code version that cannot be read refuses it.",
   'x-fern-sdk-group-name': ['settings', 'skills'],
   'x-fern-sdk-method-name': 'create_or_update_network_allowed_host',
   request: {
@@ -299,6 +345,10 @@ export const updateSkillNetworkAllowedHostRoute = createRoute({
     404: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },
       description: 'No skill with this name',
+    },
+    422: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: "The skill's code version could not be read, so nothing was stored.",
     },
     424: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },

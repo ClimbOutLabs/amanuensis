@@ -4,6 +4,7 @@
  */
 import type { LanguageModelUsage, ToolSet as ProviderToolSet, StepResultPerformance, TextStreamPart } from 'ai';
 import {
+  NEW_RECIPIENT_ACCOUNT_SWITCHED,
   NEW_RECIPIENT_REFUSED,
   SEND_LIST_STILL_UPDATING,
 } from '../../../src/core/email/mailConnector/sendListApproval';
@@ -33,6 +34,7 @@ import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { runTurn, textReplyStream } from '../../orchestration/helpers/helpers';
 import { makeSilentLogger } from '../harnessMocks';
 
+import { everyMailDraftApproved } from '../fixtures/approvedMailDrafts';
 const ROOT_ID = 'thread_root';
 const OWNER = { tenant_id: 't1', created_by: 'u1' };
 const SEND_ARGS = JSON.stringify({ to: 'ana@example.com', body: 'Lunch at noon?' });
@@ -190,6 +192,7 @@ function makeHarness(
   const mailLoaded = jest.fn<Promise<'loaded' | 'not_loaded'>, unknown[]>(() => Promise.resolve('loaded'));
   const base: SentinelServices = {
     ...defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }),
+    mail_approved_drafts: everyMailDraftApproved,
     audit: {
       record: input => {
         audit.push(input);
@@ -201,6 +204,13 @@ function makeHarness(
     mail_listed_addresses: () => Promise.resolve(options.mail?.listed ?? []),
     mail_add_recipients: mailAdd,
     mail_list_loaded: mailLoaded,
+    // The mail world of these tests holds one account, which the sidecar names default.
+    mail_accounts: () =>
+      Promise.resolve(
+        options.mail === undefined
+          ? { accounts: [], default_account: null }
+          : { accounts: ['default'], default_account: 'default' },
+      ),
   };
   const callTool: CallToolMock = jest.fn<ReturnType<ToolSource['callTool']>, Parameters<ToolSource['callTool']>>(() =>
     Promise.resolve(toolResultResponse({ text: 'sent' })),
@@ -306,12 +316,16 @@ function heldContext(thread: AgentThread) {
   return thread.toSnapshot().context;
 }
 
-function approve(callId: string, scope?: 'once' | 'chat' | 'always') {
+function approve(callId: string, scope?: 'once' | 'chat' | 'always', fromAccount?: string) {
   return {
     type: EventType.USER_TOOL_APPROVAL,
     thread_id: ROOT_ID,
     tool_call_id: callId,
-    approval: { status: 'allow' as const, ...(scope === undefined ? {} : { scope }) },
+    approval: {
+      status: 'allow' as const,
+      ...(scope === undefined ? {} : { scope }),
+      ...(fromAccount === undefined ? {} : { from_account: fromAccount }),
+    },
   };
 }
 
@@ -770,13 +784,71 @@ describe('approving a held mail send to an address not on the Email list', () =>
     await answer(h, context, [approve('call-mail')]);
 
     expect(h.mailAdd).toHaveBeenCalledTimes(1);
-    expect(h.mailAdd).toHaveBeenCalledWith(OWNER, ['stranger@example.net']);
+    expect(h.mailAdd).toHaveBeenCalledWith({ ...OWNER, account: 'default' }, ['stranger@example.net']);
     expect(h.callTool).toHaveBeenCalledTimes(1);
     expect(h.callTool).toHaveBeenCalledWith(
       { name: 'send_email', arguments: MAIL_SEND_ARGS },
       expect.objectContaining({ status: 'allow' }),
       expect.anything(),
     );
+  });
+
+  it('a card pick of another account with a new address for it adds nothing and sends nothing', async () => {
+    const { h, context } = await heldSend(['dana@example.com']);
+
+    await expect(answer(h, context, [approve('call-mail', undefined, 'other@example.com')])).rejects.toThrow(
+      NEW_RECIPIENT_ACCOUNT_SWITCHED,
+    );
+    expect(h.mailAdd).not.toHaveBeenCalled();
+    expect(h.callTool).not.toHaveBeenCalled();
+
+    // The refused answer was not recorded, so the same card can still be approved as it was shown.
+    await answer(h, context, [approve('call-mail')]);
+    expect(h.mailAdd).toHaveBeenCalledTimes(1);
+    expect(h.mailAdd).toHaveBeenCalledWith({ ...OWNER, account: 'default' }, ['stranger@example.net']);
+    expect(h.callTool).toHaveBeenCalledTimes(1);
+  });
+
+  it('a card for an account that lists every address, answered with a pick of an account that lists none, adds nothing and sends nothing', async () => {
+    const { h, context } = await heldSend(['dana@example.com', 'stranger@example.net']);
+    h.base.mail_listed_addresses = ({ account }: { account: string | null }) =>
+      Promise.resolve(account === 'other@example.com' ? [] : ['dana@example.com', 'stranger@example.net']);
+
+    await expect(answer(h, context, [approve('call-mail', undefined, 'other@example.com')])).rejects.toThrow(
+      NEW_RECIPIENT_ACCOUNT_SWITCHED,
+    );
+    expect(h.mailAdd).not.toHaveBeenCalled();
+    expect(h.callTool).not.toHaveBeenCalled();
+  });
+
+  it('records the stopped send in the activity log when a card pick switches to an account with a new address', async () => {
+    const { h, context } = await heldSend(['dana@example.com']);
+
+    await expect(answer(h, context, [approve('call-mail', undefined, 'other@example.com')])).rejects.toThrow(
+      NEW_RECIPIENT_ACCOUNT_SWITCHED,
+    );
+
+    const stopped = h.audit.filter(record => record.outcome === 'auto_denied');
+    expect(stopped).toEqual([
+      expect.objectContaining({
+        tool_name: 'send_email',
+        description: expect.stringContaining('The picked account has a new address'),
+      }),
+    ]);
+    expect(h.mailAdd).not.toHaveBeenCalled();
+    expect(h.callTool).not.toHaveBeenCalled();
+  });
+
+  it('a card pick of an account that already lists the address adds nothing, and still sends', async () => {
+    const { h, context } = await heldSend(['dana@example.com']);
+    h.base.mail_listed_addresses = ({ account }: { account: string | null }) =>
+      Promise.resolve(
+        account === 'other@example.com' ? ['stranger@example.net', 'dana@example.com'] : ['dana@example.com'],
+      );
+    await answer(h, context, [approve('call-mail', undefined, 'other@example.com')]);
+
+    expect(h.mailAdd).not.toHaveBeenCalled();
+    expect(h.callTool).toHaveBeenCalledTimes(1);
   });
 
   it('leaves the Email list alone for a connector that only carries the name Email, and still sends once approved', async () => {
@@ -796,10 +868,35 @@ describe('approving a held mail send to an address not on the Email list', () =>
     await answer(h, context, [approve('call-mail')]);
 
     expect(h.mailAdd).toHaveBeenCalledTimes(1);
-    expect(h.mailAdd).toHaveBeenCalledWith(OWNER, ['stranger@example.net']);
+    expect(h.mailAdd).toHaveBeenCalledWith({ ...OWNER, account: 'default' }, ['stranger@example.net']);
     expect(h.callTool).toHaveBeenCalledWith(
       { name: 'send_email', arguments: MAIL_SEND_ARGS },
       expect.objectContaining({ status: 'allow' }),
+      expect.anything(),
+    );
+  });
+
+  it('an approval that picks no account sends from the account the card showed', async () => {
+    const h = makeHarness([() => toolCallsStream([mailSendCall])], {
+      mail: { listed: ['dana@example.com', 'stranger@example.net'], add: 'loaded' },
+    });
+    h.base.mail_accounts = () =>
+      Promise.resolve({ accounts: ['home@example.com', 'work@example.com'], default_account: 'work@example.com' });
+    const { thread } = await runBrief(h);
+    const context = heldContext(thread);
+    const card = context.flatMap(message =>
+      'role' in message && message.role === 'assistant' ? (message.tool_calls ?? []) : [],
+    )[0]?.tool_info.tier3_card;
+    expect(card).toMatchObject({
+      mail_from: 'work@example.com',
+      mail_from_choices: ['home@example.com', 'work@example.com'],
+    });
+
+    await answer(h, context, [approve('call-mail')]);
+    expect(h.callTool).toHaveBeenCalledTimes(1);
+    expect(h.callTool).toHaveBeenCalledWith(
+      { name: 'send_email', arguments: MAIL_SEND_ARGS },
+      expect.objectContaining({ status: 'allow', from_account: 'work@example.com' }),
       expect.anything(),
     );
   });
@@ -980,7 +1077,7 @@ describe('approving a held mail draft to an address not on the Email list', () =
     await answer(h, context, [approve('call-draft')]);
 
     expect(h.mailAdd).toHaveBeenCalledTimes(1);
-    expect(h.mailAdd).toHaveBeenCalledWith(OWNER, ['stranger@example.net']);
+    expect(h.mailAdd).toHaveBeenCalledWith({ ...OWNER, account: 'default' }, ['stranger@example.net']);
     expect(h.callTool).toHaveBeenCalledTimes(1);
     expect(h.callTool).toHaveBeenCalledWith(
       { name: 'save_draft', arguments: MAIL_DRAFT_ARGS },

@@ -245,6 +245,10 @@ instance_render() {
   if [ "$browser_on" = 1 ]; then
     write_if_changed "$dir/browser-seccomp.json" 644 <"$REPO_ROOT/ops/browser-sidecar/seccomp_profile.json" || true
   fi
+  # The local model bridge, when the owner named a port of this computer for it.
+  local local_model_args=()
+  mapfile -t local_model_args < <(local_model_render_args "$name")
+  if [ -n "$(local_model_ports "$name")" ]; then local_model_files "$dir"; fi
   # The https folders are mounted from the home folder itself, except when the home is the state volume
   # (Windows): then the compose file mounts them from inside the volume, because a host folder the
   # daemon could read does not exist there.
@@ -257,7 +261,7 @@ instance_render() {
     "IF_EDGE=$edge_on" "LOGIN_HOST=$login_host" \
     "LOGIN_PORT=$login_port" "DEX_TELEMETRY_PORT=$DEX_TELEMETRY_PORT" "APP_PORTS=$app_ports" \
     "IF_TLS=$tls_on" "IF_TLS_HOST=$tls_host" "IF_TLS_VOLUME=$tls_volume" "CADDY_IMAGE=$(tls_image)" "TLS_USER=$(id -u):$(id -g)" "TLS_LEAF_DIR=$(tls_leaf_dir "$name")" \
-    "TLS_TRUST_DIR=$(tls_trust_dir "$name")" "TLS_HTTP_IN=$TLS_HTTP_IN" | write_if_changed "$dir/compose.yaml" 644 || true
+    "TLS_TRUST_DIR=$(tls_trust_dir "$name")" "TLS_HTTP_IN=$TLS_HTTP_IN" "${local_model_args[@]}" | write_if_changed "$dir/compose.yaml" 644 || true
   if [ "$tls_on" = 1 ]; then tls_prepare "$name" "$app_image"; fi
   if [ "$edge_on" = 1 ]; then edge_render "$name"; fi
   render_template "$TEMPLATES_DIR/instance/dex.yaml.tpl" \
@@ -484,7 +488,7 @@ instance_state() {
 instance_up() {
   local name=$1 rc=0 recreate=() clash
   if [ "${2:-}" = recreate ]; then recreate=(--force-recreate); fi
-  step_begin "start-$name" "Starting instance $name and waiting until it answers"
+  step_begin "start-$name" "Starting instance $name"
   # Tailscale would take the port the moment the instance stops, so a start that would stop it is not begun.
   clash=$(instance_tailscale_clash "$name")
   if [ -n "$clash" ]; then
@@ -542,7 +546,8 @@ container_networks_sync() { # name
   env="$(instance_dir "$name")/.env"
   [ -f "$env" ] || return 0
   ranges=""
-  for network in "aman-${name}_default" "aman-${name}_link" "aman-${name}_calendar" "aman-${name}_browser-control"; do
+  for network in "aman-${name}_default" "aman-${name}_link" "aman-${name}_calendar" "aman-${name}_browser-control" \
+    "aman-${name}_local-model"; do
     for subnet in $(D network inspect "$network" --format '{{range .IPAM.Config}}{{.Subnet}} {{end}}' 2>/dev/null || true); do
       case "$subnet" in
         */*) ranges="${ranges:+$ranges,}$subnet" ;;
@@ -649,7 +654,7 @@ run_doctor() {
   fi
   # Same Docker access as the rest of the run (direct, sg or sudo), so a fresh docker group member
   # does not get a failing report for a problem the run itself worked around.
-  as_docker_user env "AMANUENSIS_HOME=$AMAN_HOME" "HOME=$HOME" ${bound[@]+"${bound[@]}"} "$(doctor_shim)" doctor "$@"
+  as_docker_user env "AMANUENSIS_HOME=$AMAN_HOME" "HOME=$HOME" ${AMAN_UI_FRAMED:+"AMAN_UI_FRAMED=$AMAN_UI_FRAMED"} ${bound[@]+"${bound[@]}"} "$(doctor_shim)" doctor "$@"
 }
 
 doctor_status() {
@@ -919,6 +924,7 @@ instance_apply_addresses() { # name open|close|refresh app_image
     # A new authority is made again only when there was one before and its fingerprint changed; the first
     # authority is not "made again".
     if [ -n "$fingerprint_before" ] && [ "$(tls_fingerprint)" != "$fingerprint_before" ]; then TLS_AUTHORITY_REPLACED=1; fi
+    TRUST_NEW_NAMES="$TRUST_NEW_NAMES $name"
   fi
   reg_set "$name" tls "$tls"
   reg_set "$name" tls_port "$tls_port"
@@ -970,6 +976,7 @@ instance_create() {
     "healthy=0" "origins=$I_ORIGINS" "extra_hosts=$OPT_ADDRESSES" "sandbox=$I_SANDBOX" "tls=$I_TLS" "tls_port=$I_TLS_PORT" "token_factory=$I_TF" "tf_model=$I_TF_MODEL" \
     "tf_cap=$I_TF_CAP" "demo=$demo_on" "created=$created"
   INSTANCE_PENDING=
+  TRUST_NEW_NAMES="$TRUST_NEW_NAMES $I_NAME"
   instance_render "$I_NAME" "$REL_APP_TAG" "$REL_DEX_IMAGE"
   if docker_volume_exists "aman_${I_NAME}_data"; then
     warn "An earlier instance with this name left data behind (aman_${I_NAME}_data), which this one takes over."
@@ -1020,50 +1027,80 @@ origins_display_order() { # comma list
   done
 }
 
-# The closing table of one instance: what to open, who signs in, and where the model, sandbox, data and backups stand.
+# The address to open an instance at: the public one when there is one, else the name that survives this computer's
+# address changing (Tailscale, then the home network name), else its first network address, else this computer only.
+best_origin() { # name
+  local url origins kind origin
+  url=$(reg_get "$1" public_url)
+  origins=$(reg_get "$1" origins)
+  if [ -z "$origins" ] || edge_wanted "$1"; then
+    printf '%s\n' "$url"
+    return 0
+  fi
+  for kind in tailscale local address name loopback; do
+    while IFS= read -r origin; do
+      if [ "$(origin_kind "$origin")" = "$kind" ]; then
+        printf '%s\n' "$origin"
+        return 0
+      fi
+    done < <(printf '%s\n' "$origins" | tr ',' '\n')
+  done
+  printf '%s\n' "$url"
+}
+
+# True when the end of this run must say how a device comes to trust this computer: aman status, a new instance or one
+# that moved to https in this run, or a root certificate that was made again.
+trust_steps_due() { # name
+  if [ "$SUMMARY_FULL" = 1 ] || [ "$TLS_AUTHORITY_REPLACED" = 1 ]; then return 0; fi
+  case " $TRUST_NEW_NAMES " in *" $1 "*) return 0 ;; esac
+  return 1
+}
+
+# The closing table of one instance. A run's end shows where to open it, who signs in, and only the rows that need
+# something; aman status (SUMMARY_FULL=1) shows every address and every row.
 print_instance_summary() {
-  local name=$1 url count origin first=1 origins bookmark=
+  local name=$1 url count origin first=1 origins full=$SUMMARY_FULL
   url=$(reg_get "$name" public_url)
   origins=$(reg_get "$name" origins)
   count=$(reg_names | wc -l | tr -d ' ')
-  if [ "$count" -gt 1 ]; then ui_heading "Instance $name"; fi
-  while IFS= read -r origin; do
-    if [ "$first" = 1 ]; then ui_check_row ok "Open" "$origin"; else ui_check_more "$origin"; fi
-    first=0
-    case "$(origin_kind "$origin")" in
-      tailscale | local) if [ -z "$bookmark" ]; then bookmark=$(origin_host "$origin"); fi ;;
-    esac
-  done < <(origins_display_order "${origins:-$url}")
+  if [ "$count" -gt 1 ] || [ "$full" = 1 ]; then ui_heading "Instance $name"; fi
+  if [ "$full" = 1 ]; then
+    while IFS= read -r origin; do
+      if [ "$first" = 1 ]; then ui_check_row ok "Open" "$origin"; else ui_check_more "$origin"; fi
+      first=0
+    done < <(origins_display_order "${origins:-$url}")
+  else
+    ui_check_row ok "Open" "$(best_origin "$name")"
+  fi
   ui_check_row ok "Sign in" "$(reg_get "$name" owner_email)"
   print_model_row "$name"
   if instance_sandbox_wanted "$name"; then
     case "$SANDBOX_FAILED_NAMES " in
       *" $name "*) ui_check_row warn "Run code" "not ready: $(sandbox_repair_command)" ;;
-      *) ui_check_row ok "Run code" "on, in a sandbox, with PDF and image reading" ;;
+      *) if [ "$full" = 1 ]; then ui_check_row ok "Run code" "on, in a sandbox, with PDF and image reading"; fi ;;
     esac
-  else
+  elif [ "$full" = 1 ]; then
     ui_check_row skip "Run code" "off, with no PDF or image reading (installed with --no-sandbox)"
   fi
-  ui_check_row ok "Data" "saved in Docker"
+  if [ "$full" = 1 ]; then ui_check_row ok "Data" "saved in Docker"; fi
   print_backups_row
-  if edge_wanted "$name"; then
+  if edge_wanted "$name" && trust_steps_due "$name"; then
     ui_check_row ok "HTTPS" "on, with certificates from Let's Encrypt"
   fi
   if demo_env_on "$name"; then
     ui_check_row ok "Demo" "on. Fill again: $(demo_seed_command "$name") [--reset]"
   fi
   if edge_wanted "$name"; then
-    edge_print_firewall_hint
+    if trust_steps_due "$name"; then edge_print_firewall_hint; fi
   elif [ -n "$origins" ]; then
     if tls_active "$name"; then
-      print_trust_lines "$name"
+      if trust_steps_due "$name"; then print_trust_lines "$name"; fi
     elif origins_reach_the_network "$origins"; then
       # The warning is only for sign-in that crosses the network: an instance that only ever answers on this
       # computer keeps sign-in on this computer, so there is nothing to warn about.
       ui_line "Sign-in on your home network is not encrypted. Run the installer again to move this instance to https."
     fi
-    if [ -n "$bookmark" ]; then ui_line "Bookmark $bookmark: it keeps working when this computer's address changes."; fi
-  elif ! is_loopback_origin "$url"; then
+  elif ! is_loopback_origin "$url" && trust_steps_due "$name"; then
     print_proxy_requirements "$url" "$(reg_get "$name" app_port)" "$(reg_get "$name" login_url)"
   fi
 }
@@ -1071,26 +1108,42 @@ print_instance_summary() {
 # How a device comes to trust this computer: one short link over plain http, the same link as a code for a phone, and the
 # step an iPhone needs after installing.
 print_trust_lines() { # name
-  local link
+  local link fp qr line
   link=$(tls_trust_link "$1")
-  ui_line "On each device, the browser will first warn that the page is not private. Do not click past the warning."
-  ui_line "Instead, open this page once on that device and follow its steps: $link"
-  ui_line "On an iPhone: open it in Safari, install the profile, then turn it on in Settings, General, About, Certificate Trust Settings."
-  ui_line "Your device will show a long code called a fingerprint. It must be $(tls_fingerprint). If it differs, stop."
+  qr=$(tls_qr_text "$link")
   if [ "$TLS_AUTHORITY_REPLACED" = 1 ]; then
+    ui_heading "Set up each phone and computer again"
     ui_line "This computer's root certificate was made again, so each device must trust it again."
+  else
+    ui_heading "Set up a new phone or computer"
   fi
-  tls_print_qr "$link"
+  if [ -n "$qr" ]; then
+    ui_line "Open $link on it once and follow its steps, or scan the code below. Do not click past a warning that the page is not private."
+  else
+    ui_line "Open $link on it once and follow its steps. Do not click past a warning that the page is not private."
+  fi
+  fp=$(tls_fingerprint)
+  ui_line "Your device shows a long code called a fingerprint. It must be this one. If it differs, stop."
+  # Two lines of 16 pairs, so the code fits a narrow terminal and is easy to compare half by half.
+  ui_line "$(_ui_s 1 "${fp:0:48}")"
+  if [ -n "${fp:48}" ]; then ui_line "$(_ui_s 1 "${fp:48}")"; fi
+  if [ -n "$qr" ]; then
+    _ui_out ""
+    while IFS= read -r line; do
+      _ui_out "  $line"
+    done <<<"$qr"
+    _ui_out ""
+  fi
 }
 
-# The backups row: the daily schedule and how many are kept, or how to turn it on or make one by hand.
+# The backups row: how to turn it on or make one by hand, and for aman status also the daily schedule or how many are kept.
 print_backups_row() {
   local count=0
   if [ -d "$BACKUPS_DIR" ]; then count=$(find "$BACKUPS_DIR" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' '); fi
   case "$(backups_mode)" in
     daily)
       if backup_schedule_present; then
-        ui_check_row ok "Backups" "daily, keeps the last $BACKUP_KEEP"
+        if [ "$SUMMARY_FULL" = 1 ]; then ui_check_row ok "Backups" "daily, keeps the last $BACKUP_KEEP"; fi
       else
         ui_check_row warn "Backups" "not scheduled. Fix: aman doctor backup --fix"
       fi
@@ -1098,7 +1151,7 @@ print_backups_row() {
     off) ui_check_row skip "Backups" "off. Turn on: aman doctor backup --fix" ;;
     *)
       if [ "$count" -gt 0 ]; then
-        ui_check_row ok "Backups" "$count kept"
+        if [ "$SUMMARY_FULL" = 1 ]; then ui_check_row ok "Backups" "$count kept"; fi
       else
         ui_check_row todo "Backups" "none yet. Make one: aman backup"
       fi
@@ -1108,10 +1161,12 @@ print_backups_row() {
 
 # The last lines of a finished run: how to reach the aman command from this terminal, and how to update later.
 print_closing_lines() {
+  ui_gap
   case ":$PATH:" in
     *":$AMAN_HOME/bin:"*) ;;
     *) ui_line "Open a new terminal window to use the aman command." ;;
   esac
+  ui_line "Every address and setting: aman status"
   ui_line "Update later: aman upgrade"
 }
 
@@ -1404,6 +1459,28 @@ align_columns() {
         print line
       }
     }'
+}
+
+# aman status: every instance's addresses, settings and how to set up a new device. It reads and changes nothing, so it
+# takes no lock; the code for a phone needs Docker and is left out without it.
+cmd_status() {
+  local name
+  require_installed
+  if [ -z "$(reg_names)" ]; then
+    say "No instances yet. Run install.sh to make one."
+    return 0
+  fi
+  docker_plan_access
+  case "$DOCKER_ACCESS" in
+    direct | sg)
+      AMAN_DOCKER_MODE=$DOCKER_ACCESS
+      release_load "$RELEASE_DIR/release.json" && REL_APP_TAG=$CUR_APP_TAG
+      ;;
+  esac
+  SUMMARY_FULL=1
+  for name in $(reg_names); do
+    print_instance_summary "$name"
+  done
 }
 
 cmd_instance_list() {

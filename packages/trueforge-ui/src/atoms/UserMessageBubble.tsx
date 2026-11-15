@@ -21,7 +21,8 @@ export function UserMessageBubble({ text, attachments, editAction, className }: 
       {text.trim().length > 0 ? (
         <div
           data-slot="aui_user-message-content"
-          style={{ borderRadius: 'var(--composer-radius, 1.5rem)' }}
+          // One tighter corner points the bubble at the side it was sent from.
+          style={{ borderRadius: 'var(--composer-radius, 1.5rem)', borderBottomRightRadius: '0.375rem' }}
           className="aman-chat-text max-w-[min(80%,100%)] min-w-0 bg-user-message-bg px-3 py-2 text-user-message-text whitespace-pre-wrap break-words sm:px-4 sm:py-2.5"
         >
           {text}

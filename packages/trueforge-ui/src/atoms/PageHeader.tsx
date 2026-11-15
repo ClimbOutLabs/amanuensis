@@ -1,12 +1,17 @@
 'use client';
 
-import type { ReactNode } from 'react';
+import { createContext, useContext, type ReactNode } from 'react';
 
 import { HelpStuckButton } from '../help/HelpStuckButton.js';
 import { cn } from './lib/cn.js';
 
 /** Shared title styles for page / chat chrome headers. */
 export const pageHeaderTitleClassName = 'text-text-primary min-w-0 truncate text-base font-semibold';
+
+const PageHeaderStartContext = createContext<ReactNode>(null);
+
+/** Gives the page headers inside it a leading control, such as the phone menu button, when they have none of their own. */
+export const PageHeaderStartProvider = PageHeaderStartContext.Provider;
 
 export type PageHeaderProps = {
   /** Page name, or a custom title node (e.g. `NamedAgentHeaderLabel`). Strings use the shared h1 styles. */
@@ -39,6 +44,7 @@ export function PageHeader({
   children,
   className,
 }: PageHeaderProps) {
+  const inheritedStart = useContext(PageHeaderStartContext);
   return (
     <header
       className={cn(
@@ -47,7 +53,7 @@ export function PageHeader({
         className,
       )}
     >
-      {start}
+      {start ?? inheritedStart}
       {typeof title === 'string' ? <h1 className={pageHeaderTitleClassName}>{title}</h1> : title}
       {children}
       {end != null || helpAction || menu != null ? (

@@ -654,6 +654,11 @@ const CONNECTOR_FAMILIES: ConnectorFamily[] = [
     describe: ({ where }) => `Archive emails${where}?`,
   },
   {
+    // Like archiving, marking mail read changes only the mailbox, so it carries no recipient.
+    match: words => hasPhrase(words, 'mark_emails_as_read'),
+    describe: ({ where }) => `Mark emails as read${where}?`,
+  },
+  {
     match: words =>
       hasPhrase(
         words,

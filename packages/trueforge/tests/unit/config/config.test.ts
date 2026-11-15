@@ -11,6 +11,7 @@ import {
   parseDemoGoogleAccount,
   parseDemoSendAllowlist,
   parseLoginUpstreamUrl,
+  parsePageSortMode,
   parsePublicBaseUrl,
   parseSearchProviderChoice,
   parseTokenFactoryMode,
@@ -555,5 +556,25 @@ describe('parseDemoGoogleAccount', () => {
 
   it.each(['maya', 'a@b', 'maya@demo.example, other@demo.example'])('refuses %s at load', value => {
     expect(() => parseDemoGoogleAccount(value)).toThrow(/DEMO_GOOGLE_ACCOUNT/);
+  });
+});
+
+describe('parsePageSortMode', () => {
+  const parse = (raw: string | undefined) =>
+    parsePageSortMode({ envKey: 'MEMORY_PAGE_SORTING', raw, defaultValue: 'off' });
+
+  it('defaults to the given default when unset or blank', () => {
+    expect(parse(undefined)).toBe('off');
+    expect(parse('  ')).toBe('off');
+  });
+
+  it('parses off, report and on case-insensitively', () => {
+    expect(parse('off')).toBe('off');
+    expect(parse('Report')).toBe('report');
+    expect(parse(' ON ')).toBe('on');
+  });
+
+  it('throws on anything else', () => {
+    expect(() => parse('true')).toThrow('MEMORY_PAGE_SORTING must be one of off, report, on');
   });
 });

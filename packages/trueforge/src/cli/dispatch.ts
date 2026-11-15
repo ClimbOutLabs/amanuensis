@@ -7,6 +7,7 @@ import { exportData } from './exportData';
 import { hashPassword } from './hashPassword';
 import { importData } from './importData';
 import { UsageError, type CliIo } from './io';
+import { memoryExample } from './memoryExample';
 import { resetPassword } from './resetPassword';
 
 const COMMANDS: Readonly<Record<string, Command>> = {
@@ -17,6 +18,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
   'export-data': exportData,
   'demo-seed': demoSeed,
   'import-data': importData,
+  'memory-example': memoryExample,
   'reset-password': resetPassword,
 };
 
@@ -30,6 +32,7 @@ Commands:
   export-data     Export one user's data to a zip (--list-users shows the user ids)
   demo-seed       Seed one synthetic demo world (needs DEMO_MODE=true); --reset removes it
   import-data     Restore a data export (--in <file.zip>) into this fresh instance
+  memory-example  Replace this instance's memory with two years of made-up notes (--replace), keeping the old
   reset-password  Set a new password for the local sign-in (Aman must be stopped)
 
 JSON goes to stdout, messages to stderr. Exit codes: 0 ok, 1 failure, 2 usage.

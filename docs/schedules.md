@@ -42,7 +42,7 @@ When you ask for a schedule in a chat, a card shows it before anything is saved.
 
 ## Scheduled runs don't interrupt you
 
-A scheduled run sends no notice. Its results wait in its chat until you open it.
+A scheduled run sends no notice. Its results wait in its chat until you open it. A morning brief also leaves a quiet note under the **For you** bell when it is ready. The note never pushes to your devices or texts you.
 
 ## Nothing is sent or changed without you
 
@@ -57,7 +57,7 @@ The one thing of yours it changes by itself is a space. It can make and change a
 ### Spaces
 
 - Every change keeps a version you can ask Aman to bring back.
-- Each change a run saves is also one line in the activity log, under **Settings**, **Audit**.
+- Each change a run saves is also one line in the activity log, under **Settings**, **Activity log**.
 - Aman can't delete a space.
 - A space only keeps a clickable link that you gave or that a search returned. A link that only an email or a web page supplied is kept as plain text.
 

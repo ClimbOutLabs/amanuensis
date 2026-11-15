@@ -32,6 +32,8 @@ export interface DemoExchange {
   reply: string;
   /** Tools Aman uses first, one after another. */
   tools?: readonly DemoToolCall[];
+  /** What Aman keeps in memory from this exchange, so a memory shows as one you said in a chat. */
+  remembers?: readonly string[];
 }
 
 export interface DemoModelServer {
@@ -44,14 +46,9 @@ export interface DemoModelServer {
 
 /** The answer for any request the list does not cover. */
 const FALLBACK_REPLY = 'Sure. Tell me a little more and I will take it from there.';
-/**
- * Answers to the server's own background questions, found by a phrase their prompt holds. They keep nothing
- * new, so the demo memories stay exactly as the run saved them.
- */
-const BACKGROUND_REPLIES: readonly { prompt: string; reply: string }[] = [
-  { prompt: '{"facts":', reply: '{"facts": []}' },
-  { prompt: '<knowledge-relevance-judge', reply: '{"helpful": []}' },
-];
+/** Phrases that mark the server's memory summary question and its relevance check. */
+const MEMORY_SUMMARY_PROMPT = '{"facts":';
+const RELEVANCE_PROMPT = '<knowledge-relevance-judge';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -83,6 +80,21 @@ function currentExchange({ messages, exchanges }: { messages: ChatMessage[]; exc
     }
   }
   return { exchange, toolsAnswered };
+}
+
+/** The answer to one of the server's background questions, or undefined when the request is not one. */
+function backgroundReply({
+  messages,
+  exchanges,
+}: {
+  messages: ChatMessage[];
+  exchanges: readonly DemoExchange[];
+}): string | undefined {
+  const texts = messages.map(message => textOf(message.content));
+  if (texts.some(text => text.includes(RELEVANCE_PROMPT))) return '{"helpful": []}';
+  if (!texts.some(text => text.includes(MEMORY_SUMMARY_PROMPT))) return undefined;
+  const summarized = exchanges.find(candidate => texts.some(text => text.includes(candidate.ask)));
+  return JSON.stringify({ facts: summarized?.remembers ?? [] });
 }
 
 function advertisedName({ match, tools }: { match: string; tools: AdvertisedTool[] }): string | undefined {
@@ -146,13 +158,12 @@ export async function startDemoModelServer({
           argumentsJson: JSON.stringify(wanted.arguments),
         });
       }
-      // Only a chat answer speaks for Aman: one that offers tools, or streams, as the help guide's does without tools.
-      // Background questions get the plain fallback.
+      // The server's own background questions offer no tools and may stream. A memory summary keeps only what
+      // the exchange says it remembers, so the demo memories stay exactly as the run saved them.
+      const background = tools.length > 0 ? undefined : backgroundReply({ messages, exchanges });
+      // Otherwise only a chat answer speaks for Aman: one that offers tools, or streams, as the help guide's does.
       const chatAnswer = tools.length > 0 || stream;
-      const background = chatAnswer
-        ? undefined
-        : BACKGROUND_REPLIES.find(answer => messages.some(message => textOf(message.content).includes(answer.prompt)));
-      const text = background?.reply ?? (chatAnswer && exchange !== undefined ? exchange.reply : FALLBACK_REPLY);
+      const text = background ?? (chatAnswer && exchange !== undefined ? exchange.reply : FALLBACK_REPLY);
 
       if (!stream) {
         res.writeHead(200, { 'content-type': 'application/json' });

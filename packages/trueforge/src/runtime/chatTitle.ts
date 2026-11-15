@@ -4,6 +4,7 @@ import { extractErrorLogFields, VercelAILLM, type LLMCreateParams } from '@truef
 import type { Logger } from 'winston';
 
 import type { IAgentStore } from '../db/agentStore';
+import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 import type { IModelProviderStore } from '../db/modelProviderStore';
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import type { EventSubscription } from './event-subscription';
@@ -52,6 +53,8 @@ export interface ChatTitleDrainMember {
   derivedTitle: string;
   /** The person's first message, in full. */
   userText: string;
+  /** Put in front of the subject title, as it was in front of the working title. Empty for most chats. */
+  titlePrefix: string;
 }
 
 /**
@@ -68,10 +71,12 @@ export async function resolveChatTitleContext(params: {
   personaModelName: string | undefined;
   agentStore: IAgentStore;
   modelProviderStore: IModelProviderStore;
+  globalSettingsStore: IGlobalSettingsStore;
   tokenFactoryBudget: TokenFactoryBudget;
   sessionStore: ISessionStore<SessionCustom, TurnCustom>;
   derivedTitle: string;
   userText: string;
+  titlePrefix: string;
   logger: Logger;
 }): Promise<ChatTitleDrainMember | undefined> {
   const { logger, sessionId } = params;
@@ -81,6 +86,9 @@ export async function resolveChatTitleContext(params: {
       personaModelName: params.personaModelName,
       sessionAgent: params.sessionAgent,
       agentStore: params.agentStore,
+      globalSettingsStore: params.globalSettingsStore,
+      modelProviderStore: params.modelProviderStore,
+      logger,
     });
     if (modelName === undefined || modelName.trim() === '') {
       logger.debug('Chat title skipped for this chat: no title model resolved', { sessionId });
@@ -94,6 +102,7 @@ export async function resolveChatTitleContext(params: {
       modelName,
       derivedTitle: params.derivedTitle,
       userText: params.userText,
+      titlePrefix: params.titlePrefix,
     };
   } catch (error) {
     logger.debug('Chat title skipped for this chat: the title model did not resolve', {
@@ -279,8 +288,8 @@ export async function runChatTitleFollowUp(params: {
     if (candidate === undefined) {
       return;
     }
-    const title = capChatTitle(candidate);
-    if (title === '' || title === member.derivedTitle) {
+    const title = capChatTitle(`${member.titlePrefix}${candidate}`);
+    if (title === member.titlePrefix || title === member.derivedTitle) {
       return;
     }
     const replaced = await member.sessionStore.replaceSessionTitleIfCurrent({

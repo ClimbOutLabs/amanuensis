@@ -71,9 +71,6 @@ export async function openImportDataSession(): Promise<ImportDataSession> {
   if (!configuration.STANDALONE) {
     throw new Error('import-data writes to the standalone (SQLite) instance only. Set STANDALONE=true.');
   }
-  if (configuration.MEMORY_BACKEND !== 'markdown') {
-    throw new Error('import-data writes to the local markdown memory. Set MEMORY_BACKEND=markdown.');
-  }
 
   // The owner is whoever the app itself will treat as the one account.
   let owner: string;
@@ -149,7 +146,7 @@ export async function openImportDataSession(): Promise<ImportDataSession> {
           agentStore: new SqliteAgentStore(db),
           mcpCatalog,
           withTransaction: callback => db.transaction().execute(callback),
-          memoryTarget: { kind: 'markdown', markdownDir: configuration.MEMORY_MARKDOWN_DIR },
+          memoryMarkdownDir: configuration.MEMORY_MARKDOWN_DIR,
           ownerName: configuration.OWNER_NAME,
           personaKnowledgeDir: configuration.PERSONA_KNOWLEDGE_DIR,
           // The one-off container has no network: a model that is not on disk is "not ready", never fetched.
