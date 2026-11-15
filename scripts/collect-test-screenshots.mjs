@@ -13,6 +13,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
+import { galleryHtml } from './build-nightly-gallery.mjs';
+import { cardHtml, escapeHtml, pageHtml, parsedJson, pillHtml, tilesHtml } from './screenshot-pages.mjs';
 
 const run = promisify(execFile);
 
@@ -23,10 +25,6 @@ export const SOURCES = {
   weekly: { workflow: 'ui-sweep.yml', artifact: 'ui-sweep', keep: 4 },
 };
 const API = 'https://api.github.com';
-
-function escapeHtml(text) {
-  return text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
-}
 
 function pictureCount(count) {
   return count === 1 ? '1 picture' : `${String(count)} pictures`;
@@ -57,55 +55,121 @@ async function foldersHolding({ root, fileName }) {
   return found.sort();
 }
 
-/** One nightly run on the list: its folder, when it ran and how many pictures came from failed tests. */
+const PREVIEWS = 3;
+
+function isCount(value) {
+  return Number.isInteger(value) && value >= 0;
+}
+
+/** The link from a page `folder` levels deep (plus its kind folder) back to the list. */
+function homeLink(folder) {
+  return '../'.repeat(folder.split('/').length + 1);
+}
+
+/** The first picture of each feature set, so a night's card shows a few different screens. */
+function nightPreviews(results) {
+  if (!Array.isArray(results.feature_sets)) {
+    return [];
+  }
+  return results.feature_sets
+    .map(set => set?.features?.flatMap?.(feature => feature?.pictures ?? [])[0]?.file)
+    .filter(file => typeof file === 'string')
+    .slice(0, PREVIEWS);
+}
+
+/**
+ * The nightly runs for the list, newest first: folder, picture counts and a few pictures to show. A
+ * night that stored its details gets its page written again, so every night has today's look and a
+ * link back to the list. A night whose results cannot be read is left off the list.
+ */
 export async function readNights(root) {
   const nights = [];
-  for (const folder of await foldersHolding({ root, fileName: 'results.json' })) {
-    const results = JSON.parse(await readFile(path.join(root, folder, 'results.json'), 'utf8'));
-    nights.push({
-      folder: folder.split(path.sep).join('/'),
-      pictures: results.totals.pictures,
-      failed_pictures: results.totals.failed_pictures,
-    });
+  for (const found of await foldersHolding({ root, fileName: 'results.json' })) {
+    const results = parsedJson(await readFile(path.join(root, found, 'results.json'), 'utf8'));
+    const totals = results?.totals;
+    if (!isCount(totals?.pictures) || !isCount(totals?.failed_pictures)) {
+      continue;
+    }
+    const folder = found.split(path.sep).join('/');
+    const previews = nightPreviews(results);
+    if (previews.length > 0 && isCount(totals.features) && isCount(totals.features_with_a_test)) {
+      await writeFile(
+        path.join(root, found, 'index.html'),
+        galleryHtml({ run: results, title: whenText(folder), home: homeLink(folder) }),
+      );
+    }
+    nights.push({ folder, pictures: totals.pictures, failed_pictures: totals.failed_pictures, previews });
   }
   return nights.sort((a, b) => b.folder.localeCompare(a.folder));
 }
 
-const SWEEP_CHECKS =
-  'Opened this screen with made-up data and looked for: page errors, failed requests, sideways scrolling, parts that stick out of the window, cut-off words, controls with no name and tap targets that are too small.';
+const SIZE_NAMES = { desktop: 'Computer', phone: 'Phone', 'small-phone': 'Small phone', 'phone-dark': 'Phone, dark' };
 
-/** The page for one weekly look-over: every picture with what was opened, what was checked and what was found. */
+/** The saved notes that are whole: a picture name, a screen, a size and a list of findings in words. */
+function usableFindings(saved) {
+  if (!Array.isArray(saved)) {
+    return [];
+  }
+  return saved.filter(
+    entry =>
+      typeof entry?.picture === 'string' &&
+      typeof entry.surface === 'string' &&
+      typeof entry.size === 'string' &&
+      Array.isArray(entry.problems) &&
+      entry.problems.every(problem => typeof problem === 'string'),
+  );
+}
+
+/** The page for one weekly look-over: every picture with the screen, its size and what was found. */
 export function sweepHtml({ title, report, pictures, findings, home }) {
   const byPicture = new Map(findings.map(finding => [finding.picture, finding]));
-  const figure = file => {
+  const card = file => {
     const finding = byPicture.get(file);
     const problems = finding?.problems ?? [];
     const found =
       finding === undefined
-        ? '<dd>No notes were saved for this picture.</dd>'
+        ? 'No notes were saved for this picture.'
         : problems.length === 0
-          ? '<dd>Nothing to look at.</dd>'
-          : `<dd><ul class="found">${problems.map(problem => `<li>${escapeHtml(problem)}</li>`).join('')}</ul></dd>`;
-    const rows = [
-      finding === undefined ? '' : `<dt>Screen</dt><dd>${escapeHtml(finding.surface)}</dd>`,
-      finding === undefined ? '' : `<dt>Screen size</dt><dd>${escapeHtml(finding.size)}</dd>`,
-      `<dt>What was checked</dt><dd>${SWEEP_CHECKS}</dd>`,
-      `<dt>What was found</dt>${found}`,
-    ];
-    return `<figure${problems.length > 0 ? ' class="look"' : ''}><a href="${escapeHtml(file)}"><img loading="lazy" src="${escapeHtml(file)}" alt="${escapeHtml(file)}"></a><figcaption><p class="tag">${problems.length > 0 ? 'Something to look at' : 'Looks fine'}</p><dl>${rows.join('')}</dl></figcaption></figure>`;
+          ? 'Nothing to look at.'
+          : `<ul>${problems.map(problem => `<li>${escapeHtml(problem)}</li>`).join('')}</ul>`;
+    return cardHtml({
+      file,
+      alt: file,
+      pill:
+        problems.length > 0
+          ? { text: 'Something to look at', tone: 'bad' }
+          : {
+              text: finding === undefined ? 'No notes' : 'Looks fine',
+              tone: finding === undefined ? undefined : 'good',
+            },
+      where: finding === undefined ? file : (SIZE_NAMES[finding.size] ?? finding.size),
+      heading: finding?.surface ?? null,
+      rows: [['What was found', found]],
+      bad: problems.length > 0,
+    });
   };
   const withProblems = pictures.filter(file => (byPicture.get(file)?.problems ?? []).length > 0);
   const fine = pictures.filter(file => !withProblems.includes(file));
-  return page({
+  return pageHtml({
     title,
-    body: `<p><a href="${escapeHtml(home)}">All test screenshots</a></p>
-<p>${pictureCount(pictures.length)}. ${String(withProblems.length)} have something to look at. This is a look, not a test: nothing here passes or fails.</p>
-<h2>Something to look at</h2>
-${withProblems.length > 0 ? `<div class="grid">${withProblems.map(figure).join('')}</div>` : '<p>Nothing this week.</p>'}
-<h2>Looks fine</h2>
-<div class="grid">${fine.map(figure).join('')}</div>
-<h2>The full list as text</h2>
-<pre>${escapeHtml(report)}</pre>`,
+    eyebrow: 'Weekly look-over',
+    lead: 'Every screen was opened with made-up data at four sizes. Each one was checked for page errors, failed requests, sideways scrolling, parts that stick out of the window, cut-off words, controls with no name and tap targets that are too small. This is a look, not a test, so nothing here passes or fails.',
+    home,
+    hidden: true,
+    body: `${tilesHtml([
+      { value: pictures.length, label: 'pictures' },
+      {
+        value: withProblems.length,
+        label: 'have something to look at',
+        tone: withProblems.length > 0 ? 'bad' : undefined,
+      },
+      { value: fine.length, label: 'look fine', tone: 'good' },
+    ])}
+<section><div class="section-head"><h2>Something to look at</h2><p>${pictureCount(withProblems.length)}</p></div>
+${withProblems.length > 0 ? `<div class="grid">${withProblems.map(card).join('')}</div>` : '<p class="empty">Nothing this week.</p>'}</section>
+<section><div class="section-head"><h2>Looks fine</h2><p>${pictureCount(fine.length)}</p></div>
+<div class="grid">${fine.map(card).join('')}</div></section>
+<details><summary>The full list as text</summary><pre>${escapeHtml(report)}</pre></details>`,
   });
 }
 
@@ -122,98 +186,92 @@ export async function readSweeps(root) {
       }
       throw error;
     });
-    const findings = JSON.parse(saved);
     const name = folder.split(path.sep).join('/');
-    const home = '../'.repeat(name.split('/').length + 1);
     await writeFile(
       path.join(full, 'index.html'),
-      sweepHtml({ title: `Weekly look-over ${name}`, report, pictures, findings, home }),
+      sweepHtml({
+        title: whenText(name),
+        report,
+        pictures,
+        findings: usableFindings(parsedJson(saved)),
+        home: homeLink(name),
+      }),
     );
-    sweeps.push({ folder: name, pictures: pictures.length });
+    const computer = pictures.filter(file => file.endsWith('-desktop.png'));
+    sweeps.push({
+      folder: name,
+      pictures: pictures.length,
+      previews: (computer.length >= PREVIEWS ? computer : pictures).slice(0, PREVIEWS),
+    });
   }
   return sweeps.sort((a, b) => b.folder.localeCompare(a.folder));
 }
 
-function page({ title, body }) {
-  return `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="robots" content="noindex">
-<title>${escapeHtml(title)}</title>
-<style>
-:root { color-scheme: light dark; --bg: #fff; --fg: #1a1a1a; --soft: #5c5c5c; --line: #d9d9d9; --bad: #b3261e; }
-@media (prefers-color-scheme: dark) { :root { --bg: #161616; --fg: #ededed; --soft: #a3a3a3; --line: #3a3a3a; --bad: #ff8a80; } }
-body { margin: 0 auto; max-width: 75rem; padding: 1rem; background: var(--bg); color: var(--fg); font: 1rem/1.5 system-ui, sans-serif; }
-h1 { font-size: 1.5rem; margin: 0 0 0.25rem; }
-h2 { font-size: 1.25rem; margin: 2rem 0 0.5rem; border-top: 0.0625rem solid var(--line); padding-top: 1rem; }
-p { margin: 0.25rem 0; color: var(--soft); }
-a { color: inherit; }
-ul { list-style: none; margin: 0; padding: 0; }
-li { padding: 0.5rem 0; border-bottom: 0.0625rem solid var(--line); display: flex; flex-wrap: wrap; gap: 0.25rem 1rem; }
-li span { color: var(--soft); }
-.bad { color: var(--bad); font-weight: 600; }
-pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 0.875rem/1.5 ui-monospace, monospace; }
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr)); gap: 1rem; }
-figure { margin: 0; border: 0.0625rem solid var(--line); border-radius: 0.5rem; overflow: hidden; }
-img { display: block; width: 100%; height: 12rem; object-fit: cover; object-position: top; background: var(--line); }
-figcaption { padding: 0.5rem; font-size: 0.8125rem; overflow-wrap: anywhere; }
-figure.look { border-color: var(--bad); }
-.tag { font-weight: 600; color: var(--fg); }
-.look .tag { color: var(--bad); }
-dl { margin: 0.5rem 0 0; }
-dt { color: var(--soft); font-size: 0.75rem; margin-top: 0.375rem; }
-dd { margin: 0; }
-ul.found { list-style: disc; padding-left: 1.25rem; }
-ul.found li { display: list-item; padding: 0; border: 0; }
-</style>
-</head>
-<body>
-<h1>${escapeHtml(title)}</h1>
-${body}
-</body>
-</html>
-`;
-}
-
-/** `2026/11/14/1551` as `14 Nov 2026, 15:51 UTC`; any other folder name is shown as it is. */
-export function whenText(folder) {
-  const match = /^(\d{4})\/(\d{2})\/(\d{2})\/(\d{2})(\d{2})$/.exec(folder);
-  if (match === null) {
-    return folder;
-  }
-  const [, year, month, day, hour, minute] = match;
-  const monthName = new Date(Date.UTC(Number(year), Number(month) - 1, 1)).toLocaleString('en-GB', {
+function monthName({ year, month }) {
+  return new Date(Date.UTC(Number(year), Number(month) - 1, 1)).toLocaleString('en-GB', {
     month: 'short',
     timeZone: 'UTC',
   });
-  return `${String(Number(day))} ${monthName} ${year}, ${hour}:${minute} UTC`;
+}
+
+/** A run folder as a day and a time: `2026/11/14/1551` or `2026-11-21`. Any other name is the day as it is. */
+function whenParts(folder) {
+  const night = /^(\d{4})\/(\d{2})\/(\d{2})\/(\d{2})(\d{2})$/.exec(folder);
+  if (night !== null) {
+    const [, year, month, day, hour, minute] = night;
+    return { day: `${String(Number(day))} ${monthName({ year, month })} ${year}`, time: `${hour}:${minute} UTC` };
+  }
+  const week = /^(\d{4})-(\d{2})-(\d{2})$/.exec(folder);
+  if (week !== null) {
+    const [, year, month, day] = week;
+    return { day: `${String(Number(day))} ${monthName({ year, month })} ${year}`, time: null };
+  }
+  return { day: folder, time: null };
+}
+
+/** `2026/11/14/1551` as `14 Nov 2026, 15:51 UTC` and `2026-11-21` as `21 Nov 2026`. */
+export function whenText(folder) {
+  const { day, time } = whenParts(folder);
+  return time === null ? day : `${day}, ${time}`;
+}
+
+function runCard({ kind, run, pills }) {
+  const { day, time } = whenParts(run.folder);
+  const base = `${kind}/${run.folder}/`;
+  const strip =
+    run.previews.length > 0
+      ? `<div class="strip">${run.previews.map(file => `<img loading="lazy" src="${escapeHtml(base + file)}" alt="">`).join('')}</div>`
+      : '';
+  return `<a class="card run" href="${escapeHtml(base)}" aria-label="${escapeHtml(whenText(run.folder))}">${strip}<div class="body"><p class="day">${escapeHtml(day)}</p><p class="time">${escapeHtml(time ?? 'Weekly look-over')}</p><div class="top">${pills.map(pillHtml).join('')}</div></div></a>`;
 }
 
 /** The front page of the section: every night and every weekly look-over, newest first. */
 export function listHtml({ nights, sweeps }) {
-  const nightRows = nights.map(night => {
-    const failed =
-      night.failed_pictures > 0
-        ? `<span class="bad">${String(night.failed_pictures)} from failed tests</span>`
-        : '<span>all tests that took pictures passed</span>';
-    return `<li><a href="nightly/${escapeHtml(night.folder)}/">${escapeHtml(whenText(night.folder))}</a><span>${pictureCount(night.pictures)}</span>${failed}</li>`;
-  });
-  const sweepRows = sweeps.map(
-    sweep =>
-      `<li><a href="weekly/${escapeHtml(sweep.folder)}/">${escapeHtml(whenText(sweep.folder))}</a><span>${pictureCount(sweep.pictures)}</span></li>`,
+  const nightCards = nights.map(night =>
+    runCard({
+      kind: 'nightly',
+      run: night,
+      pills: [
+        { text: pictureCount(night.pictures) },
+        night.failed_pictures > 0
+          ? { text: `${String(night.failed_pictures)} from failed tests`, tone: 'bad' }
+          : { text: 'No failed tests', tone: 'good' },
+      ],
+    }),
   );
-  const none = '<p>Nothing is stored yet. Come back after the next run.</p>';
-  return page({
-    title: 'Aman test screenshots',
-    body: `<p>Pictures the automatic tests take of the app. Everything shown is made-up test data.</p>
-<h2>Nightly tests</h2>
-<p>Every screen the tests open, sorted by feature. The last ${String(SOURCES.nightly.keep)} nights are kept.</p>
-${nightRows.length > 0 ? `<ul>${nightRows.join('')}</ul>` : none}
-<h2>Weekly look-over</h2>
-<p>Every screen at computer, phone, small phone and dark phone size, with what looked wrong.</p>
-${sweepRows.length > 0 ? `<ul>${sweepRows.join('')}</ul>` : none}`,
+  const sweepCards = sweeps.map(sweep =>
+    runCard({ kind: 'weekly', run: sweep, pills: [{ text: pictureCount(sweep.pictures) }] }),
+  );
+  const none = '<p class="empty">Nothing is stored yet. Come back after the next run.</p>';
+  return pageHtml({
+    title: 'Test screenshots',
+    eyebrow: 'Aman',
+    lead: 'Pictures the automatic tests take of the app, with what each test did and what it should show.',
+    hidden: true,
+    body: `<section><div class="section-head"><h2>Nightly tests</h2><p>Every screen the tests open, sorted by feature. The last ${String(SOURCES.nightly.keep)} nights are kept.</p></div>
+${nightCards.length > 0 ? `<div class="runs">${nightCards.join('')}</div>` : none}</section>
+<section><div class="section-head"><h2>Weekly look-over</h2><p>Every screen at computer, phone, small phone and dark phone size, with what looked wrong.</p></div>
+${sweepCards.length > 0 ? `<div class="runs">${sweepCards.join('')}</div>` : none}</section>`,
   });
 }
 

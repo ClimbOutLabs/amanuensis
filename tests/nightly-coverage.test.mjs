@@ -202,7 +202,7 @@ test('the contact sheet groups pictures by feature set and puts failures first',
     assert.ok(html.includes('<title>Run &lt;1&gt;</title>'), 'the title is escaped');
     assert.ok(html.indexOf('>Failed<') < html.indexOf('<section id="chat">'), 'failures come first');
     assert.ok(html.includes('No test yet: settings:models'), 'features with no test are listed');
-    assert.ok(html.includes('<dt>Test</dt><dd>a reply &lt;shows&gt;</dd>'), 'a picture names its test, escaped');
+    assert.ok(html.includes('<h3>a reply &lt;shows&gt;</h3>'), 'a picture names its test, escaped');
     assert.ok(html.includes('<dt>What the test did</dt><dd>Typed &quot;Hello&quot;.</dd>'), 'and what the test did');
     assert.ok(html.includes('<dt>What it should show</dt><dd>The reply shows.</dd>'), 'and what it should show');
     assert.ok(html.includes('>Test passed<'), 'and that its test passed');

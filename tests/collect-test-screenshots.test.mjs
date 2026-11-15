@@ -66,7 +66,8 @@ test('only finished runs on main are kept, newest first, up to the limit', () =>
 
 test('a run folder reads as a date and time', () => {
   assert.equal(whenText('2026/11/14/1551'), '14 Nov 2026, 15:51 UTC');
-  assert.equal(whenText('2026-11-21'), '2026-11-21');
+  assert.equal(whenText('2026-11-21'), '21 Nov 2026');
+  assert.equal(whenText('some-folder'), 'some-folder');
 });
 
 test('the section lists every stored night and weekly look-over, newest first', async () => {
@@ -111,6 +112,7 @@ test('the section lists every stored night and weekly look-over, newest first', 
   assert.ok(front.indexOf('14 Nov 2026, 15:51 UTC') < front.indexOf('13 Nov 2026, 17:15 UTC'), 'newest night first');
   assert.match(front, /href="nightly\/2026\/11\/13\/1715\/".*40 pictures.*2 from failed tests/);
   assert.match(front, /href="weekly\/2026-11-14\/".*2 pictures/);
+  assert.match(front, /src="weekly\/2026-11-14\/chat-desktop\.png"/, 'a run shows a few of its pictures');
   assert.match(front, /noindex/);
   assert.equal(
     await readFile(path.join(siteDir, SECTION, 'nightly/2026/11/14/1551/index.html'), 'utf8'),
@@ -121,11 +123,7 @@ test('the section lists every stored night and weekly look-over, newest first', 
   assert.match(sweep, /href="\.\.\/\.\.\/"/, 'links back to the list');
   assert.match(sweep, /src="chat-desktop\.png"/);
   assert.match(sweep, /&lt;b&gt;0&lt;\/b&gt;/, 'the report is shown as text, not as markup');
-  assert.match(
-    sweep,
-    /<dt>Screen<\/dt><dd>chat<\/dd><dt>Screen size<\/dt><dd>phone<\/dd>/,
-    'each picture names its screen',
-  );
+  assert.match(sweep, /<span class="where">Phone<\/span><\/div><h3>chat<\/h3>/, 'each picture names its screen');
   assert.match(sweep, /<li>A &lt;button&gt; is cut off\.<\/li>/, 'and lists what was found on it');
   assert.ok(sweep.indexOf('chat-phone.png') < sweep.indexOf('chat-desktop.png'), 'pictures to look at come first');
   assert.match(sweep, /Nothing to look at\./, 'a picture with no finding says so');
@@ -165,4 +163,58 @@ test('a link inside stored pictures is dropped, so nothing outside them is publi
   await assert.rejects(lstat(path.join(night, 'linked-folder')), { code: 'ENOENT' });
   assert.equal(await readFile(outside, 'utf8'), 'not for the site', 'the file outside is left alone');
   assert.equal(await readFile(path.join(night, 'chat/screen-chat--open.png'), 'utf8'), 'png');
+});
+
+test('a night that stored its details gets a page with a link back, and damaged files stop nothing', async () => {
+  const siteDir = await mkdtemp(path.join(tmpdir(), 'aman-site-'));
+  const picture = { file: 'chat/screen-chat--open.png', step: 'open', failed: false, test: 'the chat opens' };
+  const whole = {
+    feature_sets: [
+      { id: 'chat', name: 'Chat', features: [{ id: 'screen:chat', has_test: true, pictures: [picture] }] },
+    ],
+    totals: { features: 1, features_with_a_test: 1, pictures: 1, failed_pictures: 0 },
+  };
+  const { github, unzip } = standInGithub({
+    runs: {
+      [SOURCES.nightly.workflow]: [finishedRun({ id: 11, day: '13' }), finishedRun({ id: 12, day: '14' })],
+      [SOURCES.weekly.workflow]: [finishedRun({ id: 21, day: '14' })],
+    },
+    stored: {
+      11: [{ id: 101, name: 'screenshots', files: { '2026/11/13/1715/results.json': '{"totals": ' } }],
+      12: [
+        {
+          id: 102,
+          name: 'screenshots',
+          files: {
+            '2026/11/14/1551/results.json': JSON.stringify(whole),
+            '2026/11/14/1551/chat/screen-chat--open.png': 'png',
+          },
+        },
+      ],
+      21: [
+        {
+          id: 201,
+          name: 'ui-sweep',
+          files: {
+            '2026-11-14/report.md': 'report',
+            '2026-11-14/chat-desktop.png': 'png',
+            '2026-11-14/chat-phone.png': 'png',
+            '2026-11-14/findings.json': JSON.stringify({ picture: 'chat-desktop.png' }),
+          },
+        },
+      ],
+    },
+  });
+
+  const listed = await collectScreenshots({ siteDir, github, unzip });
+
+  assert.deepEqual(listed.nights, [
+    { folder: '2026/11/14/1551', pictures: 1, failed_pictures: 0, previews: ['chat/screen-chat--open.png'] },
+  ]);
+  const night = await readFile(path.join(siteDir, SECTION, 'nightly/2026/11/14/1551/index.html'), 'utf8');
+  assert.match(night, /<h1>14 Nov 2026, 15:51 UTC<\/h1>/);
+  assert.match(night, /href="\.\.\/\.\.\/\.\.\/\.\.\/\.\.\/"/, 'links back to the list');
+  assert.match(night, /<h3>the chat opens<\/h3>/);
+  const sweep = await readFile(path.join(siteDir, SECTION, 'weekly/2026-11-14/index.html'), 'utf8');
+  assert.match(sweep, /No notes were saved for this picture\./);
 });
