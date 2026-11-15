@@ -55,21 +55,36 @@ export function readBuildIdentity(capabilities: unknown): BuildIdentity | null {
   return typeof ref === 'string' && ref.trim() !== '' ? { version, ref } : { version };
 }
 
+export type SignInMode = 'local' | 'oidc' | 'standalone' | 'truefoundry';
+
 /**
- * The memory backend the server resolved (`MEMORY_BACKEND`), read defensively from the
- * `memory_defaults` capability. Undefined when the capability is missing, malformed, or
- * names an unknown backend — the caller then reports memory as unknown rather than guessing.
+ * The sign-in mode the server reported, read defensively from the `sign_in` capability.
+ * Undefined when the capability is missing, malformed, or names an unknown mode, so callers
+ * show nothing rather than guessing. The SDK normalizes wire keys to camelCase; a direct
+ * host adapter may expose the raw snake_case payload instead.
  */
-export function readMemoryBackend(capabilities: unknown): 'markdown' | 'hindsight' | undefined {
+export function readSignInMode(capabilities: unknown): SignInMode | undefined {
   if (typeof capabilities !== 'object' || capabilities === null) {
     return undefined;
+  }
+  const signIn: unknown = Reflect.get(capabilities, 'signIn') ?? Reflect.get(capabilities, 'sign_in');
+  if (typeof signIn !== 'object' || signIn === null) {
+    return undefined;
+  }
+  const mode: unknown = Reflect.get(signIn, 'mode');
+  return mode === 'local' || mode === 'oidc' || mode === 'standalone' || mode === 'truefoundry' ? mode : undefined;
+}
+
+/**
+ * Whether the server reported its memory status (the `memory_defaults` capability). False when the
+ * capability is missing or malformed: the caller then says memory is unknown and does not guess.
+ */
+export function memoryStatusReported(capabilities: unknown): boolean {
+  if (typeof capabilities !== 'object' || capabilities === null) {
+    return false;
   }
   // The SDK normalizes wire keys to camelCase; a direct host adapter may expose the raw
   // snake_case payload instead.
   const defaults: unknown = Reflect.get(capabilities, 'memoryDefaults') ?? Reflect.get(capabilities, 'memory_defaults');
-  if (typeof defaults !== 'object' || defaults === null) {
-    return undefined;
-  }
-  const backend: unknown = Reflect.get(defaults, 'backend');
-  return backend === 'markdown' || backend === 'hindsight' ? backend : undefined;
+  return typeof defaults === 'object' && defaults !== null;
 }

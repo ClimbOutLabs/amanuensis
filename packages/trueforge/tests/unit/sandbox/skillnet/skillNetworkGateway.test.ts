@@ -1,4 +1,5 @@
 import type { AuditRecordInput } from '@truefoundry/trueforge-core/core';
+import { API_SERVICE_DECLARATIONS } from '@truefoundry/trueforge-core/core/connectors/apiServices';
 import { mkdtempSync } from 'node:fs';
 import {
   createServer as createTcpServer,
@@ -173,17 +174,113 @@ describe('SkillNetworkGateway', () => {
     expect(harness.dials).toEqual([{ host: 'github.com', port: 443 }]);
   });
 
+  it('refuses a site that can send email even when the grant names it, and records nothing a card could ask about', async () => {
+    const token = harness.registry.issue({ ...GRANT_INPUT, hosts: [...HOSTS, 'gmail.googleapis.com'] });
+    const reply = await connectVia(harness.socketPath, { authority: 'gmail.googleapis.com:443', token });
+    expect(reply.status).toBe(403);
+    expect(reply.body).toContain('a skill is never allowed to send email');
+    expect(harness.dials).toEqual([]);
+    expect(harness.registry.drainRefusals({ session_id: 's' })).toEqual([]);
+  });
+
+  it('refuses every site Aman knows can send email, even when the grant names it, and writes each to the activity log', async () => {
+    // One name for each service whose address carries a region or an account.
+    const named = [
+      'email.eu-west-1.amazonaws.com',
+      'mail.zoho.eu',
+      'hook.eu1.make.com',
+      'harbour.m.pipedream.net',
+      'harbour.app.n8n.cloud',
+    ];
+    const sites = [
+      ...API_SERVICE_DECLARATIONS.filter(service => service.can_send).flatMap(service => service.hosts),
+      ...named,
+    ];
+    expect(sites.length).toBeGreaterThan(named.length);
+    const token = harness.registry.issue({ ...GRANT_INPUT, hosts: [...HOSTS, ...sites] });
+
+    const opened: string[] = [];
+    for (const site of sites) {
+      const reply = await connectVia(harness.socketPath, { authority: `${site}:443`, token });
+      if (reply.status !== 403) {
+        opened.push(site);
+      }
+      reply.socket?.destroy();
+    }
+    expect(opened).toEqual([]);
+    expect(harness.dials).toEqual([]);
+
+    await new Promise(resolve => setTimeout(resolve, 25));
+    const logged = harness.auditRecords.map(record => record.description);
+    expect(sites.filter(site => !logged.some(line => line.includes(site)))).toEqual([]);
+
+    // An ordinary site in the same grant still opens.
+    const ordinary = await connectVia(harness.socketPath, { authority: 'github.com:443', token });
+    expect(ordinary.status).toBe(200);
+    ordinary.socket?.destroy();
+  });
+
   it('refuses any other site, names it, and never dials it', async () => {
     const token = harness.registry.issue({ ...GRANT_INPUT, hosts: HOSTS });
     const reply = await connectVia(harness.socketPath, { authority: 'evil.example.com:443', token });
     expect(reply.status).toBe(403);
     expect(reply.body).toContain('evil.example.com is not one of the sites approved for the skills in this chat');
-    expect(reply.body).toContain('Settings, then Skills');
+    // The next step is the card in this chat, not a trip to Settings.
+    expect(reply.body).toContain('the person is being asked in this chat whether to allow it');
+    expect(reply.body).not.toContain('Settings');
     expect(harness.dials).toEqual([]);
     // The refusal lands in the audit log with the site that was asked for.
     await new Promise(resolve => setTimeout(resolve, 25));
     expect(harness.logLines()).toContain('evil.example.com');
     expect(harness.logLines()).toContain('Skill network connection refused');
+  });
+
+  it('refuses a bare address even when the grant names it, dials nothing, and records nothing a card could ask about', async () => {
+    const token = harness.registry.issue({
+      ...GRANT_INPUT,
+      hosts: [...HOSTS, '127.0.0.1', '10.0.0.5', '169.254.169.254'],
+    });
+    for (const address of ['127.0.0.1', '10.0.0.5', '169.254.169.254', '[::1]']) {
+      const reply = await connectVia(harness.socketPath, { authority: `${address}:443`, token });
+      expect(reply.status).toBe(403);
+      expect(reply.body).toContain('is not a named site');
+    }
+    expect(harness.dials).toEqual([]);
+    expect(harness.registry.drainRefusals({ session_id: 's' })).toEqual([]);
+  });
+
+  it('matches the bare name when the target is dressed with credentials or a trailing dot', async () => {
+    const token = harness.registry.issue({ ...GRANT_INPUT, hosts: HOSTS });
+    const reply = await connectVia(harness.socketPath, { authority: 'user@github.com.:443', token });
+    expect(reply.status).toBe(200);
+    reply.socket?.destroy();
+    expect(harness.dials).toEqual([{ host: 'github.com', port: 443 }]);
+  });
+
+  it('records a refused site under its bare name, however the target was dressed', async () => {
+    const token = harness.registry.issue({ ...GRANT_INPUT, hosts: HOSTS });
+    const reply = await connectVia(harness.socketPath, { authority: 'user@evil.example.com.:443', token });
+    expect(reply.status).toBe(403);
+    expect(reply.body).toContain('evil.example.com is not one of the sites approved');
+    expect(harness.registry.drainRefusals({ session_id: 's' })).toEqual(['evil.example.com']);
+  });
+
+  it('records a refused site on its chat, so the runtime can raise a card for it', async () => {
+    const token = harness.registry.issue({ ...GRANT_INPUT, hosts: HOSTS });
+    const reply = await connectVia(harness.socketPath, { authority: 'evil.example.com:443', token });
+    expect(reply.status).toBe(403);
+    expect(harness.registry.drainRefusals({ session_id: 's' })).toEqual(['evil.example.com']);
+    // Draining hands the site out once; a second read has nothing.
+    expect(harness.registry.drainRefusals({ session_id: 's' })).toEqual([]);
+    // Another chat's refusals are its own.
+    expect(harness.registry.drainRefusals({ session_id: 'other' })).toEqual([]);
+  });
+
+  it('records nothing for a call with no token, since it names no chat', async () => {
+    harness.registry.issue({ ...GRANT_INPUT, hosts: HOSTS });
+    const reply = await connectVia(harness.socketPath, { authority: 'evil.example.com:443' });
+    expect(reply.status).toBe(403);
+    expect(harness.registry.drainRefusals({ session_id: 's' })).toEqual([]);
   });
 
   it('refuses a call with no token and one with an unknown token', async () => {
@@ -237,7 +334,9 @@ describe('SkillNetworkGateway', () => {
       }),
     ]);
     expect(harness.auditRecords[0]?.description).toContain('evil.example.com');
-    expect(harness.auditRecords[0]?.description).toContain('not one of its approved sites');
+    expect(harness.auditRecords[0]?.description).toContain('not one of the sites approved for the skills in this chat');
+    // The record names no skill: a refused connection cannot show which skill, if any, tried.
+    expect(harness.auditRecords[0]?.description).not.toContain('skill tried');
   });
 
   it('writes a granted site reached on another port to the activity log', async () => {
@@ -248,7 +347,7 @@ describe('SkillNetworkGateway', () => {
     await new Promise(resolve => setTimeout(resolve, 25));
     expect(harness.auditRecords).toHaveLength(1);
     expect(harness.auditRecords[0]?.description).toContain('github.com');
-    expect(harness.auditRecords[0]?.description).toContain('without a secure connection');
+    expect(harness.auditRecords[0]?.description).toContain('did not use a secure connection');
   });
 
   it('writes nothing to the activity log for a connection that opens', async () => {

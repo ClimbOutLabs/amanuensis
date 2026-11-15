@@ -716,6 +716,12 @@ export function createSessionsRouter(deps: SessionsRouterDeps) {
     ) {
       return c.json({ error: { message: FORBIDDEN_SESSION_ACCESS } }, 403);
     }
+    const requested = c.req.valid('json').turn_id;
+    if (requested !== undefined) {
+      // Only the named turn: a message typed meanwhile in the same chat keeps running.
+      await cancelSessionTurn({ ...deps, session }, { turnId: requested });
+      return c.json({}, 200);
+    }
     // A turn still being set up is not the chat's last turn yet, so it is stopped here too.
     deps.activeTurns.cancelAdmissions({ sessionId, abortReason: CancellationReason.ClientCancelled });
     const turnId = session.record.last_turn_id;

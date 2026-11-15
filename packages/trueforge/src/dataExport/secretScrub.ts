@@ -132,8 +132,38 @@ export interface ExportScrubber {
    * path segment that holds a secret or credential-shaped value is replaced.
    */
   url(url: string): string;
+  /**
+   * Whether text holds a secret or a credential-shaped value, for a field that cannot be redacted in place (a name
+   * the import reads as an identity). The caller leaves that entry out, and this counts it as a replacement.
+   */
+  holdsSecret(text: string): boolean;
   /** Replacements made so far, across all of the above. */
   redactionCount(): number;
+}
+
+/** The one parse an address is read through, by the export scrubber and the import check alike. */
+function parseUrl(value: string): URL | undefined {
+  try {
+    return new URL(value);
+  } catch {
+    return undefined;
+  }
+}
+
+/** Whether a parsed address carries what an export strips from one: userinfo, a query or a fragment. */
+function carriesStrippedParts(parsed: URL): boolean {
+  return parsed.username !== '' || parsed.password !== '' || parsed.search !== '' || parsed.hash !== '';
+}
+
+/**
+ * Whether an address carries what an export strips from one (userinfo, a query or a
+ * fragment), read through the same parse the scrubber uses. Import refuses such an
+ * address outright: a key can hide in any of those parts, and an export never writes
+ * one. Text that is not an address at all carries none of them.
+ */
+export function addressCarriesStrippedParts(value: string): boolean {
+  const parsed = parseUrl(value);
+  return parsed !== undefined && carriesStrippedParts(parsed);
 }
 
 /** `secrets` is the normalized exact-match set (see {@link normalizeSecrets}). */
@@ -157,14 +187,12 @@ export function createExportScrubber(secrets: readonly string[]): ExportScrubber
   }
 
   function scrubUrl(input: string): string {
-    let parsed: URL;
-    try {
-      parsed = new URL(input);
-    } catch {
+    const parsed = parseUrl(input);
+    if (parsed === undefined) {
       redactions += 1;
       return REDACTED;
     }
-    if (parsed.username !== '' || parsed.password !== '' || parsed.search !== '' || parsed.hash !== '') {
+    if (carriesStrippedParts(parsed)) {
       redactions += 1;
     }
     parsed.username = '';
@@ -214,5 +242,19 @@ export function createExportScrubber(secrets: readonly string[]): ExportScrubber
     return value;
   }
 
-  return { json: scrubJson, text: scrubText, url: scrubUrl, redactionCount: () => redactions };
+  function leavesOut(input: string): boolean {
+    if (!holdsSecret(input)) {
+      return false;
+    }
+    redactions += 1;
+    return true;
+  }
+
+  return {
+    json: scrubJson,
+    text: scrubText,
+    url: scrubUrl,
+    holdsSecret: leavesOut,
+    redactionCount: () => redactions,
+  };
 }

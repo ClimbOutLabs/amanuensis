@@ -223,8 +223,9 @@ export interface WindowsJobs {
   // True when the daily backup task is there.
   dailyBackupTaskPresent: () => Promise<boolean>;
   // The names in the backups folder, as they stand. A folder that is
-  // not there yet lists as empty.
-  listBackups: () => Promise<readonly string[]>;
+  // not there yet lists as empty. With holding, only the backups that
+  // have a folder for that instance.
+  listBackups: (options?: { holding?: string }) => Promise<readonly string[]>;
   // Makes the "Use Aman on my phone" Start menu entry, or points the
   // existing one at the aman command, running aman network open.
   ensurePhoneShortcut: () => Promise<void>;
@@ -547,11 +548,15 @@ export function systemWindowsJobs(options: {
       return result.started && result.exitCode === 0;
     },
 
-    async listBackups() {
+    async listBackups(options) {
+      const holding =
+        options?.holding === undefined
+          ? ''
+          : `| Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName ${psQuote(options.holding)}) -PathType Container } `;
       const stdout = await runPowerShell(
         `[Console]::OutputEncoding = [Text.Encoding]::UTF8; ` +
           `if (Test-Path -LiteralPath ${psQuote(paths.backupsDir)}) { ` +
-          `Get-ChildItem -LiteralPath ${psQuote(paths.backupsDir)} -Directory | ForEach-Object { $_.Name } }`,
+          `Get-ChildItem -LiteralPath ${psQuote(paths.backupsDir)} -Directory ${holding}| ForEach-Object { $_.Name } }`,
       );
       return stdout
         .split('\n')

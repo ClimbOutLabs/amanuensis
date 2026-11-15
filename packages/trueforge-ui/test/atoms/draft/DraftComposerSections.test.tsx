@@ -143,6 +143,14 @@ describe('draft composer sections', () => {
     });
   });
 
+  it('groups the model and voice controls so narrow screens can restack them', async () => {
+    render(<DraftSections />);
+
+    const model = await screen.findByTitle('Select model');
+    const selector = model.closest('.aui-composer-model-selector');
+    expect(selector?.parentElement).toHaveClass('aui-composer-right-group');
+  });
+
   it('leaves the model control out of the builder composer', () => {
     render(
       <ShellModeProvider agentConfig={{ mode: 'AgentComposer' }}>
@@ -165,7 +173,7 @@ describe('draft composer sections', () => {
       </ShellModeProvider>,
     );
 
-    expect(screen.queryByRole('button', { name: 'Agent config' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Agent setup' })).not.toBeInTheDocument();
 
     rerender(
       <ShellModeProvider agentConfig={{ mode: 'AgentComposer' }}>
@@ -181,12 +189,12 @@ describe('draft composer sections', () => {
     expect(screen.queryByRole('button', { name: 'Attach a file' })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Add' }));
-    expect(screen.getByRole('menuitem', { name: 'Agent config' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Agent setup' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('menuitem', { name: 'Attach files' }));
     expect(onAttach).toHaveBeenCalledOnce();
 
     fireEvent.click(screen.getByRole('button', { name: 'Add' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Agent config' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Agent setup' }));
     expect(screen.getByText('Config open')).toBeInTheDocument();
   });
 

@@ -1,0 +1,59 @@
+name: Obsidian notes
+
+# Notes kept in the real Obsidian app, reached through a connector added by its address. The
+# newest Obsidian and the newest Local REST API plugin are installed on every run, so a change in
+# either that breaks the connection shows here, apart from Aman's own suites.
+on:
+  workflow_call:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/obsidian-notes.yml'
+      - 'scripts/obsidian-notes/**'
+      - 'packages/trueforge/jest.obsidian-notes.config.cjs'
+      - 'packages/trueforge/tests/unit/apis/obsidianNotes.live.test.ts'
+
+permissions:
+  contents: read
+
+jobs:
+  obsidian-notes:
+    name: Notes in real Obsidian
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Obsidian and download its Local REST API plugin
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/obsidian/app" "$RUNNER_TEMP/obsidian/plugin"
+          gh release download --repo obsidianmd/obsidian-releases --pattern 'obsidian_*_amd64.deb' --dir "$RUNNER_TEMP/obsidian/app"
+          gh release download --repo coddingtonbear/obsidian-local-rest-api --pattern main.js --pattern manifest.json --pattern styles.css --dir "$RUNNER_TEMP/obsidian/plugin"
+          sudo apt-get update
+          sudo apt-get install --yes xvfb "$RUNNER_TEMP"/obsidian/app/obsidian_*_amd64.deb
+
+      - name: Start Obsidian with no screen and turn the plugin on
+        env:
+          OBSIDIAN_BIN: /opt/Obsidian/obsidian
+          OBSIDIAN_PLUGIN_DIR: ${{ runner.temp }}/obsidian/plugin
+          OBSIDIAN_WORK_DIR: ${{ runner.temp }}/obsidian
+        run: pnpm run nightly:obsidian-notes:start
+
+      - name: Add Obsidian to Aman by its address and search a note
+        run: pnpm run nightly:obsidian-notes

@@ -48,12 +48,16 @@ export function resetOidcSessionCacheForTests(): void {
 }
 
 /**
- * True when the current session is a browser OIDC login (`data.type: "oidc-connected"`).
+ * True when the current session is a browser sign-in: an OIDC login
+ * (`data.type: "oidc-connected"`) or a local sign-in (`"local-connected"`).
  * When auth is enabled, unauthenticated callers get HTTP 401 from `/me`.
+ * The local value is read defensively because the generated SDK union gains it
+ * only when the SDK is regenerated.
  */
 export async function isOidcConnectedSession(client: TrueForge = authClient): Promise<boolean> {
   const { data } = await client.auth.me();
-  const isConnected = data.type === 'oidc-connected';
+  const sessionType: unknown = data.type;
+  const isConnected = sessionType === 'oidc-connected' || sessionType === 'local-connected';
   cachedIsOidcConnected = isConnected;
   return isConnected;
 }

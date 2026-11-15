@@ -1,7 +1,8 @@
 /**
  * A scheduled brief over the real server path: no one is watching, so nothing may stop at a card. The
  * scripted model reads the inbox, searches the web, then maps the address the inbox names. A search that names
- * someone from the mail runs too: the person's own mail is theirs to use.
+ * someone from the mail runs too: the person's own mail is theirs to use. With maps set to ask, the brief
+ * leaves its map out instead of leaving a card for the owner.
  */
 import { z } from '@hono/zod-openapi';
 import { AgentSpecSchema, type Turn } from '@truefoundry/trueforge-core/agent-session';
@@ -21,6 +22,20 @@ import { HARBOUR_ADDRESS, installRecordedTavily } from '../../fixtures/groundedF
 import { installRecordedMail, MAIL_SENDER_NAME } from '../../fixtures/recordedMail';
 import { BRIEF_DIRECTIVE, RUN_DIRECTIVE_PREFIX, SEARCH_DIRECTIVE_PREFIX } from '../../fixtures/scriptedModelServer';
 
+// Name resolution is stubbed for the whole suite: localhost resolves to loopback and every other
+// name to a public address. The address check judges a connector by what its name resolves to,
+// so the suite's answer cannot depend on the DNS of the machine running it.
+jest.mock('node:dns/promises', () => {
+  const actual = jest.requireActual<typeof import('node:dns/promises')>('node:dns/promises');
+  return {
+    ...actual,
+    lookup: async (hostname: string, options?: { all?: boolean | undefined }) => {
+      const entry = { address: hostname === 'localhost' ? '127.0.0.1' : '93.184.216.34', family: 4 };
+      return options?.all === true ? [entry] : entry;
+    },
+  };
+});
+
 const TURN_TIMEOUT_MS = 60_000;
 const TAVILY_SERVER_NAME = 'tavily';
 const CLEAN_QUERY = 'Lantern Row bakery';
@@ -28,6 +43,8 @@ const CLEAN_QUERY = 'Lantern Row bakery';
 const REPEAT_QUERY = 'Quay Street florist';
 /** Carries the sender's name, which the mail header copies. */
 const NAMED_QUERY = `${MAIL_SENDER_NAME} bakery`;
+/** A phrase only the maps-set-to-ask test uses. */
+const NO_MAP_QUERY = 'Mill Lane tailor';
 
 const AGENT_SPEC = AgentSpecSchema.parse({
   model: { name: MODEL_FQN },
@@ -173,7 +190,6 @@ describe('scheduled brief: search and map after reading the mail', () => {
   let tavily: ReturnType<typeof installRecordedTavily>;
   let mail: ReturnType<typeof installRecordedMail>;
   let agent: { id: string; name: string };
-  const originalBackend = configuration.MEMORY_BACKEND;
   const originalDir = configuration.MEMORY_MARKDOWN_DIR;
   const originalEmbeddings = configuration.MEMORY_EMBEDDINGS_ENABLED;
   const originalSummarize = configuration.MEMORY_SUMMARIZE;
@@ -182,7 +198,6 @@ describe('scheduled brief: search and map after reading the mail', () => {
   beforeAll(async () => {
     // Scheduled runs save to the memory vault, so a later run could recall an earlier one.
     memoryDir = await mkdtemp(join(tmpdir(), 'scheduled-brief-memory-'));
-    configuration.MEMORY_BACKEND = 'markdown';
     configuration.MEMORY_MARKDOWN_DIR = memoryDir;
     configuration.MEMORY_EMBEDDINGS_ENABLED = false;
     configuration.MEMORY_SUMMARIZE = false;
@@ -241,7 +256,6 @@ describe('scheduled brief: search and map after reading the mail', () => {
     mail.restore();
     tavily.restore();
     await server.close();
-    configuration.MEMORY_BACKEND = originalBackend;
     configuration.MEMORY_MARKDOWN_DIR = originalDir;
     configuration.MEMORY_EMBEDDINGS_ENABLED = originalEmbeddings;
     configuration.MEMORY_SUMMARIZE = originalSummarize;
@@ -329,5 +343,36 @@ describe('scheduled brief: search and map after reading the mail', () => {
       });
     },
     TURN_TIMEOUT_MS * 2,
+  );
+
+  it(
+    'with maps set to ask, finishes without its map, says which switch to turn on, and leaves no card waiting',
+    async () => {
+      const setMaps = async (value: boolean) => {
+        const response = await server.request(
+          '/api/v1/user/settings/sentinel',
+          jsonInit({ maps_without_asking: value }, 'PATCH'),
+        );
+        expect(response.status).toBe(200);
+      };
+      await setMaps(false);
+      try {
+        const { sessionId, turn } = await runScheduledBrief({ agent, server, search: NO_MAP_QUERY });
+
+        expect(turn.state.status).toBe('done');
+        expect(turn.state).toMatchObject({ required_actions: [] });
+        expect(JSON.stringify(turn.state)).not.toContain('Needs your OK');
+        expect(tavily.calls[0]?.body).toMatchObject({ query: NO_MAP_QUERY });
+
+        const maps = (await auditEntries(server, sessionId)).filter(e => e.tool_name === 'render_map');
+        // The map went nowhere: every entry for it is a refusal, and the owner's line names the switch.
+        expect(maps.map(e => e.outcome)).toEqual(['auto_denied', 'auto_denied']);
+        expect(maps.map(e => e.auto_deny_reason)).toContain('unattended_run');
+        expect(maps.some(e => e.description.includes('turn on Maps in Settings'))).toBe(true);
+      } finally {
+        await setMaps(true);
+      }
+    },
+    TURN_TIMEOUT_MS,
   );
 });

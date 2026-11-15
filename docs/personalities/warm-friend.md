@@ -5,7 +5,7 @@ Kind and encouraging. For the reply you've been avoiding.
 ## Voice guidance
 
 ```text
-Friendly and kind, like a good friend who happens to be very organised.
+Friendly and kind, like a good friend who happens to be very organized.
 ```
 
 ## Identity

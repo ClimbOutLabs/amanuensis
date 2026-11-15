@@ -74,6 +74,7 @@ import { MessageTimestamp } from '../atoms/MessageTimestamp.js';
 import { MonacoEditorCore } from '../atoms/MonacoEditorCore.js';
 import { OpenUiFenceBlock } from '../atoms/OpenUiFenceBlock.js';
 import { PermissionGuard } from '../atoms/PermissionGuard.js';
+import { RemindersButton } from '../atoms/RemindersButton.js';
 import { SandboxArtifactDownload } from '../atoms/SandboxArtifactDownload.js';
 import { SandboxToolCallCard } from '../atoms/SandboxToolCallCard.js';
 import { SaveAgentButton } from '../atoms/SaveAgentButton.js';
@@ -121,6 +122,10 @@ const AgentCodeSnippets: ComponentType<AgentCodeSnippetsProps> = lazy(
 const SchedulesPage: ComponentType<SchedulesPageProps> = lazy(async () => {
   const mod = await import('../atoms/schedules/SchedulesPage.js');
   return { default: mod.SchedulesPage };
+});
+const RemindersPage: ComponentType = lazy(async () => {
+  const mod = await import('../atoms/reminders/RemindersPage.js');
+  return { default: mod.RemindersPage };
 });
 const AgentSessionEventTimeline: ComponentType<AgentSessionEventTimelineProps> = lazy(async () => {
   const mod = await import('../atoms/agent-details/AgentSessionEventTimeline.js');
@@ -247,6 +252,8 @@ export const defaultSlots = {
   AgentCodeBlock,
   SchedulesPage,
   SchedulesButton,
+  RemindersPage,
+  RemindersButton,
   SpacesButton,
   SaveAgentButton,
   SaveAgentForm,

@@ -14,7 +14,7 @@ import { HeldActionCard, type HeldActionStatus } from '../sentinel/HeldActionCar
 import { describeHeldAnswerFailure } from '../sentinel/heldActionErrors.js';
 import { NeedsYourOk, NotSavedNote } from '../sentinel/NeedsYourOk.js';
 import { useOptionalSentinelState } from '../sentinel/SentinelStateProvider.js';
-import type { SentinelApprovalInfo } from '../sentinel/types.js';
+import { approvalKey, type SentinelApprovalInfo } from '../sentinel/types.js';
 import { useOptionalServer } from '../server/ServerContext.js';
 import { useSlot } from '../theme/SlotsProvider.js';
 import { assistantDisplayName } from '../utils/assistantName.js';
@@ -67,9 +67,9 @@ export function NeedsYourOkContainer({ parts }: { parts: readonly PartState[] })
         answer: decision,
         reason,
       });
-      sentinel.recordAnswer(info.toolCallId, decision === 'deny' ? 'denied' : 'approved');
+      sentinel.recordAnswer(approvalKey(info), decision === 'deny' ? 'denied' : 'approved');
       const words = changeRequestText(reason);
-      if (words !== undefined) sentinel.recordChangeRequest(info.toolCallId, words);
+      if (words !== undefined) sentinel.recordChangeRequest(approvalKey(info), words);
       setStatus(info.toolCallId, decision === 'deny' ? undefined : { kind: 'approved', outcome });
       reload();
     } catch (error) {
@@ -94,7 +94,7 @@ export function NeedsYourOkContainer({ parts }: { parts: readonly PartState[] })
   const statusOf = (info: SentinelApprovalInfo): HeldActionStatus => {
     const mine = local.get(info.toolCallId);
     if (mine !== undefined) return mine;
-    const answered = sentinel.answerFor(info.toolCallId);
+    const answered = sentinel.answerFor(approvalKey(info));
     if (answered === 'denied') return { kind: 'denied' };
     if (answered === 'approved') return { kind: 'approved_earlier' };
     const expiresAt = info.held?.expiresAt;
@@ -116,7 +116,7 @@ export function NeedsYourOkContainer({ parts }: { parts: readonly PartState[] })
           onChangeRequest={
             offersChangeIt(info.card) ? text => void answer(info, 'deny', changeRequestReason(text)) : undefined
           }
-          changeRequestNote={changeRequestNote(info.toolCallId)}
+          changeRequestNote={changeRequestNote(approvalKey(info))}
         />
       ))}
     </NeedsYourOk>

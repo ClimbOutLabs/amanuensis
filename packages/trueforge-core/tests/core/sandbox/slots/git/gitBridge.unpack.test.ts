@@ -112,6 +112,7 @@ describe('GitBridge unpacks a repository in the sandbox', () => {
       guest: options.sandbox ?? guest,
       sandboxId: 's1-test',
       cwd: options.cwd ?? '/workspace',
+      commitIdentityEnv: undefined,
       timeoutSeconds: 60,
       signal: undefined,
     };

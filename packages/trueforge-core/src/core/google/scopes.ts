@@ -1,9 +1,16 @@
 /**
  * Canonical owner of what Aman may ask a Google account for. A feature is the unit the user sees and
  * the tools are gated on; each maps to the narrowest scope that covers it. Never a full-mailbox or
- * full-calendar scope: calendar access is limited to events.
+ * full-calendar scope: calendar access is limited to events, and Drive access to the files Aman
+ * created or the person opened with Aman.
  */
-export const GOOGLE_FEATURES = ['gmail_read', 'gmail_compose', 'calendar_read', 'calendar_write'] as const;
+export const GOOGLE_FEATURES = [
+  'gmail_read',
+  'gmail_compose',
+  'calendar_read',
+  'calendar_write',
+  'drive_files',
+] as const;
 export type GoogleFeature = (typeof GOOGLE_FEATURES)[number];
 
 interface GoogleFeatureInfo {
@@ -27,6 +34,12 @@ const FEATURE_INFO: Record<GoogleFeature, GoogleFeatureInfo> = {
   calendar_write: {
     scope: 'https://www.googleapis.com/auth/calendar.events',
     label: 'Add and change events you approve',
+  },
+  // One feature for Drive: the drive.file scope itself covers reading and writing, and it reaches only
+  // the files Aman created or the person opened with Aman. Never the full drive scope, which is restricted.
+  drive_files: {
+    scope: 'https://www.googleapis.com/auth/drive.file',
+    label: 'Read and add to Drive files Aman created or you opened with Aman',
   },
 };
 

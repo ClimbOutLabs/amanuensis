@@ -4,12 +4,14 @@
  * TrueFoundry (read-only ServiceFoundry server listing).
  */
 import type { ResourceName } from '../schemas/common';
-import type { AvailableModel, ModelProviderManifest } from '../schemas/modelProvider';
+import type { AvailableModel, ModelProviderCheck, ModelProviderManifest } from '../schemas/modelProvider';
 
 export interface ModelProviderRecord {
   tenant_id: string;
   name: ResourceName;
   manifest: ModelProviderManifest;
+  /** Outcome of the save-time connection check; null when no check has run for this provider. */
+  last_check: ModelProviderCheck | null;
   /** ISO-8601 UTC instant. */
   created_at: string;
   /** ISO-8601 UTC instant. */
@@ -41,6 +43,12 @@ export interface CreateModelProviderInput {
 /** Same shape as create for now; kept as a distinct name for the upsert path. */
 export type UpsertModelProviderInput = CreateModelProviderInput;
 
+export interface RecordModelProviderCheckInput {
+  tenant_id: string;
+  name: string;
+  check: ModelProviderCheck;
+}
+
 /** Unique `(tenant_id, name)` violation on create. */
 export class ModelProviderNameConflictError extends Error {
   readonly tenant_id: string;
@@ -55,6 +63,12 @@ export class ModelProviderNameConflictError extends Error {
 }
 
 export interface IModelProviderStore<TTransaction = never> {
+  /**
+   * True when the providers live somewhere else (TrueFoundry) and every write
+   * here is refused. Callers that would write, such as an import, check this
+   * instead of finding out from a thrown error.
+   */
+  readonly managedElsewhere: boolean;
   listProviders(input: ListModelProvidersInput, transaction?: TTransaction): Promise<ModelProviderRecord[]>;
   getProvider(input: GetModelProviderInput, transaction?: TTransaction): Promise<ModelProviderRecord | undefined>;
   /**
@@ -70,6 +84,15 @@ export interface IModelProviderStore<TTransaction = never> {
   createProvider(input: CreateModelProviderInput, transaction?: TTransaction): Promise<ModelProviderRecord>;
   /** Single-row write: creates the provider or replaces the whole manifest (models included). */
   upsertProvider(input: UpsertModelProviderInput, transaction?: TTransaction): Promise<ModelProviderRecord>;
+  /**
+   * Stores the outcome of the save-time connection check on the provider row, apart from the
+   * manifest (the check is a fact about the row, not part of the person's configuration).
+   * Returns the updated record, or undefined when no row matched.
+   */
+  recordProviderCheck(
+    input: RecordModelProviderCheckInput,
+    transaction?: TTransaction,
+  ): Promise<ModelProviderRecord | undefined>;
   /** Flattens manifests into the FQN read view for GET /models. */
   listModels(input: ListModelProvidersInput, transaction?: TTransaction): Promise<AvailableModel[]>;
   /** Deletes a provider. Returns true if a row was deleted, false if none matched. */

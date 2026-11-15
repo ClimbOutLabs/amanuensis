@@ -1,7 +1,14 @@
 # shellcheck shell=bash
 # Output, prompts, locking and small filesystem helpers shared by every command.
 
-say() { printf '%s\n' "$*"; }
+# Inside a step panel the line goes through the panel, so it keeps the panel's sides.
+say() {
+  if [ "${UI_PANEL:-0}" = 1 ] || [ "${UI_FRAMED:-0}" = 1 ]; then
+    ui_say "$*"
+  else
+    printf '%s\n' "$*"
+  fi
+}
 # Warnings and failures use the shared line style on stderr.
 warn() { UI_FD=2 ui_warn "$*"; }
 die() {
@@ -37,7 +44,7 @@ ask_valid() {
     ui_prompt "$__var" "$__label" "$__default" "$__shown_hint" || __eof=1
     __problem=$("$__check" "${!__var}")
     if [ -z "$__problem" ]; then return 0; fi
-    UI_FD=2 ui_fail "$__problem"
+    UI_IN_PROMPT=1 UI_FD=2 ui_fail "$__problem"
     if [ "$__eof" = 1 ]; then die "The input ended before a valid answer, so nothing was changed."; fi
     __shown_hint=
     __tries=$((__tries + 1))
@@ -55,6 +62,8 @@ consent_root() {
 
 # The rules shown above the password question, the way a sign-up form lists them under the field.
 password_rules() {
+  local UI_IN_PROMPT=1
+  ui_ask_begin
   UI_FD=2 ui_line "Your password needs:"
   UI_FD=2 ui_line "  - At least 8 characters"
   UI_FD=2 ui_line "  - At least one number (0-9)"
@@ -132,9 +141,9 @@ ask_password() {
     fi
     __problem=$(password_problem "$__first")
     if [ -n "$__problem" ]; then
-      UI_FD=2 ui_fail "$__problem"
+      UI_IN_PROMPT=1 UI_FD=2 ui_fail "$__problem"
     elif [ "$__first" != "$__second" ]; then
-      UI_FD=2 ui_fail "The passwords do not match. Type them again."
+      UI_IN_PROMPT=1 UI_FD=2 ui_fail "The passwords do not match. Type them again."
     else
       printf -v "$__var" '%s' "$__first"
       return 0
@@ -191,12 +200,15 @@ cli_log() {
   printf '%s' "$STATE_DIR/logs/$1.log"
 }
 
-# cli_reason LOG FALLBACK: the last plain line the CLI wrote, which is its error (its log lines are JSON and skipped),
-# or FALLBACK when it wrote none. Running out of memory ends Node with a stack dump instead, so it is named here.
+CLI_OUT_OF_MEMORY_REASON="Aman ran out of memory. Give Docker more memory, then run this again."
+
+# cli_reason LOG FALLBACK [RC]: the last plain line the CLI wrote, which is its error (its log lines are JSON and
+# skipped), or FALLBACK when it wrote none. Running out of memory ends Node with a stack dump, or the machine kills the
+# container (exit 137) and nothing is written at all, so both are named here.
 cli_reason() {
   local line
-  if grep -q 'JavaScript heap out of memory' "$1" 2>/dev/null; then
-    printf '%s' "Aman ran out of memory. Give Docker more memory, then run this again."
+  if [ "${3:-}" = 137 ] || grep -q 'JavaScript heap out of memory' "$1" 2>/dev/null; then
+    printf '%s' "$CLI_OUT_OF_MEMORY_REASON"
     return 0
   fi
   line=$({ grep -v '^[[:space:]]*{' "$1" 2>/dev/null || true; } | { grep -v '^[[:space:]]*$' || true; } | tail -n 1)

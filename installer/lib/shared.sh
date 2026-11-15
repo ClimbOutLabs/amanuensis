@@ -18,8 +18,9 @@ ui_path() {
 }
 
 # ---- who besides the owner can sign in --------------------------------------------------------------------------
-# An earlier version let `instance add-user` add sign-in users: a registry record, a password hash in dex.env and an
-# allowed email each. The installer removes them and the doctor reports them, both through this one rule.
+# An earlier version let `instance add-user` add sign-in users: a registry record, a password hash in dex.env, an
+# entry in dex.yaml and an allowed email each. The installer removes them and the doctor reports them, both
+# through this one rule.
 
 # The lines of an env file that Compose reads as KEY, as a POSIX ERE for awk under LC_ALL=C: any blanks (a no-break
 # space too) before it, `export` and blanks, blanks before `=` or `:`, or the bare key, which takes the caller's value.
@@ -41,11 +42,90 @@ env_key_values() { # env file, key
     }' "$1"
 }
 
+# The value Compose reads for KEY: that of its last line.
+env_get() { # env file, key
+  env_key_values "$1" "$2" | tail -n 1
+}
+
+# The user name behind one line of an env file that sets a sign-in user's password hash, DEX_USER_PASSWORD_HASH_<NAME>,
+# read in every shape Compose reads: blanks before the key, an export word, blanks around the = or :, and any case in
+# the variable name. The name comes back lowercased, with - for _. Empty when the line sets no user's hash; the owner's
+# own line, DEX_USER_PASSWORD_HASH with no name after it, never matches.
+env_user_hash_name() { # one line of an env file
+  printf '%s' "$1" | LC_ALL=C awk '
+    {
+      s = $0; sub(/\r$/, "", s)
+      sub(/^[^#A-Za-z0-9_]*(export[^#A-Za-z0-9_]+)?/, "", s)
+      if (tolower(substr(s, 1, 22)) != "dex_user_password_hash") next
+      s = substr(s, 23)
+      if (substr(s, 1, 1) != "_") next
+      s = substr(s, 2)
+      name = ""
+      while (s ~ /^[A-Za-z0-9_]/) { name = name substr(s, 1, 1); s = substr(s, 2) }
+      if (name == "") next
+      sub(/^[ \t]+/, "", s)
+      if (s != "" && s !~ /^[=:]/) next
+      gsub(/_/, "-", name)
+      print tolower(name)
+    }'
+}
+
+# The sign-in accounts a dex.yaml file lists under staticPasswords, one line each, tab separated: the email, the
+# variable the password hash comes from (empty when the hash is written in the file itself), the user name and the
+# user id. Nothing else in the file is read.
+dex_yaml_accounts() { # dex.yaml file
+  [ -f "$1" ] || return 0
+  LC_ALL=C awk '
+    function clean(v) {
+      sub(/^[ \t]+/, "", v)
+      if (substr(v, 1, 1) != "\x27" && substr(v, 1, 1) != "\"") sub(/[ \t]#.*/, "", v)
+      sub(/[ \t]+$/, "", v)
+      if (length(v) >= 2 && ((substr(v, 1, 1) == "\x27" && substr(v, length(v), 1) == "\x27") || (substr(v, 1, 1) == "\"" && substr(v, length(v), 1) == "\""))) v = substr(v, 2, length(v) - 2)
+      return v
+    }
+    function flush() { if (have) printf "%s\t%s\t%s\t%s\n", email, fromenv, username, userid; have = 0; email = ""; fromenv = ""; username = ""; userid = "" }
+    function field(l,    n, k, v) {
+      n = index(l, ":")
+      if (!n) return
+      k = substr(l, 1, n - 1); v = clean(substr(l, n + 1))
+      if (k == "email") email = v
+      else if (k == "hashFromEnv") fromenv = v
+      else if (k == "username") username = v
+      else if (k == "userID") userid = v
+    }
+    /^staticPasswords:/ { insec = 1; next }
+    insec && /^[A-Za-z]/ { flush(); insec = 0; next }
+    !insec { next }
+    /^[ \t]*$/ { next }
+    {
+      line = $0
+      if (line ~ /^[ \t]*-([ \t]|$)/) { flush(); have = 1; sub(/^[ \t]*-[ \t]*/, "", line) }
+      sub(/^[ \t]*/, "", line)
+      if (have && line !~ /^#/) field(line)
+    }
+    END { flush() }
+  ' "$1"
+}
+
+# What to call the extra sign-in accounts a dex.yaml file holds under the owner's own email. An entry there is the
+# owner's own only when its password hash comes from DEX_USER_PASSWORD_HASH, the variable the installer sets for the
+# owner; every other entry with the owner's email is another account, named by its user id, else its user name.
+# Empty when dex.yaml holds the owner's entry alone.
+dex_yaml_owner_email_extras() { # dex.yaml file, owner email
+  [ -n "$2" ] || return 0
+  dex_yaml_accounts "$1" | LC_ALL=C awk -F '\t' -v owner="$(lowercase "$2")" '
+    tolower($1) == owner {
+      if ($2 == "DEX_USER_PASSWORD_HASH" && !own) { own = 1; next }
+      id = $4; if (id == "") id = $3; if (id == "") id = $1
+      if (!seen[id]++) print id
+    }'
+}
+
 # What to call the sign-in users of an instance beyond its owner, comma separated: their emails, else the names behind
 # leftover records and password hashes. Empty when only the owner can sign in. Every OIDC_ALLOWED_EMAILS line counts
 # because Compose reads the last one, wherever it sits. Hashes are never printed.
 extra_sign_in_users() { # registry file, instance folder
-  local reg=$1 dir=$2 owner emails names
+  local reg=$1 dir=$2 owner emails names line
   owner=$(sed -n 's/^owner_email=//p' "$reg" 2>/dev/null | head -n 1)
   # With the record gone, the first allowed email is taken for the owner's.
   if [ -z "$owner" ]; then
@@ -55,6 +135,7 @@ extra_sign_in_users() { # registry file, instance folder
     {
       LC_ALL=C sed -n 's/^user_[a-z0-9-]*=[^:]*://p' "$reg" 2>/dev/null
       env_key_values "$dir/.env" OIDC_ALLOWED_EMAILS | tr ',' '\n'
+      dex_yaml_accounts "$dir/dex.yaml" | LC_ALL=C cut -f1
     } | LC_ALL=C awk -v owner="$(lowercase "$owner")" '
       { e = tolower($0); gsub(/^[ \t"\x27]+|[ \t"\x27]+$/, "", e) }
       e != "" && e != owner && !seen[e]++ { print e }'
@@ -65,11 +146,16 @@ extra_sign_in_users() { # registry file, instance folder
     names=$(
       {
         LC_ALL=C sed -n 's/^user_\([a-z0-9-]*\)=.*/\1/p' "$reg" 2>/dev/null
-        LC_ALL=C sed -n 's/^DEX_USER_PASSWORD_HASH_\([A-Z0-9_]*\)=.*/\1/p' "$dir/dex.env" 2>/dev/null | LC_ALL=C tr '[:upper:]_' '[:lower:]-'
+        if [ -f "$dir/dex.env" ]; then
+          while IFS= read -r line || [ -n "$line" ]; do env_user_hash_name "$line"; done <"$dir/dex.env"
+        fi
       } | awk '!seen[$0]++'
     )
   fi
-  printf '%s\n' "$names" | awk 'NF { if (n++) printf ", "; printf "%s", $0 }'
+  {
+    printf '%s\n' "$names"
+    dex_yaml_owner_email_extras "$dir/dex.yaml" "$owner"
+  } | awk 'NF && !seen[$0]++ { if (n++) printf ", "; printf "%s", $0 }'
 }
 
 # True when the Node.js on this computer is new enough to run the sandbox setup.
@@ -160,4 +246,34 @@ tighten_checkout() { # dir
   if checkout_has_links "$dir" || ! checkout_writable_by_others "$dir"; then return 1; fi
   chmod go-w "$dir" 2>/dev/null || true
   chmod -R go-w "$dir/installer" 2>/dev/null || true
+}
+
+# True when the person's own group has nobody else in it: no one listed as a member but them, and no other account with it
+# as its main group. Ubuntu gives each account a group like that and a umask that lets the group write, so a git pull there
+# makes new installer files group-writable while still changeable by the person alone. Unknown (no getent) counts as shared.
+own_group_private() {
+  local uid gid me line members member
+  uid=$(id -u) && gid=$(id -g) && me=$(id -un) || return 1
+  command -v getent >/dev/null 2>&1 || return 1
+  line=$(getent group "$gid") || return 1
+  members=$(printf '%s' "$line" | cut -d: -f4)
+  for member in ${members//,/ }; do
+    [ "$member" = "$me" ] || return 1
+  done
+  line=$(getent passwd) || return 1
+  ! printf '%s\n' "$line" | awk -F: -v uid="$uid" -v gid="$gid" '$4 == gid && $3 != uid { found = 1 } END { exit !found }'
+}
+
+# True when the only thing wrong with the folder is that the person's own private group can write to some of it, which is
+# what a git pull or a branch switch leaves behind under Ubuntu's umask. Nobody else could have changed those files, so
+# taking the group's write right away is safe to do without asking. Anything else (a link, a file of another user, a file
+# anyone or another group can write, a folder above that others can change) is left for the person to look at.
+checkout_only_own_group_writes() { # dir
+  local dir=$1 me gid
+  [ "$(checkout_problem "$dir")" = writable ] || return 1
+  checkout_parent_writable "$dir" && return 1
+  me=$(id -u) && gid=$(id -g) || return 1
+  [ -z "$(find "$dir" "$dir/installer" -maxdepth 0 \( -perm -o+w -o \( -perm -g+w ! -gid "$gid" \) -o ! -uid "$me" \) -print 2>/dev/null)" ] || return 1
+  [ -z "$(find "$dir/installer" \( -perm -o+w -o \( -perm -g+w ! -gid "$gid" \) -o ! -uid "$me" \) -print -quit 2>/dev/null)" ] || return 1
+  own_group_private
 }

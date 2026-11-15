@@ -91,7 +91,7 @@ export function SignOutConfirmProvider({ children }: { children: ReactNode }) {
 /**
  * Sign out, in the rail's More menu as a labeled row or elsewhere as an icon button (via the
  * `ShellActionsActionSlot` override).
- * Shown only when `auth.me()` returns `data.type: "oidc-connected"`.
+ * Shown only when `auth.me()` returns a browser sign-in type (`"oidc-connected"` or `"local-connected"`).
  * Uses a module cache so remounts of the action slot do not hide the control during refetches.
  */
 export function LogoutButton({ row = false }: ShellActionsActionSlotProps) {

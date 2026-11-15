@@ -105,6 +105,8 @@ describe('docker-compose.slots.yml', () => {
 function renderInstanceTemplate({ calendar }: { calendar: boolean }): unknown {
   const pairs = [
     'NAME=main',
+    'CONTAINER_PREFIX=aman-main',
+    'SHORT_NAME=main',
     `IF_CALENDAR=${calendar ? '1' : '0'}`,
     'CALENDAR_IMAGE=calendar-test:1',
     'IF_EMAIL=0',
@@ -292,7 +294,7 @@ describe('installer/templates/instance/compose.yaml.tpl calendar connector', () 
       })
       .loose()
       .parse(load('docker-compose.yml'));
-    expect(dev.services.loopback.networks).toEqual(['default', 'calendar', 'browser-control', 'voice']);
+    expect(dev.services.loopback.networks).toEqual(['default', 'calendar', 'mail', 'browser-control', 'voice']);
     expect(dev.services['calendar-caldav'].environment.CALENDAR_ACCOUNT_SECRET).toBe(
       dev.services.server.environment.CALENDAR_ACCOUNT_SECRET,
     );

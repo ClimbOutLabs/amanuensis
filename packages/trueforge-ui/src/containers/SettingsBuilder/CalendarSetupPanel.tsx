@@ -1,12 +1,12 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 
 import { CALDAV_GOOGLE_PROVIDER_KEY } from '@truefoundry/trueforge-core/core/calendar/caldav/presets';
 
 import { auiInputClass } from '@/atoms/lib/inputClasses.js';
 import type { CalendarAccountStatus, CalendarSetupPort } from '@/server/calendarSetup.js';
-import AccountSetupPanel from './AccountSetupPanel.js';
+import AccountSetupPanel, { type PanelAccount } from './AccountSetupPanel.js';
 
 type CalendarSetupPanelProps = {
   open: boolean;
@@ -30,19 +30,86 @@ export default function CalendarSetupPanel({ open, onOpenChange, port, onChanged
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [calendarUrl, setCalendarUrl] = useState('');
+  /** The saved account the form is changing; null while the form is for a new account. */
+  const [editingAddress, setEditingAddress] = useState<string | null>(null);
+  const statusRef = useRef<CalendarAccountStatus | null>(null);
+  const editingRef = useRef<string | null>(null);
 
-  // Every status, including the one after Remove, sets the whole form, so nothing stale is left behind.
-  const applyStatus = useCallback((next: CalendarAccountStatus) => {
-    setProviderKey(next.providerKey);
-    setEmail(next.email ?? '');
+  const fillForm = useCallback((status: CalendarAccountStatus, forAddress: string | null) => {
+    const entry =
+      forAddress === null
+        ? (status.accounts.find(account => account.isDefault) ?? status.accounts[0])
+        : status.accounts.find(account => account.email === forAddress);
+    setProviderKey(entry?.providerKey ?? status.providerKey);
+    setEmail(entry?.email ?? '');
     // The login only needs its own box when it is not the email address.
-    setUsername(next.username !== null && next.username !== next.email ? next.username : '');
-    setCalendarUrl(next.providerKey === OTHER_KEY ? (next.calendarUrl ?? '') : '');
+    setUsername(entry !== undefined && entry.username !== entry.email ? entry.username : '');
+    setCalendarUrl(entry !== undefined && entry.providerKey === OTHER_KEY ? entry.calendarUrl : '');
     setPassword('');
   }, []);
+
+  const clearForm = useCallback((status: CalendarAccountStatus | null) => {
+    setProviderKey(status?.providerKey ?? CALDAV_GOOGLE_PROVIDER_KEY);
+    setEmail('');
+    setUsername('');
+    setCalendarUrl('');
+    setPassword('');
+  }, []);
+
+  // Every status, including the one after Remove, sets the whole form, so nothing stale is left behind.
+  const applyStatus = useCallback(
+    (next: CalendarAccountStatus) => {
+      statusRef.current = next;
+      const editing = editingRef.current;
+      if (editing !== null && !next.accounts.some(account => account.email === editing)) {
+        editingRef.current = null;
+        setEditingAddress(null);
+        fillForm(next, null);
+        return;
+      }
+      fillForm(next, editing);
+    },
+    [fillForm],
+  );
   const clearPassword = useCallback(() => setPassword(''), []);
   const loadStatus = useCallback(() => port.getCalendarStatus(), [port]);
-  const removeAccount = useCallback(() => port.removeCalendarAccount(), [port]);
+  const removeAccount = useCallback(async () => {
+    const status = statusRef.current;
+    const target = editingRef.current ?? status?.defaultAddress ?? null;
+    if (status === null || target === null) {
+      return port.getCalendarStatus();
+    }
+    return port.removeCalendarAccount(target);
+  }, [port]);
+
+  const listAccounts = useCallback(
+    (status: CalendarAccountStatus): readonly PanelAccount[] =>
+      status.accounts.map(account => ({
+        key: account.email,
+        label: account.email,
+        state: account.state,
+        isDefault: account.isDefault,
+      })),
+    [],
+  );
+  const beginEdit = useCallback(
+    (key: string | null) => {
+      editingRef.current = key;
+      setEditingAddress(key);
+      if (key === null) {
+        clearForm(statusRef.current);
+      } else if (statusRef.current !== null) {
+        fillForm(statusRef.current, key);
+      }
+    },
+    [clearForm, fillForm],
+  );
+  const makeDefault = useCallback((key: string) => port.setDefaultCalendarAccount(key), [port]);
+  const removeOne = useCallback((key: string) => port.removeCalendarAccount(key), [port]);
+  const saveNote =
+    editingAddress !== null
+      ? 'Saving replaces the saved details for this account. The sign-in is checked before anything is saved.'
+      : 'The sign-in is checked before anything is saved. Connecting an account keeps the accounts already connected.';
 
   const isOther = providerKey === OTHER_KEY;
   const saveAccount = async () => {
@@ -66,8 +133,8 @@ export default function CalendarSetupPanel({ open, onOpenChange, port, onChanged
       onOpenChange={onOpenChange}
       onChanged={onChanged}
       title="Calendar"
-      description="Connect your calendar with an app password, so your assistant can look at your calendar and, with your approval, add and change events."
-      thing="calendar"
+      description="Connect calendar accounts with app passwords, so your assistant can look at your calendars and, with your approval, add and change events."
+      thing="account"
       connector="calendar connector"
       loadStatus={loadStatus}
       saveAccount={saveAccount}
@@ -75,6 +142,11 @@ export default function CalendarSetupPanel({ open, onOpenChange, port, onChanged
       onOpened={clearPassword}
       onStatus={applyStatus}
       connectedAs={status => status.email}
+      listAccounts={listAccounts}
+      beginEdit={beginEdit}
+      makeDefault={makeDefault}
+      removeOne={removeOne}
+      saveNote={saveNote}
       canSubmit={email.trim() !== '' && password !== ''}
       fields={status => {
         const providers = status.providers;

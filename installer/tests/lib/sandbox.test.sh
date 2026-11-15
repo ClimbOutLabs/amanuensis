@@ -249,8 +249,10 @@ test_install_builds_then_starts_slots_then_the_instance() {
   if [ "$build" -lt "$slots" ] && [ "$slots" -lt "$up" ]; then t_pass; else t_fail "order: image build $build, slots $slots, instance $up"; fi
   assert_not_contains "$OUT" "Sandbox check for instance main:" "the check is quiet when the sandbox answers"
   assert_log_has "doctor sandbox --instance main"
-  assert_flat_contains "$OUT" "Run code on, in a sandbox, with PDF and image reading"
+  assert_not_contains "$(flat "$OUT")" "Run code on" "a sandbox that answers is not a row of the ending"
   assert_eq "$(printf '%s\n' "$OUT" | grep -c 'run_code')" 0 "the sandbox row is not printed twice"
+  run_install status
+  assert_flat_contains "$OUT" "Run code on, in a sandbox, with PDF and image reading"
   assert_eq "$(sed -n 's/^sandbox=//p' "$AMAN_HOME/state/instances/main.conf")" slots
   sandbox_drop
 }
@@ -286,7 +288,8 @@ test_install_without_sandbox() {
   INSTALL_EXTRA=(--no-sandbox)
   install_machine
   assert_eq "$RC" 0
-  assert_log_lacks "node "
+  # Host Node.js is what the sandbox setup runs on; the app image's own Node.js still makes the web push keys.
+  if grep -q '^node ' "$STUB_LOG"; then t_fail "host Node.js ran: $(grep '^node ' "$STUB_LOG" | head -n 1)"; else t_pass; fi
   assert_log_lacks "--entrypoint cat"
   assert_log_lacks "https://nodejs.org" "no runtime is downloaded for an install without the sandbox"
   assert_no_path "$AMAN_HOME/runtime"
@@ -695,7 +698,7 @@ test_rerun_turns_the_sandbox_on_and_keeps_the_data() {
   assert_log_lacks "volume rm"
   assert_log_lacks " down"
   assert_contains "$(cat "$SB_STATE/volumes")" "aman_main_data" "the data volume is still there"
-  assert_flat_contains "$OUT" "Run code on, in a sandbox"
+  assert_not_contains "$(flat "$OUT")" "Run code not ready"
   run_install --yes --name main
   assert_contains "$OUT" "The 2 sandboxes of instance main are running"
   assert_not_contains "$OUT" "Turn on the sandbox"
@@ -759,8 +762,8 @@ test_node_calls_use_the_docker_access_of_the_run() {
   STUB_DOCKER_DENIED=1
   printf 'testuser\n' >"$SB_STATE/group_members"
   install_machine
-  assert_log_has "sg docker -c env DOCKER_BUILDKIT=1 $AMAN_HOME/runtime/node/bin/node $AMAN_HOME/bin/aman-sandbox.mjs --build-only"
-  assert_log_has "sg docker -c env DOCKER_BUILDKIT=1 $AMAN_HOME/runtime/node/bin/node $AMAN_HOME/bin/aman-sandbox.mjs --check --json"
+  assert_log_has "sg docker -c env DOCKER_BUILDKIT=1 AMAN_UI_FRAMED=1 $AMAN_HOME/runtime/node/bin/node $AMAN_HOME/bin/aman-sandbox.mjs --build-only"
+  assert_log_has "sg docker -c env DOCKER_BUILDKIT=1 AMAN_UI_FRAMED=1 $AMAN_HOME/runtime/node/bin/node $AMAN_HOME/bin/aman-sandbox.mjs --check --json"
   sandbox_drop
 }
 

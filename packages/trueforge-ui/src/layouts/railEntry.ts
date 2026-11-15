@@ -1,10 +1,10 @@
 import type { ShellModeContextValue } from '../server/ShellModeContext.js';
 
-export type RailEntry = 'chats' | 'spaces' | 'schedules' | 'more';
+export type RailEntry = 'chats' | 'spaces' | 'schedules' | 'reminders' | 'more';
 
 type RailShellState = Pick<
   ShellModeContextValue,
-  'settingsOpen' | 'sessionsOpen' | 'libraryOpen' | 'schedulesOpen' | 'spacesOpen' | 'mode'
+  'settingsOpen' | 'sessionsOpen' | 'libraryOpen' | 'schedulesOpen' | 'remindersOpen' | 'spacesOpen' | 'mode'
 >;
 
 /**
@@ -16,6 +16,7 @@ export function railEntryFor(shell: RailShellState | null): RailEntry {
   if (shell === null) return 'chats';
   if (shell.settingsOpen || shell.sessionsOpen || shell.libraryOpen) return 'more';
   if (shell.schedulesOpen) return 'schedules';
+  if (shell.remindersOpen) return 'reminders';
   if (shell.spacesOpen) return 'spaces';
   // Build agent lives under More, so the agent builder lights More.
   if (shell.mode.status === 'active' && shell.mode.isCreateAgent) return 'more';

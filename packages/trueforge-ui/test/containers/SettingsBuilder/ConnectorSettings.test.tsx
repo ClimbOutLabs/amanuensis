@@ -3,7 +3,6 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import ConnectorSettings from '@/containers/SettingsBuilder/ConnectorSettings.js';
-import type { ConnectorWithMemoryProvider } from '@/containers/SettingsBuilder/memoryProvider.js';
 import type { CalendarAccountStatus, CalendarSetupPort } from '@/server/calendarSetup.js';
 import type { ConnectorChecks, ConnectorConnectionTest } from '@/server/connectorChecks.js';
 import type { EmailAccountStatus, EmailSetupPort } from '@/server/emailSetup.js';
@@ -72,18 +71,6 @@ const github: ConnectorBase = {
 
 const configuredConnectors = [parallelWeb, github];
 
-const hindsight: ConnectorWithMemoryProvider = {
-  id: 'hindsight',
-  name: 'hindsight',
-  description: 'Long-term memory bank',
-  url: 'https://hindsight.example.com/mcp/aman/',
-  authenticated: true,
-  requiresAuth: false,
-  auth: { type: 'header' },
-};
-
-const hindsightAsProvider: ConnectorWithMemoryProvider = { ...hindsight, memoryProvider: true };
-
 vi.mock('@truefoundry/assistant-ui-runtime', () => ({
   useTrueFoundryAgentSpec: () => ({ agentSpec }),
   useTrueFoundryUpdateAgentSpec: () => updateAgentSpec,
@@ -95,6 +82,8 @@ vi.mock('@/server/ShellModeContext.js', () => ({
     mode: { status: 'active', isMutable: mutableChat },
     pendingSessionId: null,
   }),
+  // The mail setup panels point at Reach me through the shell; this page is tested without one.
+  useOptionalShellMode: () => null,
 }));
 
 /**
@@ -142,23 +131,6 @@ describe('ConnectorSettings chat enablement', () => {
     };
     updateAgentSpec.mockReset();
     disconnectConnector.mockClear();
-  });
-
-  it('does not list the memory bank, which Settings → Memory owns, while listing ordinary connectors', async () => {
-    renderSettings([parallelWeb, hindsightAsProvider]);
-
-    expect(await screen.findByText(parallelWeb.name)).toBeInTheDocument();
-    // Stored as an MCP server row, but not a connector a user attaches to anything.
-    expect(screen.queryByText(hindsightAsProvider.name)).not.toBeInTheDocument();
-    // Its explanation moved with it: nothing about memory is left on this page.
-    expect(screen.queryByText(/recalls relevant memories before every model call/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/HINDSIGHT_API_TENANT_API_KEY/)).not.toBeInTheDocument();
-  });
-
-  it('still lists a bank that is not flagged as the memory provider, since it is then an ordinary connector', async () => {
-    renderSettings([parallelWeb, hindsight]);
-
-    expect(await screen.findByText(hindsight.name)).toBeInTheDocument();
   });
 
   it('reports the tool count when a connection test reaches the connector', async () => {
@@ -559,7 +531,7 @@ describe('ConnectorSettings edit flow', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
 
     expect(screen.queryByRole('button', { name: 'Replace Key' })).not.toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Edit MCP server' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Edit connector' })).toBeInTheDocument();
     expect(screen.getByLabelText(/Name/)).toHaveValue(connector.name);
 
     fireEvent.click(screen.getByRole('radio', { name: 'None' }));
@@ -760,6 +732,8 @@ describe('ConnectorSettings page order and vocabulary', () => {
       state: 'not_connected',
       address: null,
       providerKey: 'custom',
+      accounts: [],
+      defaultAddress: null,
       providers: [],
       ...overrides,
     };
@@ -773,6 +747,8 @@ describe('ConnectorSettings page order and vocabulary', () => {
       username: null,
       calendarUrl: null,
       providerKey: 'custom',
+      accounts: [],
+      defaultAddress: null,
       providers: [],
       ...overrides,
     };
@@ -814,14 +790,14 @@ describe('ConnectorSettings page order and vocabulary', () => {
     return (first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
   }
 
-  it('renders Configured first, then the account cards, then the Available catalog rows', async () => {
+  it('renders Configured first, then the account cards, then the Add a connector catalog rows', async () => {
     renderSettings([parallelWeb, github], accountPorts({}));
 
     const configured = await screen.findByRole('heading', { name: /Configured/ });
     const email = screen.getByRole('heading', { name: 'Email', level: 4 });
     const calendar = screen.getByRole('heading', { name: 'Calendar', level: 4 });
     const google = screen.getByRole('heading', { name: 'Google', level: 4 });
-    const available = screen.getByRole('heading', { name: /Available/ });
+    const available = screen.getByRole('heading', { name: /Add a connector/ });
 
     expect(headingFollows(configured, email)).toBe(true);
     expect(headingFollows(email, calendar)).toBe(true);
@@ -832,7 +808,7 @@ describe('ConnectorSettings page order and vocabulary', () => {
   it('shows Available on each unconnected account card instead of Not connected', async () => {
     renderSettings([parallelWeb], accountPorts({}));
 
-    await screen.findByRole('heading', { name: /Available/ });
+    await screen.findByRole('heading', { name: /Add a connector/ });
     expect(screen.getAllByText('Available')).toHaveLength(3);
     expect(screen.queryByText('Not connected')).not.toBeInTheDocument();
   });
@@ -853,7 +829,22 @@ describe('ConnectorSettings page order and vocabulary', () => {
   it('never renders the word the owner struck from this page', async () => {
     renderSettings([emailInstance, parallelWeb], accountPorts({}));
 
-    await screen.findByRole('heading', { name: /Available/ });
+    await screen.findByRole('heading', { name: /Add a connector/ });
     expect(document.body.textContent ?? '').not.toMatch(/template/i);
+  });
+
+  it('shows the whole catalog description, with no class cutting it off', async () => {
+    const notionEntry = {
+      id: 'notion',
+      name: 'notion',
+      description:
+        'Search pages, read content, query databases, create pages. Signing in gives the connection the same access you have, so it can reach any page or database you can open.',
+      url: 'https://mcp.notion.com/mcp',
+      auth: { type: 'dcr' as const },
+    };
+    renderSettings([parallelWeb], { ...accountPorts({}), getConnectorCatalog: async () => [notionEntry] });
+
+    const description = await screen.findByText(notionEntry.description);
+    expect(description.className).not.toMatch(/truncate|line-clamp/);
   });
 });

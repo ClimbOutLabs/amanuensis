@@ -14,13 +14,13 @@ import { SqliteSandboxProviderStore } from '../../../src/db/sqlite/sandbox-provi
 import { SqliteTurnArtifactStore } from '../../../src/db/sqlite/turn-artifact-store/SqliteTurnArtifactStore';
 import type { PersonalizationProfileContent } from '../../../src/personalization/profile';
 import { EventSubscriptionRegistry } from '../../../src/runtime/event-subscription';
-import { HindsightClient } from '../../../src/runtime/memory/hindsightClient';
 import { TurnModelUsageLedger } from '../../../src/runtime/modelUsage';
-import type { ProfileLearningDrainMember, ProfileLearningPassConfig } from '../../../src/runtime/profileLearning';
+import type { ProfileLearningDrainMember } from '../../../src/runtime/profileLearning';
 import { resolveSandboxProvider } from '../../../src/runtime/sessionResources';
 import { TurnDrainRegistry } from '../../../src/runtime/turnDrains';
 import { TurnExecutionDeadline } from '../../../src/runtime/turnExecutionDeadline';
 import { discardedModelUsage } from '../../fixtures/discardedModelUsage';
+import { QuietMemoryClient } from '../../fixtures/memory/quietMemoryClient';
 import { uncappedTokenFactoryBudget } from '../../fixtures/uncappedTokenFactoryBudget';
 
 function tick(): Promise<void> {
@@ -35,10 +35,6 @@ async function waitFor(condition: () => boolean): Promise<void> {
     }
     await new Promise(resolve => setTimeout(resolve, 10));
   }
-}
-
-function passConfig(): ProfileLearningPassConfig {
-  return { modelFqn: '', minIntervalMs: 3_600_000, retainTimeoutMs: 1_000 };
 }
 
 class RecordingEventStore implements ICompletedTurnEventStore {
@@ -59,7 +55,7 @@ function gatedLlm(gate: Promise<void>): {
     async () => {
       await gate;
       return {
-        output: { role: 'assistant', content: '{"learned_profile": "# Learned"}' },
+        output: { role: 'assistant', content: '{"facts": []}' },
         usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
         finish_reason: 'stop',
       };
@@ -106,36 +102,34 @@ describe('drainTurnEvents awaits the TURN_DONE submissions', () => {
     await migrateSqliteToLatest(db);
     try {
       // Memory retain: the submission blocks on its gate; the verification check reads completed.
-      const memoryClient = new HindsightClient({
-        apiBase: 'https://hindsight.test.example',
-        bank: 'aman',
-        headers: {},
-        fetchImpl: () => Promise.reject(new Error('drain tests must not reach the network')),
-      });
+      const memoryClient = new QuietMemoryClient();
       const retain = jest.spyOn(memoryClient, 'retain').mockImplementation(async () => {
         await retainGate.promise;
         return { ok: true };
       });
       jest.spyOn(memoryClient, 'getOperation').mockResolvedValue({ ok: true, status: 'completed' });
 
-      // Profile learning: the distillation LLM blocks on its gate.
+      // Profile learning: no fact call runs for this turn's memory, so it makes its own, which blocks on its gate.
       const { llm, createNonStream } = gatedLlm(profileGate.promise);
       const personalizationStore = new SqlitePersonalizationStore(db);
       await seedProfile({ store: personalizationStore });
       const profileLearning: ProfileLearningDrainMember = {
         session: { is_incognito: false },
-        config: passConfig(),
         personalizationStore,
         eventStore: new RecordingEventStore(),
-        modelProviderStore: new SqliteModelProviderStore(db),
-        tokenFactoryBudget: uncappedTokenFactoryBudget,
-        modelUsage: discardedModelUsage,
         memoryClient: undefined,
+        retainTimeoutMs: 1_000,
         tenantId: 'default',
         createdBy: 'user-a',
         userText: 'I prefer plain English.',
-        turnModelFqn: 'test-provider/test-model',
-        resolveLlm: jest.fn().mockResolvedValue(llm),
+        knownLines: [],
+        factCall: {
+          modelProviderStore: new SqliteModelProviderStore(db),
+          summarizationModelFqn: 'test-provider/test-model',
+          tokenFactoryBudget: uncappedTokenFactoryBudget,
+          modelUsage: discardedModelUsage,
+          resolveLlm: jest.fn().mockResolvedValue(llm),
+        },
       };
 
       // Artifact persistence: the session lookup blocks on its gate, then resolves to no
@@ -241,12 +235,7 @@ describe('drainTurnEvents awaits the TURN_DONE submissions', () => {
       identity,
       usage: { input_tokens: 1000, output_tokens: 100, total_tokens: 1100 },
     });
-    const memoryClient = new HindsightClient({
-      apiBase: 'https://hindsight.test.example',
-      bank: 'aman',
-      headers: {},
-      fetchImpl: () => Promise.reject(new Error('drain tests must not reach the network')),
-    });
+    const memoryClient = new QuietMemoryClient();
     const appendsWhenRetainStarted: number[] = [];
     jest.spyOn(memoryClient, 'retain').mockImplementation(() => {
       appendsWhenRetainStarted.push(eventStore.appends.length);

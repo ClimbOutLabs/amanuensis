@@ -11,7 +11,9 @@ mcp_servers:
   - type: remote
     name: notion
     url: https://mcp.notion.com/mcp
-    description: Search pages, read content, query databases, create pages.
+    description: >-
+      Search pages, read content, query databases, create pages. Signing in gives the
+      connection the same access you have, so it can reach any page or database you can open.
     auth:
       type: dcr
   - type: remote
@@ -46,7 +48,10 @@ mcp_servers:
   - type: remote
     name: github
     url: https://api.githubcopilot.com/mcp/
-    description: Work with issues, pull requests, repository files, and CI status.
+    description: >-
+      Work with issues, pull requests, repository files, and CI status. Connect with a
+      personal access token from your GitHub settings; give it only the repositories and
+      permissions it needs.
     auth:
       type: header
       headers:
@@ -101,17 +106,15 @@ mcp_servers:
     description: Query product analytics, run SQL, and manage feature flags.
     auth:
       type: dcr
-  # Self-hosted, so the URL here is a placeholder: no logo either, since there is no hosted asset.
+  # The person's own Home Assistant, so the URL here is a placeholder: the connect form asks for
+  # their address and long-lived access token, and builds this endpoint and the header itself.
   - type: remote
-    name: hindsight
-    url: https://your-hindsight-host:8449/mcp/your-bank
+    name: home-assistant
+    url: https://homeassistant.local:8123/mcp_server/sse
     description: >-
-      A self-hosted Hindsight long-term memory bank. The URL here is a placeholder: add it with
-      Add MCP Server using your own Hindsight URL, which must have the shape {apiBase}/mcp/{bank}
-      naming exactly one bank, or memory cannot use it. Put the API key in the Authorization
-      header, and use one Hindsight accepts on its REST API as well as its MCP surface, because
-      memory calls the REST API.
+      See and control the Home Assistant devices you expose to voice assistants. Reads run on
+      their own; changes ask first; locks, alarms and garage doors are never controlled.
     auth:
       type: header
       headers:
-        Authorization: Bearer YOUR_HINDSIGHT_API_KEY
+        Authorization: Bearer YOUR_HOME_ASSISTANT_TOKEN

@@ -36,6 +36,15 @@ let world;
 const make = options => (world = createWorld(options));
 afterEach(() => world?.dispose());
 
+/** The report as one line of words: the sides of its panels dropped and wrapped lines joined. */
+function flatText(text) {
+  return text
+    .split('\n')
+    .map(line => line.replace(/^[|│] (.*?) *[|│]$/, '$1'))
+    .join(' ')
+    .replace(/\s+/g, ' ');
+}
+
 function machine(result, id) {
   return find(result.doc.machine, id);
 }
@@ -126,12 +135,17 @@ describe('document and exit codes', () => {
     world.df(1 * GIB_KB);
     const result = world.run();
     assert.equal(result.code, 1);
-    assert.match(result.stdout, /\nChecking this computer\n/);
+    assert.match(result.stdout, /\n\+- \[ Checking this computer \] -+ \d+ ok, 1 problem -\+\n/);
     assert.match(result.stdout, / x Only 1\.0 GB is free for Docker data/);
     assert.match(result.stdout, /Next: Run aman doctor disk --fix/);
-    assert.match(result.stdout, /\nChecking instance main\n/);
-    assert.match(result.stdout, /1 problem\./);
-    assert.match(result.stdout, /Run the Next command for each, then run aman doctor again\./);
+    assert.match(result.stdout, /\n\+- \[ Checking instance main \]/);
+    assert.match(result.stdout, /\| x 1 problem +\|/);
+    assert.match(
+      result.stdout,
+      /\| x 1 problem +\|[\s\S]* x Only 1\.0 GB is free for Docker data[\s\S]*Next: Run aman doctor disk --fix/,
+      'the closing block lists the problem with its next step',
+    );
+    assert.match(result.stdout, /Do the Next step of each, then run aman doctor again\./);
   });
 
   it('prints one line for skipped checks with the same reason, instead of a row each', () => {
@@ -139,7 +153,7 @@ describe('document and exit codes', () => {
     world.set('info', { out: '', rc: 1, err: 'Cannot connect to the Docker daemon' });
     const result = world.run();
     assert.equal(result.code, 1);
-    const flat = result.stdout.replace(/\s+/g, ' ');
+    const flat = flatText(result.stdout);
     assert.match(flat, /Skipped: Docker is not reachable\. \(images, disk, docker_memory, clock\)/);
     assert.equal(flat.split('Skipped: Docker is not reachable.').length - 1, 2, 'two lines for five skipped checks');
   });
@@ -151,7 +165,7 @@ describe('document and exit codes', () => {
     assert.match(plain.stdout, /All checks passed\./);
     assert.doesNotMatch(plain.stdout, /\(docker\)/);
     const verbose = world.run(['--verbose']);
-    assert.match(verbose.stdout, /Docker 28\.0\.1 is running and Compose 2\.29\.1 is available\. \(docker\)/);
+    assert.match(flatText(verbose.stdout), /Docker 28\.0\.1 is running and Compose 2\.29\.1 is available\. \(docker\)/);
   });
 
   it('--summary is one line when everything passed, with the number of checks and nothing else', () => {
@@ -237,18 +251,21 @@ describe('usage', () => {
       const result = world.run(args);
       assert.equal(result.code, 2, args.join(' '));
       assert.equal(result.stdout, '');
-      assert.match(result.stderr, /Usage:/);
+      assert.match(result.stderr, /Run aman help/);
     }
   });
 
   it('needs the doctor command and no longer takes --home (the state directory is AMANUENSIS_HOME)', () => {
     make();
-    for (const argv of [[], ['--json'], ['status'], ['doctor', '--home', '/tmp/elsewhere']]) {
+    for (const argv of [['--json'], ['bogus'], ['doctor', '--home', '/tmp/elsewhere']]) {
       const result = world.shim(argv);
       assert.equal(result.code, 2, argv.join(' '));
       assert.equal(result.stdout, '');
-      assert.match(result.stderr, /Usage:/);
+      assert.match(result.stderr, /Run aman help/);
     }
+    const bare = world.shim([]);
+    assert.equal(bare.code, 0, 'a bare aman shows the list of commands');
+    assert.match(bare.stdout, /aman help doctor/);
     assert.equal(world.shim(['doctor', '--json', '--instance', 'main']).code, 0);
   });
 
@@ -671,6 +688,14 @@ describe('backup age check', () => {
 });
 
 describe('instance settings file', () => {
+  it('names the restore command when the settings file is missing', () => {
+    make();
+    rmSync(path.join(world.instanceDir('main'), '.env'));
+    const check = find(world.json().doc.instances.main, 'config');
+    assert.equal(check.state, 'fail');
+    assert.equal(check.fix, 'Put it back from a backup with: aman restore main');
+  });
+
   it('fails with a chmod fix when the file is readable by others', () => {
     make();
     world.writeEnv('main', 0o644);
@@ -698,12 +723,35 @@ describe('instance settings file', () => {
     const OWNER = 'owner@x.invalid';
     const fixCommand = 'Run aman doctor instance --fix';
 
-    function setUp({ allowed, envText, hashes = [], registered = true, records = '' }) {
+    const dexYamlWith = entries =>
+      [
+        'issuer: https://login.x.invalid/dex',
+        'enablePasswordDB: true',
+        'staticPasswords:',
+        `  - email: '${OWNER}'`,
+        '    hashFromEnv: DEX_USER_PASSWORD_HASH',
+        "    username: 'Owner'",
+        "    userID: 'owner'",
+        ...entries,
+        'staticClients: []',
+        '',
+      ].join('\n');
+
+    function setUp({ allowed, envText, hashes = [], registered = true, records = '', dex = '', oldFile = '' }) {
       world?.dispose();
       make();
+      if (oldFile) {
+        mkdirSync(world.instanceDir('main'), { recursive: true });
+        writeFileSync(path.join(world.instanceDir('main'), oldFile), 'PASSWORD=SENTINEL-old-app-password\n', {
+          mode: 0o600,
+        });
+      }
       const file = path.join(world.instanceDir('main'), 'dex.env');
       writeFileSync(file, ["DEX_USER_PASSWORD_HASH='SENTINEL-owner-hash'", ...hashes, ''].join('\n'));
       chmodSync(file, 0o600);
+      if (dex) {
+        writeFileSync(path.join(world.instanceDir('main'), 'dex.yaml'), dex);
+      }
       world.writeEnv('main', 0o600, envText ?? (allowed === undefined ? '' : `OIDC_ALLOWED_EMAILS=${allowed}\n`));
       if (registered) {
         const dir = path.join(world.home, 'state', 'instances');
@@ -761,6 +809,59 @@ describe('instance settings file', () => {
       assert.doesNotMatch(world.json().stdout, /SENTINEL/);
     });
 
+    for (const [what, line] of [
+      ['an indented line', "  DEX_USER_PASSWORD_HASH_GHOST='SENTINEL-ghost-hash'"],
+      ['an export word', "export DEX_USER_PASSWORD_HASH_GHOST='SENTINEL-ghost-hash'"],
+      ['blanks around the equals sign', "DEX_USER_PASSWORD_HASH_GHOST = 'SENTINEL-ghost-hash'"],
+      ['mixed case in the variable name', "Dex_User_Password_Hash_GHOST='SENTINEL-ghost-hash'"],
+    ]) {
+      it(`reads a left-over password hash line Compose also reads: ${what}`, () => {
+        const check = setUp({ allowed: OWNER, hashes: [line] });
+        assert.equal(check.state, 'warn');
+        assert.equal(check.detail, 'More than the owner can sign in: ghost.');
+        assert.equal(check.fix, fixCommand);
+        assert.doesNotMatch(world.json().stdout, /SENTINEL/);
+      });
+    }
+
+    it("is quiet when dex.yaml holds the owner's entry alone", () => {
+      const check = setUp({ allowed: OWNER, dex: dexYamlWith([]) });
+      assert.equal(check.state, 'ok');
+      assert.equal(check.detail, 'The settings files exist and are private to you.');
+    });
+
+    it('warns about a sign-in entry that exists only in dex.yaml', () => {
+      const check = setUp({
+        allowed: OWNER,
+        dex: dexYamlWith([
+          "  - email: 'judge@x.invalid'",
+          "    hash: 'SENTINEL-planted-hash'",
+          "    username: 'judge'",
+          "    userID: 'judge'",
+        ]),
+      });
+      assert.equal(check.state, 'warn');
+      assert.equal(check.detail, 'More than the owner can sign in: judge@x.invalid.');
+      assert.equal(check.fix, fixCommand);
+      assert.doesNotMatch(world.json().stdout, /SENTINEL/);
+    });
+
+    it("warns about a second entry under the owner's own email with a password of its own", () => {
+      const check = setUp({
+        allowed: OWNER,
+        dex: dexYamlWith([
+          `  - email: '${OWNER}'`,
+          "    hash: 'SENTINEL-planted-hash'",
+          "    username: 'owner'",
+          "    userID: 'owner-copy'",
+        ]),
+      });
+      assert.equal(check.state, 'warn');
+      assert.equal(check.detail, 'More than the owner can sign in: owner-copy.');
+      assert.equal(check.fix, fixCommand);
+      assert.doesNotMatch(world.json().stdout, /SENTINEL/);
+    });
+
     it('reads every allowed-emails line, since Compose takes the last one', () => {
       const check = setUp({ allowed: `${OWNER}\nOIDC_ALLOWED_EMAILS=late@x.invalid` });
       assert.equal(check.state, 'warn');
@@ -781,6 +882,16 @@ describe('instance settings file', () => {
         assert.equal(check.state, 'warn');
         assert.equal(check.detail, 'More than the owner can sign in: late@x.invalid.');
         assert.equal(check.fix, fixCommand);
+      });
+    }
+
+    for (const file of ['.env.mail-email', '.env.calendar']) {
+      it(`warns about an old ${file} left in the instance folder, and never shows what it holds`, () => {
+        const check = setUp({ allowed: OWNER, oldFile: file });
+        assert.equal(check.state, 'warn');
+        assert.equal(check.detail, `An old file, ${file}, still holds an app password that Aman no longer uses.`);
+        assert.equal(check.fix, 'Run aman upgrade to move it into the connector and delete it');
+        assert.doesNotMatch(world.json().stdout, /SENTINEL/);
       });
     }
 
@@ -1369,6 +1480,54 @@ describe('why an instance does not run', () => {
     assert.match(fixed.stdout, /The main app is not running\./);
   });
 
+  it('with --fix, ends with a closed verdict that does not send the person back to the same repair', () => {
+    make();
+    const repo = world.sandbox();
+    world.installerStub(repo);
+    containers([app({ state: 'restarting', status: 'Restarting (1) 5 seconds ago' }), dex()]);
+    world.set('logs_c1', {
+      out: "Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/app/extra.mjs' imported from /app/entrypoint.mjs\n",
+    });
+    world.set('logs_c2', { out: '' });
+    const fixed = world.shim(['doctor', 'instance', '--fix', '--yes']);
+    assert.equal(fixed.code, 1, fixed.stderr + fixed.stdout);
+    const flat = fixed.stdout.replace(/[│|]/g, ' ').replace(/\s+/g, ' ');
+    assert.match(flat, /Checking instance main again/);
+    assert.match(flat, /a file is missing from it\. This is a bug in Aman/);
+    // Only a newer image fixes a missing file, so no line sends the person to a restart.
+    assert.doesNotMatch(flat, /aman doctor instance --fix/);
+    assert.match(flat, /Restarting did not fix instance main, so restarting again will not help\./);
+    assert.match(flat, /aman upgrade --force/);
+    // The last line is the closing rule, not a line inside a box that is still open.
+    const last = fixed.stdout.trimEnd().split('\n').at(-1) ?? '';
+    assert.doesNotMatch(last, /^[│|]/);
+  });
+
+  it('with --fix, sends a problem an upgrade cannot fix to its own cause, not to an upgrade', () => {
+    make();
+    const repo = world.sandbox();
+    world.installerStub(repo);
+    containers([app({ state: 'exited', status: 'Exited (1) 3 minutes ago' }), dex()]);
+    world.set('logs_c1', { out: 'Error: ENOSPC: no space left on device, write\n' });
+    world.set('logs_c2', { out: '' });
+    const fixed = world.shim(['doctor', 'instance', '--fix', '--yes']);
+    assert.equal(fixed.code, 1, fixed.stderr + fixed.stdout);
+    const flat = fixed.stdout.replace(/[│|]/g, ' ').replace(/\s+/g, ' ');
+    assert.match(flat, /This computer ran out of disk space\./);
+    assert.match(flat, /Restarting did not fix instance main/);
+    assert.match(flat, /Fix the problem shown above, then run aman doctor\./);
+    assert.doesNotMatch(flat, /aman upgrade/);
+  });
+
+  it('with --fix, closes its panel when there is nothing to repair', () => {
+    make();
+    containers([app({ state: 'running', status: 'Up 2 minutes' }), dex({ state: 'running', status: 'Up 2 minutes' })]);
+    const result = world.shim(['doctor', 'instance', '--fix', '--yes']);
+    assert.equal(result.code, 0, result.stderr + result.stdout);
+    const last = result.stdout.trimEnd().split('\n').at(-1) ?? '';
+    assert.doesNotMatch(last, /^[│|]/);
+  });
+
   it('with --fix, claims fixed when the refresh leaves no failing check', () => {
     make();
     const repo = world.sandbox();
@@ -1730,6 +1889,22 @@ describe('aman backup and aman upgrade', () => {
     assert.ok(world.calls().includes(`install.sh --home ${world.home} upgrade --check`));
   });
 
+  it('run aman status through the installer', () => {
+    make();
+    const repo = world.sandbox();
+    world.installerStub(repo);
+    assert.equal(world.shim(['status']).code, 0);
+    assert.ok(world.calls().includes(`install.sh --home ${world.home} status`));
+  });
+
+  it('run aman restore through the installer with the arguments given', () => {
+    make();
+    const repo = world.sandbox();
+    world.installerStub(repo);
+    assert.equal(world.shim(['restore', 'main', '--latest']).code, 0);
+    assert.ok(world.calls().includes(`install.sh --home ${world.home} restore main --latest`));
+  });
+
   it('aman password runs the installer to set a new owner password, with the arguments given', () => {
     make();
     const repo = world.sandbox();
@@ -1742,11 +1917,13 @@ describe('aman backup and aman upgrade', () => {
     );
   });
 
-  it('aman --help says the password command is run on the computer where Aman is installed', () => {
+  it('aman help password says the password command is run on the computer where Aman is installed', () => {
     make();
-    const result = world.shim(['--help']);
-    assert.match(result.stderr, /aman password \[--instance NAME\] \[--password-stdin\]/);
-    assert.match(result.stderr, /on the computer where Aman is installed/);
+    const result = world.shim(['help', 'password']);
+    assert.equal(result.code, 0);
+    assert.match(result.stdout, /aman password \[--instance NAME\] \[--password-stdin\]/);
+    assert.match(result.stdout, /Run it on the computer/);
+    assert.match(result.stdout, /where Aman is installed/);
   });
 
   it('say plainly when the folder Aman was installed from is gone', () => {
@@ -1836,6 +2013,63 @@ describe('the folder Aman runs its installer from', () => {
     chmodSync(repo, 0o775);
     assert.equal(world.shim(['upgrade', '--check']).code, 1);
     assert.ok(!world.calls().some(line => line.startsWith('install.sh')));
+  });
+
+  /** A getent that tells of the person's own group: who else is in it, and which other accounts have it as main group. */
+  function groupIs({ members = [], othersWithIt = false } = {}) {
+    const me = spawnSync('id', ['-un'], { encoding: 'utf8' }).stdout.trim();
+    const uid = process.getuid();
+    const gid = process.getgid();
+    const group = `${me}:x:${gid}:${members.join(',')}`;
+    const passwd = [`${me}:x:${uid}:${gid}::/home/${me}:/bin/sh`];
+    if (othersWithIt) {
+      passwd.push(`pippa:x:${uid + 1}:${gid}::/home/pippa:/bin/sh`);
+    }
+    world.install(
+      'getent',
+      `#!/usr/bin/env bash\ncase "$1" in\n  group) [ "$2" = ${gid} ] && echo '${group}' ;;\n  passwd) printf '%s\\n' ${passwd.map(line => `'${line}'`).join(' ')} ;;\n  *) exit 2 ;;\nesac\n`,
+    );
+  }
+
+  it("is made private again by aman upgrade when only the person's own group can write to it, as a pull leaves it", () => {
+    const repo = checkoutWith(0o775);
+    chmodSync(repo, 0o775);
+    groupIs({ members: [spawnSync('id', ['-un'], { encoding: 'utf8' }).stdout.trim()] });
+    const result = world.shim(['upgrade', '--check']);
+    assert.equal(result.code, 0, result.stdout + result.stderr);
+    assert.match(result.stderr, /private to you again/);
+    assert.equal(statSync(repo).mode & 0o022, 0);
+    assert.equal(statSync(path.join(repo, 'installer', 'install.sh')).mode & 0o022, 0);
+    assert.ok(world.calls().includes(`install.sh --home ${world.home} upgrade --check`));
+  });
+
+  for (const [what, group] of [
+    ["someone else is in the person's group", { members: ['pippa'] }],
+    ["another account has the person's group as its main group", { othersWithIt: true }],
+  ]) {
+    it(`is still not used when ${what}, and nothing is changed`, () => {
+      const repo = checkoutWith(0o775);
+      groupIs(group);
+      assert.equal(world.shim(['upgrade', '--check']).code, 1);
+      assert.equal(statSync(path.join(repo, 'installer', 'install.sh')).mode & 0o777, 0o775);
+      assert.ok(!world.calls().some(line => line.startsWith('install.sh')));
+    });
+  }
+
+  it('is still not used when anyone can write to its installer, even with a private group', () => {
+    const repo = checkoutWith(0o666);
+    groupIs();
+    assert.equal(world.shim(['upgrade', '--check']).code, 1);
+    assert.equal(statSync(path.join(repo, 'installer', 'install.sh')).mode & 0o777, 0o666);
+    assert.ok(!world.calls().some(line => line.startsWith('install.sh')));
+  });
+
+  it('is still not used with a private group when a folder above it can be changed by others', () => {
+    const repo = checkoutWith(0o775);
+    groupIs();
+    chmodSync(world.root, 0o775);
+    assert.equal(world.shim(['upgrade', '--check']).code, 1);
+    assert.equal(statSync(path.join(repo, 'installer', 'install.sh')).mode & 0o777, 0o775);
   });
 
   it('is reported by the doctor with the one fix, and --fix makes it private to the user again', () => {

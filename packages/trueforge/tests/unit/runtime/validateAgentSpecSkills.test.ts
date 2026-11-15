@@ -31,7 +31,9 @@ describe('validateAgentSpec skills require an enabled sandbox', () => {
       manifest: {
         type: 'custom',
         name: 'test-provider',
-        base_url: 'https://llm.test.example.com/v1',
+        // A public IP address, not a name: the provider is judged by the address check when a
+        // model is resolved, and a fixture name's resolution depends on the machine's DNS.
+        base_url: 'https://93.184.216.34/v1',
         auth: { api_key: 'sk-test' },
         models: [
           {

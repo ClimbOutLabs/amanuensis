@@ -1,18 +1,16 @@
 /**
- * Walks the LKOS memory-retrieval contract over the HTTP surface with the inert MCP
- * connector's `ask_memory` / `search_memory` tools (see `ops/memory/DESIGN.md`).
+ * Walks a connector's retrieval tools over the HTTP surface with the inert MCP connector's
+ * `ask_memory` / `search_memory` tools.
  *
  * Mirrors approvalFlow.test.ts's harness style: drive `POST /api/v1/sessions/{id}/turns`
  * and the turn/event reads, and judge outcomes by state transitions plus the connector's
  * invocation counters — the counters are the only evidence that a call actually reached
  * the mock server, independent of what the UI would render.
  *
- * The connector under test is registered through the memory-provider setup, so the server
- * marks it first-party: that is what lets its annotated read-only retrieval tools run
- * without an approval pause.
+ * The connector under test is one a person added, so each retrieval tool asks before it runs.
  *
- * Five axes, from the dossier's acceptance list:
- *   1. SUCCESS       — an annotated retrieval tool runs without an approval pause.
+ * Five axes:
+ *   1. SUCCESS       — an approved retrieval tool runs and its result reaches the turn events.
  *   2. ABSTENTION    — an empty result arrives as an honest, non-error empty.
  *   3. PAUSE         — a fully-deferred (preload:false) connector contributes nothing and
  *      is never dialed at turn init; a later call against it while down never reaches the
@@ -33,12 +31,7 @@ import { TENANT_ID } from '../../../src/apis/sessions';
 import { ListSessionEventsResponseSchema, TurnStreamingEventSchema } from '../../../src/schemas/events';
 import { GetMcpServerResponseSchema } from '../../../src/schemas/mcpServer';
 import { GetTurnResponseSchema } from '../../../src/schemas/turn';
-import {
-  INERT_MEMORY_SERVER_NAME,
-  MODEL_FQN,
-  startApprovalTestServer,
-  type ApprovalTestServer,
-} from '../../fixtures/approvalTestServer';
+import { MODEL_FQN, startApprovalTestServer, type ApprovalTestServer } from '../../fixtures/approvalTestServer';
 import {
   EMPTY_MEMORY_RESULT,
   INERT_ASK_MEMORY_TOOL,
@@ -115,7 +108,7 @@ function jsonInit(method: 'POST' | 'PUT', body: unknown): RequestInit {
 function agentSpec({
   preload,
   forceApprovalTools = [],
-  server = INERT_MEMORY_SERVER_NAME,
+  server = INERT_SERVER_NAME,
 }: {
   preload: boolean;
   forceApprovalTools?: string[];
@@ -128,11 +121,8 @@ function agentSpec({
       {
         name: server,
         preload,
-        // Defaults (`@write`, `@destructive`, `@unclassified`) never cover ask_memory /
-        // search_memory — both are readOnlyHint+non-open-world, so they escape gating on
-        // their own, and the memory provider's first-party mark lets them run. `forceApprovalTools`
-        // adds a literal name to force-gate one anyway, the same way approvalFlow.test.ts
-        // force-gates `inert_read` for its chat-grant test.
+        // A tool on a connector a person added asks whatever its hints say. `forceApprovalTools`
+        // names one explicitly as well, the same way approvalFlow.test.ts does for its chat-grant test.
         require_approval_for_tools: ['@write', '@destructive', '@unclassified', ...forceApprovalTools],
       },
     ],
@@ -147,7 +137,7 @@ function agentSpec({
 }
 
 /** `server` only matters for `call_tool`, which reaches a deferred connector's tool by name. */
-function userMessage(tool: string, { server = INERT_MEMORY_SERVER_NAME }: { server?: string } = {}): TurnInputItem[] {
+function userMessage(tool: string, { server = INERT_SERVER_NAME }: { server?: string } = {}): TurnInputItem[] {
   return [
     { type: 'user.message', content: `${RUN_DIRECTIVE_PREFIX}${tool} ${SERVER_DIRECTIVE_PREFIX}${server} please` },
   ];
@@ -324,11 +314,11 @@ async function toolResponses(server: ApprovalTestServer, sessionId: string) {
   return responses;
 }
 
-describe('LKOS-shaped memory retrieval over the inert connector', () => {
+describe('retrieval tools over the inert connector', () => {
   let server: ApprovalTestServer;
 
   beforeAll(async () => {
-    server = await startApprovalTestServer({ memoryProvider: true });
+    server = await startApprovalTestServer();
   }, TURN_TIMEOUT_MS);
 
   afterAll(async () => {
@@ -343,11 +333,21 @@ describe('LKOS-shaped memory retrieval over the inert connector', () => {
     await server.mcp.start();
   });
 
+  /** Runs a turn that asks for one tool, approves its card, and returns the resumed turn. */
+  async function runApproved({ sessionId, input }: { sessionId: string; input: TurnInputItem[] }): Promise<Turn> {
+    const asked = await runTurn({ server, sessionId, input });
+    const pending = pendingApproval(asked);
+    if (!pending) {
+      throw new Error(`expected the tool to ask first: ${JSON.stringify(asked.state)}`);
+    }
+    return runTurn({ server, sessionId, input: approvalInput({ ...pending, approval: { status: 'allow' } }) });
+  }
+
   it(
-    'SUCCESS: an annotated retrieval tool runs without an approval pause, and its result reaches the turn events verbatim',
+    'SUCCESS: an approved retrieval tool runs, and its result reaches the turn events verbatim',
     async () => {
       const sessionId = await createSession(server, agentSpec({ preload: true }));
-      const turn = await runTurn({ server, sessionId, input: userMessage(INERT_ASK_MEMORY_TOOL) });
+      const turn = await runApproved({ sessionId, input: userMessage(INERT_ASK_MEMORY_TOOL) });
 
       expect(requiredActions(turn)).toEqual([]);
       expect(server.mcp.askMemoryInvocations()).toBe(1);
@@ -365,10 +365,10 @@ describe('LKOS-shaped memory retrieval over the inert connector', () => {
     async () => {
       server.mcp.setAskMemoryMode('empty');
       const sessionId = await createSession(server, agentSpec({ preload: true }));
-      const turn = await runTurn({ server, sessionId, input: userMessage(INERT_ASK_MEMORY_TOOL) });
+      const turn = await runApproved({ sessionId, input: userMessage(INERT_ASK_MEMORY_TOOL) });
 
-      // No approval pause and no turn-level failure: the harness treated this as a normal,
-      // successful tool call — never a synthesized error.
+      // No turn-level failure: the harness treated this as a normal, successful tool call, never
+      // a synthesized error.
       expect(requiredActions(turn)).toEqual([]);
 
       const responses = await toolResponses(server, sessionId);
@@ -407,7 +407,7 @@ describe('LKOS-shaped memory retrieval over the inert connector', () => {
       expect(responses).toHaveLength(1);
       expect(responses[0]?.disposition).toBe('never_ran');
       const failedContent = JSON.stringify(responses[0]?.result);
-      expect(failedContent).toMatch(/inert-memory/);
+      expect(failedContent).toContain(INERT_SERVER_NAME);
       expect(failedContent).toMatch(/not reachable/i);
 
       const sessionEvents = await listSessionEvents(server, sessionId);
@@ -417,7 +417,7 @@ describe('LKOS-shaped memory retrieval over the inert connector', () => {
       expect(remediation).toEqual([expect.objectContaining({ reason_code: 'connector_unreachable' })]);
 
       // The session survives: a fresh turn succeeds once reachable again.
-      const recovered = await runTurn({ server, sessionId, input: userMessage('call_tool') });
+      const recovered = await runApproved({ sessionId, input: userMessage('call_tool') });
       expect(requiredActions(recovered)).toEqual([]);
       expect(server.mcp.askMemoryInvocations()).toBe(1);
     },
@@ -455,7 +455,7 @@ describe('LKOS-shaped memory retrieval over the inert connector', () => {
       await server.mcp.start();
 
       // No settings-API call in between: same manifest, same session, same running app.
-      const turn = await runTurn({ server, sessionId, input: userMessage(INERT_SEARCH_MEMORY_TOOL) });
+      const turn = await runApproved({ sessionId, input: userMessage(INERT_SEARCH_MEMORY_TOOL) });
       expect(requiredActions(turn)).toEqual([]);
       expect(server.mcp.searchMemoryInvocations()).toBe(1);
     },
@@ -562,11 +562,11 @@ describe('LKOS-shaped memory retrieval over the inert connector', () => {
             got.manifest.auth?.type === 'header' ? got.manifest.auth.headers['Authorization'] : undefined;
           expect(gotAuthorization).toBe(`\${env:${TOKEN_ENV_VAR}}`);
 
-          const sessionId = await createSession(server, agentSpec({ preload: true, server: INERT_SERVER_NAME }));
+          const sessionId = await createSession(server, agentSpec({ preload: true }));
           await runTurn({
             server,
             sessionId,
-            input: userMessage(INERT_ASK_MEMORY_TOOL, { server: INERT_SERVER_NAME }),
+            input: userMessage(INERT_ASK_MEMORY_TOOL),
           });
 
           expect(server.mcp.lastAuthorizationHeader()).toBe(RESOLVED_TOKEN);

@@ -21,7 +21,7 @@ describe('isStaleApprovalError', () => {
     expect(isStaleApprovalError(conflict('stale_approval_continuation'))).toBe(true);
   });
 
-  it('matches the typed 409 the server sends for Approve on a request that ended', () => {
+  it('matches the typed 409 the server sends for Allow on a request that ended', () => {
     expect(isStaleApprovalError(conflict('approval_request_ended'))).toBe(true);
   });
 

@@ -35,12 +35,17 @@ import type { TokenFactoryBudget } from '../tokenFactoryBudget';
 import type { UsageSessionReader } from '../usageSummaryCapability';
 
 export type PersonalInstanceName =
-  'personal' | 'personal-with-google' | 'personal-no-sandbox' | 'personal-no-server-sandbox';
+  | 'personal'
+  | 'personal-with-google'
+  | 'personal-with-connection-offer'
+  | 'personal-no-sandbox'
+  | 'personal-no-server-sandbox';
 
 /** Every standard setup the report measures, in report order. */
 export const PERSONAL_INSTANCE_NAMES = [
   'personal',
   'personal-with-google',
+  'personal-with-connection-offer',
   'personal-no-sandbox',
   'personal-no-server-sandbox',
 ] satisfies PersonalInstanceName[];
@@ -78,18 +83,15 @@ export type GoogleAccess = 'read' | 'read_and_write';
 
 const MEMORY_CONFIG: MemoryConfig = {
   recallMaxTokens: 600,
-  recallEntityTokens: 512,
   recallTimeoutMs: 2500,
   recallQueryWindow: 5,
   recallMinScore: 0.5,
   recallMaxItems: 12,
-  recallMaxEntities: 8,
   preRecallGateEnabled: false,
   retainTimeoutMs: 10_000,
   sweepMaxPerTurn: 5,
   screen: { enabled: false, url: '', authToken: '', threshold: 0.5, timeoutMs: 1500, maxConcurrency: 8 },
-  curated: { enabled: false, maxModels: 3, maxTokens: 512 },
-  reflect: { enabled: false, budget: 'low', maxTokens: 512, timeoutMs: 8000 },
+  pages: { maxCount: 6, maxTokens: 1500 },
 };
 
 const TOOL_OUTPUT_SCREEN: ToolOutputScreenConfig = {
@@ -128,6 +130,14 @@ function unusedSpaceStore(): SpaceTurnContext['store'] {
     createSpaceFolder: () => unused('createSpaceFolder'),
     setSpaceFolder: () => unused('setSpaceFolder'),
     listSpaceFolderAssignments: () => unused('listSpaceFolderAssignments'),
+  };
+}
+
+/** No connector connected and no offer turned down: what a new install sends until email is connected. */
+function unconnectedOffer(): NonNullable<SpaceTurnContext['connectionOffer']> {
+  return {
+    settings: { getSetting: () => Promise.resolve(undefined), setSetting: () => unused('setSetting') },
+    mailConnectorRegistered: () => Promise.resolve(false),
   };
 }
 
@@ -182,10 +192,12 @@ function unusedScheduleStore(): IScheduleStore<unknown> {
     getRun: () => unused('getRun'),
     getRunById: () => unused('getRunById'),
     getScheduledRunFor: () => unused('getScheduledRunFor'),
+    getScheduledRunsFor: () => unused('getScheduledRunsFor'),
     createRun: () => unused('createRun'),
     updateRunStatus: () => unused('updateRunStatus'),
     listScheduledRuns: () => unused('listScheduledRuns'),
     listRuns: () => unused('listRuns'),
+    listLatestRuns: () => unused('listLatestRuns'),
   };
 }
 
@@ -196,6 +208,7 @@ function scheduleContext(logger: Logger): NonNullable<SpaceTurnContext['schedule
     persona_id: null,
     approval_key: 'prompt-report',
     agent: () => unused('agent'),
+    ownAgent: null,
   };
   return {
     store: unusedScheduleStore(),
@@ -271,7 +284,7 @@ export async function buildPersonalInstance(input: {
   const logger = createLogger({ silent: true });
   const tracing = NOOP_AGENT_TRACING;
   // The sandbox object exists only when the spec enables it, as in a real turn.
-  const sandboxEnabled = input.name === 'personal' || input.name === 'personal-with-google';
+  const sandboxEnabled = input.name !== 'personal-no-sandbox' && input.name !== 'personal-no-server-sandbox';
   const spec = personalSpec({ sandbox: sandboxEnabled });
   const sandbox = new Sandbox({
     provider: sandboxProvider(),
@@ -288,7 +301,6 @@ export async function buildPersonalInstance(input: {
     sessionId: SESSION_ID,
     previousTurnId: null,
     summarize: undefined,
-    providerServerName: undefined,
     keepsNothing: false,
   };
   const space: SpaceTurnContext = {
@@ -297,6 +309,7 @@ export async function buildPersonalInstance(input: {
     sessionId: SESSION_ID,
     logger,
     googleConnections: input.name === 'personal-with-google' ? connectedGoogleStore(input.googleAccess) : undefined,
+    connectionOffer: input.name === 'personal-with-connection-offer' ? unconnectedOffer() : undefined,
     schedules: scheduleContext(logger),
     startsAnswer: true,
   };

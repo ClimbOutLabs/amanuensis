@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -9,6 +9,7 @@ import { chromium, type Browser, type Page } from 'playwright-core';
 import { createServer, defaultClientConditions, type Plugin } from 'vite';
 
 import { DEV_OPTIMIZE_DEPS } from '../src/devPrebundle.ts';
+import { featureShotPath, saveFailureShots } from './support/featureShots.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.ts';
 import { FIRST_LOAD_TIMEOUT_MS } from './support/firstLoad.ts';
 import { privateViteCache } from './support/viteCache.ts';
@@ -140,7 +141,6 @@ test('chat images: no remote image request ever leaves the page', { timeout: 180
       headless: true,
     });
 
-    const screenshotDir = process.env['CHAT_IMAGES_SCREENSHOT_DIR'];
     for (const viewport of [
       { name: 'desktop', width: 1280, height: 900, isMobile: false },
       { name: 'phone', width: 390, height: 844, isMobile: true },
@@ -190,10 +190,10 @@ test('chat images: no remote image request ever leaves the page', { timeout: 180
         (await page.evaluate(() => document.documentElement.scrollWidth)) <= viewport.width,
         `${viewport.name}: chat images overflow horizontally`,
       );
-      if (screenshotDir !== undefined) {
-        mkdirSync(screenshotDir, { recursive: true });
-        await page.screenshot({ path: join(screenshotDir, `chat-images-${viewport.name}.png`), fullPage: true });
-      }
+      await page.screenshot({
+        path: await featureShotPath({ surface: 'screen:chat-images', step: `${viewport.name}-hidden` }),
+        fullPage: true,
+      });
 
       // Showing the reply pictures loads the harbor photo; the broken copy leaves nothing behind.
       await showEach(page, 'Show image');
@@ -230,12 +230,10 @@ test('chat images: no remote image request ever leaves the page', { timeout: 180
         // 10rem at the default 16px root, with a little room for borders.
         assert.ok(width >= 150 && width <= 170, `${viewport.name}: thumbnail is ${String(width)}px wide`);
       }
-      if (screenshotDir !== undefined) {
-        await page.screenshot({
-          path: join(screenshotDir, `chat-images-${viewport.name}-approved.png`),
-          fullPage: true,
-        });
-      }
+      await page.screenshot({
+        path: await featureShotPath({ surface: 'screen:chat-images', step: `${viewport.name}-shown` }),
+        fullPage: true,
+      });
 
       const sources = await page.evaluate(() => [...document.querySelectorAll('img')].map(img => img.src));
       for (const src of sources) {
@@ -245,6 +243,9 @@ test('chat images: no remote image request ever leaves the page', { timeout: 180
       assert.deepEqual(cspViolations, [], `${viewport.name}: the page tried to break the image policy`);
       await context.close();
     }
+  } catch (error) {
+    await saveFailureShots({ browser, surface: 'screen:chat-images' });
+    throw error;
   } finally {
     await browser?.close();
     await server.close();

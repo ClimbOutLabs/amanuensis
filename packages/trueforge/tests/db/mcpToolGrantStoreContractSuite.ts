@@ -11,7 +11,7 @@ const grant = {
   created_by: 'user-a',
   mcp_server_name: 'notes',
   tool_name: 'lookup_note',
-  mcp_server_host: 'notes.example.com',
+  connector_binding: 'setup-of-notes',
 };
 
 export function runMcpToolGrantStoreContractSuite(getStore: () => IMcpToolGrantStore): void {
@@ -46,30 +46,30 @@ export function runMcpToolGrantStoreContractSuite(getStore: () => IMcpToolGrantS
     expect(await store.listToolGrants({ ...grant, created_by: 'user-b' })).toEqual([]);
   });
 
-  it('matches a grant only for the connector host it was recorded for', async () => {
+  it('matches a grant only for the connector setup it was recorded for', async () => {
     const store = getStore();
     await store.recordToolGrant(grant);
 
-    expect(await store.hasToolGrant({ ...grant, mcp_server_host: 'elsewhere.example.com' })).toBe(false);
-    expect(await store.hasToolGrant({ ...grant, mcp_server_host: null })).toBe(false);
+    expect(await store.hasToolGrant({ ...grant, connector_binding: 'setup-of-elsewhere' })).toBe(false);
+    expect(await store.hasToolGrant({ ...grant, connector_binding: null })).toBe(false);
     expect(await store.hasToolGrant(grant)).toBe(true);
   });
 
-  it('rebinds a grant to a new host when it is recorded again for that host', async () => {
+  it('rebinds a grant to a new setup when it is recorded again for that setup', async () => {
     const store = getStore();
     await store.recordToolGrant(grant);
-    await store.recordToolGrant({ ...grant, mcp_server_host: 'elsewhere.example.com' });
+    await store.recordToolGrant({ ...grant, connector_binding: 'setup-of-elsewhere' });
 
     expect(await store.hasToolGrant(grant)).toBe(false);
-    expect(await store.hasToolGrant({ ...grant, mcp_server_host: 'elsewhere.example.com' })).toBe(true);
+    expect(await store.hasToolGrant({ ...grant, connector_binding: 'setup-of-elsewhere' })).toBe(true);
     expect(await store.listToolGrants(grant)).toHaveLength(1);
   });
 
-  it('keeps a grant for a connector with no URL apart from one that has a host', async () => {
+  it('keeps a grant for a source with no setup binding apart from a bound one', async () => {
     const store = getStore();
-    await store.recordToolGrant({ ...grant, mcp_server_host: null });
+    await store.recordToolGrant({ ...grant, connector_binding: null });
 
-    expect(await store.hasToolGrant({ ...grant, mcp_server_host: null })).toBe(true);
+    expect(await store.hasToolGrant({ ...grant, connector_binding: null })).toBe(true);
     expect(await store.hasToolGrant(grant)).toBe(false);
   });
 

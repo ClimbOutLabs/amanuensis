@@ -12,6 +12,7 @@ vi.mock('@truefoundry/assistant-ui-runtime', () => ({
   useTrueFoundryToolResponses: () => ({ pending: [] }),
   useTrueFoundryApprovals: () => ({ pending: [] }),
   useTrueFoundryAgentSpec: () => ({ agentSpec: { model: { name: 'test/model' } } }),
+  useTrueFoundryReload: () => vi.fn(),
 }));
 
 function WelcomeOverride({ heading }: WelcomeScreenProps) {

@@ -8,9 +8,9 @@
  * The Postgres side engages when PG_STORE_TESTS_ADMIN_URL is set (the local
  * test Postgres); without it the suite skips.
  */
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, relative, sep } from 'node:path';
 
 import type { Transaction } from 'kysely';
 import { createLogger } from 'winston';
@@ -23,6 +23,7 @@ import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
 import { PostgresAgentStore } from '../../../src/db/postgres/agent-store/PostgresAgentStore';
 import { PostgresGlobalSettingsStore } from '../../../src/db/postgres/global-settings-store/PostgresGlobalSettingsStore';
 import { PostgresMcpServerStore } from '../../../src/db/postgres/mcp-server-store/PostgresMcpServerStore';
+import { PostgresModelProviderStore } from '../../../src/db/postgres/model-provider-store/PostgresModelProviderStore';
 import { PostgresPersonaStore } from '../../../src/db/postgres/persona-store/PostgresPersonaStore';
 import { PostgresPersonalizationStore } from '../../../src/db/postgres/personalization-store/PostgresPersonalizationStore';
 import { PostgresScheduleStore } from '../../../src/db/postgres/schedule-store/PostgresScheduleStore';
@@ -31,11 +32,13 @@ import { PostgresSessionStore } from '../../../src/db/postgres/session-store/Pos
 import { PostgresSpaceStore } from '../../../src/db/postgres/space-store/PostgresSpaceStore';
 import { PostgresTurnArtifactStore } from '../../../src/db/postgres/turn-artifact-store/PostgresTurnArtifactStore';
 import type { Database as PgDatabase } from '../../../src/db/postgres/types';
+import { ReachSettingsStore } from '../../../src/db/reachSettingsStore';
 import { SentinelAuditStore } from '../../../src/db/sentinelAuditStore';
 import { SqliteAgentStore } from '../../../src/db/sqlite/agent-store/SqliteAgentStore';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqliteGlobalSettingsStore } from '../../../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
 import { SqliteMcpServerStore } from '../../../src/db/sqlite/mcp-server-store/SqliteMcpServerStore';
+import { SqliteModelProviderStore } from '../../../src/db/sqlite/model-provider-store/SqliteModelProviderStore';
 import { SqlitePersonaStore } from '../../../src/db/sqlite/persona-store/SqlitePersonaStore';
 import { SqlitePersonalizationStore } from '../../../src/db/sqlite/personalization-store/SqlitePersonalizationStore';
 import { SqliteScheduleStore } from '../../../src/db/sqlite/schedule-store/SqliteScheduleStore';
@@ -44,6 +47,7 @@ import { SqliteSessionStore } from '../../../src/db/sqlite/session-store/SqliteS
 import { SqliteSpaceStore } from '../../../src/db/sqlite/space-store/SqliteSpaceStore';
 import { SqliteTurnArtifactStore } from '../../../src/db/sqlite/turn-artifact-store/SqliteTurnArtifactStore';
 import type { Database as SqliteDatabase } from '../../../src/db/sqlite/types';
+import { TextContactStore } from '../../../src/db/textContactStore';
 import type { WithTransaction } from '../../../src/db/transaction';
 import { PERSISTED_ARTIFACT_MIME } from '../../../src/runtime/artifacts/persistTurnArtifacts';
 import { EMBEDDING_DIMENSIONS } from '../../../src/runtime/memory/embeddingModel';
@@ -82,8 +86,11 @@ async function makeSqliteInstance(label: string): Promise<Instance<SqliteTx>> {
     sentinelSettingsStore: new SqliteSentinelSettingsStore(db),
     auditStore: new SentinelAuditStore(db),
     deliveryStore: new DeliveryStore(db),
+    reachSettingsStore: new ReachSettingsStore(db),
+    textContactStore: new TextContactStore(db),
     turnArtifactStore: new SqliteTurnArtifactStore(db),
     mcpServerStore: new SqliteMcpServerStore(db),
+    modelProviderStore: new SqliteModelProviderStore(db),
   };
   const withTransaction: WithTransaction<SqliteTx> = callback => db.transaction().execute(callback);
   return {
@@ -116,8 +123,11 @@ async function makePostgresInstance(label: string): Promise<Instance<PgTx> | und
     sentinelSettingsStore: new PostgresSentinelSettingsStore(db),
     auditStore: new SentinelAuditStore(db),
     deliveryStore: new DeliveryStore(db),
+    reachSettingsStore: new ReachSettingsStore(db),
+    textContactStore: new TextContactStore(db),
     turnArtifactStore: new PostgresTurnArtifactStore(db),
     mcpServerStore: new PostgresMcpServerStore(db),
+    modelProviderStore: new PostgresModelProviderStore(db),
   };
   const withTransaction: WithTransaction<PgTx> = callback => db.transaction().execute(callback);
   return {
@@ -146,12 +156,15 @@ async function importArchive<Tx>(instance: Instance<Tx>, archive: Buffer, userId
     globalSettingsStore: instance.stores.globalSettingsStore,
     auditStore: instance.stores.auditStore,
     deliveryStore: instance.stores.deliveryStore,
+    reachSettingsStore: instance.stores.reachSettingsStore,
+    textContactStore: instance.stores.textContactStore,
     turnArtifactStore: instance.stores.turnArtifactStore,
     mcpServerStore: instance.stores.mcpServerStore,
+    modelProviderStore: instance.stores.modelProviderStore,
     agentStore: instance.stores.agentStore,
     mcpCatalog: McpCatalog.loadShipped(),
     withTransaction: instance.withTransaction,
-    memoryTarget: { kind: 'markdown', markdownDir: instance.memoryDir },
+    memoryMarkdownDir: instance.memoryDir,
     ownerName: '',
     personaKnowledgeDir: instance.knowledgeDir,
     knowledgeEmbedder: {
@@ -231,7 +244,7 @@ function normalizeSection(name: string, parsed: unknown): unknown {
     );
     for (const entry of entries) {
       const session = recordAt(entry['session'], 'session');
-      // Import never carries Always allow this here choices; expectNoApprovalGrants checks the target side.
+      // Import never carries Always allow in this chat choices; expectNoApprovalGrants checks the target side.
       session['approval_grants'] = '<never imported>';
       entry['artifacts'] = sortBy(recordsAt(entry['artifacts'], 'artifacts'), artifact =>
         stringAt(artifact['path'], 'path'),
@@ -286,6 +299,14 @@ function normalizeSection(name: string, parsed: unknown): unknown {
       connector['first_party'] = false;
     }
     return connectors;
+  }
+  if (name === 'reach.json') {
+    // Texts, calls and the background checks start as they do for a new person; expectPhoneChannelsOff checks the target.
+    return recordsAt(normalized, name).map(entry => ({
+      ...entry,
+      channels: '<off on import>',
+      noticing_on: '<default>',
+    }));
   }
   if (name === 'folders.json') {
     return sortBy(recordsAt(normalized, name), folder => stringAt(folder['folder_id'], 'folder_id'));
@@ -431,4 +452,113 @@ describePg('data export/import cross-store round trips', () => {
       await target.close();
     }
   }, 180_000);
+});
+
+/** Every file under a folder, by its path inside it. */
+async function filesUnder(dir: string): Promise<Map<string, string>> {
+  const files = new Map<string, string>();
+  for (const entry of await readdir(dir, { recursive: true, withFileTypes: true })) {
+    if (entry.isFile()) {
+      const path = join(entry.parentPath, entry.name);
+      files.set(relative(dir, path).split(sep).join('/'), await readFile(path, 'utf8'));
+    }
+  }
+  return files;
+}
+
+const NORA_PAGE = [
+  '---',
+  'kind: person',
+  'title: Nora',
+  'aliases: [Nora]',
+  'household: false',
+  '---',
+  '# Nora',
+  '',
+  '## Now',
+  '- Is allergic to shellfish. <!-- fact: id=f_01 src=you_said since=2026-10-01 -->',
+  '',
+].join('\n');
+
+/** The rich instance, plus a memory page about a person and the record of which note it came from. */
+async function seedWithMemoryPage(source: Instance<SqliteTx>): Promise<void> {
+  await seedRichInstance({
+    stores: source.stores,
+    tenantId: TENANT,
+    userId: 'alice',
+    memoryDir: source.memoryDir,
+    knowledgeDir: source.knowledgeDir,
+  });
+  await mkdir(join(source.memoryDir, TENANT, 'people'), { recursive: true });
+  await writeFile(join(source.memoryDir, TENANT, 'people', 'nora.md'), NORA_PAGE);
+  await writeFile(join(source.memoryDir, TENANT, '.handled-notes'), '\nmd:default:2026-10-01.md#0\tpage\n');
+}
+
+// Runs on every pull request and every night: it needs no other database than the one each test makes.
+describe('data export then import into a new instance', () => {
+  let source: Instance<SqliteTx>;
+  let target: Instance<SqliteTx>;
+  let exported: Buffer;
+
+  beforeEach(async () => {
+    source = await makeSqliteInstance('sqlite-source');
+    target = await makeSqliteInstance('sqlite-target');
+    await seedWithMemoryPage(source);
+    exported = await exportArchive(source, 'alice');
+    await importArchive(target, exported, 'bob');
+  });
+
+  afterEach(async () => {
+    await source.close();
+    await target.close();
+  });
+
+  it('brings back chats, agents, personas, spaces, connectors and settings: a new export matches the first', async () => {
+    await expectChatHistoryRestored(target);
+    expectExportsToMatch(exported, await exportArchive(target, 'bob'));
+  });
+
+  it('brings back every memory note and page as it was, once', async () => {
+    const before = await filesUnder(source.memoryDir);
+    // The memory folder's own bookkeeping sits beside the vaults; only what is inside a vault is the person's.
+    const after = new Map([...(await filesUnder(target.memoryDir))].filter(([path]) => path.includes('/')));
+    expect([...after.keys()].sort()).toEqual([...before.keys()].sort());
+    for (const [path, text] of before) {
+      expect({ path, text: after.get(path) }).toEqual({ path, text });
+    }
+    expect(after.get(`${TENANT}/people/nora.md`)).toBe(NORA_PAGE);
+  });
+
+  it('starts schedules paused and texts and calls off, so nothing runs or rings before the person turns it on', async () => {
+    const schedules = await target.stores.scheduleStore.listSchedules({
+      tenant_id: TENANT,
+      limit: 10,
+      page_token: undefined,
+      agent_names: undefined,
+      created_by_or_agent_ids: { created_by_subject_id: 'bob', agent_ids: [] },
+    });
+    expect(schedules.data).toHaveLength(2);
+    expect(schedules.data.every(schedule => schedule.status === 'paused')).toBe(true);
+    const reach = recordsAt(
+      parseJson(
+        readZipEntries(await exportArchive(target, 'bob')).find(e => e.name === 'reach.json')?.data,
+        'reach.json',
+      ),
+      'reach.json',
+    );
+    expect(reach.length).toBeGreaterThan(0);
+    for (const entry of reach) {
+      expect(entry['channels']).toEqual({ texts: false, calls: false });
+    }
+  });
+
+  it('refuses a second import into the same instance, and leaves every memory and chat as it was', async () => {
+    const memoryBefore = await filesUnder(target.memoryDir);
+    const exportBefore = await exportArchive(target, 'bob');
+
+    await expect(importArchive(target, exported, 'bob')).rejects.toThrow(/already has/);
+
+    expect(await filesUnder(target.memoryDir)).toEqual(memoryBefore);
+    expectExportsToMatch(exportBefore, await exportArchive(target, 'bob'));
+  });
 });

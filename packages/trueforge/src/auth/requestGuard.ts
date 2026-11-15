@@ -7,11 +7,37 @@ import { readBearerToken } from './token';
 
 const STATE_CHANGING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 const LOOPBACK_ORIGIN_HOSTS = ['localhost', '127.0.0.1', '[::1]'];
-/** Reachable without a browser session: probes, the service-key route, and the connector OAuth redirect. */
-const ORIGIN_EXEMPT_PATHS = ['/healthz', '/api/internal/schedules', '/api/v1/mcp-servers/oauth'];
+/**
+ * Reachable without a browser session: probes, the service-key route, the connector OAuth redirect,
+ * and the Telegram webhook, which carries its own secret instead of a session.
+ */
+const ORIGIN_EXEMPT_PATHS = ['/healthz', '/api/internal/schedules', '/api/v1/mcp-servers/oauth', '/api/telegram'];
 
 function isPathExempt(path: string): boolean {
   return ORIGIN_EXEMPT_PATHS.some(exempt => path === exempt || path.startsWith(`${exempt}/`));
+}
+
+/** The origins a page of this app may be served from: the public address, listed addresses and loopback names. */
+export function pageOrigins({
+  port,
+  publicBaseUrl,
+  allowedOrigins,
+}: {
+  port: number;
+  publicBaseUrl: string;
+  allowedOrigins: readonly string[];
+}): Set<string> {
+  const publicUrl = new URL(publicBaseUrl);
+  return new Set([
+    publicUrl.origin,
+    ...allowedOrigins,
+    ...LOOPBACK_ORIGIN_HOSTS.map(host => `http://${host}:${String(port)}`),
+    ...(isLoopbackHost(publicUrl.hostname)
+      ? LOOPBACK_ORIGIN_HOSTS.map(
+          host => `${publicUrl.protocol}//${host}${publicUrl.port === '' ? '' : `:${publicUrl.port}`}`,
+        )
+      : []),
+  ]);
 }
 
 /**
@@ -43,15 +69,8 @@ export function createRequestGuardMiddleware(options: {
   const gatewayPrefix = gatewayUrl?.pathname.replace(/\/$/, '') ?? '';
   const instanceUrl = new URL(`http://localhost:${String(options.port)}`);
   const allowedOriginSet = new Set([
-    publicUrl.origin,
+    ...pageOrigins({ port: options.port, publicBaseUrl: options.publicBaseUrl, allowedOrigins }),
     ...(gatewayUrl === undefined ? [] : [gatewayUrl.origin]),
-    ...allowedOrigins,
-    ...LOOPBACK_ORIGIN_HOSTS.map(host => `http://${host}:${String(options.port)}`),
-    ...(publicIsLoopback
-      ? LOOPBACK_ORIGIN_HOSTS.map(
-          host => `${publicUrl.protocol}//${host}${publicUrl.port === '' ? '' : `:${publicUrl.port}`}`,
-        )
-      : []),
   ]);
 
   const loginPrefix = options.loginPath ?? gatewayPrefix;

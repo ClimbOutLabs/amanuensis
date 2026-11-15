@@ -6,7 +6,12 @@
  * MCP OAuth callback in mcpOAuthRoutes.ts. `me` generates normally.
  */
 import { createRoute } from '@hono/zod-openapi';
-import { AuthLoginQuerySchema, GetMeResponseSchema, OAuthCallbackQuerySchema } from '../schemas/auth';
+import {
+  AuthLoginQuerySchema,
+  ChangePasswordRequestSchema,
+  GetMeResponseSchema,
+  OAuthCallbackQuerySchema,
+} from '../schemas/auth';
 import { RequestErrorResponseSchema } from '../schemas/errors';
 import { OpenApiTag } from './openapiTags';
 
@@ -56,6 +61,32 @@ export const authLogoutRoute = createRoute({
   },
 });
 
+export const changePasswordRoute = createRoute({
+  method: 'post',
+  path: '/change-password',
+  tags: [OpenApiTag.AUTH],
+  summary: 'Change the local sign-in password',
+  description:
+    'Local sign-in only. Checks the current password, sets the new one, and ends every other session; ' +
+    'this session is re-issued so the person stays signed in here.',
+  'x-fern-ignore': true,
+  'x-excluded': true,
+  request: {
+    body: { content: { 'application/json': { schema: ChangePasswordRequestSchema } }, required: true },
+  },
+  responses: {
+    204: { description: 'Password changed.' },
+    400: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'The current password was wrong, or the new password cannot be used.',
+    },
+    401: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'No live session.',
+    },
+  },
+});
+
 export const meRoute = createRoute({
   method: 'get',
   path: '/me',
@@ -63,7 +94,7 @@ export const meRoute = createRoute({
   summary: 'Current session',
   description:
     'Returns the authenticated caller identity (`type`, `tenant_id`, `subject`, `roles`) wrapped as `{ data }`. ' +
-    '`type` is `oidc-connected` when browser OIDC is enabled, otherwise `default`. When auth is enabled ' +
+    '`type` is `oidc-connected` when browser OIDC is enabled, `local-connected` for local sign-in, otherwise `default`. When auth is enabled ' +
     'this requires a valid `id_token` cookie or `Authorization: Bearer` token (401 otherwise). When auth is ' +
     'disabled, returns the standalone default identity.',
   'x-fern-sdk-group-name': ['auth'],

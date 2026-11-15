@@ -1,5 +1,6 @@
 import type {
   GoogleConnectionStore,
+  GoogleOwner,
   PendingGoogleAuthorizationStore,
 } from '@truefoundry/trueforge-core/core/google/connection';
 
@@ -16,6 +17,8 @@ export const PENDING_GOOGLE_AUTHORIZATION_RETENTION_MS = 15 * 60 * 1000;
 export interface IGoogleConnectionStore extends GoogleConnectionStore, PendingGoogleAuthorizationStore {
   /** Drops consents past the retention window. Every consent read and write also does this, so the timer only covers idle installs. */
   purgeExpiredPending(): Promise<void>;
+  /** The people whose Google login works now, for the watchers that look at their mail and calendar. */
+  listConnectedOwners(): Promise<GoogleOwner[]>;
 }
 
 /** Space-separated scope lists are how Google reports them and how both databases store them. */

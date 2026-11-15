@@ -11,5 +11,6 @@ export interface HelpHealthItem {
     name: string;
     /** One plain sentence on what to do next, or null. */
     nextStep: string | null;
+    settingsSection: TrueForge.HelpSettingsSection | null;
     status: TrueForge.HelpHealthStatus;
 }

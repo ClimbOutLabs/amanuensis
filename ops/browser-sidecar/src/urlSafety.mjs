@@ -118,6 +118,10 @@ export function syntacticallySafeUrl(raw) {
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
     return { ok: false, reason: 'scheme' };
   }
+  // The browser would hand a name or password written before the site to that site as a sign-in.
+  if (url.username !== '' || url.password !== '') {
+    return { ok: false, reason: 'sign_in_in_address' };
+  }
   const host = unbracketed(url.hostname.toLowerCase()).replace(/\.$/, '');
   if (LOOPBACK_NAMES.has(host) || host.endsWith('.localhost')) {
     return { ok: false, reason: 'private_network' };

@@ -2,6 +2,7 @@ import type { GoogleConnectionStore } from '@truefoundry/trueforge-core/core/goo
 import type { IMcpServerStore } from '../db/mcpServerStore';
 import type { IModelProviderStore } from '../db/modelProviderStore';
 import type { ISandboxProviderStore } from '../db/sandboxProviderStore';
+import type { ITelegramStore } from '../db/telegramStore';
 import type { IOAuthTokenStore } from '../mcp/auth/types';
 import { isSecretReference, resolveSecretReference } from '../utils/secretReferences';
 
@@ -17,6 +18,8 @@ export interface OutboundSecretSources {
   tokens: Pick<IOAuthTokenStore, 'getTokens'>;
   /** The user's own Google login: its client secret and refresh token must never ride out in a call. */
   googleConnections: Pick<GoogleConnectionStore, 'get'>;
+  /** The user's own Telegram bot: whoever holds its token or webhook secret can act as the bot. */
+  telegram: Pick<ITelegramStore, 'getConnection'>;
 }
 
 /** A stored value that is a `${env:...}` or `${file:...}` pointer stands for the value it resolves to. */
@@ -65,16 +68,23 @@ async function collectSecrets(input: {
   created_by: string;
 }): Promise<string[]> {
   const { sources, tenant_id, created_by } = input;
-  const [providers, sandbox, servers, google] = await Promise.all([
+  const [providers, sandbox, servers, google, telegram] = await Promise.all([
     sources.modelProviders.listProviders({ tenant_id }),
     sources.sandboxProviders.getSandboxProvider(tenant_id),
     sources.mcpServers.listServers({ tenant_id, names: undefined }),
     sources.googleConnections.get({ tenant_id, created_by }),
+    sources.telegram.getConnection({ tenant_id, created_by }),
   ]);
   const raw: string[] = [...sources.configured()];
   const headerValues: string[] = [];
   if (google !== null) {
     raw.push(google.client_secret, google.refresh_token);
+  }
+  if (telegram !== undefined) {
+    raw.push(telegram.bot_token);
+    if (telegram.webhook_secret !== null) {
+      raw.push(telegram.webhook_secret);
+    }
   }
   for (const provider of providers) {
     const apiKey = provider.manifest.auth?.api_key;
@@ -120,7 +130,7 @@ async function collectSecrets(input: {
 
 /**
  * The exact secret values this server holds that a user's outbound call must never carry: model and
- * sandbox provider keys, connector headers, client secrets and OAuth tokens, the user's Google login, and configured
+ * sandbox provider keys, connector headers, client secrets and OAuth tokens, the user's Google login and Telegram bot, and configured
  * credentials. Read fresh from the stores (briefly cached per user), so a rotated key is covered
  * without a restart. A failing store rejects, so the caller treats the call as unchecked.
  */

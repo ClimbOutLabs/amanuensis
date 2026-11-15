@@ -16,14 +16,15 @@ export class PostgresMcpToolGrantStore implements IMcpToolGrantStore<Transaction
   async hasToolGrant(key: ToolGrantKey): Promise<boolean> {
     const row = await this.#db
       .selectFrom('mcp_tool_grant')
-      .select(['tool_name', 'mcp_server_host'])
+      .select(['tool_name', 'connector_binding'])
       .where('tenant_id', '=', key.tenant_id)
       .where('created_by', '=', key.created_by)
       .where('mcp_server_name', '=', key.mcp_server_name)
       .where('tool_name', '=', key.tool_name)
       .executeTakeFirst();
-    // The host is compared here, not in SQL. A missing row reads as undefined, which matches no host.
-    return row?.mcp_server_host === key.mcp_server_host;
+    // The binding is compared here, not in SQL, so a null binding matches only a null one. A missing row reads as
+    // undefined, which matches no binding.
+    return row?.connector_binding === key.connector_binding;
   }
 
   async recordToolGrant(key: ToolGrantKey): Promise<void> {
@@ -34,13 +35,13 @@ export class PostgresMcpToolGrantStore implements IMcpToolGrantStore<Transaction
         created_by: key.created_by,
         mcp_server_name: key.mcp_server_name,
         tool_name: key.tool_name,
-        mcp_server_host: key.mcp_server_host,
+        connector_binding: key.connector_binding,
         created_at: now(),
       })
       .onConflict(oc =>
         oc
           .columns(['tenant_id', 'created_by', 'mcp_server_name', 'tool_name'])
-          .doUpdateSet({ mcp_server_host: sql`excluded.mcp_server_host` }),
+          .doUpdateSet({ connector_binding: sql`excluded.connector_binding` }),
       )
       .execute();
   }

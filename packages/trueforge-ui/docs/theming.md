@@ -553,6 +553,10 @@ no longer depends on tfy.
 - Style content engines via `theme.classNames` or `.aui-markdown` /
   `.aui-syntax-highlighter` / `.aui-openui` / `.aui-monaco`.
 
+## Chat text size
+
+Settings > Appearance has a Chat text size choice: Smaller, Default, Larger and Largest. The choice is kept in this browser under the local storage key `aman.chat_font_size`. It only changes the chat: the thread root redefines the six type scale variables (`--text-xs` to `--text-2xl`) as the resolved theme's own `textXs` to `text2xl` tokens times the chosen factor, so a host that sets its own text sizes is the base that gets scaled. The sidebar, chat header, settings and right rail keep the theme's scale. Default sets no override at all.
+
 ## Non-goals (v1)
 
 - Pixel-perfect Claude / ChatGPT / Gemini clones

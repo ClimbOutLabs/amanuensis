@@ -42,6 +42,7 @@ export type {
   SessionSource,
   SessionSourceType,
 } from './schemas/session';
+export { LATEST_ANSWER_AT_METADATA_KEY } from './schemas/sessionMetadataKeys';
 
 export { CreatedBySubjectSchema } from './schemas/subject';
 export type { CreatedBySubject } from './schemas/subject';

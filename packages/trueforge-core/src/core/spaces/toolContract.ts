@@ -28,6 +28,9 @@ export const SPACE_WRITE_TOO_LONG_ERROR_CODE = 'space_write_too_long';
  */
 export const SPACE_WRITE_NOTHING_SAVED_FIELD = 'nothing_saved';
 
+/** The classifier's reason for a call that creates, changes, restores or files a space. */
+export const SPACE_WRITE_REASON = 'space_write';
+
 /** The plain note a size-refused space write shows in the chat: the write is split into parts instead. */
 export const SPACE_WRITE_TOO_LONG_NOTE = 'Too long for one write. Splitting it into parts.';
 

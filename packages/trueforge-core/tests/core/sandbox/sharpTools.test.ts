@@ -633,6 +633,22 @@ describe('T8 sharp sandbox tools', () => {
     expect(exec).not.toHaveBeenCalled();
   });
 
+  it('names what it refused in a skill-style loop, and the script route that reaches websites', async () => {
+    const exec = makeExec(() => readyExec());
+    const sandbox = makeSandbox(makeProvider({ exec }));
+    const command = `for id in $(curl -s "https://hn.example/top.json" | jq -r '.[:10]'); do curl -s "https://hn.example/item/$id.json"; done`;
+    const call = {
+      name: SANDBOX_EXEC_TOOL_NAME,
+      arguments: { intent: 'Fetch the top stories', purpose: 'execute', cwd: '/repo', command },
+    };
+
+    const text = resultText(await sandbox.callTool(call));
+    expect(text).toContain('it uses command substitution');
+    expect(text).toContain('python3 fetch.py');
+    expect(text).toContain('run_code is offline');
+    expect(exec).not.toHaveBeenCalled();
+  });
+
   it('does not allow execute purpose to bypass structured write admission', async () => {
     const exec = makeExec(() => readyExec());
     const sandbox = makeSandbox(makeProvider({ exec }));

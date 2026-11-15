@@ -68,9 +68,10 @@ describe('sandbox tool descriptions follow the provider network', () => {
     expect(exec).not.toContain('Network egress');
     expect(exec).not.toContain('retrieval');
     expect(runCode).toContain(`This sandbox ${OFFLINE_SENTENCE}`);
-    expect(runCode).not.toContain('requests');
-    expect(runCode).not.toContain('beautifulsoup4');
     expect(runCode).toContain('pandas');
+    for (const addOn of ['requests', 'pyyaml', 'httpx', 'beautifulsoup4']) {
+      expect(runCode).toContain(addOn);
+    }
     expect(runCode).toContain('If a network call fails, do not retry it through exec or any shell.');
   });
 

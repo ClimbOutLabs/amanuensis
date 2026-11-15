@@ -27,10 +27,71 @@ export function answeredMessageOf(message: GmailMessage): AnsweredMessage {
   };
 }
 
+/** The one readable address of a From header, or null when it is not exactly one address Aman can use. */
+function readableAddress(from: string): string | null {
+  const address = fromAddress(from);
+  if (address === null || address.length > MAX_ADDRESS_CHARS) {
+    return null;
+  }
+  // A bare word is not an address: an address has a local part, one "@" and a domain, and the domain has
+  // a dot in it with something on both sides of every dot.
+  const at = address.indexOf('@');
+  if (at <= 0 || at !== address.lastIndexOf('@')) {
+    return null;
+  }
+  const labels = address.slice(at + 1).split('.');
+  return labels.length > 1 && labels.every(label => label.length > 0) ? address : null;
+}
+
 /** The sender's address only, so a display name cannot add words or a second address to the card. */
 function senderAddress(from: string): string {
-  const address = fromAddress(from);
-  return address === null || address.length > MAX_ADDRESS_CHARS ? UNREADABLE_SENDER : address;
+  return readableAddress(from) ?? UNREADABLE_SENDER;
+}
+
+/** The address a reply to a message goes to, or why Aman cannot pick it for certain. */
+export type ReplyRecipient = { ok: true; address: string } | { ok: false; reason: string };
+
+const ADD_RECIPIENT = 'Add the recipient in "to" and save the reply again.';
+
+/**
+ * The address a reply to this message goes to: its sender's, when that can be read for certain and nothing in
+ * the message asks for replies to go anywhere else. A Reply-To that names another address is a choice between
+ * two people, so the model makes it in "to" and the refusal names both.
+ */
+export function replyRecipientOf(message: GmailMessage): ReplyRecipient {
+  // A message the person sent themselves has their own address as its sender, and a reply to it is meant for
+  // the people it went to, not for them. Which of those people is a choice the model makes in "to".
+  if ((message.labelIds ?? []).includes('SENT')) {
+    return {
+      ok: false,
+      reason: `The reply draft has no recipient: the message being answered was sent from this account. ${ADD_RECIPIENT}`,
+    };
+  }
+  const from = readableAddress(headerOf({ message, name: 'From' }));
+  if (from === null) {
+    return {
+      ok: false,
+      reason: `The reply draft has no recipient: the sender address of the message being answered could not be read. ${ADD_RECIPIENT}`,
+    };
+  }
+  const replyToHeader = headerOf({ message, name: 'Reply-To' });
+  if (replyToHeader.trim() === '') {
+    return { ok: true, address: from };
+  }
+  const replyTo = readableAddress(replyToHeader);
+  if (replyTo === null) {
+    return {
+      ok: false,
+      reason: `The reply draft has no recipient: the message being answered is from ${from} but asks for replies to go to an address Aman cannot read. ${ADD_RECIPIENT}`,
+    };
+  }
+  if (replyTo !== from) {
+    return {
+      ok: false,
+      reason: `The reply draft has no recipient: the message being answered is from ${from} but asks for replies to go to ${replyTo}. Choose one, add it in "to" and save the reply again.`,
+    };
+  }
+  return { ok: true, address: from };
 }
 
 type ReplyCheck = { ok: true; answered: AnsweredMessage | null } | { ok: false; reason: string };

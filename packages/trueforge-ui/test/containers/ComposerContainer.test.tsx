@@ -9,14 +9,14 @@ import { ToasterProvider } from '@/containers/ToasterContainer.js';
 import type { ApprovalCardPlacement } from '@/hooks/useApprovalCardPlacement.js';
 import { ComposerBusyProvider, notifyComposerBusyFailure } from '@/hooks/useComposerBusyState.js';
 import { composerDraftKey, ComposerDraftScopeProvider } from '@/hooks/useComposerDraft.js';
-import { COMPOSER_PLACEHOLDER_LINES } from '@/hooks/useComposerPlaceholder.js';
+import { AGENT_BUILDER_COMPOSER_PLACEHOLDER, COMPOSER_PLACEHOLDER_LINES } from '@/hooks/useComposerPlaceholder.js';
 import {
   CustomActionRenderersProvider,
   type CustomActionRendererProps,
 } from '@/server/CustomActionRenderersContext.js';
 import { adoptPrivateChat, forgetPrivateChat } from '@/server/privateChatStore.js';
 import { ServerProvider } from '@/server/ServerContext.js';
-import { ShellModeProvider, type AgentConfig } from '@/server/ShellModeContext.js';
+import { ShellModeProvider, useShellMode, type AgentConfig } from '@/server/ShellModeContext.js';
 import { SlotsProvider } from '@/theme/SlotsProvider.js';
 import { SPEAK_VOICE_REPLIES_STORAGE_KEY } from '@/utils/speechReplyPreferences.js';
 import { markDraftFromVoice, noteUserMessage, takeSpokenReply } from '@/utils/voiceTurn.js';
@@ -71,6 +71,7 @@ vi.mock('@truefoundry/assistant-ui-runtime', () => ({
   useTrueFoundryApprovals: () => approvalsState,
   useTrueFoundryAgentSpec: () => ({ agentSpec: agentSpecState.agentSpec }),
   useTrueFoundryUpdateAgentSpec: () => updateAgentSpec,
+  useTrueFoundryReload: () => () => undefined,
 }));
 
 vi.mock('@/atoms/lib/voiceRecorder.js', () => ({
@@ -167,6 +168,13 @@ describe('ComposerContainer', () => {
     cancelRun.mockResolvedValue();
     updateAgentSpec.mockReset();
     window.sessionStorage.clear();
+  });
+
+  it('sizes the typed text on the --text-base scale step, not a one-off literal', () => {
+    renderComposer();
+    const input = screen.getByRole<HTMLTextAreaElement>('textbox', { name: 'Message input' });
+    expect(input).toHaveClass('text-base');
+    expect(input.className).not.toMatch(/text-\[0\.9375rem\]/);
   });
 
   it('puts back the draft saved for this conversation, as after a reload or a sign-in round trip', async () => {
@@ -1111,6 +1119,7 @@ function voiceInput(availability: VoiceAvailability): VoiceInputApi {
       return () => {};
     },
     transcribe: async () => ({ text: '', language: 'en', duration_ms: 0, model: 'test' }),
+    connect: async () => ({ url: 'wss://aman.test/stream', protocols: [] }),
   };
 }
 
@@ -1207,6 +1216,44 @@ describe('ComposerContainer voice input', () => {
     fireEvent.change(input, { target: { value: 'typing' } });
 
     expect(input.getAttribute('placeholder')).toBe(first);
+  });
+});
+
+function OpenAgentBuilderButton() {
+  const shell = useShellMode();
+  return (
+    <button type="button" onClick={shell.openAgentBuilder}>
+      open builder
+    </button>
+  );
+}
+
+describe('ComposerContainer in the agent builder', () => {
+  beforeEach(() => {
+    agentSpecState.agentSpec = { model: { name: 'test/model' } };
+  });
+
+  it('asks for a task to try instead of an everyday line', async () => {
+    render(
+      <ServerProvider server={createMockAgentUIServer()}>
+        <ShellModeProvider
+          agentConfig={{ mode: 'AgentLibraryWithComposer', defaultAgentSpec: { model: { name: 'test/model' } } }}
+        >
+          <OpenAgentBuilderButton />
+          <RuntimeHarness messages={[]}>
+            <ComposerBusyProvider>
+              <ComposerContainer />
+            </ComposerBusyProvider>
+          </RuntimeHarness>
+        </ShellModeProvider>
+      </ServerProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'open builder' }));
+
+    await waitFor(() =>
+      expect(screen.getByLabelText('Message input')).toHaveAttribute('placeholder', AGENT_BUILDER_COMPOSER_PLACEHOLDER),
+    );
   });
 });
 

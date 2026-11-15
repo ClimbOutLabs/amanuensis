@@ -30,7 +30,7 @@ install_demo_with_tavily() {
   with_input "$SENTINEL_PASSWORD
 $TAVILY_KEY
 "
-  run_install --yes --password-stdin --email "$OWNER" --demo --tavily-key-stdin "$@"
+  run_install --yes --password-stdin --email "$OWNER" --demo --tavily-key-stdin
   clear_input
 }
 

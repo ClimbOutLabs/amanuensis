@@ -30,7 +30,13 @@ interface FakeConnectionState {
 }
 
 function installFakeConnection(
-  opts: { sessionId?: string | null; failFirstCallToolWith?: unknown; failListToolsWith?: unknown } = {},
+  opts: {
+    sessionId?: string | null;
+    failFirstCallToolWith?: unknown;
+    failListToolsWith?: unknown;
+    /** Rejection for the connect attempt with that 1-based number; later attempts connect. */
+    connectFailures?: Record<number, unknown>;
+  } = {},
 ): FakeConnectionState {
   const state: FakeConnectionState = {
     connectCalls: 0,
@@ -44,6 +50,10 @@ function installFakeConnection(
     state.connectCalls += 1;
     state.headersUsedByConnection.push({ ...params.headers });
     state.sessionIdRequestedByConnection.push(params.sessionId);
+    const connectFailure = opts.connectFailures?.[state.connectCalls];
+    if (connectFailure !== undefined) {
+      return Promise.reject(connectFailure);
+    }
     return Promise.resolve({
       transportType: 'streamable-http' as const,
       sessionId: opts.sessionId ?? 'sess-1',
@@ -268,5 +278,71 @@ describe('RemoteMCP transport failure wording', () => {
       'The rotating-mcp server could not be reached: connection refused at 192.168.144.3:9557.',
     );
     expect(state.connectCalls).toBe(1);
+  });
+});
+
+describe('RemoteMCP connect transport failure retry', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('retries the connect once when the first connect is refused, then runs the operation exactly once', async () => {
+    // The mail sidecar blink: it restarts to load a changed send list, so a connect landing
+    // while it is still coming up is refused even though it answers a moment later.
+    const state = installFakeConnection({
+      sessionId: 'sess-1',
+      connectFailures: { 1: connectionRefusedFailure() },
+    });
+    const remote = makeRemote(() => Promise.resolve({ headers: {} }), 'sess-1');
+
+    const response = await remote.callTool({ name: 'send_email', arguments: {} });
+
+    if ('authRequired' in response) throw new Error('unexpected authRequired');
+    expect(response.result).toEqual({ content: [{ type: 'text', text: 'called send_email' }] });
+    // Two connects: the refused one and the retry. The operation ran once, on the retry.
+    expect(state.connectCalls).toBe(2);
+    expect(state.callToolCalls).toBe(1);
+  });
+
+  it('surfaces the error when the connect is refused twice', async () => {
+    const state = installFakeConnection({
+      sessionId: 'sess-1',
+      connectFailures: { 1: connectionRefusedFailure(), 2: connectionRefusedFailure() },
+    });
+    const remote = makeRemote(() => Promise.resolve({ headers: {} }), 'sess-1');
+
+    const thrown = await captureRejection(remote.callTool({ name: 'send_email', arguments: {} }));
+
+    if (!(thrown instanceof McpConnectionError)) throw new Error('expected an McpConnectionError');
+    // One retry and no more: two connects, and the operation never ran.
+    expect(state.connectCalls).toBe(2);
+    expect(state.callToolCalls).toBe(0);
+  });
+
+  it('does not retry the connect when the connect failure is not a transport failure', async () => {
+    const state = installFakeConnection({
+      sessionId: 'sess-1',
+      connectFailures: { 1: new Error('HTTP 500 Internal Server Error') },
+    });
+    const remote = makeRemote(() => Promise.resolve({ headers: {} }), 'sess-1');
+
+    await captureRejection(remote.callTool({ name: 'send_email', arguments: {} }));
+
+    expect(state.connectCalls).toBe(1);
+    expect(state.callToolCalls).toBe(0);
+  });
+
+  it('does not retry when the operation itself hits a transport failure', async () => {
+    const state = installFakeConnection({
+      sessionId: 'sess-1',
+      failFirstCallToolWith: connectionRefusedFailure(),
+    });
+    const remote = makeRemote(() => Promise.resolve({ headers: {} }), 'sess-1');
+
+    await captureRejection(remote.callTool({ name: 'send_email', arguments: {} }));
+
+    // The call may already have run, so nothing is retried: one connect, one call.
+    expect(state.connectCalls).toBe(1);
+    expect(state.callToolCalls).toBe(1);
   });
 });

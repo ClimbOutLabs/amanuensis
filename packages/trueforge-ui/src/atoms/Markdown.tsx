@@ -2,7 +2,7 @@
 
 import { normalizeSandboxArtifactBlocks } from '@truefoundry/trueforge-core/core/sandbox/sandboxArtifacts';
 import type { ComponentProps, ComponentType, ReactNode } from 'react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { isValidElement, useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import rehypeKatex from 'rehype-katex';
 import rehypeRaw from 'rehype-raw';
@@ -252,7 +252,12 @@ function RemoteImageThumbnail({ src, alt }: { src: string; alt: string }) {
  * exception: its https pictures load through the owner's picture route. Same-origin, data: and blob:
  * images still render inline.
  */
-function MarkdownImage({
+/**
+ * The one image treatment for everything chat markdown renders, fenced generative UI
+ * included: the OpenUI fence library swaps its own image and markdown components for
+ * ones that render through this gate (see lib/gatedOpenUiLibrary).
+ */
+export function MarkdownImage({
   src,
   alt,
   imgProps,
@@ -390,6 +395,11 @@ function makeComponents(opts: {
     },
     // Strip default <pre> wrapper; each block renderer provides its own container.
     pre({ children }: { children?: ReactNode }) {
+      // A fence with no language carries no class, so the code renderer would draw it inline.
+      if (isValidElement<{ className?: string; children?: ReactNode }>(children) && !children.props.className) {
+        const code = String(children.props.children ?? '').replace(/\n$/, '');
+        return <SyntaxHighlighter code={code} language="text" darkTheme={darkTheme} />;
+      }
       return <>{children}</>;
     },
     code({ className, children }) {
@@ -408,7 +418,14 @@ function makeComponents(opts: {
       }
 
       if (language === 'openui') {
-        return <OpenUiFenceBlock content={code} isStreaming={isStreaming} darkTheme={darkTheme} />;
+        return (
+          <OpenUiFenceBlock
+            content={code}
+            isStreaming={isStreaming}
+            darkTheme={darkTheme}
+            spacePictures={spacePictures === true}
+          />
+        );
       }
 
       if (language === 'sandbox_artifacts') {

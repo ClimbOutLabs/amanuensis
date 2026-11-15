@@ -50,4 +50,24 @@ describe('Google features and scopes', () => {
     expect(grantedFeatures(['https://www.googleapis.com/auth/gmail.compose', 'openid'])).toEqual(['gmail_compose']);
     expect(grantedFeatures([])).toEqual([]);
   });
+
+  it('asks for drive.file only, never the full Drive or a read-only Drive scope', () => {
+    expect(scopesForFeatures(['drive_files'])).toEqual(['https://www.googleapis.com/auth/drive.file']);
+    for (const scope of scopesForFeatures([
+      'gmail_read',
+      'gmail_compose',
+      'calendar_read',
+      'calendar_write',
+      'drive_files',
+    ])) {
+      expect(scope).not.toMatch(/auth\/drive$|drive\.readonly|drive\.metadata/);
+    }
+  });
+
+  it('reads Drive off the scopes Google returned, alongside mail', () => {
+    expect(
+      grantedFeatures(['https://www.googleapis.com/auth/gmail.readonly', 'https://www.googleapis.com/auth/drive.file']),
+    ).toEqual(['gmail_read', 'drive_files']);
+    expect(grantedFeatures(['https://www.googleapis.com/auth/drive'])).toEqual([]);
+  });
 });

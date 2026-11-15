@@ -7,6 +7,7 @@ import {
 import type { ApprovalDecision } from '@truefoundry/trueforge-core/core/events/schema';
 import { InstructionBuilder } from '@truefoundry/trueforge-core/core/InstructionBuilder';
 import type { InternalEnrichedAssistantMessage } from '@truefoundry/trueforge-core/core/llm/LLMTypes';
+import { allowsChatApproval } from '@truefoundry/trueforge-core/core/mcp/approvalGrant';
 import { createToolCallMemoState, executeToolCalls } from '@truefoundry/trueforge-core/core/mcp/executeToolCalls';
 import { isCallToolResponseResult } from '@truefoundry/trueforge-core/core/mcp/IMCPServer';
 import { classifyUnstampedToolCall } from '@truefoundry/trueforge-core/core/runtime/AgentThread';
@@ -48,7 +49,9 @@ async function setup(input: { existing?: string[]; defaultAssistantName?: string
     manifest: {
       type: 'custom',
       name: 'test-provider',
-      base_url: 'https://llm.test.example.com/v1',
+      // A public IP address, not a name: the provider is judged by the address check when a
+      // model is resolved, and a fixture name's resolution depends on the machine's DNS.
+      base_url: 'https://93.184.216.34/v1',
       auth: { api_key: 'sk-test' },
       models: [
         { model_id: 'chat-model', name: 'chat-model', properties: { context_length: 128000, max_output_tokens: 4096 } },
@@ -157,6 +160,13 @@ function resultText(result: Awaited<ReturnType<typeof dispatch>>['result']): str
 }
 
 describe('create_persona', () => {
+  it('asks every time: its card never offers the chat-wide answer', async () => {
+    const built = await setup();
+    const info = await built.tools.toolCallInfo({ name: 'create_persona', arguments: TRAVEL_PLANNER });
+    expect(info).toMatchObject({ tier_reason: 'persona_write', is_approval_required: true });
+    expect(allowsChatApproval(info)).toBe(false);
+  });
+
   it('shows one card with the whole persona, then saves it on approval', async () => {
     const built = await setup();
     const info = await built.tools.toolCallInfo({ name: 'create_persona', arguments: TRAVEL_PLANNER });

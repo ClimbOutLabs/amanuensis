@@ -324,6 +324,8 @@ npm run package:check
 
 `pnpm verify` runs lint, type checking, unit tests, clean build, fixture e2e, usage drift, tarball inspection, and a production dependency audit. Both `pnpm-lock.yaml` and `package-lock.json` are maintained. See [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md).
 
+In this repository, `pnpm test:gmail-mcp` from the root runs the unit tests. CI runs them when this folder changes.
+
 ## License and Attribution
 
 MIT. See [LICENSE](LICENSE). This fork preserves upstream history and attribution. Behavior ported from the Arty fork includes contributions from Ambros (draft lifecycle), Jonas Frost (inline images), gabbroBRP (tool prefixes), Clement Pang (CC/BCC reads), Shivam Bansal (phishing-to-spam tools), Caio Ribeiro (full-scope deletion), Brent Baccala and collaborators (OAuth token durability), and subsequent review/fix work by Arty McLabin.

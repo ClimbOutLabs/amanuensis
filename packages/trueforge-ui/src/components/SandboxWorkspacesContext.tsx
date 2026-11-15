@@ -10,7 +10,7 @@ export type {
 } from '@truefoundry/trueforge-core/core/sandbox/sandboxWorkspaceSchemas';
 
 export type SandboxWorkspacesApi = {
-  /** The chat workspaces the sandbox slots hold, joined to their chats; rejects when the server cannot be asked. */
+  /** The chat workspaces the sandbox slots hold, joined to their chats. It rejects when the server cannot be asked. */
   listSandboxWorkspaces: () => Promise<SandboxWorkspaceListing>;
 };
 

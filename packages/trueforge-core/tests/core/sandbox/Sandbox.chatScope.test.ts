@@ -29,7 +29,7 @@ function makeProvider(): SandboxProvider {
   };
 }
 
-describe('sandbox commands keep Always allow this here', () => {
+describe('sandbox commands keep Always allow in this chat', () => {
   it('offers chat scope for a verify command that asks first', async () => {
     const sandbox = new Sandbox({
       provider: makeProvider(),

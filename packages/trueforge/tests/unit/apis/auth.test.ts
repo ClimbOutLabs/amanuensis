@@ -481,21 +481,32 @@ describe('auth router (auth enabled)', () => {
         `/callback?code=abc123&state=${state}&iss=${encodeURIComponent(ISSUER)}`,
         { redirect: 'manual', headers: { Cookie: `${STATE_COOKIE}=${stateCookieRaw}` } },
       );
-      expect(callbackRes.headers.get('location')).toBe(
-        `/?error=${encodeURIComponent('Only the owner can sign in to this instance.')}`,
-      );
+      expect(callbackRes.headers.get('location')).toBe('/?error=owner_only');
     } finally {
       Object.defineProperty(configuration, 'STANDALONE', { value: false, configurable: true });
     }
   });
 
-  it('GET /callback redirects home with error when the IdP returns an error', async () => {
+  it('GET /callback redirects home with the fixed code when the IdP returns an error', async () => {
     const res = await createTestAuthRouter({ oidcClient }).request(
       '/callback?state=any&error=access_denied&error_description=user%20cancelled',
       { redirect: 'manual' },
     );
     expect(res.status).toBe(302);
-    expect(res.headers.get('location')).toBe('/?error=user%20cancelled');
+    expect(res.headers.get('location')).toBe('/?error=login_failed');
+  });
+
+  it('GET /callback never passes on the wording an error arrives with', async () => {
+    const wording = encodeURIComponent('Your password was changed. Sign in again to keep access.');
+    for (const query of [
+      `state=any&error=access_denied&error_description=${wording}`,
+      `state=any&error=${wording}&error_description=${wording}`,
+      `state=any&error=owner_only&error_description=owner_only`,
+    ]) {
+      const res = await createTestAuthRouter({ oidcClient }).request(`/callback?${query}`, { redirect: 'manual' });
+      expect(res.status).toBe(302);
+      expect(res.headers.get('location')).toBe('/?error=login_failed');
+    }
   });
 
   it('GET /callback uses login_failed when the IdP error has no description', async () => {

@@ -46,6 +46,7 @@ const ROLE_LABELS: Record<ModelUsageEvent['role'], string> = {
   summarization: 'Memory summary',
   profile_learning: 'Profile learning',
   relevance_judge: 'Library check',
+  noticing: 'Noticing',
 };
 
 const PROVIDER_LABELS: Record<string, string> = {

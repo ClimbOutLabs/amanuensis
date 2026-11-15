@@ -2,6 +2,7 @@
 
 import { useEffect } from 'react';
 
+import { useOptionalServer } from '../server/ServerContext.js';
 import { useOptionalShellMode } from '../server/ShellModeContext.js';
 import { useOptionalDeliveries } from './DeliveriesContext.js';
 import { openDeliveryLink } from './openDelivery.js';
@@ -29,6 +30,7 @@ function clearRequestFromAddress(): void {
 export function DeliveryPushLinks() {
   const deliveries = useOptionalDeliveries();
   const shell = useOptionalShellMode();
+  const server = useOptionalServer();
   const requestOpen = deliveries?.requestOpen;
 
   useEffect(() => {
@@ -63,7 +65,7 @@ export function DeliveryPushLinks() {
         requestOpen(null);
         if (item === null) return;
         void markSeen([item.id]);
-        if (item.link !== null && shell !== null) openDeliveryLink({ shell, link: item.link });
+        if (item.link !== null && shell !== null) void openDeliveryLink({ shell, server, link: item.link });
       })
       .catch(() => {
         if (!cancelled) requestOpen(null);
@@ -71,7 +73,7 @@ export function DeliveryPushLinks() {
     return () => {
       cancelled = true;
     };
-  }, [requestedId, api, markSeen, requestOpen, shell]);
+  }, [requestedId, api, markSeen, requestOpen, shell, server]);
 
   return null;
 }

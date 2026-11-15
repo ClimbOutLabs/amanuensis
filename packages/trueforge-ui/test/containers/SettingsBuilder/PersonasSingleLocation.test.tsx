@@ -2,10 +2,11 @@
 // Bug: "Personas" used to appear twice in Settings — once as its own nav section
 // (SettingsBuilder/index.tsx), and again embedded under Roles and Personas
 // (ModelRoleSettings.tsx), matching docs/model-roles.mdx ("Settings ->
-// Roles and Personas"). This exercises the REAL ModelRoleSettings and
-// PersonaSettings (unlike SettingsBuilder/index.test.tsx, which mocks section
-// content) so it actually proves personas render in exactly one place.
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+// Roles and Personas"). Personas now sit on that page's Personas sub-tab.
+// This exercises the REAL ModelRoleSettings and PersonaSettings (unlike
+// SettingsBuilder/index.test.tsx, which mocks section content) so it
+// actually proves personas render in exactly one place.
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { DraftCatalogProvider } from '@/atoms/draft/DraftCatalogProvider.js';
@@ -59,14 +60,15 @@ function OpenSettingsButton() {
 }
 
 describe('Personas render in exactly one place in Settings', () => {
-  it('has no standalone Personas nav item, and shows personas exactly once, under Roles and Personas', async () => {
+  it('has no standalone Personas nav item, and shows personas exactly once, on the Personas sub-tab', async () => {
     render(<TestShell />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Open settings' }));
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Settings' })).toBeInTheDocument());
 
     // No separate "Personas" tab in the section nav.
-    expect(screen.queryByRole('tab', { name: 'Personas' })).not.toBeInTheDocument();
+    const sectionNav = screen.getByRole('tablist', { name: 'Settings sections' });
+    expect(within(sectionNav).queryByRole('tab', { name: 'Personas' })).not.toBeInTheDocument();
 
     // Personas live on the Roles and Personas page. The section is lazy-loaded, and a
     // cold vitest transform of its model-selector import graph can take >5s,
@@ -76,8 +78,40 @@ describe('Personas render in exactly one place in Settings', () => {
       timeout: 20000,
     });
 
-    // Exactly one "Personas" region, and the configured persona is listed once.
+    // The page opens on its Roles sub-tab: the role assignments show, no persona does.
+    const pageTabs = screen.getByRole('tablist', { name: 'Roles and Personas sections' });
+    expect(
+      within(pageTabs)
+        .getAllByRole('tab')
+        .map(tab => tab.textContent),
+    ).toEqual(['Roles', 'Personas']);
+    expect(within(pageTabs).getByRole('tab', { name: 'Roles' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('heading', { name: 'Main chat model' })).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Personas' })).not.toBeInTheDocument();
+
+    // On the Personas sub-tab: exactly one "Personas" region, the configured
+    // persona listed once, and the role assignments gone.
+    fireEvent.click(within(pageTabs).getByRole('tab', { name: 'Personas' }));
     expect(await screen.findAllByText('Zara')).toHaveLength(1);
     expect(screen.getAllByRole('region', { name: 'Personas' })).toHaveLength(1);
+    expect(screen.queryByRole('heading', { name: 'Main chat model' })).not.toBeInTheDocument();
+  }, 60000);
+
+  it('keeps a half-typed persona when switching to Roles and back', async () => {
+    render(<TestShell />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open settings' }));
+    fireEvent.click(await screen.findByRole('tab', { name: 'Roles and Personas' }));
+    const pageTabs = await screen.findByRole('tablist', { name: 'Roles and Personas sections' }, { timeout: 20000 });
+
+    fireEvent.click(within(pageTabs).getByRole('tab', { name: 'Personas' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Add persona' }));
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Milo' } });
+
+    fireEvent.click(within(pageTabs).getByRole('tab', { name: 'Roles' }));
+    expect(screen.getByRole('heading', { name: 'Main chat model' })).toBeInTheDocument();
+    fireEvent.click(within(pageTabs).getByRole('tab', { name: 'Personas' }));
+
+    expect(screen.getByLabelText('Name')).toHaveValue('Milo');
   }, 60000);
 });

@@ -51,7 +51,7 @@ export interface SessionRecord<TCustom extends object = Record<string, never>> {
    * updateSession, and createTurn — never on reads.
    */
   last_activity_timestamp_ms: number;
-  /** Server-derived grants created by "Always allow this here". */
+  /** Server-derived grants created by "Always allow in this chat". */
   approval_grants: string[];
   /** Host-owned ordered task state, persisted outside the model context. */
   task_checklist: TaskChecklist;

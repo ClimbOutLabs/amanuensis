@@ -7,12 +7,21 @@
  * `schemas/skill.ts`); this module is its single owner on the client. It collapses into the
  * generated SDK once that carries `/settings/skills/{name}/network-approval`.
  */
+import {
+  SKILL_SITES_DATA_WARNING,
+  SKILL_SITES_EMAIL_BLOCKED,
+} from '@truefoundry/trueforge-core/core/permissions/skillSitesCopy';
 import { z } from 'zod';
+
+import type { CreateSkillRequest } from './types.js';
 
 const SkillNetworkApprovalResponseSchema = z.object({
   data: z.object({
     declared_hosts: z.array(z.string()),
     approved_hosts: z.array(z.string()).nullable(),
+    allowed_hosts: z.array(z.string()),
+    denied_hosts: z.array(z.string()),
+    session_hosts: z.array(z.string()),
     send_capable: z.boolean(),
   }),
 });
@@ -22,6 +31,12 @@ export interface SkillNetworkApprovalState {
   declaredHosts: string[];
   /** The approved list in force, or null when there is none the sandbox may use. */
   approvedHosts: string[] | null;
+  /** Sites allowed one by one for this skill, from a network card or from Settings. */
+  allowedHosts: string[];
+  /** Sites turned down for this skill; they raise no card until cleared here. */
+  deniedHosts: string[];
+  /** Sites allowed once in a chat that is still open; they end with that chat. */
+  sessionHosts: string[];
   /** True when a declared site can send mail or change a calendar. */
   sendCapable: boolean;
 }
@@ -33,6 +48,14 @@ export interface SkillNetworkApproval {
   approveSkillNetwork(req: { id: string; hosts: string[] }): Promise<SkillNetworkApprovalState>;
   /** Takes the approval back. The skill keeps no network access from the next run on. */
   revokeSkillNetwork(req: { id: string }): Promise<void>;
+  /** Allows one site for the skill on its own, apart from the declared list. */
+  allowSkillNetworkHost(req: { id: string; host: string }): Promise<SkillNetworkApprovalState>;
+  /** Turns one site down for the skill, so it is not granted and raises no card. */
+  denySkillNetworkHost(req: { id: string; host: string }): Promise<SkillNetworkApprovalState>;
+  /** Clears one site's allowance. The skill cannot reach it from the next run on. */
+  clearSkillNetworkAllowedHost(req: { id: string; host: string }): Promise<void>;
+  /** Clears one site being turned down, so a card can ask about it again. */
+  clearSkillNetworkDeniedHost(req: { id: string; host: string }): Promise<void>;
 }
 
 /**
@@ -43,7 +66,11 @@ export function hasSkillNetworkApproval(catalog: object): catalog is SkillNetwor
   return (
     typeof Reflect.get(catalog, 'getSkillNetworkApproval') === 'function' &&
     typeof Reflect.get(catalog, 'approveSkillNetwork') === 'function' &&
-    typeof Reflect.get(catalog, 'revokeSkillNetwork') === 'function'
+    typeof Reflect.get(catalog, 'revokeSkillNetwork') === 'function' &&
+    typeof Reflect.get(catalog, 'allowSkillNetworkHost') === 'function' &&
+    typeof Reflect.get(catalog, 'denySkillNetworkHost') === 'function' &&
+    typeof Reflect.get(catalog, 'clearSkillNetworkAllowedHost') === 'function' &&
+    typeof Reflect.get(catalog, 'clearSkillNetworkDeniedHost') === 'function'
   );
 }
 
@@ -59,6 +86,9 @@ export function parseSkillNetworkApproval(body: unknown): SkillNetworkApprovalSt
   return {
     declaredHosts: parsed.data.data.declared_hosts,
     approvedHosts: parsed.data.data.approved_hosts,
+    allowedHosts: parsed.data.data.allowed_hosts,
+    deniedHosts: parsed.data.data.denied_hosts,
+    sessionHosts: parsed.data.data.session_hosts,
     sendCapable: parsed.data.data.send_capable,
   };
 }
@@ -70,12 +100,10 @@ export function parseSkillNetworkApproval(body: unknown): SkillNetworkApprovalSt
 export function skillNetworkApprovalLines(input: { skillName: string; state: SkillNetworkApprovalState }): string[] {
   const lines = [
     `The ${input.skillName} skill needs to reach these sites to work:`,
-    'While this skill is switched on for a chat, that chat’s sandbox can contact these sites and no others. The skill can send any of your data to them, so only allow this for a skill you trust.',
+    `While this skill is switched on for a chat, that chat’s sandbox can contact these sites and no others. ${SKILL_SITES_DATA_WARNING}`,
   ];
   if (input.state.sendCapable) {
-    lines.push(
-      'One of these sites can send email. This skill will be able to send email as you, without asking each time.',
-    );
+    lines.push(SKILL_SITES_EMAIL_BLOCKED);
   }
   return lines;
 }
@@ -83,4 +111,34 @@ export function skillNetworkApprovalLines(input: { skillName: string; state: Ski
 /** The line shown once the approval is in force, naming what ends it. */
 export function skillNetworkApprovedLine(): string {
   return 'Network access is on for this skill. Chats using it can reach the sites above, and no others.';
+}
+
+/** The websites a skill sends requests to, as the server found them in its files before it is added. */
+export interface SkillWebsiteCheck {
+  /** The exact commit whose files were read. */
+  commit: string;
+  websites: string[];
+  /** True when the skill builds web addresses while it runs, which cannot be read ahead of time. */
+  makesUpAddresses: boolean;
+  /** True when one of the websites can send email or change a calendar. */
+  canSend: boolean;
+}
+
+/**
+ * Adding a skill with its websites. Adding is all or nothing: the server saves the skill only
+ * together with the approval of exactly the websites its check found.
+ */
+export interface SkillWebsites {
+  /** Reads the skill's files and lists its websites. Nothing is saved. */
+  checkSkillWebsites(req: { repoURL: string; path: string; ref: string }): Promise<SkillWebsiteCheck>;
+  /** Adds the skill and allows exactly `approvedWebsites`, which must be the list the check showed. */
+  addSkillWithWebsites(req: CreateSkillRequest & { approvedWebsites: string[] }): Promise<void>;
+}
+
+/** Whether a catalog can check a skill's websites; another host's catalog may not. */
+export function hasSkillWebsites(catalog: object): catalog is SkillWebsites {
+  return (
+    typeof Reflect.get(catalog, 'checkSkillWebsites') === 'function' &&
+    typeof Reflect.get(catalog, 'addSkillWithWebsites') === 'function'
+  );
 }

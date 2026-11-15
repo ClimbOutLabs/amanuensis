@@ -5,6 +5,7 @@
  */
 import { createRoute } from '@hono/zod-openapi';
 import { RequestErrorResponseSchema } from '../schemas/errors';
+import { HomeAssistantCheckResponseSchema } from '../schemas/homeAssistant';
 import {
   CreateMcpServerRequestSchema,
   DeleteMcpServerResponseSchema,
@@ -21,7 +22,6 @@ import {
   McpToolGrantParamsSchema,
   UpdateMcpServerRequestSchema,
 } from '../schemas/mcpServer';
-import { MemoryProviderCheckResponseSchema } from '../schemas/memoryProvider';
 import { OpenApiTag } from './openapiTags';
 
 /** Chat/composer MCP list (not under settings). */
@@ -36,7 +36,7 @@ export const listAvailableMcpServersRoute = createRoute({
   responses: {
     200: {
       content: { 'application/json': { schema: ListAvailableMcpServersResponseSchema } },
-      description: 'MCP servers attachable to a chat (chat projection). Excludes the memory provider.',
+      description: 'MCP servers attachable to a chat (chat projection).',
     },
     401: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },
@@ -149,13 +149,12 @@ export const createMcpServerRoute = createRoute({
     409: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },
       description:
-        'An MCP server with this name already exists, or `manifest.memory_provider` or `manifest.search_provider` is set to true while another server already holds it.',
+        'An MCP server with this name already exists, or `manifest.search_provider` is set to true while another server already holds it.',
     },
     422: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },
       description:
-        'The server cannot satisfy `auth.type: dcr` (e.g. it advertises no registration_endpoint), or ' +
-        '`manifest.memory_provider: true` is set and the memory-provider connection check failed. The message ' +
+        'The server cannot satisfy `auth.type: dcr` (e.g. it advertises no registration_endpoint). The message ' +
         'carries the upstream reason.',
     },
     424: {
@@ -191,15 +190,12 @@ export const putMcpServerRoute = createRoute({
     },
     409: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },
-      description:
-        '`manifest.memory_provider` or `manifest.search_provider` is set to true while another server already holds it, or the connector changed ' +
-        'while its memory-provider connection check was running, so the save must be retried.',
+      description: '`manifest.search_provider` is set to true while another server already holds it.',
     },
     422: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },
       description:
-        'The server cannot satisfy `auth.type: dcr` (e.g. it advertises no registration_endpoint), or ' +
-        '`manifest.memory_provider: true` is set and the memory-provider connection check failed. The message ' +
+        'The server cannot satisfy `auth.type: dcr` (e.g. it advertises no registration_endpoint). The message ' +
         'carries the upstream reason.',
     },
     424: {
@@ -327,25 +323,24 @@ export const deleteMcpToolGrantRoute = createRoute({
   },
 });
 
-export const memoryCheckMcpServerRoute = createRoute({
+export const homeAssistantCheckMcpServerRoute = createRoute({
   method: 'post',
-  path: '/{name}/memory-check',
+  path: '/{name}/home-assistant-check',
   tags: [OpenApiTag.MCP_SERVERS],
-  summary: 'Check an MCP server as a memory provider',
+  summary: 'Check a Home Assistant connector',
   'x-fern-sdk-group-name': ['mcpServers'],
-  'x-fern-sdk-method-name': 'memory_check',
+  'x-fern-sdk-method-name': 'home_assistant_check',
   description:
-    'Runs one live recall against the Hindsight REST API behind this connector, the surface host-enforced memory ' +
-    'actually calls. That is not the MCP endpoint `auth_status` reflects, and it may validate a different credential. ' +
-    'Read-only: the connector is never modified, and a failed check is a 200 carrying the reason. The same check ' +
-    'runs on every create or replace that sets `manifest.memory_provider: true`.',
+    'Runs the MCP handshake against the saved connector, lists its tools, and reads the live-context ' +
+    'tool once, so the answer says how many tools and exposed entities Aman can see, or the one thing ' +
+    'to fix. Read-only: the connector is never modified, and a failed check is a 200 carrying the reason.',
   request: {
     params: McpServerNameParamsSchema,
   },
   responses: {
     200: {
-      content: { 'application/json': { schema: MemoryProviderCheckResponseSchema } },
-      description: 'The check ran; the result says whether the provider answered and why not.',
+      content: { 'application/json': { schema: HomeAssistantCheckResponseSchema } },
+      description: 'The check ran; the result says whether Home Assistant answered and why not.',
     },
     404: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },

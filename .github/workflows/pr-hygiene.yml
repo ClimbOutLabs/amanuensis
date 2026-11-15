@@ -1,0 +1,51 @@
+name: PR hygiene
+
+# The title and description are part of what this checks, so it runs again when either is edited.
+# It is its own workflow so an edit does not restart the full CI run.
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+  merge_group:
+    types: [checks_requested]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pr-hygiene:
+    name: PR hygiene
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out repository code
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        if: github.event_name == 'pull_request'
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: '.nvmrc'
+
+      # The description reaches the script through the environment, never through the command line.
+      - name: Check the title, description, commit messages and added lines
+        if: github.event_name == 'pull_request'
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node scripts/check-pr-hygiene.mjs --base "$BASE_SHA" --head "$HEAD_SHA"
+
+      # The merge queue re-runs required checks; the pull request already passed this one.
+      - name: Merge queue
+        if: github.event_name == 'merge_group'
+        run: echo "Checked on the pull request."
