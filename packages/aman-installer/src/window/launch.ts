@@ -139,6 +139,7 @@ export function channelOver(process: WindowProcess): WindowChannel {
 
   process.onData(chunk => {
     if (over !== null) {
+      chunk.fill(0);
       return;
     }
     try {
@@ -151,6 +152,10 @@ export function channelOver(process: WindowProcess): WindowChannel {
       }
     } catch {
       finish('broken');
+    } finally {
+      // The chunk may hold a password frame. The reader has its own
+      // copy to hand over, so this one is wiped at once.
+      chunk.fill(0);
     }
   });
   process.onEnd(() => {

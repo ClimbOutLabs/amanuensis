@@ -294,6 +294,7 @@ function Receive-Message($m) {
     $row = $S.rows[[string]$m['id']]
     if ($null -ne $row) { Set-Mark $row.block $row.label ([string]$m['mark']) }
   } elseif ($kind -eq 'line') {
+    if ($ui.DetailsText.Text.Length -gt 400000) { $ui.DetailsText.Clear() }
     $ui.DetailsText.AppendText([string]$m['text'] + [Environment]::NewLine)
     $ui.DetailsText.ScrollToEnd()
   } elseif ($kind -eq 'problem') {

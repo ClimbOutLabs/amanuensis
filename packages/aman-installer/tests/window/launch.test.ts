@@ -121,10 +121,16 @@ test('the script is sent first, behind its length, and messages follow as frames
   assert.equal(new TextDecoder().decode(frames[0]?.payload), '{"t":"problem","text":"x"}');
 
   process.emit(encodeFrame({ kind: FRAME_MESSAGE, payload: bytes('{"t":"next"}') }));
-  process.emit(encodeFrame({ kind: FRAME_PASSWORD, payload: bytes('Password1!') }));
+  const passwordChunk = encodeFrame({ kind: FRAME_PASSWORD, payload: bytes('Password1!') });
+  process.emit(passwordChunk);
   assert.deepEqual(await channel.next(), { kind: 'message', message: { t: 'next' } });
   const password = await channel.next();
   assert.equal(password.kind, 'password');
+  // The chunk the password arrived in is wiped; only the frame handed over holds it.
+  assert.ok(passwordChunk.every(byte => byte === 0));
+  if (password.kind === 'password') {
+    assert.equal(new TextDecoder().decode(password.bytes), 'Password1!');
+  }
   const waiting = channel.next();
   process.exit();
   assert.deepEqual(await waiting, { kind: 'gone' });
@@ -140,7 +146,11 @@ test('a frame or a message that breaks the rules ends the reading, and nothing a
     const process = new FakeProcess();
     const channel = channelOver(process);
     process.emit(bad);
-    process.emit(encodeFrame({ kind: FRAME_MESSAGE, payload: bytes('{"t":"next"}') }));
+    const late = encodeFrame({ kind: FRAME_PASSWORD, payload: bytes('Password1!') });
+    process.emit(late);
+    // What arrives after the reading ended is wiped unread, and so is what broke it.
+    assert.ok(late.every(byte => byte === 0));
+    assert.ok(bad.every(byte => byte === 0));
     assert.deepEqual(await channel.next(), { kind: 'broken' });
     assert.deepEqual(await channel.next(), { kind: 'broken' });
   }
