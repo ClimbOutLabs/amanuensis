@@ -381,7 +381,7 @@ async function decidePersonFacts(params: SubmitRetainParams): Promise<TurnMemory
     });
     return { kind: 'exchange', notes: fullReplyNotes(params) };
   }
-  // A failed summary's log line says how long the model was given, so a slow model shows as one.
+  // Every summary's log line says how long the model took, so a slow model shows before it fails.
   const askedAt = Date.now();
   const secondsTaken = (): number => Math.round((Date.now() - askedAt) / 1000);
   try {
@@ -410,6 +410,7 @@ async function decidePersonFacts(params: SubmitRetainParams): Promise<TurnMemory
           logTurnMemoryNotSaved(params, {
             message: 'it only described what the assistant could not do',
             reason: 'ability_notes_only',
+            seconds: secondsTaken(),
           });
           return { kind: 'nothing' };
         }
@@ -417,19 +418,20 @@ async function decidePersonFacts(params: SubmitRetainParams): Promise<TurnMemory
           logTurnMemoryNotSaved(params, {
             message: 'it only repeated what the profile already says',
             reason: 'profile_echo',
+            seconds: secondsTaken(),
           });
           return { kind: 'nothing' };
         }
-        params.logger.debug('Turn summarized; storing the facts instead of the exchange', {
-          sessionId: params.sessionId,
-          turnId: params.turnId,
-          factCount: facts.length,
-        });
+        logTurnSummarized(params, { factCount: facts.length, seconds: secondsTaken() });
         return { kind: 'text', text: formatFacts(facts), notes: [] };
       }
       case 'nothing_to_keep':
         await recordSummaryOutcome(params, { outcome: 'summarized' });
-        logTurnMemoryNotSaved(params, { message: 'it held nothing worth keeping', reason: 'nothing_to_keep' });
+        logTurnMemoryNotSaved(params, {
+          message: 'it held nothing worth keeping',
+          reason: 'nothing_to_keep',
+          seconds: secondsTaken(),
+        });
         return { kind: 'nothing' };
       case 'failed':
         params.logger.debug('Memory summarization failed', { reason: result.reason });
@@ -505,6 +507,26 @@ async function recordSummaryOutcome(
       reason: error instanceof Error ? error.message : String(error),
     });
   }
+}
+
+/** A kept summary's line says how long the model took, never its words; info for interactive turns only. */
+function logTurnSummarized(params: SubmitRetainParams, kept: { factCount: number; seconds: number }): void {
+  if (params.outcomeLog === undefined) {
+    params.logger.debug('Turn summarized; storing the facts instead of the exchange', {
+      sessionId: params.sessionId,
+      turnId: params.turnId,
+      factCount: kept.factCount,
+      seconds: kept.seconds,
+    });
+    return;
+  }
+  params.logger.info('Turn memory saved: the summary was kept', {
+    sessionId: params.sessionId,
+    turnId: params.turnId,
+    personaName: params.outcomeLog.personaName,
+    factCount: kept.factCount,
+    seconds: kept.seconds,
+  });
 }
 
 /** Info line for a turn that adds nothing to memory, with the one reason; interactive turns only. */
