@@ -45,7 +45,7 @@ import { createMemoryClient } from '../runtime/memory/createMemoryClient';
 import {
   createTelegramRefusalThrottle,
   processTelegramUpdate,
-  TELEGRAM_CHAT_TITLE,
+  TELEGRAM_CHAT_TITLE_PREFIX,
   TELEGRAM_METADATA_KEY,
   telegramExternalId,
   type TelegramTurnPort,
@@ -94,7 +94,7 @@ function ownerOf(connection: TelegramConnection): { tenant_id: string; created_b
  * The Telegram chat for this owner: made on the first message and reused after. It is a plain chat,
  * like one started here, set up from the default model, so the app shows it under the person's own
  * assistant (not under an agent name) and its model, persona and connectors can be changed from the
- * app like any chat's. The chat is titled Telegram and marked, so the app shows it as its own chat.
+ * app like any chat's. It is marked as the Telegram chat, and its first turn titles it "Telegram: " and its subject.
  */
 async function telegramSession<TTransaction>(params: {
   c: Context;
@@ -137,22 +137,13 @@ async function telegramSession<TTransaction>(params: {
     model: { name: modelName },
     config: { sandbox: { enabled: sandboxAvailable } },
   });
-  const { session, created } = await deps.sessions.getOrCreateByExternalId({
+  const { session } = await deps.sessions.getOrCreateByExternalId({
     tenant_id,
     external_id,
     created_by_subject: owner,
     agent: { type: 'inline', spec },
     metadata: { [TELEGRAM_METADATA_KEY]: 'true' },
   });
-  if (created || session.record.title === null) {
-    await deps.sessionStore.updateSession({
-      tenant_id,
-      session_id: session.session_id,
-      agent: undefined,
-      title: TELEGRAM_CHAT_TITLE,
-      metadata: undefined,
-    });
-  }
   if (connection.session_id !== session.session_id) {
     await deps.telegramStore.setSessionId({ ...ownerOf(connection), session_id: session.session_id });
   }
@@ -215,6 +206,8 @@ async function startTelegramTurn<TTransaction>(params: {
     userRef,
     // The person wrote this message, so their profile learns from it as it does from a chat here.
     profileLearning: { personalizationStore: deps.personalizationStore },
+    // Named after its subject like any chat, with Telegram in front so it is easy to find.
+    session_title_prefix: TELEGRAM_CHAT_TITLE_PREFIX,
     deps: {
       mcpCatalog: deps.mcpCatalog,
       activeTurns: deps.activeTurns,
