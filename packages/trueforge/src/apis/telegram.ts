@@ -45,16 +45,12 @@ import { createMemoryClient } from '../runtime/memory/createMemoryClient';
 import {
   createTelegramRefusalThrottle,
   processTelegramUpdate,
-  TELEGRAM_CHAT_TITLE,
+  TELEGRAM_CHAT_TITLE_PREFIX,
   TELEGRAM_METADATA_KEY,
   telegramExternalId,
   type TelegramTurnPort,
 } from '../runtime/telegram/telegramChannel';
-import {
-  createTelegramCommandMenu,
-  telegramChoiceKey,
-  type TelegramChatControlsPort,
-} from '../runtime/telegram/telegramChatControls';
+import { telegramChoiceKey, type TelegramChatControlsPort } from '../runtime/telegram/telegramChatControls';
 import { sendTelegramText, type TelegramSendQueue } from '../runtime/telegram/telegramSendQueue';
 import { TelegramSettingsError, type TelegramService } from '../runtime/telegram/telegramService';
 import { putDefaultModelFirst, readDefaultChatModel } from '../runtime/tokenFactoryProvider';
@@ -100,7 +96,7 @@ export const TELEGRAM_EARLIER_CHAT_DELETED = 'Your earlier chat was deleted in A
  * The Telegram chat for this owner: made on the first message and reused after. It is a plain chat,
  * like one started here, set up from the default model, so the app shows it under the person's own
  * assistant (not under an agent name) and its model, persona and connectors can be changed from the
- * app like any chat's. The chat is titled Telegram and marked, so the app shows it as its own chat.
+ * app like any chat's. It is marked as the Telegram chat, and its first turn titles it "Telegram: " and its subject.
  * When the chat in use was deleted, a new one is made and Telegram is told so.
  */
 async function telegramSession<TTransaction>(params: {
@@ -146,22 +142,13 @@ async function telegramSession<TTransaction>(params: {
     model: { name: modelName },
     config: { sandbox: { enabled: sandboxAvailable } },
   });
-  const { session, created } = await deps.sessions.getOrCreateByExternalId({
+  const { session } = await deps.sessions.getOrCreateByExternalId({
     tenant_id,
     external_id,
     created_by_subject: owner,
     agent: { type: 'inline', spec },
     metadata: { [TELEGRAM_METADATA_KEY]: 'true' },
   });
-  if (created || session.record.title === null) {
-    await deps.sessionStore.updateSession({
-      tenant_id,
-      session_id: session.session_id,
-      agent: undefined,
-      title: TELEGRAM_CHAT_TITLE,
-      metadata: undefined,
-    });
-  }
   if (connection.session_id !== session.session_id) {
     await deps.telegramStore.setSessionId({ ...ownerOf(connection), session_id: session.session_id });
   }
@@ -238,6 +225,8 @@ async function startTelegramTurn<TTransaction>(params: {
     userRef,
     // The person wrote this message, so their profile learns from it as it does from a chat here.
     profileLearning: { personalizationStore: deps.personalizationStore },
+    // Named after its subject like any chat, with Telegram in front so it is easy to find.
+    session_title_prefix: TELEGRAM_CHAT_TITLE_PREFIX,
     deps: {
       mcpCatalog: deps.mcpCatalog,
       activeTurns: deps.activeTurns,
@@ -476,9 +465,6 @@ export function createTelegramChatControlsPort<TTransaction>(params: {
   };
 }
 
-/** Sets the bot's command menu once per process for each connection, shared like the refusal throttle. */
-const telegramCommandMenu = createTelegramCommandMenu();
-
 /**
  * One refusal throttle for the whole server: the channel deps are rebuilt per call, and the
  * throttle only holds back repeat refusals if it outlives them.
@@ -492,7 +478,6 @@ function channelDeps<TTransaction>(params: { c: Context; deps: TelegramTurnExecu
     queue: params.deps.telegramQueue,
     turns: createTelegramTurnPort(params),
     controls: createTelegramChatControlsPort(params),
-    commandMenu: telegramCommandMenu,
     logger: params.deps.logger,
     refusals: telegramRefusals,
   };

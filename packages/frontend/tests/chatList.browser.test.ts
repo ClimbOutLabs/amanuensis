@@ -7,6 +7,7 @@ import { createServer } from 'vite';
 
 import { startApprovalTestServer, type ApprovalTestServer } from '../../trueforge/tests/fixtures/approvalTestServer.ts';
 import { finishedSession, inProcessApi } from './support/approvalChat.ts';
+import { watchConnections } from './support/connectionNotes.ts';
 import { featureShotPath, saveFailureShots } from './support/featureShots.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.ts';
 import { FIRST_LOAD_TIMEOUT_MS } from './support/firstLoad.ts';
@@ -128,8 +129,12 @@ test('the chat list sets each group of chats in under its heading', { timeout: 6
   let browser: Browser | undefined;
   try {
     await vite.listen();
-    const address = vite.httpServer?.address();
-    if (address == null || typeof address === 'string') throw new Error('Vite did not bind a TCP port');
+    const httpServer = vite.httpServer;
+    const address = httpServer?.address();
+    if (httpServer == null || address == null || typeof address === 'string') {
+      throw new Error('Vite did not bind a TCP port');
+    }
+    const connectionNotes = watchConnections(httpServer);
     const origin = `http://127.0.0.1:${address.port}`;
     browser = await chromium.launch({ executablePath: findChromiumExecutable(chromium.executablePath()) });
 
@@ -148,7 +153,12 @@ test('the chat list sets each group of chats in under its heading', { timeout: 6
       const page = await context.newPage();
       await page.route(/\/api\/v1\/(sessions|session-folders)(\?|\/|$)/, async route => {
         if (route.request().method() !== 'GET') return route.continue();
-        const response = await route.fetch();
+        const response = await route.fetch().catch((error: unknown) => {
+          const asked = new URL(route.request().url()).pathname;
+          throw new Error(`${view.label}-${view.theme}: ${asked} got no answer. ${connectionNotes()}`, {
+            cause: error,
+          });
+        });
         const body: unknown = await response.json().catch(() => undefined);
         if (body === undefined) return route.fulfill({ response });
         return route.fulfill({ response, json: backdate({ value: body, ages, now: Date.now() }) });

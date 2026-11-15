@@ -118,10 +118,11 @@ describe('the Telegram chat', () => {
   it(
     'is a plain chat on the default model, not one bound to a hidden agent',
     async () => {
-      await send('Hello');
+      await send('Plan the dentist visit');
       const sessionId = await chatInUse();
       const session = await server.sessionStore().getSession({ tenant_id: TENANT, session_id: sessionId });
-      expect(session?.title).toBe('Telegram');
+      // Named from the first message like any chat, with Telegram in front.
+      expect(session?.title).toMatch(/^Telegram: \S/);
       expect(session?.agent.type).toBe('inline');
     },
     TIMEOUT_MS,
@@ -145,7 +146,8 @@ describe('the Telegram chat', () => {
       const fresh = await chatInUse();
       expect(fresh).not.toBe(earlier);
       const session = await server.sessionStore().getSession({ tenant_id: TENANT, session_id: fresh });
-      expect(session?.title).toBe('Telegram');
+      // Not named yet: the first message names it.
+      expect(session?.title ?? null).toBeNull();
       expect(session?.agent.type).toBe('inline');
       expect(await server.sessionStore().getSession({ tenant_id: TENANT, session_id: earlier })).toBeDefined();
       expect(botTexts).not.toContain(TELEGRAM_EARLIER_CHAT_DELETED);
