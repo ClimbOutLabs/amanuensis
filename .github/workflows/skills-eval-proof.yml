@@ -45,13 +45,17 @@ jobs:
           SANDBOX_BACKEND: slots
           SANDBOX_SLOTS_DIR: ${{ runner.temp }}/slots
           SANDBOX_SLOTS: '2'
+          EVAL_SERVER_LOG: ${{ runner.temp }}/server.log
         run: |
           pnpm eval:models:fresh -- --models tokenfactory/model-a --label proof --skills --out "$RUNNER_TEMP/results" || true
           grep -n '"case_id":"skills' -A0 "$RUNNER_TEMP/results/results.json" | head -2 || true
-          node -e "const r=require(process.env.RUNNER_TEMP+'/results/results.json');for(const row of (r.rows??r.results??[]).filter(x=>x.group==='skills'))console.log(JSON.stringify({id:row.case_id,status:row.status,error:row.error,reply:row.reply.slice(0,800),checks:row.checks},null,1))"
+          node -e "const r=require(process.env.RUNNER_TEMP+'/results/results.json');for(const row of (r.rows??r.results??[]).filter(x=>x.group==='skills'))console.log(JSON.stringify({id:row.case_id,status:row.status,error:row.error,reply:row.reply.slice(0,800),approvals:row.approvals,tool_calls:row.tool_calls,checks:row.checks.filter(c=>!c.pass)},null,1))"
       - name: Stand-in model log
         if: always()
         run: grep -E 'wttr|hn.py|hacker|install_skill|remove_skill|exec|write_file|card|approv' "$RUNNER_TEMP/stub.log" | grep -v 'grading one reply' | cut -c1-1200 | tail -40 || true
+      - name: Server log around skills
+        if: always()
+        run: grep -nE 'Unreachable|skill|exec|write_file|held|network|approval' "$RUNNER_TEMP/server.log" | grep -vE 'nowledge|noticing|STT' | cut -c1-900 | tail -120 || true
       - name: Stop the sandbox
         if: always()
         run: pnpm sandbox:slots --down --purge --instance eval

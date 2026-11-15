@@ -3,6 +3,7 @@
 // and each provider in evals/eval-providers.json needs the key it names. Keys go only to the instance.
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
+import { openSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -147,11 +148,12 @@ export async function main({ argv, env = process.env, stdout, stderr, rootDir = 
       env: keyFree,
       stdio: ['ignore', 'ignore', 'inherit'],
     });
+    const serverLog = process.env.EVAL_SERVER_LOG === undefined ? 'ignore' : openSync(process.env.EVAL_SERVER_LOG, 'a');
     child = spawn('pnpm', ['run', 'serve:eval'], {
       cwd: trueforge,
       env: serverEnv,
       detached: true,
-      stdio: ['ignore', 'ignore', 'inherit'],
+      stdio: ['ignore', serverLog, serverLog === 'ignore' ? 'inherit' : serverLog],
     });
     await waitForHealth({ origin, child });
     const token = await createSignIn({ origin });
