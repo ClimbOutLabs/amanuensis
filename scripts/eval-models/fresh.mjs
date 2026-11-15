@@ -130,6 +130,8 @@ export async function main({ argv, env = process.env, stdout, stderr, rootDir = 
     AMAN_EVAL_MODE: 'true',
     TRUEFORGE_AUTH_MODE: 'local',
     APP_DATA_DIR: dataDir,
+    // The runner talks to 127.0.0.1. Left at localhost, the server may listen only on the IPv6 address.
+    HOST: '127.0.0.1',
     PORT: String(port),
     // Lets the eval approve adding, running and removing a skill, which only the skill cases ask for.
     ...(skills ? { AMAN_EVAL_SKILLS: 'true' } : {}),
