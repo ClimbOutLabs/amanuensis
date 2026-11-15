@@ -1,4 +1,20 @@
-export { createChatClient, type ChatClient, type ChatSummary } from './chatClient.js';
+export {
+  APPROVED_OUTCOME_TEXT,
+  DENIED_TEXT,
+  HELD_EXPIRED_TEXT,
+  REQUEST_ENDED_LINE,
+  STALE_APPROVAL_LINE,
+  approvalHeadline,
+  approvalLines,
+  approveChoiceLabel,
+  denyChoiceLabel,
+  describeAnswerFailure,
+  isNewRecipientCard,
+  pendingApprovalFromRef,
+  type AnswerFailure,
+  type PendingApproval,
+} from './approvals.js';
+export { createChatClient, type ChatClient, type ChatSummary, type StreamHooks } from './chatClient.js';
 export { ChatView, type ChatEvent, type ViewBlock } from './chatEvents.js';
 export { resolveConfigDir } from './configDir.js';
 export {
@@ -23,6 +39,7 @@ export {
   type KeyStore,
 } from './keyStore.js';
 export { defaultDeviceName, runLogin, type LoginDeps } from './login.js';
+export { runOneShot, type OneShotDeps } from './oneShot.js';
 export {
   PairingRefusedError,
   createPairingClient,
@@ -32,7 +49,9 @@ export {
 } from './pairing.js';
 export {
   chatErrorLine,
+  errorCodeOf,
   keyWasRefused,
+  serverCodeOfBody,
   serverMessageOfBody,
   serverMessageOfBodyText,
   statusCodeOfError,

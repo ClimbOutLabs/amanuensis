@@ -55,6 +55,7 @@ export function isFinalBlock(block: ViewBlock): boolean {
     case 'assistant':
       return !block.streaming;
     case 'tool':
-      return block.outcome !== null;
+      // A tool waiting for approval is not final: its outcome still changes when the answer lands.
+      return block.outcome !== null && block.outcome !== 'waiting_approval';
   }
 }

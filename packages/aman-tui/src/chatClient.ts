@@ -1,8 +1,15 @@
-import { createSessionResyncExtensions, createTrueForgeClient, type SessionTipInfo } from '@truefoundry/trueforge-chat';
+import {
+  createSessionResyncExtensions,
+  createTrueForgeClient,
+  type HeldActionDecision,
+  type HeldActionOutcome,
+  type SessionTipInfo,
+} from '@truefoundry/trueforge-chat';
 import type { TrueForge, TrueForgeApi } from '@truefoundry/trueforge-sdk';
 
+import { pendingApprovalFromRef, type PendingApproval } from './approvals.js';
 import type { ChatEvent } from './chatEvents.js';
-import { keyWasRefused } from './serverErrors.js';
+import { keyWasRefused, statusCodeOfError } from './serverErrors.js';
 
 /** One row of the chat list. */
 export interface ChatSummary {
@@ -10,6 +17,12 @@ export interface ChatSummary {
   title: string;
   personaName: string | null;
   updatedAt: string;
+}
+
+/** What a streaming call can tell the view while it runs. */
+export interface StreamHooks {
+  /** Called when the connection drops mid-turn and the rejoin begins. */
+  onConnectionLost?: () => void;
 }
 
 /** The chat operations the terminal app uses, over the shared chat package and the SDK. */
@@ -23,14 +36,40 @@ export interface ChatClient {
    * connection drops mid-turn, the turn is rejoined through the same subscribe
    * the web app uses, so the reply resumes instead of failing.
    */
-  streamMessage(sessionId: string, text: string): AsyncGenerator<ChatEvent>;
+  streamMessage(sessionId: string, text: string, hooks?: StreamHooks): AsyncGenerator<ChatEvent>;
+  /**
+   * Answers one waiting approval through the same continuation the web app
+   * sends, yields the continuation turn's events as they arrive, and returns
+   * what became of the action. A refusal by the server throws, with its
+   * status and error code intact for the caller to word.
+   */
+  answerApproval(
+    sessionId: string,
+    approval: PendingApproval,
+    decision: HeldActionDecision,
+    hooks?: StreamHooks,
+  ): AsyncGenerator<ChatEvent, HeldActionOutcome>;
+  /** Stops the turn running in a chat, through the same cancel the web app uses. */
+  stopTurn(sessionId: string): Promise<void>;
+  /**
+   * The approvals still waiting on the chat's newest turn, with their cards.
+   * The event fold learns about most of them; this read covers a chat whose
+   * saved events end before the tip turn's own record.
+   */
+  pendingApprovals(sessionId: string): Promise<PendingApproval[]>;
   /** The session's newest turn and any approvals still pending on it, from the shared resync code. */
   peekTip(sessionId: string): Promise<SessionTipInfo | null>;
+  /** Wakes a rejoin that is waiting between attempts, so it retries at once. */
+  retryConnectionNow(): void;
 }
 
 const HISTORY_EVENT_LIMIT = 2000;
 const RESUBSCRIBE_ATTEMPTS = 5;
 const RESUBSCRIBE_DELAY_MS = 1000;
+
+const CONNECTION_LOST_LINE =
+  'The connection to Aman was lost and the reply could not be rejoined. Send your message again.';
+const COULD_NOT_REACH_LINE = 'The reply did not finish. Check your connection, then send your message again.';
 
 function sequenceNumber(id: string | undefined, fallback: number): number {
   if (id === undefined) {
@@ -57,6 +96,23 @@ function summaryOf(session: TrueForgeApi.Session, personaName: string | null): C
   };
 }
 
+/** What became of an answered action, from the disposition its response carries. */
+function heldOutcomeOfDisposition(disposition: string): HeldActionOutcome {
+  switch (disposition) {
+    case 'executed_ok':
+      return 'done';
+    case 'executed_nonzero':
+      return 'failed';
+    case 'outcome_unknown':
+      return 'unclear';
+    default:
+      // denied, policy_blocked, never_ran, and anything unrecognised: the call did not run.
+      return 'not_run';
+  }
+}
+
+type TurnStream = Awaited<ReturnType<TrueForge['sessions']['createTurnStream']>>;
+
 export function createChatClient(options: {
   baseUrl: string;
   token: string;
@@ -70,6 +126,19 @@ export function createChatClient(options: {
   });
   const resync = createSessionResyncExtensions(client);
   const sleep = options.sleep ?? ((ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)));
+
+  // A rejoin waiting between attempts can be woken at once, when the person asks.
+  let wakeRetry: (() => void) | undefined;
+  async function waitRetryDelay(): Promise<void> {
+    const wake = new Promise<void>(resolve => {
+      wakeRetry = resolve;
+    });
+    try {
+      await Promise.race([sleep(RESUBSCRIBE_DELAY_MS), wake]);
+    } finally {
+      wakeRetry = undefined;
+    }
+  }
 
   async function personaNameOf(sessionId: string): Promise<string | null> {
     try {
@@ -107,10 +176,56 @@ export function createChatClient(options: {
         lastError = error;
       }
       if (attempt < RESUBSCRIBE_ATTEMPTS - 1) {
-        await sleep(RESUBSCRIBE_DELAY_MS);
+        await waitRetryDelay();
       }
     }
-    throw lastError ?? new Error('The connection to Aman was lost and the reply could not be rejoined.');
+    // A refusal with a status (the key was revoked mid-turn, say) reaches the
+    // caller as it came, so it can be worded from its status and code. A bare
+    // connection failure becomes the plain lost line.
+    if (lastError !== undefined && statusCodeOfError(lastError) !== undefined) {
+      throw lastError;
+    }
+    throw new Error(CONNECTION_LOST_LINE, lastError === undefined ? undefined : { cause: lastError });
+  }
+
+  /**
+   * Yields one turn's events from its stream. When the connection drops after
+   * the turn was created, the turn is rejoined through the subscribe route,
+   * like the web app does. A failure before the turn exists, or one the server
+   * answered with a status, reaches the caller as it came.
+   */
+  async function* pumpTurn(sessionId: string, stream: TurnStream, hooks?: StreamHooks): AsyncGenerator<ChatEvent> {
+    const cursor = { sequence: 0 };
+    let fallback = 0;
+    let turnId: string | undefined;
+    let sawDone = false;
+    try {
+      for await (const item of stream.withMetadata()) {
+        const seq = sequenceNumber(item.id, fallback);
+        cursor.sequence = seq;
+        fallback = seq + 1;
+        if (item.data.type === 'turn.created') {
+          turnId = item.data.turnId;
+        }
+        yield item.data;
+        if (item.data.type === 'turn.done') {
+          sawDone = true;
+          return;
+        }
+      }
+    } catch (error) {
+      if (turnId === undefined) {
+        if (statusCodeOfError(error) !== undefined) {
+          throw error;
+        }
+        throw new Error(COULD_NOT_REACH_LINE, { cause: error });
+      }
+      // A drop after the turn was created is rejoined below, like the web app does.
+    }
+    if (!sawDone && turnId !== undefined) {
+      hooks?.onConnectionLost?.();
+      yield* resubscribe(sessionId, turnId, cursor);
+    }
   }
 
   return {
@@ -171,44 +286,82 @@ export function createChatClient(options: {
       return newestFirst.reverse();
     },
 
-    async *streamMessage(sessionId: string, text: string): AsyncGenerator<ChatEvent> {
+    async *streamMessage(sessionId: string, text: string, hooks?: StreamHooks): AsyncGenerator<ChatEvent> {
       const clientTimezone = resolveClientTimezone();
       const stream = await client.sessions.createTurnStream(sessionId, {
         input: [{ type: 'user.message', content: text }],
         previousTurnId: 'auto',
         ...(clientTimezone === undefined ? {} : { clientTimezone }),
       });
-      const cursor = { sequence: 0 };
-      let fallback = 0;
-      let turnId: string | undefined;
-      let sawDone = false;
-      try {
-        for await (const item of stream.withMetadata()) {
-          const seq = sequenceNumber(item.id, fallback);
-          cursor.sequence = seq;
-          fallback = seq + 1;
-          if (item.data.type === 'turn.created') {
-            turnId = item.data.turnId;
-          }
-          yield item.data;
-          if (item.data.type === 'turn.done') {
-            sawDone = true;
-            return;
+      yield* pumpTurn(sessionId, stream, hooks);
+    },
+
+    async *answerApproval(
+      sessionId: string,
+      approval: PendingApproval,
+      decision: HeldActionDecision,
+      hooks?: StreamHooks,
+    ): AsyncGenerator<ChatEvent, HeldActionOutcome> {
+      const decisionBody: TrueForgeApi.ApprovalDecision =
+        decision === 'deny'
+          ? { status: 'deny' }
+          : { status: 'allow', scope: decision === 'always_allow' ? 'always' : 'once' };
+      const stream = await client.sessions.createTurnStream(sessionId, {
+        input: [
+          {
+            type: 'user.tool_approval',
+            threadId: approval.threadId,
+            toolCallId: approval.toolCallId,
+            approval: decisionBody,
+          },
+        ],
+        previousTurnId: 'auto',
+      });
+      let outcome: HeldActionOutcome = 'unclear';
+      for await (const event of pumpTurn(sessionId, stream, hooks)) {
+        if (event.type === 'tool.response.v2' && event.toolCallId === approval.toolCallId) {
+          outcome = heldOutcomeOfDisposition(event.disposition);
+        }
+        yield event;
+      }
+      return outcome;
+    },
+
+    async stopTurn(sessionId: string): Promise<void> {
+      await client.sessions.cancel(sessionId, {});
+    },
+
+    async pendingApprovals(sessionId: string): Promise<PendingApproval[]> {
+      const tip = await resync.peekSessionTip({ sessionId });
+      if (tip === null || tip.pendingApprovals.length === 0) {
+        return [];
+      }
+      const response = await client.sessions.getTurn(sessionId, tip.turnId);
+      const state = response.data.state;
+      if (state.status !== 'done') {
+        return [];
+      }
+      const wanted = new Set(tip.pendingApprovals.map(pending => pending.toolCallId));
+      const approvals: PendingApproval[] = [];
+      for (const action of state.requiredActions) {
+        if (action.type !== 'tool.approval_required') {
+          continue;
+        }
+        for (const ref of action.toolCalls) {
+          if (wanted.has(ref.id)) {
+            approvals.push(pendingApprovalFromRef({ ref, threadId: action.threadId, toolName: null }));
           }
         }
-      } catch (error) {
-        if (turnId === undefined) {
-          throw error;
-        }
-        // A drop after the turn was created is rejoined below, like the web app does.
       }
-      if (!sawDone && turnId !== undefined) {
-        yield* resubscribe(sessionId, turnId, cursor);
-      }
+      return approvals;
     },
 
     async peekTip(sessionId: string): Promise<SessionTipInfo | null> {
       return resync.peekSessionTip({ sessionId });
+    },
+
+    retryConnectionNow(): void {
+      wakeRetry?.();
     },
   };
 }

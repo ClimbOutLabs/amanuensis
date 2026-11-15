@@ -66,7 +66,14 @@ function fakeClient(overrides: Partial<ChatClient> = {}): ChatClient {
     streamMessage: async function* () {
       yield* [];
     },
+    answerApproval: async function* () {
+      yield* [];
+      return 'unclear';
+    },
+    stopTurn: async () => undefined,
+    pendingApprovals: async () => [],
     peekTip: async () => null,
+    retryConnectionNow: () => undefined,
     ...overrides,
   };
 }
@@ -351,6 +358,453 @@ describe('ChatView', () => {
     expect(frame).toContain(`Pair again with: aman-tui login ${WEB}`);
     expect(frame).not.toContain('Status code');
     expect(frame).not.toContain('"error"');
+    app.unmount();
+  });
+
+  it('shows the re-pair line when the key is refused mid-chat on send', async () => {
+    const refused = new TrueForgeError({
+      statusCode: 401,
+      body: { error: { message: 'Authentication required.' } },
+    });
+    const client = fakeClient({
+      streamMessage: async function* () {
+        yield* [];
+        throw refused;
+      },
+    });
+    const app = renderApp(
+      <ChatView
+        client={client}
+        sessionId="session-1"
+        title="Weekend plans"
+        speakerName="Mannie"
+        webAddress={WEB}
+        onBack={() => undefined}
+      />,
+    );
+    await untilText(app, '›');
+    await typeAndSend(app, 'Hello');
+    await untilText(app, "no longer accepts this terminal's key");
+    const frame = app.text().replace(/\s+/g, ' ');
+    expect(frame).toContain(`Pair again with: aman-tui login ${WEB}`);
+    expect(frame).not.toContain('Check your connection, then send your message again');
+    app.unmount();
+  });
+
+  it('shows the lost line while a dropped reply rejoins, then the reply', async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const client = fakeClient({
+      streamMessage: async function* (_sessionId, _text, hooks) {
+        yield turnCreated('e1', [{ type: 'user.message', content: 'Hello' }]);
+        yield delta('e2', 'Hel');
+        hooks?.onConnectionLost?.();
+        await gate;
+        yield modelMessage('e3', 'Hello Nora');
+        yield turnDone('e4');
+      },
+    });
+    const app = renderApp(
+      <ChatView
+        client={client}
+        sessionId="session-1"
+        title="Weekend plans"
+        speakerName="Mannie"
+        webAddress={WEB}
+        onBack={() => undefined}
+      />,
+    );
+    await untilText(app, '›');
+    await typeAndSend(app, 'Hello');
+    await untilText(app, 'The connection was lost.');
+    expect(app.text()).toContain('Press R to retry now');
+    release();
+    await untilText(app, 'Hello Nora');
+    app.unmount();
+  });
+
+  it('stops a streaming reply on Esc, keeping what had arrived', async () => {
+    let releaseStop: () => void = () => undefined;
+    const stopGate = new Promise<void>(resolve => {
+      releaseStop = resolve;
+    });
+    const stopTurn = vi.fn(async () => {
+      releaseStop();
+    });
+    const client = fakeClient({
+      streamMessage: async function* () {
+        yield turnCreated('e1', [{ type: 'user.message', content: 'Tell me a story' }]);
+        yield delta('e2', 'Once upon a');
+        await stopGate;
+        yield {
+          id: 'e3',
+          type: 'turn.done',
+          createdAt: AT,
+          threadId: null,
+          state: { status: 'cancelled', completedAt: AT, reason: 'client-cancelled' },
+        } satisfies ChatEvent;
+      },
+      stopTurn,
+    });
+    const app = renderApp(
+      <ChatView
+        client={client}
+        sessionId="session-1"
+        title="Stories"
+        speakerName="Mannie"
+        webAddress={WEB}
+        onBack={() => undefined}
+      />,
+    );
+    await untilText(app, '›');
+    await typeAndSend(app, 'Tell me a story');
+    await untilText(app, 'Once upon a');
+    await vi.waitFor(
+      () => {
+        app.write('\u001b');
+        expect(stopTurn).toHaveBeenCalledWith('session-1');
+      },
+      { timeout: 10000, interval: 50 },
+    );
+    await untilText(app, 'This reply was stopped.');
+    expect(app.text()).toContain('Once upon a');
+    app.unmount();
+  });
+});
+
+const BODY_LINES = Array.from({ length: 30 }, (_, index) => `Body line ${String(index + 1)} of the message.`);
+const LONG_BODY = [...BODY_LINES, 'The last line mentions the 8:15 train.'].join('\n');
+
+const EMAIL_CARD: TrueForgeApi.Tier3Card = {
+  amount: null,
+  cannotBeUndone: null,
+  copy: { headline: 'Send this email to Pippa?', consequence: 'Once it is sent, it cannot be unsent.', reason: null },
+  destination: null,
+  destinationHost: null,
+  mailFrom: 'nora@example.com',
+  outboundText: null,
+  outboundTruncated: false,
+  parsedCommand: null,
+  plainWhat: 'Send an email to Pippa.',
+  plainWhy: 'You asked for the train summary to go to Pippa.',
+  recipient: null,
+  whyAskedAgain: null,
+  safeChoice: true,
+  email: {
+    action: 'send',
+    to: [{ address: 'pippa@example.com', name: 'Pippa' }],
+    cc: [{ address: 'sam@example.com', name: '' }],
+    bcc: [],
+    subject: 'Train times',
+    body: LONG_BODY,
+    checkCode: 'K7Q2',
+    replaces: null,
+    replyInThread: null,
+  },
+};
+
+function sendEmailToolCall(): TrueForgeApi.ToolCall {
+  return {
+    id: 'call-1',
+    type: 'function',
+    function: { name: 'send_email', arguments: '{"subject":"Train times"}' },
+    toolInfo: { type: 'truefoundry-system', name: 'send_email' },
+  };
+}
+
+function approvalRequiredEvent(
+  id: string,
+  card: TrueForgeApi.Tier3Card | null,
+): TrueForgeApi.ToolApprovalRequiredEvent {
+  return {
+    id,
+    type: 'tool.approval_required',
+    createdAt: AT,
+    threadId: 'thread-1',
+    toolCalls: [{ id: 'call-1', sourceEventId: 'e2', tier3Card: card, canAlwaysAllow: true }],
+  };
+}
+
+function heldTurn(overrides: Partial<ChatClient>, card: TrueForgeApi.Tier3Card | null = EMAIL_CARD): ChatClient {
+  return fakeClient({
+    streamMessage: async function* () {
+      yield turnCreated('e1', [{ type: 'user.message', content: 'Send the summary to Pippa' }]);
+      yield modelMessage('e2', '', [sendEmailToolCall()]);
+      yield approvalRequiredEvent('e3', card);
+      yield {
+        id: 'e4',
+        type: 'turn.done',
+        createdAt: AT,
+        threadId: null,
+        state: {
+          status: 'done',
+          completedAt: AT,
+          output: null,
+          requiredActions: [approvalRequiredEvent('e3', card)],
+        },
+      } satisfies ChatEvent;
+    },
+    ...overrides,
+  });
+}
+
+function renderChat(client: ChatClient): RenderedApp {
+  return renderApp(
+    <ChatView
+      client={client}
+      sessionId="session-1"
+      title="Weekend plans"
+      speakerName="Mannie"
+      webAddress={WEB}
+      onBack={() => undefined}
+    />,
+  );
+}
+
+describe('ChatView approvals', () => {
+  it('shows the whole email draft, never approves on Enter, scrolls to every word, and approves on A', async () => {
+    const answerApproval = vi.fn();
+    const client = heldTurn({
+      answerApproval: async function* (sessionId, approval, decision) {
+        answerApproval(sessionId, approval, decision);
+        yield {
+          id: 'e5',
+          type: 'tool.response.v2',
+          createdAt: AT,
+          threadId: 'thread-1',
+          toolCallId: 'call-1',
+          content: '',
+          disposition: 'executed_ok',
+          admissionProvenance: { source: 'automatic' },
+        } satisfies ChatEvent;
+        yield modelMessage('e6', 'Sent.');
+        yield turnDone('e7');
+        return 'done';
+      },
+    });
+    const app = renderChat(client);
+    await untilText(app, '›');
+    await typeAndSend(app, 'Send the summary to Pippa');
+    await untilText(app, 'Waiting for your OK');
+    const frame = app.text();
+    expect(frame).toContain('Send this email to Pippa?');
+    expect(frame).toContain('From: nora@example.com');
+    expect(frame).toContain('To: Pippa (pippa@example.com)');
+    expect(frame).toContain('Subject: Train times');
+    expect(frame).toContain('Body line 1 of the message.');
+    // The end of the draft is not on screen yet, and nothing of it was cut.
+    expect(frame).not.toContain('The last line mentions the 8:15 train.');
+    // Enter sends chat messages. It never approves.
+    app.write('\r');
+    await new Promise(resolve => setTimeout(resolve, 200));
+    expect(answerApproval).not.toHaveBeenCalled();
+    // Scrolling reaches the last word of the draft.
+    await vi.waitFor(
+      () => {
+        app.write('\u001b[B');
+        expect(app.text()).toContain('The last line mentions the 8:15 train.');
+      },
+      { timeout: 10000, interval: 30 },
+    );
+    // The deliberate key answers through the continuation, and the turn resumes.
+    await vi.waitFor(
+      () => {
+        app.write('a');
+        expect(answerApproval).toHaveBeenCalled();
+      },
+      { timeout: 10000, interval: 50 },
+    );
+    expect(answerApproval.mock.calls[0]?.[1]).toMatchObject({ toolCallId: 'call-1', threadId: 'thread-1' });
+    expect(answerApproval.mock.calls[0]?.[2]).toBe('approve');
+    await untilText(app, 'Approved and done.');
+    app.unmount();
+  });
+
+  it('denies on D and shows the denied line', async () => {
+    const answerApproval = vi.fn();
+    const client = heldTurn({
+      answerApproval: async function* (sessionId, approval, decision) {
+        answerApproval(sessionId, approval, decision);
+        yield {
+          id: 'e5',
+          type: 'tool.response.v2',
+          createdAt: AT,
+          threadId: 'thread-1',
+          toolCallId: 'call-1',
+          content: '',
+          disposition: 'denied',
+          admissionProvenance: { source: 'automatic' },
+        } satisfies ChatEvent;
+        yield turnDone('e6');
+        return 'not_run';
+      },
+    });
+    const app = renderChat(client);
+    await untilText(app, '›');
+    await typeAndSend(app, 'Send the summary to Pippa');
+    await untilText(app, 'Waiting for your OK');
+    expect(app.text()).toContain("D: Don't send");
+    await vi.waitFor(
+      () => {
+        app.write('d');
+        expect(answerApproval).toHaveBeenCalled();
+      },
+      { timeout: 10000, interval: 50 },
+    );
+    expect(answerApproval.mock.calls[0]?.[2]).toBe('deny');
+    await untilText(app, 'Denied. Nothing was done.');
+    app.unmount();
+  });
+
+  it('shows the moved-on line when the answer comes back stale', async () => {
+    const stale = new TrueForgeError({
+      statusCode: 409,
+      body: { error: { message: 'Stale.', code: 'stale_approval_continuation' } },
+    });
+    const client = heldTurn({
+      answerApproval: async function* () {
+        yield* [];
+        throw stale;
+      },
+    });
+    const app = renderChat(client);
+    await untilText(app, '›');
+    await typeAndSend(app, 'Send the summary to Pippa');
+    await untilText(app, 'Waiting for your OK');
+    app.write('a');
+    await untilText(app, 'The chat moved on before this was answered.');
+    expect(app.text()).toContain('Nothing was approved or run.');
+    app.unmount();
+  });
+
+  it('shows the already-answered line on a conflict, and the ended line when the request is over', async () => {
+    const conflict = new TrueForgeError({
+      statusCode: 409,
+      body: { error: { message: 'Conflict.', code: 'approval_conflict' } },
+    });
+    const conflictApp = renderChat(
+      heldTurn({
+        answerApproval: async function* () {
+          yield* [];
+          throw conflict;
+        },
+      }),
+    );
+    await untilText(conflictApp, '›');
+    await typeAndSend(conflictApp, 'Send the summary to Pippa');
+    await untilText(conflictApp, 'Waiting for your OK');
+    conflictApp.write('a');
+    await untilText(conflictApp, 'This was already answered, or the chat has moved on.');
+    conflictApp.unmount();
+
+    const ended = new TrueForgeError({
+      statusCode: 409,
+      body: { error: { message: 'Ended.', code: 'approval_request_ended' } },
+    });
+    const endedApp = renderChat(
+      heldTurn({
+        answerApproval: async function* () {
+          yield* [];
+          throw ended;
+        },
+      }),
+    );
+    await untilText(endedApp, '›');
+    await typeAndSend(endedApp, 'Send the summary to Pippa');
+    await untilText(endedApp, 'Waiting for your OK');
+    endedApp.write('a');
+    await untilText(endedApp, 'This request ended. Ask again if you still need it.');
+    endedApp.unmount();
+  });
+
+  it('keeps the approval and shows the still-working line when the answer is refused as too early', async () => {
+    const running = new TrueForgeError({
+      statusCode: 409,
+      body: { error: { message: 'Running.', code: 'previous_turn_running' } },
+    });
+    let attempts = 0;
+    const client = heldTurn({
+      answerApproval: async function* () {
+        attempts += 1;
+        if (attempts === 1) {
+          throw running;
+        }
+        yield {
+          id: 'e5',
+          type: 'tool.response.v2',
+          createdAt: AT,
+          threadId: 'thread-1',
+          toolCallId: 'call-1',
+          content: '',
+          disposition: 'executed_ok',
+          admissionProvenance: { source: 'automatic' },
+        } satisfies ChatEvent;
+        yield turnDone('e6');
+        return 'done';
+      },
+    });
+    const app = renderChat(client);
+    await untilText(app, '›');
+    await typeAndSend(app, 'Send the summary to Pippa');
+    await untilText(app, 'Waiting for your OK');
+    await vi.waitFor(
+      () => {
+        app.write('a');
+        expect(attempts).toBe(1);
+      },
+      { timeout: 10000, interval: 50 },
+    );
+    await untilText(app, 'is still working on your last message');
+    // The approval stayed: answering again works.
+    await vi.waitFor(
+      () => {
+        app.write('a');
+        expect(attempts).toBe(2);
+      },
+      { timeout: 10000, interval: 50 },
+    );
+    await untilText(app, 'Approved and done.');
+    app.unmount();
+  });
+
+  it('answers a plan grant the same way, from its tool name alone', async () => {
+    const answerApproval = vi.fn();
+    const client = heldTurn(
+      {
+        answerApproval: async function* (sessionId, approval, decision) {
+          answerApproval(sessionId, approval, decision);
+          yield {
+            id: 'e5',
+            type: 'tool.response.v2',
+            createdAt: AT,
+            threadId: 'thread-1',
+            toolCallId: 'call-1',
+            content: '',
+            disposition: 'executed_ok',
+            admissionProvenance: { source: 'automatic' },
+          } satisfies ChatEvent;
+          yield turnDone('e6');
+          return 'done';
+        },
+      },
+      null,
+    );
+    const app = renderChat(client);
+    await untilText(app, '›');
+    await typeAndSend(app, 'Send the summary to Pippa');
+    await untilText(app, 'Waiting for your OK');
+    expect(app.text()).toContain('Needs your OK');
+    await vi.waitFor(
+      () => {
+        app.write('a');
+        expect(answerApproval).toHaveBeenCalled();
+      },
+      { timeout: 10000, interval: 50 },
+    );
+    expect(answerApproval.mock.calls[0]?.[2]).toBe('approve');
+    await untilText(app, 'Approved and done.');
     app.unmount();
   });
 });

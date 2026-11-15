@@ -1,5 +1,6 @@
 import type { TrueForgeApi } from '@truefoundry/trueforge-sdk';
 
+import { pendingApprovalFromRef, type PendingApproval } from './approvals.js';
 import { outcomeOfDisposition, plainToolName, toolCallDetail, type ToolOutcome } from './words.js';
 
 /** One event from a chat, from the live stream or from the saved event feed. Both carry the same shapes. */
@@ -31,9 +32,8 @@ export class ChatView {
   readonly #toolCalls = new Map<string, ToolCallRecord>();
   readonly #toolBlocks = new Map<string, Extract<ViewBlock, { kind: 'tool' }>>();
   readonly #openAssistant = new Map<string, Extract<ViewBlock, { kind: 'assistant' }>>();
+  readonly #pendingApprovals = new Map<string, PendingApproval>();
   #counter = 0;
-  #approvalWaiting = false;
-  #approvalNoteShown = false;
 
   constructor(webAddress: string) {
     this.#webAddress = webAddress;
@@ -163,6 +163,57 @@ export class ChatView {
     this.#closeAssistant(event.threadId);
   }
 
+  /** Adds one plain note line to the view, for an outcome the events themselves do not carry. */
+  addNote(text: string): void {
+    this.#note({ text, seed: 'note' });
+  }
+
+  /** The actions still waiting for the person's answer, in the order they were held. */
+  pendingApprovals(): PendingApproval[] {
+    return [...this.#pendingApprovals.values()];
+  }
+
+  /**
+   * Records one waiting action, or fills in the card and tool name of one the
+   * fold already holds. The tip read and the event fold both learn about
+   * waiting actions, and neither may wipe what the other already knows.
+   */
+  registerPending(approval: PendingApproval): void {
+    const existing = this.#pendingApprovals.get(approval.toolCallId);
+    if (existing !== undefined) {
+      if (existing.card === null && approval.card !== null) {
+        existing.card = approval.card;
+      }
+      if (existing.toolName === null && approval.toolName !== null) {
+        existing.toolName = approval.toolName;
+      }
+    } else {
+      this.#pendingApprovals.set(approval.toolCallId, approval);
+    }
+    const block = this.#toolBlock(approval.toolCallId);
+    if (block.outcome === null) {
+      block.outcome = 'waiting_approval';
+    }
+  }
+
+  /** Drops one waiting action, because it was answered or can no longer be answered. */
+  resolvePending(toolCallId: string): void {
+    this.#pendingApprovals.delete(toolCallId);
+  }
+
+  #registerApprovalRefs(threadId: string, refs: readonly TrueForgeApi.ApprovalToolCallRef[]): void {
+    for (const ref of refs) {
+      const record = this.#toolCalls.get(ref.id);
+      this.registerPending(
+        pendingApprovalFromRef({
+          ref,
+          threadId,
+          toolName: record === undefined ? null : plainToolName(record.name),
+        }),
+      );
+    }
+  }
+
   /** Closes every open block, for when a stream ends without its finishing events. */
   settle(): void {
     for (const threadId of [...this.#openAssistant.keys()]) {
@@ -178,8 +229,6 @@ export class ChatView {
     this.#seenEventIds.add(event.id);
     switch (event.type) {
       case 'turn.created': {
-        this.#approvalWaiting = false;
-        this.#approvalNoteShown = false;
         this.#applyUserInput(event.input, event.id);
         return;
       }
@@ -202,13 +251,11 @@ export class ChatView {
         return;
       }
       case 'tool.approval_required': {
-        this.#approvalWaiting = true;
-        for (const toolCall of event.toolCalls) {
-          this.#toolBlock(toolCall.id).outcome = 'waiting_approval';
-        }
+        this.#registerApprovalRefs(event.threadId, event.toolCalls);
         return;
       }
       case 'tool.response.v2': {
+        this.#pendingApprovals.delete(event.toolCallId);
         this.#toolBlock(event.toolCallId).outcome = outcomeOfDisposition(event.disposition);
         return;
       }
@@ -227,14 +274,16 @@ export class ChatView {
         if (state.status === 'error') {
           this.#note({ text: 'Something went wrong with that reply. Send your message again.', seed: 'turn-error' });
         }
-        const heldActions = state.status === 'done' ? state.requiredActions : [];
-        const heldApproval = heldActions.some(action => action.type === 'tool.approval_required');
-        if ((this.#approvalWaiting || heldApproval) && !this.#approvalNoteShown) {
-          this.#approvalNoteShown = true;
-          this.#note({
-            text: `This chat is waiting for an approval. Approvals are answered in the web app for now: ${this.#webAddress}`,
-            seed: 'approval-waiting',
-          });
+        if (state.status === 'cancelled') {
+          // Whatever part of the reply arrived stays on screen. This line says why it ends there.
+          this.#note({ text: 'This reply was stopped.', seed: 'turn-stopped' });
+        }
+        if (state.status === 'done') {
+          for (const action of state.requiredActions) {
+            if (action.type === 'tool.approval_required') {
+              this.#registerApprovalRefs(action.threadId, action.toolCalls);
+            }
+          }
         }
         return;
       }
