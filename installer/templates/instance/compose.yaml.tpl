@@ -7,6 +7,7 @@ services:
   # can restart without stranding the other, and the login issuer name is the same URL for the browser and for the app.
   # Other devices come in through the lan service below, so an address this computer no longer has never stops these.
   loopback:
+    container_name: @@CONTAINER_PREFIX@@-loopback
     image: @@APP_IMAGE@@
     # Built on this machine and never pulled.
     pull_policy: never
@@ -36,6 +37,7 @@ services:
 @@IF_LAN@@  # so when this computer loses one of these addresses only this one fails to start, and Aman still answers on
 @@IF_LAN@@  # 127.0.0.1. Never a wildcard.
 @@IF_LAN@@  lan:
+@@IF_LAN@@    container_name: @@CONTAINER_PREFIX@@-lan
 @@IF_LAN@@    image: @@APP_IMAGE@@
 @@IF_LAN@@    pull_policy: never
 @@IF_LAN@@    init: true
@@ -66,6 +68,7 @@ services:
   # on 8002. The services are on a network of their own with this relay alone, so they have no route to the app, the
   # login service or the https front end.
   speech-link:
+    container_name: @@CONTAINER_PREFIX@@-speech-link
     image: @@APP_IMAGE@@
     pull_policy: never
     init: true
@@ -91,6 +94,7 @@ services:
     restart: unless-stopped
 
   app:
+    container_name: @@CONTAINER_PREFIX@@-app
     image: @@APP_IMAGE@@
     pull_policy: never
     network_mode: 'service:loopback'
@@ -150,6 +154,7 @@ services:
 @@IF_LOCAL_MODEL@@  # named with aman local-model. This host side dials the model and listens only on socket files in a volume it shares
 @@IF_LOCAL_MODEL@@  # with the link side below, never on a network port, so nothing else reaches the model through it.
 @@IF_LOCAL_MODEL@@  local-model-host:
+@@IF_LOCAL_MODEL@@    container_name: @@CONTAINER_PREFIX@@-local-model-host
 @@IF_LOCAL_MODEL@@    image: @@APP_IMAGE@@
 @@IF_LOCAL_MODEL@@    pull_policy: never
 @@IF_LOCAL_MODEL@@    init: true
@@ -181,6 +186,7 @@ services:
 @@IF_LOCAL_MODEL@@  # The link side: answers the app at aman-local-model on a network only the app's network holder shares, and passes
 @@IF_LOCAL_MODEL@@  # each connection to the host side's socket file.
 @@IF_LOCAL_MODEL@@  local-model-link:
+@@IF_LOCAL_MODEL@@    container_name: @@CONTAINER_PREFIX@@-local-model-link
 @@IF_LOCAL_MODEL@@    image: @@APP_IMAGE@@
 @@IF_LOCAL_MODEL@@    pull_policy: never
 @@IF_LOCAL_MODEL@@    init: true
@@ -211,6 +217,7 @@ services:
 @@IF_TLS@@  # Serves the app over https on the addresses of this computer, with a certificate from its own authority, and sends the
 @@IF_TLS@@  # plain port to https. It shares the network of the app, so the app is never reachable except through it.
 @@IF_TLS@@  tls:
+@@IF_TLS@@    container_name: @@CONTAINER_PREFIX@@-tls
 @@IF_TLS@@    image: @@CADDY_IMAGE@@
 @@IF_TLS@@    network_mode: 'service:loopback'
 @@IF_TLS@@    user: '@@TLS_USER@@'
@@ -263,6 +270,7 @@ services:
 # and the Settings Calendar card changes through the same agent on port 9560.
 # The tool server inside runs only while a login is saved.
 @@IF_CALENDAR@@  calendar-caldav:
+@@IF_CALENDAR@@    container_name: @@CONTAINER_PREFIX@@-calendar-caldav
 @@IF_CALENDAR@@    image: @@CALENDAR_IMAGE@@
 @@IF_CALENDAR@@    pull_policy: never
 @@IF_CALENDAR@@    environment:
@@ -292,6 +300,7 @@ services:
 # through the sidecar's account agent and the Settings Email card changes through the same agent on port 9559.
 # The account agent answers only a caller that presents this instance's secret.
 @@IF_EMAIL@@  mail-email:
+@@IF_EMAIL@@    container_name: @@CONTAINER_PREFIX@@-mail-email
 @@IF_EMAIL@@    image: @@MAIL_EMAIL_IMAGE@@
 @@IF_EMAIL@@    pull_policy: never
 @@IF_EMAIL@@    # The wrapper starts the connector on the send list the app writes, and restarts it when that list changes.
@@ -336,6 +345,7 @@ services:
 @@IF_BROWSER@@# through the gateway's proxy, which refuses this computer and private networks, and the app reaches it only through
 @@IF_BROWSER@@# the gateway's relay, which checks the secret the app and the gateway share. This container never holds that secret.
 @@IF_BROWSER@@  browser:
+@@IF_BROWSER@@    container_name: @@CONTAINER_PREFIX@@-browser
 @@IF_BROWSER@@    image: @@BROWSER_IMAGE@@
 @@IF_BROWSER@@    pull_policy: never
 @@IF_BROWSER@@    init: true
@@ -364,6 +374,7 @@ services:
 @@IF_BROWSER@@    restart: unless-stopped
 
 @@IF_BROWSER@@  browser-gateway:
+@@IF_BROWSER@@    container_name: @@CONTAINER_PREFIX@@-browser-gateway
 @@IF_BROWSER@@    image: @@BROWSER_GATEWAY_IMAGE@@
 @@IF_BROWSER@@    pull_policy: never
 @@IF_BROWSER@@    environment:
@@ -392,6 +403,7 @@ services:
 @@IF_BROWSER@@    restart: unless-stopped
 
   dex:
+    container_name: @@CONTAINER_PREFIX@@-dex
     image: @@DEX_IMAGE@@
     network_mode: 'service:loopback'
     command: ['dex', 'serve', '/etc/dex/config.yaml']
@@ -441,7 +453,7 @@ volumes:
 @@IF_EMAIL@@      com.amanuensis.instance: @@NAME@@
 @@IF_EMAIL@@  # Records which send list the Email connector loaded. Written by the connector, read by the app.
 @@IF_EMAIL@@  mail-policy-status:
-@@IF_EMAIL@@    name: aman_@@NAME@@_mail_policy_status
+@@IF_EMAIL@@    name: aman_@@SHORT_NAME@@_mail_policy_status
 @@IF_EMAIL@@    labels:
 @@IF_EMAIL@@      com.amanuensis.instance: @@NAME@@
 @@IF_EMAIL@@  # Mail metadata index (SQLite). Holds mail metadata at rest, never credentials.
@@ -466,7 +478,7 @@ volumes:
 @@IF_BROWSER@@      com.amanuensis.instance: @@NAME@@
 @@IF_LOCAL_MODEL@@  # The local model bridge's socket files. Holds no data.
 @@IF_LOCAL_MODEL@@  local-model-sockets:
-@@IF_LOCAL_MODEL@@    name: aman_@@NAME@@_local_model
+@@IF_LOCAL_MODEL@@    name: aman_@@SHORT_NAME@@_local_model
 @@IF_LOCAL_MODEL@@    labels:
 @@IF_LOCAL_MODEL@@      com.amanuensis.instance: @@NAME@@
 @@IF_SANDBOX@@  # Created by the slots project, which the installer starts before this one.
