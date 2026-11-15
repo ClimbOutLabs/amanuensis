@@ -2,6 +2,7 @@
  * The Telegram chat is a plain chat, like one started here: the app lists it under the person's own
  * assistant rather than under the made-up name of an agent the host makes, and its setup can change.
  */
+import { TELEGRAM_EARLIER_CHAT_DELETED } from '../../../src/apis/telegram';
 import { STANDALONE_REQUEST_CONTEXT } from '../../../src/auth/identity';
 import configuration from '../../../src/config';
 import { TelegramStore } from '../../../src/db/telegramStore';
@@ -20,8 +21,24 @@ const TELEGRAM_USER_ID = 4242;
 
 describe('the Telegram chat', () => {
   let server: ApprovalTestServer;
+  /** The text of every message the server's own bot tried to send; none reaches Telegram. */
+  const botTexts: string[] = [];
 
   beforeAll(async () => {
+    const realFetch = globalThis.fetch;
+    jest.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = String(input instanceof Request ? input.url : input);
+      if (!url.includes('api.telegram.org')) {
+        return realFetch(input, init);
+      }
+      if (url.endsWith('/sendMessage') && typeof init?.body === 'string') {
+        const body: unknown = JSON.parse(init.body);
+        if (typeof body === 'object' && body !== null && 'text' in body && typeof body.text === 'string') {
+          botTexts.push(body.text);
+        }
+      }
+      throw new Error('No Telegram in tests.');
+    });
     server = await startApprovalTestServer();
     const store = new TelegramStore(server.db());
     await store.saveConnection({
@@ -48,6 +65,7 @@ describe('the Telegram chat', () => {
   }, TIMEOUT_MS);
 
   afterAll(async () => {
+    jest.restoreAllMocks();
     await server.close();
   }, TIMEOUT_MS);
 
@@ -132,6 +150,23 @@ describe('the Telegram chat', () => {
       expect(session?.title ?? null).toBeNull();
       expect(session?.agent.type).toBe('inline');
       expect(await server.sessionStore().getSession({ tenant_id: TENANT, session_id: earlier })).toBeDefined();
+      expect(botTexts).not.toContain(TELEGRAM_EARLIER_CHAT_DELETED);
+    },
+    TIMEOUT_MS,
+  );
+
+  it(
+    'says so in Telegram when the chat in use was deleted in the app, and carries on in a new chat',
+    async () => {
+      const deleted = await chatInUse();
+      expect((await server.request(`/api/v1/sessions/${deleted}`, { method: 'DELETE' })).ok).toBe(true);
+      await send('And the second one?');
+      const fresh = await chatInUse();
+      expect(fresh).not.toBe(deleted);
+      expect(botTexts.filter(text => text === TELEGRAM_EARLIER_CHAT_DELETED)).toHaveLength(1);
+      await send('Thanks');
+      expect(await chatInUse()).toBe(fresh);
+      expect(botTexts.filter(text => text === TELEGRAM_EARLIER_CHAT_DELETED)).toHaveLength(1);
     },
     TIMEOUT_MS,
   );
