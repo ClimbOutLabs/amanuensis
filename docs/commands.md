@@ -125,6 +125,8 @@ Backups go to `~/.amanuensis/backups`, one folder per backup. Aman keeps the sev
 
     The second and third lines ask GitHub which release is the newest. Always update to a release, not to code that is still being worked on. If the `git checkout` line fails, there is no newer release, and nothing was changed.
 
+    On Ubuntu, new files from `git checkout` or `git pull` can be changed by your group as well as by you. When that group is yours alone, `aman upgrade` takes that right away from the group by itself and says so. In any other case it stops and tells you what to do, because it won't run code that another account could have changed.
+
 === "Windows"
 
     Choose **Update Aman** in the Start menu. Or type `aman upgrade` in PowerShell.

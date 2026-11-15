@@ -50,7 +50,8 @@ export function DropdownMenu({
     },
     [controlledOpen, onOpenChange],
   );
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  const [anchor, setAnchor] = useState<{ top: number; bottom: number; left: number; right: number } | null>(null);
+  const [placement, setPlacement] = useState<'top' | 'bottom'>(side);
   const containerRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const focusedOpenRef = useRef(false);
@@ -58,7 +59,7 @@ export function DropdownMenu({
 
   useLayoutEffect(() => {
     if (!open) {
-      setPos(null);
+      setAnchor(null);
       return;
     }
 
@@ -66,10 +67,7 @@ export function DropdownMenu({
       const el = containerRef.current;
       if (!el) return;
       const rect = el.getBoundingClientRect();
-      setPos({
-        top: side === 'top' ? rect.top - 4 : rect.bottom + 4,
-        left: align === 'end' ? rect.right : rect.left,
-      });
+      setAnchor({ top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right });
     };
 
     update();
@@ -79,7 +77,22 @@ export function DropdownMenu({
       window.removeEventListener('scroll', update, true);
       window.removeEventListener('resize', update);
     };
-  }, [open, align, side]);
+  }, [open]);
+
+  // Flip to the other side when the preferred side cannot fit the menu, so it is never cut off by the window edge.
+  // Runs before paint, so the flip is not visible.
+  useLayoutEffect(() => {
+    const menu = menuRef.current;
+    if (!anchor || !menu) return;
+    const gap = 4;
+    const spaceAbove = anchor.top - gap;
+    const spaceBelow = window.innerHeight - anchor.bottom - gap;
+    const preferredSpace = side === 'top' ? spaceAbove : spaceBelow;
+    const otherSpace = side === 'top' ? spaceBelow : spaceAbove;
+    const height = menu.offsetHeight;
+    const flip = preferredSpace < height && otherSpace >= height;
+    setPlacement(flip ? (side === 'top' ? 'bottom' : 'top') : side);
+  }, [anchor, side]);
 
   useEffect(() => {
     if (!open) return;
@@ -117,11 +130,11 @@ export function DropdownMenu({
       focusedOpenRef.current = false;
       return;
     }
-    if (pos == null || focusedOpenRef.current) return;
+    if (anchor == null || focusedOpenRef.current) return;
     const first = menuRef.current?.querySelector<HTMLElement>('[role="menuitem"]:not([disabled])');
     first?.focus();
     focusedOpenRef.current = true;
-  }, [open, pos]);
+  }, [open, anchor]);
 
   useEffect(() => {
     if (!open) return;
@@ -175,17 +188,17 @@ export function DropdownMenu({
     : trigger;
 
   const menu =
-    open && pos != null
+    open && anchor != null
       ? createPortal(
           <div
             ref={menuRef}
             id={menuId}
             role="menu"
             style={{
-              top: pos.top,
-              left: pos.left,
+              top: placement === 'top' ? anchor.top - 4 : anchor.bottom + 4,
+              left: align === 'end' ? anchor.right : anchor.left,
               transform:
-                [align === 'end' ? 'translateX(-100%)' : null, side === 'top' ? 'translateY(-100%)' : null]
+                [align === 'end' ? 'translateX(-100%)' : null, placement === 'top' ? 'translateY(-100%)' : null]
                   .filter(value => value !== null)
                   .join(' ') || undefined,
             }}
