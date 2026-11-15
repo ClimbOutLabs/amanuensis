@@ -34,6 +34,11 @@ const PUBLIC_ROUTES = new Set([
   'GET /api/v1/auth/callback',
   'POST /api/v1/auth/logout',
   'GET /api/v1/mcp-servers/oauth/callback',
+  // Terminal pairing starts signed out by design: the terminal has no key yet. Starts
+  // are rate limited like the sign-in form, and the key is released only after the
+  // signed-in owner confirms the code, so an anonymous start grants nothing.
+  'POST /api/v1/terminal-pairings',
+  'POST /api/v1/terminal-pairings/complete',
 ]);
 
 /** Routes that answer any signed-in user for an id they did not create, because the record is shared on purpose. */

@@ -58,6 +58,7 @@ import type {
   TelegramPendingApprovalTable,
   TelegramPendingReplyTable,
 } from '../telegramStore';
+import type { TerminalKeyTable } from '../terminalKeyStore';
 import type { TextContactTable, TextSendCountTable, TextWordTable } from '../textContactStore';
 
 /**
@@ -846,6 +847,7 @@ export interface Database {
   sentinel_audit: SentinelAuditTable;
   brief_item_completion: BriefItemCompletionTable;
   recall_exclusion: RecallExclusionTable;
+  terminal_key: TerminalKeyTable;
   delivery: DeliveryTable;
   delivery_attempt: DeliveryAttemptTable;
   reach_settings: ReachSettingsTable;

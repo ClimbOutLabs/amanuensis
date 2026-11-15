@@ -20,6 +20,7 @@ import { SqlitePersonalizationStore } from '../../../src/db/sqlite/personalizati
 import { SqliteSandboxProviderStore } from '../../../src/db/sqlite/sandbox-provider-store/SqliteSandboxProviderStore';
 import { SqliteSkillStore } from '../../../src/db/sqlite/skill-store/SqliteSkillStore';
 import { SqliteOAuthTokenStore } from '../../../src/db/sqlite/token-store/SqliteOAuthTokenStore';
+import { TerminalKeyStore } from '../../../src/db/terminalKeyStore';
 import type { CheckSavedModelProvider } from '../../../src/runtime/modelProviderCheck';
 import { configureRemoteAddressCheck, type ResolveAddresses } from '../../../src/runtime/remoteAddress';
 import { RequestErrorResponseSchema } from '../../../src/schemas/errors';
@@ -135,6 +136,8 @@ async function createRouters(
       resolveSkillStore: () => new SqliteSkillStore(db),
       resolveSandboxProviderStore: () => new SqliteSandboxProviderStore(db),
       globalSettingsStore,
+      terminalKeyStore: new TerminalKeyStore(db),
+      audit: { record: () => Promise.resolve() },
       personalizationStore: new SqlitePersonalizationStore(db),
       tokenFactoryBudget: uncappedTokenFactoryBudget,
       memoryTidy: { tidyNow: () => undefined, tidyState: () => ({ status: 'idle' }) },

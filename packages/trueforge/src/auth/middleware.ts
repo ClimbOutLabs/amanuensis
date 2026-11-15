@@ -8,6 +8,7 @@ import type { Authenticator } from './authenticator';
 import { toRequestContext, type IdTokenClaims } from './claims';
 import { hasAdminRole, type RequestContext } from './identity';
 import { getOidcVerify } from './oidc';
+import { TERMINAL_KEY_SCOPE_MESSAGE, terminalKeyMayReachPath } from './terminalScope';
 import { extractRequestToken, readBearerToken } from './token';
 
 export { extractRequestToken, readBearerToken };
@@ -17,6 +18,11 @@ export function createAuthMiddleware(authenticator: Authenticator): MiddlewareHa
     const requestContext = await tryAuthenticate({ authenticator, context: c });
     if (requestContext === undefined) {
       throw new HTTPException(401, { message: 'Authentication required' });
+    }
+    // A paired terminal key is limited to the chat scope, here at the auth layer, so
+    // no route has to remember to refuse it.
+    if (requestContext.terminal_key_id !== undefined && !terminalKeyMayReachPath(c.req.path)) {
+      throw new HTTPException(403, { message: TERMINAL_KEY_SCOPE_MESSAGE });
     }
     c.set('request_context', requestContext);
     return next();
@@ -44,6 +50,10 @@ export function createAdminAuthMiddleware(authenticator: Authenticator): Middlew
     const requestContext = await tryAuthenticate({ authenticator, context: c });
     if (requestContext === undefined) {
       throw new HTTPException(401, { message: 'Authentication required' });
+    }
+    // A paired terminal key never reaches admin or settings routes, whatever its roles say.
+    if (requestContext.terminal_key_id !== undefined) {
+      throw new HTTPException(403, { message: TERMINAL_KEY_SCOPE_MESSAGE });
     }
     if (!hasAdminRole(requestContext)) {
       throw new HTTPException(403, { message: 'Admin access required' });

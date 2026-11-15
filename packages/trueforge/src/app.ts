@@ -71,6 +71,7 @@ import {
   TELEGRAM_WEBHOOK_BASE_PATH,
   type TelegramTurnExecutionDeps,
 } from './apis/telegram';
+import { createTerminalPairingRouter } from './apis/terminalPairings';
 import { createTextNumberRouter } from './apis/textNumber';
 import { createTodayRouter } from './apis/today';
 import { createTurnsRouter } from './apis/turns';
@@ -130,6 +131,7 @@ import type { ISessionMetricsStore } from './db/sessionMetricsStore';
 import type { ISkillStore } from './db/skillStore';
 import type { ISpaceStore } from './db/spaceStore';
 import type { ITelegramStore } from './db/telegramStore';
+import type { ITerminalKeyStore } from './db/terminalKeyStore';
 import type { ITextContactStore } from './db/textContactStore';
 import type { WithTransaction } from './db/transaction';
 import type { ITurnArtifactStore } from './db/turnArtifactStore';
@@ -347,6 +349,8 @@ export interface ServerDeps<TTransaction> {
   briefItemStore: IBriefItemCompletionStore;
   /** Facts pulled out of a chat's recall, stored with the chat. */
   recallExclusionStore: IRecallExclusionStore;
+  /** Paired terminal keys: hashes only, with device names and times. */
+  terminalKeyStore: ITerminalKeyStore;
   deliveryStore: IDeliveryStore;
   pushSubscriptionStore: IPushSubscriptionStore;
   /** The Telegram channel's connection, pairing and owed replies. */
@@ -701,6 +705,8 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       oidcDiscovery: deps.oidcDiscovery,
       logger: deps.logger,
       authMiddleware,
+      terminalKeyStore: deps.terminalKeyStore,
+      audit: deps.sentinelAuditStore,
       ...(deps.localUserStore === undefined
         ? {}
         : {
@@ -708,6 +714,20 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
               localUserStore: deps.localUserStore,
               globalSettingsStore: deps.globalSettingsStore,
             },
+          }),
+    }),
+  );
+  app.route(
+    '/api/v1/terminal-pairings',
+    createTerminalPairingRouter({
+      terminalKeyStore: deps.terminalKeyStore,
+      audit: deps.sentinelAuditStore,
+      logger: deps.logger,
+      authMiddleware,
+      ...(deps.localUserStore === undefined
+        ? {}
+        : {
+            resolveInstanceOwnerId: async () => (await deps.localUserStore?.getUser())?.id,
           }),
     }),
   );
@@ -968,6 +988,8 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         skillCatalog: deps.skillCatalog,
         resolveSandboxProviderStore: deps.resolveSandboxProviderStore,
         globalSettingsStore: deps.globalSettingsStore,
+        terminalKeyStore: deps.terminalKeyStore,
+        audit: deps.sentinelAuditStore,
         personalizationStore: deps.personalizationStore,
         tokenFactoryBudget: deps.tokenFactoryBudget,
         memoryTidy: deps.memoryTidy,

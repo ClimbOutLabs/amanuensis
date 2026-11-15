@@ -3,9 +3,11 @@ import { HTTPException } from 'hono/http-exception';
 
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 import type { ILocalUserStore } from '../db/localUserStore';
+import type { ITerminalKeyStore } from '../db/terminalKeyStore';
 import type { Authenticator } from './authenticator';
 import { STANDALONE_ADMIN_ROLE, type RequestContext } from './identity';
 import { getOrCreateLocalSessionSecret, verifyLocalSessionToken } from './localSession';
+import { carriesTerminalKey, resolveTerminalKeyContext } from './terminalKey';
 import { extractRequestToken } from './token';
 
 /**
@@ -17,14 +19,30 @@ import { extractRequestToken } from './token';
 export class LocalAuthenticator implements Authenticator {
   readonly #localUserStore: ILocalUserStore;
   readonly #globalSettingsStore: IGlobalSettingsStore;
+  readonly #terminalKeyStore: ITerminalKeyStore | undefined;
   #secret: Promise<Uint8Array> | undefined;
 
-  constructor(params: { localUserStore: ILocalUserStore; globalSettingsStore: IGlobalSettingsStore }) {
+  constructor(params: {
+    localUserStore: ILocalUserStore;
+    globalSettingsStore: IGlobalSettingsStore;
+    terminalKeyStore?: ITerminalKeyStore;
+  }) {
     this.#localUserStore = params.localUserStore;
     this.#globalSettingsStore = params.globalSettingsStore;
+    this.#terminalKeyStore = params.terminalKeyStore;
   }
 
   async authenticate(c: Context): Promise<RequestContext> {
+    // A paired terminal key is a Bearer token of its own shape, checked against the
+    // terminal key store before the token is read as a session token. A terminal key
+    // that is unknown or revoked signs nobody in.
+    if (carriesTerminalKey(c)) {
+      const terminalContext = await resolveTerminalKeyContext({ store: this.#terminalKeyStore, context: c });
+      if (terminalContext === undefined) {
+        throw new HTTPException(401, { message: 'Authentication required' });
+      }
+      return terminalContext;
+    }
     const token = extractRequestToken(c);
     if (!token) {
       throw new HTTPException(401, { message: 'Authentication required' });

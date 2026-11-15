@@ -70,6 +70,7 @@ import { SqliteSpaceStore } from '../../src/db/sqlite/space-store/SqliteSpaceSto
 import { SqliteOAuthTokenStore } from '../../src/db/sqlite/token-store/SqliteOAuthTokenStore';
 import { SqliteTurnArtifactStore } from '../../src/db/sqlite/turn-artifact-store/SqliteTurnArtifactStore';
 import { TelegramStore } from '../../src/db/telegramStore';
+import { TerminalKeyStore } from '../../src/db/terminalKeyStore';
 import { ActiveTurnRegistry } from '../../src/runtime/activeTurns';
 import { createChatImageService } from '../../src/runtime/chatImages/chatImageService';
 import { createImageReencoder } from '../../src/runtime/chatImages/reencodeInSandbox';
@@ -338,6 +339,7 @@ async function startSqlite(): Promise<OwnershipServer> {
     sentinelSettingsStore,
     briefItemStore: new BriefItemCompletionStore(db),
     recallExclusionStore: new RecallExclusionStore(db),
+    terminalKeyStore: new TerminalKeyStore(db),
     ...deliveryDeps(db),
     sessions: new Sessions({ sessionStore, sentinelServices }),
     resolveModelProviderStore: () => modelProviderStore,
@@ -446,6 +448,7 @@ async function startPostgres(): Promise<OwnershipServer | undefined> {
     sentinelSettingsStore,
     briefItemStore: new BriefItemCompletionStore(db),
     recallExclusionStore: new RecallExclusionStore(db),
+    terminalKeyStore: new TerminalKeyStore(db),
     ...deliveryDeps(db),
     sessions: new Sessions({ sessionStore, sentinelServices }),
     resolveModelProviderStore: () => modelProviderStore,

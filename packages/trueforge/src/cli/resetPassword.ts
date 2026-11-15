@@ -4,6 +4,7 @@ import {
   resetLocalUserPassword,
 } from '../auth/localSignIn';
 import type { ILocalUserStore } from '../db/localUserStore';
+import type { ITerminalKeyStore } from '../db/terminalKeyStore';
 import type { Command } from './command';
 
 const USAGE = `Usage: aman reset-password
@@ -21,7 +22,12 @@ export interface ResetPasswordDeps {
   /** True when the server answers on its own address; a reset under a running server is refused. */
   serverRunning(): Promise<boolean>;
   /** Opens the instance's local user store; only called once the command line has been accepted. */
-  openStore(): Promise<{ store: ILocalUserStore; close: () => Promise<void> }>;
+  openStore(): Promise<{
+    store: ILocalUserStore;
+    /** Paired terminal keys, revoked in full by a reset, as every other sign-in is ended. */
+    terminalKeyStore?: ITerminalKeyStore;
+    close: () => Promise<void>;
+  }>;
   /** The new password typed twice: hidden on a terminal, two lines when piped in. */
   readPasswordPair(): Promise<{ password: string; confirm: string }>;
 }
@@ -54,7 +60,7 @@ export async function runResetPassword({
     await io.stderr('Aman is running. Stop it first, then run this again.\n');
     return 1;
   }
-  const { store, close } = await deps.openStore();
+  const { store, terminalKeyStore, close } = await deps.openStore();
   try {
     const user = await store.getUser();
     if (user === undefined) {
@@ -70,6 +76,14 @@ export async function runResetPassword({
     if (!result.ok) {
       await io.stderr(`${result.message}\n`);
       return 1;
+    }
+    // A reset ends every other sign-in, and every paired terminal with it.
+    if (terminalKeyStore !== undefined) {
+      await terminalKeyStore.revokeAllForOwner({
+        tenant_id: 'default',
+        subject_id: user.id,
+        revoked_at: new Date().toISOString(),
+      });
     }
     await io.stderr('Your password is reset. Start Aman and sign in with the new password.\n');
     return 0;

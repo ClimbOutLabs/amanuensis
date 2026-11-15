@@ -1,0 +1,195 @@
+import { randomInt, timingSafeEqual } from 'node:crypto';
+
+import { hashTerminalKey, mintTerminalKey } from '../auth/terminalKey';
+import type { ITerminalKeyStore } from '../db/terminalKeyStore';
+import { newId } from '../utils/id';
+
+/** How long a pairing code stays good: long enough to walk to the web app, short enough to be worthless later. */
+export const TERMINAL_PAIRING_TTL_MS = 5 * 60_000;
+
+/** The person who confirmed a pairing, in the shape their sign-in gave. */
+export interface TerminalPairingOwner {
+  tenant_id: string;
+  subject_id: string;
+  subject_type: string;
+  subject_display_name: string;
+}
+
+interface PendingPairing {
+  pairing_id: string;
+  /** Hash of the pairing code; the code itself is never kept after it is handed to the terminal. */
+  code_hash: string;
+  device_name: string;
+  expires_at_ms: number;
+  state: 'pending' | 'confirmed';
+  /**
+   * The minted terminal key, held in memory only between the confirm and the one
+   * completion that claims it. Never stored, never logged, gone once claimed.
+   */
+  terminal_key: string | undefined;
+  /** Whether the pairing start already has its audit entry; when not, the confirm writes it. */
+  start_audit_recorded: boolean;
+}
+
+/** Letters and digits a person can read off a terminal without mixing any up: no 0, O, 1, I or L. */
+const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+const CODE_LENGTH = 8;
+
+function mintPairingCode(): string {
+  let raw = '';
+  for (let index = 0; index < CODE_LENGTH; index += 1) {
+    raw += CODE_ALPHABET.charAt(randomInt(CODE_ALPHABET.length));
+  }
+  return `${raw.slice(0, 4)}-${raw.slice(4)}`;
+}
+
+/** Codes compare without the dash and without case, so a code typed back by hand still matches. */
+export function normalizePairingCode(code: string): string {
+  return code.toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
+function codeHashesEqual(providedHash: string, storedHash: string): boolean {
+  const provided = Buffer.from(providedHash, 'utf8');
+  const stored = Buffer.from(storedHash, 'utf8');
+  return provided.length === stored.length && timingSafeEqual(provided, stored);
+}
+
+export type TerminalPairingCompletion =
+  { status: 'waiting' } | { status: 'paired'; terminal_key: string; device_name: string };
+
+/**
+ * Pairings in flight, held in memory like the sign-in limiter's state: a pairing is
+ * worth minutes, so a restart simply ends it and the person starts again. The minted
+ * key crosses from the confirm to the waiting terminal through this memory and
+ * nowhere else; only its hash ever reaches the database.
+ */
+export class TerminalPairingService {
+  readonly #terminalKeyStore: ITerminalKeyStore;
+  readonly #now: () => number;
+  readonly #ttlMs: number;
+  readonly #byId = new Map<string, PendingPairing>();
+  readonly #pairingIdByCodeHash = new Map<string, string>();
+
+  constructor(deps: { terminalKeyStore: ITerminalKeyStore; now?: () => number; ttlMs?: number }) {
+    this.#terminalKeyStore = deps.terminalKeyStore;
+    this.#now = deps.now ?? Date.now;
+    this.#ttlMs = deps.ttlMs ?? TERMINAL_PAIRING_TTL_MS;
+  }
+
+  /** Begins a pairing for a device name the terminal gave. The code is returned once, here. */
+  start(input: { device_name: string }): { pairing_id: string; code: string; expires_at: string } {
+    this.#pruneExpired();
+    let code = mintPairingCode();
+    let codeHash = hashTerminalKey(normalizePairingCode(code));
+    while (this.#pairingIdByCodeHash.has(codeHash)) {
+      code = mintPairingCode();
+      codeHash = hashTerminalKey(normalizePairingCode(code));
+    }
+    const pairing_id = newId();
+    const expires_at_ms = this.#now() + this.#ttlMs;
+    this.#byId.set(pairing_id, {
+      pairing_id,
+      code_hash: codeHash,
+      device_name: input.device_name,
+      expires_at_ms,
+      state: 'pending',
+      terminal_key: undefined,
+      start_audit_recorded: false,
+    });
+    this.#pairingIdByCodeHash.set(codeHash, pairing_id);
+    return { pairing_id, code, expires_at: new Date(expires_at_ms).toISOString() };
+  }
+
+  /** Records whether the start of this pairing already has its audit entry. */
+  noteStartAuditRecorded(pairing_id: string, recorded: boolean): void {
+    const pairing = this.#byId.get(pairing_id);
+    if (pairing !== undefined) {
+      pairing.start_audit_recorded = recorded;
+    }
+  }
+
+  /**
+   * Confirms a code for the signed-in person: mints the terminal key, stores its hash,
+   * and holds the key itself for the waiting terminal. Returns undefined when the code
+   * is unknown, expired or already used, so the three read the same from outside.
+   */
+  async confirm(input: {
+    code: string;
+    owner: TerminalPairingOwner;
+  }): Promise<{ device_name: string; paired_at: string; start_audit_recorded: boolean } | undefined> {
+    const codeHash = hashTerminalKey(normalizePairingCode(input.code));
+    const pairingId = this.#pairingIdByCodeHash.get(codeHash);
+    const pairing = pairingId === undefined ? undefined : this.#livePairing(pairingId);
+    if (pairing?.state !== 'pending' || !codeHashesEqual(codeHash, pairing.code_hash)) {
+      return undefined;
+    }
+    const terminalKey = mintTerminalKey();
+    const paired_at = new Date(this.#now()).toISOString();
+    await this.#terminalKeyStore.create({
+      id: newId(),
+      tenant_id: input.owner.tenant_id,
+      subject_id: input.owner.subject_id,
+      subject_type: input.owner.subject_type,
+      subject_display_name: input.owner.subject_display_name,
+      device_name: pairing.device_name,
+      key_hash: hashTerminalKey(terminalKey),
+      created_at: paired_at,
+      last_used_at: paired_at,
+      revoked_at: null,
+    });
+    pairing.state = 'confirmed';
+    pairing.terminal_key = terminalKey;
+    return {
+      device_name: pairing.device_name,
+      paired_at,
+      start_audit_recorded: pairing.start_audit_recorded,
+    };
+  }
+
+  /**
+   * What the waiting terminal polls: still waiting, the key (exactly once, after which
+   * the pairing is gone), or undefined when the pairing id and code name nothing live.
+   */
+  complete(input: { pairing_id: string; code: string }): TerminalPairingCompletion | undefined {
+    const pairing = this.#livePairing(input.pairing_id);
+    if (pairing === undefined) {
+      return undefined;
+    }
+    const codeHash = hashTerminalKey(normalizePairingCode(input.code));
+    if (!codeHashesEqual(codeHash, pairing.code_hash)) {
+      return undefined;
+    }
+    if (pairing.state === 'pending' || pairing.terminal_key === undefined) {
+      return { status: 'waiting' };
+    }
+    const terminal_key = pairing.terminal_key;
+    this.#drop(pairing);
+    return { status: 'paired', terminal_key, device_name: pairing.device_name };
+  }
+
+  /** The pairing when it exists and has not expired; an expired pairing is dropped and reads as gone. */
+  #livePairing(pairing_id: string): PendingPairing | undefined {
+    const pairing = this.#byId.get(pairing_id);
+    if (pairing === undefined) {
+      return undefined;
+    }
+    if (this.#now() > pairing.expires_at_ms) {
+      this.#drop(pairing);
+      return undefined;
+    }
+    return pairing;
+  }
+
+  #drop(pairing: PendingPairing): void {
+    this.#byId.delete(pairing.pairing_id);
+    this.#pairingIdByCodeHash.delete(pairing.code_hash);
+  }
+
+  #pruneExpired(): void {
+    for (const pairing of this.#byId.values()) {
+      if (this.#now() > pairing.expires_at_ms) {
+        this.#drop(pairing);
+      }
+    }
+  }
+}

@@ -54,6 +54,7 @@ import { SqliteTokenFactoryUsageStore } from '../src/db/sqlite/token-factory-usa
 import { SqliteOAuthTokenStore } from '../src/db/sqlite/token-store/SqliteOAuthTokenStore';
 import { SqliteTurnArtifactStore } from '../src/db/sqlite/turn-artifact-store/SqliteTurnArtifactStore';
 import { TelegramStore } from '../src/db/telegramStore';
+import { TerminalKeyStore } from '../src/db/terminalKeyStore';
 import { TextContactStore } from '../src/db/textContactStore';
 import { ActiveTurnRegistry } from '../src/runtime/activeTurns';
 import { createChatImageService } from '../src/runtime/chatImages/chatImageService';
@@ -155,6 +156,7 @@ const app = createServerApp({
   sentinelSettingsStore,
   briefItemStore: new BriefItemCompletionStore(db),
   recallExclusionStore: new RecallExclusionStore(db),
+  terminalKeyStore: new TerminalKeyStore(db),
   deliveryStore,
   pushSubscriptionStore: new PushSubscriptionStore(db),
   deliveryService: createDeliveryService({

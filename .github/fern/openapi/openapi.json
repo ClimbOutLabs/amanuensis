@@ -2088,6 +2088,36 @@
         ],
         "type": "object"
       },
+      "CompleteTerminalPairingRequest": {
+        "properties": {
+          "code": {
+            "description": "The pairing code from the start of this pairing.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "pairing_id": {
+            "description": "The pairing id the start of this pairing returned.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "pairing_id",
+          "code"
+        ],
+        "type": "object"
+      },
+      "CompleteTerminalPairingResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/TerminalPairingCompletion"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "ConfiguredMCPServer": {
         "additionalProperties": false,
         "properties": {
@@ -2225,6 +2255,30 @@
         "properties": {
           "data": {
             "$ref": "#/components/schemas/TelegramAccountStatus"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "ConfirmTerminalPairingRequest": {
+        "properties": {
+          "code": {
+            "description": "The pairing code the terminal showed. Dashes and letter case do not matter.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "type": "object"
+      },
+      "ConfirmTerminalPairingResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/TerminalPairingConfirmation"
           }
         },
         "required": [
@@ -3089,6 +3143,10 @@
       },
       "DeleteSpaceResponse": {
         "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
+      "DeleteTerminalKeyResponse": {
         "properties": {},
         "type": "object"
       },
@@ -4482,6 +4540,20 @@
         "properties": {
           "data": {
             "$ref": "#/components/schemas/TelegramAccountStatus"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "GetTerminalKeysResponse": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/TerminalKey"
+            },
+            "type": "array"
           }
         },
         "required": [
@@ -11231,6 +11303,17 @@
         ],
         "type": "object"
       },
+      "RevokeCurrentTerminalKeyResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/TerminalKeyRevocation"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "RevokeImplementationPlanGrantResponse": {
         "properties": {},
         "type": "object"
@@ -13653,6 +13736,31 @@
         ],
         "type": "object"
       },
+      "StartTerminalPairingRequest": {
+        "properties": {
+          "device_name": {
+            "description": "The name the terminal calls itself, shown to the person who confirms the pairing.",
+            "maxLength": 80,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "device_name"
+        ],
+        "type": "object"
+      },
+      "StartTerminalPairingResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/TerminalPairingStart"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "SweepPrivateChatsResponse": {
         "properties": {
           "deleted": {
@@ -13980,6 +14088,124 @@
         },
         "required": [
           "update_id"
+        ],
+        "type": "object"
+      },
+      "TerminalKey": {
+        "properties": {
+          "device_name": {
+            "description": "The name the terminal was paired under.",
+            "type": "string"
+          },
+          "id": {
+            "description": "The id of this terminal key.",
+            "type": "string"
+          },
+          "last_used_at": {
+            "description": "When the key last signed a request, as an ISO 8601 timestamp.",
+            "type": "string"
+          },
+          "paired_at": {
+            "description": "When the terminal was paired, as an ISO 8601 timestamp.",
+            "type": "string"
+          },
+          "revoked_at": {
+            "description": "When the key was revoked, as an ISO 8601 timestamp, or null while the key is live.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "device_name",
+          "paired_at",
+          "last_used_at",
+          "revoked_at"
+        ],
+        "type": "object"
+      },
+      "TerminalKeyRevocation": {
+        "properties": {
+          "revoked": {
+            "description": "The key this request carried has been revoked.",
+            "enum": [
+              true
+            ],
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "revoked"
+        ],
+        "type": "object"
+      },
+      "TerminalPairingCompletion": {
+        "properties": {
+          "device_name": {
+            "description": "The paired terminal name, present only when the status is `paired`.",
+            "type": "string"
+          },
+          "status": {
+            "description": "`waiting` while nobody has confirmed yet, `paired` once the key is ready to claim.",
+            "enum": [
+              "waiting",
+              "paired"
+            ],
+            "type": "string"
+          },
+          "terminal_key": {
+            "description": "The terminal key, present only when the status is `paired`. It is given once and never stored.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "type": "object"
+      },
+      "TerminalPairingConfirmation": {
+        "properties": {
+          "device_name": {
+            "description": "The name of the terminal that was just paired.",
+            "type": "string"
+          },
+          "paired_at": {
+            "description": "When the pairing was confirmed, as an ISO 8601 timestamp.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "device_name",
+          "paired_at"
+        ],
+        "type": "object"
+      },
+      "TerminalPairingStart": {
+        "properties": {
+          "code": {
+            "description": "The one-time pairing code. It works once and expires a few minutes after it is issued.",
+            "type": "string"
+          },
+          "confirm_url": {
+            "description": "The address the person opens in the web app to confirm this pairing.",
+            "type": "string"
+          },
+          "expires_at": {
+            "description": "When the code stops working, as an ISO 8601 timestamp.",
+            "type": "string"
+          },
+          "pairing_id": {
+            "description": "The id of this pairing, which the terminal gives back when it claims its key.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "pairing_id",
+          "code",
+          "confirm_url",
+          "expires_at"
         ],
         "type": "object"
       },
@@ -30021,6 +30247,121 @@
         "x-fern-sdk-method-name": "create_or_update_network_denied_host"
       }
     },
+    "/api/v1/settings/terminal-keys": {
+      "get": {
+        "description": "Every terminal the person paired, newest first, with when it was paired, last used, and revoked.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetTerminalKeysResponse"
+                }
+              }
+            },
+            "description": "The paired terminals."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Admin access required."
+          }
+        },
+        "summary": "List paired terminals",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "terminalKeys"
+        ],
+        "x-fern-sdk-method-name": "list"
+      }
+    },
+    "/api/v1/settings/terminal-keys/{terminal_key_id}": {
+      "delete": {
+        "description": "Revokes one paired terminal key. The key stops working on the next request the terminal makes.",
+        "parameters": [
+          {
+            "description": "The id of the terminal key.",
+            "in": "path",
+            "name": "terminal_key_id",
+            "required": true,
+            "schema": {
+              "description": "The id of the terminal key.",
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteTerminalKeyResponse"
+                }
+              }
+            },
+            "description": "The key was revoked."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Admin access required."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "No paired terminal has that id."
+          }
+        },
+        "summary": "Revoke a paired terminal",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "terminalKeys"
+        ],
+        "x-fern-sdk-method-name": "delete"
+      }
+    },
     "/api/v1/settings/token-factory-usage": {
       "get": {
         "description": "Tokens and cost per model counted today (UTC), and the daily cap with what is left under it. Counts come from the usage the provider reported.",
@@ -31012,6 +31353,236 @@
           "spaces"
         ],
         "x-fern-sdk-method-name": "revert"
+      }
+    },
+    "/api/v1/terminal-pairings": {
+      "post": {
+        "description": "Begins a terminal pairing and returns a one-time code, the address the person opens to confirm it, and when the code expires. The code works once.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartTerminalPairingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StartTerminalPairingResponse"
+                }
+              }
+            },
+            "description": "The pairing code and the address to confirm it at."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request body."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Too many pairing starts from this address."
+          }
+        },
+        "summary": "Start pairing a terminal",
+        "tags": [
+          "Auth"
+        ],
+        "x-fern-sdk-group-name": [
+          "terminalPairings"
+        ],
+        "x-fern-sdk-method-name": "start"
+      }
+    },
+    "/api/v1/terminal-pairings/complete": {
+      "post": {
+        "description": "The waiting terminal polls with its pairing id and code. While nobody has confirmed it answers waiting. Once confirmed it hands the terminal key over, exactly once.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompleteTerminalPairingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompleteTerminalPairingResponse"
+                }
+              }
+            },
+            "description": "Whether the pairing is still waiting, or the terminal key when it was claimed."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request body."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The pairing is unknown, expired, or already claimed."
+          }
+        },
+        "summary": "Claim the key of a confirmed pairing",
+        "tags": [
+          "Auth"
+        ],
+        "x-fern-sdk-group-name": [
+          "terminalPairings"
+        ],
+        "x-fern-sdk-method-name": "complete"
+      }
+    },
+    "/api/v1/terminal-pairings/confirm": {
+      "post": {
+        "description": "Approves a pairing code for the signed-in person and pairs the terminal that started it. The terminal key itself goes only to the waiting terminal.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmTerminalPairingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfirmTerminalPairingResponse"
+                }
+              }
+            },
+            "description": "The terminal that was paired."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request body."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The code is not right, has expired, or was already used."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Too many pairing attempts."
+          }
+        },
+        "summary": "Confirm a terminal pairing",
+        "tags": [
+          "Auth"
+        ],
+        "x-fern-sdk-group-name": [
+          "terminalPairings"
+        ],
+        "x-fern-sdk-method-name": "confirm"
+      }
+    },
+    "/api/v1/terminal-pairings/revoke-current": {
+      "post": {
+        "description": "A paired terminal revokes its own key, as it does when the person signs out on the terminal. The key stops working on the next request.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RevokeCurrentTerminalKeyResponse"
+                }
+              }
+            },
+            "description": "The key was revoked."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The request did not carry a terminal key."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          }
+        },
+        "summary": "Revoke the terminal key this request carries",
+        "tags": [
+          "Auth"
+        ],
+        "x-fern-sdk-group-name": [
+          "terminalPairings"
+        ],
+        "x-fern-sdk-method-name": "revoke_current"
       }
     },
     "/api/v1/today": {

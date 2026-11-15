@@ -3,6 +3,7 @@ import { StringDecoder } from 'node:string_decoder';
 
 import { LOCAL_NO_SIGN_IN_MESSAGE } from '../auth/localSignIn';
 import type { ILocalUserStore } from '../db/localUserStore';
+import type { ITerminalKeyStore } from '../db/terminalKeyStore';
 
 /**
  * The real wiring for `aman reset-password`: the server probe, the instance's
@@ -25,7 +26,11 @@ export async function serverRunning(): Promise<boolean> {
 }
 
 /** Opens the standalone SQLite database the npx install uses, at the latest schema. */
-export async function openLocalUserStore(): Promise<{ store: ILocalUserStore; close(): Promise<void> }> {
+export async function openLocalUserStore(): Promise<{
+  store: ILocalUserStore;
+  terminalKeyStore: ITerminalKeyStore;
+  close(): Promise<void>;
+}> {
   const { default: configuration } = await import('../config');
   if (!configuration.STANDALONE) {
     throw new Error(
@@ -35,11 +40,13 @@ export async function openLocalUserStore(): Promise<{ store: ILocalUserStore; cl
   if (!existsSync(configuration.SQLITE_PATH)) {
     throw new Error(LOCAL_NO_SIGN_IN_MESSAGE);
   }
-  const [{ createSqliteDb }, { migrateSqliteToLatest }, { SqliteLocalUserStore }] = await Promise.all([
-    import('../db/sqlite/client'),
-    import('../db/migrateSqlite'),
-    import('../db/sqlite/local-user-store/SqliteLocalUserStore'),
-  ]);
+  const [{ createSqliteDb }, { migrateSqliteToLatest }, { SqliteLocalUserStore }, { TerminalKeyStore }] =
+    await Promise.all([
+      import('../db/sqlite/client'),
+      import('../db/migrateSqlite'),
+      import('../db/sqlite/local-user-store/SqliteLocalUserStore'),
+      import('../db/terminalKeyStore'),
+    ]);
   const db = createSqliteDb(configuration.SQLITE_PATH);
   try {
     await migrateSqliteToLatest(db);
@@ -47,7 +54,11 @@ export async function openLocalUserStore(): Promise<{ store: ILocalUserStore; cl
     await db.destroy();
     throw error;
   }
-  return { store: new SqliteLocalUserStore(db), close: () => db.destroy() };
+  return {
+    store: new SqliteLocalUserStore(db),
+    terminalKeyStore: new TerminalKeyStore(db),
+    close: () => db.destroy(),
+  };
 }
 
 /** One hidden line from a raw-mode terminal: characters are read, never echoed. Ctrl-C stops. */

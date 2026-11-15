@@ -142,6 +142,7 @@ import type { ISkillStore } from './db/skillStore';
 import type { ISpaceStore } from './db/spaceStore';
 import type { Database as SqliteDatabase } from './db/sqlite/types';
 import { TelegramStore, type ITelegramStore } from './db/telegramStore';
+import { TerminalKeyStore, type ITerminalKeyStore } from './db/terminalKeyStore';
 import { TextContactStore, type ITextContactStore } from './db/textContactStore';
 import type { ITokenFactoryUsageStore } from './db/tokenFactoryUsageStore';
 import type { WithTransaction } from './db/transaction';
@@ -277,6 +278,7 @@ interface ServerPersistence<TTransaction> {
   sentinelSettingsStore: ISentinelSettingsStore<TTransaction>;
   briefItemStore: IBriefItemCompletionStore;
   recallExclusionStore: IRecallExclusionStore;
+  terminalKeyStore: ITerminalKeyStore;
   deliveryStore: IDeliveryStore;
   reachSettingsStore: IReachSettingsStore;
   personTimezoneStore: IPersonTimezoneStore;
@@ -527,6 +529,7 @@ async function createStandalonePersistence(options: {
     sentinelSettingsStore: new SqliteSentinelSettingsStore(db),
     briefItemStore: new BriefItemCompletionStore(db),
     recallExclusionStore: new RecallExclusionStore(db),
+    terminalKeyStore: new TerminalKeyStore(db),
     deliveryStore: new DeliveryStore(db),
     reachSettingsStore: new ReachSettingsStore(db),
     personTimezoneStore: new PersonTimezoneStore(db),
@@ -721,6 +724,7 @@ async function createDistributedPersistence(options: {
     sentinelSettingsStore: new PostgresSentinelSettingsStore(db),
     briefItemStore: new BriefItemCompletionStore(db),
     recallExclusionStore: new RecallExclusionStore(db),
+    terminalKeyStore: new TerminalKeyStore(db),
     deliveryStore: new DeliveryStore(db),
     reachSettingsStore: new ReachSettingsStore(db),
     personTimezoneStore: new PersonTimezoneStore(db),
@@ -1144,13 +1148,17 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     });
     authorizer = new TrueFoundryAuthorizer(serviceFoundryClient);
   } else if (mode === TrueForgeAuthMode.Oidc) {
-    authenticator = createAuthenticator({ mode: TrueForgeAuthMode.Oidc });
+    authenticator = createAuthenticator({
+      mode: TrueForgeAuthMode.Oidc,
+      terminalKeyStore: persistence.terminalKeyStore,
+    });
     authorizer = new TrueForgeAuthorizer();
   } else if (mode === TrueForgeAuthMode.Local) {
     authenticator = createAuthenticator({
       mode: TrueForgeAuthMode.Local,
       localUserStore,
       globalSettingsStore,
+      terminalKeyStore: persistence.terminalKeyStore,
     });
     authorizer = new TrueForgeAuthorizer();
   } else {
@@ -1239,6 +1247,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     turnArtifactStore,
     chatDeletionStore,
     recallExclusionStore: persistence.recallExclusionStore,
+    terminalKeyStore: persistence.terminalKeyStore,
     globalSettingsStore,
     tokenFactoryBudget,
     sessionStore,
