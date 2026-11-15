@@ -6,6 +6,7 @@ import {
   StubProcessRunner,
   SystemProcessRunner,
   commandLine,
+  lineSplitter,
   okBytesResult,
   okResult,
   type ProcessRunner,
@@ -78,4 +79,32 @@ test('the recording runner also writes down byte command lines', async () => {
   const recording = new RecordingProcessRunner(stub);
   await recording.runBytes('tool', ['read'], new Uint8Array([9]));
   assert.deepEqual(recording.lines(), ['tool read']);
+});
+
+test('lines are handed over whole, even when a chunk ends inside a line or a letter', () => {
+  const lines: string[] = [];
+  const splitter = lineSplitter(line => {
+    lines.push(line);
+  });
+  const bytes = new TextEncoder().encode('one\r\ntwo é three\nlast');
+  const cut = bytes.indexOf(0xc3) + 1;
+  splitter.push(bytes.slice(0, 2));
+  splitter.push(bytes.slice(2, cut));
+  splitter.push(bytes.slice(cut));
+  splitter.end();
+  assert.deepEqual(lines, ['one', 'two é three', 'last']);
+});
+
+test('the system runner hands over lines while the command runs and does not copy its input', async () => {
+  const lines: string[] = [];
+  const result = await new SystemProcessRunner().runBytes(
+    process.execPath,
+    ['-e', 'console.log("out"); console.error("err"); process.stdin.pipe(process.stdout)'],
+    new TextEncoder().encode('echoed\n'),
+    line => {
+      lines.push(line);
+    },
+  );
+  assert.equal(result.exitCode, 0);
+  assert.deepEqual([...lines].sort(), ['echoed', 'err', 'out']);
 });
