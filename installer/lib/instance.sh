@@ -510,7 +510,7 @@ instance_state() {
 instance_up() {
   local name=$1 rc=0 recreate=()
   if [ "${2:-}" = recreate ]; then recreate=(--force-recreate); fi
-  step_begin "start-$name" "Starting instance $name and waiting until it answers"
+  step_begin "start-$name" "Starting instance $name"
   # A whole-project start removes the containers of services the compose file no longer lists (--remove-orphans),
   # so a service dropped from the file, like the https front end when an instance closes back to this computer,
   # does not linger as an orphan. Every whole-project start follows this rule.
