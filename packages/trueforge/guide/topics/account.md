@@ -58,7 +58,7 @@ Aman can't email you a reset link, because it has no mail account of its own. Se
 
 ## Good to know
 
-- Nobody else can be added to your sign-in. Each person who uses Aman gets their own copy, called an instance, with its own sign-in.
+- Nobody else can be added to your sign-in. Each person who uses Aman gets their own copy, called an instance, with its own sign-in. On Mac and Linux, Docker lists each instance's parts under its name, such as `aman-alex-app` for an instance called alex or aman-alex.
 - Going back to a backup also brings back the password you had then.
 - Signing in says the email isn't allowed? Type exactly the email you chose at install, in lowercase.
 
