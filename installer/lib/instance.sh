@@ -1536,6 +1536,7 @@ machine_purge() {
   projects_purge aman-machine
   # shellcheck disable=SC2046 # volume names are single words
   volumes_purge $(machine_volumes) || exit 1
+  chip_key_forget
   backup_schedule_disable
   installer_state_remove
 }

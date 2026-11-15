@@ -10,6 +10,12 @@ MACHINE_KEY_FILE=/run/aman-key/master.key
 
 machine_key_volume_ensure() {
   docker_volume_exists "$MACHINE_KEY_VOLUME" && return 0
+  # A key kept in the security chip is opened in memory; a missing volume is pointed there again, never made empty.
+  if [ -f "$CHIP_KEY_BLOB" ]; then
+    chip_key_volume_create ||
+      die "The place for this computer's key could not be made. Check that Docker is running, then run the installer again."
+    return 0
+  fi
   D volume create "$MACHINE_KEY_VOLUME" >/dev/null ||
     die "The place for this computer's key could not be made. Check that Docker is running, then run the installer again."
   MACHINE_KEY_NEW=1
@@ -132,7 +138,9 @@ recovery_key_show() { # name key
   ui_newline
   ui_line "Write it down now and keep it somewhere safe. It is shown only this once."
   if [ "$MACHINE_KEY_NEW" = 1 ]; then
-    if ! disk_encryption_on; then
+    if chip_key_possible; then
+      warn "This computer's key is kept in a file on this disk, so a copied or stolen disk can be read. This computer has a security chip that can hold the key instead." "Run: install.sh key chip"
+    elif ! disk_encryption_on; then
       warn "This computer's key is kept in a file on this disk. Without disk encryption, a lost or stolen computer can be read." "Turn on disk encryption for this computer: FileVault on a Mac, BitLocker on Windows, LUKS on Linux."
     fi
     MACHINE_KEY_NEW=0

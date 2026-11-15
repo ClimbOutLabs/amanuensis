@@ -166,6 +166,26 @@ data and not in any backup.
   that lives in memory (`/run/aman-mail`), never on disk. These volumes are
   not in a backup, so after a restore on another computer the account is
   connected again in Settings.
+- On Linux with systemd and a TPM 2.0 security chip, `install.sh key chip`
+  moves the key off the disk. The disk then holds only
+  `/etc/aman/master.key.cred`, a copy of the key that the chip of this one
+  computer can open (`systemd-creds`, tied to the chip and to no start-up
+  measurement, so a system update does not lock it away). The service
+  `aman-key.service` opens it into `/run/aman-key/master.key` when the
+  computer starts, before Docker, and `/etc/tmpfiles.d/aman-key.conf` makes
+  that folder. `/run` lives in memory. The volume `aman_key` is made again
+  as a bind of `/run/aman-key`, so the Compose files and every command that
+  mounts `aman_key` stay as they are. The move is checked before anything
+  is replaced: the chip's copy must open back to the same key, and the
+  service must start. Every instance is stopped while the volume is
+  swapped and started after. If a step fails, the key stays, or is put
+  back, as a file. `install.sh key file` undoes it. Nothing does this on
+  its own; the installer only names the command when it shows a recovery
+  key on a computer that could use it. Purging the last instance removes
+  the chip's copy and the service too. If the chip is cleared or the
+  mainboard is replaced, the copy no longer opens, and the instance is
+  restored with its recovery key. Docker Desktop and computers without
+  systemd or a chip keep the key file.
 - The file `db.sqlite.keys` beside the database holds the instance's key
   records: a value that tells whether a key is this database's key, the
   computer's key encrypted with the recovery key, and any earlier keys

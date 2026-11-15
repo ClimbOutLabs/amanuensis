@@ -255,14 +255,37 @@ case "$cmd" in
     sub=$1
     shift
     case "$sub" in
-      inspect) grep -Fxq "$1" "$S/volumes"; exit $? ;;
+      inspect)
+        # With --format, the folder a bind volume points at; empty for an ordinary volume.
+        if [ "$1" = --format ]; then
+          grep -Fxq "$3" "$S/volumes" || exit 1
+          sed -n "s/^$3 //p" "$S/volume_devices" 2>/dev/null | tail -n 1
+          exit 0
+        fi
+        grep -Fxq "$1" "$S/volumes"
+        exit $?
+        ;;
       create)
         # Scratch volumes are labelled; the label lets the installer find leftovers.
         label=
         name=
         while [ "$#" -gt 0 ]; do
-          case "$1" in --label) label=$2; shift 2 ;; *) name=$1; shift ;; esac
+          case "$1" in
+            --label) label=$2; shift 2 ;;
+            --driver) shift 2 ;;
+            --opt)
+              case "$2" in device=*) device=${2#device=} ;; esac
+              shift 2
+              ;;
+            *) name=$1; shift ;;
+          esac
         done
+        [ -z "${STUB_VOLUME_CREATE_FAIL:-}" ] || [ -z "${device:-}" ] || { echo "bind volume refused" >&2; exit 1; }
+        # A bind volume shows the folder it points at: the key there is the key the containers see.
+        if [ -n "${device:-}" ]; then
+          echo "$name $device" >>"$S/volume_devices"
+          [ ! -f "$device/master.key" ] || cp "$device/master.key" "$S/key"
+        fi
         grep -Fxq "$name" "$S/volumes" || echo "$name" >>"$S/volumes"
         [ -n "$label" ] && echo "$name" >>"$S/volumes_scratch"
         echo "$name"
@@ -293,6 +316,10 @@ case "$cmd" in
           case " ${STUB_VOLUME_RM_FAIL:-} " in *" $v "*) echo "volume is in use" >&2; exit 1 ;; esac
           grep -Fxv "$v" "$S/volumes" >"$S/volumes.new" || true
           mv "$S/volumes.new" "$S/volumes"
+          if [ -f "$S/volume_devices" ]; then
+            grep -v "^$v " "$S/volume_devices" >"$S/volume_devices.new" || true
+            mv "$S/volume_devices.new" "$S/volume_devices"
+          fi
           if [ -f "$S/volumes_scratch" ] && grep -Fxq "$v" "$S/volumes_scratch"; then
             rm -rf "${S:?}/scratchfs/$v"
             echo "$v" >>"$S/scratch_removed"
@@ -407,6 +434,20 @@ case "$cmd" in
         image=${image##* }
         echo "Commands: hash-password backup backup-check doctor export-data"
         grep -Fxq "$image" "$S/images_without_seal" 2>/dev/null || echo "  secrets seal unseal"
+        exit 0
+        ;;
+      *" cat /run/aman-key/master.key")
+        # Reads this computer's key out of its volume.
+        [ -f "$S/key" ] || exit 1
+        cat "$S/key"
+        exit 0
+        ;;
+      *" rm -f /run/aman-key/master.key")
+        rm -f "$S/key"
+        exit 0
+        ;;
+      *"cat >/run/aman-key/master.key")
+        cat >"$S/key"
         exit 0
         ;;
       *"aman secrets key"*)
