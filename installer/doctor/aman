@@ -50,6 +50,8 @@ AS_JSON=0
 UI_VERBOSE=0
 SUMMARY=0
 PROBLEMS_ONLY=0
+# Set once a repair has run: a check that still fails after it is not sent back to a repair that does the same.
+REPAIR_TRIED=0
 DEEP=0
 LOCAL=0
 ONLY=""
@@ -241,22 +243,28 @@ record() { # scope id state detail fix
 
 # One command fixes a stopped, unhealthy or wrongly published instance; it never asks the person to read container logs.
 INSTANCE_FIX="Run aman doctor instance --fix"
+# --force lets the upgrade run while an instance has a problem, which is what needs it here.
+UPDATE_FIX="Get the newest Aman with: aman upgrade --force"
 
 # A value from the instance's record in the installer's state directory.
 registry_value() { # instance key
   sed -n "s/^$2=//p" "${AMAN_HOME}/state/instances/${1}.conf" 2>/dev/null | head -n 1
 }
 
-# The cause of a container failure in one sentence (starting with a space), or nothing when the log does not say.
+# Sets CAUSE to the cause of a container failure in one sentence (starting with a space), or nothing when the log does
+# not say, and CAUSE_FIX to the one thing to do: a restart, or a newer Aman when only a new image can fix it.
 # CAUSE_IDS holds the containers that are not running or not healthy.
-container_cause_sentence() {
-  local id log="" cause
+container_cause() {
+  local id log="" text
+  CAUSE=""
+  CAUSE_FIX=$INSTANCE_FIX
   for id in $CAUSE_IDS; do
     log="${log}$(bounded "$PROBE_SECONDS" docker logs --tail 50 "$id" 2>&1)"$'\n'
   done
   [ -n "$log" ] || return 0
-  cause=$(printf '%s' "$log" | container_failure_cause_stdin)
-  if [ -n "$cause" ]; then printf ' %s' "$cause"; fi
+  text=$(printf '%s' "$log" | container_failure_cause_stdin)
+  if [ -n "$text" ]; then CAUSE=" $text"; fi
+  if printf '%s\n' "$log" | grep -Eq "$MISSING_FILE_PATTERN"; then CAUSE_FIX=$UPDATE_FIX; fi
 }
 
 # Days-from-civil arithmetic, so no GNU or BSD date flags are needed.
@@ -860,7 +868,7 @@ join_words() {
 }
 
 check_instance_containers() { # name; sets APP_CONTAINER
-  local name=$1 line id cname state status service bad="" unhealthy="" starting="" found=0 ports exposed="" count=0 words
+  local name=$1 line id cname state status service bad="" unhealthy="" starting="" found=0 ports exposed="" count=0 words CAUSE CAUSE_FIX
   APP_CONTAINER=""
   CAUSE_IDS=""
   local lines
@@ -908,10 +916,12 @@ check_instance_containers() { # name; sets APP_CONTAINER
   fi
   if [ -n "$bad" ]; then
     words=$(join_words "$bad")
-    record "$name" containers fail "$(capitalize "$words") $(is_are "$bad") not running.$(container_cause_sentence)" "$INSTANCE_FIX"
+    container_cause
+    record "$name" containers fail "$(capitalize "$words") $(is_are "$bad") not running.$CAUSE" "$CAUSE_FIX"
   elif [ -n "$unhealthy" ]; then
     words=$(join_words "$unhealthy")
-    record "$name" containers fail "$(capitalize "$words") $(is_are "$unhealthy") not healthy.$(container_cause_sentence)" "$INSTANCE_FIX"
+    container_cause
+    record "$name" containers fail "$(capitalize "$words") $(is_are "$unhealthy") not healthy.$CAUSE" "$CAUSE_FIX"
   elif [ -n "$starting" ]; then
     words=$(join_words "$starting")
     record "$name" containers warn "$(capitalize "$words") $(is_are "$starting") still starting." "Wait a minute, then run aman doctor."
@@ -1172,6 +1182,7 @@ text_checks() { # scope
     if [ "$state" = ok ] && [ "$UI_VERBOSE" != 1 ] && in_list "$id" "runtime credentials checkout"; then continue; fi
     label=$detail
     if [ "$UI_VERBOSE" = 1 ]; then label="$detail ($id)"; fi
+    if [ "$REPAIR_TRIED" = 1 ] && is_refresh_fix "$fix"; then fix=""; fi
     case "$state" in
       ok) ui_ok "$label" ;;
       warn) ui_warn "$label" "$fix" ;;
@@ -1180,6 +1191,20 @@ text_checks() { # scope
   done < <(visible_records "$1")
   flush_skipped
 }
+
+# Whether a failing check of these scopes can only be fixed by a newer Aman.
+records_want_update() { # scope...
+  local scope _id state _detail fix want
+  for want in "$@"; do
+    while IFS=$'\t' read -r scope _id state _detail fix; do
+      if [ "$state" = fail ] && [ "$fix" = "$UPDATE_FIX" ]; then return 0; fi
+    done < <(visible_records "$want")
+  done
+  return 1
+}
+
+# Both repairs render the instance again from its record and restart it.
+is_refresh_fix() { [ "$1" = "$INSTANCE_FIX" ] || [ "$1" = "Run aman doctor network --fix" ]; }
 
 # Counts of the visible checks of a scope: sets N_OK, N_WARN, N_FAIL and N_OFF.
 count_checks() { # scope
@@ -1581,7 +1606,7 @@ check_machine() {
 # aman doctor instance|network [--fix [--yes]] [--instance NAME]: show the check and, with --fix, let the installer
 # render the instance again from its record and restart it, then check again and say fixed only when no check fails.
 doctor_repair() { # kind
-  local kind=$1 fix=0 yes=0 name installer failed=0 question args=()
+  local kind=$1 fix=0 yes=0 name installer failed=0 question args=() not_fixed="" needs_update=0
   shift
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -1645,13 +1670,29 @@ doctor_repair() { # kind
       question="Restart instance $name now?"
     fi
     if ui_confirm "$question" y; then
+      REPAIR_TRIED=1
       if bash "$installer" "${args[@]}" && doctor_recheck "$name"; then
         ui_ok "Instance $name is fixed"
       else
         failed=1
+        not_fixed="${not_fixed}|${name}"
+        if records_want_update machine "$name"; then needs_update=1; fi
       fi
     fi
   done
+  # The run always ends with its panel closed, so it never looks like it is still waiting for an answer.
+  if [ -n "$not_fixed" ]; then
+    ui_summary fail "Restarting did not fix instance $(join_words "$not_fixed"), so restarting again will not help."
+    # Only a missing file is fixed by a newer Aman; a full disk or a busy port has its own fix in the problem above.
+    if [ "$needs_update" = 1 ]; then
+      ui_line "$UPDATE_FIX"
+    else
+      ui_line "Fix the problem shown above, then run aman doctor."
+    fi
+    ui_summary_end
+  else
+    ui_panel_end
+  fi
   exit "$failed"
 }
 
