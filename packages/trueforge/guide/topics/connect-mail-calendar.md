@@ -180,6 +180,7 @@ See [Reach me](reach-me.md) for what Aman watches for and how it tells you.
 ## Good to know
 
 - Reading is quiet. Every draft, every send and every new or changed event asks you first, on a card that shows exactly what will happen.
+- Reading an email never marks it as read. Aman marks email as read only when you ask, and asks you on a card first.
 - An app password is saved only on this computer, in the email or calendar connector. It is never shown again, and the assistant never sees it.
 - If you connected email or calendar with an early version of Aman, the next upgrade moves that account into the connector and deletes the old file. If you connected it again in Settings since, Aman keeps that newer one.
 - Never paste a password into a chat. A chat can't connect an account. Use Settings.

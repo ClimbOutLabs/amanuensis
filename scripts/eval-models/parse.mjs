@@ -4,7 +4,7 @@ import { APPROVAL_POLICIES } from '../eval-tokens/parse.mjs';
 
 /** Must match the `group` values in packages/trueforge/evals/model-set.json. */
 export const MODEL_SET_GROUPS = Object.freeze(['memory', 'safety']);
-export const MODEL_SET_VERSION = 1;
+export const MODEL_SET_VERSION = 2;
 export const CHECK_TYPES = Object.freeze([
   'reply_includes',
   'reply_excludes',
@@ -21,7 +21,7 @@ export const CHECK_TYPES = Object.freeze([
  *   | { type: 'no_tool_args_include', any: string[] }} Check
  * @typedef {{ id: string, group: string, prompt: string, approval_policy: 'approve' | 'decline', checks: Check[], checklist: string[] }} ModelCase
  * @typedef {{ text: string, timestamp: string }} SeedMemory
- * @typedef {{ version: 1, memories: SeedMemory[], cases: ModelCase[] }} ModelSet
+ * @typedef {{ version: 2, memories: SeedMemory[], cases: ModelCase[] }} ModelSet
  */
 
 export class ModelSetError extends Error {

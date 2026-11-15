@@ -25,12 +25,14 @@ import {
   MAIL_ACCOUNT_LIST_TOOL_NAME,
   MAIL_ATTACHMENT_TOOL_NAME,
   MAIL_CONNECTOR_TOOL_NAMES,
+  MAIL_CONTENT_MARK_READ_ARGUMENT,
   MAIL_CONTENT_TOOL_NAME,
   MAIL_DRAFT_TOOL_NAME,
   MAIL_FORWARD_TOOL_NAME,
   MAIL_LIST_TOOL_NAME,
   MAIL_MAILBOX_ARGUMENTS,
   MAIL_MAILBOX_LIST_TOOL_NAME,
+  MAIL_MARK_READ_TOOL_NAME,
 } from './toolContract';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -59,6 +61,11 @@ const FORWARD_NOTE =
   'A forward takes two calls. The first shows the person the forward as a draft and sends nothing. When the person asks for it to be sent, call this again with exactly the same arguments.';
 const RECENT_WINDOW_NOTE = `With no since date, this looks at the ${String(RECENT_WINDOW_DAYS)} days up to before (or up to now), then ${String(WIDER_WINDOW_DAYS)} days if fewer messages than asked for come back. Results are newest first within that window. Set since to look further back. A since or before with no time zone offset is read in the user's time zone.`;
 
+// The sidecar's own words name its mark-as-read switch, which the model is never shown, so the host says what a read does.
+const CONTENT_DESCRIPTION = `Get the full content of one or more emails, including the body and reply-thread headers, by their email_id. Use ${MAIL_LIST_TOOL_NAME} first. Reading never marks an email as read.`;
+const MARK_READ_NOTE =
+  'Use this only when the person asked, in this chat, for these emails to be marked as read. Never offer or suggest it otherwise. The person is asked on a card first.';
+
 // A file name alone is not a path the document reader can open without asking, so the model must fetch first.
 const ATTACHMENT_NOTE = `To read an attachment, first call ${MAIL_ATTACHMENT_TOOL_NAME} for it. That saves the file in the sandbox and returns its path. Then call ${EXTRACT_DOCUMENT_TEXT_TOOL_NAME} with that path. Never pass an attachment's file name as the path.`;
 
@@ -79,7 +86,8 @@ function isAccountLeftOut(requested: unknown): requested is undefined | null {
 }
 
 /**
- * The account name is never required of the model, and list calls say how they pick recent mail. Built from
+ * The account name is never required of the model, list calls say how they pick recent mail, and a body read
+ * does not show the sidecar's mark-as-read switch. Built from
  * the listed schema alone, so the tool list stays the same on every call.
  */
 function withHostFilledAccount(tool: AgentToolSchema): AgentToolSchema {
@@ -97,12 +105,20 @@ function withHostFilledAccount(tool: AgentToolSchema): AgentToolSchema {
           ? `${tool.description ?? ''} ${FORWARD_NOTE}`.trim()
           : isMailSendToolName(tool.name)
             ? `${tool.description ?? ''} ${SEND_NOTE}`.trim()
-            : tool.name === MAIL_CONTENT_TOOL_NAME || tool.name === MAIL_ATTACHMENT_TOOL_NAME
-              ? `${tool.description ?? ''} ${ATTACHMENT_NOTE}`.trim()
-              : tool.description;
+            : tool.name === MAIL_CONTENT_TOOL_NAME
+              ? `${CONTENT_DESCRIPTION} ${ATTACHMENT_NOTE}`
+              : tool.name === MAIL_ATTACHMENT_TOOL_NAME
+                ? `${tool.description ?? ''} ${ATTACHMENT_NOTE}`.trim()
+                : tool.name === MAIL_MARK_READ_TOOL_NAME
+                  ? `${tool.description ?? ''} ${MARK_READ_NOTE}`.trim()
+                  : tool.description;
   if (properties === undefined || !isRecord(account)) {
     return { ...tool, description };
   }
+  const shown =
+    tool.name === MAIL_CONTENT_TOOL_NAME
+      ? Object.fromEntries(Object.entries(properties).filter(([key]) => key !== MAIL_CONTENT_MARK_READ_ARGUMENT))
+      : properties;
   const accountDescription = typeof account['description'] === 'string' ? `${account['description']} ` : '';
   return {
     ...tool,
@@ -110,7 +126,7 @@ function withHostFilledAccount(tool: AgentToolSchema): AgentToolSchema {
     inputSchema: {
       ...tool.inputSchema,
       properties: {
-        ...properties,
+        ...shown,
         ...Object.fromEntries(
           MAIL_MAILBOX_ARGUMENTS.flatMap(key => {
             const mailbox = properties[key];
@@ -123,7 +139,13 @@ function withHostFilledAccount(tool: AgentToolSchema): AgentToolSchema {
         ),
         [MAIL_ACCOUNT_ARGUMENT]: { ...account, description: `${accountDescription}${ACCOUNT_NOTE}` },
       },
-      ...(required === undefined ? {} : { required: required.filter(name => name !== MAIL_ACCOUNT_ARGUMENT) }),
+      ...(required === undefined
+        ? {}
+        : {
+            required: required.filter(
+              name => name !== MAIL_ACCOUNT_ARGUMENT && name !== MAIL_CONTENT_MARK_READ_ARGUMENT,
+            ),
+          }),
     },
   };
 }
@@ -308,7 +330,11 @@ export class MailConnectorSource implements ToolSource {
     if ('refused' in foldered) {
       return refusal(foldered.refused);
     }
-    const { args } = foldered;
+    // A read never marks mail as read, whatever the call said; marking is its own tool, used only when asked.
+    const args =
+      params.name === MAIL_CONTENT_TOOL_NAME
+        ? { ...foldered.args, [MAIL_CONTENT_MARK_READ_ARGUMENT]: false }
+        : foldered.args;
     const readsOnly = isMailReadToolName(params.name);
     const send = async (sent: Record<string, unknown>) => {
       const response = await this.#inner.callTool({ ...params, arguments: sent }, approvalDecision, context);

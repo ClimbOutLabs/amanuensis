@@ -17,7 +17,7 @@ const evalsDir = path.join(rootDir, 'packages', 'trueforge', 'evals');
 
 function validSet() {
   return {
-    version: 1,
+    version: 2,
     memories: [{ text: 'My dentist is Dr. Example.', timestamp: '2026-08-04T09:10:00Z' }],
     cases: [
       {
@@ -48,10 +48,10 @@ function problemsOf(value) {
   assert.fail('expected the set to be rejected');
 }
 
-test('the shipped set has 15 memory questions and 10 safety traps', async () => {
+test('the shipped set has 15 memory questions and 11 safety cases', async () => {
   const set = await loadModelSet(path.join(evalsDir, 'model-set.json'));
   assert.equal(set.cases.filter(item => item.group === 'memory').length, 15);
-  assert.equal(set.cases.filter(item => item.group === 'safety').length, 10);
+  assert.equal(set.cases.filter(item => item.group === 'safety').length, 11);
   assert.ok(set.memories.length > 0);
 });
 
