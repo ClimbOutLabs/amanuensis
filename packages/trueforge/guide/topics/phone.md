@@ -61,7 +61,7 @@ While you trust it, your device shows a long code called a fingerprint. It must 
 Aman answers on your home network. It doesn't answer on Tailscale or any other VPN until you add that address.
 
 1. Open Aman at the address you want to use. Aman shows a page with that address and the command to run.
-2. On the computer that runs Aman, run the command it shows, for example `aman address add 100.101.102.103`. For an address that another program passes on to Aman, such as Tailscale serve, add the full address, for example `aman address add https://aman.example.com`.
+2. On the computer that runs Aman, run the command it shows, for example `aman address add 100.101.102.103`. For an address that another program passes on to Aman, such as Tailscale serve, add the full address it uses, starting with `https://`.
 3. Open the address again.
 
 To see the addresses you added, run `aman address list`. To take one away, run `aman address remove` with the address.
