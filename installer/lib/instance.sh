@@ -1743,7 +1743,7 @@ cmd_instance_remove() {
       *" aman_${name}_browser_profiles "*) say "That includes the sites Aman's browser is signed in to." ;;
     esac
     if [ "$last_one" = 1 ]; then
-      say "The shared speech-to-text service and its downloaded model are kept too."
+      say "The shared speech-to-text service is kept too."
     fi
     say "To delete the data too: install.sh instance remove $name --purge-data"
     return 0

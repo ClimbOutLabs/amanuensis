@@ -56,7 +56,7 @@ The installer works in phases and shows you a printed plan before changing anyth
 
 1. **Preflight (read-only).** Checks the OS, architecture, Docker, Compose v2 or newer, and free disk. On supported Linux without a working Engine, it offers to install Docker for you.
 2. **Plan and confirmation.** Prints each step as done, to do, or needs admin, then asks to continue. `--yes` skips the prompt; `--dry-run` prints the plan and stops without changing anything.
-3. **Downloads.** Fetches third-party base images by pinned digest and the model weight files listed in the printed plan.
+3. **Downloads.** Fetches third-party base images by pinned digest. The speech and memory search model files are fetched while the images are built, not on first run.
 4. **Images.** Downloads the pinned Node.js runtime for the sandbox setup. Downloads the app and helper images a release published for this source (pinned by digest), or builds them locally from the checked-out source, then builds the sandbox slot image (its build log goes to `~/.amanuensis/state/sandbox.log`; the terminal shows one progress line).
 5. **Machine services.** Starts the shared speech-to-text service.
 6. **First instance.** Prompts for the instance details, starts the two sandbox slots (asking before the `sudo` steps on Linux: installing the AppArmor profile in `/etc/apparmor.d` and loading it, creating the slot disks, and enabling Docker at boot if it is not), then starts your stack connected to them.
@@ -80,7 +80,7 @@ Everything else is generated: ports, secrets, and the login setup.
 
 ### What it downloads, and how big
 
-The printed plan lists every first-run download with its approximate size, including the speech model weights and the embedding model. Expect a few gigabytes in total on a first install, mostly model weights and container image layers. The installer downloads over HTTPS and never pipes anything to a shell.
+The printed plan lists every first-run download with its approximate size. The speech model and the memory search model are inside the Aman images, so they are part of the image sizes. Expect a few gigabytes in total on a first install, mostly container image layers. The installer downloads over HTTPS and never pipes anything to a shell.
 
 ### Flags you may not have seen
 
