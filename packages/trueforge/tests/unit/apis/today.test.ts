@@ -333,6 +333,8 @@ describe('GET /api/v1/today', () => {
     expect(today.calendar).toBeNull();
     expect(today.free_after).toBeNull();
     expect(today.due).toHaveLength(1);
+    // With no calendar set up there is nothing that could fail to be read.
+    expect(today.calendar_unread).toBe(false);
   });
 
   it("adds tomorrow's first event, marked as tomorrow's, once the day's timed events have all finished", async () => {
@@ -475,6 +477,9 @@ describe('GET /api/v1/today', () => {
     currentNow = new Date(NOW.getTime() + 61 * 60 * 1000);
     const afterBound = await readToday(router);
     expect(afterBound.calendar).toEqual([]);
+    // Nothing could be read, so the day says so instead of passing for an empty, free one.
+    expect(afterBound.calendar_unread).toBe(true);
+    expect(afterBound.free_after).toBeNull();
   });
 });
 
@@ -675,6 +680,18 @@ describe('GET /api/v1/today with a CalDAV calendar', () => {
     expect(warn).toHaveBeenCalledWith('Calendar could not be read for the rail', expect.anything());
   });
 
+  it('says the calendar could not be read when the connector refuses and no earlier read stands in', async () => {
+    inert = await startInertMcpServer({ calendar: true, calendarEvents: [] });
+    inert.setCalendarRefusal('caldav-mcp: the server answered 503.');
+    const router = createTodayRouter(baseDeps(caldavDeps()));
+
+    const today = await readToday(router);
+
+    expect(today.calendar).toEqual([]);
+    expect(today.calendar_unread).toBe(true);
+    expect(today.free_after).toBeNull();
+  });
+
   it('reads an empty CalDAV day as an empty list, not as no calendar', async () => {
     inert = await startInertMcpServer({ calendar: true, calendarEvents: [] });
     const router = createTodayRouter(baseDeps(caldavDeps()));
@@ -683,6 +700,7 @@ describe('GET /api/v1/today with a CalDAV calendar', () => {
 
     expect(today.calendar).toEqual([]);
     expect(today.free_after).toBe(NOW.toISOString());
+    expect(today.calendar_unread).toBe(false);
   });
 });
 
