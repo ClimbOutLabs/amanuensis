@@ -251,18 +251,21 @@ describe('usage', () => {
       const result = world.run(args);
       assert.equal(result.code, 2, args.join(' '));
       assert.equal(result.stdout, '');
-      assert.match(result.stderr, /Usage:/);
+      assert.match(result.stderr, /Run aman help/);
     }
   });
 
   it('needs the doctor command and no longer takes --home (the state directory is AMANUENSIS_HOME)', () => {
     make();
-    for (const argv of [[], ['--json'], ['bogus'], ['doctor', '--home', '/tmp/elsewhere']]) {
+    for (const argv of [['--json'], ['bogus'], ['doctor', '--home', '/tmp/elsewhere']]) {
       const result = world.shim(argv);
       assert.equal(result.code, 2, argv.join(' '));
       assert.equal(result.stdout, '');
-      assert.match(result.stderr, /Usage:/);
+      assert.match(result.stderr, /Run aman help/);
     }
+    const bare = world.shim([]);
+    assert.equal(bare.code, 0, 'a bare aman shows the list of commands');
+    assert.match(bare.stdout, /aman help doctor/);
     assert.equal(world.shim(['doctor', '--json', '--instance', 'main']).code, 0);
   });
 
@@ -1914,11 +1917,13 @@ describe('aman backup and aman upgrade', () => {
     );
   });
 
-  it('aman --help says the password command is run on the computer where Aman is installed', () => {
+  it('aman help password says the password command is run on the computer where Aman is installed', () => {
     make();
-    const result = world.shim(['--help']);
-    assert.match(result.stderr, /aman password \[--instance NAME\] \[--password-stdin\]/);
-    assert.match(result.stderr, /on the computer where Aman is installed/);
+    const result = world.shim(['help', 'password']);
+    assert.equal(result.code, 0);
+    assert.match(result.stdout, /aman password \[--instance NAME\] \[--password-stdin\]/);
+    assert.match(result.stdout, /Run it on the computer/);
+    assert.match(result.stdout, /where Aman is installed/);
   });
 
   it('say plainly when the folder Aman was installed from is gone', () => {
