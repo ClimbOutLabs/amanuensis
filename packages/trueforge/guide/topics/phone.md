@@ -16,7 +16,7 @@ The first time you open Aman on a new device, the browser warns that the page is
 
 === "Linux"
 
-    1. Find **Set up a new phone or computer** at the end of the first install. It has an address that ends in `/trust`. Later, run `aman status` on the computer to see it again.
+    1. Find "Set up a new phone or computer" at the end of the first install. It has an address that ends in `/trust`. Later, run `aman status` on the computer to see it again.
     2. Open that address on the device, or scan the square code printed under it.
     3. Follow the page. It has steps for iPhone, Android, Mac and Windows.
 
@@ -42,7 +42,7 @@ While you trust it, your device shows a long code called a fingerprint. It must 
 
 ## Open Aman on the device
 
-1. Open the https address the installer printed next to **Open**, or one from the list `aman status` prints. It starts with `https://` and usually ends in `:8443`.
+1. Open the https address the installer printed next to "Open", or one from the list `aman status` prints. It starts with `https://` and usually ends in `:8443`.
 2. Sign in with your email and password.
 
 !!! tip "Keep it handy"
