@@ -71,11 +71,12 @@ function emailQuestion(email: TrueForgeApi.Tier3Email): string {
   if (email.action !== 'send') {
     return 'Save this draft?';
   }
+  const isReply = (email.replyInThread ?? null) !== null;
   if (email.to.length === 0) {
-    return email.replyInThread !== null ? 'Send this reply?' : 'Send this email?';
+    return isReply ? 'Send this reply?' : 'Send this email?';
   }
   const to = recipientsText(email.to);
-  return email.replyInThread !== null ? `Send this reply to ${to}?` : `Send this email to ${to}?`;
+  return isReply ? `Send this reply to ${to}?` : `Send this email to ${to}?`;
 }
 
 /**
@@ -88,8 +89,9 @@ export function approvalHeadline(card: TrueForgeApi.Tier3Card | null): string {
   if (card === null) {
     return GENERIC_HEADLINE;
   }
-  if (card.copy !== null) {
-    return card.copy.headline;
+  const copy = card.copy ?? null;
+  if (copy !== null) {
+    return copy.headline;
   }
   const { email, calendarEvent, schedule, persona, skill } = card;
   if (email !== null && email !== undefined) {
@@ -116,7 +118,8 @@ export function approvalHeadline(card: TrueForgeApi.Tier3Card | null): string {
 
 /** The consequence line a card shows: the copy's consequence, or the older cannot-be-undone note. */
 function cardConsequence(card: TrueForgeApi.Tier3Card): string | null {
-  return card.copy !== null ? card.copy.consequence : card.cannotBeUndone;
+  const copy = card.copy ?? null;
+  return copy !== null ? copy.consequence : (card.cannotBeUndone ?? null);
 }
 
 /** The site an address goes to, or undefined when it is not a web address. */
@@ -134,24 +137,29 @@ function questionNames(question: string, value: string): boolean {
 
 /** True when the exact request adds nothing the facts do not already show, such as a page's own address. */
 function outboundRepeatsFacts(card: TrueForgeApi.Tier3Card, outbound: string): boolean {
-  return card.destination !== null && (outbound === card.destination || outbound === `url: ${card.destination}`);
+  const destination = card.destination ?? null;
+  return destination !== null && (outbound === destination || outbound === `url: ${destination}`);
 }
 
 function factLines(card: TrueForgeApi.Tier3Card, headline: string): string[] {
   const lines: string[] = [];
-  const { destination, destinationHost } = card;
+  const destination = card.destination ?? null;
+  const destinationHost = card.destinationHost ?? null;
   const hostOfDestination = destination === null ? undefined : addressHost(destination);
   if (destination !== null && !questionNames(headline, destination)) {
     lines.push(`${hostOfDestination === undefined ? 'Where' : 'Address'}: ${destination}`);
   }
-  if (card.recipient !== null) {
-    lines.push(`To: ${card.recipient}`);
+  const recipient = card.recipient ?? null;
+  if (recipient !== null) {
+    lines.push(`To: ${recipient}`);
   }
-  if (card.amount !== null) {
-    lines.push(`Amount: ${card.amount}`);
+  const amount = card.amount ?? null;
+  if (amount !== null) {
+    lines.push(`Amount: ${amount}`);
   }
-  if (card.parsedCommand !== null) {
-    lines.push(`Command: ${card.parsedCommand}`);
+  const parsedCommand = card.parsedCommand ?? null;
+  if (parsedCommand !== null) {
+    lines.push(`Command: ${parsedCommand}`);
   }
   if (
     destinationHost !== null &&
@@ -166,7 +174,7 @@ function factLines(card: TrueForgeApi.Tier3Card, headline: string): string[] {
 
 function calendarLines(event: TrueForgeApi.Tier3CalendarEvent): string[] {
   const lines: string[] = [];
-  const { before } = event;
+  const before = event.before ?? null;
   if (before !== null) {
     lines.push('Now');
     lines.push(`Title: ${before.title}`);
@@ -286,9 +294,10 @@ function skillLines(skill: TrueForgeApi.Tier3Skill): string[] {
   lines.push('Where it comes from');
   lines.push(skill.source);
   lines.push(`Version: ${skill.version}`);
-  if (skill.instructions !== null) {
+  const instructions = skill.instructions ?? null;
+  if (instructions !== null) {
     lines.push('Instructions');
-    lines.push(...skill.instructions.split('\n'));
+    lines.push(...instructions.split('\n'));
   }
   return lines;
 }
@@ -303,12 +312,14 @@ function emailLines(card: TrueForgeApi.Tier3Card, email: TrueForgeApi.Tier3Email
   if (consequence !== null) {
     lines.push(consequence);
   }
-  if (card.whyAskedAgain !== null) {
-    lines.push(`You have seen this before: ${card.whyAskedAgain}`);
+  const whyAskedAgain = card.whyAskedAgain ?? null;
+  if (whyAskedAgain !== null) {
+    lines.push(`You have seen this before: ${whyAskedAgain}`);
   }
-  if (email.replyInThread !== null) {
-    lines.push(`Reply in the thread, subject: ${email.replyInThread.subject}`);
-    lines.push(`Reply in the thread, from: ${email.replyInThread.from}`);
+  const replyInThread = email.replyInThread ?? null;
+  if (replyInThread !== null) {
+    lines.push(`Reply in the thread, subject: ${replyInThread.subject}`);
+    lines.push(`Reply in the thread, from: ${replyInThread.from}`);
   }
   if (typeof card.mailFrom === 'string' && card.mailFrom !== '') {
     lines.push(`From: ${card.mailFrom}`);
@@ -333,8 +344,9 @@ function emailLines(card: TrueForgeApi.Tier3Card, email: TrueForgeApi.Tier3Email
   if (email.nameLeftOff === true) {
     lines.push('The name was left off an address because it looked like an address.');
   }
-  if (email.replaces !== null) {
-    lines.push(`Replaces the saved draft “${email.replaces.subject}” to ${mailboxListText(email.replaces.to)}`);
+  const replaces = email.replaces ?? null;
+  if (replaces !== null) {
+    lines.push(`Replaces the saved draft “${replaces.subject}” to ${mailboxListText(replaces.to)}`);
   }
   const forwards = email.forwards ?? null;
   if (forwards === null) {
@@ -362,12 +374,13 @@ function emailLines(card: TrueForgeApi.Tier3Card, email: TrueForgeApi.Tier3Email
         : `Files sent with it: ${forwards.attachments.join(', ')}`,
     );
   }
-  if (card.outboundText !== null) {
+  const outboundText = card.outboundText ?? null;
+  if (outboundText !== null) {
     lines.push('Also sent with this email');
     if (card.outboundTruncated) {
       lines.push('Part of what will be sent is not shown in full.');
     }
-    lines.push(...card.outboundText.split('\n'));
+    lines.push(...outboundText.split('\n'));
   }
   return lines;
 }
@@ -396,8 +409,9 @@ export function approvalLines(approval: PendingApproval, assistantName: string):
   if (email !== null) {
     lines.push(...emailLines(card, email));
   } else {
-    if (card.whyAskedAgain !== null) {
-      lines.push(card.whyAskedAgain);
+    const whyAskedAgain = card.whyAskedAgain ?? null;
+    if (whyAskedAgain !== null) {
+      lines.push(whyAskedAgain);
     }
     lines.push(...factLines(card, headline));
     if (card.calendarEvent !== null && card.calendarEvent !== undefined) {
@@ -416,20 +430,22 @@ export function approvalLines(approval: PendingApproval, assistantName: string):
       lines.push(`Skill: ${card.skillNetwork.skillName}`);
       lines.push(`Sites it asks to reach: ${card.skillNetwork.hosts.join(', ')}`);
     }
-    if (card.outboundText !== null && !outboundRepeatsFacts(card, card.outboundText)) {
+    const outboundText = card.outboundText ?? null;
+    if (outboundText !== null && !outboundRepeatsFacts(card, outboundText)) {
       lines.push('Full request');
       if (card.outboundTruncated) {
         lines.push('Part of this is not shown in full. Check it before you approve.');
       }
-      lines.push(...card.outboundText.split('\n'));
+      lines.push(...outboundText.split('\n'));
     }
     const consequence = cardConsequence(card);
     if (consequence !== null) {
       lines.push(consequence);
     }
   }
-  if (card.plainWhy !== null) {
-    lines.push(`${assistantName} says: ${card.plainWhy}`);
+  const plainWhy = card.plainWhy ?? null;
+  if (plainWhy !== null) {
+    lines.push(`${assistantName} says: ${plainWhy}`);
   }
   return lines;
 }
@@ -439,10 +455,29 @@ export function isNewRecipientCard(card: TrueForgeApi.Tier3Card | null): boolean
   return card !== null && (card.mailNewRecipients ?? []).length > 0;
 }
 
+/** A new-recipient card whose approval saves a draft instead of sending. */
+export function isNewRecipientDraftCard(card: TrueForgeApi.Tier3Card | null): boolean {
+  return isNewRecipientCard(card) && card?.mailDraft === true;
+}
+
+/**
+ * True when the always-allow answer is offered for a waiting action. The
+ * server's flag decides for most cards, but a new-recipient card never offers
+ * it: approving one adds its addresses, so no standing grant is taken on it.
+ * The terminal hides the answer itself, whatever the flag says, the way the
+ * web app's card does.
+ */
+export function alwaysAllowOffered(approval: PendingApproval): boolean {
+  return approval.canAlwaysAllow && !isNewRecipientCard(approval.card);
+}
+
 /** The words on the approve choice: Add and send on a new-recipient card, Allow on every other card. */
 export function approveChoiceLabel(card: TrueForgeApi.Tier3Card | null): string {
+  if (isNewRecipientDraftCard(card)) {
+    return 'Add and save draft';
+  }
   if (isNewRecipientCard(card)) {
-    return card?.mailDraft === true ? 'Add and save draft' : 'Add and send';
+    return 'Add and send';
   }
   return 'Allow';
 }
@@ -454,8 +489,11 @@ export function approveChoiceLabel(card: TrueForgeApi.Tier3Card | null): string 
  * other card says Deny.
  */
 export function denyChoiceLabel(card: TrueForgeApi.Tier3Card | null): string {
+  if (isNewRecipientDraftCard(card)) {
+    return "Don't save";
+  }
   if (isNewRecipientCard(card)) {
-    return card?.mailDraft === true ? "Don't save" : "Don't send";
+    return "Don't send";
   }
   if (card?.safeChoice === true) {
     const email = card.email ?? null;

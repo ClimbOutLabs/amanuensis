@@ -47,6 +47,14 @@ function emailCard(overrides: Partial<TrueForgeApi.Tier3Card> = {}): TrueForgeAp
   };
 }
 
+function emailWith(overrides: Partial<TrueForgeApi.Tier3Email>): TrueForgeApi.Tier3Email {
+  const base = emailCard().email;
+  if (base === null || base === undefined) {
+    throw new Error('Expected an email card.');
+  }
+  return { ...base, ...overrides };
+}
+
 function pending(card: TrueForgeApi.Tier3Card | null, overrides: Partial<PendingApproval> = {}): PendingApproval {
   return {
     toolCallId: 'call-1',
@@ -133,6 +141,66 @@ describe('the approval lines', () => {
     });
     const lines = approvalLines(pending(card), 'Mannie');
     expect(lines).toContain('Pippa is not on your send list. Approving adds pippa@example.com to it, then sends.');
+  });
+
+  it('reads a card whose copy never arrived, building the headline from its fields as the web does', () => {
+    const card = emailCard({ copy: undefined });
+    expect(approvalHeadline(card)).toBe('Send this email to Pippa?');
+    const lines = approvalLines(pending(card), 'Mannie');
+    expect(lines[0]).toBe('Send this email to Pippa?');
+    expect(lines).toContain('To: Pippa (pippa@example.com)');
+    expect(lines).toContain('Subject: Train times');
+    expect(lines).toContain('Message');
+  });
+
+  it('reads a card whose nullable fields never arrived, showing nothing for them', () => {
+    const card = emailCard({ copy: null, whyAskedAgain: undefined, outboundText: undefined, plainWhy: undefined });
+    const lines = approvalLines(pending(card), 'Mannie');
+    expect(lines[0]).toBe('Send this email to Pippa?');
+    expect(lines).toContain('Message');
+    expect(lines.some(line => line.includes('undefined'))).toBe(false);
+  });
+
+  it('reads an email whose reply and replaces fields never arrived', () => {
+    const card = emailCard({ email: emailWith({ replyInThread: undefined, replaces: undefined }) });
+    const lines = approvalLines(pending(card), 'Mannie');
+    expect(lines).toContain('To: Pippa (pippa@example.com)');
+    expect(lines.some(line => line.startsWith('Reply in the thread'))).toBe(false);
+    expect(lines.some(line => line.startsWith('Replaces'))).toBe(false);
+  });
+
+  it('reads a plain card whose fact fields never arrived, showing nothing for them', () => {
+    const card = emailCard({
+      email: null,
+      copy: { headline: 'Post to the team board?', consequence: null, reason: null },
+      destination: undefined,
+      recipient: undefined,
+      amount: undefined,
+      parsedCommand: undefined,
+      destinationHost: undefined,
+      outboundText: undefined,
+      whyAskedAgain: undefined,
+      plainWhy: undefined,
+    });
+    expect(approvalLines(pending(card), 'Mannie')).toEqual(['Post to the team board?']);
+  });
+
+  it('shows only the generic headline for the smallest card the schema allows', () => {
+    const card: TrueForgeApi.Tier3Card = {
+      amount: null,
+      cannotBeUndone: null,
+      copy: null,
+      destination: null,
+      destinationHost: null,
+      outboundText: null,
+      outboundTruncated: false,
+      parsedCommand: null,
+      plainWhat: 'Do a thing.',
+      plainWhy: null,
+      recipient: null,
+      whyAskedAgain: null,
+    };
+    expect(approvalLines(pending(card), 'Mannie')).toEqual(['Needs your OK']);
   });
 
   it('shows the facts of a plain card once, and the full request', () => {

@@ -1,3 +1,5 @@
+import type { HeldActionOutcome } from '@truefoundry/trueforge-chat';
+
 /**
  * The plain words the terminal shows. The web app keeps a fuller dictionary of
  * tool wording; the terminal derives a plain name from the tool's own name, so
@@ -63,7 +65,7 @@ export function outcomeWord(outcome: ToolOutcome): string {
 }
 
 /** The outcome a stream disposition names, in the words above. */
-export function outcomeOfDisposition(disposition: string): ToolOutcome {
+export function outcomeOfDisposition(disposition: string): HeldActionOutcome {
   switch (disposition) {
     case 'executed_ok':
       return 'done';

@@ -1,7 +1,13 @@
 import { Box, Text, useStdout } from 'ink';
 import { useMemo } from 'react';
 
-import { approvalLines, approveChoiceLabel, denyChoiceLabel, type PendingApproval } from '../approvals.js';
+import {
+  alwaysAllowOffered,
+  approvalLines,
+  approveChoiceLabel,
+  denyChoiceLabel,
+  type PendingApproval,
+} from '../approvals.js';
 
 /** How far the approval view can scroll, and the page size it scrolls by. */
 export function approvalScrollLimit(lineCount: number, pageSize: number): number {
@@ -64,7 +70,7 @@ export function ApprovalPanel({
       <Box marginTop={1}>
         <Text>
           <Text bold>{`A: ${approveLabel}`}</Text>
-          {approval.canAlwaysAllow ? <Text>{'   Shift+A: Always allow everywhere'}</Text> : null}
+          {alwaysAllowOffered(approval) ? <Text>{'   Shift+A: Always allow everywhere'}</Text> : null}
           <Text>{`   D: ${denyLabel}`}</Text>
           <Text dimColor>{'   Up and down arrows scroll   Esc leaves it for later'}</Text>
         </Text>

@@ -769,6 +769,57 @@ describe('ChatView approvals', () => {
     app.unmount();
   });
 
+  it('never offers always allow on a new-recipient card, even when the server flag would allow it', async () => {
+    const answerApproval = vi.fn();
+    const card: TrueForgeApi.Tier3Card = {
+      ...EMAIL_CARD,
+      mailNewRecipients: ['pippa@example.com'],
+      plainWhat: 'Pippa is not on your send list. Approving adds pippa@example.com to it, then sends.',
+    };
+    const client = heldTurn(
+      {
+        answerApproval: async function* (sessionId, approval, decision) {
+          answerApproval(sessionId, approval, decision);
+          yield {
+            id: 'e5',
+            type: 'tool.response.v2',
+            createdAt: AT,
+            threadId: 'thread-1',
+            toolCallId: 'call-1',
+            content: '',
+            disposition: 'executed_ok',
+            admissionProvenance: { source: 'automatic' },
+          } satisfies ChatEvent;
+          yield turnDone('e6');
+          return 'done';
+        },
+      },
+      card,
+    );
+    const app = renderChat(client);
+    await untilText(app, '›');
+    await typeAndSend(app, 'Send the summary to Pippa');
+    await untilText(app, 'Waiting for your OK');
+    const frame = app.text();
+    expect(frame).toContain('A: Add and send');
+    expect(frame).not.toContain('Always allow everywhere');
+    // Shift+A is not an answer on this card, whatever the server flag said.
+    app.write('A');
+    await new Promise(resolve => setTimeout(resolve, 200));
+    expect(answerApproval).not.toHaveBeenCalled();
+    // The plain approve answer still works.
+    await vi.waitFor(
+      () => {
+        app.write('a');
+        expect(answerApproval).toHaveBeenCalled();
+      },
+      { timeout: 10000, interval: 50 },
+    );
+    expect(answerApproval.mock.calls[0]?.[2]).toBe('approve');
+    await untilText(app, 'Approved and done.');
+    app.unmount();
+  });
+
   it('answers a plan grant the same way, from its tool name alone', async () => {
     const answerApproval = vi.fn();
     const client = heldTurn(

@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   APPROVED_OUTCOME_TEXT,
   DENIED_TEXT,
+  alwaysAllowOffered,
   approvalLines,
   describeAnswerFailure,
   type PendingApproval,
@@ -255,7 +256,7 @@ export function ChatView({
         answer(activeApproval, 'approve');
         return;
       }
-      if (inputChar === 'A' && activeApproval.canAlwaysAllow) {
+      if (inputChar === 'A' && alwaysAllowOffered(activeApproval)) {
         answer(activeApproval, 'always_allow');
         return;
       }

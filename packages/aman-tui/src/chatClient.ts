@@ -10,6 +10,7 @@ import type { TrueForge, TrueForgeApi } from '@truefoundry/trueforge-sdk';
 import { pendingApprovalFromRef, type PendingApproval } from './approvals.js';
 import type { ChatEvent } from './chatEvents.js';
 import { keyWasRefused, statusCodeOfError } from './serverErrors.js';
+import { outcomeOfDisposition } from './words.js';
 
 /** One row of the chat list. */
 export interface ChatSummary {
@@ -94,21 +95,6 @@ function summaryOf(session: TrueForgeApi.Session, personaName: string | null): C
     personaName: personaName ?? (session.agent.type === 'reference' ? session.agent.name : null),
     updatedAt: session.updatedAt,
   };
-}
-
-/** What became of an answered action, from the disposition its response carries. */
-function heldOutcomeOfDisposition(disposition: string): HeldActionOutcome {
-  switch (disposition) {
-    case 'executed_ok':
-      return 'done';
-    case 'executed_nonzero':
-      return 'failed';
-    case 'outcome_unknown':
-      return 'unclear';
-    default:
-      // denied, policy_blocked, never_ran, and anything unrecognised: the call did not run.
-      return 'not_run';
-  }
 }
 
 type TurnStream = Awaited<ReturnType<TrueForge['sessions']['createTurnStream']>>;
@@ -320,7 +306,7 @@ export function createChatClient(options: {
       let outcome: HeldActionOutcome = 'unclear';
       for await (const event of pumpTurn(sessionId, stream, hooks)) {
         if (event.type === 'tool.response.v2' && event.toolCallId === approval.toolCallId) {
-          outcome = heldOutcomeOfDisposition(event.disposition);
+          outcome = outcomeOfDisposition(event.disposition);
         }
         yield event;
       }
