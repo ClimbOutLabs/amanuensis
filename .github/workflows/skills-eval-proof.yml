@@ -59,6 +59,12 @@ jobs:
         run: grep -nE 'Unreachable|skill|exec|write_file|held|network|approval' "$RUNNER_TEMP/server.log" | grep -vE 'nowledge|noticing|STT' | cut -c1-900 | tail -120 || true
       - name: Skill chats' turns and tool calls
         if: always()
+        run: node scripts/eval-models-proof/print-events.mjs "$RUNNER_TEMP/skill-events.jsonl"
+      - name: Server log around skills
+        if: always()
+        run: grep -nE 'Unreachable|skill|exec|write_file|held|network|approval' "$RUNNER_TEMP/server.log" | grep -vE 'nowledge|noticing|STT' | cut -c1-900 | tail -120 || true
+      - name: Skill chats' turns and tool calls
+        if: always()
         run: |
           node -e "
           const lines = require('fs').readFileSync(process.env.RUNNER_TEMP + '/skill-events.jsonl', 'utf8').trim().split('\\n');
