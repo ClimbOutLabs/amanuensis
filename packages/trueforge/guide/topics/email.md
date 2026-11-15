@@ -77,7 +77,7 @@ If the list changed after you approved the draft, the send card says so too. Its
 - Before Aman can save Gmail drafts or send from Gmail, tick the box about drafts and sending when you connect Google. You can also click **Allow drafts and sending** later.
 - With an account connected with an app password, Aman can also move mail to your archive. That asks first, like sending.
 - Emails are things Aman reads, never instructions it follows. If an address came only from an email, the card says where Aman read it.
-- A scheduled run can read your mail, but it never drafts or sends mail. See [How schedules hold actions](../../../../docs/schedules.md).
+- A scheduled run can read your Gmail, but it never drafts or sends Gmail mail. See [How schedules hold actions](../../../../docs/schedules.md).
 
 ## Related
 
