@@ -247,3 +247,33 @@ tighten_checkout() { # dir
   chmod go-w "$dir" 2>/dev/null || true
   chmod -R go-w "$dir/installer" 2>/dev/null || true
 }
+
+# True when the person's own group has nobody else in it: no one listed as a member but them, and no other account with it
+# as its main group. Ubuntu gives each account a group like that and a umask that lets the group write, so a git pull there
+# makes new installer files group-writable while still changeable by the person alone. Unknown (no getent) counts as shared.
+own_group_private() {
+  local uid gid me line members member
+  uid=$(id -u) && gid=$(id -g) && me=$(id -un) || return 1
+  command -v getent >/dev/null 2>&1 || return 1
+  line=$(getent group "$gid") || return 1
+  members=$(printf '%s' "$line" | cut -d: -f4)
+  for member in ${members//,/ }; do
+    [ "$member" = "$me" ] || return 1
+  done
+  line=$(getent passwd) || return 1
+  ! printf '%s\n' "$line" | awk -F: -v uid="$uid" -v gid="$gid" '$4 == gid && $3 != uid { found = 1 } END { exit !found }'
+}
+
+# True when the only thing wrong with the folder is that the person's own private group can write to some of it, which is
+# what a git pull or a branch switch leaves behind under Ubuntu's umask. Nobody else could have changed those files, so
+# taking the group's write right away is safe to do without asking. Anything else (a link, a file of another user, a file
+# anyone or another group can write, a folder above that others can change) is left for the person to look at.
+checkout_only_own_group_writes() { # dir
+  local dir=$1 me gid
+  [ "$(checkout_problem "$dir")" = writable ] || return 1
+  checkout_parent_writable "$dir" && return 1
+  me=$(id -u) && gid=$(id -g) || return 1
+  [ -z "$(find "$dir" "$dir/installer" -maxdepth 0 \( -perm -o+w -o \( -perm -g+w ! -gid "$gid" \) -o ! -uid "$me" \) -print 2>/dev/null)" ] || return 1
+  [ -z "$(find "$dir/installer" \( -perm -o+w -o \( -perm -g+w ! -gid "$gid" \) -o ! -uid "$me" \) -print -quit 2>/dev/null)" ] || return 1
+  own_group_private
+}

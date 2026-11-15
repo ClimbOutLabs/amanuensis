@@ -148,6 +148,11 @@ checkout_dir() {
 checkout_installer() {
   local repo
   repo=$(checkout_dir) || return 1
+  # A pull under Ubuntu's umask leaves new installer files writable by the person's own group; that alone is put right
+  # here, as the installer itself would, instead of refusing.
+  if checkout_only_own_group_writes "$repo" && tighten_checkout "$repo"; then
+    printf 'Made %s private to you again, so only you can change what the installer runs.\n' "$repo" >&2
+  fi
   if checkout_problem "$repo" >/dev/null; then return 1; fi
   printf '%s' "${repo}/installer/install.sh"
 }
