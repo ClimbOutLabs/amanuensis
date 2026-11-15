@@ -1,9 +1,10 @@
 /**
  * Admin/settings API surface under /api/v1/settings.
- * Sub-routers (model-providers, mcp-servers, skills, sandbox-providers, run-code) mount here.
+ * Sub-routers (model-providers, mcp-servers, skills, sandbox-providers, sandbox-workspaces, run-code) mount here.
  * Auth is applied at the /api/v1/settings mount boundary in app.ts (admin when auth is enabled).
  */
 import { OpenAPIHono } from '@hono/zod-openapi';
+import type { ISessionStore } from '@truefoundry/trueforge-core/agent-session';
 import type { Context } from 'hono';
 import type { Logger } from 'winston';
 import type { ResolveRequestContext } from '../auth/identity';
@@ -16,6 +17,7 @@ import type { IMcpToolGrantStore } from '../db/mcpToolGrantStore';
 import type { IModelProviderStore } from '../db/modelProviderStore';
 import type { IPersonalizationStore } from '../db/personalizationStore';
 import type { ISandboxProviderStore } from '../db/sandboxProviderStore';
+import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import type { WithTransaction } from '../db/transaction';
 import type { IOAuthTokenStore } from '../mcp/auth/types';
 import type { NightlyMemoryJob } from '../runtime/memory/nightlyService';
@@ -24,7 +26,7 @@ import type { ResolveAddresses } from '../runtime/remoteAddress';
 import { getSharedRunCodeService } from '../runtime/sessionResources';
 import { readSkillFilesFromGit, type ReadSkillFiles } from '../runtime/skillWebsites';
 import type { TokenFactoryBudget } from '../runtime/tokenFactoryBudget';
-import { sandboxDisabledByInstaller } from '../sandbox/slotBackend';
+import { sandboxDisabledByInstaller, slotWorkspaceSessions } from '../sandbox/slotBackend';
 import { createFirstRunGuideRouter } from './firstRunGuide';
 import { createGitCommitIdentityRouter } from './gitCommitIdentity';
 import { createSettingsMcpServersRouter } from './mcpServers';
@@ -36,6 +38,7 @@ import { createMemorySummarizeRouter } from './memorySummarize';
 import { createModelProvidersRouter } from './modelProviders';
 import { createRunCodeRouter } from './runCode';
 import { createSandboxProvidersRouter } from './sandboxProviders';
+import { createSandboxWorkspacesRouter } from './sandboxWorkspaces';
 import { createSkillsRouter, type ResolveSkillStore } from './skills';
 import { createTokenFactoryUsageRouter } from './tokenFactoryUsage';
 import { createToolOutputScreensRouter } from './toolOutputScreens';
@@ -52,6 +55,7 @@ export interface SettingsRouterDeps<TTransaction> {
   /** Reads a git skill's files to find its websites; tests replace it. */
   readSkillFiles?: ReadSkillFiles;
   resolveSandboxProviderStore: (c: Context) => ISandboxProviderStore<TTransaction>;
+  sessionStore: ISessionStore<SessionCustom, TurnCustom>;
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
   personalizationStore: Pick<IPersonalizationStore<TTransaction>, 'getProfile'>;
   tokenFactoryBudget: TokenFactoryBudget;
@@ -111,6 +115,15 @@ export function createSettingsRouter<TTransaction>(deps: SettingsRouterDeps<TTra
       withTransaction: deps.withTransaction,
       logger: deps.logger,
       resolveRequestContext: deps.resolveRequestContext,
+    }),
+  );
+  router.route(
+    '/sandbox-workspaces',
+    createSandboxWorkspacesRouter({
+      sessionStore: deps.sessionStore,
+      logger: deps.logger,
+      resolveRequestContext: deps.resolveRequestContext,
+      listSlotWorkspaces: () => slotWorkspaceSessions(),
     }),
   );
   router.route(
