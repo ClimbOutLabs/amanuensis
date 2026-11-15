@@ -314,9 +314,9 @@ export interface TurnsRouterDeps {
   personaStore: IPersonaStore;
   spaceStore: ISpaceStore;
   /** Per-user Google logins; absent, no Gmail tools mount. */
+  googleConnectionStore?: IGoogleConnectionStore | undefined;
   /** Copies messages typed in the app's Telegram chat to Telegram; absent where Telegram is not wired. */
   telegramStore?: Pick<ITelegramStore, 'getConnection' | 'addPendingReply'> | undefined;
-  googleConnectionStore?: IGoogleConnectionStore | undefined;
   repositoryStore: IRepositoryStore;
   turnArtifactStore: ITurnArtifactStore;
   /** Not tenant-scoped: the persisted live tool-output screen override is global. */
