@@ -52,7 +52,8 @@ Nothing here changes a skill that stays.
 - Settings uses the same scan. Its add form checks the skill first (`POST /api/v1/settings/skills/check-websites`) and sends the list the person saw as `approved_websites`. The server scans again and saves the skill and its approval in one transaction only when the two lists match; otherwise nothing is saved. A git skill is stored at the commit that was read (its `ref` becomes that commit), and its `network_hosts` always comes from the scan, never from the request. An edit that keeps the saved url, path and commit is not read again.
 - Removing a skill in Settings removes its websites with its record, and drops its allow-once answers in open chats. A website another installed skill lists stays allowed through that skill's own record.
 - Scripts a skill brings run in the sandbox under the same rules as any other code.
-- After a call that finishes while the chat is open, the app turns the skill on for that chat. A finished call in an older chat is left alone.
+- The server turns the skill on for the chat it was added from, by adding its name to that chat's own setup, so it is ready from the next message in the app, on Telegram or through the API. A chat that runs a saved agent, or has no sandbox, is left as it is, and the reply says the skill is not on there. The app also refreshes its skill lists after a call that finishes while the chat is open.
+- A chat or schedule that still names a skill removed later keeps working: the removed skill is left out of its turns.
 - Without a sandbox the skill is still added, and the assistant says it will work once the sandbox is set up.
 
 ## 5. Where it is off
@@ -70,6 +71,7 @@ Nothing here changes a skill that stays.
 - The approved call carries the name and the website list. If either differs when the person answers, the approval no longer covers the call and nothing is removed.
 - Allow does what Settings' Remove does: deletes the record, which takes its websites with it, and drops its allow-once answers in open chats. Not now changes nothing.
 - After a call that finishes while the chat is open, the app takes the skill out of that chat and reads the skill lists again.
+- The server also takes the skill out of the setup of the chat it was removed from. Other chats that still name it skip it when they run. After a call that finishes while the chat is open, the app takes the skill out of its own copy of that chat and reads the skill lists again.
 
 ## Privacy
 

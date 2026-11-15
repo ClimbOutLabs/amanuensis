@@ -29,7 +29,8 @@ You can ask the assistant to add a skill for you: name one of the starter skills
 - An approval card shows the name, the description, the repository and folder, and the commit. It lists the websites the skill sends requests to, or says it sends none. Like the Settings network approval, it warns that the skill can send any of your data to those websites, and that Aman can't see what a site does with it. A site that can send email is marked Blocked, and the card says Aman blocks it. If the skill makes up web addresses while it runs, so they can't be read ahead of time, the card says so. For a skill read from GitHub it also shows the skill's own instructions. The name and description come from the skill's `SKILL.md`, not from the model. Nothing is saved until you allow it, and the card asks every time.
 - Approving is all or nothing. **Allow** adds the skill and lets it reach exactly the websites on the card. **Not now** adds nothing and allows nothing. If the skill's files changed between the card and your answer, nothing is added.
 - A starter skill is added as shipped, at the commit the catalog pins, with no lookup. Its card lists the websites the catalog names for it.
-- After you allow it, the skill is turned on for that chat and listed under **Settings → Skills**.
+- After you allow it, the skill is turned on for that chat, wherever the chat runs (the app or Telegram), and listed under **Settings → Skills**. A chat that runs a saved agent or has no sandbox can't take it, and the assistant says so.
+- Removing a skill never breaks a chat or schedule that used it. The skill is just no longer there.
 
 You can also ask the assistant to remove a skill. A card names the skill and the websites it will no longer reach, and asks every time. **Allow** removes it everywhere, the same as **Remove** in **Settings → Skills**, with its websites. **Not now** changes nothing.
 

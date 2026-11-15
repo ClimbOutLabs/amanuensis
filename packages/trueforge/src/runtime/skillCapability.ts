@@ -1,4 +1,10 @@
 import type { CallToolRequest } from '@modelcontextprotocol/sdk/types.js';
+import {
+  AgentSpecSchema,
+  type AgentSpec,
+  type ISessionStore,
+  type SessionRecord,
+} from '@truefoundry/trueforge-core/agent-session';
 import type {
   AgentCapability,
   AgentTracing,
@@ -98,6 +104,80 @@ export interface SkillTurnContext {
   lookup: SkillLookupDeps;
   /** Reads every file of a skill at one exact commit, so the host can see which websites it sends requests to. */
   readFiles: ReadSkillFiles;
+  /** Turns a skill on or off in this chat's own setup. */
+  chatSkills: ChatSkillSwitch;
+}
+
+export interface ChatSkillSwitch {
+  /** Turns a skill just added here on for this chat; false when it could not be. */
+  turnOn: (input: { name: string }) => Promise<boolean>;
+  /** Takes a skill just removed here out of this chat's setup, so the chat no longer names it. */
+  turnOff: (input: { name: string }) => Promise<void>;
+}
+
+/**
+ * Turns a skill on or off for one chat by changing the chat's own setup, so a skill added from any chat, the app or
+ * Telegram, is ready from the next message. Turning on refuses (false) a chat that runs a saved agent or whose setup
+ * could not take it, such as one without the sandbox.
+ */
+export function chatSkillSwitch({
+  sessionStore,
+  tenant_id,
+  session_id,
+}: {
+  /** Only the chat's setup is read and written. */
+  sessionStore: {
+    getSession(input: {
+      tenant_id: string;
+      session_id: string;
+    }): Promise<Pick<SessionRecord<object>, 'agent'> | undefined>;
+    updateSession: ISessionStore<object, object>['updateSession'];
+  };
+  tenant_id: string;
+  session_id: string;
+}): ChatSkillSwitch {
+  const inlineSpec = async () => {
+    const session = await sessionStore.getSession({ tenant_id, session_id });
+    return session?.agent.type === 'inline' ? session.agent.spec : undefined;
+  };
+  const save = (spec: AgentSpec) =>
+    sessionStore.updateSession({
+      tenant_id,
+      session_id,
+      agent: { type: 'inline', spec },
+      title: undefined,
+      metadata: undefined,
+    });
+  return {
+    turnOn: async ({ name }) => {
+      const spec = await inlineSpec();
+      if (spec === undefined) {
+        return false;
+      }
+      const current = spec.skills ?? [];
+      if (current.some(skill => skill.name === name)) {
+        return true;
+      }
+      const next = AgentSpecSchema.safeParse({ ...spec, skills: [...current, { name }] });
+      if (!next.success || !next.data.config.sandbox.enabled) {
+        return false;
+      }
+      await save(next.data);
+      return true;
+    },
+    turnOff: async ({ name }) => {
+      const spec = await inlineSpec();
+      const current = spec?.skills ?? [];
+      if (spec === undefined || !current.some(skill => skill.name === name)) {
+        return;
+      }
+      const next = AgentSpecSchema.safeParse({ ...spec, skills: current.filter(skill => skill.name !== name) });
+      // Other chats skip a removed skill when they run, so a setup that cannot be saved here is left as it is.
+      if (next.success) {
+        await save(next.data);
+      }
+    },
+  };
 }
 
 interface SkillToolSetOptions extends SkillTurnContext {
@@ -163,7 +243,15 @@ function sourceLine(skill: Pick<GitSkill, 'url' | 'path'>): string {
   return skill.path === undefined ? repository : `${repository}, folder ${skill.path}`;
 }
 
-function addedMessage({ skill, sandboxReady }: { skill: GitSkill; sandboxReady: boolean }): string {
+function addedMessage({
+  skill,
+  sandboxReady,
+  onForChat,
+}: {
+  skill: GitSkill;
+  sandboxReady: boolean;
+  onForChat: boolean;
+}): string {
   if (!sandboxReady) {
     return `The skill ${skill.name} is added, but it cannot be used yet. Skills run in the sandbox, which is not set up. Tell the user in plain words: "Added the skill ${skill.name}. It will work once the sandbox is set up."`;
   }
@@ -171,7 +259,10 @@ function addedMessage({ skill, sandboxReady }: { skill: GitSkill; sandboxReady: 
     skill.network_hosts !== undefined && skill.network_hosts.length > 0
       ? ` It can reach only the websites the user approved on the card: ${skill.network_hosts.join(', ')}.`
       : '';
-  return `The skill ${skill.name} is added. Tell the user in one plain line: "Added the skill ${skill.name}." It is ready from the next message in this chat. If it is not, tell the user to turn it on for the chat, or to look in Settings, under Skills.${sites}`;
+  const ready = onForChat
+    ? 'It is on for this chat from the next message.'
+    : 'It could not be turned on for this chat, so tell the user to turn it on for a chat in the app, under Add-ons, then Skills.';
+  return `The skill ${skill.name} is added. Tell the user in one plain line: "Added the skill ${skill.name}." ${ready}${sites}`;
 }
 
 /**
@@ -580,9 +671,11 @@ export class SkillToolSet extends LocalToolMCP {
         });
       }
     }
+    // Turning it on is a convenience: the skill is added either way, and the reply says when it is not on.
+    const onForChat = await this.#options.chatSkills.turnOn({ name: manifest.name }).catch(() => false);
     return jsonResult({
       added: { name: manifest.name, description: manifest.description },
-      next: addedMessage({ skill: manifest, sandboxReady: this.#options.sandboxReady }),
+      next: addedMessage({ skill: manifest, sandboxReady: this.#options.sandboxReady, onForChat }),
     });
   }
 
@@ -602,6 +695,8 @@ export class SkillToolSet extends LocalToolMCP {
     // The same as Settings: its websites went with its record, and its answers in open chats go too.
     skillNetworkTokens.forgetSkill({ tenant_id: this.#options.tenant_id, skill_name: name });
     forgetCachedSkillCode({ skill_name: name });
+    // Tidying this chat's setup is a convenience: the skill is gone either way, and chats skip it when they run.
+    await this.#options.chatSkills.turnOff({ name }).catch(() => undefined);
     return jsonResult({
       removed: { name },
       next: `The skill ${name} is removed. Tell the user in one plain line: "Removed the skill ${name}."`,

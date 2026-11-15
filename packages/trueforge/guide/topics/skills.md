@@ -37,6 +37,8 @@ When a skill is on for a chat, Aman reads its instructions when the job comes up
 
 Some skills come with their own scripts. Aman runs them in the sandbox, from the skill's folder. A skill's own script runs without asking, because you installed the skill. It asks first when the sandbox can reach the internet, or when Aman edited one of the skill's files in that chat.
 
+Some skills show their steps as shell commands that loop over results. Aman doesn't run loops like that directly, because the approval card couldn't show what they would run. It writes the same steps into a short script and runs that instead, and it still asks you first.
+
 A skill script that needs a website or an extra package can't get it on its own. Aman skips a skill's own install steps and uses the packages the sandbox already has. When a package is missing, Aman tells you which one instead of trying workarounds. On an installed Aman, you can add a Python package with `aman doctor sandbox --add-python` and the package's name.
 
 ## Add your own skill from GitHub
@@ -61,7 +63,7 @@ You can also ask Aman in a chat to add a skill.
 2. A card shows the skill before anything is added: its name, what it's for, where it comes from, the exact version and the websites it sends requests to. Aman reads the name and description from the skill itself, and finds the websites by reading its files.
 3. Click **Allow** to add it and let it reach those websites, or **Not now** to skip it. This card asks every time.
 
-After you allow it, the skill is on for that chat from your next message. It also shows in Settings, under Skills, where you can remove it.
+After you allow it, the skill is on for that chat from your next message, in the app or on Telegram. It also shows in Settings, under Skills, where you can remove it.
 
 !!! warning "Add only skills you trust"
 
@@ -82,7 +84,7 @@ From a chat, Aman can add or remove a skill, but it can't change one. An incogni
 
 ## Turn a skill off
 
-Click **Remove** on the skill's row under Enabled. For a skill you imported, Aman asks first: click **Remove skill**. You can import it again later.
+Click **Remove** on the skill's row under Enabled. For a skill you imported, Aman asks first: click **Remove skill**. You can import it again later. Chats that used it keep working without it.
 
 ## Let a skill reach the internet
 
