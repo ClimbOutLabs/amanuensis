@@ -1,10 +1,12 @@
 # Test only: stands in for a person at the setup window, through the
-# same Windows accessibility interface a screen reader uses. Each
-# argument is one step: click:<id>, set:<id>:<text>, select:<id>,
+# same Windows accessibility interface a screen reader uses. The steps
+# arrive on standard input, never as arguments, so what the person
+# types is not on this script's own command line. They are one line
+# each, as base64 of UTF-8: click:<id>, set:<id>:<text>, select:<id>,
 # read:<id>, close, or commandlines:<parent pid>. What a read finds is
 # printed, one line for each.
-param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Steps)
 $ErrorActionPreference = 'Stop'
+$Steps = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String([Console]::In.ReadToEnd().Trim())).Split("`n")
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
 

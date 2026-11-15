@@ -30,9 +30,11 @@ type Screen = Extract<ToWindow, { t: 'screen' }>;
 
 function drive(steps: readonly string[]): Promise<string[]> {
   return new Promise((resolve, reject) => {
-    execFile(
+    // The steps go in on standard input: on the command line, what the
+    // person types would be readable by every other program.
+    const driver = execFile(
       'powershell.exe',
-      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', DRIVER, ...steps],
+      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', DRIVER],
       { timeout: 120000 },
       (error, stdout, stderr) => {
         if (error !== null) {
@@ -42,6 +44,7 @@ function drive(steps: readonly string[]): Promise<string[]> {
         resolve(stdout.split(/\r?\n/).filter(line => line !== ''));
       },
     );
+    driver.stdin?.end(Buffer.from(steps.join('\n'), 'utf8').toString('base64'));
   });
 }
 
