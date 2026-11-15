@@ -1745,6 +1745,7 @@ async function withFakeSidecar(run) {
   const context = {
     on: () => undefined,
     route: async () => undefined,
+    newPage: async () => page,
     newCDPSession: async () => ({
       on: () => undefined,
       send: async (method, params) => {

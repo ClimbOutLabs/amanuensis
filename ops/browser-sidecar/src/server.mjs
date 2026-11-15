@@ -932,13 +932,14 @@ export class BrowserSidecar {
   }
 
   async #startProfile(owner) {
-    const { context, page } = await this.#launch({
+    // The page the browser starts with is never a chat's tab, and stays open: it keeps the window,
+    // so the browser can still open tabs after the person closes every chat's tab.
+    const { context } = await this.#launch({
       userDataDir: path.join(this.#profilesDir, ownerDirName(owner)),
       proxyServer: this.#proxyServer,
     });
     const profile = {
       context,
-      spare: page,
       tabs: new Map(),
       tabsByPage: new Map(),
       opening: Promise.resolve(),
@@ -977,9 +978,7 @@ export class BrowserSidecar {
       if (!create) {
         return undefined;
       }
-      const spare = profile.spare !== undefined && !profile.spare.isClosed() ? profile.spare : undefined;
-      const page = spare ?? (await profile.context.newPage());
-      profile.spare = undefined;
+      const page = await profile.context.newPage();
       // A download never opens in the browser; refusing it keeps the tab from navigating to a file.
       page.on('download', download => {
         download.cancel().catch(() => undefined);
