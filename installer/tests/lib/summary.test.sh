@@ -35,9 +35,8 @@ test_fresh_install_without_a_model() {
   > Model     not set: add one in Settings > Models
 
 Set up a new phone or computer
-  Open http://192.168.1.20:8791/trust on it once and follow its steps,
-  or scan the code below. Do not click past a warning that the page is
-  not private.
+  Open http://192.168.1.20:8791/trust on it once and follow its steps.
+  Do not click past a warning that the page is not private.
   Your device shows a long code called a fingerprint. It must be this
   one. If it differs, stop.
   <fingerprint, first half>

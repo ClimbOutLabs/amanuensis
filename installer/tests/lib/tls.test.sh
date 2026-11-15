@@ -176,6 +176,7 @@ test_no_code_without_colors() {
   install_machine
   assert_flat_contains "$OUT" "Open http://192.168.1.20:8791/trust on it once"
   assert_not_contains "$OUT" "▀"
+  assert_not_contains "$(flat "$OUT")" "scan the code" "no code is promised when none is drawn"
   assert_no_path "$STUB_STATE/qr_runs"
   sandbox_drop
 }

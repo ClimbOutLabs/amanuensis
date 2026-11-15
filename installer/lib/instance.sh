@@ -1108,21 +1108,32 @@ print_instance_summary() {
 # How a device comes to trust this computer: one short link over plain http, the same link as a code for a phone, and the
 # step an iPhone needs after installing.
 print_trust_lines() { # name
-  local link fp
+  local link fp qr line
   link=$(tls_trust_link "$1")
+  qr=$(tls_qr_text "$link")
   if [ "$TLS_AUTHORITY_REPLACED" = 1 ]; then
     ui_heading "Set up each phone and computer again"
     ui_line "This computer's root certificate was made again, so each device must trust it again."
   else
     ui_heading "Set up a new phone or computer"
   fi
-  ui_line "Open $link on it once and follow its steps, or scan the code below. Do not click past a warning that the page is not private."
+  if [ -n "$qr" ]; then
+    ui_line "Open $link on it once and follow its steps, or scan the code below. Do not click past a warning that the page is not private."
+  else
+    ui_line "Open $link on it once and follow its steps. Do not click past a warning that the page is not private."
+  fi
   fp=$(tls_fingerprint)
   ui_line "Your device shows a long code called a fingerprint. It must be this one. If it differs, stop."
   # Two lines of 16 pairs, so the code fits a narrow terminal and is easy to compare half by half.
   ui_line "$(_ui_s 1 "${fp:0:48}")"
   if [ -n "${fp:48}" ]; then ui_line "$(_ui_s 1 "${fp:48}")"; fi
-  tls_print_qr "$link"
+  if [ -n "$qr" ]; then
+    _ui_out ""
+    while IFS= read -r line; do
+      _ui_out "  $line"
+    done <<<"$qr"
+    _ui_out ""
+  fi
 }
 
 # The backups row: how to turn it on or make one by hand, and for aman status also the daily schedule or how many are kept.
