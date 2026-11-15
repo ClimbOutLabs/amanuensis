@@ -11,7 +11,6 @@
  */
 import { configureOutboundFetches, extractErrorLogFields } from '@truefoundry/trueforge-core/core';
 import type { Context } from 'hono';
-import { existsSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { configureRemoteAddressCheck, modelUrlProblem } from './runtime/remoteAddress';
@@ -213,6 +212,7 @@ import { EncryptedSandboxProviderStore } from './secrets/encryptedSandboxProvide
 import { EncryptedTelegramStore } from './secrets/encryptedTelegramStore';
 import { FileKeyProvider } from './secrets/fileKeyProvider';
 import { checkMasterKey } from './secrets/keyCheck';
+import { KeyRecordFile, keyRecordPath } from './secrets/keyRecordFile';
 import { SecretVault } from './secrets/secretVault';
 import { waitForMachineKey, type KeyCheckResult } from './secrets/startupGate';
 import { printStandaloneStartupBanner } from './startupBanner';
@@ -346,20 +346,9 @@ async function waitUntilUnlocked({
 }
 
 /** Whether `key` is the key this SQLite instance was set up with. A database that does not exist yet was never set up. */
-async function checkStandaloneKey({ sqlitePath, key }: { sqlitePath: string; key: Buffer }): Promise<KeyCheckResult> {
-  if (!existsSync(sqlitePath)) {
-    return 'not_set_up';
-  }
-  const [{ createSqliteDb }, { SqliteGlobalSettingsStore }] = await Promise.all([
-    import('./db/sqlite/client'),
-    import('./db/sqlite/global-settings-store/SqliteGlobalSettingsStore'),
-  ]);
-  const db = createSqliteDb(sqlitePath);
-  try {
-    return await checkMasterKey({ settings: new SqliteGlobalSettingsStore(db), key });
-  } finally {
-    await db.destroy();
-  }
+function checkStandaloneKey({ sqlitePath, key }: { sqlitePath: string; key: Buffer }): Promise<KeyCheckResult> {
+  // The key records sit beside the database, so the encrypted file is not opened until the key is known to fit.
+  return checkMasterKey({ settings: new KeyRecordFile(keyRecordPath(sqlitePath)), key });
 }
 
 /** Shared ServiceFoundry HTTP client when TrueFoundry mode is on; otherwise undefined. */
@@ -557,13 +546,13 @@ async function createStandalonePersistence(options: {
     { SqliteChatDeletionStore },
   ] = sqliteStores;
 
-  const db = createSqliteDb(sqlitePath);
+  const secretVault = await openSecretVault(new KeyRecordFile(keyRecordPath(sqlitePath)));
+  const db = createSqliteDb(sqlitePath, { key: secretVault.databaseKey() });
   await migrateSqliteToLatest(db);
   logger.info(`Standalone mode: sqlite at ${sqlitePath}`);
   logger.info('Standalone mode: executor peering disabled and Redis unused');
 
   const globalSettingsStore = new SqliteGlobalSettingsStore(db);
-  const secretVault = await openSecretVault(globalSettingsStore);
   const tokenStore = new EncryptedOAuthTokenStore({ store: new SqliteOAuthTokenStore(db), vault: secretVault });
   const agentStore = new SqliteAgentStore(db);
   const modelProviderStore = new EncryptedModelProviderStore({

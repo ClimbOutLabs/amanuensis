@@ -16,6 +16,16 @@ machine_key_volume_ensure() {
 }
 MACHINE_KEY_NEW=0
 
+# MACHINE_KEY_ARGS: what lets a one-off app command read this computer's key, so it can open the instance's
+# encrypted database. Empty when there is no key yet: naming the volume would make an empty one.
+MACHINE_KEY_ARGS=()
+machine_key_args() {
+  MACHINE_KEY_ARGS=()
+  if docker_volume_exists "$MACHINE_KEY_VOLUME"; then
+    MACHINE_KEY_ARGS=(-v "$MACHINE_KEY_VOLUME:/run/aman-key:ro" -e "SECRETS_KEY_FILE=$MACHINE_KEY_FILE")
+  fi
+}
+
 # Whether an app image can seal backups and set up the key. An image from before this could not, and the version
 # an upgrade puts back when it fails may be one of those.
 image_has_key_support() { # image

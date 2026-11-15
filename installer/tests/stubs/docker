@@ -460,7 +460,6 @@ case "$cmd" in
       *"aman unseal"*)
         # Opens a sealed file from stdin with this computer's key, and refuses one sealed with another key. With
         # --recovery-key-file the first line of stdin is the recovery key, which opens it on any computer.
-        # $S/unsealed_owner then names the key and recovery key of the data that was opened, for the restore that follows.
         typed=
         case "$*" in
           *--recovery-key-file*)
@@ -487,7 +486,6 @@ case "$cmd" in
           echo "This file was sealed with another computer's key." >&2
           exit 1
         fi
-        printf '%s\n%s\n' "${2:-}" "${3:-}" >"$S/unsealed_owner"
         cat
         exit 0
         ;;
@@ -682,9 +680,24 @@ case "$cmd" in
         esac
         exit 0
         ;;
+      *"/data/db/.restore"*)
+        # Puts a database back, with its key records when the backup holds them. Without them the database is one
+        # from before encryption, and the records of the one it replaces go.
+        keys=$S/secrets_aman-$(printf %s "${vol#aman_}" | sed 's/_data$//')
+        case " ${STUB_RESTORE_FAIL:-} " in *" $vol "*) cat >/dev/null; echo "restore failed" >&2; exit 1 ;; esac
+        work=$(mktemp -d)
+        tar -x -C "$work" -f - || exit 1
+        [ -f "$work/db.sqlite" ] || exit 1
+        rm -f "$keys"
+        [ ! -f "$work/db.sqlite.keys" ] || cp "$work/db.sqlite.keys" "$keys"
+        cp "$work/db.sqlite" "$S/restored_$vol"
+        rm -rf "$work"
+        echo "restore $vol" >>"$S/restores"
+        exit 0
+        ;;
       *"rm -f /data/db/db.sqlite /data/db"*)
         # Empties an instance's database, as undoing a restore does when the instance had none.
-        rm -f "$S/restored_$vol"
+        rm -f "$S/restored_$vol" "$S/secrets_aman-$(printf %s "${vol#aman_}" | sed 's/_data$//')"
         echo "cleared $vol" >>"$S/restores"
         exit 0
         ;;
@@ -699,6 +712,10 @@ case "$cmd" in
         # $S/db_gen stands for what the instance holds now, so a test can change it between two backups.
         gen=$(cat "$S/db_gen" 2>/dev/null || true)
         printf 'SQLITE-OF-%s%s\n' "$data_vol" "${gen:+-$gen}" >"$out/db.sqlite"
+        # The key records of a database that is set up go with it. They stand for the key and the recovery key
+        # the database answers to.
+        keys=$S/secrets_aman-$(printf %s "${data_vol#aman_}" | sed 's/_data$//')
+        [ ! -f "$keys" ] || cp "$keys" "$out/db.sqlite.keys"
         printf 'memory-%s\n' "${gen:-none}" >"$out/memory/note.md"
         printf '{"version":1,"files":[]}\n' >"$out/manifest.json"
         printf '{"target":"/backup","manifest":"manifest.json","files":1,"bytes":1}\n'
@@ -748,19 +765,6 @@ case "$cmd" in
         exit 0
         ;;
       *"sh -c"*)
-        case "$*" in
-          *db.sqlite.restore*)
-            # A database carries the key it was set up with, so putting one back from a sealed backup brings that along.
-            if [ -f "$S/unsealed_owner" ]; then
-              if [ "$(sed -n 2p "$S/unsealed_owner")" = none ]; then
-                rm -f "$S/secrets_aman-$(printf %s "${vol#aman_}" | sed "s/_data$//")"
-              else
-                cp "$S/unsealed_owner" "$S/secrets_aman-$(printf %s "${vol#aman_}" | sed "s/_data$//")"
-              fi
-              rm -f "$S/unsealed_owner"
-            fi
-            ;;
-        esac
         cat >"$S/restored_$vol"
         echo "restore $vol" >>"$S/restores"
         exit 0

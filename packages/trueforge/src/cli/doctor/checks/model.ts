@@ -26,14 +26,14 @@ function settingOr({ value, fallback }: { value: string | undefined; fallback: s
 }
 
 /** No hosted model key: the model comes from a provider added in the app, so look for one there. */
-function checkAddedModels({ deps, id }: { deps: DoctorDeps; id: string }): Check {
+async function checkAddedModels({ deps, id }: { deps: DoctorDeps; id: string }): Promise<Check> {
   const file = sqlitePath(deps);
   if (!isStandalone(deps) || file === undefined) {
     return offCheck({ id, detail: 'No hosted model key is set, and the model providers cannot be looked up here.' });
   }
   let count: number;
   try {
-    count = deps.countModelProviders({ path: file });
+    count = deps.countModelProviders({ path: file, key: await deps.databaseKey({ path: file }) });
   } catch {
     return offCheck({ id, detail: 'No hosted model key is set, and the model providers could not be read.' });
   }

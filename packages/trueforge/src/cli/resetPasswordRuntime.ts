@@ -35,12 +35,16 @@ export async function openLocalUserStore(): Promise<{ store: ILocalUserStore; cl
   if (!existsSync(configuration.SQLITE_PATH)) {
     throw new Error(LOCAL_NO_SIGN_IN_MESSAGE);
   }
-  const [{ createSqliteDb }, { migrateSqliteToLatest }, { SqliteLocalUserStore }] = await Promise.all([
-    import('../db/sqlite/client'),
-    import('../db/migrateSqlite'),
-    import('../db/sqlite/local-user-store/SqliteLocalUserStore'),
-  ]);
-  const db = createSqliteDb(configuration.SQLITE_PATH);
+  const [{ createSqliteDb }, { sqliteDatabaseKey }, { migrateSqliteToLatest }, { SqliteLocalUserStore }] =
+    await Promise.all([
+      import('../db/sqlite/client'),
+      import('../secrets/sqliteAccess'),
+      import('../db/migrateSqlite'),
+      import('../db/sqlite/local-user-store/SqliteLocalUserStore'),
+    ]);
+  const db = createSqliteDb(configuration.SQLITE_PATH, {
+    key: await sqliteDatabaseKey({ sqlitePath: configuration.SQLITE_PATH, keyFile: configuration.SECRETS_KEY_FILE }),
+  });
   try {
     await migrateSqliteToLatest(db);
   } catch (error) {

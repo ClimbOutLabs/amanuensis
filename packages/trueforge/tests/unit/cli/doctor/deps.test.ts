@@ -4,7 +4,7 @@ import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-import Database from 'better-sqlite3';
+import Database from 'better-sqlite3-multiple-ciphers';
 
 import { processDeps } from '../../../../src/cli/doctor/deps';
 import { errorCode } from '../../../../src/cli/errorCode';
@@ -26,7 +26,7 @@ describe('real doctor dependencies', () => {
     const db = new Database(file);
     db.exec("CREATE TABLE t (v TEXT); INSERT INTO t VALUES ('keep')");
     db.close();
-    deps.probeDatabaseWritable({ path: file, timeoutMs: 500 });
+    deps.probeDatabaseWritable({ path: file, key: undefined, timeoutMs: 500 });
     const after = new Database(file, { readonly: true });
     expect(after.prepare('SELECT v FROM t').all()).toEqual([{ v: 'keep' }]);
     after.close();
@@ -35,7 +35,7 @@ describe('real doctor dependencies', () => {
   it('rejects a database that does not exist instead of creating it', async () => {
     const file = path.join(scratch, 'missing.sqlite');
     expect(() => {
-      deps.probeDatabaseWritable({ path: file, timeoutMs: 100 });
+      deps.probeDatabaseWritable({ path: file, key: undefined, timeoutMs: 100 });
     }).toThrow();
     expect(existsSync(file)).toBe(false);
     await expect(deps.freeBytes(file)).rejects.toThrow();
@@ -47,7 +47,7 @@ describe('real doctor dependencies', () => {
     holder.exec('CREATE TABLE t (v TEXT); BEGIN IMMEDIATE');
     let error: unknown;
     try {
-      deps.probeDatabaseWritable({ path: file, timeoutMs: 50 });
+      deps.probeDatabaseWritable({ path: file, key: undefined, timeoutMs: 50 });
     } catch (caught) {
       error = caught;
     }

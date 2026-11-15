@@ -4,12 +4,13 @@ import { chmod, copyFile, lstat, mkdir, readdir, rm, stat, writeFile } from 'nod
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 
-import Database from 'better-sqlite3';
 import { z } from 'zod';
 
 import { SqliteChatDeletionStore } from '../db/sqlite/chat-deletion-store/SqliteChatDeletionStore';
-import { createSqliteDb } from '../db/sqlite/client';
+import { createSqliteDb, openSqliteFile } from '../db/sqlite/client';
 import { SqliteTurnArtifactStore } from '../db/sqlite/turn-artifact-store/SqliteTurnArtifactStore';
+import { keyRecordPath } from '../secrets/keyRecordFile';
+import { sqliteDatabaseKey } from '../secrets/sqliteAccess';
 import type { Command } from './command';
 import { processEnv, type CliEnv } from './env';
 import { errorCode } from './errorCode';
@@ -25,8 +26,8 @@ const FILE_MODE = 0o600;
 export interface BackupDeps {
   env: CliEnv;
   now(): Date;
-  /** Writes a consistent copy of a live SQLite database to `dest`. */
-  backupSqlite(options: { source: string; dest: string }): Promise<void>;
+  /** Writes a consistent copy of a live SQLite database to `dest`, encrypted with the same key when it has one. */
+  backupSqlite(options: { source: string; dest: string; key: Buffer | undefined }): Promise<void>;
 }
 
 interface ManifestFile {
@@ -50,8 +51,8 @@ async function pathExists(target: string): Promise<boolean> {
 const TableColumnsSchema = z.array(z.object({ name: z.string() }));
 
 /** A database from before private chats has none to remove. */
-function hasPrivateChats(file: string): boolean {
-  const db = new Database(file, { fileMustExist: true, readonly: true });
+function hasPrivateChats({ file, key }: { file: string; key: Buffer | undefined }): boolean {
+  const db = openSqliteFile({ filename: file, key, readonly: true });
   try {
     const columns = TableColumnsSchema.parse(db.pragma('table_info(session)'));
     return columns.some(column => column.name === 'is_incognito');
@@ -61,11 +62,11 @@ function hasPrivateChats(file: string): boolean {
 }
 
 /** A private chat is gone when it closes, so a backup must not keep one that was open at backup time. */
-async function removePrivateChats(file: string): Promise<void> {
-  if (!hasPrivateChats(file)) {
+async function removePrivateChats({ file, key }: { file: string; key: Buffer | undefined }): Promise<void> {
+  if (!hasPrivateChats({ file, key })) {
     return;
   }
-  const db = createSqliteDb(file);
+  const db = createSqliteDb(file, { key });
   try {
     await new SqliteChatDeletionStore({ db, turnArtifactStore: new SqliteTurnArtifactStore(db) }).deletePrivateChats();
   } finally {
@@ -73,17 +74,33 @@ async function removePrivateChats(file: string): Promise<void> {
   }
 }
 
-/** Online backup API, so a running app keeps writing; the copy must pass an integrity check. */
-export async function backupSqliteFile({ source, dest }: { source: string; dest: string }): Promise<void> {
-  const db = new Database(source, { fileMustExist: true });
+/**
+ * Copies a live database while the running app keeps writing; the copy must pass an integrity check.
+ * An encrypted database is copied with VACUUM INTO, which keeps the copy encrypted with the same key:
+ * the online backup API cannot write an encrypted copy.
+ */
+export async function backupSqliteFile({
+  source,
+  dest,
+  key,
+}: {
+  source: string;
+  dest: string;
+  key: Buffer | undefined;
+}): Promise<void> {
+  const db = openSqliteFile({ filename: source, key });
   try {
-    await db.backup(dest);
+    if (key === undefined) {
+      await db.backup(dest);
+    } else {
+      db.prepare('VACUUM INTO ?').run(dest);
+    }
   } finally {
     db.close();
   }
-  await removePrivateChats(dest);
+  await removePrivateChats({ file: dest, key });
   // Opened read-write so SQLite removes its -wal and -shm sidecars when it closes, leaving one file.
-  const copy = new Database(dest, { fileMustExist: true });
+  const copy = openSqliteFile({ filename: dest, key });
   try {
     const result = copy.pragma('integrity_check', { simple: true });
     if (result !== 'ok') {
@@ -164,7 +181,13 @@ function requiredPath({ value, flag, envKey }: { value: string | undefined; flag
 
 export function createBackup(deps: BackupDeps): Command {
   return async ({ args, io }) => {
-    let values: { target?: string; sqlite?: string; 'memory-dir'?: string; 'persona-dir'?: string };
+    let values: {
+      target?: string;
+      sqlite?: string;
+      'memory-dir'?: string;
+      'persona-dir'?: string;
+      'key-file'?: string;
+    };
     try {
       ({ values } = parseArgs({
         args: [...args],
@@ -173,6 +196,7 @@ export function createBackup(deps: BackupDeps): Command {
           sqlite: { type: 'string' },
           'memory-dir': { type: 'string' },
           'persona-dir': { type: 'string' },
+          'key-file': { type: 'string' },
         },
         allowPositionals: false,
         strict: true,
@@ -214,8 +238,17 @@ export function createBackup(deps: BackupDeps): Command {
     try {
       createdRoot = await mkdir(target, { recursive: true, mode: DIR_MODE });
       await chmod(target, DIR_MODE);
-      await deps.backupSqlite({ source: sqlite, dest: path.join(target, DB_NAME) });
+      const key = await sqliteDatabaseKey({
+        sqlitePath: sqlite,
+        keyFile: values['key-file'] ?? deps.env['SECRETS_KEY_FILE'],
+      });
+      await deps.backupSqlite({ source: sqlite, dest: path.join(target, DB_NAME), key });
       await chmod(path.join(target, DB_NAME), FILE_MODE);
+      // The key records go with the database: they are what lets the recovery key open the copy elsewhere.
+      if (await pathExists(keyRecordPath(sqlite))) {
+        await copyFile(keyRecordPath(sqlite), path.join(target, keyRecordPath(DB_NAME)));
+        await chmod(path.join(target, keyRecordPath(DB_NAME)), FILE_MODE);
+      }
       for (const [source, name] of [
         [memoryDir, MEMORY_DIR],
         [personaDir, PERSONA_DIR],

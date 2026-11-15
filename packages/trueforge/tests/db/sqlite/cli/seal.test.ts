@@ -11,13 +11,12 @@ import { UsageError } from '../../../../src/cli/io';
 import { createSealCommand, type SealDeps } from '../../../../src/cli/seal';
 import { runSecrets } from '../../../../src/cli/secrets';
 import { fakeIo } from '../../../unit/cli/fakeIo';
-import { createSqliteTestDatabase, type SqliteTestDatabase } from '../testDatabase';
 
 const CANARY = 'backup-canary-8c14e6f0a3';
 const InitResultSchema = z.object({ recovery_key: z.string() });
 
 describe('aman seal and unseal', () => {
-  let env: SqliteTestDatabase;
+  let sqlite: string;
   let dir: string;
   let keyFile: string;
   let recoveryKey: string;
@@ -38,24 +37,23 @@ describe('aman seal and unseal', () => {
   }
 
   beforeEach(async () => {
-    env = await createSqliteTestDatabase();
     dir = await mkdtemp(path.join(tmpdir(), 'aman-seal-'));
+    sqlite = path.join(dir, 'data', 'db.sqlite');
     keyFile = path.join(dir, 'master.key');
     plain = path.join(dir, 'backup.tar');
     await writeFile(plain, original);
     const io = fakeIo();
-    await runSecrets({ args: ['init', '--sqlite', env.databaseFile, '--key-file', keyFile], io, env: {} });
+    await runSecrets({ args: ['init', '--sqlite', sqlite, '--key-file', keyFile], io, env: {} });
     recoveryKey = InitResultSchema.parse(JSON.parse(io.out.join(''))).recovery_key;
   }, 120_000);
 
   afterEach(async () => {
-    await env.teardown();
     await rm(dir, { recursive: true, force: true });
   });
 
   async function sealBackup(): Promise<string> {
     const sealed = path.join(dir, 'backup.sealed');
-    await run('seal', ['--in', plain, '--out', sealed, '--sqlite', env.databaseFile, '--key-file', keyFile]);
+    await run('seal', ['--in', plain, '--out', sealed, '--sqlite', sqlite, '--key-file', keyFile]);
     return sealed;
   }
 
@@ -96,7 +94,7 @@ describe('aman seal and unseal', () => {
     const chunks: Buffer[] = [];
     const sink = new PassThrough();
     sink.on('data', (chunk: Buffer) => chunks.push(chunk));
-    await run('seal', ['--in', '-', '--out', '-', '--sqlite', env.databaseFile, '--key-file', keyFile], {
+    await run('seal', ['--in', '-', '--out', '-', '--sqlite', sqlite, '--key-file', keyFile], {
       stdin: () => Readable.from([original.subarray(0, 1000), original.subarray(1000)]),
       stdout: () => sink,
     });
@@ -133,41 +131,31 @@ describe('aman seal and unseal', () => {
   });
 
   it('refuses to seal for a database that was never set up, or with a key that is not its own', async () => {
-    const fresh = await createSqliteTestDatabase();
-    try {
-      await expect(
-        run('seal', [
-          '--in',
-          plain,
-          '--out',
-          path.join(dir, 'x'),
-          '--sqlite',
-          fresh.databaseFile,
-          '--key-file',
-          keyFile,
-        ]),
-      ).rejects.toThrow(/aman secrets init/);
-      expect(existsSync(path.join(dir, 'x'))).toBe(false);
-    } finally {
-      await fresh.teardown();
-    }
+    await expect(
+      run('seal', [
+        '--in',
+        plain,
+        '--out',
+        path.join(dir, 'x'),
+        '--sqlite',
+        path.join(dir, 'fresh', 'db.sqlite'),
+        '--key-file',
+        keyFile,
+      ]),
+    ).rejects.toThrow(/aman secrets init/);
+    expect(existsSync(path.join(dir, 'x'))).toBe(false);
   });
 
   it("refuses a file sealed with another computer's key", async () => {
     const sealed = await sealBackup();
-    const other = await createSqliteTestDatabase();
-    try {
-      const otherKey = path.join(dir, 'other.key');
-      await runSecrets({
-        args: ['init', '--sqlite', other.databaseFile, '--key-file', otherKey],
-        io: fakeIo(),
-        env: {},
-      });
-      await expect(
-        run('unseal', ['--in', sealed, '--out', path.join(dir, 'y'), '--key-file', otherKey]),
-      ).rejects.toThrow(/another computer/);
-    } finally {
-      await other.teardown();
-    }
+    const otherKey = path.join(dir, 'other.key');
+    await runSecrets({
+      args: ['init', '--sqlite', path.join(dir, 'other', 'db.sqlite'), '--key-file', otherKey],
+      io: fakeIo(),
+      env: {},
+    });
+    await expect(run('unseal', ['--in', sealed, '--out', path.join(dir, 'y'), '--key-file', otherKey])).rejects.toThrow(
+      /another computer/,
+    );
   });
 });

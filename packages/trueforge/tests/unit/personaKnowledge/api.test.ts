@@ -1,5 +1,5 @@
 import { OpenAPIHono } from '@hono/zod-openapi';
-import Database from 'better-sqlite3';
+import Database from 'better-sqlite3-multiple-ciphers';
 import { existsSync, mkdirSync, mkdtempSync, truncateSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';

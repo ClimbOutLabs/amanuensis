@@ -2,7 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-import Database from 'better-sqlite3';
+import Database from 'better-sqlite3-multiple-ciphers';
 import { z } from 'zod';
 
 import { backupCheck, createBackupCheck } from '../../../src/cli/backupCheck';
@@ -37,7 +37,7 @@ function databaseWith(names: readonly string[]): string {
 
 async function check(options: { file: string; known: readonly string[] }): Promise<z.infer<typeof ResultSchema>> {
   const io = fakeIo();
-  const command = createBackupCheck({ knownMigrations: () => Promise.resolve([...options.known]) });
+  const command = createBackupCheck({ env: {}, knownMigrations: () => Promise.resolve([...options.known]) });
   expect(await command({ args: ['--sqlite', options.file], io })).toBe(0);
   return ResultSchema.parse(JSON.parse(io.out.join('')));
 }

@@ -104,6 +104,8 @@ test_backup_layout_and_modes() {
   assert_eq "$(find "$dir" -type f | sed "s|$dir/||" | LC_ALL=C sort | tr '\n' ' ')" "SHA256SUMS main.sealed release.json " "the instance is one sealed file"
   assert_contains "$(sealed_cat "$dir/main.sealed" db.sqlite)" "SQLITE-OF-aman_main_data"
   assert_contains "$(sealed_names "$dir/main.sealed")" "manifest.json"
+  assert_contains "$(sealed_names "$dir/main.sealed")" "db.sqlite.keys" "the database's key records go with it"
+  assert_contains "$(cat "$SB_STATE/backup_runs")" "-v aman_key:/run/aman-key:ro -e SECRETS_KEY_FILE=/run/aman-key/master.key" "the copy is made with this computer's key"
   assert_contains "$(sealed_names "$dir/main.sealed")" "memory/note.md" "the memory files are inside"
   assert_contains "$(sealed_names "$dir/main.sealed")" "persona-knowledge/" "the persona folder is inside"
   assert_contains "$(sealed_cat "$dir/main.sealed" dex.tar | tr -d '\0')" "TAR-OF-aman_main_dex"

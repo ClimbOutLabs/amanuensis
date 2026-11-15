@@ -61,11 +61,25 @@ restore_checksums_ok() { # dir
 # this version does not have, and the app refuses to start on it. Prints "newer", "unreadable" or nothing.
 # An app image from before this check has no backup-check; its backups are then judged by the version record alone, as
 # they were before. A wrong guess there still fails safely: the app does not start, and the restore is undone.
-restore_database_check() { # db file, app image
-  local out
-  out=$(D run --rm -i --network none "$2" sh -c 'cat >/tmp/check.sqlite || exit 1
+# The database stays encrypted while it is checked: the CLI opens it with this computer's key, or, for a backup
+# that the recovery key opened, with that key, which goes in on the same input and is held in memory only.
+restore_database_check() { # folder holding db.sqlite, app image, what opened the backup (computer, recovery or nothing)
+  local out members=(db.sqlite)
+  [ ! -f "$1/db.sqlite.keys" ] || members+=(db.sqlite.keys)
+  machine_key_args
+  out=$({
+    [ "${3:-}" != recovery ] || printf '%s\n' "$BACKUP_RECOVERY_KEY"
+    tar -C "$1" -cf - "${members[@]}"
+  } | D run --rm -i --network none --tmpfs /run/recovery ${MACHINE_KEY_ARGS[@]+"${MACHINE_KEY_ARGS[@]}"} "$2" sh -c 'how=$1
+set --
+if [ "$how" = recovery ]; then
+  umask 077
+  IFS= read -r key && printf %s "$key" >/run/recovery/key || exit 1
+  set -- --recovery-key-file /run/recovery/key
+fi
+mkdir -p /tmp/check && tar -x --no-same-owner -C /tmp/check -f - || exit 1
 aman help 2>&1 | grep -q backup-check || { echo "{\"check\":\"none\"}"; exit 0; }
-aman backup-check --sqlite /tmp/check.sqlite' <"$1" 2>/dev/null) || {
+aman backup-check --sqlite /tmp/check/db.sqlite "$@"' sh "${3:-}" 2>/dev/null) || {
     echo unreadable
     return 0
   }
@@ -131,7 +145,7 @@ restore_problem() { # name dir
     echo "newer|it was made by a newer version of Aman than this one"
     return 0
   fi
-  case "$(restore_database_check "$view/$name/db.sqlite" "$RESTORE_IMAGE")" in
+  case "$(restore_database_check "$view/$name" "$RESTORE_IMAGE" "$(cat "$view/.opened-$name" 2>/dev/null || true)")" in
     newer) echo "newer|it was made by a newer version of Aman than this one" ;;
     unreadable) echo "incomplete|its chats cannot be read" ;;
   esac
@@ -163,7 +177,7 @@ restore_tree() { # name backup_subdir container_path image
 restore_clear_data() { # name image
   local env path
   env="$(instance_dir "$1")/.env"
-  D run --rm --network none -v "aman_${1}_data:/data" "$2" sh -c 'rm -f /data/db/db.sqlite /data/db/db.sqlite-wal /data/db/db.sqlite-shm' </dev/null || return 1
+  D run --rm --network none -v "aman_${1}_data:/data" "$2" sh -c 'rm -f /data/db/db.sqlite /data/db/db.sqlite-wal /data/db/db.sqlite-shm /data/db/db.sqlite.keys' </dev/null || return 1
   for path in MEMORY_MARKDOWN_DIR PERSONA_KNOWLEDGE_DIR; do
     tar -cf - -T /dev/null | restore_tar "aman_${1}_data" "$(env_get "$env" "$path")" "$2" 0 || return 1
   done

@@ -1,14 +1,13 @@
-import { createReadStream, createWriteStream, existsSync } from 'node:fs';
+import { createReadStream, createWriteStream } from 'node:fs';
 import { readFile, rename, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { parseArgs } from 'node:util';
 
-import { createSqliteDb } from '../db/sqlite/client';
-import { SqliteGlobalSettingsStore } from '../db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
 import { FileKeyProvider } from '../secrets/fileKeyProvider';
 import { checkMasterKey } from '../secrets/keyCheck';
+import { KeyRecordFile, keyRecordPath } from '../secrets/keyRecordFile';
 import {
   RECOVERY_COPY_SETTING,
   RecoveryKeyFormatError,
@@ -113,23 +112,16 @@ async function loadRecoveryCopy({ sqlite, key }: { sqlite: string | undefined; k
   if (sqlite === undefined) {
     throw new UsageError(`Missing --sqlite (or SQLITE_PATH in the environment).\n\n${USAGE}`);
   }
-  if (!existsSync(sqlite)) {
-    throw new Error(`No database at ${sqlite}.`);
+  // Read from the key records beside the database, so the database itself is never opened here.
+  const settings = new KeyRecordFile(keyRecordPath(sqlite));
+  if ((await checkMasterKey({ settings, key })) !== 'match') {
+    throw new Error('Saved secrets are not set up for this database with this key. Run "aman secrets init" first.');
   }
-  const db = createSqliteDb(sqlite);
-  try {
-    const settings = new SqliteGlobalSettingsStore(db);
-    if ((await checkMasterKey({ settings, key })) !== 'match') {
-      throw new Error('Saved secrets are not set up for this database with this key. Run "aman secrets init" first.');
-    }
-    const copy = await settings.getSetting({ key: RECOVERY_COPY_SETTING });
-    if (copy === undefined) {
-      throw new Error('This database has no recovery key yet. Run "aman secrets init" first.');
-    }
-    return copy.value;
-  } finally {
-    await db.destroy();
+  const copy = await settings.getSetting({ key: RECOVERY_COPY_SETTING });
+  if (copy === undefined) {
+    throw new Error('This database has no recovery key yet. Run "aman secrets init" first.');
   }
+  return copy.value;
 }
 
 /** Writes to a ".part" file that only takes the final name once everything was written, or to stdout. */

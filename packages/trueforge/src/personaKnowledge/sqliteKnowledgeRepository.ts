@@ -1,5 +1,5 @@
 import { z } from '@hono/zod-openapi';
-import Database from 'better-sqlite3';
+import Database from 'better-sqlite3-multiple-ciphers';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import * as sqliteVec from 'sqlite-vec';

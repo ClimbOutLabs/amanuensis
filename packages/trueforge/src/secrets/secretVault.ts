@@ -1,4 +1,5 @@
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
+import { deriveDatabaseKey } from './databaseKey';
 import { checkMasterKey } from './keyCheck';
 import type { KeyProvider } from './keyProvider';
 import { recoverMasterKey } from './recoveryKey';
@@ -82,6 +83,11 @@ export class SecretVault {
     // A secret saved before this database moved to this computer opens with the key it was saved with.
     const earlier = this.#retiredKeys.get(secretKeyId(value) ?? '');
     return decryptSecret({ key: earlier ?? current, value, context });
+  }
+
+  /** The key of this instance's encrypted SQLite file. */
+  databaseKey(): Buffer {
+    return deriveDatabaseKey(this.#unlockedKey());
   }
 
   #unlockedKey(): Buffer {

@@ -22,8 +22,8 @@ import { SqliteOAuthTokenStore } from '../../db/sqlite/token-store/SqliteOAuthTo
 import { SqliteTurnArtifactStore } from '../../db/sqlite/turn-artifact-store/SqliteTurnArtifactStore';
 import type { Database as SqliteDatabase } from '../../db/sqlite/types';
 import { TextContactStore } from '../../db/textContactStore';
-import { openReadingVault } from '../../secrets/cliVault';
 import { encryptSecretStores, type SecretBearingStores } from '../../secrets/encryptedStores';
+import { openSqliteVault } from '../../secrets/sqliteAccess';
 import type { ExportStores } from './stores';
 
 /** Opens an existing SQLite database; a missing file is an error, never an empty export. */
@@ -36,7 +36,12 @@ export async function openSqliteStores(options: {
   if (!existsSync(options.sqlitePath)) {
     throw new Error(`No SQLite database at ${options.sqlitePath}. Check SQLITE_PATH and the data volume.`);
   }
-  const db = createSqliteDb(options.sqlitePath);
+  const { vault, databaseKey } = await openSqliteVault({
+    sqlitePath: options.sqlitePath,
+    keyFile: options.keyFile,
+    mode: 'reading',
+  });
+  const db = createSqliteDb(options.sqlitePath, { key: databaseKey });
   try {
     if (options.migrate) {
       await migrateSqliteToLatest(db);
@@ -49,7 +54,7 @@ export async function openSqliteStores(options: {
   let secretStores: SecretBearingStores<Transaction<SqliteDatabase>>;
   try {
     secretStores = encryptSecretStores({
-      vault: await openReadingVault({ settings: globalSettingsStore, keyFile: options.keyFile }),
+      vault,
       stores: {
         modelProviderStore: new SqliteModelProviderStore(db),
         sandboxProviderStore: new SqliteSandboxProviderStore(db),

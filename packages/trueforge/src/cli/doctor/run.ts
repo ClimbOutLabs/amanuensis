@@ -44,7 +44,7 @@ export async function runInstanceChecks({
   const checks: Check[] = [
     await checkService({ deps, timeoutMs }),
     checkLogin(probe),
-    checkDatabase({ deps, timeoutMs }),
+    await checkDatabase({ deps, timeoutMs }),
     await checkDisk({ deps }),
     checkClock({ deps }),
     await checkRunCode({ deps, timeoutMs }),

@@ -4,9 +4,6 @@ import path from 'node:path';
 import { parseArgs } from 'node:util';
 
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
-import { migrateSqliteToLatest } from '../db/migrateSqlite';
-import { createSqliteDb } from '../db/sqlite/client';
-import { SqliteGlobalSettingsStore } from '../db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
 import { FileKeyProvider, encodeKeyFile } from '../secrets/fileKeyProvider';
 import { checkMasterKey, createMasterKey, recordKeyCheck } from '../secrets/keyCheck';
 import {
@@ -24,6 +21,7 @@ import { processEnv, type CliEnv } from './env';
 import { errorCode } from './errorCode';
 import { UsageError, type CliIo } from './io';
 import type { SecretsDatabase } from './secretsRuntime';
+import { sqliteSecretsDatabase } from './secretsSqlite';
 
 const USAGE = `Usage: aman secrets <init|first-run|check-recovery|adopt|key> [--sqlite <file>] [--key-file <file>] [--if-needed]
 
@@ -73,7 +71,9 @@ async function loadOrCreateKey(keyFile: string): Promise<{ key: Buffer; created:
   return { key, created: true };
 }
 
-async function initSecrets({ settings, keyFile }: { settings: IGlobalSettingsStore; keyFile: string }) {
+/** Sets the database up and returns its new recovery key, or nothing when it already had one. */
+async function initSecrets(database: SecretsDatabase): Promise<string | undefined> {
+  const { settings, keyFile } = database;
   const { key, created } = await loadOrCreateKey(keyFile);
   try {
     const state = await checkMasterKey({ settings, key });
@@ -82,8 +82,10 @@ async function initSecrets({ settings, keyFile }: { settings: IGlobalSettingsSto
         'This database was set up with a different key. Unlock it with its recovery key instead of running setup.',
       );
     }
+    // The file is encrypted before the records say so, so a database marked as set up is never readable.
+    await database.prepare(key);
     if (state === 'match' && (await settings.getSetting({ key: RECOVERY_COPY_SETTING })) !== undefined) {
-      throw new Error('Saved secrets are already set up for this database. Nothing was changed.');
+      return undefined;
     }
     if (state === 'not_set_up') {
       await recordKeyCheck({ settings, key });
@@ -118,18 +120,22 @@ async function checkRecovery({ settings, io }: { settings: IGlobalSettingsStore;
 const WRONG_RECOVERY_KEY = 'That recovery key does not unlock this database. Check each group of digits and try again.';
 
 async function adopt({
-  settings,
-  keyFile,
+  database,
   io,
 }: {
-  settings: IGlobalSettingsStore;
-  keyFile: string;
+  database: SecretsDatabase;
   io: CliIo;
 }): Promise<'adopted' | 'already_adopted'> {
+  const { settings, keyFile } = database;
   const recoveryKey = await io.readStdin();
   const { key, created } = await loadOrCreateKey(keyFile);
   try {
-    return await adoptDatabase({ settings, masterKey: key, recoveryKey });
+    return await adoptDatabase({
+      settings,
+      masterKey: key,
+      recoveryKey,
+      moveDatabase: earlierKey => database.rekey({ from: earlierKey, to: key }),
+    });
   } catch (caught) {
     if (created) {
       await rm(keyFile, { force: true });
@@ -196,21 +202,30 @@ export async function runSecrets({
       return 0;
     }
     if (action === 'adopt') {
-      const result = await adopt({ settings: database.settings, keyFile: database.keyFile, io });
+      const result = await adopt({ database, io });
       await io.stdout(`${JSON.stringify(result === 'adopted' ? { adopted: true } : { already_adopted: true })}\n`);
       return 0;
     }
     if (action === 'first-run') {
-      if (!(await alreadySetUp(database))) {
-        await io.stdout(firstRunNotice({ keyFile: database.keyFile, recoveryKey: await initSecrets(database) }));
+      const recoveryKey = (await alreadySetUp(database)) ? undefined : await initSecrets(database);
+      if (recoveryKey !== undefined) {
+        await io.stdout(firstRunNotice({ keyFile: database.keyFile, recoveryKey }));
       }
       return 0;
     }
-    if (values['if-needed'] === true && (await alreadySetUp(database))) {
+    if (await alreadySetUp(database)) {
+      if (values['if-needed'] !== true) {
+        throw new Error('Saved secrets are already set up for this database. Nothing was changed.');
+      }
       await io.stdout(`${JSON.stringify({ already_set_up: true })}\n`);
       return 0;
     }
     const recoveryKey = await initSecrets(database);
+    if (recoveryKey === undefined) {
+      // It had its key and recovery key already; only the file still had to be encrypted.
+      await io.stdout(`${JSON.stringify({ already_set_up: true })}\n`);
+      return 0;
+    }
     await io.stdout(`${JSON.stringify({ recovery_key: recoveryKey })}\n`);
     await io.stderr('Saved secrets are set up. Write down the recovery key now: it is shown only this once.\n');
     return 0;
@@ -242,23 +257,11 @@ async function openDatabase({
         : `No database at ${file}. Run "aman secrets init" first.`,
     );
   }
-  await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
-  const db = createSqliteDb(file);
-  try {
-    if (action !== 'check-recovery') {
-      // Setup runs before the first start, so it also makes the database Aman then opens.
-      await migrateSqliteToLatest(db);
-    }
-    return {
-      settings: new SqliteGlobalSettingsStore(db),
-      // Only setup reads the key file, so a recovery check needs none.
-      keyFile: action === 'check-recovery' ? '' : requiredKeyFile(keyFile),
-      close: () => db.destroy(),
-    };
-  } catch (caught) {
-    await db.destroy();
-    throw caught;
-  }
+  // Only setup reads the key file, so a recovery check needs none.
+  return sqliteSecretsDatabase({
+    sqlitePath: file,
+    keyFile: action === 'check-recovery' ? '' : requiredKeyFile(keyFile),
+  });
 }
 
 function firstRunNotice({ keyFile, recoveryKey }: { keyFile: string; recoveryKey: string }): string {
@@ -276,12 +279,14 @@ You need it to open your data if this computer's key is ever lost.
 `;
 }
 
-async function alreadySetUp({ settings, keyFile }: { settings: IGlobalSettingsStore; keyFile: string }) {
+async function alreadySetUp(database: SecretsDatabase): Promise<boolean> {
+  const { settings, keyFile } = database;
   const loaded = await new FileKeyProvider(keyFile).load();
   return (
     loaded.status === 'loaded' &&
     (await checkMasterKey({ settings, key: loaded.key })) === 'match' &&
-    (await settings.getSetting({ key: RECOVERY_COPY_SETTING })) !== undefined
+    (await settings.getSetting({ key: RECOVERY_COPY_SETTING })) !== undefined &&
+    (await database.ready(loaded.key))
   );
 }
 

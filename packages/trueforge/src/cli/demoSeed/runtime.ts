@@ -4,9 +4,8 @@ import { createLogger } from 'winston';
 import { McpCatalog } from '../../catalog/McpCatalog';
 import { SkillCatalog } from '../../catalog/SkillCatalog';
 import { flattenProviderModels } from '../../db/modelProviderStore';
-import { SqliteGlobalSettingsStore } from '../../db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
 import { getPersonaKnowledgeIndexer } from '../../personaKnowledge/knowledgeIndexer';
-import { openCommandVault } from '../../secrets/cliVault';
+import { openSqliteVault } from '../../secrets/sqliteAccess';
 import { createKnowledgeLibrary } from './knowledgeLibrary';
 import { buildDemoSession, type DemoSeedSession } from './session';
 
@@ -31,7 +30,12 @@ export async function openDemoSeedSession(): Promise<DemoSeedSession> {
     throw new Error('demo-seed writes to the standalone (SQLite) instance only. Set STANDALONE=true.');
   }
   await mkdir(path.dirname(configuration.SQLITE_PATH), { recursive: true });
-  const db = createSqliteDb(configuration.SQLITE_PATH);
+  const { vault, databaseKey } = await openSqliteVault({
+    sqlitePath: configuration.SQLITE_PATH,
+    keyFile: configuration.SECRETS_KEY_FILE,
+    mode: 'command',
+  });
+  const db = createSqliteDb(configuration.SQLITE_PATH, { key: databaseKey });
   try {
     await migrateSqliteToLatest(db);
     const { TENANT_ID } = await import('../../tenancy');
@@ -42,10 +46,6 @@ export async function openDemoSeedSession(): Promise<DemoSeedSession> {
       knowledgeDir: configuration.PERSONA_KNOWLEDGE_DIR,
       modelDir: configuration.MEMORY_EMBEDDINGS_MODEL_DIR,
       logger: { info: () => undefined, warn: () => undefined, error: () => undefined },
-    });
-    const vault = await openCommandVault({
-      settings: new SqliteGlobalSettingsStore(db),
-      keyFile: configuration.SECRETS_KEY_FILE,
     });
     return buildDemoSession({
       db,

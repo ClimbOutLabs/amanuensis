@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -6,196 +6,264 @@ import { z } from 'zod';
 
 import { UsageError } from '../../../../src/cli/io';
 import { runSecrets } from '../../../../src/cli/secrets';
+import { migrateSqliteToLatest } from '../../../../src/db/migrateSqlite';
+import { DatabaseKeyError, createSqliteDb, sqliteFileState } from '../../../../src/db/sqlite/client';
 import { SqliteGlobalSettingsStore } from '../../../../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
+import { deriveDatabaseKey } from '../../../../src/secrets/databaseKey';
 import { FileKeyProvider, encodeKeyFile } from '../../../../src/secrets/fileKeyProvider';
 import { KEY_CHECK_SETTING, createMasterKey } from '../../../../src/secrets/keyCheck';
+import { KeyRecordFile, keyRecordPath } from '../../../../src/secrets/keyRecordFile';
 import { RECOVERY_COPY_SETTING, recoverMasterKey } from '../../../../src/secrets/recoveryKey';
 import { RETIRED_KEYS_SETTING } from '../../../../src/secrets/retiredKeys';
 import { secretKeyId } from '../../../../src/secrets/secretCipher';
 import { SecretVault } from '../../../../src/secrets/secretVault';
 import { fakeIo } from '../../../unit/cli/fakeIo';
-import { createSqliteTestDatabase, type SqliteTestDatabase } from '../testDatabase';
 
 const InitResultSchema = z.object({ recovery_key: z.string().regex(/^\d{6}(-\d{6}){7}$/) });
+const WRONG_RECOVERY_KEY = '000000-000000-000000-000000-000000-000000-000000-000000';
+const MARKER = 'a line only this test would write';
 
 describe('aman secrets', () => {
-  const databases: SqliteTestDatabase[] = [];
   let dir: string;
   let keyFile: string;
+  let sqlite: string;
 
-  async function database(): Promise<SqliteTestDatabase> {
-    const created = await createSqliteTestDatabase();
-    databases.push(created);
-    return created;
+  function records(file: string = sqlite): KeyRecordFile {
+    return new KeyRecordFile(keyRecordPath(file));
   }
 
-  async function init(env: SqliteTestDatabase): Promise<string> {
+  async function machineKey(): Promise<Buffer> {
+    const loaded = await new FileKeyProvider(keyFile).load();
+    if (loaded.status !== 'loaded') {
+      throw new Error(`no key file: ${loaded.reason}`);
+    }
+    return loaded.key;
+  }
+
+  async function init(file: string = sqlite): Promise<string> {
     const io = fakeIo();
-    const code = await runSecrets({
-      args: ['init', '--sqlite', env.databaseFile, '--key-file', keyFile],
-      io,
-      env: {},
-    });
+    const code = await runSecrets({ args: ['init', '--sqlite', file, '--key-file', keyFile], io, env: {} });
     expect(code).toBe(0);
     return InitResultSchema.parse(JSON.parse(io.out.join(''))).recovery_key;
   }
 
-  function checkRecovery({ env, recoveryKey }: { env: SqliteTestDatabase; recoveryKey: string }): Promise<number> {
-    return runSecrets({
-      args: ['check-recovery'],
-      io: fakeIo({ stdin: recoveryKey }),
-      env: { SQLITE_PATH: env.databaseFile },
-    });
+  function checkRecovery({ file = sqlite, recoveryKey }: { file?: string; recoveryKey: string }): Promise<number> {
+    return runSecrets({ args: ['check-recovery'], io: fakeIo({ stdin: recoveryKey }), env: { SQLITE_PATH: file } });
+  }
+
+  async function unlocked(file: string = sqlite): Promise<SecretVault> {
+    const vault = new SecretVault({ provider: new FileKeyProvider(keyFile), settings: records(file) });
+    expect(await vault.refresh()).toEqual({ status: 'unlocked' });
+    return vault;
+  }
+
+  /** A database as Aman kept it before encryption: readable by anyone who has the file. */
+  async function readableDatabase(file: string = sqlite): Promise<void> {
+    await mkdir(path.dirname(file), { recursive: true });
+    const db = createSqliteDb(file);
+    try {
+      await migrateSqliteToLatest(db);
+      await new SqliteGlobalSettingsStore(db).setSetting({ key: 'test_marker', value: MARKER });
+    } finally {
+      await db.destroy();
+    }
+  }
+
+  async function markerIn({ file = sqlite, key }: { file?: string; key: Buffer }): Promise<string | undefined> {
+    const db = createSqliteDb(file, { key: deriveDatabaseKey(key) });
+    try {
+      return (await new SqliteGlobalSettingsStore(db).getSetting({ key: 'test_marker' }))?.value;
+    } finally {
+      await db.destroy();
+    }
   }
 
   beforeEach(async () => {
     dir = await mkdtemp(path.join(tmpdir(), 'aman-secrets-cli-'));
     keyFile = path.join(dir, 'secrets', 'master.key');
+    sqlite = path.join(dir, 'data', 'db.sqlite');
   });
 
   afterEach(async () => {
-    await Promise.all(databases.splice(0).map(env => env.teardown()));
     await rm(dir, { recursive: true, force: true });
   }, 120_000);
 
-  it('makes a private key file, records the check value and prints a recovery key that works', async () => {
-    const env = await database();
-    const recoveryKey = await init(env);
+  it('makes a private key file, an encrypted database and a recovery key that works', async () => {
+    const recoveryKey = await init();
 
     expect((await stat(keyFile)).mode & 0o777).toBe(0o600);
-    const settings = new SqliteGlobalSettingsStore(env.db);
-    const vault = new SecretVault({ provider: new FileKeyProvider(keyFile), settings });
-    expect(await vault.refresh()).toEqual({ status: 'unlocked' });
-    expect(await checkRecovery({ env, recoveryKey })).toBe(0);
+    expect((await stat(keyRecordPath(sqlite))).mode & 0o777).toBe(0o600);
+    await unlocked();
+    expect(sqliteFileState({ filename: sqlite, key: deriveDatabaseKey(await machineKey()) })).toBe('encrypted');
+    expect((await readFile(sqlite)).subarray(0, 15).toString('latin1')).not.toBe('SQLite format 3');
+    expect(() => createSqliteDb(sqlite)).toThrow(DatabaseKeyError);
+    expect(await checkRecovery({ recoveryKey })).toBe(0);
+  }, 120_000);
+
+  it('encrypts a database from before encryption where it is, and keeps what was in it', async () => {
+    await readableDatabase();
+    expect((await readFile(sqlite)).includes(MARKER)).toBe(true);
+
+    await init();
+    expect((await readFile(sqlite)).includes(MARKER)).toBe(false);
+    expect(await markerIn({ key: await machineKey() })).toBe(MARKER);
+    // The key records are beside the database, never in it.
+    const db = createSqliteDb(sqlite, { key: deriveDatabaseKey(await machineKey()) });
+    try {
+      expect(await new SqliteGlobalSettingsStore(db).getSetting({ key: KEY_CHECK_SETTING })).toBeUndefined();
+    } finally {
+      await db.destroy();
+    }
+  }, 120_000);
+
+  it('refuses to encrypt a database that Aman still has open, and leaves it and the key as they were', async () => {
+    await readableDatabase();
+    const open = createSqliteDb(sqlite);
+    try {
+      await new SqliteGlobalSettingsStore(open).getSetting({ key: 'test_marker' });
+      await expect(
+        runSecrets({ args: ['init', '--sqlite', sqlite, '--key-file', keyFile], io: fakeIo(), env: {} }),
+      ).rejects.toThrow('in use');
+    } finally {
+      await open.destroy();
+    }
+    await expect(stat(keyFile)).rejects.toThrow('ENOENT');
+    await expect(stat(keyRecordPath(sqlite))).rejects.toThrow('ENOENT');
+    expect((await readFile(sqlite)).includes(MARKER)).toBe(true);
   }, 120_000);
 
   it('uses the key file that is already there and never replaces it', async () => {
-    const env = await database();
     const key = createMasterKey();
-    await writeFile(path.join(dir, 'existing.key'), encodeKeyFile(key), { mode: 0o600 });
     keyFile = path.join(dir, 'existing.key');
+    await writeFile(keyFile, encodeKeyFile(key), { mode: 0o600 });
 
-    await init(env);
+    await init();
     expect(await readFile(keyFile, 'utf8')).toBe(encodeKeyFile(key));
   }, 120_000);
 
   it('refuses to set up the same database twice', async () => {
-    const env = await database();
-    await init(env);
-    const before = await new SqliteGlobalSettingsStore(env.db).getSetting({ key: RECOVERY_COPY_SETTING });
+    await init();
+    const before = await records().getSetting({ key: RECOVERY_COPY_SETTING });
 
     await expect(
-      runSecrets({ args: ['init', '--sqlite', env.databaseFile, '--key-file', keyFile], io: fakeIo(), env: {} }),
+      runSecrets({ args: ['init', '--sqlite', sqlite, '--key-file', keyFile], io: fakeIo(), env: {} }),
     ).rejects.toThrow('already set up');
-    const after = await new SqliteGlobalSettingsStore(env.db).getSetting({ key: RECOVERY_COPY_SETTING });
-    expect(after?.value).toBe(before?.value);
+    expect((await records().getSetting({ key: RECOVERY_COPY_SETTING }))?.value).toBe(before?.value);
   }, 120_000);
 
   it('refuses a key file that does not match the database', async () => {
-    const env = await database();
-    await init(env);
+    await init();
     await writeFile(keyFile, encodeKeyFile(createMasterKey()), { mode: 0o600 });
 
     await expect(
-      runSecrets({ args: ['init', '--sqlite', env.databaseFile, '--key-file', keyFile], io: fakeIo(), env: {} }),
+      runSecrets({ args: ['init', '--sqlite', sqlite, '--key-file', keyFile], io: fakeIo(), env: {} }),
     ).rejects.toThrow('different key');
   }, 120_000);
 
   it('leaves no new key file behind when the database belongs to a key that is gone', async () => {
-    const env = await database();
-    await init(env);
+    await init();
     await rm(keyFile);
 
     await expect(
-      runSecrets({ args: ['init', '--sqlite', env.databaseFile, '--key-file', keyFile], io: fakeIo(), env: {} }),
+      runSecrets({ args: ['init', '--sqlite', sqlite, '--key-file', keyFile], io: fakeIo(), env: {} }),
+    ).rejects.toThrow('different key');
+    await expect(stat(keyFile)).rejects.toThrow('ENOENT');
+  }, 120_000);
+
+  it('refuses an encrypted database whose key records are gone', async () => {
+    await init();
+    await rm(keyRecordPath(sqlite));
+    await rm(keyFile);
+
+    await expect(
+      runSecrets({ args: ['init', '--sqlite', sqlite, '--key-file', keyFile], io: fakeIo(), env: {} }),
     ).rejects.toThrow('different key');
     await expect(stat(keyFile)).rejects.toThrow('ENOENT');
   }, 120_000);
 
   it('finishes a setup that stopped before the recovery key was saved', async () => {
-    const env = await database();
-    const firstKey = await init(env);
-    await new SqliteGlobalSettingsStore(env.db).deleteSetting({ key: RECOVERY_COPY_SETTING });
+    const firstKey = await init();
+    await records().deleteSetting({ key: RECOVERY_COPY_SETTING });
 
-    const secondKey = await init(env);
+    const secondKey = await init();
     expect(secondKey).not.toBe(firstKey);
-    expect(await checkRecovery({ env, recoveryKey: secondKey })).toBe(0);
+    expect(await checkRecovery({ recoveryKey: secondKey })).toBe(0);
+  }, 120_000);
+
+  it('finishes a setup that stopped after the database was encrypted but before its records were saved', async () => {
+    await readableDatabase();
+    await init();
+    await rm(keyRecordPath(sqlite));
+
+    const recoveryKey = await init();
+    expect(await markerIn({ key: await machineKey() })).toBe(MARKER);
+    expect(await checkRecovery({ recoveryKey })).toBe(0);
   }, 120_000);
 
   it('gives each instance on one machine its own check value and recovery key from the same key file', async () => {
-    const first = await database();
-    const second = await database();
-    const firstRecovery = await init(first);
+    const second = path.join(dir, 'second', 'db.sqlite');
+    const firstRecovery = await init();
     const secondRecovery = await init(second);
 
     expect(firstRecovery).not.toBe(secondRecovery);
-    const firstCheck = await new SqliteGlobalSettingsStore(first.db).getSetting({ key: KEY_CHECK_SETTING });
-    const secondCheck = await new SqliteGlobalSettingsStore(second.db).getSetting({ key: KEY_CHECK_SETTING });
+    const firstCheck = await records().getSetting({ key: KEY_CHECK_SETTING });
+    const secondCheck = await records(second).getSetting({ key: KEY_CHECK_SETTING });
     expect(firstCheck?.value).not.toBe(secondCheck?.value);
-    for (const env of [first, second]) {
-      const vault = new SecretVault({
-        provider: new FileKeyProvider(keyFile),
-        settings: new SqliteGlobalSettingsStore(env.db),
-      });
-      expect(await vault.refresh()).toEqual({ status: 'unlocked' });
-    }
-    await expect(checkRecovery({ env: second, recoveryKey: firstRecovery })).rejects.toThrow(UsageError);
+    await unlocked();
+    await unlocked(second);
+    await expect(checkRecovery({ file: second, recoveryKey: firstRecovery })).rejects.toThrow(UsageError);
   }, 120_000);
 
   it('never prints the master key', async () => {
-    const env = await database();
     const io = fakeIo();
-    await runSecrets({ args: ['init', '--sqlite', env.databaseFile, '--key-file', keyFile], io, env: {} });
+    await runSecrets({ args: ['init', '--sqlite', sqlite, '--key-file', keyFile], io, env: {} });
     const keyText = (await readFile(keyFile, 'utf8')).trim();
     expect([...io.out, ...io.err].join('')).not.toContain(keyText);
   }, 120_000);
 
-  it('makes the database when setup runs before the first start', async () => {
-    const sqlite = path.join(dir, 'data', 'fresh.sqlite');
-    const io = fakeIo();
-    expect(await runSecrets({ args: ['init', '--sqlite', sqlite, '--key-file', keyFile], io, env: {} })).toBe(0);
-    const recoveryKey = InitResultSchema.parse(JSON.parse(io.out.join(''))).recovery_key;
-    const check = fakeIo({ stdin: recoveryKey });
-    expect(await runSecrets({ args: ['check-recovery', '--sqlite', sqlite], io: check, env: {} })).toBe(0);
-  }, 120_000);
-
   it('with --if-needed, sets up once and then changes nothing', async () => {
-    const env = await database();
-    const args = ['init', '--if-needed', '--sqlite', env.databaseFile, '--key-file', keyFile];
+    const args = ['init', '--if-needed', '--sqlite', sqlite, '--key-file', keyFile];
     const first = fakeIo();
     expect(await runSecrets({ args, io: first, env: {} })).toBe(0);
     InitResultSchema.parse(JSON.parse(first.out.join('')));
-    const before = await new SqliteGlobalSettingsStore(env.db).getSetting({ key: RECOVERY_COPY_SETTING });
+    const before = await records().getSetting({ key: RECOVERY_COPY_SETTING });
 
     const second = fakeIo();
     expect(await runSecrets({ args, io: second, env: {} })).toBe(0);
     expect(JSON.parse(second.out.join(''))).toEqual({ already_set_up: true });
-    const after = await new SqliteGlobalSettingsStore(env.db).getSetting({ key: RECOVERY_COPY_SETTING });
-    expect(after?.value).toBe(before?.value);
+    expect((await records().getSetting({ key: RECOVERY_COPY_SETTING }))?.value).toBe(before?.value);
+  }, 120_000);
+
+  it('with --if-needed, encrypts a readable database put back under records that are already set up', async () => {
+    const recoveryKey = await init();
+    await rm(sqlite);
+    await readableDatabase();
+
+    const io = fakeIo();
+    const args = ['init', '--if-needed', '--sqlite', sqlite, '--key-file', keyFile];
+    expect(await runSecrets({ args, io, env: {} })).toBe(0);
+    expect(JSON.parse(io.out.join(''))).toEqual({ already_set_up: true });
+    expect((await readFile(sqlite)).includes(MARKER)).toBe(false);
+    expect(await markerIn({ key: await machineKey() })).toBe(MARKER);
+    expect(await checkRecovery({ recoveryKey })).toBe(0);
   }, 120_000);
 
   it('with --if-needed, still refuses a database that belongs to another key', async () => {
-    const env = await database();
-    await init(env);
+    await init();
     await writeFile(keyFile, encodeKeyFile(createMasterKey()), { mode: 0o600 });
 
     await expect(
-      runSecrets({
-        args: ['init', '--if-needed', '--sqlite', env.databaseFile, '--key-file', keyFile],
-        io: fakeIo(),
-        env: {},
-      }),
+      runSecrets({ args: ['init', '--if-needed', '--sqlite', sqlite, '--key-file', keyFile], io: fakeIo(), env: {} }),
     ).rejects.toThrow('different key');
   }, 120_000);
 
   it('first-run shows the recovery key in plain words once, then says nothing', async () => {
-    const env = await database();
-    const args = ['first-run', '--sqlite', env.databaseFile, '--key-file', keyFile];
+    const args = ['first-run', '--sqlite', sqlite, '--key-file', keyFile];
     const first = fakeIo();
     expect(await runSecrets({ args, io: first, env: {} })).toBe(0);
     const shown = /\d{6}(-\d{6}){7}/.exec(first.out.join(''));
     expect(first.out.join('')).toContain('Write it down');
-    expect(await checkRecovery({ env, recoveryKey: shown?.[0] ?? '' })).toBe(0);
+    expect(await checkRecovery({ recoveryKey: shown?.[0] ?? '' })).toBe(0);
 
     const second = fakeIo();
     expect(await runSecrets({ args, io: second, env: {} })).toBe(0);
@@ -219,105 +287,103 @@ describe('aman secrets', () => {
   describe('adopt', () => {
     const context = { table: 'logins', primary_key: 'nora', field: 'password' };
 
-    async function adopt({ env, recoveryKey }: { env: SqliteTestDatabase; recoveryKey: string }): Promise<unknown> {
+    async function adopt(recoveryKey: string): Promise<unknown> {
       const io = fakeIo({ stdin: recoveryKey });
-      const code = await runSecrets({
-        args: ['adopt', '--sqlite', env.databaseFile, '--key-file', keyFile],
-        io,
-        env: {},
-      });
+      const code = await runSecrets({ args: ['adopt', '--sqlite', sqlite, '--key-file', keyFile], io, env: {} });
       expect(code).toBe(0);
       return JSON.parse(io.out.join(''));
     }
 
-    async function unlocked(env: SqliteTestDatabase): Promise<SecretVault> {
-      const vault = new SecretVault({
-        provider: new FileKeyProvider(keyFile),
-        settings: new SqliteGlobalSettingsStore(env.db),
-      });
-      expect(await vault.refresh()).toEqual({ status: 'unlocked' });
-      return vault;
-    }
+    it('moves the database and its saved logins to this computer key, and keeps the recovery key', async () => {
+      await readableDatabase();
+      const recoveryKey = await init();
+      const earlierKey = await machineKey();
+      const earlier = (await unlocked()).encrypt({ plaintext: 'made-up-password', context });
 
-    it('opens logins saved on the earlier computer, saves new ones with this computer key, and keeps the recovery key', async () => {
-      const env = await database();
-      const recoveryKey = await init(env);
-      const earlier = (await unlocked(env)).encrypt({ plaintext: 'made-up-password', context });
-      const earlierKeyText = await readFile(keyFile, 'utf8');
-
-      // Another computer: its own key file, the same database.
+      // Another computer: its own key file, the same database and key records.
       keyFile = path.join(dir, 'other-computer', 'master.key');
-      expect(await adopt({ env, recoveryKey })).toEqual({ adopted: true });
-      expect(await readFile(keyFile, 'utf8')).not.toBe(earlierKeyText);
+      expect(await adopt(recoveryKey)).toEqual({ adopted: true });
+      const key = await machineKey();
+      expect(key.equals(earlierKey)).toBe(false);
 
-      const vault = await unlocked(env);
+      expect(await markerIn({ key })).toBe(MARKER);
+      expect(sqliteFileState({ filename: sqlite, key: deriveDatabaseKey(earlierKey) })).toBe('other_key');
+      const vault = await unlocked();
       expect(vault.decrypt({ value: earlier, context })).toBe('made-up-password');
       const later = vault.encrypt({ plaintext: 'second-password', context });
       expect(secretKeyId(later)).not.toBe(secretKeyId(earlier));
       expect(vault.decrypt({ value: later, context })).toBe('second-password');
-      expect(await checkRecovery({ env, recoveryKey })).toBe(0);
-      expect(await adopt({ env, recoveryKey })).toEqual({ already_adopted: true });
+      expect(await checkRecovery({ recoveryKey })).toBe(0);
+      expect(await adopt(recoveryKey)).toEqual({ already_adopted: true });
     }, 120_000);
 
     it('keeps every earlier key when the database moves a second time', async () => {
-      const env = await database();
-      const recoveryKey = await init(env);
-      const first = (await unlocked(env)).encrypt({ plaintext: 'one', context });
+      const recoveryKey = await init();
+      const first = (await unlocked()).encrypt({ plaintext: 'one', context });
       keyFile = path.join(dir, 'second', 'master.key');
-      await adopt({ env, recoveryKey });
-      const second = (await unlocked(env)).encrypt({ plaintext: 'two', context });
+      await adopt(recoveryKey);
+      const second = (await unlocked()).encrypt({ plaintext: 'two', context });
       keyFile = path.join(dir, 'third', 'master.key');
-      await adopt({ env, recoveryKey });
+      await adopt(recoveryKey);
 
-      const vault = await unlocked(env);
+      const vault = await unlocked();
       expect(vault.decrypt({ value: first, context })).toBe('one');
       expect(vault.decrypt({ value: second, context })).toBe('two');
     }, 120_000);
 
     it('refuses a wrong recovery key, changes nothing and leaves no key file behind', async () => {
-      const env = await database();
-      const recoveryKey = await init(env);
+      const recoveryKey = await init();
       const earlierKeyFile = keyFile;
-      const settings = new SqliteGlobalSettingsStore(env.db);
-      const before = await settings.getSetting({ key: KEY_CHECK_SETTING });
+      const before = await records().getSetting({ key: KEY_CHECK_SETTING });
 
       keyFile = path.join(dir, 'other-computer', 'master.key');
       await expect(
         runSecrets({
-          args: ['adopt', '--sqlite', env.databaseFile, '--key-file', keyFile],
-          io: fakeIo({ stdin: '000000-000000-000000-000000-000000-000000-000000-000000' }),
+          args: ['adopt', '--sqlite', sqlite, '--key-file', keyFile],
+          io: fakeIo({ stdin: WRONG_RECOVERY_KEY }),
           env: {},
         }),
       ).rejects.toThrow(UsageError);
       await expect(stat(keyFile)).rejects.toThrow('ENOENT');
-      expect((await settings.getSetting({ key: KEY_CHECK_SETTING }))?.value).toBe(before?.value);
-      expect(await settings.getSetting({ key: RETIRED_KEYS_SETTING })).toBeUndefined();
+      expect((await records().getSetting({ key: KEY_CHECK_SETTING }))?.value).toBe(before?.value);
+      expect(await records().getSetting({ key: RETIRED_KEYS_SETTING })).toBeUndefined();
       keyFile = earlierKeyFile;
-      await unlocked(env);
-      expect(await checkRecovery({ env, recoveryKey })).toBe(0);
+      await unlocked();
+      expect(sqliteFileState({ filename: sqlite, key: deriveDatabaseKey(await machineKey()) })).toBe('encrypted');
+      expect(await checkRecovery({ recoveryKey })).toBe(0);
+    }, 120_000);
+
+    it('finishes a move that stopped after the database moved but before its records did', async () => {
+      await readableDatabase();
+      const recoveryKey = await init();
+      const earlierRecords = await readFile(keyRecordPath(sqlite), 'utf8');
+      keyFile = path.join(dir, 'other-computer', 'master.key');
+      await adopt(recoveryKey);
+      await writeFile(keyRecordPath(sqlite), earlierRecords);
+
+      expect(await adopt(recoveryKey)).toEqual({ adopted: true });
+      const key = await machineKey();
+      expect(await markerIn({ key })).toBe(MARKER);
+      expect((await recoverMasterKey({ settings: records(), recoveryKey })).equals(key)).toBe(true);
     }, 120_000);
 
     it('finishes a move that stopped before the recovery key was tied to this computer', async () => {
-      const env = await database();
-      const recoveryKey = await init(env);
-      const settings = new SqliteGlobalSettingsStore(env.db);
-      const earlierCopy = await settings.getSetting({ key: RECOVERY_COPY_SETTING });
+      const recoveryKey = await init();
+      const earlierCopy = await records().getSetting({ key: RECOVERY_COPY_SETTING });
       keyFile = path.join(dir, 'other-computer', 'master.key');
-      await adopt({ env, recoveryKey });
-      await settings.setSetting({ key: RECOVERY_COPY_SETTING, value: earlierCopy?.value ?? '' });
+      await adopt(recoveryKey);
+      await records().setSetting({ key: RECOVERY_COPY_SETTING, value: earlierCopy?.value ?? '' });
 
-      expect(await adopt({ env, recoveryKey })).toEqual({ already_adopted: true });
-      const loaded = await new FileKeyProvider(keyFile).load();
-      const recovered = await recoverMasterKey({ settings, recoveryKey });
-      expect(loaded.status === 'loaded' && loaded.key.equals(recovered)).toBe(true);
+      expect(await adopt(recoveryKey)).toEqual({ already_adopted: true });
+      expect((await recoverMasterKey({ settings: records(), recoveryKey })).equals(await machineKey())).toBe(true);
     }, 120_000);
 
     it('says to set up instead when the database never had a key', async () => {
-      const env = await database();
+      await readableDatabase();
       await expect(
         runSecrets({
-          args: ['adopt', '--sqlite', env.databaseFile, '--key-file', keyFile],
-          io: fakeIo({ stdin: '000000-000000-000000-000000-000000-000000-000000-000000' }),
+          args: ['adopt', '--sqlite', sqlite, '--key-file', keyFile],
+          io: fakeIo({ stdin: WRONG_RECOVERY_KEY }),
           env: {},
         }),
       ).rejects.toThrow('secrets init');

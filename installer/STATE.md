@@ -111,8 +111,8 @@ hyphens.
 
 ## This computer's key
 
-Saved logins in an instance's database are encrypted with one key per
-computer. The key is the file `master.key` in the Docker volume `aman_key`,
+An instance's database file and the saved logins in it are encrypted with
+one key per computer. The key is the file `master.key` in the Docker volume `aman_key`,
 which the installer makes once. It is not in the home, not in any instance's
 data and not in any backup.
 
@@ -128,6 +128,20 @@ data and not in any backup.
   to a file or a log, and at a terminal asks the person to type it back.
   Then it records `secrets=1` in the registry and does not run setup for
   that instance again.
+- Setup also encrypts the instance's database file where it is, with a key
+  derived from the computer's key. The app must be stopped for that, and
+  the installer stops it. From then on nothing reads `db.sqlite` without
+  the key: the app, `aman backup`, `aman backup-check`, import, export,
+  the doctor and the password reset all open it through `aman_key`.
+- The file `db.sqlite.keys` beside the database holds the instance's key
+  records: a value that tells whether a key is this database's key, the
+  computer's key encrypted with the recovery key, and any earlier keys
+  encrypted with the current one. Nothing in it is usable without the
+  computer's key or the recovery key. It is outside the database because
+  it is what opens the database. It travels with the database in every
+  backup and restore. A restored database from before encryption has no
+  such file; the next start then sets it up as new, with a new recovery
+  key.
 - Each instance has its own recovery key. It opens that instance's data on
   a computer that does not have the key.
 - `aman_key` is removed only when the last instance is removed with its

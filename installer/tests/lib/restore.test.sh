@@ -373,6 +373,8 @@ yes
   assert_flat_contains "$OUT" "The data of main is now protected by this computer's key. The recovery key you typed still opens it."
   assert_contains "$(restored_db main)" "SQLITE-OF-aman_main_data-one"
   assert_eq "$(cat "$SB_STATE/adopt_runs")" "aman-main" "the data was tied to this computer once"
+  assert_log_has "set -- --recovery-key-file /run/recovery/key"
+  assert_log_has "\"\$@\" sh recovery"
   assert_eq "$(sed -n 1p "$SB_STATE/secrets_aman-main")" "$(cat "$SB_STATE/key")" "the data answers to this computer's key"
   assert_eq "$(sed -n 2p "$SB_STATE/secrets_aman-main")" "$OLD_RECOVERY_KEY" "the same recovery key still works"
   assert_eq "$(reg_value main secrets)" 1

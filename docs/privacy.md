@@ -5,7 +5,7 @@ description: 'Every service Aman talks to, what each one sees, and what stays on
 
 # Privacy in detail
 
-Aman runs on your computer. Your memory is a set of plain text files (Markdown) on your disk. Your chats, personas and settings are kept in a database file on the same computer.
+Aman runs on your computer. Your chats, personas and settings are kept in a database file on that computer. The file is encrypted with a key kept on the same computer, so a copy of the file alone can't be read. Your memory is a set of plain text files (Markdown) on your disk. Those files aren't encrypted, so turn on disk encryption for the computer.
 
 For a short overview, see [Your privacy](../packages/trueforge/guide/topics/privacy.md).
 
@@ -116,7 +116,8 @@ Apart from the services above, Aman's server contacts nothing. Every outside add
 - **Voice input and voice mode.** A small model on your computer turns your speech into text, and a voice on your computer reads replies aloud. Nothing you say is saved, except the message in your chat. The small speech-detection model it needs ships inside Aman. Voice mode ends by itself after 2 minutes without you speaking, and after 30 minutes in any case, so a forgotten tab doesn't keep the microphone on. See [Voice input](voice-input.mdx).
 - **Memory search.** A small model on your computer finds related memories.
 - **Deleting a memory.** Deleting a memory on the Memories page removes its text from your disk, and editing one replaces the old wording. A backup or an export you made earlier still holds what it held.
-- **Backups.** They're written to a folder on your computer. See [Back up and restore](backup.md).
+- **Backups.** They're written to a folder on your computer, encrypted. See [Back up and restore](backup.md).
+- **The key.** Aman makes one key for this computer when it is set up, and shows you a recovery key once. The recovery key opens your data on another computer. Without the computer or the recovery key, nobody can open the database or a backup, and that includes you.
 
 ## Incognito chats
 

@@ -1,4 +1,4 @@
-import Database from 'better-sqlite3';
+import Database from 'better-sqlite3-multiple-ciphers';
 import { cacheStatements } from '../../../../src/db/sqlite/client';
 
 function openDatabase(): Database.Database {

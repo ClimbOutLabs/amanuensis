@@ -54,10 +54,13 @@ export async function adoptDatabase({
   settings,
   masterKey,
   recoveryKey,
+  moveDatabase,
 }: {
   settings: IGlobalSettingsStore;
   masterKey: Buffer;
   recoveryKey: string;
+  /** Moves the stored data itself from the earlier key to `masterKey`, before the records say it has moved. */
+  moveDatabase: (earlierKey: Buffer) => Promise<void>;
 }): Promise<'adopted' | 'already_adopted'> {
   const state = await checkMasterKey({ settings, key: masterKey });
   if (state === 'not_set_up') {
@@ -69,6 +72,7 @@ export async function adoptDatabase({
     return 'already_adopted';
   }
   const earlierKey = await recoverMasterKey({ settings, recoveryKey });
+  await moveDatabase(earlierKey);
   const retired = await loadRetiredKeys({ settings, masterKey: earlierKey });
   retired.set(masterKeyId(earlierKey).toString('hex'), earlierKey);
   const keys = [...retired.entries()].map(([keyId, key]) => ({

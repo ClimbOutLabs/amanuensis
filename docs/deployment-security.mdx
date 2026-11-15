@@ -47,7 +47,7 @@ Two defenses do not depend on the Prompt Guard screens and cannot be turned off:
 
 ## Limits to keep in mind
 
-- Sign-in protects the app, not the computer it runs on. Anyone with administrator rights or Docker access on that computer can read Aman's data, and backups are stored unencrypted.
+- Sign-in protects the app, not the computer it runs on. Anyone with administrator rights or Docker access on that computer can read Aman's data. The SQLite database, saved logins and backups are encrypted with a key kept on the same computer, which protects a copied file or backup, not a computer someone else controls. Memory files and the instance settings file are not encrypted. A Postgres deployment encrypts saved logins only; the database itself is the operator's to protect.
 - Tool approval and sandboxing reduce risk; they are not an unlimited safety boundary. Review enabled capabilities, provider trust, egress policy, and approval requests.
 - Model credentials stay in the harness. Built-in MCP access from Code Mode is bridged back through the harness so its stored MCP tokens do not enter the sandbox; do not assume the same boundary for arbitrary custom code, tools, or integrations. Administrators remain responsible for secret storage, transport security, and provider configuration.
 - Markdown memory stores memories as plain files under `MEMORY_MARKDOWN_DIR` (default `./data/memory`) — treat that directory as sensitive. Recall screening and live tool-output screening default off.

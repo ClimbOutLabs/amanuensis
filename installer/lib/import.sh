@@ -107,6 +107,7 @@ import_run() {
   # so it can be shown as printed and kept in the log, and the JSON never reaches the screen.
   layout=$log.layout
   : >"$layout"
+  machine_key_args
   if [ "$(instance_state "$name")" != stopped ]; then was_running=1; fi
   if [ "$was_running" = 1 ]; then
     IMPORT_STOPPED_APP=$name
@@ -123,7 +124,7 @@ import_run() {
   (D run --rm -i --network none \
     --env-file "$(instance_dir "$name")/.env" -e NODE_ENV=production \
     -v "aman_${name}_data:/data" \
-    -v "$MACHINE_KEY_VOLUME:/run/aman-key:ro" -e SECRETS_KEY_FILE="$MACHINE_KEY_FILE" \
+    ${MACHINE_KEY_ARGS[@]+"${MACHINE_KEY_ARGS[@]}"} \
     --tmpfs /import:rw,mode=0700,uid=10001,gid=10001,size=1200m \
     "$image" sh -c "cat >/import/export.zip && exec aman import-data --in /import/export.zip --user \"\$1\" --display-name \"\$2\" \${3:+\"\$3\"}" \
     import "$owner" "$display" ${check[@]+"${check[@]}"} <"$file") >"$layout" 2>"$log" || rc=$?

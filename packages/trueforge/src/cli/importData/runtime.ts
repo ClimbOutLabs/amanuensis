@@ -3,10 +3,9 @@ import path from 'node:path';
 
 import { createLogger, format, transports } from 'winston';
 
-import { openCommandVault } from '../../secrets/cliVault';
 import { EncryptedMcpServerStore } from '../../secrets/encryptedMcpServerStore';
 import { EncryptedModelProviderStore } from '../../secrets/encryptedModelProviderStore';
-import type { SecretVault } from '../../secrets/secretVault';
+import { openSqliteVault } from '../../secrets/sqliteAccess';
 import type { ImportDataSession } from './session';
 
 /** Messages go to stderr so stdout stays the printed summary; the JSON result is on stderr too. */
@@ -91,7 +90,13 @@ export async function openImportDataSession(): Promise<ImportDataSession> {
   }
 
   await mkdir(path.dirname(configuration.SQLITE_PATH), { recursive: true });
-  const db = createSqliteDb(configuration.SQLITE_PATH);
+  // An import saves connectors and model providers, so it needs this computer's key like the server does.
+  const { vault, databaseKey } = await openSqliteVault({
+    sqlitePath: configuration.SQLITE_PATH,
+    keyFile: configuration.SECRETS_KEY_FILE,
+    mode: 'command',
+  });
+  const db = createSqliteDb(configuration.SQLITE_PATH, { key: databaseKey });
   try {
     await withLogsOnStderr(() => migrateSqliteToLatest(db));
   } catch (error) {
@@ -123,15 +128,7 @@ export async function openImportDataSession(): Promise<ImportDataSession> {
     import('../../db/sqlite/turn-artifact-store/SqliteTurnArtifactStore'),
   ]);
 
-  // An import saves connectors and model providers, so it needs this computer's key like the server does.
   const globalSettingsStore = new SqliteGlobalSettingsStore(db);
-  let vault: SecretVault;
-  try {
-    vault = await openCommandVault({ settings: globalSettingsStore, keyFile: configuration.SECRETS_KEY_FILE });
-  } catch (error) {
-    await db.destroy();
-    throw error;
-  }
 
   const modelDir = configuration.MEMORY_EMBEDDINGS_MODEL_DIR;
   const embeddingModel = getSharedEmbeddingModel({ modelDir });

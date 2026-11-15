@@ -1,8 +1,11 @@
+import { DatabaseLockedError } from '../../../secrets/sqliteAccess';
 import { errorCode } from '../../errorCode';
 import type { DoctorDeps } from '../deps';
 import { failCheck, offCheck, okCheck, type Check } from '../schemas';
 
 const START_FIX = 'Run aman doctor instance --fix';
+const KEY_FIX =
+  'Run install.sh again. If it says this data came from another computer, run aman restore and type its recovery key.';
 
 export function isStandalone(deps: DoctorDeps): boolean {
   return deps.env['STANDALONE']?.trim().toLowerCase() !== 'false';
@@ -31,7 +34,7 @@ function describeDatabaseError(error: unknown): string {
   return 'unknown error';
 }
 
-export function checkDatabase({ deps, timeoutMs }: { deps: DoctorDeps; timeoutMs: number }): Check {
+export async function checkDatabase({ deps, timeoutMs }: { deps: DoctorDeps; timeoutMs: number }): Promise<Check> {
   const id = 'database';
   if (!isStandalone(deps)) {
     return offCheck({ id, detail: 'Skipped: this instance does not use the built-in SQLite database.' });
@@ -44,8 +47,18 @@ export function checkDatabase({ deps, timeoutMs }: { deps: DoctorDeps; timeoutMs
       fix: 'Rerun install.sh to regenerate the instance settings, or set SQLITE_PATH in its .env file, then restart the instance.',
     });
   }
+  let key: Buffer | undefined;
   try {
-    deps.probeDatabaseWritable({ path: file, timeoutMs });
+    key = await deps.databaseKey({ path: file });
+  } catch (error) {
+    return failCheck({
+      id,
+      detail: `The database is encrypted and cannot be opened here: ${error instanceof DatabaseLockedError ? error.why : describeDatabaseError(error)}.`,
+      fix: KEY_FIX,
+    });
+  }
+  try {
+    deps.probeDatabaseWritable({ path: file, key, timeoutMs });
     return okCheck({ id, detail: 'The database can be written to.' });
   } catch (error) {
     return failCheck({

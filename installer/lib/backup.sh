@@ -80,7 +80,9 @@ backup_instance() {
     esac
   }
   D volume create --label "$BACKUP_SCRATCH_LABEL" "$scratch" >/dev/null || return 1
-  D run --rm --network none -v "aman_${name}_data:/data" -v "$scratch:/backup" "$image" aman backup \
+  # The key lets the CLI read the encrypted database; its copy stays encrypted, and its key records go along.
+  machine_key_args
+  D run --rm --network none -v "aman_${name}_data:/data" -v "$scratch:/backup" ${MACHINE_KEY_ARGS[@]+"${MACHINE_KEY_ARGS[@]}"} "$image" aman backup \
     --target /backup \
     --sqlite "$sqlite" \
     --memory-dir "$(env_get "$env_file" MEMORY_MARKDOWN_DIR)" \
@@ -380,7 +382,8 @@ backup_open() { # name dir image
   ensure_private_dir "$view"
   rm -rf "${view:?}/$name"
   ensure_private_dir "$view/$name"
-  if ! D run --rm -i --network none -v "$MACHINE_KEY_VOLUME:/run/aman-key:ro" "$image" \
+  machine_key_args
+  if ! D run --rm -i --network none ${MACHINE_KEY_ARGS[@]+"${MACHINE_KEY_ARGS[@]}"} "$image" \
     aman unseal --in - --out - --key-file "$MACHINE_KEY_FILE" <"$dir/$name.sealed" 2>/dev/null |
     tar -x --no-same-owner -C "$view/$name" -f - 2>/dev/null; then
     rm -rf "${view:?}/$name"
@@ -397,16 +400,22 @@ backup_open() { # name dir image
 }
 
 # restore_sqlite NAME BACKUPDIR IMAGE: puts the backed-up database back and drops stale WAL files. BACKUPDIR is the
-# folder that holds NAME/, so an opened one for a sealed backup.
+# folder that holds NAME/, so an opened one for a sealed backup. The database's key records go back with it; a
+# database from before encryption has none, and then the records of the one it replaces are removed, so they can
+# never be taken for its own.
 restore_sqlite() {
-  local name=$1 dir=$2 image=$3
+  local name=$1 dir=$2 image=$3 members=(db.sqlite)
   if [ ! -f "$dir/$name/db.sqlite" ]; then
     warn "The backup in $dir has no data for instance $name, so nothing was put back for it."
     return 0
   fi
-  D run --rm -i --network none -v "aman_${name}_data:/data" "$image" sh -c \
-    'mkdir -p /data/db && cat > /data/db/db.sqlite.restore && rm -f /data/db/db.sqlite-wal /data/db/db.sqlite-shm && mv /data/db/db.sqlite.restore /data/db/db.sqlite' \
-    <"$dir/$name/db.sqlite"
+  [ ! -f "$dir/$name/db.sqlite.keys" ] || members+=(db.sqlite.keys)
+  tar -C "$dir/$name" -cf - "${members[@]}" |
+    D run --rm -i --network none -v "aman_${name}_data:/data" "$image" sh -c \
+      'rm -rf /data/db/.restore && mkdir -p /data/db/.restore && tar -x --no-same-owner -C /data/db/.restore -f - &&
+rm -f /data/db/db.sqlite-wal /data/db/db.sqlite-shm /data/db/db.sqlite.keys &&
+if [ -f /data/db/.restore/db.sqlite.keys ]; then mv /data/db/.restore/db.sqlite.keys /data/db/db.sqlite.keys; fi &&
+mv /data/db/.restore/db.sqlite /data/db/db.sqlite && rmdir /data/db/.restore'
 }
 
 # install.sh backups daily|off: turns the automatic daily backup on or off.
