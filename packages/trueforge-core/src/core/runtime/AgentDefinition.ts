@@ -75,11 +75,10 @@ export interface AgentDefinition {
       }
     | undefined;
   /**
-   * IANA timezone name the client sent with the turn (e.g. via
-   * Intl.DateTimeFormat().resolvedOptions().timeZone), used to report local time from
-   * get_current_datetime and in the ambient current-date section. Undefined when the client
-   * sent none, or the resolver has no client to ask; both the tool and the section fall back
-   * to UTC.
+   * The person's IANA timezone for this turn: the one the client sent (e.g. via
+   * Intl.DateTimeFormat().resolvedOptions().timeZone), else the one the host knows for them. It is the only zone
+   * get_current_datetime and the ambient current-date section report in. Undefined when none is known; both then
+   * report UTC and say the person's zone is not known.
    */
   clientTimezone?: string | undefined;
   /** True when the person spoke the message and the client reads the reply aloud. */

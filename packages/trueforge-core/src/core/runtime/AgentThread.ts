@@ -2177,15 +2177,16 @@ export class AgentThread {
     // instead assume one from training and reason years into the past, which a
     // live session demonstrated against dated memory retrievals. Date only, no
     // time of day. The get_current_datetime tool remains for precise time.
-    const dateUtc = this.replyDate.toISOString().slice(0, 10);
+    // One date only, the person's own when their zone is known: from late afternoon in the Americas the UTC day
+    // is already tomorrow, and a model shown both days takes the first one for today.
     const local = resolveLocalTime(this.replyDate, this.definition.clientTimezone);
-    const localDateClause = local.isFallback
-      ? ''
-      : ` The user's local date is ${local.date} (${weekdayNameOf(local.date)}, ${local.zone}, UTC${local.utcOffset}).`;
+    const where = local.isFallback
+      ? "UTC, because the person's time zone is not known"
+      : `${local.zone}, UTC${local.utcOffset}`;
     // The weekday is stated, not left to the model: models often name the wrong day for a date.
     builder.addSection(
       'current-date',
-      `Today's date is ${dateUtc} (${weekdayNameOf(dateUtc)}, UTC).${localDateClause} Reason about past and future relative to this date, not to your training data.`,
+      `Today's date is ${local.date} (${weekdayNameOf(local.date)}, ${where}). Reason about past and future relative to this date, not to your training data.`,
     );
     if (!this.parent && this.definition.spokenReply === true) {
       builder.addSection(

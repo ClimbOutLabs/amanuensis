@@ -14,6 +14,7 @@ import { createReminderReach } from '../../src/runtime/noticing/reminderReach';
 import { createTelegramSendQueue } from '../../src/runtime/telegram/telegramSendQueue';
 import { createTelegramService } from '../../src/runtime/telegram/telegramService';
 import { createTextNumberService } from '../../src/runtime/texts/textNumber';
+import { turnTimezoneFor } from '../../src/runtime/turnTimezone';
 
 /**
  * The feed's stores and service over a test database, with no push channel and an activity log that drops writes,
@@ -45,6 +46,11 @@ export function deliveryDeps(
       logger: winston.createLogger({ silent: true }),
     }),
     reachSettingsStore,
+    turnTimezone: turnTimezoneFor({
+      reachSettings: reachSettingsStore,
+      knownTimezone: () => Promise.resolve(undefined),
+      logger: winston.createLogger({ silent: true }),
+    }),
     noticingStore,
     noticingService: { run: () => Promise.resolve({ owners: 0, raised: 0 }) },
     reminderReach: createReminderReach({
