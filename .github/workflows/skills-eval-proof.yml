@@ -54,11 +54,14 @@ jobs:
           cd packages/trueforge
           pnpm run build:gen > /dev/null
           (setsid pnpm run serve:eval > "$RUNNER_TEMP/diag.log" 2>&1 &)
-          for i in $(seq 1 48); do
+          for i in $(seq 1 72); do
             if curl -s http://127.0.0.1:8899/healthz; then echo; echo "healthy after $((i*5))s"; break; fi
             sleep 5
           done
-          grep -v noticing "$RUNNER_TEMP/diag.log" | tail -80 | cut -c1-500
+          date -u
+          grep -vE "noticing|nowledge document|STT health|at async|undici|processTicks|TypeError" "$RUNNER_TEMP/diag.log" | head -150 | cut -c1-500
+          ls -la "$RUNNER_TEMP/slots/1/mirror/"
+          ps aux | grep -E "tsx|node" | grep -v grep | cut -c1-200
           pkill -f "tsx src/main.ts" || true
           sleep 3
       - name: Run the eval with skills
