@@ -56,9 +56,13 @@ export function countRefusedCommands(items) {
   }).length;
 }
 
-/** True when a stored tool name is `tool`, with or without a connector prefix. */
+/**
+ * True when a stored tool name is `tool`, with or without a connector prefix. Sandbox tools are stored with what the
+ * call was for after a colon, such as `exec:execute:<id>` or `write_file:edit`, so that part is left out.
+ */
 export function toolNameMatches({ stored, tool }) {
-  return stored === tool || new RegExp(`(^|[._-])${tool.replace(/[^A-Za-z0-9_]/g, '')}$`).test(stored);
+  const base = stored.split(':')[0];
+  return base === tool || new RegExp(`(^|[._-])${tool.replace(/[^A-Za-z0-9_]/g, '')}$`).test(base);
 }
 
 function lower(text) {
