@@ -100,7 +100,7 @@ Stop the `aman-tts` container, and replies are read by your browser's voice inst
 - It is built from `ops/aman-stt` (Python 3.11 slim, processor only, with no CUDA). The app pins `device=cpu`.
 - It has a 2 GB memory limit. It is not tied to particular cores, so the stack starts on any computer. See Tuning to give it cores of its own.
 - It publishes no port on your computer. It is reachable only inside the compose network at `http://aman-stt:8001`.
-- The Whisper model (about 464 MB) downloads once at first start into the `stt-model-cache` volume. Recreated containers reuse it.
+- The Whisper model (about 464 MB) is part of the image. Nothing downloads when the service starts.
 - It restarts unless stopped, like the server.
 
 Compose sets `STT_URL` itself. The server does not wait for `aman-stt` to be healthy, so typed chat works while transcription is down.
@@ -125,7 +125,7 @@ The service uses the same build, image, memory limit and thread count as the ful
 - It publishes `127.0.0.1:8001`, on your own computer only.
 - Do not give it cores of its own here. The server runs on your computer and cannot be kept off them.
 
-`pnpm dev:infra` rebuilds the images each time, so an older voice service is never reused. The first run builds the image and downloads the model (about 464 MB) into the dev project's own `stt-model-cache` volume.
+`pnpm dev:infra` rebuilds the images each time, so an older voice service is never reused. The first run builds the image, which includes the model (about 464 MB), so the first build takes longer.
 
 Set these in `packages/trueforge/.env` (both are already in `packages/trueforge/.env.example`), then restart `pnpm dev`:
 

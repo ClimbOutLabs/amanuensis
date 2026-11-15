@@ -31,7 +31,7 @@ export const EMBEDDING_MODEL_DOWNLOAD_SIZE = 'about 120 MB';
  * Trust anchor: SHA-256 of every file the pinned revision must contain, measured
  * 2026-09-20. Do not change without re-running the retrieval eval.
  */
-const EMBEDDING_MODEL_FILES: Record<string, string> = {
+export const EMBEDDING_MODEL_FILES: Record<string, string> = {
   'config.json': 'cb99455288675345e1a4f411438d5d0adbba5fbd3a67ea4fb03c015433b996c1',
   'tokenizer.json': '0b44a9d7b51c3c62626640cda0e2c2f70fdacdc25bbbd68038369d14ebdf4c39',
   'tokenizer_config.json': 'a1d6bc8734a6f635dc158508bef000f8e2e5a759c7d92f984b2c86e5ff53425b',

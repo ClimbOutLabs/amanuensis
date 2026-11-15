@@ -390,9 +390,6 @@ plan_build() {
   else
     plan_add todo "Start the speech-to-text service"
   fi
-  if ! docker_available_for_probes || ! docker_volume_exists aman_stt_cache; then
-    dl_add stt-weights
-  fi
 
   if [ -n "$(reg_names)" ]; then
     for name in $(reg_names); do
@@ -422,7 +419,6 @@ plan_build() {
     if [ "$I_TF" = 1 ]; then
       plan_add todo "Use Token Factory (model $I_TF_MODEL) as the default model" "$(tf_plan_detail)"
     fi
-    dl_add embed
   fi
   if [ "$OPT_DEMO" = 1 ]; then
     name=$(demo_target)

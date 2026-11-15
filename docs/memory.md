@@ -34,7 +34,7 @@ When you send an email through Aman, it keeps one note of it in the daily log: w
 
 Aman searches your memories by meaning, not just by matching words. So "where did we stay in Paris" finds the hotel note even if it says "Hotel Lumiere" and never mentions Paris.
 
-To do that, Aman downloads a small memory model once, about 120 MB. The download starts in the background when the server starts, so it is usually done before you need it. There is nothing to install or click.
+To do that, Aman uses a small memory model, about 120 MB, that comes built into the app. Nothing is downloaded when you start Aman. There is nothing to install or click.
 
 - After that one download, memory search works fully offline, and everything stays on your server.
 - The memory model is kept inside the memory folder, so the two travel together.

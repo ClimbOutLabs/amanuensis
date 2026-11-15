@@ -463,7 +463,7 @@
     {
       "host": "huggingface.co",
       "category": "model_download",
-      "reason": "Memory search model files, downloaded once on first use and checked against pinned hashes."
+      "reason": "Pinned speech and memory search model files, fetched when the Aman images are built and checked against fixed hashes. The memory search service fetches them again only if the built-in copy fails its hash check."
     },
     {
       "host": "raw.githubusercontent.com",

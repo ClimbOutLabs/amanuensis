@@ -168,7 +168,7 @@ installer/install.sh instance add <person> --email <owner-email>
 
 The installer asks for the instance name, whether to back up every day, `Go ahead?` after its plan, and the owner's password twice. It does not ask for a model address or key: those are set in the app afterwards (step 7). Give each instance the email the person signs in with: the new instance recognises them by it.
 
-The first start of an instance downloads the memory search model once (about 120 MB). The import waits for it by itself (step 5).
+The memory search model is built into the app, so nothing is downloaded at the first start. The import waits for it to load by itself (step 5).
 
 ## 5. Import
 

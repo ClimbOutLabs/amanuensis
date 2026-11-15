@@ -318,7 +318,7 @@ aman import ~/.amanuensis/exports/aman-export-<timestamp>.zip --display-name "Yo
 Before anything is written, the import:
 
 1. Starts the instance once if it never started, so there is something to back up.
-2. Waits for the search model to finish downloading (about 120 MB, once), with one line saying so. Persona knowledge is searched by meaning, so the import needs it.
+2. Waits for the search model, which is built into the app, to load. Persona knowledge is searched by meaning, so the import needs it.
 3. Takes a backup named `<timestamp>-before-import`, which is never pruned. To start over, put it back.
 
 Then it stops the app of the instance, restores the export in a one-off container that has the instance's data and no network, and starts the app again. The same restore is available by hand as `aman import-data --in <file.zip> [--user <owner>] [--display-name <name>]`; `--user` can only be the owner, and the app must be stopped first. Administrators can also upload an export to `POST /api/v1/data/import`; anyone else gets a 403.

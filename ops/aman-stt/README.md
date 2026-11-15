@@ -46,11 +46,12 @@ without it, because the Docker health check carries no secret.
 
 ## Lifecycle
 
-1. At container start the sidecar resolves the pinned model revision from
-   `PINNED_MODELS` in `aman_stt.py` (exact Hugging Face repo plus commit
-   hash, never a branch). If the revision is already in the persistent
-   `stt-model-cache` volume (`/data/stt-cache`), it loads from there with no
-   network access; otherwise it downloads the pinned revision once.
+1. The image holds the pinned model revision from `PINNED_MODELS` in
+   `aman_stt.py` (exact Hugging Face repo plus commit hash, never a branch).
+   It was fetched at build time into `/opt/aman-stt-models`, and the build
+   fails unless every file matches its SHA-256. At run time the sidecar loads
+   from that folder and makes no network calls; the offline flags stop the
+   Hugging Face libraries from downloading anything.
 2. Every required file's SHA-256 is verified against the pinned hashes
    before the model loads. On any missing file, hash mismatch, or revision
    mismatch the model is refused, the error is logged, and `/healthz`
@@ -95,7 +96,7 @@ newer model revision:
 | `AMAN_STT_MODEL`                  | `small`            | Whisper model size (must be a pinned size in `PINNED_MODELS`) |
 | `AMAN_STT_FALLBACK_MODEL`         | `base`             | fallback if `small` fails to load (also pinned and verified)  |
 | `AMAN_STT_CPU_THREADS`            | `4`                | faster-whisper encoder threads; keep equal to pinned cores    |
-| `AMAN_STT_MODEL_DIR`              | `/data/stt-cache`  | model cache directory (persistent volume)                     |
+| `AMAN_STT_MODEL_DIR`              | `/opt/aman-stt-models` | model folder baked into the image (read only)            |
 | `AMAN_STT_MAX_BODY_BYTES`         | `31457280`         | 30 MB body cap                                                |
 
 ## Resource isolation and tuning
