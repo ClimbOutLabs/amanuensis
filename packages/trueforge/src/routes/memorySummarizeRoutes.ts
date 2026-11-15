@@ -9,8 +9,7 @@ export const getMemorySummarizeRoute = createRoute({
   path: '/',
   tags: [OpenApiTag.CAPABILITIES],
   summary: 'Get the turn-summarization setting',
-  description:
-    'The stored override for turn summarization, or the `MEMORY_SUMMARIZE` env default when none is stored, plus the effective state with the markdown-only gate applied.',
+  description: 'The stored override for turn summarization, or the `MEMORY_SUMMARIZE` env default when none is stored.',
   'x-fern-sdk-group-name': ['settings', 'memorySummarize'],
   'x-fern-sdk-method-name': 'get',
   responses: {
@@ -35,7 +34,7 @@ export const putMemorySummarizeRoute = createRoute({
   tags: [OpenApiTag.CAPABILITIES],
   summary: 'Create, replace, or clear the turn-summarization override',
   description:
-    'Persists the turn-summarization override: `true`/`false` turns summarization on/off; `null` clears the override back to the `MEMORY_SUMMARIZE` env default. The response carries the effective state.',
+    'Persists the turn-summarization override: `true`/`false` turns summarization on/off; `null` clears the override back to the `MEMORY_SUMMARIZE` env default.',
   'x-fern-sdk-group-name': ['settings', 'memorySummarize'],
   'x-fern-sdk-method-name': 'create_or_update',
   request: {

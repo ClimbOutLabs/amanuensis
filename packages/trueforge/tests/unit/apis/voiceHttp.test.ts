@@ -1,14 +1,22 @@
+import { OpenAPIHono } from '@hono/zod-openapi';
 import { createLogger, transports } from 'winston';
 
 import { createVoiceRouter } from '../../../src/apis/voice';
-import { resolveRequestContext } from '../../../src/auth/identity';
+import type { Authenticator } from '../../../src/auth/authenticator';
+import { STANDALONE_REQUEST_CONTEXT, resolveRequestContext } from '../../../src/auth/identity';
+import { createAuthMiddleware } from '../../../src/auth/middleware';
+import { SpeechRateLimiter } from '../../../src/voice/speechRateLimit';
 
 jest.mock('../../../src/config', () => {
   const actual = jest.requireActual<typeof import('../../../src/config')>('../../../src/config');
   return {
     ...actual,
     __esModule: true,
-    default: { ...actual.default, STT_URL: 'http://stt-test:8001' },
+    default: {
+      ...actual.default,
+      STT_URL: 'http://stt-test:8001',
+      SPEECH_SECRET: 'test-speech-secret-value-with-32-plus-chars',
+    },
   };
 });
 
@@ -41,7 +49,28 @@ describe('voice HTTP endpoints', () => {
   const logger = createLogger({ transports: [new transports.Console({ silent: true })] });
   const infoSpy = jest.spyOn(logger, 'info');
   const warnSpy = jest.spyOn(logger, 'warn');
-  const router = createVoiceRouter({ logger, resolveRequestContext, app: { fetch: () => new Response('{}') } });
+
+  /** Every caller is the standalone owner; the router's per-person limit keys on that subject. */
+  const alwaysAuthenticator: Authenticator = {
+    authenticate: () => Promise.resolve(STANDALONE_REQUEST_CONTEXT),
+  };
+
+  function appWith(speechLimiter?: SpeechRateLimiter): OpenAPIHono {
+    const app = new OpenAPIHono();
+    app.use('*', createAuthMiddleware(alwaysAuthenticator));
+    app.route(
+      '/',
+      createVoiceRouter({
+        logger,
+        resolveRequestContext,
+        ...(speechLimiter === undefined ? {} : { speechLimiter }),
+        app: { fetch: () => new Response('{}') },
+      }),
+    );
+    return app;
+  }
+
+  const router = appWith();
 
   beforeEach(() => {
     fetchMock.mockReset();
@@ -109,6 +138,30 @@ describe('voice HTTP endpoints', () => {
       expect(init?.method).toBe('POST');
       expect((init?.headers as Record<string, string>)['content-type']).toBe('audio/wav');
       expect(init?.body).toBeInstanceOf(Uint8Array);
+    });
+
+    it('sends the shared secret to the sidecar', async () => {
+      fetchMock.mockResolvedValue(jsonResponse(sidecarTranscript, 200));
+
+      const res = await router.request(wavRequest(new Uint8Array([82, 73, 70, 70])));
+
+      expect(res.status).toBe(200);
+      const [, init] = fetchMock.mock.calls[0] ?? [];
+      expect(init?.headers).toMatchObject({ 'x-speech-secret': 'test-speech-secret-value-with-32-plus-chars' });
+    });
+
+    it('limits transcription requests per person, like speak', async () => {
+      fetchMock.mockImplementation(() => Promise.resolve(jsonResponse(sidecarTranscript, 200)));
+      const app = appWith(new SpeechRateLimiter({ maxPerWindow: 2 }));
+
+      expect((await app.request(wavRequest(new Uint8Array([1])))).status).toBe(200);
+      expect((await app.request(wavRequest(new Uint8Array([2])))).status).toBe(200);
+      const limited = await app.request(wavRequest(new Uint8Array([3])));
+
+      expect(limited.status).toBe(429);
+      expect(Number(limited.headers.get('retry-after'))).toBeGreaterThan(0);
+      expect(await limited.json()).toMatchObject({ error: { code: 'rate_limited' } });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
     });
 
     it('passes no language hint; the sidecar auto-detects', async () => {

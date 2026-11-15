@@ -18,6 +18,7 @@ import { McpCatalog } from '../../src/catalog/McpCatalog';
 import { ModelCatalog } from '../../src/catalog/ModelCatalog';
 import { SandboxCatalog } from '../../src/catalog/SandboxCatalog';
 import { SkillCatalog } from '../../src/catalog/SkillCatalog';
+import configuration from '../../src/config';
 import { BriefItemCompletionStore } from '../../src/db/briefItemCompletionStore';
 import type { IMcpServerStore } from '../../src/db/mcpServerStore';
 import { McpServerWithAuthStore } from '../../src/db/McpServerWithAuthStore';
@@ -44,6 +45,7 @@ import { PostgresSkillStore } from '../../src/db/postgres/skill-store/PostgresSk
 import { PostgresSpaceStore } from '../../src/db/postgres/space-store/PostgresSpaceStore';
 import { PostgresOAuthTokenStore } from '../../src/db/postgres/token-store/PostgresOAuthTokenStore';
 import { PostgresTurnArtifactStore } from '../../src/db/postgres/turn-artifact-store/PostgresTurnArtifactStore';
+import { RecallExclusionStore } from '../../src/db/recallExclusionStore';
 import { SentinelAuditStore } from '../../src/db/sentinelAuditStore';
 import { SqliteAgentStore } from '../../src/db/sqlite/agent-store/SqliteAgentStore';
 import { SqliteApprovalTokenStore } from '../../src/db/sqlite/approval-token-store/SqliteApprovalTokenStore';
@@ -67,12 +69,14 @@ import { SqliteSkillStore } from '../../src/db/sqlite/skill-store/SqliteSkillSto
 import { SqliteSpaceStore } from '../../src/db/sqlite/space-store/SqliteSpaceStore';
 import { SqliteOAuthTokenStore } from '../../src/db/sqlite/token-store/SqliteOAuthTokenStore';
 import { SqliteTurnArtifactStore } from '../../src/db/sqlite/turn-artifact-store/SqliteTurnArtifactStore';
+import { TelegramStore } from '../../src/db/telegramStore';
 import { ActiveTurnRegistry } from '../../src/runtime/activeTurns';
 import { createChatImageService } from '../../src/runtime/chatImages/chatImageService';
 import { createImageReencoder } from '../../src/runtime/chatImages/reencodeInSandbox';
 import { ChatSearchIndexer } from '../../src/runtime/chatSearchIndexing';
 import { EventSubscriptionRegistry } from '../../src/runtime/event-subscription';
 import { createOutboundSecretSource } from '../../src/runtime/outboundSecrets';
+import { localModelEndpointOf } from '../../src/runtime/remoteAddress';
 import { createSentinelServices } from '../../src/runtime/sentinelServices';
 import { TurnDrainRegistry } from '../../src/runtime/turnDrains';
 import { TENANT_ID } from '../../src/tenancy';
@@ -136,6 +140,7 @@ type SharedDeps = Pick<
   | 'skillCatalog'
   | 'sandboxCatalog'
   | 'tokenFactoryBudget'
+  | 'memoryTidy'
   | 'activeTurns'
   | 'turnDrains'
   | 'requestReplyRouter'
@@ -154,6 +159,7 @@ function sharedDeps(): SharedDeps {
     skillCatalog: SkillCatalog.load(),
     sandboxCatalog: SandboxCatalog.load(),
     tokenFactoryBudget: uncappedTokenFactoryBudget,
+    memoryTidy: { tidyNow: () => undefined, tidyState: () => ({ status: 'idle' }) },
     activeTurns: new ActiveTurnRegistry(),
     turnDrains: new TurnDrainRegistry(),
     requestReplyRouter: new RequestReplyRouter(),
@@ -173,9 +179,22 @@ async function seedBackends({
 }: {
   modelProviders: IModelProviderStore<unknown>;
   mcpServers: IMcpServerStore<unknown>;
-}): Promise<{ model: ScriptedModelServer; mcp: InertMcpServer }> {
+}): Promise<{ model: ScriptedModelServer; mcp: InertMcpServer; restoreConfig: () => void }> {
   const mcp = await startInertMcpServer();
   const model = await startScriptedModelServer();
+  // Both doubles listen on loopback, which the address check refuses unless the operator of
+  // the instance vouches for them: the model's exact endpoint is named as a local model
+  // endpoint, and the connector's origin is listed as the operator's own. The listing grants
+  // the connector no trust by itself; its row below stays first_party false.
+  const originalFirstPartyOrigins = configuration.FIRST_PARTY_MCP_ORIGINS;
+  const originalLocalModelEndpoints = configuration.LOCAL_MODEL_ENDPOINTS;
+  configuration.FIRST_PARTY_MCP_ORIGINS = [mcp.origin];
+  const modelEndpoint = localModelEndpointOf(model.baseUrl);
+  configuration.LOCAL_MODEL_ENDPOINTS = modelEndpoint === null ? [] : [modelEndpoint];
+  const restoreConfig = () => {
+    configuration.FIRST_PARTY_MCP_ORIGINS = originalFirstPartyOrigins;
+    configuration.LOCAL_MODEL_ENDPOINTS = originalLocalModelEndpoints;
+  };
   await modelProviders.upsertProvider({
     tenant_id: TENANT_ID,
     name: MODEL_PROVIDER_NAME,
@@ -199,7 +218,7 @@ async function seedBackends({
     manifest: { type: 'remote', name: INERT_SERVER_NAME, url: mcp.url, description: 'Inert connector.' },
     first_party: false,
   });
-  return { model, mcp };
+  return { model, mcp, restoreConfig };
 }
 
 function wrap({
@@ -208,7 +227,7 @@ function wrap({
   close,
 }: {
   app: ReturnType<typeof createServerApp>;
-  backends: { model: ScriptedModelServer; mcp: InertMcpServer };
+  backends: { model: ScriptedModelServer; mcp: InertMcpServer; restoreConfig: () => void };
   close: () => Promise<void>;
 }): OwnershipServer {
   return {
@@ -225,6 +244,7 @@ function wrap({
     model: backends.model,
     requestAnonymous: async ({ path, method }) => await app.request(path, { method: method ?? 'GET' }),
     close: async () => {
+      backends.restoreConfig();
       await close();
       await backends.model.close();
       await backends.mcp.close();
@@ -258,6 +278,7 @@ async function startSqlite(): Promise<OwnershipServer> {
     mcpServers: mcpServerStore,
     tokens: tokenStore,
     googleConnections: googleConnectionStore,
+    telegram: new TelegramStore(db),
   });
   const sentinelServices = createSentinelServices({
     demoMode: false,
@@ -316,6 +337,7 @@ async function startSqlite(): Promise<OwnershipServer> {
     sentinelAuditStore,
     sentinelSettingsStore,
     briefItemStore: new BriefItemCompletionStore(db),
+    recallExclusionStore: new RecallExclusionStore(db),
     ...deliveryDeps(db),
     sessions: new Sessions({ sessionStore, sentinelServices }),
     resolveModelProviderStore: () => modelProviderStore,
@@ -364,6 +386,7 @@ async function startPostgres(): Promise<OwnershipServer | undefined> {
     mcpServers: mcpServerStore,
     tokens: tokenStore,
     googleConnections: googleConnectionStore,
+    telegram: new TelegramStore(db),
   });
   const sentinelServices = createSentinelServices({
     demoMode: false,
@@ -422,6 +445,7 @@ async function startPostgres(): Promise<OwnershipServer | undefined> {
     sentinelAuditStore,
     sentinelSettingsStore,
     briefItemStore: new BriefItemCompletionStore(db),
+    recallExclusionStore: new RecallExclusionStore(db),
     ...deliveryDeps(db),
     sessions: new Sessions({ sessionStore, sentinelServices }),
     resolveModelProviderStore: () => modelProviderStore,

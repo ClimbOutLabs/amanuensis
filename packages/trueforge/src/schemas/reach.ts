@@ -140,6 +140,10 @@ export const ReachChannelAvailabilitySchema = z
   .object({
     available: z.boolean().describe('Whether this channel can be used on this server now.'),
     note: z.string().describe('A plain-words line about the channel, shown beside its switch.'),
+    problem: z
+      .string()
+      .nullable()
+      .describe('Set when the channel works but has a problem to fix, in plain words with what to do. Null otherwise.'),
   })
   .openapi('ReachChannelAvailability');
 

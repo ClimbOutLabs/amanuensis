@@ -38,6 +38,7 @@ import {
   ShellModeProvider,
   useShellMode,
   type AgentConfig,
+  type OpenSessionRequest,
   type SettingsOpenRequest,
 } from '../server/ShellModeContext.js';
 import { SpaceProvider, type SpaceStore } from '../server/SpaceContext.js';
@@ -46,6 +47,7 @@ import type { AgentUIServer } from '../server/types.js';
 import { SlotsProvider, useThemeMode, type SlotOverrides } from '../theme/SlotsProvider.js';
 import type { LayoutProp, ThemeConfig } from '../theme/types.js';
 import { getErrorMessage } from '../utils/getErrorMessage.js';
+import { OpenSessionRequestBridge } from './OpenSessionRequestBridge.js';
 import { TrueFoundryChatProvider, type TrueFoundryChatProviderProps } from './TrueFoundryChatProvider.js';
 import { useResolvedServer } from './useResolvedServer.js';
 
@@ -105,6 +107,12 @@ export type TrueForgeUIProps = {
    * remembered, not answered.
    */
   settingsOpenRequest?: SettingsOpenRequest;
+  /**
+   * Ask the shell to open one chat by id after mount, from UI that lives outside the shell
+   * tree (the right rail's desk rows). Raise the request's nonce on every ask; a request the
+   * shell mounts with is remembered, not answered.
+   */
+  openSessionRequest?: OpenSessionRequest;
   /**
    * Host UI for pending client-side tools, keyed by tool name.
    * When a pending tool matches, the composer mounts that component instead of Ask User.
@@ -345,6 +353,7 @@ export function TrueForgeUIShell(props: TrueForgeUIShellProps) {
     agentConfig = DEFAULT_AGENT_CONFIG,
     initialSettingsOpen = false,
     settingsOpenRequest,
+    openSessionRequest,
     onSettingsChromeEnabledChange,
     server: serverConfig,
     onError,
@@ -399,6 +408,7 @@ export function TrueForgeUIShell(props: TrueForgeUIShellProps) {
       onSettingsChromeEnabledChange={onSettingsChromeEnabledChange}
     >
       <LibrarySessionShareBoot />
+      <OpenSessionRequestBridge request={openSessionRequest} />
       {resolvedRoutes != null ? (
         <Suspense fallback={null}>
           <ShellRouteSync

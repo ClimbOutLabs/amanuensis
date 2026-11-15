@@ -6,21 +6,21 @@ covers: settings:audit, route:auditLog
 
 The activity log lists everything Aman did or asked to do for you, across all your chats. Use it to check what happened and what you decided.
 
-How to get there: Click **More** in the left bar, then **Settings**, then **Audit**.
+How to get there: Click **More** in the left bar, then **Settings**, then **Activity log**.
 
 === "Computer"
 
-    ![The Audit page in Settings, listing actions with their time and outcome](../../../../docs/screenshots/app/activity-log-list-desktop.png)
+    ![The Activity log page in Settings, listing actions with their time and outcome](../../../../docs/screenshots/app/activity-log-list-desktop.png)
 
 === "Phone"
 
-    ![The Audit page in Settings, listing actions with their time and outcome](../../../../docs/screenshots/app/activity-log-list-phone.png)
+    ![The Activity log page in Settings, listing actions with their time and outcome](../../../../docs/screenshots/app/activity-log-list-phone.png)
 
 ## Look through the log
 
-1. Click **More** in the left bar, click **Settings**, then click **Audit**.
+1. Click **More** in the left bar, click **Settings**, then click **Activity log**.
 2. Read the list. The newest action is at the top. Each line shows when it happened, what Aman did in plain words, such as "Sent an email", and what came of it.
-3. Click **Open chat** on a line to go to the chat it came from.
+3. Each line ends with "In:" and the name of the chat it came from. Click the name to open that chat.
 4. Click **Load more** at the bottom to see older actions.
 
 ## Find one action
@@ -42,7 +42,8 @@ How to get there: Click **More** in the left bar, then **Settings**, then **Audi
 
 ## Good to know
 
-- The log stays when you delete a chat. Those lines say "Chat deleted" instead of a link.
+- The log stays when you delete a chat. Those lines say "In: a deleted chat" instead of a link.
+- An action that never had a chat, such as a reminder set outside one, names no chat.
 - The log only shows what happened. You can't change or delete lines here.
 - Each change a scheduled run makes to a space is a line in the log too.
 - The log keeps a short line about each action, even from an incognito chat. That line can repeat words from the action, such as the address an email went to.

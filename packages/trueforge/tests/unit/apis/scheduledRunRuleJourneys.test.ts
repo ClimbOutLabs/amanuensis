@@ -218,7 +218,6 @@ describe('scheduled runs', () => {
   let agent: { id: string; name: string };
   let memoryDir: string;
   const original = {
-    MEMORY_BACKEND: configuration.MEMORY_BACKEND,
     MEMORY_MARKDOWN_DIR: configuration.MEMORY_MARKDOWN_DIR,
     MEMORY_EMBEDDINGS_ENABLED: configuration.MEMORY_EMBEDDINGS_ENABLED,
     MEMORY_SUMMARIZE: configuration.MEMORY_SUMMARIZE,
@@ -228,7 +227,6 @@ describe('scheduled runs', () => {
     // A scheduled run saves to the memory vault, so it gets a folder of its own.
     memoryDir = await mkdtemp(join(tmpdir(), 'scheduled-run-rules-'));
     Object.assign(configuration, {
-      MEMORY_BACKEND: 'markdown',
       MEMORY_MARKDOWN_DIR: memoryDir,
       MEMORY_EMBEDDINGS_ENABLED: false,
       MEMORY_SUMMARIZE: false,
@@ -298,6 +296,8 @@ describe('scheduled runs', () => {
 
       // The connector now goes somewhere else, so the place the card named is no longer where this would go.
       const elsewhere = await startInertMcpServer({ webSearch: false });
+      // Both test connectors listen on this computer, which the address check refuses unless they are listed.
+      server.setFirstPartyOrigins([server.mcp.origin, elsewhere.origin]);
       try {
         const moved = await server.request(
           '/api/v1/settings/mcp-servers',
@@ -324,6 +324,22 @@ describe('scheduled runs', () => {
         expect(server.mcp.writeInvocations()).toBe(writesBefore);
         expect(elsewhere.writeInvocations()).toBe(0);
       } finally {
+        // Later tests run against the connector as it was.
+        await server.request(
+          '/api/v1/settings/mcp-servers',
+          jsonInit(
+            {
+              manifest: {
+                type: 'remote',
+                name: INERT_SERVER_NAME,
+                url: server.mcp.url,
+                description: 'Inert connector used by approval-flow tests.',
+              },
+            },
+            'PUT',
+          ),
+        );
+        server.setFirstPartyOrigins([server.mcp.origin]);
         await elsewhere.close();
       }
     },
@@ -474,7 +490,6 @@ describe('a scheduled run that wants to run code', () => {
   let server: ApprovalTestServer;
   let memoryDir: string;
   const original = {
-    MEMORY_BACKEND: configuration.MEMORY_BACKEND,
     MEMORY_MARKDOWN_DIR: configuration.MEMORY_MARKDOWN_DIR,
     MEMORY_EMBEDDINGS_ENABLED: configuration.MEMORY_EMBEDDINGS_ENABLED,
     MEMORY_SUMMARIZE: configuration.MEMORY_SUMMARIZE,
@@ -483,7 +498,6 @@ describe('a scheduled run that wants to run code', () => {
   beforeAll(async () => {
     memoryDir = await mkdtemp(join(tmpdir(), 'scheduled-run-code-'));
     Object.assign(configuration, {
-      MEMORY_BACKEND: 'markdown',
       MEMORY_MARKDOWN_DIR: memoryDir,
       MEMORY_EMBEDDINGS_ENABLED: false,
       MEMORY_SUMMARIZE: false,

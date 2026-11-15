@@ -114,6 +114,7 @@ describe('GitBridge (real git on both sides)', () => {
       guest,
       sandboxId: 's1-test',
       cwd,
+      commitIdentityEnv: undefined,
       timeoutSeconds: 60,
       signal: undefined,
     };
@@ -200,6 +201,35 @@ describe('GitBridge (real git on both sides)', () => {
       .filter(call => call.env['TRUEFORGE_GIT_TOKEN'] === TOKEN)
       .flatMap(call => credentialScopes(call.env));
     expect(new Set(scopes)).toEqual(new Set([`${URL}.git`, URL]));
+  });
+
+  test('a pull that has to merge writes the merge commit under the name it was given', async () => {
+    const dir = await cloned();
+    const other = join(base, 'other');
+    git(base, 'clone', remote, other);
+    await writeFile(join(other, 'three.txt'), '3\n');
+    git(other, 'add', '.');
+    git(other, 'commit', '-m', 'third');
+    git(other, 'push', 'origin', 'main');
+    await writeFile(join(dir, 'local.txt'), 'mine\n');
+    git(dir, 'add', '.');
+    git(dir, 'commit', '-m', 'local work');
+
+    const pulled = await bridge.run({
+      ...input('git pull --no-rebase', TOKEN, '/workspace/widgets', APPROVED_ORIGIN),
+      commitIdentityEnv: {
+        GIT_AUTHOR_NAME: 'Sam Rivera',
+        GIT_AUTHOR_EMAIL: 'sam@example.com',
+        GIT_COMMITTER_NAME: 'Sam Rivera',
+        GIT_COMMITTER_EMAIL: 'sam@example.com',
+      },
+    });
+
+    expect(pulled).toMatchObject({ success: true, response: { exitCode: 0 } });
+    expect(git(dir, 'log', '-1', '--format=%P').split(' ')).toHaveLength(2);
+    expect(git(dir, 'log', '-1', '--format=%an <%ae> / %cn <%ce>')).toBe(
+      'Sam Rivera <sam@example.com> / Sam Rivera <sam@example.com>',
+    );
   });
 
   describe('fetch and pull through a named or default remote', () => {

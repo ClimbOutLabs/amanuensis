@@ -14,7 +14,10 @@ import {
   open,
   openChat,
   openChatList,
+  openForYou,
   openMoreMenu,
+  openReminders,
+  pickTab,
   press,
   rowButton,
   see,
@@ -78,6 +81,19 @@ export const SHOTS: readonly Shot[] = [
     world: 'full',
     steps: [openChat('morningBrief'), see('Needs a decision')],
     crop: ['[data-testid="aman-brief"]'],
+  },
+  {
+    name: 'reminders-bell',
+    world: 'full',
+    steps: [openChat('dinner'), openForYou],
+    crop: ['[data-role="delivery-bell"]', '[role="dialog"][aria-label="For you"]'],
+  },
+  { name: 'reminders-page', world: 'full', steps: [openReminders, see("Book Pepper's checkup")] },
+  {
+    name: 'personas-list',
+    world: 'full',
+    steps: [settingsTab('Roles and Personas'), pickTab('Personas'), see('Add persona')],
+    crop: SETTINGS_PANEL,
   },
   { name: 'schedules-page', world: 'full', steps: [open('/schedules'), see('morning-brief')] },
   { name: 'spaces-list', world: 'full', steps: [open('/spaces'), see('Kitchen refresh')] },
@@ -143,7 +159,7 @@ export const SHOTS: readonly Shot[] = [
     steps: [settingsTab('Permissions'), see('Offline mode')],
     crop: SETTINGS_PANEL,
   },
-  { name: 'activity-log-list', world: 'full', steps: [settingsTab('Audit')], crop: SETTINGS_PANEL },
+  { name: 'activity-log-list', world: 'full', steps: [settingsTab('Activity log')], crop: SETTINGS_PANEL },
   // These make new chats, so they come after the chat list. The help chat comes last of all.
   {
     name: 'incognito-banner',
@@ -151,7 +167,12 @@ export const SHOTS: readonly Shot[] = [
     steps: [ask('incognito', { incognito: true }), see('Close and delete')],
     crop: ['main'],
   },
-  { name: 'calendar-event-card', world: 'full', steps: [ask('calendarEvent'), see(/to your calendar\?/)], crop: CARD },
+  {
+    name: 'calendar-event-card',
+    world: 'full',
+    steps: [ask('calendarEvent'), see(/to your Google Calendar on/)],
+    crop: CARD,
+  },
   { name: 'approvals-card', world: 'full', steps: [ask('deletePlants'), see('Allow')], crop: CARD },
   {
     name: 'getting-help-guide',

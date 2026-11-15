@@ -93,3 +93,40 @@ func TestBuildConfigCapsFileSizeWhenAskedTo(t *testing.T) {
 		t.Fatal("no cap, no rlimit")
 	}
 }
+
+// A guest that asks for a network of its own gets an empty one, so a guest meant to share the slot's
+// network, to reach the package mirror, must not ask for one. Every other guest must.
+func TestBuildConfigGivesOnlyAnIsolatedGuestItsOwnNetwork(t *testing.T) {
+	asksForOwnNetwork := func(shared bool) bool {
+		spec := guest.Spec{ID: "g", RootFS: "/rootfs", Cwd: "/", Argv: []string{"true"}, SharedNetwork: shared}
+		raw, err := guest.BuildConfig(spec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var cfg struct {
+			Linux struct {
+				Namespaces []struct {
+					Type string `json:"type"`
+				} `json:"namespaces"`
+			} `json:"linux"`
+		}
+		if err := json.Unmarshal(raw, &cfg); err != nil {
+			t.Fatal(err)
+		}
+		if len(cfg.Linux.Namespaces) < 4 {
+			t.Fatalf("the other namespaces must stay: %+v", cfg.Linux.Namespaces)
+		}
+		for _, ns := range cfg.Linux.Namespaces {
+			if ns.Type == "network" {
+				return true
+			}
+		}
+		return false
+	}
+	if !asksForOwnNetwork(false) {
+		t.Error("a guest with no grant must get its own, empty network")
+	}
+	if asksForOwnNetwork(true) {
+		t.Error("a guest that shares the slot's network must not ask for its own")
+	}
+}

@@ -39,28 +39,6 @@ describe('what is read back for a voice approval', () => {
     expect(said).toContain('Thursday at three works for me. Bring the form, $40 in cash & 2 photos.');
   });
 
-  it('reads back the sending account a card carries, for a service that exists nowhere in the product', () => {
-    const base = sendReplyCard();
-    const email = base.email;
-    if (email === null || email === undefined) {
-      throw new Error('expected the fixture to carry a mail');
-    }
-    const result = plan({ ...base, email: { ...email, sent_from: { address: 'ada@moonmail.example', service: 'Moonmail' } } });
-    if (result.kind !== 'ask') {
-      throw new Error('expected a read-back');
-    }
-    expect(result.body).toContain('The sending account is ada at moonmail dot example, on Moonmail.');
-  });
-
-  it('leaves a card stored before the sending account was recorded for the screen', () => {
-    const base = sendReplyCard();
-    const email = base.email;
-    if (email === null || email === undefined) {
-      throw new Error('expected the fixture to carry a mail');
-    }
-    expect(plan({ ...base, email: { ...email, sent_from: null } })).toEqual({ kind: 'typed_only' });
-  });
-
   it('says a calendar event with its description', () => {
     const result = plan(dentistCard);
     if (result.kind !== 'ask') {
@@ -176,6 +154,26 @@ describe('what is read back for a voice approval', () => {
     }
     return result.body;
   }
+
+  it('reads out the one account a mail goes from, as an address', () => {
+    const body = said({ ...sendReplyCard(), mail_from: 'me@example.com', mail_from_choices: ['me@example.com'] });
+    expect(body).toContain('From me at example dot com');
+  });
+
+  it('with two accounts, reads only the account the mail goes from, so a "yes" approves the one heard', () => {
+    const body = said({
+      ...sendReplyCard(),
+      mail_from: 'me@example.com',
+      mail_from_choices: ['me@example.com', 'work@other-place.org'],
+    });
+    expect(body).toContain('From me at example dot com');
+    expect(body).not.toContain('other dash place');
+  });
+
+  it('leaves a from account with a line break, or on a card that is not a mail, for the screen', () => {
+    expect(plan({ ...sendReplyCard(), mail_from: 'me@example.com\nTo x' })).toEqual({ kind: 'typed_only' });
+    expect(plan({ ...dentistCard, mail_from: 'me@example.com' })).toEqual({ kind: 'typed_only' });
+  });
 
   it('reads out the name a mail is sent as, so a spoofed sender name cannot go unheard', () => {
     const base = sendReplyCard();
@@ -360,7 +358,6 @@ describe('the wording around the card fields', () => {
   /** Every line the engine writes starts with one of these; person-supplied text never starts a line. */
   const OWN_LINES = [
     "I'll ",
-    'The sending account is ',
     'Replies will go to',
     'The name was left off',
     'To ',

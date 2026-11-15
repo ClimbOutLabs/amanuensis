@@ -24,11 +24,6 @@
  * connector offline and bring it back on the same port (a refused connection,
  * simulating the server process being down), distinct from `sever`/`restore`
  * (which keeps listening but answers every request with a 503).
- *
- * The same server doubles as a Hindsight-shaped memory provider: `memoryProviderUrl`
- * has the `{apiBase}/mcp/{bank}` shape the memory-provider setup requires, and the fixture answers the
- * REST recall route behind it, so the setup's connection check passes and a connector registered
- * through the real setup flow is first-party.
  */
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -38,6 +33,12 @@ import {
   CALDAV_READ_TOOL_NAMES,
   CALDAV_TOOL_NAMES,
 } from '@truefoundry/trueforge-core/core/calendar/caldav/toolContract';
+import {
+  isMailComposeToolName,
+  isMailSendToolName,
+  MAIL_ACCOUNT_LIST_TOOL_NAME,
+  MAIL_CONNECTOR_TOOL_NAMES,
+} from '@truefoundry/trueforge-core/core/email/mailConnector/toolContract';
 import { randomUUID } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { z } from 'zod';
@@ -60,7 +61,25 @@ export const INERT_WEB_SEARCH_TOOL = 'web_search';
 /** Opt-in (`startInertMcpServer({ searchProvider: true })`) with `web_search` in the search provider's shape. */
 export const INERT_WEB_FETCH_TOOL = 'web_fetch';
 /** Opt-in (`startInertMcpServer({ mail: true })`): the Email sidecar's tool names, unannotated, answering with no mail. */
-export const INERT_MAIL_TOOLS = ['list_emails_metadata', 'get_emails_content', 'list_mailboxes', 'send_email'] as const;
+export const INERT_MAIL_TOOLS = [...MAIL_CONNECTOR_TOOL_NAMES, MAIL_ACCOUNT_LIST_TOOL_NAME] as const;
+/** The mail accounts the stand-in lists, the first being the one a call with no account uses. */
+export const INERT_MAIL_ACCOUNTS = ['home@harbour.example', 'work@harbour.example'] as const;
+
+/** The fields of a message the mail stand-in keeps, so a test can compare what arrived with what the card showed. */
+const MAIL_MESSAGE_SHAPE = {
+  account_name: z.string().optional(),
+  recipients: z.array(z.string()).optional(),
+  cc: z.array(z.string()).optional(),
+  bcc: z.array(z.string()).optional(),
+  subject: z.string().optional(),
+  body: z.string().optional(),
+};
+
+/** One call the mail stand-in received. */
+export interface InertMailCall {
+  name: string;
+  arguments: Record<string, unknown>;
+}
 
 /**
  * Opt-in (`startInertMcpServer({ calendar: true })`): the Calendar sidecar's tool names, the reads
@@ -69,6 +88,21 @@ export const INERT_MAIL_TOOLS = ['list_emails_metadata', 'get_emails_content', '
  * would leave it undescribable, so the change would be refused instead of asked about.
  */
 export const INERT_CALENDAR_TOOLS = CALDAV_TOOL_NAMES;
+
+/** One event in the Calendar sidecar's `list_events` answer shape, as the rail's CalDAV read parses it. */
+export interface InertCalendarEvent {
+  summary?: string | undefined;
+  location?: string | undefined;
+  start: { value: string; tzid?: string | undefined; all_day: boolean };
+  end?: { value: string; tzid?: string | undefined; all_day: boolean } | undefined;
+  [key: string]: unknown;
+}
+
+/** The Calendar sidecar's `list_events` answer: the events under `structuredContent`. */
+export interface InertCalendarEventsResult {
+  events: InertCalendarEvent[];
+  [key: string]: unknown;
+}
 
 /**
  * The structured `get_event` answer, in the shape the event review reads: a title, a start, and
@@ -93,10 +127,6 @@ export const INERT_CALENDAR_EVENT_RESULT: InertCalendarEventResult = {
     attendees: [],
   },
 };
-
-/** Bank in `memoryProviderUrl`; the fixture answers a recall for any bank, so a URL can move between them. */
-const INERT_MEMORY_BANK = 'aman';
-const MEMORY_RECALL_PATH = /^\/v1\/default\/banks\/[^/]+\/memories\/recall$/;
 
 /**
  * LKOS's `AskMemoryResponse` shape: empty means empty context plus empty claim groups.
@@ -143,9 +173,7 @@ export interface InertRedirect {
 export interface InertMcpServer {
   /** Streamable HTTP endpoint to register as the connector `url`. Stable across `stop`/`start`. */
   url: string;
-  /** The same endpoint as a single-bank memory provider URL; the setup's recall check is answered. */
-  memoryProviderUrl: string;
-  /** Origin of {@link InertMcpServer.url}: what an operator lists in `FIRST_PARTY_MCP_ORIGINS` to vouch for this server. */
+  /** Origin of {@link InertMcpServer.url}: what a test puts on the first-party origin list to vouch for this server. */
   origin: string;
   /** Times the gated write tool actually started executing. */
   writeInvocations: () => number;
@@ -171,6 +199,8 @@ export interface InertMcpServer {
   redirectAllTo: (redirect: InertRedirect | undefined) => void;
   /** HTTP requests received since the last reset, whatever they were answered with. */
   requestsSeen: () => number;
+  /** Every call the mail tools received since the last reset, in order, with the message fields as they arrived. */
+  mailCalls: () => readonly InertMailCall[];
   /**
    * While set, the search provider's `web_search` answers each query with these page links, as JSON results
    * that each carry their own `url` like a real provider's, instead of its invented line. `undefined` restores it.
@@ -183,6 +213,13 @@ export interface InertMcpServer {
   restore: () => void;
   /** Sets the result shape the next (and every subsequent) `ask_memory` call answers with. */
   setAskMemoryMode: (mode: MemoryToolMode) => void;
+  /**
+   * Sets the events the calendar tools' `list_events` answers with, in the sidecar's shape.
+   * `undefined` restores the default empty text answer.
+   */
+  setCalendarEvents: (events: readonly InertCalendarEvent[] | undefined) => void;
+  /** The arguments of every calendar `list_events` call so far, in the order they arrived. */
+  calendarListCalls: () => readonly Record<string, unknown>[];
   /** Sets the result shape the next (and every subsequent) `search_memory` call answers with. */
   setSearchMemoryMode: (mode: MemoryToolMode) => void;
   /**
@@ -219,6 +256,14 @@ interface Counters {
 
 interface SearchResults {
   current: ((query: string) => string[]) | undefined;
+}
+
+interface CalendarEvents {
+  current: readonly InertCalendarEvent[] | undefined;
+  /** Each account's own events, answered when a `list_events` call names that account. */
+  byAccount: Readonly<Record<string, readonly InertCalendarEvent[]>> | undefined;
+  /** The arguments of every `list_events` call, in the order they arrived. */
+  listCalls: Record<string, unknown>[];
 }
 
 interface MemoryModes {
@@ -263,6 +308,10 @@ function memoryResult(structuredContent: MemoryToolResult) {
   return { content: [], structuredContent, isError: false };
 }
 
+function calendarEventsResult(structuredContent: InertCalendarEventsResult) {
+  return { content: [], structuredContent, isError: false };
+}
+
 /** The `get_event` answer: the one readable event, as structured content with its JSON text beside it. */
 function calendarEventResult() {
   return {
@@ -282,9 +331,11 @@ function buildMcpServer({
   gates,
   memoryModes,
   searchResults,
+  calendarEvents,
   webSearch,
   searchProvider,
   mail,
+  mailCalls,
   calendar,
   pageById,
   messageSearch,
@@ -294,9 +345,11 @@ function buildMcpServer({
   gates: WriteGate[];
   memoryModes: MemoryModes;
   searchResults: SearchResults;
+  calendarEvents: CalendarEvents;
   webSearch: boolean;
   searchProvider: boolean;
   mail: boolean;
+  mailCalls: InertMailCall[];
   calendar: boolean;
   pageById: boolean;
   messageSearch: boolean;
@@ -511,8 +564,17 @@ function buildMcpServer({
     for (const name of INERT_MAIL_TOOLS) {
       server.registerTool(
         name,
-        { description: `Pretends to ${name.replace(/_/g, ' ')}. Never reaches a mailbox.`, inputSchema: {} },
-        () => textResult('[]'),
+        {
+          description: `Pretends to ${name.replace(/_/g, ' ')}. Never reaches a mailbox.`,
+          inputSchema: isMailComposeToolName(name) ? MAIL_MESSAGE_SHAPE : {},
+        },
+        (message: Record<string, unknown>) => {
+          mailCalls.push({ name, arguments: message });
+          if (name === MAIL_ACCOUNT_LIST_TOOL_NAME) {
+            return textResult(JSON.stringify(INERT_MAIL_ACCOUNTS.map(account_name => ({ account_name }))));
+          }
+          return textResult(isMailSendToolName(name) ? 'Email sent successfully to the people named.' : '[]');
+        },
       );
     }
   }
@@ -523,15 +585,32 @@ function buildMcpServer({
         name,
         {
           description: `Pretends to ${name.replace(/_/g, ' ')}. Never reaches a calendar.`,
-          inputSchema: {},
+          // `list_events` keeps every argument it is given, so a test can read which account was asked for.
+          inputSchema: name === 'list_events' ? z.looseObject({}) : {},
           // The reads declare themselves read-only and closed-world; the changes publish nothing.
           ...(CALDAV_READ_TOOL_NAMES.some(read => read === name)
             ? { annotations: { readOnlyHint: true, openWorldHint: false } }
             : {}),
         },
-        // A change reads its event first: `get_event` answers with the one readable event, so a
-        // change to it asks. Every other tool still answers with nothing.
-        name === 'get_event' ? () => calendarEventResult() : () => textResult('[]'),
+        (args: Record<string, unknown>) => {
+          // A change reads its event first: `get_event` answers with the one readable event, so a
+          // change to it asks. Once a test sets events, `list_events` answers with them in the
+          // sidecar's shape, or with the named account's own events when the test gave them per
+          // account. Every other tool answers with nothing.
+          if (name === 'get_event') {
+            return calendarEventResult();
+          }
+          if (name !== 'list_events') {
+            return textResult('[]');
+          }
+          calendarEvents.listCalls.push({ ...args });
+          const account = typeof args['account'] === 'string' ? args['account'] : undefined;
+          const events =
+            account !== undefined && calendarEvents.byAccount !== undefined
+              ? calendarEvents.byAccount[account]
+              : calendarEvents.current;
+          return events === undefined ? textResult('[]') : calendarEventsResult({ events: [...events] });
+        },
       );
     }
   }
@@ -592,6 +671,10 @@ export async function startInertMcpServer(options?: {
   mail?: boolean;
   /** Adds the Calendar sidecar's tool names; the reads declare read-only and closed-world. */
   calendar?: boolean;
+  /** The events the calendar tools' `list_events` starts out answering with; changeable via `setCalendarEvents`. */
+  calendarEvents?: readonly InertCalendarEvent[];
+  /** Each account's own `list_events` answer, used when a call names that account in `account`. */
+  calendarEventsByAccount?: Readonly<Record<string, readonly InertCalendarEvent[]>>;
   /** Adds `inert_get_page`, a read by id. */
   pageById?: boolean;
   /** Adds `search_messages`, a search known as a lookup by its name. */
@@ -606,6 +689,7 @@ export async function startInertMcpServer(options?: {
   if (webSearch && searchProvider) {
     throw new Error('inert MCP fixture offers one web_search: pick webSearch or searchProvider');
   }
+  const mailCalls: InertMailCall[] = [];
   const counters: Counters = {
     echo: 0,
     read: 0,
@@ -621,6 +705,11 @@ export async function startInertMcpServer(options?: {
   };
   const memoryModes: MemoryModes = { ask: 'result', search: 'result' };
   const searchResults: SearchResults = { current: undefined };
+  const calendarEvents: CalendarEvents = {
+    current: options?.calendarEvents,
+    byAccount: options?.calendarEventsByAccount,
+    listCalls: [],
+  };
   const gates: WriteGate[] = [];
   const transports = new Map<string, StreamableHTTPServerTransport>();
   let severed = false;
@@ -647,14 +736,6 @@ export async function startInertMcpServer(options?: {
     if (severed) {
       res.writeHead(503, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ error: 'inert MCP fixture is severed' }));
-      return;
-    }
-    if (req.method === 'POST' && req.url !== undefined && MEMORY_RECALL_PATH.test(req.url)) {
-      // The memory-provider setup check: an authenticated, empty recall.
-      req.resume();
-      const body = JSON.stringify({ results: [], entities: {} });
-      res.writeHead(200, { 'content-type': 'application/json', 'content-length': String(Buffer.byteLength(body)) });
-      res.end(body);
       return;
     }
     const sessionHeader = req.headers['mcp-session-id'];
@@ -690,9 +771,11 @@ export async function startInertMcpServer(options?: {
       gates,
       memoryModes,
       searchResults,
+      calendarEvents,
       webSearch,
       searchProvider,
       mail,
+      mailCalls,
       calendar,
       pageById: options?.pageById === true,
       messageSearch: options?.messageSearch === true,
@@ -760,7 +843,6 @@ export async function startInertMcpServer(options?: {
   return {
     url,
     origin,
-    memoryProviderUrl: `${url}/${INERT_MEMORY_BANK}`,
     writeInvocations: () => counters.write,
     echoInvocations: () => counters.echo,
     readInvocations: () => counters.read,
@@ -786,11 +868,13 @@ export async function startInertMcpServer(options?: {
       lastAuthorizationHeader = undefined;
       requestCount = 0;
       redirect = undefined;
+      mailCalls.length = 0;
     },
     redirectAllTo: next => {
       redirect = next;
     },
     requestsSeen: () => requestCount,
+    mailCalls: () => [...mailCalls],
     setSearchResults: results => {
       searchResults.current = results;
     },
@@ -819,6 +903,10 @@ export async function startInertMcpServer(options?: {
     setAskMemoryMode: mode => {
       memoryModes.ask = mode;
     },
+    setCalendarEvents: events => {
+      calendarEvents.current = events;
+    },
+    calendarListCalls: () => calendarEvents.listCalls,
     setSearchMemoryMode: mode => {
       memoryModes.search = mode;
     },

@@ -2,7 +2,7 @@
 
 Aman Setup is one program that installs everything. You don't need a terminal, WSL, Git or a Linux window.
 
-It takes about an hour on a computer with nothing installed yet. Most of that is waiting while Docker Desktop downloads and Aman builds. You answer four questions near the start, and the rest runs on its own.
+It takes about an hour on a computer with nothing installed yet. Most of that is waiting while Docker Desktop downloads and Aman builds. You answer three questions near the start, and the rest runs on its own.
 
 Using another computer? Follow [Install on a Mac](install-mac.md) or [Install on Linux](install-linux.md) instead.
 
@@ -25,13 +25,14 @@ If that page lists no release, Aman Setup is not out yet. Check again later.
     You can check the file against the signed list on the release page before you run it.
 
     1. From the same release page, download `manifest.json` and `manifest.json.minisig` into the folder that holds `Aman-Setup.exe`.
-    2. Check the list's signature with [minisign](https://github.com/jedisct1/minisign), using the release key from [SECURITY.md](../SECURITY.md#checking-a-download). It must say the signature is verified:
+    2. Open PowerShell in that folder and paste these two lines. The first checks the list's signature with [minisign](https://github.com/jedisct1/minisign), using the Aman release key from [SECURITY.md](../SECURITY.md#checking-a-download). The second prints the hash of the file:
 
-        ```
-        minisign -Vm manifest.json -P <release key>
+        ```powershell
+        minisign -Vm manifest.json -P RWR8aR0vofffsH8dRDfeCxHcPAo2hBKQp6W9krptCFjneeXPDr+ZB0wr
+        Get-FileHash .\Aman-Setup.exe
         ```
 
-    3. In PowerShell, in that folder, run `Get-FileHash .\Aman-Setup.exe`. The hash it prints must match the one next to `Aman-Setup.exe` in `manifest.json`.
+    3. The first must say the signature is verified. The hash the second prints must match the one next to `Aman-Setup.exe` in `manifest.json`.
 
     Every release page also prints the release key and these steps. `SHA256SUMS` on the release page lists the same hashes. On its own, it only shows that the file was not damaged on the way, not who made it.
 
@@ -59,14 +60,13 @@ If not, Aman Setup downloads it from Docker, checks that the download is signed 
 
 If Aman Setup can't open again by itself, it says so before the restart. In that case, open the Aman Setup download again from where you saved it, usually your Downloads folder.
 
-## Step 4: answer four questions
+## Step 4: answer three questions
 
-Aman Setup checks that Docker has enough memory. Then it asks four questions, one at a time:
+Aman Setup checks that Docker has enough memory. Then it asks three questions, one at a time:
 
 1. `Your email, used to sign in:` This is only your sign-in name. Nothing is sent to it.
-2. `Choose a password (at least 8 characters, not shown):` It also needs a number and a symbol, like @ # $ %. Then it asks `Type it again:`. Nothing shows while you type.
-3. `Paste your model key (not shown):` This question is for a Nebius Token Factory key. If you have one, paste it. If your key is from another company, such as Together AI, press ++enter++ to skip. You add it later in Aman.
-4. `Also use Aman from your phone and other devices on your home Wi-Fi? (yes or no):` Answer `yes` or `no`. You can change this later.
+2. `Choose a password with at least 8 characters, a number and a symbol, like @ # $ % (not shown):` If the password falls short, it says what is missing and asks again. Then it asks `Type it again:`. Nothing shows while you type.
+3. `Also use Aman from your phone and other devices on your home Wi-Fi? (yes or no):` Answer `yes` or `no`. You can change this later.
 
 Nothing else is asked. Aman Setup then downloads the newest Aman and builds it on your computer, with daily backups and a secure (https) address.
 

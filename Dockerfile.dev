@@ -69,13 +69,12 @@ RUN pnpm --filter @truefoundry/trueforge-core build && pnpm --filter @truefoundr
 
 # ---------------------------------------------------------------------------
 # frontend-builder: build the UI the server serves (parallel to builder above).
-# Bundlers read SDK src/ (trueforge-dev); the UI prebuild emits the declarations
-# tsc needs, so this stage never compiles SDK JavaScript.
+# `frontend build` builds its own dependencies first (frontend -> UI -> SDK), so
+# one command builds each of them exactly once.
 # ---------------------------------------------------------------------------
 FROM workspace AS frontend-builder
 RUN pnpm install --frozen-lockfile --offline --filter frontend...
 COPY packages/trueforge-sdk packages/trueforge-sdk
-RUN pnpm --filter @truefoundry/trueforge-sdk build
 # The UI and frontend import public subpaths from trueforge-core. A clean
 # Docker build has no host dist artifacts, so make the core build produced by
 # the parallel builder stage available before generating UI declarations.
@@ -89,7 +88,6 @@ COPY packages/trueforge-core/src packages/trueforge-core/src
 COPY packages/trueforge-ui packages/trueforge-ui
 # Vite alone peaks above 3 GB; the cap trades build time for staying inside a 6 GB Docker VM.
 ENV NODE_OPTIONS=--max-old-space-size=3072
-RUN pnpm --filter @truefoundry/trueforge-ui build
 COPY packages/frontend packages/frontend
 RUN pnpm --filter frontend build
 

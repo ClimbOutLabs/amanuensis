@@ -246,6 +246,8 @@ export interface ScriptedReply {
 
 export class FakeTurns implements VoiceTurnRunner {
   readonly sent: string[] = [];
+  /** For each message, whether the person began over a line that holds the floor. */
+  readonly spokenOver: boolean[] = [];
   readonly answers: { decision: 'allow' | 'deny'; toolCallId: string }[] = [];
   cancels = 0;
   /** Cards answered somewhere else, such as on the screen. */
@@ -260,8 +262,19 @@ export class FakeTurns implements VoiceTurnRunner {
     } = {},
   ) {}
 
-  async sendMessage({ text, signal, onText }: { text: string; signal: AbortSignal; onText: (delta: string) => void }) {
+  async sendMessage({
+    text,
+    startedOverHeldLine,
+    signal,
+    onText,
+  }: {
+    text: string;
+    startedOverHeldLine?: boolean;
+    signal: AbortSignal;
+    onText: (delta: string) => void;
+  }) {
     this.sent.push(text);
+    this.spokenOver.push(startedOverHeldLine ?? false);
     return this.#run({ reply: this.replies.message?.shift(), signal, onText });
   }
 

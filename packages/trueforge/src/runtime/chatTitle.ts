@@ -4,11 +4,13 @@ import { extractErrorLogFields, VercelAILLM, type LLMCreateParams } from '@truef
 import type { Logger } from 'winston';
 
 import type { IAgentStore } from '../db/agentStore';
+import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 import type { IModelProviderStore } from '../db/modelProviderStore';
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import type { EventSubscription } from './event-subscription';
-import { resolveSummarizationModelFqn } from './memory/memorySummarize';
+import { resolveSummarizationModelFqn, withRequestFields } from './memory/memorySummarize';
 import { flushModelUsage, modelIdentity, type ModelUsageDrainMember, type TurnModelUsage } from './modelUsage';
+import { shortCallRequestFields } from './oneShotModelCall';
 import { getModelDetails } from './sessionResources';
 import { meterHelperLlm, type TokenFactoryBudget } from './tokenFactoryBudget';
 
@@ -51,6 +53,8 @@ export interface ChatTitleDrainMember {
   derivedTitle: string;
   /** The person's first message, in full. */
   userText: string;
+  /** Put in front of the subject title, as it was in front of the working title. Empty for most chats. */
+  titlePrefix: string;
 }
 
 /**
@@ -67,10 +71,12 @@ export async function resolveChatTitleContext(params: {
   personaModelName: string | undefined;
   agentStore: IAgentStore;
   modelProviderStore: IModelProviderStore;
+  globalSettingsStore: IGlobalSettingsStore;
   tokenFactoryBudget: TokenFactoryBudget;
   sessionStore: ISessionStore<SessionCustom, TurnCustom>;
   derivedTitle: string;
   userText: string;
+  titlePrefix: string;
   logger: Logger;
 }): Promise<ChatTitleDrainMember | undefined> {
   const { logger, sessionId } = params;
@@ -80,6 +86,9 @@ export async function resolveChatTitleContext(params: {
       personaModelName: params.personaModelName,
       sessionAgent: params.sessionAgent,
       agentStore: params.agentStore,
+      globalSettingsStore: params.globalSettingsStore,
+      modelProviderStore: params.modelProviderStore,
+      logger,
     });
     if (modelName === undefined || modelName.trim() === '') {
       logger.debug('Chat title skipped for this chat: no title model resolved', { sessionId });
@@ -93,6 +102,7 @@ export async function resolveChatTitleContext(params: {
       modelName,
       derivedTitle: params.derivedTitle,
       userText: params.userText,
+      titlePrefix: params.titlePrefix,
     };
   } catch (error) {
     logger.debug('Chat title skipped for this chat: the title model did not resolve', {
@@ -216,18 +226,14 @@ export async function generateChatSubjectTitle(params: {
     name: params.modelName,
     store: params.modelProviderStore,
   });
+  const fields = shortCallRequestFields({ modelProperties, maxTokens: CHAT_TITLE_MAX_TOKENS });
   const request: LLMCreateParams = {
     messages: buildChatTitleMessages({ userText: params.userText, assistantText: params.assistantText }),
-    max_completion_tokens: CHAT_TITLE_MAX_TOKENS,
+    max_completion_tokens: fields.max_completion_tokens,
     temperature: 0,
     top_p: 1,
   };
-  // Same provider-extension discipline as the knowledge relevance check:
-  // extensions only when the configured model explicitly advertises `none`.
-  if (modelProperties.reasoning_efforts?.includes('none') === true) {
-    Object.assign(request, { enable_thinking: false, reasoning_effort: 'none' });
-  }
-  const llm = meterHelperLlm({
+  const metered = meterHelperLlm({
     llm: new VercelAILLM({
       providerConfig,
       logger: params.logger,
@@ -238,6 +244,12 @@ export async function generateChatSubjectTitle(params: {
     role: 'summarization',
     budget: params.tokenFactoryBudget,
     usage: params.modelUsage,
+    logger: params.logger,
+  });
+  const llm = withRequestFields({
+    llm: metered,
+    fields: fields.reasoning,
+    modelKey: `${params.tenantId}/${params.modelName}`,
     logger: params.logger,
   });
   const result = await llm.createNonStream(request);
@@ -276,8 +288,8 @@ export async function runChatTitleFollowUp(params: {
     if (candidate === undefined) {
       return;
     }
-    const title = capChatTitle(candidate);
-    if (title === '' || title === member.derivedTitle) {
+    const title = capChatTitle(`${member.titlePrefix}${candidate}`);
+    if (title === member.titlePrefix || title === member.derivedTitle) {
       return;
     }
     const replaced = await member.sessionStore.replaceSessionTitleIfCurrent({

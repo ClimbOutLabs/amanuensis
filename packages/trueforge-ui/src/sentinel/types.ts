@@ -14,6 +14,12 @@
  * server sent an explicit `tier`.
  */
 import { toolInvocationKey, toolInvocationRawId } from '@truefoundry/assistant-ui-runtime';
+import {
+  NOT_SENT_REASONS,
+  SEND_RECEIPT_EVENT_TYPE,
+  type NotSentReason,
+  type SendReceiptMessage,
+} from '@truefoundry/trueforge-core/core/email/gmail/sendReceipt';
 import { changeRequestText } from '@truefoundry/trueforge-core/core/permissions/changeRequest';
 import { savedSearchHold, withHoldSay } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
 import { readStoredMailbox, type Tier3Mailbox } from '@truefoundry/trueforge-core/core/permissions/tierMailbox';
@@ -55,16 +61,13 @@ export type SentinelApprovalMailbox = Tier3Mailbox;
 /** The whole message of a mail card, so what is approved is everything that is sent. */
 export type SentinelApprovalEmail = {
   action: SentinelApprovalEmailAction;
-  /**
-   * The account the message is sent from: its address and the name of its service, as that service
-   * names itself. Null on a card stored before the account was recorded.
-   */
-  sent_from: { address: string; service: string } | null;
   to: SentinelApprovalMailbox[];
   cc: SentinelApprovalMailbox[];
   bcc: SentinelApprovalMailbox[];
   subject: string;
   body: string;
+  /** Short code a send card and its receipt both show; null for a draft or a card from before codes. */
+  check_code: string | null;
   /** The saved draft a change replaces, or null. */
   replaces: { subject: string; to: SentinelApprovalMailbox[] } | null;
   /** The message a reply answers in its thread, or null when the message is not a reply. */
@@ -75,7 +78,27 @@ export type SentinelApprovalEmail = {
   from_name?: string | null;
   /** True when a name was left off an address because it looked like an address; absent on an older card. */
   name_left_off?: boolean;
+  /** The message a forward sends on, below the note in `body`; null or absent when the message is not a forward. */
+  forwards?: { from: string; subject: string; body: string; truncated: boolean; attachments: string[] } | null;
 };
+
+export type SentinelNotSentReason = NotSentReason;
+
+/** The message a receipt repeats, as the server verified it. */
+export type SentinelReceiptMessage = SendReceiptMessage;
+
+/** How a send ended, written by the server from what it verified. Keyed to the send's tool call. */
+export type SentinelSendReceipt =
+  | {
+      outcome: 'sent';
+      toolCallId: string;
+      /** ISO time Gmail accepted the send. */
+      sentAt: string;
+      sentMessageId: string;
+      checkCode: string;
+      message: SentinelReceiptMessage;
+    }
+  | { outcome: 'not_sent'; toolCallId: string; reason: SentinelNotSentReason };
 
 const APPROVAL_CALENDAR_ACTIONS = ['create', 'change'] as const;
 
@@ -159,7 +182,7 @@ export type SentinelApprovalCopy = {
   headline: string;
   /** What follows from approving, in one line, or null when nothing needs saying. */
   consequence: string | null;
-  /** Why the tier asks, in plain words, shown behind "Why I'm asking", or null. */
+  /** Why the tier asks, in plain words, shown on its own line under the question, or null. */
   reason: string | null;
 };
 
@@ -174,9 +197,9 @@ export type SentinelApprovalCard = {
   plain_what: string;
   /** The headline, consequence and reason the card renders, or null on cards saved before copy existed. */
   copy?: SentinelApprovalCopy | null | undefined;
-  /** True when the safe choice is the primary button: the action is irreversible or reaches other people. */
+  /** True when the action is irreversible or reaches other people: the no choice then uses safe words and takes keyboard focus. */
   safe_choice?: boolean | undefined;
-  /** True when the action destroys or sends something for good, so its button wears the destructive ink. */
+  /** True when the action destroys or sends something for good, so the no choice says Keep it. */
   destructive?: boolean | undefined;
   /** One sentence on why the agent wants this, from agent intent when available. */
   plain_why: string | null;
@@ -214,6 +237,25 @@ export type SentinelApprovalCard = {
   mail_new_recipients?: string[] | null;
   /** True when a card carrying mail_new_recipients approves saving a draft rather than sending. */
   mail_draft?: boolean | undefined;
+  /** For a mail card: the account the mail goes from, as the call named it or the default. Otherwise null. */
+  mail_from?: string | null | undefined;
+  /** For a mail card: every connected account the person could pick instead. Null when there is no choice. */
+  mail_from_choices?: string[] | null | undefined;
+  /** The network question when the card asks about a skill's sites, or null. */
+  skill_network?: SentinelApprovalSkillNetwork | null;
+};
+
+const APPROVAL_SKILL_NETWORK_REASONS = ['first_use', 'undeclared_host', 'code_changed'] as const;
+
+export type SentinelApprovalSkillNetworkReason = (typeof APPROVAL_SKILL_NETWORK_REASONS)[number];
+
+/** The network question a skill network card asks: the skill, the sites, and why it is asked. */
+export type SentinelApprovalSkillNetwork = {
+  skill_name: string;
+  hosts: string[];
+  reason: SentinelApprovalSkillNetworkReason;
+  /** The code version the approval is pinned to, or null when no pin is in force. */
+  code_pin: string | null;
 };
 
 /** The whole persona a chat call adds, in plain words. */
@@ -241,6 +283,12 @@ export type SentinelApprovalSkill = {
   starter: boolean;
   /** The skill's own instruction file, or null for a starter skill. */
   instructions: string | null;
+  /** The websites the skill sends requests to. Approving the card allows exactly these. */
+  websites: string[];
+  /** True when the skill also builds web addresses while it runs, which could not be read ahead of time. */
+  makes_up_addresses: boolean;
+  /** True when one of the websites can send email or change a calendar. */
+  can_send: boolean;
 };
 
 /** What the server says about an action a scheduled run held for its owner instead of asking. */
@@ -363,6 +411,8 @@ export type SentinelAuditEntry = {
 export type SentinelUserAuditEntry = SentinelAuditEntry & {
   /** False once the chat the entry came from has been deleted. */
   chat_exists: boolean;
+  /** Title of the chat the entry came from; null when deleted or not yet titled. */
+  session_title: string | null;
 };
 
 /** One page of the owner's audit log; `nextPageToken` is absent on the last page. */
@@ -443,6 +493,8 @@ export type SentinelSessionContext = {
   answers?: Record<string, ApprovalAnswer> | undefined;
   /** The words the owner typed with a "Change it" answer, by card key (`approvalKey`). Absent when the host reads none. */
   changeRequests?: Record<string, string> | undefined;
+  /** How each send ended, by tool call id. Absent when the host reads none. */
+  receipts?: Record<string, SentinelSendReceipt> | undefined;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -552,24 +604,31 @@ function parseEmail(value: unknown): SentinelApprovalEmail | null {
       ? null
       : (optionalString(value, 'from_name') ?? optionalString(value, 'fromName'));
   const nameLeftOff = optionalBoolean(value, 'name_left_off') ?? optionalBoolean(value, 'nameLeftOff');
-  // A card from before the sending account was recorded has none, and reads as not known. One that
-  // carries the account in a shape this reader cannot read is not shown at all.
-  const rawSentFrom = value.sent_from ?? value.sentFrom;
-  let sentFrom: SentinelApprovalEmail['sent_from'] = null;
-  if (rawSentFrom !== undefined && rawSentFrom !== null) {
-    const address = isRecord(rawSentFrom) ? optionalString(rawSentFrom, 'address') : undefined;
-    const service = isRecord(rawSentFrom) ? optionalString(rawSentFrom, 'service') : undefined;
-    if (address === undefined || service === undefined) return null;
-    sentFrom = { address, service };
+  const forwarded = value.forwards;
+  const forwardedFrom = isRecord(forwarded) ? optionalString(forwarded, 'from') : undefined;
+  const forwardedSubject = isRecord(forwarded) ? optionalString(forwarded, 'subject') : undefined;
+  const forwardedBody = isRecord(forwarded) ? optionalString(forwarded, 'body') : undefined;
+  const forwardedFiles = isRecord(forwarded) ? stringList(forwarded.attachments) : undefined;
+  // A forward whose message cannot be read is no email card at all, so it is never shown as a plain message.
+  if (
+    forwarded !== undefined &&
+    forwarded !== null &&
+    (!isRecord(forwarded) ||
+      forwardedFrom === undefined ||
+      forwardedSubject === undefined ||
+      forwardedBody === undefined ||
+      forwardedFiles === undefined)
+  ) {
+    return null;
   }
   return {
     action,
-    sent_from: sentFrom,
     to,
     cc,
     bcc,
     subject,
     body,
+    check_code: optionalString(value, 'check_code') ?? optionalString(value, 'checkCode') ?? null,
     replaces:
       replacedSubject === undefined || replacedTo === undefined ? null : { subject: replacedSubject, to: replacedTo },
     reply_in_thread:
@@ -577,6 +636,21 @@ function parseEmail(value: unknown): SentinelApprovalEmail | null {
     reply_to: replyTo,
     ...(fromName === undefined ? {} : { from_name: fromName }),
     ...(nameLeftOff === undefined ? {} : { name_left_off: nameLeftOff }),
+    ...(isRecord(forwarded) &&
+    forwardedFrom !== undefined &&
+    forwardedSubject !== undefined &&
+    forwardedBody !== undefined &&
+    forwardedFiles !== undefined
+      ? {
+          forwards: {
+            from: forwardedFrom,
+            subject: forwardedSubject,
+            body: forwardedBody,
+            truncated: optionalBoolean(forwarded, 'truncated') ?? false,
+            attachments: forwardedFiles,
+          },
+        }
+      : {}),
   };
 }
 
@@ -711,7 +785,16 @@ function parseSkill(value: unknown): SentinelApprovalSkill | null {
   const source = optionalString(value, 'source');
   const version = optionalString(value, 'version');
   const { starter, instructions } = value;
+  // A card saved before websites were shown has none of these; its approval cannot add websites. Through the SDK
+  // the two flags arrive camel-cased.
+  const websites = value.websites ?? [];
+  const makesUpAddresses = value.makes_up_addresses ?? value.makesUpAddresses ?? false;
+  const canSend = value.can_send ?? value.canSend ?? false;
   if (
+    !Array.isArray(websites) ||
+    !websites.every((site): site is string => typeof site === 'string') ||
+    typeof makesUpAddresses !== 'boolean' ||
+    typeof canSend !== 'boolean' ||
     name === undefined ||
     description === undefined ||
     source === undefined ||
@@ -721,7 +804,17 @@ function parseSkill(value: unknown): SentinelApprovalSkill | null {
   ) {
     return null;
   }
-  return { name, description, source, version, starter, instructions };
+  return {
+    name,
+    description,
+    source,
+    version,
+    starter,
+    instructions,
+    websites,
+    makes_up_addresses: makesUpAddresses,
+    can_send: canSend,
+  };
 }
 
 /** A card missing any field is not shown as a schedule, so a partial schedule is never approved as if it were whole. */
@@ -765,6 +858,19 @@ function parseApprovalCopy(value: unknown): SentinelApprovalCopy | undefined {
   };
 }
 
+/** A card missing any field is not shown as a network question, so a partial one is never approved as if whole. */
+function parseSkillNetwork(value: unknown): SentinelApprovalSkillNetwork | null {
+  if (!isRecord(value)) return null;
+  const skill_name = optionalString(value, 'skill_name') ?? optionalString(value, 'skillName');
+  const hosts = stringList(value.hosts);
+  const reason = APPROVAL_SKILL_NETWORK_REASONS.find(candidate => candidate === value.reason);
+  const code_pin = value.code_pin === null ? null : optionalString(value, 'code_pin');
+  if (skill_name === undefined || hosts === undefined || reason === undefined || code_pin === undefined) {
+    return null;
+  }
+  return { skill_name, hosts, reason, code_pin };
+}
+
 function parseApprovalCard(value: unknown): SentinelApprovalCard | undefined {
   if (!isRecord(value)) return undefined;
   const plain_what = optionalString(value, 'plain_what') ?? optionalString(value, 'plainWhat');
@@ -792,6 +898,9 @@ function parseApprovalCard(value: unknown): SentinelApprovalCard | undefined {
     skill: parseSkill(value.skill),
     mail_new_recipients: parseNewRecipients(value.mail_new_recipients ?? value.mailNewRecipients),
     mail_draft: cardFlag(value, { snake: 'mail_draft', camel: 'mailDraft' }),
+    mail_from: cardString(value, { snake: 'mail_from', camel: 'mailFrom' }),
+    mail_from_choices: parseNewRecipients(value.mail_from_choices ?? value.mailFromChoices),
+    skill_network: parseSkillNetwork(value.skill_network ?? value.skillNetwork),
   });
 }
 
@@ -923,10 +1032,53 @@ function toolCallsAskedBy(event: unknown): { eventId: string; toolCallIds: strin
 }
 
 /** Folds raw session events into per-tool-call Sentinel state (later events win). */
+function parseNotSentReason(value: unknown): SentinelNotSentReason | undefined {
+  return NOT_SENT_REASONS.find(reason => reason === value);
+}
+
+function parseReceiptMessage(value: unknown): SentinelReceiptMessage | undefined {
+  if (!isRecord(value)) return undefined;
+  const to = mailboxList(value.to);
+  const cc = mailboxList(value.cc);
+  const bcc = mailboxList(value.bcc);
+  const subject = optionalString(value, 'subject');
+  const body = optionalString(value, 'body');
+  if (to === undefined || cc === undefined || bcc === undefined || subject === undefined || body === undefined) {
+    return undefined;
+  }
+  const replyTo = optionalString(value, 'reply_to') ?? optionalString(value, 'replyTo') ?? null;
+  return { to, cc, bcc, subject, body, reply_to: replyTo };
+}
+
+/**
+ * Reads a send receipt off a raw or persisted event. A receipt that does not carry everything a sent
+ * message needs is dropped, so the chat never shows a half-filled "Sent".
+ */
+export function extractSendReceiptFromEvent(event: unknown): SentinelSendReceipt | undefined {
+  if (!isRecord(event) || event.type !== SEND_RECEIPT_EVENT_TYPE) return undefined;
+  const toolCallId = optionalString(event, 'tool_call_id') ?? optionalString(event, 'toolCallId');
+  const result = event.result;
+  if (toolCallId === undefined || !isRecord(result)) return undefined;
+  if (result.outcome === 'not_sent') {
+    const reason = parseNotSentReason(result.reason);
+    return reason === undefined ? undefined : { outcome: 'not_sent', toolCallId, reason };
+  }
+  if (result.outcome !== 'sent') return undefined;
+  const sentAt = optionalString(result, 'sent_at') ?? optionalString(result, 'sentAt');
+  const sentMessageId = optionalString(result, 'sent_message_id') ?? optionalString(result, 'sentMessageId');
+  const checkCode = optionalString(result, 'check_code') ?? optionalString(result, 'checkCode');
+  const message = parseReceiptMessage(result.message);
+  if (sentAt === undefined || sentMessageId === undefined || checkCode === undefined || message === undefined) {
+    return undefined;
+  }
+  return { outcome: 'sent', toolCallId, sentAt, sentMessageId, checkCode, message };
+}
+
 export function extractSentinelSessionContext(events: unknown[]): SentinelSessionContext {
   const approvals = new Map<string, SentinelApprovalInfo>();
   const answers: Record<string, ApprovalAnswer> = {};
   const changeRequests: Record<string, string> = {};
+  const receipts: Record<string, SentinelSendReceipt> = {};
   // The model message that last asked for each call id. A card that does not name its source event takes this
   // one, so every card and every answer is filed under the full key of the call it belongs to, and a later call
   // that reuses the id never matches it.
@@ -952,8 +1104,11 @@ export function extractSentinelSessionContext(events: unknown[]): SentinelSessio
     }
     for (const [toolCallId, answer] of answersFromEvent(event)) answers[keyFor(toolCallId)] = answer;
     for (const [toolCallId, words] of changeRequestsFromEvent(event)) changeRequests[keyFor(toolCallId)] = words;
+    // A receipt names only the call id, like an answer, so it is filed under the call it answers.
+    const receipt = extractSendReceiptFromEvent(event);
+    if (receipt !== undefined) receipts[keyFor(receipt.toolCallId)] = receipt;
   }
-  return { approvals: [...approvals.values()], answers, changeRequests };
+  return { approvals: [...approvals.values()], answers, changeRequests, receipts };
 }
 
 function parseAuditEntry(value: unknown): SentinelAuditEntry | undefined {
@@ -1012,7 +1167,8 @@ export function parseUserAuditPage(body: unknown): SentinelUserAuditPage {
   for (const item of body.data) {
     const entry = parseAuditEntry(item);
     if (entry === undefined || !isRecord(item) || typeof item.chat_exists !== 'boolean') continue;
-    entries.push({ ...entry, chat_exists: item.chat_exists });
+    const session_title = typeof item.session_title === 'string' ? item.session_title : null;
+    entries.push({ ...entry, chat_exists: item.chat_exists, session_title });
   }
   const pagination = isRecord(body.pagination) ? body.pagination : undefined;
   const nextPageToken = pagination === undefined ? undefined : optionalString(pagination, 'next_page_token');

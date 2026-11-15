@@ -370,12 +370,12 @@ describe('checkHeldReplay', () => {
 
   const EMAIL: NonNullable<Tier3Card['email']> = {
     action: 'send',
-    sent_from: { address: 'ada@example.com', service: 'Gmail' },
     to: [{ name: 'Ana', address: 'ana@example.com' }],
     cc: [],
     bcc: [],
     subject: 'Lunch on Friday',
     body: 'Are you free at one?',
+    check_code: null,
     replaces: null,
     reply_in_thread: null,
     reply_to: null,

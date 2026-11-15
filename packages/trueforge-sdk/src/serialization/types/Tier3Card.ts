@@ -5,6 +5,7 @@ import * as core from "../../core/index.js";
 import type * as serializers from "../index.js";
 import { ApprovalCardCopy } from "./ApprovalCardCopy.js";
 import { Tier3CalendarEvent } from "./Tier3CalendarEvent.js";
+import { Tier3CardSkillNetwork } from "./Tier3CardSkillNetwork.js";
 import { Tier3Email } from "./Tier3Email.js";
 import { Tier3Persona } from "./Tier3Persona.js";
 import { Tier3Schedule } from "./Tier3Schedule.js";
@@ -21,6 +22,11 @@ export const Tier3Card: core.serialization.ObjectSchema<serializers.Tier3Card.Ra
         destructive: core.serialization.boolean().optional(),
         email: Tier3Email.optionalNullable(),
         mailDraft: core.serialization.property("mail_draft", core.serialization.boolean().optional()),
+        mailFrom: core.serialization.property("mail_from", core.serialization.string().optionalNullable()),
+        mailFromChoices: core.serialization.property(
+            "mail_from_choices",
+            core.serialization.list(core.serialization.string()).optionalNullable(),
+        ),
         mailNewRecipients: core.serialization.property(
             "mail_new_recipients",
             core.serialization.list(core.serialization.string()).optionalNullable(),
@@ -39,6 +45,7 @@ export const Tier3Card: core.serialization.ObjectSchema<serializers.Tier3Card.Ra
         safeChoice: core.serialization.property("safe_choice", core.serialization.boolean().optional()),
         schedule: Tier3Schedule.optionalNullable(),
         skill: Tier3Skill.optionalNullable(),
+        skillNetwork: core.serialization.property("skill_network", Tier3CardSkillNetwork.optionalNullable()),
         whyAskedAgain: core.serialization.property("why_asked_again", core.serialization.string().nullable()),
     });
 
@@ -53,6 +60,8 @@ export declare namespace Tier3Card {
         destructive?: boolean | null;
         email?: (Tier3Email.Raw | null | undefined) | null;
         mail_draft?: boolean | null;
+        mail_from?: (string | null | undefined) | null;
+        mail_from_choices?: (string[] | null | undefined) | null;
         mail_new_recipients?: (string[] | null | undefined) | null;
         outbound_plumbing_text?: (string | null | undefined) | null;
         outbound_text?: string | null;
@@ -65,6 +74,7 @@ export declare namespace Tier3Card {
         safe_choice?: boolean | null;
         schedule?: (Tier3Schedule.Raw | null | undefined) | null;
         skill?: (Tier3Skill.Raw | null | undefined) | null;
+        skill_network?: (Tier3CardSkillNetwork.Raw | null | undefined) | null;
         why_asked_again?: string | null;
     }
 }

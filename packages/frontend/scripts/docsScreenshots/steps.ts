@@ -7,6 +7,22 @@ import { askInNewChat, composer, type OwnerApi } from './seed.ts';
 
 export const STEP_TIMEOUT_MS = 45_000;
 
+/** How long the screen must stay still before it is pictured. */
+const SETTLE_MS = 600;
+
+/** Waits until nothing is loading: no spinner, no busy region, fonts ready and animations done. */
+export async function settle(page: Page): Promise<void> {
+  await page.waitForLoadState('networkidle', { timeout: STEP_TIMEOUT_MS }).catch(() => undefined);
+  await page.waitForFunction(
+    () =>
+      document.fonts.status === 'loaded' &&
+      document.querySelector('[aria-busy="true"], [role="progressbar"], .animate-spin') === null,
+    undefined,
+    { timeout: STEP_TIMEOUT_MS },
+  );
+  await page.waitForTimeout(SETTLE_MS);
+}
+
 export interface StepContext {
   page: Page;
   origin: string;
@@ -166,12 +182,36 @@ export function enableSkill(name: string): Step {
 /** Opens the More menu in the left bar, or the bottom bar on a phone. */
 export const openMoreMenu: Step = async context => {
   const { page } = context;
-  if (context.phone) await press('Navigation')(context);
+  // The menu button's name gains an unread count when the demo has a notification.
+  if (context.phone) await press(/^Navigation(,|$)/)(context);
   const more = page.getByRole('button', { name: 'More', exact: true });
   await shows(more);
   await more.first().click();
   await shows(page.getByRole('menu'));
 };
+
+/** Opens the For you panel from the bell in the left panel, after the menu button on a phone. */
+export const openForYou: Step = async context => {
+  if (context.phone) await press(/^Navigation/)(context);
+  await press(/^For you/)(context);
+  await shows(context.page.getByRole('dialog', { name: 'For you' }).getByText('Call the pharmacy'));
+};
+
+/** Opens the Reminders page from the left panel, after the menu button on a phone. */
+export const openReminders: Step = async context => {
+  await open('/')(context);
+  if (context.phone) await press(/^Navigation/)(context);
+  await press('Reminders')(context);
+};
+
+/** Picks a tab inside the page, such as Personas on the Roles and Personas page. */
+export function pickTab(name: string): Step {
+  return async ({ page }) => {
+    const tab = page.getByRole('tabpanel').getByRole('tab', { name, exact: true });
+    await shows(tab);
+    await tab.first().click();
+  };
+}
 
 /**
  * Opens the chat list with its Earlier group unfolded: the Chats button in the left bar, or the menu button and
@@ -179,7 +219,7 @@ export const openMoreMenu: Step = async context => {
  */
 export const openChatList: Step = async context => {
   const { page } = context;
-  if (context.phone) await press('Navigation')(context);
+  if (context.phone) await press(/^Navigation(,|$)/)(context);
   const chats = page.getByRole('button', { name: 'Chats', exact: true }).locator('visible=true');
   await shows(chats);
   if ((await page.getByLabel('Recent chats').locator('visible=true').count()) === 0) await chats.first().click();

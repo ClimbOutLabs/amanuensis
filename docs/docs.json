@@ -44,7 +44,7 @@
           },
           {
             "group": "Your Data and Safety",
-            "pages": ["safety", "privacy", "browser", "schedules", "reach-me", "backup"]
+            "pages": ["safety", "privacy", "browser", "text-messages", "phone-calls", "schedules", "reach-me", "backup"]
           },
           {
             "group": "Connectors",

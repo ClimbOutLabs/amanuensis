@@ -3,27 +3,40 @@ import type { Logger } from 'winston';
 
 import type { ResolveRequestContext } from '../auth/identity';
 import type { INoticingStore } from '../db/noticingStore';
+import type { PersonOwner } from '../db/personOwner';
 import type { IReachSettingsStore } from '../db/reachSettingsStore';
+import type { ITextContactStore } from '../db/textContactStore';
 import {
   getReachRoute,
   listReachSuggestionsRoute,
   testReachChannelRoute,
   updateReachRoute,
 } from '../routes/reachRoutes';
+import { callFailureWords } from '../runtime/calls/twilioCalls';
+import { TEST_WORDS } from '../runtime/delivery/deliveryChannel';
 import type { DeliveryService } from '../runtime/delivery/deliveryService';
 import { KIND_MAX_LEVEL } from '../runtime/noticing/levels';
 import { calendarProblemOf, mailProblemOf } from '../runtime/noticing/noticingService';
+import type { ChannelViewer } from '../runtime/noticing/reachChannels';
 import { suggestAlwaysImportant } from '../runtime/noticing/suggestions';
+import { smsFailureWords } from '../runtime/texts/smsProvider';
+import { canText } from '../runtime/texts/textNumber';
 import type { ReachAvailability } from '../schemas/reach';
 import { defaultReachSettings, NOTICING_KINDS, type AlwaysImportantSender, type ReachSettings } from '../schemas/reach';
 
 export interface ReachRouterDeps {
   reachStore: IReachSettingsStore;
+  textContacts: Pick<ITextContactStore, 'get'>;
   /** Where each watcher's trouble is kept, so Reach me can say mail is not being checked. */
   noticingStore: Pick<INoticingStore, 'getCheckpoint'>;
   deliveryService: Pick<DeliveryService, 'deliver'>;
-  /** Which phone channels this server can use now. Read per request, since a later part may set one up while running. */
-  channels: () => ReachAvailability;
+  /**
+   * Which phone channels this server can use now. Read per request, since a later part may set one up while running.
+   * The viewer only changes how a problem is worded.
+   */
+  channels: (input?: { viewer: ChannelViewer }) => ReachAvailability;
+  /** Whether this person runs Aman, so a problem with the server's setup is worded for them. */
+  isInstanceOwner: (owner: PersonOwner) => boolean;
   /** The texts of the memories that may name a sender. Empty when this server keeps no readable memory. */
   memories: (input: { tenant_id: string }) => Promise<string[]>;
   resolveRequestContext: ResolveRequestContext;
@@ -90,7 +103,7 @@ export function createReachRouter(deps: ReachRouterDeps) {
     return {
       settings,
       saved: stored !== undefined,
-      availability: deps.channels(),
+      availability: deps.channels({ viewer: deps.isInstanceOwner(owner) ? 'owner' : 'person' }),
       max_levels: KIND_MAX_LEVEL,
       mail_problem: problem === undefined ? null : { since: problem.since.toISOString(), kind: problem.kind },
       calendar_problem:
@@ -110,8 +123,33 @@ export function createReachRouter(deps: ReachRouterDeps) {
     if (settings.channels.texts && !channels.texts.available) {
       return c.json({ error: { message: `${channels.texts.note} Leave texts off for now.` } }, 400);
     }
-    if (settings.channels.calls && !channels.calls.available) {
-      return c.json({ error: { message: `${channels.calls.note} Leave calls off for now.` } }, 400);
+    if (settings.channels.texts) {
+      const contact = await deps.textContacts.get(owner);
+      if (!canText(contact)) {
+        return c.json(
+          { error: { message: 'Confirm your number first. Enter it and the code we text you, then switch texts on.' } },
+          400,
+        );
+      }
+    }
+    // Calls already on stay on while the voice parts are briefly down; only switching them on needs them now.
+    const callsWereOn = (await deps.reachStore.get(owner))?.channels.calls === true;
+    if (settings.channels.calls && !channels.calls.available && !callsWereOn) {
+      return c.json({ error: { message: channels.calls.note } }, 400);
+    }
+    if (settings.channels.calls) {
+      const contact = await deps.textContacts.get(owner);
+      if (!canText(contact)) {
+        return c.json(
+          {
+            error: {
+              message:
+                'Calls ring the number you confirm under Texts. Confirm your number first, then switch calls on.',
+            },
+          },
+          400,
+        );
+      }
     }
     const blocked = settings.call_kinds.find(kind => KIND_MAX_LEVEL[kind] !== 'call');
     if (blocked !== undefined) {
@@ -144,19 +182,97 @@ export function createReachRouter(deps: ReachRouterDeps) {
     const owner = ownerOf(c);
     const { channel } = c.req.valid('json');
     const channels = deps.channels();
-    // Texts and calls have no test of their own yet; the part that sets one up adds it here.
-    if (channel === 'text' || channel === 'call') {
-      const status = channel === 'text' ? channels.texts : channels.calls;
-      return c.json({ error: { message: `${status.note} Try the app or push notices for now.` } }, 409);
+    if (channel === 'text') {
+      if (!channels.texts.available) {
+        return c.json({ error: { message: `${channels.texts.note} Try the app or push notices for now.` } }, 409);
+      }
+      const notOn = 'Confirm your number and switch texts on first, then try again.';
+      const settings = await deps.reachStore.get(owner);
+      if (settings?.channels.texts !== true || !canText(await deps.textContacts.get(owner))) {
+        return c.json({ error: { message: notOn } }, 409);
+      }
+      // The text sender claims the day's limits and the button's own limit together, so a refused test counts nowhere.
+      const delivery = await deps.deliveryService.deliver({
+        ...owner,
+        // A note in the feed, so a test never uses up one of the day's nudges.
+        kind: 'note',
+        level: 'nudge',
+        text: TEST_WORDS,
+        reason: 'You pressed Try it in Reach me settings.',
+        link: null,
+        test: 'sms',
+      });
+      const sent = delivery.attempts.find(attempt => attempt.channel === 'sms');
+      if (sent === undefined || sent.outcome === 'skipped') {
+        // A confirmed number with texts on is skipped only by a limit. Otherwise, between the check above and the
+        // send, texts were switched off or the number replied STOP, which also switches them off.
+        const contact = await deps.textContacts.get(owner);
+        if (sent?.outcome === 'skipped' && canText(contact)) {
+          return c.json({ error: { message: sent.detail ?? 'No text was sent. Try again later.' } }, 429);
+        }
+        const stopped = typeof contact?.opted_out_at === 'string';
+        return c.json(
+          { error: { message: stopped ? smsFailureWords({ failure: 'opted_out', during: 'delivery' }) : notOn } },
+          409,
+        );
+      }
+      if (sent.outcome !== 'sent') {
+        return c.json(
+          { error: { message: sent.detail ?? 'The test text could not be sent. Try again in a minute.' } },
+          502,
+        );
+      }
+      return c.json({ data: { delivery_id: delivery.id, devices_reached: 0 } }, 201);
     }
-    // A test is a note in the feed, so a push test never uses up one of the day's nudges.
+    if (channel === 'call') {
+      if (!channels.calls.available) {
+        return c.json({ error: { message: channels.calls.note } }, 409);
+      }
+      const notOn = 'Confirm your number and switch calls on first, then try again.';
+      const settings = await deps.reachStore.get(owner);
+      if (settings?.channels.calls !== true || !canText(await deps.textContacts.get(owner))) {
+        return c.json({ error: { message: notOn } }, 409);
+      }
+      // The call sender claims the button's own limits once the call can ring, so a refused test counts nowhere. A
+      // note in the feed, so a test never counts toward the time between calls, and a test call never texts.
+      const delivery = await deps.deliveryService.deliver({
+        ...owner,
+        kind: 'note',
+        level: 'nudge',
+        text: 'This is a test call. If you can hear this, calls work.',
+        reason: 'You pressed Try it in Reach me settings.',
+        link: null,
+        test: 'call',
+      });
+      const rang = delivery.attempts.find(attempt => attempt.channel === 'call');
+      if (rang === undefined) {
+        return c.json({ error: { message: notOn } }, 409);
+      }
+      if (rang.outcome === 'skipped') {
+        // With calls on and a confirmed number, only the button's limits or the voice parts going down skip a call.
+        const stillOn = deps.channels().calls.available && canText(await deps.textContacts.get(owner));
+        return stillOn
+          ? c.json({ error: { message: rang.detail ?? 'No call was made. Try again later.' } }, 429)
+          : c.json({ error: { message: rang.detail ?? notOn } }, 409);
+      }
+      if (rang.outcome !== 'sent') {
+        return c.json(
+          { error: { message: rang.detail ?? callFailureWords({ failure: 'unreachable', test: true }) } },
+          502,
+        );
+      }
+      return c.json({ data: { delivery_id: delivery.id, devices_reached: 0 } }, 201);
+    }
+    // A test is a note in the feed, so a push test never uses up one of the day's nudges, and it reaches only the
+    // person's devices, so it never sends a paid text.
     const delivery = await deps.deliveryService.deliver({
       ...owner,
       kind: 'note',
       level: channel === 'push' ? 'nudge' : 'note',
-      text: 'This is a test. If you can read this, it works.',
+      text: TEST_WORDS,
       reason: 'You pressed Try it in Reach me settings.',
       link: null,
+      test: channel === 'push' ? 'web_push' : 'in_app',
     });
     const devices_reached = delivery.attempts.filter(
       attempt => attempt.channel === 'web_push' && attempt.outcome === 'sent',

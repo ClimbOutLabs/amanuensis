@@ -390,6 +390,17 @@ async function withWorld(run) {
       <label for="q">Search</label>
       <input id="q" onkeydown="document.getElementById('side').focus()">
       <iframe id="side" src="http://site-b.test/tricky-widget" style="width: 12rem; height: 5rem"></iframe>`),
+    // A chart drawn on a canvas beside a small icon button: only the chart counts as a picture.
+    '/chart': html(`<h1>Asset allocation</h1>
+      <canvas width="600" height="300" style="display:block"></canvas>
+      <button><svg width="16" height="16"><title>Settings</title></svg></button>`),
+    // A sign-in form for the live view's paste and copy: each change is reported, and so is a send.
+    '/paste-copy': html(`<form onsubmit="event.preventDefault(); fetch('/submitted', { method: 'POST' })">
+      <input id="name" autofocus oninput="fetch('/name?' + encodeURIComponent(this.value), { method: 'POST' })">
+      <input id="pw" type="password" value="hunter2">
+      <textarea id="note" oninput="fetch('/note?' + encodeURIComponent(this.value), { method: 'POST' })"></textarea>
+      <button>Sign in</button>
+    </form>`),
     // A page with another site's widget in a frame at its top corner, as a human check sits on a page.
     '/widget-frame': html(`<iframe src="http://site-b.test/widget"
       style="position: fixed; left: 0; top: 0; width: 12rem; height: 8rem; border: 0"></iframe>`),
@@ -1531,6 +1542,58 @@ test(
   },
 );
 
+test('a read says how many pictures are in view, and leaves out icons', { skip: !browsersAvailable }, async () => {
+  await withWorld(async ({ sidecar }) => {
+    const opened = await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/chart' });
+    assert.match(opened.text, /Also in view: 1 picture .* use browser_screenshot\./);
+    const plain = await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/' });
+    assert.doesNotMatch(plain.text, /Also in view/);
+  });
+});
+
+test(
+  'the live view pastes as one insert that never sends the form, and copies a selection but never a password',
+  { skip: !browsersAvailable },
+  async () => {
+    await withWorld(async ({ sidecar, siteA }) => {
+      const where = { owner: 'owner-1', tab: 'chat-1' };
+      await sidecar.open({ ...where, url: 'http://site-a.test/paste-copy' });
+      await settle();
+      assert.deepEqual(await sidecar.liveCopy(where), { status: 'nothing_selected' });
+
+      // A pasted line break in a one-line field is dropped, as a real paste drops it, and Enter is never pressed.
+      assert.deepEqual(await sidecar.liveInput({ ...where, input: { kind: 'paste', text: 'ada@example.test\n' } }), {
+        status: 'ok',
+      });
+      await settle();
+      const reported = siteA.hits.filter(hit => hit.method === 'POST').map(hit => hit.url);
+      assert.ok(reported.includes(`/name?${encodeURIComponent('ada@example.test')}`), reported.join(', '));
+      assert.ok(!reported.includes('/submitted'), 'the paste never sent the form');
+      // The paste went in as one change, not a key at a time.
+      assert.equal(reported.filter(url => url.startsWith('/name?')).length, 1);
+
+      // Select all, then copy: the field's own text comes back.
+      await sidecar.liveInput({ ...where, input: { kind: 'key', key: 'ControlOrMeta+A' } });
+      assert.deepEqual(await sidecar.liveCopy(where), { status: 'ok', text: 'ada@example.test' });
+
+      // A password field's text is never read out, even when all of it is selected.
+      await sidecar.liveInput({ ...where, input: { kind: 'key', key: 'Tab' } });
+      await sidecar.liveInput({ ...where, input: { kind: 'key', key: 'ControlOrMeta+A' } });
+      assert.deepEqual(await sidecar.liveCopy(where), { status: 'password' });
+
+      // In a box of many lines, the pasted lines stay lines.
+      await sidecar.liveInput({ ...where, input: { kind: 'key', key: 'Tab' } });
+      await sidecar.liveInput({ ...where, input: { kind: 'paste', text: 'one\ntwo' } });
+      await settle();
+      assert.ok(
+        siteA.hits.some(hit => hit.url === `/note?${encodeURIComponent('one\ntwo')}`),
+        'the box got both lines',
+      );
+      assert.ok(!siteA.hits.some(hit => hit.url === '/submitted'), 'nothing sent the form');
+    });
+  },
+);
+
 test(
   "a frame cannot find its guard's key, in the switch or on its way, so Aman's typing never reaches it",
   { skip: !browsersAvailable },
@@ -1756,12 +1819,18 @@ async function fakeSidecar() {
   let shotsToFail = 0;
   let pageTitle = 'Account';
   let frameUrls = ['https://site-a.test/account'];
+  let framesHang = false;
   const mainFrame = { name: 'main' };
   const page = {
     mainFrame: () => mainFrame,
     url: () => 'https://site-a.test/account',
     title: async () => pageTitle,
-    frames: () => frameUrls.map(url => ({ url: () => url, evaluate: async () => undefined })),
+    // A hung frame never answers a script, as a page stuck in its own code does.
+    frames: () =>
+      frameUrls.map(url => ({
+        url: () => url,
+        evaluate: () => (framesHang ? new Promise(() => undefined) : Promise.resolve(undefined)),
+      })),
     goto: async () => undefined,
     exposeBinding: async () => undefined,
     addInitScript: async () => undefined,
@@ -1803,6 +1872,9 @@ async function fakeSidecar() {
       press: async key => {
         acts.push({ key });
       },
+      insertText: async text => {
+        acts.push({ paste: text });
+      },
     },
     on: (event, handler) => {
       handlers[event] = handler;
@@ -1820,7 +1892,9 @@ async function fakeSidecar() {
         }),
       };
     },
-    close: async () => undefined,
+    close: async () => {
+      acts.push({ closed: true });
+    },
   };
   // Reads run in the sidecar's own world in the page; this page has nothing on it to read.
   const cdp = {
@@ -1895,6 +1969,10 @@ async function fakeSidecar() {
     failShots: count => {
       shotsToFail = count;
     },
+    /** Every frame stops answering scripts. */
+    hangFrames: () => {
+      framesHang = true;
+    },
     /** A human check appears on the page: its widget frame, served from the check's own host. */
     showChallenge: () => {
       frameUrls = [...frameUrls, 'https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/g/widget'];
@@ -1948,6 +2026,8 @@ test('the live view lists, frames and drives a tab through a stand-in page', asy
     assert.deepEqual(acts.at(-1), { type: '123456' });
     await sidecar.liveInput({ owner: 'owner-1', tab: 'chat-1', input: { kind: 'key', key: 'Enter' } });
     assert.deepEqual(acts.at(-1), { key: 'Enter' });
+    await sidecar.liveInput({ owner: 'owner-1', tab: 'chat-1', input: { kind: 'paste', text: 'a\nb' } });
+    assert.deepEqual(acts.at(-1), { paste: 'a\nb' });
     await sidecar.liveInput({ owner: 'owner-1', tab: 'chat-1', input: { kind: 'wheel', dy: 240 } });
     assert.deepEqual(acts.at(-1), { wheel: [0, 240] });
 
@@ -1957,6 +2037,25 @@ test('the live view lists, frames and drives a tab through a stand-in page', asy
       await sidecar.liveInput({ owner: 'owner-1', tab: 'chat-9', input: { kind: 'key', key: 'Enter' } }),
       { status: 'closed' },
     );
+  } finally {
+    gateway.close();
+    await sidecar.close();
+  }
+});
+
+test('a copy from a page that never answers gives up, and the tab keeps taking acts', async () => {
+  if (BrowserSidecar === undefined) {
+    return;
+  }
+  const { sidecar, gateway, hangFrames, acts } = await fakeSidecar();
+  try {
+    await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'https://site-a.test/account' });
+    hangFrames();
+    const started = Date.now();
+    assert.deepEqual(await sidecar.liveCopy({ owner: 'owner-1', tab: 'chat-1' }), { status: 'nothing_selected' });
+    assert.ok(Date.now() - started < 5000, 'the copy gave up on the hung frame');
+    await sidecar.liveInput({ owner: 'owner-1', tab: 'chat-1', input: { kind: 'key', key: 'Enter' } });
+    assert.deepEqual(acts.at(-1), { key: 'Enter' });
   } finally {
     gateway.close();
     await sidecar.close();
@@ -2101,6 +2200,17 @@ test('the live routes answer over HTTP, and listing them needs no tab', async ()
     assert.equal(badInput.status, 200);
     assert.deepEqual(await badInput.json(), { status: 'bad_input' });
 
+    const badPaste = await post('/live/input', { owner: 'owner-1', tab: 'chat-1', kind: 'paste', text: '' });
+    assert.deepEqual(await badPaste.json(), { status: 'bad_input' });
+
+    const closeWithNoTab = await post('/live/close', { owner: 'owner-1', tab: 'chat-1' });
+    assert.equal(closeWithNoTab.status, 200);
+    assert.deepEqual(await closeWithNoTab.json(), { status: 'closed' });
+
+    const copyWithNoTab = await post('/live/copy', { owner: 'owner-1', tab: 'chat-1' });
+    assert.equal(copyWithNoTab.status, 200);
+    assert.deepEqual(await copyWithNoTab.json(), { status: 'closed' });
+
     const badTakeover = await post('/live/takeover', { owner: 'owner-1', tab: 'chat-1', on: 'yes' });
     assert.equal(badTakeover.status, 200);
     assert.deepEqual(await badTakeover.json(), { status: 'bad_input' });
@@ -2148,6 +2258,29 @@ test('the live view puts a file into the picker the page opened, else its file f
 
     const tooBig = Buffer.alloc(10 * 1024 * 1024 + 1).toString('base64');
     assert.deepEqual(await sidecar.liveUpload({ ...file, data: tooBig }), { status: 'bad_input' });
+  } finally {
+    gateway.close();
+    await sidecar.close();
+  }
+});
+
+test("the person ends the session from the live view, which closes the chat's tab", async () => {
+  if (BrowserSidecar === undefined) {
+    return;
+  }
+  const { sidecar, acts, gateway } = await fakeSidecar();
+  const where = { owner: 'owner-1', tab: 'chat-1' };
+  try {
+    assert.deepEqual(await sidecar.liveClose(where), { status: 'closed' });
+    await sidecar.open({ ...where, url: 'https://site-a.test/account' });
+    assert.equal((await sidecar.liveTabs({ owner: 'owner-1' })).tabs.length, 1);
+
+    assert.deepEqual(await sidecar.liveClose(where), { status: 'ok' });
+    assert.deepEqual(acts.at(-1), { closed: true });
+    // The chat has no page now: the list is empty, and every step on it answers closed until a new open.
+    assert.deepEqual((await sidecar.liveTabs({ owner: 'owner-1' })).tabs, []);
+    assert.deepEqual(await sidecar.liveCopy(where), { status: 'closed' });
+    assert.deepEqual(await sidecar.liveClose(where), { status: 'closed' });
   } finally {
     gateway.close();
     await sidecar.close();

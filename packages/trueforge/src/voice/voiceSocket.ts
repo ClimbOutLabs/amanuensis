@@ -22,7 +22,7 @@ import {
   VOICE_STREAM_PATH,
 } from './browserTransport';
 import { VoiceSession, type VoiceSessionDeps } from './session';
-import { speechLimiter } from './speechRateLimit';
+import { speechLimiter, speechPersonKey } from './speechRateLimit';
 import { SidecarSpeechToText } from './sttClient';
 import { SidecarSpeechSynthesizer } from './ttsClient';
 import { HttpVoiceTurnRunner } from './turnRunner';
@@ -99,7 +99,10 @@ export async function productionParts({
     stt: new SidecarSpeechToText(),
     tts: new SidecarSpeechSynthesizer({
       voice: ticket.voice,
-      share: { limiter: speechLimiter, person: `${ticket.tenantId}:${ticket.subjectId}` },
+      share: {
+        limiter: speechLimiter,
+        person: speechPersonKey({ tenantId: ticket.tenantId, personId: ticket.subjectId }),
+      },
     }),
     turns: turnRunnerFor({ ticket, selfFetch }),
   };

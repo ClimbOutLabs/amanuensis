@@ -9,6 +9,7 @@ import {
   type IModelProviderStore,
   type ListModelProvidersInput,
   type ModelProviderRecord,
+  type RecordModelProviderCheckInput,
   type UpsertModelProviderInput,
 } from '../db/modelProviderStore';
 import type { AvailableModel, ModelProviderManifest } from '../schemas/modelProvider';
@@ -81,6 +82,15 @@ export class TrueFoundryModelProviderStore<TTransaction = never> implements IMod
     return trueFoundryManaged();
   }
 
+  recordProviderCheck(
+    input: RecordModelProviderCheckInput,
+    transaction?: TTransaction,
+  ): Promise<ModelProviderRecord | undefined> {
+    void input;
+    void transaction;
+    return trueFoundryManaged();
+  }
+
   deleteProvider(input: GetModelProviderInput, transaction?: TTransaction): Promise<boolean> {
     void input;
     void transaction;
@@ -135,6 +145,7 @@ function toRecords(input: {
       tenant_id: input.tenant_id,
       name: accountName,
       manifest: toManifest({ models, gatewayUrl: input.gatewayUrl, accessToken: input.accessToken }),
+      last_check: null,
       created_at: now,
       updated_at: now,
     }));

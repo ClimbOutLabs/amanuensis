@@ -71,6 +71,7 @@ const unusedStore: IModelProviderStore = {
   getProviderForUpdate: jest.fn(),
   createProvider: jest.fn(),
   upsertProvider: jest.fn(),
+  recordProviderCheck: jest.fn(async () => undefined),
   listModels: jest.fn(),
   deleteProvider: jest.fn(),
 };
@@ -460,5 +461,35 @@ describe('summarizeTurnNotes', () => {
       createNonStream: () => Promise.reject(new Error('model down')),
     };
     expect(await run({ results: [EMAIL], assistantText: LONG_REPLY, llm })).toEqual([]);
+  });
+
+  it('asks once more with more room when the token cap cut the reply off before any answer', async () => {
+    const caps: number[] = [];
+    const llm: ILLM = {
+      create: () => {
+        throw new Error('streaming is not used');
+      },
+      createNonStream: input => {
+        caps.push(input.max_tokens ?? 0);
+        const cutOff = caps.length === 1;
+        return Promise.resolve({
+          output: {
+            role: 'assistant',
+            content: cutOff
+              ? ''
+              : JSON.stringify({
+                  findings: [{ result: 1, text: 'Priya needs the signed form by 3 November.' }],
+                  responses: [],
+                }),
+          },
+          usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
+          finish_reason: cutOff ? 'length' : 'stop',
+        });
+      },
+    };
+    const notes = await run({ results: [EMAIL], assistantText: LONG_REPLY, llm });
+    expect(notes.map(note => note.text)).toEqual(['Priya needs the signed form by 3 November.']);
+    expect(caps).toHaveLength(2);
+    expect(caps[1]).toBeGreaterThan(caps[0] ?? Number.POSITIVE_INFINITY);
   });
 });

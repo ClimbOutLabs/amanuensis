@@ -140,6 +140,7 @@ describe('Drive write classification', () => {
     expect(decision.card?.plain_what).toContain('Create a Google Doc named');
     expect(decision.card?.plain_what).toContain('Trip plan');
     expect(decision.card?.outbound_text).toBe('Fly out Friday.');
+    expect(decision.own_drive_write).toBe(true);
     expect(decision.approval_token_id).not.toBeNull();
   });
 

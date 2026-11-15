@@ -194,7 +194,7 @@ describe('SidebarLayout Chats entry', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Chats' }));
     expect(await screen.findByRole('complementary', { name: 'Recent chats' })).toBeInTheDocument();
-    expect(screen.queryByRole('dialog', { name: 'Agent Config' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Agent setup' })).not.toBeInTheDocument();
   });
 
   it('reveals the chat list inside the mobile drawer without closing it', async () => {
@@ -346,6 +346,43 @@ describe('SidebarLayout rail highlight', () => {
     fireEvent.click(within(nav).getByRole('button', { name: 'Chats' }));
     await waitFor(() => expect(highlighted()).toEqual(['Chats']));
   });
+
+  it('keeps the Navigation button on pages that fill the screen, so a phone can leave them', async () => {
+    render(
+      <SlotsProvider>
+        <ServerProvider
+          server={createMockAgentUIServer({ catalog: createMockCatalog(), schedules: createMockScheduleServer() })}
+        >
+          <ShellModeProvider agentConfig={{ mode: 'AgentLibraryWithComposer' }}>
+            <SpaceProvider store={mockSpaceStore()}>
+              <AgentConfigInstructionsProvider>
+                <RuntimeHarness messages={[]}>
+                  <div className="h-96">
+                    <SidebarLayout />
+                  </div>
+                </RuntimeHarness>
+              </AgentConfigInstructionsProvider>
+            </SpaceProvider>
+          </ShellModeProvider>
+        </ServerProvider>
+      </SlotsProvider>,
+    );
+    const nav = screen.getByRole('navigation', { name: 'Sidebar' });
+
+    fireEvent.click(within(nav).getByRole('button', { name: 'Schedules' }));
+    const schedulesHeader = (await screen.findByRole('heading', { name: 'Scheduled Agents' })).closest('header');
+    expect(schedulesHeader).not.toBeNull();
+    if (schedulesHeader === null) return;
+    fireEvent.click(within(schedulesHeader).getByRole('button', { name: 'Navigation' }));
+    const drawer = await screen.findByRole('dialog', { name: 'Navigation' });
+
+    fireEvent.click(within(drawer).getByRole('button', { name: 'More' }));
+    fireEvent.click(within(screen.getByRole('menu')).getByRole('button', { name: 'Agents' }));
+    const agentsHeader = (await screen.findByRole('heading', { name: 'Agents' })).closest('header');
+    expect(agentsHeader).not.toBeNull();
+    if (agentsHeader === null) return;
+    expect(within(agentsHeader).getByRole('button', { name: 'Navigation' })).toBeInTheDocument();
+  });
 });
 
 describe('SidebarLayout More menu', () => {
@@ -429,11 +466,30 @@ describe('SidebarLayout notifications bell', () => {
     localStorage.clear();
   });
 
-  function renderSidebarLayoutWithBell() {
+  function renderSidebarLayoutWithBell({ chatDeleted = false }: { chatDeleted?: boolean } = {}) {
     const { api } = fakeServer([item({ id: 'a' })]);
+    // The bell looks an item's chat up before it opens it, so the chat the item leads to exists here
+    // unless the test deletes it.
+    const gone = new Error('Session not found');
+    gone.name = 'NotFoundError';
+    const server = createMockAgentUIServer({
+      catalog: createMockCatalog(),
+      getSession: async ({ sessionId }) => {
+        if (chatDeleted) {
+          throw gone;
+        }
+        return {
+          id: sessionId,
+          title: 'Reminders',
+          isMutable: true,
+          createdAt: '2026-01-01T00:00:00Z',
+          updatedAt: '2026-01-01T00:00:00Z',
+        };
+      },
+    });
     return render(
       <SlotsProvider>
-        <ServerProvider server={mockServer()}>
+        <ServerProvider server={server}>
           <ShellModeProvider>
             <AgentConfigInstructionsProvider>
               <RuntimeHarness messages={[]}>
@@ -513,5 +569,19 @@ describe('SidebarLayout notifications bell', () => {
 
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Navigation' })).not.toBeInTheDocument());
     expect(screen.queryByRole('dialog', { name: 'For you' })).not.toBeInTheDocument();
+  });
+
+  it('keeps the drawer and the panel open and says so when a bell item leads to a deleted chat', async () => {
+    renderSidebarLayoutWithBell({ chatDeleted: true });
+
+    fireEvent.click(await screen.findByRole('button', { name: /Navigation/ }));
+    const drawer = await screen.findByRole('dialog', { name: 'Navigation' });
+
+    fireEvent.click(within(drawer).getByRole('button', { name: 'For you, 1 unread' }));
+    const panel = await within(drawer).findByRole('dialog', { name: 'For you' });
+    fireEvent.click(within(panel).getByRole('button', { name: /Call the dentist/ }));
+
+    expect(await within(panel).findByRole('alert')).toHaveTextContent('This chat was deleted');
+    expect(screen.getByRole('dialog', { name: 'Navigation' })).toBeInTheDocument();
   });
 });

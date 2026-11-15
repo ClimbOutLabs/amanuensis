@@ -22,7 +22,8 @@ import type {
   ToolInfo,
 } from '../llm/LLMTypes';
 import { UNKNOWN_TOOL_NAME } from '../llm/LLMTypes';
-import { estimateTokensForString } from '../llm/usage';
+import { toOpenAIChatMessage } from '../llm/toOpenAIChatMessage';
+import { estimateTokensForString, PICTURE_TOKEN_ESTIMATE } from '../llm/usage';
 import type { PendingHostNoteKind } from '../mcp/executeToolCalls';
 import type {
   AgentThreadRuntimeSendInput,
@@ -486,7 +487,26 @@ export function hostPictureMessage(input: { note: string; imageUrl: string }): C
   };
 }
 
-function isHostWrittenUserContent(content: ChatCompletionMessageParam['content']): boolean {
+function isTextPart(part: unknown): part is { type: 'text'; text: string } {
+  return (
+    typeof part === 'object' &&
+    part !== null &&
+    'type' in part &&
+    part.type === 'text' &&
+    'text' in part &&
+    typeof part.text === 'string'
+  );
+}
+
+function isImagePart(part: unknown): boolean {
+  return typeof part === 'object' && part !== null && 'type' in part && part.type === 'image_url';
+}
+
+function isHostTextPart(part: unknown): boolean {
+  return isTextPart(part) && isHostWrappedText(part.text);
+}
+
+function isHostWrittenUserContent(content: unknown): boolean {
   if (typeof content === 'string') {
     return isHostWrappedText(content);
   }
@@ -495,11 +515,12 @@ function isHostWrittenUserContent(content: ChatCompletionMessageParam['content']
   }
   // A picture the host attached comes with its note first. A person's own picture never does: an
   // upload is announced by other host text, so a message of the person's keeps counting as theirs.
-  const [first, ...rest] = content;
-  if (first?.type === 'text' && first.text.startsWith(HOST_PICTURE_NOTE_START)) {
-    return rest.every(part => part.type === 'image_url' || (part.type === 'text' && isHostWrappedText(part.text)));
+  const parts: unknown[] = content;
+  const first = parts[0];
+  if (isTextPart(first) && first.text.startsWith(HOST_PICTURE_NOTE_START)) {
+    return parts.slice(1).every(part => isImagePart(part) || isHostTextPart(part));
   }
-  return content.every(part => part.type === 'text' && isHostWrappedText(part.text));
+  return content.every(isHostTextPart);
 }
 
 /**
@@ -507,7 +528,7 @@ function isHostWrittenUserContent(content: ChatCompletionMessageParam['content']
  * messages the host wrote: internal notes such as the empty-answer nudge, and extracted file text,
  * which follows the person's message. The one owner of "where is the person's message".
  */
-export function personMessageIndex(messages: readonly ChatCompletionMessageParam[]): number {
+export function personMessageIndex(messages: readonly { role: string; content?: unknown }[]): number {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const message = messages[i];
     if (message?.role === 'user' && !isHostWrittenUserContent(message.content)) {
@@ -515,6 +536,38 @@ export function personMessageIndex(messages: readonly ChatCompletionMessageParam
     }
   }
   return -1;
+}
+
+/**
+ * The context as the model is sent it: thinking stays only on replies after the person's latest
+ * message, where a tool-using reply needs it to continue. Earlier thinking is never needed again
+ * and providers drop or ignore it, so sending it would only fill the context window.
+ */
+export function withoutEarlierThinking(context: readonly ContextMessage[]): ContextMessage[] {
+  let personIndex = -1;
+  for (let i = context.length - 1; i >= 0; i -= 1) {
+    const message = context[i];
+    if (
+      message !== undefined &&
+      isLLMContextMessage(message) &&
+      message.role === 'user' &&
+      !isHostWrittenUserContent(toOpenAIChatMessage(message).content)
+    ) {
+      personIndex = i;
+      break;
+    }
+  }
+  return context.map((message, index) => {
+    if (index >= personIndex || !isLLMContextMessage(message) || message.role !== 'assistant') {
+      return message;
+    }
+    if (message.thinking_blocks === undefined) {
+      return message;
+    }
+    const { thinking_blocks: _earlierThinking, ...rest } = message;
+    void _earlierThinking;
+    return rest;
+  });
 }
 
 export function internalSystemMessage(m: string): LLMUserMessage {
@@ -760,6 +813,40 @@ export function getThreadId(): string {
   return crypto.randomUUID();
 }
 
+/** A message's content as far as sizing reads it: text, or parts that may carry text or a picture. */
+type SizedContent = string | readonly { type?: string; text?: string }[] | null | undefined;
+
+/** How many pictures a message's content holds. */
+export function pictureCount(content: SizedContent): number {
+  if (typeof content === 'string' || content == null) {
+    return 0;
+  }
+  return content.filter(part => part.type === 'image_url').length;
+}
+
+/** Tokens of one message's content: its text, and a fixed amount for each picture when they are counted. */
+export function estimateTokensForChatMessageContent({
+  content,
+  countPictures,
+}: {
+  content: SizedContent;
+  countPictures: boolean;
+}): number {
+  if (typeof content === 'string') {
+    return estimateTokensForString(content);
+  }
+  if (content == null) {
+    return 0;
+  }
+  let total = countPictures ? pictureCount(content) * PICTURE_TOKEN_ESTIMATE : 0;
+  for (const part of content) {
+    if (typeof part.text === 'string') {
+      total += estimateTokensForString(part.text);
+    }
+  }
+  return total;
+}
+
 export function estimateTokensForContextMessages(messages: ContextMessage[]): CurrentContextUsage {
   let tokenCount = 0;
 
@@ -785,6 +872,16 @@ export function estimateTokensForContextMessages(messages: ContextMessage[]): Cu
 
     if ('tool_call_id' in b && b.tool_call_id) {
       tokenCount += estimateTokensForString(b.tool_call_id);
+    }
+
+    // Earlier thinking is sent back with every request, so it takes room in the model's context
+    // like any other text; leaving it out lets compaction keep a tail far larger than it measured.
+    if ('thinking_blocks' in b && b.thinking_blocks) {
+      for (const block of b.thinking_blocks) {
+        if (block.type === 'thinking') {
+          tokenCount += estimateTokensForString(block.thinking);
+        }
+      }
     }
   }
 

@@ -125,6 +125,23 @@
   font-size: inherit;
 }
 
+/* The app-wide reset strips list markers; prose needs its numbers and dots back. */
+.markdown-body ul {
+  list-style-type: disc;
+}
+
+.markdown-body ol {
+  list-style-type: decimal;
+}
+
+.aui-markdown.markdown-body li::marker {
+  color: var(--gold-ink);
+}
+
+.aui-markdown.markdown-body ol > li::marker {
+  font-weight: 600;
+}
+
 .aui-markdown.markdown-body h3 {
   font-size: 1em;
 }

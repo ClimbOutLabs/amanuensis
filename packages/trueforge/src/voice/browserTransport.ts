@@ -7,7 +7,7 @@ import type { RawData, WebSocket } from 'ws';
 
 import { VoiceClientMessageSchema, type VoiceServerEvent } from '@truefoundry/trueforge-core/schemas/voiceLine';
 import { OUTPUT_SAMPLE_RATE } from './audio';
-import type { VoiceEvent, VoiceTransport } from './transport';
+import { socketBytes, type VoiceEvent, type VoiceTransport } from './transport';
 
 /** Sub-protocol name that the browser asks for and the server answers with. */
 export const VOICE_SOCKET_PROTOCOL = 'aman-voice.v1';
@@ -57,13 +57,6 @@ export class BrowserVoiceTransport implements VoiceTransport {
   }
 }
 
-function joined(data: RawData): Buffer {
-  if (Array.isArray(data)) {
-    return Buffer.concat(data);
-  }
-  return data instanceof ArrayBuffer ? Buffer.from(new Uint8Array(data)) : data;
-}
-
 /** What a frame from the browser is: audio bytes, or the request to end. */
 export function readClientFrame({
   data,
@@ -73,10 +66,10 @@ export function readClientFrame({
   isBinary: boolean;
 }): { kind: 'audio'; bytes: Uint8Array } | { kind: 'end' } | { kind: 'ignore' } {
   if (isBinary) {
-    return { kind: 'audio', bytes: new Uint8Array(joined(data)) };
+    return { kind: 'audio', bytes: new Uint8Array(socketBytes(data)) };
   }
   try {
-    return VoiceClientMessageSchema.safeParse(JSON.parse(joined(data).toString())).success
+    return VoiceClientMessageSchema.safeParse(JSON.parse(socketBytes(data).toString())).success
       ? { kind: 'end' }
       : { kind: 'ignore' };
   } catch {

@@ -42,6 +42,14 @@ describe('Home Assistant preset', () => {
     server = await startApprovalTestServer();
     stub = await startHomeAssistantStub({ token: CANARY_TOKEN });
     missingStub = await startHomeAssistantStub({ integrationInstalled: false });
+    // The stubs run on this computer, which the address check refuses; the operator vouches for
+    // them by listing their origins, as FIRST_PARTY_MCP_ORIGINS does for services of their own.
+    server.setFirstPartyOrigins([
+      server.mcp.origin,
+      new URL(stub.url).origin,
+      new URL(missingStub.url).origin,
+      'http://127.0.0.1:1',
+    ]);
   }, TEST_TIMEOUT_MS);
 
   afterAll(async () => {

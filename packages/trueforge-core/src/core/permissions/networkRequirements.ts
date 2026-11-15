@@ -24,6 +24,7 @@ const FIRST_PARTY_REQUIRES_NETWORK: Record<string, boolean> = {
   replace_text: false,
   write_file: false,
   run_registered_command: false,
+  run_skill_script: false,
   run_workflow: false,
   submit_implementation_plan: false,
   // Local builtins.

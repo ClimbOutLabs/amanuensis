@@ -34,6 +34,7 @@ describe('commandDownloadsPackages', () => {
     'pip3 download -r requirements.txt',
     'python3 -m pip install flask',
     'python3 -m pip download flask',
+    '.venv/bin/python -m pip install mcp',
     'cd app && npm ci',
     'npm install',
     'npm i lodash',

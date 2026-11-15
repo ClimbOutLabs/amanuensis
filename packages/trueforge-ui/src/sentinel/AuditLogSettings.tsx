@@ -58,27 +58,43 @@ function localDayAfterStartIso(value: string): string | undefined {
   return date.toISOString();
 }
 
-const AuditRow: FC<{ entry: SentinelUserAuditEntry; chatHref: string | null }> = ({ entry, chatHref }) => (
-  <li className="flex flex-col gap-1 border-b border-border/60 px-4 py-3 last:border-b-0">
-    <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-      <time dateTime={entry.created_at} className="text-xs text-text-secondary">
-        {whenLabel(entry.created_at)}
-      </time>
-      <span className={`text-xs font-medium ${outcomeTone(entry.outcome)}`}>{sentinelAuditLabel(entry)}</span>
-    </div>
-    <p className="text-sm text-text-primary">{entry.description}</p>
-    <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 text-xs text-text-secondary">
-      <span className="min-w-0 truncate">{toolDoneWords(entry.action_type)}</span>
-      {!entry.chat_exists ? (
-        <span>Chat deleted</span>
-      ) : chatHref !== null ? (
-        <a href={chatHref} className="underline hover:text-text-primary">
-          Open chat
-        </a>
-      ) : null}
-    </div>
-  </li>
-);
+// Matches the sidebar: a chat with no usable title shows as untitled.
+function chatTitle(sessionTitle: string | null): string {
+  const title = sessionTitle?.trim() ?? '';
+  return title === '' ? 'Untitled chat' : title;
+}
+
+// A row with no chat id never had a chat (a reminder set outside one), so it names no chat at all.
+const AuditRow: FC<{ entry: SentinelUserAuditEntry; chatHref: string | null }> = ({ entry, chatHref }) => {
+  const title = chatTitle(entry.session_title);
+  return (
+    <li className="flex flex-col gap-1 border-b border-border/60 px-4 py-3 last:border-b-0">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+        <time dateTime={entry.created_at} className="text-xs text-text-secondary">
+          {whenLabel(entry.created_at)}
+        </time>
+        <span className={`text-xs font-medium ${outcomeTone(entry.outcome)}`}>{sentinelAuditLabel(entry)}</span>
+      </div>
+      <p className="text-sm text-text-primary">{entry.description}</p>
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 text-xs text-text-secondary">
+        <span className="min-w-0 truncate">{toolDoneWords(entry.action_type)}</span>
+        {entry.session_id === '' ? null : !entry.chat_exists ? (
+          <span className="min-w-0 max-w-full">In: a deleted chat</span>
+        ) : chatHref !== null ? (
+          <a
+            href={chatHref}
+            title={title}
+            className="block min-w-0 max-w-full truncate underline hover:text-text-primary"
+          >
+            {`In: ${title}`}
+          </a>
+        ) : (
+          <span className="block min-w-0 max-w-full truncate">{`In: ${title}`}</span>
+        )}
+      </div>
+    </li>
+  );
+};
 
 /**
  * Settings > Audit: every Sentinel audit entry for the signed-in user across all chats, newest
@@ -143,7 +159,7 @@ export const AuditLogSettings: FC = () => {
   return (
     <div className="flex min-h-0 flex-col gap-4">
       <div>
-        <h2 className="text-base font-semibold text-text-primary">Audit</h2>
+        <h2 className="text-base font-semibold text-text-primary">Activity log</h2>
         <p className="mt-1 text-sm text-text-secondary">
           Everything the assistant asked to do on your behalf and what happened, across all your chats. Entries stay
           here even after you delete a chat.
@@ -151,10 +167,10 @@ export const AuditLogSettings: FC = () => {
       </div>
 
       <div className="flex flex-wrap items-end gap-3">
-        <label className="flex items-center gap-2 text-sm text-text-secondary">
+        <label className="flex max-w-full min-w-0 items-center gap-2 text-sm text-text-secondary">
           Show
           <select
-            className="rounded-md border border-border bg-primary-bg px-2 py-1 text-sm text-text-primary"
+            className="max-w-full min-w-0 rounded-md border border-border bg-primary-bg px-2 py-1 text-sm text-text-primary"
             value={outcome ?? ''}
             onChange={event => setOutcome(parseOutcomeFilter(event.target.value))}
           >

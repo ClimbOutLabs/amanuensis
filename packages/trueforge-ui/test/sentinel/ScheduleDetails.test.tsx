@@ -69,7 +69,6 @@ function renderCard(card: SentinelApprovalCard) {
 describe('schedule approval card', () => {
   it('says when it runs, exactly what it does, who runs it, and that it starts on approval', () => {
     renderCard(MORNING_BRIEF_CARD);
-    expect(screen.getByText('New schedule')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Create the schedule "Morning brief"?' })).toBeInTheDocument();
     const lines = Array.from(document.querySelectorAll('[data-role="schedule"] p, [data-role="schedule"] li')).map(
       node => node.textContent,
@@ -96,7 +95,7 @@ describe('schedule approval card', () => {
       cannot_be_undone: 'Once deleted, the schedule is gone for good.',
       schedule: { ...MORNING_BRIEF_CARD.schedule, action: 'delete', next_runs: [] },
     });
-    expect(screen.getByText('Delete schedule')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Delete the schedule "Morning brief"?' })).toBeInTheDocument();
     expect(screen.getByText('Once deleted, the schedule is gone for good.')).toBeInTheDocument();
     expect(screen.queryByText(/^Starts:/)).toBeNull();
     expect(screen.queryByText('Next runs')).toBeNull();

@@ -1,8 +1,15 @@
-import { renderMailAccountEnv } from '@truefoundry/trueforge-core/core/email/mailConnector/accountFile';
+import {
+  renderMailAccountEnv,
+  renderMailAccountsEnv,
+  type MailAccount,
+} from '@truefoundry/trueforge-core/core/email/mailConnector/accountFile';
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+
+/** The secret the agent under test asks every caller for; synthetic and long enough to be accepted. */
+export const MAIL_AGENT_SECRET = 'test-mail-agent-secret-0123456789abcdef';
 
 const REPO_ROOT = resolve(__dirname, '..', '..', '..', '..', '..');
 const AGENT = resolve(REPO_ROOT, 'ops/compose/mail-email/account_agent.py');
@@ -55,6 +62,8 @@ export interface MailAgentHarness {
   /** Every IMAP command the agent sent since the server started. */
   commands: () => string;
   saveAccount: (password: string) => void;
+  /** Saves another account first in the file, with the server's own account named as the default. */
+  saveBehindOtherAccount: (other: { address: string; password: string }) => void;
   /** What the agent printed. */
   output: () => string;
   stop: () => void;
@@ -107,18 +116,27 @@ export async function startMailAgent({
   });
   await eventually(() => existsSync(portFile) && readFileSync(portFile, 'utf8').trim() !== '');
   const imapPort = Number(readFileSync(portFile, 'utf8').trim());
+  const accountWith = ({ address, password: saved }: { address: string; password: string }): MailAccount => ({
+    address,
+    password: saved,
+    imap_host: 'localhost',
+    imap_port: imapPort,
+    imap_mode: 'ssl',
+    smtp_host: 'localhost',
+    smtp_port: 465,
+    smtp_mode: 'ssl',
+  });
   const saveAccount = (saved: string) => {
+    writeFileSync(accountFile, renderMailAccountEnv(accountWith({ address: ADDRESS, password: saved })), {
+      mode: 0o600,
+    });
+  };
+  const saveBehindOtherAccount = (other: { address: string; password: string }) => {
     writeFileSync(
       accountFile,
-      renderMailAccountEnv({
-        address: ADDRESS,
-        password: saved,
-        imap_host: 'localhost',
-        imap_port: imapPort,
-        imap_mode: 'ssl',
-        smtp_host: 'localhost',
-        smtp_port: 465,
-        smtp_mode: 'ssl',
+      renderMailAccountsEnv({
+        accounts: [accountWith(other), accountWith({ address: ADDRESS, password })],
+        default_address: ADDRESS,
       }),
       { mode: 0o600 },
     );
@@ -131,6 +149,7 @@ export async function startMailAgent({
       AMAN_MAIL_ACCOUNT_FILE: accountFile,
       AMAN_MAIL_ACCOUNT_PORT: String(port),
       AMAN_MAIL_LIST_SECONDS: String(list_seconds),
+      AMAN_MAIL_ACCOUNT_SECRET: MAIL_AGENT_SECRET,
       SSL_CERT_FILE: cert,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -143,7 +162,7 @@ export async function startMailAgent({
   });
   let up = false;
   await eventually(() => {
-    fetch(`${url}/account`)
+    fetch(`${url}/account`, { headers: { authorization: `Bearer ${MAIL_AGENT_SECRET}` } })
       .then(response => {
         up = response.ok;
       })
@@ -159,6 +178,7 @@ export async function startMailAgent({
       return existsSync(file) ? readFileSync(file, 'utf8') : '';
     },
     saveAccount,
+    saveBehindOtherAccount,
     output: () => output,
     stop: () => {
       agent.kill('SIGKILL');

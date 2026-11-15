@@ -41,6 +41,20 @@ async function allow(page: Page): Promise<void> {
   // The "Waiting for you" line can show before the card's buttons do.
   await button.first().waitFor({ timeout: RENDER_TIMEOUT_MS });
   assert.equal(await button.count(), 1, 'one card is waiting');
+  // Allow leads its row on every kind, and no choice is filled or inked differently from it.
+  const row = await button.evaluate(allowButton => {
+    const actions = allowButton.closest('.aui-approval-card__actions');
+    if (actions === null) throw new Error('Allow is outside the card choices');
+    return Array.from(actions.querySelectorAll('button')).map(choice => {
+      const style = getComputedStyle(choice);
+      return { label: (choice.textContent ?? '').trim(), background: style.backgroundColor, color: style.color };
+    });
+  });
+  assert.equal(row[0]?.label, 'Allow', `Allow is not the first choice: ${row.map(choice => choice.label).join(', ')}`);
+  for (const choice of row) {
+    assert.equal(choice.background, row[0]?.background, `"${choice.label}" is filled differently from Allow`);
+    assert.equal(choice.color, row[0]?.color, `"${choice.label}" has a different ink from Allow`);
+  }
   await button.click();
   await page.locator('main').getByText(FINAL_TEXT).first().waitFor({ timeout: RENDER_TIMEOUT_MS });
   await button.waitFor({ state: 'detached', timeout: RENDER_TIMEOUT_MS });

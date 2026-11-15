@@ -5,6 +5,8 @@ import { apiPath } from './publicPath';
 // The server owns the wire shape (src/schemas/reminders.ts). Bodies are checked here, never asserted: a reminder
 // this version does not recognise is dropped rather than drawn wrong.
 const REMINDERS_URL = '/api/v1/user/reminders';
+// A reminder is stored as a schedule, so deleting one goes through the schedules API, which checks it is theirs.
+const SCHEDULES_URL = '/api/v1/schedules';
 /** Schedules the server reads per page; the most it accepts. */
 const PAGE_LIMIT = 100;
 /** A stop for a server that keeps handing back a page token: no person has this many pages of schedules. */
@@ -79,7 +81,7 @@ function errorMessage({ body, status }: { body: unknown; status: number }): stri
   return `That did not work (error ${String(status)}). Try again in a moment.`;
 }
 
-/** Backs `ReminderListProvider`: every reminder the signed-in person set, read-only, gathered page by page. */
+/** Backs `ReminderListProvider`: every reminder the signed-in person set, gathered page by page, and deleting one. */
 export function createRemindersApi(fetcher: typeof fetch): RemindersApi {
   return {
     async listReminders() {
@@ -106,6 +108,13 @@ export function createRemindersApi(fetcher: typeof fetch): RemindersApi {
         pageToken = next;
       }
       return reminders;
+    },
+    async deleteReminder(id) {
+      const response = await fetcher(apiPath(`${SCHEDULES_URL}/${encodeURIComponent(id)}`), { method: 'DELETE' });
+      if (!response.ok) {
+        const body: unknown = await response.json().catch((): null => null);
+        throw new Error(errorMessage({ body, status: response.status }));
+      }
     },
   };
 }

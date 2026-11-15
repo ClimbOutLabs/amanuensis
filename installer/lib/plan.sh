@@ -234,6 +234,7 @@ print_plan() {
   fi
   if [ -n "$PLAN_UPGRADE_NOTE" ]; then ui_line "$PLAN_UPGRADE_NOTE"; fi
   print_plan_rows
+  ui_gap
   if [ "${PLAN_DOWNLOADS_AMAN:-0}" = 1 ]; then
     ui_hint "Aman's own parts are downloaded where a release published them, checked by their pinned digest, and the rest is built on this computer. Nothing is sent anywhere."
   else
@@ -397,10 +398,14 @@ plan_build() {
     for name in $(reg_names); do
       extra=$(extra_sign_in_users "$(reg_file "$name")" "$(instance_dir "$name")")
       if [ -n "$extra" ]; then plan_add todo "Remove $extra from instance $name"; fi
+      # Says which line to change when the Twilio port the settings file asks for cannot be opened.
+      sms_webhook_port "$name" >/dev/null
       if [ "$INSTALL_UPGRADE" = 1 ]; then
         plan_add todo "Restart instance $name on the new version"
       elif [ -n "$(instance_address_change "$name")" ]; then
         plan_existing_addresses "$name"
+      elif sms_settings_changed "$name"; then
+        plan_add todo "Restart instance $name with the texts settings from its settings file"
       elif docker_available_for_probes && [ "$(instance_state "$name")" = running ]; then
         plan_add have "Instance $name is running"
       else
@@ -640,7 +645,8 @@ install_execute() {
   # Before the build and the backup, so a port Tailscale would take stops the run with nothing changed.
   for name in $(reg_names); do instance_tailscale_port_check "$name"; done
   if need_new_instance && [ -z "$AMAN_PASSWORD" ]; then
-    ui_hint "Asked now so the rest of the setup runs on its own."
+    if [ -t 0 ]; then ui_ask_begin; fi
+    UI_IN_PROMPT=1 ui_hint "Asked now so the rest of the setup runs on its own."
     ask_password AMAN_PASSWORD
   fi
   ui_phase "Building the app" 4 6
@@ -670,6 +676,7 @@ install_execute() {
       recreate=
       case "$ADDRESS_CHANGED" in *" $name "*) recreate=recreate ;; esac
       if instance_enforce_single_owner "$name"; then recreate=recreate; fi
+      if sms_settings_changed "$name"; then recreate=recreate; fi
       if [ "$(instance_state "$name")" != running ] || [ -n "$recreate" ] || { instance_sandbox_wanted "$name" && ! instance_sandbox_wired "$name"; } ||
         { instance_sandbox_wanted "$name" && ! sandbox_slots_use_current_image "$name"; }; then
         if [ "$name" = "$enabled" ]; then recreate=recreate; fi

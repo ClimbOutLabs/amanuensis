@@ -17,7 +17,10 @@ function renderPreferences({ callsReady = false }: { callsReady?: boolean } = {}
   if (callsReady) {
     server.state.reach = {
       ...server.state.reach,
-      availability: { ...server.state.reach.availability, calls: { available: true, note: 'Calls are on.' } },
+      availability: {
+        ...server.state.reach.availability,
+        calls: { available: true, note: 'Calls are on.', problem: null },
+      },
     };
   }
   render(<ReachPreferences reach={server.api.reach} />);
@@ -122,10 +125,37 @@ describe('Settings, Reach me preferences', () => {
     const calls = screen.getByRole('checkbox', { name: /Phone calls/ });
     expect(texts).toHaveProperty('disabled', true);
     expect(calls).toHaveProperty('disabled', true);
-    expect(screen.getByText('Texts are not set up yet.')).toBeTruthy();
+    expect(
+      screen.getByText(/Texts are not set up on this server\. To set them up, follow the Text messages page/),
+    ).toBeTruthy();
     expect(screen.getByText('Phone calls are not set up yet.')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Try texts' })).toHaveProperty('disabled', true);
     expect(screen.getByRole('button', { name: 'Try calls' })).toHaveProperty('disabled', true);
+  });
+
+  it('offers calls once the server has them, with the privacy note beside Calls and a test call after saving', async () => {
+    const server = fakeServer([]);
+    const note =
+      "Calls and texts travel through Twilio and the phone company. The assistant's voice and the transcript are made on your computer.";
+    server.state.reach = {
+      ...server.state.reach,
+      availability: { ...server.state.reach.availability, calls: { available: true, note, problem: null } },
+    };
+    render(<ReachPreferences reach={server.api.reach} />);
+    const calls = await screen.findByRole('checkbox', { name: /Phone calls/ });
+    expect(calls).toHaveProperty('disabled', false);
+    expect(screen.getByText(note)).toBeTruthy();
+    expect(screen.queryByText('Call settings appear here once phone calls are set up.')).toBeNull();
+    expect(screen.getByRole('checkbox', { name: 'Call me for reminders I mark urgent' })).toBeTruthy();
+    expect(screen.getByLabelText('Fewest hours between two calls')).toBeTruthy();
+    // A test call is offered only once calls are saved as on.
+    expect(screen.getByRole('button', { name: 'Try calls' })).toHaveProperty('disabled', true);
+    fireEvent.click(calls);
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Try calls' })).toHaveProperty('disabled', false));
+    fireEvent.click(screen.getByRole('button', { name: 'Try calls' }));
+    await waitFor(() => expect(server.api.reach.test).toHaveBeenCalledWith('call'));
+    expect(await screen.findByText(/Calling your phone now\./)).toBeTruthy();
   });
 
   it('hides what only matters for calls until phone calls are set up, and says so', async () => {
@@ -255,6 +285,153 @@ describe('Settings, Reach me preferences', () => {
     vi.mocked(api.reach.test).mockRejectedValueOnce('offline');
     fireEvent.click(await screen.findByRole('button', { name: 'Try push' }));
     expect(await screen.findByText('That test did not go through. Try again in a minute.')).toBeTruthy();
+  });
+
+  describe('texts, once the server has a text provider', () => {
+    function renderWithTexts() {
+      const server = fakeServer([]);
+      server.state.reach = {
+        ...server.state.reach,
+        availability: {
+          ...server.state.reach.availability,
+          texts: { available: true, note: 'Texts travel through Twilio and the phone company.', problem: null },
+        },
+      };
+      render(<ReachPreferences reach={server.api.reach} />);
+      return server;
+    }
+
+    it('asks for a number first, with nothing to switch on until it is confirmed', async () => {
+      renderWithTexts();
+      expect(await screen.findByLabelText('Your phone number')).toBeTruthy();
+      expect(screen.queryByRole('checkbox', { name: /Send me texts/ })).toBeNull();
+      expect(screen.getByText(/Nothing else is sent until then\./)).toBeTruthy();
+      expect(screen.queryByRole('button', { name: 'Try texts' })).toBeNull();
+    });
+
+    it('walks number, code, confirm, then Private by default, and saves texts on', async () => {
+      const { api } = renderWithTexts();
+      fireEvent.change(await screen.findByLabelText('Your phone number'), { target: { value: '+15550111' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Send code' }));
+      await waitFor(() => expect(api.reach.texts.sendCode).toHaveBeenCalledWith('+15550111'));
+      fireEvent.change(await screen.findByLabelText('Code from the text'), { target: { value: '000000' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
+      expect((await screen.findByRole('alert')).textContent).toContain('You have 4 tries left.');
+      fireEvent.change(screen.getByLabelText('Code from the text'), { target: { value: '123456' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
+
+      expect(await screen.findByText('+15550111')).toBeTruthy();
+      const privateMode = screen.getByRole('radio', { name: /Private \(recommended\)/ });
+      expect(privateMode).toHaveProperty('checked', true);
+      expect(screen.getByText(/“Mannie: a reminder is due\. Open the app to see it\.”/)).toBeTruthy();
+      fireEvent.click(screen.getByRole('radio', { name: /Full/ }));
+      await waitFor(() => expect(api.reach.texts.setMode).toHaveBeenCalledWith('full'));
+
+      fireEvent.click(screen.getByRole('checkbox', { name: /Send me texts/ }));
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+      await waitFor(() => expect(api.reach.save).toHaveBeenCalledWith(expect.objectContaining({ textsOn: true })));
+    });
+
+    it('shows a problem with texts beside them while texts still work', async () => {
+      const server = fakeServer([]);
+      const words = 'STOP replies do not reach Aman yet. Ask the person who runs Aman to check the Twilio settings.';
+      server.state.reach = {
+        ...server.state.reach,
+        saved: true,
+        availability: { ...server.state.reach.availability, texts: { available: true, note: 'On.', problem: words } },
+      };
+      server.state.texts = {
+        phone: '+15550111',
+        confirmed: true,
+        mode: 'private',
+        optedOut: false,
+        codePending: false,
+        pendingPhone: null,
+        privatePreview: 'Mannie: a reminder is due. Open the app to see it.',
+        words: [],
+      };
+      render(<ReachPreferences reach={server.api.reach} />);
+      expect(await screen.findByText(words)).toBeTruthy();
+    });
+
+    it('turns texts off and forgets the number on remove', async () => {
+      const server = fakeServer([]);
+      server.state.reach = {
+        ...server.state.reach,
+        settings: { ...server.state.reach.settings, textsOn: true },
+        saved: true,
+        availability: { ...server.state.reach.availability, texts: { available: true, note: 'On.', problem: null } },
+      };
+      server.state.texts = {
+        phone: '+15550111',
+        confirmed: true,
+        mode: 'private',
+        optedOut: false,
+        codePending: false,
+        pendingPhone: null,
+        privatePreview: 'Mannie: a reminder is due. Open the app to see it.',
+        words: [],
+      };
+      render(<ReachPreferences reach={server.api.reach} />);
+      expect(await screen.findByRole('checkbox', { name: /Send me texts/ })).toHaveProperty('checked', true);
+      expect(screen.getByRole('button', { name: 'Try texts' })).toHaveProperty('disabled', false);
+      fireEvent.click(screen.getByRole('button', { name: 'Remove number' }));
+      await waitFor(() => expect(server.api.reach.texts.remove).toHaveBeenCalled());
+      expect(await screen.findByLabelText('Your phone number')).toBeTruthy();
+      expect(screen.queryByRole('checkbox', { name: /Send me texts/ })).toBeNull();
+    });
+
+    it('keeps texts going to the confirmed number while a new one waits for its code', async () => {
+      const server = fakeServer([]);
+      server.state.reach = {
+        ...server.state.reach,
+        settings: { ...server.state.reach.settings, textsOn: true },
+        saved: true,
+        availability: { ...server.state.reach.availability, texts: { available: true, note: 'On.', problem: null } },
+      };
+      server.state.texts = {
+        phone: '+15550111',
+        confirmed: true,
+        mode: 'private',
+        optedOut: false,
+        codePending: false,
+        pendingPhone: null,
+        privatePreview: 'Mannie: a reminder is due. Open the app to see it.',
+        words: [],
+      };
+      render(<ReachPreferences reach={server.api.reach} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Change number' }));
+      fireEvent.change(screen.getByLabelText('Your phone number'), { target: { value: '+15550122' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Send code' }));
+      expect(await screen.findByText('Texts keep going to +15550111 until you confirm +15550122.')).toBeTruthy();
+      fireEvent.change(screen.getByLabelText('Code from the text'), { target: { value: '123456' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
+      expect(await screen.findByText('+15550122')).toBeTruthy();
+      expect(screen.getByRole('checkbox', { name: /Send me texts/ })).toHaveProperty('checked', true);
+    });
+
+    it('says what a STOP did and what to do next', async () => {
+      const server = fakeServer([]);
+      server.state.reach = {
+        ...server.state.reach,
+        availability: { ...server.state.reach.availability, texts: { available: true, note: 'On.', problem: null } },
+      };
+      server.state.texts = {
+        phone: '+15550111',
+        confirmed: false,
+        mode: 'private',
+        optedOut: true,
+        codePending: false,
+        pendingPhone: null,
+        privatePreview: 'Mannie: a reminder is due. Open the app to see it.',
+        words: [],
+      };
+      render(<ReachPreferences reach={server.api.reach} />);
+      expect(
+        await screen.findByText(/You replied STOP, so texts are off\. To use them again, reply START/),
+      ).toBeTruthy();
+      expect(screen.queryByRole('checkbox', { name: /Send me texts/ })).toBeNull();
+    });
   });
 });
 

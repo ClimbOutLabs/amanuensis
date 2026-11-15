@@ -22,7 +22,7 @@ const MOUNT_RETRY_MAX = 12;
 type ApprovalFocusApi = {
   registerTarget: (approvalId: string, getElement: () => HTMLElement | null) => () => void;
   registerExpand: (toolCallId: string, expand: () => void) => () => void;
-  /** `focusPrimary` also moves keyboard focus to the card's main button; a card does not take focus on its own. */
+  /** `focusPrimary` also moves keyboard focus to the card's focus target (Allow, or the no on a safe-first card); a card does not take focus on its own. */
   focus: (approvalId: string, options?: { focusPrimary?: boolean }) => void;
   flashingApprovalId: string | null;
 };

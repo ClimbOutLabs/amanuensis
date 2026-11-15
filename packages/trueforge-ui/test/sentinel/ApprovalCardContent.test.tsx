@@ -59,12 +59,12 @@ describe('approval card content', () => {
           plain_what: 'Send Lease from your Gmail to grace@example.com?',
           email: {
             action: 'send',
-            sent_from: { address: 'ada@gmail.com', service: 'Gmail' },
             to: [{ name: 'Grace', address: 'grace@example.com' }],
             cc: [],
             bcc: [],
             subject: 'Lease',
             body: 'Thursday works.',
+            check_code: null,
             replaces: null,
             reply_in_thread: null,
             reply_to: null,
@@ -93,12 +93,12 @@ describe('approval card content', () => {
           plain_what: 'Save a draft Lease in your Gmail to grace@example.com? It is not sent.',
           email: {
             action: 'save',
-            sent_from: { address: 'ada@gmail.com', service: 'Gmail' },
             to: [{ name: '', address: 'grace@example.com' }],
             cc: [],
             bcc: [],
             subject: 'Lease',
             body: 'Draft body.',
+            check_code: null,
             replaces: null,
             reply_in_thread: null,
             reply_to: null,
@@ -216,20 +216,17 @@ describe('approval card content', () => {
   });
 
   it('asks a held search as a question with no provider id, and one status line', () => {
-    const what = searchHoldCardText({
-      summary: 'harbour tides',
-      say: 'Searches are set to ask, so Mannie is checking with you first.',
-      page: false,
-    });
+    const reason = 'Searches are set to ask, so Mannie is checking with you first.';
+    const what = searchHoldCardText({ summary: 'harbour tides', say: reason, page: false });
     const { container } = renderTicket(
       baseCard({
         plain_what: what,
-        copy: { headline: what, consequence: null, reason: null },
+        copy: { headline: 'Search the web for harbour tides?', consequence: null, reason },
         destination_host: 'Tavily',
       }),
     );
-    expect(screen.getByRole('heading', { name: what })).toBeInTheDocument();
-    expect(what.startsWith('Search the web for harbour tides?')).toBe(true);
+    expect(screen.getByRole('heading', { name: 'Search the web for harbour tides?' })).toBeInTheDocument();
+    expect(screen.getByText(reason)).toBeInTheDocument();
     expect(container.textContent).not.toMatch(/api\.tavily|tavily_/);
     expect(screen.getAllByText('Waiting for you')).toHaveLength(1);
   });
@@ -292,6 +289,6 @@ describe('approval card content', () => {
     expect(screen.getAllByText('Waiting for you')).toHaveLength(1);
     fireEvent.click(screen.getByRole('button', { name: 'Allow' }));
     expect(screen.queryAllByText('Waiting for you')).toHaveLength(0);
-    expect(screen.getByText(/^Done · /)).toBeInTheDocument();
+    expect(screen.getByText(/^Allowed · /)).toBeInTheDocument();
   });
 });

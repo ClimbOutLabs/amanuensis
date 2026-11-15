@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { changeRequestReason } from '@truefoundry/trueforge-core/core/permissions/changeRequest';
-import { ToolApprovalRequiredEvent } from '@truefoundry/trueforge-sdk/serialization';
+import { SendReceiptPersistedEvent, ToolApprovalRequiredEvent } from '@truefoundry/trueforge-sdk/serialization';
 import { describe, expect, it } from 'vitest';
 
 import { toolInvocationKey } from '@truefoundry/assistant-ui-runtime';
@@ -8,6 +8,7 @@ import { toolInvocationKey } from '@truefoundry/assistant-ui-runtime';
 import {
   approvalKey,
   entryForPart,
+  extractSendReceiptFromEvent,
   extractSentinelFromEvent,
   extractSentinelSessionContext,
   parseAuditEntries,
@@ -312,6 +313,7 @@ describe('extractSentinelFromEvent', () => {
                 bcc: [{ name: '', address: 'audit@example.com' }],
                 subject: 'Lease',
                 body: 'Thursday works.\n\nAda',
+                check_code: null,
                 replaces: { subject: 'Old lease', to: [{ name: 'Sam Lee', address: 'sam@example.com' }] },
                 reply_in_thread: { subject: 'Lease renewal', from: 'Grace <grace@example.com>' },
               },
@@ -323,12 +325,12 @@ describe('extractSentinelFromEvent', () => {
     );
     expect(extractSentinelFromEvent(parsed)[0]?.card.email).toEqual({
       action: 'change',
-      sent_from: null,
       to: [{ name: 'Grace Lee', address: 'grace@example.com' }],
       cc: [],
       bcc: [{ name: '', address: 'audit@example.com' }],
       subject: 'Lease',
       body: 'Thursday works.\n\nAda',
+      check_code: null,
       replaces: { subject: 'Old lease', to: [{ name: 'Sam Lee', address: 'sam@example.com' }] },
       reply_in_thread: { subject: 'Lease renewal', from: 'Grace <grace@example.com>' },
       reply_to: null,
@@ -348,33 +350,16 @@ describe('extractSentinelFromEvent', () => {
     // A card stored before names were kept holds bare address strings; each is read as a recipient with no name.
     expect(card({ action: 'send', to: ['grace@example.com'], cc: [], bcc: [], subject: 's', body: 'b' })).toEqual({
       action: 'send',
-      sent_from: null,
       to: [{ name: '', address: 'grace@example.com' }],
       cc: [],
       bcc: [],
       subject: 's',
       body: 'b',
+      check_code: null,
       replaces: null,
       reply_in_thread: null,
       reply_to: null,
     });
-  });
-
-  it('reads the account a mail is sent from, in either key shape, and refuses one it cannot read', () => {
-    const card = (email: unknown) =>
-      extractSentinelFromEvent({
-        type: 'tool.approval_required',
-        tool_calls: [{ id: 'call-17', tier: 3, tier3_card: { plain_what: 'Do it', email } }],
-      })[0]?.card.email;
-    const base = { action: 'send', to: [], cc: [], bcc: [], subject: 's', body: 'b', replaces: null };
-    expect(card({ ...base, sent_from: { address: 'ada@moonmail.example', service: 'Moonmail' } })).toMatchObject({
-      sent_from: { address: 'ada@moonmail.example', service: 'Moonmail' },
-    });
-    expect(card({ ...base, sentFrom: { address: 'ada@moonmail.example', service: 'Moonmail' } })).toMatchObject({
-      sent_from: { address: 'ada@moonmail.example', service: 'Moonmail' },
-    });
-    expect(card({ ...base, sent_from: { address: 'ada@moonmail.example' } })).toBeNull();
-    expect(card({ ...base, sent_from: 'Moonmail' })).toBeNull();
   });
 
   it('keeps the name a mail is sent as and its name-left-off note, and leaves them off an older card', () => {
@@ -496,9 +481,7 @@ describe('extractSentinelFromEvent', () => {
     const stored: Record<string, unknown> = { ...CALENDAR_EVENT };
     delete stored['guests_line'];
     expect(event({ ...stored, guests_emailed: true })?.guests_line).toBe('The guests will be emailed about this.');
-    expect(event({ ...stored, guests_emailed: false })?.guests_line).toBe(
-      'The guests will not be emailed about this.',
-    );
+    expect(event({ ...stored, guests_emailed: false })?.guests_line).toBe('The guests will not be emailed about this.');
   });
 
   it('reads a camel-cased card from a regenerated SDK shape', () => {
@@ -996,6 +979,107 @@ describe('chat scope offer', () => {
     expect(read({ can_chat_allow: false })?.chatAllowOffered).toBe(false);
     expect(read({ canChatAllow: true })?.chatAllowOffered).toBe(true);
     expect(read({})).not.toHaveProperty('chatAllowOffered');
+  });
+});
+
+describe('send receipts', () => {
+  const message = {
+    to: [{ name: 'Grace', address: 'grace@example.com' }],
+    cc: [],
+    bcc: [],
+    subject: 'Lease',
+    body: 'Thursday works.',
+    reply_to: null,
+  };
+  const sent = {
+    type: 'aman.email.send_receipt',
+    id: 'evt_1',
+    created_at: '2026-10-17T09:12:00.000Z',
+    tool_call_id: 'call-1',
+    result: {
+      outcome: 'sent',
+      sent_at: '2026-10-17T09:12:00.000Z',
+      sent_message_id: 'm-1',
+      check_code: 'A7F39C',
+      message,
+    },
+  };
+
+  it('reads a sent receipt from a persisted event', () => {
+    expect(extractSendReceiptFromEvent(sent)).toEqual({
+      outcome: 'sent',
+      toolCallId: 'call-1',
+      sentAt: '2026-10-17T09:12:00.000Z',
+      sentMessageId: 'm-1',
+      checkCode: 'A7F39C',
+      message,
+    });
+  });
+
+  it('reads the same receipt after the SDK has camel-cased it on the live stream', () => {
+    const parsed = SendReceiptPersistedEvent.parseOrThrow(sent, {
+      unrecognizedObjectKeys: 'passthrough',
+      allowUnrecognizedUnionMembers: true,
+      allowUnrecognizedEnumValues: true,
+    });
+    expect(extractSendReceiptFromEvent(parsed)).toEqual({
+      outcome: 'sent',
+      toolCallId: 'call-1',
+      sentAt: '2026-10-17T09:12:00.000Z',
+      sentMessageId: 'm-1',
+      checkCode: 'A7F39C',
+      message,
+    });
+  });
+
+  it('reads a send that did not go out, with its reason and nothing else', () => {
+    expect(extractSendReceiptFromEvent({ ...sent, result: { outcome: 'not_sent', reason: 'draft_changed' } })).toEqual({
+      outcome: 'not_sent',
+      toolCallId: 'call-1',
+      reason: 'draft_changed',
+    });
+  });
+
+  it.each([
+    ['a sent receipt without a message id', { ...sent, result: { ...sent.result, sent_message_id: undefined } }],
+    ['a sent receipt without a check code', { ...sent, result: { ...sent.result, check_code: undefined } }],
+    ['a sent receipt without its message', { ...sent, result: { ...sent.result, message: undefined } }],
+    [
+      'a sent receipt whose recipients are unreadable',
+      { ...sent, result: { ...sent.result, message: { ...message, to: [42] } } },
+    ],
+    ['a reason it does not know', { ...sent, result: { outcome: 'not_sent', reason: 'because' } }],
+    ['an event of another type', { ...sent, type: 'aman.skill.used' }],
+    ['an event without a tool call', { ...sent, tool_call_id: undefined }],
+  ])('drops %s instead of showing half a receipt', (_name, event) => {
+    expect(extractSendReceiptFromEvent(event)).toBeUndefined();
+  });
+
+  it('puts each receipt in the session context under its tool call', () => {
+    const context = extractSentinelSessionContext([
+      sent,
+      { ...sent, tool_call_id: 'call-2', result: { outcome: 'not_sent', reason: 'needs_ok_again' } },
+    ]);
+    expect(Object.keys(context.receipts ?? {}).sort()).toEqual(['call-1', 'call-2']);
+    expect(context.receipts?.['call-2']).toEqual({
+      outcome: 'not_sent',
+      toolCallId: 'call-2',
+      reason: 'needs_ok_again',
+    });
+  });
+
+  it('reads the check code a send card carries, and none from a card stored before codes', () => {
+    const card = {
+      plain_what: 'Send?',
+      email: { action: 'send', to: [], cc: [], bcc: [], subject: 'Lease', body: 'x', replaces: null },
+    };
+    const read = (email: Record<string, unknown>) =>
+      extractSentinelFromEvent({
+        type: 'tool.approval_required',
+        tool_calls: [{ tool_call_id: 'call-1', tier: 3, tier3_card: { ...card, email } }],
+      })[0]?.card.email?.check_code;
+    expect(read({ ...card.email, check_code: 'A7F39C' })).toBe('A7F39C');
+    expect(read(card.email)).toBeNull();
   });
 });
 

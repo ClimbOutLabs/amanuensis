@@ -29,6 +29,7 @@ import { SqliteSessionStore } from '../../../src/db/sqlite/session-store/SqliteS
 import { SqliteSpaceStore } from '../../../src/db/sqlite/space-store/SqliteSpaceStore';
 import { SqliteTurnArtifactStore } from '../../../src/db/sqlite/turn-artifact-store/SqliteTurnArtifactStore';
 import type { Database } from '../../../src/db/sqlite/types';
+import { TextContactStore } from '../../../src/db/textContactStore';
 import { TurnStreamingEventSchema } from '../../../src/schemas/events';
 import { GetTurnResponseSchema } from '../../../src/schemas/turn';
 import { MODEL_FQN, startApprovalTestServer, type ApprovalTestServer } from '../../fixtures/approvalTestServer';
@@ -237,6 +238,7 @@ describe('an imported chat never runs a tool without a fresh approval from the o
       auditStore: new SentinelAuditStore(db),
       deliveryStore: new DeliveryStore(db),
       reachSettingsStore: new ReachSettingsStore(db),
+      textContactStore: new TextContactStore(db),
       turnArtifactStore: new SqliteTurnArtifactStore(db),
       mcpServerStore: new SqliteMcpServerStore(db),
       modelProviderStore: new SqliteModelProviderStore(db),
@@ -268,6 +270,11 @@ describe('an imported chat never runs a tool without a fresh approval from the o
     configuration.PERSONA_KNOWLEDGE_DIR = join(dir, 'knowledge');
     const target = await startApprovalTestServer({ authenticator: headerAuthenticator });
     targets.push(target);
+    // The archive's connector record still points at the source instance's connector, which
+    // listens on this computer: the operator of this instance lists that origin as well, so
+    // the address check lets the connection through. The listing grants the record no trust;
+    // it stays unmarked, and its tools still ask.
+    target.setFirstPartyOrigins([target.mcp.origin, source.mcp.origin]);
     const mcp = new SqliteMcpServerStore(target.db());
     for (const server of await mcp.listServers({ tenant_id: TENANT_ID, names: undefined })) {
       await mcp.deleteServer({ tenant_id: TENANT_ID, name: server.name });

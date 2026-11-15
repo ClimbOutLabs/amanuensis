@@ -12,6 +12,9 @@ import {
 const TEN_X_STATE: SkillNetworkApprovalState = {
   declaredHosts: ['github.com', 'api.github.com'],
   approvedHosts: null,
+  allowedHosts: [],
+  deniedHosts: [],
+  sessionHosts: [],
   sendCapable: false,
 };
 
@@ -22,10 +25,20 @@ describe('parseSkillNetworkApproval', () => {
         data: {
           declared_hosts: ['gmail.googleapis.com'],
           approved_hosts: ['gmail.googleapis.com'],
+          allowed_hosts: ['mail.example.com'],
+          denied_hosts: ['trackers.example.com'],
+          session_hosts: ['once.example.com'],
           send_capable: true,
         },
       }),
-      { declaredHosts: ['gmail.googleapis.com'], approvedHosts: ['gmail.googleapis.com'], sendCapable: true },
+      {
+        declaredHosts: ['gmail.googleapis.com'],
+        approvedHosts: ['gmail.googleapis.com'],
+        allowedHosts: ['mail.example.com'],
+        deniedHosts: ['trackers.example.com'],
+        sessionHosts: ['once.example.com'],
+        sendCapable: true,
+      },
     );
   });
 
@@ -35,14 +48,26 @@ describe('parseSkillNetworkApproval', () => {
 });
 
 describe('hasSkillNetworkApproval', () => {
-  it('is true only when all three calls are present', () => {
+  it('is true only when all the calls are present', () => {
+    assert.equal(
+      hasSkillNetworkApproval({
+        getSkillNetworkApproval: async () => TEN_X_STATE,
+        approveSkillNetwork: async () => TEN_X_STATE,
+        revokeSkillNetwork: async () => undefined,
+        allowSkillNetworkHost: async () => TEN_X_STATE,
+        denySkillNetworkHost: async () => TEN_X_STATE,
+        clearSkillNetworkAllowedHost: async () => undefined,
+        clearSkillNetworkDeniedHost: async () => undefined,
+      }),
+      true,
+    );
     assert.equal(
       hasSkillNetworkApproval({
         getSkillNetworkApproval: async () => TEN_X_STATE,
         approveSkillNetwork: async () => TEN_X_STATE,
         revokeSkillNetwork: async () => undefined,
       }),
-      true,
+      false,
     );
     assert.equal(hasSkillNetworkApproval({}), false);
     assert.equal(hasSkillNetworkApproval({ getSkillNetworkApproval: async () => TEN_X_STATE }), false);
@@ -60,7 +85,7 @@ describe('the approval wording', () => {
         ),
       ),
     );
-    assert.ok(lines.some(line => line.includes('The skill can send any of your data to them')));
+    assert.ok(lines.some(line => line.includes('Any of them could pass your data on')));
     // Nothing claims the traffic is inspected or checked.
     assert.ok(!lines.join(' ').toLowerCase().includes('inspect'));
     assert.ok(!lines.join(' ').toLowerCase().includes('monitor'));
@@ -68,14 +93,21 @@ describe('the approval wording', () => {
 
   it('adds the sending line only when a declared site can send', () => {
     const withoutSend = skillNetworkApprovalLines({ skillName: 'ten-x', state: TEN_X_STATE });
-    assert.ok(!withoutSend.some(line => line.includes('send email as you')));
+    assert.ok(!withoutSend.some(line => line.includes('A skill can never send email')));
     const withSend = skillNetworkApprovalLines({
       skillName: 'google',
-      state: { declaredHosts: ['gmail.googleapis.com'], approvedHosts: null, sendCapable: true },
+      state: {
+        declaredHosts: ['gmail.googleapis.com'],
+        approvedHosts: null,
+        allowedHosts: [],
+        deniedHosts: [],
+        sessionHosts: [],
+        sendCapable: true,
+      },
     });
     assert.ok(
       withSend.includes(
-        'One of these sites can send email. This skill will be able to send email as you, without asking each time.',
+        'Aman blocks the email sites on this list. A skill can never send email. Email only goes out through Aman, and you approve each one.',
       ),
     );
   });

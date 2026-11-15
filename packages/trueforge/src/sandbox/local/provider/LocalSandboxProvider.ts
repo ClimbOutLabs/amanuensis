@@ -25,6 +25,7 @@ import {
   SandboxPathIsDirectoryError,
   shellEscape,
   validateNoPathTraversal,
+  withArgvAsCommandLine,
   withTrustedPath,
   workspaceTerminationCommand,
 } from '@truefoundry/trueforge-core/core';
@@ -672,7 +673,7 @@ export class LocalSandboxProvider implements SandboxProvider {
     // Match remote providers: an already-cancelled call must not initialize a
     // sandbox, create its virtualenv, or spawn a host process.
     throwIfSignalAborted(params.signal);
-    const lockedParams = commandWithWorkspaceLock(params);
+    const lockedParams = commandWithWorkspaceLock(withArgvAsCommandLine(params));
     this.ensureSandboxRoot(lockedParams.sandboxId);
     try {
       await this.ensureSrt(lockedParams.signal);

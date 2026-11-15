@@ -1,4 +1,4 @@
-import { Tier3CalendarEventSchema, Tier3EmailSchema } from '../../../src/core/permissions/tier';
+import { Tier3CalendarEventSchema } from '../../../src/core/permissions/tier';
 
 const EVENT = {
   action: 'create',
@@ -41,31 +41,5 @@ describe('Tier3CalendarEventSchema', () => {
     const stored: Record<string, unknown> = { ...EVENT };
     delete stored['guests_line'];
     expect(Tier3CalendarEventSchema.parse(stored).guests_line).toBe('');
-  });
-});
-
-const EMAIL = {
-  action: 'send',
-  sent_from: { address: 'ada@moonmail.example', service: 'Moonmail' },
-  to: [{ name: '', address: 'grace@example.com' }],
-  cc: [],
-  bcc: [],
-  subject: 'Lease',
-  body: 'Thursday works.',
-  replaces: null,
-  reply_in_thread: null,
-  reply_to: null,
-};
-
-describe('Tier3EmailSchema', () => {
-  it('carries the sending account of a service that exists nowhere in the product', () => {
-    const parsed = Tier3EmailSchema.parse(EMAIL);
-    expect(parsed.sent_from).toEqual({ address: 'ada@moonmail.example', service: 'Moonmail' });
-  });
-
-  it('reads a card stored before the sending account was recorded as not known', () => {
-    const stored: Record<string, unknown> = { ...EMAIL };
-    delete stored['sent_from'];
-    expect(Tier3EmailSchema.parse(stored).sent_from).toBeNull();
   });
 });

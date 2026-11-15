@@ -7,24 +7,30 @@
  * resubmission for a vanished operation) is a no-op on the memory provider's side.
  */
 import type { SessionRecord } from '@truefoundry/trueforge-core/agent-session';
+import { extractErrorLogFields, type ILLM } from '@truefoundry/trueforge-core/core';
 import type { Logger } from 'winston';
 import configuration from '../../config';
+import type { IGlobalSettingsStore } from '../../db/globalSettingsStore';
 import type { IModelProviderStore } from '../../db/modelProviderStore';
+import { readMemoryPageSortingSetting } from '../memoryPageSortingSettings';
 import type { TurnModelUsage } from '../modelUsage';
 import { sessionKeepsNothing } from '../privateChat';
 import type { TokenFactoryBudget } from '../tokenFactoryBudget';
-import { stripAssistantAbilityNotes, withoutAbilityNotes } from './assistantAbilityNotes';
-import type { RetainItem } from './hindsightClient';
-import { isOperationCompletedStatus, isOperationFailedStatus } from './hindsightClient';
+import { withoutAbilityNotes } from './assistantAbilityNotes';
+import { appendHandledNote } from './handledNotes';
 import { localDay } from './localDay';
 import { normalizedEntryBody, SESSION_ID_METADATA_KEY } from './markdownMemoryFiles';
-import type { MemoryClient } from './memoryClient';
+import { trackMemoryBackgroundWork } from './memoryBackgroundWork';
+import type { MemoryClient, RetainItem, WrittenEntry } from './memoryClient';
+import { isOperationCompletedStatus, isOperationFailedStatus } from './memoryClient';
 import {
+  ASSISTANT_RESPONSE_SOURCE,
   labeledNoteText,
   NOTE_DATE_METADATA_KEY,
   NOTE_SOURCE_METADATA_KEY,
   noteLabel,
   noteRetainContent,
+  REPLY_READ_NOTHING_METADATA_KEY,
   type MemoryNoteSource,
 } from './memoryNotes';
 import { summarizeTurnNotes, type TurnToolResult } from './memoryNotesSummarize';
@@ -34,7 +40,13 @@ import {
   USER_STATED_ORIGIN,
   type AmanMemoryOrigin,
 } from './memoryOrigin';
-import { summarizeTurnContent, usablePersonName, type SummaryFallbackReason } from './memorySummarize';
+import {
+  summarizeTurnContent,
+  usablePersonName,
+  type ProfileLineSuggestion,
+  type SummaryFallbackReason,
+} from './memorySummarize';
+import { sortWrittenNotes } from './pageSortRun';
 import { uuidv5 } from './uuidv5';
 
 /** Fixed namespace for every operation id this host mints, in the style of RFC 4122's example namespaces. */
@@ -49,13 +61,12 @@ export interface BuildRetainItemParams {
   sessionId: string;
   turnId: string;
   userText: string;
-  assistantText: string;
   completedAt: string;
-  /** Provenance for the screening posture at recall. Defaults to `user_stated`. */
-  origin?: AmanMemoryOrigin | undefined;
+  /** Where the turn's text came from. The caller always says; nothing is assumed. */
+  origin: AmanMemoryOrigin;
   /**
-   * The text to store in place of the verbatim `User:`/`Assistant:` transcript: the durable
-   * facts, or the person's own words. Set only when `MEMORY_SUMMARIZE` is on for this turn.
+   * The text to store in place of the person's words as they wrote them: the durable facts.
+   * Set only when `MEMORY_SUMMARIZE` is on for this turn.
    *
    * Screening adjudication: it inherits the turn's origin unchanged. Summarization is not a
    * trust upgrade: facts from a tool_ingested turn stay tool_ingested (the summarizer treats
@@ -66,30 +77,28 @@ export interface BuildRetainItemParams {
 }
 
 /**
- * Returns undefined when there is nothing worth retaining (both sides empty, or blank `memoryText`).
+ * The item for the person's side of a turn: the facts, or their own words when the turn is kept in full.
+ * The reply is never part of it, because what the assistant said is not what the person said; a turn kept
+ * in full saves the reply as a note of its own. Returns undefined when that side holds nothing.
  *
  * Lossless by design: this never drops or gates a memory on its origin. It only stamps the origin
  * so the recall screen can decide, later and per turn, which recalled items reach the model.
  */
 export function buildRetainItem(params: BuildRetainItemParams): RetainItem | undefined {
   const userText = params.userText.trim();
-  const assistantText = params.assistantText.trim();
-  if (!userText && !assistantText) {
-    return undefined;
-  }
-  const memoryText = params.memoryText?.trim();
-  if (memoryText === '') {
+  const content = params.memoryText === undefined ? userText && `User: ${userText}` : params.memoryText.trim();
+  if (content === '') {
     return undefined;
   }
   const item: RetainItem = {
-    content: memoryText ?? `User: ${userText}\n\nAssistant: ${assistantText}`,
+    content,
     timestamp: params.completedAt,
     document_id: `aman-${params.sessionId}-${params.turnId}`,
     metadata: {
       [SESSION_ID_METADATA_KEY]: params.sessionId,
       turn_id: params.turnId,
       source: 'aman-chat',
-      [MEMORY_ORIGIN_METADATA_KEY]: params.origin ?? USER_STATED_ORIGIN,
+      [MEMORY_ORIGIN_METADATA_KEY]: params.origin,
     },
   };
   return item;
@@ -106,10 +115,12 @@ export interface SummarizeTurnContext {
   summarizationModelFqn: string | undefined;
   tokenFactoryBudget: TokenFactoryBudget;
   modelUsage: TurnModelUsage;
+  /** Read after a save to learn whether notes are sorted onto pages. */
+  globalSettingsStore: IGlobalSettingsStore;
   /**
-   * The person's name from their personalization profile, so saved facts are written in their
-   * name. Undefined when the profile holds no name; the summarizer then writes its facts about
-   * "the person" instead.
+   * The person's name from their personalization profile. A saved fact leaves the person out and
+   * uses the name only where it would be unclear without it. Undefined when the profile holds no
+   * name; the summarizer then falls back on "the person".
    */
   personName?: string | undefined;
   /**
@@ -122,6 +133,8 @@ export interface SummarizeTurnContext {
    * not saved, so the profile is never copied into memory turn after turn.
    */
   profileLines?: readonly string[] | undefined;
+  /** Test seam; production leaves it unset and resolves a model client over the configured provider. */
+  resolveLlm?: ((modelFqn: string) => Promise<ILLM>) | undefined;
 }
 
 /** A line as compared for the profile guard: case, surrounding space, and a leading bullet do not count. */
@@ -157,6 +170,17 @@ export interface RetainOutcomeLog {
   personaName: string;
 }
 
+/**
+ * Rides the turn's fact call when the person has profile learning on, so learning costs no model
+ * call of its own: the call is shown the profile's lines and says which kept facts belong there.
+ */
+export interface TurnProfileLearning {
+  /** The learned profile's lines, in the order the model sees them numbered. */
+  knownLines: readonly string[];
+  /** Called once the fact call has run, with the lines it suggested; an empty list when it kept nothing or failed. */
+  onAnswered: (lines: readonly ProfileLineSuggestion[]) => void;
+}
+
 export interface SubmitRetainParams {
   client: MemoryClient;
   /** The chat the turn belongs to; a private chat keeps nothing, so nothing is decided or sent. */
@@ -168,8 +192,19 @@ export interface SubmitRetainParams {
   completedAt: string;
   /** The person's IANA time zone, so a summary writes dates as the day they lived. */
   timeZone?: string | undefined;
-  /** Provenance for the screening posture at recall. Defaults to `user_stated`. */
-  origin?: AmanMemoryOrigin | undefined;
+  /** Where the turn's text came from. The caller always says; nothing is assumed. */
+  origin: AmanMemoryOrigin;
+  /**
+   * True only when the caller knows the chat had read nothing from outside when the reply was written:
+   * no tool result, file, recalled note or summary that is not the person's own words, in any turn.
+   * Left out, the chat counts as having read something.
+   */
+  chatReadNothing?: boolean | undefined;
+  /**
+   * True when the reply changed a memory page with the page tools. The message then has its one writer, so the
+   * notes saved from it are kept but never sorted onto pages a second time, in other words.
+   */
+  chatWrotePages?: boolean | undefined;
   logger: Logger;
   outcomeLog?: RetainOutcomeLog | undefined;
   /** What the turn's tools returned, so concrete findings can be saved as labeled notes. */
@@ -182,6 +217,8 @@ export interface SubmitRetainParams {
    * never summarize (the full exchange is kept).
    */
   summarize?: SummarizeTurnContext | undefined;
+  /** Present only when profile learning is on for the person and this is the turn's first attempt. */
+  profileLearning?: TurnProfileLearning | undefined;
 }
 
 /**
@@ -191,21 +228,62 @@ export interface SubmitRetainParams {
  * state) is the retry path for a submission that never reached the provider.
  */
 export async function submitRetain(params: SubmitRetainParams): Promise<void> {
-  await attemptRetainSubmission(params);
+  await whileRetainUnderWay({ params, work: () => attemptRetainSubmission(params) });
+}
+
+/** The turns whose save is being decided or written in this process right now, by operation id. */
+const retainsUnderWay = new Set<string>();
+
+/**
+ * Whether a turn's save is still being worked on here. A summary on a slow model can outlast the person's next
+ * message, and until it ends the store holds no record of the turn. That is not a lost save.
+ */
+export function retainIsUnderWay(operationId: string): boolean {
+  return retainsUnderWay.has(operationId);
+}
+
+/**
+ * Counts a turn's save as under way from now until the returned function is called. The work after a turn calls
+ * this before its first step, so the next turn of the chat never finds the save unrecorded and unannounced.
+ */
+export function markRetainUnderWay(params: Pick<SubmitRetainParams, 'sessionId' | 'turnId'>): () => void {
+  const operationId = retainOperationId({ sessionId: params.sessionId, turnId: params.turnId });
+  retainsUnderWay.add(operationId);
+  return () => {
+    retainsUnderWay.delete(operationId);
+  };
+}
+
+async function whileRetainUnderWay<T>({
+  params,
+  work,
+}: {
+  params: Pick<SubmitRetainParams, 'sessionId' | 'turnId'>;
+  work: () => Promise<T>;
+}): Promise<T> {
+  const ended = markRetainUnderWay(params);
+  try {
+    return await work();
+  } finally {
+    ended();
+  }
 }
 
 /** Outcome of one retain submission attempt; `skipped` means there was nothing to retain. */
 type RetainSubmissionResult = 'submitted' | 'failed' | 'skipped';
 
-/** What one turn adds to memory: text to store, the full exchange, or nothing at all. */
+/**
+ * What one turn adds to memory: text to store, notes alone, the turn in full, or nothing at all. A turn kept
+ * in full is the person's words plus the reply as a note.
+ */
 type TurnMemory =
   | { kind: 'text'; text: string; notes: readonly LabeledNote[] }
   | { kind: 'notes'; notes: readonly LabeledNote[] }
-  | { kind: 'exchange' }
+  | { kind: 'exchange'; notes: readonly LabeledNote[] }
   | { kind: 'nothing' };
 
 /** A finding or reply note ready to store: its source, its day, and its text with the label in front. */
-interface LabeledNote {
+export interface LabeledNote {
   source: MemoryNoteSource;
   date: string;
   text: string;
@@ -262,11 +340,7 @@ async function decideNotes({
     modelUsage: summarize.modelUsage,
     logger: params.logger,
   });
-  const instant = new Date(params.completedAt);
-  const date = localDay({
-    instant: Number.isNaN(instant.getTime()) ? new Date() : instant,
-    timeZone: params.timeZone,
-  }).date;
+  const date = turnDay(params);
   const assistantName = usablePersonName(summarize.assistantName);
   return notes
     .filter(note => withoutAbilityNotes([note.text]).length > 0)
@@ -277,6 +351,26 @@ async function decideNotes({
     }));
 }
 
+/** The day the turn ended, as the person lived it. */
+function turnDay(params: SubmitRetainParams): string {
+  const instant = new Date(params.completedAt);
+  return localDay({
+    instant: Number.isNaN(instant.getTime()) ? new Date() : instant,
+    timeZone: params.timeZone,
+  }).date;
+}
+
+/** The whole reply of a turn kept in full, as a reply note; nothing when the reply only said what the assistant cannot do. */
+function fullReplyNotes(params: SubmitRetainParams): LabeledNote[] {
+  const [reply] = withoutAbilityNotes([params.assistantText.trim()]);
+  if (reply === undefined) {
+    return [];
+  }
+  const date = turnDay(params);
+  const label = noteLabel({ source: ASSISTANT_RESPONSE_SOURCE, date, assistantName: undefined });
+  return [{ source: ASSISTANT_RESPONSE_SOURCE, date, text: labeledNoteText({ label, text: reply }) }];
+}
+
 /** What the person said that is worth keeping, decided as it always was; notes are decided apart from it. */
 async function decidePersonFacts(params: SubmitRetainParams): Promise<TurnMemory> {
   const summarize = params.summarize;
@@ -285,8 +379,11 @@ async function decidePersonFacts(params: SubmitRetainParams): Promise<TurnMemory
       sessionId: params.sessionId,
       turnId: params.turnId,
     });
-    return { kind: 'exchange' };
+    return { kind: 'exchange', notes: fullReplyNotes(params) };
   }
+  // Every summary's log line says how long the model took, so a slow model shows before it fails.
+  const askedAt = Date.now();
+  const secondsTaken = (): number => Math.round((Date.now() - askedAt) / 1000);
   try {
     const result = await summarizeTurnContent({
       userText: params.userText,
@@ -300,7 +397,11 @@ async function decidePersonFacts(params: SubmitRetainParams): Promise<TurnMemory
       tokenFactoryBudget: summarize.tokenFactoryBudget,
       modelUsage: summarize.modelUsage,
       logger: params.logger,
+      profileLines: params.profileLearning?.knownLines,
+      vaultDir: params.client.pagesWriteDir?.(),
+      resolveLlm: summarize.resolveLlm,
     });
+    params.profileLearning?.onAnswered(result.status === 'summarized' ? (result.profileLines ?? []) : []);
     switch (result.status) {
       case 'summarized': {
         await recordSummaryOutcome(params, { outcome: 'summarized' });
@@ -309,6 +410,7 @@ async function decidePersonFacts(params: SubmitRetainParams): Promise<TurnMemory
           logTurnMemoryNotSaved(params, {
             message: 'it only described what the assistant could not do',
             reason: 'ability_notes_only',
+            seconds: secondsTaken(),
           });
           return { kind: 'nothing' };
         }
@@ -316,24 +418,29 @@ async function decidePersonFacts(params: SubmitRetainParams): Promise<TurnMemory
           logTurnMemoryNotSaved(params, {
             message: 'it only repeated what the profile already says',
             reason: 'profile_echo',
+            seconds: secondsTaken(),
           });
           return { kind: 'nothing' };
         }
-        params.logger.debug('Turn summarized; storing the facts instead of the exchange', {
-          sessionId: params.sessionId,
-          turnId: params.turnId,
-          factCount: facts.length,
-        });
+        logTurnSummarized(params, { factCount: facts.length, seconds: secondsTaken() });
         return { kind: 'text', text: formatFacts(facts), notes: [] };
       }
       case 'nothing_to_keep':
         await recordSummaryOutcome(params, { outcome: 'summarized' });
-        logTurnMemoryNotSaved(params, { message: 'it held nothing worth keeping', reason: 'nothing_to_keep' });
+        logTurnMemoryNotSaved(params, {
+          message: 'it held nothing worth keeping',
+          reason: 'nothing_to_keep',
+          seconds: secondsTaken(),
+        });
         return { kind: 'nothing' };
       case 'failed':
         params.logger.debug('Memory summarization failed', { reason: result.reason });
         await recordSummaryOutcome(params, { outcome: 'failed', reason: result.fallback });
-        logTurnMemoryNotSaved(params, { message: 'the summary failed', reason: result.fallback });
+        logTurnMemoryNotSaved(params, {
+          message: 'the summary failed',
+          reason: result.fallback,
+          seconds: secondsTaken(),
+        });
         return { kind: 'nothing' };
       case 'skipped':
         params.logger.debug('Memory summarization skipped', { reason: result.reason });
@@ -349,8 +456,35 @@ async function decidePersonFacts(params: SubmitRetainParams): Promise<TurnMemory
       reason: error instanceof Error ? error.message : String(error),
     });
     await recordSummaryOutcome(params, { outcome: 'failed', reason: 'model_failed' });
-    logTurnMemoryNotSaved(params, { message: 'the summary failed', reason: 'model_failed' });
+    logTurnMemoryNotSaved(params, { message: 'the summary failed', reason: 'model_failed', seconds: secondsTaken() });
     return { kind: 'nothing' };
+  }
+}
+
+/**
+ * A turn that was stopped or ended in an error has no finished reply, so it owes no summary. It is
+ * recorded as done, so the next turn does not report a failed summary for it. This applies only with
+ * summaries on: a turn kept in full is still rebuilt from the chat by the next turn. Never throws.
+ */
+export async function noteUnfinishedTurnOwesNoSummary(params: {
+  client: MemoryClient;
+  session: Pick<SessionRecord, 'is_incognito'>;
+  sessionId: string;
+  turnId: string;
+  summarize: SummarizeTurnContext | undefined;
+  logger: Logger;
+}): Promise<void> {
+  if (params.summarize === undefined || sessionKeepsNothing({ session: params.session })) {
+    return;
+  }
+  try {
+    await params.client.completeOperation?.(retainOperationId({ sessionId: params.sessionId, turnId: params.turnId }));
+  } catch (error) {
+    params.logger.debug('Recording that an unfinished turn owes no summary failed', {
+      sessionId: params.sessionId,
+      turnId: params.turnId,
+      reason: error instanceof Error ? error.message : String(error),
+    });
   }
 }
 
@@ -365,7 +499,7 @@ async function recordSummaryOutcome(
   note: { outcome: 'summarized' | 'failed'; reason?: SummaryFallbackReason | undefined },
 ): Promise<void> {
   try {
-    await params.client.noteSummaryOutcome?.(note);
+    await params.client.noteSummaryOutcome?.({ ...note, sessionId: params.sessionId });
   } catch (error) {
     params.logger.debug('Recording the turn summary outcome failed', {
       sessionId: params.sessionId,
@@ -375,8 +509,31 @@ async function recordSummaryOutcome(
   }
 }
 
+/** A kept summary's line says how long the model took, never its words; info for interactive turns only. */
+function logTurnSummarized(params: SubmitRetainParams, kept: { factCount: number; seconds: number }): void {
+  if (params.outcomeLog === undefined) {
+    params.logger.debug('Turn summarized; storing the facts instead of the exchange', {
+      sessionId: params.sessionId,
+      turnId: params.turnId,
+      factCount: kept.factCount,
+      seconds: kept.seconds,
+    });
+    return;
+  }
+  params.logger.info('Turn memory saved: the summary was kept', {
+    sessionId: params.sessionId,
+    turnId: params.turnId,
+    personaName: params.outcomeLog.personaName,
+    factCount: kept.factCount,
+    seconds: kept.seconds,
+  });
+}
+
 /** Info line for a turn that adds nothing to memory, with the one reason; interactive turns only. */
-function logTurnMemoryNotSaved(params: SubmitRetainParams, why: { message: string; reason: string }): void {
+function logTurnMemoryNotSaved(
+  params: SubmitRetainParams,
+  why: { message: string; reason: string; seconds?: number },
+): void {
   if (params.outcomeLog === undefined) {
     return;
   }
@@ -385,6 +542,7 @@ function logTurnMemoryNotSaved(params: SubmitRetainParams, why: { message: strin
     turnId: params.turnId,
     personaName: params.outcomeLog.personaName,
     reason: why.reason,
+    ...(why.seconds === undefined ? {} : { seconds: why.seconds }),
   });
 }
 
@@ -400,29 +558,61 @@ function noteRetainItems({
   params: SubmitRetainParams;
   notes: readonly LabeledNote[];
 }): RetainItem[] {
-  return notes.map((note, index) => ({
+  return notes.map((note, index) =>
+    noteRetainItem({
+      sessionId: params.sessionId,
+      turnId: params.turnId,
+      completedAt: params.completedAt,
+      note,
+      documentId: `aman-${params.sessionId}-${params.turnId}-note-${String(index)}`,
+      chatReadNothing: params.chatReadNothing === true && params.origin === USER_STATED_ORIGIN,
+    }),
+  );
+}
+
+/** One note ready for the provider, carrying the untrusted origin like every note. */
+export function noteRetainItem({
+  sessionId,
+  turnId,
+  completedAt,
+  note,
+  documentId,
+  chatReadNothing,
+}: {
+  sessionId: string;
+  turnId: string;
+  completedAt: string;
+  note: LabeledNote;
+  documentId: string;
+  /** Whether the chat had read nothing from outside when this note was made; it counts only on a reply note. */
+  chatReadNothing: boolean;
+}): RetainItem {
+  return {
     content: noteRetainContent({ text: note.text, source: note.source, date: note.date }),
-    timestamp: params.completedAt,
-    document_id: `aman-${params.sessionId}-${params.turnId}-note-${String(index)}`,
+    timestamp: completedAt,
+    document_id: documentId,
     metadata: {
-      [SESSION_ID_METADATA_KEY]: params.sessionId,
-      turn_id: params.turnId,
+      [SESSION_ID_METADATA_KEY]: sessionId,
+      turn_id: turnId,
       source: 'aman-chat',
       [MEMORY_ORIGIN_METADATA_KEY]: TOOL_INGESTED_ORIGIN,
       [NOTE_SOURCE_METADATA_KEY]: note.source,
       [NOTE_DATE_METADATA_KEY]: note.date,
+      ...(chatReadNothing && note.source === ASSISTANT_RESPONSE_SOURCE
+        ? { [REPLY_READ_NOTHING_METADATA_KEY]: 'true' }
+        : {}),
     },
-  }));
+  };
 }
 
-/** Newest daily files compared before a retain: the same window recall reads, so the check stays cheap. */
+/** Newest daily files compared before a retain. An older copy is stored again, and recall shows the two as one. */
 const DUPLICATE_CHECK_DAILY_FILES = 14;
 
 /**
  * The items not already in the vault this client writes into. An item that carries the read-content
  * origin (a finding, a reply note, or a fact from a turn that read a tool result) comes back turn after
  * turn while the same email or page is in view, so one whose body matches a live entry in the newest
- * daily files is not stored again. An older copy is not seen, which is the price of a bounded scan.
+ * daily files is not stored again.
  * Items from a turn that read nothing outside the chat, and backends with no listing, store every item.
  */
 async function withoutStoredCopies({
@@ -432,8 +622,7 @@ async function withoutStoredCopies({
   params: SubmitRetainParams;
   items: readonly RetainItem[];
 }): Promise<RetainItem[]> {
-  const readContent = (item: RetainItem): boolean =>
-    item.metadata?.[MEMORY_ORIGIN_METADATA_KEY] === TOOL_INGESTED_ORIGIN;
+  const readContent = (item: RetainItem): boolean => item.metadata[MEMORY_ORIGIN_METADATA_KEY] === TOOL_INGESTED_ORIGIN;
   if (!items.some(readContent)) {
     return [...items];
   }
@@ -462,6 +651,65 @@ async function withoutStoredCopies({
   return items.filter(item => !readContent(item) || !stored.has(normalizedEntryBody(item.content)));
 }
 
+/**
+ * Records that the notes a save has just written need no sorting, because the reply wrote to the pages itself.
+ * Never throws: a note that could not be recorded is sorted later like any other.
+ */
+async function markFiledByChat({
+  client,
+  written,
+  logger,
+}: {
+  client: MemoryClient;
+  written: readonly WrittenEntry[] | undefined;
+  logger: Logger;
+}): Promise<void> {
+  const vaultDir = client.pagesWriteDir?.();
+  if (vaultDir === undefined) {
+    return;
+  }
+  try {
+    for (const entry of written ?? []) {
+      await appendHandledNote({ vaultDir, noteId: entry.id, outcome: 'chat' });
+    }
+  } catch (error) {
+    logger.warn(
+      'Notes of a reply that wrote to the pages could not be recorded as filed.',
+      extractErrorLogFields(error),
+    );
+  }
+}
+
+/**
+ * Starts sorting the notes a save has just written, without waiting for it: the reply and the save never depend
+ * on it. The work is bounded by the summarizer's limit on calls at once.
+ */
+export function startPageSorting({
+  client,
+  written,
+  summarize,
+  timeZone,
+  logger,
+}: {
+  client: MemoryClient;
+  written: readonly WrittenEntry[] | undefined;
+  summarize: SummarizeTurnContext | undefined;
+  timeZone: string | undefined;
+  logger: Logger;
+}): void {
+  if (written === undefined || written.length === 0 || summarize === undefined) {
+    return;
+  }
+  // The setting is read now, after the save, so a change in Settings applies to the very next save.
+  void trackMemoryBackgroundWork(
+    readMemoryPageSortingSetting({ globalSettingsStore: summarize.globalSettingsStore, logger })
+      .then(setting => sortWrittenNotes({ mode: setting.mode, client, written, summarize, timeZone, logger }))
+      .catch((error: unknown) => {
+        logger.warn('Notes that were just saved could not be sorted onto pages.', extractErrorLogFields(error));
+      }),
+  );
+}
+
 async function attemptRetainSubmission(
   params: SubmitRetainParams,
   /**
@@ -480,24 +728,21 @@ async function attemptRetainSubmission(
     await params.client.completeOperation?.(retainOperationId({ sessionId: params.sessionId, turnId: params.turnId }));
     return 'skipped';
   }
-  const noteItems =
-    memory.kind === 'text' || memory.kind === 'notes' ? noteRetainItems({ params, notes: memory.notes }) : [];
+  const noteItems = noteRetainItems({ params, notes: memory.notes });
   const personItem =
     memory.kind === 'notes'
       ? undefined
       : buildRetainItem({ ...params, memoryText: memory.kind === 'text' ? memory.text : undefined });
-  const item = personItem ?? noteItems[0];
-  if (item === undefined) {
-    return 'skipped';
-  }
-  // Decided here, before any backend call, so every backend behaves the same. Returning
-  // 'skipped' also ends the verification pass, so this info line is logged once per turn.
-  // Summarized facts were already filtered, so only a kept exchange needs this check.
-  if (memory.kind === 'exchange' && stripAssistantAbilityNotes(item.content) === '') {
-    logTurnMemoryNotSaved(params, {
-      message: 'it only described what the assistant could not do',
-      reason: 'ability_notes_only',
-    });
+  if (personItem === undefined && noteItems.length === 0) {
+    // Decided here, before any backend call, so every backend behaves the same. Returning
+    // 'skipped' also ends the verification pass, so this info line is logged once per turn.
+    // Summarized facts were already filtered, so only a turn kept in full needs this line.
+    if (memory.kind === 'exchange' && params.assistantText.trim() !== '') {
+      logTurnMemoryNotSaved(params, {
+        message: 'it only described what the assistant could not do',
+        reason: 'ability_notes_only',
+      });
+    }
     return 'skipped';
   }
   const items = await withoutStoredCopies({
@@ -522,6 +767,17 @@ async function attemptRetainSubmission(
         reason: outcome.reason,
       });
       return 'failed';
+    }
+    if (params.chatWrotePages === true) {
+      await markFiledByChat({ client: params.client, written: outcome.written, logger: params.logger });
+    } else {
+      startPageSorting({
+        client: params.client,
+        written: outcome.written,
+        summarize: params.summarize,
+        timeZone: params.timeZone,
+        logger: params.logger,
+      });
     }
     return 'submitted';
   } catch (error) {
@@ -549,6 +805,10 @@ async function attemptRetainSubmission(
  * accepted by a retry), so callers can make claims about a save only on that outcome.
  */
 export async function submitRetainWithVerification(params: SubmitRetainParams): Promise<boolean> {
+  return whileRetainUnderWay({ params, work: () => retainAndVerify(params) });
+}
+
+async function retainAndVerify(params: SubmitRetainParams): Promise<boolean> {
   // Before the summary model runs: a private chat's words reach neither memory nor its notes.
   if (sessionKeepsNothing({ session: params.session })) {
     return false;

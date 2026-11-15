@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react';
 
 import { Switch } from '../atoms/primitives/Switch.js';
 import { useAssistantDisplayName } from '../components/PersonalizationContext.js';
+import { BUTTON, CARD, Check, INPUT } from './reachFields.js';
+import { TextsSettings } from './TextsSettings.js';
 import {
   NOTICING_KINDS,
   type NoticingKind,
@@ -23,46 +25,12 @@ const KIND_WORDS: Record<NoticingKind, string> = {
   approval_waiting: 'An approval waiting for you',
 };
 
-const CARD = 'border-border rounded-xl border p-4';
-const INPUT = 'border-border bg-transparent text-text-primary rounded-lg border px-2 py-1 text-sm';
-const BUTTON = 'text-text-primary border-border hover:bg-ghost-button-hover rounded-lg border px-3 py-1.5 text-sm';
-
 function browserTimezone(): string {
   try {
     return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
   } catch {
     return 'UTC';
   }
-}
-
-function Check({
-  label,
-  checked,
-  disabled = false,
-  note,
-  onChange,
-}: {
-  label: string;
-  checked: boolean;
-  disabled?: boolean;
-  note?: string;
-  onChange: (next: boolean) => void;
-}) {
-  return (
-    <label className="flex items-start gap-2 text-sm">
-      <input
-        type="checkbox"
-        className="mt-1"
-        checked={checked}
-        disabled={disabled}
-        onChange={event => onChange(event.target.checked)}
-      />
-      <span className="text-text-primary">
-        {label}
-        {note === undefined ? null : <span className="text-text-secondary block">{note}</span>}
-      </span>
-    </label>
-  );
 }
 
 function NumberField({
@@ -305,7 +273,9 @@ export function ReachPreferences({ reach }: { reach: ReachApi }) {
           ? devicesReached > 0
             ? `Sent to ${String(devicesReached)} ${devicesReached === 1 ? 'device' : 'devices'}.`
             : 'Sent, but no device has notices turned on.'
-          : 'Sent. Look under the bell.';
+          : channel === 'call'
+            ? `Calling your phone now. Answer it to hear ${assistant}.`
+            : 'Sent. Look under the bell.';
       setTrial(current => ({ ...current, [channel]: text }));
     } catch (caught) {
       setTrial(current => ({
@@ -362,16 +332,21 @@ export function ReachPreferences({ reach }: { reach: ReachApi }) {
           <span className="text-text-primary text-sm">Notices on your devices</span>
           {tryButton('push')}
         </div>
-        <div className="flex flex-wrap items-start justify-between gap-2">
-          <Check
-            label="Texts"
-            checked={draft.textsOn}
-            disabled={!availability.texts.available}
-            note={availability.texts.note}
-            onChange={next => change({ textsOn: next })}
+        {availability.texts.available ? (
+          <TextsSettings
+            texts={reach.texts}
+            textsOn={draft.textsOn}
+            savedOn={view.settings.textsOn}
+            onTextsOn={next => change({ textsOn: next })}
+            problem={availability.texts.problem}
+            tryButton={tryButton('text', !view.settings.textsOn)}
           />
-          {tryButton('text', !availability.texts.available)}
-        </div>
+        ) : (
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <Check label="Texts" checked={false} disabled note={availability.texts.note} onChange={() => undefined} />
+            {tryButton('text', true)}
+          </div>
+        )}
         <div className="flex flex-wrap items-start justify-between gap-2">
           <Check
             label="Phone calls"
@@ -380,7 +355,7 @@ export function ReachPreferences({ reach }: { reach: ReachApi }) {
             note={availability.calls.note}
             onChange={next => change({ callsOn: next })}
           />
-          {tryButton('call', !availability.calls.available)}
+          {tryButton('call', !availability.calls.available || !view.settings.callsOn)}
         </div>
       </Card>
 

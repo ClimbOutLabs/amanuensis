@@ -1,6 +1,5 @@
 import type { SessionHandle, Sessions, TurnInputItem } from '@truefoundry/trueforge-core/agent-session';
-import { DOCUMENT_REPORT_TOOL_NAMES } from '@truefoundry/trueforge-core/core';
-import { SANDBOX_FILE_WRITE_TOOLS } from '@truefoundry/trueforge-core/core/permissions/dispatch';
+import { DOCUMENT_REPORT_TOOL_NAMES, SANDBOX_FILE_WRITE_TOOLS } from '@truefoundry/trueforge-core/core';
 import { isMorningBriefPrompt, isMorningBriefSchedule } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
 import { SPACE_WRITE_TOOL_NAMES } from '@truefoundry/trueforge-core/core/spaces/toolContract';
 import { TrueForge } from '@truefoundry/trueforge-sdk';
@@ -20,6 +19,7 @@ import type { WithTransaction } from '../db/transaction';
 import { createTlsFetch, normalizeTlsUrl } from '../http/tls';
 import type { Persona } from '../personas/persona';
 import { firstRunAfter } from '../runtime/cron';
+import { plainScheduleName } from '../runtime/scheduleCapability';
 import { InvalidCronError, type ScheduleRunStatus } from '../schemas/schedule';
 import type { ControlLoop } from './Controller';
 
@@ -119,6 +119,30 @@ export interface PreparedScheduleTurn {
   agent: AgentRecord;
   /** The persona kept from the chat the schedule was made in; undefined runs the agent's own assistant. */
   persona: Persona | undefined;
+  /** The run's chat title, from the schedule's name and the run's date; never the task text. */
+  session_title: string;
+}
+
+/** Longest title a schedule run gives its chat: the same cap the first-message title uses. */
+const MAX_SCHEDULE_RUN_TITLE_LENGTH = 50;
+
+/**
+ * The title of the chat a schedule run creates: the schedule's name in plain words, then the
+ * run's date in the schedule's own time zone, so one run's chat reads apart from the next one
+ * in the chat list. The task text never becomes the title: a task is an instruction, not a
+ * name, and it reads as one everywhere the chat is named.
+ */
+export function scheduleRunSessionTitle(params: { name: string; scheduled_for: string; timezone: string }): string {
+  const date = new Intl.DateTimeFormat('en-US', {
+    timeZone: params.timezone,
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+  }).format(new Date(params.scheduled_for));
+  const suffix = ` · ${date}`;
+  const name = plainScheduleName(params.name);
+  const room = MAX_SCHEDULE_RUN_TITLE_LENGTH - suffix.length;
+  return `${name.length > room ? name.slice(0, room).trimEnd() : name}${suffix}`;
 }
 
 /**
@@ -225,6 +249,11 @@ export async function startScheduleRun(params: {
     userRef: schedule.created_by_subject.subject_id,
     agent: named,
     persona,
+    session_title: scheduleRunSessionTitle({
+      name: schedule.name,
+      scheduled_for: run.scheduled_for,
+      timezone: schedule.manifest.timezone,
+    }),
   };
 }
 

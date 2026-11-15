@@ -27,11 +27,17 @@ jobs:
     permissions:
       contents: read
 
+  upgrade-from-release:
+    name: Upgrade from the last release
+    uses: ./.github/workflows/upgrade-from-release.yml
+    permissions:
+      contents: read
+
   # One issue tracks a failing nightly run: opened on the first failure, added to while it keeps
   # failing, closed on the next pass. Runs started by hand on another branch report nothing.
   report:
     name: Report
-    needs: [suites, obsidian-notes]
+    needs: [suites, obsidian-notes, upgrade-from-release]
     if: always() && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 5

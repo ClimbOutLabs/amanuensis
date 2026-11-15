@@ -7,6 +7,7 @@ import type { ReadableStreamReadResult } from 'node:stream/web';
 import configuration from '../config';
 import type { OutputFormat } from './audio';
 import type { SpeechRateLimiter } from './speechRateLimit';
+import { speechSecretHeaders } from './speechSecret';
 import { UncheckedSpeechError, WouldChangeTextError, type SpeechSynthesizer } from './transport';
 
 const TTS_STREAM_TIMEOUT_MS = 60_000;
@@ -22,15 +23,26 @@ export function ttsBaseUrl(): string {
 
 const TTS_HEALTH_TIMEOUT_MS = 2_000;
 
-/** True when the voice service answers and has its model loaded. */
-export async function probeTtsHealth(): Promise<boolean> {
+/** How the voice service stands: not answering or not loaded, an older one that cannot check exact speech, or ready. */
+export type TtsHealth = 'down' | 'no_exact' | 'ready';
+
+export async function readTtsHealth(): Promise<TtsHealth> {
   try {
     const response = await fetch(`${ttsBaseUrl()}/healthz`, { signal: AbortSignal.timeout(TTS_HEALTH_TIMEOUT_MS) });
     const body: unknown = response.ok ? await response.json() : undefined;
-    return typeof body === 'object' && body !== null && 'model_loaded' in body && body.model_loaded === true;
+    if (typeof body !== 'object' || body === null || !('model_loaded' in body) || body.model_loaded !== true) {
+      return 'down';
+    }
+    return 'exact' in body && body.exact === true ? 'ready' : 'no_exact';
   } catch {
-    return false;
+    return 'down';
   }
+}
+
+/** True when the voice service answers and has its model loaded. */
+export async function probeTtsHealth(): Promise<boolean> {
+  const health = await readTtsHealth();
+  return health === 'ready' || health === 'no_exact';
 }
 
 /** The service marks a 400 that is no fault with a header, not wording. */
@@ -65,7 +77,27 @@ export class WholeSamples {
   }
 }
 
-/** How long a conversation waits for a free place before giving up on one sentence. */
+/** How long the service asked callers to wait before trying again, when it said. */
+function retryAfterMs(response: Response): number | undefined {
+  const seconds = Number(response.headers.get('retry-after'));
+  return Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : undefined;
+}
+
+function sleep({ ms, signal }: { ms: number; signal: AbortSignal }): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const stop = (): void => {
+      clearTimeout(timer);
+      reject(signal.reason instanceof Error ? signal.reason : new Error('stopped waiting'));
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', stop);
+      resolve();
+    }, ms);
+    signal.addEventListener('abort', stop, { once: true });
+  });
+}
+
+/** How long a conversation waits for a free place, or for a busy service, before giving up on one sentence. */
 const SHARE_WAIT_MS = 10_000;
 
 export class SidecarSpeechSynthesizer implements SpeechSynthesizer {
@@ -109,18 +141,30 @@ export class SidecarSpeechSynthesizer implements SpeechSynthesizer {
     signal: AbortSignal;
     exact?: boolean;
   }): AsyncIterable<Uint8Array> {
-    const response = await fetch(`${ttsBaseUrl()}/v1/speak`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        text,
-        format,
-        stream: true,
-        ...(exact ? { exact: true } : {}),
-        ...(this.#voice === undefined ? {} : { voice: this.#voice }),
-      }),
-      signal: AbortSignal.any([signal, AbortSignal.timeout(TTS_STREAM_TIMEOUT_MS)]),
+    const body = JSON.stringify({
+      text,
+      format,
+      stream: true,
+      ...(exact ? { exact: true } : {}),
+      ...(this.#voice === undefined ? {} : { voice: this.#voice }),
     });
+    const budgetEnds = Date.now() + SHARE_WAIT_MS;
+    let response: Response;
+    for (;;) {
+      response = await fetch(`${ttsBaseUrl()}/v1/speak`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...speechSecretHeaders() },
+        body,
+        signal: AbortSignal.any([signal, AbortSignal.timeout(TTS_STREAM_TIMEOUT_MS)]),
+      });
+      // The service answers 429 once other requests queue up; asking again after the time it names usually works.
+      const waitMs = response.status === 429 ? retryAfterMs(response) : undefined;
+      if (waitMs === undefined || Date.now() + waitMs > budgetEnds) {
+        break;
+      }
+      await response.body?.cancel().catch(() => undefined);
+      await sleep({ ms: waitMs, signal });
+    }
     // A sentence with nothing to say aloud (a lone symbol) is skipped; any other refusal is a real failure.
     if (refusedFor({ response, reason: 'nothing_to_say' })) {
       return;

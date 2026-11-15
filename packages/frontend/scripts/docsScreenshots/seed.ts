@@ -186,7 +186,7 @@ export async function askInNewChat({
   key: ChatKey;
   leaveWaiting: boolean;
   incognito: boolean;
-  /** Answers the last card with Not now instead of Allow. */
+  /** Answers the last card with its safe choice instead of Allow. */
   decline: boolean;
 }): Promise<string> {
   const chat: DemoChat = CHATS[key];
@@ -208,7 +208,10 @@ export async function askInNewChat({
       await allow.first().waitFor({ timeout: STEP_TIMEOUT_MS });
       if (leaveWaiting && index === cards - 1) return id;
       if (decline && index === cards - 1)
-        await main.getByRole('button', { name: 'Not now', exact: true }).first().click();
+        await main
+          .getByRole('button', { name: /^(Not now|Keep it)$/ })
+          .first()
+          .click();
       else await allow.first().click();
       await allow.first().waitFor({ state: 'detached', timeout: STEP_TIMEOUT_MS });
     }

@@ -23,12 +23,12 @@ export function sendReplyCard(body = 'Thursday at three works for me. See you th
     recipient: 'victor@example.com',
     email: {
       action: 'send',
-      sent_from: { address: 'me@example.com', service: 'Gmail' },
       to: [{ name: 'Victor', address: 'victor@example.com' }],
       cc: [],
       bcc: [],
       subject: 'Re: Thursday',
       body,
+      check_code: 'A7F39C',
       replaces: null,
       reply_in_thread: { subject: 'Thursday', from: 'Victor' },
       reply_to: null,

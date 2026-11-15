@@ -9,6 +9,9 @@ import { createHarnessBuilderServer } from './builderServer.js';
 import { createChatImagesCatalog } from './catalogs/chatImagesCatalog.js';
 import { createChatSearchCatalog } from './catalogs/chatSearchCatalog.js';
 import { createConnectorCatalog } from './catalogs/connectorCatalog.js';
+import { createGitCommitIdentityCatalog } from './catalogs/gitCommitIdentityCatalog.js';
+import { createMemoryNightlyCatalog, createMemoryPageSortingCatalog } from './catalogs/memoryHelpersCatalog.js';
+import { createMemoryPagesCatalog } from './catalogs/memoryPagesCatalog.js';
 import { createMemoryRecallCatalog } from './catalogs/memoryRecallCatalog.js';
 import { createMemoryScreenCatalog } from './catalogs/memoryScreenCatalog.js';
 import { createMemorySummarizeCatalog } from './catalogs/memorySummarizeCatalog.js';
@@ -77,7 +80,7 @@ export {
 } from './chatServer.js';
 export { createTrueForgeClient } from './client.js';
 export type { CreateTrueForgeClientOptions } from './client.js';
-export { getCapabilities, listConfiguredMcpServers, listModels, listSkills, readMemoryBackend } from './lists.js';
+export { getCapabilities, listConfiguredMcpServers, listModels, listSkills, memoryStatusReported } from './lists.js';
 export type { BuildIdentity } from './lists.js';
 export { createHarnessPermissionsServer, type CreateHarnessPermissionsServerOptions } from './permissionsServer.js';
 export { createScheduleServer } from './schedules/scheduleServer.js';
@@ -133,9 +136,13 @@ export function createTrueForgeAgentUIServer(options: CreateTrueForgeAgentUIServ
     chatImages: createChatImagesCatalog(clientOptions),
     memoryScreen: createMemoryScreenCatalog(clientOptions),
     memoryRecall: createMemoryRecallCatalog(clientOptions),
+    gitCommitIdentity: createGitCommitIdentityCatalog(clientOptions),
     chatSearch: createChatSearchCatalog(clientOptions),
     memorySummarize: createMemorySummarizeCatalog(clientOptions),
+    memoryPageSorting: createMemoryPageSortingCatalog(clientOptions),
+    memoryNightly: createMemoryNightlyCatalog(clientOptions),
     memoryVault: createMemoryVaultCatalog(clientOptions),
+    memoryPages: createMemoryPagesCatalog(clientOptions),
     tokenFactoryUsage: createTokenFactoryUsageCatalog(client),
   };
 }

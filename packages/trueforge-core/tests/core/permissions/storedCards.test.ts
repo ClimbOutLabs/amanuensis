@@ -130,7 +130,9 @@ const EVENT_APPROVAL = { ...APPROVAL, tool_calls: [{ ...CALL, tier3_card: EVENT_
 
 describe('stored calendar events and the guest line', () => {
   it('rebuilds the line from the flag on a stored event, in plain words', () => {
-    const item = upgradeStoredSessionEventItem(storedAs<SessionEventItem>({ turn_id: 'turn-1', event: EVENT_APPROVAL }));
+    const item = upgradeStoredSessionEventItem(
+      storedAs<SessionEventItem>({ turn_id: 'turn-1', event: EVENT_APPROVAL }),
+    );
     expect(item.event).toMatchObject({
       tool_calls: [{ tier3_card: { calendar_event: { guests_line: 'The guests will be emailed about this.' } } }],
     });

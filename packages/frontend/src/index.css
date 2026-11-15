@@ -112,6 +112,20 @@ body {
     margin: 0;
     font-size: 0.9rem;
   }
+
+  /* Open, the strip also lists what is coming up or waiting (Today, Due, Needs your OK, or the
+   * chat's own lists) under the name, in a short scrolling area so the chat keeps its room. */
+  .aman-shell > .aman-runtime-rail:not(.aman-runtime-rail--collapsed) {
+    flex-wrap: wrap;
+    max-height: 45dvh;
+    overflow-y: auto;
+  }
+
+  .aman-shell > .aman-runtime-rail .aman-runtime-rail__section.aman-runtime-rail__desk {
+    display: grid;
+    flex: 1 0 100%;
+    min-width: 0;
+  }
 }
 
 .boot-screen {

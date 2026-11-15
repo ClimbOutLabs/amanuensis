@@ -1,150 +1,74 @@
 # Memory runbook
 
-This runbook covers the Hindsight memory provider, which is what
-host-enforced memory runs on, and the evaluation-only Prompt Guard sidecar
+This runbook covers the memory pages and the evaluation-only Prompt Guard sidecar
 that can screen recall and tool output.
 
-## Hindsight memory provider
+## Memory pages
 
-Host-enforced memory is an ordinary connector carrying `memory_provider: true`
-in its manifest. Exactly one connector may hold the flag. The host recalls from
-it before every model call and retains every completed turn; the model is never
-responsible for remembering to use it. A shipped catalog preset named
-`hindsight` records the URL shape and header auth, with a placeholder host.
+A vault is one folder under `MEMORY_MARKDOWN_DIR`.
+The pages and their format are described in [the design](DESIGN.md#pages). You can edit pages by hand, and in a chat Aman can add, change or forget a single fact when you ask.
 
-### Two surfaces, one connector
+### A page is not loaded
 
-The connector URL is Hindsight's MCP endpoint, `{apiBase}/mcp/{bank}`, and it
-must name exactly one bank. Memory itself does not speak MCP. It calls the REST
-API directly at `POST {apiBase}/v1/default/banks/{bank}/memories/recall`, with
-the same resolved headers the connector carries.
+If the server log warns that page files were skipped, some files in `people/` or `matters/` do not have a lowercase
+page name. The log gives a count, not names. Look for such files and rename them, for example
+`people/Nora.md` to `people/nora.md`. Aman picks it up on the next turn.
 
-Hindsight can be configured so those two surfaces validate different
-credentials. When that happens the connector's `auth_status` reads
-`authenticated`, because the MCP endpoint accepted the key, while every recall
-fails with `HTTP 401 {"detail":"Authentication failed: Invalid API key"}`. A
-failed recall degrades the turn to no memory instead of failing it, by design,
-so nothing surfaces the breakage except the logs and the per-turn
-`aman.memory.recall` events.
+### Moving pages to a new server
 
-The fix belongs in the deployment, not the connector: set
-`HINDSIGHT_API_TENANT_API_KEY` to the same value the MCP surface accepts, with
-`HINDSIGHT_API_TENANT_EXTENSION` set to the builtin `ApiKeyTenantExtension`, so
-one credential satisfies both surfaces.
+`aman export-data` and `aman import-data` carry each vault's `people/` and `matters/` pages. Run them
+as usual; there is nothing extra to copy. After an import, the summary lists the pages that came
+along. If it says some pages have a name that is not all lowercase, rename each one to its lowercase
+name in the memory folder, for example `people/Nora.md` to `people/nora.md`; Aman reads it on the next
+turn. If it says other files were not copied, they were not `.md` pages; copy them by hand if you need
+them. If it says pages were left out because memory is kept in a different way, pages only work with the
+Markdown memory backend. `.memory-state/` and `.memory-history/` are not exported. The cache is
+rebuilt on the new server. The history starts again there, with your edits and Aman's later changes.
 
-### The connection check
+### Files in `.memory-state/`
 
-Every create or replace that leaves `memory_provider: true` on a manifest first
-runs one real recall against that REST API, with a trivial query and the
-smallest sensible budget. It resolves headers the way a turn does, including
-`${env:}` and `${file:}` references and OAuth tokens, and is bounded by
-`MEMORY_CHECK_TIMEOUT_MS` (default 5000, deliberately longer than the turn-time
-recall timeout so a cold provider is not rejected).
+- `aliases.json` is a cache of page names. Deleting it is safe. It is rebuilt on the next turn that
+  needs it.
+- `lock.<n>` and `lock.<n>.beat` are the lock that keeps two writers from changing pages at once. Leave
+  them alone while Aman is running. If every process is stopped and you still see them, delete them all.
 
-The credential is always the one the row will carry once the write lands, never
-whatever it happens to carry now. So an OAuth (`dcr`) manifest is only checked
-against a stored token when that token survives the write, meaning an already
-authorized OAuth connector saved at an unchanged URL. A new OAuth connector, one
-switched over from header auth, and one whose URL is changing (which clears
-every token for the row) all report `auth_required` instead of borrowing a
-credential that is about to be replaced or deleted.
+### The lock is busy
 
-- Check passes: the write commits.
-- Check fails: the write is rejected with 422 and the message carries the upstream reason, for example
-  `memory provider check failed: recall returned HTTP 401: Authentication failed: Invalid API key`.
-  Nothing is written, so a provider memory cannot reach is never left configured.
-- The connector changed while the check ran: the write is rejected with 409 and nothing is written.
-  The check runs before the write transaction takes its lock, so a concurrent save can land in
-  between; the transaction compares what it is about to commit against what was checked and refuses
-  the mismatch. Retry the save.
-- Flag absent or false: no check runs and the connector is never dialed.
+A chat that asks Aman to remember something while another change is running waits up to 10 seconds, then
+Aman says it could not save and asks you to try again. If a process crashed while it held the lock, the
+next writer takes over after 30 seconds of silence. You do not need to do anything.
 
-`POST /api/v1/mcp-servers/{name}/memory-check` re-runs the same check against a
-saved connector and changes nothing, so a fixed provider can be re-checked
-without toggling the flag off and on. It is the Test control beside the memory
-provider badge in connector settings. It answers 200 with `{"data":{"status":"ok"}}`
-or `{"data":{"status":"failed","code":...,"reason":...,"http_status":...,"detail":...}}`.
+### The page history
 
-Moving the flag from one connector to another in settings runs that same check
-against the candidate first. Only one connector may hold the flag, so the flag
-has to be cleared off the incumbent before it can be set on the candidate: a
-candidate that fails the check leaves the incumbent alone, and an incumbent that
-was already cleared is put back if setting the candidate then fails.
+Every change Aman makes to `people/` or `matters/` is one commit in `<vault>/.memory-history`. It is
+separate from any git repository your memory folder is already part of, and it never changes that one.
+The next time Aman writes, it first commits anything you changed by hand as "Your edits". If git is not
+installed on the server, pages are still saved but there is no history, and the log says so once. Install
+git to turn it back on.
 
-The Test connection control on every configured connector row is a different
-check: it dials the MCP endpoint through
-`GET /api/v1/mcp-servers/{name}/tools` and reports the tool count or what the
-endpoint said. On a memory provider, run both: this one clears the MCP surface,
-the memory check clears the REST API.
+If your memory folder is also a git repository of your own, `git status` there lists `.memory-history/` as a new
+folder. Aman never changes your repository or your `.gitignore`. If you want git to stop listing it, add this one
+line to your own `.gitignore`:
 
-### First-party status
+    .memory-history/
 
-A memory provider is first-party only when the operator says so in the server
-configuration. Set `FIRST_PARTY_MCP_ORIGINS` to a comma-separated list of exact
-origins (scheme, host and port, no path), for example `https://memory.internal:8443`,
-and restart. The default is empty, which means nothing is first-party. List only an
-origin that serves nothing but your own memory provider.
+A `.gitignore` of yours never hides pages from Aman's history.
 
-A save marks the connector first-party when it keeps `memory_provider: true`, the
-check above passes in that same save, and the URL's origin is on the list. The mark
-lives on the stored connector, never in the manifest, and no request can set it. The
-server also reads the list again each time it loads the connector for a turn, so
-removing an origin takes effect after the restart with no save.
+To look at the history, use the same two folders every time. Replace `VAULT` with the vault's folder:
 
-On a first-party connector a tool that declares itself read-only and explicitly
-closed-world (`readOnlyHint` true and `openWorldHint` false) runs without an approval
-card, and each run is recorded in the audit log. Everything else keeps asking,
-including a tool that leaves `openWorldHint` out, since an absent hint means open-world.
+    git --git-dir=VAULT/.memory-history --work-tree=VAULT log --stat
+    git --git-dir=VAULT/.memory-history --work-tree=VAULT show HEAD
 
-A first-party connection does not follow redirects, and neither does the check above. A
-provider whose URL answers with a 3xx (for example `http` redirecting to `https`, or a
-trailing slash) fails the check with "recall returned HTTP 308, a redirect to ...", and a
-saved first-party connector that starts redirecting fails its turns with "server answered
-HTTP 302 with a redirect to ...", so that a listed origin cannot hand its mark to another
-host. Save the address that serves the provider directly.
+To undo Aman's last change to one page, stop Aman first so that no write is running, then put the page
+back from the commit before it:
 
-Every save decides the mark afresh. A provider on an origin that is not listed stays
-a user-added connector whatever its URL looks like: another port, `http` instead of
-`https`, a longer host name, or an `@` in the URL each name a different origin. Adding
-an origin to the list does not mark a provider saved earlier. Save the provider again,
-which re-runs the check, to turn the mark on.
+    git --git-dir=VAULT/.memory-history --work-tree=VAULT checkout HEAD~1 -- people/nora.md
+    git --git-dir=VAULT/.memory-history --work-tree=VAULT commit -m "Undo by hand" people/nora.md
 
-### Per-bank tuning in Settings > Memory
-
-Everything that shapes what the host reads from a bank is set on the bank's row in Settings >
-Memory, under "Memory tuning", and travels on the connector manifest as `memory_settings`. A blank
-field keeps the server-wide `MEMORY_*` default, and the form shows that default's actual value in
-the blank field (the server reports its resolved defaults under `memory_defaults` in
-`GET /api/v1/capabilities`), so an instance with no tuning behaves exactly as its environment says
-and nobody has to guess what that is. Fields and bounds (the API rejects anything outside them):
-
-| Field                     | Wire name             | Bounds         | Server default               |
-| ------------------------- | --------------------- | -------------- | ---------------------------- |
-| Recall timeout (ms)       | `recall_timeout_ms`   | 500 to 120000  | `MEMORY_RECALL_TIMEOUT_MS`   |
-| Recall query window       | `recall_query_window` | 1 to 20        | `MEMORY_RECALL_QUERY_WINDOW` |
-| Curated layer             | `curated_enabled`     | on, off        | `MEMORY_CURATED_ENABLED`     |
-| Mental models per turn    | `curated_max_models`  | 1 to 20        | `MEMORY_CURATED_MAX_MODELS`  |
-| Mental model token budget | `curated_max_tokens`  | 64 to 8192     | `MEMORY_CURATED_MAX_TOKENS`  |
-| Reflect layer             | `reflect_enabled`     | on, off        | `MEMORY_REFLECT_ENABLED`     |
-| Reflect effort            | `reflect_budget`      | low, mid, high | `MEMORY_REFLECT_BUDGET`      |
-| Reflect answer token cap  | `reflect_max_tokens`  | 64 to 8192     | `MEMORY_REFLECT_MAX_TOKENS`  |
-| Reflect timeout (ms)      | `reflect_timeout_ms`  | 500 to 120000  | `MEMORY_REFLECT_TIMEOUT_MS`  |
-
-Saving the bank still runs the connection check; that check waits at least as long as the bank's
-recall timeout, so a bank tuned for a slow provider does not fail its own save. The effective
-values for a turn are what the `aman.memory.recall` event reflects.
-
-### Reading a failure
-
-| code                       | What it means                                                                                                 |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `invalid_url`              | The connector URL is not `{apiBase}/mcp/{bank}`. Memory would be off for every turn.                          |
-| `auth_required`            | An OAuth connector will hold no usable token for this user once the write lands.                              |
-| `header_resolution_failed` | An `${env:}` or `${file:}` header reference did not resolve on the server.                                    |
-| `timeout`                  | No answer within `MEMORY_CHECK_TIMEOUT_MS`, including a provider that sent headers and then stalled mid-body. |
-| `request_failed`           | The host could not reach the provider at all.                                                                 |
-| `http_error`               | A non-2xx answer; `http_status` and `detail` carry what the provider said.                                    |
-| `invalid_response`         | The answer was unreadable, unparseable, or over `MEMORY_MAX_RESPONSE_BYTES`.                                  |
+Change `HEAD~1` to any commit from the log to go further back. If you skip the second command, Aman
+commits the restored page as "Your edits" the next time it writes. A forgotten fact is not lost: it sits
+under "Earlier" with an end date, so you can also move the line back by hand. If a history call keeps
+failing, check that the disk has room. Deleting `.memory-history` only removes the history, never the pages.
 
 ## Evaluation-only Prompt Guard sidecar
 
@@ -174,7 +98,7 @@ accepted.
 Recall screening stays off by default. It needs a classifier sidecar that the
 installer does not start, so a default of "on" would have nothing to screen
 against: with no service reachable, every memory that came from something Aman
-read would be withheld. With it on, each recalled item and entity costs one
+read would be withheld. With it on, each recalled item and each page costs one
 classifier request per turn (run in parallel, up to the concurrency setting,
 each bounded by `MEMORY_SCREEN_TIMEOUT_MS`); the recorded runs show a median of
 about 21 ms, but a 95th percentile of about 6 s on CPU and about 0.7 s on GPU.

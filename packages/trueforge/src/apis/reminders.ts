@@ -2,7 +2,7 @@
  * Reminders API (mounted at /api/v1/user/reminders).
  *
  * Read-only: the reminders a person set, read from their schedules, for the Reminders view.
- * Making, changing and cancelling reminders stays in chat, where it already lives.
+ * Making and changing reminders stays in chat. The view deletes one through the schedule it is stored as.
  */
 import { OpenAPIHono, type RouteHandler } from '@hono/zod-openapi';
 import { InvalidPageTokenError, type ISessionStore } from '@truefoundry/trueforge-core/agent-session';

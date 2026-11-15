@@ -183,6 +183,11 @@ case "$cmd" in
             echo
             exit 0
             ;;
+          *--format*Subnet*) # The subnets of a network: lines "name subnet" in $S/network_subnets.
+            [ -f "$S/network_subnets" ] && awk -v n="$1" '$1 == n { printf "%s ", $2 }' "$S/network_subnets"
+            echo
+            exit 0
+            ;;
           *--format*) case "$1" in aman-*_default) echo "172.30.0.1 "; exit 0 ;; esac ;;
         esac
         grep -Fxq "$1" "$S/networks"
@@ -640,6 +645,11 @@ case "$cmd" in
         fi
         exit 0
         ;;
+      *"-d /run/aman-local-model"*)
+        # Whether the app image has the local model bridge's folder: an image built before it does not.
+        [ -n "${STUB_OLD_APP_IMAGE:-}" ] && exit 1
+        exit 0
+        ;;
       *host-report*)
         # The app's saved check result, written into the data volume.
         cat >"$S/host_report_$vol"
@@ -783,8 +793,15 @@ case "$cmd" in
             if [ "$svc" = calendar-caldav ] && [ "$(printf '%s\n' "$text" | grep -c '^CALDAV_\(URL\|USERNAME\|PASSWORD\|USER_EMAIL\)=.')" -lt 4 ]; then
               exit 2
             fi
+            # The mail agent refuses text that holds no complete account.
+            if [ "$svc" != calendar-caldav ] && [ "$(printf '%s\n' "$text" | grep -c '^MCP_EMAIL_SERVER_\(EMAIL_ADDRESS\|PASSWORD\|IMAP_HOST\|IMAP_PORT\|SMTP_HOST\|SMTP_PORT\)=.')" -lt 6 ]; then
+              exit 2
+            fi
             printf '%s\n' "$text" >"$store"
             echo "saved"
+            ;;
+          *--has-account*)
+            if [ -s "$store" ]; then echo saved; else echo none; fi
             ;;
           *--remove*)
             : >"$store"

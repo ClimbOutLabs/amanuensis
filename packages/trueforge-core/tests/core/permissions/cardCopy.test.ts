@@ -67,7 +67,6 @@ describe('calendarCardCopy', () => {
 describe('emailCardCopy', () => {
   const base: Tier3Email = {
     action: 'send',
-    sent_from: { address: 'ada@example.test', service: 'Example Mail' },
     to: [{ name: 'Grace Hopper', address: 'grace@example.test' }],
     cc: [],
     bcc: [],
@@ -76,6 +75,7 @@ describe('emailCardCopy', () => {
     replaces: null,
     reply_in_thread: null,
     reply_to: null,
+    check_code: null,
   };
 
   it('names the first recipient on a send and says a send cannot be unsent', () => {

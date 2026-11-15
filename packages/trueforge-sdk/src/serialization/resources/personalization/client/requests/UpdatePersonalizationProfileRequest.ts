@@ -9,11 +9,13 @@ export const UpdatePersonalizationProfileRequest: core.serialization.Schema<
     serializers.UpdatePersonalizationProfileRequest.Raw,
     TrueForge.UpdatePersonalizationProfileRequest
 > = core.serialization.object({
+    expectedRevision: core.serialization.property("expected_revision", core.serialization.number().optionalNullable()),
     profile: PersonalizationProfileContent,
 });
 
 export declare namespace UpdatePersonalizationProfileRequest {
     export interface Raw {
+        expected_revision?: (number | null | undefined) | null;
         profile: PersonalizationProfileContent.Raw;
     }
 }

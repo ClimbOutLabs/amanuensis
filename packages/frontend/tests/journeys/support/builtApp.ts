@@ -137,8 +137,11 @@ async function startLoginService({
   return { issuer, child };
 }
 
-/** Starts the sign-in service and the built server on free loopback ports, with an empty data folder. */
-export async function startBuiltApp(): Promise<BuiltApp> {
+/**
+ * Starts the sign-in service and the built server on free loopback ports, with an empty data folder.
+ * Loopback model servers the journey uses must be listed, because the app refuses unlisted local addresses.
+ */
+export async function startBuiltApp({ localModelEndpoints }: { localModelEndpoints: string[] }): Promise<BuiltApp> {
   if (!existsSync(SERVER_ENTRY)) {
     throw new Error(`The built app is missing at ${SERVER_ENTRY}. Run "pnpm build" first.`);
   }
@@ -158,6 +161,7 @@ export async function startBuiltApp(): Promise<BuiltApp> {
       PORT: String(port),
       PUBLIC_BASE_URL: origin,
       APP_DATA_DIR: join(workDir, 'data'),
+      LOCAL_MODEL_ENDPOINTS: localModelEndpoints.join(','),
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });

@@ -27,8 +27,10 @@ export type ReminderItem = {
   sessionId: string | null;
 };
 
-/** The reminders list, served by the host. Read-only: reminders are set and changed in chat. */
+/** The reminders list, served by the host. Reminders are set and changed in chat; the list can delete one. */
 export type RemindersApi = {
   /** Every reminder the person set. */
   listReminders(): Promise<ReminderItem[]>;
+  /** Deletes one reminder for good. Rejects with a message fit to show. */
+  deleteReminder(id: string): Promise<void>;
 };

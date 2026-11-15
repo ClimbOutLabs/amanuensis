@@ -67,12 +67,16 @@ Aman doesn't come with an AI model. It can't answer until you add one.
 
 How to get there: Click **Choose a model** next to **Add a model** in the checklist. Or click **More** in the left bar, then **Settings**, then **Models**.
 
+Do you run your own model on this computer, such as Ollama? Then you don't need a key. See [A model on this computer](local-model.md).
+
 1. Under "Available", find the company you have a key for, such as Together AI, OpenAI, Anthropic or Google Gemini.
 2. Click **Configure** next to it.
 3. Paste your key into **API key**.
 4. Click **Create**.
 
 The company moves up to "Configured", with a green "Connected" mark. Its models now appear in the model button under the message box. Click that button in any chat to pick another model.
+
+On Mac and Linux, `aman status` on the computer now says the model is set up.
 
 === "Computer"
 
@@ -84,16 +88,28 @@ The company moves up to "Configured", with a green "Connected" mark. Its models 
 
 To change the key later, click **Edit** next to the company. To stop using it, click **Remove**.
 
+### Check that the model works
+
+When you add a company, or change one and save it, Aman makes one small test call to it before the save finishes. The company's card then shows one line under its name, starting "Last check". The line is one of these:
+
+- "The model server answered the test call." The company is set up and ready to use.
+- "The model server refused the API key. Check the key for this provider and save again." The server answered, but it would not accept the key you saved.
+- "The model server did not answer. Check the server is running and the address is right, then save again." Nothing answered at the company's address.
+- "The model server took too long to answer. It may still be starting up, or busy loading the model. Wait a moment, then save again." The server did not answer in time. A model on your own computer can need a while to load the first time.
+- "The model server answered with an error. Check the provider settings and save again." The server answered, but the test call failed for another reason.
+
+The save goes through either way. A line that names a problem means chats using this company will hit the same problem until it is fixed.
+
 ## Step 2: tell Aman about you
 
 Aman greets you by name and speaks to you the way you ask.
 
 How to get there: Click **Open Personalization** in the checklist. Or click **More** in the left bar, then **Settings**, then **Personalization**.
 
-1. Type your name in **Your name**.
+1. On the **Your profile** tab, type your name in **Your name**.
 2. If you like, fill in how Aman should address you, and a few lines about where you live, what you work on and what you care about.
-3. If you like, give the assistant a different name under "Assistant profile".
-4. Click **Save personalization**.
+3. If you like, click the **Assistant profile** tab and give the assistant a different name.
+4. Click **Save personalization**. It saves both tabs at once.
 
 Everything you type here stays on your computer.
 
@@ -124,10 +140,6 @@ Here are a few more things to try:
 3. Click **Sign out** again to leave, or **Stay** to keep working.
 
 Your chats and settings stay on the computer. They are there when you sign in again.
-
-## New answers in your chats
-
-In the list of chats, a dot and a bold title mark a chat with an answer you have not opened yet. Open the chat and the mark goes away. Each browser keeps its own marks, so reading a chat on your phone does not clear its mark on your laptop.
 
 ## Related
 

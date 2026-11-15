@@ -194,6 +194,11 @@ export interface GetScheduledRunForInput {
   schedule_id: string;
 }
 
+export interface GetScheduledRunsForInput {
+  tenant_id: string;
+  schedule_ids: readonly string[];
+}
+
 export interface ListLatestRunsInput {
   tenant_id: string;
   schedule_ids: readonly string[];
@@ -290,6 +295,8 @@ export interface IScheduleStore<TTransaction = never> {
     input: GetScheduledRunForInput,
     transaction?: TTransaction,
   ): Promise<ScheduleRunRecord | undefined>;
+  /** The pending (`scheduled`) runs of many schedules in one lookup; at most one run per schedule. */
+  getScheduledRunsFor(input: GetScheduledRunsForInput, transaction?: TTransaction): Promise<ScheduleRunRecord[]>;
   /** Inserts a run. Throws {@link ScheduleRunConflictError} on either unique index. */
   createRun(input: CreateScheduleRunInput, transaction?: TTransaction): Promise<ScheduleRunRecord>;
   /**

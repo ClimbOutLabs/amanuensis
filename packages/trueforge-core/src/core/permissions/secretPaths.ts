@@ -106,16 +106,24 @@ function stripQuotes(text: string): string {
   return text.slice(start, end);
 }
 
-/** Division, fraction, big solidus and fullwidth slashes, which read as a path separator. */
-const LOOK_ALIKE_SLASH = /[\u2215\u2044\u29F8\uFF0F\uFF3C]/gu;
+/**
+ * Slashes and backslashes that read as a path separator: division, fraction and big solidus, the
+ * fullwidth pair, big reverse solidus and set minus.
+ */
+const LOOK_ALIKE_SLASH = /[\u2215\u2044\u29F8\uFF0F\uFF3C\u29F9\u2216]/gu;
+/** The look-alike slashes that read as a backslash rather than a forward slash. */
+const LOOK_ALIKE_BACKSLASH: ReadonlySet<string> = new Set(['\uFF3C', '\u29F9', '\u2216']);
 /** A run of valid percent escapes, which may be a multi-byte character such as `%E2%88%95`. */
 const PERCENT_ESCAPE_RUN = /(?:%[0-9A-Fa-f]{2})+/g;
 const ASCII_PERCENT_ESCAPE = /%([0-9A-Fa-f]{2})/g;
-/** Decoding stops after this many rounds, so `%252e` counts as `.`, and a deeper nest is left as text. */
+/**
+ * Decoding stops after this many rounds, so `%252e` counts as `.`. A nest deeper than the cap is
+ * past what the checks can read, so they fail closed on it instead of judging a part-decoded form.
+ */
 const MAX_DECODE_ROUNDS = 3;
 
 function foldSlashes(text: string): string {
-  return text.normalize('NFKC').replace(LOOK_ALIKE_SLASH, ch => (ch === '\uFF3C' ? '\\' : '/'));
+  return text.normalize('NFKC').replace(LOOK_ALIKE_SLASH, ch => (LOOK_ALIKE_BACKSLASH.has(ch) ? '\\' : '/'));
 }
 
 /**
@@ -152,6 +160,14 @@ function normalizePathText(text: string): string {
   return current;
 }
 
+/**
+ * Whether a normalized text was encoded deeper than the decode cap: one more round would still
+ * change it, so what it names sits past what the checks can read and they fail closed on it.
+ */
+function encodedPastDecodeCap(normalized: string): boolean {
+  return foldSlashes(decodeEscapes(normalized)) !== normalized;
+}
+
 /** A word that has a path shape: a separator, a leading `~` or dot, or a dot inside a name. */
 function looksLikePathWord(word: string): boolean {
   return /[/\\]/.test(word) || /^[~.]/.test(word) || /\.\w/.test(word);
@@ -168,7 +184,11 @@ function segmentsName(text: string): boolean {
  * word is not a read of one.
  */
 export function namesSecretPath(text: string): boolean {
-  const whole = stripQuotes(normalizePathText(text).trim());
+  const normalized = normalizePathText(text);
+  if (encodedPastDecodeCap(normalized)) {
+    return true;
+  }
+  const whole = stripQuotes(normalized.trim());
   if ((!/\s/.test(whole) || /[/\\]/.test(whole)) && segmentsName(whole)) {
     return true;
   }
@@ -189,7 +209,11 @@ const FILE_EXTENSION = /[\p{L}\p{N}_-]\.\p{L}[\p{L}\p{N}]{0,9}/u;
  * argument keeps its grant. Intl rejects path strings, so that check cannot exempt a real path.
  */
 function isPathLikeText(text: string): boolean {
-  const whole = stripQuotes(normalizePathText(text).trim());
+  const normalized = normalizePathText(text);
+  if (encodedPastDecodeCap(normalized)) {
+    return true;
+  }
+  const whole = stripQuotes(normalized.trim());
   if (/[/\\]/.test(whole) || whole.startsWith('~') || whole.startsWith('.') || DRIVE_LETTER.test(whole)) {
     return !isValidTimezone(whole);
   }

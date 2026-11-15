@@ -5,6 +5,8 @@
  */
 import type { Tier3Card } from '@truefoundry/trueforge-core/core';
 import type { VoiceServerEvent } from '@truefoundry/trueforge-core/schemas/voiceLine';
+import type { RawData } from 'ws';
+
 import type { InputFormat, OutputFormat } from './audio';
 
 /** An answer waiting on the person: the same card the chat shows, found on the finished turn. */
@@ -89,10 +91,13 @@ export type TurnOutcome =
 export interface VoiceTurnRunner {
   sendMessage({
     text,
+    startedOverHeldLine,
     signal,
     onText,
   }: {
     text: string;
+    /** The person began while a line that holds the floor, such as a call's opening, was still playing. */
+    startedOverHeldLine?: boolean;
     signal: AbortSignal;
     onText: (delta: string) => void;
   }): Promise<TurnOutcome>;
@@ -111,4 +116,12 @@ export interface VoiceTurnRunner {
   stillWaiting({ turnId, approval }: { turnId: string; approval: PendingApproval }): Promise<boolean>;
   /** Stops the turn that is running, if any. */
   cancel(): Promise<void>;
+}
+
+/** The bytes of one WebSocket message, however `ws` handed them over. */
+export function socketBytes(data: RawData): Buffer {
+  if (Array.isArray(data)) {
+    return Buffer.concat(data);
+  }
+  return data instanceof ArrayBuffer ? Buffer.from(new Uint8Array(data)) : data;
 }

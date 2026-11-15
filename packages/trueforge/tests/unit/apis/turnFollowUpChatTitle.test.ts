@@ -109,7 +109,9 @@ async function createChat(options?: { incognito?: boolean }) {
     name: 'test-provider',
     manifest: {
       type: 'openai',
-      base_url: 'https://models.test.example/v1',
+      // A public IP address, not a name: the provider is judged by the address check when a
+      // model is resolved, and a fixture name's resolution depends on the machine's DNS.
+      base_url: 'https://93.184.216.34/v1',
       auth: { api_key: 'sk-test' },
       models: [{ model_id: 'test-model', name: 'test-model', properties: { context_length: 8000 } }],
     },
@@ -186,7 +188,17 @@ async function createChat(options?: { incognito?: boolean }) {
   };
 
   /** Begins a turn with the server's own wiring; the model's reply is a finished turn. */
-  const beginTurn = async ({ turnId, text }: { turnId: string; text: string }) => {
+  const beginTurn = async ({
+    turnId,
+    text,
+    sessionTitle,
+    titlePrefix,
+  }: {
+    turnId: string;
+    text: string;
+    sessionTitle?: string;
+    titlePrefix?: string;
+  }) => {
     const record = await sessionStore.getSession({ tenant_id: TENANT_ID, session_id: SESSION_ID });
     if (record === undefined) {
       throw new Error('test session was never created');
@@ -213,6 +225,8 @@ async function createChat(options?: { incognito?: boolean }) {
       input: [{ type: 'user.message', content: text }],
       previous_turn_id: record.last_turn_id ?? undefined,
       userRef: STANDALONE_REQUEST_CONTEXT.subject.id,
+      session_title: sessionTitle,
+      session_title_prefix: titlePrefix,
       deps,
     });
   };
@@ -345,6 +359,49 @@ describe('a finished first turn gives the chat a subject title', () => {
     expect(mockHelperCall).toHaveBeenCalledTimes(1);
     expect(replaceSpy).not.toHaveBeenCalled();
     expect(await chat.readTitle()).toBe(firstMessage.slice(0, 50));
+  });
+});
+
+describe('a chat that started elsewhere says so in front of its title', () => {
+  it('keeps the prefix on the working title and on the subject title', async () => {
+    // The title call waits, so the working title can be read before it is swapped.
+    const { promise: titleAnswer, resolve: releaseTitle } = Promise.withResolvers<RawAssistantMessageWithUsage>();
+    mockHelperCall.mockReturnValue(titleAnswer);
+    chat = await createChat();
+
+    const { drainInput } = await chat.beginTurn({
+      turnId: 'turn-1',
+      text: 'Plan the dentist visit for next week',
+      titlePrefix: 'Telegram: ',
+    });
+    expect(await chat.readTitle()).toBe('Telegram: Plan the dentist visit for next week');
+    await withinBound(drainTurnEvents(drainInput), "the first turn's follow-up");
+    await chat.waitForHelperCalls(1);
+    releaseTitle(helperAnswer('Dentist visit'));
+
+    await chat.waitForTitle('Telegram: Dentist visit');
+  });
+});
+
+describe('a chat the caller named keeps that name', () => {
+  it('sets the caller title and never asks a model for a subject title', async () => {
+    mockHelperCall.mockResolvedValue(helperAnswer('Morning brief'));
+    chat = await createChat();
+    // A schedule run's first message is its task: an instruction sentence, not a name.
+    const taskText = 'Give me my morning brief: read everything new since my last brief and write one digest sentence';
+
+    const { drainInput } = await chat.beginTurn({
+      turnId: 'turn-1',
+      text: taskText,
+      sessionTitle: 'Morning brief · Tuesday, November 10',
+    });
+    await withinBound(drainTurnEvents(drainInput), "the named turn's follow-up");
+
+    // The title step starts detached when it runs at all; give it its chance,
+    // then check it never ran: no helper call, and the caller's title stands.
+    await new Promise(resolve => setTimeout(resolve, 300));
+    expect(mockHelperCall).not.toHaveBeenCalled();
+    expect(await chat.readTitle()).toBe('Morning brief · Tuesday, November 10');
   });
 });
 

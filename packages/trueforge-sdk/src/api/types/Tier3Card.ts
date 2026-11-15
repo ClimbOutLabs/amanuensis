@@ -13,11 +13,15 @@ export interface Tier3Card {
     destination: string | null;
     /** Host of the connector server that receives the call, or null when it is not a remote server. */
     destinationHost: string | null;
-    /** True when the action destroys or sends something for good, so its button wears the destructive ink. */
+    /** True when the action destroys or sends something for good, so the no choice says Keep it. */
     destructive?: boolean;
     email?: TrueForge.Tier3Email | null;
     /** True when a card carrying mail_new_recipients approves saving a draft rather than sending. */
     mailDraft?: boolean;
+    /** For a mail card: the account the message goes from. Otherwise null. */
+    mailFrom?: string | null;
+    /** For a card on the Email connector: every connected account the person could pick instead. Otherwise null. */
+    mailFromChoices?: string[] | null;
     /** For a mail send to addresses not yet on the Email list: those addresses, lowercased. Otherwise null. */
     mailNewRecipients?: string[] | null;
     /** Lines of outbound_text that a search service adds on its own, repeated so the card can fold them. Null when none. */
@@ -35,10 +39,12 @@ export interface Tier3Card {
     plainWhy: string | null;
     /** Verifiable recipient (address, handle), or null. */
     recipient: string | null;
-    /** True when the safe choice is the primary button: the action is irreversible or reaches other people. */
+    /** True when the action is irreversible or reaches other people, so the no choice uses safe words such as Keep it or Don't send. */
     safeChoice?: boolean;
     schedule?: TrueForge.Tier3Schedule | null;
     skill?: TrueForge.Tier3Skill | null;
+    /** For a skill network card: the skill, the sites it asks for, and why. Otherwise null. */
+    skillNetwork?: TrueForge.Tier3CardSkillNetwork | null;
     /** Actual cause of re-escalation, or null on first ask. */
     whyAskedAgain: string | null;
 }

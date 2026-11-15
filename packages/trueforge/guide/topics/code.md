@@ -1,7 +1,7 @@
 ---
 id: code
 title: Run code
-covers: settings:sandbox, route:runCode, route:sandboxProvider
+covers: settings:sandbox, route:runCode, route:sandboxProvider, route:gitCommitIdentity
 ---
 
 Aman can write and run small programs for you, to work out numbers, sort data or draw a chart. For example, ask it to add up your expenses by category and draw a chart. The code runs in the sandbox: a walled-off space on your computer with no internet access, where nothing it does can reach your own files or accounts.
@@ -45,6 +45,18 @@ To change your mind:
 Turning a switch off stops downloads there at once, even in chats that are already running.
 
 Allowing downloads doesn't install anything by itself. Each time Aman wants to install a package, it shows you a card first.
+
+## Choose the name on Git commits
+
+Git is a tool that keeps the history of a project. Each saved step in that history is called a commit, and it carries a name and an email. When Aman saves work with Git in the sandbox, the commit carries your own name, the one under **Personalization**. If you gave no name there, it says "Aman".
+
+To use a different name or email:
+
+1. Click **More** in the left bar, then **Settings**, then **Sandbox**.
+2. Under **Name on Git commits**, type the name and the email you want.
+3. Click **Save**.
+
+Leave a box empty to go back to what is shown in grey. A change applies from your next message. To have GitHub link the commits to you, use an email from your GitHub account.
 
 ## What asks first
 

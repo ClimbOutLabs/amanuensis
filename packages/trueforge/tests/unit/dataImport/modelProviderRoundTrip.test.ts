@@ -31,6 +31,7 @@ import { SqliteSessionStore } from '../../../src/db/sqlite/session-store/SqliteS
 import { SqliteSpaceStore } from '../../../src/db/sqlite/space-store/SqliteSpaceStore';
 import { SqliteTurnArtifactStore } from '../../../src/db/sqlite/turn-artifact-store/SqliteTurnArtifactStore';
 import type { Database } from '../../../src/db/sqlite/types';
+import { TextContactStore } from '../../../src/db/textContactStore';
 import { EMBEDDING_DIMENSIONS } from '../../../src/runtime/memory/embeddingModel';
 import { trueFoundryManaged } from '../../../src/truefoundry/errors';
 import { exportInstanceArchive } from '../../fixtures/dataTransferExport';
@@ -71,6 +72,7 @@ async function makeInstance(label: string): Promise<Instance> {
       modelProviderStore: new SqliteModelProviderStore(db),
       deliveryStore: new DeliveryStore(db),
       reachSettingsStore: new ReachSettingsStore(db),
+      textContactStore: new TextContactStore(db),
     },
     db,
     memoryDir: join(dir, 'memory'),
@@ -96,10 +98,11 @@ function importDeps(instance: Instance): DataImportDeps<Tx> {
     modelProviderStore: instance.stores.modelProviderStore,
     deliveryStore: instance.stores.deliveryStore,
     reachSettingsStore: instance.stores.reachSettingsStore,
+    textContactStore: instance.stores.textContactStore,
     agentStore: instance.stores.agentStore,
     mcpCatalog: McpCatalog.loadShipped(),
     withTransaction: callback => instance.db.transaction().execute(callback),
-    memoryTarget: { kind: 'markdown', markdownDir: instance.memoryDir },
+    memoryMarkdownDir: instance.memoryDir,
     personaKnowledgeDir: instance.knowledgeDir,
     ownerName: '',
     knowledgeEmbedder: {
@@ -251,6 +254,7 @@ describe('model provider export and import round trip', () => {
         getProviderForUpdate: () => trueFoundryManaged(),
         createProvider: () => trueFoundryManaged(),
         upsertProvider: () => trueFoundryManaged(),
+        recordProviderCheck: () => trueFoundryManaged(),
         deleteProvider: () => trueFoundryManaged(),
         listModels: (input, tx) => sqlite.listModels(input, tx),
       };

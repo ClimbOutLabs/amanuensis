@@ -194,6 +194,13 @@ describe('Markdown', () => {
     expect(document.querySelector('.code-block-header')).not.toBeInTheDocument();
   });
 
+  it('renders a code fence with no language as a block, not as inline code', () => {
+    const { container } = render(<Markdown content={'```\n=SUM(B2:B5)\n```'} />);
+    expect(screen.getByText(/=SUM\(B2:B5\)/)).toBeInTheDocument();
+    expect(container.querySelector('.aui-syntax-highlighter')).toBeInTheDocument();
+    expect(container.querySelector('.aui-inline-code')).not.toBeInTheDocument();
+  });
+
   it('renders a code fence with syntax highlighting for non-openui languages', () => {
     render(<Markdown content={'```js\nconst x = 1;\n```'} />);
     // react-syntax-highlighter renders the code as text nodes inside the fence block.

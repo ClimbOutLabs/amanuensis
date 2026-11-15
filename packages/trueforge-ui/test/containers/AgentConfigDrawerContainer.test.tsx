@@ -100,7 +100,7 @@ describe('AgentConfigDrawerContainer', () => {
     fireEvent.keyDown(window, { key: 'Escape' });
 
     expect(screen.getByTestId('config-open')).toHaveTextContent('true');
-    expect(screen.queryByRole('button', { name: 'Close agent config' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Close agent setup' })).not.toBeInTheDocument();
   });
 
   it('opens Run settings in a second right-side drawer', async () => {
@@ -117,6 +117,7 @@ describe('AgentConfigDrawerContainer', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: 'Open config' }));
+    fireEvent.click(screen.getByRole('button', { name: /More settings/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Edit Run settings' }));
 
     const runtimeDrawer = await screen.findByRole('dialog', { name: 'Run settings' });

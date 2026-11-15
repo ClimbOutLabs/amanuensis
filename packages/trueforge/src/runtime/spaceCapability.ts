@@ -44,6 +44,7 @@ import { ulid } from 'ulid';
 import type { Logger } from 'winston';
 import { z } from 'zod';
 import configuration from '../config';
+import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 import {
   SpaceAggregateRevisionConflictError,
   SpaceFolderNotFoundError,
@@ -68,6 +69,8 @@ import {
 } from '../schemas/space';
 import { browserCapability } from './browserCapability';
 import { toolImagesCapability, type ToolImagesOptions } from './chatImages/toolImagesCapability';
+import { connectionOfferCapability } from './connectionOfferCapability';
+import { OFFERABLE_CONNECTORS } from './connectionOfferRegistry';
 import { googleCapability, sandboxAttachmentStager } from './googleCapability';
 import { googleSetupCapability } from './googleSetupCapability';
 import { mapsCapability } from './mapsCapability';
@@ -1893,12 +1896,11 @@ class SpaceTool extends LocalToolMCP {
       name: EDIT_SPACE_TOOL_NAME,
       description:
         'Change part of one space by its exact space_name, without resending the body. ' +
-        'Read the space first (get_space, or list_blocks for just its blocks) and send expected_revision set to the revision that read showed: every entry addresses a block of that one revision. ' +
-        'A call naming an older revision is applied only when every block up to the one it names, and the block after it, is unchanged since that read; otherwise it is refused with the current revision and blocks. ' +
+        'Read the space first (get_space, or list_blocks for just its blocks) and send expected_revision set to the revision that read showed. ' +
+        'An older revision is applied only when every block up to the one named, and the block after it, is unchanged since that read; otherwise the call is refused with the current revision and blocks. ' +
         'A call that only appends and changes no title, purpose, status, or format is applied to the current end. ' +
-        'edits is a list of up to 50 entries: a block entry {type: "block", anchor, fingerprint, new_content} replaces the content of the block the anchor names, and empty new_content deletes it; an insert entry {type: "insert", after, fingerprint, new_content} adds new content right after the named block; an append entry {type: "append", new_content} adds content at the end of the space with no anchor or fingerprint: the way to add rows or sections. Send at most one append entry per call, and put it last. One block can be named by only one entry per call. ' +
-        "fingerprint is the block's fingerprint as that read showed it: a short code hashed from the block's exact current content. An entry whose fingerprint does not match the block at its anchor is refused and nothing is saved; when exactly one other block now carries that fingerprint, the refusal names that block's anchor. " +
-        'Anchors come from list_blocks: the name of a <!-- @block:name --> section, "preamble" for the text before the first one, or b1, b2, and so on for the blocks a body without markers is split into. ' +
+        'edits holds up to 50 entries: {type: "block", anchor, fingerprint, new_content} replaces that block, and empty new_content deletes it; {type: "insert", after, fingerprint, new_content} adds content right after that block; {type: "append", new_content} adds content at the end: the way to add rows or sections. Send at most one append entry per call, and put it last. One block can be named by only one entry per call. ' +
+        "anchor and fingerprint are the block's own, as that read showed them. A fingerprint that does not match is refused and nothing is saved; when exactly one other block carries it, the refusal names that block's anchor. " +
         'An unknown or duplicate anchor fails the whole edit and nothing is saved: do not retry the same entry. Re-read the space and correct the entry from the fresh read. ' +
         'The new content across one call may total at most ' +
         SPACE_WRITE_SIZE_TEXT +
@@ -2807,6 +2809,13 @@ export interface SpaceTurnContext {
   store: SpaceToolStore;
   /** Per-user Google logins; absent, no Gmail tools mount. */
   googleConnections?: GoogleConnectionStore | undefined;
+  /** The connection offer's footing: the remembered declines and what its connected checks read. Absent, no offer mounts. */
+  connectionOffer?:
+    | {
+        settings: Pick<IGlobalSettingsStore, 'getSetting' | 'setSetting'>;
+        mailConnectorRegistered: () => Promise<boolean>;
+      }
+    | undefined;
   /** The notes folder service; absent, no notes tools mount. */
   notesFolder?: NotesFolderTurnContext | undefined;
   authority: SpaceTurnAuthority;
@@ -2822,6 +2831,11 @@ export interface SpaceTurnContext {
   skills?: SkillTurnContext | undefined;
   /** The request carries a new message from the person, not an approval resuming the same answer. */
   startsAnswer: boolean;
+  /**
+   * No person watches this turn (a scheduled run): the connection offer never mounts, because nobody
+   * can answer its card and a decline recorded there would hold in every chat.
+   */
+  unattended?: boolean | undefined;
 }
 
 /**
@@ -2879,6 +2893,7 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
       return resolved;
     }
     const google = await this.#google(input);
+    const connectionOffer = await this.#connectionOffer(input);
     const notesFolder = await this.#notesFolder(input);
     const sentinel = this.#sentinel(input);
     const schedules = this.#space.schedules;
@@ -2920,6 +2935,7 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
             ]
           : []),
         ...google,
+        ...connectionOffer,
         ...notesFolder,
         ...(personas === undefined
           ? []
@@ -2992,6 +3008,33 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
     } catch (error) {
       this.#space.logger.warn(
         'Google tools not mounted: the Google login could not be read',
+        extractErrorLogFields(error),
+      );
+      return [];
+    }
+  }
+
+  /** A state read that fails costs the chat the connection offer, never the chat itself. */
+  async #connectionOffer(input: Parameters<MemoryTurnResourceResolver['resolveAgentDefinition']>[0]) {
+    const context = this.#space.connectionOffer;
+    if (context === undefined || configuration.AMAN_EVAL_MODE || this.#space.unattended === true) {
+      return [];
+    }
+    try {
+      const capability = await connectionOfferCapability({
+        connectors: OFFERABLE_CONNECTORS,
+        host: {
+          mailConnectorRegistered: context.mailConnectorRegistered,
+          googleConnections: this.#space.googleConnections,
+          owner: { tenant_id: input.tenant_id, created_by: input.created_by },
+        },
+        settings: context.settings,
+        tracing: input.tracing,
+      });
+      return capability === undefined ? [] : [capability];
+    } catch (error) {
+      this.#space.logger.warn(
+        'Connection offer not mounted: its state could not be read',
         extractErrorLogFields(error),
       );
       return [];

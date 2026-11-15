@@ -1454,8 +1454,12 @@ describe('ThreadListContainer', () => {
     });
     expect(within(folder).getByTestId('thread-row-Outside chat')).toBeInTheDocument();
 
-    const settledCommits = commits;
-    await new Promise(resolve => setTimeout(resolve, 100));
+    // The render that removes the folder copy can land a moment after the row goes, so wait for quiet.
+    let settledCommits = -1;
+    for (let tries = 0; tries < 20 && settledCommits !== commits; tries++) {
+      settledCommits = commits;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
     expect(commits).toBe(settledCommits);
     expect(commits).toBeLessThan(50);
   });

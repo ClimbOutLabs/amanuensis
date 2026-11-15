@@ -19,21 +19,24 @@ import {
 const BASE = EMAIL_SETTINGS_BASE_PATH;
 const CANARY = 'CANARY-APP-PASSWORD-7f3d9';
 const ACCOUNT_URL = 'http://mail-email:9559';
+const SECRET = 'test-account-secret-0123456789abcdef0123';
 
 type AgentReply = { status: number; body: unknown };
 
 /** One recorded call to the fake account agent. */
-type AgentCall = { method: string; url: string; body: string | undefined };
+type AgentCall = { method: string; url: string; body: string | undefined; authorization: string | undefined };
 
 /** The agent the server proxies to: answers from a script and records every call. */
 function makeFakeAgent() {
   const calls: AgentCall[] = [];
   let replies: AgentReply[] = [];
   const fetchImpl = async (input: string | Request | URL, init?: RequestInit): Promise<Response> => {
+    const authorization = new Headers(init?.headers).get('authorization') ?? undefined;
     calls.push({
       method: init?.method ?? 'GET',
       url: String(input),
       body: typeof init?.body === 'string' ? init.body : undefined,
+      authorization,
     });
     const reply = replies.shift();
     if (reply === undefined) {
@@ -59,17 +62,23 @@ type AgentBody = Record<string, unknown>;
 const NOT_CONNECTED: AgentBody = { connected: false, sign_in: null };
 
 /** A connected agent body for a custom account, carrying the canary where a leak would show. */
-const CONNECTED: AgentBody = {
-  connected: true,
-  address: 'person@example.com',
-  imap_host: 'imap.example.com',
-  imap_port: 993,
-  imap_mode: 'ssl',
-  smtp_host: 'smtp.example.com',
-  smtp_port: 587,
-  smtp_mode: 'starttls',
-  sign_in: 'ok',
-};
+function connectedBody(overrides: AgentBody = {}): AgentBody {
+  const flat: AgentBody = {
+    connected: true,
+    address: 'person@example.com',
+    imap_host: 'imap.example.com',
+    imap_port: 993,
+    imap_mode: 'ssl',
+    smtp_host: 'smtp.example.com',
+    smtp_port: 587,
+    smtp_mode: 'starttls',
+    sign_in: 'ok',
+    ...overrides,
+  };
+  const { connected: _connected, sign_in, ...account } = flat;
+  const address = flat['address'];
+  return { ...flat, accounts: [{ ...account, sign_in }], default: typeof address === 'string' ? address : null };
+}
 
 /** A fake MCP store for the connector registration the save and remove handlers keep in step. */
 function makeFakeStore() {
@@ -96,6 +105,7 @@ function makeFakeStore() {
 describe('the email settings endpoints', () => {
   const originalAccountUrl = configuration.MAIL_EMAIL_ACCOUNT_URL;
   const originalMcpUrl = configuration.MAIL_SIDECAR_MCP_URL;
+  const originalSecret = configuration.MAIL_EMAIL_ACCOUNT_SECRET;
   let agent: ReturnType<typeof makeFakeAgent>;
   let fakeStore: ReturnType<typeof makeFakeStore>;
   let app: Hono;
@@ -104,6 +114,7 @@ describe('the email settings endpoints', () => {
     agent = makeFakeAgent();
     fakeStore = makeFakeStore();
     configuration.MAIL_EMAIL_ACCOUNT_URL = ACCOUNT_URL;
+    configuration.MAIL_EMAIL_ACCOUNT_SECRET = SECRET;
     // An instantly refused address: the registration sync also tries a first send-list fill
     // against it, and a real sidecar name would hang the test on DNS and retries.
     configuration.MAIL_SIDECAR_MCP_URL = 'http://127.0.0.1:1/mcp';
@@ -119,6 +130,7 @@ describe('the email settings endpoints', () => {
   afterEach(() => {
     configuration.MAIL_EMAIL_ACCOUNT_URL = originalAccountUrl;
     configuration.MAIL_SIDECAR_MCP_URL = originalMcpUrl;
+    configuration.MAIL_EMAIL_ACCOUNT_SECRET = originalSecret;
   });
 
   async function call(input: {
@@ -169,7 +181,7 @@ describe('the email settings endpoints', () => {
   });
 
   it('reports Connected with the address, and never the password', async () => {
-    agent.script([{ status: 200, body: { ...CONNECTED, password: CANARY } }]);
+    agent.script([{ status: 200, body: connectedBody({ password: CANARY }) }]);
     const { status, text } = await call({ method: 'GET', path: '/status' });
     expect(status).toBe(200);
     expect(text).not.toContain(CANARY);
@@ -180,21 +192,21 @@ describe('the email settings endpoints', () => {
   });
 
   it('reports a stopped sign-in in plain words', async () => {
-    agent.script([{ status: 200, body: { ...CONNECTED, sign_in: 'refused' } }]);
+    agent.script([{ status: 200, body: connectedBody({ sign_in: 'refused' }) }]);
     const { text } = await call({ method: 'GET', path: '/status' });
     expect(JSON.parse(text).data.state).toBe('sign_in_stopped');
   });
 
   it('says not working when the saved account cannot be signed in to right now', async () => {
-    agent.script([{ status: 200, body: { ...CONNECTED, sign_in: 'unreachable' } }]);
+    agent.script([{ status: 200, body: connectedBody({ sign_in: 'unreachable' }) }]);
     const { text } = await call({ method: 'GET', path: '/status' });
     expect(JSON.parse(text).data.state).toBe('not_working');
   });
 
   it('keeps Email registered when the saved login is refused on a status read, since a passing mail error can look like a refusal', async () => {
     agent.script([
-      { status: 200, body: CONNECTED },
-      { status: 200, body: { ...CONNECTED, sign_in: 'refused' } },
+      { status: 200, body: connectedBody() },
+      { status: 200, body: connectedBody({ sign_in: 'refused' }) },
     ]);
     await call({ method: 'GET', path: '/status' });
     const { text } = await call({ method: 'GET', path: '/status' });
@@ -204,7 +216,7 @@ describe('the email settings endpoints', () => {
 
   it('every status read settles the registration from what the agent holds', async () => {
     agent.script([
-      { status: 200, body: CONNECTED },
+      { status: 200, body: connectedBody() },
       { status: 200, body: NOT_CONNECTED },
     ]);
     await call({ method: 'GET', path: '/status' });
@@ -215,6 +227,30 @@ describe('the email settings endpoints', () => {
 
   it('hides the card when the instance has no email connector to configure', async () => {
     configuration.MAIL_EMAIL_ACCOUNT_URL = undefined;
+    const { text } = await call({ method: 'GET', path: '/status' });
+    expect(JSON.parse(text).data.available).toBe(false);
+    expect(agent.calls).toHaveLength(0);
+  });
+
+  it('presents the instance secret to the agent on every call, and nothing else as a credential', async () => {
+    agent.script([
+      { status: 200, body: NOT_CONNECTED },
+      { status: 200, body: connectedBody() },
+      { status: 200, body: NOT_CONNECTED },
+    ]);
+    await call({ method: 'GET', path: '/status' });
+    await call({
+      method: 'POST',
+      path: '/',
+      body: { provider_key: 'gmail', address: 'person@gmail.com', password: CANARY },
+    });
+    await call({ method: 'DELETE', path: '/', body: {} });
+    expect(agent.calls.map(sent => sent.authorization)).toEqual(Array(3).fill(`Bearer ${SECRET}`));
+    expect(agent.calls.map(sent => sent.url).join(' ')).not.toContain(SECRET);
+  });
+
+  it('leaves the card off while the agent has no secret to answer to', async () => {
+    configuration.MAIL_EMAIL_ACCOUNT_SECRET = undefined;
     const { text } = await call({ method: 'GET', path: '/status' });
     expect(JSON.parse(text).data.available).toBe(false);
     expect(agent.calls).toHaveLength(0);
@@ -236,7 +272,7 @@ describe('the email settings endpoints', () => {
   });
 
   it('checks a Gmail sign-in before saving, and registers the connector', async () => {
-    agent.script([{ status: 200, body: { ...CONNECTED, address: 'person@gmail.com' } }]);
+    agent.script([{ status: 200, body: connectedBody({ address: 'person@gmail.com' }) }]);
     const { status, text } = await call({
       method: 'POST',
       path: '/',
@@ -307,7 +343,7 @@ describe('the email settings endpoints', () => {
   });
 
   it('a save answer that echoes the password is dropped by the status parser', async () => {
-    agent.script([{ status: 200, body: { ...CONNECTED, password: CANARY, debug: CANARY } }]);
+    agent.script([{ status: 200, body: connectedBody({ password: CANARY, debug: CANARY }) }]);
     const { status, text } = await call({
       method: 'POST',
       path: '/',
@@ -368,7 +404,7 @@ describe('the email settings endpoints', () => {
 
   it('remove deletes the account and the connector registration', async () => {
     agent.script([
-      { status: 200, body: { ...CONNECTED, address: 'person@gmail.com' } },
+      { status: 200, body: connectedBody({ address: 'person@gmail.com' }) },
       { status: 200, body: NOT_CONNECTED },
     ]);
     await call({

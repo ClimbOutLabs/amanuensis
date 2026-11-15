@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The ending of an install: one compact table per instance, the doctor's one line or only its problems, and the
+# The ending of an install: one address, who signs in and only the rows that need something per instance, the doctor's one line or only its problems, and the
 # command to upgrade later. Each case is compared with the exact text a person sees.
 set -euo pipefail
 # shellcheck source=../helpers.sh
@@ -7,50 +7,45 @@ set -euo pipefail
 
 # From the doctor's phase on, with this run's paths replaced and the elapsed time (which varies) dropped.
 ending() {
-  printf '%s\n' "$OUT" | sed -n '/^Checking the result/,$p' |
+  printf '%s\n' "$OUT" | sed -n '/^+- \[ 6 of 6 \]  Checking the result/,$p' |
     sed "s|$SB_INSTALLER|<checkout>/installer|g; s|$AMAN_HOME|<home>|g" |
-    sed -E 's/([0-9A-F]{2}:){31}[0-9A-F]{2}/<fingerprint>/g' |
+    sed -E 's/([0-9A-F]{2}:){31}[0-9A-F]{2}/<fingerprint>/g; s/^  ([0-9A-F]{2}:){16}$/  <fingerprint, first half>/; s/^  ([0-9A-F]{2}:){15}[0-9A-F]{2}$/  <fingerprint, second half>/' |
     awk '/^$/ { held = 1; next } /^Done in / { held = 0; next } { if (held) print ""; held = 0; print }'
 }
 
 TF_KEY=tf-key-0123456789abcdef
 
 test_fresh_install_without_a_model() {
-  t_begin "the ending of a fresh install with no model: the table with the nearest addresses first, the model as a next step, the daily backup and the update line"
+  t_begin "the ending of a fresh install with no model: one address, the model as a next step, how to set up a new device, and the update line"
   sandbox_new
   fixture_network 192.168.1.20
   fixture_hostname host
   install_machine
   assert_eq "$(ending)" "$(cat <<'SNAP'
-Checking the result (6 of 6)
-  + All 16 checks passed
++- [ 6 of 6 ]  Checking the result --------------------- ############ -+
+|   + All 16 checks passed                                             |
++----------------------------------------------------------------------+
 
-------------------------------------------------------------------------
-Ready. Instance main is running.
++----------------------------------------------------------------------+
+| + Ready. Instance main is running.                                   |
++----------------------------------------------------------------------+
 
-  + Open      https://192.168.1.20:8443
-              https://host.local:8443
-              https://host:8443
-              http://127.0.0.1:8791
-              http://localhost:8791
+  + Open      https://host.local:8443
   + Sign in   owner@example.invalid
   > Model     not set: add one in Settings > Models
-  + Run code  on, in a sandbox, with PDF and image reading
-  + Data      saved in Docker
-  + Backups   daily, keeps the last 7
-  On each device, the browser will first warn that the page is not
-  private. Do not click past the warning.
-  Instead, open this page once on that device and follow its steps:
-  http://192.168.1.20:8791/trust
-  On an iPhone: open it in Safari, install the profile, then turn it on
-  in Settings, General, About, Certificate Trust Settings.
-  Your device will show a long code called a fingerprint. It must be
-  <fingerprint>.
-  If it differs, stop.
-  Bookmark host.local: it keeps working when this computer's address
-  changes.
+
+Set up a new phone or computer
+  Open http://192.168.1.20:8791/trust on it once and follow its steps.
+  Do not click past a warning that the page is not private.
+  Your device shows a long code called a fingerprint. It must be this
+  one. If it differs, stop.
+  <fingerprint, first half>
+  <fingerprint, second half>
+
   Open a new terminal window to use the aman command.
+  Every address and setting: aman status
   Update later: aman upgrade
+
 ------------------------------------------------------------------------
 SNAP
 )"
@@ -58,25 +53,26 @@ SNAP
 }
 
 test_fresh_install_without_a_model_on_a_computer_with_no_network() {
-  t_begin "the ending on a computer with no network address: this computer's own addresses over plain http, the model as a next step, the daily backup and the update line"
+  t_begin "the ending on a computer with no network address: this computer's own address over plain http, the model as a next step, and the update line"
   sandbox_new
   install_machine
   assert_eq "$(ending)" "$(cat <<'SNAP'
-Checking the result (6 of 6)
-  + All 16 checks passed
++- [ 6 of 6 ]  Checking the result --------------------- ############ -+
+|   + All 16 checks passed                                             |
++----------------------------------------------------------------------+
 
-------------------------------------------------------------------------
-Ready. Instance main is running.
++----------------------------------------------------------------------+
+| + Ready. Instance main is running.                                   |
++----------------------------------------------------------------------+
 
   + Open      http://127.0.0.1:8791
-              http://localhost:8791
   + Sign in   owner@example.invalid
   > Model     not set: add one in Settings > Models
-  + Run code  on, in a sandbox, with PDF and image reading
-  + Data      saved in Docker
-  + Backups   daily, keeps the last 7
+
   Open a new terminal window to use the aman command.
+  Every address and setting: aman status
   Update later: aman upgrade
+
 ------------------------------------------------------------------------
 SNAP
 )"
@@ -94,21 +90,23 @@ $TF_KEY
   clear_input
   assert_rc 0
   assert_eq "$(ending)" "$(cat <<'SNAP'
-Checking the result (6 of 6)
-  + All 16 checks passed
++- [ 6 of 6 ]  Checking the result --------------------- ############ -+
+|   + All 16 checks passed                                             |
++----------------------------------------------------------------------+
 
-------------------------------------------------------------------------
-Ready. Instance main is running.
++----------------------------------------------------------------------+
+| + Ready. Instance main is running.                                   |
++----------------------------------------------------------------------+
 
   + Open      http://127.0.0.1:8791
   + Sign in   owner@example.invalid
   + Model     Token Factory, nvidia/nemotron-3-super-120b-a12b, limit
               500000 tokens a day
-  + Run code  on, in a sandbox, with PDF and image reading
-  + Data      saved in Docker
-  + Backups   daily, keeps the last 7
+
   Open a new terminal window to use the aman command.
+  Every address and setting: aman status
   Update later: aman upgrade
+
 ------------------------------------------------------------------------
 SNAP
 )"
@@ -125,23 +123,26 @@ test_install_with_a_problem() {
   run_install --yes --password-stdin --email owner@example.invalid --local-only
   clear_input
   assert_eq "$(ending)" "$(cat <<'SNAP'
-Checking the result (6 of 6)
-  Instance main
-  x Port 5556 is already in use by another program.
-    Next: Run aman doctor instance --fix
-  15 other checks passed. Full report: aman doctor
++- [ 6 of 6 ]  Checking the result --------------------- ############ -+
+|   Instance main                                                      |
+|   x Port 5556 is already in use by another program.                  |
+|     Next: Run aman doctor instance --fix                             |
+|   15 other checks passed. Full report: aman doctor                   |
++----------------------------------------------------------------------+
 
-------------------------------------------------------------------------
-Running, but the checks found a problem (listed above).
++----------------------------------------------------------------------+
+| ! Running, but the checks found a problem (listed above).            |
++----------------------------------------------------------------------+
 
   + Open      http://127.0.0.1:8791
   + Sign in   owner@example.invalid
   > Model     not set: add one in Settings > Models
   ! Run code  not ready: aman doctor sandbox --fix
-  + Data      saved in Docker
-  + Backups   daily, keeps the last 7
+
   Open a new terminal window to use the aman command.
+  Every address and setting: aman status
   Update later: aman upgrade
+
 ------------------------------------------------------------------------
 SNAP
 )"

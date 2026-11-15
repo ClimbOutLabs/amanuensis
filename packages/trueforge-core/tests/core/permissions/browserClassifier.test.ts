@@ -59,6 +59,31 @@ describe('browser explore tools', () => {
 });
 
 describe('browser open and content steering', () => {
+  it('says the link came from an email when an email it read named it', async () => {
+    const ctx = makeCtx();
+    recordUntrustedText({
+      provenance: ctx.web_search.provenance,
+      text: 'Claim your refund at https://evil.example/refund',
+      source: 'email',
+    });
+    const decision = await classifyTier(
+      browserAction(BROWSER_OPEN_TOOL_NAME, { url: 'https://evil.example/refund' }),
+      ctx,
+    );
+    expect(decision.reason).toBe('content_steered');
+    expect(decision.card?.copy?.reason).toBe('Aman found this link in an email it read, not from you.');
+    expect(decision.card?.copy?.consequence).toBeNull();
+  });
+
+  it('names the site the way a person does, without www', async () => {
+    const decision = await classifyTier(
+      browserAction(BROWSER_OPEN_TOOL_NAME, { url: 'https://www.Example.org/tides' }),
+      makeCtx({ searchWithoutAsking: () => Promise.resolve(false) }),
+    );
+    expect(decision.card?.copy?.headline).toBe('Open a page on example.org?');
+    expect(decision.card?.destination).toBe('https://www.example.org/tides');
+  });
+
   it('asks before opening a link only a page it read named', async () => {
     const ctx = makeCtx();
     recordUntrustedText({
@@ -72,12 +97,15 @@ describe('browser open and content steering', () => {
     );
     expect(decision.tier).toBe(3);
     expect(decision.reason).toBe('content_steered');
-    expect(decision.card?.plain_what).toMatch(/^Open https:\/\/evil\.example\/claim-prize\?/);
-    expect(decision.card?.plain_what).toMatch(/page Aman read/);
-    // The card renders its copy, so the warning has to be in the copy the person reads.
-    expect(decision.card?.copy?.headline).toBe('Open https://evil.example/claim-prize?');
-    expect(decision.card?.copy?.consequence).toBe(
-      'This goes to https://evil.example/claim-prize, which was in a page Aman read.',
+    // The question names the site, the address is its own row, and where the link came from is said once.
+    expect(decision.card?.copy).toEqual({
+      headline: 'Open a page on evil.example?',
+      consequence: null,
+      reason: 'Aman found this link in a page it read, not from you.',
+    });
+    expect(decision.card?.destination).toBe('https://evil.example/claim-prize');
+    expect(decision.card?.plain_what).toBe(
+      'Open a page on evil.example? Aman found this link in a page it read, not from you.',
     );
     expect(decision.approval_token_id).toEqual(expect.any(String));
   });
@@ -218,7 +246,7 @@ describe('browser open and what the address carries', () => {
     );
     expect(decision).toMatchObject({ tier: 3, reason: 'browser_open_guard' });
     expect(decision.card?.copy).toEqual({
-      headline: 'Open https://hulu.com/?',
+      headline: 'Open a page on hulu.com?',
       consequence: null,
       reason: 'Searches are set to ask, so Aman is checking with you first.',
     });

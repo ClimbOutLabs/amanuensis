@@ -4,9 +4,9 @@ title: Schedules
 covers: approval:schedule, route:schedule
 ---
 
-A schedule asks Aman to do the same job again and again, such as "Every weekday at 7:30, send me my morning brief". Each run is saved as a chat, so you can open it and see what Aman found.
+A schedule asks Aman to do the same job again and again, such as "Every weekday at 7:30, send me my morning brief". Each run is saved as a chat, so you can open it and see what Aman found. The chat is named for the schedule and the day it ran, such as "Morning brief · Thursday, November 13".
 
-How to get there: Click **Schedules** in the left bar.
+How to get there: Click **Schedules** in the left bar. On a phone, tap the menu button at the top left first.
 
 === "Computer"
 
@@ -62,16 +62,16 @@ A scheduled run happens while you are away, so it never sends or changes anythin
 1. The run reads and searches, the same as a chat.
 2. Anything that would show a card in a chat is held instead. That includes running code and setting a reminder, which a chat may do without asking.
 3. When the run ends, its chat ends with a **Needs your OK** list. Nothing on it has been done yet.
-4. Click **Approve** on an item to do it, or **Deny** to drop it.
+4. Click **Allow** on an item to do it, or **Deny** to drop it.
 5. When you approve, Aman checks the item again. If anything on it changed since, nothing is done, and Aman says to ask again in a chat.
 
 Held items expire after 24 hours.
 
-A space is the one exception. A run can make and change any space without asking, so a list it keeps for you stays up to date. Every change keeps a version you can ask Aman to bring back. Each change is also one line under **Settings**, **Audit**. Aman can't delete a space.
+A space is the one exception. A run can make and change any space without asking, so a list it keeps for you stays up to date. Every change keeps a version you can ask Aman to bring back. Each change is also one line under **Settings**, **Activity log**. Aman can't delete a space.
 
 ## Good to know
 
-- A scheduled run sends no notice. Its results wait in its chat until you open it.
+- A scheduled run sends no notice. Its results wait in its chat until you open it. A morning brief also leaves a quiet note under the **For you** bell when it is ready.
 - A scheduled run can read your Gmail, but it never drafts or sends Gmail mail.
 - An incognito chat can't make, pause or delete a schedule. Ask in a normal chat.
 - Reminders don't show on the Schedules page. See [Reminders](reminders.md).

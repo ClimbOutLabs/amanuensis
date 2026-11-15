@@ -114,13 +114,17 @@ describe('notes in Obsidian, reached through a connector the person adds by its 
 
   beforeAll(async () => {
     server = await startApprovalTestServer();
+    const obsidianUrl = requiredEnv('OBSIDIAN_MCP_URL');
+    // Obsidian listens on this computer, which the address check refuses unless its origin is listed as the
+    // operator's own. The fixture restores the list on close.
+    server.setFirstPartyOrigins([server.mcp.origin, new URL(obsidianUrl).origin]);
     const added = await server.request(
       '/api/v1/settings/mcp-servers',
       jsonInit({
         manifest: {
           type: 'remote',
           name: OBSIDIAN,
-          url: requiredEnv('OBSIDIAN_MCP_URL'),
+          url: obsidianUrl,
           description: 'My notes in Obsidian.',
           auth: { type: 'header', headers: { Authorization: `Bearer ${requiredEnv('OBSIDIAN_API_KEY')}` } },
         },

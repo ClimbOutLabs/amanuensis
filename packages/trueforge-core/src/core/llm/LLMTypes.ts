@@ -13,7 +13,13 @@ import {
   ImplementationPlanGrantScopeSchema,
 } from '../mcp/implementationPlanGrant';
 import { ShellApprovalBindingSchema } from '../permissions/approvalTokens';
-import { TIER2_ACTION_KINDS, Tier3CardSchema, TierSchema, TrackedExecutionBindingSchema } from '../permissions/tier';
+import {
+  TIER2_ACTION_KINDS,
+  Tier3CardSchema,
+  Tier3SkillNetworkSchema,
+  TierSchema,
+  TrackedExecutionBindingSchema,
+} from '../permissions/tier';
 import { GitRemotePreconditionSchema } from '../sandbox/gitRemoteObservation';
 import { StructuredEditPreconditionSchema } from '../sandbox/structuredEditPrecondition';
 import {
@@ -250,6 +256,11 @@ export const InternalToolCallInfoSchema = z.object({
     .describe(
       'Set when an unattended run held this call for the owner instead of asking; duplicate marks a repeat of a call already held in the same batch. Never model-authored.',
     ),
+  skill_network: Tier3SkillNetworkSchema.nullable()
+    .optional()
+    .describe(
+      'Set on a held call that carries a skill network card: the skill, the sites it asks for, and why. The answer is recorded against the skill, and approving re-runs the command. Never model-authored.',
+    ),
   search_provider_call: z
     .literal(true)
     .optional()
@@ -265,6 +276,28 @@ export const InternalToolCallInfoSchema = z.object({
     .optional()
     .describe(
       "Set when the call is a send through the host's own Email sidecar, so approving it checks the Email list. Never model-authored.",
+    ),
+  standing_grant_barred: z
+    .boolean()
+    .optional()
+    .describe('Set from the classifier decision when this call may never take a standing grant. Never model-authored.'),
+  chat_grantable_consequence: z
+    .boolean()
+    .optional()
+    .describe(
+      'Set from the classifier decision when this consequential call may take a chat grant for a target its card names. Never model-authored.',
+    ),
+  own_calendar_change: z
+    .boolean()
+    .optional()
+    .describe(
+      "Set from the classifier decision when this call changes only the person's own calendar. Never model-authored.",
+    ),
+  own_drive_write: z
+    .boolean()
+    .optional()
+    .describe(
+      "Set from the classifier decision when this call writes only the person's own Drive files. Never model-authored.",
     ),
   approval_binding: TrackedExecutionBindingSchema.nullable()
     .optional()

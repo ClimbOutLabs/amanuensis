@@ -76,12 +76,12 @@ const emailCard: SentinelApprovalCard = {
   plain_what: 'Send an email',
   email: {
     action: 'send',
-    sent_from: { address: 'ada@example.com', service: 'Gmail' },
     to: [{ name: 'Grace', address: 'grace@example.com' }],
     cc: [],
     bcc: [],
     subject: 'Lease',
     body: 'Thursday works.\n\nBest,\nAda',
+    check_code: null,
     replaces: null,
     reply_in_thread: null,
     reply_to: null,

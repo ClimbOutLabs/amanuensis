@@ -97,6 +97,17 @@ export type SettingsOpenRequest = {
   nonce: number;
 };
 
+/**
+ * A host request to open one chat by id, made after the shell has mounted (for example a
+ * right-rail desk row that lives outside the shell tree). Like `SettingsOpenRequest`, the
+ * nonce is what makes it a request: the host raises it on every ask, and the shell answers
+ * only when the nonce changes, never for the value it first mounts with.
+ */
+export type OpenSessionRequest = {
+  sessionId: string;
+  nonce: number;
+};
+
 export type HistoryAgentFilter = {
   agentId?: string;
   agentName: string;

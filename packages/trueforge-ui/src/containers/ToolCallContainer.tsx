@@ -30,9 +30,10 @@ import { useInstalledSkill } from '../hooks/useInstalledSkill.js';
 import { useActiveSessionCanManage } from '../hooks/useResourcePermissions.js';
 import { useHighlightedCard } from '../hooks/useRewardLedger.js';
 import { useWaitingToolCallIds } from '../hooks/useWaitingToolCallIds.js';
-import { ALWAYS_ALLOW_TOOL_OPTION_ID, offersChangeIt, SAVE_DRAFT_OPTION_ID } from '../sentinel/approvalChoices.js';
+import { ALWAYS_ALLOW_TOOL_OPTION_ID, offersChangeIt } from '../sentinel/approvalChoices.js';
 import { EmailApprovalCard } from '../sentinel/EmailApprovalCard.js';
 import { PermissionApprovalCard } from '../sentinel/PermissionApprovalCard.js';
+import { SendReceiptCard } from '../sentinel/SendReceiptCard.js';
 import { useOptionalSentinelState } from '../sentinel/SentinelStateProvider.js';
 import { standInApprovalCard } from '../sentinel/standInCard.js';
 import { useSlot } from '../theme/SlotsProvider.js';
@@ -154,7 +155,7 @@ function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
     nextAppointmentId: null,
   });
 
-  const respond = (response: ToolApprovalResponse) => {
+  const respond = (response: ToolApprovalResponse & { fromAccount?: string }) => {
     if (part.approval == null) return;
 
     let approved: boolean | undefined;
@@ -178,9 +179,12 @@ function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
       approved,
       ...(optionId != null && optionId !== '__allow' && optionId !== '__deny' ? { optionId } : {}),
       ...('reason' in response && response.reason != null ? { reason: response.reason } : {}),
+      ...(response.fromAccount != null ? { fromAccount: response.fromAccount } : {}),
     };
 
-    if (isNestedReadonly || normalizedResponse.optionId === 'allow-chat') {
+    // The message part's own response narrows an approval to approved, option and reason, so an
+    // answer carrying an account pick rides the runtime path, which carries it to the server.
+    if (isNestedReadonly || normalizedResponse.optionId === 'allow-chat' || 'fromAccount' in normalizedResponse) {
       respondToNestedApproval(normalizedResponse);
       return;
     }
@@ -206,23 +210,24 @@ function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
     });
   };
 
-  const onSelectOption = (optionId: string, reason?: string) => {
-    if (optionId === 'allow-once') return respond({ optionId, approved: true });
-    if (optionId === 'allow-chat') return respond({ optionId, approved: true });
+  const onSelectOption = (optionId: string, reason?: string, fromAccount?: string) => {
+    const picked = fromAccount === undefined ? {} : { fromAccount };
+    if (optionId === 'allow-once') return respond({ optionId, approved: true, ...picked });
+    if (optionId === 'allow-chat') return respond({ optionId, approved: true, ...picked });
     if (optionId === 'deny') return respond({ optionId, approved: false, reason });
-    if (optionId === '__allow') return respond({ approved: true });
+    if (optionId === '__allow') return respond({ approved: true, ...picked });
     if (optionId === '__deny') return respond({ approved: false, reason });
-    return respond({ optionId, reason });
+    return respond({ optionId, reason, ...picked });
   };
 
   const options = buildApprovalOptions(part.approval?.options);
-  // Approve is always a single-use allow: a declared chat-scoped grant can sort first,
+  // Allow is always a single-use allow: a declared chat-scoped grant can sort first,
   // and taking the first allow option would silently approve every later equivalent call.
   const allowOnceId = allowOnceOptionId(part.approval?.options) ?? '__allow';
   const denyOption = options.find(option => !option.isAllow);
   const onDeny = () => onSelectOption(denyOption?.id ?? '__deny');
 
-  // The server's plain-language card from the `tool.approval_required` event picks the card. Approve/Deny
+  // The server's plain-language card from the `tool.approval_required` event picks the card. Allow/Deny
   // reuse the same option plumbing, so grants and confirmations behave identically.
   const approvalInfo = sentinel?.approvalFor(part.toolCallId);
   if (approvalInfo?.tier === 2 || approvalInfo?.tier === 3) {
@@ -231,7 +236,7 @@ function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
     // Only Tier 2 calls batch, and only those asked by this same approval event on this
     // same thread: a sub-agent's calls never ride along with the parent's. Each call still
     // gets its own allow and redeems its own single-use token. A Tier 3 call is never listed
-    // here, so "Approve all" cannot reach it.
+    // here, so "Allow all" cannot reach it.
     const thisPending = pendingApprovals.find(pending => pending.approvalId === approvalInfo.toolCallId);
     const tier2Batch =
       approvalInfo.tier === 2 && thisPending !== undefined && approvalInfo.eventId !== null
@@ -260,8 +265,6 @@ function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
             }
           }
         : undefined;
-    // A draft option exists only when the server offers it on this approval; otherwise no button shows.
-    const saveDraftOption = options.find(option => option.id === SAVE_DRAFT_OPTION_ID);
     // A "Change it" answer is a denial that carries the person's words, so the call never runs.
     const onChangeRequest = offersChangeIt(approvalInfo.card)
       ? (text: string) => onSelectOption(denyOption?.id ?? '__deny', changeRequestReason(text))
@@ -271,10 +274,9 @@ function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
         <EmailApprovalCard
           approvalId={approvalInfo.toolCallId}
           card={approvalInfo.card}
-          onApprove={() => onSelectOption(allowOnceId)}
+          onApprove={fromAccount => onSelectOption(allowOnceId, undefined, fromAccount)}
           onDeny={onDeny}
           onChangeRequest={onChangeRequest}
-          onSaveDraft={saveDraftOption === undefined ? undefined : () => onSelectOption(SAVE_DRAFT_OPTION_ID)}
           disabled={!canManageSession}
         />
       );
@@ -558,6 +560,31 @@ function ToolCallPart(part: ToolCallMessagePartProps) {
   const onToggle = () => setExpanded(prev => !prev);
   const expandSubAgent = useCallback(() => setExpanded(true), []);
   useRegisterApprovalExpand(isSubAgent ? part.toolCallId : '', expandSubAgent);
+  const sendReceipt = sentinelState?.receiptFor(part.toolCallId);
+  const aui = useAui();
+
+  // Once the server says how a send ended, its card becomes the receipt (or the plain reason it did not go).
+  if (sendReceipt !== undefined) {
+    return (
+      <div data-slot="tool-call-card" data-variant="send-receipt" className="w-full">
+        <SendReceiptCard
+          receipt={sendReceipt}
+          approvedCheckCode={
+            sentinelState?.answerFor(part.toolCallId) === 'approved'
+              ? (sentinelState.approvalFor(part.toolCallId)?.card.email?.check_code ?? null)
+              : null
+          }
+          onReviewAgain={
+            isNewestMessage
+              ? () => {
+                  aui.thread().append({ role: 'user', content: [{ type: 'text', text: 'Send that draft again.' }] });
+                }
+              : undefined
+          }
+        />
+      </div>
+    );
+  }
 
   if (part.toolName === ASK_USER_TOOL_NAME) {
     if (hasPendingAskUserResponse(part)) {

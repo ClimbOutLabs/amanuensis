@@ -65,12 +65,12 @@ function draftCard(): SentinelApprovalCard {
     outbound_truncated: false,
     email: {
       action: 'save',
-      sent_from: { address: 'ada@example.test', service: 'Gmail' },
       to: [{ name: 'Robin Example', address: 'robin@example.test' }],
       cc: [],
       bcc: [],
       subject: 'Picnic plans',
       body: 'Bring the blue blanket.',
+      check_code: null,
       replaces: null,
       reply_in_thread: { subject: 'Picnic plans', from: 'robin@example.test' },
       reply_to: null,

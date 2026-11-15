@@ -34,7 +34,7 @@ import type { CurrentContextUsage } from '@truefoundry/trueforge-core/core/runti
 import type { HelpAreaId } from '@truefoundry/trueforge-core/schemas/personalizationHelpAreas';
 import type { ColumnType, Generated, JSONColumnType } from 'kysely';
 import type { McpServerManifest } from '../../schemas/mcpServer';
-import type { ModelProviderManifest } from '../../schemas/modelProvider';
+import type { ModelProviderCheck, ModelProviderManifest } from '../../schemas/modelProvider';
 import type {
   SandboxBuildMetadata,
   SandboxBuildStatus,
@@ -48,8 +48,17 @@ import type { DeliveryAttemptTable, DeliveryTable } from '../deliveryStore';
 import type { LocalUserTable } from '../localUserStore';
 import type { OAuthClient, OAuthPendingAuthorizationData, OAuthServer, OAuthToken } from '../mcpServerStore';
 import type { NoticingCheckpointTable, NoticingEventTable, ReachLeaseTable } from '../noticingStore';
+import type { PersonTimezoneTable } from '../personTimezoneStore';
+import type { PhoneCallTable } from '../phoneCallStore';
 import type { PushSubscriptionTable } from '../pushSubscriptionStore';
 import type { ReachSettingsTable } from '../reachSettingsStore';
+import type { RecallExclusionTable } from '../recallExclusionStore';
+import type {
+  TelegramConnectionTable,
+  TelegramPendingApprovalTable,
+  TelegramPendingReplyTable,
+} from '../telegramStore';
+import type { TextContactTable, TextSendCountTable, TextWordTable } from '../textContactStore';
 
 /**
  * Trace-level state for one thread at one turn (`turn_thread.checkpoint`).
@@ -515,6 +524,8 @@ export interface ModelProviderTable {
   name: string;
   /** ModelProviderManifest document; replaced whole on every upsert */
   manifest: JsonbColumn<ModelProviderManifest>;
+  /** Outcome of the save-time connection check; null when no check has run */
+  last_check: JsonbColumn<ModelProviderCheck> | null;
   created_at: string;
   updated_at: string;
 }
@@ -531,6 +542,12 @@ export interface SkillTable {
   manifest: JsonbColumn<SkillManifest>;
   /** The person's approved site list for this skill's network access, or null when not approved */
   network_approval: JsonbColumn<string[]> | null;
+  /** The code version the approval is pinned to, or null when there is no pin */
+  network_approval_code_sha: string | null;
+  /** Sites the person allowed one by one for this skill */
+  network_allowed_hosts: JsonbColumn<string[]>;
+  /** Sites the person turned down for this skill */
+  network_denied_hosts: JsonbColumn<string[]>;
   created_at: string;
   updated_at: string;
 }
@@ -828,14 +845,23 @@ export interface Database {
   space_folder_assignment: SpaceFolderAssignmentTable;
   sentinel_audit: SentinelAuditTable;
   brief_item_completion: BriefItemCompletionTable;
+  recall_exclusion: RecallExclusionTable;
   delivery: DeliveryTable;
   delivery_attempt: DeliveryAttemptTable;
   reach_settings: ReachSettingsTable;
+  person_timezone: PersonTimezoneTable;
+  text_contact: TextContactTable;
+  phone_call: PhoneCallTable;
+  text_send_count: TextSendCountTable;
+  text_word: TextWordTable;
   noticing_event: NoticingEventTable;
   noticing_checkpoint: NoticingCheckpointTable;
   reach_lease: ReachLeaseTable;
   push_subscription: PushSubscriptionTable;
   local_user: LocalUserTable;
+  telegram_connection: TelegramConnectionTable;
+  telegram_pending_reply: TelegramPendingReplyTable;
+  telegram_pending_approval: TelegramPendingApprovalTable;
   approval_token: ApprovalTokenTable;
   sentinel_user_settings: SentinelUserSettingsTable;
   implementation_plan_grant: ImplementationPlanGrantTable;

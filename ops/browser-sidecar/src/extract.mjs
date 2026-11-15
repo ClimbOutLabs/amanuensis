@@ -236,11 +236,37 @@ function isAlwaysShown(element) {
   return alert !== null && (alert.textContent ?? '').length <= ALERT_MAX_CHARS;
 }
 
+/** The smallest picture worth naming, in square pixels: smaller ones are icons, not charts or photos. */
+const PICTURE_MIN_AREA = 120 * 80;
+
+/**
+ * How many charts, drawings, photos and videos are in view. Their content never shows in the page's
+ * text, so the model is told they are there and can take a screenshot to see them. Icons inside a
+ * button or a link are left out: their names are already in the text.
+ */
+function picturesInView() {
+  let count = 0;
+  for (const element of document.querySelectorAll('canvas, svg, img, video')) {
+    if (element.parentElement?.closest('svg') || element.closest('a, button, [role="button"]')) {
+      continue;
+    }
+    const box = element.getBoundingClientRect();
+    const width = Math.min(box.right, window.innerWidth) - Math.max(box.left, 0);
+    const height = Math.min(box.bottom, window.innerHeight) - Math.max(box.top, 0);
+    if (width > 0 && height > 0 && width * height >= PICTURE_MIN_AREA && isVisible(element)) {
+      count += 1;
+    }
+  }
+  return count;
+}
+
 /**
  * Where the view is, in whole pixels down what scrolls: the scroll box under the middle of the view
- * when there is one (many web apps scroll an inner box), or else the page.
+ * when there is one (many web apps scroll an inner box), or else the page. It also counts the
+ * pictures in view (see picturesInView).
  */
 export function viewPosition() {
+  const pictures = picturesInView();
   const middle = document.elementFromPoint(window.innerWidth / 2, window.innerHeight / 2);
   for (
     let box = middle;
@@ -253,6 +279,7 @@ export function viewPosition() {
         top: Math.round(box.scrollTop),
         bottom: Math.round(box.scrollTop + box.clientHeight),
         height: Math.round(box.scrollHeight),
+        pictures,
       };
     }
   }
@@ -261,6 +288,7 @@ export function viewPosition() {
     top: Math.round(window.scrollY),
     bottom: Math.round(window.scrollY + window.innerHeight),
     height: Math.round(Math.max(page.scrollHeight, window.innerHeight)),
+    pictures,
   };
 }
 

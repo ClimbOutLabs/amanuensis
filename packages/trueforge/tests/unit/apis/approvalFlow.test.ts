@@ -11,12 +11,7 @@ import { TurnSchema, type Turn, type TurnInputItem } from '@truefoundry/trueforg
 import { RequestErrorResponseSchema } from '../../../src/schemas/errors';
 import { ListSessionEventsResponseSchema, TurnStreamingEventSchema } from '../../../src/schemas/events';
 import { GetTurnResponseSchema, ListTurnsResponseSchema } from '../../../src/schemas/turn';
-import {
-  INERT_MEMORY_SERVER_NAME,
-  MODEL_FQN,
-  startApprovalTestServer,
-  type ApprovalTestServer,
-} from '../../fixtures/approvalTestServer';
+import { MODEL_FQN, startApprovalTestServer, type ApprovalTestServer } from '../../fixtures/approvalTestServer';
 import {
   INERT_ASK_MEMORY_TOOL,
   INERT_ECHO_TOOL,
@@ -24,7 +19,6 @@ import {
   INERT_SERVER_NAME,
   INERT_UNANNOTATED_TOOL,
   INERT_WRITE_TOOL,
-  startInertMcpServer,
 } from '../../fixtures/inertMcpServer';
 import { RUN_DIRECTIVE_PREFIX, THREE_AT_ONCE_DIRECTIVE } from '../../fixtures/scriptedModelServer';
 
@@ -74,16 +68,14 @@ const UNFORCED_AGENT_SPEC = {
   ],
 };
 
-/**
- * Mounts the memory-provider connector, which the server marked first-party when it was set up.
- * Same default gating as UNFORCED_AGENT_SPEC.
- */
-function firstPartyAgentSpec(requireApprovalForTools: string[] = ['@write', '@destructive', '@unclassified']) {
+/** The name the tests below save a second connector under, as the settings page would. */
+const SAVED_CONNECTOR_NAME = 'saved-connector';
+
+/** Mounts the connector saved from Settings. Same default gating as UNFORCED_AGENT_SPEC. */
+function savedConnectorAgentSpec(requireApprovalForTools: string[] = ['@write', '@destructive', '@unclassified']) {
   return {
     ...AGENT_SPEC,
-    mcp_servers: [
-      { name: INERT_MEMORY_SERVER_NAME, preload: true, require_approval_for_tools: requireApprovalForTools },
-    ],
+    mcp_servers: [{ name: SAVED_CONNECTOR_NAME, preload: true, require_approval_for_tools: requireApprovalForTools }],
   };
 }
 
@@ -338,26 +330,17 @@ async function auditEntries({ server, sessionId }: { server: ApprovalTestServer;
   return AuditLogResponseSchema.parse(await audit.json()).entries;
 }
 
-/** Saves the memory connector the way the settings page does, so the server re-decides its trust. */
-async function saveMemoryConnector({
-  server,
-  url,
-  memoryProvider,
-}: {
-  server: ApprovalTestServer;
-  url: string;
-  memoryProvider: boolean;
-}) {
+/** Saves the connector the way the settings page does. */
+async function saveConnector({ server, url }: { server: ApprovalTestServer; url: string }) {
   const response = await server.request('/api/v1/settings/mcp-servers', {
     method: 'PUT',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       manifest: {
         type: 'remote',
-        name: INERT_MEMORY_SERVER_NAME,
+        name: SAVED_CONNECTOR_NAME,
         url,
-        description: 'Inert connector registered as the memory provider.',
-        ...(memoryProvider ? { memory_provider: true } : {}),
+        description: 'Inert connector saved from Settings.',
       },
     }),
   });
@@ -368,7 +351,7 @@ describe('approval gate over an inert connector', () => {
   let server: ApprovalTestServer;
 
   beforeAll(async () => {
-    server = await startApprovalTestServer({ memoryProvider: true });
+    server = await startApprovalTestServer();
   }, TURN_TIMEOUT_MS);
 
   afterAll(async () => {
@@ -395,148 +378,17 @@ describe('approval gate over an inert connector', () => {
     TURN_TIMEOUT_MS,
   );
 
-  describe('first-party connector (the memory provider)', () => {
-    it(
-      'autoruns a read-only annotated tool and records the run in the audit log',
-      async () => {
-        const sessionId = await createSession(server, firstPartyAgentSpec());
-        const turn = await runTurn({ server, sessionId, input: userMessage(INERT_ASK_MEMORY_TOOL) });
+  it(
+    'asks for a read-only tool that declares itself closed-world too',
+    async () => {
+      const sessionId = await createSession(server, UNFORCED_AGENT_SPEC);
+      const turn = await runTurn({ server, sessionId, input: userMessage(INERT_ASK_MEMORY_TOOL) });
 
-        expect(requiredActions(turn)).toEqual([]);
-        expect(server.mcp.askMemoryInvocations()).toBe(1);
-        expect(await auditEntries({ server, sessionId })).toEqual([
-          expect.objectContaining({
-            tier: 1,
-            tool_name: INERT_ASK_MEMORY_TOOL,
-            outcome: 'logged',
-            description: expect.stringContaining('First-party'),
-          }),
-        ]);
-      },
-      TURN_TIMEOUT_MS,
-    );
-
-    it(
-      'asks for the same tool on a user-added connector with identical hints',
-      async () => {
-        const sessionId = await createSession(server, UNFORCED_AGENT_SPEC);
-        const turn = await runTurn({ server, sessionId, input: userMessage(INERT_ASK_MEMORY_TOOL) });
-
-        expect(pendingApproval(turn)).toBeDefined();
-        expect(server.mcp.askMemoryInvocations()).toBe(0);
-      },
-      TURN_TIMEOUT_MS,
-    );
-
-    it.each([
-      ['a read-only tool that does not declare itself closed-world', INERT_ECHO_TOOL, 'echoInvocations'],
-      ['a write tool', INERT_WRITE_TOOL, 'writeInvocations'],
-      ['an unannotated tool', INERT_UNANNOTATED_TOOL, 'unannotatedInvocations'],
-    ] as const)(
-      'still asks for %s',
-      async (_label, tool, invocations) => {
-        const sessionId = await createSession(server, firstPartyAgentSpec());
-        const turn = await runTurn({ server, sessionId, input: userMessage(tool) });
-
-        expect(pendingApproval(turn)).toBeDefined();
-        expect(server.mcp[invocations]()).toBe(0);
-        expect(await auditEntries({ server, sessionId })).toEqual([]);
-      },
-      TURN_TIMEOUT_MS,
-    );
-
-    it(
-      'still asks when an explicit require-approval selector names the tool, and audits no autorun',
-      async () => {
-        const spec = firstPartyAgentSpec(['@write', '@destructive', '@unclassified', INERT_ASK_MEMORY_TOOL]);
-        const sessionId = await createSession(server, spec);
-        const turn = await runTurn({ server, sessionId, input: userMessage(INERT_ASK_MEMORY_TOOL) });
-
-        expect(pendingApproval(turn)).toBeDefined();
-        expect(server.mcp.askMemoryInvocations()).toBe(0);
-        expect(await auditEntries({ server, sessionId })).toEqual([]);
-      },
-      TURN_TIMEOUT_MS,
-    );
-
-    it(
-      'refuses a listed origin that answers with a redirect to another host, so the tool never runs there',
-      async () => {
-        // An origin the operator never listed, which would serve the same routes if it were followed.
-        const elsewhere = await startInertMcpServer();
-        try {
-          server.mcp.redirectAllTo({ to: elsewhere.origin, status: 302 });
-          const sessionId = await createSession(server, firstPartyAgentSpec());
-          const turn = await runTurn({ server, sessionId, input: userMessage(INERT_ASK_MEMORY_TOOL) });
-
-          expect(turn.state).toMatchObject({
-            status: 'error',
-            message: `Failed to connect to remote MCP server '${INERT_MEMORY_SERVER_NAME}': server answered HTTP 302 with a redirect to ${elsewhere.origin}, and this connection does not follow redirects`,
-          });
-          expect(server.mcp.askMemoryInvocations()).toBe(0);
-          expect(elsewhere.requestsSeen()).toBe(0);
-          expect(elsewhere.askMemoryInvocations()).toBe(0);
-        } finally {
-          await elsewhere.close();
-        }
-      },
-      TURN_TIMEOUT_MS,
-    );
-
-    it(
-      'refuses the same redirect when the connector page tests the connection',
-      async () => {
-        const elsewhere = await startInertMcpServer();
-        try {
-          // A 307 keeps the request, so following it would have reached a server that answers.
-          server.mcp.redirectAllTo({ to: elsewhere.origin, status: 307 });
-          const response = await server.request(`/api/v1/mcp-servers/${INERT_MEMORY_SERVER_NAME}/tools`);
-
-          expect(response.status).toBe(502);
-          expect(await response.json()).toEqual({
-            error: {
-              message: `Failed to connect to remote MCP server '${INERT_MEMORY_SERVER_NAME}': server answered HTTP 307 with a redirect to ${elsewhere.origin}, and this connection does not follow redirects`,
-            },
-          });
-          expect(elsewhere.requestsSeen()).toBe(0);
-        } finally {
-          await elsewhere.close();
-        }
-      },
-      TURN_TIMEOUT_MS,
-    );
-
-    // Last in this block: it repoints the shared connector, then restores it through setup.
-    it(
-      'keeps trust on another bank of the same origin, and asks once the connector moves to an origin the operator did not list',
-      async () => {
-        // Answers the memory provider check like any server, but the operator never listed its origin.
-        const elsewhere = await startInertMcpServer();
-        try {
-          await saveMemoryConnector({ server, url: `${server.mcp.url}/other`, memoryProvider: true });
-          const sameOrigin = await createSession(server, firstPartyAgentSpec());
-          const ran = await runTurn({ server, sessionId: sameOrigin, input: userMessage(INERT_ASK_MEMORY_TOOL) });
-          expect(requiredActions(ran)).toEqual([]);
-          expect(server.mcp.askMemoryInvocations()).toBe(1);
-
-          await saveMemoryConnector({ server, url: elsewhere.memoryProviderUrl, memoryProvider: true });
-          const moved = await createSession(server, firstPartyAgentSpec());
-          const asked = await runTurn({ server, sessionId: moved, input: userMessage(INERT_ASK_MEMORY_TOOL) });
-          expect(pendingApproval(asked)).toBeDefined();
-          expect(elsewhere.askMemoryInvocations()).toBe(0);
-        } finally {
-          await saveMemoryConnector({ server, url: server.mcp.memoryProviderUrl, memoryProvider: true });
-          await elsewhere.close();
-        }
-
-        const restored = await createSession(server, firstPartyAgentSpec());
-        const again = await runTurn({ server, sessionId: restored, input: userMessage(INERT_ASK_MEMORY_TOOL) });
-        expect(requiredActions(again)).toEqual([]);
-        expect(server.mcp.askMemoryInvocations()).toBe(2);
-      },
-      TURN_TIMEOUT_MS,
-    );
-  });
+      expect(pendingApproval(turn)).toBeDefined();
+      expect(server.mcp.askMemoryInvocations()).toBe(0);
+    },
+    TURN_TIMEOUT_MS,
+  );
 
   it(
     'pauses the write tool before it executes',
@@ -1071,11 +923,11 @@ describe('approval gate over an inert connector', () => {
   );
 });
 
-describe('memory provider on an origin the operator did not list', () => {
+describe('a connector saved from Settings', () => {
   let server: ApprovalTestServer;
 
   beforeAll(async () => {
-    // No origin is listed, as on any server that never set FIRST_PARTY_MCP_ORIGINS.
+    // No origin is listed, as on any server with no Email or Calendar set up.
     server = await startApprovalTestServer();
   }, TURN_TIMEOUT_MS);
 
@@ -1088,12 +940,12 @@ describe('memory provider on an origin the operator did not list', () => {
   });
 
   it(
-    'keeps a hostile memory provider user-added, so its read-only closed-world tool still asks',
+    'keeps a hostile connector user-added, so its read-only closed-world tool still asks',
     async () => {
-      // The server answers the setup check and declares ask_memory read-only and closed-world,
+      // The server declares ask_memory read-only and closed-world,
       // which is everything a hostile server needs to say.
-      await saveMemoryConnector({ server, url: server.mcp.memoryProviderUrl, memoryProvider: true });
-      const sessionId = await createSession(server, firstPartyAgentSpec());
+      await saveConnector({ server, url: server.mcp.url });
+      const sessionId = await createSession(server, savedConnectorAgentSpec());
       const turn = await runTurn({ server, sessionId, input: userMessage(INERT_ASK_MEMORY_TOOL) });
 
       expect(pendingApproval(turn)).toBeDefined();
@@ -1104,30 +956,17 @@ describe('memory provider on an origin the operator did not list', () => {
   );
 
   it(
-    'trusts it only once the operator lists the origin and the provider is saved again, and stops when the origin is removed',
+    'keeps a connector saved from Settings user-added even when its origin is on the first-party list',
     async () => {
-      await saveMemoryConnector({ server, url: server.mcp.memoryProviderUrl, memoryProvider: true });
+      await saveConnector({ server, url: server.mcp.url });
 
-      // Listing the origin changes nothing for a provider that was saved before.
+      // Only the host's own setup marks a connector first-party; a save never does.
       server.setFirstPartyOrigins([server.mcp.origin]);
-      const beforeSave = await createSession(server, firstPartyAgentSpec());
-      const asked = await runTurn({ server, sessionId: beforeSave, input: userMessage(INERT_ASK_MEMORY_TOOL) });
-      expect(pendingApproval(asked)).toBeDefined();
+      const sessionId = await createSession(server, savedConnectorAgentSpec());
+      const turn = await runTurn({ server, sessionId, input: userMessage(INERT_ASK_MEMORY_TOOL) });
+
+      expect(pendingApproval(turn)).toBeDefined();
       expect(server.mcp.askMemoryInvocations()).toBe(0);
-
-      // Saving it again re-runs the setup check and marks it.
-      await saveMemoryConnector({ server, url: server.mcp.memoryProviderUrl, memoryProvider: true });
-      const afterSave = await createSession(server, firstPartyAgentSpec());
-      const ran = await runTurn({ server, sessionId: afterSave, input: userMessage(INERT_ASK_MEMORY_TOOL) });
-      expect(requiredActions(ran)).toEqual([]);
-      expect(server.mcp.askMemoryInvocations()).toBe(1);
-
-      // Removing the origin takes effect on the next turn, with no save.
-      server.setFirstPartyOrigins([]);
-      const afterRemoval = await createSession(server, firstPartyAgentSpec());
-      const askedAgain = await runTurn({ server, sessionId: afterRemoval, input: userMessage(INERT_ASK_MEMORY_TOOL) });
-      expect(pendingApproval(askedAgain)).toBeDefined();
-      expect(server.mcp.askMemoryInvocations()).toBe(1);
     },
     TURN_TIMEOUT_MS,
   );
@@ -1347,7 +1186,7 @@ describe('three connector calls pending in one turn', () => {
   let server: ApprovalTestServer;
 
   beforeAll(async () => {
-    server = await startApprovalTestServer({ memoryProvider: true });
+    server = await startApprovalTestServer();
   }, TURN_TIMEOUT_MS);
 
   afterAll(async () => {

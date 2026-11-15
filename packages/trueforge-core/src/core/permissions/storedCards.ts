@@ -22,8 +22,6 @@ function storedMailboxes(recipients: readonly unknown[]): Tier3Mailbox[] {
 function withStoredRecipients(email: Tier3Email): Tier3Email {
   return {
     ...email,
-    // Cards stored before the sending account was recorded hold no sent_from; they read as not known.
-    sent_from: email.sent_from ?? null,
     to: storedMailboxes(email.to),
     cc: storedMailboxes(email.cc),
     bcc: storedMailboxes(email.bcc),

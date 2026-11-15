@@ -17,7 +17,7 @@ import {
 } from '../../../src/runtime/noticing/sidecarSources';
 import type { MailAccess, MailSource } from '../../../src/runtime/noticing/sources';
 import { defaultReachSettings, type NoticingEvent } from '../../../src/schemas/reach';
-import { startMailAgent, type MailAgentHarness, type Stored } from './mailAgentSupport';
+import { MAIL_AGENT_SECRET, startMailAgent, type MailAgentHarness, type Stored } from './mailAgentSupport';
 
 const OWNER = { tenant_id: 'default', created_by: 'owner-1' };
 const NOW = new Date('2026-11-05T15:00:00.000Z');
@@ -81,7 +81,7 @@ async function scenario(harness: MailAgentHarness, { delay_ms = 0 }: { delay_ms?
   const deliveryStore = new DeliveryStore(db);
   const deliveries = createDeliveryService({
     store: deliveryStore,
-    senders: [{ send: () => Promise.resolve([]) }],
+    senders: [{ channel: 'web_push', send: () => Promise.resolve([]) }],
     audit: { record: () => Promise.resolve() },
     logger: winston.createLogger({ silent: true }),
   });
@@ -93,7 +93,7 @@ async function scenario(harness: MailAgentHarness, { delay_ms = 0 }: { delay_ms?
   const outOfTime = () => {
     clock.now = new Date(clock.now.getTime() + 61_000);
   };
-  const lister = imapAgent({ url: URL, fetchImpl: undefined });
+  const lister = imapAgent({ url: URL, secret: MAIL_AGENT_SECRET, fetchImpl: undefined });
   const agent: ListAfterAgent = async request => {
     const read = await lister(request);
     stop.lists -= 1;
@@ -114,7 +114,7 @@ async function scenario(harness: MailAgentHarness, { delay_ms = 0 }: { delay_ms?
     },
     account: 'default',
     agent,
-    validity: imapMailboxValidity({ url: URL, fetchImpl: undefined }),
+    validity: imapMailboxValidity({ url: URL, secret: MAIL_AGENT_SECRET, fetchImpl: undefined }),
   });
   let mail: MailAccess = { status: 'ready', source: imap, kind: 'email_connector' };
   const makeService = () =>
@@ -131,8 +131,8 @@ async function scenario(harness: MailAgentHarness, { delay_ms = 0 }: { delay_ms?
       judgeFor: () => Promise.resolve(() => Promise.resolve({ level: 'note', reason: 'It can wait.', message: 'Ok.' })),
       budget: { isExhausted: () => Promise.resolve(false) },
       channels: () => ({
-        texts: { available: false, note: 'Texts are not set up yet.' },
-        calls: { available: false, note: 'Phone calls are not set up yet.' },
+        texts: { available: false, note: 'Texts are not set up yet.', problem: null },
+        calls: { available: false, note: 'Phone calls are not set up yet.', problem: null },
       }),
       logger: winston.createLogger({ silent: true }),
       now: () => clock.now,

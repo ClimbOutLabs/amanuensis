@@ -30,6 +30,9 @@ interface LiveCall {
 /** Said by the stand-in, as the app server says it, for a file the page has nowhere to put. */
 const NO_PLACE_FOR_FILE = 'This page has no place to upload a file. Click its upload button first.';
 
+/** The text the stand-in says is selected in the tab. */
+const COPIED_TEXT = 'ORDER-12345';
+
 /** A plain JPEG of the frame's size, made by the test browser itself. */
 async function makeFrame(browser: Browser): Promise<string> {
   const context = await browser.newContext({ viewport: FRAME, deviceScaleFactor: 1 });
@@ -41,12 +44,17 @@ async function makeFrame(browser: Browser): Promise<string> {
 }
 
 /** Answers the page's live calls the way the app server does, and records each one. */
-async function answerLiveRoutes(page: Page, options: { frame: string; tabs: unknown[] }): Promise<LiveCall[]> {
+async function answerLiveRoutes(
+  page: Page,
+  options: { frame: string; tabs: unknown[]; browserOff?: boolean },
+): Promise<LiveCall[]> {
   const calls: LiveCall[] = [];
   let inputsInFlight = 0;
   // Whose hand holds the tab, as the sidecar would report it; while the person holds it, the page
   // is showing a human check, which is the moment takeover exists for.
   let takeoverOn = false;
+  // Tabs the person ended the session on; the tab list leaves them out from then on.
+  const closedTabs = new Set<string>();
   await page.route('**/api/browser/live/**', async (route: Route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
@@ -69,12 +77,18 @@ async function answerLiveRoutes(page: Page, options: { frame: string; tabs: unkn
       });
       return;
     }
+    if (path === '/api/browser/live/close') {
+      closedTabs.add(String(bodyOf(call)['tab']));
+    }
     if (path === '/api/browser/live/takeover') {
       takeoverOn = bodyOf(call)['on'] === true;
     }
     const data =
       path === '/api/browser/live/tabs'
-        ? { tabs: options.tabs }
+        ? {
+            tabs: options.tabs.filter(tab => !(isRecord(tab) && closedTabs.has(String(tab['tab'])))),
+            browser_on: options.browserOff !== true,
+          }
         : path === '/api/browser/live/frame'
           ? {
               status: 'ok',
@@ -86,7 +100,9 @@ async function answerLiveRoutes(page: Page, options: { frame: string; tabs: unkn
             }
           : path === '/api/browser/live/takeover'
             ? { status: 'ok', takeover: takeoverOn }
-            : { status: 'ok' };
+            : path === '/api/browser/live/copy'
+              ? { text: COPIED_TEXT }
+              : { status: 'ok' };
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data }) });
   });
   return calls;
@@ -123,6 +139,7 @@ test('the live browser page shows the tab and sends clicks, typing and files to 
       for (const theme of THEMES) {
         const label = `${viewport.width}px ${theme}`;
         const context = await browser.newContext({ viewport, deviceScaleFactor: 1 });
+        await context.grantPermissions(['clipboard-read', 'clipboard-write']);
         const page = await context.newPage();
         const calls = await answerLiveRoutes(page, {
           frame,
@@ -152,6 +169,20 @@ test('the live browser page shows the tab and sends clicks, typing and files to 
       'no tabs: only the tab list is asked for',
     );
     await context.close();
+
+    // On a server without a browser, the person is told so rather than asked to open a page.
+    const offContext = await browser.newContext({ viewport: VIEWPORTS[0], deviceScaleFactor: 1 });
+    const offPage = await offContext.newPage();
+    const offCalls = await answerLiveRoutes(offPage, { frame, tabs: [], browserOff: true });
+    await offPage.goto(fixtureUrl, { waitUntil: 'domcontentloaded', timeout: FIRST_LOAD_TIMEOUT_MS });
+    await offPage
+      .getByText("Aman's browser is not turned on here", { exact: false })
+      .waitFor({ timeout: RENDER_TIMEOUT_MS });
+    assert.ok(
+      offCalls.every(call => call.path === '/api/browser/live/tabs'),
+      'browser off: only the tab list is asked for',
+    );
+    await offContext.close();
   } catch (error) {
     await saveFailureShots({ browser, surface: 'screen:browser-live' });
     throw error;
@@ -293,6 +324,53 @@ async function checkLivePage(page: Page, calls: LiveCall[], label: string) {
   await page.getByRole('button', { name: 'Type it' }).click();
   await waitForCall(calls, call => isInput(call, 'type') && hasText(call, '123456'));
 
+  // Paste on the picture goes in as one paste, line break and all, so the page never sees Enter.
+  await page.evaluate(() => navigator.clipboard.writeText('my code\n'));
+  await picture.click();
+  await page.keyboard.press('ControlOrMeta+V');
+  await waitForCall(calls, call => isInput(call, 'paste') && hasText(call, 'my code\n'));
+
+  // Select all goes to the page, and copy brings the page's selected text to this computer's clipboard.
+  await page.keyboard.press('ControlOrMeta+A');
+  await waitForCall(calls, call => isInput(call, 'key') && bodyOf(call)['key'] === 'ControlOrMeta+A');
+  await page.keyboard.press('ControlOrMeta+C');
+  await waitForCall(calls, call => call.path === '/api/browser/live/copy' && hasTab(call, 'chat-1'));
+  await page.getByText('Copied.', { exact: false }).waitFor({ timeout: RENDER_TIMEOUT_MS });
+  assert.equal(await page.evaluate(() => navigator.clipboard.readText()), COPIED_TEXT, `${label}: copied out`);
+
+  // The buttons do the same, for a phone or a browser with no paste key.
+  await page.evaluate(() => navigator.clipboard.writeText('from the button'));
+  await page.getByRole('button', { name: 'Paste into page' }).click();
+  await waitForCall(calls, call => isInput(call, 'paste') && hasText(call, 'from the button'));
+
+  // A password filled in its own box goes in as a paste, and the box is emptied once it is used.
+  // The sign-in boxes sit folded away under the picture until the person opens them.
+  await page.getByText('Sign in with your password manager', { exact: true }).click();
+  const password = page.getByLabel('Password for the page');
+  assert.equal(await password.getAttribute('type'), 'password', `${label}: the password is hidden`);
+  // Both boxes sit on Aman's own address, so a password manager must not offer or save Aman's own sign-in there.
+  assert.equal(await password.getAttribute('autocomplete'), 'off', `${label}: no autofill of Aman's own password`);
+  assert.equal(
+    await page.getByLabel('Name or email for the page').getAttribute('autocomplete'),
+    'off',
+    `${label}: no autofill of Aman's own name`,
+  );
+  // Each box is one normal line with its button beside it, so the panel never pushes the picture away.
+  for (const box of [password, page.getByLabel('Name or email for the page')]) {
+    const height = (await box.boundingBox())?.height ?? 0;
+    assert.ok(height > 0 && height <= 48, `${label}: a sign-in box is one line tall (${String(height)}px)`);
+  }
+  await page.locator('details.browser-live-panel').screenshot({
+    path: await featureShotPath({ surface: 'screen:browser-live', step: `sign-in-${shotName(label)}` }),
+  });
+  await password.fill('hunter2');
+  await page.getByRole('button', { name: 'Put password in page' }).click();
+  await waitForCall(calls, call => isInput(call, 'paste') && hasText(call, 'hunter2'));
+  assert.equal(await password.inputValue(), '', `${label}: the password box is emptied`);
+  await page.getByLabel('Name or email for the page').fill('ada@example.test');
+  await page.getByRole('button', { name: 'Put name in page' }).click();
+  await waitForCall(calls, call => isInput(call, 'paste') && hasText(call, 'ada@example.test'));
+
   // A file goes to the shown tab as base64, with its name and type.
   await page.getByLabel('Upload a file into the page').setInputFiles({
     name: 'id.txt',
@@ -322,6 +400,8 @@ async function checkLivePage(page: Page, calls: LiveCall[], label: string) {
   await waitForCall(calls, call => call.path === '/api/browser/live/takeover' && bodyOf(call)['on'] === true);
   await page.getByText('asking for a human check', { exact: false }).waitFor({ timeout: RENDER_TIMEOUT_MS });
   const clicksBefore = calls.filter(call => isInput(call, 'click')).length;
+  // The sign-in boxes above may have scrolled the picture away; the press needs it on screen.
+  await picture.scrollIntoViewIfNeeded();
   const box = await picture.boundingBox();
   assert.ok(box !== null, `${label}: the picture has a box to press`);
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
@@ -353,6 +433,26 @@ async function checkLivePage(page: Page, calls: LiveCall[], label: string) {
     `${label}: the page does not scroll sideways`,
   );
 
+  // End session asks once, then closes the shown tab, which leaves the tab list.
+  await page.getByRole('button', { name: 'End session' }).click();
+  await page.getByText('Ending the session closes this page', { exact: false }).waitFor({ timeout: RENDER_TIMEOUT_MS });
+  assert.equal(
+    calls.filter(call => call.path === '/api/browser/live/close').length,
+    0,
+    `${label}: the first press only asks`,
+  );
+  await page.getByRole('button', { name: 'Press again to end' }).click();
+  await waitForCall(calls, call => call.path === '/api/browser/live/close' && hasTab(call, 'chat-2'));
+  await page.getByText('Session ended.', { exact: false }).waitFor({ timeout: RENDER_TIMEOUT_MS });
+  await page.screenshot({
+    path: await featureShotPath({ surface: 'screen:browser-live', step: `session-ended-${shotName(label)}` }),
+  });
+  assert.equal(
+    await tabs.getByRole('button', { name: 'https://example.test/upload' }).count(),
+    0,
+    `${label}: the ended tab leaves the list`,
+  );
+
   // Done stops asking for frames and sends the person back to the chat to tell Aman.
   await page.getByRole('button', { name: 'Done' }).click();
   await page.getByText('Go back to the chat and tell Aman', { exact: false }).waitFor({ timeout: RENDER_TIMEOUT_MS });
@@ -367,6 +467,15 @@ async function checkLivePage(page: Page, calls: LiveCall[], label: string) {
 
 function frameSize() {
   return { image_width: FRAME.width, image_height: FRAME.height };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+/** A picture name from a viewport and theme label, such as 1280px-dark. */
+function shotName(label: string): string {
+  return label.toLowerCase().replace(/[^a-z0-9]+/g, '-');
 }
 
 function bodyOf(call: LiveCall): Record<string, unknown> {
