@@ -134,7 +134,7 @@ test_colors_and_plain_text() {
   local c
   # In the plain locale a byte is a column.
   for c in "" $ALL_COMMANDS; do
-    run_aman LANG=C -- help $c
+    run_aman LANG=C -- help ${c:+"$c"}
     assert_eq "$(printf '%s\n' "$OUT" | awk 'length($0) > 80 { n++ } END { print n + 0 }')" 0 "no line of help $c is wider than the screen"
   done
   sandbox_drop
