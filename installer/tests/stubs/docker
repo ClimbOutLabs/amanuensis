@@ -400,6 +400,95 @@ case "$cmd" in
       prev=$a
     done
     case "$*" in
+      *" aman help")
+        # What the app image can do. An image from before sealed backups, listed in $S/images_without_seal, cannot seal.
+        all_args="$*"
+        image=${all_args% aman help}
+        image=${image##* }
+        echo "Commands: hash-password backup backup-check doctor export-data"
+        grep -Fxq "$image" "$S/images_without_seal" 2>/dev/null || echo "  secrets seal unseal"
+        exit 0
+        ;;
+      *"aman secrets key"*)
+        # Makes this computer's key when there is none, without touching any data.
+        if [ -f "$S/key" ]; then
+          printf '{"created":false}\n'
+        else
+          echo "key-$(date +%s%N)" >"$S/key"
+          echo "backup" >>"$S/key_made_by"
+          printf '{"created":true}\n'
+        fi
+        exit 0
+        ;;
+      *"tar -x --no-same-owner -C /backup"*)
+        # A readable backup from before sealing, unpacked into the scratch volume.
+        mkdir -p "$S/scratchfs/$scratch_vol"
+        tar -x -C "$S/scratchfs/$scratch_vol" -f -
+        exit 0
+        ;;
+      *'cat >"/backup/$1"'*)
+        # One more file for the scratch volume, from stdin.
+        args=("$@")
+        mkdir -p "$S/scratchfs/$scratch_vol"
+        cat >"$S/scratchfs/$scratch_vol/${args[${#args[@]} - 1]}"
+        exit 0
+        ;;
+      *"aman seal"*)
+        # Models the CLI: one header line naming the key and the recovery key that open the file, then the scratch
+        # volume as a tar archive. The real file is encrypted; the stub keeps it readable so tests can look inside.
+        echo "$*" >>"$S/seal_runs"
+        [ -n "${STUB_SEAL_FAIL:-}" ] && { echo "seal failed" >&2; exit 1; }
+        [ -f "$S/key" ] || { echo "This computer's key is not available: missing." >&2; exit 1; }
+        proj=aman-${scratch_vol#aman_}
+        proj=${proj%_backup_scratch}
+        case "$*" in
+          *--this-computer-only*) recovery=none ;;
+          *)
+            if [ ! -f "$S/secrets_$proj" ] || [ "$(sed -n 1p "$S/secrets_$proj")" != "$(cat "$S/key")" ]; then
+              echo "Saved secrets are not set up for this database with this key." >&2
+              exit 1
+            fi
+            recovery=$(sed -n 2p "$S/secrets_$proj")
+            ;;
+        esac
+        # The real header is JSON and says "recovery_copy":null when no recovery key opens the file.
+        [ "$recovery" != none ] || recovery='none "recovery_copy":null'
+        printf 'AMANSEAL-STUB %s %s\n' "$(cat "$S/key")" "$recovery"
+        tar -C "$S/scratchfs/$scratch_vol" -cf - .
+        exit 0
+        ;;
+      *"aman unseal"*)
+        # Opens a sealed file from stdin with this computer's key, and refuses one sealed with another key. With
+        # --recovery-key-file the first line of stdin is the recovery key, which opens it on any computer.
+        typed=
+        case "$*" in
+          *--recovery-key-file*)
+            echo "unseal with a recovery key" >>"$S/unseal_runs"
+            IFS= read -r typed || exit 1
+            ;;
+          *) echo "$*" >>"$S/unseal_runs" ;;
+        esac
+        IFS= read -r header || { echo "The sealed file is cut short." >&2; exit 1; }
+        set -- $header
+        if [ "${1:-}" != AMANSEAL-STUB ]; then
+          cat >/dev/null
+          echo "This is not a sealed file." >&2
+          exit 1
+        fi
+        if [ -n "$typed" ]; then
+          if [ "${3:-}" = none ] || [ "$(printf '%s' "$typed" | tr -cd 0-9)" != "$(printf '%s' "${3:-}" | tr -cd 0-9)" ]; then
+            cat >/dev/null
+            echo "That recovery key does not open this file." >&2
+            exit 2
+          fi
+        elif [ ! -f "$S/key" ] || [ "${2:-}" != "$(cat "$S/key")" ]; then
+          cat >/dev/null
+          echo "This file was sealed with another computer's key." >&2
+          exit 1
+        fi
+        cat
+        exit 0
+        ;;
       *"--entrypoint cat"*)
         # The slot setup copied out of the app image.
         [ -n "${STUB_NO_BUNDLE:-}" ] && exit 1
@@ -591,9 +680,24 @@ case "$cmd" in
         esac
         exit 0
         ;;
+      *"/data/db/.restore"*)
+        # Puts a database back, with its key records when the backup holds them. Without them the database is one
+        # from before encryption, and the records of the one it replaces go.
+        keys=$S/secrets_aman-$(printf %s "${vol#aman_}" | sed 's/_data$//')
+        case " ${STUB_RESTORE_FAIL:-} " in *" $vol "*) cat >/dev/null; echo "restore failed" >&2; exit 1 ;; esac
+        work=$(mktemp -d)
+        tar -x -C "$work" -f - || exit 1
+        [ -f "$work/db.sqlite" ] || exit 1
+        rm -f "$keys"
+        [ ! -f "$work/db.sqlite.keys" ] || cp "$work/db.sqlite.keys" "$keys"
+        cp "$work/db.sqlite" "$S/restored_$vol"
+        rm -rf "$work"
+        echo "restore $vol" >>"$S/restores"
+        exit 0
+        ;;
       *"rm -f /data/db/db.sqlite /data/db"*)
         # Empties an instance's database, as undoing a restore does when the instance had none.
-        rm -f "$S/restored_$vol"
+        rm -f "$S/restored_$vol" "$S/secrets_aman-$(printf %s "${vol#aman_}" | sed 's/_data$//')"
         echo "cleared $vol" >>"$S/restores"
         exit 0
         ;;
@@ -608,6 +712,10 @@ case "$cmd" in
         # $S/db_gen stands for what the instance holds now, so a test can change it between two backups.
         gen=$(cat "$S/db_gen" 2>/dev/null || true)
         printf 'SQLITE-OF-%s%s\n' "$data_vol" "${gen:+-$gen}" >"$out/db.sqlite"
+        # The key records of a database that is set up go with it. They stand for the key and the recovery key
+        # the database answers to.
+        keys=$S/secrets_aman-$(printf %s "${data_vol#aman_}" | sed 's/_data$//')
+        [ ! -f "$keys" ] || cp "$keys" "$out/db.sqlite.keys"
         printf 'memory-%s\n' "${gen:-none}" >"$out/memory/note.md"
         printf '{"version":1,"files":[]}\n' >"$out/manifest.json"
         printf '{"target":"/backup","manifest":"manifest.json","files":1,"bytes":1}\n'
@@ -677,6 +785,7 @@ case "$cmd" in
         --project-name) proj=$2; shift 2 ;;
         --env-file) envfile=$2; shift 2 ;;
         --project-directory) shift 2 ;;
+        --profile) shift 2 ;;
         -f) file=$2; shift 2 ;;
         *) break ;;
       esac
@@ -710,7 +819,10 @@ case "$cmd" in
         case " $* " in *" dex "*) rm -f "$S/dex_stopped_$proj" ;; esac
         printf '%s\n' "$img" >"$S/up/$proj"
         awk '/^    name: / {n = $2} /com.amanuensis.instance:/ {print n, $2}' "$file" >>"$S/volumes_labels"
+        # Compose owns only the volumes it makes; an external one belongs to no project.
+        externals=$(awk '/^    name: / {n = $2} /external: true/ {print n}' "$file")
         grep -o 'name: aman_[a-z0-9_-]*' "$file" | sed 's/name: //' | while read -r v; do
+          if printf '%s\n' "$externals" | grep -Fxq "$v"; then continue; fi
           case "$v" in
             *_stt | *_speech) grep -Fxq "$v" "$S/networks" 2>/dev/null || echo "$v" >>"$S/networks" ;;
             *) grep -Fxq "$v" "$S/volumes" || echo "$v" >>"$S/volumes"; echo "$v $proj" >>"$S/volume_projects" ;;
@@ -763,9 +875,95 @@ case "$cmd" in
         exit 0
         ;;
       run)
+        # `run --rm -T secrets-setup init|check-recovery ...`: ties an instance's data to this computer's key, as the
+        # real command does. The key is $S/key; each project's data remembers the key it was set up with and its
+        # recovery key. $S/key_lost models a computer whose key is gone while the data is still there.
+        case "$*" in
+          *" secrets-setup init "*)
+            [ -n "${STUB_SECRETS_FAIL:-}" ] && { echo "The database could not be opened." >&2; exit 1; }
+            [ -f "$S/key" ] || { echo "key-$(date +%s%N)" >"$S/key"; echo "$proj" >>"$S/key_made_by"; }
+            if [ -f "$S/secrets_$proj" ]; then
+              if [ "$(sed -n 1p "$S/secrets_$proj")" = "$(cat "$S/key")" ]; then
+                printf '{"already_set_up":true}\n'
+                exit 0
+              fi
+              echo "This database was set up with a different key. Unlock it with its recovery key instead of running setup." >&2
+              exit 1
+            fi
+            n=$(($(cat "$S/secrets_count" 2>/dev/null || echo 0) + 1))
+            echo "$n" >"$S/secrets_count"
+            recovery=$(printf '%06d-222222-333333-444444-555555-666666-777777-888888' "$n")
+            printf '%s\n%s\n' "$(cat "$S/key")" "$recovery" >"$S/secrets_$proj"
+            printf '{"recovery_key":"%s"}\n' "$recovery"
+            echo "Saved secrets are set up. Write down the recovery key now: it is shown only this once." >&2
+            exit 0
+            ;;
+          *" secrets-setup adopt "*)
+            # Ties data set up with another computer's key to this one, given that data's recovery key on stdin.
+            typed=$(cat)
+            echo "$proj" >>"$S/adopt_runs"
+            [ -n "${STUB_ADOPT_FAIL:-}" ] && { echo "The database could not be opened." >&2; exit 1; }
+            if [ "$(printf '%s' "$typed" | tr -cd 0-9)" != "$(sed -n 2p "$S/secrets_$proj" 2>/dev/null | tr -cd 0-9)" ]; then
+              echo "That recovery key does not unlock this database." >&2
+              exit 2
+            fi
+            [ -f "$S/key" ] || { echo "key-$(date +%s%N)" >"$S/key"; echo "$proj" >>"$S/key_made_by"; }
+            if [ "$(sed -n 1p "$S/secrets_$proj")" = "$(cat "$S/key")" ]; then
+              printf '{"already_adopted":true}\n'
+            else
+              printf '%s\n%s\n' "$(cat "$S/key")" "$typed" >"$S/secrets_$proj"
+              printf '{"adopted":true}\n'
+            fi
+            exit 0
+            ;;
+          *" secrets-setup env put "*)
+            # Keeps a paid-account key the way the app does: encrypted, so only a digest of it is ever on disk here.
+            # STUB_SAVED_ENV_OLD models a version from before keys were kept this way.
+            [ -z "${STUB_SAVED_ENV_OLD:-}" ] || { echo "Usage: aman secrets <init|first-run|check-recovery|adopt|key>" >&2; exit 2; }
+            if [ ! -f "$S/secrets_$proj" ] || [ "$(sed -n 1p "$S/secrets_$proj")" != "$(cat "$S/key" 2>/dev/null)" ]; then
+              echo 'Saved secrets are not set up for this database with this key. Run "aman secrets init" first.' >&2
+              exit 1
+            fi
+            name=
+            while [ "$#" -gt 0 ]; do
+              if [ "$1" = --name ]; then name=$2; fi
+              shift
+            done
+            IFS= read -r value || true
+            [ -n "$value" ] || { echo "No value came in on stdin." >&2; exit 2; }
+            { grep -v "^$name " "$S/saved_env_$proj" 2>/dev/null || true; printf '%s %s\n' "$name" "$(printf '%s' "$value" | sha256sum | cut -c1-64)"; } >"$S/saved_env_$proj.new"
+            mv "$S/saved_env_$proj.new" "$S/saved_env_$proj"
+            printf '{"saved":"%s"}\n' "$name"
+            exit 0
+            ;;
+          *" secrets-setup connector-key "*)
+            # Prints the key of a connector's own account file, which only an instance tied to this computer's key has.
+            if [ ! -f "$S/secrets_$proj" ] || [ "$(sed -n 1p "$S/secrets_$proj")" != "$(cat "$S/key" 2>/dev/null)" ]; then
+              echo 'Saved secrets are not set up for this database with this key. Run "aman secrets init" first.' >&2
+              exit 1
+            fi
+            name=
+            while [ "$#" -gt 0 ]; do
+              if [ "$1" = --name ]; then name=$2; fi
+              shift
+            done
+            printf '%s-key-%s\n' "$name" "$(sha256sum <"$S/key" | cut -c1-16)"
+            exit 0
+            ;;
+          *" secrets-setup check-recovery "*)
+            typed=$(cat)
+            if [ "$(printf '%s' "$typed" | tr -cd 0-9)" = "$(sed -n 2p "$S/secrets_$proj" 2>/dev/null | tr -cd 0-9)" ]; then
+              printf '{"ok":true}\n'
+              exit 0
+            fi
+            echo "That recovery key does not unlock this database." >&2
+            exit 2
+            ;;
+        esac
         # A connector's account agent, run one-off: it reads the account from stdin, empties it, or checks
         # it, in the named volume the compose project owns. The service must exist in the file, as in
-        # Compose. The account text arrives on stdin only, never in the logged command. The calendar agent
+        # Compose. The account text arrives on stdin only, never in the logged command. The store stands for
+        # what the agent holds once its file is opened. The calendar agent
         # can be made to refuse an address (STUB_CALENDAR_REFUSES) or to report a sign-in answer
         # (STUB_CALENDAR_CHECK, default ok).
         svc=
@@ -779,15 +977,20 @@ case "$cmd" in
         [ -n "$svc" ] || exit 1
         grep -q "^  $svc:" "$file" 2>/dev/null || { echo "no such service: $svc" >&2; exit 1; }
         case "$svc" in
-          calendar-caldav) store="$S/calendar-account-$proj" ;;
-          *) store="$S/mail-account-$proj" ;;
+          calendar-caldav) kind=calendar ;;
+          *) kind=mail ;;
         esac
+        store="$S/$kind-account-$proj"
         case "$*" in
           *--write-stdin*)
             if [ "$svc" = calendar-caldav ] && [ -n "${STUB_CALENDAR_REFUSES:-}" ]; then
               cat >/dev/null
               exit 3
             fi
+            # The agents keep their file encrypted: the first line must be the key of this instance's file.
+            IFS= read -r given || true
+            [ "$given" = "$kind-key-$(sha256sum <"$S/key" 2>/dev/null | cut -c1-16)" ] || { cat >/dev/null; exit 2; }
+            echo "$proj" >>"$S/$kind-account-keyed"
             text=$(cat)
             # The calendar agent refuses text that does not hold all four settings.
             if [ "$svc" = calendar-caldav ] && [ "$(printf '%s\n' "$text" | grep -c '^CALDAV_\(URL\|USERNAME\|PASSWORD\|USER_EMAIL\)=.')" -lt 4 ]; then
@@ -809,7 +1012,15 @@ case "$cmd" in
             ;;
           *--check*)
             # STUB_CALENDAR_CHECK=silent models a check that printed nothing.
-            if [ -s "$store" ]; then [ "${STUB_CALENDAR_CHECK:-ok}" = silent ] || echo "${STUB_CALENDAR_CHECK:-ok}"; else echo none; fi
+            # A saved account opens only with the key of this instance's file, given on the first line.
+            IFS= read -r given || true
+            if [ ! -s "$store" ]; then
+              echo none
+            elif [ "$given" != "$kind-key-$(sha256sum <"$S/key" 2>/dev/null | cut -c1-16)" ]; then
+              echo locked
+            else
+              [ "${STUB_CALENDAR_CHECK:-ok}" = silent ] || echo "${STUB_CALENDAR_CHECK:-ok}"
+            fi
             ;;
         esac
         exit 0

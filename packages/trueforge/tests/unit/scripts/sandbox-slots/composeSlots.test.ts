@@ -173,7 +173,10 @@ describe('installer/templates/instance/compose.yaml.tpl sandbox wiring', () => {
   });
 
   test('the shared control volumes are the slots project volumes of the same name, and no workspace volume is shared', () => {
-    const external = Object.entries(app.volumes).filter(([, volume]) => volume.external === true);
+    // The only other volume from outside the project holds this computer's key, which is not a slot volume.
+    const external = Object.entries(app.volumes).filter(
+      ([, volume]) => volume.external === true && volume.name !== 'aman_key',
+    );
     expect(external.map(([, volume]) => volume.name)).toEqual([
       'main_slot_ctl_1',
       'main_slot_ctl_2',

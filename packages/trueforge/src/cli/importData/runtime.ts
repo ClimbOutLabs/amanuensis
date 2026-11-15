@@ -3,6 +3,10 @@ import path from 'node:path';
 
 import { createLogger, format, transports } from 'winston';
 
+import { usePersonaKnowledgeKeys } from '../../personaKnowledge/sqliteKnowledgeRepository';
+import { EncryptedMcpServerStore } from '../../secrets/encryptedMcpServerStore';
+import { EncryptedModelProviderStore } from '../../secrets/encryptedModelProviderStore';
+import { openSqliteVault } from '../../secrets/sqliteAccess';
 import type { ImportDataSession } from './session';
 
 /** Messages go to stderr so stdout stays the printed summary; the JSON result is on stderr too. */
@@ -87,7 +91,14 @@ export async function openImportDataSession(): Promise<ImportDataSession> {
   }
 
   await mkdir(path.dirname(configuration.SQLITE_PATH), { recursive: true });
-  const db = createSqliteDb(configuration.SQLITE_PATH);
+  // An import saves connectors and model providers, so it needs this computer's key like the server does.
+  const { vault, databaseKey } = await openSqliteVault({
+    sqlitePath: configuration.SQLITE_PATH,
+    keyFile: configuration.SECRETS_KEY_FILE,
+    mode: 'command',
+  });
+  usePersonaKnowledgeKeys({ ...vault.knowledgeKeys(), upgrade: true });
+  const db = createSqliteDb(configuration.SQLITE_PATH, { key: databaseKey });
   try {
     await withLogsOnStderr(() => migrateSqliteToLatest(db));
   } catch (error) {
@@ -119,6 +130,8 @@ export async function openImportDataSession(): Promise<ImportDataSession> {
     import('../../db/sqlite/turn-artifact-store/SqliteTurnArtifactStore'),
   ]);
 
+  const globalSettingsStore = new SqliteGlobalSettingsStore(db);
+
   const modelDir = configuration.MEMORY_EMBEDDINGS_MODEL_DIR;
   const embeddingModel = getSharedEmbeddingModel({ modelDir });
   const logger = stderrLogger();
@@ -135,14 +148,14 @@ export async function openImportDataSession(): Promise<ImportDataSession> {
           personalizationStore: new SqlitePersonalizationStore(db),
           spaceStore: new SqliteSpaceStore(db),
           scheduleStore: new SqliteScheduleStore(db),
-          globalSettingsStore: new SqliteGlobalSettingsStore(db),
+          globalSettingsStore,
           auditStore: audit,
           deliveryStore: new DeliveryStore(db),
           reachSettingsStore: new ReachSettingsStore(db),
           textContactStore: new TextContactStore(db),
           turnArtifactStore: new SqliteTurnArtifactStore(db),
-          mcpServerStore: new SqliteMcpServerStore(db),
-          modelProviderStore: new SqliteModelProviderStore(db),
+          mcpServerStore: new EncryptedMcpServerStore({ store: new SqliteMcpServerStore(db), vault }),
+          modelProviderStore: new EncryptedModelProviderStore({ store: new SqliteModelProviderStore(db), vault }),
           agentStore: new SqliteAgentStore(db),
           mcpCatalog,
           withTransaction: callback => db.transaction().execute(callback),

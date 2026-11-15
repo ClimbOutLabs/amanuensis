@@ -72,6 +72,8 @@ services:
       NODE_ENV: production
       # Tells the server it was set up by the installer and under what name, so Settings can say how to turn the sandbox on.
       INSTALLER_INSTANCE: '@@NAME@@'
+      # This computer's key for saved logins. The app only reads it, and waits, locked, while it is missing.
+      SECRETS_KEY_FILE: /run/aman-key/master.key
 @@IF_SANDBOX@@      # Run code, shell and files go to the gVisor sandbox slots (project @@NAME@@-slots), never to Docker.
 @@IF_SANDBOX@@      SANDBOX_BACKEND: slots
 @@IF_SANDBOX@@      SANDBOX_SLOTS: '2'
@@ -88,6 +90,7 @@ services:
 @@IF_BROWSER@@      BROWSER_URL: http://browser-relay:8792
     volumes:
       - data:/data
+      - machine-key:/run/aman-key:ro
 @@IF_SANDBOX@@      # Read-only views of each slot's control socket. No Docker socket, no workspace volume.
 @@IF_SANDBOX@@      - slot_ctl_1:/run/aman-slots/1:ro
 @@IF_SANDBOX@@      - slot_ctl_2:/run/aman-slots/2:ro
@@ -117,6 +120,26 @@ services:
     # Above the app's graceful shutdown window so a kill does not cut off turn drain.
     stop_grace_period: 35s
     restart: unless-stopped
+
+  # Runs only when the installer asks, never on a normal start. It ties this instance's data to this computer's
+  # key, makes the key the first time, and is the only service that may write it. It has no network.
+  secrets-setup:
+    image: @@APP_IMAGE@@
+    pull_policy: never
+    profiles:
+      - setup
+    network_mode: none
+    entrypoint:
+      - aman
+      - secrets
+    volumes:
+      - data:/data
+      - machine-key:/run/aman-key
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: 'no'
 
 @@IF_LOCAL_MODEL@@  # The local model bridge: carries the app's model requests to a model server on this computer, at the ports its owner
 @@IF_LOCAL_MODEL@@  # named with aman local-model. This host side dials the model and listens only on socket files in a volume it shares
@@ -232,7 +255,7 @@ services:
 # set it up. The app reaches it at http://calendar-caldav:9558/mcp. Nothing is published. It sits on a network of its own
 # that only the app's network holder shares, so no other service (the mail connector reads untrusted mail) can reach its
 # account port, which also answers only a caller that presents this instance's secret.
-# The calendar login lives in a volume this sidecar owns, which the installer writes through the sidecar's account agent
+# The calendar login lives encrypted in a volume this sidecar owns, which the installer writes through the sidecar's account agent
 # and the Settings Calendar card changes through the same agent on port 9560.
 # The tool server inside runs only while a login is saved.
 @@IF_CALENDAR@@  calendar-caldav:
@@ -262,7 +285,7 @@ services:
 
 # Email connector. It starts with the instance, and the app reaches it at http://mail-email:9557/mcp. Nothing is
 # published. It sits on a network of its own that only the app's network holder shares, so no other service can reach
-# its tool port or its account port. The account lives in a volume this sidecar owns, which the installer writes
+# its tool port or its account port. The account lives encrypted in a volume this sidecar owns, which the installer writes
 # through the sidecar's account agent and the Settings Email card changes through the same agent on port 9559.
 # The account agent answers only a caller that presents this instance's secret.
 @@IF_EMAIL@@  mail-email:
@@ -281,6 +304,8 @@ services:
 @@IF_EMAIL@@      AMAN_MAIL_STATUS_FILE: /mail-status/loaded.sha256
 @@IF_EMAIL@@      # The account agent: the account file it owns, its private-network port, and its own path in the image.
 @@IF_EMAIL@@      AMAN_MAIL_ACCOUNT_FILE: /account/.env.mail-email
+@@IF_EMAIL@@      # In memory: the accounts in the form the mail server reads, which the agent renders once it has the file's key.
+@@IF_EMAIL@@      AMAN_MAIL_RUN_DIR: /run/aman-mail
 @@IF_EMAIL@@      AMAN_MAIL_ACCOUNT_PORT: '9559'
 @@IF_EMAIL@@      # Shared with the app through .env, which the installer fills in once.
 @@IF_EMAIL@@      AMAN_MAIL_ACCOUNT_SECRET: ${MAIL_EMAIL_ACCOUNT_SECRET:?missing from .env}
@@ -297,6 +322,8 @@ services:
 @@IF_EMAIL@@      - mail-policy:/policy:ro
 @@IF_EMAIL@@      - mail-policy-status:/mail-status
 @@IF_EMAIL@@      - mail-email-data:/data
+@@IF_EMAIL@@    tmpfs:
+@@IF_EMAIL@@      - /run/aman-mail:mode=0700
 @@IF_EMAIL@@    expose:
 @@IF_EMAIL@@      - '9557'
 @@IF_EMAIL@@      - '9559'
@@ -401,6 +428,10 @@ volumes:
     name: aman_@@NAME@@_data
     labels:
       com.amanuensis.instance: @@NAME@@
+  # This computer's key for saved logins, shared by every instance. The installer makes it; Compose never does.
+  machine-key:
+    name: aman_key
+    external: true
   dex:
     name: aman_@@NAME@@_dex
     labels:
@@ -427,7 +458,7 @@ volumes:
 @@IF_EMAIL@@    name: aman_@@NAME@@_mail_email_data
 @@IF_EMAIL@@    labels:
 @@IF_EMAIL@@      com.amanuensis.instance: @@NAME@@
-@@IF_EMAIL@@  # The Email account file, owned by the connector. Holds the app password; nothing else reads it.
+@@IF_EMAIL@@  # The Email account file, owned by the connector. Holds the app password, encrypted; nothing else reads it.
 @@IF_EMAIL@@  mail-account:
 @@IF_EMAIL@@    name: aman_@@NAME@@_mail_account
 @@IF_EMAIL@@    labels:

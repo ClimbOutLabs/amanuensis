@@ -42,14 +42,19 @@ tavily_key_take() {
   AMAN_TAVILY_KEY=$1
 }
 
-demo_tavily_on() {
-  local env
-  env="$(instance_dir "$1")/.env"
-  [ "$(env_get "$env" SEARCH_PROVIDER)" = tavily ] && [ "$(env_get "$env" TAVILY_API_KEY)" = "$AMAN_TAVILY_KEY" ]
+# A short digest of the key, so a run given the same key again changes nothing. The key itself is never kept here.
+tavily_key_mark() {
+  printf '%s' "$1" | sha256_stdin | cut -c1-16
 }
 
-# Sets SEARCH_PROVIDER=tavily and TAVILY_API_KEY in the managed block from the --tavily-key-stdin key, and restarts
-# the app when that changed the settings. Without a key it does nothing. The key only passes through shell builtins.
+demo_tavily_on() {
+  [ "$(env_get "$(instance_dir "$1")/.env" SEARCH_PROVIDER)" = tavily ] &&
+    [ "$(reg_get "$1" tavily_mark)" = "$(tavily_key_mark "$AMAN_TAVILY_KEY")" ]
+}
+
+# Sets SEARCH_PROVIDER=tavily in the managed block, saves the --tavily-key-stdin key encrypted with the instance's
+# data, and restarts the app when that changed anything. Without a key it does nothing. The key only passes through
+# shell builtins.
 demo_tavily_apply() {
   local name=$1 env
   [ -n "$AMAN_TAVILY_KEY" ] || return 0
@@ -59,7 +64,8 @@ demo_tavily_apply() {
   fi
   env="$(instance_dir "$name")/.env"
   env_managed_set "$env" SEARCH_PROVIDER tavily
-  env_managed_set "$env" TAVILY_API_KEY "$AMAN_TAVILY_KEY"
+  saved_env_keep "$name" TAVILY_API_KEY "$AMAN_TAVILY_KEY"
+  reg_set "$name" tavily_mark "$(tavily_key_mark "$AMAN_TAVILY_KEY")"
   AMAN_TAVILY_KEY=
   log_event "demo instance $name searches the web with Tavily"
   say "Instance $name now searches the web with Tavily. Restarting the app."

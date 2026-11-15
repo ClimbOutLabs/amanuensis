@@ -139,7 +139,7 @@ test_check_reports_without_changing() {
 }
 
 test_successful_upgrade_backs_up_first() {
-  t_begin "upgrade backs up, then rebuilds, then restarts on the new images"
+  t_begin "upgrade rebuilds, then backs up with the new version, then restarts on the new images"
   sandbox_new
   install_machine
   local old new
@@ -156,7 +156,8 @@ test_successful_upgrade_backs_up_first() {
   backup_line=$(grep -n 'aman backup --target' "$STUB_LOG" | tail -n 1 | cut -d: -f1)
   build_line=$(grep -n 'docker build' "$STUB_LOG" | tail -n 1 | cut -d: -f1)
   up_line=$(grep -n 'aman-main.* up -d' "$STUB_LOG" | tail -n 1 | cut -d: -f1)
-  if [ "$backup_line" -lt "$build_line" ] && [ "$build_line" -lt "$up_line" ]; then t_pass; else t_fail "order was backup=$backup_line build=$build_line up=$up_line"; fi
+  if [ "$build_line" -lt "$backup_line" ] && [ "$backup_line" -lt "$up_line" ]; then t_pass; else t_fail "order was build=$build_line backup=$backup_line up=$up_line"; fi
+  assert_contains "$(grep 'aman backup --target' "$STUB_LOG" | tail -n 1)" "$new" "the new version makes the backup, so it can seal it"
   assert_log_lacks "docker push"
   assert_eq "$(cat "$SB_STATE/restores" 2>/dev/null || true)" "" "nothing restored on success"
   sandbox_drop
@@ -199,6 +200,7 @@ test_upgrade_moves_a_complete_old_email_account() {
   assert_not_contains "$OUT$ERR" "Email was set up the old way"
   assert_no_path "$dir/.env.mail-email"
   assert_contains "$(cat "$STUB_STATE/mail-account-aman-main")" "MCP_EMAIL_SERVER_PASSWORD='old-mail-sentinel-4b7e'"
+  assert_eq "$(sort -u "$STUB_STATE/mail-account-keyed")" aman-main "the moved account went in with the key of the connector's file"
   assert_eq "$(grep -c '^MAIL_EMAIL_MCP_URL=' "$dir/.env" || true)" 1 "the app is pointed at the connector"
   assert_not_contains "$OUT$ERR" "old-mail-sentinel-4b7e"
   run_install upgrade
@@ -714,7 +716,7 @@ test_backup_and_upgrade_force_cope_with_an_instance_without_a_database() {
   no_database_yet main
   run_install backup
   assert_rc 0
-  assert_flat_contains "$OUT" "Instance main has no data yet, so only its settings are saved."
+  assert_flat_contains "$OUT" "Instance main has no data yet, so there is nothing to back up for it."
   assert_not_contains "$OUT$ERR" "Cannot open database"
   assert_not_contains "$OUT$ERR" "failed"
   assert_no_path "$SB_STATE/backup_runs"

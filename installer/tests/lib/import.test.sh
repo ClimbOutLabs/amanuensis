@@ -38,6 +38,7 @@ test_import_stops_the_app_runs_the_cli_and_starts_it_again() {
   assert_contains "$run" "-v aman_main_data:/data"
   assert_contains "$run" "--tmpfs /import:rw,mode=0700,uid=10001,gid=10001"
   assert_contains "$run" "--env-file $AMAN_HOME/instances/main/.env"
+  assert_contains "$run" "-v aman_key:/run/aman-key:ro -e SECRETS_KEY_FILE=/run/aman-key/master.key" "the import can save logins with this computer's key"
   assert_contains "$run" "aman import-data --in /import/export.zip --user \"\$1\" --display-name \"\$2\" \${3:+\"\$3\"} import $OWNER owner"
   local stop_line run_line up_line
   stop_line=$(grep -n 'compose .* stop app' "$STUB_LOG" | head -n 1 | cut -d: -f1)
@@ -59,6 +60,7 @@ test_import_stops_the_app_runs_the_cli_and_starts_it_again() {
   assert_contains "$(cat "$AMAN_HOME/state/logs/import.log")" '"user_id":"stub"'
   assert_contains "$(cat "$AMAN_HOME/state/logs/import.log")" 'Not brought over: model keys'
   assert_flat_contains "$ERR" "Full log:"
+  assert_flat_contains "$ERR" "still holds these chats, and anyone who gets it can read them. Delete it once you have checked the result."
   assert_file "$SB_STATE/up/aman-main"
   sandbox_drop
 }
@@ -229,7 +231,7 @@ test_import_takes_a_kept_backup_first() {
   run_install instance import main "$EXPORT_FILE"
   assert_rc 0
   assert_eq "$(kept_backups | wc -l | tr -d ' ')" 1
-  assert_file "$(kept_backups)/main/db.sqlite"
+  assert_contains "$(sealed_names "$(kept_backups)/main.sealed")" "db.sqlite"
   assert_flat_contains "$OUT" "kept until you remove it"
   local backup_line run_line
   backup_line=$(grep -n 'aman backup' "$STUB_LOG" | tail -n 1 | cut -d: -f1)

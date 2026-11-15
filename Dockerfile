@@ -53,7 +53,8 @@ RUN groupadd --gid 10001 trueforge \
 # The local model bridge's two sides share socket files in a volume mounted at
 # /run/aman-local-model, made here for the same reason.
 RUN mkdir -p /data/memory /data/persona-knowledge /data/app /data/mail-policy /run/aman-local-model \
-  && chown -R 10001:10001 /data /run/aman-local-model
+  && mkdir -m 700 /run/aman-key \
+  && chown -R 10001:10001 /data /run/aman-local-model /run/aman-key
 
 # Image-level defaults so either image works without deploy-specific env: the
 # data roots above are writable by the runtime user. Deploys that pin their own

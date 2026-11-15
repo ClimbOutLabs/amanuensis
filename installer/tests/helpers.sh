@@ -55,7 +55,7 @@ sandbox_new() {
   fixture_node_runtime
   unset STUB_DOCKER_DENIED STUB_DOCKER_DOWN STUB_ROOTLESS STUB_PODMAN STUB_BUILD_FAIL STUB_BUILD_OOM STUB_DOCKER_MEM_BYTES STUB_UP_FAIL_UNLESS_TAG \
     STUB_DOCKER_ROOT STUB_DOCKER_ROOT_KB AMAN_PASSWORD STUB_BUSY_PORTS STUB_BACKUP_FAIL STUB_VOLUME_RM_FAIL STUB_ENGINE_VERSION STUB_COMPOSE_VERSION STUB_DOCTOR_EXIT STUB_DOCTOR_JSON STUB_MODEL_STATE STUB_VIA_SG STUB_VIA_SUDO \
-    STUB_CURL_FAIL STUB_CURL_CORRUPT STUB_SUDO_SH_FAIL STUB_SUDO_REFUSE STUB_SLOT_DISK_FAIL STUB_APPARMOR STUB_CGROUP STUB_DOCKER_OS STUB_NO_BUNDLE STUB_UP_FAIL_LOG STUB_ADDRS STUB_HOSTNAME STUB_TS_IP STUB_TS_NAME STUB_TS_HANG STUB_TS_SERVE_PORTS STUB_NODE_VERSION STUB_PKI_FAIL STUB_PUSH_KEYS_FAIL STUB_SANDBOX_DOCTOR_EXIT STUB_SLOT_BUILD_RC STUB_DEMO_FAIL STUB_IMPORT_FAIL STUB_IMPORT_SIGNAL \
+    STUB_CURL_FAIL STUB_CURL_CORRUPT STUB_SUDO_SH_FAIL STUB_SUDO_REFUSE STUB_SLOT_DISK_FAIL STUB_APPARMOR STUB_CGROUP STUB_DOCKER_OS STUB_NO_BUNDLE STUB_UP_FAIL_LOG STUB_ADDRS STUB_HOSTNAME STUB_TS_IP STUB_TS_NAME STUB_TS_HANG STUB_TS_SERVE_PORTS STUB_NODE_VERSION STUB_PKI_FAIL STUB_PUSH_KEYS_FAIL STUB_SANDBOX_DOCTOR_EXIT STUB_SLOT_BUILD_RC STUB_DEMO_FAIL STUB_IMPORT_FAIL STUB_IMPORT_SIGNAL STUB_SECRETS_FAIL STUB_DISK_ENCRYPTED STUB_SEAL_FAIL STUB_ADOPT_FAIL STUB_SAVED_ENV_OLD \
     STUB_MODEL_DOWNLOADING STUB_MODEL_BROKEN STUB_EXPORT_USERS STUB_EXPORT_FAIL STUB_EXPORT_LIST_FAIL STUB_PGDUMP_FAIL STUB_OLD_PG_STOPPED STUB_COPY_SIGNAL STUB_FAIL_ON STUB_UP_FAIL_ONCE STUB_RESTORE_FAIL || true
   # Room for two instances with the sandbox: two 16 GB disks each, plus Docker's 10 GB when it shares the disk.
   STUB_DF_KB=90000000
@@ -219,7 +219,7 @@ build_run_env() {
     STUB_CURL_FAIL="${STUB_CURL_FAIL:-}" STUB_CURL_CORRUPT="${STUB_CURL_CORRUPT:-}" STUB_SUDO_SH_FAIL="${STUB_SUDO_SH_FAIL:-}"
     STUB_SUDO_REFUSE="${STUB_SUDO_REFUSE:-}" STUB_SLOT_DISK_FAIL="${STUB_SLOT_DISK_FAIL:-}"
     STUB_APPARMOR="${STUB_APPARMOR:-}" STUB_CGROUP="${STUB_CGROUP:-}" STUB_DOCKER_OS="${STUB_DOCKER_OS:-}" STUB_NO_BUNDLE="${STUB_NO_BUNDLE:-}"
-    STUB_UP_FAIL_LOG="${STUB_UP_FAIL_LOG:-}" STUB_ADDRS="${STUB_ADDRS:-}" STUB_HOSTNAME="${STUB_HOSTNAME:-}" STUB_TS_IP="${STUB_TS_IP:-}" STUB_TS_NAME="${STUB_TS_NAME:-}" STUB_TS_HANG="${STUB_TS_HANG:-}" STUB_TS_SERVE_PORTS="${STUB_TS_SERVE_PORTS:-}" STUB_NODE_VERSION="${STUB_NODE_VERSION:-}" STUB_SANDBOX_DOCTOR_EXIT="${STUB_SANDBOX_DOCTOR_EXIT:-}" STUB_SLOT_BUILD_RC="${STUB_SLOT_BUILD_RC:-}" STUB_DEMO_FAIL="${STUB_DEMO_FAIL:-}" STUB_IMPORT_FAIL="${STUB_IMPORT_FAIL:-}" STUB_IMPORT_SIGNAL="${STUB_IMPORT_SIGNAL:-}"
+    STUB_UP_FAIL_LOG="${STUB_UP_FAIL_LOG:-}" STUB_ADDRS="${STUB_ADDRS:-}" STUB_HOSTNAME="${STUB_HOSTNAME:-}" STUB_TS_IP="${STUB_TS_IP:-}" STUB_TS_NAME="${STUB_TS_NAME:-}" STUB_TS_HANG="${STUB_TS_HANG:-}" STUB_TS_SERVE_PORTS="${STUB_TS_SERVE_PORTS:-}" STUB_NODE_VERSION="${STUB_NODE_VERSION:-}" STUB_SANDBOX_DOCTOR_EXIT="${STUB_SANDBOX_DOCTOR_EXIT:-}" STUB_SLOT_BUILD_RC="${STUB_SLOT_BUILD_RC:-}" STUB_DEMO_FAIL="${STUB_DEMO_FAIL:-}" STUB_IMPORT_FAIL="${STUB_IMPORT_FAIL:-}" STUB_IMPORT_SIGNAL="${STUB_IMPORT_SIGNAL:-}" STUB_SECRETS_FAIL="${STUB_SECRETS_FAIL:-}" STUB_DISK_ENCRYPTED="${STUB_DISK_ENCRYPTED:-}" STUB_SEAL_FAIL="${STUB_SEAL_FAIL:-}" STUB_ADOPT_FAIL="${STUB_ADOPT_FAIL:-}" STUB_SAVED_ENV_OLD="${STUB_SAVED_ENV_OLD:-}"
     STUB_MODEL_DOWNLOADING="${STUB_MODEL_DOWNLOADING:-}" STUB_MODEL_BROKEN="${STUB_MODEL_BROKEN:-}" STUB_EXPORT_USERS="${STUB_EXPORT_USERS:-}"
     STUB_EXPORT_FAIL="${STUB_EXPORT_FAIL:-}" STUB_EXPORT_LIST_FAIL="${STUB_EXPORT_LIST_FAIL:-}" STUB_PGDUMP_FAIL="${STUB_PGDUMP_FAIL:-}" STUB_OLD_PG_STOPPED="${STUB_OLD_PG_STOPPED:-}" STUB_COPY_SIGNAL="${STUB_COPY_SIGNAL:-}" AMAN_IMPORT_POLL_SECONDS=0 STUB_FAIL_ON="${STUB_FAIL_ON:-}"
     STUB_UP_FAIL_ONCE="${STUB_UP_FAIL_ONCE:-}" STUB_RESTORE_FAIL="${STUB_RESTORE_FAIL:-}"
@@ -248,6 +248,13 @@ run_install_tty() {
   local answers=$1
   shift
   build_run_env
+  # A new instance shows its recovery key and asks for it back. Unless the test answers that itself, the key on
+  # the screen is typed back, as a person would.
+  case "$answers" in
+    *"Recovery key=>"*) ;;
+    *) answers="*Recovery key=><RECOVERY_KEY>
+$answers" ;;
+  esac
   printf '%s\n' "$answers" >"$SB/answers"
   set +e
   OUT=$(python3 "$TESTS_DIR/pty_run.py" "$SB/answers" -- env -i "${RUN_ENV[@]}" TERM=dumb bash "$SB_INSTALLER/install.sh" "$@")
@@ -304,6 +311,38 @@ install_machine() {
     return 1
   }
 }
+
+# ---- sealed backups ------------------------------------------------------------------------------
+
+# The stub's sealed file is one header line and then a readable tar archive, so a test can look at what a real
+# sealed file would hold. sealed_names FILE lists its members; sealed_cat FILE MEMBER prints one.
+sealed_names() { tail -n +2 "$1" | tar -tf - | sed 's|^\./||' | grep -v '^$' | LC_ALL=C sort; }
+sealed_cat() { tail -n +2 "$1" | tar -xOf - "./$2"; }
+# sealed_unpack FILE prints a folder holding the file's members, for a test to change; sealed_repack FOLDER FILE
+# seals the folder again under the same header.
+sealed_unpack() {
+  local dir
+  dir=$(mktemp -d "$SB/unsealed.XXXXXX")
+  tail -n +2 "$1" | tar -x -C "$dir" -f -
+  printf '%s\n' "$dir"
+}
+sealed_repack() {
+  local header
+  header=$(head -n 1 "$2")
+  { printf '%s\n' "$header"; tar -C "$1" -cf - .; } >"$2.new"
+  mv "$2.new" "$2"
+  chmod 600 "$2"
+  rm -rf "$1"
+}
+# Turns a sealed backup of NAME into the readable layout backups had before sealing.
+unseal_to_old_layout() { # backup dir, name
+  mkdir -p "$1/$2"
+  tail -n +2 "$1/$2.sealed" | tar -x -C "$1/$2" -f -
+  rm "$1/$2.sealed"
+  chmod -R go-rwx "$1/$2"
+}
+# The recovery key that opens the file, or "none" for one that opens only on the computer that made it.
+sealed_recovery() { head -n 1 "$1" | cut -d' ' -f3; }
 
 # ---- assertions ----------------------------------------------------------------------------------
 
@@ -381,6 +420,17 @@ assert_log_lacks() {
 log_count() { grep -Fc -- "$1" "$STUB_LOG" || true; }
 
 # True when no file under $1 contains the sentinel.
+# The digest the stub keeps of a paid-account key the installer saved encrypted for an instance, or nothing. The stub
+# never keeps the key itself, as the app never keeps it readable.
+saved_key() { # instance, setting name
+  sed -n "s/^$2 //p" "$STUB_STATE/saved_env_aman-$1" 2>/dev/null | head -n 1
+}
+
+# The digest saved_key gives for a key that was saved.
+key_digest() {
+  printf '%s' "$1" | sha256sum | cut -c1-64
+}
+
 assert_tree_lacks() {
   if grep -rIl -- "$2" "$1" >/dev/null 2>&1; then
     t_fail "found [$2] under $1: $(grep -rIl -- "$2" "$1" | head -n 3 | tr '\n' ' ')"

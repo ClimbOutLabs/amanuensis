@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# The stub disk sits on an encrypted layer, as a LUKS install does.
+printf 'lvm\ncrypt\npart\ndisk\n'

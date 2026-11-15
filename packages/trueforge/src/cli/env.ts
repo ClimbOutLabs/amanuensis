@@ -7,3 +7,8 @@ export type CliEnv = Readonly<Record<string, string | undefined>>;
 export function processEnv(): CliEnv {
   return process.env;
 }
+
+/** For start-up only: gives the process a setting that was kept encrypted, before the server config reads it. */
+export function setProcessEnv({ name, value }: { name: string; value: string }): void {
+  process.env[name] = value;
+}

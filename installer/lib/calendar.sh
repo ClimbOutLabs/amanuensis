@@ -269,7 +269,7 @@ calendar_collect() { # install|instance
 calendar_plan_row() {
   [ -n "$CAL_EMAIL" ] && [ -n "$CAL_TARGET" ] || return 0
   plan_add todo "Connect the calendar of $CAL_EMAIL to instance $CAL_TARGET" \
-    "The calendar connector keeps the app password in its own private storage."
+    "The calendar connector keeps the app password encrypted, in its own private storage."
 }
 
 # Saves the account in the connector, checks the sign-in once, and restarts the app so it learns the calendar is set
@@ -294,18 +294,39 @@ calendar_service_up() { # name
   fi
 }
 
+# The key of the connector's own account file, on one line, as the app works it out. The connector keeps the file
+# encrypted and is handed this key with whatever it is asked to save or check. Prints nothing and fails when the
+# instance is not tied to this computer's key yet.
+calendar_file_keys() { # name
+  local keys
+  keys=$(secrets_setup_run "$1" connector-key --name calendar --sqlite /data/db/db.sqlite --key-file "$MACHINE_KEY_FILE" </dev/null) && [ -n "$keys" ] || return 1
+  printf '%s\n' "$keys"
+}
+
 # Saves the account into the connector's volume through its account agent, run as a one-off container on the
-# instance's own compose project. The password travels on stdin only, never on a command line or in a host file.
+# instance's own compose project. The file's key goes in first, on its own line, and the account after it. Both travel
+# on stdin only, never on a command line or in a host file.
 # The agent refuses an address it may not sign in to, and the installer says so in plain words.
 calendar_agent_write() { # name
-  local name=$1 rc=0
-  calendar_env_text | dc "$name" run --rm --no-deps --entrypoint node "$CALENDAR_SERVICE" "$CALENDAR_AGENT" --write-stdin >/dev/null 2>&1 || rc=$?
+  local name=$1 rc=0 keys
+  keys=$(calendar_file_keys "$name") ||
+    die "The calendar account could not be saved, because the key that protects it could not be read. Run: install.sh upgrade, then: install.sh instance calendar $name"
+  { printf '%s\n' "$keys" && calendar_env_text; } | dc "$name" run --rm --no-deps --entrypoint node "$CALENDAR_SERVICE" "$CALENDAR_AGENT" --write-stdin >/dev/null 2>&1 || rc=$?
   case "$rc" in
     0) return 0 ;;
     2) die "The calendar connector could not save those details. Check the address, login name, email and app password for odd characters, then run: install.sh instance calendar $name" ;;
     3) die "That calendar address cannot be used here. Use the address your provider gives you, then run: install.sh instance calendar $name" ;;
     *) die "The calendar account could not be saved in the connector. Run: install.sh instance calendar $name" ;;
   esac
+}
+
+# Asks the connector's agent about the saved account, from a one-off container. Prints the agent's one word: ok,
+# login, server, blocked, certificate, redirect, none, or locked when the file's key could not be given. Prints
+# nothing when the check did not run.
+calendar_agent_check() { # name
+  local name=$1 keys
+  keys=$(calendar_file_keys "$name") || keys=
+  printf '%s\n' "$keys" | dc "$name" run --rm --no-deps --entrypoint node "$CALENDAR_SERVICE" "$CALENDAR_AGENT" --check 2>/dev/null | tr -d '\r' | tail -n 1 || true
 }
 
 # Deletes the account in the connector's volume through its account agent. Returns 0 when the compose file has no
@@ -340,7 +361,7 @@ calendar_env_text() {
 # refused the sign-in), server (the server could not be reached or trusted) or blocked.
 calendar_check() { # name
   local name=$1 answer
-  answer=$(dc "$name" run --rm --no-deps --entrypoint node "$CALENDAR_SERVICE" "$CALENDAR_AGENT" --check 2>/dev/null | tr -d '\r' | tail -n 1 || true)
+  answer=$(calendar_agent_check "$name")
   case "$answer" in
     ok)
       ui_ok "Signed in to $CAL_URL as $CAL_USER. The calendar connector can read this calendar."
@@ -369,18 +390,19 @@ calendar_link_remove() { # env file
 # old file and its settings line. An account already saved in the connector (connected again in Settings) is newer, so
 # it is kept and the old file is only deleted. Returns 1 when the account could not be moved, and then keeps the file.
 calendar_migrate_old_file() { # name
-  local name=$1 dir old answer
+  local name=$1 dir old answer keys
   dir=$(instance_dir "$name")
   old=$dir/.env.calendar
   [ -s "$old" ] || return 0
   grep -q "^  $CALENDAR_SERVICE:" "$dir/compose.yaml" 2>/dev/null || return 1
   dc "$name" up -d --no-deps "$CALENDAR_SERVICE" >/dev/null 2>&1 || return 1
-  answer=$(dc "$name" run --rm --no-deps --entrypoint node "$CALENDAR_SERVICE" "$CALENDAR_AGENT" --check 2>/dev/null | tr -d '\r' | tail -n 1 || true)
+  answer=$(calendar_agent_check "$name")
   # The old file goes only once the connector is known to hold an account: the agent printed one of its known words,
   # or the old account was just saved. An empty or unknown answer means the check did not run, so the file stays.
   case "$answer" in
     none)
-      dc "$name" run --rm --no-deps --entrypoint node "$CALENDAR_SERVICE" "$CALENDAR_AGENT" --write-stdin <"$old" >/dev/null 2>&1 || return 1
+      keys=$(calendar_file_keys "$name") || return 1
+      { printf '%s\n' "$keys" && cat "$old"; } | dc "$name" run --rm --no-deps --entrypoint node "$CALENDAR_SERVICE" "$CALENDAR_AGENT" --write-stdin >/dev/null 2>&1 || return 1
       ;;
     ok | login | server | blocked | certificate | redirect) ;;
     *) return 1 ;;

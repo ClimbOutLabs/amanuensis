@@ -1,18 +1,20 @@
 // Starts the calendar sidecar: the account agent, one CalDAV tool server per saved account, and the
 // multiplexer that fronts them all at one HTTP address. Each tool server always starts from the
 // account file, never from the environment Docker loaded, and restarts when its account changes.
-// With no account saved nothing listens at the tool address, so no calendar tools are offered.
+// With no account saved, or while the file's key has not arrived, nothing listens at the tool
+// address, so no calendar tools are offered.
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { fileURLToPath, URL } from 'node:url';
 
 import { allowedAddresses, defaultAccount, hostOf, parseAccounts } from './account.mjs';
 import {
+  AccountLockedError,
+  createAccountStore,
   createAgent,
   createAgentServer,
   DEFAULT_ACCOUNT_FILE,
   DEFAULT_PORT as DEFAULT_AGENT_PORT,
-  readAccountText,
   secretIsUsable,
 } from './agent.mjs';
 import { createMux } from './mux.mjs';
@@ -56,15 +58,27 @@ function withoutAgentSecret(environment) {
 
 const hashOf = text => createHash('sha256').update(text, 'utf8').digest('hex');
 
-export function startSupervisor({ file, host, port, deps = {} }) {
+export function startSupervisor({ file, store = createAccountStore({ file }), host, port, deps = {} }) {
   // One running tool server per account: its loopback port, its child, and the hash of the account
   // text it was started from, so a change to one account restarts only that account's server.
   const running = new Map();
   let mux = null;
   let ticking = false;
 
+  /** The saved accounts. A file whose key has not arrived yet counts as no account. */
+  function savedAccounts() {
+    try {
+      return parseAccounts(store.read());
+    } catch (error) {
+      if (error instanceof AccountLockedError) {
+        return parseAccounts('');
+      }
+      throw error;
+    }
+  }
+
   function targets() {
-    const list = parseAccounts(readAccountText(file));
+    const list = savedAccounts();
     const first = defaultAccount(list);
     const ordered = first === null ? list.accounts : [first, ...list.accounts.filter(a => a.email !== first.email)];
     const out = [];
@@ -100,7 +114,7 @@ export function startSupervisor({ file, host, port, deps = {} }) {
     }
     ticking = true;
     try {
-      const list = parseAccounts(readAccountText(file));
+      const list = savedAccounts();
       const wanted = new Map(list.accounts.map(account => [account.email, account]));
       for (const email of [...running.keys()]) {
         if (!wanted.has(email)) {
@@ -173,7 +187,8 @@ if (process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.
   const secret = process.env.CALENDAR_ACCOUNT_SECRET;
   // Without a usable secret the account port stays closed. The saved account is still served, and the
   // installer still writes it through the command line.
-  const server = secretIsUsable(secret) ? createAgentServer({ agent: createAgent({ file }), secret }) : null;
+  const store = createAccountStore({ file });
+  const server = secretIsUsable(secret) ? createAgentServer({ agent: createAgent({ file, store }), secret }) : null;
   if (server === null) {
     process.stderr.write('calendar account agent: no account secret is set, so its port is closed\n');
   } else {
@@ -181,6 +196,7 @@ if (process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.
   }
   const supervisor = startSupervisor({
     file,
+    store,
     host: process.env.CALENDAR_MCP_HOST ?? '0.0.0.0',
     port: Number(process.env.CALENDAR_MCP_PORT ?? 9558),
   });

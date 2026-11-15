@@ -1,4 +1,4 @@
-import Database from 'better-sqlite3';
+import Database from 'better-sqlite3-multiple-ciphers';
 import {
   CompiledQuery,
   Kysely,
@@ -17,6 +17,7 @@ import {
 import { chmodSync, existsSync, lstatSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 
+import { errorCode } from '../../cli/errorCode';
 import type { Database as Schema } from './types';
 
 const STATEMENT_CACHE_SIZE = 200;
@@ -150,6 +151,17 @@ class ImmediateSqliteDialect implements Dialect {
   }
 }
 
+/** The database file is encrypted and the key given, if any, is not its key. */
+export class DatabaseKeyError extends Error {
+  constructor(options?: ErrorOptions) {
+    super(
+      'The database is encrypted and this computer\'s key does not open it. Run "aman doctor" to see how to fix it.',
+      options,
+    );
+    this.name = 'DatabaseKeyError';
+  }
+}
+
 function applyPragmas(database: Database.Database): void {
   database.pragma('journal_mode = WAL');
   // Autocheckpoint ~4 MiB; leftover WAL 64 MiB after checkpoint (Rails/common WAL-app default).
@@ -215,7 +227,117 @@ function shouldParseJsonResultColumn(_value: string, jsonPath: string): boolean 
   return column !== undefined && JSON_RESULT_COLUMNS.has(column);
 }
 
-export function createSqliteDb(filename: string): Kysely<Schema> {
+/** Gives an open connection the key of an encrypted database file. Must run before anything is read. */
+function applyKey({ database, key }: { database: Database.Database; key: Buffer }): void {
+  database.pragma("cipher = 'chacha20'");
+  database.pragma(`key = 'raw:${key.toString('hex')}'`);
+}
+
+/**
+ * A plain connection to a database file, for the few commands that do not go through Kysely.
+ * With `key`, the file is read and written encrypted; a wrong or missing key fails on first read.
+ */
+export function openSqliteFile({
+  filename,
+  key,
+  readonly = false,
+  fileMustExist = true,
+  timeoutMs,
+}: {
+  filename: string;
+  key: Buffer | undefined;
+  readonly?: boolean;
+  fileMustExist?: boolean;
+  timeoutMs?: number;
+}): Database.Database {
+  const database = new Database(filename, {
+    readonly,
+    fileMustExist,
+    ...(timeoutMs === undefined ? {} : { timeout: timeoutMs }),
+  });
+  if (key !== undefined) {
+    applyKey({ database, key });
+  }
+  return database;
+}
+
+// By code, not by class: the driver's error class is not the same object in every loaded copy of it.
+function isNotADatabase(caught: unknown): boolean {
+  return errorCode(caught) === 'SQLITE_NOTADB';
+}
+
+function opens({ filename, key }: { filename: string; key: Buffer | undefined }): boolean {
+  const database = openSqliteFile({ filename, key, readonly: true });
+  try {
+    database.pragma('schema_version');
+    return true;
+  } catch (caught) {
+    if (isNotADatabase(caught)) {
+      return false;
+    }
+    throw caught;
+  } finally {
+    database.close();
+  }
+}
+
+/**
+ * How a database file is stored: `missing`, readable by anyone (`plain`), encrypted with `key`
+ * (`encrypted`), or neither, which means another key encrypted it (`other_key`).
+ */
+export function sqliteFileState({
+  filename,
+  key,
+}: {
+  filename: string;
+  key: Buffer;
+}): 'missing' | 'plain' | 'encrypted' | 'other_key' {
+  if (!existsSync(filename)) {
+    return 'missing';
+  }
+  if (opens({ filename, key })) {
+    return 'encrypted';
+  }
+  return opens({ filename, key: undefined }) ? 'plain' : 'other_key';
+}
+
+const IN_USE = 'The database is in use. Stop Aman, then run this again.';
+
+/**
+ * Rewrites every page of a database file under `to`, in place: from readable to encrypted when
+ * `from` is undefined, or from one key to another. Nothing else may have the file open, because
+ * the pages still waiting in the write-ahead log have to be folded in first.
+ */
+export function rekeySqliteFile({
+  filename,
+  from,
+  to,
+}: {
+  filename: string;
+  from: Buffer | undefined;
+  to: Buffer;
+}): void {
+  const database = openSqliteFile({ filename, key: from, timeoutMs: 5000 });
+  try {
+    database.pragma('wal_checkpoint(TRUNCATE)');
+    // Stays in write-ahead mode while another program has the file open.
+    if (database.pragma('journal_mode = DELETE', { simple: true }) !== 'delete') {
+      throw new Error(IN_USE);
+    }
+    database.pragma("cipher = 'chacha20'");
+    database.pragma(`rekey = 'raw:${to.toString('hex')}'`);
+  } catch (caught) {
+    const code = errorCode(caught);
+    if (code === 'SQLITE_BUSY' || code === 'SQLITE_LOCKED') {
+      throw new Error(IN_USE, { cause: caught });
+    }
+    throw caught;
+  } finally {
+    database.close();
+  }
+}
+
+export function createSqliteDb(filename: string, options: { key?: Buffer | undefined } = {}): Kysely<Schema> {
   const isMemoryDb = filename === ':memory:';
   const isNewFile = !isMemoryDb && !existsSync(filename);
   if (!isMemoryDb) {
@@ -226,7 +348,18 @@ export function createSqliteDb(filename: string): Kysely<Schema> {
   if (isNewFile) {
     chmodSync(filename, 0o600);
   }
-  applyPragmas(database);
+  if (options.key !== undefined) {
+    applyKey({ database, key: options.key });
+  }
+  try {
+    applyPragmas(database);
+  } catch (caught) {
+    database.close();
+    if (isNotADatabase(caught)) {
+      throw new DatabaseKeyError({ cause: caught });
+    }
+    throw caught;
+  }
   return new Kysely<Schema>({
     dialect: new ImmediateSqliteDialect(database),
     // Parse only projected JSON columns once; never re-parse nested string values.

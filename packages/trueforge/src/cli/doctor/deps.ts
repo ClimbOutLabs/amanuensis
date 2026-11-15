@@ -6,11 +6,12 @@ import {
   type DriverReadiness,
   type SlotAttachmentProbeResult,
 } from '@truefoundry/trueforge-core/core';
-import Database from 'better-sqlite3';
 import winston from 'winston';
 import { z } from 'zod';
 
+import { openSqliteFile } from '../../db/sqlite/client';
 import { runTokenFactorySmoke, type SmokeCheck } from '../../runtime/tokenFactorySmoke';
+import { sqliteDatabaseKey } from '../../secrets/sqliteAccess';
 import { processEnv, type CliEnv } from '../env';
 
 export interface HttpResponse {
@@ -25,10 +26,12 @@ export interface DoctorDeps {
   /** Rejects when nothing answers within `timeoutMs`. */
   get(options: { url: string; timeoutMs: number }): Promise<HttpResponse>;
   freeBytes(dir: string): Promise<number>;
+  /** The key of the encrypted database file, or nothing for one from before encryption. Rejects when this computer cannot open it. */
+  databaseKey(options: { path: string }): Promise<Buffer | undefined>;
   /** Throws unless a write transaction can be opened on an existing database. */
-  probeDatabaseWritable(options: { path: string; timeoutMs: number }): void;
+  probeDatabaseWritable(options: { path: string; key: Buffer | undefined; timeoutMs: number }): void;
   /** How many model providers are set up in the database, read without changing it. */
-  countModelProviders(options: { path: string }): number;
+  countModelProviders(options: { path: string; key: Buffer | undefined }): number;
   /** Asks the sandbox slots the way the app does: every slot's attestation, through their control sockets. */
   slotsReadiness(options: { socketPaths: string[]; timeoutMs: number }): Promise<DriverReadiness>;
   /** Sends a few bytes into a throwaway slot workspace and asks the guest for the PDF and OCR tools. */
@@ -64,8 +67,16 @@ async function freeBytes(dir: string): Promise<number> {
 }
 
 /** Takes and releases the write lock without changing any row. */
-function probeDatabaseWritable({ path, timeoutMs }: { path: string; timeoutMs: number }): void {
-  const db = new Database(path, { fileMustExist: true, timeout: timeoutMs });
+function probeDatabaseWritable({
+  path,
+  key,
+  timeoutMs,
+}: {
+  path: string;
+  key: Buffer | undefined;
+  timeoutMs: number;
+}): void {
+  const db = openSqliteFile({ filename: path, key, timeoutMs });
   try {
     db.exec('BEGIN IMMEDIATE; ROLLBACK;');
   } finally {
@@ -75,8 +86,8 @@ function probeDatabaseWritable({ path, timeoutMs }: { path: string; timeoutMs: n
 
 const ProviderCountSchema = z.object({ n: z.number() });
 
-function countModelProviders({ path }: { path: string }): number {
-  const db = new Database(path, { fileMustExist: true, readonly: true });
+function countModelProviders({ path, key }: { path: string; key: Buffer | undefined }): number {
+  const db = openSqliteFile({ filename: path, key, readonly: true });
   try {
     return ProviderCountSchema.parse(db.prepare('SELECT COUNT(*) AS n FROM model_provider').get()).n;
   } finally {
@@ -139,11 +150,13 @@ function tokenFactoryChecks({
 }
 
 export function processDeps(): DoctorDeps {
+  const env = processEnv();
   return {
-    env: processEnv(),
+    env,
     nowMs: () => Date.now(),
     get,
     freeBytes,
+    databaseKey: ({ path }) => sqliteDatabaseKey({ sqlitePath: path, keyFile: env['SECRETS_KEY_FILE'] }),
     probeDatabaseWritable,
     countModelProviders,
     slotsReadiness,

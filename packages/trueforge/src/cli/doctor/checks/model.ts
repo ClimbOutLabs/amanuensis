@@ -8,7 +8,7 @@ import { isStandalone, sqlitePath } from './database';
 
 function fixFor(failed: SmokeCheck): string {
   if (/^HTTP 40[13]\b/.test(failed.detail)) {
-    return 'Token Factory refused the key. Create a new key in the Token Factory console, put it in NEBIUS_API_KEY in the instance .env file, then restart the instance.';
+    return 'Token Factory refused the key. Create a new key in the Token Factory console, then run the installer again with --token-factory-key-stdin and give it the new key.';
   }
   if (failed.label.startsWith('model listed')) {
     return 'Set TOKEN_FACTORY_MODEL in the instance .env file to a model id that Token Factory lists for your key, then restart the instance.';
@@ -26,14 +26,14 @@ function settingOr({ value, fallback }: { value: string | undefined; fallback: s
 }
 
 /** No hosted model key: the model comes from a provider added in the app, so look for one there. */
-function checkAddedModels({ deps, id }: { deps: DoctorDeps; id: string }): Check {
+async function checkAddedModels({ deps, id }: { deps: DoctorDeps; id: string }): Promise<Check> {
   const file = sqlitePath(deps);
   if (!isStandalone(deps) || file === undefined) {
     return offCheck({ id, detail: 'No hosted model key is set, and the model providers cannot be looked up here.' });
   }
   let count: number;
   try {
-    count = deps.countModelProviders({ path: file });
+    count = deps.countModelProviders({ path: file, key: await deps.databaseKey({ path: file }) });
   } catch {
     return offCheck({ id, detail: 'No hosted model key is set, and the model providers could not be read.' });
   }
@@ -54,7 +54,7 @@ function checkAddedModels({ deps, id }: { deps: DoctorDeps; id: string }): Check
  * The model check that needs no outside service: the models added in the app are counted, and a hosted model key is
  * only noted, since checking it would call Token Factory.
  */
-export function checkModelLocally({ deps }: { deps: DoctorDeps }): Check {
+export async function checkModelLocally({ deps }: { deps: DoctorDeps }): Promise<Check> {
   const apiKey = deps.env['NEBIUS_API_KEY']?.trim();
   if (apiKey === undefined || apiKey === '') {
     return checkAddedModels({ deps, id: 'model' });

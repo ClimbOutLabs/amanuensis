@@ -9,6 +9,8 @@
  * Topology defaults from env / config (`STANDALONE=true` unless set): standalone
  * uses SQLite with no Redis; `STANDALONE=false` uses Postgres + Redis peering.
  */
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 
 import { PACKAGE_VERSION } from './packageVersion';
@@ -39,6 +41,21 @@ function applyPort(raw: string | undefined): void {
   process.env['PORT'] = String(port);
 }
 
+/**
+ * Aman never makes its own key at start, so the first run makes it here and shows the recovery key once.
+ * When setup fails Aman still starts, and its locked page says what to do.
+ */
+function setUpSavedLoginsOnFirstRun(): void {
+  try {
+    execFileSync(process.execPath, [fileURLToPath(new URL('./aman.js', import.meta.url)), 'secrets', 'first-run'], {
+      stdio: 'inherit',
+    });
+  } catch {
+    // The command already printed why.
+    console.error('Aman could not set up the key that protects your saved logins.');
+  }
+}
+
 try {
   const { values } = parseArgs({
     args: process.argv.slice(2),
@@ -54,6 +71,7 @@ try {
     printUsage();
   } else {
     applyPort(values.port);
+    setUpSavedLoginsOnFirstRun();
     await import('./main.js');
   }
 } catch (error) {

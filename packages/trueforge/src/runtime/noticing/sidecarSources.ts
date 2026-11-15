@@ -293,7 +293,8 @@ async function askAgent({
     if (word === 'login_failed') {
       throw new MailLoginFailedError({ cause: new Error('The Email connector could not log in.') });
     }
-    throw word === 'unavailable'
+    // `locked`: the connector restarted and has not been handed the key of its account file yet.
+    throw word === 'unavailable' || word === 'locked'
       ? new MailSourceBusyError({ cause: new Error('The mail server could not be reached.') })
       : new Error(`The mail agent could not read the mailbox (${word}).`);
   }

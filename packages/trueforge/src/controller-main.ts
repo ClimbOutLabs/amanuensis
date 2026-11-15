@@ -17,11 +17,17 @@ import { extractErrorLogFields } from '@truefoundry/trueforge-core/core';
 import configuration, { isPlaceholderTrueForgeApiKey } from './config';
 import { runController } from './controller';
 import { createDb } from './db/postgres/client';
+import { PostgresGlobalSettingsStore } from './db/postgres/global-settings-store/PostgresGlobalSettingsStore';
 import { PostgresScheduleStore } from './db/postgres/schedule-store/PostgresScheduleStore';
 import { PostgresSessionStore } from './db/postgres/session-store/PostgresSessionStore';
 import { TelegramStore } from './db/telegramStore';
 import { createControllerLogger } from './logger';
 import { PACKAGE_VERSION } from './packageVersion';
+import { openCommandVault } from './secrets/cliVault';
+import { EncryptedTelegramStore } from './secrets/encryptedTelegramStore';
+import { FileKeyProvider } from './secrets/fileKeyProvider';
+import { checkMasterKey } from './secrets/keyCheck';
+import { waitForMachineKey } from './secrets/startupGate';
 
 try {
   const logger = createControllerLogger({
@@ -61,11 +67,25 @@ try {
     mTlsEnabled: configuration.TRUEFORGE_MTLS_ENABLED,
   });
 
+  // The controller reads the Telegram bot token, so it waits for this computer's key like the server does.
+  const settings = new PostgresGlobalSettingsStore(db);
+  await waitForMachineKey({
+    provider: new FileKeyProvider(configuration.SECRETS_KEY_FILE),
+    checkKey: key => checkMasterKey({ settings, key }),
+    onLockChange: lock => {
+      logger.warn('The controller is locked and waiting', { reason: lock.reason, detail: lock.detail });
+    },
+  });
+  const vault = await openCommandVault({ settings, keyFile: configuration.SECRETS_KEY_FILE });
+
   runController({
     scheduleStore: new PostgresScheduleStore(db),
     withTransaction: callback => db.transaction().execute(callback),
     logger,
-    telegram: { store: new TelegramStore(db), sessionStore: new PostgresSessionStore(db) },
+    telegram: {
+      store: new EncryptedTelegramStore({ store: new TelegramStore(db), vault }),
+      sessionStore: new PostgresSessionStore(db),
+    },
     gracefulTimeoutSeconds: configuration.GRACEFUL_TIMEOUT_SECONDS,
     onStopped: () => db.destroy(),
   });

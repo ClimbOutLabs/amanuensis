@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The optional Token Factory key: stdin, the instance .env, and every place the key must never appear.
+# The optional Token Factory key: stdin, the encrypted store of the instance, and every place the key must never appear.
 set -euo pipefail
 # shellcheck source=../helpers.sh
 . "$(dirname "${BASH_SOURCE[0]}")/../helpers.sh"
@@ -9,11 +9,11 @@ DEFAULT_MODEL=nvidia/nemotron-3-super-120b-a12b
 
 env_value() { sed -n "s/^$2=//p" "$AMAN_HOME/instances/$1/.env" | head -n 1; }
 
-# Fails when the key is in any file under the home other than the instance .env, or in anything the run printed.
-assert_key_only_in_env() {
+# Fails when the key is in any file under the home, the settings file included, or in anything the run printed.
+assert_key_in_no_file() {
   local found
   found=$(grep -rIl -- "$TF_KEY" "$AMAN_HOME" "$SB/stub.log" 2>/dev/null | sort | tr '\n' ' ' || true)
-  assert_eq "$found" "$AMAN_HOME/instances/main/.env " "files holding the key"
+  assert_eq "$found" "" "files holding the key"
   assert_not_contains "$OUT" "$TF_KEY" "stdout"
   assert_not_contains "$ERR" "$TF_KEY" "stderr"
 }
@@ -27,15 +27,15 @@ $TF_KEY
 }
 
 test_key_from_stdin_reaches_only_the_env() {
-  t_begin "the key read from stdin is written to the instance .env (0600) and nowhere else"
+  t_begin "the key read from stdin is saved encrypted with the instance and written to no file"
   sandbox_new
   install_with_key_stdin
   assert_rc 0
-  assert_eq "$(env_value main NEBIUS_API_KEY)" "$TF_KEY"
+  assert_eq "$(saved_key main NEBIUS_API_KEY)" "$(key_digest "$TF_KEY")"
   assert_eq "$(env_value main TOKEN_FACTORY_MODEL)" "$DEFAULT_MODEL"
   assert_eq "$(env_value main TOKEN_FACTORY_DAILY_TOKEN_CAP)" "" "no cap unless asked for"
   assert_mode "$AMAN_HOME/instances/main/.env" 600
-  assert_key_only_in_env
+  assert_key_in_no_file
   assert_tree_lacks "$AMAN_HOME" "$SENTINEL_PASSWORD"
   assert_flat_contains "$OUT" "Model Token Factory, $DEFAULT_MODEL"
   assert_not_contains "$OUT" "not set: add one in Settings" "a model is set"
@@ -52,10 +52,10 @@ test_model_and_cap_flags() {
   local env managed
   env=$(cat "$AMAN_HOME/instances/main/.env")
   managed=${env%%# <<< end of managed block*}
-  assert_contains "$managed" "NEBIUS_API_KEY=$TF_KEY" "inside the managed block"
+  assert_not_contains "$managed" "NEBIUS_API_KEY" "the key has no line in the settings file"
   assert_contains "$managed" "TOKEN_FACTORY_DAILY_TOKEN_CAP=250000"
   assert_flat_contains "$OUT" "limit 250000 tokens a day"
-  assert_key_only_in_env
+  assert_key_in_no_file
   sandbox_drop
 }
 
@@ -69,7 +69,7 @@ $TF_KEY
   clear_input
   assert_rc 0
   assert_eq "$(cat "$SB_STATE/hash_stdin")" "$SENTINEL_PASSWORD" "the password line reached the hashing step"
-  assert_eq "$(env_value main NEBIUS_API_KEY)" "$TF_KEY"
+  assert_eq "$(saved_key main NEBIUS_API_KEY)" "$(key_digest "$TF_KEY")"
   sandbox_drop
 }
 
@@ -197,7 +197,7 @@ $key
   run_install --yes --password-stdin --token-factory-key-stdin --email owner@example.invalid
   clear_input
   assert_rc 0
-  assert_eq "$(env_value main NEBIUS_API_KEY)" "$key"
+  assert_eq "$(saved_key main NEBIUS_API_KEY)" "$(key_digest "$key")"
   sandbox_drop
 }
 
@@ -225,7 +225,7 @@ test_dry_run_plans_without_reading_or_printing_the_key() {
   run_install --dry-run --token-factory-key-stdin --token-factory-model vendor/m --token-factory-daily-cap 1000 --email owner@example.invalid
   clear_input
   assert_rc 0
-  assert_flat_contains "$OUT" "Use Token Factory (model vendor/m) as the default model The key is saved only in the settings file of this instance. Capped at 1000 tokens per day."
+  assert_flat_contains "$OUT" "Use Token Factory (model vendor/m) as the default model The key is kept encrypted with this instance's data. Capped at 1000 tokens per day."
   assert_not_contains "$OUT$ERR" "$TF_KEY"
   assert_no_path "$AMAN_HOME"
   sandbox_drop
@@ -268,7 +268,7 @@ $TF_KEY
   run_install instance add second --yes --password-stdin --token-factory-key-stdin --email second@example.invalid --token-factory-daily-cap 5000
   clear_input
   assert_rc 0
-  assert_eq "$(env_value second NEBIUS_API_KEY)" "$TF_KEY"
+  assert_eq "$(saved_key second NEBIUS_API_KEY)" "$(key_digest "$TF_KEY")"
   assert_eq "$(env_value second TOKEN_FACTORY_DAILY_TOKEN_CAP)" 5000
   assert_eq "$(env_value main NEBIUS_API_KEY)" "" "the first instance is untouched"
   assert_not_contains "$OUT$ERR" "$TF_KEY"
@@ -288,9 +288,9 @@ test_rerun_does_not_rewrite_the_env() {
 
 NEW_KEY="v1.sentinel-rotated-key_5b2e08d4"
 
-# The files under the home and the run's output must not hold a key; the .env holds exactly the other one.
+# The files under the home and the run's output must not hold either key; the encrypted store holds the new one.
 assert_rotated() {
-  assert_eq "$(env_value "${1:-main}" NEBIUS_API_KEY)" "$NEW_KEY" "the new key is in the .env"
+  assert_eq "$(saved_key "${1:-main}" NEBIUS_API_KEY)" "$(key_digest "$NEW_KEY")" "the new key is the one saved"
   assert_tree_lacks "$AMAN_HOME" "$TF_KEY"
   assert_tree_lacks "$SB/stub.log" "$NEW_KEY"
   assert_not_contains "$OUT$ERR" "$NEW_KEY"
@@ -298,7 +298,7 @@ assert_rotated() {
 }
 
 test_a_key_on_a_rerun_replaces_the_old_one() {
-  t_begin "a new key on stdin for an existing instance is written in place (0600), the app restarts, nothing else moves"
+  t_begin "a new key on stdin for an existing instance replaces the saved one, the app restarts, nothing else moves"
   sandbox_new
   install_with_key_stdin --token-factory-model vendor/m --token-factory-daily-cap 5000
   assert_rc 0
@@ -318,7 +318,7 @@ test_a_key_on_a_rerun_replaces_the_old_one() {
   assert_eq "$(env_value main TOKEN_FACTORY_MODEL)" vendor/m
   assert_eq "$(env_value main TOKEN_FACTORY_DAILY_TOKEN_CAP)" 5000
   assert_eq "$(env_value main MY_OWN_SETTING)" kept "a line below the managed block"
-  assert_eq "$(grep -c '^NEBIUS_API_KEY=' "$AMAN_HOME/instances/main/.env")" 1
+  assert_eq "$(grep -c '^NEBIUS_API_KEY=' "$AMAN_HOME/instances/main/.env" || true)" 0 "the key has no line in the settings file"
   # The mail account lives in the connector's volume, so no account file is expected here; any .env. name is a leftover.
   assert_not_contains "$(dir_names "$AMAN_HOME/instances/main")" ".env." "no temporary file is left"
   assert_log_has "up -d --force-recreate --no-deps --wait --wait-timeout 240 app"
@@ -357,8 +357,8 @@ $TF_KEY
   clear_input
   assert_rc 0
   assert_contains "$OUT" "Token Factory key updated. Restarting the app."
-  assert_eq "$(env_value second NEBIUS_API_KEY)" "$NEW_KEY"
-  assert_eq "$(env_value main NEBIUS_API_KEY)" "$TF_KEY" "the other instance is untouched"
+  assert_eq "$(saved_key second NEBIUS_API_KEY)" "$(key_digest "$NEW_KEY")"
+  assert_eq "$(saved_key main NEBIUS_API_KEY)" "$(key_digest "$TF_KEY")" "the other instance is untouched"
   assert_not_contains "$OUT$ERR" "$NEW_KEY"
   sandbox_drop
 }
@@ -372,8 +372,8 @@ test_a_key_for_an_instance_that_had_none() {
   run_install --yes --token-factory-key-stdin
   clear_input
   assert_rc 0
-  assert_eq "$(env_value main NEBIUS_API_KEY)" "$NEW_KEY"
-  assert_eq "$(sed -n '/^# >>> managed/,/^# <<< end/p' "$AMAN_HOME/instances/main/.env" | grep -c '^NEBIUS_API_KEY=')" 1 "inside the managed block"
+  assert_eq "$(saved_key main NEBIUS_API_KEY)" "$(key_digest "$NEW_KEY")"
+  assert_eq "$(grep -c '^NEBIUS_API_KEY=' "$AMAN_HOME/instances/main/.env" || true)" 0 "the key has no line in the settings file"
   assert_eq "$(sed -n 's/^token_factory=//p' "$AMAN_HOME/state/instances/main.conf")" 1
   assert_eq "$(sed -n 's/^tf_model=//p' "$AMAN_HOME/state/instances/main.conf")" "$DEFAULT_MODEL"
   assert_not_contains "$OUT$ERR" "$NEW_KEY"

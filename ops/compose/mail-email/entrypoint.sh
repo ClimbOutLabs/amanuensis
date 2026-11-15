@@ -4,13 +4,13 @@
 # this records the hash of the list it started with, once the started server answers on its port. The server
 # waits for that hash before it sends, so the record must not appear while the server is still starting.
 # A stale hash only makes the server wait or refuse, never let a send through.
-# The mail accounts come from the account file in this sidecar's own volume. The installer writes it
-# through the account agent's command line and the Settings Email card changes it through the account
-# agent (started below, on this container's private network port). The server reads its accounts from
-# a config file, so at each start this wrapper composes that file from the send list and the accounts
-# the agent renders, and starts the server on the composed file. The server never starts from the
-# environment Docker loaded at container start, which can hold an older account; when the account
-# file changes, the sidecar restarts on the new accounts.
+# The mail accounts come from the account file in this sidecar's own volume, which is encrypted. The
+# account agent (started below, on this container's private network port) is the only reader: the
+# app hands it the key after each start, and it renders the accounts in the server's own config form
+# into a folder that lives in memory. At each start this wrapper composes the file the server reads
+# from the send list and those rendered accounts, in that same folder, so no password is written to
+# disk in a readable form. The server never starts from the environment Docker loaded at container
+# start, which can hold an older account; when the rendered accounts change, the sidecar restarts.
 set -eu
 
 # The list file is the only source of recipients. An env list would let the sidecar send to addresses the file lacks.
@@ -20,9 +20,15 @@ policy=${MCP_EMAIL_SERVER_CONFIG_PATH:?set MCP_EMAIL_SERVER_CONFIG_PATH to the s
 status=${AMAN_MAIL_STATUS_FILE:?set AMAN_MAIL_STATUS_FILE to the loaded-list status file}
 account=${AMAN_MAIL_ACCOUNT_FILE:?set AMAN_MAIL_ACCOUNT_FILE to the account file}
 agent=${AMAN_MAIL_ACCOUNT_AGENT:?set AMAN_MAIL_ACCOUNT_AGENT to the account agent}
-# The composed config lives beside the account file, in the volume this sidecar owns: it holds the
-# accounts' passwords, so it is written mode 600 and never leaves this container.
-config=${AMAN_MAIL_CONFIG_FILE:-$(dirname "$account")/config.toml}
+# A folder in memory. The agent renders the accounts there, and the composed config goes there too:
+# both hold the accounts' passwords, so they are mode 600 and are gone when the container stops.
+run_dir=${AMAN_MAIL_RUN_DIR:-/run/aman-mail}
+rendered=$run_dir/accounts.toml
+config=$run_dir/config.toml
+mkdir -p "$run_dir"
+chmod 700 "$run_dir"
+# An earlier version composed the config beside the account file, on disk.
+rm -f "$(dirname "$account")/config.toml"
 
 # How long a stop is given before the server is forced down. The server holds nothing across a
 # restart (mail connections are made per tool call, and sessions are the client's to rebuild), so
@@ -40,9 +46,9 @@ list_hash() {
   sha256sum "$policy" 2>/dev/null | cut -d' ' -f1 || true
 }
 
-# An absent account file hashes to nothing; the file lives in the sidecar's volume and is emptied on remove.
+# The accounts as the agent last rendered them. Not rendered yet hashes to nothing.
 account_hash() {
-  sha256sum "$account" 2>/dev/null | cut -d' ' -f1 || true
+  sha256sum "$rendered" 2>/dev/null | cut -d' ' -f1 || true
 }
 
 # Where the started server listens, read from the --host and --port it is started with. A server
@@ -125,14 +131,12 @@ record_loaded() {
   recorded=yes
 }
 
-# Writes the file the server reads: the send list first, then the accounts in the server's own
-# config form, rendered by the account agent from the account file. Replaced in one step, so the
-# server never reads a half-written file.
+# Writes the file the server reads: the send list first, then the accounts the agent rendered.
+# Replaced in one step, so the server never reads a half-written file.
 compose_config() {
   tmp="$config.tmp"
-  cat "$policy" >"$tmp"
-  python3 "$agent" --print-config >>"$tmp" || true
-  chmod 600 "$tmp"
+  (umask 077 && cat "$policy" >"$tmp")
+  cat "$rendered" >>"$tmp" 2>/dev/null || true
   mv "$tmp" "$config"
 }
 
@@ -168,7 +172,8 @@ start_server() {
   if server_answers "$answer_wait"; then
     record_loaded
   fi
-  echo "mail server started (send list $loaded, account $loaded_account)"
+  # The accounts' hash is not logged: it is made from text that holds the passwords.
+  echo "mail server started (send list $loaded)"
   # A start that does not hold must be plain in the log, not a silent service: give the server a
   # moment, then say if it already stopped or if the loaded-list record is not what was written.
   # The loop below keeps starting it again either way.
@@ -232,6 +237,14 @@ read_listen_address "$@"
 python3 "$agent" &
 agent_pid=$!
 
+# The agent renders the accounts as soon as it starts. A short wait for that saves starting the
+# server once without them and again with them.
+waited=0
+while [ ! -f "$rendered" ] && [ "$waited" -lt 25 ]; do
+  sleep 0.2
+  waited=$((waited + 1))
+done
+
 # The server creates the list before it starts this sidecar. Until then there is nothing to load.
 # Say so once when the wait begins, so a missing list is plain in the log instead of a silent wait.
 if [ ! -f "$policy" ]; then
@@ -253,7 +266,7 @@ while :; do
     stop_server
     start_server "$@"
   elif [ "$(account_hash)" != "$loaded_account" ]; then
-    echo "the mail account changed (was $loaded_account); restarting the mail server"
+    echo "the mail accounts changed; restarting the mail server"
     stop_server
     start_server "$@"
   elif [ -z "$recorded" ] && server_answers 1; then

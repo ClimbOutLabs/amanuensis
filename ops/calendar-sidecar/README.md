@@ -14,7 +14,7 @@ address, on the private Docker network only.
 
 ## Credentials
 
-The calendar logins are kept in one file, `/account/.env.calendar`, in a volume this service owns. They are never copied into the image. The file holds one block of settings per account:
+The calendar logins are kept in one file, `/account/.env.calendar`, in a volume this service owns. The file is encrypted (see [The file's key](#the-files-key)). The logins are never copied into the image. Inside, the file holds one block of settings per account:
 
 - `CALDAV_URL`: the address of the calendar server. It must be https.
 - `CALDAV_USERNAME` and `CALDAV_PASSWORD`: the login.
@@ -27,9 +27,19 @@ For a Google account, the Settings Calendar card and the installer fill in Googl
 Two things write the file, and both go through the account agent, which checks the address first:
 
 - The Settings Calendar card, over the agent's HTTP port. The agent also checks the sign-in before it saves. The request must carry `Authorization: Bearer <CALENDAR_ACCOUNT_SECRET>` and a JSON body, or the agent refuses it (401 without the secret, 415 for another kind of body).
-- The installer, with `install.sh instance calendar NAME`. The password goes to the agent on stdin only.
+- The installer, with `install.sh instance calendar NAME`. The file's key and the password go to the agent on stdin only, the key on the first line.
 
 Each tool server always starts from this file and restarts when its account changes. Removing an account stops its tool server. Removing the last account deletes the file and closes the tool address.
+
+## The file's key
+
+The account file is encrypted with AES-256-GCM. Its key is worked out by the app from this computer's key, and is only for this file. The agent holds it in memory and never writes it down, so the volume alone opens nothing.
+
+- The app asks the agent which key it holds (`GET /key`, which answers with a short name for the key, never the key) and hands the key over when it holds none (`POST /key`). It does this after each start of this service.
+- Until the key arrives, an encrypted file reads as locked: the agent answers 423, and no tool server is started. Nothing is saved without the key.
+- A file from before encryption is still read, and is encrypted as soon as the key arrives.
+- After the instance moves to another computer, the app also sends the key from the earlier computer. The agent opens the file with it and writes it again under the new key.
+- A key that does not open the file is refused (409), and nothing changes.
 
 ## The account secret
 

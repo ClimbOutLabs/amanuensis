@@ -23,17 +23,29 @@ import { SqliteTurnArtifactStore } from '../../db/sqlite/turn-artifact-store/Sql
 import type { Database as SqliteDatabase } from '../../db/sqlite/types';
 import { TelegramStore } from '../../db/telegramStore';
 import { TextContactStore } from '../../db/textContactStore';
+import { usePersonaKnowledgeKeys } from '../../personaKnowledge/sqliteKnowledgeRepository';
+import { encryptSecretStores, type SecretBearingStores } from '../../secrets/encryptedStores';
+import { openSqliteVault } from '../../secrets/sqliteAccess';
 import type { ExportStores } from './stores';
 
 /** Opens an existing SQLite database; a missing file is an error, never an empty export. */
 export async function openSqliteStores(options: {
   sqlitePath: string;
   migrate: boolean;
+  /** Where this computer's key is; saved logins are read through it. */
+  keyFile: string;
 }): Promise<ExportStores<Transaction<SqliteDatabase>>> {
   if (!existsSync(options.sqlitePath)) {
     throw new Error(`No SQLite database at ${options.sqlitePath}. Check SQLITE_PATH and the data volume.`);
   }
-  const db = createSqliteDb(options.sqlitePath);
+  const { vault, databaseKey } = await openSqliteVault({
+    sqlitePath: options.sqlitePath,
+    keyFile: options.keyFile,
+    mode: 'reading',
+  });
+  // An export only reads: a library is opened under whichever key it has and is left as it is.
+  usePersonaKnowledgeKeys(vault.state.status === 'unlocked' ? { ...vault.knowledgeKeys(), upgrade: false } : undefined);
+  const db = createSqliteDb(options.sqlitePath, { key: databaseKey });
   try {
     if (options.migrate) {
       await migrateSqliteToLatest(db);
@@ -42,21 +54,34 @@ export async function openSqliteStores(options: {
     await db.destroy();
     throw error;
   }
+  const globalSettingsStore = new SqliteGlobalSettingsStore(db);
+  let secretStores: SecretBearingStores<Transaction<SqliteDatabase>>;
+  try {
+    secretStores = encryptSecretStores({
+      vault,
+      stores: {
+        modelProviderStore: new SqliteModelProviderStore(db),
+        sandboxProviderStore: new SqliteSandboxProviderStore(db),
+        mcpServerStore: new SqliteMcpServerStore(db),
+        tokenStore: new SqliteOAuthTokenStore(db),
+        googleConnectionStore: new SqliteGoogleConnectionStore(db),
+      },
+    });
+  } catch (error) {
+    await db.destroy();
+    throw error;
+  }
   return {
+    ...secretStores,
     sessionStore: new SqliteSessionStore(db),
     personaStore: new SqlitePersonaStore(db),
     personalizationStore: new SqlitePersonalizationStore(db),
     spaceStore: new SqliteSpaceStore(db),
     scheduleStore: new SqliteScheduleStore(db),
-    globalSettingsStore: new SqliteGlobalSettingsStore(db),
+    globalSettingsStore,
     sentinelSettingsStore: new SqliteSentinelSettingsStore(db),
     turnArtifactStore: new SqliteTurnArtifactStore(db),
     agentStore: new SqliteAgentStore(db),
-    modelProviderStore: new SqliteModelProviderStore(db),
-    sandboxProviderStore: new SqliteSandboxProviderStore(db),
-    mcpServerStore: new SqliteMcpServerStore(db),
-    tokenStore: new SqliteOAuthTokenStore(db),
-    googleConnectionStore: new SqliteGoogleConnectionStore(db),
     auditStore: new SentinelAuditStore(db),
     deliveryStore: new DeliveryStore(db),
     reachSettingsStore: new ReachSettingsStore(db),

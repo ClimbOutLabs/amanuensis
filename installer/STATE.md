@@ -110,8 +110,75 @@ Later steps add keys with the same rule (for example `healthy` is set to `1`
 once an instance answers, `sms_port` holds the Twilio port the compose
 file publishes, empty when none, `sms_settings` the digest of its texts
 lines, empty when none, and `local_models` holds the comma-separated ports of
-this computer that `aman local-model` named for the local model bridge). Instance names use lowercase letters, digits and
+this computer that `aman local-model` named for the local model bridge, and `secrets` is set to `1` once the
+instance's data is tied to this computer's key). Instance names use lowercase letters, digits and
 hyphens.
+
+## This computer's key
+
+An instance's database file and the saved logins in it are encrypted with
+one key per computer. The key is the file `master.key` in the Docker volume `aman_key`,
+which the installer makes once. It is not in the home, not in any instance's
+data and not in any backup.
+
+- Every instance's app mounts `aman_key` read-only at `/run/aman-key` and
+  reads the key from there (`SECRETS_KEY_FILE`). The app never makes a key.
+  With no key, or a key that does not match its data, it starts locked and
+  serves only a page that says so.
+- Before an instance starts for the first time with this layout, the
+  installer runs the `secrets-setup` service of its Compose file once
+  (`aman secrets init --if-needed`). It makes the key when the volume is
+  empty, ties the instance's database to it, and prints that instance's
+  recovery key. The installer shows the recovery key once, never writes it
+  to a file or a log, and at a terminal asks the person to type it back.
+  Then it records `secrets=1` in the registry and does not run setup for
+  that instance again.
+- Setup also encrypts the instance's database file where it is, with a key
+  derived from the computer's key. The app must be stopped for that, and
+  the installer stops it. From then on nothing reads `db.sqlite` without
+  the key: the app, `aman backup`, `aman backup-check`, import, export,
+  the doctor and the password reset all open it through `aman_key`.
+- The keys of paid accounts (`NEBIUS_API_KEY`, `TAVILY_API_KEY`,
+  `TWILIO_AUTH_TOKEN`) are not kept in the instance's `.env`. The installer
+  saves them encrypted in `db.sqlite.keys` (`aman secrets env put`, value on
+  standard input), and the app reads them from there when it starts. A key
+  a person types into `.env` is moved the same way after the next good
+  start, and its line is removed. With a version from before this, the line
+  stays in `.env`, where that version reads it.
+- Each persona's knowledge library (`<persona>.sqlite` under the persona
+  knowledge folder) is encrypted the same way, with its own key derived
+  from the computer's key. The app encrypts a library from before
+  encryption the first time it opens it. After a restore on another
+  computer it moves the library to that computer's key on first open.
+- The Email and Calendar connectors each keep their account, with its app
+  password, in one file in a volume of their own (`aman_<name>_mail_account`,
+  `aman_<name>_calendar_account`). The connector writes that file encrypted
+  and holds its key in memory only. The key is derived from the computer's
+  key, one per connector, so a connector never holds the computer's key.
+  The app hands it over after each start of the connector, and again
+  whenever the connector says it holds none. Until then the connector reads
+  as locked and offers no tools. When the installer saves an account it gets
+  the same key from the instance (`aman secrets connector-key`, through the
+  `secrets-setup` service) and pipes it to the connector on standard input,
+  ahead of the account. A file from before encryption is still read, and is
+  encrypted as soon as the key arrives. The Email connector's mail server
+  reads its accounts from a config file; that file is composed in a folder
+  that lives in memory (`/run/aman-mail`), never on disk. These volumes are
+  not in a backup, so after a restore on another computer the account is
+  connected again in Settings.
+- The file `db.sqlite.keys` beside the database holds the instance's key
+  records: a value that tells whether a key is this database's key, the
+  computer's key encrypted with the recovery key, and any earlier keys
+  encrypted with the current one. Nothing in it is usable without the
+  computer's key or the recovery key. It is outside the database because
+  it is what opens the database. It travels with the database in every
+  backup and restore. A restored database from before encryption has no
+  such file; the next start then sets it up as new, with a new recovery
+  key.
+- Each instance has its own recovery key. It opens that instance's data on
+  a computer that does not have the key.
+- `aman_key` is removed only when the last instance is removed with its
+  data.
 
 ## The release record
 
@@ -165,9 +232,29 @@ The sandbox slot image is always built on the computer.
 Each backup is one folder under `backups/`, named with the UTC time it was
 made (`%Y%m%dT%H%M%SZ`, for example `20261020T030405Z`), with `-<label>`
 added when it carries a label, and `-1`, `-2` and so on when the name is
-already taken. Inside: one folder per instance that was backed up, a copy of
-`release/release.json`, a copy of the authority's `root.crt` under `tls/`
-(never its key), and `SHA256SUMS` with the hash of every file. Unlabelled
+already taken. Inside: one file `<instance>.sealed` per instance that was
+backed up, a copy of `release/release.json`, a copy of the authority's
+`root.crt` under `tls/` (never its key), and `SHA256SUMS` with the hash of
+every file. The sealed file is the instance's database copy, memory files,
+persona knowledge files, sign-in data (`dex.tar`), `env`, `dex.env` and
+`manifest.json`, gathered in a scratch Docker volume and encrypted there by
+`aman seal` in the app image, so nothing readable is written to the backup
+folder. It opens with this computer's key, or with the instance's recovery
+key on any computer. A backup of an instance that is not tied to the key yet
+(`secrets` is not `1`) is sealed with `--this-computer-only` and opens only
+here. A backup needs an app image that can seal; with an older one it stops
+and says to run `aman upgrade`. An upgrade loads the new images before its
+backup, so the new image seals it. Backups from before sealing hold one
+readable folder per instance and still restore. `backup_seal_old` turns each
+of those folders into a sealed file in place: it runs at the end of every
+backup that is not an upgrade's, and at the end of an upgrade, once every
+instance is tied to the key. The readable folder is removed only after the
+sealed file was opened again and lists the same files. A folder of an
+instance that no longer exists is sealed for this computer only; one whose
+instance is not tied to the key yet waits. The same pass deletes
+`tls/root.key` from the few early backups that hold it, and writes
+`SHA256SUMS` again. The doctor's backup check warns while a readable folder
+is left. Unlabelled
 backups are pruned to the newest seven. The database copy in each backup
 holds no incognito chats: `aman backup` deletes them from its copy before the
 copy is checked, so an incognito chat open at backup time is not kept.
@@ -175,7 +262,18 @@ copy is checked, so an incognito chat open at backup time is not kept.
 part its instance needs is there, `SHA256SUMS` matches, neither
 `release.json`'s `schema` nor the instance's `manifest.json` version is newer
 than this installer's, and `aman backup-check` in the installed app image finds
-no database migration that image does not ship. The copy it saves first carries
+no database migration that image does not ship. A sealed backup is opened into
+`state/stage/<timestamp>/<instance>/` (mode 700) for the checks and the restore;
+`state/stage` is removed when the run ends, however it ends. When this
+computer's key does not open the backup, restore asks for the recovery key. The
+typed key reaches the container on its input only, never on a command line, in
+a file on disk or in a log. After the data is put back, `aman secrets adopt`
+runs in the `secrets-setup` service: it keeps the earlier key in the database,
+encrypted with this computer's key, so saved logins still open, and makes the
+same recovery key open the data under this computer's key. A sealed backup with
+no recovery copy is refused on another computer without asking. Every restore
+clears `secrets` in the registry, and the start that follows sets it again.
+The copy it saves first carries
 the label `before-restore`. After writing the backup's `.env` it sets the keys
 the registry owns again from the registry (`PUBLIC_BASE_URL`,
 `ALLOWED_ORIGINS`, `AUTH_COOKIE_SUFFIX`, `OIDC_ISSUER_URL`,
@@ -265,8 +363,8 @@ longer than the dead limit while the others stay out.
   home.
 - Volumes an instance owns on Docker are named after it: `aman_<name>_data`
   and `aman_<name>_dex`, its Compose project is `aman-<name>`, and the
-  shared volumes are `aman_home`, `aman_source`, `aman_stt_cache` and
-  `aman_machine`. Its containers are `aman-<short>-<service>`, where
+  shared volumes are `aman_home`, `aman_source`, `aman_stt_cache`,
+  `aman_machine` and `aman_key`. Its containers are `aman-<short>-<service>`, where
   `<short>` is the name without a leading `aman-`, so `aman-` is written once;
   the volumes that hold no data (`aman_<short>_local_model`,
   `aman_<short>_mail_policy_status`) use the short name too. Volumes with data

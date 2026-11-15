@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { spawn, type ChildProcess } from 'node:child_process';
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
@@ -32,24 +32,32 @@ function delay(ms: number): Promise<void> {
 /** Boots the real server in local sign-in mode against a throwaway data directory. */
 async function bootLocalServer(dataDir: string, port: number): Promise<ChildProcess> {
   const trueforgeRoot = fileURLToPath(new URL('../../trueforge/', import.meta.url));
+  const env = {
+    PATH: process.env['PATH'] ?? '',
+    HOME: dataDir,
+    NODE_OPTIONS: '--conditions=trueforge-dev',
+    NODE_ENV: 'production',
+    STANDALONE: 'true',
+    TRUEFORGE_AUTH_MODE: 'local',
+    HOST: 'localhost',
+    PORT: String(port),
+    ACCESS_LOGS: 'false',
+    MEMORY_EMBEDDINGS_ENABLED: 'false',
+    SQLITE_PATH: path.join(dataDir, 'db', 'db.sqlite'),
+    SECRETS_KEY_FILE: path.join(dataDir, 'secrets', 'master.key'),
+    MEMORY_MARKDOWN_DIR: path.join(dataDir, 'memory'),
+    PERSONA_KNOWLEDGE_DIR: path.join(dataDir, 'persona'),
+    APP_DATA_DIR_SUFFIX: `auth-local-test-${path.basename(dataDir)}`,
+  };
+  // The server waits, locked, until its key is set up, so setup runs first as it does on a real install.
+  execFileSync(process.execPath, ['--import', 'tsx', 'src/cli/main.ts', 'secrets', 'init', '--if-needed'], {
+    cwd: trueforgeRoot,
+    env,
+    stdio: 'ignore',
+  });
   const child = spawn(process.execPath, ['--import', 'tsx', 'src/main.ts'], {
     cwd: trueforgeRoot,
-    env: {
-      PATH: process.env['PATH'] ?? '',
-      HOME: dataDir,
-      NODE_OPTIONS: '--conditions=trueforge-dev',
-      NODE_ENV: 'production',
-      STANDALONE: 'true',
-      TRUEFORGE_AUTH_MODE: 'local',
-      HOST: 'localhost',
-      PORT: String(port),
-      ACCESS_LOGS: 'false',
-      MEMORY_EMBEDDINGS_ENABLED: 'false',
-      SQLITE_PATH: path.join(dataDir, 'db', 'db.sqlite'),
-      MEMORY_MARKDOWN_DIR: path.join(dataDir, 'memory'),
-      PERSONA_KNOWLEDGE_DIR: path.join(dataDir, 'persona'),
-      APP_DATA_DIR_SUFFIX: `auth-local-test-${path.basename(dataDir)}`,
-    },
+    env,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   const base = `http://localhost:${String(port)}`;

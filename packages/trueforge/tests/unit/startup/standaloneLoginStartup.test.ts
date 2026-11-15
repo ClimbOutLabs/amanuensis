@@ -4,6 +4,8 @@ import { createServer, request, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
+import { setUpSecrets } from './secretsSetup';
+
 const PACKAGE_ROOT = path.resolve(__dirname, '../../..');
 const BOOT_TIMEOUT_MS = 40_000;
 
@@ -162,6 +164,7 @@ describe('standalone login startup', () => {
     const booted = boot(
       {
         PORT: String(port),
+        ...(await setUpSecrets({ dataDir })),
         HOME: path.join(blocker, 'home'),
         APP_DATA_DIR: appDataDir,
         OIDC_ISSUER_URL: `http://127.0.0.1:${String(await freePort())}/dex`,
@@ -185,6 +188,7 @@ describe('standalone login startup', () => {
     const base = `http://localhost:${String(port)}`;
     const booted = boot(
       {
+        ...(await setUpSecrets({ dataDir })),
         PORT: String(port),
         OIDC_ISSUER_URL: `http://127.0.0.1:${String(idpPort)}/dex`,
         OIDC_CLIENT_ID: 'client-a',

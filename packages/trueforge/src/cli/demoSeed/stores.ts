@@ -11,6 +11,8 @@ import { SqliteSpaceStore } from '../../db/sqlite/space-store/SqliteSpaceStore';
 import { SqliteTurnArtifactStore } from '../../db/sqlite/turn-artifact-store/SqliteTurnArtifactStore';
 import type { Database } from '../../db/sqlite/types';
 import { MarkdownMemoryClient } from '../../runtime/memory/markdownMemoryClient';
+import { EncryptedMcpServerStore } from '../../secrets/encryptedMcpServerStore';
+import type { SecretVault } from '../../secrets/secretVault';
 import type { DemoKnowledgeLibrary } from './knowledgeLibrary';
 import type { DemoSeedStores } from './seed';
 
@@ -20,11 +22,14 @@ export function createSqliteDemoSeedStores({
   memoryDir,
   tenantId,
   knowledge,
+  vault,
 }: {
   db: Kysely<Database>;
   memoryDir: string;
   tenantId: string;
   knowledge: DemoKnowledgeLibrary;
+  /** Connectors the seed saves go through it, so their keys are encrypted like any other. */
+  vault: SecretVault;
 }): DemoSeedStores<Transaction<Database>> {
   return {
     withTransaction: callback => db.transaction().execute(callback),
@@ -35,7 +40,7 @@ export function createSqliteDemoSeedStores({
     spaceStore: new SqliteSpaceStore(db),
     sessionStore: new SqliteSessionStore(db),
     turnArtifactStore: new SqliteTurnArtifactStore(db),
-    mcpServerStore: new SqliteMcpServerStore(db),
+    mcpServerStore: new EncryptedMcpServerStore({ store: new SqliteMcpServerStore(db), vault }),
     globalSettingsStore: new SqliteGlobalSettingsStore(db),
     skillStore: new SqliteSkillStore(db),
     knowledge,

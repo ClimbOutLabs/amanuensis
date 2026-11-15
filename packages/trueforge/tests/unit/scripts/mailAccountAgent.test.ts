@@ -5,11 +5,14 @@ import {
   renderMailAccountsEnv,
   type MailAccount,
 } from '@truefoundry/trueforge-core/core/email/mailConnector/accountFile';
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
+import { execFileSync, spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { request as httpRequest } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+
+import { connectorKeyId } from '../../../src/runtime/connectorAccountKey';
+import { giveMailAgentKey, MAIL_AGENT_KEY, openMailAccountText, sealMailAccountText } from './mailAgentSupport';
 
 const REPO_ROOT = resolve(__dirname, '..', '..', '..', '..', '..');
 const AGENT = resolve(REPO_ROOT, 'ops/compose/mail-email/account_agent.py');
@@ -21,6 +24,7 @@ const WRONG = 'CANARY-WRONG-PASSWORD-9z';
 const SECRET = 'test-account-secret-0123456789abcdef0123';
 const WRONG_SECRET = 'test-account-secret-ffffffffffffffffffff';
 const AGENT_PORT = 19771;
+const AGENT_URL = `http://127.0.0.1:${String(AGENT_PORT)}`;
 const ADDRESS = 'person@example.com';
 
 /** Waits until `check` passes, polling. Fails the test when it never does. */
@@ -127,6 +131,7 @@ describe('the mail account agent', () => {
       env: {
         ...process.env,
         AMAN_MAIL_ACCOUNT_FILE: accountFile,
+        AMAN_MAIL_RUN_DIR: join(dir, 'run'),
         AMAN_MAIL_ACCOUNT_PORT: String(AGENT_PORT),
         AMAN_MAIL_ACCOUNT_SECRET: SECRET,
         AMAN_MAIL_EMAIL_CHECK: EMAIL_CHECK,
@@ -192,6 +197,34 @@ describe('the mail account agent', () => {
     expect(JSON.parse(text).error).toBe('unauthorized');
   });
 
+  it('saves nothing while it holds no key for its account file', async () => {
+    const held = await rawAgentCall({ method: 'GET', authorization: `Bearer ${SECRET}`, path: '/key' });
+    expect(JSON.parse(held.text)).toEqual({ key_id: null });
+    const { status, text } = await agentCall('POST', postBody(CANARY));
+    expect(status).toBe(423);
+    expect(JSON.parse(text).error).toBe('locked');
+    expect(readFileSync(accountFile, 'utf8')).toBe('');
+  }, 30_000);
+
+  it('takes a key only from a caller with the secret, and only a whole key', async () => {
+    const stranger = await rawAgentCall({
+      method: 'POST',
+      authorization: undefined,
+      path: '/key',
+      body: { current: MAIL_AGENT_KEY, earlier: [] },
+    });
+    expect(stranger.status).toBe(401);
+    const short = await giveMailAgentKey({ url: AGENT_URL, secret: SECRET, key: 'abcd' });
+    expect(short.status).toBe(400);
+    const given = await giveMailAgentKey({ url: AGENT_URL, secret: SECRET });
+    expect(given.status).toBe(200);
+    const held = await rawAgentCall({ method: 'GET', authorization: `Bearer ${SECRET}`, path: '/key' });
+    expect(held.text).not.toContain(MAIL_AGENT_KEY);
+    expect(JSON.parse(held.text)).toEqual(given.body);
+    // The same short name the app works out, so the app can tell the key is held without sending it.
+    expect(given.body).toEqual({ key_id: connectorKeyId(Buffer.from(MAIL_AGENT_KEY, 'hex')) });
+  });
+
   it('checks before saving: a refused sign-in saves nothing', async () => {
     const before = readFileSync(accountFile, 'utf8');
     const { status, text } = await agentCall('POST', postBody(WRONG));
@@ -210,7 +243,7 @@ describe('the mail account agent', () => {
     expect(readFileSync(accountFile, 'utf8')).toBe(before);
   }, 30_000);
 
-  it('saves a checked account in the installer file format, mode 600, and never returns the password', async () => {
+  it('saves a checked account encrypted, in the installer file format, mode 600, and never returns the password', async () => {
     const { status, text } = await agentCall('POST', postBody(CANARY));
     expect(status).toBe(200);
     expect(text).not.toContain(CANARY);
@@ -220,7 +253,12 @@ describe('the mail account agent', () => {
     expect(body.accounts[0].address).toBe(ADDRESS);
     expect(body.accounts[0].sign_in).toBe('ok');
     expect(body.default).toBe(ADDRESS);
-    expect(readFileSync(accountFile, 'utf8')).toBe(renderMailAccountEnv(accountWith(CANARY)));
+    const onDisk = readFileSync(accountFile, 'utf8');
+    // Nothing of the account is readable in the file: not the password, not even the address.
+    expect(onDisk).not.toContain(CANARY);
+    expect(onDisk).not.toContain(ADDRESS);
+    expect(openMailAccountText({ sealed: onDisk })).toBe(renderMailAccountEnv(accountWith(CANARY)));
+    expect(() => openMailAccountText({ sealed: onDisk, key: 'ff'.repeat(32) })).toThrow();
     expect(statSync(accountFile).mode & 0o777).toBe(0o600);
     // The fake server recorded the exact password the check signed in with: the password
     // that was checked is the password that was saved.
@@ -228,7 +266,9 @@ describe('the mail account agent', () => {
   }, 30_000);
 
   it('reports a saved sign-in that stopped working after the file changes under it', async () => {
-    writeFileSync(accountFile, renderMailAccountEnv(accountWith(WRONG)), { mode: 0o600 });
+    writeFileSync(accountFile, sealMailAccountText({ text: renderMailAccountEnv(accountWith(WRONG)) }), {
+      mode: 0o600,
+    });
     const { text } = await agentCall('GET');
     const body = JSON.parse(text);
     expect(body.connected).toBe(true);
@@ -289,7 +329,9 @@ describe('the mail account agent', () => {
       const both = JSON.parse(added.text);
       expect(both.accounts.map((entry: { address: string }) => entry.address)).toEqual([ADDRESS, secondAddress]);
       expect(both.default).toBe(ADDRESS);
-      expect(parseMailAccountsEnv(readFileSync(accountFile, 'utf8')).accounts).toHaveLength(2);
+      expect(
+        parseMailAccountsEnv(openMailAccountText({ sealed: readFileSync(accountFile, 'utf8') })).accounts,
+      ).toHaveLength(2);
 
       const moved = await rawAgentCall({
         method: 'POST',
@@ -299,7 +341,9 @@ describe('the mail account agent', () => {
       });
       expect(moved.status).toBe(200);
       expect(JSON.parse(moved.text).default).toBe(secondAddress);
-      expect(parseMailAccountsEnv(readFileSync(accountFile, 'utf8')).default_address).toBe(secondAddress);
+      expect(
+        parseMailAccountsEnv(openMailAccountText({ sealed: readFileSync(accountFile, 'utf8') })).default_address,
+      ).toBe(secondAddress);
 
       const unknown = await rawAgentCall({
         method: 'POST',
@@ -315,7 +359,7 @@ describe('the mail account agent', () => {
       const left = JSON.parse(removed.text);
       expect(left.accounts.map((entry: { address: string }) => entry.address)).toEqual([secondAddress]);
       expect(left.default).toBe(secondAddress);
-      expect(readFileSync(accountFile, 'utf8')).toBe(
+      expect(openMailAccountText({ sealed: readFileSync(accountFile, 'utf8') })).toBe(
         renderMailAccountsEnv({ accounts: [second], default_address: secondAddress }),
       );
     } finally {
@@ -324,21 +368,16 @@ describe('the mail account agent', () => {
     }
   }, 60_000);
 
-  it('the server config comes from the account file, and clears when the account goes', async () => {
+  it('the server config is rendered in the run folder, and clears when the account goes', async () => {
+    const rendered = join(dir, 'run', 'accounts.toml');
     await agentCall('POST', postBody(CANARY));
-    const withAccount = execFileSync('python3', [AGENT, '--print-config'], {
-      env: { ...process.env, AMAN_MAIL_ACCOUNT_FILE: accountFile },
-      encoding: 'utf8',
-    });
+    const withAccount = readFileSync(rendered, 'utf8');
     expect(withAccount).toContain('[[emails]]');
     expect(withAccount).toContain(`account_name = "${ADDRESS}"`);
     expect(withAccount).toContain(`email_address = "${ADDRESS}"`);
+    expect(statSync(rendered).mode & 0o777).toBe(0o600);
     await agentCall('DELETE');
-    const without = execFileSync('python3', [AGENT, '--print-config'], {
-      env: { ...process.env, AMAN_MAIL_ACCOUNT_FILE: accountFile },
-      encoding: 'utf8',
-    });
-    expect(without).toBe('');
+    expect(readFileSync(rendered, 'utf8')).toBe('');
   }, 30_000);
 
   it('says whether an account is saved with one word, and never prints the account', async () => {
@@ -375,6 +414,7 @@ describe('the mail account agent with no usable secret', () => {
     const env: NodeJS.ProcessEnv = {
       ...process.env,
       AMAN_MAIL_ACCOUNT_FILE: accountFile,
+      AMAN_MAIL_RUN_DIR: join(dir, 'run'),
       AMAN_MAIL_ACCOUNT_PORT: String(port),
     };
     if (secretValue === undefined) {
@@ -419,13 +459,134 @@ describe('the mail account agent with no usable secret', () => {
     expect(started.output()).not.toContain('too-short');
     await expect(fetch('http://127.0.0.1:19773/account')).rejects.toThrow();
   });
+});
 
-  it('the command line still works with no secret set', () => {
-    const out = execFileSync('python3', [AGENT, '--print-config'], {
-      env: agentEnv(undefined, 19774),
-      encoding: 'utf8',
+describe('the mail account file and its keys', () => {
+  const OLD_KEY = '11'.repeat(32);
+  const OTHER_KEY = '22'.repeat(32);
+  const PORT = 19781;
+  const URL_BASE = `http://127.0.0.1:${String(PORT)}`;
+  const account: MailAccount = {
+    address: ADDRESS,
+    password: CANARY,
+    imap_host: 'localhost',
+    imap_port: 59997,
+    imap_mode: 'ssl',
+    smtp_host: 'localhost',
+    smtp_port: 465,
+    smtp_mode: 'ssl',
+  };
+  const accountText = renderMailAccountEnv(account);
+  let dir: string;
+  let accountFile: string;
+  let agent: ChildProcess | undefined;
+
+  function env(): NodeJS.ProcessEnv {
+    return {
+      ...process.env,
+      AMAN_MAIL_ACCOUNT_FILE: accountFile,
+      AMAN_MAIL_RUN_DIR: join(dir, 'run'),
+      AMAN_MAIL_ACCOUNT_PORT: String(PORT),
+      AMAN_MAIL_ACCOUNT_SECRET: SECRET,
+    };
+  }
+
+  async function startAgent(): Promise<void> {
+    agent = spawn('python3', [AGENT], { env: env(), stdio: 'ignore' });
+    await eventually(async () => {
+      try {
+        return (await fetch(`${URL_BASE}/key`, { headers: { authorization: `Bearer ${SECRET}` } })).status === 200;
+      } catch {
+        return false;
+      }
     });
-    expect(out).toBe('');
+  }
+
+  async function accountStatus(): Promise<number> {
+    return (await fetch(`${URL_BASE}/account`, { headers: { authorization: `Bearer ${SECRET}` } })).status;
+  }
+
+  function rendered(): string {
+    return readFileSync(join(dir, 'run', 'accounts.toml'), 'utf8');
+  }
+
+  function writeStdin(input: string): { status: number | null; stdout: string; stderr: string } {
+    const done = spawnSync('python3', [AGENT, '--write-stdin'], { env: env(), input, encoding: 'utf8' });
+    return { status: done.status, stdout: done.stdout, stderr: done.stderr };
+  }
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'mail-agent-keys-'));
+    accountFile = join(dir, '.env.mail-email');
+  });
+
+  afterEach(() => {
+    agent?.kill('SIGKILL');
+    agent = undefined;
+  });
+
+  it('an encrypted file stays locked until its key arrives, and the server gets no account before that', async () => {
+    writeFileSync(accountFile, sealMailAccountText({ text: accountText }), { mode: 0o600 });
+    await startAgent();
+    expect(await accountStatus()).toBe(423);
+    expect(rendered()).toBe('');
+    const wrong = await giveMailAgentKey({ url: URL_BASE, secret: SECRET, key: OTHER_KEY });
+    expect(wrong).toEqual({ status: 409, body: { error: 'wrong_key' } });
+    expect(await accountStatus()).toBe(423);
+    expect((await giveMailAgentKey({ url: URL_BASE, secret: SECRET })).status).toBe(200);
+    expect(rendered()).toContain(`email_address = "${ADDRESS}"`);
+  }, 30_000);
+
+  it('a file from before encryption is still read, and is encrypted once the key arrives', async () => {
+    writeFileSync(accountFile, accountText, { mode: 0o600 });
+    await startAgent();
+    expect(rendered()).toContain(`email_address = "${ADDRESS}"`);
+    expect((await giveMailAgentKey({ url: URL_BASE, secret: SECRET })).status).toBe(200);
+    const onDisk = readFileSync(accountFile, 'utf8');
+    expect(onDisk).not.toContain(CANARY);
+    expect(openMailAccountText({ sealed: onDisk })).toBe(accountText);
+    expect(statSync(accountFile).mode & 0o777).toBe(0o600);
+  }, 30_000);
+
+  it('a file under an earlier key is opened with it and moved to the current key', async () => {
+    writeFileSync(accountFile, sealMailAccountText({ text: accountText, key: OLD_KEY }), { mode: 0o600 });
+    await startAgent();
+    expect((await giveMailAgentKey({ url: URL_BASE, secret: SECRET, earlier: [OLD_KEY] })).status).toBe(200);
+    expect(openMailAccountText({ sealed: readFileSync(accountFile, 'utf8') })).toBe(accountText);
+    expect(rendered()).toContain(`email_address = "${ADDRESS}"`);
+  }, 30_000);
+
+  it('the installer write path encrypts with the key on its first line, and refuses to write without one', () => {
+    const refused = writeStdin(accountText);
+    expect(refused.status).toBe(2);
+    expect(existsSync(accountFile)).toBe(false);
+    const saved = writeStdin(`${MAIL_AGENT_KEY}\n${accountText}`);
+    expect(saved).toEqual({ status: 0, stdout: 'saved\n', stderr: '' });
+    const onDisk = readFileSync(accountFile, 'utf8');
+    expect(onDisk).not.toContain(CANARY);
+    expect(openMailAccountText({ sealed: onDisk })).toBe(accountText);
+  });
+
+  it('the installer write path keeps the other accounts, and leaves a file it cannot open alone', () => {
+    const other: MailAccount = { ...account, address: 'nora@example.com' };
+    writeFileSync(accountFile, sealMailAccountText({ text: renderMailAccountEnv(other), key: OLD_KEY }), {
+      mode: 0o600,
+    });
+    const before = readFileSync(accountFile, 'utf8');
+    const locked = writeStdin(`${MAIL_AGENT_KEY}\n${accountText}`);
+    expect(locked.status).toBe(3);
+    expect(locked.stderr).not.toContain(CANARY);
+    expect(readFileSync(accountFile, 'utf8')).toBe(before);
+    expect(writeStdin(`${MAIL_AGENT_KEY} ${OLD_KEY}\n${accountText}`).status).toBe(0);
+    const merged = parseMailAccountsEnv(openMailAccountText({ sealed: readFileSync(accountFile, 'utf8') }));
+    expect(merged.accounts.map(saved => saved.address)).toEqual(['nora@example.com', ADDRESS]);
+  });
+
+  it('the installer remove path empties the file with no key', () => {
+    writeFileSync(accountFile, sealMailAccountText({ text: accountText }), { mode: 0o600 });
+    const done = spawnSync('python3', [AGENT, '--remove'], { env: env(), encoding: 'utf8' });
+    expect(done.stdout).toBe('removed\n');
+    expect(readFileSync(accountFile, 'utf8')).toBe('');
   });
 });
 

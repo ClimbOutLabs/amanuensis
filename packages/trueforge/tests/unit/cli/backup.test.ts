@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from 
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-import Database from 'better-sqlite3';
+import Database from 'better-sqlite3-multiple-ciphers';
 import { z } from 'zod';
 
 import { MAIN_THREAD_ID } from '@truefoundry/trueforge-core/agent-session';
@@ -190,7 +190,11 @@ describe('backup', () => {
 describe('backupSqliteFile', () => {
   it('fails for a missing source database', async () => {
     await expect(
-      backupSqliteFile({ source: path.join(scratch, 'none.sqlite'), dest: path.join(scratch, 'copy.sqlite') }),
+      backupSqliteFile({
+        source: path.join(scratch, 'none.sqlite'),
+        dest: path.join(scratch, 'copy.sqlite'),
+        key: undefined,
+      }),
     ).rejects.toThrow();
   });
 
@@ -203,7 +207,7 @@ describe('backupSqliteFile', () => {
     db.pragma('writable_schema = ON');
     db.exec("DELETE FROM sqlite_master WHERE type = 'index' AND name = 'i'");
     db.close();
-    await expect(backupSqliteFile({ source, dest: path.join(scratch, 'copy.sqlite') })).rejects.toThrow(
+    await expect(backupSqliteFile({ source, dest: path.join(scratch, 'copy.sqlite'), key: undefined })).rejects.toThrow(
       'integrity check',
     );
   });
@@ -211,7 +215,7 @@ describe('backupSqliteFile', () => {
   it('produces a copy that passes the integrity check', async () => {
     const source = path.join(scratch, 'live', 'db.sqlite');
     const dest = path.join(scratch, 'copy.sqlite');
-    await backupSqliteFile({ source, dest });
+    await backupSqliteFile({ source, dest, key: undefined });
     const copy = new Database(dest, { readonly: true });
     expect(copy.pragma('integrity_check', { simple: true })).toBe('ok');
     copy.close();
@@ -253,7 +257,7 @@ describe('backupSqliteFile', () => {
     }
     const dest = path.join(scratch, 'copy.sqlite');
     try {
-      await backupSqliteFile({ source: env.databaseFile, dest });
+      await backupSqliteFile({ source: env.databaseFile, dest, key: undefined });
     } finally {
       await env.teardown();
     }

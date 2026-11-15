@@ -434,11 +434,11 @@ plan_build() {
       plan_add todo "$(demo_plan_text "$name" "$(reg_get "$name" owner_email)")"
     fi
     if [ -n "$AMAN_TAVILY_KEY" ] || { [ "$DRY_RUN" = 1 ] && [ "$OPT_TAVILY_KEY_STDIN" = 1 ]; }; then
-      plan_add todo "Use Tavily for web search on instance $name" "The key is saved only in the settings file of this instance."
+      plan_add todo "Use Tavily for web search on instance $name" "The key is kept encrypted with this instance's data."
     fi
   fi
   if ! need_new_instance && [ "$OPT_TF_KEY_STDIN" = 1 ]; then
-    plan_add todo "Replace the Token Factory key of instance $(tf_rotation_name) and restart its app" "The key is saved only in the settings file of that instance."
+    plan_add todo "Replace the Token Factory key of instance $(tf_rotation_name) and restart its app" "The key is kept encrypted with that instance's data."
   fi
   calendar_plan_row
   email_plan_row
@@ -677,6 +677,8 @@ install_execute() {
       case "$ADDRESS_CHANGED" in *" $name "*) recreate=recreate ;; esac
       if instance_enforce_single_owner "$name"; then recreate=recreate; fi
       if sms_settings_changed "$name"; then recreate=recreate; fi
+      # An instance from before this computer's key is tied to it now, which needs a fresh start.
+      if [ "$(reg_get "$name" secrets)" != 1 ]; then recreate=recreate; fi
       if [ "$(instance_state "$name")" != running ] || [ -n "$recreate" ] || { instance_sandbox_wanted "$name" && ! instance_sandbox_wired "$name"; } ||
         { instance_sandbox_wanted "$name" && ! sandbox_slots_use_current_image "$name"; }; then
         if [ "$name" = "$enabled" ]; then recreate=recreate; fi

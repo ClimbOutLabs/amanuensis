@@ -4,6 +4,8 @@ import { createServer, request, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
+import { setUpSecrets } from './secretsSetup';
+
 const PACKAGE_ROOT = path.resolve(__dirname, '../../..');
 // A cold tsx boot of the whole server takes well over half a minute on a loaded machine.
 const BOOT_TIMEOUT_MS = 120_000;
@@ -167,7 +169,10 @@ describe('local sign-in startup', () => {
   it('boots on this computer with no OIDC at all and serves the create form', async () => {
     const port = await freePort();
     const base = `http://localhost:${String(port)}`;
-    const booted = boot({ PORT: String(port), TRUEFORGE_AUTH_MODE: 'local' }, dataDir);
+    const booted = boot(
+      { ...(await setUpSecrets({ dataDir })), PORT: String(port), TRUEFORGE_AUTH_MODE: 'local' },
+      dataDir,
+    );
     running.push(booted);
 
     await waitUntilServing({ booted, base });
@@ -183,7 +188,10 @@ describe('local sign-in startup', () => {
   it('refuses a create with no Origin, and lets the same create through with the page own Origin', async () => {
     const port = await freePort();
     const base = `http://localhost:${String(port)}`;
-    const booted = boot({ PORT: String(port), TRUEFORGE_AUTH_MODE: 'local' }, dataDir);
+    const booted = boot(
+      { ...(await setUpSecrets({ dataDir })), PORT: String(port), TRUEFORGE_AUTH_MODE: 'local' },
+      dataDir,
+    );
     running.push(booted);
 
     await waitUntilServing({ booted, base });

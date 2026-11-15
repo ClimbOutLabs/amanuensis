@@ -171,7 +171,11 @@ export async function openExportDataSession({ migrate }: { migrate: boolean }): 
       : undefined;
   if (configuration.STANDALONE) {
     const { openSqliteStores } = await import('./sqliteStores');
-    const stores = await openSqliteStores({ sqlitePath: configuration.SQLITE_PATH, migrate });
+    const stores = await openSqliteStores({
+      sqlitePath: configuration.SQLITE_PATH,
+      migrate,
+      keyFile: configuration.SECRETS_KEY_FILE,
+    });
     return buildSession({ stores, signInOffUserId });
   }
   const { openPostgresStores } = await import('./postgresStores');
@@ -182,6 +186,7 @@ export async function openExportDataSession({ migrate }: { migrate: boolean }): 
     idleInTransactionSessionTimeoutMs: configuration.POSTGRES_IDLE_IN_TRANSACTION_SESSION_TIMEOUT_MS,
     connectionTimeoutMs: configuration.POSTGRES_CONNECT_TIMEOUT_MS,
     migrate,
+    keyFile: configuration.SECRETS_KEY_FILE,
   });
   return buildSession({ stores, signInOffUserId });
 }

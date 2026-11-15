@@ -4,12 +4,60 @@ import {
   type MailAccount,
 } from '@truefoundry/trueforge-core/core/email/mailConnector/accountFile';
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
+import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 /** The secret the agent under test asks every caller for; synthetic and long enough to be accepted. */
 export const MAIL_AGENT_SECRET = 'test-mail-agent-secret-0123456789abcdef';
+
+/** A synthetic key for the agent's account file, in the hex form the app sends. */
+export const MAIL_AGENT_KEY = '5a'.repeat(32);
+
+const SEALED_PREFIX = 'aman-sealed:v1:';
+const SEAL_LABEL = Buffer.from('aman mail account v1');
+
+/** The account file's bytes on disk for this text, written the way the agent writes them. */
+export function sealMailAccountText({ text, key = MAIL_AGENT_KEY }: { text: string; key?: string }): string {
+  const nonce = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', Buffer.from(key, 'hex'), nonce);
+  cipher.setAAD(SEAL_LABEL);
+  const sealed = Buffer.concat([nonce, cipher.update(text, 'utf8'), cipher.final(), cipher.getAuthTag()]);
+  return `${SEALED_PREFIX}${sealed.toString('base64')}\n`;
+}
+
+/** The account text inside the file's bytes on disk. Throws when the file is not encrypted with this key. */
+export function openMailAccountText({ sealed, key = MAIL_AGENT_KEY }: { sealed: string; key?: string }): string {
+  if (!sealed.startsWith(SEALED_PREFIX)) {
+    throw new Error('the account file is not encrypted');
+  }
+  const blob = Buffer.from(sealed.slice(SEALED_PREFIX.length).trim(), 'base64');
+  const decipher = createDecipheriv('aes-256-gcm', Buffer.from(key, 'hex'), blob.subarray(0, 12));
+  decipher.setAAD(SEAL_LABEL);
+  decipher.setAuthTag(blob.subarray(blob.length - 16));
+  return Buffer.concat([decipher.update(blob.subarray(12, blob.length - 16)), decipher.final()]).toString('utf8');
+}
+
+/** Hands the agent the key of its account file, as the app does after each start. */
+export async function giveMailAgentKey({
+  url,
+  secret,
+  key = MAIL_AGENT_KEY,
+  earlier = [],
+}: {
+  url: string;
+  secret: string;
+  key?: string;
+  earlier?: string[];
+}): Promise<{ status: number; body: unknown }> {
+  const response = await fetch(`${url}/key`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${secret}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ current: key, earlier }),
+  });
+  return { status: response.status, body: await response.json() };
+}
 
 const REPO_ROOT = resolve(__dirname, '..', '..', '..', '..', '..');
 const AGENT = resolve(REPO_ROOT, 'ops/compose/mail-email/account_agent.py');
@@ -147,6 +195,7 @@ export async function startMailAgent({
     env: {
       ...process.env,
       AMAN_MAIL_ACCOUNT_FILE: accountFile,
+      AMAN_MAIL_RUN_DIR: join(dir, 'run'),
       AMAN_MAIL_ACCOUNT_PORT: String(port),
       AMAN_MAIL_LIST_SECONDS: String(list_seconds),
       AMAN_MAIL_ACCOUNT_SECRET: MAIL_AGENT_SECRET,

@@ -43,7 +43,7 @@ TWILIO_WEBHOOK_PUBLIC_URL=https://your-address.example
 # REACH_SMS_MAX_TEXTS_PER_DAY=500
 ```
 
-Then start Aman again with the new settings. If you installed Aman with the installer, run `./installer/install.sh` again from your `amanuensis` folder. If you run Aman from a copy of the code, stop it and start it again. Do the same after you change any of these lines later, such as a new auth token. The installer notices a change to these lines by itself. After you change any other line in that file, also run `./installer/install.sh instance refresh <name>`.
+Then start Aman again with the new settings. If you installed Aman with the installer, run `./installer/install.sh` again from your `amanuensis` folder. If you run Aman from a copy of the code, stop it and start it again. Do the same after you change any of these lines later, such as a new auth token. The installer notices a change to these lines by itself. Once Aman has started with it, the installer takes the `TWILIO_AUTH_TOKEN` line out of the file and keeps the token encrypted with your Aman's data. To use a new auth token later, add the line again and run the installer. After you change any other line in that file, also run `./installer/install.sh instance refresh <name>`.
 
 When Aman starts, it tells Twilio to send the texts that come in to your number to `TWILIO_WEBHOOK_PUBLIC_URL` followed by `/twilio/sms`. You do not set this in the Twilio console. Aman changes only that setting, and only for the number in `TWILIO_FROM_NUMBER`.
 

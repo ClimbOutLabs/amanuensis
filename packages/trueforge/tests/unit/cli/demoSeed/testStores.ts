@@ -14,6 +14,7 @@ import type { Database } from '../../../../src/db/sqlite/types';
 import { personaKnowledgeLocation } from '../../../../src/personaKnowledge/knowledgePaths';
 import { openPersonaKnowledgeRepository } from '../../../../src/personaKnowledge/sqliteKnowledgeRepository';
 import { EMBEDDING_DIMENSIONS } from '../../../../src/runtime/memory/embeddingModel';
+import { createUnlockedVault } from '../../../db/sqlite/secrets/testVault';
 
 export const TENANT_ID = 'default';
 export const USER_ID = 'judge@example.com';
@@ -73,7 +74,13 @@ export async function createTestWorld(options: { indexes?: boolean } = {}): Prom
     },
   });
   return {
-    stores: createSqliteDemoSeedStores({ db, memoryDir, tenantId: TENANT_ID, knowledge }),
+    stores: createSqliteDemoSeedStores({
+      db,
+      memoryDir,
+      tenantId: TENANT_ID,
+      knowledge,
+      vault: await createUnlockedVault(db),
+    }),
     db,
     memoryDir,
     knowledgeDir,

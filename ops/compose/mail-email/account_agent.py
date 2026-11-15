@@ -2,13 +2,16 @@
 """The mail sidecar's account agent: the Settings Email card's counterpart inside the sidecar.
 
 It listens on the instance's private network only (the port is exposed inside the compose
-network, never published). It holds no state of its own except short-lived sign-in results;
-the accounts themselves live in the one account file in the sidecar's own volume, which the
-installer writes through this agent's command line and the Settings card writes through this
-agent's HTTP port. The file holds one account block per email account, in the same env shape
-the installer has always written, with an optional line naming the default account. The
-wrapper restarts the mail server whenever the file changes, and starts it from a config this
-agent renders (see --print-config), so this agent never touches Docker.
+network, never published). It holds no state of its own except short-lived sign-in results
+and the key of the account file; the accounts themselves live in the one account file in the
+sidecar's own volume, which the installer writes through this agent's command line and the
+Settings card writes through this agent's HTTP port. The file holds one account block per
+email account, in the same env shape the installer has always written, with an optional line
+naming the default account. On disk the whole file is encrypted. The app hands this agent the
+key after each start, and it is kept in memory only, so the volume alone opens nothing. The
+mail server reads its accounts from a config this agent renders into a folder that lives in
+memory, and the wrapper restarts the server whenever that config changes, so this agent never
+touches Docker.
 
 Security rules, enforced here:
 - Every request must present the instance's shared account secret, the same caller check the
@@ -17,6 +20,9 @@ Security rules, enforced here:
   is stored, and is never written to a log, a response, or an error. Responses carry fixed
   result words only, so a mail server's error text (which can echo credentials) never reaches
   the app.
+- The account file is written encrypted or not at all: without the key nothing is saved, and
+  an encrypted file reads as locked until the key that opens it arrives. A file from before
+  encryption is still read, and is encrypted as soon as the key arrives.
 - Nothing is logged at all: the HTTP server's request log is silenced, and unexpected failures
   print only the exception's type name to stderr, never its text.
 - The same port lists new mail for the app's noticing, by UIDVALIDITY and UID, and says the inbox's UIDVALIDITY:
@@ -26,6 +32,8 @@ Security rules, enforced here:
   same way), so both paths give the same answer for the same account.
 """
 
+import base64
+import binascii
 import email.parser
 import email.policy
 import email.utils
@@ -58,7 +66,71 @@ ADDRESS_KEY = "MCP_EMAIL_SERVER_EMAIL_ADDRESS"
 RECHECK_AFTER_SECONDS = 300
 MAX_BODY_BYTES = 65536
 
+# Lives in memory (a tmpfs mount): the accounts in the mail server's own config form.
+RUN_DIR = os.environ.get("AMAN_MAIL_RUN_DIR", "/run/aman-mail")
+RENDERED_FILE = os.path.join(RUN_DIR, "accounts.toml")
+SEALED_PREFIX = "aman-sealed:v1:"
+SEAL_LABEL = b"aman mail account v1"
+KEY_BYTES = 32
+NONCE_BYTES = 12
+MOST_EARLIER_KEYS = 16
+
 LOCK = threading.Lock()
+# The key the account file is written with, and keys it may still be under after the instance
+# moved to another computer. Held in memory only.
+KEY = None
+EARLIER_KEYS = []
+
+
+class Locked(Exception):
+    """The account file is encrypted and no key that opens it is here, or a save has no key to use."""
+
+
+class NoCipher(Exception):
+    """This Python has no AES-GCM, so nothing can be encrypted or opened."""
+
+
+def cipher(key):
+    try:
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    except ImportError:
+        raise NoCipher() from None
+    return AESGCM(key)
+
+
+def seal(text, key):
+    nonce = os.urandom(NONCE_BYTES)
+    sealed = cipher(key).encrypt(nonce, text.encode("utf-8"), SEAL_LABEL)
+    return SEALED_PREFIX + base64.b64encode(nonce + sealed).decode("ascii") + "\n"
+
+
+def unseal(raw, key):
+    """The text inside an encrypted file, or None when this key does not open it."""
+    aead = cipher(key)
+    try:
+        blob = base64.b64decode(raw[len(SEALED_PREFIX):].strip(), validate=True)
+        return aead.decrypt(blob[:NONCE_BYTES], blob[NONCE_BYTES:], SEAL_LABEL).decode("utf-8")
+    except (binascii.Error, ValueError, UnicodeDecodeError):
+        return None
+    except Exception as caught:
+        if type(caught).__name__ == "InvalidTag":
+            return None
+        raise
+
+
+def key_from_hex(value):
+    """A key from its hex form, or None when the value is not one."""
+    if not isinstance(value, str) or len(value) != KEY_BYTES * 2:
+        return None
+    try:
+        return bytes.fromhex(value)
+    except ValueError:
+        return None
+
+
+def key_id(key):
+    """A short name for a key, so the app can tell which key is held without the key travelling."""
+    return hashlib.sha256(b"aman connector key id" + key).hexdigest()[:16]
 # The last sign-in check per account address: {address: {"fingerprint", "at", "result"}}.
 # A fingerprint is the hash of that account's own block, so one account changing never
 # makes another account look unchecked.
@@ -197,21 +269,33 @@ def public_account(account):
     }
 
 
-def read_file_text():
+def raw_file_text():
     try:
         with open(ACCOUNT_FILE, "r", encoding="utf-8") as handle:
             return handle.read()
-    except OSError:
+    except (OSError, UnicodeDecodeError):
         return ""
+
+
+def read_file_text():
+    """The account text. An encrypted file opens with the held key or an earlier one; a file
+    from before encryption reads as it is."""
+    raw = raw_file_text()
+    if not raw.startswith(SEALED_PREFIX):
+        return raw
+    for key in ([KEY] if KEY is not None else []) + EARLIER_KEYS:
+        text = unseal(raw, key)
+        if text is not None:
+            return text
+    raise Locked()
 
 
 def read_accounts():
     return parse_accounts(read_file_text())
 
 
-def write_file_text(text):
-    """Writes in place, mode 600, flushed to disk. In place keeps the wrapper's watch on the
-    same file, and mode 600 keeps the passwords readable only by this sidecar's user."""
+def store_raw(text):
+    """Writes in place, mode 600, flushed to disk, so the file is readable only by this sidecar's user."""
     fd = os.open(ACCOUNT_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     try:
         os.fchmod(fd, 0o600)
@@ -219,6 +303,75 @@ def write_file_text(text):
         os.fsync(fd)
     finally:
         os.close(fd)
+
+
+def write_file_text(text):
+    """Stores the account text encrypted. With no account left the file is emptied, which needs no key."""
+    if text == "":
+        store_raw("")
+        return
+    if KEY is None:
+        raise Locked()
+    store_raw(seal(text, KEY))
+
+
+def publish_config():
+    """Renders the accounts into the config the wrapper starts the mail server on. The file is
+    replaced in one step. While the account file is locked it holds no account."""
+    try:
+        accounts, default_address = read_accounts()
+    except Locked:
+        accounts, default_address = [], None
+    os.makedirs(RUN_DIR, mode=0o700, exist_ok=True)
+    tmp = RENDERED_FILE + ".tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        os.fchmod(fd, 0o600)
+        os.write(fd, config_toml(accounts, default_address).encode("utf-8"))
+    finally:
+        os.close(fd)
+    os.replace(tmp, RENDERED_FILE)
+
+
+def held_key_body():
+    with LOCK:
+        return {"key_id": key_id(KEY) if KEY is not None else None}
+
+
+def take_key(payload):
+    """Takes the account file's key from the app. Returns (status, body).
+
+    A file encrypted under one of the earlier keys, or not encrypted yet, is rewritten under
+    the current key. A key that does not open the file is refused, and nothing changes.
+    """
+    global KEY, EARLIER_KEYS
+    current = key_from_hex(payload.get("current")) if isinstance(payload, dict) else None
+    listed = payload.get("earlier", []) if isinstance(payload, dict) else None
+    if current is None or not isinstance(listed, list) or len(listed) > MOST_EARLIER_KEYS:
+        return 400, {"error": "invalid"}
+    earlier = [key_from_hex(value) for value in listed]
+    if any(key is None for key in earlier):
+        return 400, {"error": "invalid"}
+    with LOCK:
+        raw = raw_file_text()
+        if raw.startswith(SEALED_PREFIX):
+            text = None
+            opened_with = None
+            for candidate in [current] + earlier:
+                text = unseal(raw, candidate)
+                if text is not None:
+                    opened_with = candidate
+                    break
+            if text is None:
+                return 409, {"error": "wrong_key"}
+            if opened_with != current:
+                store_raw(seal(text, current))
+        elif parse_accounts(raw)[0]:
+            store_raw(seal(raw, current))
+        KEY = current
+        EARLIER_KEYS = []
+        publish_config()
+        return 200, {"key_id": key_id(current)}
 
 
 def run_check(account):
@@ -319,6 +472,8 @@ def save_account(payload):
     if account is None:
         return 400, {"error": "invalid"}
     with LOCK:
+        if KEY is None:
+            raise Locked()
         result = run_check(account)
         if result == "login":
             return 400, {"error": "sign_in_refused"}
@@ -333,6 +488,7 @@ def save_account(payload):
         if not replaced:
             accounts.append(account)
         write_file_text(render_accounts(accounts, default_address))
+        publish_config()
         LAST_CHECKS[account["address"]] = {
             "fingerprint": block_fingerprint(account),
             "at": time.time(),
@@ -361,6 +517,7 @@ def remove_account(payload):
         if default_address is not None and all(saved["address"] != default_address for saved in kept):
             default_address = None
         write_file_text(render_accounts(kept, default_address))
+        publish_config()
         for saved in removed:
             LAST_CHECKS.pop(saved["address"], None)
         return 200, status_body()
@@ -376,6 +533,7 @@ def set_default(payload):
         if all(saved["address"] != address for saved in accounts):
             return 400, {"error": "invalid"}
         write_file_text(render_accounts(accounts, address))
+        publish_config()
         return 200, status_body()
 
 
@@ -740,6 +898,17 @@ class Handler(BaseHTTPRequestHandler):
                 self.close_connection = True
                 self._send(401, {"error": "unauthorized"})
                 return
+            if self.path == "/key" and method == "GET":
+                self._send(200, held_key_body())
+                return
+            if self.path == "/key" and method == "POST":
+                payload = self._read_payload()
+                if payload is None:
+                    self._send(400, {"error": "invalid"})
+                    return
+                status, body = take_key(payload)
+                self._send(status, body)
+                return
             if self.path == "/account/default" and method == "POST":
                 payload = self._read_payload()
                 if payload is None:
@@ -787,6 +956,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(status, body)
             else:
                 self._send(405, {"error": "method_not_allowed"})
+        except Locked:
+            self._send(423, {"error": "locked"})
+        except NoCipher:
+            self._send(501, {"error": "no_cipher"})
         except Exception as caught:  # Fixed words only: exception text can carry credentials.
             sys.stderr.write("mail account agent: request failed (%s)\n" % type(caught).__name__)
             try:
@@ -863,31 +1036,32 @@ def config_toml(accounts, default_address):
     return "\n".join(lines) + "\n"
 
 
-def print_config():
-    """Prints the config fragment for the saved accounts, for the wrapper to compose."""
-    accounts, default_address = read_accounts()
-    sys.stdout.write(config_toml(accounts, default_address))
-    return 0
-
-
 def write_account_stdin():
-    """The installer's write path: account text arrives on stdin and is stored.
+    """The installer's write path: the file's keys and the account text arrive on stdin.
 
-    Text carrying a default line or several accounts is a whole list and replaces the
-    file. A single account with no default line, which is what the installer writes, is
-    merged in: an account with the same address is replaced, the others are kept. The
-    installer already checked the sign-in before calling, so this only refuses text
-    that is empty, too large, or holds no complete account. Prints one fixed word.
+    The first line holds the keys in hex, the current one first and any earlier ones after
+    it, split by spaces. The rest is the account text. Text carrying a default line or
+    several accounts is a whole list and replaces the file. A single account with no
+    default line, which is what the installer writes, is merged in: an account with the
+    same address is replaced, the others are kept. The installer already checked the
+    sign-in before calling, so this only refuses text that is empty, too large, holds no
+    complete account, or comes without a key that opens the saved file. Prints one fixed word.
     """
+    global KEY, EARLIER_KEYS
     raw = sys.stdin.buffer.read(MAX_BODY_BYTES + 1)
     if len(raw) > MAX_BODY_BYTES:
         sys.stderr.write("mail account agent: refused oversized account text\n")
         return 2
     try:
-        text = raw.decode("utf-8")
+        key_line, _, text = raw.decode("utf-8").partition("\n")
     except UnicodeDecodeError:
         sys.stderr.write("mail account agent: refused unreadable account text\n")
         return 2
+    keys = [key_from_hex(value) for value in key_line.split()]
+    if not keys or any(key is None for key in keys) or len(keys) > MOST_EARLIER_KEYS + 1:
+        sys.stderr.write("mail account agent: refused account text that came without its key\n")
+        return 2
+    KEY, EARLIER_KEYS = keys[0], keys[1:]
     incoming, incoming_default = parse_accounts(text)
     if not incoming:
         sys.stderr.write("mail account agent: refused incomplete account text\n")
@@ -909,21 +1083,29 @@ def write_account_stdin():
     except OSError:
         sys.stderr.write("mail account agent: account write failed (OSError)\n")
         return 1
+    except Locked:
+        sys.stderr.write("mail account agent: the key does not open the saved accounts\n")
+        return 3
+    except NoCipher:
+        sys.stderr.write("mail account agent: this image cannot encrypt the account file\n")
+        return 4
     sys.stdout.write("saved\n")
     return 0
 
 
 def has_account_cli():
     """The installer's look before it moves an older account in: one fixed word, never the account itself."""
-    accounts, _ = read_accounts()
-    sys.stdout.write("saved\n" if accounts else "none\n")
+    raw = raw_file_text()
+    # An encrypted file always holds an account, because an empty one is stored as an empty file.
+    saved = raw.startswith(SEALED_PREFIX) or bool(parse_accounts(raw)[0])
+    sys.stdout.write("saved\n" if saved else "none\n")
     return 0
 
 
-def remove_account_cli(address):
-    """The installer's remove path: one account by address, or every account with no address."""
+def remove_accounts_cli():
+    """The installer's remove path: every account goes. Emptying the file needs no key."""
     try:
-        remove_account({"address": address} if address is not None else None)
+        store_raw("")
     except OSError:
         sys.stderr.write("mail account agent: account remove failed (OSError)\n")
         return 1
@@ -932,14 +1114,13 @@ def remove_account_cli(address):
 
 
 def main():
-    if len(sys.argv) > 1 and sys.argv[1] == "--print-config":
-        sys.exit(print_config())
     if len(sys.argv) > 1 and sys.argv[1] == "--write-stdin":
         sys.exit(write_account_stdin())
     if len(sys.argv) > 1 and sys.argv[1] == "--has-account":
         sys.exit(has_account_cli())
     if len(sys.argv) > 1 and sys.argv[1] == "--remove":
-        sys.exit(remove_account_cli(sys.argv[2] if len(sys.argv) > 2 else None))
+        sys.exit(remove_accounts_cli())
+    publish_config()
     if not secret_is_usable(SECRET):
         sys.stderr.write("mail account agent: no account secret is set, so its port is closed\n")
         return

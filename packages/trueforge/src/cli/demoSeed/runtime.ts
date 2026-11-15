@@ -5,6 +5,8 @@ import { McpCatalog } from '../../catalog/McpCatalog';
 import { SkillCatalog } from '../../catalog/SkillCatalog';
 import { flattenProviderModels } from '../../db/modelProviderStore';
 import { getPersonaKnowledgeIndexer } from '../../personaKnowledge/knowledgeIndexer';
+import { usePersonaKnowledgeKeys } from '../../personaKnowledge/sqliteKnowledgeRepository';
+import { openSqliteVault } from '../../secrets/sqliteAccess';
 import { createKnowledgeLibrary } from './knowledgeLibrary';
 import { buildDemoSession, type DemoSeedSession } from './session';
 
@@ -29,10 +31,17 @@ export async function openDemoSeedSession(): Promise<DemoSeedSession> {
     throw new Error('demo-seed writes to the standalone (SQLite) instance only. Set STANDALONE=true.');
   }
   await mkdir(path.dirname(configuration.SQLITE_PATH), { recursive: true });
-  const db = createSqliteDb(configuration.SQLITE_PATH);
+  const { vault, databaseKey } = await openSqliteVault({
+    sqlitePath: configuration.SQLITE_PATH,
+    keyFile: configuration.SECRETS_KEY_FILE,
+    mode: 'command',
+  });
+  usePersonaKnowledgeKeys({ ...vault.knowledgeKeys(), upgrade: true });
+  const db = createSqliteDb(configuration.SQLITE_PATH, { key: databaseKey });
   try {
     await migrateSqliteToLatest(db);
     const { TENANT_ID } = await import('../../tenancy');
+    // Only model names are read here, so the providers' keys stay encrypted and unread.
     const providers = await new SqliteModelProviderStore(db).listProviders({ tenant_id: TENANT_ID });
     // The seed indexes the personas' libraries itself; the logger is quiet because the status of each document is reported.
     const indexer = getPersonaKnowledgeIndexer({
@@ -42,6 +51,7 @@ export async function openDemoSeedSession(): Promise<DemoSeedSession> {
     });
     return buildDemoSession({
       db,
+      vault,
       tenantId: TENANT_ID,
       memoryDir: configuration.MEMORY_MARKDOWN_DIR,
       models: flattenProviderModels(providers).map(model => model.name),

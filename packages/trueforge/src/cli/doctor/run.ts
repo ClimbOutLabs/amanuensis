@@ -44,7 +44,7 @@ export async function runInstanceChecks({
   const checks: Check[] = [
     await checkService({ deps, timeoutMs }),
     checkLogin(probe),
-    checkDatabase({ deps, timeoutMs }),
+    await checkDatabase({ deps, timeoutMs }),
     await checkDisk({ deps }),
     checkClock({ deps }),
     await checkRunCode({ deps, timeoutMs }),
@@ -55,7 +55,7 @@ export async function runInstanceChecks({
   ];
   // The model check spends a few tokens, so it only runs when asked for or when nothing is filtered.
   if (local) {
-    checks.push(checkModelLocally({ deps }));
+    checks.push(await checkModelLocally({ deps }));
   } else if (only === undefined || only === 'model') {
     checks.push(await checkModel({ deps, timeoutMs: deep ? DEEP_PROBE_TIMEOUT_MS : MODEL_TIMEOUT_MS }));
   }

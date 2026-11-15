@@ -25,7 +25,7 @@ describe('model check', () => {
     it('warns, pointing at Settings and nothing else, when no provider is set up', async () => {
       const countModelProviders = jest.fn().mockReturnValue(0);
       const check = await checkModel({ deps: fakeDeps({ env, countModelProviders }), timeoutMs: 1 });
-      expect(countModelProviders).toHaveBeenCalledWith({ path: '/data/db/db.sqlite' });
+      expect(countModelProviders).toHaveBeenCalledWith({ path: '/data/db/db.sqlite', key: undefined });
       expect(check).toMatchObject({ id: 'model', state: 'warn' });
       expect(check.fix).toBe('Open Aman and add a model in Settings › Models.');
       expect(`${check.detail} ${check.fix}`).not.toMatch(/\.env|docker|aman doctor|NEBIUS|command/);
@@ -93,7 +93,11 @@ describe('model check', () => {
   });
 
   it.each([
-    ['a refused key', { ok: false, label: 'GET /models', detail: 'HTTP 401 unauthorized' }, 'NEBIUS_API_KEY'],
+    [
+      'a refused key',
+      { ok: false, label: 'GET /models', detail: 'HTTP 401 unauthorized' },
+      '--token-factory-key-stdin',
+    ],
     [
       'an unlisted model',
       { ok: false, label: `model listed ${MODEL}`, detail: 'not in /models' },

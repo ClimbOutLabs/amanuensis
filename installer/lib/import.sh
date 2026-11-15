@@ -97,7 +97,7 @@ import_wait_for_search_model() {
 
 # import_run NAME FILE OWNER DISPLAY IMAGE: the file is streamed in and held on a private tmpfs, because the app user
 # inside the image cannot read a 0600 file of the host user; the instance's own settings reach the CLI through its .env,
-# so it reads the same database and memory paths the app does.
+# so it reads the same database and memory paths the app does. It saves logins, so it gets this computer's key too.
 import_run() {
   local name=$1 file=$2 owner=$3 display=$4 image=$5 base was_running=0 rc=0 log layout check=()
   base=$(basename -- "$file")
@@ -107,6 +107,7 @@ import_run() {
   # so it can be shown as printed and kept in the log, and the JSON never reaches the screen.
   layout=$log.layout
   : >"$layout"
+  machine_key_args
   if [ "$(instance_state "$name")" != stopped ]; then was_running=1; fi
   if [ "$was_running" = 1 ]; then
     IMPORT_STOPPED_APP=$name
@@ -123,6 +124,7 @@ import_run() {
   (D run --rm -i --network none \
     --env-file "$(instance_dir "$name")/.env" -e NODE_ENV=production \
     -v "aman_${name}_data:/data" \
+    ${MACHINE_KEY_ARGS[@]+"${MACHINE_KEY_ARGS[@]}"} \
     --tmpfs /import:rw,mode=0700,uid=10001,gid=10001,size=1200m \
     "$image" sh -c "cat >/import/export.zip && exec aman import-data --in /import/export.zip --user \"\$1\" --display-name \"\$2\" \${3:+\"\$3\"}" \
     import "$owner" "$display" ${check[@]+"${check[@]}"} <"$file") >"$layout" 2>"$log" || rc=$?
@@ -151,6 +153,7 @@ import_run() {
   fi
   log_event "data import into instance $name from $base"
   ui_ok "Imported into instance $name."
+  UI_FD=2 ui_hint "The file $(ui_path "$file") still holds these chats, and anyone who gets it can read them. Delete it once you have checked the result."
   UI_FD=2 ui_hint "Full log: $(ui_path "$log")"
 }
 

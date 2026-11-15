@@ -1,3 +1,6 @@
+// Gives commands such as the doctor the keys this instance keeps encrypted, as the server gets them.
+import '../secrets/savedEnvStart';
+
 import { runCli } from './dispatch';
 import { processIo } from './io';
 

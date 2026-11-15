@@ -41,7 +41,8 @@ export async function callAccountAgent({
   accountUrl: string;
   secret: string | undefined;
   fetchImpl: typeof fetch | undefined;
-  logger: Pick<Logger, 'warn'>;
+  /** Without one, an agent that cannot be reached is not logged here. */
+  logger: Pick<Logger, 'warn'> | undefined;
   label: string;
   method: 'GET' | 'POST' | 'DELETE';
   payload?: unknown;
@@ -67,7 +68,7 @@ export async function callAccountAgent({
     });
   } catch (cause) {
     // Only a fixed line is logged: a failed request's message can carry the address it went to.
-    logger.warn(`${label} account agent could not be reached`);
+    logger?.warn(`${label} account agent could not be reached`);
     return { reached: false, cause };
   }
   const body: unknown = await response.json().catch(() => null);

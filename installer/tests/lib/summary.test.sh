@@ -5,12 +5,14 @@ set -euo pipefail
 # shellcheck source=../helpers.sh
 . "$(dirname "${BASH_SOURCE[0]}")/../helpers.sh"
 
-# From the doctor's phase on, with this run's paths replaced and the elapsed time (which varies) dropped.
+# From the doctor's phase on, with this run's paths replaced and the elapsed time (which varies) dropped, also
+# where the closing line carries it after warnings.
 ending() {
   printf '%s\n' "$OUT" | sed -n '/^+- \[ 6 of 6 \]  Checking the result/,$p' |
     sed "s|$SB_INSTALLER|<checkout>/installer|g; s|$AMAN_HOME|<home>|g" |
     sed -E 's/([0-9A-F]{2}:){31}[0-9A-F]{2}/<fingerprint>/g; s/^  ([0-9A-F]{2}:){16}$/  <fingerprint, first half>/; s/^  ([0-9A-F]{2}:){15}[0-9A-F]{2}$/  <fingerprint, second half>/' |
-    awk '/^$/ { held = 1; next } /^Done in / { held = 0; next } { if (held) print ""; held = 0; print }'
+    awk '/^$/ { held = 1; next } /^Done in / { held = 0; next } { if (held) print ""; held = 0; print }' |
+    awk '/^-+ Done in [^ ]+ --$/ { gsub(/./, "-") } { print }'
 }
 
 TF_KEY=tf-key-0123456789abcdef
@@ -46,6 +48,12 @@ Set up a new phone or computer
   Every address and setting: aman status
   Update later: aman upgrade
 
+Warnings
+  ! This computer's key is kept in a file on this disk. Without disk
+    encryption, a lost or stolen computer can be read. Turn on disk
+    encryption for this computer: FileVault on a Mac, BitLocker on
+    Windows, LUKS on Linux.
+
 ------------------------------------------------------------------------
 SNAP
 )"
@@ -55,7 +63,7 @@ SNAP
 test_fresh_install_without_a_model_on_a_computer_with_no_network() {
   t_begin "the ending on a computer with no network address: this computer's own address over plain http, the model as a next step, and the update line"
   sandbox_new
-  install_machine
+  STUB_DISK_ENCRYPTED=1 install_machine
   assert_eq "$(ending)" "$(cat <<'SNAP'
 +- [ 6 of 6 ]  Checking the result --------------------- ############ -+
 |   + All 16 checks passed                                             |
@@ -86,7 +94,7 @@ test_install_with_token_factory() {
   with_input "$SENTINEL_PASSWORD
 $TF_KEY
 "
-  run_install --yes --password-stdin --token-factory-key-stdin --token-factory-daily-cap 500000 --email owner@example.invalid --local-only
+  STUB_DISK_ENCRYPTED=1 run_install --yes --password-stdin --token-factory-key-stdin --token-factory-daily-cap 500000 --email owner@example.invalid --local-only
   clear_input
   assert_rc 0
   assert_eq "$(ending)" "$(cat <<'SNAP'
@@ -120,7 +128,7 @@ test_install_with_a_problem() {
   STUB_SANDBOX_DOCTOR_EXIT=1
   with_input "$SENTINEL_PASSWORD
 "
-  run_install --yes --password-stdin --email owner@example.invalid --local-only
+  STUB_DISK_ENCRYPTED=1 run_install --yes --password-stdin --email owner@example.invalid --local-only
   clear_input
   assert_eq "$(ending)" "$(cat <<'SNAP'
 +- [ 6 of 6 ]  Checking the result --------------------- ############ -+

@@ -56,7 +56,7 @@ test_restore_latest() {
   assert_mode "$AMAN_HOME/instances/main/.env" 600
   assert_mode "$AMAN_HOME/instances/main/dex.env" 600
   assert_eq "$(backup_count)" 2 "the copy of the current state is a second backup"
-  assert_contains "$(cat "$(backup_dirs | tail -n 1)/main/db.sqlite")" "SQLITE-OF-aman_main_data-two"
+  assert_contains "$(sealed_cat "$(backup_dirs | tail -n 1)/main.sealed" db.sqlite)" "SQLITE-OF-aman_main_data-two"
   assert_contains "$OUT" "$(backup_dirs | tail -n 1)" "the saved copy is named"
   assert_contains "$OUT" "is running"
   assert_file "$SB_STATE/up/aman-main"
@@ -131,16 +131,20 @@ test_refuses_an_incomplete_backup() {
   install_machine
   set_state one
   run_install backup
-  local dir
+  local dir inner
   dir=$(backup_dirs | head -n 1)
-  rm "$dir/main/dex.tar"
+  inner=$(sealed_unpack "$dir/main.sealed")
+  rm "$inner/dex.tar"
+  sealed_repack "$inner" "$dir/main.sealed"
+  resum "$dir"
   with_input "yes
 "
   run_install restore --latest
   assert_rc 1
   assert_flat_contains "$ERR" "cannot be used because part of it is missing. Nothing was changed."
   assert_flat_contains "$ERR" "Pick another one with: aman restore main"
-  printf 'x\n' >"$dir/main/dex.tar"
+  assert_no_path "$AMAN_HOME/state/stage" "the opened copy does not outlive the run"
+  printf 'x\n' >>"$dir/main.sealed"
   run_install restore --latest
   assert_flat_contains "$ERR" "because it was copied only in part or has been changed"
   rm "$dir/SHA256SUMS"
@@ -158,7 +162,7 @@ test_refuses_a_newer_backup() {
   sandbox_new
   install_machine
   run_install backup
-  local dir
+  local dir inner
   dir=$(backup_dirs | head -n 1)
   sed -i.bak 's/"schema": "1"/"schema": "2"/' "$dir/release.json" && rm "$dir/release.json.bak"
   resum "$dir"
@@ -169,7 +173,9 @@ test_refuses_a_newer_backup() {
   assert_flat_contains "$ERR" "cannot be used because it was made by a newer version of Aman than this one. Nothing was changed."
   assert_flat_contains "$ERR" "Update Aman with aman upgrade"
   sed -i.bak 's/"schema": "2"/"schema": "1"/' "$dir/release.json" && rm "$dir/release.json.bak"
-  sed -i.bak 's/"version":1/"version":2/' "$dir/main/manifest.json" && rm "$dir/main/manifest.json.bak"
+  inner=$(sealed_unpack "$dir/main.sealed")
+  sed -i.bak 's/"version":1/"version":2/' "$inner/manifest.json" && rm "$inner/manifest.json.bak"
+  sealed_repack "$inner" "$dir/main.sealed"
   resum "$dir"
   run_install restore --latest
   assert_rc 1
@@ -243,7 +249,7 @@ test_other_instances_are_untouched() {
   assert_no_path "$SB_STATE/volfs/aman_second_dex"
   assert_log_lacks "aman-second"
   assert_log_lacks "aman_second_"
-  assert_eq "$(dir_names "$(backup_dirs | tail -n 1)")" "SHA256SUMS main release.json " "the saved copy covers main only"
+  assert_eq "$(dir_names "$(backup_dirs | tail -n 1)")" "SHA256SUMS main.sealed release.json " "the saved copy covers main only"
   assert_file "$SB_STATE/up/aman-second"
   run_install restore
   assert_rc 1
@@ -266,7 +272,7 @@ test_missing_settings_file_is_put_back() {
   assert_file "$AMAN_HOME/instances/main/.env"
   assert_mode "$AMAN_HOME/instances/main/.env" 600
   assert_contains "$(restored_db main)" "SQLITE-OF-aman_main_data-one"
-  assert_contains "$(cat "$(backup_dirs | tail -n 1)/main/db.sqlite")" "SQLITE-OF-aman_main_data-two"
+  assert_contains "$(sealed_cat "$(backup_dirs | tail -n 1)/main.sealed" db.sqlite)" "SQLITE-OF-aman_main_data-two"
   sandbox_drop
 }
 
@@ -295,7 +301,7 @@ test_kept_backups() {
   assert_flat_contains "$OUT" "with the backup from $(basename "$KEPT" | sed 's/^\(....\)\(..\)\(..\)T\(..\)\(..\).*/\1-\2-\3 \4:\5/') UTC (before import)."
   assert_contains "$(restored_db main)" "SQLITE-OF-aman_main_data-one"
   UNDO=$(backup_dirs | grep -- '-before-restore$')
-  assert_contains "$(cat "$UNDO/main/db.sqlite")" "SQLITE-OF-aman_main_data-three" "the copy holds the state before the restore"
+  assert_contains "$(sealed_cat "$UNDO/main.sealed" db.sqlite)" "SQLITE-OF-aman_main_data-three" "the copy holds the state before the restore"
   assert_contains "$OUT" "go back with: aman restore main $(basename "$UNDO")"
   [ -d "$OLDEST" ] || t_fail "the copy pushed the oldest plain backup out"
   assert_eq "$(backup_dirs | grep -vc -- '-before-')" 7 "still seven plain backups"
@@ -333,6 +339,149 @@ test_nothing_to_restore() {
 # The value of KEY that Compose reads from an instance's settings: the last line.
 env_value() { sed -n "s/^$2=//p" "$AMAN_HOME/instances/$1/.env" | tail -n 1; }
 reg_value() { sed -n "s/^$2=//p" "$AMAN_HOME/state/instances/$1.conf" | tail -n 1; }
+OLD_RECOVERY_KEY=000001-222222-333333-444444-555555-666666-777777-888888
+WRONG_RECOVERY_KEY=999999-222222-333333-444444-555555-666666-777777-888888
+
+# A backup of state "one" made on one computer, then a fresh install on another computer with that backup copied in.
+backup_carried_to_a_new_computer() {
+  local saved
+  sandbox_new
+  install_machine
+  set_state one
+  run_install backup
+  saved=$(mktemp -d)
+  cp -R "$AMAN_HOME/backups/." "$saved/"
+  sandbox_drop
+  sandbox_new
+  install_machine
+  set_state two
+  mkdir -p "$AMAN_HOME/backups"
+  cp -R "$saved/." "$AMAN_HOME/backups/"
+  rm -rf "$saved"
+}
+
+test_backup_from_another_computer_opens_with_the_recovery_key() {
+  t_begin "a backup from another computer asks for its recovery key, and the data is then tied to this computer's key"
+  backup_carried_to_a_new_computer
+  : >"$STUB_LOG"
+  with_input "$OLD_RECOVERY_KEY
+yes
+"
+  run_install restore --latest
+  assert_rc 0
+  assert_flat_contains "$OUT" "was made on another computer"
+  assert_flat_contains "$OUT" "The data of main is now protected by this computer's key. The recovery key you typed still opens it."
+  assert_contains "$(restored_db main)" "SQLITE-OF-aman_main_data-one"
+  assert_eq "$(cat "$SB_STATE/adopt_runs")" "aman-main" "the data was tied to this computer once"
+  assert_log_has "set -- --recovery-key-file /run/recovery/key"
+  assert_log_has "\"\$@\" sh recovery"
+  assert_eq "$(sed -n 1p "$SB_STATE/secrets_aman-main")" "$(cat "$SB_STATE/key")" "the data answers to this computer's key"
+  assert_eq "$(sed -n 2p "$SB_STATE/secrets_aman-main")" "$OLD_RECOVERY_KEY" "the same recovery key still works"
+  assert_eq "$(reg_value main secrets)" 1
+  assert_file "$SB_STATE/up/aman-main"
+  assert_log_lacks "$OLD_RECOVERY_KEY"
+  assert_not_contains "$(cat "$AMAN_HOME/state/"*.log 2>/dev/null)" "$OLD_RECOVERY_KEY" "the recovery key is in no log"
+  assert_no_path "$AMAN_HOME/state/stage"
+  # The copy saved first was made here, so going back needs no recovery key.
+  with_input "yes
+"
+  run_install restore main "$(basename "$(backup_dirs | tail -n 1)")"
+  assert_rc 0
+  assert_contains "$(restored_db main)" "SQLITE-OF-aman_main_data-two"
+  assert_eq "$(cat "$SB_STATE/adopt_runs")" "aman-main" "going back ties nothing again"
+  sandbox_drop
+}
+
+test_wrong_recovery_key_changes_nothing() {
+  t_begin "a wrong recovery key is asked for again, and giving up changes nothing"
+  backup_carried_to_a_new_computer
+  local backups_before
+  backups_before=$(backup_dirs | wc -l)
+  with_input "$WRONG_RECOVERY_KEY
+12345
+"
+  run_install restore --latest
+  assert_rc 1
+  assert_flat_contains "$ERR" "That recovery key does not open this backup. Check each group of six digits and type it again."
+  assert_flat_contains "$ERR" "No answer was given, so nothing was changed."
+  assert_no_path "$SB_STATE/adopt_runs"
+  assert_no_path "$SB_STATE/restored_aman_main_data"
+  assert_eq "$(backup_dirs | wc -l)" "$backups_before" "no copy was saved"
+  assert_no_path "$AMAN_HOME/state/stage"
+  assert_file "$SB_STATE/up/aman-main"
+  with_input "$WRONG_RECOVERY_KEY
+$OLD_RECOVERY_KEY
+yes
+"
+  run_install restore --latest
+  assert_rc 0
+  assert_contains "$(restored_db main)" "SQLITE-OF-aman_main_data-one"
+  sandbox_drop
+}
+
+test_failed_tie_to_this_computer_puts_the_old_state_back() {
+  t_begin "when the data cannot be tied to this computer's key, the instance goes back to how it was"
+  backup_carried_to_a_new_computer
+  with_input "$OLD_RECOVERY_KEY
+yes
+"
+  STUB_ADOPT_FAIL=1 run_install restore --latest
+  assert_rc 1
+  assert_flat_contains "$OUT" "The restore did not work, so main was put back the way it was."
+  assert_contains "$(restored_db main)" "SQLITE-OF-aman_main_data-two"
+  assert_eq "$(sed -n 1p "$SB_STATE/secrets_aman-main")" "$(cat "$SB_STATE/key")" "the data put back answers to this computer's key"
+  assert_file "$SB_STATE/up/aman-main"
+  assert_no_path "$AMAN_HOME/state/stage"
+  sandbox_drop
+}
+
+test_backup_without_a_recovery_key_from_another_computer() {
+  t_begin "a backup that only its own computer can open is refused elsewhere without asking for a key"
+  backup_carried_to_a_new_computer
+  local dir file
+  dir=$(backup_dirs | tail -n 1)
+  file=$dir/main.sealed
+  { printf '%s none "recovery_copy":null\n' "$(head -n 1 "$file" | cut -d' ' -f1-2)"; tail -n +2 "$file"; } >"$file.new"
+  mv "$file.new" "$file"
+  ( cd "$dir" && sha256sum main.sealed release.json >SHA256SUMS ) 2>/dev/null || ( cd "$dir" && shasum -a 256 main.sealed release.json >SHA256SUMS )
+  with_input "$OLD_RECOVERY_KEY
+yes
+"
+  run_install restore --latest
+  assert_rc 1
+  assert_flat_contains "$ERR" "can only be opened on the computer that made it. Nothing was changed."
+  assert_not_contains "$OUT$ERR" "Recovery key"
+  assert_no_path "$SB_STATE/restored_aman_main_data"
+  sandbox_drop
+}
+
+test_backup_from_before_sealing_still_restores() {
+  t_begin "a backup made before backups were encrypted still restores, and is encrypted on the way"
+  sandbox_new
+  install_machine
+  set_state one
+  run_install backup
+  local dir
+  dir=$(backup_dirs | tail -n 1)
+  unseal_to_old_layout "$dir" main
+  ( cd "$dir" && find . -type f ! -name SHA256SUMS | sed 's|^\./||' | LC_ALL=C sort | while IFS= read -r f; do
+    if command -v sha256sum >/dev/null 2>&1; then sha256sum "$f"; else shasum -a 256 "$f"; fi
+  done >SHA256SUMS )
+  set_state two
+  with_input "yes
+"
+  run_install restore main "$(basename "$dir")"
+  assert_rc 0
+  assert_contains "$(restored_db main)" "SQLITE-OF-aman_main_data-one"
+  # The copy saved first also encrypts the old backup where it is, and the restore then reads the encrypted one.
+  assert_no_path "$dir/main"
+  assert_file "$dir/main.sealed"
+  assert_no_path "$AMAN_HOME/state/stage"
+  assert_contains "$(sealed_cat "$(backup_dirs | tail -n 1)/main.sealed" db.sqlite)" "SQLITE-OF-aman_main_data-two"
+  assert_eq "$(reg_value main secrets)" 1
+  sandbox_drop
+}
+
 dex_client_id() { sed -n 's/^ *- id: //p' "$AMAN_HOME/instances/$1/dex.yaml" | head -n 1; }
 
 test_restore_on_a_new_install_keeps_sign_in_working() {
@@ -361,7 +510,8 @@ test_restore_on_a_new_install_keeps_sign_in_working() {
   new_client=$(reg_value main client_id)
   new_cookie=$(reg_value main cookie_suffix)
   [ "$new_client" != "$old_client" ] || t_fail "the fresh install made a new sign-in client"
-  with_input "yes
+  with_input "$OLD_RECOVERY_KEY
+yes
 "
   run_install restore --latest
   assert_rc 0
@@ -389,12 +539,14 @@ test_restore_takes_this_installs_addresses() {
   install_machine
   set_state one
   run_install backup
-  local dir env
+  local dir env inner
   dir=$(backup_dirs | head -n 1)
-  env=$dir/main/env
+  inner=$(sealed_unpack "$dir/main.sealed")
+  env=$inner/env
   sed -i.bak -e 's|^PUBLIC_BASE_URL=.*|PUBLIC_BASE_URL=http://old.example.invalid:9999|' "$env" && rm "$env.bak"
   awk '/^# <<< end of managed block/ { print "ALLOWED_ORIGINS=http://old.example.invalid:9999"; print "LOGIN_UPSTREAM_URL=http://127.0.0.1:1/dex"; print "TRUSTED_PROXY_ADDRESSES=172.99.0.1" } { print }' "$env" >"$env.new" && mv "$env.new" "$env"
   printf 'OIDC_CLIENT_ID=hand-made\nMY_OWN_SETTING=kept\n' >>"$env"
+  sealed_repack "$inner" "$dir/main.sealed"
   resum "$dir"
   with_input "yes
 "
@@ -455,9 +607,11 @@ test_refuses_a_database_from_a_newer_version() {
   sandbox_new
   install_machine
   run_install backup
-  local dir
+  local dir inner
   dir=$(backup_dirs | head -n 1)
-  printf 'NEWER\n' >>"$dir/main/db.sqlite"
+  inner=$(sealed_unpack "$dir/main.sealed")
+  printf 'NEWER\n' >>"$inner/db.sqlite"
+  sealed_repack "$inner" "$dir/main.sealed"
   resum "$dir"
   with_input "yes
 "
@@ -466,7 +620,9 @@ test_refuses_a_database_from_a_newer_version() {
   assert_flat_contains "$ERR" "cannot be used because it was made by a newer version of Aman than this one. Nothing was changed."
   assert_flat_contains "$ERR" "Update Aman with aman upgrade"
   assert_file "$SB_STATE/backup_checks"
-  printf 'BROKEN\n' >"$dir/main/db.sqlite"
+  inner=$(sealed_unpack "$dir/main.sealed")
+  printf 'BROKEN\n' >"$inner/db.sqlite"
+  sealed_repack "$inner" "$dir/main.sealed"
   resum "$dir"
   run_install restore --latest
   assert_rc 1
@@ -550,4 +706,9 @@ test_refuses_a_database_from_a_newer_version
 test_app_image_without_the_database_check
 test_undo_of_an_instance_without_data
 test_failed_copy_after_putting_back_missing_files
+test_backup_from_another_computer_opens_with_the_recovery_key
+test_wrong_recovery_key_changes_nothing
+test_failed_tie_to_this_computer_puts_the_old_state_back
+test_backup_without_a_recovery_key_from_another_computer
+test_backup_from_before_sealing_still_restores
 tests_finish

@@ -86,7 +86,7 @@ The printed plan lists every first-run download with its approximate size, inclu
 
 - `--confirm-name NAME`: with `--purge-data`, the instance name typed in advance so it does not prompt.
 - `--password-stdin`: read the owner password from the first line of stdin, before any prompt.
-- `--token-factory-key-stdin`: read the Token Factory key from stdin (the line after the password when `--password-stdin` is also given). The key is never accepted as a command-line value, and it is written only to the instance `.env` (mode 600). See [Feeding the Token Factory key safely](#feeding-the-token-factory-key-safely). On an instance that already exists it replaces the key and restarts the app.
+- `--token-factory-key-stdin`: read the Token Factory key from stdin (the line after the password when `--password-stdin` is also given). The key is never accepted as a command-line value, and it is kept encrypted with the instance's data, never in a file you can read. See [Feeding the Token Factory key safely](#feeding-the-token-factory-key-safely). On an instance that already exists it replaces the key and restarts the app.
 - `--token-factory-model ID`: the Token Factory model to use (default `nvidia/nemotron-3-super-120b-a12b`).
 - `--token-factory-daily-cap N`: stop answering after N Token Factory tokens per day (default: no cap).
 - `--tls local`: https on your network with a certificate from an authority made on this computer (the default). See [First login](#first-login).
@@ -116,7 +116,7 @@ unset KEY
 
 `printf` is a shell builtin, so the key never appears as an argument of any process. With `--password-stdin` as well, the password is the first line and the key the second.
 
-To rotate the key, run the same command again on the machine. For an instance that already exists, the installer replaces `NEBIUS_API_KEY` in the managed block of its `.env` (mode 600, written atomically), prints `Token Factory key updated. Restarting the app.`, and recreates the app container. Add `--name <instance>` when there is more than one instance and none is called `main`.
+To rotate the key, run the same command again on the machine. For an instance that already exists, the installer replaces the saved key, prints `Token Factory key updated. Restarting the app.`, and recreates the app container. Add `--name <instance>` when there is more than one instance and none is called `main`.
 
 ### Fresh Docker installs on Linux
 
@@ -244,7 +244,7 @@ Common checks and what they mean:
 | disk          | Under 2 GB free is a fail                       | Free space or prune unused images                               |
 | clock         | Machine clock disagrees with the containers     | Set the computer's clock to the right time                     |
 | run_code      | The app cannot reach the sandbox slots, or a slot fails a safety check | Run `aman doctor sandbox --fix`                   |
-| model         | Token Factory refuses the key, does not list the model, or the model answers a tool call without `tool_calls` | The check says which; fix `NEBIUS_API_KEY` or `TOKEN_FACTORY_MODEL` in the instance `.env` and restart |
+| model         | Token Factory refuses the key, does not list the model, or the model answers a tool call without `tool_calls` | The check says which; give a new key with `--token-factory-key-stdin`, or fix `TOKEN_FACTORY_MODEL` in the instance `.env` and restart |
 | public_url    | The public https address does not answer the health check (https instances only) | Check DNS, Caddy (`sudo systemctl status caddy`) and port 443 |
 | public_login  | The login discovery document is not served over https with the configured issuer | Same as above; the issuer in the instance `.env` must be the address Caddy serves for sign-in |
 
@@ -252,14 +252,14 @@ A fresh install never warns about backups until the first backup exists.
 
 ## Backup and upgrade
 
-Backups stay on your machine, unencrypted, and are never uploaded:
+Backups stay on your machine, encrypted, and are never uploaded:
 
 ```bash
 installer/install.sh backup          # back up every instance
 installer/install.sh backup main     # back up one instance
 ```
 
-Backups land in `~/.amanuensis/backups/<timestamp>/` with restricted permissions. The installer keeps the seven most recent. A backup taken before an import is named `<timestamp>-before-import`, does not count toward the seven, and is kept until you remove it. Install asks whether to back up every day at 03:30 (default yes; `--backups daily|off` answers without asking), and `installer/install.sh backups daily` or `installer/install.sh backups off` changes that later. `aman doctor backup` checks that backups are recent and scheduled. To check a copied backup, run `sha256sum -c SHA256SUMS` in its folder (`shasum -a 256 -c SHA256SUMS` on a Mac). To copy backups off this computer, see [Backups](/backup).
+Backups land in `~/.amanuensis/backups/<timestamp>/` with restricted permissions. Each one is encrypted: it opens on this computer, or on another one with the recovery key shown at setup. The installer keeps the seven most recent. A backup taken before an import is named `<timestamp>-before-import`, does not count toward the seven, and is kept until you remove it. Install asks whether to back up every day at 03:30 (default yes; `--backups daily|off` answers without asking), and `installer/install.sh backups daily` or `installer/install.sh backups off` changes that later. `aman doctor backup` checks that backups are recent and scheduled. To check a copied backup, run `sha256sum -c SHA256SUMS` in its folder (`shasum -a 256 -c SHA256SUMS` on a Mac). To copy backups off this computer, see [Backups](/backup).
 
 ### Restore an instance from a backup
 
@@ -277,10 +277,10 @@ A backup is refused, with the reason in plain words, when part of it is missing,
 
 ```bash
 installer/install.sh upgrade --check   # compare the installed version with the checkout 
-installer/install.sh upgrade           # back up, rebuild, restart, health-check
+installer/install.sh upgrade           # rebuild, back up, restart, health-check
 ```
 
-Upgrade refuses to start unless doctor shows no failures, unless you pass `--force`. It backs up every instance first, downloads or rebuilds the images, restarts each stack, and checks health. If the upgrade fails after the restart begins, it restores the backup and the previous images, then tells you what it did.
+Upgrade refuses to start unless doctor shows no failures, unless you pass `--force`. It downloads or rebuilds the images, backs up every instance with the new version, restarts each stack, and checks health. If the upgrade fails after the restart begins, it restores the backup and the previous images, then tells you what it did.
 
 ### Exporting one person's data
 

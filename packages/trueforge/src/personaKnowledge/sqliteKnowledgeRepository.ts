@@ -1,10 +1,11 @@
 import { z } from '@hono/zod-openapi';
-import Database from 'better-sqlite3';
+import type Database from 'better-sqlite3-multiple-ciphers';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import * as sqliteVec from 'sqlite-vec';
 import { ulid } from 'ulid';
 
+import { DatabaseKeyError, openSqliteFile, rekeySqliteFile, sqliteFileState } from '../db/sqlite/client';
 import type { KnowledgeDocumentStatus } from '../schemas/personaKnowledge';
 import { PersonaKnowledgeDocumentSchema } from '../schemas/personaKnowledge';
 import type {
@@ -429,6 +430,45 @@ export class SqlitePersonaKnowledgeRepository implements PersonaKnowledgeReposit
  * database closes when the last holder releases. Long-lived holders (the
  * indexer, per-turn retrieval) simply never call `close()`.
  */
+/**
+ * How library files are encrypted in this process. `upgrade` rewrites a readable library, or one
+ * still under an earlier key, to the current key when it is opened; a command that only reads
+ * leaves the file as it is.
+ */
+export interface PersonaKnowledgeKeys {
+  current: Buffer;
+  earlier: readonly Buffer[];
+  upgrade: boolean;
+}
+
+let libraryKeys: PersonaKnowledgeKeys | undefined;
+
+/** Set once at start, before any library is opened. Without it, libraries stay readable files. */
+export function usePersonaKnowledgeKeys(keys: PersonaKnowledgeKeys | undefined): void {
+  libraryKeys = keys;
+}
+
+function openLibraryFile(dbPath: string): Database.Database {
+  if (libraryKeys === undefined) {
+    return openSqliteFile({ filename: dbPath, key: undefined, fileMustExist: false });
+  }
+  const { current, earlier, upgrade } = libraryKeys;
+  const state = sqliteFileState({ filename: dbPath, key: current });
+  if (state === 'missing' || state === 'encrypted') {
+    return openSqliteFile({ filename: dbPath, key: current, fileMustExist: false });
+  }
+  const from =
+    state === 'plain' ? undefined : earlier.find(key => sqliteFileState({ filename: dbPath, key }) === 'encrypted');
+  if (state === 'other_key' && from === undefined) {
+    throw new DatabaseKeyError();
+  }
+  if (!upgrade) {
+    return openSqliteFile({ filename: dbPath, key: from });
+  }
+  rekeySqliteFile({ filename: dbPath, from, to: current });
+  return openSqliteFile({ filename: dbPath, key: current });
+}
+
 const openRepositories = new Map<string, { repo: SqlitePersonaKnowledgeRepository; refs: number }>();
 
 function repositoryCacheKey(dbPath: string, dimensions: number): string {
@@ -472,7 +512,7 @@ export function openPersonaKnowledgeRepository(input: {
   // The library directory is created on first use: the per-persona SQLite file
   // lives under a knowledgeDir that may not exist yet (fresh install, tests).
   mkdirSync(path.dirname(input.dbPath), { recursive: true });
-  const db = new Database(input.dbPath);
+  const db = openLibraryFile(input.dbPath);
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
   for (const statement of SCHEMA_STATEMENTS) {

@@ -250,9 +250,9 @@ importers:
       bcryptjs:
         specifier: 3.0.3
         version: 3.0.3
-      better-sqlite3:
-        specifier: ^13.0.3
-        version: 13.0.3
+      better-sqlite3-multiple-ciphers:
+        specifier: ^13.1.1
+        version: 13.1.1
       cron-parser:
         specifier: ^5.10.1
         version: 5.10.1
@@ -471,9 +471,9 @@ importers:
       bcryptjs:
         specifier: 3.0.3
         version: 3.0.3
-      better-sqlite3:
-        specifier: ^13.0.3
-        version: 13.0.3
+      better-sqlite3-multiple-ciphers:
+        specifier: ^13.1.1
+        version: 13.1.1
       cron-parser:
         specifier: ^5.10.1
         version: 5.10.1
@@ -553,9 +553,6 @@ importers:
       '@swc/jest':
         specifier: ^0.2.39
         version: 0.2.39(@swc/core@1.16.2)
-      '@types/better-sqlite3':
-        specifier: ^7.6.13
-        version: 7.6.13
       '@types/jest':
         specifier: ^29.5.14
         version: 29.5.14
@@ -4498,9 +4495,6 @@ packages:
   '@types/babel__traverse@7.28.0':
     resolution: {integrity: sha512-8PvcXf70gTDZBgt9ptxJ8elBeBjcLOAcOtoO/mPJjtji1+CdGbHgm77om1GrsPxsiE+uXIpNSK64UYaIwQXd4Q==}
 
-  '@types/better-sqlite3@7.6.13':
-    resolution: {integrity: sha512-NMv9ASNARoKksWtsq/SHakpYAYnhBrQgGD8zkLYk/jaK8jUGn08CfEdTRgYhMypUQAfzSP8W6gNLe0q19/t4VA==}
-
   '@types/chai@5.2.3':
     resolution: {integrity: sha512-Mw558oeA9fFbv65/y4mHtXDs9bPnFMZAL/jxdPFUpOHHIXX91mcgEHbS5Lahr+pwZFR8A7GQleRWeI6cGFC2UA==}
 
@@ -5214,8 +5208,8 @@ packages:
     resolution: {integrity: sha512-GlF5wPWnSa/X5LKM1o0wz0suXIINz1iHRLvTS+sLyi7XPbe5ycmYI3DlZqVGZZtDgl4DmasFg7gOB3JYbphV5g==}
     hasBin: true
 
-  better-sqlite3@13.0.3:
-    resolution: {integrity: sha512-RbOBxmLBG8uvFUc15X9+9SFemKcQ0WBuISBVkpuiaUB2qblC8UWlHEjdWVoZ8AdhSwmoEgsiXKfopX0CQxaACQ==}
+  better-sqlite3-multiple-ciphers@13.1.1:
+    resolution: {integrity: sha512-X50as6K9SVl0PrK55e92auE08q91PMoh1Ll/eWzZcRSHHxReA+ooW5t0oQ/b9SvPppt/5SWZIerswaRn/L1m6Q==}
     engines: {node: '>=22'}
 
   bignumber.js@9.3.1:
@@ -13024,10 +13018,6 @@ snapshots:
     dependencies:
       '@babel/types': 7.29.7
 
-  '@types/better-sqlite3@7.6.13':
-    dependencies:
-      '@types/node': 20.19.43
-
   '@types/chai@5.2.3':
     dependencies:
       '@types/deep-eql': 4.0.2
@@ -13854,7 +13844,7 @@ snapshots:
 
   bcryptjs@3.0.3: {}
 
-  better-sqlite3@13.0.3:
+  better-sqlite3-multiple-ciphers@13.1.1:
     dependencies:
       node-addon-api: 8.9.1
 
