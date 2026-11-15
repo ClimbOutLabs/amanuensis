@@ -63,7 +63,7 @@ You can also ask Aman in a chat to add a skill.
 2. A card shows the skill before anything is added: its name, what it's for, where it comes from, the exact version and the websites it sends requests to. Aman reads the name and description from the skill itself, and finds the websites by reading its files.
 3. Click **Allow** to add it and let it reach those websites, or **Not now** to skip it. This card asks every time.
 
-After you allow it, the skill is on for that chat from your next message. It also shows in Settings, under Skills, where you can remove it.
+After you allow it, the skill is on for that chat from your next message, in the app or on Telegram. It also shows in Settings, under Skills, where you can remove it.
 
 !!! warning "Add only skills you trust"
 
@@ -84,7 +84,7 @@ From a chat, Aman can add or remove a skill, but it can't change one. An incogni
 
 ## Turn a skill off
 
-Click **Remove** on the skill's row under Enabled. For a skill you imported, Aman asks first: click **Remove skill**. You can import it again later.
+Click **Remove** on the skill's row under Enabled. For a skill you imported, Aman asks first: click **Remove skill**. You can import it again later. Chats that used it keep working without it.
 
 ## Let a skill reach the internet
 
