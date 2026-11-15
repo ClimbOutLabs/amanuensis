@@ -29,6 +29,14 @@ There are two versions of the command. Which one you have depends on how you ins
 
 The rest of this page, up to the Windows section, is for Mac, Linux and WSL.
 
+## See the list of commands
+
+```
+aman help
+```
+
+It shows every command on one screen, grouped as every day, when something is wrong, your data and advanced. To see all the options of one command, add its name: `aman help doctor`. `aman COMMAND --help` shows the same page. `aman` on its own shows the list too.
+
 ## See your addresses and settings
 
 ```
