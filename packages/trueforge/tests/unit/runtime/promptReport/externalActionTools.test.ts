@@ -37,13 +37,13 @@ const TOOL_KINDS: Record<string, Kind> = {
   'Email/get_emails_content': 'reads',
   'Email/list_emails_metadata': 'reads',
   'Email/list_mailboxes': 'reads',
-  'Calendar/create_event1': 'acts',
-  'Calendar/update_event1': 'acts',
+  'Calendar/create_event': 'acts',
+  'Calendar/update_event': 'acts',
   'Calendar/delete_event': 'acts',
   'Calendar/respond_to_event': 'acts',
-  'Calendar/get_event1': 'reads',
+  'Calendar/get_event': 'reads',
   'Calendar/list_calendars': 'reads',
-  'Calendar/list_events1': 'reads',
+  'Calendar/list_events': 'reads',
   'Calendar/search_events': 'reads',
   'maps/render_map': 'acts',
   'maps/render_places': 'acts',
@@ -76,12 +76,14 @@ const TOOL_KINDS: Record<string, Kind> = {
   'sub_agents/create_sub_agent': 'inside',
   'usage/usage_summary': 'inside',
   'ask-user-question/ask_user_question': 'inside',
+  'connection_offer/connection_offer_status': 'inside',
+  'connection_offer/record_connection_offer_decline': 'inside',
   'current-datetime/get_current_datetime': 'inside',
   'openui/get_openui_instructions': 'inside',
 };
 
 function keyOf(row: ToolRow): string {
-  return `${row.server}/${row.name}`;
+  return row.key;
 }
 
 describe('every tool Aman can call', () => {
