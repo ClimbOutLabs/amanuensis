@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# aman address: adding an address of this computer to listen on, a name, or the full address of a forward; the lan
+# aman address (command:address): adding an address of this computer to listen on, a name, or the full address of a forward; the lan
 # service that listens for other devices; and what is said when this computer no longer has an address it listened on.
 set -euo pipefail
 # shellcheck source=../helpers.sh
