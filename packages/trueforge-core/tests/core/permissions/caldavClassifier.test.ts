@@ -148,6 +148,20 @@ describe('CalDAV changes', () => {
     expect(decision.card?.plain_what).toBe('Add "Team sync", 23 Oct 2026, 09:30 to "work"?');
   });
 
+  it('keeps the create card when the call names its account, and the card names the calendar with its account', async () => {
+    const decision = await classifyTier(
+      caldavAction('create_event', {
+        calendar_id: 'alice@example.invalid|work',
+        account: 'alice@example.invalid',
+        summary: 'Team sync',
+        start: '2026-10-23T09:30:00+02:00',
+      }),
+      makeCtx(),
+    );
+    expect(decision.tier).toBe(3);
+    expect(decision.card?.plain_what).toBe('Add "Team sync", 23 Oct 2026, 09:30 to "alice@example.invalid|work"?');
+  });
+
   it('shows an update card that names the existing event', async () => {
     const decision = await classifyTier(
       caldavAction('update_event', { ...EVENT_ID, summary: 'Moved' }, { caldav_event: DENTIST }),
