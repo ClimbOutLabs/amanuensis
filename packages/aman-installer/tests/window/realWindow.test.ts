@@ -56,7 +56,7 @@ function launch(): WindowLaunch {
 function withPerson(
   opened: WindowLaunch,
   answer: (screen: Screen) => readonly string[] | null,
-): { launch: WindowLaunch; seen: string[]; failures: unknown[] } {
+): { launch: WindowLaunch; seen: string[]; failures: unknown[]; settled: () => Promise<void> } {
   const seen: string[] = [];
   const failures: unknown[] = [];
   let chain: Promise<void> = Promise.resolve();
@@ -82,7 +82,8 @@ function withPerson(
         });
     },
   };
-  return { launch: { ...opened, channel }, seen, failures };
+  // The person's last steps can still be running when the setup ends.
+  return { launch: { ...opened, channel }, seen, failures, settled: () => chain };
 }
 
 function forward(screen: Screen): readonly string[] {
@@ -119,6 +120,7 @@ test(
     const world = await makeWorld();
     const person = withPerson(launch(), forward);
     const outcome = await runWindowInstall(world.deps, person.launch);
+    await person.settled();
     assert.deepEqual(person.failures, []);
     assert.deepEqual(outcome, { kind: 'finished', code: 0 });
     const run = world.runner.installRuns[0];
@@ -155,6 +157,7 @@ test(
     const world = await makeWorld();
     const person = withPerson(launch(), screen => (screen.name === 'welcome' ? ['close'] : null));
     const outcome = await runWindowInstall(world.deps, person.launch);
+    await person.settled();
     assert.deepEqual(person.failures, []);
     assert.deepEqual(outcome, { kind: 'finished', code: 1 });
     assert.equal(world.printed.at(-1), problemText(WINDOW_CLOSED_EARLY));
@@ -185,6 +188,7 @@ test(
       return forward(screen);
     });
     const outcome = await runWindowInstall(world.deps, person.launch);
+    await person.settled();
     assert.deepEqual(person.failures, []);
     assert.deepEqual(outcome, { kind: 'finished', code: 0 });
     assert.ok(person.seen.includes('Problem=The passwords do not match. Type them again.'), person.seen.join('\n'));
