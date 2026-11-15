@@ -91,6 +91,10 @@ test('the section lists every stored night and weekly look-over, newest first', 
               '# What the look-over found\n\n2 screens were opened. <b>0</b> have something to look at.\n',
             '2026-11-14/chat-desktop.png': 'png',
             '2026-11-14/chat-phone.png': 'png',
+            '2026-11-14/findings.json': JSON.stringify([
+              { surface: 'chat', size: 'desktop', picture: 'chat-desktop.png', problems: [] },
+              { surface: 'chat', size: 'phone', picture: 'chat-phone.png', problems: ['A <button> is cut off.'] },
+            ]),
           },
         },
       ],
@@ -117,6 +121,14 @@ test('the section lists every stored night and weekly look-over, newest first', 
   assert.match(sweep, /href="\.\.\/\.\.\/"/, 'links back to the list');
   assert.match(sweep, /src="chat-desktop\.png"/);
   assert.match(sweep, /&lt;b&gt;0&lt;\/b&gt;/, 'the report is shown as text, not as markup');
+  assert.match(
+    sweep,
+    /<dt>Screen<\/dt><dd>chat<\/dd><dt>Screen size<\/dt><dd>phone<\/dd>/,
+    'each picture names its screen',
+  );
+  assert.match(sweep, /<li>A &lt;button&gt; is cut off\.<\/li>/, 'and lists what was found on it');
+  assert.ok(sweep.indexOf('chat-phone.png') < sweep.indexOf('chat-desktop.png'), 'pictures to look at come first');
+  assert.match(sweep, /Nothing to look at\./, 'a picture with no finding says so');
 });
 
 test('with nothing stored the page still builds and says so', async () => {

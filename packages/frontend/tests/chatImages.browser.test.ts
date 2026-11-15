@@ -191,7 +191,13 @@ test('chat images: no remote image request ever leaves the page', { timeout: 180
         `${viewport.name}: chat images overflow horizontally`,
       );
       await page.screenshot({
-        path: await featureShotPath({ surface: 'screen:chat-images', step: `${viewport.name}-hidden` }),
+        path: await featureShotPath({
+          surface: 'screen:chat-images',
+          step: `${viewport.name}-hidden`,
+          did: `Opened a chat whose replies and an email hold pictures from the web, on a ${viewport.name} screen, and pressed nothing.`,
+          expect:
+            'Only the chart Aman made itself shows. Each web picture is replaced by a line such as "Image from example.com hidden", the email says 2 images were not loaded, and nothing was fetched from the web.',
+        }),
         fullPage: true,
       });
 
@@ -231,7 +237,13 @@ test('chat images: no remote image request ever leaves the page', { timeout: 180
         assert.ok(width >= 150 && width <= 170, `${viewport.name}: thumbnail is ${String(width)}px wide`);
       }
       await page.screenshot({
-        path: await featureShotPath({ surface: 'screen:chat-images', step: `${viewport.name}-shown` }),
+        path: await featureShotPath({
+          surface: 'screen:chat-images',
+          step: `${viewport.name}-shown`,
+          did: `In the same chat on a ${viewport.name} screen, pressed Show image on each hidden picture and Load images on the email.`,
+          expect:
+            "The pictures show as small thumbnails of one size, the email's two in one row. One picture that is too large says so, and a broken one leaves no empty box. All were fetched through Aman, never straight from the web.",
+        }),
         fullPage: true,
       });
 

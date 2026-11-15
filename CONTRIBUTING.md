@@ -283,7 +283,9 @@ When you add a feature, add its row and its test in the same PR. Add it to `not_
 
 ### Screenshots
 
-Browser tests save a picture at each named step with `featureShotPath({ surface, step })` from [`packages/frontend/tests/support/featureShots.ts`](packages/frontend/tests/support/featureShots.ts). The feature's id picks the folder, so pictures land in one folder per feature set. A failing test saves a picture of every open page with `FAILED` in its name.
+Browser tests save a picture at each named step with `featureShotPath({ surface, step, did, expect })` from [`packages/frontend/tests/support/featureShots.ts`](packages/frontend/tests/support/featureShots.ts). The feature's id picks the folder, so pictures land in one folder per feature set. A failing test saves a picture of every open page with `FAILED` in its name.
+
+Every picture needs two plain sentences: `did` says what the test did to reach the picture, and `expect` says what the picture should show. They are saved beside the picture with the test's name and whether the test passed, and the contact sheet shows all four under the picture. A picture with no context tells a reader nothing, so both are required.
 
 In CI the pictures go in a folder named for the run's date and time in UTC, such as `2026/11/10/0917/chat/`. The folder gets an `index.html` contact sheet and a `results.json`, and the run keeps it for 30 days as the **screenshots** download on the run's page. To see the same on your machine:
 

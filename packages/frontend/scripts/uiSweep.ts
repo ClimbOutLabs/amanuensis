@@ -159,6 +159,15 @@ async function main(): Promise<void> {
   }
   const reportPath = join(outDir, 'report.md');
   await writeFile(reportPath, report(findings));
+  // The same findings per picture, for a page that shows each picture with what was found on it.
+  await writeFile(
+    join(outDir, 'findings.json'),
+    `${JSON.stringify(
+      findings.map(finding => ({ ...finding, picture: basename(finding.picture) })),
+      null,
+      2,
+    )}\n`,
+  );
   console.log(`Pictures of ${String(findings.length)} screens are in ${outDir}. What to look at is in ${reportPath}.`);
 }
 

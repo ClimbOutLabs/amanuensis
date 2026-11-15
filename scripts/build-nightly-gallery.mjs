@@ -5,7 +5,7 @@
 // index.html, which shows every picture grouped by feature set with failures first, and results.json,
 // which holds the same facts for a later run to be compared with.
 
-import { readdir, writeFile } from 'node:fs/promises';
+import { readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { COVERAGE_FILE, readCoverageMap, surfaceFileName } from './check-nightly-coverage.mjs';
@@ -29,8 +29,34 @@ async function pictureFiles(folder) {
 }
 
 /**
+ * What the test wrote beside a picture: its name, what it did, what the picture should show and
+ * whether it passed. All null for a picture saved without a note.
+ */
+async function pictureNote(file) {
+  const empty = { test: null, did: null, expect: null, passed: null };
+  const text = await readFile(`${file.slice(0, -'.png'.length)}.json`, 'utf8').catch(error => {
+    if (error?.code === 'ENOENT') {
+      return undefined;
+    }
+    throw error;
+  });
+  if (text === undefined) {
+    return empty;
+  }
+  const note = JSON.parse(text);
+  const words = value => (typeof value === 'string' && value !== '' ? value : null);
+  return {
+    test: words(note.test),
+    did: words(note.did),
+    expect: words(note.expect),
+    passed: typeof note.passed === 'boolean' ? note.passed : null,
+  };
+}
+
+/**
  * The run as data: every feature set with its features, each feature's pictures, and whether the
- * feature has a test at all. A picture whose step starts with FAILED- was saved by a failing test.
+ * feature has a test at all. A picture whose step starts with FAILED- was saved at the moment a test
+ * failed; `passed` says how the test that took a picture ended.
  */
 export async function readRun({ folder, coverage }) {
   const byFileName = new Map(Object.keys(coverage.surfaces).map(id => [surfaceFileName(id), id]));
@@ -48,7 +74,12 @@ export async function readRun({ folder, coverage }) {
       const failed = step.startsWith(FAILED_MARK);
       pictures.set(surface, [
         ...(pictures.get(surface) ?? []),
-        { file: `${setId}/${file}`, step: failed ? step.slice(FAILED_MARK.length) : step, failed },
+        {
+          file: `${setId}/${file}`,
+          step: failed ? step.slice(FAILED_MARK.length) : step,
+          failed,
+          ...(await pictureNote(path.join(folder, setId, file))),
+        },
       ]);
     }
     const features = Object.entries(coverage.surfaces)
@@ -65,24 +96,48 @@ export async function readRun({ folder, coverage }) {
       features: features.length,
       features_with_a_test: features.filter(feature => feature.has_test).length,
       pictures: pictures.length,
-      failed_pictures: pictures.filter(picture => picture.failed).length,
+      failed_pictures: pictures.filter(fromFailedTest).length,
     },
     unknown_files: unknown,
   };
 }
 
+/** True for a picture taken when a test failed, or by a test that went on to fail. */
+function fromFailedTest(picture) {
+  return picture.failed || picture.passed === false;
+}
+
+function resultText(picture) {
+  if (picture.failed) {
+    return 'Test failed. This is the page at that moment.';
+  }
+  if (picture.passed === true) {
+    return 'Test passed';
+  }
+  if (picture.passed === false) {
+    return 'Test failed later';
+  }
+  return picture.test === null ? 'No result was recorded' : 'Test did not finish';
+}
+
 function pictureHtml({ feature, picture }) {
   const label = `${feature.id} · ${picture.step}`;
-  const tag = picture.failed ? '<span class="tag failed">FAILED</span>' : '<span class="tag">OK</span>';
-  return `<figure${picture.failed ? ' class="failed"' : ''}><a href="${escapeHtml(picture.file)}"><img loading="lazy" src="${escapeHtml(picture.file)}" alt="${escapeHtml(label)}"></a><figcaption>${tag} ${escapeHtml(label)}</figcaption></figure>`;
+  const bad = fromFailedTest(picture);
+  const rows = [
+    ['Test', picture.test],
+    ['What the test did', picture.did],
+    ['What it should show', picture.expect],
+    ['Feature and step', label],
+  ]
+    .filter(([, words]) => words !== null)
+    .map(([name, words]) => `<dt>${name}</dt><dd>${escapeHtml(words)}</dd>`);
+  return `<figure${bad ? ' class="failed"' : ''}><a href="${escapeHtml(picture.file)}"><img loading="lazy" src="${escapeHtml(picture.file)}" alt="${escapeHtml(label)}"></a><figcaption><p class="tag${bad ? ' failed' : ''}">${resultText(picture)}</p><dl>${rows.join('')}</dl></figcaption></figure>`;
 }
 
 /** The contact sheet as one page with no outside files, so it opens straight from the download. */
 export function galleryHtml({ run, title }) {
   const failures = run.feature_sets.flatMap(set =>
-    set.features.flatMap(feature =>
-      feature.pictures.filter(picture => picture.failed).map(picture => ({ feature, picture })),
-    ),
+    set.features.flatMap(feature => feature.pictures.filter(fromFailedTest).map(picture => ({ feature, picture }))),
   );
   const sections = run.feature_sets.map(set => {
     const shown = set.features.flatMap(feature => feature.pictures.map(picture => ({ feature, picture })));
@@ -114,12 +169,15 @@ p { margin: 0.25rem 0; color: var(--soft); }
 nav { display: flex; flex-wrap: wrap; gap: 0.25rem 0.75rem; }
 nav a { white-space: nowrap; }
 a { color: inherit; }
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); gap: 1rem; margin-top: 0.75rem; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr)); gap: 1rem; margin-top: 0.75rem; }
 figure { margin: 0; border: 0.0625rem solid var(--line); border-radius: 0.5rem; overflow: hidden; }
 figure.failed { border-color: var(--bad); }
 img { display: block; width: 100%; height: 12rem; object-fit: cover; object-position: top; background: var(--line); }
 figcaption { padding: 0.5rem; font-size: 0.8125rem; overflow-wrap: anywhere; }
-.tag { font-weight: 600; }
+.tag { font-weight: 600; color: var(--fg); }
+dl { margin: 0.5rem 0 0; }
+dt { color: var(--soft); font-size: 0.75rem; margin-top: 0.375rem; }
+dd { margin: 0; }
 .failed .tag, .tag.failed, .bad { color: var(--bad); }
 .gap { font-size: 0.8125rem; overflow-wrap: anywhere; }
 </style>

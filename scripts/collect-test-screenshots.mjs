@@ -71,19 +71,41 @@ export async function readNights(root) {
   return nights.sort((a, b) => b.folder.localeCompare(a.folder));
 }
 
-/** The page for one weekly look-over: what it found, then every picture it took. */
-export function sweepHtml({ title, report, pictures, home }) {
-  const figures = pictures.map(
-    file =>
-      `<figure><a href="${escapeHtml(file)}"><img loading="lazy" src="${escapeHtml(file)}" alt="${escapeHtml(file)}"></a><figcaption>${escapeHtml(file.slice(0, -'.png'.length))}</figcaption></figure>`,
-  );
+const SWEEP_CHECKS =
+  'Opened this screen with made-up data and looked for: page errors, failed requests, sideways scrolling, parts that stick out of the window, cut-off words, controls with no name and tap targets that are too small.';
+
+/** The page for one weekly look-over: every picture with what was opened, what was checked and what was found. */
+export function sweepHtml({ title, report, pictures, findings, home }) {
+  const byPicture = new Map(findings.map(finding => [finding.picture, finding]));
+  const figure = file => {
+    const finding = byPicture.get(file);
+    const problems = finding?.problems ?? [];
+    const found =
+      finding === undefined
+        ? '<dd>No notes were saved for this picture.</dd>'
+        : problems.length === 0
+          ? '<dd>Nothing to look at.</dd>'
+          : `<dd><ul class="found">${problems.map(problem => `<li>${escapeHtml(problem)}</li>`).join('')}</ul></dd>`;
+    const rows = [
+      finding === undefined ? '' : `<dt>Screen</dt><dd>${escapeHtml(finding.surface)}</dd>`,
+      finding === undefined ? '' : `<dt>Screen size</dt><dd>${escapeHtml(finding.size)}</dd>`,
+      `<dt>What was checked</dt><dd>${SWEEP_CHECKS}</dd>`,
+      `<dt>What was found</dt>${found}`,
+    ];
+    return `<figure${problems.length > 0 ? ' class="look"' : ''}><a href="${escapeHtml(file)}"><img loading="lazy" src="${escapeHtml(file)}" alt="${escapeHtml(file)}"></a><figcaption><p class="tag">${problems.length > 0 ? 'Something to look at' : 'Looks fine'}</p><dl>${rows.join('')}</dl></figcaption></figure>`;
+  };
+  const withProblems = pictures.filter(file => (byPicture.get(file)?.problems ?? []).length > 0);
+  const fine = pictures.filter(file => !withProblems.includes(file));
   return page({
     title,
     body: `<p><a href="${escapeHtml(home)}">All test screenshots</a></p>
-<h2>What it found</h2>
-<pre>${escapeHtml(report)}</pre>
-<h2>${pictureCount(pictures.length)}</h2>
-<div class="grid">${figures.join('')}</div>`,
+<p>${pictureCount(pictures.length)}. ${String(withProblems.length)} have something to look at. This is a look, not a test: nothing here passes or fails.</p>
+<h2>Something to look at</h2>
+${withProblems.length > 0 ? `<div class="grid">${withProblems.map(figure).join('')}</div>` : '<p>Nothing this week.</p>'}
+<h2>Looks fine</h2>
+<div class="grid">${fine.map(figure).join('')}</div>
+<h2>The full list as text</h2>
+<pre>${escapeHtml(report)}</pre>`,
   });
 }
 
@@ -94,11 +116,18 @@ export async function readSweeps(root) {
     const full = path.join(root, folder);
     const pictures = (await readdir(full)).filter(name => name.endsWith('.png')).sort();
     const report = await readFile(path.join(full, 'report.md'), 'utf8');
+    const saved = await readFile(path.join(full, 'findings.json'), 'utf8').catch(error => {
+      if (error?.code === 'ENOENT') {
+        return '[]';
+      }
+      throw error;
+    });
+    const findings = JSON.parse(saved);
     const name = folder.split(path.sep).join('/');
     const home = '../'.repeat(name.split('/').length + 1);
     await writeFile(
       path.join(full, 'index.html'),
-      sweepHtml({ title: `Weekly look-over ${name}`, report, pictures, home }),
+      sweepHtml({ title: `Weekly look-over ${name}`, report, pictures, findings, home }),
     );
     sweeps.push({ folder: name, pictures: pictures.length });
   }
@@ -126,10 +155,18 @@ li { padding: 0.5rem 0; border-bottom: 0.0625rem solid var(--line); display: fle
 li span { color: var(--soft); }
 .bad { color: var(--bad); font-weight: 600; }
 pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 0.875rem/1.5 ui-monospace, monospace; }
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); gap: 1rem; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr)); gap: 1rem; }
 figure { margin: 0; border: 0.0625rem solid var(--line); border-radius: 0.5rem; overflow: hidden; }
 img { display: block; width: 100%; height: 12rem; object-fit: cover; object-position: top; background: var(--line); }
 figcaption { padding: 0.5rem; font-size: 0.8125rem; overflow-wrap: anywhere; }
+figure.look { border-color: var(--bad); }
+.tag { font-weight: 600; color: var(--fg); }
+.look .tag { color: var(--bad); }
+dl { margin: 0.5rem 0 0; }
+dt { color: var(--soft); font-size: 0.75rem; margin-top: 0.375rem; }
+dd { margin: 0; }
+ul.found { list-style: disc; padding-left: 1.25rem; }
+ul.found li { display: list-item; padding: 0; border: 0; }
 </style>
 </head>
 <body>
