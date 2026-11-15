@@ -1,7 +1,11 @@
 import { Writable } from 'stream';
 import winston from 'winston';
 
-import { pollTelegramOnce, telegramPollBackoffMs } from '../../../src/controller/telegramDispatch';
+import {
+  pollTelegramOnce,
+  telegramCommandMenuLoop,
+  telegramPollBackoffMs,
+} from '../../../src/controller/telegramDispatch';
 import type { TelegramClient } from '../../../src/runtime/telegram/telegramClient';
 import { createTelegramService } from '../../../src/runtime/telegram/telegramService';
 import type { TelegramUpdate } from '../../../src/schemas/telegram';
@@ -217,5 +221,39 @@ describe('pollTelegramOnce', () => {
       now: () => 0,
     });
     expect(polls).toBe(0);
+  });
+});
+
+describe('telegram command menu loop', () => {
+  it('sets the menu in the paired chat without waiting for a message, once per process', async () => {
+    const { store, client, service } = harness([]);
+    const loop = telegramCommandMenuLoop({ store, service, logger });
+    await loop.tick(new AbortController().signal);
+    await loop.tick(new AbortController().signal);
+    expect(client.commandMenus).toEqual([
+      { chat_id: '777', commands: ['new', 'model', 'persona', 'connectors', 'status'] },
+    ]);
+  });
+
+  it('sets no menu before the bot is paired, and sets it on the first pass after pairing', async () => {
+    const { store, client, service } = harness([]);
+    store.connection = fakeTelegramConnection();
+    const loop = telegramCommandMenuLoop({ store, service, logger });
+    await loop.tick(new AbortController().signal);
+    expect(client.commandMenus).toEqual([]);
+    store.connection = fakePairedConnection();
+    await loop.tick(new AbortController().signal);
+    expect(client.commandMenus).toHaveLength(1);
+  });
+
+  it('tries again on the next pass when Telegram refuses', async () => {
+    const { store, client, service } = harness([]);
+    const setMyCommands = client.setMyCommands.bind(client);
+    client.setMyCommands = () => Promise.reject(new Error('Telegram is down'));
+    const loop = telegramCommandMenuLoop({ store, service, logger });
+    await loop.tick(new AbortController().signal);
+    client.setMyCommands = setMyCommands;
+    await loop.tick(new AbortController().signal);
+    expect(client.commandMenus).toHaveLength(1);
   });
 });

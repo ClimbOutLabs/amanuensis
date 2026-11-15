@@ -63,10 +63,18 @@ export function telegramChoiceKey(name: string): string {
   return createHash('sha256').update(name).digest('hex').slice(0, 16);
 }
 
+/** Other spellings people reach for, answered as the menu command they mean. */
+const COMMAND_ALIASES: Readonly<Record<string, TelegramCommand>> = {
+  models: 'model',
+  personas: 'persona',
+  connector: 'connectors',
+};
+
 /** The menu command a message is, or undefined for an ordinary message. `/model@my_bot` counts as `/model`. */
 export function telegramCommandOf(text: string): TelegramCommand | undefined {
   const match = /^\/([a-z]+)(?:@\w+)?$/i.exec(text.trim());
-  const name = match?.[1]?.toLowerCase();
+  const typed = match?.[1]?.toLowerCase();
+  const name = typed === undefined ? undefined : (COMMAND_ALIASES[typed] ?? typed);
   if (name === 'help') {
     return 'help';
   }

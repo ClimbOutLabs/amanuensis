@@ -5,6 +5,7 @@ import configuration from '../config';
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import type { ITelegramStore } from '../db/telegramStore';
 import { createTlsFetch, normalizeTlsUrl } from '../http/tls';
+import { createTelegramCommandMenu } from '../runtime/telegram/telegramChatControls';
 import { deliverPendingTelegramReplies } from '../runtime/telegram/telegramReplies';
 import { createTelegramSendQueue } from '../runtime/telegram/telegramSendQueue';
 import type { TelegramService } from '../runtime/telegram/telegramService';
@@ -14,7 +15,8 @@ import type { ControlLoop } from './Controller';
 /**
  * The controller side of the Telegram channel: one loop long-polls Telegram for each connected
  * bot and hands every update to the server over HTTP, the way schedule dispatch hands over runs;
- * one loop sends the replies finished turns owe Telegram. Polling is single-flight per connection
+ * one loop sends the replies finished turns owe Telegram; one sets each paired bot's command menu.
+ * Polling is single-flight per connection
  * (the loop's own pass is the only poller, and a pass does not overlap itself), the stored offset
  * advances only for updates the server accepted, and a failing connection backs off instead of
  * spinning.
@@ -24,6 +26,8 @@ export const TELEGRAM_POLL_LOOP_NAME = 'telegram-poll';
 export const TELEGRAM_POLL_INTERVAL_MS = 1000;
 export const TELEGRAM_REPLY_LOOP_NAME = 'telegram-replies';
 export const TELEGRAM_REPLY_INTERVAL_MS = 3000;
+export const TELEGRAM_MENU_LOOP_NAME = 'telegram-menu';
+export const TELEGRAM_MENU_INTERVAL_MS = 15_000;
 
 const BACKOFF_BASE_MS = 5000;
 const BACKOFF_CAP_MS = 60_000;
@@ -171,6 +175,34 @@ export function telegramReplyLoop(params: {
         sessionStore: params.sessionStore,
         logger: params.logger,
       });
+    },
+  };
+}
+
+/**
+ * Sets the command menu in each paired chat soon after start or pairing, without waiting for the
+ * person to write first. Each menu is set once per process; a failed try is tried again next pass.
+ */
+export function telegramCommandMenuLoop(params: {
+  store: ITelegramStore;
+  service: TelegramService;
+  logger: Logger;
+}): ControlLoop {
+  const menu = createTelegramCommandMenu();
+  return {
+    name: TELEGRAM_MENU_LOOP_NAME,
+    intervalMs: TELEGRAM_MENU_INTERVAL_MS,
+    async tick(): Promise<void> {
+      for (const connection of await params.store.listConnections()) {
+        try {
+          await menu.ensure({ client: params.service.clientFor(connection), connection, logger: params.logger });
+        } catch (error) {
+          params.logger.warn('The Telegram command menu could not be set', {
+            connection_id: connection.id,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
     },
   };
 }

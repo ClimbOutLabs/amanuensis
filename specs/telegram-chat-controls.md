@@ -25,6 +25,8 @@ Every change applies only to the Telegram chat and is the same setting the app s
 
 **Connecting a new connector stays in the app.** Signing in to a service needs a browser and secrets. `/connectors` only turns on or off connectors the person has already set up.
 
+**Set at start, not on first message.** Aman sets the menu for each paired chat soon after it starts or after pairing, so the person sees it without writing first. The common plural spellings `/models`, `/personas` and `/connector` answer as the commands they mean.
+
 **Only the paired person.** Commands and button taps from anyone else are refused, as every other bot action is. The menu is set for the paired chat only.
 
 **Short button data.** A button carries a short hash of the model, persona or connector name, because Telegram limits button data to 64 bytes. A tap on a choice that no longer exists says so and changes nothing.

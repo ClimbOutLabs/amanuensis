@@ -31,7 +31,7 @@ Send the bot a message and it is answered in the Telegram chat, with the same me
 
 ## Change what the chat uses
 
-Tap the menu button beside the text box in Telegram to see the bot's commands, or send one yourself:
+Tap the **Menu** button beside the text box in Telegram, or type / to see the bot's commands. You can also send one yourself:
 
 - /new starts a fresh chat. The earlier one stays in Aman.
 - /model shows your models as buttons. The one in use is ticked. Tap another to switch.
@@ -40,7 +40,7 @@ Tap the menu button beside the text box in Telegram to see the bot's commands, o
 - /status shows the model, the persona and the connectors this chat uses.
 - /help lists these commands.
 
-These change only the Telegram chat, the same settings you see when you open that chat in Aman.
+These change only the Telegram chat, the same settings you see when you open that chat in Aman. If the **Menu** button is missing, close the bot chat and open it again. Telegram shows the menu once it has fetched it.
 
 Reminders and other notices that would show on your devices are sent to Telegram as well. When Aman tries to call you and the phone does not ring, the message comes to Telegram instead. Quiet notes stay under the bell in the app. So when your morning brief is ready, Telegram gets no message: read the brief in its chat in the app.
 

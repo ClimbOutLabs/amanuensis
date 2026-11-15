@@ -5,7 +5,12 @@ import { Controller } from './controller/Controller';
 import { noticingLoops } from './controller/noticingLoops';
 import { privateChatSweepLoop } from './controller/privateChatSweep';
 import { scheduleDispatchLoop } from './controller/scheduleDispatch';
-import { telegramPollLoop, telegramReplyLoop, type TelegramUpdateExecutor } from './controller/telegramDispatch';
+import {
+  telegramCommandMenuLoop,
+  telegramPollLoop,
+  telegramReplyLoop,
+  type TelegramUpdateExecutor,
+} from './controller/telegramDispatch';
 import type { IScheduleStore } from './db/scheduleStore';
 import type { SessionCustom, TurnCustom } from './db/sessionCustom';
 import type { ITelegramStore } from './db/telegramStore';
@@ -58,6 +63,7 @@ export function createController<TTransaction>(params: {
         sessionStore: params.telegram.sessionStore,
         logger: params.logger,
       }),
+      telegramCommandMenuLoop({ store: params.telegram.store, service, logger: params.logger }),
     );
   }
   return new Controller({ loops, logger: params.logger });
