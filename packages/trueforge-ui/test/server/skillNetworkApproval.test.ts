@@ -85,7 +85,7 @@ describe('the approval wording', () => {
         ),
       ),
     );
-    assert.ok(lines.some(line => line.includes('The skill can send any of your data to them')));
+    assert.ok(lines.some(line => line.includes('Any of them could pass your data on')));
     // Nothing claims the traffic is inspected or checked.
     assert.ok(!lines.join(' ').toLowerCase().includes('inspect'));
     assert.ok(!lines.join(' ').toLowerCase().includes('monitor'));
@@ -93,7 +93,7 @@ describe('the approval wording', () => {
 
   it('adds the sending line only when a declared site can send', () => {
     const withoutSend = skillNetworkApprovalLines({ skillName: 'ten-x', state: TEN_X_STATE });
-    assert.ok(!withoutSend.some(line => line.includes('not each email it sends')));
+    assert.ok(!withoutSend.some(line => line.includes('A skill can never send email')));
     const withSend = skillNetworkApprovalLines({
       skillName: 'google',
       state: {
@@ -107,7 +107,7 @@ describe('the approval wording', () => {
     });
     assert.ok(
       withSend.includes(
-        'One of these sites can send email. You approve each run of the skill, not each email it sends.',
+        'Aman blocks the email sites on this list. A skill can never send email. Email only goes out through Aman, and you approve each one.',
       ),
     );
   });

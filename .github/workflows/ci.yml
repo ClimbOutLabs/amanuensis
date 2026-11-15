@@ -1088,6 +1088,13 @@ jobs:
           docker build -t aman-browser:arm64-check ops/browser-sidecar
           docker build -f ops/browser-sidecar/Dockerfile.gateway -t aman-browser-gateway:arm64-check ops/browser-sidecar
 
+      # The arm64 browser is Playwright's own Chromium build, which reads its policy from a different folder than x64.
+      - name: Check the browser never offers to save passwords
+        if: matrix.image == 'browser'
+        run: |
+          docker run --rm --init -v "$PWD/ops/browser-sidecar/test/image:/checks:ro" aman-browser:arm64-check \
+            xvfb-run --auto-servernum node /checks/saving-off.mjs
+
       # The installer pulls these by digest; each must have an arm64 image behind it. Every non-empty
       # `*_image` key is checked, so a newly pinned image is covered without editing this list.
       - name: Pull the pinned images for arm64

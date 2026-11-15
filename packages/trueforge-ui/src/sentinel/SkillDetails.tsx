@@ -1,8 +1,9 @@
 'use client';
 
+import { isSkillBlockedHost } from '@truefoundry/trueforge-core/core/connectors/apiServices';
 import {
   SKILL_SITES_DATA_WARNING,
-  SKILL_SITES_SEND_WARNING,
+  SKILL_SITES_EMAIL_BLOCKED,
 } from '@truefoundry/trueforge-core/core/permissions/skillSitesCopy';
 import type { FC, ReactNode } from 'react';
 
@@ -34,12 +35,20 @@ function SkillWebsites({ skill }: { skill: SentinelApprovalSkill }) {
       ) : (
         <>
           <ul className="space-y-1" aria-label="Websites">
-            {skill.websites.map(site => (
-              <li key={site} className="flex items-center gap-2 break-all text-text-primary">
-                <span className="size-1.5 shrink-0 rounded-full bg-text-secondary" aria-hidden="true" />
-                {site}
-              </li>
-            ))}
+            {skill.websites.map(site =>
+              isSkillBlockedHost(site) ? (
+                <li key={site} className="flex items-center gap-2 break-all text-text-secondary">
+                  <Icon name="lock" className="size-3.5 shrink-0" aria-hidden="true" />
+                  <span className="line-through">{site}</span>
+                  <span className="shrink-0 rounded-full border border-border px-2 text-xs">Blocked</span>
+                </li>
+              ) : (
+                <li key={site} className="flex items-center gap-2 break-all text-text-primary">
+                  <span className="size-1.5 shrink-0 rounded-full bg-text-secondary" aria-hidden="true" />
+                  {site}
+                </li>
+              ),
+            )}
           </ul>
           <p className="text-sm text-text-secondary">
             Adding it lets the skill reach these websites and no others. {SKILL_SITES_DATA_WARNING}
@@ -47,9 +56,9 @@ function SkillWebsites({ skill }: { skill: SentinelApprovalSkill }) {
         </>
       )}
       {skill.can_send && (
-        <p className="flex items-start gap-2 rounded-lg bg-warning-bg/10 px-3 py-2.5 text-text-primary" role="note">
-          <Icon name="triangle-exclamation" className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-          <span>{SKILL_SITES_SEND_WARNING}</span>
+        <p className="flex items-start gap-2 rounded-lg bg-primary-bg px-3 py-2.5 text-text-primary" role="note">
+          <Icon name="lock" className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+          <span>{SKILL_SITES_EMAIL_BLOCKED}</span>
         </p>
       )}
       {skill.makes_up_addresses && (

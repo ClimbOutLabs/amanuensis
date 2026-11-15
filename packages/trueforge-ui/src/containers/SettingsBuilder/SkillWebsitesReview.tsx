@@ -1,8 +1,10 @@
 'use client';
 
+import { isSkillBlockedHost } from '@truefoundry/trueforge-core/core/connectors/apiServices';
 import {
   SKILL_SITES_DATA_WARNING,
-  SKILL_SITES_SEND_WARNING,
+  SKILL_SITES_EMAIL_BLOCKED,
+  skillSiteLabel,
 } from '@truefoundry/trueforge-core/core/permissions/skillSitesCopy';
 import type { FC } from 'react';
 
@@ -22,14 +24,14 @@ export const SkillWebsitesReview: FC<{ check: SkillWebsiteCheck }> = ({ check })
         <ul className="list-disc pl-5 text-text-primary">
           {check.websites.map(site => (
             <li key={site} className="break-words">
-              {site}
+              {skillSiteLabel({ site, blocked: isSkillBlockedHost(site) })}
             </li>
           ))}
         </ul>
         <p className="text-text-primary">
           Adding it lets the skill reach these websites and no others. {SKILL_SITES_DATA_WARNING}
         </p>
-        {check.canSend && <p className="font-semibold text-text-primary">{SKILL_SITES_SEND_WARNING}</p>}
+        {check.canSend && <p className="font-semibold text-text-primary">{SKILL_SITES_EMAIL_BLOCKED}</p>}
       </>
     )}
     {check.makesUpAddresses && (

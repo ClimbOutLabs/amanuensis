@@ -1384,6 +1384,8 @@ export interface DrainTurnEventsInput {
    * detached; nothing in the drain waits for it.
    */
   chatTitle?: ChatTitleDrainMember | undefined;
+  /** Present only on a scheduled run that leaves a line in the bell: given the finished answer's text. Never throws. */
+  onFinishedAnswer?: ((answerText: string) => Promise<void>) | undefined;
 }
 
 export interface PrivateChatDrainMember {
@@ -1605,6 +1607,7 @@ async function runTurnFollowUp(params: {
     chatSearch,
     answerMark,
     chatTitle,
+    onFinishedAnswer,
   } = input;
   // Before the first step: the next turn may start as soon as the files below are saved, and must not take
   // this turn's memory save for lost while the steps before it still run.
@@ -1638,6 +1641,8 @@ async function runTurnFollowUp(params: {
         logger,
       });
     }
+    // Ahead of the memory steps, so the bell line never waits on their model calls.
+    await onFinishedAnswer?.(formatAssistantMessageText(state.output?.content));
     // Before the model calls below, so the answer's usage is visible before that slower work.
     const flushUsage = async () => {
       if (modelUsage !== undefined) {
@@ -2225,6 +2230,8 @@ export async function startTurnInProcess(params: {
   profileLearning?: { personalizationStore: IPersonalizationStore } | undefined;
   /** A title the caller has already chosen for this session; see beginTurnExecution. */
   session_title?: string | undefined;
+  /** Given the finished answer's text once the turn is done; not called for a turn that failed or stopped. */
+  onFinishedAnswer?: ((answerText: string) => Promise<void>) | undefined;
 }): Promise<TurnHandle<TurnCustom>> {
   const { turn, drainInput } = await beginTurnExecution(params);
 
@@ -2232,6 +2239,7 @@ export async function startTurnInProcess(params: {
   const { promise: firstEventDualWritten, resolve: markFirstEventDualWritten } = Promise.withResolvers<undefined>();
   void drainTurnEvents({
     ...drainInput,
+    onFinishedAnswer: params.onFinishedAnswer,
     onEvent: () => {
       markFirstEventDualWritten(undefined);
       return Promise.resolve();

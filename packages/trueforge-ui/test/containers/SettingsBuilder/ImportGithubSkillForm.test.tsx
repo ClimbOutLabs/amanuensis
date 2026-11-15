@@ -71,7 +71,7 @@ describe('ImportGithubSkillForm with a website check', () => {
     await screen.findByText('It sends requests to these websites:');
     expect(onCheck).toHaveBeenCalledWith({ repoURL: 'https://github.com/org/news', path: 'skills/news', ref: 'main' });
     expect(screen.getByRole('listitem')).toHaveTextContent('api.news-digest.info');
-    expect(screen.getByText(/The skill can send any of your data to them/)).toBeInTheDocument();
+    expect(screen.getByText(/Any of them could pass your data on/)).toBeInTheDocument();
     expect(screen.getByText(/makes up web addresses while it runs/)).toBeInTheDocument();
     expect(onImport).not.toHaveBeenCalled();
 

@@ -1,4 +1,5 @@
 import { resolveGitSkillObjectId } from '@truefoundry/trueforge-core/core';
+import { isSkillBlockedHost } from '@truefoundry/trueforge-core/core/connectors/apiServices';
 import type { ISkillStore, SkillRecord } from '../../db/skillStore';
 import {
   grantedSkillNetworkHosts,
@@ -340,7 +341,7 @@ export async function drainSkillNetworkCards(input: {
       }),
     );
     const denied = new Set(record.network_denied_hosts);
-    const missing = declared.filter(host => !granted.has(host) && !denied.has(host));
+    const missing = declared.filter(host => !granted.has(host) && !denied.has(host) && !isSkillBlockedHost(host));
     const changedNote = input.registry.codeChangedNote({
       session_id: input.session_id,
       skill_name: record.name,

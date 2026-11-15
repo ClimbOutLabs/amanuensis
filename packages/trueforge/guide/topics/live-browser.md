@@ -54,6 +54,8 @@ To stop Aman using a page, click **End session** at the top, then click it again
 
 Your password manager can't fill the picture of the page, because the picture has no real boxes. Use the name and password boxes under the picture instead.
 
+The live browser never offers to save a password, card or address, so it keeps none of them. Your password manager stays the place for them.
+
 1. Under the picture, click **Sign in with your password manager** to open the boxes.
 2. In the picture, click the site's name or email box.
 3. In **Name or email**, fill your name from your password manager, then click **Put name in page**.

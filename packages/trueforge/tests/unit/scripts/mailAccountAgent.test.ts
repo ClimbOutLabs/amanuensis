@@ -341,6 +341,18 @@ describe('the mail account agent', () => {
     expect(without).toBe('');
   }, 30_000);
 
+  it('says whether an account is saved with one word, and never prints the account', async () => {
+    const look = () =>
+      execFileSync('python3', [AGENT, '--has-account'], {
+        env: { ...process.env, AMAN_MAIL_ACCOUNT_FILE: accountFile },
+        encoding: 'utf8',
+      });
+    await agentCall('POST', postBody(CANARY));
+    expect(look()).toBe('saved\n');
+    await agentCall('DELETE');
+    expect(look()).toBe('none\n');
+  }, 30_000);
+
   it('the agent never printed the password or the secret anywhere', () => {
     expect(agentOutput).not.toContain(CANARY);
     expect(agentOutput).not.toContain(WRONG);

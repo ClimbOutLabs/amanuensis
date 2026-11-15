@@ -14583,6 +14583,45 @@
               "null"
             ]
           },
+          "forwards": {
+            "description": "The message a forward sends on, below the note in `body`; null when the message is not a forward.",
+            "properties": {
+              "attachments": {
+                "description": "Names of the files sent on with the message.",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "body": {
+                "description": "Text of the message being forwarded.",
+                "type": "string"
+              },
+              "from": {
+                "description": "Sender of the message being forwarded.",
+                "type": "string"
+              },
+              "subject": {
+                "description": "Subject of the message being forwarded.",
+                "type": "string"
+              },
+              "truncated": {
+                "description": "True when the text is longer than the part shown.",
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "from",
+              "subject",
+              "body",
+              "truncated",
+              "attachments"
+            ],
+            "type": [
+              "object",
+              "null"
+            ]
+          },
           "from_name": {
             "description": "The display name the message is sent as, or null when none is set.",
             "type": [

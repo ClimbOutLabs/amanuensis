@@ -174,7 +174,7 @@ describe('install_skill', () => {
     const built = await setup();
     const info = await built.tools.toolCallInfo({ name: 'install_skill', arguments: RELEASE_NOTES });
     expect(info.tier3_card?.plain_what).toBe(
-      'Add the skill "release-notes"? Aman will follow its instructions when a task calls for it. It sends requests to api.release-feed.info. Adding it lets the skill reach these websites and no others. The skill can send any of your data to them, so only allow this for a skill you trust.',
+      `Add the skill "release-notes"? Aman will follow its instructions when a task calls for it. It sends requests to api.release-feed.info. Adding it lets the skill reach these websites and no others. Aman can't see what these sites do with what the skill sends them. Any of them could pass your data on, even by email, so only add a skill you trust.`,
     );
     expect(info.tier3_card?.skill).toEqual({
       name: 'release-notes',
@@ -225,7 +225,7 @@ describe('install_skill', () => {
     );
     const info = await built.tools.toolCallInfo({ name: 'install_skill', arguments: RELEASE_NOTES });
     expect(info.tier3_card?.skill).toMatchObject({ websites: ['gmail.googleapis.com'], can_send: true });
-    expect(info.tier3_card?.plain_what).toContain('You approve each run of the skill, not each email it sends.');
+    expect(info.tier3_card?.plain_what).toContain('A skill can never send email.');
   });
 
   it('adds nothing when the files cannot be read to check them', async () => {

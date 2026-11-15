@@ -605,6 +605,7 @@ export * from "./Tier3Card.js";
 export * from "./Tier3CardSkillNetwork.js";
 export * from "./Tier3Email.js";
 export * from "./Tier3EmailAction.js";
+export * from "./Tier3EmailForwards.js";
 export * from "./Tier3EmailReplaces.js";
 export * from "./Tier3EmailReplyInThread.js";
 export * from "./Tier3Mailbox.js";

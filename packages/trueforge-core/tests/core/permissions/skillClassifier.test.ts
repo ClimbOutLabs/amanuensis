@@ -58,7 +58,7 @@ describe('Skill tool classification', () => {
     );
     expect(decision.card?.skill).toMatchObject({ websites: ['api.release-feed.info'], makes_up_addresses: true });
     expect(decision.card?.plain_what).toContain(
-      'It sends requests to api.release-feed.info. Adding it lets the skill reach these websites and no others. The skill can send any of your data to them, so only allow this for a skill you trust. One of these sites can send email. You approve each run of the skill, not each email it sends.',
+      `It sends requests to api.release-feed.info. Adding it lets the skill reach these websites and no others. Aman can't see what these sites do with what the skill sends them. Any of them could pass your data on, even by email, so only add a skill you trust. Aman blocks the email sites on this list. A skill can never send email. Email only goes out through Aman, and you approve each one.`,
     );
   });
 

@@ -4,6 +4,9 @@ Aman's own web browser: a real, headed Chromium running under Xvfb (a virtual sc
 persistent profile per person so logins survive restarts, and one tab per chat inside it. It is never
 published to the host.
 
+Chromium never offers to save passwords, payment cards or addresses: the image sets that by policy
+(`chromium-policy.json`), so a profile keeps sign-in cookies but no saved passwords.
+
 ## How it is walled off
 
 The browser reads hostile pages, so it shares a network with nothing of Aman's.

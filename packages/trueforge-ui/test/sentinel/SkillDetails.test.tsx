@@ -81,15 +81,25 @@ describe('the skill approval card', () => {
     expect(screen.getByRole('list', { name: 'Websites' })).toBeInTheDocument();
     expect(screen.getByRole('listitem')).toHaveTextContent('api.release-feed.info');
     expect(websites).toHaveTextContent('Adding it lets the skill reach these websites and no others.');
-    expect(websites).toHaveTextContent('The skill can send any of your data to them');
-    expect(websites).not.toHaveTextContent('not each email it sends');
+    expect(websites).toHaveTextContent('Any of them could pass your data on');
+    expect(websites).not.toHaveTextContent('A skill can never send email');
     expect(websites).not.toHaveTextContent('makes up some web addresses');
   });
 
-  it('warns when one of the websites can send email as the person', () => {
-    renderCard({ ...RELEASE_NOTES_CARD, skill: { ...RELEASE_NOTES_CARD.skill, can_send: true } });
-    expect(document.querySelector('[data-role="skill-websites"]')).toHaveTextContent(
-      'One of these sites can send email. You approve each run of the skill, not each email it sends.',
+  it('marks a site that can send email as blocked, and says email only goes out through Aman', () => {
+    renderCard({
+      ...RELEASE_NOTES_CARD,
+      skill: {
+        ...RELEASE_NOTES_CARD.skill,
+        websites: ['api.release-feed.info', 'gmail.googleapis.com'],
+        can_send: true,
+      },
+    });
+    const items = screen.getAllByRole('listitem');
+    expect(items[0]).not.toHaveTextContent('Blocked');
+    expect(items[1]).toHaveTextContent('gmail.googleapis.comBlocked');
+    expect(screen.getByRole('note')).toHaveTextContent(
+      'Aman blocks the email sites on this list. A skill can never send email. Email only goes out through Aman, and you approve each one.',
     );
   });
 

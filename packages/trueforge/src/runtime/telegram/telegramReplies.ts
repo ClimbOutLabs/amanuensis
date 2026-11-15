@@ -1,9 +1,11 @@
 import type { ISessionStore } from '@truefoundry/trueforge-core/agent-session';
 import type { Tier3Card } from '@truefoundry/trueforge-core/core';
+import { isSkillBlockedHost } from '@truefoundry/trueforge-core/core/connectors/apiServices';
 import type { ActionRequiredEvent, ModelMessageEvent } from '@truefoundry/trueforge-core/core/events/schema';
 import {
   SKILL_SITES_DATA_WARNING,
-  SKILL_SITES_SEND_WARNING,
+  SKILL_SITES_EMAIL_BLOCKED,
+  skillSiteLabel,
 } from '@truefoundry/trueforge-core/core/permissions/skillSitesCopy';
 import type {
   Tier3CalendarEventSchema,
@@ -142,6 +144,7 @@ export const TELEGRAM_SHOWN_SECTION_FIELDS = {
     'reply_to',
     'from_name',
     'name_left_off',
+    'forwards',
   ] as const satisfies readonly (keyof z.infer<typeof Tier3EmailSchema>)[],
   calendar_event: [
     'action',
@@ -266,7 +269,8 @@ function approvalCardLines(card: Tier3Card): string[] {
   if (card.why_asked_again !== null) {
     lines.push(card.why_asked_again);
   }
-  if (card.recipient !== null) {
+  // An email lists its own recipients below, so the card's recipient line would only repeat them.
+  if (card.recipient !== null && (card.email ?? null) === null) {
     lines.push(`To: ${card.recipient}`);
   }
   if (card.destination !== null) {
@@ -317,8 +321,26 @@ function approvalCardLines(card: Tier3Card): string[] {
         `Replaces the saved draft "${email.replaces.subject}" to ${email.replaces.to.map(mailboxLine).join(', ')}`,
       );
     }
-    lines.push('Message body:');
-    lines.push(email.body);
+    const forwards = email.forwards ?? null;
+    if (forwards === null) {
+      lines.push('Message body:');
+      lines.push(email.body);
+    } else {
+      lines.push(email.body === '' ? 'No note is added.' : 'Your note:');
+      if (email.body !== '') {
+        lines.push(email.body);
+      }
+      lines.push(`Forwarded message from ${forwards.from}, subject "${forwards.subject}":`);
+      lines.push(forwards.body);
+      if (forwards.truncated) {
+        lines.push('The forwarded message is longer than the part shown here. All of it is sent.');
+      }
+      lines.push(
+        forwards.attachments.length === 0
+          ? 'No files are sent with it.'
+          : `Files sent with it: ${forwards.attachments.join(', ')}`,
+      );
+    }
   }
   const event = card.calendar_event ?? null;
   if (event !== null) {
@@ -418,10 +440,12 @@ function approvalCardLines(card: Tier3Card): string[] {
     if (websites.length === 0) {
       lines.push("It doesn't send requests to any website.");
     } else {
-      lines.push(`It sends requests to these websites: ${websites.join(', ')}`);
+      lines.push(
+        `It sends requests to these websites: ${websites.map(site => skillSiteLabel({ site, blocked: isSkillBlockedHost(site) })).join(', ')}`,
+      );
       lines.push(`Adding it lets the skill reach these websites and no others. ${SKILL_SITES_DATA_WARNING}`);
       if (skill.can_send === true) {
-        lines.push(SKILL_SITES_SEND_WARNING);
+        lines.push(SKILL_SITES_EMAIL_BLOCKED);
       }
     }
     if (skill.makes_up_addresses === true) {
@@ -460,7 +484,8 @@ function approvalCardLines(card: Tier3Card): string[] {
     lines.push(`New email addresses: ${card.mail_new_recipients.join(', ')}`);
   }
   if (card.outbound_text !== null) {
-    lines.push('Full request:');
+    // Beside an email shown in full, these lines are only what else the call carries.
+    lines.push(email === null ? 'Full request:' : 'Also sent with this email:');
     if (card.outbound_truncated) {
       lines.push('Part of this request is not shown in full.');
     }

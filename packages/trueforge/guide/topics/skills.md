@@ -99,7 +99,7 @@ To change an answer later, open Settings, then Skills. A skill that names sites 
 
 !!! warning
 
-    A skill with internet access can send any of your data to the sites it lists. Only allow this for a skill you trust. If a site can send email, Aman says so. Each time the skill runs, it asks you first. Once you allow a run, it does not ask again for each email that run sends.
+    A skill with internet access can send any of your data to the sites it lists. Aman can't see what a site does with it, so only allow this for a skill you trust. A skill can never reach an email service, such as Gmail or Outlook, or a service that forwards messages by email. Aman blocks those sites even if you allow the rest, and marks them Blocked. Email only goes out through Aman, and you approve each one.
 
 ## Good to know
 

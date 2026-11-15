@@ -955,7 +955,7 @@ describe('ShellModeProvider', () => {
 
     expect(readDraftSpecPreferences('agent')).toEqual({
       model: { name: 'chosen/model' },
-      config: { sandbox: { enabled: true } },
+      config: { sandbox: { enabled: true }, askUserQuestions: { enabled: false } },
     });
   });
 
@@ -980,6 +980,7 @@ describe('ShellModeProvider', () => {
 
     expect(readDraftSpecPreferences('agent')).toEqual({
       model: { name: 'chosen/model' },
+      config: { askUserQuestions: { enabled: false } },
     });
   });
 
@@ -1005,7 +1006,7 @@ describe('ShellModeProvider', () => {
 
     expect(readDraftSpecPreferences('agent')).toEqual({
       model: { name: 'chosen/model' },
-      config: { sandbox: { enabled: false } },
+      config: { sandbox: { enabled: false }, askUserQuestions: { enabled: false } },
     });
   });
 
@@ -1039,7 +1040,7 @@ describe('ShellModeProvider', () => {
     expect(readDraftSpecPreferences('chat')).toEqual({ model: { name: 'remembered/model' } });
     expect(readDraftSpecPreferences('agent')).toEqual({
       model: { name: 'remembered/model' },
-      config: { sandbox: { enabled: true } },
+      config: { sandbox: { enabled: true }, askUserQuestions: { enabled: false } },
     });
   });
 });

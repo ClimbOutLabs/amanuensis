@@ -25,6 +25,7 @@ import {
 import { ChangeRequestBox } from './ChangeRequestBox.js';
 import { countEmailWords, isLongEmailBody, splitEmailBody } from './emailBody.js';
 import { MailFromPicker, useMailFromPick } from './MailFromPicker.js';
+import { OutboundBlock } from './PermissionApprovalCard.js';
 import type { SentinelApprovalCard, SentinelApprovalEmail, SentinelApprovalMailbox } from './types.js';
 
 export type EmailApprovalCardProps = {
@@ -154,6 +155,7 @@ export const EmailApprovalCard: FC<EmailApprovalCardProps> = ({
   if (email === null) return null;
 
   const sending = email.action === 'send';
+  const forwards = email.forwards ?? null;
   const sendNow = () => {
     setAnsweredAt(approvalTime(new Date()));
     onApprove(fromPick.picked);
@@ -165,6 +167,10 @@ export const EmailApprovalCard: FC<EmailApprovalCardProps> = ({
           { label: 'Reply in the thread, subject', value: email.reply_in_thread.subject },
           { label: 'Reply in the thread, from', value: email.reply_in_thread.from },
         ]),
+    // With two or more accounts the picker shows the account instead, so it is never listed twice.
+    ...(fromPick.choices.length < 2 && typeof card.mail_from === 'string' && card.mail_from !== ''
+      ? [{ label: 'From', value: card.mail_from }]
+      : []),
     { label: 'To', value: mailboxListText(email.to) },
     ...(email.cc.length > 0 ? [{ label: 'Copy', value: mailboxListText(email.cc) }] : []),
     ...(email.bcc.length > 0 ? [{ label: 'Hidden copy', value: mailboxListText(email.bcc) }] : []),
@@ -219,9 +225,45 @@ export const EmailApprovalCard: FC<EmailApprovalCardProps> = ({
         </p>
       )}
 
-      <section aria-label="Message body" className="rounded-lg border border-border">
-        <EmailBody body={email.body} />
-      </section>
+      {forwards === null ? (
+        <section aria-label="Message body" className="rounded-lg border border-border">
+          <EmailBody body={email.body} />
+        </section>
+      ) : (
+        <>
+          {email.body === '' ? (
+            <p className="text-text-secondary">No note is added.</p>
+          ) : (
+            <section aria-label="Your note" className="rounded-lg border border-border">
+              <p className="px-4 pt-3 text-text-secondary">Your note</p>
+              <EmailBody body={email.body} />
+            </section>
+          )}
+          <section aria-label="Forwarded message" className="rounded-lg border border-border">
+            <p className="px-4 pt-3 text-text-secondary">
+              Forwarded message from {forwards.from}, subject “{forwards.subject}”
+            </p>
+            <EmailBody body={forwards.body} />
+            {forwards.truncated && (
+              <p className="px-4 pb-3 text-text-secondary">
+                The forwarded message is longer than the part shown here. All of it is sent.
+              </p>
+            )}
+          </section>
+          <p className="text-text-primary" data-role="forwarded-files">
+            {forwards.attachments.length === 0
+              ? 'No files are sent with it.'
+              : `Files sent with it: ${forwards.attachments.join(', ')}`}
+          </p>
+        </>
+      )}
+      {card.outbound_text !== null && (
+        <OutboundBlock
+          text={card.outbound_text}
+          truncated={card.outbound_truncated}
+          label="Also sent with this email"
+        />
+      )}
 
       {card.plain_why !== null && (
         <p className="text-text-secondary" data-role="approval-intent">

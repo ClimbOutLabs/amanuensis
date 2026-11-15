@@ -1,4 +1,5 @@
 import { OpenAPIHono, type RouteHandler } from '@hono/zod-openapi';
+import { isSkillBlockedHost } from '@truefoundry/trueforge-core/core/connectors/apiServices';
 import type { Context } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import type { ResolveRequestContext } from '../auth/identity';
@@ -155,18 +156,18 @@ function toSkillNetworkApproval(
   return {
     declared_hosts: [...declared],
     approved_hosts: effective === null ? null : [...effective],
-    allowed_hosts: record.network_allowed_hosts.filter(host => !denied.has(host)),
+    allowed_hosts: record.network_allowed_hosts.filter(host => !denied.has(host) && !isSkillBlockedHost(host)),
     denied_hosts: [...record.network_denied_hosts],
     session_hosts:
       viewer === undefined
         ? []
-        : [
-            ...skillNetworkTokens.sessionHostsForSkill({
+        : skillNetworkTokens
+            .sessionHostsForSkill({
               tenant_id: viewer.tenant_id,
               created_by: viewer.created_by,
               skill_name: record.name,
-            }),
-          ],
+            })
+            .filter(host => !isSkillBlockedHost(host)),
     send_capable: skillNetworkHostsCanSend(declared),
   };
 }

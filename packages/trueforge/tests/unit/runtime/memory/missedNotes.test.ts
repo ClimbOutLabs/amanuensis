@@ -67,6 +67,47 @@ const NEW_ON_NORA = {
 };
 
 describe('notes the sorter missed', () => {
+  // Reply notes as each version wrote them: the hidden note line, the source line alone, and the oldest source line.
+  it.each([
+    ['as written today', '<!-- note: assistant_response 2026-11-09 -->\n\n> External source: assistant reply'],
+    [
+      'from a chat that had read nothing',
+      '<!-- note: assistant_response 2026-11-09 -->\n\n> External source: assistant reply, nothing read before it',
+    ],
+    ['with only its source line', '> External source: assistant reply'],
+    ['with the source line older versions wrote', '> Source: assistant reply'],
+  ])('settles a reply note %s without the model, and puts nothing on a page', async (_name, closing) => {
+    const base = await setUp();
+    const before = await readPage(base.vaultDir, 'matter', 'nora');
+    await mkdir(path.join(base.vaultDir, 'memory'), { recursive: true });
+    await writeFile(
+      path.join(base.vaultDir, 'memory', '2026-11-09.md'),
+      [
+        `## 2026-11-09T00:00:00.000Z\n\nFrom Juno's reply, Nov 9: Nora should take the oat bars on the walk.\n\n${closing}`,
+        '## 2026-11-09T01:00:00.000Z\n\nNora has a new job.\n\n> From you',
+      ].join('\n\n') + '\n',
+    );
+    const model = modelAnswering(prompt => (prompt.includes('oat bars') ? NEW_ON_NORA : IGNORE_ALL));
+
+    const result = await run({ base, mode: 'on', model });
+
+    // Only the person's own note reached the model.
+    expect(model.prompts).toHaveLength(1);
+    expect(model.prompts.join('\n')).not.toContain('oat bars');
+    expect(result).toEqual({ asked: 1, sorted: 1, reasons: [] });
+    expect(await readPage(base.vaultDir, 'matter', 'nora')).toBe(before);
+    expect(await readHandledNotes(base.vaultDir)).toEqual(
+      new Map([
+        [noteId('2026-11-09', 0), 'none'],
+        [noteId('2026-11-09', 1), 'none'],
+      ]),
+    );
+
+    // The next night finds nothing left to do.
+    expect(await run({ base, mode: 'on', model })).toEqual({ asked: 0, sorted: 0, reasons: [] });
+    expect(model.prompts).toHaveLength(1);
+  });
+
   it('sorts a missed note in on mode and marks it handled', async () => {
     const base = await setUp();
     await writeDay({ vaultDir: base.vaultDir, day: '2026-11-09', notes: ['Nora has a new job.'] });
