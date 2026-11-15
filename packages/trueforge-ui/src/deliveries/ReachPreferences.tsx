@@ -125,6 +125,30 @@ function MailSource({ source }: { source: NonNullable<ReachView['mailSource']> }
   );
 }
 
+/**
+ * The words over the always-important list. The rule is a capability, so the words follow whether the mail Aman
+ * watches reports sender confirmation, and name that mail only as the instance of it. Until the fact is known,
+ * only the rule itself is stated.
+ */
+function alwaysImportantIntro({
+  assistant,
+  sourceWords,
+  senderConfirmation,
+}: {
+  assistant: string;
+  sourceWords: string | null;
+  senderConfirmation: boolean | null;
+}): string {
+  const rule = `${assistant} tells you about mail from these people, as long as your mail server confirms the sender. Anything else it only mentions when it names a bill or deadline.`;
+  if (senderConfirmation === null || sourceWords === null) {
+    return rule;
+  }
+  const instance = `${sourceWords.charAt(0).toUpperCase()}${sourceWords.slice(1)}`;
+  return senderConfirmation
+    ? `${rule} ${instance} confirms its senders.`
+    : `${rule} ${instance} cannot confirm senders yet, so mail from these people is treated as ordinary mail.`;
+}
+
 function Card({ title, children, intro }: { title: string; children: ReactNode; intro?: string }) {
   return (
     <div className={CARD}>
@@ -361,7 +385,11 @@ export function ReachPreferences({ reach }: { reach: ReachApi }) {
 
       <Card
         title="Mail that always matters"
-        intro={`${assistant} tells you about mail from these people, as long as your mail server confirms the sender. Anything else it only mentions when it names a bill or deadline. This needs a Google account. With the shared Email connector, senders cannot be confirmed yet, so their mail is treated as ordinary mail.`}
+        intro={alwaysImportantIntro({
+          assistant,
+          sourceWords: view.mailSource === null ? null : MAIL_SOURCE_WORDS[view.mailSource],
+          senderConfirmation: view.mailSenderConfirmation,
+        })}
       >
         {draft.alwaysImportant.length === 0 ? (
           <p className="text-text-secondary text-sm">No one yet.</p>

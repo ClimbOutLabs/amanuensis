@@ -15,6 +15,10 @@ export const ReachView: core.serialization.ObjectSchema<serializers.ReachView.Ra
         availability: ReachAvailability,
         calendarProblem: core.serialization.property("calendar_problem", CalendarProblem.nullable()),
         mailProblem: core.serialization.property("mail_problem", MailProblem.nullable()),
+        mailSenderConfirmation: core.serialization.property(
+            "mail_sender_confirmation",
+            core.serialization.boolean().nullable(),
+        ),
         mailSource: core.serialization.property("mail_source", MailSourceKind.nullable()),
         maxLevels: core.serialization.property("max_levels", ReachViewMaxLevels),
         saved: core.serialization.boolean(),
@@ -26,6 +30,7 @@ export declare namespace ReachView {
         availability: ReachAvailability.Raw;
         calendar_problem?: CalendarProblem.Raw | null;
         mail_problem?: MailProblem.Raw | null;
+        mail_sender_confirmation?: boolean | null;
         mail_source?: MailSourceKind.Raw | null;
         max_levels: ReachViewMaxLevels.Raw;
         saved: boolean;
