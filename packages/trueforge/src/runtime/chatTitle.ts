@@ -53,6 +53,8 @@ export interface ChatTitleDrainMember {
   derivedTitle: string;
   /** The person's first message, in full. */
   userText: string;
+  /** Put in front of the subject title, as it was in front of the working title. Empty for most chats. */
+  titlePrefix: string;
 }
 
 /**
@@ -74,6 +76,7 @@ export async function resolveChatTitleContext(params: {
   sessionStore: ISessionStore<SessionCustom, TurnCustom>;
   derivedTitle: string;
   userText: string;
+  titlePrefix: string;
   logger: Logger;
 }): Promise<ChatTitleDrainMember | undefined> {
   const { logger, sessionId } = params;
@@ -99,6 +102,7 @@ export async function resolveChatTitleContext(params: {
       modelName,
       derivedTitle: params.derivedTitle,
       userText: params.userText,
+      titlePrefix: params.titlePrefix,
     };
   } catch (error) {
     logger.debug('Chat title skipped for this chat: the title model did not resolve', {
@@ -284,8 +288,8 @@ export async function runChatTitleFollowUp(params: {
     if (candidate === undefined) {
       return;
     }
-    const title = capChatTitle(candidate);
-    if (title === '' || title === member.derivedTitle) {
+    const title = capChatTitle(`${member.titlePrefix}${candidate}`);
+    if (title === member.titlePrefix || title === member.derivedTitle) {
       return;
     }
     const replaced = await member.sessionStore.replaceSessionTitleIfCurrent({
