@@ -16,7 +16,7 @@ The folder is set by `MEMORY_MARKDOWN_DIR`, relative to the server's working fol
 
 Memory is on by default. Before every reply, Aman looks up the memories that fit what you asked. After every finished turn, it saves what is worth keeping. The model never has to remember to do either.
 
-With **Turn summaries** on, Aman keeps only lasting facts: facts about you, plans, preferences, decisions and anything you asked it to remember. A turn with nothing lasting saves nothing. If a summary can't be made, nothing is saved for that turn, and the **Memories** tab says so.
+With **Turn summaries** on, Aman keeps only lasting facts: facts about you, plans, preferences, decisions and anything you asked it to remember. A turn with nothing lasting saves nothing. If a summary can't be made, nothing is saved for that turn, and the **Memories** tab says so. The note says when it happened and why, and **Open the chat** takes you to the chat it was about. The server log has a line that starts `Turn memory not saved` with the chat, the reason and how many seconds the model was given.
 
 Each fact is a short note that starts with what it is about, such as "Sister Pippa is allergic to shellfish", without your name in front. Aman uses your name only where a note would be unclear without it. Notes saved before this change keep their wording.
 

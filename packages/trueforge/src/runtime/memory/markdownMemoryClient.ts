@@ -65,6 +65,7 @@ import {
   withoutHiddenMarkers,
   withoutSourceLines,
   type NamespaceScan,
+  type SummaryPendingMark,
   type VaultScope,
   type VaultTombstone,
 } from './markdownMemoryFiles';
@@ -739,7 +740,11 @@ export class MarkdownMemoryClient implements MemoryClient {
         await markSummaryFailed({
           baseDir: this.baseDir,
           namespace: this.writeNamespace,
-          mark: { failed_at: new Date().toISOString(), reason: params.reason ?? 'model_failed' },
+          mark: {
+            failed_at: new Date().toISOString(),
+            reason: params.reason ?? 'model_failed',
+            ...(params.sessionId === undefined ? {} : { session_id: params.sessionId }),
+          },
         });
       }
     } catch {
@@ -747,11 +752,11 @@ export class MarkdownMemoryClient implements MemoryClient {
     }
   }
 
-  /** When the summary the vault for a wire namespace is still owed failed, or undefined when none is owed. Never throws. */
-  async summaryPendingSince(params: { namespace: string }): Promise<string | undefined> {
+  /** The failed summary the vault for a wire namespace is still owed, or undefined when none is owed. Never throws. */
+  async summaryPending(params: { namespace: string }): Promise<SummaryPendingMark | undefined> {
     try {
       const filesystemNamespace = vaultFilesystemNamespace(this.namespace, params.namespace);
-      return (await readSummaryPending({ baseDir: this.baseDir, namespace: filesystemNamespace }))?.failed_at;
+      return await readSummaryPending({ baseDir: this.baseDir, namespace: filesystemNamespace });
     } catch {
       return undefined;
     }

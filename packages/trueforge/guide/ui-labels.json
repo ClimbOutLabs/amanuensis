@@ -304,6 +304,7 @@
   "Forget": "packages/trueforge-ui/src/atoms/memory/MemoryVaultEntry.tsx",
   "Forget selected": "packages/trueforge-ui/src/atoms/memory/MemoryVaultPanels.tsx",
   "Keep them": "packages/trueforge-ui/src/atoms/memory/MemoryVaultPanels.tsx",
+  "Open the chat": "packages/trueforge-ui/src/atoms/memory/MemoryVaultPanels.tsx",
   "Copy": "packages/trueforge-ui/src/atoms/memory/MemoryVaultEntry.tsx",
   "Export, import, and topics": "packages/trueforge-ui/src/atoms/memory/MemoryVaultPanels.tsx",
   "Export": "packages/trueforge-ui/src/atoms/memory/MemoryVaultPanels.tsx",
