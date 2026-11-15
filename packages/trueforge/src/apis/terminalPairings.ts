@@ -53,7 +53,8 @@ export interface TerminalPairingRouterDeps {
  */
 export function createTerminalPairingRouter(deps: TerminalPairingRouterDeps) {
   const router = new OpenAPIHono();
-  const service = deps.pairingService ?? new TerminalPairingService({ terminalKeyStore: deps.terminalKeyStore });
+  const service =
+    deps.pairingService ?? new TerminalPairingService({ terminalKeyStore: deps.terminalKeyStore, logger: deps.logger });
   const limiter = deps.limiter ?? new LoginAttemptLimiter();
   const clientKey = deps.clientKey ?? clientKeyFor(configuration.TRUSTED_PROXY_ADDRESSES);
 
@@ -97,7 +98,7 @@ export function createTerminalPairingRouter(deps: TerminalPairingRouterDeps) {
       });
     }
     const body = c.req.valid('json');
-    const started = service.start({ device_name: body.device_name });
+    const started = await service.start({ device_name: body.device_name });
     const ownerId = deps.resolveInstanceOwnerId === undefined ? undefined : await deps.resolveInstanceOwnerId();
     if (ownerId !== undefined) {
       await recordStart({ tenant_id: 'default', created_by: ownerId, device_name: body.device_name });
@@ -117,9 +118,9 @@ export function createTerminalPairingRouter(deps: TerminalPairingRouterDeps) {
     );
   });
 
-  router.openapi(completeTerminalPairingRoute, c => {
+  router.openapi(completeTerminalPairingRoute, async c => {
     const body = c.req.valid('json');
-    const completion = service.complete({ pairing_id: body.pairing_id, code: body.code });
+    const completion = await service.complete({ pairing_id: body.pairing_id, code: body.code });
     if (completion === undefined) {
       throw new HTTPException(404, { message: PAIRING_GONE_MESSAGE });
     }

@@ -1151,6 +1151,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     authenticator = createAuthenticator({
       mode: TrueForgeAuthMode.Oidc,
       terminalKeyStore: persistence.terminalKeyStore,
+      logger,
     });
     authorizer = new TrueForgeAuthorizer();
   } else if (mode === TrueForgeAuthMode.Local) {
@@ -1159,6 +1160,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
       localUserStore,
       globalSettingsStore,
       terminalKeyStore: persistence.terminalKeyStore,
+      logger,
     });
     authorizer = new TrueForgeAuthorizer();
   } else {

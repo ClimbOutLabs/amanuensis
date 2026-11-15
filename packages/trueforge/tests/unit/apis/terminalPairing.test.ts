@@ -194,6 +194,12 @@ describe('terminal pairing with the sign-in service', () => {
         data: { subject_id: context.subject.id, terminal_key_id: context.terminal_key_id ?? null },
       });
     });
+    // The session repository routes and the sandbox file download, at their real
+    // shapes under the sessions prefix: chat-adjacent, but not chat scope.
+    sessions.put('/:session_id/repository', c => c.json({ data: { bound: true } }));
+    sessions.delete('/:session_id/repository', c => c.json({ data: { bound: false } }));
+    sessions.post('/:session_id/repository/start-work', c => c.json({ data: { started: true } }));
+    sessions.get('/:session_id/turns/:turn_id/download-sandbox-file', c => c.json({ data: { file: true } }));
     app.route('/api/v1/sessions', sessions);
     // A signed-in route outside the chat scope.
     const models = new OpenAPIHono();
@@ -480,6 +486,58 @@ describe('terminal pairing with the sign-in service', () => {
       headers: { Authorization: `Bearer ${key}` },
     });
     expect(list.status).toBe(403);
+  });
+
+  it('refuses a terminal key on the repository routes and the sandbox file download under sessions', async () => {
+    const harness = await buildHarness();
+    const token = await harness.noraToken();
+    const { key } = await pairPippa(harness);
+    const refused: [string, RequestInit][] = [
+      ['/api/v1/sessions/sess-1/repository', { method: 'PUT' }],
+      ['/api/v1/sessions/sess-1/repository', { method: 'DELETE' }],
+      ['/api/v1/sessions/sess-1/repository/start-work', { method: 'POST' }],
+      ['/api/v1/sessions/sess-1/turns/turn-1/download-sandbox-file', { method: 'GET' }],
+    ];
+    for (const [path, init] of refused) {
+      const withKey = await harness.request(path, {
+        ...init,
+        headers: { Authorization: `Bearer ${key}` },
+      });
+      expect(withKey.status).toBe(403);
+      expect(ErrorResponseSchema.parse(await jsonBody(withKey)).error.message).toContain('can only reach chats');
+      // The same routes answer a normal sign-in: the refusal is the terminal scope, not the route.
+      const withToken = await harness.request(path, {
+        ...init,
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      expect(withToken.status).toBe(200);
+    }
+  });
+
+  it('revokes the stored key when a confirmed pairing lapses before the terminal collects it', async () => {
+    let nowMs = Date.parse('2026-11-15T10:00:00.000Z');
+    const harness = await buildHarness({
+      pairingService: store => new TerminalPairingService({ terminalKeyStore: store, now: () => nowMs }),
+    });
+    const token = await harness.noraToken();
+    const started = await harness.request('/api/v1/terminal-pairings', postJson({ device_name: 'Pippa' }));
+    const start = StartResponseSchema.parse(await jsonBody(started));
+    const confirmed = await harness.request(
+      '/api/v1/terminal-pairings/confirm',
+      postJson({ code: start.data.code }, { Authorization: `Bearer ${token}` }),
+    );
+    expect(confirmed.status).toBe(200);
+
+    nowMs += 6 * 60_000;
+    const completed = await harness.request(
+      '/api/v1/terminal-pairings/complete',
+      postJson({ pairing_id: start.data.pairing_id, code: start.data.code }),
+    );
+    expect(completed.status).toBe(404);
+
+    const stored = await harness.terminalKeyStore.listForOwner({ tenant_id: 'default', subject_id: 'nora' });
+    expect(stored).toHaveLength(1);
+    expect(stored[0]?.revoked_at).not.toBeNull();
   });
 
   it('refuses a terminal key on a browser-only route', async () => {

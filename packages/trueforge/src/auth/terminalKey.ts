@@ -1,4 +1,6 @@
+import { extractErrorLogFields } from '@truefoundry/trueforge-core/core';
 import { createHash, randomBytes } from 'node:crypto';
+import type { Logger } from 'winston';
 
 import type { ITerminalKeyStore } from '../db/terminalKeyStore';
 import type { RequestContext } from './identity';
@@ -29,18 +31,28 @@ export function hashTerminalKey(key: string): string {
 /**
  * The request context for a presented terminal key, or undefined when the key is
  * unknown or revoked. A live key is marked used, so its last-used time follows it.
+ * That write is bookkeeping: when it fails, the failure is logged and the request
+ * still signs in, because a stale last-used time must never lock a terminal out.
  * The context carries no roles: a terminal key is not an admin, and the auth layer
  * limits it to the chat scope (see terminalScope.ts).
  */
 export async function terminalKeyRequestContext(params: {
   store: ITerminalKeyStore;
   bearerToken: string;
+  logger?: Logger;
 }): Promise<RequestContext | undefined> {
   const record = await params.store.findByKeyHash(hashTerminalKey(params.bearerToken));
   if (record?.revoked_at !== null) {
     return undefined;
   }
-  await params.store.markUsed({ id: record.id, used_at: new Date().toISOString() });
+  try {
+    await params.store.markUsed({ id: record.id, used_at: new Date().toISOString() });
+  } catch (markUsedError) {
+    params.logger?.error('Failed to record a terminal key use', {
+      terminal_key_id: record.id,
+      ...extractErrorLogFields(markUsedError),
+    });
+  }
   return {
     tenant_id: record.tenant_id,
     subject: {
@@ -63,6 +75,7 @@ export async function terminalKeyRequestContext(params: {
 export async function resolveTerminalKeyContext(params: {
   store: ITerminalKeyStore | undefined;
   context: Parameters<typeof readBearerToken>[0];
+  logger?: Logger;
 }): Promise<RequestContext | undefined> {
   if (params.store === undefined) {
     return undefined;
@@ -71,7 +84,11 @@ export async function resolveTerminalKeyContext(params: {
   if (bearer === undefined || !isTerminalKey(bearer)) {
     return undefined;
   }
-  return terminalKeyRequestContext({ store: params.store, bearerToken: bearer });
+  return terminalKeyRequestContext({
+    store: params.store,
+    bearerToken: bearer,
+    ...(params.logger === undefined ? {} : { logger: params.logger }),
+  });
 }
 
 /** True when the request carries a terminal-shaped Bearer token, live or not. */

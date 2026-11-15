@@ -1,5 +1,6 @@
 import type { Context } from 'hono';
 import { HTTPException } from 'hono/http-exception';
+import type { Logger } from 'winston';
 
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 import type { ILocalUserStore } from '../db/localUserStore';
@@ -20,16 +21,19 @@ export class LocalAuthenticator implements Authenticator {
   readonly #localUserStore: ILocalUserStore;
   readonly #globalSettingsStore: IGlobalSettingsStore;
   readonly #terminalKeyStore: ITerminalKeyStore | undefined;
+  readonly #logger: Logger | undefined;
   #secret: Promise<Uint8Array> | undefined;
 
   constructor(params: {
     localUserStore: ILocalUserStore;
     globalSettingsStore: IGlobalSettingsStore;
     terminalKeyStore?: ITerminalKeyStore;
+    logger?: Logger;
   }) {
     this.#localUserStore = params.localUserStore;
     this.#globalSettingsStore = params.globalSettingsStore;
     this.#terminalKeyStore = params.terminalKeyStore;
+    this.#logger = params.logger;
   }
 
   async authenticate(c: Context): Promise<RequestContext> {
@@ -37,7 +41,11 @@ export class LocalAuthenticator implements Authenticator {
     // terminal key store before the token is read as a session token. A terminal key
     // that is unknown or revoked signs nobody in.
     if (carriesTerminalKey(c)) {
-      const terminalContext = await resolveTerminalKeyContext({ store: this.#terminalKeyStore, context: c });
+      const terminalContext = await resolveTerminalKeyContext({
+        store: this.#terminalKeyStore,
+        context: c,
+        ...(this.#logger === undefined ? {} : { logger: this.#logger }),
+      });
       if (terminalContext === undefined) {
         throw new HTTPException(401, { message: 'Authentication required' });
       }

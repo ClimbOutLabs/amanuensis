@@ -1,6 +1,7 @@
 import type { Context } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import { jwtVerify } from 'jose';
+import type { Logger } from 'winston';
 
 import type { ITerminalKeyStore } from '../db/terminalKeyStore';
 import type { Authenticator } from './authenticator';
@@ -12,9 +13,11 @@ import { extractRequestToken } from './token';
 
 export class OidcAuthenticator implements Authenticator {
   readonly #terminalKeyStore: ITerminalKeyStore | undefined;
+  readonly #logger: Logger | undefined;
 
-  constructor(params?: { terminalKeyStore?: ITerminalKeyStore }) {
+  constructor(params?: { terminalKeyStore?: ITerminalKeyStore; logger?: Logger }) {
     this.#terminalKeyStore = params?.terminalKeyStore;
+    this.#logger = params?.logger;
   }
 
   async authenticate(c: Context): Promise<RequestContext> {
@@ -22,7 +25,11 @@ export class OidcAuthenticator implements Authenticator {
     // terminal key store before the token is read as a sign-in token. A terminal key
     // that is unknown or revoked signs nobody in.
     if (carriesTerminalKey(c)) {
-      const terminalContext = await resolveTerminalKeyContext({ store: this.#terminalKeyStore, context: c });
+      const terminalContext = await resolveTerminalKeyContext({
+        store: this.#terminalKeyStore,
+        context: c,
+        ...(this.#logger === undefined ? {} : { logger: this.#logger }),
+      });
       if (terminalContext === undefined) {
         throw new HTTPException(401, { message: 'Authentication required' });
       }

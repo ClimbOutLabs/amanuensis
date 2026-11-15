@@ -37,11 +37,11 @@ A terminal app pairs with Aman instead of signing in. Pairing works the same way
 
 - **Pairing starts with a short code.** The terminal asks Aman to start pairing and gets a code of eight letters and numbers and a link. You open the link in the web app while signed in and confirm the code there. The code lasts five minutes and works once.
 - **The terminal gets its own key.** Once you confirm, the waiting terminal receives a terminal key made for that one terminal. Aman stores only a scrambled copy of the key, never the key itself, and the key never appears in any log.
-- **A terminal key reaches chats only.** With it, the terminal can open chats, send turns and stream the answers, answer approval cards, use plan grants, search chats and read memory recall. It cannot open Settings or any admin page, and it cannot use the parts of the web app that only a browser session can open, such as chat pictures and map tiles.
+- **A terminal key reaches chats only.** With it, the terminal can open chats, send turns and stream the answers, answer approval cards, use plan grants and search chats. There is no separate memory recall for a terminal to read: what Aman recalls reaches the terminal only inside its chats, as part of a turn. It cannot open Settings or any admin page, it cannot bind a repository to a chat or download files from a chat's sandbox, and it cannot use the parts of the web app that only a browser session can open, such as chat pictures and map tiles.
 - **Pairing is slowed against guessing.** Starting a pairing and confirming a code are limited the way the sign-in form is limited, so trying code after code does not work.
 - **Every step is written to the audit log.** Each pairing start, each confirm and each revoke leaves an entry.
 - **Revoke a key in Settings.** The Paired terminals list in Settings shows each terminal's name, when it paired and when it was last used. Revoking one stops it at once: the key fails on its next request. A terminal can also revoke its own key.
-- **Changing your password revokes every key.** A password change signs out other devices, and it revokes all terminal keys with them. Resetting the password from the terminal does the same. Pair each terminal again afterwards.
+- **Changing your password revokes every key, when Aman keeps the password itself.** With local sign-in, a password change signs out other devices, and it revokes all terminal keys with them. Resetting the password from the terminal does the same. Pair each terminal again afterwards. On an install that uses the sign-in service, the password changes at the service and Aman does not hear about it, so the keys stay live until you revoke them in Settings. You can revoke one key or every key there.
 
 ## Option A — leave login off
 
