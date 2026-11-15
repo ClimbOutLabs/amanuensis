@@ -1,10 +1,5 @@
 #!/usr/bin/env bash
-# Records the call; "cat" fails so a unit is never taken to exist. Starting the service that opens Aman's key does
-# what the real one does: the chip's copy is opened into the folder in memory (STUB_CHIP_UNIT_FAILS: it is not).
+# Records the call; "cat" fails so a unit is never taken to exist.
 printf 'stub-systemctl %s\n' "$*" >>"$STUB_LOG"
 [ "${1:-}" != cat ] || exit 1
-if [ "${1:-}" = restart ] && [ "${2:-}" = aman-key.service ] && [ -n "${AMAN_CHIP_ROOT:-}" ]; then
-  [ -z "${STUB_CHIP_UNIT_FAILS:-}" ] || exit 1
-  systemd-creds decrypt --name=aman-master-key "$AMAN_CHIP_ROOT/etc/aman/master.key.cred" - >"$AMAN_CHIP_ROOT/run/aman-key/master.key"
-fi
 exit 0

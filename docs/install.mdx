@@ -261,8 +261,6 @@ installer/install.sh backup main     # back up one instance
 
 Backups land in `~/.amanuensis/backups/<timestamp>/` with restricted permissions. Each one is encrypted: it opens on this computer, or on another one with the recovery key shown at setup. The installer keeps the seven most recent. A backup taken before an import is named `<timestamp>-before-import`, does not count toward the seven, and is kept until you remove it. Install asks whether to back up every day at 03:30 (default yes; `--backups daily|off` answers without asking), and `installer/install.sh backups daily` or `installer/install.sh backups off` changes that later. `aman doctor backup` checks that backups are recent and scheduled. To check a copied backup, run `sha256sum -c SHA256SUMS` in its folder (`shasum -a 256 -c SHA256SUMS` on a Mac). To copy backups off this computer, see [Backups](/backup).
 
-Aman's data is encrypted with a key kept on this computer. On a Linux computer with a security chip (TPM 2.0), `installer/install.sh key chip` moves that key into the chip. After that a copied or stolen disk cannot open Aman's data. It needs administrator rights and stops each instance for a moment. Your recovery keys keep working, and `installer/install.sh key file` puts the key back in a file. On a Mac or on Windows, turn on disk encryption instead (FileVault or BitLocker).
-
 ### Restore an instance from a backup
 
 `aman restore` puts one instance back the way a backup had it: its chats, memory and settings, and its sign-in data. With no arguments it lists the backups of the instance (date and time, size, newest first) and asks which one:

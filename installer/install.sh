@@ -17,7 +17,6 @@
 #        install.sh docker
 #        install.sh command
 #        install.sh tls
-#        install.sh key chip|file
 set -euo pipefail
 # Everything written is private unless a file is deliberately made world-readable.
 umask 077
@@ -56,8 +55,6 @@ DOWNLOADS_FILE=$INSTALLER_DIR/downloads.txt
 . "$INSTALLER_DIR/lib/registry.sh"
 # shellcheck source=lib/machinekey.sh
 . "$INSTALLER_DIR/lib/machinekey.sh"
-# shellcheck source=lib/chipkey.sh
-. "$INSTALLER_DIR/lib/chipkey.sh"
 # shellcheck source=lib/release.sh
 . "$INSTALLER_DIR/lib/release.sh"
 # shellcheck source=lib/templates.sh
@@ -192,7 +189,6 @@ Amanuensis installer
   install.sh docker               install or start Docker, or update it, asking before anything that needs admin rights
   install.sh command              put the aman command back
   install.sh tls                  renew the https certificates that are due
-  install.sh key chip|file        keep this computer's key in its security chip (Linux), or back in a file
 
 Options
   --home DIR            keep Aman's data in this folder (default ~/.amanuensis)
@@ -323,11 +319,11 @@ parse_args() {
         case "$positional:$COMMAND" in
           1:install)
             case "$arg" in
-              instance | backup | backups | upgrade | docker | command | tls | migrate | restore | key) COMMAND=$arg ;;
+              instance | backup | backups | upgrade | docker | command | tls | migrate | restore) COMMAND=$arg ;;
               *) usage_die "unknown command $arg" ;;
             esac
             ;;
-          2:instance | 2:key) SUBCOMMAND=$arg ;;
+          2:instance) SUBCOMMAND=$arg ;;
           3:instance | 2:backup) OPT_NAME=$arg ;;
           4:instance)
             if [ "$SUBCOMMAND" = local-model ]; then OPT_LOCAL_MODEL=$arg; else OPT_IMPORT_FILE=$arg; fi
@@ -520,7 +516,6 @@ main() {
     docker) docker_fix ;;
     command) cmd_command ;;
     tls) cmd_tls ;;
-    key) cmd_key ;;
     upgrade) cmd_upgrade ;;
     migrate) cmd_migrate ;;
     instance)
