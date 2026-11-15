@@ -1,4 +1,5 @@
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
+import { errorCode } from './errorCode';
 
 export interface SecretsDatabase {
   /** Where this database's key records are kept. */
@@ -11,6 +12,31 @@ export interface SecretsDatabase {
   /** Moves a SQLite file from one master key to another. Postgres has nothing to move. */
   rekey(keys: { from: Buffer; to: Buffer }): Promise<void>;
   close(): Promise<void>;
+}
+
+/** What Postgres answers when a table does not exist. */
+const UNDEFINED_TABLE = '42P01';
+
+/**
+ * A new Postgres database has no tables until `prepare` runs, and setup looks for key records before that.
+ * No table means no records, so the look answers that nothing is stored instead of failing.
+ */
+export function settingsBeforeSchema(settings: IGlobalSettingsStore): IGlobalSettingsStore {
+  return {
+    getSetting: async input => {
+      try {
+        return await settings.getSetting(input);
+      } catch (error) {
+        if (errorCode(error) === UNDEFINED_TABLE) {
+          return undefined;
+        }
+        throw error;
+      }
+    },
+    setSetting: input => settings.setSetting(input),
+    deleteSetting: input => settings.deleteSetting(input),
+    compareAndSetSetting: input => settings.compareAndSetSetting(input),
+  };
 }
 
 /**
@@ -40,7 +66,7 @@ export async function openConfiguredSecretsDatabase(): Promise<SecretsDatabase> 
     },
   });
   return {
-    settings: new PostgresGlobalSettingsStore(db),
+    settings: settingsBeforeSchema(new PostgresGlobalSettingsStore(db)),
     keyFile,
     ready: () => Promise.resolve(true),
     prepare: () => migrateToLatest(db),
