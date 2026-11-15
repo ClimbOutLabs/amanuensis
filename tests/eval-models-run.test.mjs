@@ -692,6 +692,9 @@ function skillClient({ broken = false, noSandbox = false } = {}) {
     async importMemories() {
       return undefined;
     },
+    async setSessionSkills({ skills }) {
+      state.mounted = [...(state.mounted ?? []), skills];
+    },
     async getCapabilities() {
       return { sandbox: noSandbox ? { enabled: false, reason: 'the slots are not built' } : { enabled: true } };
     },
@@ -818,6 +821,11 @@ test('a skill case adds, runs and removes a skill in one chat, checking each mes
   assert.deepEqual(client.state.skills, [{ name: 'kept' }]);
   assert.deepEqual(client.state.deleted, []);
   assert.equal(client.state.sandboxChats, 1, 'the skill chat has the sandbox on');
+  assert.deepEqual(
+    client.state.mounted,
+    [['weather'], []],
+    'the chat turns the skill on after the add and off after the remove',
+  );
 });
 
 test('skill cases stop before any chat when the instance has no working sandbox', async () => {
