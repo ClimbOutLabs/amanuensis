@@ -54,7 +54,7 @@ async function checkAddedModels({ deps, id }: { deps: DoctorDeps; id: string }):
  * The model check that needs no outside service: the models added in the app are counted, and a hosted model key is
  * only noted, since checking it would call Token Factory.
  */
-export function checkModelLocally({ deps }: { deps: DoctorDeps }): Check {
+export async function checkModelLocally({ deps }: { deps: DoctorDeps }): Promise<Check> {
   const apiKey = deps.env['NEBIUS_API_KEY']?.trim();
   if (apiKey === undefined || apiKey === '') {
     return checkAddedModels({ deps, id: 'model' });
