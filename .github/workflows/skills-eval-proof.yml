@@ -51,7 +51,7 @@ jobs:
           node -e "const r=require(process.env.RUNNER_TEMP+'/results/results.json');for(const row of (r.rows??r.results??[]).filter(x=>x.group==='skills'))console.log(JSON.stringify({id:row.case_id,status:row.status,error:row.error,reply:row.reply.slice(0,800),checks:row.checks},null,1))"
       - name: Stand-in model log
         if: always()
-        run: cut -c1-600 "$RUNNER_TEMP/stub.log" | grep -v '"last":""' | tail -60 || true
+        run: grep -E 'wttr|hn.py|hacker|install_skill|remove_skill|exec|write_file|card|approv' "$RUNNER_TEMP/stub.log" | grep -v 'grading one reply' | cut -c1-1200 | tail -40 || true
       - name: Stop the sandbox
         if: always()
         run: pnpm sandbox:slots --down --purge --instance eval

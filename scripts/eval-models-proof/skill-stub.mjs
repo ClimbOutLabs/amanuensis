@@ -49,12 +49,12 @@ function decide(body) {
   }
   if (/weather/i.test(ask)) {
     return results.length === 0
-      ? call('exec', { command: 'curl -s https://wttr.in/Lisbon?format=3' })
+      ? call('exec', { intent: 'Check the weather in Lisbon', purpose: 'execute', command: 'curl -s https://wttr.in/Lisbon?format=3' })
       : { content: results.at(-1).slice(0, 1500) };
   }
   if (/hacker news/i.test(ask)) {
-    if (results.length === 0) return call('write_file', { path: 'hn.py', content: HN_SCRIPT });
-    if (results.length === 1) return call('exec', { command: 'python3 hn.py' });
+    if (results.length === 0) return call('write_file', { intent: 'Save a script that reads the Hacker News front page', path: 'hn.py', content: HN_SCRIPT });
+    if (results.length === 1) return call('exec', { intent: 'Read the Hacker News front page', purpose: 'execute', command: 'python3 hn.py' });
     return { content: results.at(-1).slice(0, 1500) };
   }
   return { content: 'Done.' };
