@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { isPairTerminalPath } from '../src/pairTerminalPath';
+import { isPairTerminalPath, stripPairingCodeSearch } from '../src/pairTerminalPath';
 
 describe('isPairTerminalPath', () => {
   it('knows the pair-a-terminal page at the root, with or without a trailing slash', () => {
@@ -18,5 +18,26 @@ describe('isPairTerminalPath', () => {
     for (const pathname of ['/', '/settings', '/pair-terminal-x', '/pair-terminal/extra', '/sessions/pair-terminal']) {
       assert.equal(isPairTerminalPath(pathname, '/'), false, pathname);
     }
+  });
+});
+
+describe('stripPairingCodeSearch', () => {
+  it('takes the pairing code out of the address and keeps everything else', () => {
+    assert.equal(
+      stripPairingCodeSearch({ pathname: '/pair-terminal', search: '?code=K7QX2M9A', hash: '' }),
+      '/pair-terminal',
+    );
+    assert.equal(
+      stripPairingCodeSearch({ pathname: '/aman/pair-terminal', search: '?from=link&code=K7QX2M9A', hash: '#top' }),
+      '/aman/pair-terminal?from=link#top',
+    );
+  });
+
+  it('leaves an address with no code in it unchanged', () => {
+    assert.equal(stripPairingCodeSearch({ pathname: '/pair-terminal', search: '', hash: '' }), '/pair-terminal');
+    assert.equal(
+      stripPairingCodeSearch({ pathname: '/pair-terminal', search: '?from=link', hash: '' }),
+      '/pair-terminal?from=link',
+    );
   });
 });

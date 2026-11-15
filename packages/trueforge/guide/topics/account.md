@@ -74,7 +74,7 @@ To stop a terminal:
 2. Under **Paired terminals**, find the terminal and click **Revoke**.
 3. Click **Revoke** once more to confirm.
 
-The terminal stops working the next time it asks Aman for anything, and you can pair it again afterwards. Changing your password also stops every paired terminal.
+The terminal stops working the next time it asks Aman for anything, and you can pair it again afterwards. Changing your password also stops every paired terminal, when Aman keeps the password itself. When you sign in through the sign-in service, the password changes there and Aman does not hear about it, so revoke each terminal here instead.
 
 ## Good to know
 

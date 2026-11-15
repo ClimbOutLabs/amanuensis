@@ -67,7 +67,7 @@ import { createLocalAccountApi } from './localAccountApi';
 import { LogoutButton, SignOutConfirmProvider } from './LogoutButton';
 import { createMemoryRecallApi } from './memoryRecallApi';
 import { createModelUsageApi } from './modelUsageApi';
-import { isPairTerminalPath } from './pairTerminalPath';
+import { isPairTerminalPath, stripPairingCodeSearch } from './pairTerminalPath';
 import { createPersonaApi } from './personaApi';
 import { createPersonalizationApi } from './personalizationApi';
 import { API_BASE_URL, apiPath, uiRouterBasename } from './publicPath';
@@ -305,6 +305,12 @@ function AmanShell({
 
 export function App() {
   const authError = parseAuthErrorReason(window.location.search);
+  // The pairing code arrives in the address of the pair-a-terminal page. Read it once,
+  // here: the effect below takes it out of the address once the page is shown, so the
+  // code does not sit in the address bar or the browser history for the page's life.
+  const [pairingCode] = useState(() =>
+    isPairTerminalPath(window.location.pathname) ? new URLSearchParams(window.location.search).get('code') : null,
+  );
   const [session, setSession] = useState<SessionState | { status: 'checking' }>({ status: 'checking' });
   // Drafts in session storage are keyed by this, so a later sign-in in the same tab never sees them.
   const [draftScope, setDraftScope] = useState('');
@@ -338,6 +344,27 @@ export function App() {
       window.history.state,
       '',
       stripAuthErrorSearch({
+        pathname: window.location.pathname,
+        search: window.location.search,
+        hash: window.location.hash,
+      }),
+    );
+  }, [session]);
+
+  useEffect(() => {
+    if (session.status !== 'authenticated') {
+      return;
+    }
+    if (!isPairTerminalPath(window.location.pathname)) {
+      return;
+    }
+    if (new URLSearchParams(window.location.search).get('code') == null) {
+      return;
+    }
+    window.history.replaceState(
+      window.history.state,
+      '',
+      stripPairingCodeSearch({
         pathname: window.location.pathname,
         search: window.location.search,
         hash: window.location.hash,
@@ -565,11 +592,10 @@ export function App() {
   // screen above shows instead, and its sign-in comes back to the address the person
   // opened, this one included.
   if (isPairTerminalPath(window.location.pathname)) {
-    const code = new URLSearchParams(window.location.search).get('code');
     return (
       <ThemeProvider>
         <TerminalPairingProvider api={terminalPairingApi}>
-          <PairTerminalPage code={code} />
+          <PairTerminalPage code={pairingCode} />
         </TerminalPairingProvider>
       </ThemeProvider>
     );

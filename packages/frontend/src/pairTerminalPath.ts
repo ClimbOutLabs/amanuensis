@@ -13,3 +13,19 @@ export function isPairTerminalPath(pathname: string, uiBasePath: string = UI_BAS
   const path = pathname.length > 1 ? pathname.replace(/\/$/, '') : pathname;
   return path === `${base}${PAIR_TERMINAL_PATH}`;
 }
+
+/** Path + search + hash with the pairing `code` query removed. */
+export function stripPairingCodeSearch({
+  pathname,
+  search,
+  hash,
+}: {
+  pathname: string;
+  search: string;
+  hash: string;
+}): string {
+  const params = new URLSearchParams(search);
+  params.delete('code');
+  const nextSearch = params.toString();
+  return `${pathname}${nextSearch === '' ? '' : `?${nextSearch}`}${hash}`;
+}
