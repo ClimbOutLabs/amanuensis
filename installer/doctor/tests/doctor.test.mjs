@@ -2020,6 +2020,63 @@ describe('the folder Aman runs its installer from', () => {
     assert.ok(!world.calls().some(line => line.startsWith('install.sh')));
   });
 
+  /** A getent that tells of the person's own group: who else is in it, and which other accounts have it as main group. */
+  function groupIs({ members = [], othersWithIt = false } = {}) {
+    const me = spawnSync('id', ['-un'], { encoding: 'utf8' }).stdout.trim();
+    const uid = process.getuid();
+    const gid = process.getgid();
+    const group = `${me}:x:${gid}:${members.join(',')}`;
+    const passwd = [`${me}:x:${uid}:${gid}::/home/${me}:/bin/sh`];
+    if (othersWithIt) {
+      passwd.push(`pippa:x:${uid + 1}:${gid}::/home/pippa:/bin/sh`);
+    }
+    world.install(
+      'getent',
+      `#!/usr/bin/env bash\ncase "$1" in\n  group) [ "$2" = ${gid} ] && echo '${group}' ;;\n  passwd) printf '%s\\n' ${passwd.map(line => `'${line}'`).join(' ')} ;;\n  *) exit 2 ;;\nesac\n`,
+    );
+  }
+
+  it("is made private again by aman upgrade when only the person's own group can write to it, as a pull leaves it", () => {
+    const repo = checkoutWith(0o775);
+    chmodSync(repo, 0o775);
+    groupIs({ members: [spawnSync('id', ['-un'], { encoding: 'utf8' }).stdout.trim()] });
+    const result = world.shim(['upgrade', '--check']);
+    assert.equal(result.code, 0, result.stdout + result.stderr);
+    assert.match(result.stderr, /private to you again/);
+    assert.equal(statSync(repo).mode & 0o022, 0);
+    assert.equal(statSync(path.join(repo, 'installer', 'install.sh')).mode & 0o022, 0);
+    assert.ok(world.calls().includes(`install.sh --home ${world.home} upgrade --check`));
+  });
+
+  for (const [what, group] of [
+    ["someone else is in the person's group", { members: ['pippa'] }],
+    ["another account has the person's group as its main group", { othersWithIt: true }],
+  ]) {
+    it(`is still not used when ${what}, and nothing is changed`, () => {
+      const repo = checkoutWith(0o775);
+      groupIs(group);
+      assert.equal(world.shim(['upgrade', '--check']).code, 1);
+      assert.equal(statSync(path.join(repo, 'installer', 'install.sh')).mode & 0o777, 0o775);
+      assert.ok(!world.calls().some(line => line.startsWith('install.sh')));
+    });
+  }
+
+  it('is still not used when anyone can write to its installer, even with a private group', () => {
+    const repo = checkoutWith(0o666);
+    groupIs();
+    assert.equal(world.shim(['upgrade', '--check']).code, 1);
+    assert.equal(statSync(path.join(repo, 'installer', 'install.sh')).mode & 0o777, 0o666);
+    assert.ok(!world.calls().some(line => line.startsWith('install.sh')));
+  });
+
+  it('is still not used with a private group when a folder above it can be changed by others', () => {
+    const repo = checkoutWith(0o775);
+    groupIs();
+    chmodSync(world.root, 0o775);
+    assert.equal(world.shim(['upgrade', '--check']).code, 1);
+    assert.equal(statSync(path.join(repo, 'installer', 'install.sh')).mode & 0o777, 0o775);
+  });
+
   it('is reported by the doctor with the one fix, and --fix makes it private to the user again', () => {
     const repo = checkoutWith(0o666);
     const shown = world.shim(['doctor', 'checkout']);
