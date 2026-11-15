@@ -1,0 +1,57 @@
+name: Skills eval proof (temporary)
+
+on:
+  push:
+    branches: [test/weekly-skills-proof]
+
+permissions:
+  contents: read
+
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
+      - name: Build the sandbox from this checkout and start it
+        run: pnpm sandbox:slots --fix --yes --no-hard-disk-limit --instance eval
+      - name: Let the eval instance reach the sandbox
+        run: |
+          sudo chmod o+x /var/lib/docker /var/lib/docker/volumes
+          for n in 1 2; do
+            control=$(docker volume inspect --format '{{ .Mountpoint }}' "eval_slot_ctl_$n")
+            mirror=$(docker volume inspect --format '{{ .Mountpoint }}' "eval_slot_mirror_$n")
+            sudo chmod o+x "$(dirname "$control")" "$control" "$(dirname "$mirror")"
+            sudo chmod 0777 "$mirror"
+            mkdir -p "$RUNNER_TEMP/slots/$n"
+            ln -s "$control/agent.sock" "$RUNNER_TEMP/slots/$n/agent.sock"
+            ln -s "$mirror" "$RUNNER_TEMP/slots/$n/mirror"
+          done
+          ls -la "$RUNNER_TEMP/slots/1" "$RUNNER_TEMP/slots/1/mirror/"
+      - name: Start the stand-in model
+        run: STUB_LOG="$RUNNER_TEMP/stub.log" nohup node scripts/eval-models-proof/skill-stub.mjs >/dev/null 2>&1 &
+      - name: Run the eval with skills
+        env:
+          NEBIUS_API_KEY: stand-in
+          TOKEN_FACTORY_BASE_URL: http://127.0.0.1:9999/v1
+          TOKEN_FACTORY_MODEL: stub/model-a
+          LOCAL_MODEL_ENDPOINTS: 127.0.0.1:9999
+          SANDBOX_BACKEND: slots
+          SANDBOX_SLOTS_DIR: ${{ runner.temp }}/slots
+          SANDBOX_SLOTS: '2'
+        run: |
+          pnpm eval:models:fresh -- --models tokenfactory/model-a --label proof --skills --out "$RUNNER_TEMP/results" || true
+          grep -n '"case_id":"skills' -A0 "$RUNNER_TEMP/results/results.json" | head -2 || true
+          node -e "const r=require(process.env.RUNNER_TEMP+'/results/results.json');for(const row of (r.rows??r.results??[]).filter(x=>x.group==='skills'))console.log(JSON.stringify({id:row.case_id,status:row.status,error:row.error,reply:row.reply.slice(0,800),checks:row.checks},null,1))"
+      - name: Stand-in model log
+        if: always()
+        run: cut -c1-600 "$RUNNER_TEMP/stub.log" | grep -v '"last":""' | tail -60 || true
+      - name: Stop the sandbox
+        if: always()
+        run: pnpm sandbox:slots --down --purge --instance eval
