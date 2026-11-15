@@ -69,6 +69,7 @@ export async function sendTelegramText(input: {
   chat_id: string;
   text: string;
   inline_buttons?: readonly (readonly TelegramInlineButton[])[] | undefined;
+  no_link_preview?: boolean | undefined;
   sleep?: (ms: number) => Promise<void>;
 }): Promise<TelegramSentMessage> {
   const sleep = input.sleep ?? ((ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)));
@@ -82,6 +83,7 @@ export async function sendTelegramText(input: {
           chat_id: input.chat_id,
           text: part,
           inline_buttons: isLast ? input.inline_buttons : undefined,
+          no_link_preview: input.no_link_preview,
         });
       } catch (error) {
         // Only a refusal proves nothing went out. A 429 names its wait; any other refusal is
@@ -95,6 +97,7 @@ export async function sendTelegramText(input: {
           chat_id: input.chat_id,
           text: part,
           inline_buttons: isLast ? input.inline_buttons : undefined,
+          no_link_preview: input.no_link_preview,
         });
       }
     });

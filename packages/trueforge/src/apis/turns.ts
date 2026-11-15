@@ -49,6 +49,7 @@ import {
   type HeldRefusalReason,
 } from '@truefoundry/trueforge-core/core';
 import { readTurnedOffConnectorKeys } from '@truefoundry/trueforge-core/core/connectors/chatConnectorChoice';
+import { MAIL_CONNECTOR_NAME } from '@truefoundry/trueforge-core/core/email/mailConnector/toolContract';
 import type { RawToolCall } from '@truefoundry/trueforge-core/core/llm/LLMTypes';
 import { upgradeStoredTurnState } from '@truefoundry/trueforge-core/core/permissions/storedCards';
 import type { Context } from 'hono';
@@ -96,6 +97,7 @@ import {
 import type { ActiveTurnRegistry, TurnAdmission } from '../runtime/activeTurns';
 import { findTurnArtifact } from '../runtime/artifacts/findTurnArtifact';
 import { submitArtifactPersistence } from '../runtime/artifacts/persistTurnArtifacts';
+import { getCalendarAccountState } from '../runtime/calendarAccount';
 import { chatModelName, resolveChatAssistant, scheduleRunsAs, type ChatRunner } from '../runtime/chatAssistant';
 import type { ChatSearchIndexer } from '../runtime/chatSearchIndexing';
 import { readChatSearchEnabled } from '../runtime/chatSearchSettings';
@@ -454,8 +456,8 @@ function createTurnResolver(deps: {
   spaceStore: ISpaceStore;
   /** Per-user Google logins; absent, no Gmail tools mount. */
   googleConnectionStore?: IGoogleConnectionStore | undefined;
-  /** The instance's global settings, where the notes folder choice lives; absent, no notes tools mount. */
-  globalSettingsStore?: IGlobalSettingsStore | undefined;
+  /** Instance settings: the connection offer remembers a person's no in them, and the notes folder choice lives in them too. */
+  globalSettingsStore: IGlobalSettingsStore;
   /** From CreateTurnRequest.client_timezone. See ITurnResourceResolver.clientTimezone. */
   clientTimezone?: string | undefined;
   /** From CreateTurnRequest.spoken_reply. See ITurnResourceResolver.spokenReply. */
@@ -519,6 +521,7 @@ function createTurnResolver(deps: {
     personaStore,
     spaceStore,
     googleConnectionStore,
+    globalSettingsStore,
     turnArtifactStore,
     clientTimezone,
     spokenReply,
@@ -711,6 +714,34 @@ function createTurnResolver(deps: {
         }
         return { default_name: state?.default_key ?? null, allowed };
       },
+      calendarAccountFacts: async () => {
+        const state = await getCalendarAccountState({
+          accountUrl: configuration.CALENDAR_ACCOUNT_URL,
+          secret: configuration.CALENDAR_ACCOUNT_SECRET,
+          fetchImpl: undefined,
+          logger,
+        }).catch(() => undefined);
+        if (state === undefined || !state.connected || state.accounts.length === 0) {
+          return undefined;
+        }
+        return { names: state.accounts.map(entry => entry.account.email), default_name: state.default_key };
+      },
+      calendarRouting: async () => {
+        const state = await getCalendarAccountState({
+          accountUrl: configuration.CALENDAR_ACCOUNT_URL,
+          secret: configuration.CALENDAR_ACCOUNT_SECRET,
+          fetchImpl: undefined,
+          logger,
+        }).catch(() => undefined);
+        let allowed: readonly string[] | null = null;
+        if (personaContext !== undefined && personaStore !== undefined) {
+          const persona = await personaStore
+            .getPersona({ tenant_id, id: personaContext.persona_id, created_by: userRef })
+            .catch(() => undefined);
+          allowed = persona?.calendar_accounts ?? null;
+        }
+        return { default_name: state?.default_key ?? null, allowed };
+      },
       mcpRequestTimeoutMs: configuration.MCP_REQUEST_TIMEOUT_MS,
       mcpConnectTimeoutMs: configuration.MCP_CONNECT_TIMEOUT_MS,
       mcpMaxResponseBytes: configuration.MCP_TOOL_CALL_MAX_RESPONSE_BYTES,
@@ -758,10 +789,7 @@ function createTurnResolver(deps: {
           store: mcpServerStore,
         });
         const gitCommitIdentity = effectiveGitCommitIdentity({
-          stored:
-            deps.globalSettingsStore === undefined
-              ? { name: null, email: null }
-              : await readStoredGitCommitIdentity({ globalSettingsStore: deps.globalSettingsStore, logger }),
+          stored: await readStoredGitCommitIdentity({ globalSettingsStore: deps.globalSettingsStore, logger }),
           personName: personalizationProfile?.user_name,
         });
         return buildTurnSandbox({
@@ -1037,12 +1065,14 @@ function createTurnResolver(deps: {
     {
       store: spaceStore,
       googleConnections: googleConnectionStore,
-      notesFolder:
-        deps.globalSettingsStore === undefined
-          ? undefined
-          : {
-              service: sharedNotesFolderService(notesFolderServiceDeps({ settings: deps.globalSettingsStore, logger })),
-            },
+      connectionOffer: {
+        settings: globalSettingsStore,
+        mailConnectorRegistered: async () =>
+          (await mcpServerStore.listServers({ tenant_id, names: [MAIL_CONNECTOR_NAME] })).length > 0,
+      },
+      notesFolder: {
+        service: sharedNotesFolderService(notesFolderServiceDeps({ settings: deps.globalSettingsStore, logger })),
+      },
       authority: { tenantId: tenant_id, userRef },
       sessionId,
       schedules,
@@ -1050,6 +1080,8 @@ function createTurnResolver(deps: {
       skills,
       logger,
       startsAnswer,
+      // A scheduled run has nobody to answer the connection offer card, so the offer stays unmounted.
+      unattended: deps.unattended,
     },
     { store: turnArtifactStore, tenantId: tenant_id, sessionId, turnId, logger },
     {

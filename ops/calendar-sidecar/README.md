@@ -1,22 +1,26 @@
 # Calendar connector (CalDAV)
 
-This small service lets the Aman app read and change a CalDAV calendar. It runs the
-`@ni-c/caldav-mcp` tool server behind a plain HTTP address, on the private Docker network only.
+This small service lets the Aman app read and change CalDAV calendars. It runs one
+`@ni-c/caldav-mcp` tool server per connected account, behind a multiplexer at one plain HTTP
+address, on the private Docker network only.
 
 ## What it does
 
-- Serves the calendar tools at `http://calendar-caldav:9558/mcp` inside the Compose network, while a calendar login is saved. With no login saved, nothing listens on that port and no tools are offered.
+- Serves the calendar tools at `http://calendar-caldav:9558/mcp` inside the Compose network, while at least one calendar login is saved. With no login saved, nothing listens on that port and no tools are offered.
 - Offers eight tools: list calendars, list events, get an event, search events, create, update, delete, and respond to an event. Nothing else is offered.
 - Asks for confirmation before a change is made.
 - Runs a small account agent on port 9560, which the Settings Calendar card talks to. It answers only a caller that presents the instance's secret.
+- Calendar and event ids name their account in front of a | sign, like `alice@example.com|/dav/alice/personal/`. A read that names no account spans every account, and each answer says which account a calendar or event belongs to. A change goes to the account its ids name, so an approval keeps acting on the account it was given on.
 
 ## Credentials
 
-The calendar login is kept in one file, `/account/.env.calendar`, in a volume this service owns. It is never copied into the image and never passed through the service's environment. Its settings are:
+The calendar logins are kept in one file, `/account/.env.calendar`, in a volume this service owns. They are never copied into the image. The file holds one block of settings per account:
 
 - `CALDAV_URL`: the address of the calendar server. It must be https.
 - `CALDAV_USERNAME` and `CALDAV_PASSWORD`: the login.
 - `CALDAV_USER_EMAIL`: your own email address, used to find your invitations.
+
+A line `AMAN_CALENDAR_DEFAULT_ACCOUNT=<address>` names the default account when it is not the first one in the file. A file with one account reads exactly as it always has.
 
 For a Google account, the Settings Calendar card and the installer fill in Google's CalDAV address from the email address.
 
@@ -25,7 +29,7 @@ Two things write the file, and both go through the account agent, which checks t
 - The Settings Calendar card, over the agent's HTTP port. The agent also checks the sign-in before it saves. The request must carry `Authorization: Bearer <CALENDAR_ACCOUNT_SECRET>` and a JSON body, or the agent refuses it (401 without the secret, 415 for another kind of body).
 - The installer, with `install.sh instance calendar NAME`. The password goes to the agent on stdin only.
 
-The tool server always starts from this file and restarts when it changes. Removing the account deletes the file and stops the tool server.
+Each tool server always starts from this file and restarts when its account changes. Removing an account stops its tool server. Removing the last account deletes the file and closes the tool address.
 
 ## The account secret
 

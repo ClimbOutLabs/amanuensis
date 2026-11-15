@@ -167,6 +167,7 @@ export function telegramReplyLoop(params: {
   store: ITelegramStore;
   service: TelegramService;
   sessionStore: Pick<ISessionStore<SessionCustom, TurnCustom>, 'getTurn'>;
+  appAddress: string | undefined;
   logger: Logger;
 }): ControlLoop {
   const queue = createTelegramSendQueue();
@@ -179,6 +180,7 @@ export function telegramReplyLoop(params: {
         service: params.service,
         queue,
         sessionStore: params.sessionStore,
+        appAddress: params.appAddress,
         logger: params.logger,
       });
     },

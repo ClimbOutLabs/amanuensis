@@ -43,6 +43,19 @@ const AGENT_CONNECTED = {
   default: 'person@gmail.com',
 };
 
+/** The flat body an agent that has not learned the list answer yet gives for one connected Gmail account. */
+const AGENT_FLAT_CONNECTED = {
+  connected: true,
+  sign_in: 'ok',
+  address: 'person@gmail.com',
+  imap_host: 'imap.gmail.com',
+  imap_port: 993,
+  imap_mode: 'ssl',
+  smtp_host: 'smtp.gmail.com',
+  smtp_port: 465,
+  smtp_mode: 'ssl',
+};
+
 const PERSON_ACCOUNT: MailAccountState['account'] = {
   address: 'person@gmail.com',
   imap_host: 'imap.gmail.com',
@@ -156,6 +169,20 @@ describe('the account agent client', () => {
     await expect(getMailAccountState({ accountUrl: ACCOUNT_URL, fetchImpl, logger })).resolves.toEqual(
       NOT_CONNECTED_STATE,
     );
+  });
+
+  it('reads a status from an agent that still answers with one flat account', async () => {
+    const fetchImpl = async () => new Response(JSON.stringify(AGENT_FLAT_CONNECTED), { status: 200 });
+    await expect(getMailAccountState({ accountUrl: ACCOUNT_URL, fetchImpl, logger })).resolves.toEqual(CONNECTED_STATE);
+  });
+
+  it('reads a refused sign-in from an agent that still answers with one flat account', async () => {
+    const fetchImpl = async () =>
+      new Response(JSON.stringify({ ...AGENT_FLAT_CONNECTED, sign_in: 'refused' }), { status: 200 });
+    const state = await getMailAccountState({ accountUrl: ACCOUNT_URL, fetchImpl, logger });
+    expect(state.connected).toBe(true);
+    expect(state.sign_in).toBe('refused');
+    expect(state.account).toEqual(PERSON_ACCOUNT);
   });
 
   it('a reply that is not the status shape is a plain connector failure, never echoed', async () => {
