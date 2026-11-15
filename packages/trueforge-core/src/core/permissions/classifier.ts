@@ -234,6 +234,7 @@ import {
 
 import type { CaldavEventReview } from '../calendar/caldav/eventReview';
 import { CALDAV_SERVER_NAME, isCaldavReadToolName } from '../calendar/caldav/toolContract';
+import { isSkillBlockedHost } from '../connectors/apiServices';
 import { MAIL_DRAFT_FIRST_DETAIL, mailDraftKey } from '../email/mailConnector/approvedDrafts';
 import { forwardedSubject, type MailForwardReview } from '../email/mailConnector/forwardReview';
 import {
@@ -252,6 +253,7 @@ import {
   simpleCardCopy,
 } from './cardCopy';
 import { classifyHomeAssistantTool } from './homeAssistantTier';
+import { SKILL_SITES_DATA_WARNING, SKILL_SITES_EMAIL_BLOCKED, skillSiteLabel } from './skillSitesCopy';
 
 export interface SentinelAction {
   /** Original tool name (sandbox name or mcp server tool name). */
@@ -3360,11 +3362,24 @@ async function classifyPersonaTool(action: SentinelAction, ctx: ClassifyContext)
   });
 }
 
+/**
+ * Approving an install also allows the websites the skill sends requests to, so the card says so,
+ * with the same warnings the Settings network approval gives.
+ */
+function skillWebsitesSentence(review: Tier3Skill): string {
+  const websites = review.websites ?? [];
+  if (websites.length === 0) {
+    return '';
+  }
+  const send = review.can_send === true ? ` ${SKILL_SITES_EMAIL_BLOCKED}` : '';
+  return ` It sends requests to ${websites.map(site => skillSiteLabel({ site: escapeDisplayText(site), blocked: isSkillBlockedHost(site) })).join(', ')}. Adding it lets the skill reach these websites and no others. ${SKILL_SITES_DATA_WARNING}${send}`;
+}
+
 function skillInstallCard(input: { review: Tier3Skill; assistant: string; agent_intent: string | null }): Tier3Card {
   const { review } = input;
   const show = (text: string) => escapeDisplayText(text);
   return {
-    plain_what: `Add the skill ${cardSubject(review.name)}? ${input.assistant} will follow its instructions when a task calls for it.`,
+    plain_what: `Add the skill ${cardSubject(review.name)}? ${input.assistant} will follow its instructions when a task calls for it.${skillWebsitesSentence(review)}`,
     copy: simpleCardCopy({ headline: `Add the skill ${cardSubject(review.name)}?`, undo: null, reason: null }),
     plain_why: plainWhy(input.agent_intent),
     cannot_be_undone: null,
@@ -3384,6 +3399,9 @@ function skillInstallCard(input: { review: Tier3Skill; assistant: string; agent_
       starter: review.starter,
       instructions:
         review.instructions === null ? null : escapeDisplayText(review.instructions, { keepNewlines: true }),
+      websites: (review.websites ?? []).map(show),
+      makes_up_addresses: review.makes_up_addresses ?? false,
+      can_send: review.can_send ?? false,
     },
   };
 }

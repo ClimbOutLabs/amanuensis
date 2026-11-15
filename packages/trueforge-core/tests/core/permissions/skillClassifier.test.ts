@@ -44,9 +44,22 @@ describe('Skill tool classification', () => {
   it('always asks before adding a skill, with the skill as the host read it', async () => {
     const decision = await classifyTier(skillAction('install_skill', { skill_install: REVIEW }), makeCtx());
     expect(decision).toMatchObject({ tier: 3, reason: 'skill_install', auto_deny: null });
-    expect(decision.card?.skill).toEqual(REVIEW);
+    expect(decision.card?.skill).toEqual({ ...REVIEW, websites: [], makes_up_addresses: false, can_send: false });
     expect(decision.card?.plain_what).toContain('Add the skill "release-notes"?');
     expect(decision.standing_grant_barred).toBe(true);
+  });
+
+  it('names the websites the skill sends requests to, which approving allows', async () => {
+    const decision = await classifyTier(
+      skillAction('install_skill', {
+        skill_install: { ...REVIEW, websites: ['api.release-feed.info'], makes_up_addresses: true, can_send: true },
+      }),
+      makeCtx(),
+    );
+    expect(decision.card?.skill).toMatchObject({ websites: ['api.release-feed.info'], makes_up_addresses: true });
+    expect(decision.card?.plain_what).toContain(
+      `It sends requests to api.release-feed.info. Adding it lets the skill reach these websites and no others. Aman can't see what these sites do with what the skill sends them. Any of them could pass your data on, even by email, so only add a skill you trust. Aman blocks the email sites on this list. A skill can never send email. Email only goes out through Aman, and you approve each one.`,
+    );
   });
 
   it('shows text from the skill as plain text, so it cannot dress the card up', async () => {
