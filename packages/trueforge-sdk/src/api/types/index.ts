@@ -400,6 +400,7 @@ export * from "./MemoryVaultReviewNote.js";
 export * from "./MemoryVaultReviewResult.js";
 export * from "./MemoryVaultReviewResultRefusedItem.js";
 export * from "./MemoryVaultSharing.js";
+export * from "./MemoryVaultSummaryFailureCause.js";
 export * from "./MemoryVaultSummaryStatus.js";
 export * from "./MeSessionType.js";
 export * from "./MetricsUnit.js";

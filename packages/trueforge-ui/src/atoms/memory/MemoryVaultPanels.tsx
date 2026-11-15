@@ -6,6 +6,7 @@ import { auiButtonClass } from '@/atoms/lib/buttonClasses.js';
 import { cn } from '@/atoms/lib/cn.js';
 import { Spinner } from '@/atoms/primitives/Spinner.js';
 import { Icon } from '@/icons/Icon.js';
+import type { MemoryVaultSummaryFailureCause } from '@/plugins/trueforge-agent-server-adapter/catalogs/memoryVaultCatalog.js';
 import { useAssistantDisplayName } from '../../components/PersonalizationContext.js';
 import { MemoryExplorerFilters } from './MemoryExplorerFilters.js';
 import { MemoryReviewNotice, MemoryReviewPanel } from './MemoryReviewPanel.js';
@@ -18,7 +19,7 @@ import {
   formatCount,
   memoryCountCopy,
 } from './memoryExplorer.js';
-import { MEMORY_PAGE_SIZE, type MemoryVaultState } from './useMemoryVaultState.js';
+import { MEMORY_PAGE_SIZE, type MemoryVaultState, type SummaryPendingNote } from './useMemoryVaultState.js';
 
 const INPUT_CLASS = 'rounded-md border border-border bg-primary-bg px-2 py-1.5 text-sm text-text-primary';
 
@@ -29,12 +30,39 @@ export function summaryPendingLine(persona: string | null): string {
     : `Couldn't make a summary of the latest chat with ${persona}, so nothing from it was saved. In your next chat with ${persona}, ask to remember anything important again.`;
 }
 
-/** The day a summary failed, in words, or null when the server did not say or the day cannot be read. */
-function summaryFailedDay(failedAt: string | null): string | null {
+/** The day and time a summary failed, in words, or null when the server did not say or it cannot be read. */
+function summaryFailedTime(failedAt: string | null): string | null {
   const time = failedAt === null ? Number.NaN : Date.parse(failedAt);
   return Number.isNaN(time)
     ? null
-    : new Date(time).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+    : new Date(time).toLocaleString(undefined, {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+      });
+}
+
+/** Why a summary failed, in plain words, and the one thing to do about that cause. */
+const SUMMARY_FAILURE_WORDS: Record<MemoryVaultSummaryFailureCause, string> = {
+  model_too_slow:
+    'The model took too long to answer. If this keeps happening, choose a faster Background model in Settings.',
+  model_error: 'The model gave an error instead of an answer. Check that the model is running.',
+  model_not_found: 'The model that makes summaries could not be found. Choose a Background model in Settings.',
+  answer_unusable:
+    "The model's answer could not be used. If this keeps happening, choose a different Background model in Settings.",
+  interrupted: 'Aman stopped before the summary was finished. Nothing is wrong with the model.',
+};
+
+/** When and why a summary failed, as far as the server said, or null when it said neither. */
+export function summaryFailureDetail(pending: Pick<SummaryPendingNote, 'failedAt' | 'cause'>): string | null {
+  const when = summaryFailedTime(pending.failedAt);
+  const parts = [
+    ...(when === null ? [] : [`This happened on ${when}.`]),
+    ...(pending.cause === null ? [] : [SUMMARY_FAILURE_WORDS[pending.cause]]),
+  ];
+  return parts.length === 0 ? null : parts.join(' ');
 }
 
 /** The undo bar: forgotten memories wait here for the undo window before the server call. */
@@ -355,19 +383,32 @@ export function MemoryVaultFactsPanel({
             >
               <div className="flex min-w-0 flex-1 basis-64 flex-col gap-1">
                 <p className="text-sm text-text-primary">{summaryPendingLine(pending.persona)}</p>
-                {summaryFailedDay(pending.failedAt) === null ? null : (
-                  <p className="text-xs text-text-secondary">This happened on {summaryFailedDay(pending.failedAt)}.</p>
+                {summaryFailureDetail(pending) === null ? null : (
+                  <p className="text-xs text-text-secondary">{summaryFailureDetail(pending)}</p>
                 )}
               </div>
-              <button
-                type="button"
-                onClick={() => {
-                  void state.dismissSummaryPending(pending.namespace);
-                }}
-                className={auiButtonClass({ variant: 'secondary', size: 'small' })}
-              >
-                Dismiss
-              </button>
+              <div className="flex flex-wrap gap-2">
+                {pending.sessionId !== null && state.openSummaryChat !== undefined ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (pending.sessionId !== null) state.openSummaryChat?.(pending.sessionId);
+                    }}
+                    className={auiButtonClass({ variant: 'secondary', size: 'small' })}
+                  >
+                    Open the chat
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => {
+                    void state.dismissSummaryPending(pending.namespace);
+                  }}
+                  className={auiButtonClass({ variant: 'secondary', size: 'small' })}
+                >
+                  Dismiss
+                </button>
+              </div>
             </div>
           ))
         : null}
