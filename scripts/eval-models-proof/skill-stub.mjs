@@ -25,9 +25,10 @@ function decide(body) {
     const all = msgs.map(text).join('\n');
     return { content: all.includes('{"facts"') ? '{"facts":[]}' : '{"items":[]}' };
   }
-  const lastUser = msgs.findLastIndex(m => m.role === 'user');
+  const lastUser = msgs.findLastIndex(m => m.role === 'user' && !text(m).startsWith('<tfy-internal>'));
   const ask = text(msgs[lastUser] ?? {});
   const results = msgs.slice(lastUser + 1).filter(m => m.role === 'tool').map(text);
+  if (results.length > 0 && /approv|card|denied|declined/i.test(results.at(-1)) && results.length < 4) { /* keep going */ }
   const call = (name, args) => {
     const real = toolName(tools, name);
     return real === undefined
