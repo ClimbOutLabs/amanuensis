@@ -75,6 +75,7 @@ import { createTextNumberRouter } from './apis/textNumber';
 import { createTodayRouter } from './apis/today';
 import { createTurnsRouter } from './apis/turns';
 import { createVoiceRouter } from './apis/voice';
+import { createRefusedAddressLog } from './auth/addressNotListedPage';
 import type { Authenticator } from './auth/authenticator';
 import type { Authorizer } from './auth/authorizer';
 import { resolveRequestContext, STANDALONE_REQUEST_CONTEXT } from './auth/identity';
@@ -647,6 +648,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         ...(configuration.OIDC !== undefined && getAllowedOrigins().length > 0
           ? { loginPath: new URL(configuration.OIDC.OIDC_ISSUER_URL).pathname.replace(/\/$/, '') }
           : {}),
+        onAddressRefused: createRefusedAddressLog(configuration.REFUSED_ADDRESSES_PATH),
       }),
     );
   }

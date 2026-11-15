@@ -27,7 +27,7 @@ const PAGE_STYLE = `
   button { width: 100%; margin-top: 1.25rem; font-size: 1rem; padding: 0.625rem; border: 0; border-radius: 0.375rem; background: #1c1a17; color: #ffffff; cursor: pointer; }
 `;
 
-function escapeHtml(value: string): string {
+export function escapeHtml(value: string): string {
   return value
     .replaceAll('&', '&amp;')
     .replaceAll('<', '&lt;')

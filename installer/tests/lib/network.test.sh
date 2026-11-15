@@ -19,14 +19,15 @@ in_lib() {
     AMAN_SYS_NET="$SB/sysnet" PATH=$SB_BIN "$SB_BIN/bash" -c "set -euo pipefail; AMAN_HOME='$AMAN_HOME'; . '$INSTALLER_DIR/lib/ui.sh'; . '$INSTALLER_DIR/lib/shared.sh'; . '$INSTALLER_DIR/lib/common.sh'; . '$INSTALLER_DIR/lib/network.sh'; . '$INSTALLER_DIR/lib/tls.sh'; . '$INSTALLER_DIR/lib/instance.sh'; $1"
 }
 
-# A computer on a home network with Tailscale: a LAN address, a Tailscale address, its name and its MagicDNS name.
+# A computer on a home network with Tailscale running: a LAN address, a Tailscale address, its name and its MagicDNS
+# name. Aman listens on the LAN alone; Tailscale is treated like any other VPN.
 fixture_full_machine() {
   fixture_network 192.168.1.20 tailscale0:100.101.102.103
   fixture_hostname host
   fixture_tailscale 100.101.102.103 host.example.ts.net
 }
 
-ALL_ORIGINS="http://127.0.0.1:8791,http://localhost:8791,https://192.168.1.20:8443,https://100.101.102.103:8443,https://host:8443,https://host.local:8443,https://host.example.ts.net:8443"
+ALL_ORIGINS="http://127.0.0.1:8791,http://localhost:8791,https://192.168.1.20:8443,https://host:8443,https://host.local:8443"
 
 test_default_install_answers_at_every_address() {
   t_begin "the app is published on 127.0.0.1 and the https service on each private address of this computer, never on a wildcard, and it answers at each name"
@@ -38,7 +39,7 @@ test_default_install_answers_at_every_address() {
   compose=$(cat "$AMAN_HOME/instances/main/compose.yaml")
   assert_contains "$compose" "- '127.0.0.1:8791:8790'"
   assert_contains "$compose" "- '192.168.1.20:8443:8443'"
-  assert_contains "$compose" "- '100.101.102.103:8443:8443'"
+  assert_not_contains "$compose" "100.101.102.103" "a VPN address is used only when the owner adds it"
   assert_not_contains "$compose" "- '8791:8790'" "no wildcard publish"
   assert_not_contains "$compose" "'0.0.0.0:"
   assert_not_contains "$compose" "[::]"
@@ -119,7 +120,7 @@ test_sign_in_is_registered_for_every_address() {
   for origin in ${ALL_ORIGINS//,/ }; do
     assert_contains "$dex" "- $origin/api/v1/auth/callback"
   done
-  assert_eq "$(printf '%s\n' "$dex" | grep -c 'api/v1/auth/callback')" 7 "no other return address"
+  assert_eq "$(printf '%s\n' "$dex" | grep -c 'api/v1/auth/callback')" 5 "no other return address"
   sandbox_drop
 }
 
@@ -252,23 +253,13 @@ test_private_and_public_hosts_match_the_shared_list() {
   local host
   while read -r host; do
     if in_lib "private_host '$host'"; then t_pass; else t_fail "private host refused: $host"; fi
-  done < <(each_host private)
+  done < <(each_host private cgnat)
   while read -r host; do
     if in_lib "private_host '$host'"; then t_fail "public host accepted: $host"; else t_pass; fi
-  done < <(each_host public cgnat)
-  fixture_tailscale 100.101.102.103 host.example.ts.net
-  fixture_network
-  while read -r host; do
-    STUB_ADDRS="tailscale0:$host"
-    if in_lib "private_host '$host'"; then t_pass; else t_fail "100.64.0.0/10 refused on the Tailscale link: $host"; fi
-    STUB_ADDRS="eth0:$host"
-    if in_lib "private_host '$host'"; then t_fail "100.64.0.0/10 accepted on another link even though Tailscale is here: $host"; else t_pass; fi
-  done < <(each_host cgnat)
-  STUB_ADDRS=''
-  fixture_network
-  while read -r host; do
-    if in_lib "private_host '$host'"; then t_fail "public host accepted with Tailscale present: $host"; else t_pass; fi
   done < <(each_host public)
+  while read -r host; do
+    if in_lib "private_ipv4 '$host'"; then t_fail "100.64.0.0/10 taken as a home network address: $host"; else t_pass; fi
+  done < <(each_host cgnat)
   sandbox_drop
 }
 
@@ -288,8 +279,8 @@ test_leading_zeros_are_not_an_address() {
   sandbox_drop
 }
 
-test_carrier_grade_nat_is_public_without_tailscale() {
-  t_begin "100.64.0.0/10 is left out and called public without Tailscale (provider NAT), and used with it"
+test_carrier_grade_nat_is_never_listened_on_by_itself() {
+  t_begin "100.64.0.0/10 is left out on any link, Tailscale's included, and used once the owner adds it"
   sandbox_new_open
   fixture_network 192.168.1.20 100.64.5.5
   run_install --dry-run --email owner@example.invalid
@@ -302,6 +293,13 @@ test_carrier_grade_nat_is_public_without_tailscale() {
   sandbox_new_open
   fixture_network 192.168.1.20 tailscale0:100.64.5.5
   fixture_tailscale 100.64.5.5 host.example.ts.net
+  install_machine
+  assert_eq "$(env_value main ALLOWED_ORIGINS)" "http://127.0.0.1:8791,http://localhost:8791,https://192.168.1.20:8443"
+  assert_not_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "100.64.5.5"
+  sandbox_drop
+  sandbox_new_open
+  fixture_network 192.168.1.20 tailscale0:100.64.5.5
+  INSTALL_EXTRA=(--address 100.64.5.5)
   install_machine
   assert_contains "$(env_value main ALLOWED_ORIGINS)" "https://100.64.5.5:8443"
   assert_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "- '100.64.5.5:8443:8443'"
@@ -320,27 +318,16 @@ test_a_name_only_address_is_not_published_on() {
   sandbox_drop
 }
 
-test_a_wedged_tailscale_cannot_stall_the_install() {
-  t_begin "tailscale is asked with a time limit, so a hung tailscaled costs a few seconds and the install still finishes"
-  sandbox_new_open
-  fixture_network 192.168.1.20
-  fixture_tailscale 100.101.102.103 host.example.ts.net
-  STUB_TS_HANG=1
-  local start=$SECONDS
-  assert_eq "$(in_lib 'network_default_hosts' | tr '\n' ' ')" "127.0.0.1 localhost 192.168.1.20 "
-  if [ $((SECONDS - start)) -lt 15 ]; then t_pass; else t_fail "took $((SECONDS - start)) seconds"; fi
-  sandbox_drop
-}
-
-test_tailscale_names_and_addresses() {
-  t_begin "only this computer's own MagicDNS name is used, and an address that ip and tailscale both report is listed once"
+test_tailscale_is_never_asked() {
+  t_begin "Aman never runs tailscale and never takes its name, so a hung tailscaled cannot stall the install"
   sandbox_new_open
   fixture_network 192.168.1.20 tailscale0:100.101.102.103
   fixture_hostname host
   fixture_tailscale 100.101.102.103 host.example.ts.net
-  assert_eq "$(in_lib 'network_tailscale_name')" "host.example.ts.net"
-  assert_eq "$(in_lib 'network_ipv4_addresses' | grep -c '100.101.102.103')" 1
-  assert_not_contains "$(in_lib 'network_default_hosts')" "other.example.ts.net" "a peer's name is never taken"
+  STUB_TS_HANG=1
+  local start=$SECONDS
+  assert_eq "$(in_lib 'network_default_hosts' | tr '\n' ' ')" "127.0.0.1 localhost 192.168.1.20 host host.local "
+  if [ $((SECONDS - start)) -lt 15 ]; then t_pass; else t_fail "took $((SECONDS - start)) seconds"; fi
   sandbox_drop
 }
 
@@ -349,7 +336,7 @@ test_summary_lists_the_addresses_and_the_trust_steps() {
   sandbox_new_open
   fixture_full_machine
   install_machine
-  assert_flat_contains "$OUT" "Open https://host.example.ts.net:8443"
+  assert_flat_contains "$OUT" "Open https://host.local:8443"
   assert_not_contains "$OUT" "https://192.168.1.20:8443" "the ending names one address"
   assert_flat_contains "$OUT" "Open http://192.168.1.20:8791/trust on it once"
   assert_not_contains "$OUT" "not encrypted"
@@ -359,7 +346,7 @@ test_summary_lists_the_addresses_and_the_trust_steps() {
   # command:status prints every address, every row and how to set up a new device.
   run_install status
   assert_rc 0
-  assert_flat_contains "$OUT" "Open https://192.168.1.20:8443 https://100.101.102.103:8443 https://host.example.ts.net:8443 https://host.local:8443 https://host:8443 http://127.0.0.1:8791 http://localhost:8791"
+  assert_flat_contains "$OUT" "Open https://192.168.1.20:8443 https://host.local:8443 https://host:8443 http://127.0.0.1:8791 http://localhost:8791"
   assert_flat_contains "$OUT" "Open http://192.168.1.20:8791/trust on it once"
   assert_flat_contains "$OUT" "Data saved in Docker"
   sandbox_drop
@@ -396,7 +383,7 @@ test_the_plan_names_the_addresses() {
   fixture_full_machine
   run_install --dry-run --email owner@example.invalid
   assert_rc 0
-  assert_flat_contains "$OUT" "It opens over https on port 8443 at: 127.0.0.1, localhost, 192.168.1.20, 100.101.102.103, host, host.local, host.example.ts.net, with a certificate Aman makes on this computer."
+  assert_flat_contains "$OUT" "It opens over https on port 8443 at: 127.0.0.1, localhost, 192.168.1.20, host, host.local, with a certificate Aman makes on this computer."
   assert_flat_contains "$OUT" "Port 8791 only sends devices to https."
   sandbox_drop
 }
@@ -496,7 +483,7 @@ test_an_existing_instance_opens_on_the_network_on_a_plain_rerun() {
   assert_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "- '192.168.1.20:8443:8443'"
   assert_log_has "--force-recreate"
   assert_not_contains "$(cat "$STUB_LOG")" "volume rm" "no data was removed"
-  assert_flat_contains "$OUT" "Open https://host.example.ts.net:8443"
+  assert_flat_contains "$OUT" "Open https://host.local:8443"
   assert_flat_contains "$OUT" "/trust on it once" "a move to https says how to set up each device"
   run_install --yes
   assert_flat_contains "$OUT" "Nothing to do."
@@ -548,7 +535,7 @@ assert_open_at_every_address() { # label
   assert_eq "$(reg_value main origins)" "$ALL_ORIGINS" "$1: origins record"
   assert_eq "$(env_value main ALLOWED_ORIGINS)" "$ALL_ORIGINS" "$1: ALLOWED_ORIGINS"
   assert_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "- '192.168.1.20:8443:8443'" "$1: LAN publish"
-  assert_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "- '100.101.102.103:8443:8443'" "$1: Tailscale publish"
+  assert_not_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "100.101.102.103" "$1: no Tailscale publish"
   assert_contains "$(cat "$AMAN_HOME/instances/main/dex.yaml")" "http: 127.0.0.1:5556" "$1: sign-in stays behind the app"
 }
 
@@ -632,17 +619,16 @@ test_virtual_and_vpn_links_are_never_opened_on() {
   sandbox_drop
 }
 
-test_tailscale_is_used_only_on_its_own_link() {
-  t_begin "a 100.64.0.0/10 address counts as private only on tailscale0, or on a utun that tailscale itself names"
+test_vpn_addresses_are_used_only_when_added() {
+  t_begin "a 100.64.0.0/10 address is never on the list by itself, and one the owner adds on a VPN link is listened on"
   sandbox_new_open
-  fixture_network eth0:192.168.1.20 eth1:100.64.7.7 utun4:100.101.102.103 utun5:100.99.99.99
-  fixture_tailscale 100.101.102.103 host.example.ts.net
-  assert_eq "$(in_lib 'network_ipv4_addresses' | tr '\n' ' ')" "192.168.1.20 100.64.7.7 100.101.102.103 "
-  assert_eq "$(in_lib 'network_default_hosts' | grep -c '^100\.')" 1 "only Tailscale's own address is a private host"
-  assert_contains "$(in_lib 'network_default_hosts')" "100.101.102.103"
-  assert_not_contains "$(in_lib 'network_default_hosts')" "100.64.7.7"
-  assert_not_contains "$(in_lib 'network_default_hosts')" "100.99.99.99"
+  fixture_network eth0:192.168.1.20 eth1:100.64.7.7 utun4:100.101.102.103 tailscale0:100.99.99.99
+  fixture_tailscale 100.99.99.99 host.example.ts.net
+  assert_eq "$(in_lib 'network_ipv4_addresses' | tr '\n' ' ')" "192.168.1.20 100.64.7.7 "
+  assert_eq "$(in_lib 'network_default_hosts' | grep -c '^100\.' || true)" 0 "no 100.64.0.0/10 address by itself"
   assert_contains "$(in_lib 'network_public_addresses')" "100.64.7.7" "provider NAT on a normal link is public"
+  assert_eq "$(in_lib "network_bind_addresses 'https://192.168.1.20:8443,https://100.99.99.99:8443,https://100.101.102.103:8443,https://10.9.9.9:8443'" | tr '\n' ' ')" \
+    "127.0.0.1 192.168.1.20 100.99.99.99 100.101.102.103 " "added addresses this computer has, on any link, and no other"
   sandbox_drop
 }
 
@@ -674,13 +660,12 @@ test_public_url_is_unchanged
 test_issuer_must_be_loopback_or_https
 test_private_and_public_hosts_match_the_shared_list
 test_leading_zeros_are_not_an_address
-test_carrier_grade_nat_is_public_without_tailscale
+test_carrier_grade_nat_is_never_listened_on_by_itself
 test_a_name_only_address_is_not_published_on
-test_a_wedged_tailscale_cannot_stall_the_install
+test_tailscale_is_never_asked
 test_virtual_and_vpn_links_are_never_opened_on
-test_tailscale_is_used_only_on_its_own_link
+test_vpn_addresses_are_used_only_when_added
 test_numeric_looking_names_are_not_names
-test_tailscale_names_and_addresses
 test_an_existing_instance_opens_on_the_network_on_a_plain_rerun
 test_local_only_on_a_rerun_puts_an_instance_back
 test_a_legacy_instance_stays_local_with_local_only

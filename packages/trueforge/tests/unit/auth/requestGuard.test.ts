@@ -346,3 +346,32 @@ describe('request guard: sign-in address passed through by the app', () => {
     expect(await status({ app, headers: { host: 'other.example.com' } })).toBe(421);
   });
 });
+
+describe('request guard: an address the instance was not set up for', () => {
+  const listed = {
+    port: 8790,
+    publicBaseUrl: 'http://127.0.0.1:8791',
+    allowedOrigins: ['http://127.0.0.1:8791', 'https://192.168.1.20:8443', 'https://aman.example.ts.net'],
+  };
+
+  it('shows the address it got and the command that allows it, and says which address it refused', async () => {
+    const refused: string[] = [];
+    const app = appFor({ ...listed, onAddressRefused: host => refused.push(host) });
+    const res = await app.request('/', { headers: { host: 'other.example.ts.net' } });
+    expect(res.status).toBe(421);
+    expect(res.headers.get('content-type')).toContain('text/html');
+    const body = await res.text();
+    expect(body).toContain('<strong>other.example.ts.net</strong>');
+    expect(body).toContain('aman address add https://other.example.ts.net');
+    expect(refused).toEqual(['other.example.ts.net']);
+  });
+
+  it('never echoes markup from the Host header', async () => {
+    const app = appFor(listed);
+    const res = await app.request('/', { headers: { host: '<script>x</script>' } });
+    expect(res.status).toBe(421);
+    const body = await res.text();
+    expect(body).not.toContain('<script>x');
+    expect(body).toContain('aman address add &lt;the address you opened&gt;');
+  });
+});
